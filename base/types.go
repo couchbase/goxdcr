@@ -166,6 +166,10 @@ func (c *CollectionNamespace) IsDefault() bool {
 	return c.ScopeName == DefaultScopeCollectionName && c.CollectionName == DefaultScopeCollectionName
 }
 
+func (c *CollectionNamespace) IsEmpty() bool {
+	return c.ScopeName == "" && c.CollectionName == ""
+}
+
 func (c CollectionNamespace) LessThan(other CollectionNamespace) bool {
 	if c.ScopeName == other.ScopeName {
 		return c.CollectionName < other.CollectionName

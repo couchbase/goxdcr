@@ -939,7 +939,7 @@ func (c CollectionNamespaceList) Clone() (other CollectionNamespaceList) {
 
 func (c CollectionNamespaceList) Contains(namespace *base.CollectionNamespace) bool {
 	if namespace == nil {
-		return false
+		panic("Nil namespace")
 	}
 
 	for _, j := range c {
@@ -1094,6 +1094,7 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 // Returns the srcPtr for referring to the exact tgtList
 func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
 	if src == nil {
+		panic("Nil source")
 		return
 	}
 
@@ -1111,7 +1112,13 @@ func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr 
 
 func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
 	if src == nil || tgt == nil {
+		panic("Invalid input")
 		return
+	}
+	if src.IsEmpty() {
+		panic("Empty source namespace")
+	} else if tgt.IsEmpty() {
+		panic("Empty target namespace")
 	}
 
 	srcPtr, tgtList, found := c.Get(src)

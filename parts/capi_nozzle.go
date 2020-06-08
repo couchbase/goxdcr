@@ -1343,6 +1343,6 @@ func (capi *CapiNozzle) ResponsibleVBs() []uint16 {
 	return capi.vbList
 }
 
-func (xmem *CapiNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
+func (capi *CapiNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
 	// no op
 }

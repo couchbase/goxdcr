@@ -38,7 +38,12 @@ type Nozzle interface {
 
 	// To avoid garbage
 	RecycleDataObj(obj interface{})
+}
 
-	// Valid for outgoing nozzles
+type OutNozzle interface {
+	Nozzle
+
 	SetUpstreamObjRecycler(func(interface{}))
+
+	SetUpstreamErrReporter(func(interface{}))
 }

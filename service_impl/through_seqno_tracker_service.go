@@ -23,6 +23,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -272,7 +273,7 @@ func (t *SeqnoManifestsMapType) GetManifestId(vbno uint16, seqno uint64) (uint64
 func truncateGapSeqnoList(through_seqno uint64, seqno_list []uint64) []uint64 {
 	index, found := base.SearchUint64List(seqno_list, through_seqno)
 	if found {
-		panic("through_seqno cannot be in gap_seqno_list")
+		panic(fmt.Sprintf("through_seqno %v cannot be in gap_seqno_list", through_seqno))
 	} else if index > 0 {
 		return seqno_list[index:]
 	}
@@ -454,7 +455,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		tsTracker.processGapSeqnos(vbno, seqno)
 	case common.DataNotReplicated:
 		wrappedMcr := event.Data.(*base.WrappedMCRequest)
+		recycler, ok := event.OtherInfos.(utilities.RecycleObjFunc)
 		tsTracker.markMCRequestAsIgnored(wrappedMcr)
+		if ok {
+			recycler(wrappedMcr)
+		}
 	case common.StreamingEnd:
 		vbno, ok := event.Data.(uint16)
 		if !ok {

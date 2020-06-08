@@ -272,7 +272,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		}
 		sourceNozzle.SetConnector(router)
 
-		for _, outNozzle := range outNozzles {
+		for _, nozzle := range outNozzles {
+			outNozzle := nozzle.(common.OutNozzle)
 			outNozzle.SetUpstreamObjRecycler(sourceNozzle.Connector().GetUpstreamObjRecycler())
 		}
 	}

@@ -33,7 +33,7 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${scope1Arr[@]})
 
 # Scopes -> Collections
 # ----------------------
@@ -42,27 +42,111 @@ declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 
-function runDataLoad {
-	# Run CBWorkloadgen in parallel
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
-	waitForBgJobs
+function runDataLoadContinuous {
+	while (( 1 ));do
+		runCbWorkloadGenCollectionCont "C1" "B1" "S1" "col1" > /dev/null 2>&1
+	done
 }
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
+	if [[ ! -z "$BG_WORKLOAD_PID" ]];then
+		kill $BG_WORKLOAD_PID
+	fi
+}
+
+function checkChangesLeftBackup {
+	local ongoingThreshold=30000
+	changesLeft=`getChangesLeft "C1" "B1" "C2" "B2"`
+	if (( $changesLeft > $ongoingThreshold ));then
+		echo "Changes left is $changesLeft"
+		echo "Killing workload"
+		kill $BG_WORKLOAD_PID
+		echo "Sleeping 30 seconds before exiting"
+		sleep 30
+		exit 1
+	fi
 }
 
 BROKEN_MSG="The followings are collection mappings that are newly broken"
 REPAIR_MSG="The followings are collection mappings that are now repaired"
 BACKFILL_MSG="These collections need to backfill"
-BACKFILL_APPEND_MSG="These collections need to append backfill"
 VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
+
+function deleteAndRecreateBackfillMultiples {
+	local total=$1
+	local i
+
+	for (( i=0; $i < $total; i=$(($i+1)) ))
+	do
+		echo "Sleeping 10 seconds before running another pass"
+		sleep 10
+		echo "Running multiple delete and recreate target collection $(( $i+1 )) out of $total"
+
+		# Get current instance
+		local -i currentBrokenInstanceCnt
+		local -i currentRepairedInstanceCnt
+		local -i currentBackfillInstanceCnt
+		local -i currentVBTasksDoneInstanceCnt
+
+		local currentClusterLog
+		currentClusterLog=`getClusterLogs "C1"`
+		currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
+		currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+
+		local currentXdcrLog
+		currentXdcrLog=`getInternalNodeXdcrLog "C1"`
+		currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
+		currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+
+		echo "Waiting 5 seconds before checking item count first pass"
+		sleep 5
+		checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+		checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+		checkChangesLeftBackup
+
+		echo "BEFORE DELETING COLLECTION: `date`"
+		printGlobalScopeAndCollectionInfo | grep "col1"
+		echo "DELETING COLLECTION: `date`"
+		deleteCollection "C2" "B2" "S1" "col1"
+		printGlobalScopeAndCollectionInfo | grep "col1"
+		# Bucket 2 should have 0 items since col1 just got deleted
+		checkItemCnt "C2" "B2" 0
+		checkChangesLeftBackup
+
+		echo "Waiting 10 seconds to check broken mapping message"
+		sleep 10
+		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+                validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
+
+		echo "RECREATING COLLECTION `date`"
+		createCollection "C2" "B2" "S1" "col1"
+		# Bucket 2 should have 0 items since col1 just got recreated
+		checkItemCnt "C2" "B2" 0
+		printGlobalScopeAndCollectionInfo | grep "col1"
+		echo "Waiting for 30 seconds until discovery and automatic backfill"
+		sleep 30
+		validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
+		#TODO - MB-39849
+		#validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+		checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+		echo "Giving XDCR 15 seconds for UI to show repair messages"
+		sleep 15 
+		# Main pipeline should show repaired message
+                validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
+		# Broken message should have remained constant
+		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+
+		grepForPanics
+	done
+}
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running live rediscover test case"
+	echo "Running continuous and repeated backfill test"
 	echo "============================================================================"
 	testForClusterRun
 	if (( $? != 0 ));then
@@ -80,23 +164,6 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap cleanupTestCaseInternalSettings EXIT
 
-	# Get current instance
-	local -i currentBrokenInstanceCnt
-	local -i currentRepairedInstanceCnt
-	local -i currentBackfillInstanceCnt
-	local -i currentVBTasksDoneInstanceCnt
-
-	local currentClusterLog
-	currentClusterLog=`getClusterLogs "C1"`
-	currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
-	currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
-
-	local currentXdcrLog
-	currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-	currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
-	currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
-	currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
-
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
@@ -105,37 +172,16 @@ function runTestCase {
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
-	runDataLoad
+	
+	echo "Sleep 20 seconds before starting I/O for manifest to be pulled"
+	sleep 20
+	runDataLoadContinuous &
+	BG_WORKLOAD_PID=$!
+	echo "GOT RUNNING PID $BG_WORKLOAD_PID"
 
-	echo "Waiting 5 seconds before checking item count first pass"
-	sleep 5
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" 0
+	# TODO MB-39849 - change this to 3
+	deleteAndRecreateBackfillMultiples 1
 
-	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
-
-	# Then re-setup the implicit matching that matches
-	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
-	setupTopologies
-	echo "Sleeping 30 seconds for discovery and automatic backfill"
-	sleep 30
-	printGlobalScopeAndCollectionInfo
-
-	# After sleeping, the backfill manager should have triggered the backfill
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-
-	# Before running I/O, router will not raise a repaired message
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
-	runDataLoad
-	# After running I/O, router should raise a repaired message
-	sleep 10
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
-
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt + 2 ))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
-	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
 

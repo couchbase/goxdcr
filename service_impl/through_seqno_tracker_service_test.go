@@ -61,6 +61,7 @@ func setupMocks(pipeline *commonMock.Pipeline,
 	pipeline.On("GetAsyncListenerMap").Return(nil)
 	pipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
 	pipeline.On("RuntimeContext").Return(runtimeCtxMock)
+	pipeline.On("Type").Return(common.MainPipeline)
 
 	replSpecSvc.On("GetDerivedObj", mock.Anything).Return(nil, nil)
 
@@ -207,6 +208,13 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 	assert.Equal(uint64(4), through_seqno)
 
 	// Say 5 and 6 are not replicated
+	mutationEvent.Seqno = 5
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	mutationEvent.Seqno = 6
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
 	wrappedMCR := &base.WrappedMCRequest{
 		Seqno: 5,
 		Req:   &gomemcached.MCRequest{VBucket: 1},
@@ -240,6 +248,42 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 	through_seqno = svc.GetThroughSeqno(1)
 	svc.truncateSeqnoLists(1, through_seqno)
 	assert.Equal(uint64(7), through_seqno)
+
+	// Pretend everything else from now on is not sent but ignored
+	mutationEvent.Seqno = 8
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 9
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 10
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	wrappedMCR.Seqno = 8
+	wrappedMCR.Req = &gomemcached.MCRequest{VBucket: 1}
+	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(8), through_seqno)
+
+	wrappedMCR.Seqno = 10
+	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	through_seqno = svc.GetThroughSeqno(1)
+	//	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(8), through_seqno)
+
+	wrappedMCR.Seqno = 9
+	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	through_seqno = svc.GetThroughSeqno(1)
+	//	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(10), through_seqno)
+
 	fmt.Println("============== Test case end: TestIgnoredEventThroughSeqno =================")
 }
 

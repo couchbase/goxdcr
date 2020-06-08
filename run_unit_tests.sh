@@ -17,6 +17,7 @@ pipeline_manager
 parts
 metadata
 metadata_svc
+service_impl
 utils
 )
 

@@ -262,19 +262,24 @@ declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 function setCustomManifestRefreshInterval {
 	local cluster="$1"
 
-	ORIG_TARGET_MAN_PULL_INTERVAL=`getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval"`
-	tempTargetManifestPullInterval="5"
+	for (( i=0; i < 2; i=$(( $i + 1 )) ))
+	do
+		ORIG_TARGET_MAN_PULL_INTERVAL=`getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval"`
+		tempTargetManifestPullInterval="5"
 
-	echo "Temporarily updating targetManifestPull from $ORIG_TARGET_MAN_PULL_INTERVAL to $tempTargetManifestPullInterval"
-	setInternalSettings "$cluster" "ManifestRefreshTgtInterval=$tempTargetManifestPullInterval"
+		echo "Temporarily updating targetManifestPull from $ORIG_TARGET_MAN_PULL_INTERVAL to $tempTargetManifestPullInterval"
+		setInternalSettings "$cluster" "ManifestRefreshTgtInterval=$tempTargetManifestPullInterval"
 
-	echo "Sleeping 10 seconds for XDCR to reboot before checking..."
-	sleep 10
-	chkTargetManifestPullInterval=`getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval"`
-	if (( $chkTargetManifestPullInterval != $tempTargetManifestPullInterval ));then
-		echo "Error - unable to update pull interval - stuck at $chkTargetManifestPullInterval"
-		exit 1
-	fi
+		echo "Sleeping 10 seconds for XDCR to reboot before checking..."
+		sleep 10
+		chkTargetManifestPullInterval=`getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval"`
+		if (( $chkTargetManifestPullInterval == $tempTargetManifestPullInterval ));then
+			return 0
+		else
+			echo "Error - unable to update pull interval - stuck at $chkTargetManifestPullInterval. Trying again..."
+		fi
+	done
+	exit 1
 }
 
 function resetCustomManifestRefreshInterval {

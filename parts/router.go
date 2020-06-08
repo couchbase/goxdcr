@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Couchbase, Inc.
+// Copyright (c) 2018-2020 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -476,6 +476,7 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 // When a request is considered unroutable, then it needs to be marked to be
 // bypassed. Until it is marked, the throughseqNo will remain static, so data loss is safe
 // The process must be that the broken mapping is noted before it can be marked bypassed
+// Note: Unroutable request means that the req are collection related
 func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	wrappedMcr, ok := req.(*base.WrappedMCRequest)
 	if !ok {
@@ -485,7 +486,10 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	c.brokenMapMtx.Lock()
 
 	// At this point only implicit routing is supported
-	alreadyExists := c.brokenMapping.AddSingleMapping(wrappedMcr.ColNamespace /*src*/, wrappedMcr.ColNamespace /*target*/)
+	// When raising an ignore event, prevent the namespace from being recycled
+	clonedNamespace := &base.CollectionNamespace{}
+	*clonedNamespace = *(wrappedMcr.ColNamespace)
+	alreadyExists := c.brokenMapping.AddSingleMapping(clonedNamespace /*src*/, clonedNamespace /*target*/)
 	if !alreadyExists && c.logger.GetLogLevel() > log.LogLevelDebug {
 		c.logger.Debugf("Based on target manifest %v brokenmap: %v", wrappedMcr.ColInfo.ManifestId, c.brokenMapping.String())
 	}
@@ -514,10 +518,17 @@ func (c CollectionsRoutingMap) Init(downStreamParts map[string]common.Part,
 	ignoreDataFunc IgnoreDataEventer,
 	fatalErrorFunc func(error)) error {
 
-	for partId, _ := range downStreamParts {
-		_, exists := c[partId]
+	for partId, outNozzlePart := range downStreamParts {
+		collectionRouter, exists := c[partId]
 		if !exists {
-			c[partId] = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc)
+			collectionRouter = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc)
+			c[partId] = collectionRouter
+		}
+		outNozzle, ok := outNozzlePart.(common.OutNozzle)
+		if !ok {
+			return base.ErrorInvalidInput
+		} else {
+			outNozzle.SetUpstreamErrReporter(collectionRouter.recordUnroutableRequest)
 		}
 	}
 
@@ -662,7 +673,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	}
 
 	ignoreRequestFunc := func(req *base.WrappedMCRequest) {
-		ignoreEvent := common.NewEvent(common.DataNotReplicated, req, router, nil, nil)
+		ignoreEvent := common.NewEvent(common.DataNotReplicated, req, router, nil, utilities.RecycleObjFunc(router.recycleDataObj))
 		router.RaiseEvent(ignoreEvent)
 	}
 

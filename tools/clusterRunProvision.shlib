@@ -893,6 +893,8 @@ function validateCbWorkloadGenCollection {
 	done
 }
 
+CONTINUOUS_WORKLOAD_PREFIX="_xdcr_continuous_workload"
+
 function runCbWorkloadGenCollection {
 	local clusterName=$1
 	local bucketName=$2
@@ -901,6 +903,7 @@ function runCbWorkloadGenCollection {
 	local additionalPrefix=${5:-}
 	local collectionId
 	local i
+	local loopFlag=""
 
 	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]];then
 		echo "Invalid input"
@@ -934,9 +937,13 @@ function runCbWorkloadGenCollection {
 		prefix=xdcrProv_$clusterName
 		if [[ ! -z "$additionalPrefix" ]];then
 			prefix=${prefix}_${additionalPrefix}
+			if [[ "$additionalPrefix" == "$CONTINUOUS_WORKLOAD_PREFIX" ]];then
+				echo "LOOPFLAG"
+				loopFlag="-l"
+			fi
 		fi
 		# Run 10000 items of json documents with set/get ratio of 100%
-		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $collectionId
+		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $collectionId "$loopFlag"
 		if (( $? == 0 ));then
 			return 0
 		elif (( $? != 0 )) && (( $i != 2 ));then
@@ -944,6 +951,16 @@ function runCbWorkloadGenCollection {
 			sleep 10
 		fi
 	done
+}
+
+function runCbWorkloadGenCollectionCont {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local collectionName=$4
+
+	# hacky - specially named prefix
+	runCbWorkloadGenCollection "$clusterName" "$bucketName" "$scopeName" "$collectionName" "$CONTINUOUS_WORKLOAD_PREFIX"
 }
 
 function waitForBgJobs {

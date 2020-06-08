@@ -782,6 +782,7 @@ type XmemNozzle struct {
 
 	counter_sent                uint64
 	counter_received            uint64
+	counter_ignored             uint64
 	counter_compressed_received uint64
 	counter_compressed_sent     uint64
 	counter_waittime            uint64
@@ -828,6 +829,8 @@ type XmemNozzle struct {
 	collectionEnabled uint32
 
 	upstreamObjRecycler utilities.RecycleObjFunc
+
+	upstreamErrReporter utilities.ErrReportFunc
 }
 
 func NewXmemNozzle(id string,
@@ -867,6 +870,7 @@ func NewXmemNozzle(id string,
 		finish_ch:           make(chan bool, 1),
 		counter_sent:        0,
 		counter_received:    0,
+		counter_ignored:     0,
 		counter_waittime:    0,
 		counter_batches:     0,
 		topic:               topic,
@@ -1034,7 +1038,6 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 		err = fmt.Errorf("Got data of unexpected type")
 		xmem.handleGeneralError(errors.New(fmt.Sprintf("%v", err)))
 		return err
-
 	}
 
 	err = xmem.accumuBatch(request)
@@ -1944,6 +1947,7 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 
 	xmem.counter_received = 0
 	xmem.counter_sent = 0
+	xmem.counter_ignored = 0
 
 	//init a new batch
 	xmem.initNewBatch()
@@ -2082,16 +2086,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
 							} else if isCollectionMappingError(response.Status) {
-								pos := xmem.getPosFromOpaque(response.Opaque)
-								// If Target manifest retrieved successfully and router has made a decision that this
-								// mutation's corresponding target collection should exist, then the reasons why
-								// the target responded with a collection mapping errors are only:
-								// 1. The target collection has been removed since the router has detected it OR
-								// 2. The target KV for this mutation's vbucket is particularly slow at getting the manifest
-								//    so it would return an UNKNOWN_COLLECTION error
-								// Either way, use the same logic as if a mutation is locked, which is to wait for the timeout
-								// monitor to kick in, and retry with a exponential backoff algorithm as the locked flag is set
-								_, err = xmem.buf.modSlot(pos, xmem.setCollectionNotFoundFlag)
+								xmem.upstreamErrReporter(wrappedReq)
+								if xmem.buf.evictSlot(pos) != nil {
+									panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
+								}
+								atomic.AddUint64(&xmem.counter_ignored, 1)
 							} else {
 								// for other non-temporary errors, repair connections
 								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
@@ -2310,6 +2309,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer statsTicker.Stop()
 	var sent_count uint64 = 0
 	var received_count uint64 = 0
+	var ignored_count uint64 = 0
 	var resp_waitingConfirm_count int = 0
 	var repairCount_setMeta = 0
 	var repairCount_getMeta = 0
@@ -2334,9 +2334,11 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			batches_ready_queue := xmem.batches_ready_queue
 			dataChan := xmem.dataChan
 			xmem_count_sent := atomic.LoadUint64(&xmem.counter_sent)
+			xmem_count_ignored := atomic.LoadUint64(&xmem.counter_ignored)
 			count++
 
-			if xmem_count_sent == sent_count && int(buffer_count) == resp_waitingConfirm_count &&
+			if xmem_count_sent == sent_count && xmem_count_ignored == ignored_count &&
+				int(buffer_count) == resp_waitingConfirm_count &&
 				(len(xmem.dataChan) > 0 || buffer_count != 0) &&
 				repairCount_setMeta == xmem.client_for_setMeta.repairCount() &&
 				repairCount_getMeta == xmem.client_for_getMeta.repairCount() {
@@ -2348,18 +2350,19 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			}
 
 			sent_count = xmem_count_sent
+			ignored_count = xmem_count_ignored
 			resp_waitingConfirm_count = int(buffer_count)
 			repairCount_setMeta = xmem.client_for_setMeta.repairCount()
 			repairCount_getMeta = xmem.client_for_getMeta.repairCount()
 			if count == 10 {
-				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, len(dataChan), received_count, atomic.LoadUint32(&xmem.cur_batch_count))
+				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, xmem.counter_ignored=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, xmem_count_ignored, len(dataChan), received_count, atomic.LoadUint32(&xmem.cur_batch_count))
 				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(xmem.dataChan), int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				count = 0
 			}
 			max_idle_count := xmem.getAdjustedMaxIdleCount()
 			if freeze_counter > max_idle_count {
 				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem_id, max_idle_count, len(dataChan), buffer_count <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.getBackOffFactor(), xmem.client_for_getMeta.getBackOffFactor())
-				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(dataChan), received_count, xmem_count_sent, int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
+				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, ignored %v item, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(dataChan), received_count, xmem_count_sent, xmem_count_ignored, int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
 				xmem.client_for_setMeta.markConnUnhealthy()
@@ -2561,44 +2564,11 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 	return modified, nil
 }
 
-// If target is unable to find the collection, then set the correpsonding flag
-// And in the meantime, piggy back off the mutationLocked logic
-func (xmem *XmemNozzle) setCollectionNotFoundFlag(req *bufferedMCRequest, pos uint16) (bool, error) {
-	req.lock.Lock()
-	defer req.lock.Unlock()
-
-	if req.req == nil {
-		return false, nil
-	}
-
-	var colModified bool
-	if !req.collectionMapErr {
-		req.collectionMapErr = true
-		colModified = true
-	}
-
-	modified, _ := xmem.setMutationLockedFlagInternal(req, pos, false /*lockNeeded*/)
-
-	if !modified && colModified {
-		// locked has already been set - but this collectionMapErr set is new
-		// need to return the fact that something did change
-		return true, nil
-	}
-
-	return modified, nil
-}
-
 // set mutationLocked flag on the bufferedMCRequest
 // returns true if modification is made on the bufferedMCRequest
 func (xmem *XmemNozzle) setMutationLockedFlag(req *bufferedMCRequest, pos uint16) (bool, error) {
-	return xmem.setMutationLockedFlagInternal(req, pos, true /*lock and from actual call */)
-}
-
-func (xmem *XmemNozzle) setMutationLockedFlagInternal(req *bufferedMCRequest, pos uint16, lockNeeded bool) (bool, error) {
-	if lockNeeded {
-		req.lock.Lock()
-		defer req.lock.Unlock()
-	}
+	req.lock.Lock()
+	defer req.lock.Unlock()
 
 	// check that there is a valid WrappedMCRequest associated with req
 	if req.req == nil {
@@ -2612,17 +2582,9 @@ func (xmem *XmemNozzle) setMutationLockedFlagInternal(req *bufferedMCRequest, po
 		return true, nil
 	}
 
-	var modified bool
-	if lockNeeded && req.collectionMapErr {
-		// this means that this call was made directly from receiveResponse and not from setCollectionNotFound
-		// So, if collectionNotFound flag has been set, it needs to be unset
-		// to accurately represent the state of the mutation... that the last failure was due to mutationLocked
-		// and not due to mapping erros
-		req.collectionMapErr = false
-		modified = true
-	}
+	// no op if req has already been marked as mutationLocked before
 
-	return modified, nil
+	return false, nil
 }
 
 func (xmem *XmemNozzle) getPosFromOpaque(opaque uint32) uint16 {
@@ -2652,10 +2614,11 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v\n",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
-			atomic.LoadUint64(&xmem.counter_compressed_sent), xmem.buf.itemCountInBuffer(), len(xmem.dataChan),
+			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_ignored),
+			xmem.buf.itemCountInBuffer(), len(xmem.dataChan),
 			atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(),
 			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend), atomic.LoadUint64(&xmem.counter_locked),
 			xmem.client_for_getMeta.repairCount(), xmem.client_for_setMeta.repairCount())
@@ -3192,4 +3155,8 @@ func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
 // Should only be done during pipeline construction
 func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
 	xmem.upstreamObjRecycler = utilities.RecycleObjFunc(recycler)
+}
+
+func (xmem *XmemNozzle) SetUpstreamErrReporter(reporter func(interface{})) {
+	xmem.upstreamErrReporter = reporter
 }

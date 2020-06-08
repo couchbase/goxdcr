@@ -1113,7 +1113,6 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	wrappedEvent := dcp.wrappedUprPool.Get()
 	wrappedEvent.UprEvent = m
 	wrappedEvent.ColNamespace = colInfo
-
 	return wrappedEvent, nil
 }
 
@@ -1839,8 +1838,4 @@ func (dcp *DcpNozzle) RecycleDataObj(req interface{}) {
 	default:
 		panic("Coding error")
 	}
-}
-
-func (dcp *DcpNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
-	// no op
 }

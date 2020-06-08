@@ -937,6 +937,9 @@ func (ckmgr *CheckpointManager) loadBrokenMapFromCkptDocs(ckptDocs map[uint16]*m
 			if record.TargetManifest > highestManifestId {
 				// Simply set the new map
 				ckmgr.cachedBrokenMap.brokenMap = *record.BrokenMappings()
+				if ckmgr.cachedBrokenMap.brokenMap == nil {
+					ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
+				}
 			} else if record.TargetManifest == highestManifestId {
 				// Same version - consolidate it into a bigger fishing net
 				ckmgr.cachedBrokenMap.brokenMap.Consolidate(*record.BrokenMappings())

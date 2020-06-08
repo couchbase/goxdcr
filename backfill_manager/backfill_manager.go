@@ -280,6 +280,10 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		if err != nil {
 			b.logger.Errorf("Unable to halt backfill pipeline %v - %v", replId, err)
 		}
+		err = b.pipelineMgr.CleanupBackfillCkpts(replId)
+		if err != nil {
+			b.logger.Errorf("Unable to clean up backfill pipeline checkpoint %v - %v", replId, err)
+		}
 		if startNewTask {
 			err = b.pipelineMgr.RequestBackfill(replId)
 			if err != nil {
@@ -558,6 +562,11 @@ func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTarg
 	}
 	b.cacheSpecTargetMap[replId] = newTargetManifest
 	b.cacheMtx.Unlock()
+
+	if len(backfillMapping) == 0 {
+		// If no backfill is needed such as when collections get del' on the target, don't raise backfill request
+		return
+	}
 
 	b.specReqHandlersMtx.RLock()
 	handler := b.specToReqHandlerMap[replId]

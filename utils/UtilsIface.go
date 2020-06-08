@@ -18,6 +18,7 @@ type ExponentialOpFunc func() error
 type ExponentialOpFunc2 func(interface{}) (interface{}, error)
 type ReleaseMemFunc func()
 type RecycleObjFunc func(obj interface{})
+type ErrReportFunc func(obj interface{})
 
 type HELOFeatures struct {
 	Xattribute      bool
