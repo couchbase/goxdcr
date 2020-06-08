@@ -228,7 +228,10 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 
 	} else {
 		// this is the case where pipeline is not running and spec is not active.
-		// nothing needs to be done
+		// Need to initiate the status if this is a newly created pasued replication
+		if oldSpec == nil {
+			replication_mgr.pipelineMgr.InitiateRepStatus(newSpec.Id)
+		}
 		return nil
 	}
 }
