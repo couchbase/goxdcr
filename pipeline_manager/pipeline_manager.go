@@ -78,7 +78,6 @@ type PipelineMgrInternalIface interface {
 	StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap
 	StartPipeline(topic string) base.ErrorMap
 	Update(topic string, cur_err error) error
-	CleanupPipeline(topic string) error
 	RemoveReplicationStatus(topic string) error
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
 	GetLastUpdateResult(topic string) bool // whether or not the last update was successful
@@ -88,14 +87,22 @@ type PipelineMgrInternalIface interface {
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
 	AutoPauseReplication(topic string) error
-	PauseReplication(topic string) error
 	ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error
-	// Used by updater
+}
+
+type PipelineMgrForUpdater interface {
+	PipelineMgrInternalIface
 	StartBackfillPipeline(topic string) base.ErrorMap
 	StopBackfillPipeline(topic string) base.ErrorMap
-	// Used by serializer
+}
+
+type PipelineMgrForSerializer interface {
+	PipelineMgrInternalIface
+	PauseReplication(topic string) error
+	CleanupPipeline(topic string) error
 	StartBackfill(topic string) error
 	StopBackfill(topic string) error
+	CleanupBackfillPipeline(topic string) error
 }
 
 // Specifically APIs used by backfill manager
@@ -103,6 +110,7 @@ type PipelineMgrBackfillIface interface {
 	GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error)
 	RequestBackfill(topic string) error
 	HaltBackfill(topic string) error
+	CleanupBackfillCkpts(topic string) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -215,6 +223,10 @@ func (pipelineMgr *PipelineManager) RequestBackfill(pipelineName string) error {
 
 func (pipelineMgr *PipelineManager) HaltBackfill(pipelineName string) error {
 	return pipelineMgr.serializer.StopBackfill(pipelineName)
+}
+
+func (pipelineMgr *PipelineManager) CleanupBackfillCkpts(topic string) error {
+	return pipelineMgr.serializer.CleanBackfill(topic)
 }
 
 // This should really be the method to be used. This is considered part of the interface
@@ -579,6 +591,36 @@ func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 	// regardless of err above, we should restart updater
 	err = pipelineMgr.launchUpdater(topic, nil, rep_status)
 
+	return err
+}
+
+// When a backfill pipeline is stopped, it can choose to cleanup the checkpoints for the backfill pipeline
+// so that when a new backfill task starts, it will start cleanly
+func (pipelineMgr *PipelineManager) CleanupBackfillPipeline(topic string) error {
+	var rep_status *pipeline.ReplicationStatus
+	var err error
+	defer pipelineMgr.logger.Infof("%v CleanupBackfillPipeline including checkpoints removal finished (err = %v)", topic, err)
+	getOp := func() error {
+		rep_status, err = pipelineMgr.GetOrCreateReplicationStatus(topic, nil)
+		return err
+	}
+	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("GetOrCreateReplicationStatus %v", topic), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, getOp)
+
+	if err != nil {
+		return err
+	}
+
+	replId := rep_status.RepId()
+
+	backfillSpecId := common.ComposeFullTopic(replId, common.BackfillPipeline)
+	retryOp := func() error {
+		return pipelineMgr.checkpoint_svc.DelCheckpointsDocs(backfillSpecId)
+	}
+
+	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelCheckpointsDocs %v", backfillSpecId), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)
+	if err != nil {
+		pipelineMgr.logger.Warnf("Removing checkpoint resulting in error: %v\n")
+	}
 	return err
 }
 
@@ -1008,7 +1050,7 @@ type PipelineUpdater struct {
 	overflowErrors *pmErrMapType
 
 	// Pipeline Manager that created this updater
-	pipelineMgr PipelineMgrInternalIface
+	pipelineMgr PipelineMgrForUpdater
 
 	// should modify it via scheduleFutureRefresh() and cancelFutureRefresh()
 	// Null if nothing is being scheduled

@@ -23,6 +23,7 @@ const (
 	PipelineAutoPause     PipelineMgtOpType = iota
 	BackfillPipelineStart PipelineMgtOpType = iota
 	BackfillPipelineStop  PipelineMgtOpType = iota
+	BackfillPipelineClean PipelineMgtOpType = iota
 )
 
 func (p PipelineMgtOpType) String() string {
@@ -43,6 +44,8 @@ func (p PipelineMgtOpType) String() string {
 		return "BackfillPipelineStart"
 	case BackfillPipelineStop:
 		return "BackfillPipelineStop"
+	case BackfillPipelineClean:
+		return "BackfillPipelineClean"
 	default:
 		return "?? PipelineMgtOpType"
 	}
@@ -91,7 +94,7 @@ func (j *Job) String() string {
 
 type PipelineOpSerializer struct {
 	// Pipeline Manager related stuff
-	pipelineMgr PipelineMgrInternalIface
+	pipelineMgr PipelineMgrForSerializer
 	childWGrp   sync.WaitGroup
 	logger      *log.CommonLogger
 
@@ -107,7 +110,7 @@ type PipelineOpSerializer struct {
 
 // The goal of the serializer is to provide a serialized front-end to end-users for any operations
 // to the pipeline, and then distribute the operations into safe parallel tasks for pipeline manager
-func NewPipelineOpSerializer(pipelineMgrIn PipelineMgrInternalIface, logger *log.CommonLogger) *PipelineOpSerializer {
+func NewPipelineOpSerializer(pipelineMgrIn PipelineMgrForSerializer, logger *log.CommonLogger) *PipelineOpSerializer {
 	serializer := &PipelineOpSerializer{
 		pipelineMgr: pipelineMgrIn,
 		logger:      logger,
@@ -198,6 +201,18 @@ func (serializer *PipelineOpSerializer) StopBackfill(topic string) error {
 	stopBackfillJob.pipelineTopic = topic
 
 	return serializer.distributeJob(stopBackfillJob)
+}
+
+func (serializer *PipelineOpSerializer) CleanBackfill(topic string) error {
+	if serializer.isStopped() {
+		return SerializerStoppedErr
+	}
+
+	var cleanBackfillJob Job
+	cleanBackfillJob.jobType = BackfillPipelineClean
+	cleanBackfillJob.pipelineTopic = topic
+
+	return serializer.distributeJob(cleanBackfillJob)
 }
 
 // Synchronous call
@@ -352,6 +367,11 @@ forloop:
 				err := serializer.pipelineMgr.StopBackfill(job.pipelineTopic)
 				if err != nil {
 					serializer.logger.Warnf("Error stopping backfill pipeline %v. err=%v", job.pipelineTopic, err)
+				}
+			case BackfillPipelineClean:
+				err := serializer.pipelineMgr.CleanupBackfillPipeline(job.pipelineTopic)
+				if err != nil {
+					serializer.logger.Warnf("Error cleaning backfill pipeline ckpts %v. err=%v", job.pipelineTopic, err)
 				}
 			default:
 				serializer.logger.Errorf(fmt.Sprintf("Unknown job type: %v -> %v", job.jobType, job.String()))

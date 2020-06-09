@@ -7,6 +7,20 @@ type PipelineMgrBackfillIface struct {
 	mock.Mock
 }
 
+// CleanupBackfillCkpts provides a mock function with given fields: topic
+func (_m *PipelineMgrBackfillIface) CleanupBackfillCkpts(topic string) error {
+	ret := _m.Called(topic)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(topic)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // GetMainPipelineThroughSeqnos provides a mock function with given fields: topic
 func (_m *PipelineMgrBackfillIface) GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error) {
 	ret := _m.Called(topic)
