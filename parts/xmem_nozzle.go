@@ -1171,33 +1171,38 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 			if base.DeveloperPreview == false {
 				//batch get meta to find what needs to be not sent via the noRep map
 				noRep_map, err = xmem.batchGetMeta(batch.getMeta_map)
+				if err != nil {
+					xmem.Logger().Errorf("%v batchGetMeta failed. err=%v\n", xmem.Id(), err)
+				} else {
+					batch.bigDoc_noRep_map = noRep_map
+				}
 			} else {
 				// From Xattr, we get a map of what should not be replicated, and a map to get target
 				// document for further process
 				noRep_map, getDoc_map, err := xmem.batchGetXattrForCustomCR(batch.getMeta_map)
-				var conflict_map map[string]RequestToResponse
-				if err == nil && len(getDoc_map) > 0 {
-					conflict_map, err = xmem.batchGetForCustomCR(getDoc_map, &noRep_map)
-				}
-
-				// TODO: merge docs in conflict_map and setWithMeta to source with optimistic locking
-				//		 if it fails because CAS changed, ignore it.
 				if err != nil {
 					if err == PartStoppedError {
 						goto done
 					}
-					xmem.Logger().Errorf(fmt.Sprintf("Received error '%v' with noRep_map='%v' and conflict_map='%v'", err, noRep_map, conflict_map))
 					xmem.handleGeneralError(err)
 				}
-			}
-			if err != nil {
-				xmem.Logger().Errorf("%v batchGetMeta failed. err=%v\n", xmem.Id(), err)
-			} else {
+				if len(getDoc_map) > 0 {
+					conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map)
+					if err != nil {
+						if err == PartStoppedError {
+							goto done
+						}
+						xmem.handleGeneralError(err)
+					}
+					if len(setBack_map) > 0 {
+						// go xmem.setBack(setBack_map)
+					}
+					if len(conflict_map) > 0 {
+						// go xmem.mergeAndSet(conflict_map)
+					}
+				}
 				batch.bigDoc_noRep_map = noRep_map
 			}
-			// TODO: If setWithMeta failed because target changed:
-			// 1. If target CAS is larger, ignore the error since it would fail CR anyway
-			// 2. Otherwise, call accumBatch to put the request in the next batch
 			err = xmem.processBatch(batch)
 			if err != nil {
 				if err == PartStoppedError {
@@ -1206,6 +1211,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 
 				xmem.handleGeneralError(err)
 			}
+			// TODO: Wait for setBack/mergeAndSet to finish
 			xmem.recordBatchSize(batch.count())
 		case <-xmem.getBatchNonEmptyCh():
 			if xmem.validateRunningState() != nil {
@@ -1520,8 +1526,8 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 	return err
 }
 
-// Launched as a part of the batchGetMeta and batchGetForCustomCR, which will fire off the requests
-// and this is the handler to decrypt the info coming back
+// Launched as a part of the batchGetMeta, batchGetXattrForCustomCR and batchGetDocForCustomCR,
+// which will fire off the requests and this is the handler to decrypt the info coming back
 func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_ch chan bool,
 	opaque_keySeqno_map opaqueKeySeqnoMap, respMap base.MCResponseMap, logger *log.CommonLogger, isGetMeta bool) {
 	var batchGetStr string
@@ -1806,123 +1812,108 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque u
 	return req
 }
 
+func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int, include_doc bool) (respMap base.MCResponseMap, err error) {
+	// if input size is 0, then we are done
+	if len(get_map) == 0 {
+		return nil, nil
+	}
+
+	respMap = make(base.MCResponseMap, xmem.config.maxCount)
+
+	opaque_keySeqno_map := make(opaqueKeySeqnoMap)
+	receiver_fin_ch := make(chan bool, 1)
+	receiver_return_ch := make(chan bool, 1)
+
+	// A list (slice) of req_bytes
+	reqs_bytes_list := [][][]byte{}
+
+	var sequence uint16 = uint16(time.Now().UnixNano())
+	// Slice of requests that have been converted to serialized bytes
+	reqs_bytes := [][]byte{}
+	// Counts the number of requests that will fit into each req_bytes slice
+	numOfReqsInReqBytesBatch := 0
+
+	// Establish an opaque based on the current time - and since getting doc doesn't utilize buffer buckets, feed it 0
+	opaque := getOpaque(0, sequence)
+	sent_key_map := make(map[string]bool, len(get_map))
+
+	// Add each req in reqs_bytes_list and set sent_key_map for each doc key
+	for _, originalReq := range get_map {
+		docKey := string(originalReq.Req.Key)
+		if docKey == "" {
+			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, getMeta_map=%v%v%v", xmem.Id(),
+				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, get_map, base.UdTagEnd)
+			return respMap, errors.New(xmem.Id() + " received empty docKey.")
+		}
+
+		if _, ok := sent_key_map[docKey]; !ok {
+			req := xmem.composeRequestForSubdocGet(docKey, originalReq.Req.VBucket, opaque, include_doc)
+			// .Bytes() returns data ready to be fed over the wire
+			reqs_bytes = append(reqs_bytes, req.Bytes())
+			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
+			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
+			opaque++
+			numOfReqsInReqBytesBatch++
+			sent_key_map[docKey] = true
+
+			if numOfReqsInReqBytesBatch > base.XmemMaxBatchSize {
+				// Consider this a batch of requests and put it in as an element in reqs_bytes_list
+				reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+				numOfReqsInReqBytesBatch = 0
+				reqs_bytes = [][]byte{}
+			}
+		}
+	}
+
+	// In case there are tail ends of the batch that did not fill base.XmemMaxBatchSize, append them to the end
+	if numOfReqsInReqBytesBatch > 0 {
+		reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
+	}
+
+	// launch the receiver - passing channel and maps in are fine since they are "reference types"
+	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), true /* isGetMeta */)
+
+	//send the requests
+	for _, packet := range reqs_bytes_list {
+		err = xmem.sendWithRetry(xmem.client_for_getMeta, retry, packet)
+		if err != nil {
+			return
+		}
+	}
+
+	//wait for receiver to finish
+	<-receiver_return_ch
+
+	return
+}
+
 /**
  * Subdoc batch call to get XATTR for custom conflict resolution.
  * There is no target site custom CR so we will retry in case of failure.
  * This routine returns noRep_Map which contains the mutations that should not be replicated,
- * and getDoc_map which contains the mutations that need target documents for furthur process.
+ * and getDoc_map which contains the mutations that need target documents for further process.
  */
 func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) (noRep_map map[string]bool, getDoc_map base.McRequestMap, err error) {
-	retryCount := 0
 	noRep_map = make(map[string]bool)
 	getDoc_map = make(base.McRequestMap)
 
-	for {
-	RETRY:
-		// if input size is 0, then we are done
-		if len(getMeta_map) == 0 {
-			return noRep_map, getDoc_map, nil
+	for i := 0; i < xmem.config.maxRetry; i++ {
+		respMap, err := xmem.sendBatchGetRequest(getMeta_map, xmem.config.maxRetry, false /* include_doc */)
+		if err != nil {
+			// Log the error. We will retry maxRetry times.
+			xmem.Logger().Errorf("sentBatchGetRequest returned error '%v'. Retry number %v", err, i)
 		}
-
-		// If we don't get any response many times, then something is wrong. Return error
-		if retryCount >= xmem.config.maxRetry {
-			return noRep_map, getDoc_map, errors.New("batchGetXattrForCustomCR failed after " + string(retryCount) + "times")
-		}
-
-		respMap := make(base.MCResponseMap, xmem.config.maxCount)
-
-		opaque_keySeqno_map := make(opaqueKeySeqnoMap)
-		receiver_fin_ch := make(chan bool, 1)
-		receiver_return_ch := make(chan bool, 1)
-
-		// A list (slice) of req_bytes
-		reqs_bytes_list := [][][]byte{}
-
-		var sequence uint16 = uint16(time.Now().UnixNano())
-		// Slice of requests that have been converted to serialized bytes
-		reqs_bytes := [][]byte{}
-		// Counts the number of requests that will fit into each req_bytes slice
-		numOfReqsInReqBytesBatch := 0
-
-		// Establish an opaque based on the current time - and since getting doc doesn't utilize buffer buckets, feed it 0
-		opaque := getOpaque(0, sequence)
-		sent_key_map := make(map[string]bool, len(getMeta_map))
-
-		// Add each req in reqs_bytes_list and set sent_key_map for each doc key
-		for _, originalReq := range getMeta_map {
-			docKey := string(originalReq.Req.Key)
-			if docKey == "" {
-				xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, getMeta_map=%v%v%v", xmem.Id(),
-					base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, getMeta_map, base.UdTagEnd)
-				return noRep_map, getDoc_map, errors.New(xmem.Id() + " received empty docKey.")
-			}
-
-			if _, ok := sent_key_map[docKey]; !ok {
-				req := xmem.composeRequestForGetXattr(docKey, originalReq.Req.VBucket, opaque)
-				// .Bytes() returns data ready to be fed over the wire
-				reqs_bytes = append(reqs_bytes, req.Bytes())
-				// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-				opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
-				opaque++
-				numOfReqsInReqBytesBatch++
-				sent_key_map[docKey] = true
-
-				if numOfReqsInReqBytesBatch > base.XmemMaxBatchSize {
-					// Consider this a batch of requests and put it in as an element in reqs_bytes_list
-					reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
-					numOfReqsInReqBytesBatch = 0
-					reqs_bytes = [][]byte{}
-				}
-			}
-		}
-
-		// In case there are tail ends of the batch that did not fill base.XmemMaxBatchSize, append them to the end
-		if numOfReqsInReqBytesBatch > 0 {
-			reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
-		}
-
-		// launch the receiver - passing channel and maps in are fine since they are "reference types"
-		go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), true /* isGetMeta */)
-
-		//send the requests
-		for _, packet := range reqs_bytes_list {
-			err, _ = xmem.writeToClient(xmem.client_for_getMeta, packet, true)
-			if err != nil {
-				xmem.Logger().Errorf("batchGetXattrForCustomCR encountered error writing to client. Will retry.")
-				// Kill the receiver and retry
-				close(receiver_fin_ch)
-				retryCount++
-				xmem.Logger().Debugf("XmemGet retry count: " + string(retryCount))
-				goto RETRY
-			}
-		}
-
-		//wait for receiver to finish
-		<-receiver_return_ch
-
-		if len(respMap) == 0 {
-			retryCount++
-			xmem.Logger().Debugf("XmemGet retry count: " + string(retryCount))
-			goto RETRY
-		}
-		// Got some response. Reset retryCount
-		retryCount = 0
-
 		// Process the response the handler received
 		keys_to_be_deleted := make(map[string]bool)
 		for uniqueKey, wrappedReq := range getMeta_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
-			// SUBDOC_BAD_MULTI is returned when some SUBDOC path doesn't exist
+			// SUBDOC_BAD_MULTI is returned when XATTR _xdcr does not exist. This is expected for new documents that XDCR
+			// with custom CR never set. We will continue with detectConflictWithXattr() since it handles _xdcr nil value
 			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI) {
 				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
 				case SourceDominate:
-					// TODO(MB-39012): when UPRRequest is extended to support optimistic locking:
-					// if resp.Status == mc.KEY_ENOENT {
-					//	set expectedCas to Does_not_exist
-					//} else {
-					//	wrappedReq.Req.expectedCas = resp.Cas
-					//}
+					// No op
 				case TargetDominate:
 					noRep_map[uniqueKey] = true
 				case Conflict:
@@ -1944,25 +1935,31 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 			}
 		}
 	}
+	if len(getMeta_map) > 0 {
+		err = errors.New(fmt.Sprintf("Failed to get XATTR from target for %v documents after %v retries", len(getMeta_map), xmem.config.maxRetry))
+	}
+	return
 }
 
 // Request to get _xdcr XATTR
-func (xmem *XmemNozzle) composeRequestForGetXattr(key string, vb uint16, opaque uint32) *mc.MCRequest {
-	req := &mc.MCRequest{VBucket: vb,
+func (xmem *XmemNozzle) composeRequestForSubdocGet(key string, vb uint16, opaque uint32, include_doc bool) *mc.MCRequest {
+	var body []byte
+	if include_doc {
+		// body contains path spec, in the form:
+		// commandCode (1B) flag (1B) length (2B) path, and repeat
+		body = []byte{uint8(base.SUBDOC_GET), base.SUBDOC_FLAG_XATTR, 0, 0, '_', 'x', 'd', 'c', 'r',
+			uint8(base.GET), 0, 0, 0}
+	} else {
+		body = []byte{uint8(base.SUBDOC_GET), base.SUBDOC_FLAG_XATTR, 0, 0, '_', 'x', 'd', 'c', 'r'}
+	}
+	binary.BigEndian.PutUint16(body[2:], uint16(len("_xdcr")))
+	return &mc.MCRequest{VBucket: vb,
 		Key:    []byte(key),
 		Opaque: opaque,
 		// We want the XATTR even if the document is deleted
 		Extras: []byte{base.SUBDOC_DOC_FLAG_ACCESS_DELETED},
-		/*
-		 * Paths are specified in body in the form:
-		 * commandCode(1 byte) flag(1 byte) length(2 bytes) path
-		 * We only look up one path: _xdcr
-		 */
-		Body:   []byte{uint8(base.SUBDOC_GET), base.SUBDOC_FLAG_XATTR, 0, 0, '_', 'x', 'd', 'c', 'r'},
+		Body:   body,
 		Opcode: base.SUBDOC_MULTI_LOOKUP}
-	binary.BigEndian.PutUint16(req.Body[2:], uint16(len("_xdcr")))
-
-	return req
 }
 
 const (
@@ -2076,150 +2073,50 @@ func findItemInVV(vv []byte, key []byte) (cas uint64, err error) {
 }
 
 /**
- * batch call to memcached GET command for documents that are conflicting with source documents
- * based on metadata alone.
- * It takes a possibleConflict_map and returns rep_map and conflict_map
- * For each key in possibleConflict_map, it tries to fetch the target document:
- * 1. If target document doesn't exist or source wins, it is addded to rep_map and removed from
- *    possibleConflict_map
- * 2. If the target document dominates, it is removed from possibleConflict_map and event will
- *    raised so it will be added to vb_failed_cr_seqno_list_map.
- * 3. If conflict, it is added to conflict_map and removed from possibleConflict_map
- *
- * If we don't receive response for some keys, repeat the process for these keys.
- * If we receive response for all keys, possibleConflict_map will be empty and it is done
- *
- * TODO: Review if we can use client_for_getMeta or create a new client with compression
+ * batch call to memcached subdoc_get command for documents that needs target document for custom CR
  */
-func (xmem *XmemNozzle) batchGetForCustomCR(possibleConflict_map base.McRequestMap, noRep_map *map[string]bool) (map[string]RequestToResponse, error) {
-	retryCount := 0
-	conflict_map := make(map[string]RequestToResponse)
+func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap) (conflict_map, setBack_map map[string]RequestToResponse, err error) {
+	conflict_map = make(map[string]RequestToResponse)
+	setBack_map = make(map[string]RequestToResponse)
 
-	for {
-	RETRY:
-		// if the possibleConflict_map size is 0, then we are done
-		if possibleConflict_map != nil && len(possibleConflict_map) == 0 {
-			return conflict_map, nil
+	for i := 0; i < xmem.config.maxRetry; i++ {
+		respMap, err := xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
+		if err != nil {
+			xmem.Logger().Errorf(err.Error())
 		}
-		// If we don't get any response many times, then something is wrong. Return error
-		if retryCount >= xmem.config.maxRetry {
-			return conflict_map, errors.New("batchGetForCustomCR failed after " + string(retryCount) + "times")
-		}
-
-		respMap := make(base.MCResponseMap, xmem.config.maxCount)
-
-		opaque_keySeqno_map := make(opaqueKeySeqnoMap)
-		receiver_fin_ch := make(chan bool, 1)
-		receiver_return_ch := make(chan bool, 1)
-
-		// A list (slice) of req_bytes
-		reqs_bytes_list := [][][]byte{}
-
-		var sequence uint16 = uint16(time.Now().UnixNano())
-		// Slice of requests that have been converted to serialized bytes
-		reqs_bytes := [][]byte{}
-		// Counts the number of requests that will fit into each req_bytes slice
-		numOfReqsInReqBytesBatch := 0
-
-		// establish an opaque based on the current time - and since getting doc doesn't utilize buffer buckets, feed it 0
-		opaque := getOpaque(0, sequence)
-		sent_key_map := make(map[string]bool, len(possibleConflict_map))
-
-		// Add each req in reqs_bytes_list and set sent_key_map for each doc key
-		for _, originalReq := range possibleConflict_map {
-			docKey := string(originalReq.Req.Key)
-			if docKey == "" {
-				xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, possibleConflict_map=%v%v%v", xmem.Id(),
-					base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, possibleConflict_map, base.UdTagEnd)
-				return conflict_map, errors.New(xmem.Id() + " received empty docKey.")
-			}
-
-			if _, ok := sent_key_map[docKey]; !ok {
-				req := xmem.composeRequestForGet(docKey, originalReq.Req.VBucket, opaque)
-				// .Bytes() returns data ready to be fed over the wire
-				reqs_bytes = append(reqs_bytes, req.Bytes())
-				// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
-				opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
-				opaque++
-				numOfReqsInReqBytesBatch++
-				sent_key_map[docKey] = true
-
-				if numOfReqsInReqBytesBatch > base.XmemMaxBatchSize {
-					// Consider this a batch of requests and put it in as an element in reqs_bytes_list
-					reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
-					numOfReqsInReqBytesBatch = 0
-					reqs_bytes = [][]byte{}
-				}
-			}
-		}
-
-		// In case there are tail ends of the batch that did not fill base.XmemMaxBatchSize, append them to the end
-		if numOfReqsInReqBytesBatch > 0 {
-			reqs_bytes_list = append(reqs_bytes_list, reqs_bytes)
-		}
-
-		// launch the receiver - passing channel and maps in are fine since they are "reference types"
-		go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), false)
-
-		//send the requests
-		for _, packet := range reqs_bytes_list {
-			err, _ := xmem.writeToClient(xmem.client_for_getMeta, packet, true)
-			if err != nil {
-				xmem.Logger().Errorf("BatchGetWithRetry encountered error writing to client. Will retry.")
-				// Kill the receiver and retry
-				close(receiver_fin_ch)
-				retryCount++
-				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-					xmem.Logger().Debugf("XmemGet retry count: " + string(retryCount))
-				}
-				goto RETRY
-			}
-		}
-
-		//wait for receiver to finish
-		<-receiver_return_ch
-
-		if len(respMap) == 0 {
-			retryCount++
-
-			xmem.Logger().Debugf("XmemGet retry count: " + string(retryCount))
-			goto RETRY
-		}
-		// Got some response. Reset retryCount
-		retryCount = 0
-
 		// Process the response the handler received
 		keys_to_be_deleted := make(map[string]bool)
-		for uniqueKey, wrappedReq := range possibleConflict_map {
+		for uniqueKey, wrappedReq := range getDoc_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
 			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI) {
 				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
 				case SourceDominate:
-					// TODO(MB-39012): when UPRRequest is extended to have expectedCas field:
-					// if resp.Status == mc.KEY_ENOENT {
-					//	set expectedCas to Does_not_exist
-					//} else {
-					//	wrappedReq.Req.expectedCas = resp.Cas
-					//}
+					// This should not happen, since getDoc_map contains source mutation that does not dominate
 				case TargetDominate:
-					(*noRep_map)[uniqueKey] = true
+					// We don't need to merge or set back to source. The source mutation is already in noRep_map. Do nothing
 				case Conflict:
 					conflict_map[uniqueKey] = RequestToResponse{wrappedReq, resp}
-					(*noRep_map)[uniqueKey] = true
+				case TargetSetBack:
+					// This is the case where target has smaller CAS but it dominates source MV.
+					setBack_map[uniqueKey] = RequestToResponse{wrappedReq, resp}
 				}
 				keys_to_be_deleted[uniqueKey] = true
 			}
 		}
-		if len(keys_to_be_deleted) == len(possibleConflict_map) {
+		if len(keys_to_be_deleted) == len(getDoc_map) {
 			// Got response for all
-			return conflict_map, nil
+			return conflict_map, setBack_map, nil
 		} else {
 			for uniqueKey, _ := range keys_to_be_deleted {
-				delete(possibleConflict_map, uniqueKey)
+				delete(getDoc_map, uniqueKey)
 			}
 		}
 	}
+	if len(getDoc_map) > 0 {
+		err = errors.New(fmt.Sprintf("Failed to get XATTR and document body from target for %v documents after %v retries", len(getDoc_map), xmem.config.maxRetry))
+	}
+	return
 }
 
 type CustomCRMeta struct {

@@ -3,6 +3,7 @@
 package parts
 
 import (
+	"encoding/binary"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
@@ -398,7 +399,7 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	 * Target: kingarthur7_mv, no new change (Cas == cv)
 	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
 	 */
-	fmt.Println("Test 7: Target is a merged doc, source PCAS dominates MV.")
+	fmt.Println("Test 7: Target is a merged doc, source PCAS does not dominates. Conflict.")
 	getXattrForCustomCR(7, t, "testdata/customCR/kingarthur7_pcasNotDominateMv.json", xmem, router, Conflict)
 	/*
 	 * Test 8: Target does not have _xdcr, Source pcas dominates target
@@ -408,6 +409,15 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	 */
 	fmt.Println("Test 8: Target does not have _xdcr, source PCAS dominates target CAS.")
 	getXattrForCustomCR(8, t, "testdata/customCR/kingarthur8_pcasDominateTargetCas1.json", xmem, router, SourceDominate)
+	/*
+	 * Test 9: Source larger CAS, both merged doc, but target MV dominates source MV. Setback
+	 * Source: kingarthur6_pcasDominateMv
+	 *		_xdcr{"cv":"0x0000d4a7994f1716","id":"SourceCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU"}}
+	 * Target: kingarthur6_mv, no new change (Cas == cv)
+	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	 */
+	fmt.Println("Test 9: Source larger CAS, but target MV dominates source MV. TargetSetBack.")
+	getXattrForCustomCR(9, t, "testdata/customCR/kingarthur6_largerCasSmallerMv.json", xmem, router, TargetSetBack)
 }
 func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
 	assert := assert.New(t)
@@ -427,8 +437,47 @@ func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNo
 	} else if expectedResult == TargetDominate {
 		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
 		assert.Equal(0, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
-	} else if expectedResult == Conflict {
+	} else if expectedResult == Conflict || expectedResult == TargetSetBack {
 		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
 		assert.Equal(1, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
 	}
+	if len(getDoc_map) > 0 {
+		conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map)
+		assert.Nil(err)
+		if expectedResult == Conflict {
+			assert.Equal(1, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
+			assert.Equal(0, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
+			for _, v := range conflict_map {
+				printMultiLookupResult(testId, t, v.resp.Body)
+			}
+		}
+		if expectedResult == TargetSetBack {
+			assert.Equal(0, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
+			assert.Equal(1, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
+			for _, v := range setBack_map {
+				printMultiLookupResult(testId, t, v.resp.Body)
+			}
+		}
+	}
+}
+func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
+	assert := assert.New(t)
+	var i = 0
+	status := binary.BigEndian.Uint16(body[i:])
+	i = i + 2
+	len := int(binary.BigEndian.Uint32(body[i:]))
+	i = i + 4
+	fmt.Println("SUBDOC_MULTI_LOOKUP response:")
+	if len > 0 {
+		xattr := body[i : i+len]
+		fmt.Printf("status=%v, XATTR=%s\n", status, xattr)
+		i = i + len
+	}
+	status = binary.BigEndian.Uint16(body[i:])
+	i = i + 2
+	len = int(binary.BigEndian.Uint32(body[i:]))
+	i = i + 4
+	assert.Greater(len, 0, fmt.Sprintf("Test %d failed", testId))
+	doc := body[i : i+len]
+	fmt.Printf("status=%v, Document=%s\n", status, doc)
 }
