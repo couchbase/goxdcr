@@ -10,6 +10,7 @@
 package metadata
 
 import (
+	"bytes"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -143,6 +144,22 @@ func (b *BackfillReplicationSpec) MergeNewTasks(vbTasksMap VBTasksMapType, skipF
 			b.VBTasksMap[vb] = &mergeCopy
 		}
 	}
+}
+
+// When traffic is bursty, it's possible that multiple routers will be raising the same task
+// Returns true if incoming taskmap duplicates a portion of current spec
+func (b *BackfillReplicationSpec) Contains(vbTasksMap VBTasksMapType) bool {
+	for vb, newTasks := range vbTasksMap {
+		currentTasks, exists := b.VBTasksMap[vb]
+		if !exists {
+			return false
+		}
+
+		if !currentTasks.Contains(*newTasks) {
+			return false
+		}
+	}
+	return true
 }
 
 // Given a list of tasks for VBs, add (append) them to the list of currently existing tasks
@@ -335,6 +352,41 @@ func (b BackfillTasks) SameAs(other BackfillTasks) bool {
 	return true
 }
 
+func (b BackfillTasks) Contains(subsetOfTasks BackfillTasks) bool {
+	for _, task := range subsetOfTasks {
+		if task == nil {
+			continue
+		}
+
+		var found bool
+		for _, curTask := range b {
+			if task.Contains(curTask) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (b BackfillTasks) PrettyPrint() string {
+	if len(b) == 0 {
+		return ""
+	}
+
+	var buffer bytes.Buffer
+	buffer.WriteString(fmt.Sprintf("BackfillTasks composed of %v tasks:\n", len(b)))
+	for _, task := range b {
+		buffer.WriteString(task.String())
+		buffer.WriteString("\n")
+	}
+
+	return buffer.String()
+}
+
 // Returns a map of sha -> mapping
 func (b BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNamespaceMap {
 	returnMap := make(ShaToCollectionNamespaceMap)
@@ -416,6 +468,18 @@ type BackfillTask struct {
 	RequestedCollectionsShas []string
 }
 
+func (b BackfillTask) String() string {
+	var buffer bytes.Buffer
+	buffer.WriteString(fmt.Sprintf("Backfill task (VB %v) [%v,%v) with the following mappings:\n",
+		b.Timestamps.StartingTimestamp.Vbno, b.Timestamps.StartingTimestamp.Seqno, b.Timestamps.EndingTimestamp.Seqno))
+	for i, col := range b.RequestedCollections() {
+		buffer.WriteString(fmt.Sprintf("Sha: %v ", b.RequestedCollectionsShas[i]))
+		buffer.WriteString(col.String())
+		buffer.WriteString("\n")
+	}
+	return buffer.String()
+}
+
 func NewBackfillTask(ts *BackfillVBTimestamps, requestedCollectionMappings []CollectionNamespaceMapping) *BackfillTask {
 	var shas []string
 	for _, reqCols := range requestedCollectionMappings {
@@ -481,6 +545,42 @@ func (b *BackfillTask) AddCollectionNamespaceMapping(nsMapping CollectionNamespa
 	b.RequestedCollectionsShas = append(b.RequestedCollectionsShas, incomingShaStr)
 }
 
+// NOTE - this short circuits and check the SHA's only
+// It depends on ShaRefService to correctly restore the mappings
+func (b *BackfillTask) Contains(other *BackfillTask) bool {
+	if b == nil && other != nil {
+		return false
+	} else if b != nil && other == nil {
+		return false
+	} else if b == nil && other == nil {
+		return true
+	}
+
+	if b.Timestamps.StartingTimestamp.Seqno > other.Timestamps.StartingTimestamp.Seqno {
+		return false
+	}
+
+	if b.Timestamps.EndingTimestamp.Seqno < other.Timestamps.EndingTimestamp.Seqno {
+		return false
+	}
+
+	sortedShas := base.SortStringList(b.RequestedCollectionsShas)
+	otherShas := base.SortStringList(other.RequestedCollectionsShas)
+	if len(sortedShas) != len(otherShas) {
+		return false
+	}
+
+	for i := 0; i < len(sortedShas); i++ {
+		if sortedShas[i] != otherShas[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// NOTE - this short circuits and check the SHA's only
+// It depends on ShaRefService to correctly restore the mappings
 func (b *BackfillTask) SameAs(other *BackfillTask) bool {
 	if b == nil && other != nil {
 		return false
@@ -496,7 +596,6 @@ func (b *BackfillTask) SameAs(other *BackfillTask) bool {
 		return false
 	}
 
-	// Save work and just compare digests instead of actually diving into mappings
 	for i := 0; i < len(sortedShas); i++ {
 		if sortedShas[i] != otherShas[i] {
 			return false

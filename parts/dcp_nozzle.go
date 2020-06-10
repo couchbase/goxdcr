@@ -1076,30 +1076,53 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 		return nil, base.ErrorSourceCollectionsNotSupported
 	}
 
-	var err error
-
-	// VB events comes in sequence order, so the latest manifest must have the info for this collection data
-	topManifestUid := atomic.LoadUint64(&dcp.vbHighestManifestUidArray[m.VBucket])
-	manifest, err := dcp.specificManifestGetter(topManifestUid)
-	if err != nil {
-		dcp.Logger().Errorf("Vbno %v Asking for manifest %v got error: %v\n", m.VBucket, topManifestUid, err)
-		return nil, err
-	}
-	if manifest.Uid() < topManifestUid {
-		dcp.Logger().Errorf("Vbno %v Asking for manifest %v got %v\n", m.VBucket, topManifestUid, manifest.Uid())
-		return nil, base.ErrorInvalidType
-	}
-	// It is possible that the returned manifest from collectionsManifestService is higher than the one vb has seen
-
-	// TODO - need to change for explicit mapping
 	var mappedScopeName string = base.DefaultScopeCollectionName
 	var mappedColName string = base.DefaultScopeCollectionName
+
+	topManifestUid := atomic.LoadUint64(&dcp.vbHighestManifestUidArray[m.VBucket])
 	if m.CollectionId > 0 {
-		mappedScopeName, mappedColName, err = manifest.GetScopeAndCollectionName(m.CollectionId)
+		// NOTE - for future once mirroring mode is turned on, this optimization may be turned off
+		// First, check the "last source pulled" manifest" and see if the source collection ID is in there.
+		// If it is, then use it. DCP is sequential and won't send down a mutation with a collection ID that has
+		// been deleted
+		// If it is not there, then force a refresh
+		var err error
+		var forcePull bool
+		manifest, err := dcp.specificManifestGetter(math.MaxUint64)
 		if err != nil {
-			err = fmt.Errorf("Document %v%v%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v returned err %v",
-				base.UdTagBegin, string(m.Key), base.UdTagEnd, m.VBucket, topManifestUid, manifest, m.CollectionId, err)
-			return nil, err
+			dcp.Logger().Errorf("Unable to get last pulled source manifest. Forcing a refresh")
+			forcePull = true
+		} else {
+			mappedScopeName, mappedColName, err = manifest.GetScopeAndCollectionName(m.CollectionId)
+			if err != nil {
+				// The last cached version of source manifest does not contain the mutation's collectionID
+				// Which means a later source manifest exists and must be used to figure out the scope and col names
+				forcePull = true
+			}
+		}
+
+		if forcePull {
+			// VB events comes in sequence order, so the latest manifest must have the info for this collection data
+			manifest, err := dcp.specificManifestGetter(topManifestUid)
+			if err != nil {
+				dcp.Logger().Errorf("Vbno %v Asking for manifest %v got error: %v\n", m.VBucket, topManifestUid, err)
+				return nil, err
+			}
+			if manifest == nil {
+				panic(fmt.Sprintf("Nil manifest when asking for %v", topManifestUid))
+			}
+			if manifest.Uid() < topManifestUid {
+				// This case shouldn't be hit because of the way manifest service is implemented, but have it here in case
+				dcp.Logger().Errorf("Vbno %v Asking for manifest %v got %v\n", m.VBucket, topManifestUid, manifest.Uid())
+				return nil, err
+			}
+			// TODO - need to change for explicit mapping
+			mappedScopeName, mappedColName, err = manifest.GetScopeAndCollectionName(m.CollectionId)
+			if err != nil {
+				err = fmt.Errorf("Document %v%v%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v returned err %v",
+					base.UdTagBegin, string(m.Key), base.UdTagEnd, m.VBucket, topManifestUid, manifest, m.CollectionId, err)
+				return nil, err
+			}
 		}
 	}
 

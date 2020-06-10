@@ -681,7 +681,7 @@ func (genericPipeline *GenericPipeline) State() common.PipelineState {
 }
 
 func (genericPipeline *GenericPipeline) InstanceId() string {
-	return fmt.Sprintf("%v-%v", genericPipeline.topic, genericPipeline.instance_id)
+	return fmt.Sprintf("%v-%v", genericPipeline.fullTopic, genericPipeline.instance_id)
 }
 
 func (genericPipeline *GenericPipeline) String() string {

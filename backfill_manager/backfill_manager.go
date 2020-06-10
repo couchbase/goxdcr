@@ -411,6 +411,11 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		delete(b.cacheSpecTargetMap, changedSpecId)
 		b.cacheMtx.Unlock()
 
+		err := b.deleteBackfillRequestHandler(oldSpec.Id, oldSpec.InternalId)
+		if err == base.ErrorNotFound {
+			// No need to del checkpointdocs
+			return nil
+		}
 		err = b.postDeleteBackfillRepl(changedSpecId, oldSpec.InternalId)
 	}
 
@@ -418,13 +423,8 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 }
 
 func (b *BackfillMgr) postDeleteBackfillRepl(specId, internalId string) error {
-	err := b.deleteBackfillRequestHandler(specId, internalId)
-	if err == base.ErrorNotFound {
-		// No need to del checkpointdocs
-		return nil
-	}
 	backfillSpecId := common.ComposeFullTopic(specId, common.BackfillPipeline)
-	err = b.checkpointsSvc.DelCheckpointsDocs(backfillSpecId)
+	err := b.checkpointsSvc.DelCheckpointsDocs(backfillSpecId)
 	if err != nil {
 		b.logger.Errorf("Cleaning up backfill checkpoints for %v got err %v", backfillSpecId, err)
 	}
@@ -509,11 +509,10 @@ func (b *BackfillMgr) handleManifestsChanges(replId string, oldManifests, newMan
 		b.handleSourceOnlyChange(replId, newManifests.Source)
 	} else if newManifests.Source == nil && newManifests.Target != nil {
 		// Source did not change but target did change
-		b.handleTargetChanges(replId, nil /*source*/, oldManifests.Target, newManifests.Target)
+		b.handleSrcAndTgtChanges(replId, nil /*source*/, oldManifests.Target, newManifests.Target)
 	} else {
 		// Both changed
-		// First handle source change then target change
-		b.handleTargetChanges(replId, newManifests.Source, oldManifests.Target, newManifests.Target)
+		b.handleSrcAndTgtChanges(replId, newManifests.Source, oldManifests.Target, newManifests.Target)
 	}
 }
 
@@ -525,7 +524,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, sourceManifest *meta
 	b.cacheMtx.Unlock()
 }
 
-func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTargetManifest, newTargetManifest *metadata.CollectionsManifest) {
+func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, sourceManifest, oldTargetManifest, newTargetManifest *metadata.CollectionsManifest) {
 	// For added and modified since last time, need to launch backfill if they are mapped from source
 	var sourceChanged bool = sourceManifest != nil
 
@@ -551,7 +550,7 @@ func (b *BackfillMgr) handleTargetChanges(replId string, sourceManifest, oldTarg
 
 	backfillMapping, err := newTargetManifest.ImplicitGetBackfillCollections(oldTargetManifest, sourceManifest)
 	if err != nil {
-		b.logger.Errorf("handleTargetChanges error: %v", err)
+		b.logger.Errorf("handleSrcAndTgtChanges error: %v", err)
 		return
 	}
 

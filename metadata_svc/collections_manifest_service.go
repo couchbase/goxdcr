@@ -397,13 +397,27 @@ func (a *CollectionsManifestAgent) refreshAndNotify(refreshImmediately bool) {
 	oldSrc, newSrc, srcErr := a.refreshSource()
 	oldTgt, newTgt, tgtErr := a.refreshTarget(refreshImmediately)
 
-	if srcErr == nil && tgtErr == nil && (oldSrc != nil || newSrc != nil || oldTgt != nil || newTgt != nil) {
-		oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
-		newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
-		err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
-		if err != nil {
-			a.logger.Errorf("Error with callback: %v\n", err.Error())
-		}
+	if srcErr != nil {
+		oldSrc = nil
+		newSrc = nil
+	}
+
+	if tgtErr != nil {
+		oldTgt = nil
+		newTgt = nil
+	}
+
+	if srcErr == nil || tgtErr == nil {
+		a.notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt)
+	}
+}
+
+func (a *CollectionsManifestAgent) notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt *metadata.CollectionsManifest) {
+	oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
+	newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
+	err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
+	if err != nil {
+		a.logger.Errorf("Error with callback: %v\n", err.Error())
 	}
 }
 
@@ -574,6 +588,20 @@ func (m ManifestsCache) String() string {
 	return strings.Join(output, " ")
 }
 
+func (m ManifestsCache) GetMaxManifestID() uint64 {
+	var max uint64
+	for k, v := range m {
+		if v == nil {
+			// This is a problem...
+			continue
+		}
+		if k > max {
+			max = k
+		}
+	}
+	return max
+}
+
 func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr error) {
 	srcGet, srcErr := a.metakvSvc.GetSourceManifests(a.replicationSpec)
 	tgtGet, tgtErr := a.metakvSvc.GetTargetManifests(a.replicationSpec)
@@ -696,22 +724,34 @@ func (a *CollectionsManifestAgent) GetSourceManifest() (*metadata.CollectionsMan
 	}
 
 	var err error
+	var oldSrc *metadata.CollectionsManifest
+	var newSrc *metadata.CollectionsManifest
 	a.srcMtx.RLock()
 	_, ok := a.sourceCache[a.lastSourcePull]
 	if !ok {
 		a.srcMtx.RUnlock()
-		_, _, err = a.refreshSource()
+		oldSrc, newSrc, err = a.refreshSource()
+		if err == nil {
+			a.notifyManifestsChange(oldSrc, newSrc, nil /*oldTgt*/, nil /*newTgt*/)
+		}
 		a.srcMtx.RLock()
 	}
 	defer a.srcMtx.RUnlock()
 	if err != nil {
 		return nil, err
 	} else {
-		return a.sourceCache[a.lastSourcePull], nil
+		manifest := a.sourceCache[a.lastSourcePull]
+		if manifest == nil {
+			panic(fmt.Sprintf("sourceCache %v is nil", a.lastSourcePull))
+		}
+		return manifest, nil
 	}
 }
 
-// Returns nil if not found in cache
+// Caller can send in MaxUint64 to get the latest cached version
+// If caller passes in an actual non-MaxUint64 version of the manifest, then
+// look for the specific version in cache. If it does not exist, then find one that is higher than the requested
+// available, fetching it from ns_server if necessary
 func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	if a.isStopped() {
 		return nil, parts.PartStoppedError
@@ -721,9 +761,8 @@ func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uin
 		return &defaultManifest, nil
 	}
 
-	a.srcMtx.RLock()
-
 	if manifestVersion == math.MaxUint64 {
+		a.srcMtx.RLock()
 		defer a.srcMtx.RUnlock()
 		if a.lastSourcePull == 0 {
 			return &defaultManifest, nil
@@ -738,21 +777,45 @@ func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uin
 	}
 
 	var err error
+	var oldSrc *metadata.CollectionsManifest
+	var newSrc *metadata.CollectionsManifest
+	a.srcMtx.RLock()
 	manifest, ok := a.sourceCache[manifestVersion]
-	if !ok {
-		// Given X < Y
-		// It is possible that when XDCR starts up, the collections manifest for a bucket is already at version Y
-		// If there's no checkpoint, DCP starts from 0 and could send down mutations that refer to manifest X
-		// If some collections exist in X but not in Y because they got deleted, those mutations will not be streamed
-		// by DCP.
-		// So if someone asks for X, and we don't have it, it should be safe to return Y
-		for i := manifestVersion; i <= a.lastSourcePull; i++ {
-			if manifest, ok = a.sourceCache[i]; ok {
-				break
+	if !ok || manifest == nil {
+		var needEmergencyPull bool = true
+		if manifestVersion <= a.lastSourcePull {
+			// It is possible that when XDCR starts up, the collections manifest for a bucket is already at version Y
+			// If there's no checkpoint, DCP starts from 0 and could send down mutations that refer to manifest X
+			// If some collections exist in X but not in Y because they got deleted, those mutations will not be streamed
+			// by DCP.
+			// So if someone asks for X, and we don't have it, it should be safe to return Y
+			for i := manifestVersion; i <= a.lastSourcePull; i++ {
+				if manifest, ok = a.sourceCache[i]; ok && manifest != nil {
+					needEmergencyPull = false
+					break
+				}
+			}
+		}
+
+		// This covers the case of if manifestVersion > a.lastSourcePull
+		if needEmergencyPull {
+			a.srcMtx.RUnlock()
+			oldSrc, newSrc, err = a.refreshSource()
+			if err == nil {
+				a.notifyManifestsChange(oldSrc, newSrc, nil /*oldTgt*/, nil /*newTgt*/)
+			}
+			a.srcMtx.RLock()
+			if a.lastSourcePull < manifestVersion {
+				// Even after emergency pull, we still cannot provide the caller a >= version of what they asked for
+				err = fmt.Errorf("Unable to provide requested version %v even after emergency pull", manifestVersion)
+			} else {
+				manifest = a.sourceCache[a.lastSourcePull]
+				if manifest == nil {
+					err = fmt.Errorf("Nil manifest even though emergency pulled")
+				}
 			}
 		}
 	}
-
 	a.srcMtx.RUnlock()
 	return manifest, err
 }
@@ -788,10 +851,15 @@ func (a *CollectionsManifestAgent) GetSpecificTargetManifest(manifestVersion uin
 
 // Returns nil pair if not updated
 func (a *CollectionsManifestAgent) refreshSource() (oldManifest, newManifest *metadata.CollectionsManifest, err error) {
-	return a.refreshSourceCustom(base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry)
+	return a.refreshSourceCustom(base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, true /*lock*/)
 }
 
-func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, maxRetry int) (oldManifest, newManifest *metadata.CollectionsManifest, err error) {
+// For if caller already holds a write-lock
+func (a *CollectionsManifestAgent) refreshSourceNoLock() (oldManifest, newManifest *metadata.CollectionsManifest, err error) {
+	return a.refreshSourceCustom(base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, false /*lock*/)
+}
+
+func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, maxRetry int, lock bool) (oldManifest, newManifest *metadata.CollectionsManifest, err error) {
 	if a.isStopped() {
 		return nil, nil, parts.PartStoppedError
 	}
@@ -810,14 +878,27 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 		base.BucketInfoOpRetryFactor, getRetry)
 	if err != nil {
 		a.logger.Errorf("refreshSource err: %v\n", err)
+		if lock {
+			a.srcMtx.Lock()
+			defer a.srcMtx.Unlock()
+		}
+		maxID := a.sourceCache.GetMaxManifestID()
+		if maxID < a.lastSourcePull {
+			a.logger.Warnf("%v is unable to pull a higher source manifest, going back in time from %v to %v", a.lastSourcePull, maxID)
+		}
+		a.lastSourcePull = maxID
 		return
 	}
 
-	a.srcMtx.RLock()
+	if lock {
+		a.srcMtx.RLock()
+	}
 	// It is possible that we pulled a default collection and lastSourcePull is initialized at 0
 	if a.lastSourcePull < manifest.Uid() || len(a.sourceCache) == 0 {
-		a.srcMtx.RUnlock()
-		a.srcMtx.Lock()
+		if lock {
+			a.srcMtx.RUnlock()
+			a.srcMtx.Lock()
+		}
 		a.logger.Infof("CollectionsManifestAgent: Updated source manifest from old version %v to new version %v\n", a.lastTargetPull, manifest.Uid())
 		oldManifest, ok = a.sourceCache[a.lastSourcePull]
 		a.lastSourcePull = manifest.Uid()
@@ -825,9 +906,13 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 		if ok {
 			newManifest = manifest
 		}
-		a.srcMtx.Unlock()
+		if lock {
+			a.srcMtx.Unlock()
+		}
 	} else {
-		a.srcMtx.RUnlock()
+		if lock {
+			a.srcMtx.RUnlock()
+		}
 	}
 	return
 }
@@ -838,11 +923,16 @@ func (a *CollectionsManifestAgent) GetTargetManifest() (*metadata.CollectionsMan
 	}
 
 	var err error
+	var oldTgt *metadata.CollectionsManifest
+	var newTgt *metadata.CollectionsManifest
 	a.tgtMtx.RLock()
 	_, ok := a.targetCache[a.lastTargetPull]
 	if !ok {
 		a.tgtMtx.RUnlock()
-		_, _, err = a.refreshTarget(false)
+		oldTgt, newTgt, err = a.refreshTarget(false)
+		if err == nil {
+			a.notifyManifestsChange(nil /*oldSrc*/, nil /*newSrc*/, oldTgt, newTgt)
+		}
 		a.tgtMtx.RLock()
 	}
 	defer a.tgtMtx.RUnlock()
@@ -850,16 +940,25 @@ func (a *CollectionsManifestAgent) GetTargetManifest() (*metadata.CollectionsMan
 	if err != nil {
 		return nil, err
 	} else {
-		return a.targetCache[a.lastTargetPull], nil
+		manifest := a.targetCache[a.lastTargetPull]
+		if manifest == nil {
+			panic(fmt.Sprintf("TargetCache %v is nil", a.lastTargetPull))
+		}
+		return manifest, nil
 	}
 }
 
 // return nils if no update
 func (a *CollectionsManifestAgent) refreshTarget(force bool) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
-	return a.refreshTargetCustom(force, base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry)
+	return a.refreshTargetCustom(force, true /*lock*/, base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry)
 }
 
-func (a *CollectionsManifestAgent) refreshTargetCustom(force bool, waitTime time.Duration, maxRetry int) (oldManifest, newManifest *metadata.CollectionsManifest, err error) {
+// Write lock must be held
+func (a *CollectionsManifestAgent) refreshTargetNoLock(force bool) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
+	return a.refreshTargetCustom(force, false /*lock*/, base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry)
+}
+
+func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTime time.Duration, maxRetry int) (oldManifest, newManifest *metadata.CollectionsManifest, err error) {
 	if a.isStopped() {
 		return nil, nil, parts.PartStoppedError
 	}
@@ -880,14 +979,27 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force bool, waitTime time
 		base.RemoteMcRetryFactor, getRetry)
 	if err != nil || manifest == nil {
 		a.logger.Errorf("refreshTarget returned err: %v\n", err)
+		if lock {
+			a.tgtMtx.Lock()
+			defer a.tgtMtx.Unlock()
+		}
+		maxID := a.targetCache.GetMaxManifestID()
+		if maxID < a.lastTargetPull {
+			a.logger.Warnf("%v is unable to pull a higher target manifest, going back in time from %v to %v", a.lastTargetPull, maxID)
+		}
+		a.lastTargetPull = maxID
 		return
 	}
 
-	a.tgtMtx.RLock()
+	if lock {
+		a.tgtMtx.RLock()
+	}
 	// It is possible that we pulled a default collection and lastTargetPull is initialized at 0
 	if a.lastTargetPull < manifest.Uid() || len(a.targetCache) == 0 {
-		a.tgtMtx.RUnlock()
-		a.tgtMtx.Lock()
+		if lock {
+			a.tgtMtx.RUnlock()
+			a.tgtMtx.Lock()
+		}
 		a.logger.Infof("CollectionsManifestAgent: Updated target manifest from old version %v to new version %v\n", a.lastTargetPull, manifest.Uid())
 		oldManifest, ok = a.targetCache[a.lastTargetPull]
 		a.lastTargetPull = manifest.Uid()
@@ -895,9 +1007,13 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force bool, waitTime time
 		if ok {
 			newManifest = manifest
 		}
-		a.tgtMtx.Unlock()
+		if lock {
+			a.tgtMtx.Unlock()
+		}
 	} else {
-		a.tgtMtx.RUnlock()
+		if lock {
+			a.tgtMtx.RUnlock()
+		}
 	}
 	return
 }
@@ -1006,50 +1122,93 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 	var srcErr []uint64
 	var tgtErr []uint64
 	var err error
+	var waitGroup sync.WaitGroup
+	var needEmergencySourcePull bool
+	var oldSrc *metadata.CollectionsManifest
+	var newSrc *metadata.CollectionsManifest
+	var needEmergencyTargetPull bool
+	var oldTgt *metadata.CollectionsManifest
+	var newTgt *metadata.CollectionsManifest
 
-	replacementMap := make(ManifestsCache)
-	replacementMap[0] = &defaultManifest
-	a.srcMtx.Lock()
-	for _, uid := range srcList {
-		manifest, ok := a.sourceCache[uid]
-		if !ok {
-			srcErr = append(srcErr, uid)
-		} else {
-			replacementMap[uid] = manifest
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		replacementMap := make(ManifestsCache)
+		replacementMap[0] = &defaultManifest
+		a.srcMtx.Lock()
+		for _, uid := range srcList {
+			manifest, ok := a.sourceCache[uid]
+			if !ok {
+				srcErr = append(srcErr, uid)
+			} else {
+				replacementMap[uid] = manifest
+			}
 		}
-	}
-	// For safety, check the last source pull to ensure we didn't lose the last refresh
-	if a.lastSourcePull > 0 {
-		_, lastPullExists := replacementMap[a.lastSourcePull]
-		_, lastPullOk := a.sourceCache[a.lastSourcePull]
-		if !lastPullExists && lastPullOk {
-			replacementMap[a.lastSourcePull] = a.sourceCache[a.lastSourcePull]
+		// For safety, check the last source pull to ensure we didn't lose the last refresh
+		if a.lastSourcePull > 0 {
+			_, lastPullExists := replacementMap[a.lastSourcePull]
+			_, lastPullOk := a.sourceCache[a.lastSourcePull]
+			if !lastPullExists && lastPullOk {
+				replacementMap[a.lastSourcePull] = a.sourceCache[a.lastSourcePull]
+			} else {
+				// Unable to find the lastSourcePull. Need to force a refresh before giving access back
+				needEmergencySourcePull = true
+			}
 		}
-	}
-	a.sourceCache = replacementMap
-	a.srcMtx.Unlock()
+		a.sourceCache = replacementMap
+		if needEmergencySourcePull {
+			var srcPullErr error
+			oldSrc, newSrc, srcPullErr = a.refreshSourceNoLock()
+			if srcPullErr != nil {
+				// Don't notify any new sources
+				oldSrc = nil
+				newSrc = nil
+			}
+		}
+		a.srcMtx.Unlock()
+	}()
 
-	replacementMap = make(ManifestsCache)
-	replacementMap[0] = &defaultManifest
-	a.tgtMtx.Lock()
-	for _, uid := range tgtList {
-		manifest, ok := a.targetCache[uid]
-		if !ok {
-			tgtErr = append(tgtErr, uid)
-		} else {
-			replacementMap[uid] = manifest
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		replacementMap := make(ManifestsCache)
+		replacementMap[0] = &defaultManifest
+		a.tgtMtx.Lock()
+		for _, uid := range tgtList {
+			manifest, ok := a.targetCache[uid]
+			if !ok {
+				tgtErr = append(tgtErr, uid)
+			} else {
+				replacementMap[uid] = manifest
+			}
 		}
-	}
-	// For safety, check the last target pull to ensure we didn't lose the last refresh
-	if a.lastTargetPull > 0 {
-		_, lastPullExists := replacementMap[a.lastTargetPull]
-		_, lastPullOk := a.targetCache[a.lastTargetPull]
-		if !lastPullExists && lastPullOk {
-			replacementMap[a.lastTargetPull] = a.targetCache[a.lastTargetPull]
+		// For safety, check the last target pull to ensure we didn't lose the last refresh
+		if a.lastTargetPull > 0 {
+			_, lastPullExists := replacementMap[a.lastTargetPull]
+			_, lastPullOk := a.targetCache[a.lastTargetPull]
+			if !lastPullExists && lastPullOk {
+				replacementMap[a.lastTargetPull] = a.targetCache[a.lastTargetPull]
+			} else {
+				needEmergencyTargetPull = true
+			}
 		}
+		a.targetCache = replacementMap
+		if needEmergencyTargetPull {
+			var tgtPullErr error
+			oldTgt, newTgt, tgtPullErr = a.refreshTargetNoLock(true /*force*/)
+			if tgtPullErr != nil {
+				oldTgt = nil
+				newTgt = nil
+			}
+		}
+		a.tgtMtx.Unlock()
+	}()
+	waitGroup.Wait()
+
+	if needEmergencySourcePull || needEmergencyTargetPull {
+		// Any out-of-periodic refresh will require notification
+		a.notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt)
 	}
-	a.targetCache = replacementMap
-	a.tgtMtx.Unlock()
 
 	if len(srcErr) > 0 || len(tgtErr) > 0 {
 		err = fmt.Errorf("Pruning %v, unable to find srcMmanifests %v and targetManifests %v",
@@ -1094,7 +1253,10 @@ func (a *CollectionsManifestAgent) GetLastPersistedManifests() (*metadata.Collec
 }
 
 func (a *CollectionsManifestAgent) ForceTargetManifestRefresh() error {
-	_, _, err := a.refreshTarget(true)
+	oldTgt, newTgt, err := a.refreshTarget(true)
+	if err == nil {
+		a.notifyManifestsChange(nil /*oldSrc*/, nil /*newSrc*/, oldTgt, newTgt)
+	}
 	return err
 }
 

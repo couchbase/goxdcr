@@ -124,6 +124,7 @@ func brhMockCkptMgr() *pipeline_svc.CheckpointMgrSvc {
 
 func brhMockSupervisor() *pipeline_svc.PipelineSupervisorSvc {
 	supervisor := &pipeline_svc.PipelineSupervisorSvc{}
+	supervisor.On("OnEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	return supervisor
 }
 
@@ -183,6 +184,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	var setCount int
 	// Make a dummy namespacemapping
 	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
 	requestMapping := make(metadata.CollectionNamespaceMapping)
 	requestMapping.AddSingleMapping(collectionNs, collectionNs)
 
@@ -209,15 +211,20 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	// Calling twice in a row with the same result will result in a single add
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(2)
+	var err1 error
+	var err2 error
 	go func() {
-		assert.Nil(rh.HandleBackfillRequest(requestMapping))
+		err1 = rh.HandleBackfillRequest(requestMapping)
 		waitGroup.Done()
 	}()
 	go func() {
-		assert.Nil(rh.HandleBackfillRequest(requestMapping))
+		err2 = rh.HandleBackfillRequest(requestMapping)
 		waitGroup.Done()
 	}()
 	waitGroup.Wait()
+
+	// At least one is going to be nil and one is going to be duplicate
+	assert.True(err1 == nil && err2 == nil)
 
 	// Test cool down period is active
 	startTime := time.Now()
@@ -225,6 +232,8 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Doing another handle will result in a set
+	// Change requestMapping to avoid errorDuplicate
+	requestMapping.AddSingleMapping(dummyNs, dummyNs)
 	assert.Nil(rh.HandleBackfillRequest(requestMapping))
 
 	time.Sleep(100 * time.Millisecond)
@@ -249,4 +258,83 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	// With 2 cooldown periods of 500ms each, this should be > 1 second
 	assert.True(endTime.Sub(startTime).Seconds() > 1)
 	fmt.Println("============== Test case stop: TestBackfillReqHandlerCreateReqThenMarkDone =================")
+}
+
+func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBackfillReqHandlerCreateReqThenMarkDoneThenDel =================")
+	logger, _ := setupBRHBoilerPlate()
+	spec := createTestSpec()
+	vbsGetter := createVBsGetter()
+	seqnoGetter := createSeqnoGetterFunc(100)
+	var addCount int
+	var setCount int
+	var delCount int
+	// Make a dummy namespacemapping
+	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	//	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
+	requestMapping := make(metadata.CollectionNamespaceMapping)
+	requestMapping.AddSingleMapping(collectionNs, collectionNs)
+
+	backfillReplSvc := &service_def.BackfillReplSvc{}
+	brhMockBackfillReplSvcCommon(backfillReplSvc)
+	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
+	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
+
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, 500*time.Millisecond, createVBDoneFunc())
+
+	assert.NotNil(rh)
+	assert.Nil(rh.Start())
+
+	srcNozzleMap := brhMockSourceNozzles()
+	ckptMgr := brhMockCkptMgr()
+	supervisor := brhMockSupervisor()
+	ctx := brhMockPipelineContext(ckptMgr, supervisor)
+	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
+	assert.Nil(rh.Attach(pipeline))
+	assert.Nil(rh.Attach(backfillPipeline))
+
+	// Wait for the go-routine to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Manually put requestMapping into the channel
+	rh.incomingReqCh <- requestMapping
+	err1 := <-rh.persistResultCh
+	assert.Nil(err1)
+	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+
+	// Test has 1024 VB's
+	for i := uint16(0); i < 1024; i++ {
+		iCopy := i
+		go func() { rh.doneTaskCh <- iCopy }()
+	}
+
+	for i := uint16(0); i < 1024; i++ {
+		taskResult := <-rh.doneTaskResultCh
+		if i < 1023 {
+			assert.Nil(taskResult)
+			assert.Nil(<-rh.persistResultCh)
+		} else {
+			assert.Equal(errorSyncDel, taskResult)
+			assert.Equal(0, len(rh.persistResultCh))
+		}
+	}
+
+	assert.Equal(0, setCount)
+	assert.Equal(1, addCount)
+	assert.Equal(1, delCount)
+
+	assert.Nil(rh.cachedBackfillSpec)
+
+	// After delete, the next handle will be an add
+	rh.incomingReqCh <- requestMapping
+	err1 = <-rh.persistResultCh
+	assert.Nil(err1)
+	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+
+	assert.Equal(0, setCount)
+	assert.Equal(2, addCount)
+	assert.Equal(1, delCount)
+	fmt.Println("============== Test case end: TestBackfillReqHandlerCreateReqThenMarkDoneThenDel =================")
 }

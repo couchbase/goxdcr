@@ -77,11 +77,15 @@ func TestBackfillReplMarshal(t *testing.T) {
 	}
 	err = json.Unmarshal(marshalledSpec, &checkSpec)
 	assert.Nil(err)
+
+	// No sha service, so the SameAs checks only the shas
 	assert.True(checkSpec.SameAs(testSpec))
 
 	assert.Equal(2, len(*(testSpec.VBTasksMap[0])))
 	assert.Equal(1, len(*(testSpec.VBTasksMap[1])))
 	assert.Nil(testSpec.VBTasksMap[2])
+	assert.True(testSpec.VBTasksMap[0].Contains(*(checkSpec.VBTasksMap[0])))
+	assert.True(testSpec.VBTasksMap[0].SameAs(*(checkSpec.VBTasksMap[0])))
 
 	// Test append
 	vb0TasksClone := vb0Tasks.Clone()
@@ -106,6 +110,8 @@ func TestBackfillReplMarshal(t *testing.T) {
 	appendTasksMap[2] = &vb0TasksClone
 
 	testSpec.AppendTasks(appendTasksMap)
+	assert.True(testSpec.VBTasksMap[0].Contains(*(checkSpec.VBTasksMap[0])))
+	assert.False(testSpec.VBTasksMap[0].SameAs(*(checkSpec.VBTasksMap[0])))
 
 	assert.Equal(3, len(*(testSpec.VBTasksMap[0])))
 	assert.Equal(2, len(*(testSpec.VBTasksMap[1])))

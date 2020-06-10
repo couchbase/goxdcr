@@ -85,6 +85,7 @@ function pauseAndResumeMultiples {
 		runDataLoad "$i"
 		# Changes left should go to 0
 		checkUnidirectionalChangesLeft
+		sleep 10
 		if (( `getDocsProcessed "C1" "B1" "C2" "B2"` == $oldDocsProcessed ));then
 			echo "Data processed should not be the same after run"
 			exit 1

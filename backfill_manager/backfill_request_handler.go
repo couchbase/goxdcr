@@ -27,7 +27,8 @@ import (
 	"time"
 )
 
-var errorStopped error = fmt.Errorf("BackfillMgr is stopping")
+var errorStopped error = fmt.Errorf("BackfillReqHandler is stopping")
+var errorSyncDel error = fmt.Errorf("Synchronous deletion took place")
 
 type PersistType int
 
@@ -75,6 +76,7 @@ type BackfillRequestHandler struct {
 
 	// TODO MB-38931 - once consistent metakv is in, this needs to be updated
 	cachedBackfillSpec *metadata.BackfillReplicationSpec
+	delOpBackfillId    string
 }
 
 type LatestSeqnoGetter func() (map[uint16]uint64, error)
@@ -145,6 +147,18 @@ func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.C
 // handling the actual request, and subsequently, the error code for persisting
 // Callers are expected to listen first to handleResultsCh, and if it is nil, then go listen on
 // persistResultCh
+//
+// Another channel being serialized here is the doneTaskCh. It is used when a VB is finished with a task.
+// When a VB is done with a task, the VB's task (top one) is removed from the cached backfill's VBTasksMap
+// and the cached backfill is queued up for persistence. The persistence path is shared between handling
+// the incoming req and handling the VBs being marked done
+// Only cavaet here is that IF the VB being marked done is the LAST TASK in the whole backfill replication,
+// the backfill replication MUST be deleted. This is necessary because when a the last VB task is marked done,
+// PipelineManager will NOT restart a new backfill pipeline.
+// So the backfill spec must be removed, so that when a new VB task comes in afterwards, it will be a brand new
+// spec and that will trigger the callback for a brand new spec, which is to launch backfill pipeline.
+// Because handling VB done and handling incoming requests are serialized here, it is safe to delete the spec
+// (synchronously) and then re-create a new spec once the incomingReqCh is read next
 func (b *BackfillRequestHandler) run() {
 	var needToRunPersist bool
 	var needCoolDown uint32
@@ -160,10 +174,14 @@ func (b *BackfillRequestHandler) run() {
 			}
 		case vbno := <-b.doneTaskCh:
 			err := b.handleVBDone(vbno)
-			b.doneTaskResultCh <- err
 			if err == nil {
 				needToRunPersist = true
+			} else if err == errorSyncDel {
+				// Handling this VB has led to completion of the backfill spec
+				// The spec has been synchronously deleted
+				needToRunPersist = false
 			}
+			b.doneTaskResultCh <- err
 		default:
 			if needToRunPersist && atomic.LoadUint32(&needCoolDown) == 0 {
 				needToRunPersist = false
@@ -174,12 +192,8 @@ func (b *BackfillRequestHandler) run() {
 					atomic.StoreUint32(&needCoolDown, 1)
 					go func() {
 						// Cool down period
-						resetFunc := func() {
-							atomic.StoreUint32(&needCoolDown, 0)
-						}
-						cooldownTimer := time.AfterFunc(b.persistInterval, resetFunc)
-						time.Sleep(b.persistInterval + 100*time.Millisecond)
-						cooldownTimer.Stop()
+						time.Sleep(b.persistInterval)
+						atomic.StoreUint32(&needCoolDown, 0)
 					}()
 					b.persistResultCh <- err
 					// For any overflow, return the results too
@@ -227,6 +241,10 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 	b.doneTaskCh <- vbno
 	err := <-b.doneTaskResultCh
 	if err != nil {
+		if err == errorSyncDel {
+			// The backfill replication was deleted because this vb being done meant the every task was finished
+			err = nil
+		}
 		return err
 	}
 
@@ -256,36 +274,56 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 	if !exists {
 		backfillSpec := metadata.NewBackfillReplicationSpec(clonedSpec.Id, clonedSpec.InternalId, vbTasksMap, clonedSpec)
 		b.cachedBackfillSpec = backfillSpec
-		b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
+		b.logNewBackfillMsg(req, seqnosMap)
 		b.requestPersistence(AddOp)
 	} else {
+		if b.cachedBackfillSpec.Contains(vbTasksMap) {
+			// already handled - redundant request
+			// Just request persistence to ensure synchronization
+			b.requestPersistence(SetOp)
+			return nil
+		}
+
 		var shouldSkipFirst bool = true
-		b.pipelinesMtx.RLock()
-		pipeline, _ := b.getPipeline(common.BackfillPipeline)
-		if pipeline != nil && (pipeline.State() == common.Pipeline_Initial || pipeline.State() == common.Pipeline_Stopped) {
-			// See if there are checkpoints present that represent the backfill pipeline has started before
-			// If any is present, it means that the first VBTask has made progress and the incoming task cannot be merged with it
-			checkpointMgr, ok := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
-			if ok {
-				ckptExists, err := checkpointMgr.CheckpointsExist(pipeline.FullTopic())
-				if err == nil && !ckptExists {
-					shouldSkipFirst = false
+		if b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask() {
+			b.pipelinesMtx.RLock()
+			pipeline, _ := b.getPipeline(common.BackfillPipeline)
+			if pipeline != nil && (pipeline.State() == common.Pipeline_Initial || pipeline.State() == common.Pipeline_Stopped) {
+				// See if there are checkpoints present that represent the backfill pipeline has started before
+				// If any is present, it means that the first VBTask has made progress and the incoming task cannot be merged with it
+				checkpointMgr, ok := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
+				if ok {
+					ckptExists, err := checkpointMgr.CheckpointsExist(pipeline.FullTopic())
+					if err == nil && !ckptExists {
+						shouldSkipFirst = false
+					}
 				}
 			}
+			b.pipelinesMtx.RUnlock()
+
+			skipFirstString := ""
+			if !shouldSkipFirst {
+				skipFirstString = " (complete merge) "
+			}
+			// Note, this message is used for integration testing script
+			b.logger.Infof("Replication %v%v- These collections need to append backfill %v for vb->seqnos %v", b.id, skipFirstString, req, seqnosMap)
+		} else {
+			b.logNewBackfillMsg(req, seqnosMap)
 		}
-		b.pipelinesMtx.RUnlock()
-		skipFirstString := ""
-		if !shouldSkipFirst {
-			skipFirstString = " (complete merge) "
-		}
+
 		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, shouldSkipFirst)
-		b.logger.Infof("Replication %v%v- These collections need to append backfill %v for vb->seqnos %v", b.id, skipFirstString, req, seqnosMap)
 		b.requestPersistence(SetOp)
 	}
 	return nil
 }
 
-func (b *BackfillRequestHandler) requestPersistence(op PersistType) {
+// Note, this message is used for integration testing script
+func (b *BackfillRequestHandler) logNewBackfillMsg(req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) {
+	b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
+}
+
+func (b *BackfillRequestHandler) requestPersistence(op PersistType) error {
+	var err error
 	if op == AddOp || op == SetOp {
 		select {
 		case b.persistenceNeededCh <- op:
@@ -295,8 +333,23 @@ func (b *BackfillRequestHandler) requestPersistence(op PersistType) {
 			b.persistentOverflowCh <- true
 		}
 	} else if op == DelOp {
-		panic("DelOp isn't a form or persistence")
+		// DelOps are synchronous - overwrites any previous add or sets
+		// all previous persist actions are considered successful, return them to sender
+	OVERFLOWRETURN2:
+		for {
+			select {
+			case <-b.persistenceNeededCh:
+				b.persistResultCh <- nil
+			case <-b.persistentOverflowCh:
+				b.persistResultCh <- nil
+			default:
+				break OVERFLOWRETURN2
+			}
+		}
+		// Then synchronously delete
+		err = b.metaKvOp(op)
 	}
+	return err
 }
 
 // This is called per vb when ThroughSeqnoSvc notifies backfill request handler that a VB has finished a task
@@ -338,7 +391,6 @@ func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
 		panic("Cannot be nil")
 	} else {
 		b.cachedBackfillSpec.VBTasksMap.MarkOneVBTaskDone(vbno)
-		b.requestPersistence(SetOp)
 
 		// Need to also delete the checkpoints associated with this VB
 		// So that when backfill pipeline restarts and if there's another task to be done
@@ -360,11 +412,30 @@ func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
 	}
 	b.pipelinesMtx.Unlock()
 
+	var hasMoreTasks bool
 	if backfillDone {
-		hasMoreTasks := b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask()
+		hasMoreTasks = b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask()
 		b.vbsDoneNotifier(hasMoreTasks)
 	}
-	return nil
+
+	var err error
+	if backfillDone && !hasMoreTasks {
+		// TODO - once metakv is in, this need to be revisited
+		b.delOpBackfillId = b.cachedBackfillSpec.Id
+		b.cachedBackfillSpec = nil
+		// At this point, there is no more tasks in the backfill spec
+		// This is only possible if all the tasks are done
+		// We must delete the spec here before a new one can be added
+		delErr := b.requestPersistence(DelOp)
+		if delErr == nil {
+			err = errorSyncDel
+		} else {
+			err = delErr
+		}
+	} else {
+		b.requestPersistence(SetOp)
+	}
+	return err
 }
 
 func (b *BackfillRequestHandler) metaKvOp(op PersistType) error {
@@ -374,7 +445,8 @@ func (b *BackfillRequestHandler) metaKvOp(op PersistType) error {
 	case SetOp:
 		return b.backfillReplSvc.SetBackfillReplSpec(b.cachedBackfillSpec)
 	default:
-		panic("DELETE NOT IMPLEMENTED YET")
+		_, err := b.backfillReplSvc.DelBackfillReplSpec(b.delOpBackfillId)
+		return err
 	}
 }
 

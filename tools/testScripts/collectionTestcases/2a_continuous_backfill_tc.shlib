@@ -116,8 +116,8 @@ function deleteAndRecreateBackfillMultiples {
 		checkItemCnt "C2" "B2" 0
 		checkChangesLeftBackup
 
-		echo "Waiting 10 seconds to check broken mapping message"
-		sleep 10
+		echo "Waiting 15 seconds to check broken mapping message"
+		sleep 15
 		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
                 validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
 
@@ -129,9 +129,8 @@ function deleteAndRecreateBackfillMultiples {
 		echo "Waiting for 30 seconds until discovery and automatic backfill"
 		sleep 30
 		validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-		#TODO - MB-39849
-		#validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
 		checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+		validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
 
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
 		sleep 15 
@@ -179,8 +178,7 @@ function runTestCase {
 	BG_WORKLOAD_PID=$!
 	echo "GOT RUNNING PID $BG_WORKLOAD_PID"
 
-	# TODO MB-39849 - change this to 3
-	deleteAndRecreateBackfillMultiples 1
+	deleteAndRecreateBackfillMultiples 3
 
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
