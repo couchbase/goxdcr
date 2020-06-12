@@ -326,7 +326,7 @@ func (b *BackfillMgr) deleteBackfillRequestHandler(replId, internalId string) er
 		waitGrp.Wait()
 		if len(errCh) > 0 {
 			err := <-errCh
-			b.logger.Errorf("Stopped backfill request handler for spec %v internalId %v with err %v", replId, internalId, err.Err)
+			b.logger.Infof("Stopped backfill request handler for spec %v internalId %v with err %v", replId, internalId, err.Err)
 		} else {
 			b.logger.Infof("Stopped backfill request handler for spec %v internalId %v", replId, internalId)
 		}

@@ -404,7 +404,6 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 
 	for _, serverAddr := range nodes {
 		// If the remote cluster does not support collections, then only get the stat for default collection
-		// TODO MB-38157: when backfilling or doing explicit mapping, get stats for a specific set of collections
 		var features utilities.HELOFeatures
 		if !rcCapability.Collection {
 			features.Collections = true

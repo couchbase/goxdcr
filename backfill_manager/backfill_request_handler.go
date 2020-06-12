@@ -55,6 +55,8 @@ type BackfillRequestHandler struct {
 	backfillPipelineTotalVBsDone int
 	raisePipelineErrors          []func(error)
 	detachCbs                    []func()
+	// atomic indicators
+	backfillPipelineAttached uint32
 
 	childrenWaitgrp     sync.WaitGroup
 	finCh               chan bool
@@ -525,6 +527,7 @@ func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 				b.backfillPipelineVBsDone[vb] = false
 			}
 		}
+		atomic.StoreUint32(&b.backfillPipelineAttached, 1)
 	} else if pipeline.Type() == common.MainPipeline {
 		asyncListenerMap := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 		pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.CollectionRoutingEventListener, b)
@@ -559,6 +562,9 @@ func (b *BackfillRequestHandler) Detach(pipeline common.Pipeline) error {
 		if pipeline.FullTopic() == attachedP.FullTopic() {
 			b.logger.Infof("Detaching %v %v", attachedP.Type(), attachedP.Topic())
 			idxToDel = i
+			if pipeline.Type() == common.BackfillPipeline {
+				atomic.StoreUint32(&b.backfillPipelineAttached, 0)
+			}
 			break
 		}
 	}
@@ -631,8 +637,8 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			return err
 		}
 		err := b.HandleVBTaskDone(vbno)
-		if err != nil {
-			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), err)
+		if err != nil && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {
+			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), vbno, err)
 		}
 	default:
 		b.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, b.id)

@@ -407,7 +407,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-status_check_ticker.C:
 			rm.pipelineMgr.CheckPipelines()
 		case <-stats_update_ticker.C:
-			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), bucket_kv_mem_clients, logger_rm, rm.utils, rm.remote_cluster_svc)
+			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), bucket_kv_mem_clients, logger_rm, rm.utils, rm.remote_cluster_svc, rm.backfillReplSvc)
 		}
 	}
 }

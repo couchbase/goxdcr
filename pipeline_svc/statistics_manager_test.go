@@ -58,7 +58,8 @@ func setupBoilerPlate() (*log.CommonLogger,
 	*parts.DcpNozzle,
 	*common.Connector,
 	*service_def.UILogSvc,
-	*service_def.CollectionsManifestSvc) {
+	*service_def.CollectionsManifestSvc,
+	*service_def.BackfillReplSvc) {
 
 	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
 	throughSeqSvc := &service_def.ThroughSeqnoTrackerSvc{}
@@ -95,9 +96,12 @@ func setupBoilerPlate() (*log.CommonLogger,
 
 	collectionsManifestSvc := &service_def.CollectionsManifestSvc{}
 
+	backfillReplSvc := &service_def.BackfillReplSvc{}
+
 	return testLogger, throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc
 }
 
 func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
@@ -117,7 +121,8 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	dcpNozzle *parts.DcpNozzle,
 	connector *common.Connector,
 	uiLogSvc *service_def.UILogSvc,
-	collectionsManifestSvc *service_def.CollectionsManifestSvc) {
+	collectionsManifestSvc *service_def.CollectionsManifestSvc,
+	backfillReplSvc *service_def.BackfillReplSvc) {
 
 	pipeline.On("Specification").Return(replicationSpec)
 	pipeline.On("Topic").Return(pipelineTopic)
@@ -128,12 +133,15 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	pipeline.On("GetAsyncListenerMap").Return(nil)
 	pipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
 	pipeline.On("RuntimeContext").Return(runtimeCtx)
+	pipeline.On("Type").Return(commonReal.MainPipeline)
+	pipeline.On("FullTopic").Return(pipelineTopic)
 
 	connector.On("AsyncComponentEventListeners").Return(nil)
 	connector.On("DownStreams").Return(nil)
 	connector.On("Id").Return(testRouter)
 
 	dcpNozzle.SetConnector(connector)
+
 }
 
 func setupInnerMock(runtimeCtx *common.PipelineRuntimeContext,
@@ -155,12 +163,14 @@ func setupCheckpointMgr(
 	utils *utilities.UtilsIface,
 	statsMgr *StatisticsManager,
 	uiLogSvc *service_def.UILogSvc,
-	collectionsManifestSvc *service_def.CollectionsManifestSvc) *CheckpointManager {
+	collectionsManifestSvc *service_def.CollectionsManifestSvc,
+	backfillReplSvc *service_def.BackfillReplSvc) *CheckpointManager {
 
 	ckptManager, _ := NewCheckpointManager(ckptService, capiSvc, remoteClusterSvc,
 		replSpecSvc, clusterInfoSvc, xdcrTopologySvc, throughSeqSvc, activeVBs,
 		"targetUsername", "targetPassword", "targetBucketName", targetKVVbMap, remoteClusterRef,
-		0, false, log.DefaultLoggerContext, utils, statsMgr, uiLogSvc, collectionsManifestSvc)
+		0, false, log.DefaultLoggerContext, utils, statsMgr, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc)
 
 	return ckptManager
 }
@@ -170,18 +180,21 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	assert := assert.New(t)
 	_, throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc := setupBoilerPlate()
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc := setupBoilerPlate()
 
 	setupMocks(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc)
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc,
 		log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc,
-		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc, collectionsManifestSvc)
+		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
+		collectionsManifestSvc, backfillReplSvc)
 	setupInnerMock(runtimeCtx, ckptManager)
 
 	statsMgr.Attach(pipeline)
@@ -301,18 +314,21 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	assert := assert.New(t)
 	_, throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc := setupBoilerPlate()
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc := setupBoilerPlate()
 
 	setupMocks(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc)
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc,
 		log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc,
-		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc, collectionsManifestSvc)
+		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
+		collectionsManifestSvc, backfillReplSvc)
 	setupInnerMock(runtimeCtx, ckptManager)
 
 	statsMgr.Attach(pipeline)

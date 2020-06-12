@@ -152,6 +152,8 @@ type CheckpointManager struct {
 	isBackfillPipeline uint32
 	bpVbMtx            sync.RWMutex
 	bpVbHasCkpt        map[uint16]bool
+
+	backfillReplSvc service_def.BackfillReplSvc
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -190,7 +192,8 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
 	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
 	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface,
-	uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc) (*CheckpointManager, error) {
+	uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc,
+	backfillReplSvc service_def.BackfillReplSvc) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -227,6 +230,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		uiLogSvc:                  uiLogSvc,
 		collectionsManifestSvc:    collectionsManifestSvc,
 		backfillStartingTs:        make(map[uint16]*base.VBTimestamp),
+		backfillReplSvc:           backfillReplSvc,
 	}, nil
 }
 
@@ -585,8 +589,26 @@ func (ckmgr *CheckpointManager) Stop() error {
 }
 
 func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
-	spec, _ := ckmgr.rep_spec_svc.ReplicationSpec(ckmgr.pipeline.FullTopic())
-	if spec == nil {
+	var specExists bool
+	switch ckmgr.pipeline.Type() {
+	case common.MainPipeline:
+		spec, _ := ckmgr.rep_spec_svc.ReplicationSpec(ckmgr.pipeline.Topic())
+		specExists = spec != nil
+	case common.BackfillPipeline:
+		backfillSpec, _ := ckmgr.backfillReplSvc.BackfillReplSpec(ckmgr.pipeline.Topic())
+		specExists = backfillSpec != nil
+		if specExists {
+			if !backfillSpec.VBTasksMap.ContainsAtLeastOneTask() {
+				// If Backfill spec does not have any more VB tasks, then it is considered finished
+				// and the checkpoints are to be deleted, so do not checkpoint
+				specExists = false
+			}
+		}
+	default:
+		panic(fmt.Sprintf("Unhandled type %v", ckmgr.pipeline.Type().String()))
+	}
+
+	if !specExists {
 		// do not perform checkpoint if spec has been deleted
 		ckmgr.logger.Infof("Skipping checkpointing for %v %v before stopping since replication spec has been deleted", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 		return
@@ -608,11 +630,11 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 	for {
 		select {
 		case <-ret:
-			ckmgr.logger.Infof("Checkpointing for %v %v completed", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+			ckmgr.logger.Infof("Checkpointing completed for %v %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 			return
 		case <-timeout_timer.C:
 			close(close_ch)
-			ckmgr.logger.Infof("Checkpointing for %v %v timed out after %v.", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), base.TimeoutCheckpointBeforeStop)
+			ckmgr.logger.Infof("Checkpointing timed out for %v %v after %v.", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), base.TimeoutCheckpointBeforeStop)
 			// do not wait for ckmgr.PerformCkpt to complete, which could get stuck if call to target never comes back
 			return
 		}

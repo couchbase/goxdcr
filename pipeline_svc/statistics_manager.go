@@ -231,6 +231,10 @@ type StatisticsManager struct {
 	user_agent string
 
 	utils utilities.UtilsIface
+
+	endSeqnos map[uint16]uint64
+	// For now, backfill pipeline do not dynamically change VB tasks
+	totalBackfillChanges uint64
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
@@ -753,7 +757,19 @@ func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	}
 	return docs_checked
 }
+
 func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (int64, error) {
+	switch stats_mgr.pipeline.Type() {
+	case common.MainPipeline:
+		return stats_mgr.calculateChangesLeftMainPipeline(docs_processed)
+	case common.BackfillPipeline:
+		return stats_mgr.calculateChangesLeftBackfillPipeline(docs_processed)
+	default:
+		return 0, fmt.Errorf("Invalid pipeline: %v", stats_mgr.pipeline.Type().String())
+	}
+}
+
+func (stats_mgr *StatisticsManager) calculateChangesLeftMainPipeline(docs_processed int64) (int64, error) {
 	stats_mgr.kv_mem_clients_lock.Lock()
 	defer stats_mgr.kv_mem_clients_lock.Unlock()
 
@@ -763,7 +779,22 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 		return 0, err
 	}
 	changes_left := total_changes - docs_processed
-	stats_mgr.logger.Infof("%v total_docs=%v, docs_processed=%v, changes_left=%v\n", stats_mgr.pipeline.Topic(), total_changes, docs_processed, changes_left)
+	stats_mgr.logChangesLeft(total_changes, docs_processed, changes_left)
+	return changes_left, nil
+}
+func (stats_mgr *StatisticsManager) logChangesLeft(total_changes, docs_processed, changes_left int64) {
+	stats_mgr.logger.Infof("%v total_docs=%v, docs_processed=%v, changes_left=%v\n", stats_mgr.pipeline.FullTopic(), total_changes, docs_processed, changes_left)
+}
+
+func (stats_mgr *StatisticsManager) calculateChangesLeftBackfillPipeline(docs_processed int64) (int64, error) {
+	total_changes := int64(stats_mgr.totalBackfillChanges)
+	changes_left := total_changes - docs_processed
+	if changes_left < 0 {
+		// Since DCP always sends until the end of a snapshot, it's possible that DCP
+		// will send us seqno after our requested endpoint, which will result in a negative changes_left
+		changes_left = 0
+	}
+	stats_mgr.logChangesLeft(total_changes, docs_processed, changes_left)
 	return changes_left, nil
 }
 
@@ -825,7 +856,7 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 
 	//register the aggregation metrics for the pipeline
 	stats_mgr.initOverviewRegistry()
-	stats_mgr.logger.Infof("StatisticsManager is started for pipeline %v", stats_mgr.pipeline.Topic)
+	stats_mgr.logger.Infof("StatisticsManager is started for %v %v", stats_mgr.pipeline.Type(), stats_mgr.pipeline.FullTopic())
 
 	return nil
 }
@@ -833,7 +864,8 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 // compose user agent string for HELO command
 func (stats_mgr *StatisticsManager) composeUserAgent() {
 	spec := stats_mgr.pipeline.Specification().GetReplicationSpec()
-	stats_mgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr StatsMgr", spec.SourceBucketName, spec.TargetBucketName)
+	stats_mgr.user_agent = base.ComposeUserAgentWithBucketNames(fmt.Sprintf("Goxdcr StatsMgr %v", stats_mgr.pipeline.Type()),
+		spec.SourceBucketName, spec.TargetBucketName)
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
@@ -906,6 +938,19 @@ func (stats_mgr *StatisticsManager) initializeConfig(settings metadata.Replicati
 		update_interval_duration = stats_mgr.getUpdateInterval()
 	}
 
+	vbTasksRaw, exists := settings[parts.DCP_VBTasksMap]
+	if exists {
+		backfillVBTasks := vbTasksRaw.(metadata.VBTasksMapType)
+		stats_mgr.endSeqnos = make(map[uint16]uint64)
+		for vb, vbTasks := range backfillVBTasks {
+			if vbTasks != nil && len(*vbTasks) > 0 {
+				endSeqno := (*vbTasks)[0].Timestamps.EndingTimestamp.Seqno
+				stats_mgr.endSeqnos[vb] = endSeqno
+				stats_mgr.totalBackfillChanges += endSeqno
+			}
+		}
+	}
+
 	if stats_mgr.logger.GetLogLevel() >= log.LogLevelDebug {
 		redactOnceFunc()
 		stats_mgr.logger.Debugf("%v StatisticsManager Starts: update_interval=%v, settings=%v\n", stats_mgr.pipeline.InstanceId(), update_interval_duration, redactedSettings)
@@ -954,7 +999,6 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 	var features utilities.HELOFeatures
 	if !rcCapability.Collection {
 		// If remote cluster does not support collection, then only get stats for default collection
-		// TODO MB-38157
 		features.Collections = true
 	}
 
@@ -1542,7 +1586,8 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.Replic
 
 func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	checkpoints_svc service_def.CheckpointsService, bucket_kv_mem_clients map[string]map[string]mcc.ClientIface,
-	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc) {
+	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc,
+	backfillReplSvc service_def.BackfillReplSvc) {
 	logger.Debug("updateStats for paused replications")
 
 	for repl_id, repl_status := range pipeline_manager.ReplicationStatusMap() {
@@ -1578,18 +1623,25 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			kv_mem_clients = checkMccConnectionsCapability(bucket_kv_mem_clients, spec.SourceBucketName, remoteClusterCapability)
 		}
 
+		// Check to see if backfill replication exists
+		backfillSpec, err := backfillReplSvc.BackfillReplSpec(spec.Id)
+		if err != nil {
+			// no backfill spec to use
+			backfillSpec = nil
+		}
+
 		if overview_stats == nil {
 			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
 			// or it may be nil when the underying replication is not paused but has not completed startup process
 			// construct it
-			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils, remoteClusterCapability)
+			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils, remoteClusterCapability, backfillSpec)
 			if err != nil {
 				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
 				continue
 			}
 		} else {
 			if repl_status.RuntimeStatus(true) != pipeline_pkg.Replicating {
-				err := updateStatsForReplication(repl_status, overview_stats, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils, remoteClusterCapability)
+				err := updateStatsForReplication(repl_status, overview_stats, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils, remoteClusterCapability, backfillSpec)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
 					continue
@@ -1616,7 +1668,6 @@ func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]m
 		connsShouldHaveCollectionsEnabled = true
 	} else {
 		// When remote cluster support collections, this means that we should use the traditional stats
-		// TODO - MB-38157 and other situations, like explicit mapping
 	}
 
 	// Check the connections
@@ -1646,7 +1697,8 @@ func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]m
 // compute and set changes_left and docs_processed stats. set other stats to 0
 func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
 	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
-	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterCapability metadata.Capability) error {
+	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterCapability metadata.Capability,
+	backfillSpec *metadata.BackfillReplicationSpec) error {
 	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
@@ -1660,7 +1712,35 @@ func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, s
 
 	changes_left := total_changes - int64(docs_processed)
 
-	logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
+	var logBackfillStat bool
+	var backfillCkptsExist bool
+	var backfillTotalChanges int64
+	var backfillDocsProcessed uint64
+	if backfillSpec != nil {
+		// Need to also construct stats with backfill info
+		backfillTotalChanges, backfillCkptsExist, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc,
+			logger, cur_vb_list)
+		if err == nil {
+			logBackfillStat = true
+			total_changes += backfillTotalChanges
+			if backfillCkptsExist {
+				backfillTopic := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
+				backfillDocsProcessed, err = getDocsProcessedForReplication(backfillTopic, cur_vb_list, checkpoints_svc, logger)
+				if err != nil {
+					logger.Warnf("Unable to get backfill docs processed for %v", backfillTopic)
+				} else {
+					docs_processed += backfillDocsProcessed
+				}
+			}
+		}
+	}
+
+	if logBackfillStat {
+		logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v (total_backfill_docs=%v), docs_processed=%v (backfill_docs_processed=%v), changes_left=%v\n",
+			spec.Id, cur_kv_vb_map, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
+	} else {
+		logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
+	}
 
 	overview_stats := new(expvar.Map).Init()
 	overview_stats.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
@@ -1683,7 +1763,6 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	remoteClusterCapability metadata.Capability) (int64, error) {
 	var total_changes uint64 = 0
 
-	// TOOD - MB-38157 - backfill or explicit mapping will need a specific set of collection IDs
 	var features utilities.HELOFeatures
 	var collectionIds []uint32
 	if !remoteClusterCapability.Collection {
@@ -1715,9 +1794,31 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 	return int64(total_changes), nil
 }
 
+// For a paused pipeline, we need to update what is the total number of changes for the paused backfill pipeline
+// The total number of changes will be: SUM_ALL_VBS(endSeqnoRequested - startSeqnoRequested)
+func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicationSpec, checkpointsSvc service_def.CheckpointsService,
+	logger *log.CommonLogger, cur_vb_list []uint16) (int64, bool, error) {
+	var backfillTotalChanges int64 = 0
+	var checkpointExists bool
+
+	for _, vb := range cur_vb_list {
+		tasksPtr, exists := backfillSpec.VBTasksMap[vb]
+		if !exists || tasksPtr == nil || len(*tasksPtr) == 0 {
+			continue
+		}
+		tasks := *tasksPtr
+		oneTask := *(tasks[0])
+		begin := oneTask.Timestamps.StartingTimestamp.Seqno
+		end := oneTask.Timestamps.EndingTimestamp.Seqno
+		backfillTotalChanges += int64(end - begin)
+	}
+	return backfillTotalChanges, checkpointExists, nil
+}
+
 func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, overview_stats *expvar.Map, cur_kv_vb_map map[string][]uint16,
 	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
-	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterCapability metadata.Capability) error {
+	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterCapability metadata.Capability,
+	backfillSpec *metadata.BackfillReplicationSpec) error {
 
 	// if pipeline is not running, update docs_processed and changes_left stats, which are not being
 	// updated by running pipeline and may have become inaccurate
@@ -1740,6 +1841,8 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
 	base.SortUint16List(cur_vb_list)
 	sameList := base.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
+
+	var backfillDocsProcessed uint64
 	if sameList {
 		docs_processed, err = strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
@@ -1751,7 +1854,18 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 		if err != nil {
 			return err
 		}
+
 		docs_processed = int64(docs_processed_uint64)
+
+		if backfillSpec != nil {
+			backfillTopic := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
+			backfillDocsProcessed, err = getDocsProcessedForReplication(backfillTopic, cur_vb_list, checkpoints_svc, logger)
+			if err != nil {
+				return err
+			}
+			docs_processed += int64(backfillDocsProcessed)
+		}
+
 		docs_processed_var := new(expvar.Int)
 		docs_processed_var.Set(docs_processed)
 		overview_stats.Set(DOCS_PROCESSED_METRIC, docs_processed_var)
@@ -1764,13 +1878,28 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 		return err
 	}
 
+	var backfillTotalChanges int64
+	if backfillSpec != nil {
+		backfillTotalChanges, _, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc,
+			logger, cur_vb_list)
+		if err != nil {
+			return err
+		}
+		total_changes += backfillTotalChanges
+	}
+
 	changes_left := total_changes - docs_processed
 	changes_left_var := new(expvar.Int)
 	changes_left_var.Set(changes_left)
 
 	overview_stats.Set(CHANGES_LEFT_METRIC, changes_left_var)
 
-	logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
+	if backfillSpec != nil {
+		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v (totalBackfillDocs=%v), docs_processed=%v (totalBackfillDocsProcessed=%v), changes_left=%v\n",
+			spec.Id, cur_kv_vb_map, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
+	} else {
+		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
+	}
 	return nil
 }
 
