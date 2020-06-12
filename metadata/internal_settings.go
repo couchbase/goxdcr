@@ -4,6 +4,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"math"
+	"time"
 )
 
 var logger_is *log.CommonLogger = log.NewLogger("InternalSetting", log.DefaultLoggerContext)
@@ -307,7 +308,7 @@ var FilteringInternalXattrConfig = &SettingsConfig{base.InternalKeyXattr, nil}
 var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterAlternateAddrChangeCnt, &Range{1, 1000}}
 var ManifestRefreshSrcIntervalConfig = &SettingsConfig{base.ManifestRefreshSrcInterval, &Range{1, 10000}}
 var ManifestRefreshTgtIntervalConfig = &SettingsConfig{base.ManifestRefreshTgtInterval, &Range{1, 10000}}
-var BackfillPersistIntervalConfig = &SettingsConfig{base.BackfillPersistInterval.Milliseconds(), &Range{1, 10000}}
+var BackfillPersistIntervalConfig = &SettingsConfig{int64(base.BackfillPersistInterval / time.Millisecond), &Range{1, 10000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
