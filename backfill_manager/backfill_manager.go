@@ -477,7 +477,7 @@ func (b *BackfillMgr) collectionsManifestChangeCb(replId string, oldVal, newVal 
 		// Don't think it's possible...
 		b.logger.Infof("Target manifest has been deleted")
 		tgtErr = base.ErrorInvalidInput
-	} else {
+	} else if oldManifests.Target != nil {
 		_, _, _, tgtErr = newManifests.Target.Diff(oldManifests.Target)
 		if tgtErr != nil {
 			b.logger.Errorf("Unable to diff between target manifests: %v", tgtErr.Error())

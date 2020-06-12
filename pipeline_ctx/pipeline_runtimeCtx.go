@@ -148,10 +148,6 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 		}
 	}
 
-	if ctx.Pipeline().Type() != common.MainPipeline {
-		ctx.logger.Infof("%v Pipeline context is attached to %v, not a main pipeline. Not stopping services", ctx.Pipeline().Type().String, topic)
-		return nil
-	}
 	ctx.logger.Infof("%v Pipeline context is stopping...", topic)
 
 	stopServicesFunc := func() error {
@@ -163,6 +159,12 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 
 		//stop all registered services
 		for name, service := range ctx.runtime_svcs {
+			if service.IsSharable() {
+				// If it is sharable, only the main pipeline can stop the service
+				ctx.logger.Infof("%v service %v is sharable. This context is not based on Main Pipeline. Skip stopping",
+					topic, name)
+				continue
+			}
 			// stop services in parallel to ensure that all services get their turns
 			waitGrp.Add(1)
 			go ctx.stopService(name, service, waitGrp, errCh)
