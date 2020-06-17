@@ -299,8 +299,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		return err
 	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
-		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, spec.Settings.SourceNozzlePerNode*2,
-		base.BackfillPersistInterval, vbsTasksDoneNotifier)
+		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 

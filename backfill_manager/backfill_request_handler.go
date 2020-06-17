@@ -56,17 +56,15 @@ type BackfillRequestHandler struct {
 	raisePipelineErrors          []func(error)
 	detachCbs                    []func()
 
-	childrenWaitgrp      sync.WaitGroup
-	finCh                chan bool
-	stopRequested        uint32
-	incomingReqCh        chan metadata.CollectionNamespaceMapping
-	doneTaskCh           chan uint16
-	handleResultCh       chan error
-	doneTaskResultCh     chan error
-	persistResultCh      chan error
-	persistenceNeededCh  chan PersistType
-	persistentOverflowCh chan bool
-	persistInterval      time.Duration
+	childrenWaitgrp     sync.WaitGroup
+	finCh               chan bool
+	stopRequested       uint32
+	incomingReqCh       chan ReqAndResp
+	doneTaskCh          chan ReqAndResp
+	persistenceNeededCh chan PersistType
+	persistInterval     time.Duration
+
+	queuedResps []chan error
 
 	getThroughSeqno LatestSeqnoGetter
 	vbsGetter       MyVBsGetter
@@ -85,27 +83,29 @@ type MyVBsGetter func() ([]uint16, error)
 
 type MyVBsTasksDoneNotifier func(startNewTask bool)
 
+type ReqAndResp struct {
+	Request         interface{}
+	HandleResponse  chan error
+	PersistResponse chan error
+}
+
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc,
-	spec *metadata.ReplicationSpecification, seqnoGetter LatestSeqnoGetter, vbsGetter MyVBsGetter, maxConcurrentReqs int,
+	spec *metadata.ReplicationSpecification, seqnoGetter LatestSeqnoGetter, vbsGetter MyVBsGetter,
 	persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
-		AbstractComponent:    component.NewAbstractComponentWithLogger(replId, logger),
-		logger:               logger,
-		id:                   replId,
-		finCh:                make(chan bool),
-		incomingReqCh:        make(chan metadata.CollectionNamespaceMapping),
-		doneTaskCh:           make(chan uint16, base.NumberOfVbs),
-		doneTaskResultCh:     make(chan error, base.NumberOfVbs),
-		handleResultCh:       make(chan error, maxConcurrentReqs),
-		persistResultCh:      make(chan error, maxConcurrentReqs+base.NumberOfVbs),
-		persistenceNeededCh:  make(chan PersistType, 1),
-		persistentOverflowCh: make(chan bool, maxConcurrentReqs+base.NumberOfVbs),
-		spec:                 spec,
-		getThroughSeqno:      seqnoGetter,
-		vbsGetter:            vbsGetter,
-		backfillReplSvc:      backfillReplSvc,
-		persistInterval:      persistInterval,
-		vbsDoneNotifier:      vbsTasksDoneNotifier,
+		AbstractComponent:   component.NewAbstractComponentWithLogger(replId, logger),
+		logger:              logger,
+		id:                  replId,
+		finCh:               make(chan bool),
+		incomingReqCh:       make(chan ReqAndResp),
+		doneTaskCh:          make(chan ReqAndResp, base.NumberOfVbs),
+		persistenceNeededCh: make(chan PersistType, 1),
+		spec:                spec,
+		getThroughSeqno:     seqnoGetter,
+		vbsGetter:           vbsGetter,
+		backfillReplSvc:     backfillReplSvc,
+		persistInterval:     persistInterval,
+		vbsDoneNotifier:     vbsTasksDoneNotifier,
 	}
 }
 
@@ -160,53 +160,82 @@ func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.C
 // Because handling VB done and handling incoming requests are serialized here, it is safe to delete the spec
 // (synchronously) and then re-create a new spec once the incomingReqCh is read next
 func (b *BackfillRequestHandler) run() {
-	var needToRunPersist bool
+	batchPersistCh := make(chan bool, 1)
+	var persistTimer *time.Timer
+
+	requestPersistFunc := func() {
+		if persistTimer == nil {
+			persistTimer = time.AfterFunc(b.persistInterval, func() {
+				select {
+				case batchPersistCh <- true:
+				default:
+					// Already needed to persist
+				}
+			})
+		} else {
+			persistTimer.Reset(b.persistInterval)
+		}
+	}
+
+	cancelPersistFunc := func() {
+		if persistTimer != nil {
+			persistTimer.Stop()
+			persistTimer = nil
+		}
+		// When cancelling, need to remove any potential batches
+		select {
+		case <-batchPersistCh:
+		default:
+		}
+	}
+
 	var needCoolDown uint32
 	for {
 		select {
 		case <-b.finCh:
 			return
-		case req := <-b.incomingReqCh:
-			err := b.handleBackfillRequestInternal(req)
-			b.handleResultCh <- err
+		case reqAndResp := <-b.incomingReqCh:
+			err := b.handleBackfillRequestInternal(reqAndResp)
+			reqAndResp.HandleResponse <- err
 			if err == nil {
-				needToRunPersist = true
+				requestPersistFunc()
+			} else {
+				close(reqAndResp.PersistResponse)
 			}
-		case vbno := <-b.doneTaskCh:
-			err := b.handleVBDone(vbno)
-			if err == nil {
-				needToRunPersist = true
-			} else if err == errorSyncDel {
+		case reqAndResp := <-b.doneTaskCh:
+			handleErr := b.handleVBDone(reqAndResp)
+			reqAndResp.HandleResponse <- handleErr
+			if handleErr == nil {
+				requestPersistFunc()
+				// Actual persistence will return to PersistResp
+			} else if handleErr == errorSyncDel {
 				// Handling this VB has led to completion of the backfill spec
-				// The spec has been synchronously deleted
-				needToRunPersist = false
+				// The spec has been synchronously deleted, and err returned to persistResponse
+				cancelPersistFunc()
+			} else {
+				// Erroneous state, no persist will take place for this request
+				close(reqAndResp.PersistResponse)
 			}
-			b.doneTaskResultCh <- err
-		default:
-			if needToRunPersist && atomic.LoadUint32(&needCoolDown) == 0 {
-				needToRunPersist = false
-				// No more incoming requests - done bursting handling, do a single metakv operation
-				select {
-				case persistType := <-b.persistenceNeededCh:
-					err := b.metaKvOp(persistType)
-					atomic.StoreUint32(&needCoolDown, 1)
-					go func() {
-						// Cool down period
-						time.Sleep(b.persistInterval)
-						atomic.StoreUint32(&needCoolDown, 0)
-					}()
-					b.persistResultCh <- err
-					// For any overflow, return the results too
-				OVERFLOWRETURN:
-					for {
-						select {
-						case <-b.persistentOverflowCh:
-							b.persistResultCh <- err
-						default:
-							break OVERFLOWRETURN
-						}
-					}
+		case <-batchPersistCh:
+			if atomic.LoadUint32(&needCoolDown) == 1 {
+				batchPersistCh <- true
+				break
+			}
+			// No more incoming requests - done bursting handling, do a single metakv operation
+			select {
+			case persistType := <-b.persistenceNeededCh:
+				err := b.metaKvOp(persistType)
+				atomic.StoreUint32(&needCoolDown, 1)
+				go func() {
+					// Cool down period
+					time.Sleep(b.persistInterval)
+					atomic.StoreUint32(&needCoolDown, 0)
+				}()
+				// Return the error code to all the callers that are waiting
+				for _, respCh := range b.queuedResps {
+					respCh <- err
 				}
+				b.queuedResps = b.queuedResps[:0]
 			}
 		}
 	}
@@ -221,25 +250,34 @@ func (b *BackfillRequestHandler) HandleBackfillRequest(req metadata.CollectionNa
 		return errorStopped
 	}
 
-	// Serialize the requests - goes to handleBackfillRequestInternal()
-	b.incomingReqCh <- req
+	var reqAndResp ReqAndResp
+	reqAndResp.Request = req
+	reqAndResp.PersistResponse = make(chan error, 1)
+	reqAndResp.HandleResponse = make(chan error, 1)
 
-	err := <-b.handleResultCh
+	// Serialize the requests - goes to handleBackfillRequestInternal()
+	b.incomingReqCh <- reqAndResp
+
+	err := <-reqAndResp.HandleResponse
 	if err != nil {
 		return err
 	}
 
-	return <-b.persistResultCh
+	return <-reqAndResp.PersistResponse
 }
 
 func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 	if b.IsStopped() {
 		return errorStopped
 	}
+	var reqAndResp ReqAndResp
+	reqAndResp.Request = vbno
+	reqAndResp.HandleResponse = make(chan error, 1)
+	reqAndResp.PersistResponse = make(chan error, 1)
 
 	// goes to handleVBDone()
-	b.doneTaskCh <- vbno
-	err := <-b.doneTaskResultCh
+	b.doneTaskCh <- reqAndResp
+	err := <-reqAndResp.HandleResponse
 	if err != nil {
 		if err == errorSyncDel {
 			// The backfill replication was deleted because this vb being done meant the every task was finished
@@ -248,11 +286,11 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 		return err
 	}
 
-	return <-b.persistResultCh
+	return <-reqAndResp.PersistResponse
 }
 
 // TODO - MB-38931 - once consistent metakv is in place, need to have a listener, handle concurrent updates, etc
-func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.CollectionNamespaceMapping) error {
+func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
 	clonedSpec := b.spec.Clone()
 
 	seqnosMap, err := b.getThroughSeqno()
@@ -265,6 +303,11 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 		return err
 	}
 
+	req, ok := reqAndResp.Request.(metadata.CollectionNamespaceMapping)
+	if !ok {
+		return fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(reqAndResp.Request))
+	}
+
 	vbTasksMap, err := metadata.NewBackfillVBTasksMap(req, myVBs, seqnosMap)
 	if err != nil {
 		return err
@@ -275,12 +318,12 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 		backfillSpec := metadata.NewBackfillReplicationSpec(clonedSpec.Id, clonedSpec.InternalId, vbTasksMap, clonedSpec)
 		b.cachedBackfillSpec = backfillSpec
 		b.logNewBackfillMsg(req, seqnosMap)
-		b.requestPersistence(AddOp)
+		b.requestPersistence(AddOp, reqAndResp.PersistResponse)
 	} else {
 		if b.cachedBackfillSpec.Contains(vbTasksMap) {
 			// already handled - redundant request
 			// Just request persistence to ensure synchronization
-			b.requestPersistence(SetOp)
+			b.requestPersistence(SetOp, reqAndResp.PersistResponse)
 			return nil
 		}
 
@@ -312,7 +355,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(req metadata.Coll
 		}
 
 		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, shouldSkipFirst)
-		b.requestPersistence(SetOp)
+		b.requestPersistence(SetOp, reqAndResp.PersistResponse)
 	}
 	return nil
 }
@@ -322,7 +365,7 @@ func (b *BackfillRequestHandler) logNewBackfillMsg(req metadata.CollectionNamesp
 	b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
 }
 
-func (b *BackfillRequestHandler) requestPersistence(op PersistType) error {
+func (b *BackfillRequestHandler) requestPersistence(op PersistType, resp chan error) error {
 	var err error
 	if op == AddOp || op == SetOp {
 		select {
@@ -330,24 +373,27 @@ func (b *BackfillRequestHandler) requestPersistence(op PersistType) error {
 			// Got op to persist
 		default:
 			// Piggy back off of previous above request
-			b.persistentOverflowCh <- true
 		}
+		b.queuedResps = append(b.queuedResps, resp)
 	} else if op == DelOp {
-		// DelOps are synchronous - overwrites any previous add or sets
-		// all previous persist actions are considered successful, return them to sender
-	OVERFLOWRETURN2:
-		for {
-			select {
-			case <-b.persistenceNeededCh:
-				b.persistResultCh <- nil
-			case <-b.persistentOverflowCh:
-				b.persistResultCh <- nil
-			default:
-				break OVERFLOWRETURN2
-			}
+		// Clear any previous ops
+		select {
+		case <-b.persistenceNeededCh:
+		// cleared
+		default:
+			// nothing
 		}
+		// DelOps are synchronous - invalidates any previous add or sets
+		// Assume all previous set/add actions are considered successful, return them to sender
+		for _, respCh := range b.queuedResps {
+			respCh <- nil
+		}
+		b.queuedResps = b.queuedResps[:0]
 		// Then synchronously delete
+		// For del ops, because it is synchronous, do not return it to resp channel since the handler channel
+		// hasn't been returned yet
 		err = b.metaKvOp(op)
+		resp <- err
 	}
 	return err
 }
@@ -361,7 +407,12 @@ func (b *BackfillRequestHandler) requestPersistence(op PersistType) error {
 // DCP has a check stuckness monitor. So if a VB is stuck, it'll restart the pipeline
 // If XMEM is stuck, then this callback will not be called, checkpoints will not be deleted,
 // and backfill pipeline will restart with error to restart from the last checkpoint.
-func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
+func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
+	vbno, ok := reqAndResp.Request.(uint16)
+	if !ok {
+		panic(fmt.Sprintf("Wrong datatype: %v", reflect.TypeOf(reqAndResp.Request)))
+	}
+
 	b.pipelinesMtx.Lock()
 	pipeline, i := b.getPipeline(common.BackfillPipeline)
 	if pipeline == nil {
@@ -402,6 +453,7 @@ func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
 			err := checkpointMgr.DelSingleVBCheckpoint(pipeline.FullTopic(), vbno)
 			if err != nil {
 				b.logger.Errorf("Unable to delete checkpoint doc for %v vbno %v err %v", pipeline.FullTopic(), vbno, err)
+				return err
 			}
 		}
 	}
@@ -426,14 +478,14 @@ func (b *BackfillRequestHandler) handleVBDone(vbno uint16) error {
 		// At this point, there is no more tasks in the backfill spec
 		// This is only possible if all the tasks are done
 		// We must delete the spec here before a new one can be added
-		delErr := b.requestPersistence(DelOp)
+		delErr := b.requestPersistence(DelOp, reqAndResp.PersistResponse)
 		if delErr == nil {
 			err = errorSyncDel
 		} else {
 			err = delErr
 		}
 	} else {
-		b.requestPersistence(SetOp)
+		b.requestPersistence(SetOp, reqAndResp.PersistResponse)
 	}
 	return err
 }

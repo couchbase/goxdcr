@@ -141,15 +141,13 @@ func brhMockBackfillReplSvcCommon(svc *service_def.BackfillReplSvc) {
 	svc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 }
 
-var maxConcurrentReqs int = 4
-
 var unitTestFullTopic string = "BackfillReqHandlerFullTopic"
 
 func TestBackfillReqHandlerStartStop(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc := setupBRHBoilerPlate()
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), maxConcurrentReqs, time.Second, createVBDoneFunc())
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), time.Second, createVBDoneFunc())
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
@@ -193,7 +191,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, 500*time.Millisecond, createVBDoneFunc())
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc())
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -282,7 +280,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, maxConcurrentReqs, 500*time.Millisecond, createVBDoneFunc())
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc())
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -299,27 +297,51 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Manually put requestMapping into the channel
-	rh.incomingReqCh <- requestMapping
-	err1 := <-rh.persistResultCh
+	var reqAndResp ReqAndResp
+	reqAndResp.Request = requestMapping
+	reqAndResp.PersistResponse = make(chan error, 1)
+	reqAndResp.HandleResponse = make(chan error, 1)
+
+	rh.incomingReqCh <- reqAndResp
+	err1 := <-reqAndResp.HandleResponse
 	assert.Nil(err1)
+	err2 := <-reqAndResp.PersistResponse
+	assert.Nil(err2)
 	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
 
 	// Test has 1024 VB's
+	var handleResponses [1024]chan error
+	var persistResponses [1024]chan error
+	var waitGrp sync.WaitGroup
 	for i := uint16(0); i < 1024; i++ {
 		iCopy := i
-		go func() { rh.doneTaskCh <- iCopy }()
+		waitGrp.Add(1)
+		go func() {
+			defer waitGrp.Done()
+			var reqAndResp ReqAndResp
+			reqAndResp.Request = iCopy
+			reqAndResp.HandleResponse = make(chan error, 1)
+			reqAndResp.PersistResponse = make(chan error, 1)
+			handleResponses[iCopy] = reqAndResp.HandleResponse
+			persistResponses[iCopy] = reqAndResp.PersistResponse
+			rh.doneTaskCh <- reqAndResp
+		}()
 	}
+	waitGrp.Wait()
 
+	var nilErrCnt int
+	var syncDelCnt int
 	for i := uint16(0); i < 1024; i++ {
-		taskResult := <-rh.doneTaskResultCh
-		if i < 1023 {
-			assert.Nil(taskResult)
-			assert.Nil(<-rh.persistResultCh)
-		} else {
-			assert.Equal(errorSyncDel, taskResult)
-			assert.Equal(0, len(rh.persistResultCh))
+		assert.Nil(<-persistResponses[i])
+		taskResult := <-handleResponses[i]
+		if taskResult == nil {
+			nilErrCnt++
+		} else if taskResult == errorSyncDel {
+			syncDelCnt++
 		}
 	}
+	assert.Equal(1023, nilErrCnt)
+	assert.Equal(1, syncDelCnt)
 
 	assert.Equal(0, setCount)
 	assert.Equal(1, addCount)
@@ -328,9 +350,15 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	assert.Nil(rh.cachedBackfillSpec)
 
 	// After delete, the next handle will be an add
-	rh.incomingReqCh <- requestMapping
-	err1 = <-rh.persistResultCh
+	reqAndResp.Request = requestMapping
+	reqAndResp.PersistResponse = make(chan error)
+	reqAndResp.HandleResponse = make(chan error)
+
+	rh.incomingReqCh <- reqAndResp
+	err1 = <-reqAndResp.HandleResponse
 	assert.Nil(err1)
+	err2 = <-reqAndResp.PersistResponse
+	assert.Nil(err2)
 	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
 
 	assert.Equal(0, setCount)
