@@ -364,6 +364,8 @@ type DcpNozzle struct {
 	// Datapools for reusing memory
 	wrappedUprPool          utilities.WrappedUprPoolIface
 	collectionNamespacePool utilities.CollectionNamespacePoolIface
+
+	endSeqnoForDcp map[uint16]*base.SeqnoWithLock
 }
 
 func NewDcpNozzle(id string,
@@ -399,6 +401,7 @@ func NewDcpNozzle(id string,
 		collectionNamespacePool:  utilities.NewCollectionNamespacePool(),
 		setTsCheckedManifests:    make(map[uint64]bool),
 		specificManifestGetter:   specificManifestGetter,
+		endSeqnoForDcp:           make(map[uint16]*base.SeqnoWithLock),
 	}
 
 	for _, vbno := range vbnos {
@@ -408,6 +411,7 @@ func NewDcpNozzle(id string,
 			var xattr_seqno uint64 = 0
 			dcp.vb_xattr_seqno_map[vbno] = &xattr_seqno
 		}
+		dcp.endSeqnoForDcp[vbno] = base.NewSeqnoWithLock()
 	}
 
 	dcp.composeUserAgent()
@@ -953,6 +957,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 						}
 						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
 						dcp.vbHandshakeMap[vbno].processSuccessResponse(m.Opaque)
+						// Check for corner case - where streamReq seqno will be the same as seqend Seqno
+						endSeqnoCheck := dcp.endSeqnoForDcp[vbno].GetSeqno()
+						if endSeqnoCheck > 0 && endSeqnoCheck == m.Seqno {
+							err = dcp.handleStreamEnd(vbno)
+							if err != nil {
+								return err
+							}
+						}
 					} else {
 						err = fmt.Errorf("%v Stream for vb=%v is not supposed to be opened\n", dcp.Id(), vbno)
 						dcp.handleGeneralError(err)
@@ -968,13 +980,9 @@ func (dcp *DcpNozzle) processData() (err error) {
 				// It is possible for DCP to receive a UPR_STREAMEND even if the original StreamRequest sent was not
 				// successful. In that case, make sure it is a no-op, by checking the status, which should not be active.
 				if err == nil && stream_status == Dcp_Stream_Active {
-					err_streamend := fmt.Errorf("%v stream for vb=%v is closed by producer", dcp.Id(), m.VBucket)
-					dcp.Logger().Infof("%v: %v", dcp.Id(), err_streamend)
-					if dcp.vbStreamEndIsOk(vbno) {
-						err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
-						go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
-					} else {
-						dcp.handleVBError(vbno, err_streamend)
+					err = dcp.handleStreamEnd(vbno)
+					if err != nil {
+						return err
 					}
 				}
 			} else if m.IsSystemEvent() {
@@ -997,6 +1005,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 						if !dcp.is_capi {
 							dcp.handleXattr(m)
 						}
+						dcp.endSeqnoForDcp[m.VBucket].SetSeqno(m.Seqno)
 						wrappedUpr, err := dcp.composeWrappedUprEvent(m)
 						if err != nil {
 							dcp.handleGeneralError(err)
@@ -1024,6 +1033,19 @@ func (dcp *DcpNozzle) processData() (err error) {
 	}
 done:
 	return
+}
+
+func (dcp *DcpNozzle) handleStreamEnd(vbno uint16) error {
+	var err error
+	err_streamend := fmt.Errorf("%v stream for vb=%v is closed by producer", dcp.Id(), vbno)
+	dcp.Logger().Infof("%v: seqno: %v %v", dcp.Id(), dcp.endSeqnoForDcp[vbno].GetSeqno(), err_streamend)
+	if dcp.vbStreamEndIsOk(vbno) {
+		err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
+		go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
+	} else {
+		dcp.handleVBError(vbno, err_streamend)
+	}
+	return err
 }
 
 func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {
@@ -1299,6 +1321,9 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 			err = fmt.Errorf("Error converting VBTask to DCP Nozzle Task %v", err)
 			return err
 		}
+		// In a corner case where startSeq == endSeqno, DCP will not send down a streamEnd and instead just
+		// close the connection. Mark the endSeqno here first to check if this is the case
+		dcp.endSeqnoForDcp[vbno].SetSeqno(seqEnd)
 	}
 
 	dcp.Logger().Debugf("%v starting vb stream for vb=%v, version=%v collectionEnabled=%v endSeqno=%v\n", dcp.Id(), vbno, version, dcp.CollectionEnabled(), seqEnd)
