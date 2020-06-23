@@ -275,7 +275,7 @@ func GetStatisticsForPipeline(topic string) (*expvar.Map, error) {
 		return nil, nil
 	}
 
-	return repl_status.GetOverviewStats(), nil
+	return repl_status.GetOverviewStats(common.MainPipeline), nil
 }
 
 func (stats_mgr *StatisticsManager) initialize() {
@@ -528,7 +528,7 @@ func (stats_mgr *StatisticsManager) formatStatsForLog() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	expvar_stats_map := rs.Storage()
+	expvar_stats_map := rs.Storage(stats_mgr.pipeline.Type())
 	return fmt.Sprintf("Stats for pipeline %v %v\n", stats_mgr.pipeline.InstanceId(), expvar_stats_map.String()), nil
 }
 
@@ -566,7 +566,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 		if registry_name != OVERVIEW_METRICS_KEY {
 			map_for_registry := new(expvar.Map).Init()
 
-			orig_registry := rs.GetStats(registry_name)
+			orig_registry := rs.GetStats(registry_name, stats_mgr.pipeline.Type())
 			registry.Each(func(name string, i interface{}) {
 				stats_mgr.publishMetricToMap(map_for_registry, name, i, true)
 				switch m := i.(type) {
@@ -599,7 +599,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 					sample_stats_list_map[name] = sample_stats_list
 				}
 			})
-			rs.SetStats(registry_name, map_for_registry)
+			rs.SetStats(registry_name, map_for_registry, stats_mgr.pipeline.Type())
 		}
 	}
 
@@ -651,7 +651,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	current_time_var.Set(time.Now().UnixNano())
 	map_for_overview.Set(base.CurrentTime, current_time_var)
 
-	rs.SetOverviewStats(map_for_overview)
+	rs.SetOverviewStats(map_for_overview, stats_mgr.pipeline.Type())
 	return nil
 }
 
@@ -1591,7 +1591,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 	logger.Debug("updateStats for paused replications")
 
 	for repl_id, repl_status := range pipeline_manager.ReplicationStatusMap() {
-		overview_stats := repl_status.GetOverviewStats()
+		overview_stats := repl_status.GetOverviewStats(common.MainPipeline)
 		spec := repl_status.Spec()
 		if spec == nil {
 			continue
@@ -1749,7 +1749,11 @@ func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, s
 		overview_stats.Add(statsToInitialize, 0)
 	}
 
-	repl_status.SetOverviewStats(overview_stats)
+	if backfillSpec != nil {
+		repl_status.SetOverviewStats(overview_stats, common.BackfillPipeline)
+	} else {
+		repl_status.SetOverviewStats(overview_stats, common.MainPipeline)
+	}
 
 	// set vb list to establish the base for future stats update,
 	// so that we can avoid re-computation when vb list does not change

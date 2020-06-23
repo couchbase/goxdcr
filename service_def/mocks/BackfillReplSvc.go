@@ -26,6 +26,29 @@ func (_m *BackfillReplSvc) AddBackfillReplSpec(spec *metadata.BackfillReplicatio
 	return r0
 }
 
+// AllActiveBackfillSpecsReadOnly provides a mock function with given fields:
+func (_m *BackfillReplSvc) AllActiveBackfillSpecsReadOnly() (map[string]*metadata.BackfillReplicationSpec, error) {
+	ret := _m.Called()
+
+	var r0 map[string]*metadata.BackfillReplicationSpec
+	if rf, ok := ret.Get(0).(func() map[string]*metadata.BackfillReplicationSpec); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]*metadata.BackfillReplicationSpec)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // BackfillReplSpec provides a mock function with given fields: replicationId
 func (_m *BackfillReplSvc) BackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	ret := _m.Called(replicationId)

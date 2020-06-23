@@ -534,7 +534,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 
 		pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
 
-		rep_status.ResetStorage()
+		rep_status.ResetStorage(common.MainPipeline)
 		pipelineMgr.repl_spec_svc.SetDerivedObj(replId, nil)
 
 		//close the connection pool for the replication
@@ -616,6 +616,7 @@ func (pipelineMgr *PipelineManager) CleanupBackfillPipeline(topic string) error 
 	retryOp := func() error {
 		return pipelineMgr.checkpoint_svc.DelCheckpointsDocs(backfillSpecId)
 	}
+	rep_status.ResetStorage(common.BackfillPipeline)
 
 	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelCheckpointsDocs %v", backfillSpecId), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)
 	if err != nil {

@@ -80,13 +80,13 @@ func (_m *ReplicationStatusIface) Errors() pipeline.PipelineErrorArray {
 	return r0
 }
 
-// GetOverviewStats provides a mock function with given fields:
-func (_m *ReplicationStatusIface) GetOverviewStats() *expvar.Map {
-	ret := _m.Called()
+// GetOverviewStats provides a mock function with given fields: pipelineType
+func (_m *ReplicationStatusIface) GetOverviewStats(pipelineType common.PipelineType) *expvar.Map {
+	ret := _m.Called(pipelineType)
 
 	var r0 *expvar.Map
-	if rf, ok := ret.Get(0).(func() *expvar.Map); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(common.PipelineType) *expvar.Map); ok {
+		r0 = rf(pipelineType)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*expvar.Map)
@@ -124,13 +124,13 @@ func (_m *ReplicationStatusIface) GetSpecInternalId() string {
 	return r0
 }
 
-// GetStats provides a mock function with given fields: registryName
-func (_m *ReplicationStatusIface) GetStats(registryName string) *expvar.Map {
-	ret := _m.Called(registryName)
+// GetStats provides a mock function with given fields: registryName, pipelineType
+func (_m *ReplicationStatusIface) GetStats(registryName string, pipelineType common.PipelineType) *expvar.Map {
+	ret := _m.Called(registryName, pipelineType)
 
 	var r0 *expvar.Map
-	if rf, ok := ret.Get(0).(func(string) *expvar.Map); ok {
-		r0 = rf(registryName)
+	if rf, ok := ret.Get(0).(func(string, common.PipelineType) *expvar.Map); ok {
+		r0 = rf(registryName, pipelineType)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*expvar.Map)
@@ -190,9 +190,9 @@ func (_m *ReplicationStatusIface) RepId() string {
 	return r0
 }
 
-// ResetStorage provides a mock function with given fields:
-func (_m *ReplicationStatusIface) ResetStorage() {
-	_m.Called()
+// ResetStorage provides a mock function with given fields: pipelineType
+func (_m *ReplicationStatusIface) ResetStorage(pipelineType common.PipelineType) {
+	_m.Called(pipelineType)
 }
 
 // RuntimeStatus provides a mock function with given fields: lock
@@ -214,9 +214,9 @@ func (_m *ReplicationStatusIface) SetCustomSettings(customSettings map[string]in
 	_m.Called(customSettings)
 }
 
-// SetOverviewStats provides a mock function with given fields: stats
-func (_m *ReplicationStatusIface) SetOverviewStats(stats *expvar.Map) {
-	_m.Called(stats)
+// SetOverviewStats provides a mock function with given fields: stats, pipelineType
+func (_m *ReplicationStatusIface) SetOverviewStats(stats *expvar.Map, pipelineType common.PipelineType) {
+	_m.Called(stats, pipelineType)
 }
 
 // SetPipeline provides a mock function with given fields: _a0
@@ -224,9 +224,9 @@ func (_m *ReplicationStatusIface) SetPipeline(_a0 common.Pipeline) {
 	_m.Called(_a0)
 }
 
-// SetStats provides a mock function with given fields: registryName, stats
-func (_m *ReplicationStatusIface) SetStats(registryName string, stats *expvar.Map) {
-	_m.Called(registryName, stats)
+// SetStats provides a mock function with given fields: registryName, stats, pipelineType
+func (_m *ReplicationStatusIface) SetStats(registryName string, stats *expvar.Map, pipelineType common.PipelineType) {
+	_m.Called(registryName, stats, pipelineType)
 }
 
 // SetUpdater provides a mock function with given fields: updater
@@ -280,13 +280,13 @@ func (_m *ReplicationStatusIface) Spec() *metadata.ReplicationSpecification {
 	return r0
 }
 
-// Storage provides a mock function with given fields:
-func (_m *ReplicationStatusIface) Storage() *expvar.Map {
-	ret := _m.Called()
+// Storage provides a mock function with given fields: pipelineType
+func (_m *ReplicationStatusIface) Storage(pipelineType common.PipelineType) *expvar.Map {
+	ret := _m.Called(pipelineType)
 
 	var r0 *expvar.Map
-	if rf, ok := ret.Get(0).(func() *expvar.Map); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(common.PipelineType) *expvar.Map); ok {
+		r0 = rf(pipelineType)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*expvar.Map)

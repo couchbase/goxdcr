@@ -14,6 +14,7 @@ import (
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
@@ -229,6 +230,8 @@ type ResourceManager struct {
 	overallThroughputSamples metrics.Sample
 	// historical samples of high priority replication throughputs
 	highThroughputSamples metrics.Sample
+
+	backfillReplSvc service_def.BackfillReplSvc
 }
 
 type ResourceMgrIface interface {
@@ -243,7 +246,7 @@ type ResourceMgrIface interface {
 func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
 	uilog_svc service_def.UILogSvc, throughput_throttler_svc service_def.ThroughputThrottlerSvc,
-	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface) ResourceMgrIface {
+	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, backfillReplSvc service_def.BackfillReplSvc) ResourceMgrIface {
 
 	resourceMgrRetVar := &ResourceManager{
 		pipelineMgr:              pipelineMgr,
@@ -265,6 +268,7 @@ func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec
 		accumulativeTotalCpu:     -1,
 		accumulativeIdleCpu:      -1,
 		inExtraQuotaPeriod:       &base.AtomicBooleanType{},
+		backfillReplSvc:          backfillReplSvc,
 	}
 
 	resourceMgrRetVar.logger.Info("Resource Manager is initialized")
@@ -276,7 +280,7 @@ func (rm *ResourceManager) Start() error {
 	rm.logger.Infof("%v starting ....\n", ResourceManagerName)
 	defer rm.logger.Infof("%v started\n", ResourceManagerName)
 
-	// igore error
+	// ignore error
 	rm.getSystemStats()
 
 	// this does not return error as of now
@@ -1053,7 +1057,8 @@ func (rm *ResourceManager) getStatsFromReplication(spec *metadata.ReplicationSpe
 	if err != nil {
 		return nil, err
 	}
-	statsMap := rs.GetOverviewStats()
+	// TODO - main or backfill spec
+	statsMap := rs.GetOverviewStats(common.MainPipeline)
 	if statsMap == nil {
 		// this is possible when replication is starting up
 		return nil, fmt.Errorf("Cannot find overview stats for %v", spec.Id)

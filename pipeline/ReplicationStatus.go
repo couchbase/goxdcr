@@ -77,15 +77,15 @@ type ReplicationStatusIface interface {
 	AddError(err error)
 	AddErrorsFromMap(errMap base.ErrorMap)
 	RuntimeStatus(lock bool) ReplicationState
-	Storage() *expvar.Map
+	Storage(pipelineType common.PipelineType) *expvar.Map
 	// Called by UI every second
-	GetStats(registryName string) *expvar.Map
+	GetStats(registryName string, pipelineType common.PipelineType) *expvar.Map
 	GetSpecInternalId() string
-	GetOverviewStats() *expvar.Map
-	SetStats(registryName string, stats *expvar.Map)
-	SetOverviewStats(stats *expvar.Map)
+	GetOverviewStats(pipelineType common.PipelineType) *expvar.Map
+	SetStats(registryName string, stats *expvar.Map, pipelineType common.PipelineType)
+	SetOverviewStats(stats *expvar.Map, pipelineType common.PipelineType)
 	CleanupBeforeExit(statsToClear []string)
-	ResetStorage()
+	ResetStorage(pipelineType common.PipelineType)
 	Publish(lock bool)
 	PublishWithStatus(status string, lock bool)
 	Pipeline() common.Pipeline
@@ -295,13 +295,14 @@ func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
 }
 
 //return the corresponding expvar map as its storage
-func (rs *ReplicationStatus) Storage() *expvar.Map {
+func (rs *ReplicationStatus) Storage(pipelineType common.PipelineType) *expvar.Map {
 	var rep_map *expvar.Map
 	root_map := RootStorage()
-	rep_map_var := root_map.Get(rs.specId)
+	id := common.ComposeFullTopic(rs.specId, pipelineType)
+	rep_map_var := root_map.Get(id)
 	if rep_map_var == nil {
 		rep_map = new(expvar.Map).Init()
-		root_map.Set(rs.specId, rep_map)
+		root_map.Set(id, rep_map)
 	} else {
 		rep_map = rep_map_var.(*expvar.Map)
 	}
@@ -310,8 +311,8 @@ func (rs *ReplicationStatus) Storage() *expvar.Map {
 }
 
 // Called by UI every second
-func (rs *ReplicationStatus) GetStats(registryName string) *expvar.Map {
-	expvar_var := rs.Storage()
+func (rs *ReplicationStatus) GetStats(registryName string, pipelineType common.PipelineType) *expvar.Map {
+	expvar_var := rs.Storage(pipelineType)
 	stats := expvar_var.Get(registryName)
 	if stats != nil {
 		statsMap, ok := stats.(*expvar.Map)
@@ -322,33 +323,42 @@ func (rs *ReplicationStatus) GetStats(registryName string) *expvar.Map {
 	return nil
 }
 
-func (rs *ReplicationStatus) GetOverviewStats() *expvar.Map {
-	return rs.GetStats(OVERVIEW_METRICS_KEY)
+func (rs *ReplicationStatus) GetOverviewStats(pipelineType common.PipelineType) *expvar.Map {
+	return rs.GetStats(OVERVIEW_METRICS_KEY, pipelineType)
 }
 
-func (rs *ReplicationStatus) SetStats(registryName string, stats *expvar.Map) {
-	expvar_var := rs.Storage()
+func (rs *ReplicationStatus) SetStats(registryName string, stats *expvar.Map, pipelineType common.PipelineType) {
+	expvar_var := rs.Storage(pipelineType)
 	expvar_var.Set(registryName, stats)
 }
 
-func (rs *ReplicationStatus) SetOverviewStats(stats *expvar.Map) {
-	rs.SetStats(OVERVIEW_METRICS_KEY, stats)
+func (rs *ReplicationStatus) SetOverviewStats(stats *expvar.Map, pipelineType common.PipelineType) {
+	rs.SetStats(OVERVIEW_METRICS_KEY, stats, pipelineType)
 }
 
 func (rs *ReplicationStatus) CleanupBeforeExit(statsToClear []string) {
-	overviewStats := rs.GetOverviewStats()
-	rs.ResetStorage()
+	overviewStats := rs.GetOverviewStats(common.MainPipeline)
+	rs.ResetStorage(common.MainPipeline)
+
+	backfillOverviewStats := rs.GetOverviewStats(common.BackfillPipeline)
+	rs.ResetStorage(common.BackfillPipeline)
+
 	// clear a subset of stats and preserve the rest
+	rs.clearStats(statsToClear, overviewStats, common.MainPipeline)
+	rs.clearStats(statsToClear, backfillOverviewStats, common.BackfillPipeline)
+
+	rs.PublishWithStatus(base.Pending, true)
+}
+
+func (rs *ReplicationStatus) clearStats(statsToClear []string, overviewStats *expvar.Map, pipelineType common.PipelineType) {
 	if overviewStats != nil {
 		zero_var := new(expvar.Int)
 		zero_var.Set(0)
 		for _, statsToClear := range statsToClear {
 			overviewStats.Set(statsToClear, zero_var)
 		}
-		rs.SetOverviewStats(overviewStats)
+		rs.SetOverviewStats(overviewStats, pipelineType)
 	}
-
-	rs.PublishWithStatus(base.Pending, true)
 }
 
 func RootStorage() *expvar.Map {
@@ -359,9 +369,10 @@ func RootStorage() *expvar.Map {
 	return replications_root_map.(*expvar.Map)
 }
 
-func (rs *ReplicationStatus) ResetStorage() {
+func (rs *ReplicationStatus) ResetStorage(pipelineType common.PipelineType) {
 	root_map := RootStorage()
-	root_map.Set(rs.specId, nil)
+	id := common.ComposeFullTopic(rs.specId, pipelineType)
+	root_map.Set(id, nil)
 }
 
 func (rs *ReplicationStatus) Publish(lock bool) {
@@ -370,13 +381,14 @@ func (rs *ReplicationStatus) Publish(lock bool) {
 
 // there may be cases, e.g., when we are about to pause the replication, where we want to publish
 // a specified status instead of the one inferred from pipeline.State()
+// Any type of publish is outward facing and will only contain main pipeline information
 func (rs *ReplicationStatus) PublishWithStatus(status string, lock bool) {
 	if lock {
 		rs.lock.RLock()
 		defer rs.lock.RUnlock()
 	}
 
-	rep_map := rs.Storage()
+	rep_map := rs.Storage(common.MainPipeline)
 
 	//publish status
 	statusVar := new(expvar.String)

@@ -646,3 +646,31 @@ func (b *BackfillReplicationService) loadLatestMetakvRevisionIntoSpec(spec *meta
 	spec.SetRevision(rev)
 	return nil
 }
+
+func cacheableMetadataObjToBackfillSpec(val CacheableMetadataObj) *metadata.BackfillReplicationSpec {
+	rsv, ok := val.(*ReplicationSpecVal)
+	if !ok {
+		return nil
+	}
+	if rsv.spec == nil {
+		return nil
+	}
+	genSpec, ok := rsv.spec.(metadata.GenericSpecification)
+	if !ok {
+		return nil
+	}
+	spec := genSpec.(*metadata.BackfillReplicationSpec)
+	return spec
+}
+
+func (b *BackfillReplicationService) AllActiveBackfillSpecsReadOnly() (map[string]*metadata.BackfillReplicationSpec, error) {
+	specs := make(map[string]*metadata.BackfillReplicationSpec)
+	values_map := b.getCache().GetMap()
+	for key, val := range values_map {
+		spec := cacheableMetadataObjToBackfillSpec(val)
+		if spec != nil && spec.ReplicationSpec() != nil && spec.ReplicationSpec().Settings.Active {
+			specs[key] = spec
+		}
+	}
+	return specs, nil
+}

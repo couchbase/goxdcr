@@ -19,6 +19,7 @@ type BackfillReplSvc interface {
 	AddBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error
 	SetBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error
 	DelBackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error)
+	AllActiveBackfillSpecsReadOnly() (map[string]*metadata.BackfillReplicationSpec, error)
 
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
 
