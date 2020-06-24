@@ -1427,3 +1427,11 @@ func (u Uleb128) ToUint32() uint32 {
 
 	return result
 }
+
+func CompileBackfillPipelineSpecId(regularId string) string {
+	return fmt.Sprintf("%v%v", BackfillPipelineTopicPrefix, regularId)
+}
+
+func GetMainPipelineSpecIdFromBackfillId(fullId string) string {
+	return strings.TrimPrefix(fullId, BackfillPipelineTopicPrefix)
+}

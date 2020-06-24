@@ -10,9 +10,9 @@
 package common
 
 import (
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
+	"strings"
 )
 
 type PipelineState int
@@ -25,8 +25,6 @@ const (
 	Pipeline_Stopped  PipelineState = iota
 	Pipeline_Error    PipelineState = iota
 )
-
-const backfillPipelineTopicPrefix = "backfill_"
 
 type PipelineType int
 
@@ -51,9 +49,17 @@ func ComposeFullTopic(topic string, t PipelineType) string {
 	case MainPipeline:
 		return topic
 	case BackfillPipeline:
-		return fmt.Sprintf("%v%v", backfillPipelineTopicPrefix, topic)
+		return base.CompileBackfillPipelineSpecId(topic)
 	default:
 		return "Unable to composeFullTopic"
+	}
+}
+
+func DecomposeFullTopic(fullTopic string) (string, PipelineType) {
+	if strings.HasPrefix(fullTopic, base.BackfillPipelineTopicPrefix) {
+		return base.GetMainPipelineSpecIdFromBackfillId(fullTopic), BackfillPipeline
+	} else {
+		return fullTopic, MainPipeline
 	}
 }
 

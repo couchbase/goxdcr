@@ -66,6 +66,14 @@ func (b *BackfillReplicationSpec) SetReplicationSpec(spec *ReplicationSpecificat
 	b.replicationSpec_ = spec
 }
 
+func (b *BackfillReplicationSpec) Type() ReplicationType {
+	return BackfillReplication
+}
+
+func (b *BackfillReplicationSpec) GetFullId() string {
+	return base.CompileBackfillPipelineSpecId(b.Id)
+}
+
 func (b *BackfillReplicationSpec) ReplicationSpec() *ReplicationSpecification {
 	return b.replicationSpec_
 }

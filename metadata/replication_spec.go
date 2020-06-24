@@ -69,6 +69,14 @@ func (spec *ReplicationSpecification) GetBackfillSpec() *BackfillReplicationSpec
 	return nil
 }
 
+func (spec *ReplicationSpecification) Type() ReplicationType {
+	return MainReplication
+}
+
+func (spec *ReplicationSpecification) GetFullId() string {
+	return spec.Id
+}
+
 func (spec *ReplicationSpecification) String() string {
 	if spec == nil {
 		return ""

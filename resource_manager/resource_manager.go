@@ -232,6 +232,8 @@ type ResourceManager struct {
 	highThroughputSamples metrics.Sample
 
 	backfillReplSvc service_def.BackfillReplSvc
+
+	managedResourceOnceSpecMap map[string]*metadata.GenericSpecification
 }
 
 type ResourceMgrIface interface {
@@ -249,26 +251,27 @@ func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec
 	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, backfillReplSvc service_def.BackfillReplSvc) ResourceMgrIface {
 
 	resourceMgrRetVar := &ResourceManager{
-		pipelineMgr:              pipelineMgr,
-		repl_spec_svc:            repl_spec_svc,
-		xdcr_topology_svc:        xdcr_topology_svc,
-		remote_cluster_svc:       remote_cluster_svc,
-		checkpoint_svc:           checkpoint_svc,
-		logger:                   log.NewLogger(ResourceManagerName, logger_context),
-		cluster_info_svc:         cluster_info_svc,
-		uilog_svc:                uilog_svc,
-		utils:                    utilsIn,
-		finch:                    make(chan bool),
-		ongoingReplMap:           make(map[string]bool),
-		replDcpPriorityMap:       make(map[string]mcc.PriorityType),
-		throughputThrottlerSvc:   throughput_throttler_svc,
-		maxCpu:                   int64(base.DefaultGoMaxProcs * 100),
-		overallThroughputSamples: metrics.NewExpDecaySample(base.ThroughputSampleSize, float64(base.ThroughputSampleAlpha)/1000),
-		highThroughputSamples:    metrics.NewExpDecaySample(base.ThroughputSampleSize, float64(base.ThroughputSampleAlpha)/1000),
-		accumulativeTotalCpu:     -1,
-		accumulativeIdleCpu:      -1,
-		inExtraQuotaPeriod:       &base.AtomicBooleanType{},
-		backfillReplSvc:          backfillReplSvc,
+		pipelineMgr:                pipelineMgr,
+		repl_spec_svc:              repl_spec_svc,
+		xdcr_topology_svc:          xdcr_topology_svc,
+		remote_cluster_svc:         remote_cluster_svc,
+		checkpoint_svc:             checkpoint_svc,
+		logger:                     log.NewLogger(ResourceManagerName, logger_context),
+		cluster_info_svc:           cluster_info_svc,
+		uilog_svc:                  uilog_svc,
+		utils:                      utilsIn,
+		finch:                      make(chan bool),
+		ongoingReplMap:             make(map[string]bool),
+		replDcpPriorityMap:         make(map[string]mcc.PriorityType),
+		throughputThrottlerSvc:     throughput_throttler_svc,
+		maxCpu:                     int64(base.DefaultGoMaxProcs * 100),
+		overallThroughputSamples:   metrics.NewExpDecaySample(base.ThroughputSampleSize, float64(base.ThroughputSampleAlpha)/1000),
+		highThroughputSamples:      metrics.NewExpDecaySample(base.ThroughputSampleSize, float64(base.ThroughputSampleAlpha)/1000),
+		accumulativeTotalCpu:       -1,
+		accumulativeIdleCpu:        -1,
+		inExtraQuotaPeriod:         &base.AtomicBooleanType{},
+		backfillReplSvc:            backfillReplSvc,
+		managedResourceOnceSpecMap: make(map[string]*metadata.GenericSpecification),
 	}
 
 	resourceMgrRetVar.logger.Info("Resource Manager is initialized")
@@ -500,8 +503,18 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 		rm.logger.Infof("Skipping resource management actions because of err = %v\n", err)
 		return err
 	}
+	backfillSpecs, err := rm.backfillReplSvc.AllActiveBackfillSpecsReadOnly()
+	rm.managedResourceOnceSpecMap = make(map[string]*metadata.GenericSpecification)
+	for _, spec := range specs {
+		genSpec := metadata.GenericSpecification(spec)
+		rm.managedResourceOnceSpecMap[spec.GetFullId()] = &genSpec
+	}
+	for _, spec := range backfillSpecs {
+		genSpec := metadata.GenericSpecification(spec)
+		rm.managedResourceOnceSpecMap[spec.GetFullId()] = &genSpec
+	}
 
-	specReplStatsMap := rm.collectReplStats(specs)
+	specReplStatsMap := rm.collectReplStats()
 
 	previousState := rm.getPreviousState()
 
@@ -509,7 +522,7 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 
 	rm.computeActionsToTake(previousState, state)
 
-	rm.takeActions(specs, previousState, state)
+	rm.takeActions(previousState, state)
 
 	rm.setPreviousState(state)
 
@@ -601,37 +614,38 @@ func (rm *ResourceManager) setPreviousState(state *State) {
 	rm.previousState = state
 }
 
-func (rm *ResourceManager) collectReplStats(specs map[string]*metadata.ReplicationSpecification) map[*metadata.ReplicationSpecification]*ReplStats {
-	specReplStatsMap := make(map[*metadata.ReplicationSpecification]*ReplStats)
+func (rm *ResourceManager) collectReplStats() map[*metadata.GenericSpecification]*ReplStats {
+	specReplStatsMap := make(map[*metadata.GenericSpecification]*ReplStats)
 
-	for _, spec := range specs {
+	for _, specPtr := range rm.managedResourceOnceSpecMap {
+		spec := *specPtr
 		replStats, err := rm.getStatsFromReplication(spec)
 		if err != nil {
-			rm.logger.Warnf("Could not retrieve runtime stats for %v. err=%v\n", spec.Id, err)
+			rm.logger.Warnf("Could not retrieve runtime stats for %v. err=%v\n", spec.GetFullId(), err)
 		} else {
-			specReplStatsMap[spec] = replStats
+			specReplStatsMap[specPtr] = replStats
 		}
 	}
 
 	return specReplStatsMap
 }
 
-func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.ReplicationSpecification]*ReplStats,
-	previousState *State) (state *State) {
+func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.GenericSpecification]*ReplStats, previousState *State) (state *State) {
 	state = newState()
 	state.cpu = rm.getCpu()
 	state.totalCpu = rm.getTotalCpu()
 	state.idleCpu = rm.getIdleCpu()
 
-	for spec, replStats := range specReplStatsMap {
-		isReplHighPriority := rm.IsReplHighPriority(spec.Id, spec.Settings.GetPriority())
+	for genericSpecPtr, replStats := range specReplStatsMap {
+		spec := *genericSpecPtr
+		isReplHighPriority := rm.IsReplHighPriority(spec.GetReplicationSpec().Id, spec.GetReplicationSpec().Settings.GetPriority())
 		if isReplHighPriority {
 			state.highPriorityReplExist = true
 		} else {
 			state.lowPriorityReplExist = true
 		}
 
-		state.replStatsMap[spec.Id] = replStats
+		state.replStatsMap[spec.GetFullId()] = replStats
 
 		if replStats.changesLeft <= int64(base.ChangesLeftThresholdForOngoingReplication) {
 			rm.setReplOngoing(spec)
@@ -643,9 +657,9 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.Replicati
 		var ok bool
 
 		if previousState != nil {
-			previousReplStats, ok = previousState.replStatsMap[spec.Id]
+			previousReplStats, ok = previousState.replStatsMap[spec.GetFullId()]
 			if ok {
-				statsChanged = (replStats.timestamp != previousReplStats.timestamp)
+				statsChanged = replStats.timestamp != previousReplStats.timestamp
 			}
 		}
 
@@ -675,7 +689,7 @@ func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.Replicati
 
 			// for high priority replications, compute throughputNeededByHighRepl
 			// This is the throughput desired to clear the changesLeft in whatever time specified
-			throughputNeededByHighRepl := replStats.changesLeft * 1000 / int64(spec.Settings.GetDesiredLatencyMs())
+			throughputNeededByHighRepl := replStats.changesLeft * 1000 / int64(spec.GetReplicationSpec().Settings.GetDesiredLatencyMs())
 			state.throughputNeededByHighRepl += throughputNeededByHighRepl
 
 			// If we cannot clear the changesLeft within specified time, this is considered backlog
@@ -848,13 +862,12 @@ func (rm *ResourceManager) computeDcpActionsWithBacklog(state *State) {
 	return
 }
 
-func (rm *ResourceManager) takeActions(specs map[string]*metadata.ReplicationSpecification,
-	previousState *State, state *State) {
+func (rm *ResourceManager) takeActions(previousState *State, state *State) {
 	rm.setThrottlerActions(previousState, state)
 
 	switch state.dcpPriorityAction {
 	case DcpPriorityActionSet:
-		rm.setDcpPriorities(specs, state)
+		rm.setDcpPriorities(state)
 	case DcpPriorityActionReset:
 		rm.resetDcpPriorities(state)
 	default:
@@ -919,34 +932,35 @@ func (rm *ResourceManager) constructSettings(state *State, previousHighTokens, p
 	return settings
 }
 
-func (rm *ResourceManager) setDcpPriorities(specs map[string]*metadata.ReplicationSpecification, state *State) {
+func (rm *ResourceManager) setDcpPriorities(state *State) {
 	rm.mapLock.Lock()
 	defer rm.mapLock.Unlock()
 
-	for replId, _ := range state.replStatsMap {
+	for fullSpecId, _ := range state.replStatsMap {
 		var targetPriority mcc.PriorityType
-		spec, ok := specs[replId]
+		specPtr, ok := rm.managedResourceOnceSpecMap[fullSpecId]
 		if !ok {
 			// should never get here
-			rm.logger.Warnf("Skipping setting dcp priority for %v because of error retrieving replication spec", replId)
+			rm.logger.Warnf("Skipping setting dcp priority for %v because of error retrieving replication spec", fullSpecId)
 			continue
 		}
-		if rm.isReplHighPriority(spec.Id, spec.Settings.GetPriority(), false /*lock*/) {
+		spec := *specPtr
+		if rm.isReplHighPriority(spec.GetFullId(), spec.GetReplicationSpec().Settings.GetPriority(), false /*lock*/) {
 			targetPriority = mcc.PriorityHigh
 		} else {
 			targetPriority = mcc.PriorityLow
 		}
 
-		if currentPriority, ok := rm.replDcpPriorityMap[replId]; ok && currentPriority == targetPriority {
+		if currentPriority, ok := rm.replDcpPriorityMap[spec.GetFullId()]; ok && currentPriority == targetPriority {
 			// no op if the current set priority is the same as the target value
 			continue
 		}
 
-		err := rm.setDcpPriority(replId, targetPriority)
+		err := rm.setDcpPriority(spec, targetPriority)
 		if err == nil {
-			rm.replDcpPriorityMap[replId] = targetPriority
+			rm.replDcpPriorityMap[spec.GetFullId()] = targetPriority
 		} else {
-			rm.logger.Warnf("Error setting dcp priority for %v to %v. err=%v\n", replId, targetPriority, err)
+			rm.logger.Warnf("Error setting dcp priority for %v to %v. err=%v\n", spec.GetFullId(), targetPriority, err)
 			continue
 		}
 	}
@@ -964,17 +978,23 @@ func (rm *ResourceManager) resetDcpPriorities(state *State) {
 
 	targetPriority := mcc.PriorityMed
 
-	for replId, _ := range state.replStatsMap {
-		if currentPriority, ok := rm.replDcpPriorityMap[replId]; !ok || currentPriority == targetPriority {
+	for fullReplId, _ := range state.replStatsMap {
+		if currentPriority, ok := rm.replDcpPriorityMap[fullReplId]; !ok || currentPriority == targetPriority {
 			// no op if dcp priority has not been set before, or the set value is the same as the target value
 			continue
 		}
+		specPtr, ok := rm.managedResourceOnceSpecMap[fullReplId]
+		if !ok || specPtr == nil {
+			rm.logger.Warnf("Unable to find generic spec given full replId: %v", fullReplId)
+			continue
+		}
+		spec := *specPtr
 
-		err := rm.setDcpPriority(replId, targetPriority)
+		err := rm.setDcpPriority(spec, targetPriority)
 		if err == nil {
-			rm.replDcpPriorityMap[replId] = targetPriority
+			rm.replDcpPriorityMap[fullReplId] = targetPriority
 		} else {
-			rm.logger.Warnf("Error setting dcp priority for %v to %v. err=%v\n", replId, targetPriority, err)
+			rm.logger.Warnf("Error setting dcp priority for %v to %v. err=%v\n", fullReplId, targetPriority, err)
 			continue
 		}
 	}
@@ -993,27 +1013,27 @@ func (rm *ResourceManager) isReplOngoing(replId string, lock bool) bool {
 	}
 }
 
-func (rm *ResourceManager) setReplOngoing(spec *metadata.ReplicationSpecification) error {
-	if rm.isReplOngoing(spec.Id, true) {
+func (rm *ResourceManager) setReplOngoing(spec metadata.GenericSpecification) error {
+	if rm.isReplOngoing(spec.GetFullId(), true) {
 		// replication is already ongoing. no op
 		return nil
 	}
 
-	if spec.Settings.GetPriority() == base.PriorityTypeMedium {
+	if spec.GetReplicationSpec().Settings.GetPriority() == base.PriorityTypeMedium {
 		// change "isHighReplication" flag on Medium replication
 		settings := make(map[string]interface{})
 		settings[parts.IsHighReplicationKey] = true
 
-		err := rm.applySettingsToPipeline(spec.Id, settings)
+		err := rm.applySettingsToPipeline(spec, settings)
 		if err != nil {
 			// do not add repl to ongoingReplMap
 			// we will get another chance to repeat this op in the next interval
-			rm.logger.Warnf("Skipping changing needToThrottle setting for %v due to err=%v.", spec.Id, err)
+			rm.logger.Warnf("Skipping changing needToThrottle setting for %v due to err=%v.", spec.GetFullId(), err)
 			return err
 		}
 	}
 
-	rm.addReplToOngoingReplMap(spec.Id)
+	rm.addReplToOngoingReplMap(spec.GetFullId())
 	return nil
 }
 
@@ -1026,16 +1046,29 @@ func (rm *ResourceManager) addReplToOngoingReplMap(replId string) {
 	rm.logger.Infof("Set ongoing flag for %v\nongoingReplMap=%v\n", replId, rm.ongoingReplMap)
 }
 
-func (rm *ResourceManager) applySettingsToPipeline(replId string, settings map[string]interface{}) error {
+func (rm *ResourceManager) applySettingsToPipeline(spec metadata.GenericSpecification, settings map[string]interface{}) error {
+	replId := spec.GetReplicationSpec().Id
 	rs, err := rm.pipelineMgr.ReplicationStatus(replId)
 	if err != nil {
 		return fmt.Errorf("Skipping updating settings for %v because of error retrieving replication status. settings=%v, err=%v\n", replId, settings, err)
 	}
 
-	// set custom settings on replStatus so that settings can be automatically re-applied after pipeline restart
-	rs.SetCustomSettings(settings)
+	if spec.Type() == metadata.MainReplication {
+		// set custom settings on replStatus so that settings can be automatically re-applied after pipeline restart
+		// Backfill pipelines do not reapply when pipeline restarts
+		rs.SetCustomSettings(settings)
+	}
 
-	pipeline := rs.Pipeline()
+	var pipeline common.Pipeline
+	switch spec.Type() {
+	case metadata.MainReplication:
+		pipeline = rs.Pipeline()
+	case metadata.BackfillReplication:
+		pipeline = rs.BackfillPipeline()
+	default:
+		panic(fmt.Sprintf("Invalid type: %v", spec.Type().String()))
+	}
+
 	if pipeline == nil {
 		return fmt.Errorf("Skipping updating settings for %v because of nil pipeline. err=%v\n", replId)
 	}
@@ -1043,25 +1076,33 @@ func (rm *ResourceManager) applySettingsToPipeline(replId string, settings map[s
 	return pipeline.UpdateSettings(settings)
 }
 
-func (rm *ResourceManager) setDcpPriority(replId string, priority mcc.PriorityType) error {
-	rm.logger.Infof("Setting dcp priority to %v for %v", priority, replId)
+func (rm *ResourceManager) setDcpPriority(spec metadata.GenericSpecification, priority mcc.PriorityType) error {
+	rm.logger.Infof("Setting dcp priority to %v for %v", priority, spec.GetFullId())
 
 	settings := make(map[string]interface{})
 	settings[parts.DCP_Priority] = priority
 
-	return rm.applySettingsToPipeline(replId, settings)
+	return rm.applySettingsToPipeline(spec, settings)
 }
 
-func (rm *ResourceManager) getStatsFromReplication(spec *metadata.ReplicationSpecification) (*ReplStats, error) {
-	rs, err := rm.pipelineMgr.ReplicationStatus(spec.Id)
+func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecification) (*ReplStats, error) {
+	var pipelineType common.PipelineType
+	switch spec.Type() {
+	case metadata.MainReplication:
+		pipelineType = common.MainPipeline
+	case metadata.BackfillReplication:
+		pipelineType = common.BackfillPipeline
+	default:
+		panic(fmt.Sprintf("Unknown type: %v", spec.Type().String()))
+	}
+	rs, err := rm.pipelineMgr.ReplicationStatus(spec.GetReplicationSpec().Id)
 	if err != nil {
 		return nil, err
 	}
-	// TODO - main or backfill spec
-	statsMap := rs.GetOverviewStats(common.MainPipeline)
+	statsMap := rs.GetOverviewStats(pipelineType)
 	if statsMap == nil {
 		// this is possible when replication is starting up
-		return nil, fmt.Errorf("Cannot find overview stats for %v", spec.Id)
+		return nil, fmt.Errorf("Cannot find overview stats for %v", spec.GetFullId())
 	}
 
 	changesLeft, err := base.ParseStats(statsMap, base.ChangesLeftStats)

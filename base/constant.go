@@ -1087,3 +1087,5 @@ const ActiveTransactionRecordSuffix = "-#[0-9a-f]+$"
 var ActiveTxnRecordRegexp *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("%v%v%v", ActiveTransactionRecordPrefix, ValidVbucketRangeRegexpGroup, ActiveTransactionRecordSuffix))
 
 const TransactionXattrKey = "txn"
+
+const BackfillPipelineTopicPrefix = "backfill_"
