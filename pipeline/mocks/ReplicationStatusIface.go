@@ -28,6 +28,22 @@ func (_m *ReplicationStatusIface) AddErrorsFromMap(errMap base.ErrorMap) {
 	_m.Called(errMap)
 }
 
+// AllPipelines provides a mock function with given fields:
+func (_m *ReplicationStatusIface) AllPipelines() []common.Pipeline {
+	ret := _m.Called()
+
+	var r0 []common.Pipeline
+	if rf, ok := ret.Get(0).(func() []common.Pipeline); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]common.Pipeline)
+		}
+	}
+
+	return r0
+}
+
 // BackfillPipeline provides a mock function with given fields:
 func (_m *ReplicationStatusIface) BackfillPipeline() common.Pipeline {
 	ret := _m.Called()

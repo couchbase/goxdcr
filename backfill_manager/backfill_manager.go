@@ -376,6 +376,10 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			b.logger.Errorf("Unable to run postDel backfill for %v", changedSpecId)
 			return err
 		}
+	} else {
+		// If any replication spec changes occurred, and the backfill spec's pointer has changed
+		// then the main replication pipeline will restart. When main pipeline restarts, the backfill pipeline
+		// will also restart alongside with it, and backfill pipelines will restart with the new settings
 	}
 	return nil
 }

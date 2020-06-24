@@ -320,21 +320,21 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic str
 	for {
 		rs, err := replication_mgr.pipelineMgr.ReplicationStatus(topic)
 		if err == nil {
-			pipeline := rs.Pipeline()
-			if pipeline != nil {
-				// check if the pipeline is associated with the correct repl spec to which the new settings belongs
-				curSpecInternalId := rs.Spec().InternalId
-				if curSpecInternalId == specInternalId {
-					err = pipeline.UpdateSettings(newSettingsMap)
-					if err != nil {
-						rscl.logger.Errorf("Live update on pipeline %v returned err = %v", topic, err)
+			pipelines := rs.AllPipelines()
+			for _, pipeline := range pipelines {
+				if pipeline != nil {
+					// check if the pipeline is associated with the correct repl spec to which the new settings belongs
+					curSpecInternalId := rs.Spec().InternalId
+					if curSpecInternalId == specInternalId {
+						err = pipeline.UpdateSettings(newSettingsMap)
+						if err != nil {
+							rscl.logger.Errorf("Live update on pipeline %v %v returned err = %v", pipeline.Type(), pipeline.Topic(), err)
+						}
+					} else {
+						rscl.logger.Warnf("Abort live update on pipeline %v since replication spec has been recreated. oldSpecId=%v, newSpecId=%v", topic, specInternalId, curSpecInternalId)
 					}
-				} else {
-					rscl.logger.Warnf("Abort live update on pipeline %v since replication spec has been recreated. oldSpecId=%v, newSpecId=%v", topic, specInternalId, curSpecInternalId)
+					return
 				}
-				return
-			} else {
-				err = fmt.Errorf("Cannot find pipeline with topic %v", topic)
 			}
 		}
 

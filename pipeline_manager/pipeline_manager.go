@@ -550,6 +550,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 // Stops pipeline and cleans all checkpoints with it, results in a restream
 // Add retry mechanism here because failure will not be ideal
 // Should be called only from serializer
+// Also deletes any backfill replications because restreaming takes care of backfill cases
 func (pipelineMgr *PipelineManager) CleanupPipeline(topic string) error {
 	var rep_status *pipeline.ReplicationStatus
 	var err error

@@ -90,6 +90,7 @@ type ReplicationStatusIface interface {
 	PublishWithStatus(status string, lock bool)
 	Pipeline() common.Pipeline
 	BackfillPipeline() common.Pipeline
+	AllPipelines() []common.Pipeline
 	VbList() []uint16
 	SetVbList(vb_list []uint16)
 	SettingsMap() map[string]interface{}
@@ -432,6 +433,19 @@ func (rs *ReplicationStatus) BackfillPipeline() common.Pipeline {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.backfillPipeline_
+}
+
+func (rs *ReplicationStatus) AllPipelines() []common.Pipeline {
+	var retList []common.Pipeline
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+	if rs.pipeline_ != nil {
+		retList = append(retList, rs.pipeline_)
+	}
+	if rs.backfillPipeline_ != nil {
+		retList = append(retList, rs.backfillPipeline_)
+	}
+	return retList
 }
 
 func (rs *ReplicationStatus) VbList() []uint16 {

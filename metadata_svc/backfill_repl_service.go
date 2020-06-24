@@ -583,23 +583,13 @@ func (b *BackfillReplicationService) updateCacheInternal(specId string, newSpec 
 
 	oldSpec, updated, err := b.updateCacheInternalNoLock(specId, newSpec)
 
-	if updated && oldSpec != nil && newSpec == nil {
-		// TODO MB-39349 - notify Backfill Manager
+	if updated {
 		b.metadataChangeCbMtx.RLock()
 		for _, cb := range b.metadataChangeCallbacks {
 			cb(specId, oldSpec, newSpec)
 		}
 		b.metadataChangeCbMtx.RUnlock()
 	}
-
-	if updated && oldSpec == nil && newSpec != nil {
-		b.metadataChangeCbMtx.RLock()
-		for _, cb := range b.metadataChangeCallbacks {
-			cb(specId, oldSpec, newSpec)
-		}
-		b.metadataChangeCbMtx.RUnlock()
-	}
-
 	return err
 }
 
@@ -614,7 +604,7 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 	}
 
 	if oldSpec == nil && newSpec != nil {
-		// TODO MB-38331 - notify Backfill Manager??
+		// Backfill Manager already watches this case
 	} else if oldSpec != nil && newSpec == nil {
 		_, err := b.DelBackfillReplSpec(id)
 		if err == nil {
@@ -627,6 +617,14 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 			b.updateCache(id, nil)
 		}
 		return err
+	} else {
+		// It's possible that changes have gone into the original replication spec
+		backfillSpec, err := b.backfillSpec(id)
+		if err != nil {
+			return err
+		}
+		backfillSpec.SetReplicationSpec(newSpec)
+		b.updateCache(id, backfillSpec)
 	}
 	return nil
 }
