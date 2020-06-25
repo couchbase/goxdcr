@@ -146,12 +146,13 @@ type TargetCollectionInfo struct {
 }
 
 type WrappedMCRequest struct {
-	Seqno        uint64
-	Req          *gomemcached.MCRequest
-	Start_time   time.Time
-	UniqueKey    string
-	ColNamespace *CollectionNamespace
-	ColInfo      *TargetCollectionInfo
+	Seqno              uint64
+	Req                *gomemcached.MCRequest
+	Start_time         time.Time
+	UniqueKey          string
+	ColNamespace       *CollectionNamespace
+	ColInfo            *TargetCollectionInfo
+	SlicesToBeReleased [][]byte
 }
 
 func (req *WrappedMCRequest) ConstructUniqueKey() {
@@ -262,8 +263,9 @@ type VBErrorEventAdditional struct {
 type ConflictResolutionMode int
 
 const (
-	CRMode_RevId ConflictResolutionMode = iota
-	CRMode_LWW   ConflictResolutionMode = iota
+	CRMode_RevId  ConflictResolutionMode = iota
+	CRMode_LWW    ConflictResolutionMode = iota
+	CRMode_Custom ConflictResolutionMode = iota
 )
 
 // stack implementation
@@ -594,7 +596,7 @@ func NewXattrIterator(body []byte) (*XattrIterator, error) {
 	// Couchbase doc size is max of 20MB. Xattribute count against this limit.
 	// So if total xattr size is greater than this limit, then something is wrong
 	if xattrSize > MaxDocSizeByte {
-		return nil, fmt.Errorf("xattrs size exceeds max doc size")
+		return nil, fmt.Errorf("xattrs size %v exceeds max doc size", xattrSize)
 	}
 	return &XattrIterator{
 		body:   body,

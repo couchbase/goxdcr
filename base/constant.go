@@ -85,6 +85,7 @@ var AlternateKey = "alternateAddresses"
 var ExternalKey = "external"
 var CapiPortKey = "capi"
 var CapiSSLPortKey = "capiSSL"
+var DeveloperPreviewKey = "isDeveloperPreview"
 
 // Collection consts
 const UIDKey = "uid"
@@ -101,7 +102,6 @@ var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
 // Custom conflict resolution related constants
-var DeveloperPreview = false
 var JSEngineWorkersPerNode = 1
 var JSEngineThreadsPerWorker = 2
 
@@ -391,6 +391,7 @@ const (
 	GET                 = mc.CommandCode(0x00)
 	GET_WITH_META       = mc.CommandCode(0xa0)
 	SET_WITH_META       = mc.CommandCode(0xa2)
+	ADD_WITH_META       = mc.CommandCode(0xa4)
 	DELETE_WITH_META    = mc.CommandCode(0xa8)
 	SET_TIME_SYNC       = mc.CommandCode(0xc1)
 	SUBDOC_GET          = mc.CommandCode(0xc5)
@@ -405,6 +406,11 @@ const (
 	SUBDOC_FLAG_XATTR = 0x04
 )
 
+// Return status for operations that has not been added to gomemcached
+const (
+	XATTR_EINVAL           = 0x87 // There is something wrong with the XATTR
+	SUBDOC_SUCCESS_DELETED = 0xcd
+)
 const (
 	PipelineSetting_RequestPool = "RequestPool"
 	DefaultRequestPoolSize      = 10000
@@ -481,6 +487,7 @@ var UnexpectedEOF = "unexpected EOF"
 
 // flag for memcached to enable lww to lww bucket replication
 var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02
+var SKIP_CONFLICT_RESOLUTION_FLAG uint32 = 0x08
 
 // https://github.com/couchbase/kv_engine/blob/master/engines/ep/docs/protocol/del_with_meta.md
 var IS_EXPIRATION uint32 = 0x10

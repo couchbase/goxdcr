@@ -761,7 +761,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), base.TagUD(item.Req.Key))
 				}
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-					Opcode:      encodeOpCode(item.Req.Opcode),
+					Opcode:      encodeOpCode(item.Req, false /* isCustomCR */),
 					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 					VBucket:     item.Req.VBucket,
 				}
@@ -846,7 +846,7 @@ func (capi *CapiNozzle) validateRunningState() error {
 
 func (capi *CapiNozzle) adjustRequest(req *base.WrappedMCRequest) {
 	mc_req := req.Req
-	mc_req.Opcode = encodeOpCode(mc_req.Opcode)
+	mc_req.Opcode = encodeOpCode(mc_req, false /* isCustomCR */)
 	mc_req.Cas = 0
 }
 

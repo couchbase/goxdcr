@@ -935,7 +935,7 @@ func Base64ToUint64(b64 []byte) (uint64, error) {
 	return binary.BigEndian.Uint64(decoded), nil
 }
 
-func Uint64ToBase64(u64 uint64) ([]byte) {
+func Uint64ToBase64(u64 uint64) []byte {
 	src := make([]byte, 8)
 	binary.BigEndian.PutUint64(src, u64)
 	encoded := make([]byte, base64.RawStdEncoding.EncodedLen(8))
@@ -968,6 +968,16 @@ func Uint64ToHexLittleEndian(u64 uint64) []byte {
 	encoded[0] = '0'
 	encoded[1] = 'x'
 	return encoded
+}
+
+func HexToBase64(h string) ([]byte, error) {
+	decoded := make([]byte, hex.DecodedLen(len(h)))
+	if _, err := hex.Decode(decoded, []byte(h)); err != nil {
+		return nil, err
+	}
+	encoded := make([]byte, base64.RawStdEncoding.EncodedLen(len(decoded)))
+	base64.RawStdEncoding.Encode(encoded, decoded)
+	return encoded, nil
 }
 
 // construct vb->server map for the vbs in vbList using server->vbList map

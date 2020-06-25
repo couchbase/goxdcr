@@ -671,7 +671,7 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 		event.Opcode == mc.UPR_EXPIRATION {
 
 		extrasSize := 24
-		if router.sourceCRMode == base.CRMode_LWW || event.Opcode == mc.UPR_EXPIRATION {
+		if router.sourceCRMode == base.CRMode_LWW || router.sourceCRMode == base.CRMode_Custom || event.Opcode == mc.UPR_EXPIRATION {
 			extrasSize = 28
 		}
 		if len(req.Extras) != extrasSize {
@@ -688,6 +688,9 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 		if router.sourceCRMode == base.CRMode_LWW {
 			// if source bucket is of lww type, add FORCE_ACCEPT_WITH_META_OPS options for memcached
 			options |= base.FORCE_ACCEPT_WITH_META_OPS
+		} else if router.sourceCRMode == base.CRMode_Custom {
+			// TODO (MB-39012): Review this once KV has the proper CR mode. Right now without set FORCE_ACCEPT_WITH_META_OPS, KV has to be RevId CR to test custom CR
+			options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
 		}
 		if event.Opcode == mc.UPR_EXPIRATION {
 			options |= base.IS_EXPIRATION

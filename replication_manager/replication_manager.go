@@ -181,10 +181,10 @@ func StartReplicationManager(sourceKVHost string,
 
 		replication_mgr.initMetadataChangeMonitor()
 
-		if base.DeveloperPreview {
-			// Init and start Eventing Javascript Engine before admin port is started
-			functions.Init(sourceKVHost, xdcrRestPort)
-		}
+		// Init and start Eventing Javascript Engine before admin port is started. This will start a few OS processes called js_evaluator
+		// TODO: Should we only start when it is in DP mode? To do that, we will need to handle user turning on DP mode, either restart
+		// http server gracefully with zero downtime or restart XDCR
+		functions.Init(sourceKVHost, xdcrRestPort)
 
 		// start adminport
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils)

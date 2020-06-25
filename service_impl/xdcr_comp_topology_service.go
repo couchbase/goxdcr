@@ -271,6 +271,21 @@ func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
 	return implVersionParts[0], nil
 }
 
+func (top_svc *XDCRTopologySvc) IsMyClusterDeveloperPreview() bool {
+	var poolsInfo map[string]interface{}
+	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
+	if err != nil || statusCode != 200 {
+		top_svc.logger.Errorf("Failed to get DeveloperPreview status. err=%v, statusCode=%v", err, statusCode)
+		return false
+	}
+	isDP, ok := poolsInfo[base.DeveloperPreviewKey]
+	if ok && isDP == true {
+		return true
+	} else {
+		return false
+	}
+}
+
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {
 	return "http://" + base.GetHostAddr(top_svc.GetLocalHostName(), top_svc.adminport)
 }
