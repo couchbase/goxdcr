@@ -50,7 +50,6 @@ var RefreshAlreadyActive = errors.New("There is a refresh that is ongoing")
 var RefreshAborted = errors.New("Refresh instance was called to be aborted")
 var DeleteAlreadyIssued = errors.New("Underlying remote cluster reference has been already deleted manually")
 var WriteToMetakvErrString = "Error writing to metakv"
-var NoChangeNeeded = errors.New("No change is needed")
 
 func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
@@ -323,6 +322,9 @@ type refreshContext struct {
 	origAddressPref           AddressType
 	addressPrefUpdate         bool
 	cachedNodeListWithMinInfo []interface{}
+
+	// non-empty if the refresh context needs to raise an UI error message when committing
+	uiErrorMsg string
 }
 
 // Initializes the context and also populates the credentials for connecting to nodes
@@ -411,6 +413,9 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 					rctx.agent.logger.Warnf(updateErr.Error())
 				}
 				return updateErr
+			}
+			if rctx.uiErrorMsg != "" {
+				rctx.agent.uiLogSvc.Write(rctx.uiErrorMsg)
 			}
 		} else {
 			rctx.agent.refMtx.Lock()
@@ -627,19 +632,12 @@ func (agent *RemoteClusterAgent) Refresh() error {
 				// This node is an acceptable replacement for active node - and sets atLeastOneValid
 				rctx.finalizeRefCacheListFrom(nodeAddressesList, nodeList)
 
-				//  so check the list to make sure that the bootstrap node is valid
-				hostNameInCluster := false
-				for _, pair := range nodeAddressesList {
-					// refCache.HostName() could be http addr or https addr
-					if pair.GetFirstString() == rctx.refCache.HostName() || pair.GetSecondString() == rctx.refCache.HostName() {
-						hostNameInCluster = true
-						break
-					}
+				if rctx.refOrig.IsDnsSRV() {
+					rctx.checkDnsSRVEntries(nodeAddressesList)
+				} else {
+					rctx.checkIfBootstrapNodeIsValidAndReplaceIfNot(nodeAddressesList)
 				}
-				if !hostNameInCluster {
-					// Bootstrap mode is NOT in the node list - find a replace node if possible, from the already pulled list
-					rctx.replaceHostNameUsingList(nodeAddressesList)
-				}
+
 				// We are done
 				break
 			} else {
@@ -658,6 +656,56 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	// If there's anything that needs to be persisted to agent, update it
 	err = rctx.checkAndUpdateAgentReference()
 	return err
+}
+
+func (rctx *refreshContext) checkDnsSRVEntries(nodeAddressesList base.StringPairList) {
+	_, _, totalEntries, err := rctx.refCache.RefreshSRVEntries()
+	if err != nil || totalEntries == 0 {
+		oldHostName := rctx.refCache.HostName()
+		rctx.replaceHostNameUsingList(nodeAddressesList)
+		rctx.uiErrorMsg = rctx.getSRVReplacementMsg(oldHostName)
+		if err != nil {
+			rctx.agent.logger.Errorf(err.Error())
+		}
+	} else {
+		err = rctx.refCache.CheckSRVValidityUsingNodeAddressesList(nodeAddressesList)
+		if err != nil {
+			if err == metadata.ErrorNoBootableSRVEntryFound {
+				// Do a second level validation
+				err = rctx.refCache.CheckSRVValidityByUUID(rctx.agent.utils.GetClusterUUID,
+					rctx.agent.logger)
+				if err != nil {
+					rctx.agent.logger.Errorf(err.Error())
+					if err == metadata.ErrorNoBootableSRVEntryFound {
+						oldHostName := rctx.refCache.HostName()
+						rctx.replaceHostNameUsingList(nodeAddressesList)
+						rctx.uiErrorMsg = rctx.getSRVReplacementMsg(oldHostName)
+					}
+				}
+			}
+		}
+	}
+}
+
+func (rctx *refreshContext) getSRVReplacementMsg(oldHostName string) string {
+	return fmt.Sprintf("Remote Cluster reference was given DNS SRV record with %v, but the DNS SRV entries are no longer valid for bootstrap. The hostname will now be replaced. To restore, re-edit the remote cluster reference manually.",
+		oldHostName)
+}
+
+func (rctx *refreshContext) checkIfBootstrapNodeIsValidAndReplaceIfNot(nodeAddressesList base.StringPairList) {
+	//  so check the list to make sure that the bootstrap node is valid
+	hostNameInCluster := false
+	for _, pair := range nodeAddressesList {
+		// refCache.HostName() could be http addr or https addr
+		if pair.GetFirstString() == rctx.refCache.HostName() || pair.GetSecondString() == rctx.refCache.HostName() {
+			hostNameInCluster = true
+			break
+		}
+	}
+	if !hostNameInCluster {
+		// Bootstrap mode is NOT in the node list - find a replace node if possible, from the already pulled list
+		rctx.replaceHostNameUsingList(nodeAddressesList)
+	}
 }
 
 // Returns true if this call successfully disabled refresh, and need to re-enable it
@@ -952,6 +1000,9 @@ func (agent *RemoteClusterAgent) getCredentialsAndMisc() (username, password str
 		err = fmt.Errorf("Agent pendingRef is empty when doing sync to %v", agent.reference.Id())
 		return
 	}
+
+	agent.pendingRef.PopulateDnsSrvIfNeeded(true)
+
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err = agent.pendingRef.MyCredentials()
 	if err != nil {
 		return
@@ -2059,7 +2110,9 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		}
 	}
 
-	refHostName := ref.HostName()
+	ref.PopulateDnsSrvIfNeeded(false)
+
+	refHostName, _ := ref.MyConnectionStr()
 	hostName := base.GetHostName(refHostName)
 	port, err := base.GetPortNumber(refHostName)
 	if err != nil {
@@ -2191,13 +2244,30 @@ func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.Rem
 
 func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metadata.RemoteClusterReference) error {
 	if !ref.IsEncryptionEnabled() {
-		ref.SetActiveHostName(ref.HostName())
+		if ref.IsDnsSRV() {
+			srvHosts := ref.GetSRVHostNames()
+			if len(srvHosts) > 0 {
+				ref.SetActiveHostName(srvHosts[0])
+			} else {
+				ref.SetActiveHostName(ref.HostName())
+			}
+		} else {
+			ref.SetActiveHostName(ref.HostName())
+		}
 		// nothing more needs to be done if encryption is not enabled
 		return nil
 	}
 
 	refHostName := ref.HostName()
 	refHttpsHostName := ref.HttpsHostName()
+	if ref.IsDnsSRV() {
+		// We will overwrite both with DNS SRV entries
+		// When user set up DNS SRV with encryption, they should have coded the correct port
+		srvHosts := ref.GetSRVHostNames()
+		if len(srvHosts) > 0 {
+			refHostName = srvHosts[0]
+		}
+	}
 	var externalRefHttpsHostName string
 	var err error
 	var err1 error
@@ -2593,6 +2663,7 @@ func constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.R
 		return nil, err
 	}
 	ref.SetRevision(rev)
+	ref.PopulateDnsSrvIfNeeded(true /*retryOnErr*/)
 
 	return ref, err
 }

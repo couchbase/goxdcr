@@ -15,6 +15,7 @@ import (
 	"fmt"
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
+	base2 "github.com/couchbase/goxdcr/base/helpers"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -369,7 +370,7 @@ func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool,
 	}
 
 	if len(errorsMap) == 0 {
-		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, hostnameMode, demandEncryption, encryptionType, certificate, clientCertificate, clientKey)
+		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, hostnameMode, demandEncryption, encryptionType, certificate, clientCertificate, clientKey, &base2.DnsSrvHelper{})
 	}
 
 	return

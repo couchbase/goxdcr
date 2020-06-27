@@ -14,9 +14,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	baseH "github.com/couchbase/goxdcr/base/helpers"
+	"github.com/couchbase/goxdcr/log"
+	"math/rand"
+	"net"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -79,16 +84,70 @@ type RemoteClusterReference struct {
 
 	// Internal RW Mutex to prevent concurrent data race
 	mutex sync.RWMutex
+
+	// In-memory flag of whether or not the HostName_ field is a DNS SRV entry
+	hostNameIsDnsSrv bool
+	// srv related things that need to be used by remote cluster agent
+	dnsSrvHelper baseH.DnsSrvHelperIface
+	srvEntries   SrvEntriesType
+}
+
+type SrvEntriesType []SrvEntryType
+
+type SrvEntryType struct {
+	srv *net.SRV
+}
+
+func (s SrvEntryType) GetTarget() string {
+	if s.srv == nil {
+		return ""
+	}
+	// SRV target always end with an extra period
+	return strings.TrimSuffix(s.srv.Target, ".")
+}
+
+// Because Remote Cluster Reference doesn't care about weight or priority
+// as long as both lists contain the same information, they are same
+// even if the ordering is off
+func (s SrvEntriesType) SameAs(other SrvEntriesType) bool {
+	if len(s) != len(other) {
+		return false
+	}
+
+	for _, oneEntry := range s {
+		var found bool
+		for _, oneOtherEntry := range other {
+			if *oneEntry.srv == *oneOtherEntry.srv {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (s SrvEntriesType) Clone() SrvEntriesType {
+	var cloned SrvEntriesType
+	for _, entry := range s {
+		clonedSrvPtr := &net.SRV{}
+		*clonedSrvPtr = *(entry.srv)
+		cloned = append(cloned, SrvEntryType{clonedSrvPtr})
+	}
+	return cloned
 }
 
 func NewRemoteClusterReference(uuid, name, hostName, userName, password, hostnameMode string,
-	demandEncryption bool, encryptionType string, certificate, clientCertificate, clientKey []byte) (*RemoteClusterReference, error) {
+	demandEncryption bool, encryptionType string, certificate, clientCertificate, clientKey []byte,
+	dnsSrvHelper baseH.DnsSrvHelperIface) (*RemoteClusterReference, error) {
 	refId, err := RemoteClusterRefId()
 	if err != nil {
 		return nil, err
 	}
 
-	return &RemoteClusterReference{Id_: refId,
+	ref := &RemoteClusterReference{Id_: refId,
 		Uuid_:              uuid,
 		Name_:              name,
 		HostName_:          hostName,
@@ -100,7 +159,10 @@ func NewRemoteClusterReference(uuid, name, hostName, userName, password, hostnam
 		ClientCertificate_: clientCertificate,
 		ClientKey_:         clientKey,
 		HostnameMode_:      hostnameMode,
-	}, nil
+		dnsSrvHelper:       dnsSrvHelper,
+	}
+
+	return ref, nil
 }
 
 func RemoteClusterRefId() (string, error) {
@@ -115,7 +177,15 @@ func RemoteClusterRefId() (string, error) {
 // implements base.ClusterConnectionInfoProvider
 func (ref *RemoteClusterReference) MyConnectionStr() (string, error) {
 
-	if ref.IsHttps() {
+	if ref.IsDnsSRV() && ref.ActiveHostName() == "" && ref.ActiveHttpsHostName() == "" {
+		srvHostnames := ref.GetSRVHostNames()
+		if len(srvHostnames) == 0 {
+			// Shouldn't be the case
+			return ref.HostName(), nil
+		}
+		randIdx := rand.Int() % len(srvHostnames)
+		return srvHostnames[randIdx], nil
+	} else if ref.IsHttps() {
 		activeHttpsHostName := ref.ActiveHttpsHostName()
 		if len(activeHttpsHostName) > 0 {
 			return activeHttpsHostName, nil
@@ -213,7 +283,8 @@ func (ref *RemoteClusterReference) IsSame(ref2 *RemoteClusterReference) bool {
 		ref2.mutex.RLock()
 		defer ref2.mutex.RUnlock()
 		return reflect.DeepEqual(ref.revision, ref2.revision) && ref.HttpsHostName_ == ref2.HttpsHostName_ &&
-			ref.ActiveHostName_ == ref2.ActiveHostName_ && ref.ActiveHttpsHostName_ == ref2.ActiveHttpsHostName_
+			ref.ActiveHostName_ == ref2.ActiveHostName_ && ref.ActiveHttpsHostName_ == ref2.ActiveHttpsHostName_ &&
+			ref.hostNameIsDnsSrv == ref2.hostNameIsDnsSrv && ref.srvEntries.SameAs(ref2.srvEntries)
 	}
 }
 
@@ -313,6 +384,9 @@ func (ref *RemoteClusterReference) LoadFrom(inRef *RemoteClusterReference) {
 	ref.loadNonActivesFromNoLock(inRef)
 	ref.ActiveHostName_ = inRef.ActiveHostName()
 	ref.ActiveHttpsHostName_ = inRef.ActiveHttpsHostName()
+	ref.hostNameIsDnsSrv = inRef.hostNameIsDnsSrv
+	ref.srvEntries = inRef.srvEntries.Clone()
+	ref.dnsSrvHelper = inRef.dnsSrvHelper
 }
 
 func (ref *RemoteClusterReference) LoadNonActivesFrom(inRef *RemoteClusterReference) {
@@ -405,7 +479,10 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		HostnameMode_:      ref.HostnameMode_,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
-		revision: ref.revision,
+		revision:         ref.revision,
+		dnsSrvHelper:     ref.dnsSrvHelper,
+		hostNameIsDnsSrv: ref.hostNameIsDnsSrv,
+		srvEntries:       ref.srvEntries.Clone(),
 	}
 }
 
@@ -651,4 +728,244 @@ func (ref *RemoteClusterReference) Unmarshal(value []byte) error {
 	ref.mutex.Lock()
 	defer ref.mutex.Unlock()
 	return json.Unmarshal(value, ref)
+}
+
+func (ref *RemoteClusterReference) IsDnsSRV() bool {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return ref.hostNameIsDnsSrv
+}
+
+func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+
+	if !ref.hostNameIsDnsSrv || len(ref.srvEntries) == 0 {
+		return
+	}
+
+	for _, oneEntry := range ref.srvEntries {
+		// SRV entries always have end with a "."
+		targetHostname := strings.TrimSuffix(oneEntry.srv.Target, ".")
+		hostnameList = append(hostnameList, fmt.Sprintf("%v:%v", targetHostname, oneEntry.srv.Port))
+	}
+	return
+}
+
+// DNS SRV look up should be quick
+// In the case of failure, if it is a user induced action, then retryOnErr should be false
+// because the user can fix any DNS SRV look up error if it isn't right
+// If it is a cold start-up or metakv callback, retry on error before giving up
+// because there is no way to manually intervene before the system corrects itself
+func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(retryOnErr bool) {
+	ref.mutex.RLock()
+	if net.ParseIP(ref.HostName_) != nil {
+		// If it is IPv4 or IPv6, it is not going to be a DNS SRV
+		ref.mutex.RUnlock()
+		return
+	}
+	ref.mutex.RUnlock()
+
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+
+	if ref.dnsSrvHelper == nil {
+		ref.dnsSrvHelper = &baseH.DnsSrvHelper{}
+	}
+
+	var entries []*net.SRV
+	var err error
+	for i := 0; i < 5; i++ {
+		// Dns srv lookup shouldn't fail - try 5 times
+		entries, err = ref.dnsSrvHelper.DnsSrvLookup(ref.getSRVLookupHostnameNoLock())
+		if err == nil || !retryOnErr {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		ref.hostNameIsDnsSrv = false
+		return
+	}
+	ref.hostNameIsDnsSrv = true
+	for _, entry := range entries {
+		ref.srvEntries = append(ref.srvEntries, SrvEntryType{entry})
+	}
+	return
+}
+
+func (ref *RemoteClusterReference) getSRVLookupHostnameNoLock() string {
+	lookupHostname := ref.HostName_
+
+	// Replication Manager should have called validate already, so hostname should be valid IPv4/IPv6/FQDN
+	portNumber, err := base.GetPortNumber(ref.HostName_)
+	if err == nil {
+		if portNumber != base.DefaultAdminPort && portNumber != base.DefaultAdminPortSSL {
+			// If port number is non-8091, not going to be a valid DnsSRV
+			return lookupHostname
+		} else {
+			// If 8091, strip it before DNS-SRV lookup. We assume that the user has set up DNS SRV correctly
+			// i.e. if they specified 18091, they should have DNS SRV entry pointing to the SSL adminport of the target
+			lookupHostname = base.GetHostName(lookupHostname)
+		}
+	}
+	return lookupHostname
+}
+
+var ErrorNonSRV error = fmt.Errorf("Cannot call RefreshSRVEntries on a non-SRV entry")
+var ErrorNoLongerSRV error = fmt.Errorf("Hostname was an SRV entry, but now is no longer an SRV entry")
+
+// When entries are refreshed, the remote cluster's reference, which should be a SRV
+// is re-pulled. All the cached DNS SRV entries targets status's are cleared
+func (ref *RemoteClusterReference) RefreshSRVEntries() (added, removed []*net.SRV, totalSRVEntries int, err error) {
+	if !ref.IsDnsSRV() {
+		err = ErrorNonSRV
+		return
+	}
+	ref.mutex.RLock()
+	pulledEntries, err := ref.dnsSrvHelper.DnsSrvLookup(ref.getSRVLookupHostnameNoLock())
+	ref.mutex.RUnlock()
+	if err != nil {
+		for i := 0; i < 5; i++ {
+			ref.mutex.RLock()
+			pulledEntries, err = ref.dnsSrvHelper.DnsSrvLookup(ref.getSRVLookupHostnameNoLock())
+			ref.mutex.RUnlock()
+			if err == nil {
+				break
+			}
+		}
+	}
+
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+	if ref.hostNameIsDnsSrv && err != nil {
+		ref.hostNameIsDnsSrv = false
+		ref.srvEntries = ref.srvEntries[:0]
+		return
+	}
+
+	for _, oneEntry := range pulledEntries {
+		var found bool
+		for _, existingEntry := range ref.srvEntries {
+			if *oneEntry == *existingEntry.srv {
+				found = true
+				break
+			}
+		}
+		if !found {
+			added = append(added, oneEntry)
+			ref.srvEntries = append(ref.srvEntries, SrvEntryType{srv: oneEntry})
+		}
+	}
+
+	var toRemove []*SrvEntryType
+	for _, existingEntry := range ref.srvEntries {
+		var found bool
+		for _, oneEntry := range pulledEntries {
+			if *oneEntry == *existingEntry.srv {
+				found = true
+				break
+			}
+		}
+		if !found {
+			removed = append(removed, existingEntry.srv)
+			toRemove = append(toRemove, &existingEntry)
+		}
+	}
+
+	for _, ptr := range toRemove {
+		var index int = -1
+		var curEntry SrvEntryType
+		for index, curEntry = range ref.srvEntries {
+			if &curEntry == ptr {
+				break
+			}
+		}
+		if index >= 0 {
+			ref.srvEntries = append(ref.srvEntries[:index], ref.srvEntries[index+1:]...)
+		}
+	}
+
+	totalSRVEntries = len(ref.srvEntries)
+	return
+}
+
+var ErrorNoBootableSRVEntryFound = fmt.Errorf("None of the SRV entries are bootstrappable")
+
+// Given the reference's cluster's UUID, these are the nodes that are part of the target cluster
+// that target ns_server has returned
+// If the user set up SRV such that it forwards to the same FQDN as what the ns_server list returns,
+// i.e. user sets up a.abc.com to point to a node: 10.10.1.1 and that node exists in the pulled list
+// from ns_server, then it is good enough to validate that the SRV entry is still bootable
+func (ref *RemoteClusterReference) CheckSRVValidityUsingNodeAddressesList(nodeAddressesList base.StringPairList) error {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+
+	var bootable bool
+OUTERFOR:
+	for _, entry := range ref.srvEntries {
+		for _, pair := range nodeAddressesList {
+			regHostName := base.GetHostName(pair.GetFirstString())
+			sslHostName := base.GetHostName(pair.GetSecondString())
+			if entry.GetTarget() == regHostName || entry.GetTarget() == sslHostName {
+				bootable = true
+				break OUTERFOR
+			}
+		}
+	}
+	if !bootable {
+		return ErrorNoBootableSRVEntryFound
+	}
+	return nil
+}
+
+type GetUUIDFunc func(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
+
+// In the case where user sets up the SRV entries such that they do not reflect the pulled ns_server list,
+// then this method is used to validate that the SRV is actually still valid for bootstrap.
+// This is more expensive, as it requires connecting to at least one SRV entry to see if the UUID of the target
+// matches the UUID of the reference
+// If none match, it means the srv record is no longer valid for bootstrap
+func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, logger *log.CommonLogger) error {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+
+	if ref.Uuid_ == "" {
+		// Uninitialized UUID - weird but means assume SRV entry is valid
+		return nil
+	}
+
+	var valid bool
+	atLeastOneErr := make(base.ErrorMap)
+	// Randomize SRV entry hit, since we don't really take in account for weight
+	clonedEntries := ref.srvEntries.Clone()
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(clonedEntries), func(i, j int) { clonedEntries[i], clonedEntries[j] = clonedEntries[j], clonedEntries[i] })
+	for _, entry := range clonedEntries {
+		hostAddr := entry.GetTarget()
+		checkUuid, err := getter(hostAddr, ref.UserName_, ref.Password_, ref.HttpAuthMech_, ref.Certificate_, ref.SANInCertificate_, ref.ClientCertificate_, ref.ClientKey_, logger)
+		if err != nil {
+			// Skip and check a next one
+			continue
+		}
+		if checkUuid == ref.Uuid_ {
+			valid = true
+			break
+		} else {
+			atLeastOneErr[hostAddr] = fmt.Errorf("this SRV entry is pointing to a different cluster UUID: %v", checkUuid)
+		}
+	}
+
+	if !valid {
+		return ErrorNoBootableSRVEntryFound
+	} else if len(atLeastOneErr) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(atLeastOneErr))
+	}
+	return nil
+}
+
+func (ref *RemoteClusterReference) UnitTestSetSRVHelper(helper baseH.DnsSrvHelperIface) {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+	ref.dnsSrvHelper = helper
 }

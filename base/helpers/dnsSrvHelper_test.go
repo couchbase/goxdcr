@@ -1,0 +1,54 @@
+package base
+
+import (
+	"fmt"
+	"github.com/stretchr/testify/assert"
+	"net"
+	"testing"
+)
+
+// HOW TO SET UP LOCAL ENVIRONMENT FOR UNIT TEST
+// 1. Set up local DNS server using dnsmasq as described here:
+//    https://medium.com/@zhimin.wen/setup-local-dns-server-on-macbook-82ad22e76f2a
+// 2. For me, I set up the conf file  /usr/local/etc/dnsmasq.d/xdcr.conf - with the 2 entries:
+//    address=/xdcr.couchbase.target.local/192.168.0.1
+//    srv-host=xdcr.couchbase.target.local,192.168.0.1,9001
+// 3. For MacOS - the /etc/resolver/ doesn't really work. I had to actually go to the Network Preference, Wifi,
+//    Advanced, and manually add a DNS server of 127.0.0.1 entry
+// 4. Validate it by running nslookup as well as dig:
+//    neil.huang@NeilsMacbookPro:~$ dig master xdcr.couchbase.target.local @localhost +short
+//    192.168.0.1
+//
+//    neil.huang@NeilsMacbookPro:~$ nslookup -type=srv xdcr.couchbase.target.local
+//    Server:		127.0.0.1
+//    Address:	127.0.0.1#53
+//
+//    xdcr.couchbase.target.local	service = 0 0 9001 192.168.0.1.
+var dnsSrvHostname string = "xdcr.couchbase.target.local"
+
+// NOTE - SRV entries for "name" will end with a .
+// See above actual output
+func TestDNSHelper(t *testing.T) {
+	// Test to see if above set up has been done correctly
+	cname, addrs, err := net.LookupSRV("", "", dnsSrvHostname)
+	if err != nil {
+		fmt.Printf("Local DNS look up failed for %v, skipping DNSSRV unit test\n", dnsSrvHostname)
+		return
+	}
+	for _, addr := range addrs {
+		fmt.Printf("Address: %v port: %v, priority: %v weight: %v\n", addr.Target, addr.Port, addr.Priority, addr.Weight)
+	}
+
+	assert := assert.New(t)
+	assert.Nil(err)
+	assert.NotEqual(0, len(addrs))
+	assert.Equal("192.168.0.1.", addrs[0].Target)
+	assert.Equal(uint16(9001), addrs[0].Port)
+
+	helper := &DnsSrvHelper{}
+	entries, err := helper.DnsSrvLookup(dnsSrvHostname)
+	assert.Nil(err)
+	assert.Equal(1, len(entries))
+	assert.Equal("192.168.0.1.", entries[0].Target)
+	assert.Equal(uint16(9001), addrs[0].Port)
+}

@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	base2 "github.com/couchbase/goxdcr/base/helpers"
+	baseMock "github.com/couchbase/goxdcr/base/helpers/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
@@ -24,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -33,6 +36,8 @@ import (
 var uuidField string = "5220aac3bdc2f7ac663ac288bb85ae27"
 var uuidField2 string = "dummyUUID2"
 var hostname string = "dummyHostName1:9999"
+var dnsRemotenodeHostname string = "192.168.0.1:9001"
+var dnsSrvHostname string = "xdcr.couchbase.target.local"
 var hostnameSSL string = "dummyHostName1:19999"
 var externalHostnameSSL string = "dummyHostName1:29999"
 var hostname2 string = "dummyHostName2:9999"
@@ -40,6 +45,7 @@ var hostname3 string = "dummyHostName3:9999"
 var hostname4 string = "dummyHostName4:9999"
 var dummyHostNameList = base.StringPairList{base.StringPair{hostname, ""}, base.StringPair{hostname2, ""}, base.StringPair{hostname3, ""}}
 var dummyHostNameList2 = base.StringPairList{base.StringPair{hostname, ""}, base.StringPair{hostname2, ""}, base.StringPair{hostname3, ""}, base.StringPair{hostname4, ""}}
+var dnsValidHostNameList = base.StringPairList{base.StringPair{dnsRemotenodeHostname, ""}}
 var localhost string = "localhost"
 var emptyMap = map[string]interface{}{}
 var nonEmptyMap = map[string]interface{}{"test": "test"}
@@ -115,9 +121,7 @@ func setupMetaSvcMockGeneric(metadataSvcMock *service_def.MetadataSvc, remoteClu
 var testUtils = realUtils.NewUtilities()
 
 func setupUtilsMockGeneric(utilitiesMock *utilsMock.UtilsIface, simulatedNetworkDelay time.Duration) {
-	setupUtilsMockSpecific(utilitiesMock, simulatedNetworkDelay,
-		nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-		true /*getExternal*/, false /*getExternalPort*/, false /*accurateData*/, clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, simulatedNetworkDelay, nil, "", 0, nil, true, false, false, clusterMadHatter, dummyHostNameList)
 }
 
 // This is used so when unit tests load actual JSON data, they can use the hostnames in the actual data to
@@ -169,10 +173,7 @@ const (
 	clusterCheshireCat clusterVersion = iota
 )
 
-func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetworkDelay time.Duration,
-	getNodeListWithMinInfoErr error,
-	extHost string, extPort int, extErr error,
-	getExternalData bool, getExternalPort bool, accurateData bool, version clusterVersion) {
+func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetworkDelay time.Duration, getNodeListWithMinInfoErr error, extHost string, extPort int, extErr error, getExternalData bool, getExternalPort bool, accurateData bool, version clusterVersion, nonAccurateNodeAddressesList base.StringPairList) {
 	var emptyList []interface{}
 	localhostEntry := make(map[string]interface{})
 	hostnameList := append(emptyList, localhostEntry)
@@ -195,7 +196,7 @@ func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetwor
 		nodeListPairsInt, _ = testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, "" /*connStr*/, false /*https*/, nil /*logger*/, false /*external*/)
 		utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything, false /*external*/).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(nodeListPairsInt, nil)
 	} else {
-		utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(dummyHostNameList, nil)
+		utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(nonAccurateNodeAddressesList, nil)
 	}
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
@@ -406,19 +407,26 @@ func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
 func createRemoteClusterReference(id string) *metadata.RemoteClusterReference {
 	// Use name the same as ID for ease
 
-	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", "", false, "", nil, nil, nil)
+	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", "", false, "", nil, nil, nil, nil)
 	aRef.SetId(id)
 	return aRef
 }
 
 func createRemoteClusterReferenceExtOnly(id string) *metadata.RemoteClusterReference {
-	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", metadata.HostnameMode_External, false, "", nil, nil, nil)
+	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", metadata.HostnameMode_External, false, "", nil, nil, nil, nil)
 	aRef.SetId(id)
 	return aRef
 }
 
 func createRemoteClusterReferenceIntOnly(id string) *metadata.RemoteClusterReference {
-	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", metadata.HostnameMode_Internal, false, "", nil, nil, nil)
+	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", metadata.HostnameMode_Internal, false, "", nil, nil, nil, nil)
+	aRef.SetId(id)
+	return aRef
+}
+
+func createRemoteClusterReferenceDNSSRV(id string, helper base2.DnsSrvHelperIface) *metadata.RemoteClusterReference {
+	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, dnsSrvHostname, "", "", metadata.HostnameMode_Internal, false, "", nil, nil,
+		nil, helper)
 	aRef.SetId(id)
 	return aRef
 }
@@ -1474,11 +1482,7 @@ func TestAddressPreferenceInitFail(t *testing.T) {
 	ref := createRemoteClusterReference(idAndName)
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			base.ErrorUnauthorized,             /*GetNodeListWithMinInfo*/
-			"" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, false /*getExternalPort*/, false, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, base.ErrorUnauthorized, "", 0, nil, true, false, false, clusterMadHatter, dummyHostNameList)
 	}
 
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
@@ -1488,6 +1492,8 @@ func TestAddressPreferenceInitFail(t *testing.T) {
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
 	assert.Nil(err)
 	assert.False(alreadyExists)
+
+	agent.waitForRefreshEnabled()
 
 	// However, agent should return error when bootstrap had issues
 	_, err = agent.UsesAlternateAddress()
@@ -1573,10 +1579,7 @@ func TestAddressPreferenceChange(t *testing.T) {
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, false /*getExternalPort*/, true, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false, true, clusterMadHatter, dummyHostNameList)
 	}
 
 	idAndName := "test"
@@ -1592,10 +1595,7 @@ func TestAddressPreferenceChange(t *testing.T) {
 
 	// resetup utilitiesMock knowing this info
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, ref.HostName_ /*extHost*/, -1 /*extPort*/, base.ErrorNoPortNumber, /*extErr*/
-		true /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	// First bootstrap agent with a reference that refers to the external hostname
@@ -1613,27 +1613,15 @@ func TestAddressPreferenceChange(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
+	agent.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
-	if err == base.ErrorRemoteClusterUninit {
-		for i := 0; i < 5; i++ {
-			useAlternate, err = agent.UsesAlternateAddress()
-			if err == nil {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
 	assert.Nil(err)
 	assert.True(useAlternate)
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, -1 /*extPort*/, base.ErrorResourceDoesNotExist, /*extErr*/
-		false /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	for i := 0; i <= base.RemoteClusterAlternateAddrChangeCnt-1; i++ {
@@ -1658,7 +1646,7 @@ func TestAddressPreferenceChange(t *testing.T) {
 	refList2, _ := remoteClusterSvc.GetRefListForRestartAndClearState()
 	assert.Equal(0, len(refList2))
 
-	fmt.Println("============== Test case start: TestAddressPreferenceChange =================")
+	fmt.Println("============== Test case end: TestAddressPreferenceChange =================")
 }
 
 func TestAddressPreferenceChangeForceExt(t *testing.T) {
@@ -1669,10 +1657,7 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, false /*getExternalPort*/, true, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false, true, clusterMadHatter, dummyHostNameList)
 	}
 
 	idAndName := "test"
@@ -1688,10 +1673,7 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 
 	// resetup utilitiesMock knowing this info
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, ref.HostName_ /*extHost*/, -1 /*extPort*/, base.ErrorNoPortNumber, /*extErr*/
-		true /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	// First bootstrap agent with a reference that refers to the external hostname
@@ -1709,27 +1691,15 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
+	agent.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
-	if err == base.ErrorRemoteClusterUninit {
-		for i := 0; i < 5; i++ {
-			useAlternate, err = agent.UsesAlternateAddress()
-			if err == nil {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
 	assert.Nil(err)
 	assert.True(useAlternate)
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, -1 /*extPort*/, base.ErrorResourceDoesNotExist, /*extErr*/
-		false /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	for i := 0; i <= base.RemoteClusterAlternateAddrChangeCnt-1; i++ {
@@ -1765,10 +1735,7 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, false /*getExternalPort*/, true, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false, true, clusterMadHatter, dummyHostNameList)
 	}
 
 	idAndName := "test"
@@ -1785,10 +1752,7 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 
 	// resetup utilitiesMock knowing this info
 	_, _, _, _, utilitiesMockExt, _ := setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMockExt, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, ref.HostName_ /*extHost*/, -1 /*extPort*/, base.ErrorNoPortNumber, /*extErr*/
-		true /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMockExt, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMockExt)
 
 	// First bootstrap agent with a reference that refers to the external hostname
@@ -1806,27 +1770,15 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
+	agent.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
-	if err == base.ErrorRemoteClusterUninit {
-		for i := 0; i < 5; i++ {
-			useAlternate, err = agent.UsesAlternateAddress()
-			if err == nil {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
 	assert.Nil(err)
 	assert.True(useAlternate)
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, -1 /*extPort*/, base.ErrorResourceDoesNotExist, /*extErr*/
-		false /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	for i := 0; i <= base.RemoteClusterAlternateAddrChangeCnt-2; i++ {
@@ -1941,10 +1893,7 @@ func TestCapabilityChange(t *testing.T) {
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, false /*getExternalPort*/, true, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false, true, clusterMadHatter, dummyHostNameList)
 	}
 
 	idAndName := "test"
@@ -1969,10 +1918,7 @@ func TestCapabilityChange(t *testing.T) {
 
 	// Now pretend target cluster upgraded to Cheshire Cat
 	_, _, _, _, utilitiesMockNew, _ := setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMockNew, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-		true /*getExternal*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterCheshireCat)
+	setupUtilsMockSpecific(utilitiesMockNew, 0*time.Second, nil, "", 0, nil, true, false, true, clusterCheshireCat, dummyHostNameList)
 
 	// Force a manual refresh to pick up the cheshire cat version
 	remoteClusterSvc.updateUtilities(utilitiesMockNew)
@@ -2003,10 +1949,7 @@ func TestInitializeWithExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 	ref := createRemoteClusterReferenceExtOnly(idAndName)
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, true /*getExternalPort*/, true, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, true, true, clusterMadHatter, dummyHostNameList)
 	}
 
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
@@ -2063,10 +2006,7 @@ func TestInitializeWithoutExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 	ref := createRemoteClusterReference(idAndName)
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, true /*getExternalPort*/, true, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, true, true, clusterMadHatter, dummyHostNameList)
 	}
 
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
@@ -2110,10 +2050,7 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
-		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-			nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, 0 /*extPort*/, nil, /*extErr*/
-			true /*getExternal*/, false /*getExternalPort*/, true, /*accurateData*/
-			clusterMadHatter)
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false, true, clusterMadHatter, dummyHostNameList)
 	}
 
 	idAndName := "test"
@@ -2129,10 +2066,7 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 
 	// resetup utilitiesMock knowing this info
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, ref.HostName_ /*extHost*/, -1 /*extPort*/, base.ErrorNoPortNumber, /*extErr*/
-		true /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	// First bootstrap agent with a reference that refers to the external hostname
@@ -2150,17 +2084,8 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	err = agent.Refresh()
 	assert.Equal(RefreshNotEnabledYet, err)
 
+	agent.waitForRefreshEnabled()
 	useAlternate, err := agent.UsesAlternateAddress()
-	if err == base.ErrorRemoteClusterUninit {
-		for i := 0; i < 5; i++ {
-			useAlternate, err = agent.UsesAlternateAddress()
-			if err == nil {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
 	assert.Nil(err)
 	// Should be false for use alternate because of forced internal
 	assert.False(useAlternate)
@@ -2168,10 +2093,7 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 
 	// Now, all the nodes will return internal
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, /*networkDelay*/
-		nil /*GetNodeListWithMinInfo*/, "" /*extHost*/, -1 /*extPort*/, base.ErrorResourceDoesNotExist, /*extErr*/
-		false /*externalHost*/, false /*getExternalPort*/, true, /*accurateData*/
-		clusterMadHatter)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	for i := 0; i <= base.RemoteClusterAlternateAddrChangeCnt-1; i++ {
@@ -2192,4 +2114,91 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	refList, _ := remoteClusterSvc.GetRefListForRestartAndClearState()
 	assert.Equal(0, len(refList))
 	fmt.Println("============== Test case start: TestAddressPreferenceChangeWithDefaultMode =================")
+}
+
+func TestDNSSrv(t *testing.T) {
+	fmt.Println("============== Test case start: TestDNSSrv =================")
+
+	// Test to see if above set up has been done correctly
+	cname, addrs, err := net.LookupSRV("", "", dnsSrvHostname)
+	if err != nil {
+		fmt.Printf("Local DNS look up failed for %v, skipping DNSSRV unit test\n", dnsSrvHostname)
+		return
+	}
+	fmt.Printf("ND: Lookup cname: %v, addrs: %v, err: %v\n", cname, addrs, err)
+	for _, addr := range addrs {
+		fmt.Printf("Address: %v port: %v, priority: %v weight: %v\n", addr.Target, addr.Port, addr.Priority, addr.Weight)
+	}
+
+	assert := assert.New(t)
+
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	utilsMockFunc := func() {
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false,
+			false, clusterMadHatter, dnsValidHostNameList)
+	}
+
+	srvHelper := &baseMock.DnsSrvHelperIface{}
+	srvEntry := &net.SRV{
+		Target: "192.168.0.1.",
+		Port:   9001,
+	}
+	var srvList []*net.SRV
+	srvList = append(srvList, srvEntry)
+
+	srvHelper.On("DnsSrvLookup", dnsSrvHostname).Return(srvList, nil)
+
+	idAndName := "test"
+	ref := createRemoteClusterReferenceDNSSRV(idAndName, srvHelper)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	assert.Nil(err)
+	assert.False(alreadyExists)
+	agent.unitTestBypassMetaKV = true
+
+	agent.waitForRefreshEnabled()
+	agent.refMtx.RLock()
+	assert.True(agent.reference.IsDnsSRV())
+	srvHostNames := agent.reference.GetSRVHostNames()
+	agent.refMtx.RUnlock()
+	var found bool
+	for _, host := range srvHostNames {
+		if host == dnsRemotenodeHostname {
+			found = true
+			break
+		}
+	}
+	assert.True(found)
+	assert.Equal(dnsSrvHostname, ref.HostName())
+	agent.waitForRefreshEnabled()
+	agent.refMtx.RLock()
+	assert.Equal(dnsSrvHostname, agent.reference.HostName())
+	assert.True(agent.reference.IsDnsSRV())
+	agent.refMtx.RUnlock()
+
+	// After refresh, hostname should remain the same
+	assert.Nil(agent.Refresh())
+	agent.refMtx.RLock()
+	assert.Equal(dnsSrvHostname, agent.reference.HostName())
+	oldHostName := agent.reference.HostName()
+	agent.refMtx.RUnlock()
+
+	// Now pretend DNS SRV is turned off/broken
+	badSRVHelper := &baseMock.DnsSrvHelperIface{}
+	var emptyList []*net.SRV
+	badSRVHelper.On("DnsSrvLookup", mock.Anything).Return(emptyList, fmt.Errorf("Dummy"))
+	agent.refMtx.Lock()
+	agent.reference.UnitTestSetSRVHelper(badSRVHelper)
+	agent.refMtx.Unlock()
+
+	// Host name should be replaced
+	assert.Nil(agent.Refresh())
+	agent.refMtx.RLock()
+	assert.NotEqual(oldHostName, agent.reference.HostName())
+	agent.refMtx.RUnlock()
+	fmt.Println("============== Test case end: TestDNSSrv =================")
 }

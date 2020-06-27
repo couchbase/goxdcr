@@ -398,7 +398,7 @@ func (service *MigrationSvc) migrateRemoteCluster(remoteClusterData interface{},
 	}
 
 	// save remote cluster  - even if there are validation errors
-	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, "", demandEncryption, encryptionType, certificate, nil, nil)
+	ref, err := metadata.NewRemoteClusterReference(uuid, name, hostname, username, password, "", demandEncryption, encryptionType, certificate, nil, nil, nil)
 	if err != nil {
 		// err here comes from random number generation, which is promised to always be nil by golang
 		// handle it anyways
