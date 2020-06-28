@@ -21,14 +21,24 @@ service_impl
 utils
 )
 
+function killAllBgOnExit {
+	for job in `jobs -p`;do
+		kill $job
+	done
+}
+
+trap killAllBgOnExit EXIT
+
+pids=""
+totalTasks=0
 for directory in ${DIRS_WITH_UT[@]}
 do
 	cd ${ROOT_DIR}/${directory}
-	go test
-	result=$?
-	if (( !$result == 0 ));then
-		exit $result
-	fi
+	go test  > /dev/null 2>&1 &
+	lastPid="$!"
+	echo "Test $directory with background PID $lastPid"
+	pids+=" $lastPid"
+	totalTasks=$(( $totalTasks + 1 ))
 	pcreTestsFound=false
 	for testFile in `ls *_test.go`
 	do
@@ -38,10 +48,46 @@ do
 		fi
 	done
 	if [[ "$pcreTestsFound" == "true" ]];then
-		go test -tags=pcre
-		result=$?
-		if (( !$result == 0 ));then
-			exit $result
-		fi
+		go test -tags=pcre > /dev/null 2>&1 &
+		lastPid2="$!"
+		echo "Test $directory PCRE tests with background PID $lastPid2"
+		pids+=" $lastPid2"
+		totalTasks=$(( $totalTasks + 1 ))
 	fi
 done
+
+# Do a pretty print progress bar
+# https://stackoverflow.com/questions/12498304/using-bash-to-display-a-progress-indicator
+echo "Total tasks running: $totalTasks"
+count=0
+failedCnt=0
+pstr="[=======================================================================]"
+while (( $count < $totalTasks))
+do
+	replacementPids=""
+	for p in $pids
+	do
+		kill -0 $p > /dev/null 2>&1
+		if (( $? == 0 ));then
+			# process is still running
+			replacementPids+=" $p"
+		else
+			# process is done running
+			count=$(( $count + 1 ))
+			wait $p
+			if (( $? > 0 ));then
+				echo ""
+				echo "PID $p failed unit test"
+				failedCnt=$(( $failedCnt + 1 ))
+			fi
+		fi
+	done
+	pids=$replacementPids
+	pd=$(( $count * 73 / $totalTasks ))
+	printf "\r%3d.%1d%% %.${pd}s" $(( $count * 100 / $totalTasks )) $(( ($count * 1000 / $totalTasks) % 10 )) $pstr
+	sleep 0.5
+done
+
+if (( $failedCnt > 0 ));then
+	exit 1
+fi
