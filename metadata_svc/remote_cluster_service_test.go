@@ -216,20 +216,24 @@ func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetwor
 	default:
 		panic("Not implemented")
 	}
+
+	utilitiesMock.On("GetClusterInfoWStatusCode", mock.Anything, base.DefaultPoolPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(clusterInfo, getNodeListWithMinInfoErr, http.StatusOK)
 	utilitiesMock.On("GetClusterInfoWStatusCode", mock.Anything, base.PoolsPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(simulatedNetworkDelay) }).Return(poolsInfo, nil, http.StatusOK)
-	utilitiesMock.On("GetClusterInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(poolsInfo, getNodeListWithMinInfoErr, http.StatusOK)
+	utilitiesMock.On("GetClusterInfo", mock.Anything, base.DefaultPoolPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(clusterInfo, getNodeListWithMinInfoErr)
+	utilitiesMock.On("GetClusterInfo", mock.Anything, base.PoolsPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(poolsInfo, getNodeListWithMinInfoErr)
 }
 
 func setupUtilsSSL(utilitiesMock *utilsMock.UtilsIface) {
 	// This is to simulate when user entered :8091 and tried to use SSL - it will fail
-	utilitiesMock.On("GetDefaultPoolInfoUsingHttps", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("HttpsUsingdefault will fail"))
+	utilitiesMock.On("GetDefaultPoolInfoUsingHttps", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, http.StatusUnauthorized, fmt.Errorf("HttpsUsingdefault will fail"))
 	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, externalHostnameSSL, nil)
 	// When using hostname instead of hostnameSSL (i.e. 8091), fail
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, fmt.Errorf("WrongPort") /*err*/)
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, nil /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("WrongPort") /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusOK, nil /*err*/)
 	utilitiesMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(nil, nil)
 	var sslPairList base.StringPairList
 	onePair := base.StringPair{hostname, hostnameSSL}
@@ -245,11 +249,11 @@ func setupUtilsSSL2(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetDefaultPoolInfoUsingHttps", hostname, "", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("HttpsUsingdefault will fail"))
 	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, externalHostnameSSL, nil)
 	// When using hostname instead of hostnameSSL (i.e. 8091), fail
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, fmt.Errorf("WrongPort") /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("WrongPort") /*err*/)
 	// Pretend that the target internal host and port is closed
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, fmt.Errorf("dummy") /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("dummy") /*err*/)
 	// Only if external port is used then it's ok
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, externalHostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, defaultPool /*defaultPoolInfo*/, nil /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, externalHostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, defaultPool /*defaultPoolInfo*/, http.StatusOK, nil /*err*/)
 
 	nodeList, _ := testUtils.GetNodeListFromInfoMap(defaultPool, nil)
 	// The 0th element of the node List is the dummy one we want
@@ -282,6 +286,7 @@ func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetHostName", mock.Anything).Return(localhost)
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil)
+	utilitiesMock.On("GetClusterInfoWStatusCode", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil, http.StatusOK)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 }
@@ -326,6 +331,10 @@ func setupUtilsMock1Good3Bad(utilitiesMock *utilsMock.UtilsIface) base.StringPai
 	utilitiesMock.On("GetClusterInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil)
 	utilitiesMock.On("GetClusterInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil)
 	utilitiesMock.On("GetClusterInfo", hostname4, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname4, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", nonEmptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField, emptyList, nil)
 
@@ -359,9 +368,15 @@ func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) base.String
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
-	utilitiesMock.On("GetClusterInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil)
-	utilitiesMock.On("GetClusterInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil)
-	utilitiesMock.On("GetClusterInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil)
+	//utilitiesMock.On("GetClusterInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	//	mock.Anything).Return(nonEmptyMap, nil)
+	//utilitiesMock.On("GetClusterInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	//	mock.Anything).Return(emptyMap, nil)
+	//utilitiesMock.On("GetClusterInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	//	mock.Anything).Return(emptyMap, nil)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", nonEmptyMap, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetExternalMgtHostAndPort", mock.Anything, mock.Anything).Return("", -1, base.ErrorResourceDoesNotExist)
@@ -394,6 +409,10 @@ func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetClusterInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil)
 	utilitiesMock.On("GetClusterInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil)
 	utilitiesMock.On("GetClusterInfo", hostname4, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostname4, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", nonEmptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return("", emptyList, dummyErr)
 
@@ -2201,4 +2220,30 @@ func TestDNSSrv(t *testing.T) {
 	assert.NotEqual(oldHostName, agent.reference.HostName())
 	agent.refMtx.RUnlock()
 	fmt.Println("============== Test case end: TestDNSSrv =================")
+}
+
+func TestConnHelper(t *testing.T) {
+	fmt.Println("============== Test case start: TestConnHelper =================")
+	assert := assert.New(t)
+
+	helper := NewConnectivityHelper()
+	helper.MarkNode("testNode0", ConnValid)
+	helper.MarkNode("testNode1", ConnValid)
+	assert.Equal(ConnValid, helper.GetOverallStatus())
+
+	helper.MarkNode("testNode1", ConnError)
+	assert.Equal(ConnDegraded, helper.GetOverallStatus())
+
+	helper.MarkNode("testNode0", ConnAuthErr)
+	assert.Equal(ConnAuthErr, helper.GetOverallStatus())
+
+	// Test that if one node is good, one node has connection error, overall state is degraded
+	helper.MarkNode("testNode0", ConnValid)
+	helper.MarkNode("testNode1", ConnValid)
+	assert.Equal(ConnValid, helper.GetOverallStatus())
+	helper.MarkNode("testNode1", ConnError)
+	helper.SyncWithValidList(base.StringPairList{base.StringPair{"testNode0", ""}, base.StringPair{"testNode1", ""}})
+	assert.Equal(ConnDegraded, helper.GetOverallStatus())
+
+	fmt.Println("============== Test case end: TestConnHelper =================")
 }

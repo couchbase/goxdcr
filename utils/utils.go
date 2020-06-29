@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/go-couchbase"
-	"github.com/couchbaselabs/gojsonsm"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goutils/scramsha"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbaselabs/gojsonsm"
 	"github.com/golang/snappy"
 	gocb "gopkg.in/couchbase/gocb.v1"
 	"io"
@@ -2547,25 +2547,25 @@ func (u *Utilities) ExponentialBackoffExecutorWithFinishSignal(name string, init
 // CALLER BEWARE: defaultPoolInfo is returned ONLY when either scram sha or ssl is enabled, so as to avoid unnecessary work
 func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string,
 	certificate []byte, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (sanInCertificate bool,
-	httpAuthMech base.HttpAuthMech, defaultPoolInfo map[string]interface{}, err error) {
+	httpAuthMech base.HttpAuthMech, defaultPoolInfo map[string]interface{}, statusCode int, err error) {
 	if !scramShaEnabled && len(certificate) == 0 {
 		// security settings are irrelevant if we are not using scram sha or ssl
 		// note that a nil defaultPoolInfo is returned in this case
-		return false, base.HttpAuthMechPlain, nil, nil
+		return false, base.HttpAuthMechPlain, nil, statusCode, nil
 	}
 
 	if scramShaEnabled {
 		// if scram sha is enabled, we will first try to connect to target ns_server using scram sha authentication
 		// even if certificate/clientCert have been provided, we will not use them here because they are not needed by scram sha authentication
-		defaultPoolInfo, err = u.GetDefaultPoolInfoUsingScramSha(hostAddr, username, password, logger)
+		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingScramSha(hostAddr, username, password, logger)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechScramSha
 		} else if err != TargetMayNotSupportScramShaError {
-			return false, base.HttpAuthMechPlain, nil, err
+			return false, base.HttpAuthMechPlain, nil, statusCode, err
 		} else {
 			if len(certificate) == 0 {
 				// certificate not provided, cannot fall back to https. return error right away
-				return false, base.HttpAuthMechPlain, nil, fmt.Errorf("Cannot connect to target %v using \"half\" secure mode. Received unauthorized error when using Scram-Sha authentication. Cannot use https because server certificate has not been provided.", hostAddr)
+				return false, base.HttpAuthMechPlain, nil, statusCode, fmt.Errorf("Cannot connect to target %v using \"half\" secure mode. Received unauthorized error when using Scram-Sha authentication. Cannot use https because server certificate has not been provided.", hostAddr)
 			} else {
 				// proceed to fall back to https
 			}
@@ -2575,12 +2575,12 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	if defaultPoolInfo == nil {
 		// if we get here, either scram sha is not enabled, or scram sha is enabled and target ns_server returned 401 error on our scram sha attempt
 		// either way, it is implied that certificate has been provided. use https to connect to target
-		defaultPoolInfo, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
+		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
 			certificate, clientCertificate, clientKey, logger)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
 		} else {
-			return false, base.HttpAuthMechPlain, nil, err
+			return false, base.HttpAuthMechPlain, nil, statusCode, err
 		}
 	}
 
@@ -2590,58 +2590,58 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	nodeList, err := u.GetNodeListFromInfoMap(defaultPoolInfo, logger)
 	if err != nil || len(nodeList) == 0 {
 		err = fmt.Errorf("Can't get nodes information for cluster %v, err=%v", hostAddr, err)
-		return false, base.HttpAuthMechPlain, nil, err
+		return false, base.HttpAuthMechPlain, nil, statusCode, err
 	}
 
 	clusterCompatibility, err := u.GetClusterCompatibilityFromNodeList(nodeList)
 	if err != nil {
-		return false, base.HttpAuthMechPlain, nil, err
+		return false, base.HttpAuthMechPlain, nil, statusCode, err
 	}
 
 	targetHasScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
 	if scramShaEnabled && targetHasScramShaSupport && httpAuthMech != base.HttpAuthMechScramSha {
 		// do not fall back to https if target is vulcan and up
-		return false, base.HttpAuthMechPlain, nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v using SCRAM-SHA authentication. Please check whether SCRAM-SHA is enabled on target.", hostAddr)
+		return false, base.HttpAuthMechPlain, nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v using SCRAM-SHA authentication. Please check whether SCRAM-SHA is enabled on target.", hostAddr)
 	}
 
 	if scramShaEnabled && !targetHasScramShaSupport && httpAuthMech == base.HttpAuthMechScramSha {
 		// Cluster is not ScramSha compatible. We need to fallback to https.
 		// Before doing so, we will get default pool using https again to make sure it works
-		defaultPoolInfo, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
+		defaultPoolInfo, statusCode, err = u.GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password,
 			certificate, clientCertificate, clientKey, logger)
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
 		} else {
-			return false, base.HttpAuthMechPlain, nil, err
+			return false, base.HttpAuthMechPlain, nil, statusCode, err
 		}
 	}
 	sanInCertificate = base.IsClusterCompatible(clusterCompatibility, base.VersionForSANInCertificateSupport)
-	return sanInCertificate, httpAuthMech, defaultPoolInfo, nil
+	return sanInCertificate, httpAuthMech, defaultPoolInfo, statusCode, nil
 }
 
-func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger) (map[string]interface{}, error) {
+func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	defaultPoolInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechScramSha, nil /*certificate*/, false /*sanInCertificate*/, nil /*clientCertificate*/, nil /*clientKey*/, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {
 		// target supports scram sha
-		return defaultPoolInfo, nil
+		return defaultPoolInfo, statusCode, nil
 	} else if statusCode == http.StatusUnauthorized {
 		// unauthorized error could be returned when target ns_server is pre-vulcan and does not support scram sha.
 		// return a specific error to allow caller to fall back to https
-		return nil, TargetMayNotSupportScramShaError
+		return nil, statusCode, TargetMayNotSupportScramShaError
 	} else {
-		return nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v using scram sha, err=%v, statusCode=%v", hostAddr, err, statusCode)
+		return nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v using scram sha, err=%v, statusCode=%v", hostAddr, err, statusCode)
 	}
 }
 
 func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, password string,
-	certificate []byte, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	certificate []byte, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	defaultPoolInfo := make(map[string]interface{})
 
 	// we do not know the correct values of sanInCertificate. set sanInCertificate set to true for better security
 	err, statusCode := u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, true /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {
-		return defaultPoolInfo, nil
+		return defaultPoolInfo, statusCode, nil
 	} else {
 		if err != nil && strings.Contains(err.Error(), base.NoIpSANErrMsg) {
 			// if the error is about certificate not containing IP SANs, it could be that the target cluster is of an old version
@@ -2650,17 +2650,17 @@ func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, passwo
 			logger.Debugf("Received certificate validation error from %v. Target may be an old version that does not support SAN in certificates. Retrying connection to target using sanInCertificate = false.", hostHttpsAddr)
 			err, statusCode = u.QueryRestApiWithAuth(hostHttpsAddr, base.DefaultPoolPath, false, username, password, base.HttpAuthMechHttps, certificate, false /*sanInCertificate*/, clientCertificate, clientKey, base.MethodGet, "", nil, base.ShortHttpTimeout, &defaultPoolInfo, nil, false, logger)
 			if err == nil && statusCode == http.StatusOK {
-				return defaultPoolInfo, nil
+				return defaultPoolInfo, statusCode, nil
 			} else if statusCode == http.StatusUnauthorized {
-				return nil, u.getUnauthorizedError(username)
+				return nil, statusCode, u.getUnauthorizedError(username)
 			} else {
 				// if the second try still fails, return error
-				return nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
+				return nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
 			}
 		} else if statusCode == http.StatusUnauthorized {
-			return nil, u.getUnauthorizedError(username)
+			return nil, statusCode, u.getUnauthorizedError(username)
 		} else {
-			return nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
+			return nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
 		}
 	}
 }

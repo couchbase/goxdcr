@@ -85,6 +85,138 @@ func (a *AddressType) Set(external bool) {
 	}
 }
 
+type ConnectivityStatus int
+
+const (
+	// Nothing wrong yet
+	ConnValid ConnectivityStatus = iota
+	// If any remote cluster node returned authentication error
+	ConnAuthErr ConnectivityStatus = iota
+	// If this node experienced connectivity issues to a least one remote cluster nodes
+	ConnDegraded ConnectivityStatus = iota
+	// If this node cannot contact every single remote cluster nodes
+	ConnError ConnectivityStatus = iota
+)
+
+func (c ConnectivityStatus) String() string {
+	switch c {
+	case ConnValid:
+		return "RC_OK"
+	case ConnAuthErr:
+		return "RC_AUTH_ERR"
+	case ConnDegraded:
+		return "RC_DEGRADED"
+	case ConnError:
+		return "RC_ERROR"
+	default:
+		return "?? (ConnectivityStatus)"
+	}
+}
+
+func NewConnectivityHelper() *ConnectivityHelper {
+	return &ConnectivityHelper{
+		nodeStatus: make(map[string]ConnectivityStatus),
+	}
+}
+
+type ConnectivityHelper struct {
+	nodeStatus map[string]ConnectivityStatus
+	mtx        sync.RWMutex
+}
+
+func (c *ConnectivityHelper) String() string {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	var output []string
+	for node, status := range c.nodeStatus {
+		output = append(output, fmt.Sprintf("Node: %v Status: %v |", node, status.String()))
+	}
+	return strings.Join(output, " ")
+}
+
+// Returns true if node has existed and state has been changed
+func (c *ConnectivityHelper) MarkNode(nodeName string, status ConnectivityStatus) (changedState, authErrFixed bool) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if curStatus, exists := c.nodeStatus[nodeName]; exists && curStatus != status {
+		changedState = true
+		if curStatus == ConnAuthErr && status == ConnValid {
+			authErrFixed = true
+		}
+	}
+	c.nodeStatus[nodeName] = status
+	return
+}
+
+func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	var keysToDelete []string
+	for _, nodePair := range nodeList {
+		var found bool
+		var nodeName string
+		for nodeName, _ = range c.nodeStatus {
+			if nodeName == nodePair.GetFirstString() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			keysToDelete = append(keysToDelete, nodeName)
+		}
+	}
+
+	for _, key := range keysToDelete {
+		delete(c.nodeStatus, key)
+	}
+
+	// The Given the list, only set to connValid if it never existed before
+	for _, nodePair := range nodeList {
+		_, exists := c.nodeStatus[nodePair.GetFirstString()]
+		if !exists {
+			c.nodeStatus[nodePair.GetFirstString()] = ConnValid
+		}
+	}
+
+	// For the rest, if this func is called, it means that target has returned a valid nodeList
+	// Reset any auth errors
+	for key, status := range c.nodeStatus {
+		if status == ConnAuthErr {
+			c.nodeStatus[key] = ConnValid
+		}
+	}
+
+	// If a node is in the ConnError state, leave them be. Let the refresh() take care of
+	// fixing the connError state when the node is contacted for refresh and returned successfully
+}
+
+func (c *ConnectivityHelper) GetOverallStatus() ConnectivityStatus {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+
+	totalCount := len(c.nodeStatus)
+	var connErrCount int
+
+	for _, status := range c.nodeStatus {
+		if status == ConnAuthErr {
+			// Any auth error means the whole cluster is auth errored
+			return ConnAuthErr
+		}
+		if status == ConnError {
+			connErrCount++
+		}
+	}
+
+	if connErrCount == totalCount {
+		return ConnError
+	} else if connErrCount > 0 {
+		return ConnDegraded
+	} else {
+		return ConnValid
+	}
+}
+
 /**
  * A RemoteClusterAgent is responsible for handling all operations related to a specific RemoteClusterReference.
  * RemoteClusterService's job is to wrap around them and provide APIs to other components that require info
@@ -104,6 +236,7 @@ type RemoteClusterAgentIface interface {
 	/* Getter ops */
 	// To be used for RemoteClusterService for any caller requesting a copy of the RC Reference
 	GetReferenceClone() *metadata.RemoteClusterReference
+	GetReferenceAndStatusClone() *metadata.RemoteClusterReference
 	GetConnectionStringForCAPIRemoteCluster() string
 	UsesAlternateAddress() (bool, error)
 	GetCapability() (metadata.Capability, error)
@@ -184,6 +317,9 @@ type RemoteClusterAgent struct {
 
 	// For certain unit tests, bypass metakv
 	unitTestBypassMetaKV bool
+
+	// To be able to return remote cluster status
+	connectivityHelper *ConnectivityHelper
 }
 
 const (
@@ -202,6 +338,12 @@ func (agent *RemoteClusterAgent) GetReferenceClone() *metadata.RemoteClusterRefe
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
 	return agent.reference.Clone()
+}
+
+func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteClusterReference {
+	ref := agent.GetReferenceClone()
+	ref.SetConnectivityStatus(agent.connectivityHelper.GetOverallStatus().String())
+	return ref
 }
 
 func (agent *RemoteClusterAgent) ConfigurationHasChanged() bool {
@@ -450,6 +592,7 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 
 	var defaultPoolInfo map[string]interface{}
 	var bgErr error
+	var statusCode int
 	// This backgroundRPC is launched with an opaque
 	// Because it is possible that an Refresh is aborted - in which this function call will need to bail out
 	// quickly and leave this RPC call hanging.
@@ -467,15 +610,18 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 		defer signalFunc()
 		if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
 			// if updateSecuritySettings is true, get up to date security settings from target
-			sanInCertificate, httpAuthMech, defaultPoolInfo, bgErr = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
+			sanInCertificate, httpAuthMech, defaultPoolInfo, statusCode, bgErr = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
+			rctx.markNodeWithStatus(statusCode)
 			if bgErr != nil {
 				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id(), connStr, bgErr)
 				return
 			}
 		} else {
-			defaultPoolInfo, bgErr = rctx.agent.utils.GetClusterInfo(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
+			defaultPoolInfo, bgErr, statusCode = rctx.agent.utils.GetClusterInfoWStatusCode(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
+			rctx.markNodeWithStatus(statusCode)
 			if bgErr != nil {
-				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. err=%v\n", rctx.refCache.Id(), connStr, bgErr)
+				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. statusCode=%v err=%v\n", rctx.refCache.Id(), connStr,
+					statusCode, bgErr)
 				return
 			}
 		}
@@ -555,6 +701,26 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	return nodeList, err
 }
 
+func (rctx *refreshContext) markNodeWithStatus(statusCode int) {
+	markedHostname := rctx.hostName
+
+	if statusCode == http.StatusUnauthorized {
+		changed, _ := rctx.agent.connectivityHelper.MarkNode(markedHostname, ConnAuthErr)
+		if changed {
+			// This rctx will not get to be able to update the agent's reference, so log the error now
+			rctx.agent.uiLogSvc.Write(fmt.Sprintf("The remote cluster reference node %v returned authentication error. Please check the remote cluster credentials", markedHostname))
+		}
+	} else if statusCode == http.StatusOK {
+		_, authErrFixed := rctx.agent.connectivityHelper.MarkNode(markedHostname, ConnValid)
+		if authErrFixed {
+			rctx.agent.uiLogSvc.Write(fmt.Sprintf("The remote cluster credentials that includes node %v have now been fixed", markedHostname))
+		}
+	} else {
+		// Any non-OK return code
+		rctx.agent.connectivityHelper.MarkNode(markedHostname, ConnError)
+	}
+}
+
 func (rctx *refreshContext) checkUserIntent(nodeList []interface{}) {
 	if rctx.refOrig.HostnameMode() != metadata.HostnameMode_None {
 		// No need to check intent
@@ -608,7 +774,8 @@ func (agent *RemoteClusterAgent) Refresh() error {
 
 	var nodeAddressesList base.StringPairList
 	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList /*already shuffled*/); rctx.index++ {
-		rctx.setHostNamesAndConnStr(rctx.cachedRefNodesList[rctx.index])
+		hostnamePair := rctx.cachedRefNodesList[rctx.index]
+		rctx.setHostNamesAndConnStr(hostnamePair)
 
 		nodeList, err := rctx.verifyNodeAndGetList(rctx.connStr, true /*updateSecuritySettings*/)
 		if err != nil {
@@ -1300,6 +1467,7 @@ func (agent *RemoteClusterAgent) commitStagedChanges(rctx *refreshContext) {
 		agent.oldRef = agent.reference.Clone()
 		agent.reference.LoadFrom(&agent.pendingRef)
 		agent.refNodesList = base.DeepCopyStringPairList(agent.pendingRefNodes)
+		agent.connectivityHelper.SyncWithValidList(agent.refNodesList)
 	}
 
 	// Only set once to prevent constant locking
@@ -2020,7 +2188,8 @@ func (service *RemoteClusterService) RemoteClusters() (map[string]*metadata.Remo
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 	for refId, agent := range service.agentMap {
-		remoteClusterReferencesMap[refId] = agent.GetReferenceClone()
+		// Used by external REST call, so get the status to be returned
+		remoteClusterReferencesMap[refId] = agent.GetReferenceAndStatusClone()
 	}
 
 	return remoteClusterReferencesMap, nil
@@ -2289,7 +2458,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 	}
 
-	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 	if err != nil {
 		if !ref.IsFullEncryption() {
 			return wrapAsInvalidRemoteClusterError(err.Error())
@@ -2305,13 +2474,13 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 
 		// now we potentially have valid https address, re-do security settings retrieval
-		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 		if err != nil {
 			if len(externalRefHttpsHostName) > 0 {
 				// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
 				// as a last resort, try that for a third time
 				refHttpsHostName = externalRefHttpsHostName
-				refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+				refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 			}
 			if err != nil {
 				return wrapAsInvalidRemoteClusterError(err.Error())
@@ -2468,6 +2637,7 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		bucketRefCnt:           make(map[string]uint32),
 		bucketManifestGetters:  make(map[string]*BucketManifestGetter),
 		agentFinCh:             make(chan bool, 1),
+		connectivityHelper:     NewConnectivityHelper(),
 	}
 	newAgent.refreshCv = &sync.Cond{L: &newAgent.refreshMtx}
 	return newAgent

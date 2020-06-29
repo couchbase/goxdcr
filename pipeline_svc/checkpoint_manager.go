@@ -494,7 +494,7 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initia
 				return nil, err
 			}
 			// hostAddr not used in full encryption mode
-			san_in_certificate, _, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
+			san_in_certificate, _, _, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
 				ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, false /*scramShaEnabled*/, ckmgr.logger)
 			if err != nil {
 				return nil, err

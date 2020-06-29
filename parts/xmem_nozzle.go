@@ -3123,7 +3123,7 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 				return nil, err
 			}
 			// hostAddr not used in full encryption mode
-			sanInCertificate, _, _, err = xmem.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
+			sanInCertificate, _, _, _, err = xmem.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
 				xmem.config.username, xmem.config.password, xmem.config.certificate, xmem.config.clientCertificate,
 				xmem.config.clientKey, false /*scramShaEnabled*/, logger)
 			if err != nil {

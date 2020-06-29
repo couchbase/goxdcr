@@ -828,7 +828,7 @@ func (_m *UtilsIface) GetConflictResolutionTypeFromBucketInfo(bucketName string,
 }
 
 // GetDefaultPoolInfoUsingHttps provides a mock function with given fields: hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger
-func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	ret := _m.Called(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger)
 
 	var r0 map[string]interface{}
@@ -840,18 +840,25 @@ func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, usernam
 		}
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger) error); ok {
+	var r1 int
+	if rf, ok := ret.Get(1).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger) int); ok {
 		r1 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(int)
 	}
 
-	return r0, r1
+	var r2 error
+	if rf, ok := ret.Get(2).(func(string, string, string, []byte, []byte, []byte, *log.CommonLogger) error); ok {
+		r2 = rf(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // GetDefaultPoolInfoUsingScramSha provides a mock function with given fields: hostAddr, username, password, logger
-func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username string, password string, logger *log.CommonLogger) (map[string]interface{}, error) {
+func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username string, password string, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	ret := _m.Called(hostAddr, username, password, logger)
 
 	var r0 map[string]interface{}
@@ -863,14 +870,21 @@ func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username 
 		}
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, *log.CommonLogger) error); ok {
+	var r1 int
+	if rf, ok := ret.Get(1).(func(string, string, string, *log.CommonLogger) int); ok {
 		r1 = rf(hostAddr, username, password, logger)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(int)
 	}
 
-	return r0, r1
+	var r2 error
+	if rf, ok := ret.Get(2).(func(string, string, string, *log.CommonLogger) error); ok {
+		r2 = rf(hostAddr, username, password, logger)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // GetEvictionPolicyFromBucketInfo provides a mock function with given fields: bucketName, bucketInfo
@@ -1452,7 +1466,7 @@ func (_m *UtilsIface) GetRemoteServerVBucketsMap(connStr string, bucketName stri
 }
 
 // GetSecuritySettingsAndDefaultPoolInfo provides a mock function with given fields: hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger
-func (_m *UtilsIface) GetSecuritySettingsAndDefaultPoolInfo(hostAddr string, hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (bool, base.HttpAuthMech, map[string]interface{}, error) {
+func (_m *UtilsIface) GetSecuritySettingsAndDefaultPoolInfo(hostAddr string, hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (bool, base.HttpAuthMech, map[string]interface{}, int, error) {
 	ret := _m.Called(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
 
 	var r0 bool
@@ -1478,14 +1492,21 @@ func (_m *UtilsIface) GetSecuritySettingsAndDefaultPoolInfo(hostAddr string, hos
 		}
 	}
 
-	var r3 error
-	if rf, ok := ret.Get(3).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) error); ok {
+	var r3 int
+	if rf, ok := ret.Get(3).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) int); ok {
 		r3 = rf(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
 	} else {
-		r3 = ret.Error(3)
+		r3 = ret.Get(3).(int)
 	}
 
-	return r0, r1, r2, r3
+	var r4 error
+	if rf, ok := ret.Get(4).(func(string, string, string, string, []byte, []byte, []byte, bool, *log.CommonLogger) error); ok {
+		r4 = rf(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
+	} else {
+		r4 = ret.Error(4)
+	}
+
+	return r0, r1, r2, r3, r4
 }
 
 // GetServerVBucketsMap provides a mock function with given fields: connStr, bucketName, bucketInfo

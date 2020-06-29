@@ -69,6 +69,22 @@ func (_m *RemoteClusterAgentIface) GetConnectionStringForCAPIRemoteCluster() str
 	return r0
 }
 
+// GetReferenceAndStatusClone provides a mock function with given fields:
+func (_m *RemoteClusterAgentIface) GetReferenceAndStatusClone() *metadata.RemoteClusterReference {
+	ret := _m.Called()
+
+	var r0 *metadata.RemoteClusterReference
+	if rf, ok := ret.Get(0).(func() *metadata.RemoteClusterReference); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.RemoteClusterReference)
+		}
+	}
+
+	return r0
+}
+
 // GetReferenceClone provides a mock function with given fields:
 func (_m *RemoteClusterAgentIface) GetReferenceClone() *metadata.RemoteClusterReference {
 	ret := _m.Called()

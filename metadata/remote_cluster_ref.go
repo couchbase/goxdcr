@@ -90,6 +90,9 @@ type RemoteClusterReference struct {
 	// srv related things that need to be used by remote cluster agent
 	dnsSrvHelper baseH.DnsSrvHelperIface
 	srvEntries   SrvEntriesType
+
+	// If requested by REST, this field will be non-Empty
+	connectivityStatus string
 }
 
 type SrvEntriesType []SrvEntryType
@@ -262,6 +265,9 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	}
 	if len(ref.ClientCertificate_) > 0 {
 		outputMap[base.RemoteClusterClientCertificate] = string(ref.ClientCertificate_)
+	}
+	if ref.connectivityStatus != "" {
+		outputMap[base.ConnectivityStatus] = ref.connectivityStatus
 	}
 
 	return outputMap
@@ -962,6 +968,12 @@ func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, lo
 		return fmt.Errorf(base.FlattenErrorMap(atLeastOneErr))
 	}
 	return nil
+}
+
+func (ref *RemoteClusterReference) SetConnectivityStatus(status string) {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+	ref.connectivityStatus = status
 }
 
 func (ref *RemoteClusterReference) UnitTestSetSRVHelper(helper baseH.DnsSrvHelperIface) {

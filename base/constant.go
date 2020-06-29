@@ -287,6 +287,7 @@ const (
 	IsEnterprise                   = "isEnterprise"
 	Pools                          = "pools"
 	RemoteClusterHostnameMode      = "network_type"
+	ConnectivityStatus             = "connectivityStatus"
 )
 
 // secure type for remote cluster reference
