@@ -34,10 +34,26 @@ type Range struct {
 // ConfigMapRetriever retrieves default config map for settings
 type ConfigMapRetriever func() map[string]*SettingsConfig
 
+type SpecialSettingValue interface {
+	SameAs(other interface{}) bool
+}
+
+var SpecialSettingKeys = []string{CollectionsMappingRulesKey}
+
+func CheckIfKeyIsSpecialSetting(key string) bool {
+	for _, checkKey := range SpecialSettingKeys {
+		if key == checkKey {
+			return true
+		}
+	}
+	return false
+}
+
 type Settings struct {
 	// key - name of setting
 	// value - value of setting
 	// value could be a primitive type, int, bool, string, etc., or a user defined type like LogLevel
+	// If value are not comparable types, they must implement the SpecialSettingValue interface
 	Values map[string]interface{} `json:"values"`
 
 	// pointer to function that retrieves config map
@@ -79,9 +95,16 @@ func (s *Settings) Equals(s2 *Settings) bool {
 			return false
 		}
 		// use != operator on value, which should be a primitive type or enum type
-		if value != value2 {
-			return false
+		if CheckIfKeyIsSpecialSetting(key) {
+			if !value.(SpecialSettingValue).SameAs(value2) {
+				return false
+			}
+		} else {
+			if value != value2 {
+				return false
+			}
 		}
+
 	}
 
 	// no way to compare configMapRetriever. skip it
@@ -111,7 +134,15 @@ func (s *Settings) UpdateSettingsFromMap(settingsMap map[string]interface{}) (ch
 		}
 
 		oldSettingValue, ok := s.Values[settingKey]
-		if !ok || settingValue != oldSettingValue {
+		var settingChanged bool
+		if ok {
+			if CheckIfKeyIsSpecialSetting(settingKey) {
+				settingChanged = !settingValue.(SpecialSettingValue).SameAs(oldSettingValue)
+			} else {
+				settingChanged = settingValue != oldSettingValue
+			}
+		}
+		if !ok || settingChanged {
 			s.Values[settingKey] = settingValue
 			changedSettingsMap[settingKey] = settingValue
 		}

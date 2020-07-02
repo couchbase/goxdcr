@@ -1491,3 +1491,10 @@ func CompileBackfillPipelineSpecId(regularId string) string {
 func GetMainPipelineSpecIdFromBackfillId(fullId string) string {
 	return strings.TrimPrefix(fullId, BackfillPipelineTopicPrefix)
 }
+
+func ValidateAndConvertStringToJsonType(value string) (map[string]interface{}, error) {
+	outMap := make(map[string]interface{})
+	err := json.Unmarshal([]byte(value), &outMap)
+
+	return outMap, err
+}

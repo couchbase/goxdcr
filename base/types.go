@@ -19,6 +19,7 @@ import (
 	mrand "math/rand"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -640,6 +641,126 @@ func (a FilterExpDelType) String() string {
 func (a FilterExpDelType) LogString() string {
 	return fmt.Sprintf("StripTTL(%v), SkipDeletes(%v), SkipExpiration(%v)",
 		a&FilterExpDelStripExpiration > 0, a&FilterExpDelSkipDeletes > 0, a&FilterExpDelSkipExpiration > 0)
+}
+
+type CollectionsMgtType int
+
+const (
+	CollectionsMappingKey = "collectionsExplicitMapping"
+	CollectionsMirrorKey  = "collectionsMirroringMode"
+	CollectionsMigrateKey = "collectionsMigrationMode"
+)
+
+const (
+	colMgtMappingN   = 0 // Non-Set bit if implicit, Set bit if explicit
+	colMgtMirroringN = 1 // Non-Set bit if mirrirng off, set bit if mirroring on
+	colMgtMigrateN   = 2 // Non-set if traditional, set bit if migration mode
+)
+
+var CollectionsMgtDefault CollectionsMgtType = 0 // Implicit, no mirror, no migration
+var CollectionsExplicitBit CollectionsMgtType = 1 << colMgtMappingN
+var CollectionsMirroringBit CollectionsMgtType = 1 << colMgtMirroringN
+var CollectionsMigrationBit CollectionsMgtType = 1 << colMgtMigrateN
+
+var CollectionsMgtMax = CollectionsExplicitBit | CollectionsMirroringBit | CollectionsMigrationBit
+
+func (c CollectionsMgtType) String() string {
+	var output []string
+	output = append(output, "ExplicitMapping:")
+	output = append(output, fmt.Sprintf("%v", c.IsExplicitMapping()))
+	output = append(output, "Mirroring:")
+	output = append(output, fmt.Sprintf("%v", c.IsMirroringOn()))
+	output = append(output, "Migration:")
+	output = append(output, fmt.Sprintf("%v", c.IsMigrationOn()))
+	return strings.Join(output, " ")
+}
+
+func (c *CollectionsMgtType) IsExplicitMapping() bool {
+	return *c&CollectionsExplicitBit > 0
+}
+
+func (c *CollectionsMgtType) SetExplicitMapping(val bool) {
+	if c.IsExplicitMapping() != val {
+		*c ^= 1 << colMgtMappingN
+	}
+}
+
+func (c *CollectionsMgtType) IsMirroringOn() bool {
+	return *c&CollectionsMirroringBit > 0
+}
+
+func (c *CollectionsMgtType) SetMirroring(val bool) {
+	if c.IsMirroringOn() != val {
+		*c ^= 1 << colMgtMirroringN
+	}
+}
+
+func (c *CollectionsMgtType) IsMigrationOn() bool {
+	return *c&CollectionsMigrationBit > 0
+}
+
+func (c *CollectionsMgtType) SetMigration(val bool) {
+	if c.IsMigrationOn() != val {
+		*c ^= 1 << colMgtMigrateN
+	}
+}
+
+const CollectionsMappingRulesKey = "colMappingRules"
+
+func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMappingRulesType, error) {
+	jsonMap, err := ValidateAndConvertStringToJsonType(value)
+	if err != nil {
+		return nil, err
+	}
+	return ValidateAndConvertJsonMapToRuleType(jsonMap)
+}
+
+func ValidateAndConvertJsonMapToRuleType(jsonMap map[string]interface{}) (CollectionsMappingRulesType, error) {
+	rulesOut := make(CollectionsMappingRulesType)
+	for k, v := range jsonMap {
+		if v == nil {
+			rulesOut[k] = nil
+			continue
+		}
+		vString, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("value for key %v is the wrong type: %v", k, reflect.TypeOf(v))
+		}
+		rulesOut[k] = vString
+	}
+	return rulesOut, nil
+}
+
+type CollectionsMappingRulesType map[string]interface{}
+
+func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
+	// TODO
+	return nil
+}
+
+func (c CollectionsMappingRulesType) ValidateExplicitMapping() error {
+	// TODO
+	return nil
+}
+
+func (c CollectionsMappingRulesType) SameAs(otherRaw interface{}) bool {
+	other, ok := otherRaw.(CollectionsMappingRulesType)
+	if !ok {
+		return false
+	}
+	if len(c) != len(other) {
+		return false
+	}
+	for k, v := range c {
+		v2, exists := other[k]
+		if !exists {
+			return false
+		}
+		if v != v2 {
+			return false
+		}
+	}
+	return true
 }
 
 type XattrIterator struct {

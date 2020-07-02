@@ -21,6 +21,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 	"sort"
 	"strconv"
 )
@@ -77,6 +78,10 @@ const (
 	FilterExpKey                   = "filterExpiration"
 	FilterDelKey                   = "filterDeletion"
 	BypassExpiryKey                = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
+	CollectionsMappingKey          = base.CollectionsMappingKey
+	CollectionsMirrorKey           = base.CollectionsMirrorKey
+	CollectionsMigrateKey          = base.CollectionsMigrateKey
+	CollectionsMappingRulesKey     = base.CollectionsMappingRulesKey
 )
 
 // constants for parsing create replication response
@@ -156,6 +161,10 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterExpKey:                   metadata.FilterExpKey,
 	FilterDelKey:                   metadata.FilterDelKey,
 	BypassExpiryKey:                metadata.BypassExpiryKey,
+	CollectionsMappingKey:          metadata.CollectionsMgtMappingKey,
+	CollectionsMigrateKey:          metadata.CollectionsMgtMigrateKey,
+	CollectionsMirrorKey:           metadata.CollectionsMgtMirrorKey,
+	CollectionsMappingRulesKey:     metadata.CollectionsMappingRulesKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -183,6 +192,10 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterExpKey:                      FilterExpKey,
 	metadata.FilterDelKey:                      FilterDelKey,
 	metadata.BypassExpiryKey:                   BypassExpiryKey,
+	metadata.CollectionsMgtMappingKey:          CollectionsMappingKey,
+	metadata.CollectionsMgtMigrateKey:          CollectionsMigrateKey,
+	metadata.CollectionsMgtMirrorKey:           CollectionsMirrorKey,
+	metadata.CollectionsMappingRulesKey:        CollectionsMappingRulesKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
@@ -556,6 +569,11 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	if err != nil {
 		errorsMap[FilterExpression] = err
 	}
+
+	err = validateCollectionsMappingRule(settings, base.CollectionsMgtDefault)
+	if err != nil {
+		errorsMap[CollectionsMappingRulesKey] = err
+	}
 	return
 }
 
@@ -593,6 +611,34 @@ func filterExpressionVariousChecks(settings metadata.ReplicationSettingsMap, cre
 	return nil
 }
 
+func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, currentMode base.CollectionsMgtType) error {
+	mappingRulesObj, exists := settings[metadata.CollectionsMappingRulesKey]
+	if !exists {
+		return nil
+	}
+
+	mappingRules, ok := mappingRulesObj.(base.CollectionsMappingRulesType)
+	if !ok {
+		return fmt.Errorf("Invalid mapping rule type: %v", reflect.TypeOf(mappingRules))
+	}
+
+	// If input does not contain any traces of mode changes, then use the currentMode to drive rule validation
+	var rulesToCheck = currentMode
+
+	if multiHelper, ok := settings[metadata.CollectionsMgtMultiKey].(metadata.ReplicationMultiValueHelper); ok {
+		baselineSetting := metadata.EmptyReplicationSettings()
+		baselineSetting.Values[metadata.CollectionsMgtMultiKey] = currentMode
+		peekMap := multiHelper.PeekValues(baselineSetting)
+		rulesToCheck = peekMap[metadata.CollectionsMgtMultiKey].(base.CollectionsMgtType)
+	}
+
+	if rulesToCheck.IsMigrationOn() {
+		return mappingRules.ValidateMigrateRules()
+	} else {
+		return mappingRules.ValidateExplicitMapping()
+	}
+}
+
 func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings metadata.ReplicationSettingsMap, errorsMap base.ErrorMap) {
 	errorsMap = make(base.ErrorMap)
 
@@ -608,6 +654,7 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 
 	var isDefaultSettings bool
 	var isCapi bool
+	var currentCollectionMode = base.CollectionsMgtDefault
 	if len(replicationId) == 0 {
 		// empty replicationId indicates that we are handling default settings that are not replication specific
 		isDefaultSettings = true
@@ -623,6 +670,10 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 			return
 		}
 		isCapi = spec.Settings.IsCapi()
+		currentSetting, ok := spec.Settings.Values[metadata.CollectionsMgtMultiKey].(base.CollectionsMgtType)
+		if ok {
+			currentCollectionMode = currentSetting
+		}
 	}
 
 	settings, settingsErrorsMap := DecodeSettingsFromRequest(request, isDefaultSettings, true, isCapi)
@@ -634,6 +685,12 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	if err != nil {
 		errorsMap[FilterExpression] = err
 	}
+
+	err = validateCollectionsMappingRule(settings, currentCollectionMode)
+	if err != nil {
+		errorsMap[CollectionsMappingRulesKey] = err
+	}
+
 	return
 }
 
