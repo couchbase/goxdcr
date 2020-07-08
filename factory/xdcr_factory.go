@@ -116,6 +116,9 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 	}
 
 	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, common.MainPipeline, spec, progress_recorder)
+	if err != nil {
+		return nil, err
+	}
 
 	err = registerCb(nil /*main pipeline*/)
 	if err != nil {
@@ -136,6 +139,9 @@ func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline com
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 
 	pipeline, registerCb, err := xdcrf.newPipelineCommon(topic, pipelineType, spec, progress_recorder)
+	if err != nil {
+		return nil, err
+	}
 
 	// For secondary pipeline, use existing pipeline's context
 	err = registerCb(&primaryPipeline)
