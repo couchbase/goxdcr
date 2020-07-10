@@ -425,4 +425,96 @@ func TestCollectionMigrateRuleValidation(t *testing.T) {
 	assert.Nil(err)
 	err = rules.ValidateMigrateRules()
 	assert.NotNil(err)
+
+	doubleKey := "{\"key\":\"val\",\"key\":\"val2\"}"
+	rules, err = ValidateAndConvertStringToMappingRuleType(doubleKey)
+	assert.NotNil(err)
+}
+
+func TestExplicitMappingValidatorParseRule(t *testing.T) {
+	fmt.Println("============== Test case start: TestExplicitMappingValidatorParseRule =================")
+	defer fmt.Println("============== Test case end: TestExplicitMappingValidatorParseRule =================")
+	assert := assert.New(t)
+
+	validator := NewExplicitMappingValidator()
+
+	key := "Scope"
+	value := "Scope"
+	assert.Equal(explicitRuleScopeToScope, validator.parseRule(key, value))
+	assert.Equal(explicitRuleScopeToScope, validator.parseRule(key, nil))
+
+	key = "Scope:collection"
+	value = "scope2:collection2"
+	assert.Equal(explicitRuleOneToOne, validator.parseRule(key, value))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule(key, nil))
+
+	// Invalid names
+	key = "#%(@&#FJ"
+	value = "scope"
+	assert.Equal(explicitRuleInvalid, validator.parseRule(key, value))
+}
+
+func TestExplicitMappingValidatorRules(t *testing.T) {
+	fmt.Println("============== Test case start: TestExplicitMappingValidatorRules =================")
+	defer fmt.Println("============== Test case end: TestExplicitMappingValidatorRules =================")
+	assert := assert.New(t)
+
+	validator := NewExplicitMappingValidator()
+	key := "Scope"
+	value := "TargetScope"
+	assert.Nil(validator.ValidateKV(key, value))
+
+	key = "Scope2"
+	value = "TargetScope2"
+	assert.Nil(validator.ValidateKV(key, value))
+
+	key = "AnotherScope:AnotherCollection"
+	value = "AnotherTargetScope:AnotherTargetCollection"
+	assert.Nil(validator.ValidateKV(key, value))
+
+	key = "AnotherScope2:AnotherCollection2"
+	value = "AnotherTargetScope2:AnotherTargetCollection2"
+	assert.Nil(validator.ValidateKV(key, value))
+
+	// Adding non-duplicating blacklist rules
+	key = "Scope3"
+	assert.Nil(validator.ValidateKV(key, nil))
+
+	key = "Scope:Collection"
+	assert.Nil(validator.ValidateKV(key, nil))
+
+	// Adding duplicating blacklist rules
+	key = "Scope3:Collection3"
+	assert.NotNil(validator.ValidateKV(key, nil))
+
+	key = "Scope"
+	assert.NotNil(validator.ValidateKV(key, nil))
+
+	// Test complex mapping - one specific collection will have special mapping, everything else implicit under scope
+	// 1. ScopeRedundant:ColRedundant -> ScopeTRedundant:ColTRedundant
+	// 2. ScopeRedundant -> ScopeTRedundant
+	key = "ScopeRedundant"
+	value = "ScopeTRedundant"
+	assert.Nil(validator.ValidateKV(key, value))
+
+	// This is not redundant
+	key = "ScopeRedundant:ColRedundant"
+	value = "ScopeTRedundant:ColTRedundant"
+	assert.Nil(validator.ValidateKV(key, value))
+
+	// This is redundant
+	key = "ScopeRedundant:ColRedundant"
+	value = "ScopeTRedundant:ColRedundant"
+	assert.NotNil(validator.ValidateKV(key, value))
+
+	// ** Converse of above
+	// Not Redundant
+	key = "ScopeRedundant2:ColRedundant2"
+	value = "ScopeTRedundant2:ColTRedundant2"
+	assert.Nil(validator.ValidateKV(key, value))
+
+	// Combining both should be fine
+	key = "ScopeRedundant2"
+	value = "ScopeTRedundant2"
+	assert.Nil(validator.ValidateKV(key, value))
 }

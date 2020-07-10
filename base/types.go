@@ -12,6 +12,7 @@ package base
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/couchbase/gomemcached"
@@ -728,6 +729,15 @@ func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMapping
 	if err != nil {
 		return nil, err
 	}
+	// Check for duplicated keys
+	testMarshal, err := json.Marshal(jsonMap)
+	if err != nil {
+		return CollectionsMappingRulesType{}, err
+	}
+	if len(testMarshal) != len([]byte(value)) {
+		return CollectionsMappingRulesType{}, fmt.Errorf("JSON string passed in did not pass re-encode test. Are there potentially duplicated keys?")
+	}
+
 	return ValidateAndConvertJsonMapToRuleType(jsonMap)
 }
 
@@ -779,7 +789,13 @@ func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 }
 
 func (c CollectionsMappingRulesType) ValidateExplicitMapping() error {
-	// TODO
+	validator := NewExplicitMappingValidator()
+	for k, v := range c {
+		err := validator.ValidateKV(k, v)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -972,3 +988,147 @@ func (list_obj *SortedSeqnoListWithLock) TruncateSeqnos(through_seqno uint64) {
 }
 
 type Uleb128 []byte
+
+type ExplicitMappingValidator struct {
+	// S:C -> S:C || S:C -> nil
+	oneToOneRules map[string]interface{}
+	// S -> S || S -> nil
+	scopeToScopeRules map[string]interface{}
+}
+
+type explicitValidatingType int
+
+const (
+	explicitRuleInvalid      explicitValidatingType = iota
+	explicitRuleOneToOne     explicitValidatingType = iota
+	explicitRuleScopeToScope explicitValidatingType = iota
+)
+
+func NewExplicitMappingValidator() *ExplicitMappingValidator {
+	return &ExplicitMappingValidator{
+		oneToOneRules:     make(map[string]interface{}),
+		scopeToScopeRules: make(map[string]interface{}),
+	}
+}
+
+func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitValidatingType {
+	if k == "" {
+		return explicitRuleInvalid
+	}
+	vStr, vIsString := v.(string)
+
+	_, err := NewCollectionNamespaceFromString(k)
+	if err == nil {
+		// value must be the same or nil
+		if v == nil {
+			return explicitRuleOneToOne
+		}
+		if !vIsString {
+			return explicitRuleInvalid
+		}
+		_, err = NewCollectionNamespaceFromString(vStr)
+		if err != nil {
+			return explicitRuleInvalid
+		}
+		return explicitRuleOneToOne
+	}
+
+	// At this point, name has to be a scope name
+	matched := CollectionNameValidationRegex.MatchString(k)
+	if !matched {
+		return explicitRuleInvalid
+	}
+	if vIsString {
+		matched = CollectionNameValidationRegex.MatchString(vStr)
+		if !matched {
+			return explicitRuleInvalid
+		}
+	} else if v != nil {
+		// Can only be string type or nil type
+		return explicitRuleInvalid
+	}
+	return explicitRuleScopeToScope
+}
+
+// Rules in descending priority:
+// 1. S:C -> S':C'
+// 2. S:C -> null
+// 3. S -> S'
+// 4. S -> null
+//
+// Given the same scope:
+// 1 can coexist with 3 if C' != C
+// 1 can coexist with 4
+// 2 can coexist with 3
+func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
+	ruleType := e.parseRule(k, v)
+	switch ruleType {
+	case explicitRuleInvalid:
+		return fmt.Errorf("invalid rule: %v:%v", k, v)
+	case explicitRuleOneToOne:
+		// Shouldn't have duplicated keys, but check anyway
+		_, exists := e.oneToOneRules[k]
+		if exists {
+			return fmt.Errorf("Key already exists: %v", k)
+		}
+		e.oneToOneRules[k] = v
+
+		// Check for duplicity
+		submatches := CollectionNamespaceRegex.FindStringSubmatch(k)
+		sourceScopeName := submatches[1]
+		sourceCollectionName := submatches[2]
+		//sourceNamespace, _ := NewCollectionNamespaceFromString(k)
+		targetScope, exists := e.scopeToScopeRules[sourceScopeName]
+		if v == nil {
+			if exists && targetScope == nil {
+				// S -> null already exists. S:C -> null is redundant
+				return fmt.Errorf("The rule %v:%v is redundant", k, v)
+			}
+		} else {
+			submatches2 := CollectionNamespaceRegex.FindStringSubmatch(v.(string))
+			targetCollectionName := submatches2[2]
+			if exists && targetScope != nil {
+				if sourceCollectionName == targetCollectionName {
+					// S -> S2 already exists, S:C -> S2:C is redundant
+					return fmt.Errorf("The rule %v:%v is redundant", k, v)
+				} else {
+					// S -> S2 exists, but S:C -> S2:C2 will have higher priority
+					// (S:C -> S2:C will not take place as the more specific rule takes higher precedence)
+				}
+			}
+		}
+	case explicitRuleScopeToScope:
+		// Shouldn't have duplicated keys, but check anyway
+		_, exists := e.scopeToScopeRules[k]
+		if exists {
+			return fmt.Errorf("Key already exists: %v", k)
+		}
+		e.scopeToScopeRules[k] = v
+
+		// Check for duplicity
+		for checkK, checkV := range e.oneToOneRules {
+			submatches := CollectionNamespaceRegex.FindStringSubmatch(checkK)
+			sourceScopeName := submatches[1]
+			sourceCollectionName := submatches[2]
+			if sourceScopeName == checkK {
+				if v == nil && checkV == nil {
+					// S1:C1 -> nil already exists
+					return fmt.Errorf("The rule %v:%v is redundant", checkK, checkV)
+				} else if v != nil && checkV != nil {
+					//targetNamespace, _ := NewCollectionNamespaceFromString(checkV.(string))
+					submatches2 := CollectionNamespaceRegex.FindStringSubmatch(checkV.(string))
+					targetColName := submatches2[2]
+					if sourceCollectionName == targetColName {
+						// S1:C1 -> S2:C1 exists, and trying to enter rule S1 -> S2
+						return fmt.Errorf("The rule %v:%v is redundant", checkK, checkV)
+					} else {
+						// S1:C1 -> S2:C3 exists, and can coexist with S1 -> S2
+					}
+				}
+			}
+		}
+	default:
+		panic(fmt.Sprintf("Unhandled rule type: %v", ruleType))
+	}
+	return nil
+}
