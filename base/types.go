@@ -163,6 +163,22 @@ type CollectionNamespace struct {
 	CollectionName string
 }
 
+// The specificStr should follow the format of: "<scope>:<collection>"
+func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, error) {
+	if !CollectionNamespaceRegex.MatchString(specificStr) {
+		return CollectionNamespace{}, fmt.Errorf("Invalid CollectionNamespace format")
+	} else {
+		names := CollectionNamespaceRegex.FindStringSubmatch(specificStr)
+		if len(names) != 3 {
+			return CollectionNamespace{}, fmt.Errorf("Invalid capture for CollectionNameSpaces")
+		}
+		return CollectionNamespace{
+			ScopeName:      names[1],
+			CollectionName: names[2],
+		}, nil
+	}
+}
+
 func (c *CollectionNamespace) IsDefault() bool {
 	return c.ScopeName == DefaultScopeCollectionName && c.CollectionName == DefaultScopeCollectionName
 }
@@ -734,8 +750,32 @@ func ValidateAndConvertJsonMapToRuleType(jsonMap map[string]interface{}) (Collec
 type CollectionsMappingRulesType map[string]interface{}
 
 func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
-	// TODO
-	return nil
+	errorMap := make(ErrorMap)
+	for filterExpr, targetNamespaceRaw := range c {
+		// filterExpr must be a valid gojsonsm expression
+		_, err := GoJsonsmGetFilterExprMatcher(filterExpr)
+		if err != nil {
+			errorMap[filterExpr] = err
+		}
+
+		// targetnamespace must be a string type, no nil allowed
+		targetNamespace, ok := targetNamespaceRaw.(string)
+		if !ok {
+			errorMap[fmt.Sprintf("%v (value)", filterExpr)] = fmt.Errorf("Invalid value type specified: %v", reflect.TypeOf(targetNamespaceRaw))
+		}
+
+		// targetnamespace must be a specific form of ScopeName:CollectionName
+		_, err = NewCollectionNamespaceFromString(targetNamespace)
+		if err != nil {
+			errorMap[targetNamespace] = err
+		}
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf(FlattenErrorMap(errorMap))
+	} else {
+		return nil
+	}
 }
 
 func (c CollectionsMappingRulesType) ValidateExplicitMapping() error {

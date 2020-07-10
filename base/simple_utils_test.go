@@ -387,3 +387,42 @@ func TestUleb128EncoderDecoder(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestUleb128EncoderDecoder =================")
 }
+
+func TestCollectionNamespaceFromString(t *testing.T) {
+	fmt.Println("============== Test case start: TestCollectionNamespaceFromString =================")
+	defer fmt.Println("============== Test case end: TestCollectionNamespaceFromString =================")
+
+	assert := assert.New(t)
+	namespace, err := NewCollectionNamespaceFromString("a123:_123b")
+	assert.Nil(err)
+	assert.Equal("a123", namespace.ScopeName)
+	assert.Equal("_123b", namespace.CollectionName)
+
+	_, err = NewCollectionNamespaceFromString("abcdef")
+	assert.NotNil(err)
+}
+
+func TestCollectionMigrateRuleValidation(t *testing.T) {
+	fmt.Println("============== Test case start: TestCollectionMigrateRuleValidation =================")
+	defer fmt.Println("============== Test case end: TestCollectionMigrateRuleValidation =================")
+	assert := assert.New(t)
+
+	validRules := make(map[string]interface{})
+	validRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1:targetCol1"
+	validRules[fmt.Sprintf("doc.Value == %v%v%v AND doc.Value2 != %v%v%v", "\"", "abc", "\"", "\"", "def", "\"")] = "targetScope2:targetCol2"
+
+	rules, err := ValidateAndConvertJsonMapToRuleType(validRules)
+	assert.Nil(err)
+	err = rules.ValidateMigrateRules()
+	assert.Nil(err)
+
+	invalidRules := make(map[string]interface{})
+	// Incorrect target namespace
+	invalidRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1*"
+	// Incorrect filter
+	invalidRules[fmt.Sprintf("WRONGREGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1*"
+	rules, err = ValidateAndConvertJsonMapToRuleType(invalidRules)
+	assert.Nil(err)
+	err = rules.ValidateMigrateRules()
+	assert.NotNil(err)
+}

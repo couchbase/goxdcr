@@ -93,6 +93,18 @@ const UIDKey = "uid"
 const NameKey = "name"
 const CollectionsKey = "collections"
 const DefaultScopeCollectionName = "_default"
+const ScopeCollectionDelimiter = ":"
+
+// From KV design doc:
+// A user’s collection can only contain characters A-Z, a-z, 0-9 and the following symbols _ - %
+// The prefix character of a user’s collection name however is restricted. It cannot be _ or %
+// Note that XDCR doesn't care if it is system vs user. It just replicates
+const CollectionValidNameCharClass = "[0-9A-Za-z-_%]"
+
+var CollectionNamespaceRegexExpr = fmt.Sprintf("^(?P<scope>%v+):(?P<collection>%v+)$", CollectionValidNameCharClass, CollectionValidNameCharClass)
+var CollectionNamespaceRegex, _ = regexp.Compile(CollectionNamespaceRegexExpr)
+
+var CollectionNameValidationRegex, _ = regexp.Compile(fmt.Sprintf("^%v+$", CollectionValidNameCharClass))
 
 var DefaultCollectionId uint32 = 0
 
