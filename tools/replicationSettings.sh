@@ -122,11 +122,7 @@ function getReplicationSettings {
 		return $?
 	fi
 
-	if [[ ! -z "$jqStr" ]];then
-		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId} | $jqStr
-	else
-		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId}
-	fi
+	getReplicationSettingsInternal "$replId" "$port"
 }
 
 function setReplicationSettings {
@@ -139,23 +135,7 @@ function setReplicationSettings {
 		return $?
 	fi
 
-	# Because to do multiple -d keyvals, it's better to pass in a single array
-	local -a curlMultiArr
-	for kv in "${keyVal[@]}"
-	do
-		curlMultiArr+=(" -d ")
-		curlMultiArr+=("$kv")
-	done
-
-	if [[ ! -z "$jqStr" ]];then
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId} ${curlMultiArr[@]} | $jqStr
-	else
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId} ${curlMultiArr[@]}
-	fi
-
-	# sometimes setting doesn't return output always, so wait and then re-list
-	sleep 1
-	listInternalSettings
+	setReplicationSettingsInternal "$replId" "$port" ${keyVal[@]}
 }
 
 declare id
