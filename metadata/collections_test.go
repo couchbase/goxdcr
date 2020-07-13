@@ -641,3 +641,136 @@ func TestNoIntersectionDiff(t *testing.T) {
 	assert.Equal(1, len(added))
 	assert.Equal(1, len(removed))
 }
+
+//      "name": "S2",
+//          "name": "col3",
+//          "name": "col2",
+//          "name": "col1",
+//      "name": "S1",
+//          "name": "col2",
+//          "name": "col1",
+//      "name": "_default",
+//          "name": "_default",
+func TestExplicitMapping(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestExplicitMapping =================")
+	defer fmt.Println("============== Test case start: TestExplicitMapping =================")
+
+	data, err := ioutil.ReadFile(provisionedFile)
+	assert.Nil(err)
+	source, _ := NewCollectionsManifestFromBytes(data)
+	target, _ := NewCollectionsManifestFromBytes(data)
+	manifestPair := CollectionsManifestPair{
+		Source: &source,
+		Target: &target,
+	}
+	var mappingMode base.CollectionsMgtType
+	mappingMode.SetExplicitMapping(true)
+
+	rules := make(base.CollectionsMappingRulesType)
+	rules["S2"] = "S1"
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	assert.Nil(err)
+	assert.NotNil(explicitMap)
+
+	assert.Equal(2, len(explicitMap))
+	sourceNamespace := base.CollectionNamespace{
+		ScopeName:      "S2",
+		CollectionName: "col1",
+	}
+	targetNamespace := base.CollectionNamespace{
+		ScopeName:      "S1",
+		CollectionName: "col1",
+	}
+	_, tgtCheckList, ok := explicitMap.Get(&sourceNamespace)
+	assert.True(ok)
+	assert.Equal(1, len(tgtCheckList))
+	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
+
+	// Check a diff collection
+	sourceNamespace.CollectionName = "col2"
+	targetNamespace.CollectionName = "col2"
+	_, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	assert.True(ok)
+	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
+
+	// Last one is unmapped
+	sourceNamespace.CollectionName = "col3"
+	_, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	assert.False(ok)
+
+	// Test blacklist
+	rules = make(base.CollectionsMappingRulesType)
+	rules["S1"] = "S2"
+	rules["S1:col2"] = nil
+	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	assert.Nil(err)
+	assert.NotNil(explicitMap)
+
+	assert.Equal(1, len(explicitMap))
+	sourceNamespace.ScopeName = "S1"
+	sourceNamespace.CollectionName = "col1"
+	targetNamespace.ScopeName = "S2"
+	targetNamespace.CollectionName = "col1"
+	_, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	assert.True(ok)
+	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
+
+	// Src: s1:col1
+	// Tgt: s2:col1
+	//      s2:col2
+	// rule: s1:col1 -> s2:col3
+	// In this case, s1:col1 should *not* have a corresponding target
+	customSrcColMap := make(CollectionsMap)
+	customSrcColMap["col1"] = Collection{
+		Uid:  1,
+		Name: "col1",
+	}
+	customSrcScopes := make(ScopesMap)
+	customSrcScopes["s1"] = Scope{
+		Uid:         1,
+		Name:        "s1",
+		Collections: customSrcColMap,
+	}
+	customSrcManifest := CollectionsManifest{
+		uid:    1,
+		scopes: customSrcScopes,
+	}
+
+	customTgtColMap := make(CollectionsMap)
+	customTgtColMap["col1"] = Collection{
+		Uid:  2,
+		Name: "col1",
+	}
+	customTgtColMap["col2"] = Collection{
+		Uid:  3,
+		Name: "col2",
+	}
+	customTgtScopes := make(ScopesMap)
+	customTgtScopes["s2"] = Scope{
+		Uid:         3,
+		Name:        "s2",
+		Collections: customTgtColMap,
+	}
+	customTgtManifest := CollectionsManifest{
+		uid:    2,
+		scopes: customTgtScopes,
+	}
+
+	rules = make(base.CollectionsMappingRulesType)
+	rules["s1"] = "s2"
+	rules["s1:col1"] = "s2:col3"
+	customManifestPair := CollectionsManifestPair{
+		Source: &customSrcManifest,
+		Target: &customTgtManifest,
+	}
+	explicitMap, err = NewCollectionNamespaceMappingFromRules(customManifestPair, mappingMode, rules)
+	assert.Nil(err)
+	assert.NotNil(explicitMap)
+	checkNamespace := &base.CollectionNamespace{
+		ScopeName:      "s1",
+		CollectionName: "col1",
+	}
+	_, _, exists := explicitMap.Get(checkNamespace)
+	assert.False(exists)
+}

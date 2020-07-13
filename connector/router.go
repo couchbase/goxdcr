@@ -118,8 +118,6 @@ func (router *Router) Forward(data interface{}) error {
 			if part != nil {
 				err = part.Receive(partData)
 				if err != nil {
-					// TODO - MB-38023 - KV may lag even though manifest says collection exists
-					// May be moved into XMEM
 					break
 				}
 			} else {

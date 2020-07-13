@@ -747,6 +747,15 @@ func (s *ReplicationSettings) GetCollectionModes() base.CollectionsMgtType {
 	return val.(base.CollectionsMgtType)
 }
 
+func (s *ReplicationSettings) GetCollectionsRoutingRules() base.CollectionsMappingRulesType {
+	val, _ := s.GetSettingValueOrDefaultValue(CollectionsMappingRulesKey)
+	if val == nil {
+		return make(base.CollectionsMappingRulesType)
+	} else {
+		return val.(base.CollectionsMappingRulesType)
+	}
+}
+
 type ReplicationSettingsMap map[string]interface{}
 
 type redactDictType int

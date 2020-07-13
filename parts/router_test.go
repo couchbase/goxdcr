@@ -5,6 +5,7 @@ package parts
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/couchbase/gomemcached"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
+	"sync/atomic"
 	"testing"
 )
 
@@ -41,6 +43,40 @@ func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]commo
 	spec, _ = metadata.NewReplicationSpecification("srcBucket", "srcBucketUUID", "targetClusterUUID", "tgtBucket", "tgtBucketUUID")
 
 	return
+}
+
+func setupCollectionManifestsSvcRouter(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc) (pair metadata.CollectionsManifestPair) {
+	manifestFileDir := "../metadata/testdata"
+	manifestFileName := "provisionedManifest.json"
+
+	data, err := ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileName))
+	if err != nil {
+		panic(err.Error())
+	}
+	manifest, err := metadata.NewCollectionsManifestFromBytes(data)
+	if err != nil {
+		panic(err.Error())
+	}
+	collectionsManifestSvc.On("GetLatestManifests", mock.Anything).Return(&manifest, &manifest, nil)
+	pair.Source = &manifest
+	pair.Target = &manifest
+	return
+}
+
+func setupCollectionManifestsSvcRouterWithDefaultTarget(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc) {
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	manifestFileDir := "../metadata/testdata"
+	manifestFileName := "provisionedManifest.json"
+
+	data, err := ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileName))
+	if err != nil {
+		panic(err.Error())
+	}
+	manifest, err := metadata.NewCollectionsManifestFromBytes(data)
+	if err != nil {
+		panic(err.Error())
+	}
+	collectionsManifestSvc.On("GetLatestManifests", mock.Anything).Return(&manifest, &defaultManifest, nil)
 }
 
 func TestRouterRouteFunc(t *testing.T) {
@@ -273,6 +309,8 @@ func TestRouterManifestChange(t *testing.T) {
 		utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
 
+	setupCollectionManifestsSvcRouter(collectionsManifestSvc)
+
 	expDelMode = base.FilterExpDelAll
 
 	router, err := NewRouter(routerId, spec, downStreamParts,
@@ -320,6 +358,7 @@ func TestRouterManifestChange(t *testing.T) {
 func mockTargetCollectionDNE(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc) {
 	// Target DNE simply means an empty manifest
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	setupCollectionManifestsSvcRouter(collectionsManifestSvc)
 	collectionsManifestSvc.On("GetSpecificTargetManifest", mock.Anything, mock.Anything).Return(&defaultManifest, nil)
 }
 
@@ -423,4 +462,87 @@ func TestRouterTargetCollectionDNEPersistErr(t *testing.T) {
 	// The ignore count should be 0 to indicate that throughSeqno will not move foward
 	assert.Equal(0, ignoreCnt)
 	fmt.Println("============== Test case end: TargetCollectionDNEPersistErr =================")
+}
+
+func TestRouterExplicitMode(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterExplicitMode =================")
+	defer fmt.Println("============== Test case end: TestRouterExplicitMode =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx,
+		utilsMock, throughputThrottlerSvc,
+		needToThrottle, expDelMode, collectionsManifestSvc, spec := setupBoilerPlateRouter()
+
+	mappingMode := spec.Settings.GetCollectionModes()
+	mappingMode.SetExplicitMapping(true)
+	rules := spec.Settings.GetCollectionsRoutingRules()
+	rules["S1"] = "S2"
+	updatedMap := make(map[string]interface{})
+	updatedMap[metadata.CollectionsMgtMultiKey] = mappingMode
+	updatedMap[metadata.CollectionsMappingRulesKey] = rules
+	_, errMap := spec.Settings.UpdateSettingsFromMap(updatedMap)
+	assert.Equal(0, len(errMap))
+
+	setupCollectionManifestsSvcRouterWithDefaultTarget(collectionsManifestSvc)
+
+	router, err := NewRouter(routerId, spec, downStreamParts,
+		routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle,
+		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
+
+	assert.Nil(err)
+	assert.Equal(uint32(1), atomic.LoadUint32(&router.isExplicitMapping))
+
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+	collectionsRouter.Start()
+
+	// routing updater receiver
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+		return nil
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+
+	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+
+	sourceNs := &base.CollectionNamespace{"S1", "col1"}
+	mcReq := &gomemcached.MCRequest{
+		Key:    []byte("testKey"),
+		Keylen: len("testKey"),
+	}
+	dummyData := &base.WrappedMCRequest{
+		Req:          mcReq,
+		ColNamespace: sourceNs,
+		ColInfo:      &base.TargetCollectionInfo{},
+	}
+	err = router.RouteCollection(dummyData, dummyDownStream)
+	// Right now target cluster gave back "default manifest"
+	assert.Equal(base.ErrorIgnoreRequest, err)
+	assert.Equal(1, ignoreCnt)
+	assert.Equal(1, len(collectionsRouter.brokenMapping))
+	// Second one should be already ignored
+	err = router.RouteCollection(dummyData, dummyDownStream)
+	assert.Equal(base.ErrorRequestAlreadyIgnored, err)
+	assert.Equal(2, ignoreCnt)
+	assert.Equal(1, len(collectionsRouter.brokenMapping))
+
+	collectionsManifestSvc = &service_def_mocks.CollectionsManifestSvc{}
+	pair := setupCollectionManifestsSvcRouter(collectionsManifestSvc)
+	collectionsRouter.collectionsManifestSvc = collectionsManifestSvc
+
+	// TODO - change this to use actual update call
+	collectionsRouter.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, mappingMode, rules)
+	assert.Nil(err)
+
+	err = router.RouteCollection(dummyData, dummyDownStream)
+	assert.Nil(err)
+	//targetNs := &base.CollectionNamespace{"S2", "col1"}
+
+	//// Even if persist has problem, routeCollection should return a non-nil error to prevent forwarding to xmem
+	//assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream))
+	//// The ignore count should be 0 to indicate that throughSeqno will not move foward
 }

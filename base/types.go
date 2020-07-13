@@ -759,6 +759,14 @@ func ValidateAndConvertJsonMapToRuleType(jsonMap map[string]interface{}) (Collec
 
 type CollectionsMappingRulesType map[string]interface{}
 
+func (c CollectionsMappingRulesType) Clone() CollectionsMappingRulesType {
+	clonedCopy := make(CollectionsMappingRulesType)
+	for k, v := range c {
+		clonedCopy[k] = v
+	}
+	return clonedCopy
+}
+
 func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 	errorMap := make(ErrorMap)
 	for filterExpr, targetNamespaceRaw := range c {
@@ -817,6 +825,98 @@ func (c CollectionsMappingRulesType) SameAs(otherRaw interface{}) bool {
 		}
 	}
 	return true
+}
+
+// Match in the right priorities:
+// 1. S:C -> TS:TC
+// 2. S:C -> nil
+// 3. S -> TS
+// 4. S -> nil
+// Returns a boolean for matched. If matched, it means replication should occur
+func (c CollectionsMappingRulesType) ExplicitMatch(srcNamespace, tgtNamespace *CollectionNamespace) bool {
+	srcNamespaceExists, matched := c.checkCase1(srcNamespace, tgtNamespace)
+	if matched {
+		return true
+	}
+
+	_, matched = c.checkCase2(srcNamespace)
+	if matched {
+		// Matched means this source namespace is not to be replicated
+		return false
+	}
+
+	if srcNamespaceExists {
+		// S:C exist as a rule but the tgt portion does not match either rule 1 or 2
+		// Do not check for case 3
+		return false
+	}
+
+	matched = c.checkCase3(srcNamespace, tgtNamespace)
+	if matched {
+		return true
+	}
+
+	// case 4 is the "default" case
+	return false
+}
+
+// Returns found if a rule with srcNamespace as the key exists
+func (c CollectionsMappingRulesType) checkCase1(srcNamespace, tgtNamespace *CollectionNamespace) (keyExists, matched bool) {
+	for k, v := range c {
+		if v == nil {
+			continue
+		}
+		checkSourceNamespace, _ := NewCollectionNamespaceFromString(k)
+		if srcNamespace.IsSameAs(checkSourceNamespace) {
+			keyExists = true
+		}
+		checkTargetNamespace, _ := NewCollectionNamespaceFromString(v.(string))
+		if srcNamespace.IsSameAs(checkSourceNamespace) && tgtNamespace.IsSameAs(checkTargetNamespace) {
+			matched = true
+			return
+		}
+	}
+	return
+}
+
+func (c CollectionsMappingRulesType) checkCase2(srcNamespace *CollectionNamespace) (found, matched bool) {
+	for k, v := range c {
+		if v != nil {
+			continue
+		}
+		checkSourceNamespace, _ := NewCollectionNamespaceFromString(k)
+		if !found && srcNamespace.IsSameAs(checkSourceNamespace) {
+			found = true
+		}
+		if srcNamespace.IsSameAs(checkSourceNamespace) {
+			matched = true
+		}
+	}
+	return
+}
+
+func (c CollectionsMappingRulesType) checkCase3(srcNamespace, tgtNamespace *CollectionNamespace) bool {
+	for k, v := range c {
+		if v == nil {
+			continue
+		}
+
+		_, err := NewCollectionNamespaceFromString(k)
+		if err == nil {
+			// S:C namespace has already been checked in case1
+			continue
+		}
+
+		// v must be non-nil string of a Scope name
+		ruleSourceScopeName := k
+		ruleTargetScopeName := v.(string)
+
+		if srcNamespace.ScopeName == ruleSourceScopeName && tgtNamespace.ScopeName == ruleTargetScopeName &&
+			srcNamespace.CollectionName == tgtNamespace.CollectionName {
+			return true
+		}
+	}
+	return false
 }
 
 type XattrIterator struct {

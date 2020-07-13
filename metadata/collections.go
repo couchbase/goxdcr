@@ -1027,6 +1027,51 @@ func newCollectionNsMetaObj() *collectionNsMetaObj {
 // This means rest needs to do some gymanistics, instead of just simply checking for pointers
 type CollectionNamespaceMapping map[*base.CollectionNamespace]CollectionNamespaceList
 
+func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules base.CollectionsMappingRulesType) (CollectionNamespaceMapping, error) {
+	if manifestsPair.Source == nil || manifestsPair.Target == nil {
+		return CollectionNamespaceMapping{}, fmt.Errorf("creating collection namespace mapping pair contains at least one nil element")
+	}
+	switch mappingMode.IsExplicitMapping() {
+	case false:
+		// Implicit mapping
+		successfulMapping, _, _ := manifestsPair.Source.ImplicitMap(manifestsPair.Target)
+		return successfulMapping, nil
+	case true:
+		// Explicit mapping
+		switch mappingMode.IsMigrationOn() {
+		case false:
+			outputMapping := make(CollectionNamespaceMapping)
+			// Not very efficient - but this should only happens with manifest change - so not too often
+			for _, sourceScope := range manifestsPair.Source.Scopes() {
+				for _, sourceCollection := range sourceScope.Collections {
+					for _, targetScope := range manifestsPair.Target.Scopes() {
+						for _, targetCollection := range targetScope.Collections {
+							srcNamespace := &base.CollectionNamespace{
+								ScopeName:      sourceScope.Name,
+								CollectionName: sourceCollection.Name,
+							}
+							tgtNamespace := &base.CollectionNamespace{
+								ScopeName:      targetScope.Name,
+								CollectionName: targetCollection.Name,
+							}
+							matched := rules.ExplicitMatch(srcNamespace, tgtNamespace)
+							if matched {
+								outputMapping.AddSingleMapping(srcNamespace, tgtNamespace)
+							}
+						}
+					}
+				}
+			}
+			return outputMapping, nil
+		case true:
+			// TODO - MB-40474
+			panic("TODO")
+			return CollectionNamespaceMapping{}, fmt.Errorf("Not implemented")
+		}
+	}
+	return CollectionNamespaceMapping{}, base.ErrorInvalidInput
+}
+
 func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 	metaObj := newCollectionNsMetaObj()
 
