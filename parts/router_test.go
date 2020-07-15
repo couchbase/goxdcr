@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
-	"sync/atomic"
 	"testing"
 )
 
@@ -490,7 +489,8 @@ func TestRouterExplicitMode(t *testing.T) {
 		expDelMode, collectionsManifestSvc, nil /*objRecycler*/)
 
 	assert.Nil(err)
-	assert.Equal(uint32(1), atomic.LoadUint32(&router.isExplicitMapping))
+	modes := router.collectionModes.Get()
+	assert.True(modes.IsExplicitMapping())
 
 	collectionsRouter := router.collectionsRouting[dummyDownStream]
 	assert.NotNil(collectionsRouter)

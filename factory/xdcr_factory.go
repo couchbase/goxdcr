@@ -1020,6 +1020,16 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[metadata.BrokenMappingsPair] = brokenMappingsPair
 	}
 
+	collectionsMgtMode, ok := settings[metadata.CollectionsMgtMultiKey]
+	if ok {
+		routerSettings[metadata.CollectionsMgtMultiKey] = collectionsMgtMode
+	}
+
+	explicitMappingRules, ok := settings[metadata.CollectionsMappingRulesKey]
+	if ok {
+		routerSettings[metadata.CollectionsMappingRulesKey] = explicitMappingRules
+	}
+
 	return routerSettings, nil
 }
 

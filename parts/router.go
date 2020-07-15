@@ -82,6 +82,16 @@ func (f *FilterExpDelAtomicType) Get() base.FilterExpDelType {
 	return base.FilterExpDelType(atomic.LoadUint32(&f.val))
 }
 
+type CollectionsMgtAtomicType uint32
+
+func (c *CollectionsMgtAtomicType) Set(value base.CollectionsMgtType) {
+	atomic.StoreUint32((*uint32)(c), uint32(value))
+}
+
+func (c *CollectionsMgtAtomicType) Get() base.CollectionsMgtType {
+	return base.CollectionsMgtType(atomic.LoadUint32((*uint32)(c)))
+}
+
 type RouterIface interface {
 	Start() error
 	Stop() error
@@ -99,10 +109,10 @@ type Router struct {
 	routingMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	topic      string
 	// whether lww conflict resolution mode has been enabled
-	sourceCRMode      base.ConflictResolutionMode
-	utils             utilities.UtilsIface
-	expDelMode        FilterExpDelAtomicType
-	isExplicitMapping uint32
+	sourceCRMode    base.ConflictResolutionMode
+	utils           utilities.UtilsIface
+	expDelMode      FilterExpDelAtomicType
+	collectionModes CollectionsMgtAtomicType
 
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
 	// whether the current replication is a high priority replication
@@ -163,12 +173,7 @@ type CollectionsRouter struct {
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	started                uint32
 	logger                 *log.CommonLogger
-
-	// Collections Mapping related
-	specAndMappingMtx    sync.RWMutex
-	spec                 *metadata.ReplicationSpecification
-	explicitMappings     metadata.CollectionNamespaceMapping // nil for implicit mapping
-	lastKnownSrcManifest *metadata.CollectionsManifest
+	spec                   *metadata.ReplicationSpecification // Read-Only at startup
 
 	/*
 	 * When retry fails, these members record the needed information
@@ -181,6 +186,13 @@ type CollectionsRouter struct {
 	ignoreDataFunc       IgnoreDataEventer
 
 	fatalErrorFunc func(error)
+
+	// Collections Mapping related
+	mappingMtx           sync.RWMutex
+	explicitMappings     metadata.CollectionNamespaceMapping // nil for implicit mapping
+	collectionMode       base.CollectionsMgtType
+	cachedRules          base.CollectionsMappingRulesType
+	lastKnownSrcManifest *metadata.CollectionsManifest
 }
 
 // A collection router is critically important to not only route to the target collection, but
@@ -272,15 +284,15 @@ func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc,
 
 func (c *CollectionsRouter) Start() error {
 	atomic.StoreUint32(&c.started, 1)
-	c.specAndMappingMtx.RLock()
+	c.mappingMtx.RLock()
 	modes := c.spec.Settings.GetCollectionModes()
 	curSrcMan, curTgtMan, err := c.collectionsManifestSvc.GetLatestManifests(c.spec)
 	if err != nil {
-		c.specAndMappingMtx.RUnlock()
+		c.mappingMtx.RUnlock()
 		return err
 	}
 	rules := c.spec.Settings.GetCollectionsRoutingRules().Clone()
-	c.specAndMappingMtx.RUnlock()
+	c.mappingMtx.RUnlock()
 
 	if !modes.IsExplicitMapping() {
 		return nil
@@ -290,10 +302,12 @@ func (c *CollectionsRouter) Start() error {
 		Source: curSrcMan,
 		Target: curTgtMan,
 	}
-	c.specAndMappingMtx.Lock()
+	c.mappingMtx.Lock()
 	c.lastKnownSrcManifest = curSrcMan
 	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules)
-	c.specAndMappingMtx.Unlock()
+	c.collectionMode = c.spec.Settings.GetCollectionModes()
+	c.cachedRules = rules
+	c.mappingMtx.Unlock()
 	return err
 }
 
@@ -372,9 +386,9 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.Colle
 		err = PartStoppedError
 		return
 	}
-	c.specAndMappingMtx.RLock()
+	c.mappingMtx.RLock()
 	isExplicitMapping := c.explicitMappings != nil
-	c.specAndMappingMtx.RUnlock()
+	c.mappingMtx.RUnlock()
 
 	var latestSourceManifest *metadata.CollectionsManifest
 	var latestTargetManifest *metadata.CollectionsManifest
@@ -423,20 +437,23 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 		return fmt.Errorf("Nil source or target manifest given")
 	}
 
-	c.specAndMappingMtx.RLock()
+	c.mappingMtx.RLock()
 	isExplicitMapping := c.explicitMappings != nil
-	lastKnownUid := c.lastKnownSrcManifest.Uid()
-	c.specAndMappingMtx.RUnlock()
+	var lastKnownUid uint64
+	if c.lastKnownSrcManifest != nil {
+		lastKnownUid = c.lastKnownSrcManifest.Uid()
+	}
+	c.mappingMtx.RUnlock()
 
 	if !isExplicitMapping || latestSourceManifest.Uid() <= lastKnownUid {
 		return nil
 	}
 
-	c.specAndMappingMtx.RLock()
-	mappingMode := c.spec.Settings.GetCollectionModes()
-	rules := c.spec.Settings.GetCollectionsRoutingRules().Clone()
+	c.mappingMtx.RLock()
+	mappingMode := c.collectionMode
+	rules := c.cachedRules.Clone()
 	cachedExplicitMap := c.explicitMappings.Clone()
-	c.specAndMappingMtx.RUnlock()
+	c.mappingMtx.RUnlock()
 	manifestsPair := metadata.CollectionsManifestPair{
 		Source: latestSourceManifest,
 		Target: latestTargetManifest,
@@ -455,9 +472,11 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 	}
 
 	// TODO MB-40468 - need to raise backfill
-	c.specAndMappingMtx.Lock()
+	// When a new explicit map shows up because the source or target manifest change caused it to be valid,
+	// ongoing mutations will start flowing but need to backfill previously missed
+	c.mappingMtx.Lock()
 	c.explicitMappings = explicitMap
-	c.specAndMappingMtx.Unlock()
+	c.mappingMtx.Unlock()
 	return nil
 }
 
@@ -482,9 +501,9 @@ func (c *CollectionsRouter) implicitMap(namespace *base.CollectionNamespace, lat
 
 func (c *CollectionsRouter) explicitMap(srcNamespace *base.CollectionNamespace, latestTargetManifest *metadata.CollectionsManifest) (manifestId uint64, colId uint32, err error) {
 	manifestId = latestTargetManifest.Uid()
-	c.specAndMappingMtx.RLock()
+	c.mappingMtx.RLock()
 	_, tgtCollections, exists := c.explicitMappings.Get(srcNamespace)
-	c.specAndMappingMtx.RUnlock()
+	c.mappingMtx.RUnlock()
 	if !exists || len(tgtCollections) == 0 {
 		c.brokenMapMtx.RLock()
 		_, _, exists := c.brokenMapping.Get(srcNamespace)
@@ -878,14 +897,12 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	}
 
 	router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(),
-		CollectionsRoutingUpdater(routingUpdater), IgnoreDataEventer(ignoreRequestFunc), fatalErrorFunc)
+		routingUpdater, ignoreRequestFunc, fatalErrorFunc)
 
 	modes := spec.Settings.GetCollectionModes()
-	if modes.IsExplicitMapping() {
-		router.isExplicitMapping = 1
-	}
+	router.collectionModes = CollectionsMgtAtomicType(modes)
 
-	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v and filter=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg)
+	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v, filter=%v, collectionMode=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg, modes.String())
 	return router, nil
 }
 
@@ -1074,7 +1091,8 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 	var manifestId uint64
 	var err error
 
-	if atomic.LoadUint32(&router.isExplicitMapping) == 0 &&
+	collectionMode := router.collectionModes.Get()
+	if !collectionMode.IsExplicitMapping() &&
 		(mcRequest.ColNamespace == nil || mcRequest.ColNamespace.IsDefault()) {
 		colId = 0
 	} else {
@@ -1251,6 +1269,11 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		if ok && ok2 && router.Router.IsStartable() {
 			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappings, targetManifestId)
 		}
+	}
+
+	collectionsMgtMode, ok := settings[metadata.CollectionsMgtMultiKey].(base.CollectionsMgtType)
+	if ok {
+		router.collectionModes.Set(collectionsMgtMode)
 	}
 
 	if len(errMap) > 0 {

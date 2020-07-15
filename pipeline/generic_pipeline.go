@@ -770,7 +770,7 @@ func (genericPipeline *GenericPipeline) UpdateSettings(settings metadata.Replica
 
 	if genericPipeline.logger.GetLogLevel() >= log.LogLevelDebug {
 		redactOnce()
-		genericPipeline.logger.Debugf("%v update settings called with settings=%v\n", genericPipeline.InstanceId(), redactedSettings)
+		genericPipeline.logger.Infof("%v update settings called with settings=%v\n", genericPipeline.InstanceId(), redactedSettings)
 	}
 
 	if len(settings) == 0 {

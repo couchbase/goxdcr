@@ -422,6 +422,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		err = b.postDeleteBackfillRepl(changedSpecId, oldSpec.InternalId)
 	}
 
+	// TODO MB-40468 - need to raise backfill
 	return err
 }
 
