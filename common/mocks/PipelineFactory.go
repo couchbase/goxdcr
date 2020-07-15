@@ -1,7 +1,9 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -54,4 +56,9 @@ func (_m *PipelineFactory) NewSecondaryPipeline(topic string, primaryPipeline co
 	}
 
 	return r0, r1
+}
+
+// SetPipelineStopCallback provides a mock function with given fields: cbType
+func (_m *PipelineFactory) SetPipelineStopCallback(cbType base.PipelineMgrStopCbType) {
+	_m.Called(cbType)
 }

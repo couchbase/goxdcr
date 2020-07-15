@@ -295,3 +295,17 @@ func (_m *PipelineMgrForSerializer) Update(topic string, cur_err error) error {
 
 	return r0
 }
+
+// UpdateWithStoppedCb provides a mock function with given fields: topic, callback, errCb
+func (_m *PipelineMgrForSerializer) UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	ret := _m.Called(topic, callback, errCb)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, func() error, func(error)) error); ok {
+		r0 = rf(topic, callback, errCb)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}

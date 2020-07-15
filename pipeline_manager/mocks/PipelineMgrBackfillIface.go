@@ -58,6 +58,20 @@ func (_m *PipelineMgrBackfillIface) HaltBackfill(topic string) error {
 	return r0
 }
 
+// ReInitStreams provides a mock function with given fields: pipelineName
+func (_m *PipelineMgrBackfillIface) ReInitStreams(pipelineName string) error {
+	ret := _m.Called(pipelineName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(pipelineName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // RequestBackfill provides a mock function with given fields: topic
 func (_m *PipelineMgrBackfillIface) RequestBackfill(topic string) error {
 	ret := _m.Called(topic)

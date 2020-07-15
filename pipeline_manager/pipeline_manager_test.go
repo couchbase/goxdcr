@@ -81,6 +81,8 @@ func setupBoilerPlate() (*log.CommonLogger,
 	collectionsManifestSvc := &service_def.CollectionsManifestSvc{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
 
+	pipelineMock.On("SetPipelineStopCallback", mock.Anything).Return(nil)
+
 	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock,
 		remoteClusterMock, clusterInfoSvc, nil, /*checkpoint_svc*/
 		uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc,
@@ -896,4 +898,58 @@ func TestCollectionsRefreshError(t *testing.T) {
 	// Collection target refresh should have fired once
 	assert.Equal(uint64(1), currentRun-prevRun)
 	fmt.Println("============== Test case end: TestCollectionsRefreshError=================")
+}
+
+func TestPipelineMgrCallbacks(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineMgrCallbacks =================")
+	defer fmt.Println("============== Test case start: TestPipelineMgrCallbacks =================")
+	assert := assert.New(t)
+
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
+
+	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
+
+	setupLaunchUpdater(testRepairer, true)
+	assert.Equal(uint64(0), atomic.LoadUint64(&testRepairer.runCounter))
+
+	var callbackCount int
+	var errCount int
+	callback := func() error {
+		callbackCount++
+		return nil
+	}
+	errFunc := func(err error) {
+		errCount++
+	}
+	pipelineMgr.UpdateWithStoppedCb("testTopic", callback, errFunc)
+	time.Sleep(250 * time.Millisecond)
+
+	assert.Equal(1, callbackCount)
+	assert.Equal(0, errCount)
+	assert.Equal(uint64(1), atomic.LoadUint64(&testRepairer.runCounter))
+
+	// Test concurrent run - only callback once
+	go pipelineMgr.Update("testTopic", nil)
+	go pipelineMgr.UpdateWithStoppedCb("testTopic", callback, errFunc)
+	time.Sleep(250 * time.Millisecond)
+	assert.Equal(2, callbackCount)
+	assert.Equal(0, errCount)
+	assert.Equal(uint64(3), atomic.LoadUint64(&testRepairer.runCounter))
+
+	// Test failure call
+	callback = func() error {
+		callbackCount++
+		return fmt.Errorf("Dummy")
+	}
+	pipelineMgr.UpdateWithStoppedCb("testTopic", callback, errFunc)
+	time.Sleep(250 * time.Millisecond)
+	assert.Equal(3, callbackCount)
+	assert.Equal(1, errCount)
+	assert.Equal(uint64(4), atomic.LoadUint64(&testRepairer.runCounter))
 }

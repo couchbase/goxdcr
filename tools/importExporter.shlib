@@ -40,6 +40,12 @@ function exportProvisionedConfig {
 	local -a outputArr
 	local outputFile=$XDCR_HIDDEN_EXPORTFILE
 
+	# if running from tools/testScripts directory, export to just tools
+	if [[ `basename $PWD`  == "testScripts" ]];then
+	  outputFile="../${outputFile}"
+  fi
+
+
 	for mapName in CLUSTER_NAME_PORT_MAP \
 					CLUSTER_NAME_XDCR_PORT_MAP \
 					CLUSTER_NAME_BUCKET_MAP \

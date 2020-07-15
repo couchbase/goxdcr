@@ -15,10 +15,13 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/utils"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -64,6 +67,8 @@ type BackfillMgr struct {
 
 	pipelineSvc  *pipelineSvcWrapper
 	startStopMtx sync.Mutex
+
+	utils utils.UtilsIface
 }
 
 // Pipeline SvcWrapper is a way for backfill manager to pretend to be a pipeline service
@@ -163,6 +168,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		xdcrTopologySvc:        xdcrTopologySvc,
 		pipelineSvc:            &pipelineSvcWrapper{},
 		checkpointsSvc:         checkpointsSvc,
+		utils:                  utils.NewUtilities(),
 	}
 
 	return backfillMgr
@@ -291,6 +297,11 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 			}
 		}
 	}
+
+	mainPipelineCkptSeqnosGetter := func() (map[uint16]uint64, error) {
+		return b.getThroughSeqnosFromMainCkpts(replId, internalId)
+	}
+
 	var err error
 	b.specReqHandlersMtx.Lock()
 	if _, exists := b.specToReqHandlerMap[replId]; exists {
@@ -299,7 +310,8 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		return err
 	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
-		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier)
+		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier,
+		mainPipelineCkptSeqnosGetter)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
@@ -420,10 +432,112 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 			return nil
 		}
 		err = b.postDeleteBackfillRepl(changedSpecId, oldSpec.InternalId)
+	} else {
+		// metakv_change_listener will call GetExplicitMappingChangeHandler if needed
+	}
+	return err
+}
+
+func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
+	callback := func() error {
+		err, upToDate := b.checkUpToDateSpec(specId, internalSpecId)
+		if !upToDate {
+			return err
+		}
+
+		oldCollectionMode := oldSettings.GetCollectionModes()
+		oldRoutingRules := oldSettings.GetCollectionsRoutingRules()
+		newCollectionMode := newSettings.GetCollectionModes()
+		newRoutingRules := newSettings.GetCollectionsRoutingRules()
+
+		if oldCollectionMode.IsExplicitMapping() != newCollectionMode.IsExplicitMapping() {
+			// Any changes between implicit or explicit mapping means all checkpoints are deleted and everything starts over
+			// This is handled by replication spec service
+			return nil
+		} else if !newCollectionMode.IsExplicitMapping() {
+			// No need to worry about raising backfill for implicit mapping
+			// This is handled by replication spec service
+			return nil
+		} else if !oldRoutingRules.SameAs(newRoutingRules) {
+			// Explicit mapping and explicit mapping rules have changed
+			specForId := metadata.ReplicationSpecification{Id: specId} /* only need the spec for the Id */
+			srcMan, tgtMan, err := b.collectionsManifestSvc.GetLatestManifests(&specForId)
+			if err != nil {
+				b.logger.Errorf("error - Unable to retrieve manifests for spec %v due to %v - recommended to restream", specId, err)
+				return err
+			}
+			manifestPair := metadata.CollectionsManifestPair{
+				Source: srcMan,
+				Target: tgtMan,
+			}
+			newMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, newCollectionMode, newRoutingRules)
+			if err != nil {
+				return err
+			}
+			oldMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, oldCollectionMode, oldRoutingRules)
+			if err != nil {
+				return err
+			}
+			added, removed := newMapping.Diff(oldMapping)
+			err = b.handleExplicitMapChangeBackfillReq(specId, added, removed)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
-	// TODO MB-40468 - need to raise backfill
-	return err
+	errCallback := func(err error) {
+		b.explicitMappingCbGenericErrHandler(err, specId)
+	}
+
+	return callback, errCallback
+}
+
+func (b *BackfillMgr) explicitMappingCbGenericErrHandler(err error, specId string) {
+	if err != nil {
+		b.logger.Fatalf("Unable to Handle backfilling data for explicit mapping change due to err %v. To prevent data loss, the whole replication %v must be restarted from seqno 0", err, specId)
+		b.pipelineMgr.ReInitStreams(specId)
+	}
+}
+
+func (b *BackfillMgr) checkUpToDateSpec(specId string, internalSpecId string) (error, bool) {
+	// First, get most up-to-date spec to ensure this call is not out of date
+	spec, err := b.replSpecSvc.ReplicationSpec(specId)
+	if err != nil {
+		if err == metadata_svc.ReplNotFoundErr {
+			// This is ok - this callback was too late
+			return nil, false
+		} else {
+			// shouldn't happen
+			return err, false
+		}
+	}
+
+	if spec.InternalId != internalSpecId {
+		// Callback is too late - spec got recreated already, no op
+		return nil, false
+	}
+	return nil, true
+}
+
+func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
+	callback := func() error {
+		err, upToDate := b.checkUpToDateSpec(specId, internalSpecId)
+		if !upToDate {
+			return err
+		}
+		err = b.handleExplicitMapChangeBackfillReq(specId, diff.Added, diff.Removed)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	errCb := func(err error) {
+		b.explicitMappingCbGenericErrHandler(err, specId)
+	}
+	return callback, errCb
 }
 
 func (b *BackfillMgr) postDeleteBackfillRepl(specId, internalId string) error {
@@ -433,6 +547,31 @@ func (b *BackfillMgr) postDeleteBackfillRepl(specId, internalId string) error {
 		b.logger.Errorf("Cleaning up backfill checkpoints for %v got err %v", backfillSpecId, err)
 	}
 	return err
+}
+
+func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string) (map[uint16]uint64, error) {
+	ckptDocs, err := b.checkpointsSvc.CheckpointsDocs(specId, false)
+	if err != nil {
+		return nil, err
+	}
+	maxSeqnoMap := make(map[uint16]uint64)
+
+	for vb, ckptDoc := range ckptDocs {
+		if ckptDoc.SpecInternalId != internalId {
+			continue
+		}
+		var maxSeqno uint64
+		for _, record := range ckptDoc.Checkpoint_records {
+			if record == nil {
+				continue
+			}
+			if record.Seqno > maxSeqno {
+				maxSeqno = record.Seqno
+			}
+		}
+		maxSeqnoMap[vb] = maxSeqno
+	}
+	return maxSeqnoMap, nil
 }
 
 func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification) error {
@@ -610,4 +749,34 @@ func (b *BackfillMgr) GetPipelineSvc() common.PipelineService {
 
 func (b *BackfillMgr) GetComponentEventListener(pipeline common.Pipeline) (common.ComponentEventListener, error) {
 	return b.pipelineSvc.GetComponentEventListener(pipeline)
+}
+
+func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added metadata.CollectionNamespaceMapping, removed metadata.CollectionNamespaceMapping) error {
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[replId]
+	handlerFinCh := handler.finCh
+	b.specReqHandlersMtx.RUnlock()
+	if handler == nil {
+		b.logger.Errorf("Unable to find handler for spec %v", replId)
+		return base.ErrorNotFound
+	}
+
+	mapPair := metadata.CollectionNamespaceMappingsDiffPair{
+		Added:   added,
+		Removed: removed,
+	}
+
+	handleRequestWrapper := func(interface{}) (interface{}, error) {
+		return nil, handler.HandleBackfillRequest(mapPair)
+	}
+	_, err := b.utils.ExponentialBackoffExecutorWithFinishSignal("explicitMapChange", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, handleRequestWrapper, nil, handlerFinCh)
+	if err != nil {
+		if strings.Contains(err.Error(), base.FinClosureStr) {
+			// If finClosure, then this means that the handler has been told to stop, which means spec was deleted
+			err = nil
+		} else {
+			b.logger.Errorf("%v Executing explicitMapChange with retry resulted in %v", replId, err)
+		}
+	}
+	return err
 }

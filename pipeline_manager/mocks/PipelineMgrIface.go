@@ -1,7 +1,9 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/base"
 	metadata "github.com/couchbase/goxdcr/metadata"
+
 	mock "github.com/stretchr/testify/mock"
 
 	pipeline "github.com/couchbase/goxdcr/pipeline"
@@ -183,6 +185,20 @@ func (_m *PipelineMgrIface) UpdatePipeline(pipelineName string, cur_err error) e
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, error) error); ok {
 		r0 = rf(pipelineName, cur_err)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UpdatePipelineWithStoppedCb provides a mock function with given fields: topic, callback, errCb
+func (_m *PipelineMgrIface) UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	ret := _m.Called(topic, callback, errCb)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) error); ok {
+		r0 = rf(topic, callback, errCb)
 	} else {
 		r0 = ret.Error(0)
 	}

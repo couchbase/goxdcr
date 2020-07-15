@@ -71,9 +71,7 @@ func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
 
 	colManifestSvc := &serviceDefMocks.CollectionsManifestSvc{}
 
-	router, _ := NewRouter("testId", spec, nil /*downstreamparts*/, nil, /*routingMap*/
-		base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil /*throughputThrottler*/, false, /*highRepl*/
-		base.FilterExpDelNone, colManifestSvc, nil /*recycler*/)
+	router, _ := NewRouter("testId", spec, nil, nil, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil)
 
 	return utilitiesMock, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc, colManifestSvc
 }

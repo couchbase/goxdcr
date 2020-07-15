@@ -53,7 +53,7 @@ type PipelineManager struct {
 
 	once       sync.Once
 	logger     *log.CommonLogger
-	serializer *PipelineOpSerializer
+	serializer PipelineOpSerializerIface
 	utils      utilities.UtilsIface
 }
 
@@ -71,6 +71,7 @@ type PipelineMgrIface interface {
 	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
 	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
 	OnExit() error
+	UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 }
 
 type PipelineMgrInternalIface interface {
@@ -103,6 +104,7 @@ type PipelineMgrForSerializer interface {
 	StartBackfill(topic string) error
 	StopBackfill(topic string) error
 	CleanupBackfillPipeline(topic string) error
+	UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 }
 
 // Specifically APIs used by backfill manager
@@ -111,6 +113,7 @@ type PipelineMgrBackfillIface interface {
 	RequestBackfill(topic string) error
 	HaltBackfill(topic string) error
 	CleanupBackfillCkpts(topic string) error
+	ReInitStreams(pipelineName string) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -145,6 +148,8 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 	if pipeline_mgr == nil {
 		pipeline_mgr = pipelineMgrRetVar
 	}
+
+	pipelineMgrRetVar.pipeline_factory.SetPipelineStopCallback(pipelineMgrRetVar.UpdateWithStoppedCb)
 
 	return pipelineMgrRetVar
 }
@@ -743,6 +748,42 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 	return nil
 }
 
+// This is a specialized version of Update(), in which the update call will ensure that the updater
+// execute a specialized version of update where the "callback" is called once pipelines have stopped, and before they
+// start up again
+// If the callback fails with a non-nil error, then the errCb() function is called as a result
+func (pipelineMgr *PipelineManager) UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	rep_status, retErr := pipelineMgr.GetOrCreateReplicationStatus(topic, nil)
+	if rep_status == nil {
+		combinedRetErr := errors.New(ReplicationStatusNotFound.Error() + " Cause: " + retErr.Error())
+		return combinedRetErr
+	} else if retErr != nil {
+		return retErr
+	}
+
+	updaterObj := rep_status.Updater()
+	if updaterObj == nil {
+		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in update()", topic)
+		return errors.New(errorStr)
+	} else {
+		updater, ok := updaterObj.(*PipelineUpdater)
+		if updater == nil || !ok {
+			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
+			return errors.New(errorStr)
+		}
+		err := updater.registerPipelineStoppedCb(updaterIntermediateCb{
+			callback: callback,
+			errCb:    errCb,
+		})
+		if err != nil {
+			// Unable to register the callback - this means the callback will not get to execute
+			// and thus the errCb() will need to be called
+			errCb(err)
+		}
+	}
+	return nil
+}
+
 // Should be called internally from serializer's Pause()
 func (pipelineMgr *PipelineManager) PauseReplication(topic string) error {
 	currentSpec, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic)
@@ -962,6 +1003,10 @@ func (pipelineMgr *PipelineManager) GetMainPipelineThroughSeqnos(topic string) (
 	return statsMgr.GetThroughSeqnosFromTsService(), nil
 }
 
+func (pipelineMgr *PipelineManager) UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	return pipelineMgr.serializer.UpdateWithStoppedCb(topic, callback, errCb)
+}
+
 var updaterStateErrorStr = "Can't move update state from %v to %v"
 
 // unit test injection flags
@@ -1023,6 +1068,11 @@ const (
 	DCInvalid      DisableCompressionReason = iota
 )
 
+type updaterIntermediateCb struct {
+	callback base.StoppedPipelineCallback
+	errCb    base.StoppedPipelineErrCallback
+}
+
 //pipelineRepairer is responsible to repair a failing pipeline
 //it will retry after the retry_interval
 type PipelineUpdater struct {
@@ -1036,6 +1086,8 @@ type PipelineUpdater struct {
 	update_now_ch chan bool
 	// update-error-map channel
 	update_err_map_ch chan base.ErrorMap
+	// Specialized request channel for cosumers asking for callback during updates
+	updateWithCb chan updaterIntermediateCb
 	// channel indicating whether updater is really done
 	done_ch chan bool
 	// startBackfillChannel
@@ -1161,6 +1213,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error,
 		done_ch:                make(chan bool, 1),
 		update_now_ch:          make(chan bool, 1),
 		update_err_map_ch:      make(chan base.ErrorMap, 1),
+		updateWithCb:           make(chan updaterIntermediateCb, MaxNonblockingQueueJobs),
 		backfillStartCh:        make(chan bool, 1),
 		backfillStopCh:         make(chan bool, 1),
 		backfillErrMapCh:       make(chan base.ErrorMap, 1),
@@ -1208,23 +1261,13 @@ func (r *PipelineUpdater) run() {
 			if len(retErrMap) > 0 {
 				r.logger.Infof("Replication %v update experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 				r.sendUpdateErrMap(retErrMap)
+			} else if r.callbacksStillRemain() {
+				r.logger.Infof("There are still callback requests that need to run. Will need to update pipeline %v again", r.pipeline_name)
+				r.sendUpdateNow()
 			}
 		case retErrMap = <-r.update_err_map_ch:
-			var updateAgain bool
 			r.currentErrors.ConcatenateErrors(retErrMap)
-			if r.getLastResult() {
-				// Last time update succeeded, so this error then triggers an immediate update
-				r.logger.Infof("Replication %v's status experienced changes or errors (%v), updating now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
-				retErrMap = r.update()
-				r.cancelFutureRefresh()
-				if len(retErrMap) > 0 {
-					updateAgain = true
-				}
-			} else {
-				r.logger.Infof("Replication %v's status experienced changes or errors (%v). However, last update resulted in failure, so will reschedule a future update\n", r.pipeline_name, retErr)
-				// Last time update failed, so we should wait for stablization
-				updateAgain = true
-			}
+			updateAgain := r.checkIfNeedToReUpdate(retErrMap, retErr)
 			if updateAgain {
 				r.scheduleFutureRefresh()
 			}
@@ -1272,6 +1315,32 @@ func (r *PipelineUpdater) run() {
 			}
 		}
 	}
+}
+
+func (r *PipelineUpdater) checkIfNeedToReUpdate(retErrMap base.ErrorMap, retErr error) bool {
+	var updateAgain bool
+	if r.getLastResult() {
+		// Last time update succeeded, so this error then triggers an immediate update
+		r.logger.Infof("Replication %v's status experienced changes or errors (%v), updating now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+		retErrMap = r.update()
+		r.cancelFutureRefresh()
+		if len(retErrMap) > 0 {
+			updateAgain = true
+		}
+	} else {
+		r.logger.Infof("Replication %v's status experienced changes or errors (%v). However, last update resulted in failure, so will reschedule a future update\n", r.pipeline_name, retErr)
+		// Last time update failed, so we should wait for stablization
+		updateAgain = true
+	}
+	if r.callbacksStillRemain() {
+		r.logger.Infof("There are still callback requests that need to run. Will need to update pipeline %v again", r.pipeline_name)
+		updateAgain = true
+	}
+	return updateAgain
+}
+
+func (r *PipelineUpdater) callbacksStillRemain() bool {
+	return len(r.updateWithCb) > 0
 }
 
 func allErrorsAreAllowed(errMap base.ErrorMap) bool {
@@ -1399,6 +1468,9 @@ func (r *PipelineUpdater) update() base.ErrorMap {
 		errMap[checkReplicationActivenessKey] = err
 		goto RE
 	}
+
+	// If callbacks need to be called before pipeline start again, call them
+	r.executeQueuedCallbacks()
 
 	errMap = r.pipelineMgr.StartPipeline(r.pipeline_name)
 
@@ -1752,4 +1824,31 @@ func (r *PipelineUpdater) clearErrors() {
 
 func getRequestPoolSize(rep_status *pipeline.ReplicationStatus, numOfTargetNozzles int) int {
 	return rep_status.Spec().Settings.BatchCount * 52 * numOfTargetNozzles
+}
+
+func (r *PipelineUpdater) registerPipelineStoppedCb(cb updaterIntermediateCb) error {
+	select {
+	case r.updateWithCb <- cb:
+		r.logger.Infof("pipeline %v updater received callback registration. Current callback count: %v", r.pipeline_name, len(r.updateWithCb))
+		r.sendUpdateNow()
+		return nil
+	default:
+		r.logger.Errorf("pipeline %v updater unable to register callback because channel is full")
+		return base.ErrorMaxReached
+	}
+}
+
+func (r *PipelineUpdater) executeQueuedCallbacks() {
+	for {
+		select {
+		case cb := <-r.updateWithCb:
+			r.logger.Infof("%v calling one callback...", r.pipeline_name)
+			err := cb.callback()
+			if err != nil {
+				cb.errCb(err)
+			}
+		default:
+			return
+		}
+	}
 }

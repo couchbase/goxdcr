@@ -64,6 +64,8 @@ type XDCRFactory struct {
 	pipeline_failure_handler common.SupervisorFailureHandler
 	logger                   *log.CommonLogger
 	utils                    utilities.UtilsIface
+
+	pipelineMgrStopCallback base.PipelineMgrStopCbType
 }
 
 type BackfillMgrGetter func() service_def.BackfillMgrIface
@@ -654,13 +656,24 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	logger_ctx *log.LoggerContext,
 	srcNozzleObjRecycler utilities.RecycleObjFunc) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
+
+	// When router detects a diff, it simply calls this function and this will handle the rest
+	explicitMappingChangeHandler := func(diff metadata.CollectionNamespaceMappingsDiffPair) {
+		callback, errCb := xdcrf.getBackfillMgr().GetRouterMappingChangeHandler(spec.Id, spec.InternalId, diff)
+		err := xdcrf.pipelineMgrStopCallback(spec.Id, callback, errCb)
+		if err != nil {
+			errCb(err)
+		}
+	}
+
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
 	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
 		logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc,
 		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(),
-		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler)
+		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler)
+
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
 	} else {
@@ -1299,4 +1312,11 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 	}
 
 	return ssl_port_map, nil
+}
+
+// When PipelineMgr is passed in the factory, it'll call this setter to allow factory to create parts that are
+// aware of the UpdateWithCallback API
+// This should only be called at consumer initiation and only called once (thus no lock)
+func (xdcrf *XDCRFactory) SetPipelineStopCallback(stopCb base.PipelineMgrStopCbType) {
+	xdcrf.pipelineMgrStopCallback = stopCb
 }

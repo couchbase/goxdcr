@@ -9,9 +9,14 @@
 
 package common
 
-import ()
+import (
+	"github.com/couchbase/goxdcr/base"
+)
 
 type PipelineFactory interface {
 	NewPipeline(topic string, progressRecorder PipelineProgressRecorder) (Pipeline, error)
 	NewSecondaryPipeline(topic string, primaryPipeline Pipeline, progress_recorder PipelineProgressRecorder, pipelineType PipelineType) (Pipeline, error)
+
+	// Due to inability to have import cycle, these APIs are called by Factory Consumers to set consumer APIs for callbacks
+	SetPipelineStopCallback(cbType base.PipelineMgrStopCbType)
 }

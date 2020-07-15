@@ -10,7 +10,9 @@
 package service_def
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/metadata"
 )
 
 type BackfillMgrIface interface {
@@ -20,6 +22,10 @@ type BackfillMgrIface interface {
 
 	// Backfill manager can act as a pipeline service and handle specific pipeline needs
 	GetPipelineSvc() common.PipelineService
+
+	// When explicit mapping changes, this callback should be used in between updates once pipelines have stopped
+	GetExplicitMappingChangeHandler(specId, internalSpecId string, oldSettings, newSettings *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
+	GetRouterMappingChangeHandler(specId, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 }
 
 type BackfillMgrComponentListenerGetter interface {

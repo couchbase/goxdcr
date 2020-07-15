@@ -323,5 +323,27 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 	assert.True(testSpec.VBTasksMap[0].containsStartEndRange(5, 5005))
 	assert.True(testSpec.VBTasksMap[0].containsStartEndRange(5005, 15005))
 	assert.True(testSpec.VBTasksMap[0].containsStartEndRange(15005, 20000))
+
+	// Test removing a namespace
+	dummyNamespaceMapping := make(CollectionNamespaceMapping)
+	dummyNamespace := base.CollectionNamespace{
+		ScopeName:      "Dummy",
+		CollectionName: "Dummy",
+	}
+	dummyNamespaceMapping.AddSingleMapping(&dummyNamespace, &dummyNamespace)
+	assert.False(testSpec.VBTasksMap.RemoveNamespaceMappings(dummyNamespaceMapping))
+	assert.Equal(4, len(*(testSpec.VBTasksMap[0])))
+	oldShaMap := testSpec.VBTasksMap.GetAllCollectionNamespaceMappings()
+	assert.Equal(1, len(oldShaMap))
+
+	assert.True(testSpec.VBTasksMap.RemoveNamespaceMappings(namespaceMapping))
+	// Since all the VBTasksMap only contain the namespaceMapping, removing it means the whole
+	// backfill spec should be nil
+	assert.Nil(testSpec.VBTasksMap[0])
+	newShaMap := testSpec.VBTasksMap.GetAllCollectionNamespaceMappings()
+	assert.Equal(0, len(newShaMap))
+	assert.Equal(0, len(testSpec.VBTasksMap))
+
+	//namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
 	fmt.Println("============== Test case end: TestMergeTasksIntoSpec =================")
 }

@@ -3,6 +3,7 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/pipeline"
 	"sync"
@@ -15,15 +16,16 @@ var ErrQueueMaxed error = errors.New("The requested action has been persisted in
 var SerializerStoppedErr error = errors.New("Pipeline Manager is shutting down. The requested action is unable to be processed.")
 
 const (
-	PipelineGetOrCreate   PipelineMgtOpType = iota
-	PipelineInit          PipelineMgtOpType = iota
-	PipelineUpdate        PipelineMgtOpType = iota
-	PipelineDeletion      PipelineMgtOpType = iota
-	PipelineReinitStream  PipelineMgtOpType = iota
-	PipelineAutoPause     PipelineMgtOpType = iota
-	BackfillPipelineStart PipelineMgtOpType = iota
-	BackfillPipelineStop  PipelineMgtOpType = iota
-	BackfillPipelineClean PipelineMgtOpType = iota
+	PipelineGetOrCreate      PipelineMgtOpType = iota
+	PipelineInit             PipelineMgtOpType = iota
+	PipelineUpdate           PipelineMgtOpType = iota
+	PipelineUpdateWStoppedCb PipelineMgtOpType = iota
+	PipelineDeletion         PipelineMgtOpType = iota
+	PipelineReinitStream     PipelineMgtOpType = iota
+	PipelineAutoPause        PipelineMgtOpType = iota
+	BackfillPipelineStart    PipelineMgtOpType = iota
+	BackfillPipelineStop     PipelineMgtOpType = iota
+	BackfillPipelineClean    PipelineMgtOpType = iota
 )
 
 func (p PipelineMgtOpType) String() string {
@@ -34,6 +36,8 @@ func (p PipelineMgtOpType) String() string {
 		return "PipelineInit"
 	case PipelineUpdate:
 		return "PipelineUpdate"
+	case PipelineUpdateWStoppedCb:
+		return "PipelineUpdateWStoppedCb"
 	case PipelineDeletion:
 		return "PipelineDeletion"
 	case PipelineReinitStream:
@@ -55,6 +59,7 @@ type PipelineOpSerializerIface interface {
 	// Asynchronous User APIs
 	Delete(topic string) error
 	Update(topic string, err error) error
+	UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	Init(topic string) error
 	ReInit(topic string) error
 	Pause(topic string) error
@@ -62,6 +67,7 @@ type PipelineOpSerializerIface interface {
 	// Async Backfill APIs
 	StartBackfill(topic string) error
 	StopBackfill(topic string) error
+	CleanBackfill(topic string) error
 
 	// Synchronous User APIs - call and get data from a channel
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
@@ -83,6 +89,10 @@ type Job struct {
 
 	// Aux inputs for jobs
 	errForUpdateOp error
+
+	// Input for UpdateWithStoppedCallback
+	callbackForWhenPipelineIsStopped base.StoppedPipelineCallback
+	errorCbForFailedStoppedOp        base.StoppedPipelineErrCallback
 
 	// Optional outputs from jobs
 	repStatusCh chan SerializerRepStatusPair
@@ -337,6 +347,11 @@ forloop:
 				if err != nil {
 					serializer.logger.Warnf("Error updating pipeline %v. err=%v", job.pipelineTopic, err)
 				}
+			case PipelineUpdateWStoppedCb:
+				err = serializer.pipelineMgr.UpdateWithStoppedCb(job.pipelineTopic, job.callbackForWhenPipelineIsStopped, job.errorCbForFailedStoppedOp)
+				if err != nil {
+					serializer.logger.Errorf("Error updating pipeline %v with callback. err=%v", job.pipelineTopic, err)
+				}
 			case PipelineReinitStream:
 				// Any errors here would be considered critical, as filters in replication spec has already been
 				// changed but replication is not reflecting the changes. Raise UI errors to get users' attention
@@ -423,4 +438,18 @@ func (serializer *PipelineOpSerializer) Stop() {
 		serializer.pipelineMgr = nil
 		serializer.logger.Infof("Pipeline Manager Serializer stopped")
 	})
+}
+
+func (serializer *PipelineOpSerializer) UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	if serializer.isStopped() {
+		return SerializerStoppedErr
+	}
+
+	var updateJob Job
+	updateJob.jobType = PipelineUpdateWStoppedCb
+	updateJob.pipelineTopic = topic
+	updateJob.callbackForWhenPipelineIsStopped = callback
+	updateJob.errorCbForFailedStoppedOp = errCb
+
+	return serializer.distributeJob(updateJob)
 }

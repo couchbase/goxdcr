@@ -1351,6 +1351,11 @@ func NewCollectionNamespaceMappingFromSnappyData(data []byte) (*CollectionNamesp
 	return &newMap, err
 }
 
+type CollectionNamespaceMappingsDiffPair struct {
+	Added   CollectionNamespaceMapping
+	Removed CollectionNamespaceMapping
+}
+
 type CollectionNsMappingsDoc struct {
 	NsMappingRecords CompressedColNamespaceMappingList `json:"NsMappingRecords"`
 

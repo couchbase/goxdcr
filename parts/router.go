@@ -34,6 +34,7 @@ var ErrorInvalidDataForRouter = errors.New("Input data to Router is invalid.")
 var ErrorNoDownStreamNodesForRouter = errors.New("No downstream nodes have been defined for the Router.")
 var ErrorNoRoutingMapForRouter = errors.New("No routingMap has been defined for Router.")
 var ErrorInvalidRoutingMapForRouter = errors.New("routingMap in Router is invalid.")
+var ErrorPipelineRestartDueToExplicitMapChange = errors.New("explicit mapping has changed and pipeline needs to restart to reflect the mapping change")
 
 var IsHighReplicationKey = "IsHighReplication"
 var NeedToThrottleKey = "NeedToThrottle"
@@ -132,6 +133,8 @@ type Router struct {
 	// When DataFiltered events are raised, instead of looking up the latest manifestID
 	// just use the last known successful manifestID here instead
 	lastSuccessfulManifestId uint64
+
+	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
 }
 
 /**
@@ -185,7 +188,7 @@ type CollectionsRouter struct {
 	routingUpdater       CollectionsRoutingUpdater
 	ignoreDataFunc       IgnoreDataEventer
 
-	fatalErrorFunc func(error)
+	fatalErrorFunc func(error, interface{})
 
 	// Collections Mapping related
 	mappingMtx           sync.RWMutex
@@ -193,6 +196,8 @@ type CollectionsRouter struct {
 	collectionMode       base.CollectionsMgtType
 	cachedRules          base.CollectionsMappingRulesType
 	lastKnownSrcManifest *metadata.CollectionsManifest
+
+	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
 }
 
 // A collection router is critically important to not only route to the target collection, but
@@ -265,20 +270,16 @@ type CollectionsRouter struct {
 //	   a. Any future checkpoints will no longer contain broken maps.
 //	5. Now, mutation y+2 will be routed successfully.
 
-func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc,
-	spec *metadata.ReplicationSpecification,
-	logger *log.CommonLogger,
-	routingUpdater CollectionsRoutingUpdater,
-	ignoreDataFunc IgnoreDataEventer,
-	fatalErrorFunc func(error)) *CollectionsRouter {
+func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)) *CollectionsRouter {
 	return &CollectionsRouter{
-		collectionsManifestSvc: colManifestSvc,
-		spec:                   spec,
-		logger:                 logger,
-		brokenMapping:          make(metadata.CollectionNamespaceMapping),
-		routingUpdater:         routingUpdater,
-		ignoreDataFunc:         ignoreDataFunc,
-		fatalErrorFunc:         fatalErrorFunc,
+		collectionsManifestSvc:   colManifestSvc,
+		spec:                     spec,
+		logger:                   logger,
+		brokenMapping:            make(metadata.CollectionNamespaceMapping),
+		routingUpdater:           routingUpdater,
+		ignoreDataFunc:           ignoreDataFunc,
+		fatalErrorFunc:           fatalErrorFunc,
+		explicitMapChangeHandler: explicitMapChangeHandler,
 	}
 }
 
@@ -346,7 +347,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 			err = fmt.Errorf("Collections Router %v error - unable to find last known target manifest version %v from collectionsManifestSvc - err: %v",
 				c.spec.Id, targetManifestId, err)
 			// TODO MB-38445
-			c.fatalErrorFunc(err)
+			c.fatalErrorFunc(err, nil)
 			return
 		}
 
@@ -471,9 +472,22 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 		return nil
 	}
 
-	// TODO MB-40468 - need to raise backfill
 	// When a new explicit map shows up because the source or target manifest change caused it to be valid,
 	// ongoing mutations will start flowing but need to backfill previously missed
+	// Restarting the pipeline to ensure a clean cut over using the explicitMapChangeHandler, which will make pipelinemgr:
+	// 1. Stop the pipeline
+	// 2. Get the latest seqnos from ckpts
+	// 3. Create backfill request based on the latest seqnos
+	// 4. Start pipelines
+	added, removed := explicitMap.Diff(c.explicitMappings)
+	pair := metadata.CollectionNamespaceMappingsDiffPair{
+		Added:   added,
+		Removed: removed,
+	}
+	c.explicitMapChangeHandler(pair)
+
+	// It's possible pipeline may take some time to get to the stop/start part
+	// so in the meantime, update the mapping and write to the right target collection for the ongoing stream
 	c.mappingMtx.Lock()
 	c.explicitMappings = explicitMap
 	c.mappingMtx.Unlock()
@@ -725,18 +739,12 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 // Key - xmem nozzle ID
 type CollectionsRoutingMap map[string]*CollectionsRouter
 
-func (c CollectionsRoutingMap) Init(downStreamParts map[string]common.Part,
-	colManifestSvc service_def.CollectionsManifestSvc,
-	spec *metadata.ReplicationSpecification,
-	logger *log.CommonLogger,
-	routingUpdater CollectionsRoutingUpdater,
-	ignoreDataFunc IgnoreDataEventer,
-	fatalErrorFunc func(error)) error {
+func (c CollectionsRoutingMap) Init(downStreamParts map[string]common.Part, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)) error {
 
 	for partId, outNozzlePart := range downStreamParts {
 		collectionRouter, exists := c[partId]
 		if !exists {
-			collectionRouter = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc)
+			collectionRouter = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc, explicitMapChangeHandler)
 			c[partId] = collectionRouter
 		}
 		outNozzle, ok := outNozzlePart.(common.OutNozzle)
@@ -798,17 +806,7 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.Col
  * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
  * 3+ Rest should be relatively obv
  */
-func NewRouter(id string, spec *metadata.ReplicationSpecification,
-	downStreamParts map[string]common.Part,
-	routingMap map[uint16]string,
-	sourceCRMode base.ConflictResolutionMode,
-	logger_context *log.LoggerContext,
-	utilsIn utilities.UtilsIface,
-	throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
-	isHighReplication bool,
-	filterExpDelType base.FilterExpDelType,
-	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	dcpObjRecycler utilities.RecycleObjFunc) (*Router, error) {
+func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, ok := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -830,19 +828,20 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	}
 
 	router := &Router{
-		id:                     id,
-		filter:                 filter,
-		routingMap:             routingMap,
-		topic:                  topic,
-		sourceCRMode:           sourceCRMode,
-		utils:                  utilsIn,
-		isHighReplication:      base.NewAtomicBooleanType(isHighReplication),
-		throughputThrottlerSvc: throughputThrottlerSvc,
-		collectionsRouting:     make(CollectionsRoutingMap),
-		dcpObjRecycler:         dcpObjRecycler,
-		targetColInfoPool:      utilities.NewTargetCollectionInfoPool(),
-		dataPool:               utilities.NewDataPool(),
-		mcRequestPool:          base.NewMCRequestPool(spec.Id, nil /*logger*/),
+		id:                       id,
+		filter:                   filter,
+		routingMap:               routingMap,
+		topic:                    topic,
+		sourceCRMode:             sourceCRMode,
+		utils:                    utilsIn,
+		isHighReplication:        base.NewAtomicBooleanType(isHighReplication),
+		throughputThrottlerSvc:   throughputThrottlerSvc,
+		collectionsRouting:       make(CollectionsRoutingMap),
+		dcpObjRecycler:           dcpObjRecycler,
+		targetColInfoPool:        utilities.NewTargetCollectionInfoPool(),
+		dataPool:                 utilities.NewDataPool(),
+		mcRequestPool:            base.NewMCRequestPool(spec.Id, nil /*logger*/),
+		explicitMapChangeHandler: explicitMapChangeHandler,
 	}
 
 	router.expDelMode.Set(filterExpDelType)
@@ -892,12 +891,12 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		router.RaiseEvent(ignoreEvent)
 	}
 
-	fatalErrorFunc := func(err error) {
-		router.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, router, nil, err))
+	fatalErrorFunc := func(err error, data interface{}) {
+		router.RaiseEvent(common.NewEvent(common.ErrorEncountered, data, router, nil, err))
 	}
 
 	router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(),
-		routingUpdater, ignoreRequestFunc, fatalErrorFunc)
+		routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler)
 
 	modes := spec.Settings.GetCollectionModes()
 	router.collectionModes = CollectionsMgtAtomicType(modes)

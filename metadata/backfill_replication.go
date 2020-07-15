@@ -332,6 +332,30 @@ func (v *VBTasksMapType) MarkOneVBTaskDone(vbno uint16) {
 	}
 }
 
+func (v *VBTasksMapType) RemoveNamespaceMappings(removed CollectionNamespaceMapping) (modified bool) {
+	if v == nil {
+		return
+	}
+
+	var keysToDel []uint16
+	for vbno, backfillTasks := range *v {
+		oneModified := backfillTasks.RemoveNamespaceMappings(removed)
+		if oneModified {
+			modified = true
+			if len(*backfillTasks) == 0 {
+				keysToDel = append(keysToDel, vbno)
+			}
+		}
+	}
+
+	if modified {
+		for _, vbno := range keysToDel {
+			delete((*v), vbno)
+		}
+	}
+	return
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks []*BackfillTask
 
@@ -463,6 +487,40 @@ func (b BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool {
 	return false
 }
 
+func (b *BackfillTasks) RemoveNamespaceMappings(removed CollectionNamespaceMapping) (modified bool) {
+	var needCleanup bool
+	for _, task := range *b {
+		oneModified := task.RemoveCollectionNamespaceMapping(removed)
+		if oneModified && !modified {
+			modified = true
+			if len(task.RequestedCollections()) == 0 {
+				needCleanup = true
+			}
+		}
+	}
+
+	if !needCleanup {
+		return
+	}
+
+	var doneCleanedUp bool
+	for !doneCleanedUp {
+		doneCleanedUp = true
+		var i int
+		var task *BackfillTask
+		for i, task = range *b {
+			if len(task.RequestedCollections()) == 0 {
+				doneCleanedUp = false
+				break
+			}
+		}
+		if !doneCleanedUp {
+			*b = append((*b)[:i], (*b)[i+1:]...)
+		}
+	}
+	return
+}
+
 // Each backfill task should be RO once created
 // And new tasks can be created to split/merge existing ones
 type BackfillTask struct {
@@ -489,12 +547,17 @@ func (b BackfillTask) String() string {
 }
 
 func NewBackfillTask(ts *BackfillVBTimestamps, requestedCollectionMappings []CollectionNamespaceMapping) *BackfillTask {
+	shas := generateShas(requestedCollectionMappings)
+	return &BackfillTask{Timestamps: ts, requestedCollections_: requestedCollectionMappings, RequestedCollectionsShas: shas}
+}
+
+func generateShas(requestedCollectionMappings []CollectionNamespaceMapping) []string {
 	var shas []string
 	for _, reqCols := range requestedCollectionMappings {
 		shaSlice, _ := reqCols.Sha256()
 		shas = append(shas, fmt.Sprintf("%x", shaSlice[:]))
 	}
-	return &BackfillTask{Timestamps: ts, requestedCollections_: requestedCollectionMappings, RequestedCollectionsShas: shas}
+	return shas
 }
 
 // When given a new task, try to merge the new tasks's request into this current task
@@ -551,6 +614,23 @@ func (b *BackfillTask) AddCollectionNamespaceMapping(nsMapping CollectionNamespa
 
 	b.requestedCollections_ = append(b.requestedCollections_, nsMapping)
 	b.RequestedCollectionsShas = append(b.RequestedCollectionsShas, incomingShaStr)
+}
+
+func (b *BackfillTask) RemoveCollectionNamespaceMapping(nsMapping CollectionNamespaceMapping) (found bool) {
+	var i int
+	var oneMapping CollectionNamespaceMapping
+	for i, oneMapping = range b.requestedCollections_ {
+		if oneMapping.IsSame(nsMapping) {
+			found = true
+			break
+		}
+	}
+
+	if found {
+		b.requestedCollections_ = append(b.requestedCollections_[:i], b.requestedCollections_[i+1:]...)
+		b.RequestedCollectionsShas = generateShas(b.requestedCollections_)
+	}
+	return
 }
 
 // NOTE - this short circuits and check the SHA's only

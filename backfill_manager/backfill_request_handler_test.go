@@ -22,7 +22,7 @@ func setupBRHBoilerPlate() (*log.CommonLogger, *service_def.BackfillReplSvc) {
 	return logger, backfillReplSvc
 }
 
-func createSeqnoGetterFunc(topSeqno uint64) LatestSeqnoGetter {
+func createSeqnoGetterFunc(topSeqno uint64) SeqnosGetter {
 	highMap := make(map[uint16]uint64)
 	var vb uint16
 	for vb = 0; vb < 1024; vb++ {
@@ -147,7 +147,7 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc := setupBRHBoilerPlate()
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), time.Second, createVBDoneFunc())
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), time.Second, createVBDoneFunc(), nil)
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
@@ -191,7 +191,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc())
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), nil)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -280,7 +280,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc())
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), nil)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -365,4 +365,60 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	assert.Equal(2, addCount)
 	assert.Equal(1, delCount)
 	fmt.Println("============== Test case end: TestBackfillReqHandlerCreateReqThenMarkDoneThenDel =================")
+}
+
+func TestBackfillHandlerExplicitMapChange(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBackfillHandlerExplicitMapChange =================")
+	defer fmt.Println("============== Test case end: TestBackfillHandlerExplicitMapChange =================")
+
+	logger, _ := setupBRHBoilerPlate()
+	spec := createTestSpec()
+	vbsGetter := createVBsGetter()
+	seqnoGetter := createSeqnoGetterFunc(100)
+	mainPipelineSeqnoGetter := createSeqnoGetterFunc(500)
+	var addCount int
+	var setCount int
+	var delCount int
+	// Make a dummy namespacemapping
+	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
+	requestMapping := make(metadata.CollectionNamespaceMapping)
+	requestMapping.AddSingleMapping(collectionNs, dummyNs)
+
+	backfillReplSvc := &service_def.BackfillReplSvc{}
+	brhMockBackfillReplSvcCommon(backfillReplSvc)
+	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
+	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
+
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter)
+
+	assert.NotNil(rh)
+	assert.Nil(rh.Start())
+
+	assert.Nil(rh.cachedBackfillSpec)
+	// Test remove when there's no spec
+	pair := metadata.CollectionNamespaceMappingsDiffPair{
+		Added:   metadata.CollectionNamespaceMapping{},
+		Removed: requestMapping,
+	}
+	err := rh.HandleBackfillRequest(pair)
+	assert.Nil(err)
+	assert.Nil(rh.cachedBackfillSpec)
+
+	// Test add
+	pair.Added = requestMapping
+	pair.Removed = metadata.CollectionNamespaceMapping{}
+	err = rh.HandleBackfillRequest(pair)
+	assert.Nil(err)
+	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+
+	// Removed should cause the whole thing to be removed
+	pair.Added = metadata.CollectionNamespaceMapping{}
+	pair.Removed = requestMapping
+	err = rh.HandleBackfillRequest(pair)
+	assert.Nil(err)
+	assert.Equal(0, len(rh.cachedBackfillSpec.VBTasksMap))
+
 }

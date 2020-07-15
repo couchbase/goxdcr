@@ -185,14 +185,14 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 
 	specActive := newSpec.Settings.Active
 	//if the replication doesn't exit, it is treated the same as it exits, but it is paused
-	specActive_old := false
+	specActiveOld := false
 	var oldSettings *metadata.ReplicationSettings = nil
 	if oldSpec != nil {
 		oldSettings = oldSpec.Settings
-		specActive_old = oldSettings.Active
+		specActiveOld = oldSettings.Active
 	}
 
-	if specActive_old && specActive {
+	if specActiveOld && specActive {
 		// if some critical settings have been changed, stop, reconstruct, and restart pipeline
 		if needToReconstructPipeline(oldSettings, newSpec.Settings) {
 			if needToRestreamPipeline(oldSettings, newSpec.Settings) {
@@ -203,7 +203,11 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 				return err
 			}
 			rscl.logger.Infof("Restarting pipeline %v since the changes to replication spec are critical\n", topic)
-			return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+			if callback, errCb, needCb := needSpecialCallbackUpdate(topic, newSpec.InternalId, oldSettings, newSpec.Settings); needCb {
+				return replication_mgr.pipelineMgr.UpdatePipelineWithStoppedCb(topic, callback, errCb)
+			} else {
+				return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+			}
 		} else {
 			// otherwise, perform live update to pipeline
 			err := rscl.liveUpdatePipeline(topic, oldSettings, newSpec.Settings, newSpec.InternalId)
@@ -216,12 +220,29 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 			}
 		}
 
-	} else if specActive_old && !specActive {
+	} else if specActiveOld && !specActive {
 		//stop replication
 		rscl.logger.Infof("Stopping pipeline %v since the replication spec has been changed to inactive\n", topic)
-		return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+		stopErr := replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+		if needToRestreamPipelineEvenIfStopped(oldSettings, newSpec.Settings) {
+			rscl.logger.Infof("Cleaning up pipeline %v because of setting change\n", topic)
+			cleanErr := replication_mgr.pipelineMgr.ReInitStreams(topic)
+			if cleanErr != nil {
+				rscl.logger.Errorf("unable to cleanup %v due to %v - pipeline may be missing earlier data. Recommended manual delete and recreation", topic, cleanErr)
+			}
+			return cleanErr
+		} else {
+			return stopErr
+		}
 
-	} else if !specActive_old && specActive {
+	} else if !specActiveOld && specActive {
+		if needToRestreamPipelineEvenIfStopped(oldSettings, newSpec.Settings) {
+			rscl.logger.Infof("Cleaning up pipeline %v because of setting change before starting\n", topic)
+			cleanErr := replication_mgr.pipelineMgr.ReInitStreams(topic)
+			if cleanErr != nil {
+				rscl.logger.Errorf("unable to cleanup %v due to %v - pipeline may be missing earlier data. Recommended manual delete and recreation", topic, cleanErr)
+			}
+		}
 		// start replication
 		rscl.logger.Infof("Starting pipeline %v since the replication spec has been changed to active\n", topic)
 		return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
@@ -231,9 +252,25 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		// Need to initiate the status if this is a newly created pasued replication
 		if oldSpec == nil {
 			replication_mgr.pipelineMgr.InitiateRepStatus(newSpec.Id)
+		} else {
+			// is not a newly created spec
+			if needToRestreamPipelineEvenIfStopped(oldSettings, newSpec.Settings) {
+				cleanErr := replication_mgr.pipelineMgr.ReInitStreams(topic)
+				if cleanErr != nil {
+					rscl.logger.Errorf("unable to cleanup %v due to %v - pipeline may be missing earlier data. Recommended manual delete and recreation", topic, cleanErr)
+				}
+			}
 		}
 		return nil
 	}
+}
+
+func needSpecialCallbackUpdate(topic, internalSpecId string, oldSettings, newSettings *metadata.ReplicationSettings) (callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, needCallback bool) {
+	if !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules()) {
+		needCallback = true
+		callback, errCb = replication_mgr.backfillMgr.GetExplicitMappingChangeHandler(topic, internalSpecId, oldSettings, newSettings)
+	}
+	return
 }
 
 func (rscl *ReplicationSpecChangeListener) validateReplicationSpec(specObj interface{}) (*metadata.ReplicationSpecification, error) {
@@ -252,7 +289,7 @@ func (rscl *ReplicationSpecChangeListener) validateReplicationSpec(specObj inter
 }
 
 // whether there are critical changes to the replication spec that require pipeline reconstruction
-func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
+func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSettings) bool {
 
 	// the following require reconstruction of pipeline
 	repTypeChanged := !(oldSettings.RepType == newSettings.RepType)
@@ -274,13 +311,33 @@ func needToReconstructPipeline(oldSettings *metadata.ReplicationSettings, newSet
 }
 
 func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
+	// Filter changed that require restart
 	skip := false
 	filterChanged := !(oldSettings.FilterExpression == newSettings.FilterExpression)
 
 	if val, ok := newSettings.Values[metadata.FilterSkipRestreamKey]; ok {
 		skip = val.(bool)
 	}
-	return !skip && filterChanged
+	if !skip && filterChanged {
+		return true
+	}
+
+	return needToRestreamPipelineEvenIfStopped(oldSettings, newSettings)
+}
+
+func needToRestreamPipelineEvenIfStopped(oldSettings, newSettings *metadata.ReplicationSettings) bool {
+	if oldSettings == nil || newSettings == nil {
+		return false
+	}
+	oldMode := oldSettings.GetCollectionModes()
+	newMode := newSettings.GetCollectionModes()
+	// Any of these toggle changes mean start over
+	if oldMode.IsExplicitMapping() != newMode.IsExplicitMapping() {
+		return true
+	} else if oldMode.IsMigrationOn() != newMode.IsMigrationOn() {
+		return true
+	}
+	return false
 }
 
 func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings, newSpecInternalId string) error {
