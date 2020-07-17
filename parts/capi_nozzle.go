@@ -1346,3 +1346,7 @@ func (capi *CapiNozzle) ResponsibleVBs() []uint16 {
 func (capi *CapiNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
 	// no op
 }
+
+func (capi *CapiNozzle) SetUpstreamErrReporter(func(interface{})) {
+	// no op
+}
