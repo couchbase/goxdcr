@@ -674,7 +674,7 @@ function createBucketReplication {
 		repId=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}"`
 		if (( (( $? == 0 )) && (( `echo "$repId" | grep -c error` == 0 )) ));then
 			if (( `checkJQ` == 0 ));then
-				repIdReal=`getKeyUsingJQ $repId '.id'`
+				repIdReal=`getKeyUsingJQ "$repId" '.id'`
 				if [[ "$repIdReal" == "" ]];then
 					echo "Captured replicationID: $repId"
 				else

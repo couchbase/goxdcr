@@ -925,6 +925,11 @@ func (xdcrf *XDCRFactory) disableCollectionIfNeeded(incomingSettings, filteredSe
 	if !capability.Collection {
 		filteredSettings[parts.ForceCollectionDisableKey] = true
 	}
+
+	// CAPI replication should disable any collections
+	if spec.Settings.IsCapi() {
+		filteredSettings[parts.ForceCollectionDisableKey] = true
+	}
 	return nil
 }
 

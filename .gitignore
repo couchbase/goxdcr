@@ -24,3 +24,9 @@ tools/testScripts/testsLibrary.sh
 
 # MacOS file
 .DS_Store
+
+# vim swap files
+*.swp
+
+# GoLand project space
+.idea/
