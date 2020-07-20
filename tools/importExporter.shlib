@@ -76,7 +76,7 @@ function exportProvisionedConfig {
 
 function importProvisionedConfig {
 	# Find the exported variables file
-	. $XDCR_HIDDEN_EXPORTFILE
+	. $XDCR_HIDDEN_EXPORTFILE 2> /dev/null
 }
 
 # Returns via stdout: REST id

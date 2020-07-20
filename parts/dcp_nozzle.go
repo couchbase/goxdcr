@@ -1085,7 +1085,7 @@ func (dcp *DcpNozzle) vbStreamEndIsOk(vbno uint16) bool {
 
 // TODO - MB-37984
 func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprEvent, error) {
-	if m.IsSystemEvent() || !m.IsCollectionType() || atomic.LoadUint32(&dcp.collectionEnabled) == 0 {
+	if m.IsSystemEvent() || !m.IsCollectionType() || !dcp.CollectionEnabled() {
 		// Collection not used
 		wrappedEvent := dcp.wrappedUprPool.Get()
 		wrappedEvent.UprEvent = m

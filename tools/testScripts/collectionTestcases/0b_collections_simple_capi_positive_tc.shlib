@@ -84,7 +84,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-        cleanupBucketReplications
-        cleanupBuckets
-        cleanupRemoteClusterRefs
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
 }
