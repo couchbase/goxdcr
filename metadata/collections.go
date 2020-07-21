@@ -1240,6 +1240,14 @@ func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (add
 			for _, removedNamespace := range listRemoved {
 				removed.AddSingleMapping(src, removedNamespace)
 			}
+			// Need to do reverse check
+			listRemoved, listAdded = oTgtList.Diff(tgtList)
+			for _, addedNamespace := range listAdded {
+				added.AddSingleMapping(src, addedNamespace)
+			}
+			for _, removedNamespace := range listRemoved {
+				removed.AddSingleMapping(src, removedNamespace)
+			}
 		}
 	}
 

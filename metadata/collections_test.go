@@ -613,3 +613,31 @@ func TestManifestFindBackfill(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestManifestFindBackfill =================")
 }
+
+func TestNoIntersectionDiff(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestNoIntersectionDiff =================")
+	defer fmt.Println("============== Test case start: TestNoIntersectionDiff =================")
+
+	oldMapping := make(CollectionNamespaceMapping)
+	src := base.CollectionNamespace{
+		ScopeName:      "S1",
+		CollectionName: "col1",
+	}
+	tgt0 := base.CollectionNamespace{
+		ScopeName:      "S3",
+		CollectionName: "col3",
+	}
+	oldMapping.AddSingleMapping(&src, &tgt0)
+
+	newMapping := make(CollectionNamespaceMapping)
+	tgt1 := base.CollectionNamespace{
+		ScopeName:      "S3",
+		CollectionName: "col2",
+	}
+	newMapping.AddSingleMapping(&src, &tgt1)
+
+	added, removed := oldMapping.Diff(newMapping)
+	assert.Equal(1, len(added))
+	assert.Equal(1, len(removed))
+}
