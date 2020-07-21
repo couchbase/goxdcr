@@ -707,7 +707,7 @@ func TestExplicitMapping(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 
-	assert.Equal(1, len(explicitMap))
+	assert.Equal(2, len(explicitMap))
 	sourceNamespace.ScopeName = "S1"
 	sourceNamespace.CollectionName = "col1"
 	targetNamespace.ScopeName = "S2"

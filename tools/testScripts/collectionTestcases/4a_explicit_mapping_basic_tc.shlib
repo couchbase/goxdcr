@@ -63,7 +63,18 @@ function runTestCase {
 	if (( $? != 0 ));then
 		exit $?
 	fi
-	
+
+	# Get current instance
+    local -i currentBackfillInstanceCnt
+    local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillAppendInstanceCnt
+	local currentXdcrLog
+
+    currentXdcrLog=`getInternalNodeXdcrLog "C1"`
+    currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
+    currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
+    currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
@@ -75,10 +86,16 @@ function runTestCase {
 	
 	runDataLoad
 
+	echo "VALIDATING Data..."
+	validateCbWorkloadGenCollection "C2" "B2" "S3" "col3" "C1" "B1" "S1" "col1"
+
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	# No backfill should be raised for first pass
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $currentBackfillInstanceCnt
 
 	# After replicating 10k items from a source collection to target collection
 	# change the replication mapping to point to a new target collection
@@ -91,6 +108,18 @@ function runTestCase {
 	sleep 5
 	newCount=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 ))
 	checkItemCnt "C2" "B2" $newCount
+
+	validateCbWorkloadGenCollection "C2" "B2" "S3" "col2" "C1" "B1" "S1" "col1"
+	echo "VALIDATING data"
+	sleep 5
+	checkItemCnt "C2" "B2" $newCount
+
+	# Backfill should have been raised
+	#validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
+	#validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"

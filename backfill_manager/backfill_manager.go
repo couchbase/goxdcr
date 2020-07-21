@@ -302,6 +302,10 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		return b.getThroughSeqnosFromMainCkpts(replId, internalId)
 	}
 
+	restreamPipelineFatalFunc := func() {
+		b.pipelineMgr.ReInitStreams(spec.Id)
+	}
+
 	var err error
 	b.specReqHandlersMtx.Lock()
 	if _, exists := b.specToReqHandlerMap[replId]; exists {
@@ -309,9 +313,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		b.specReqHandlersMtx.Unlock()
 		return err
 	}
-	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId,
-		b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier,
-		mainPipelineCkptSeqnosGetter)
+	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier, mainPipelineCkptSeqnosGetter, restreamPipelineFatalFunc)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
@@ -649,78 +651,217 @@ func (b *BackfillMgr) handleManifestsChanges(replId string, oldManifests, newMan
 		return
 	} else if newManifests.Source != nil && newManifests.Target == nil {
 		// Source changed but target did not
-		b.handleSourceOnlyChange(replId, newManifests.Source)
+		b.handleSourceOnlyChange(replId, oldManifests.Source, newManifests.Source)
 	} else if newManifests.Source == nil && newManifests.Target != nil {
 		// Source did not change but target did change
-		b.handleSrcAndTgtChanges(replId, nil /*source*/, oldManifests.Target, newManifests.Target)
+		b.handleSrcAndTgtChanges(replId, nil, nil, oldManifests.Target, newManifests.Target)
 	} else {
 		// Both changed
-		b.handleSrcAndTgtChanges(replId, newManifests.Source, oldManifests.Target, newManifests.Target)
+		b.handleSrcAndTgtChanges(replId, oldManifests.Source, newManifests.Source, oldManifests.Target, newManifests.Target)
 	}
 }
 
-func (b *BackfillMgr) handleSourceOnlyChange(replId string, sourceManifest *metadata.CollectionsManifest) {
-	// Nothing to do for now - TODO - mirroring policy handler will be here
-	// Last step - update internal cache
+func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, newSourceManifest *metadata.CollectionsManifest) {
+	// update internal cache
 	b.cacheMtx.Lock()
-	b.cacheSpecSourceMap[replId] = sourceManifest
+	b.cacheSpecSourceMap[replId] = newSourceManifest
 	b.cacheMtx.Unlock()
+
+	// TODO - mirroring policy handler will be here
+	spec, err := b.replSpecSvc.ReplicationSpec(replId)
+	if err != nil {
+		b.logger.Errorf("Unable to find spec %v - %v", spec.Id, err)
+		return
+	}
+	modes := spec.Settings.GetCollectionModes()
+	if !modes.IsExplicitMapping() {
+		// Nothing to do for implicit mapping
+		return
+	}
+
+	b.cacheMtx.RLock()
+	latestTgtManifestOrig := b.cacheSpecTargetMap[replId]
+	if latestTgtManifestOrig == nil {
+		b.logger.Warnf("%v Target has no manifest", replId)
+		b.cacheMtx.RUnlock()
+		return
+	}
+	latestTgtManifestObj := latestTgtManifestOrig.Clone()
+	latestTgtManifest := &latestTgtManifestObj
+	b.cacheMtx.RUnlock()
+
+	if latestTgtManifest == nil {
+		b.logger.Errorf("Unable to do explicit mapping diff for %v if target manifest is nil", spec.Id)
+		return
+	}
+
+	diffPair, err := b.compileExplicitBackfillReq(spec, modes, oldSourceManifest, latestTgtManifest, newSourceManifest, latestTgtManifest)
+	if err != nil {
+		b.logger.Errorf("%v Error compiling explicit backfillReq: %v", spec.Id, err)
+		return
+	}
+	b.raiseBackfillReq(replId, diffPair)
 }
 
-func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, sourceManifest, oldTargetManifest, newTargetManifest *metadata.CollectionsManifest) {
+func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest *metadata.CollectionsManifest) {
 	// For added and modified since last time, need to launch backfill if they are mapped from source
-	var sourceChanged bool = sourceManifest != nil
+	var sourceChanged bool = newSourceManifest != nil
 
-	if sourceManifest == nil {
+	if newSourceManifest == nil {
 		b.cacheMtx.RLock()
-		sourceManifest = b.cacheSpecSourceMap[replId]
+		newSourceManifest = b.cacheSpecSourceMap[replId]
 		b.cacheMtx.RUnlock()
 
-		if sourceManifest == nil {
+		if newSourceManifest == nil {
 			// Really odd error
 			b.logger.Errorf("Repl %v Unable to find a baseline source manifest, and thus unable to figure out backfill situation", replId)
 			return
 		}
 	}
 
-	if sourceManifest.Uid() == 0 {
+	if newSourceManifest.Uid() == 0 {
 		// Source manifest 0 means only default collection is being replicated
 		// If it's implicit mapping, no-op
-		// TODO - this section will change for explicit mapping and/or upgrade
+		// TODO MB-40588 - this section will change for explicit mapping and/or upgrade
 		b.logger.Infof("Repl %v shows default source manifest, thus no backfill would be created", replId)
-		return
-	}
-
-	backfillMapping, err := newTargetManifest.ImplicitGetBackfillCollections(oldTargetManifest, sourceManifest)
-	if err != nil {
-		b.logger.Errorf("handleSrcAndTgtChanges error: %v", err)
 		return
 	}
 
 	// Update cache
 	b.cacheMtx.Lock()
 	if sourceChanged {
-		b.cacheSpecSourceMap[replId] = sourceManifest
+		b.cacheSpecSourceMap[replId] = newSourceManifest
 	}
 	b.cacheSpecTargetMap[replId] = newTargetManifest
 	b.cacheMtx.Unlock()
 
-	if len(backfillMapping) == 0 {
-		// If no backfill is needed such as when collections get del' on the target, don't raise backfill request
+	spec, err := b.replSpecSvc.ReplicationSpec(replId)
+	if err != nil {
+		b.logger.Errorf("Unable to retrieve repl spec %v to determine whether it is implicit or explicit mapping", replId)
 		return
 	}
+	modes := spec.Settings.GetCollectionModes()
 
+	var backfillReq interface{}
+	if modes.IsExplicitMapping() {
+		if newTargetManifest == nil {
+			b.logger.Errorf("%v Unable to do explicit mapping if target manifest is nil", spec.Id)
+			return
+		}
+		if oldSourceManifest != nil && oldTargetManifest != nil && newSourceManifest != nil && newTargetManifest != nil {
+			// Both changed
+			diffPair, err := b.compileExplicitBackfillReq(spec, modes, oldSourceManifest, oldTargetManifest, newSourceManifest, newTargetManifest)
+			if err != nil {
+				return
+			}
+			backfillReq = diffPair
+		} else if oldTargetManifest != nil && newTargetManifest != nil {
+			// Only target changed
+			sourceManifest := b.getLatestSourceManifestClone(replId)
+			if sourceManifest == nil {
+				return
+			}
+			diffPair, err := b.compileExplicitBackfillReq(spec, modes, sourceManifest, oldTargetManifest, sourceManifest, newTargetManifest)
+			if err != nil {
+				return
+			}
+			backfillReq = diffPair
+		} else if newTargetManifest != nil {
+			// potentially brand new target manifest change - backfill everything
+			sourceManifest := b.getLatestSourceManifestClone(replId)
+			if sourceManifest == nil {
+				return
+			}
+			manifestsPair := metadata.CollectionsManifestPair{
+				Source: sourceManifest,
+				Target: newTargetManifest,
+			}
+			explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules())
+			if err != nil {
+				panic("FIME")
+			}
+			diffPair := metadata.CollectionNamespaceMappingsDiffPair{
+				Added:   explicitMapping,
+				Removed: nil,
+			}
+			backfillReq = diffPair
+		} else {
+			// Invalid function call
+			panic("Invalid functionc call")
+		}
+	} else {
+		backfillMapping, err := newTargetManifest.ImplicitGetBackfillCollections(oldTargetManifest, newSourceManifest)
+		if err != nil {
+			b.logger.Errorf("%v handleSrcAndTgtChanges error: %v", spec.Id, err)
+			return
+		}
+		if len(backfillMapping) == 0 {
+			// If no backfill is needed such as when collections get del' on the target, don't raise backfill request
+			return
+		}
+		backfillReq = backfillMapping
+	}
+
+	b.raiseBackfillReq(replId, backfillReq)
+}
+
+func (b *BackfillMgr) getLatestSourceManifestClone(replId string) *metadata.CollectionsManifest {
+	b.cacheMtx.RLock()
+	sourceManifest := b.cacheSpecSourceMap[replId]
+	if sourceManifest == nil {
+		b.logger.Warnf("%v could not find source manifest", replId)
+		b.cacheMtx.RUnlock()
+		return nil
+	}
+	sourceManifestObj := sourceManifest.Clone()
+	sourceManifest = &sourceManifestObj
+	b.cacheMtx.RUnlock()
+	return sourceManifest
+}
+
+func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpecification, modes base.CollectionsMgtType, oldSourceManifest, oldTargetManifest, newSourceManifest, newTargetManifest *metadata.CollectionsManifest) (metadata.CollectionNamespaceMappingsDiffPair, error) {
+	pair := metadata.CollectionsManifestPair{
+		Source: oldSourceManifest,
+		Target: oldTargetManifest,
+	}
+	oldExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules())
+	if err != nil {
+		b.logger.Errorf("%v Error compiling old explicit map: %v", spec.Id, err)
+		panic("FIXME")
+		return metadata.CollectionNamespaceMappingsDiffPair{}, err
+	}
+	pair.Source = newSourceManifest
+	pair.Target = newTargetManifest
+	newExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules())
+	if err != nil {
+		b.logger.Errorf("%v Error compiling new explicit map: %v", spec.Id, err)
+		panic("FIXME")
+		return metadata.CollectionNamespaceMappingsDiffPair{}, err
+	}
+	added, removed := oldExplicitMap.Diff(newExplicitMap)
+	diffPair := metadata.CollectionNamespaceMappingsDiffPair{
+		Added:   added,
+		Removed: removed,
+	}
+	return diffPair, nil
+}
+
+func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}) {
 	b.specReqHandlersMtx.RLock()
 	handler := b.specToReqHandlerMap[replId]
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
 		b.logger.Errorf("Unable to find handler for spec %v", replId)
+		b.logger.Fatalf(base.GetBackfillFatalDataLossError(replId).Error())
+		b.pipelineMgr.ReInitStreams(replId)
 		return
 	}
 
-	err = handler.HandleBackfillRequest(backfillMapping)
+	err := handler.HandleBackfillRequest(backfillReq)
 	if err != nil {
-		b.logger.Errorf("Handler returned err %v", err)
+		b.logger.Errorf("%v Backfill Handler returned err %v while raising backfill request", replId, err)
+		b.logger.Fatalf(base.GetBackfillFatalDataLossError(replId).Error())
+		b.pipelineMgr.ReInitStreams(replId)
 	}
 }
 

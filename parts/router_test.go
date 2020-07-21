@@ -327,15 +327,15 @@ func TestRouterManifestChange(t *testing.T) {
 	assert.Nil(collectionsRouter.handleNewManifestChanges(&targetv8Manifest))
 	// Force a manual brokenmap. V9 will have the following fixed
 	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
-	collectionsRouter.brokenMapMtx.Lock()
+	collectionsRouter.brokenDenyMtx.Lock()
 	collectionsRouter.brokenMapping.AddSingleMapping(implicitNamespace, implicitNamespace)
-	collectionsRouter.brokenMapMtx.Unlock()
+	collectionsRouter.brokenDenyMtx.Unlock()
 
 	assert.Nil(collectionsRouter.handleNewManifestChanges(&targetv9Manifest))
 
-	collectionsRouter.brokenMapMtx.Lock()
+	collectionsRouter.brokenDenyMtx.Lock()
 	assert.Equal(0, len(collectionsRouter.brokenMapping))
-	collectionsRouter.brokenMapMtx.Unlock()
+	collectionsRouter.brokenDenyMtx.Unlock()
 
 	fmt.Println("============== Test case end: TestRouterManifestChange =================")
 }
@@ -474,7 +474,7 @@ func TestRouterExplicitMode(t *testing.T) {
 
 	collectionsRouter := router.collectionsRouting[dummyDownStream]
 	assert.NotNil(collectionsRouter)
-	collectionsRouter.Start()
+	assert.Nil(collectionsRouter.Start())
 
 	// routing updater receiver
 	newRoutingUpdater := func(info CollectionsRoutingInfo) error {

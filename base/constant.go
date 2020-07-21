@@ -269,6 +269,10 @@ var ErrorIgnoreRequest = errors.New("Request should be ignored")
 var ErrorXmemCollectionSubErr = errors.New(StringTargetCollectionMappingErr)
 var ErrorRequestAlreadyIgnored = errors.New("Request has been marked ignored")
 
+func GetBackfillFatalDataLossError(specId string) error {
+	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
+}
+
 const FinClosureStr = "because of finch closure"
 
 const StringTargetCollectionMappingErr = "Target node unable to find"

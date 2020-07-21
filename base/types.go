@@ -860,6 +860,25 @@ func (c CollectionsMappingRulesType) ExplicitMatch(srcNamespace, tgtNamespace *C
 	return false
 }
 
+func (c CollectionsMappingRulesType) ExplicitlyDenied(srcNamespace *CollectionNamespace) bool {
+	// case 2
+	targetRule, exists := c[fmt.Sprintf("%v:%v", srcNamespace.ScopeName, srcNamespace.CollectionName)]
+	if exists {
+		if targetRule == nil {
+			return true
+		} else {
+			return false
+		}
+	}
+
+	// case 4
+	targetRule, exists = c[srcNamespace.ScopeName]
+	if exists && targetRule == nil {
+		return true
+	}
+	return false
+}
+
 // Returns found if a rule with srcNamespace as the key exists
 func (c CollectionsMappingRulesType) checkCase1(srcNamespace, tgtNamespace *CollectionNamespace) (keyExists, matched bool) {
 	for k, v := range c {
@@ -917,6 +936,37 @@ func (c CollectionsMappingRulesType) checkCase3(srcNamespace, tgtNamespace *Coll
 		}
 	}
 	return false
+}
+
+// Returns non-nil error if this collection was never meant to be replicated given the rules
+// Returns nil error and nil namespace if it's denied replication
+func (c CollectionsMappingRulesType) GetPotentialTargetNamespace(sourceNs *CollectionNamespace) (*CollectionNamespace, error) {
+	// Check case 1 or 2
+	rule1Key := fmt.Sprintf("%v:%v", sourceNs.ScopeName, sourceNs.CollectionName)
+	targetRule, exists := c[rule1Key]
+	if exists {
+		if targetRule == nil {
+			return nil, nil
+		} else {
+			// Should not return error
+			retNs, err := NewCollectionNamespaceFromString(targetRule.(string))
+			return &retNs, err
+		}
+	}
+
+	// This means the rules did not have S:C listed. Check just "S"
+	targetRule, exists = c[sourceNs.ScopeName]
+	if !exists {
+		return nil, ErrorInvalidInput
+	}
+
+	if targetRule == nil {
+		// case 4
+		return nil, nil
+	} else {
+		// case 3
+		return &CollectionNamespace{ScopeName: targetRule.(string), CollectionName: sourceNs.CollectionName}, nil
+	}
 }
 
 type XattrIterator struct {

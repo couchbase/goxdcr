@@ -26,9 +26,8 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-#pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
-#declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1:col1":"S3:col3","S1:col3":null}')
 
 # Bucket -> Scopes
 # -----------------
@@ -37,14 +36,19 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
 
 # Scopes -> Collections
 # ----------------------
-declare -a collection1Arr=("col1" "col2")
-declare -a collection2Arr=("col1" "col2" "col3")
+declare -a collection1Arr=("col1" "col2" "col3" "col4")
+declare -a collection2Arr=("col1" "col2")
+declare -a collection3Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	# Run this job as "background noise" since S1:col2 isn't explicitly mapped, it should raise no warning and cause no brokenMap
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	# This col3 should be on the deny list
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
 	waitForBgJobs
 }
 
@@ -56,7 +60,7 @@ function cleanupTestCaseInternalSettings {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running live rediscover test case"
+	echo "Running explicit mapping broken then repaired test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (( $? != 0 ));then
@@ -75,67 +79,60 @@ function runTestCase {
 	trap cleanupTestCaseInternalSettings EXIT
 
 	# Get current instance
-	local -i currentBrokenInstanceCnt
-	local -i currentRepairedInstanceCnt
-	local -i currentBackfillInstanceCnt
-	local -i currentVBTasksDoneInstanceCnt
-	local -i currentBackfillAppendInstanceCnt
+    local -i currentBrokenInstanceCnt
+    local -i currentRepairedInstanceCnt
+    local -i currentBackfillInstanceCnt
+    local -i currentVBTasksDoneInstanceCnt
+    local -i currentBackfillAppendInstanceCnt
 
-	local currentClusterLog
-	currentClusterLog=`getClusterLogs "C1"`
-	currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
-	currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+    local currentClusterLog
+    currentClusterLog=`getClusterLogs "C1"`
+    currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
+    currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
 
-	local currentXdcrLog
-	currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-	currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
-	currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
-	currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+    local currentXdcrLog
+    currentXdcrLog=`getInternalNodeXdcrLog "C1"`
+    currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
+    currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
+    currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
+	
 	runDataLoad
 
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	# 3x because there is white noise writing to S1:col2, and one more S1:col3 on the deny list
+	checkItemCnt "C1" "B1" $(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 3 ))
+	# currently, there is no S3:col3 on target
 	checkItemCnt "C2" "B2" 0
 
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
 
 	# Then re-setup the implicit matching that matches
-	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+    #SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection3Arr[@]})
+    SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection3Arr[@]})
 	setupTopologies
+	printGlobalScopeAndCollectionInfo
 	echo "Sleeping 30 seconds for discovery and automatic backfill"
 	sleep 30
-	printGlobalScopeAndCollectionInfo
 
 	# After sleeping, the backfill manager should have triggered the backfill
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
 
-	# Before running I/O, router will not raise a repaired message
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
-	runDataLoad
-	# After running I/O, router should raise a repaired message
-	sleep 10
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
-
-	# TODO - need to think if this is an issue. Because router didn't receive any I/O, it won't log
-	# the message. Now with I/O, it'll ask for a backfill when it was already done
-	# Under normal I/O load, these should happen closely together
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 2 ))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 2 ))
-	grepForPanics
-	validateXDCRCheckpoints "C1"
-	validateXDCRCheckpoints "C2"
+	# No append should occur
+	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt ))
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -143,7 +140,6 @@ function runTestCase {
 	cleanupBucketReplications
  	cleanupBuckets
  	cleanupRemoteClusterRefs
- 	cleanupTestCaseInternalSettings
  	# remove trap as no longer needed
  	trap - EXIT
 }

@@ -78,6 +78,7 @@ type BackfillRequestHandler struct {
 	cachedBackfillSpec           *metadata.BackfillReplicationSpec
 	delOpBackfillId              string
 	mainpipelineCkptSeqnosGetter SeqnosGetter
+	restreamPipelineFatalFunc    func()
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -92,7 +93,7 @@ type ReqAndResp struct {
 	PersistResponse chan error
 }
 
-func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, vbsGetter MyVBsGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, vbsGetter MyVBsGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func()) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
 		logger:                       logger,
@@ -108,6 +109,7 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		persistInterval:              persistInterval,
 		vbsDoneNotifier:              vbsTasksDoneNotifier,
 		mainpipelineCkptSeqnosGetter: mainPipelineCkptSeqnosGetter,
+		restreamPipelineFatalFunc:    restreamPipelineFatalFunc,
 	}
 }
 
@@ -240,6 +242,11 @@ func (b *BackfillRequestHandler) run() {
 					time.Sleep(b.persistInterval)
 					atomic.StoreUint32(&needCoolDown, 0)
 				}()
+				if err != nil && persistType != DelOp {
+					b.logger.Errorf("%v experienced error when persisting - %v", b.id, err.Error())
+					b.logger.Fatalf(base.GetBackfillFatalDataLossError(b.id).Error())
+					b.restreamPipelineFatalFunc()
+				}
 				// Return the error code to all the callers that are waiting
 				for _, respCh := range b.queuedResps {
 					respCh <- err
@@ -314,7 +321,7 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
 	seqnosMap, err := b.getThroughSeqno()
 	if err != nil {
-		// TODO handle error
+		b.logger.Errorf("%v unable to get seqno as part of handling backfill pipeline request")
 		return err
 	}
 	myVBs, err := b.vbsGetter()
@@ -324,16 +331,23 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 
 	req, ok := reqAndResp.Request.(metadata.CollectionNamespaceMapping)
 	if !ok {
-		return fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(reqAndResp.Request))
+		err = fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(reqAndResp.Request))
+		b.logger.Errorf(err.Error())
+		return err
 	}
 
 	vbTasksMap, err := metadata.NewBackfillVBTasksMap(req, myVBs, seqnosMap)
 	if err != nil {
+		b.logger.Errorf(err.Error())
 		return err
 	}
 
 	err = b.updateBackfillSpec(reqAndResp.PersistResponse, vbTasksMap, req, seqnosMap)
-	return err
+	if err != nil {
+		b.logger.Errorf(err.Error())
+		return err
+	}
+	return nil
 }
 
 func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap metadata.VBTasksMapType, req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) error {
@@ -387,7 +401,7 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 
 // Note, this message is used for integration testing script
 func (b *BackfillRequestHandler) logNewBackfillMsg(req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) {
-	b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req, seqnosMap)
+	b.logger.Infof("Replication %v - These collections need to backfill %v for vb->seqnos %v", b.id, req.String(), seqnosMap)
 }
 
 func (b *BackfillRequestHandler) requestPersistence(op PersistType, resp chan error) error {
@@ -644,6 +658,8 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		err := b.HandleBackfillRequest(routingInfo.BackfillMap)
 		if err != nil {
 			b.logger.Errorf("Handler Process event received err %v for backfillmap %v", err, routingInfo.BackfillMap)
+			b.logger.Fatalf(base.GetBackfillFatalDataLossError(b.id).Error())
+			b.restreamPipelineFatalFunc()
 		}
 		syncCh <- err
 		close(syncCh)
@@ -662,6 +678,10 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		err := b.HandleVBTaskDone(vbno)
 		if err != nil && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {
 			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), vbno, err)
+			// When err is not nil, the backfill job needs to be redone
+			_, i := b.getPipeline(common.BackfillPipeline)
+			b.logger.Errorf(err.Error())
+			b.raisePipelineErrors[i](err)
 		}
 	default:
 		b.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, b.id)

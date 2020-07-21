@@ -70,11 +70,6 @@ function checkChangesLeftBackup {
 	fi
 }
 
-BROKEN_MSG="The followings are collection mappings that are newly broken"
-REPAIR_MSG="The followings are collection mappings that are now repaired"
-BACKFILL_MSG="These collections need to backfill"
-VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
-
 function deleteAndRecreateBackfillMultiples {
 	local total=$1
 	local i

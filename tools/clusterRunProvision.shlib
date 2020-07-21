@@ -967,10 +967,12 @@ function runCbWorkloadGenCollection {
 	fi
 
 	local prefix
+	local colIdHex
 	for (( i=0; i < 3; i=$(( $i+1 ))))
 	do
 		echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
 		prefix=xdcrProv_$clusterName
+		colIdHex=`printf '%x' $collectionId`
 		if [[ ! -z "$additionalPrefix" ]];then
 			prefix=${prefix}_${additionalPrefix}
 			if [[ "$additionalPrefix" == "$CONTINUOUS_WORKLOAD_PREFIX" ]];then
@@ -979,7 +981,7 @@ function runCbWorkloadGenCollection {
 			fi
 		fi
 		# Run 10000 items of json documents with set/get ratio of 100%
-		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $collectionId "$loopFlag"
+		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex "$loopFlag"
 		if (( $? == 0 ));then
 			return 0
 		elif (( $? != 0 )) && (( $i != 2 ));then

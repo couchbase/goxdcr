@@ -906,7 +906,11 @@ func SortCollectionsNamespaceList(list CollectionNamespaceList) CollectionNamesp
 func (c CollectionNamespaceList) String() string {
 	var buffer bytes.Buffer
 	for _, j := range c {
-		buffer.WriteString(fmt.Sprintf("|Scope: %v Collection: %v| ", j.ScopeName, j.CollectionName))
+		if j.IsEmpty() {
+			buffer.WriteString(fmt.Sprintf("|<nil>| "))
+		} else {
+			buffer.WriteString(fmt.Sprintf("|Scope: %v Collection: %v| ", j.ScopeName, j.CollectionName))
+		}
 	}
 	return buffer.String()
 }
@@ -1062,6 +1066,18 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 					}
 				}
 			}
+			// Handle denied entries
+			for _, sourceScope := range manifestsPair.Source.Scopes() {
+				for _, sourceCollection := range sourceScope.Collections {
+					srcNamespace := &base.CollectionNamespace{
+						ScopeName:      sourceScope.Name,
+						CollectionName: sourceCollection.Name,
+					}
+					if rules.ExplicitlyDenied(srcNamespace) {
+						outputMapping.AddSingleMapping(srcNamespace, &base.CollectionNamespace{})
+					}
+				}
+			}
 			return outputMapping, nil
 		case true:
 			// TODO - MB-40474
@@ -1162,8 +1178,6 @@ func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionN
 	}
 	if src.IsEmpty() {
 		panic("Empty source namespace")
-	} else if tgt.IsEmpty() {
-		panic("Empty target namespace")
 	}
 
 	srcPtr, tgtList, found := c.Get(src)
