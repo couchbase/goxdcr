@@ -50,11 +50,13 @@ function runDataLoadContinuous {
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
+declare -a BG_WORKLOAD_PID
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
 	if [[ ! -z "$BG_WORKLOAD_PID" ]];then
 		kill $BG_WORKLOAD_PID
 	fi
+	unset BG_WORKLOAD_PID
 }
 
 function checkChangesLeftBackup {

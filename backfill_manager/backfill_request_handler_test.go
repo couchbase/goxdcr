@@ -7,6 +7,7 @@ import (
 	common "github.com/couchbase/goxdcr/common/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/parts"
 	pipeline_svc "github.com/couchbase/goxdcr/pipeline_svc/mocks"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
@@ -421,4 +422,11 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(0, len(rh.cachedBackfillSpec.VBTasksMap))
 
+	var info parts.CollectionsRoutingInfo
+	info.ExplicitBackfillMap = pair
+	syncCh := make(chan error)
+	backfillEvent := commonReal.NewEvent(commonReal.FixedRoutingUpdateEvent, info, nil, nil, syncCh)
+	go rh.OnEvent(backfillEvent)
+	err = <-syncCh
+	assert.Nil(err)
 }

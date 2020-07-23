@@ -41,7 +41,6 @@ declare -a collection2Arr=("col1" "col2")
 declare -a collection3Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
@@ -52,15 +51,31 @@ function runDataLoad {
 	waitForBgJobs
 }
 
+function runDataLoadContinuous {
+    local scopeName="$1"
+    local collectionName="$2"
+	while (( 1 ));do
+		runCbWorkloadGenCollectionCont "C1" "B1" "$scopeName" "$collectionName" > /dev/null 2>&1
+	done
+}
+
+
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
+	if [[ ! -z "$BG_PIDS" ]];then
+        for pid in `echo "${BG_PIDS[@]}"`
+        do
+            kill $pid
+        done
+        unset BG_PIDS
+	fi
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running explicit mapping broken then repaired test case"
+	echo "Running explicit mapping broken then repaired with cont I/O test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (( $? != 0 ));then
@@ -104,8 +119,13 @@ function runTestCase {
 	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
-	
-	runDataLoad
+
+	runDataLoadContinuous "S1" "col1" &
+	BG_PIDS[0]=$!
+	runDataLoadContinuous "S1" "col2" &
+	BG_PIDS[${#BG_PIDS[@]}]=$!
+	runDataLoadContinuous "S1" "col3" &
+	BG_PIDS[${#BG_PIDS[@]}]=$!
 
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
@@ -117,7 +137,6 @@ function runTestCase {
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
 
 	# Then re-setup the implicit matching that matches
-    #SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection3Arr[@]})
     SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection3Arr[@]})
 	setupTopologies
 	printGlobalScopeAndCollectionInfo
@@ -130,15 +149,13 @@ function runTestCase {
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
 
-	# No append should occur
-	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt ))
-
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
 	cleanupBucketReplications
  	cleanupBuckets
  	cleanupRemoteClusterRefs
+ 	cleanupTestCaseInternalSettings
  	# remove trap as no longer needed
  	trap - EXIT
 }

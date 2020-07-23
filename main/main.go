@@ -19,6 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"net/http"
 	"os"
 	"runtime"
 	"time"
@@ -80,6 +81,10 @@ func main() {
 	runtime.GOMAXPROCS(rm.GoMaxProcs_env())
 
 	argParse()
+
+	go func() {
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	// initializes logger
 	if options.logFileDir != "" {

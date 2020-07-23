@@ -655,7 +655,15 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			// ProcessEvent doesn't care about return code
 			return nil
 		}
-		err := b.HandleBackfillRequest(routingInfo.BackfillMap)
+		// It's either backfillMap or ExplicitPair
+		var err error
+		if len(routingInfo.BackfillMap) > 0 {
+			err = b.HandleBackfillRequest(routingInfo.BackfillMap)
+		} else if len(routingInfo.ExplicitBackfillMap.Added) > 0 || len(routingInfo.ExplicitBackfillMap.Removed) > 0 {
+			err = b.HandleBackfillRequest(routingInfo.ExplicitBackfillMap)
+		} else {
+			err = base.ErrorInvalidInput
+		}
 		if err != nil {
 			b.logger.Errorf("Handler Process event received err %v for backfillmap %v", err, routingInfo.BackfillMap)
 			b.logger.Fatalf(base.GetBackfillFatalDataLossError(b.id).Error())

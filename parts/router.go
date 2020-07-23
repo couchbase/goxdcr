@@ -57,11 +57,11 @@ type IgnoreDataEventer func(*base.WrappedMCRequest)
  * routes will need to be backfilled if the target manifest has moved forward
  */
 type CollectionsRoutingInfo struct {
-	// Chose one of the following
+	// Chose one of the following (like C union)
 	BrokenMap           metadata.CollectionNamespaceMapping
 	BackfillMap         metadata.CollectionNamespaceMapping
 	ExplicitBackfillMap metadata.CollectionNamespaceMappingsDiffPair
-	// The target manifest that the above routing information is based on
+	// Only used (and required) along with BrokenMap
 	TargetManifestId uint64
 }
 
@@ -910,7 +910,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		// 2. Backfill manager should synchronously persist the backfill.
 		//    If it cannot persist, it must not allow the following to continue
 		// 3. Once Backfill Manager has persisted it, then the broken event can be raised to the checkpoint manager
-		if len(info.BackfillMap) > 0 {
+		if len(info.BackfillMap) > 0 ||
+			len(info.ExplicitBackfillMap.Added) > 0 || len(info.ExplicitBackfillMap.Removed) > 0 {
 			syncCh := make(chan error)
 			backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, nil, syncCh)
 			go router.RaiseEvent(backfillEvent)
