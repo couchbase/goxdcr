@@ -77,7 +77,8 @@ if (( $? != 0 ));then
 	exit $?
 fi
 
-setupTopologies
+# NOTE: Sets up all clusters with developer preview to enable all features
+setupTopologies -d
 if (( $? != 0 ));then
 	exit $?
 fi

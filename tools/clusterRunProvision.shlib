@@ -383,9 +383,20 @@ function setupCluster {
 		if (( $? != 0 ));then
 			return $?
 		fi
-		# enable developer preview
+		echo ""
+	done
+}
+
+function enableDeveloperPreview {
+	for clusterName in `echo ${!CLUSTER_NAME_PORT_MAP[@]}`
+	do
+ 		# enable developer preview
 		echo -n "Enabling developer preview on $clusterName"
+		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/settings/developerPreview -d enabled="true"
+		if (( $? != 0 ));then
+			return $?
+		fi
 		echo ""
 	done
 }
@@ -542,11 +553,34 @@ function setupCollections {
 	done
 }
 
+# Allow specific flags to be passed in:
+# -d : <developer mode>
 function setupTopologies {
+  local OPTIND
+  local d
+  local developerPreviewSet=0
+  local opt
+
+  while getopts "d" opt;do
+    case ${opt} in
+      d)
+       developerPreviewSet=1
+      ;;
+    esac
+  done
+
 	setupCluster
 	if (( $? != 0 ));then
 		return $?
 	fi
+
+	if (( $developerPreviewSet == 1 ));then
+	  enableDeveloperPreview
+	  if (( $? != 0 ));then
+	    return $?
+	  fi
+	fi
+
 	setupBuckets
 	if (( $? != 0 ));then
 		return $?
