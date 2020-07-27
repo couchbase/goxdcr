@@ -129,6 +129,7 @@ func (doc_meta *documentMetadata) CloneAndRedact() *documentMetadata {
 }
 
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes
+// This is shared between GetReceived and GetMetaReceived
 type GetMetaReceivedEventAdditional struct {
 	Key         string
 	Seqno       uint64
@@ -203,9 +204,11 @@ func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettings
  * unique ID) to a specific member's element within the dataBatch (i.e. bigDoc_noRep_map)
  */
 type dataBatch struct {
-	// the document whose size is larger than optimistic replication threshold
-	// key of the map is the document key
-	bigDoc_map base.McRequestMap
+	// The documents that need target metadata for source side conflict resolution.
+	// They can be documents larger than optimistic replication threshold or
+	// documents that needs source side custom conflict resolution. 
+	// Key of the map is the document unique key
+	getMeta_map base.McRequestMap
 	// tracks big docs that do not need to be replicated
 	// key of the map is the document key_revSeqno
 	// value of the map has two possible values:
@@ -228,7 +231,7 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		curSize:           0,
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
-		bigDoc_map:        make(base.McRequestMap),
+		getMeta_map:       make(base.McRequestMap),
 		bigDoc_noRep_map:  make(map[string]bool),
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
@@ -252,7 +255,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		}
 		if !classifyFunc(req.Req) {
 			// If it fails the classifyFunc, then we're going to do bigDoc processing on it
-			b.bigDoc_map[req.UniqueKey] = req
+			b.getMeta_map[req.UniqueKey] = req
 		}
 		curSize := b.incrementSize(uint32(size))
 		if curCount < b.capacity_count && curSize < b.capacity_size*1000 {

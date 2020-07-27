@@ -40,6 +40,7 @@ const (
 	EXPIRY_DOCS_WRITTEN_METRIC   = "expiry_docs_written"
 	DELETION_DOCS_WRITTEN_METRIC = "deletion_docs_written"
 	SET_DOCS_WRITTEN_METRIC      = "set_docs_written"
+	ADD_DOCS_WRITTEN_METRIC      = "add_docs_written"
 
 	// the number of docs processed by pipeline
 	DOCS_PROCESSED_METRIC  = "docs_processed"
@@ -62,6 +63,7 @@ const (
 
 	CHANGES_LEFT_METRIC = base.ChangesLeftStats
 	DOCS_LATENCY_METRIC = "wtavg_docs_latency"
+	GET_LATENCY_METRIC  = "wtavg_get_latency"
 	META_LATENCY_METRIC = "wtavg_meta_latency"
 	RESP_WAIT_METRIC    = "resp_wait_time"
 
@@ -119,7 +121,7 @@ const (
 // stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
 var StatsToInitializeForPausedReplications = []string{DOCS_WRITTEN_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, DOCS_FILTERED_METRIC,
 	RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC, RATE_REPLICATED_METRIC,
-	BANDWIDTH_USAGE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC}
+	BANDWIDTH_USAGE_METRIC, DOCS_LATENCY_METRIC, GET_LATENCY_METRIC, META_LATENCY_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
@@ -130,12 +132,12 @@ var StatsToClearForPausedReplications = []string{SIZE_REP_QUEUE_METRIC, DOCS_REP
 
 // keys for metrics in overview
 var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
-	SET_DOCS_WRITTEN_METRIC, DOCS_PROCESSED_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, EXPIRY_FAILED_CR_SOURCE_METRIC,
+	SET_DOCS_WRITTEN_METRIC, ADD_DOCS_WRITTEN_METRIC, DOCS_PROCESSED_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, EXPIRY_FAILED_CR_SOURCE_METRIC,
 	DELETION_FAILED_CR_SOURCE_METRIC, SET_FAILED_CR_SOURCE_METRIC, DATA_REPLICATED_METRIC, DOCS_FILTERED_METRIC, DOCS_UNABLE_TO_FILTER_METRIC,
 	EXPIRY_FILTERED_METRIC, DELETION_FILTERED_METRIC, SET_FILTERED_METRIC, NUM_CHECKPOINTS_METRIC, NUM_FAILEDCKPTS_METRIC,
 	TIME_COMMITING_METRIC, DOCS_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, EXPIRY_RECEIVED_DCP_METRIC,
 	DELETION_RECEIVED_DCP_METRIC, SET_RECEIVED_DCP_METRIC, SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC,
-	RESP_WAIT_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC,
+	RESP_WAIT_METRIC, GET_LATENCY_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC,
 	DP_GET_FAIL_METRIC, EXPIRY_STRIPPED_METRIC}
 
 var VBMetricKeys = []string{DOCS_FILTERED_METRIC, DOCS_UNABLE_TO_FILTER_METRIC}
@@ -1078,6 +1080,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(DELETION_DOCS_WRITTEN_METRIC, deletion_docs_written)
 		set_docs_written := metrics.NewCounter()
 		registry.Register(SET_DOCS_WRITTEN_METRIC, set_docs_written)
+		add_docs_written := metrics.NewCounter()
+		registry.Register(ADD_DOCS_WRITTEN_METRIC, add_docs_written)
 		docs_failed_cr := metrics.NewCounter()
 		registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, docs_failed_cr)
 		expiry_failed_cr := metrics.NewCounter()
@@ -1095,9 +1099,13 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		resp_wait := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(RESP_WAIT_METRIC, resp_wait)
 		meta_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(GET_LATENCY_METRIC, meta_latency)
+		get_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(META_LATENCY_METRIC, meta_latency)
 		throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 		registry.Register(THROTTLE_LATENCY_METRIC, throttle_latency)
+		dp_failed := metrics.NewCounter()
+		registry.Register(DP_GET_FAIL_METRIC, dp_failed)
 
 		metric_map := make(map[string]interface{})
 		metric_map[SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1106,6 +1114,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[EXPIRY_DOCS_WRITTEN_METRIC] = expiry_docs_written
 		metric_map[DELETION_DOCS_WRITTEN_METRIC] = deletion_docs_written
 		metric_map[SET_DOCS_WRITTEN_METRIC] = set_docs_written
+		metric_map[ADD_DOCS_WRITTEN_METRIC] = add_docs_written
 		metric_map[DOCS_FAILED_CR_SOURCE_METRIC] = docs_failed_cr
 		metric_map[EXPIRY_FAILED_CR_SOURCE_METRIC] = expiry_failed_cr
 		metric_map[DELETION_FAILED_CR_SOURCE_METRIC] = deletion_failed_cr
@@ -1114,8 +1123,10 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[DOCS_OPT_REPD_METRIC] = docs_opt_repd
 		metric_map[DOCS_LATENCY_METRIC] = docs_latency
 		metric_map[RESP_WAIT_METRIC] = resp_wait
+		metric_map[GET_LATENCY_METRIC] = get_latency
 		metric_map[META_LATENCY_METRIC] = meta_latency
 		metric_map[THROTTLE_LATENCY_METRIC] = throttle_latency
+		metric_map[DP_GET_FAIL_METRIC] = dp_failed
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -1126,6 +1137,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataFailedCREventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetMetaReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
 
@@ -1174,6 +1186,8 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			metric_map[DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == base.SET_WITH_META {
 			metric_map[SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+		} else if req_opcode == base.ADD_WITH_META {
+			metric_map[ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id())
 		}
@@ -1196,6 +1210,10 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		} else {
 			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id())
 		}
+	} else if event.EventType == common.GetReceived {
+		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
+		commit_time := event_otherInfos.Commit_time
+		metric_map[GET_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.GetMetaReceived {
 		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
@@ -1203,6 +1221,8 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	} else if event.EventType == common.DataThrottled {
 		throttle_latency := event.OtherInfos.(time.Duration)
 		metric_map[THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
+	} else if event.EventType == common.DataPoolGetFail {
+		metric_map[DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
 	}
 
 	return nil

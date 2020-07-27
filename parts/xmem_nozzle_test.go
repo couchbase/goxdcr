@@ -3,7 +3,9 @@
 package parts
 
 import (
+	"encoding/binary"
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -29,7 +31,7 @@ const password = "wewewe"
 var kvString = fmt.Sprintf("%s:%s", "127.0.0.1", xmemPort)
 var connString = fmt.Sprintf("%s:%s", "127.0.0.1", targetPort)
 
-func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
+func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
 	map[string]interface{},
 	*XmemNozzle,
 	*Router,
@@ -47,8 +49,8 @@ func setupBoilerPlateXmem() (*utilsMock.UtilsIface,
 	remoteClusterSvc := &serviceDefMocks.RemoteClusterSvc{}
 
 	// local cluster run has KV port starting at 12000
-	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
-		kvString, "B1", xmemBucket, "temporaryBucketUuid", "Administrator", "wewewe",
+	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
+		kvString, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe",
 		base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList)
 
 	// settings map
@@ -136,12 +138,14 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 		fmt.Printf("Error creating RCR: %v\n", err)
 	}
 	remoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(remoteClusterRef, nil)
+	xmem.sourceClusterId = []byte("SourceCluster")
+	xmem.targetClusterId = []byte("TargetCluster")
 }
 
 func TestPositiveXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
 	assert.Nil(xmem.initialize(settings))
@@ -151,7 +155,7 @@ func TestPositiveXmemNozzle(t *testing.T) {
 func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
+	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
 	setupMocksCompressNeg(utils)
 
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
@@ -161,7 +165,7 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem()
+	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
 	settings[ForceCollectionDisableKey] = true
 	setupMocksCompressNeg(utils)
@@ -174,7 +178,7 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 func TestPositiveXmemNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzleAuto =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
 
@@ -196,38 +200,49 @@ func TestPositiveXmemNozzleAuto(t *testing.T) {
 func TestXmemSendAPacket(t *testing.T) {
 	fmt.Println("============== Test case start: TestXmemSendAPacket =================")
 	defer fmt.Println("============== Test case end: TestXmemSendAPacket =================")
-	assert := assert.New(t)
+
+	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
+	xmemSendPackets(t, []string{uprNotCompressFile}, xmemBucket)
+}
+
+func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 	if !targetXmemIsUpAndCorrectSetupExists() {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
 
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem()
+	assert := assert.New(t)
+
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bname)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
 
 	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := realUtils.GetBucketInfo(connString, xmemBucket, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	bucketInfo, err := realUtils.GetBucketInfo(connString, bname, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
 	assert.Nil(err)
 	uuid, ok := bucketInfo["uuid"].(string)
 	assert.True(ok)
 	xmem.targetBucketUuid = uuid
-
-	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
-	event, err := RetrieveUprFile(uprNotCompressFile)
-	assert.Nil(err)
-	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
-	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
-	assert.Nil(err)
-	assert.NotNil(wrappedMCRequest)
-
 	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
 	settings[ForceCollectionDisableKey] = true
 	err = xmem.Start(settings)
 	assert.Nil(err)
-	xmem.Receive(wrappedMCRequest)
+
+	// Send the events
+	var events []*mcc.UprEvent
+	for _, uprfile := range uprfiles {
+		event, err := RetrieveUprFile(uprfile)
+		assert.Nil(err)
+		events = append(events, event)
+
+		wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+		wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+		assert.Nil(err)
+		assert.NotNil(wrappedMCRequest)
+		xmem.Receive(wrappedMCRequest)
+	}
 
 	// retrieve the doc to check
 	cluster, err := gocb.Connect(fmt.Sprintf("http://127.0.0.1:%s", targetPort))
@@ -237,11 +252,309 @@ func TestXmemSendAPacket(t *testing.T) {
 		Password: password,
 	})
 
-	bucket, err := cluster.OpenBucket(xmemBucket, "")
+	bucket, err := cluster.OpenBucket(bname, "")
 	assert.Nil(err)
 
-	var byteSlice []byte
-	_, err = bucket.Get(string(event.Key), &byteSlice)
+	for _, event := range events {
+		if event.DataType&mcc.XattrDataType == 0 {
+			// Get doesn't work if it has XATTR
+			var byteSlice []byte
+			_, err = bucket.Get(string(event.Key), &byteSlice)
+			assert.Nil(err)
+			assert.NotEqual(0, len(byteSlice))
+		}
+	}
+}
+func setUpTargetBucket(t *testing.T, bucketName string) {
+	assert := assert.New(t)
+
+	cluster, err := gocb.Connect(fmt.Sprintf("http://127.0.0.1:%s", "9001"))
 	assert.Nil(err)
-	assert.NotEqual(0, len(byteSlice))
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: username,
+		Password: password,
+	})
+	cm := cluster.Manager(username, password)
+
+	_ = cm.RemoveBucket(bucketName)
+	bucketSettings := gocb.BucketSettings{false, false, bucketName, "", 100, 0, gocb.Couchbase}
+	err = cm.InsertBucket(&bucketSettings)
+	assert.Nil(err)
+
+	bucket, err := cluster.OpenBucket(bucketName, "")
+	for err != nil {
+		bucket, err = cluster.OpenBucket(bucketName, "")
+	}
+	assert.Nil(err)
+	assert.NotNil(bucket)
+
+	time.Sleep(2 * time.Second)
+}
+
+type User struct {
+	Id        string   `json:"uid"`
+	Email     string   `json:"email"`
+	Interests []string `json:"interests"`
+}
+
+/*
+ * This testcase will create a bucket GetXattrForCCR and test conflict detection.
+ *
+ * To avoid tightly couple the test files with real clusterID/UUID, we will use
+ * "SourceCluster" and "TargetCluster" as clusterIDs for the tests.
+ */
+func TestGetXattrForCustomCR(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetXattrForCustomCR =================")
+	defer fmt.Println("============== Test case end: TestGetXattrForCustomCR =================")
+
+	if !targetXmemIsUpAndCorrectSetupExists() {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+	bucketName := "GetXattrForCCR"
+	setUpTargetBucket(t, bucketName)
+
+	assert := assert.New(t)
+
+	// Set up target documents
+	xmemSendPackets(t, []string{"testdata/customCR/kingarthur2_new_cas2.json",
+		"testdata/customCR/kingarthur3_cv1_cas1.json",
+		"testdata/customCR/kingarthur4_cv1_cas2.json",
+		"testdata/customCR/kingarthur5_cv1_cas2.json",
+		"testdata/customCR/kingarthur6_mv.json",
+		"testdata/customCR/kingarthur7_mv.json",
+		"testdata/customCR/kingarthur8_cas1.json",
+	}, bucketName)
+
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+
+	// Need to find the actual running targetBucketUUID
+	bucketInfo, err := realUtils.GetBucketInfo(connString, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	assert.Nil(err)
+	uuid, ok := bucketInfo["uuid"].(string)
+	assert.True(ok)
+	xmem.targetBucketUuid = uuid
+
+	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
+	settings[ForceCollectionDisableKey] = true
+	err = xmem.Start(settings)
+	assert.Nil(err)
+	/*
+	 * Test 1: Doc never existed at target, source wins
+	 * Source doc: kingarthur1_new
+	 * Target doc: none
+	 */
+	fmt.Println("Test 1: Source dominates when it doesn't exist at target.")
+	getXattrForCustomCR(1, t, "testdata/customCR/kingarthur1_new.json", xmem, router, SourceDominate)
+	/*
+	 * Test 2: Target larger CAS. Target wins
+	 * Source: kingarthur2_new_cas1
+	 * Target: kingarthur2_new_cas2
+	 */
+	fmt.Println("Test 2: Target dominates when it has larger CAS.")
+	getXattrForCustomCR(2, t, "testdata/customCR/kingarthur2_new_cas1.json", xmem, router, TargetDominate)
+	/*
+	 * Test 3: Target doc comes from source. Source larger CAS. Source wins
+	 * Source: kingarthur3_new_cas2
+	 * Target: kingarthur3_cv1_cas1 (cv1 == cas1)
+	 *         _xdcr{"cv":"0x0000ccae473b1316","id":"SourceCluster"}
+	 */
+	fmt.Println("Test 3: Source larger CAS. Target comes from source with no new change. Source wins")
+	getXattrForCustomCR(3, t, "testdata/customCR/kingarthur3_new_cas2.json", xmem, router, SourceDominate)
+	/*
+	 * Test 4: Both has local changes and source pcas does not dominate. Conflict
+	 * Source: kingarthur4_pcasNoTarget_cas3:
+	 *		_xdcr{"cv":"0x0000ccae473b1316","id":"Cluster4","pc":{"cluster3":"Fge5BJLoAAQ"}}
+	 *		Fge5BJLoAAQ is base64 of 1587440822967074820
+	 * Target: kingarthur4_cv1_cas2, new change (Cas > cv)
+	 *		_xdcr{"cv":"0x0000ccae473b1316","id":"SourceCluster"}
+	 */
+	fmt.Println("Test 4: Both has changes (CAS > cv), source has PCAS but does not dominate. Conflict")
+	getXattrForCustomCR(4, t, "testdata/customCR/kingarthur4_pcasNoTarget_cas3.json", xmem, router, Conflict)
+	/*
+	 * Test 5: Both has local changes and source pcas that dominates target change
+	 * Source: kingarthur5_pcasDominateTargetCas.json:
+	 *		_xdcr{"cv":"0x0b00f8da4d881416","id":"Cluster3","pc":{"TargetCluster":"FhSITdr4AAA"}}
+	 * Target: kingarthur5_cv1_cas2, new change (Cas > cv)
+	 *		_xdcr{"cv":"0x0400e89204b90716","id":"SourceCluster"}, Cas: 1591046436336173056
+	 */
+	fmt.Println("Test 5: Both has changes (CAS > cv), source has PCAS that dominates.")
+	getXattrForCustomCR(5, t, "testdata/customCR/kingarthur5_pcasDominateTargetCas.json", xmem, router, SourceDominate)
+	/*
+	 * Test 6: Target is a merged doc (has mv, CAS == cv). Source PCAS dominates
+	 * Source: kingarthur6_pcasDominateMv
+	 *		_xdcr{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	 * Target: kingarthur6_mv, no new change (Cas == cv)
+	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	 */
+	fmt.Println("Test 6: Target is a merged doc, source PCAS dominates MV.")
+	getXattrForCustomCR(6, t, "testdata/customCR/kingarthur6_pcasDominateMv.json", xmem, router, SourceDominate)
+	/*
+	 * Test 7: Target is a merged doc (has mv, CAS == cv). Source PCAS does not dominate
+	 * Source: kingarthur7_pcasNotDominateMv
+	 *		_xdcr{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster3":"FhSITdr4ACA"}}
+	 * Target: kingarthur7_mv, no new change (Cas == cv)
+	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	 */
+	fmt.Println("Test 7: Target is a merged doc, source PCAS does not dominates. Conflict.")
+	getXattrForCustomCR(7, t, "testdata/customCR/kingarthur7_pcasNotDominateMv.json", xmem, router, Conflict)
+	/*
+	 * Test 8: Target does not have _xdcr, Source pcas dominates target
+	 * Source: kingarthur8_pcasDominateTargetCas1
+	 *		_xdcr{"cv":"0x0b00104adc921416","id":"Cluster4","pc":{"Cluster2":"FhSITdr4ABU","TargetCluster":"FhSS3EoQAAA"}}
+	 * Target: kingarthur8_cas1
+	 */
+	fmt.Println("Test 8: Target does not have _xdcr, source PCAS dominates target CAS.")
+	getXattrForCustomCR(8, t, "testdata/customCR/kingarthur8_pcasDominateTargetCas1.json", xmem, router, SourceDominate)
+	/*
+	 * Test 9: Source larger CAS, both merged doc, but target MV dominates source MV. Setback
+	 * Source: kingarthur6_pcasDominateMv
+	 *		_xdcr{"cv":"0x0000d4a7994f1716","id":"SourceCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU"}}
+	 * Target: kingarthur6_mv, no new change (Cas == cv)
+	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	 */
+	fmt.Println("Test 9: Source larger CAS, but target MV dominates source MV. TargetSetBack.")
+	getXattrForCustomCR(9, t, "testdata/customCR/kingarthur6_largerCasSmallerMv.json", xmem, router, TargetSetBack)
+}
+func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
+	assert := assert.New(t)
+	event, err := RetrieveUprFile(fname)
+	assert.Nil(err)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	getMeta_map := make(base.McRequestMap)
+	getMeta_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
+	noRep_map, getDoc_map, err := xmem.batchGetXattrForCustomCR(getMeta_map)
+	assert.Nil(err)
+	if expectedResult == SourceDominate {
+		assert.Equal(0, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(0, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
+	} else if expectedResult == TargetDominate {
+		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(0, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
+	} else if expectedResult == Conflict || expectedResult == TargetSetBack {
+		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
+		assert.Equal(1, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
+	}
+	if len(getDoc_map) > 0 {
+		conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map)
+		assert.Nil(err)
+		if expectedResult == Conflict {
+			assert.Equal(1, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
+			assert.Equal(0, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
+			for _, v := range conflict_map {
+				printMultiLookupResult(testId, t, v.resp.Body)
+			}
+		}
+		if expectedResult == TargetSetBack {
+			assert.Equal(0, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
+			assert.Equal(1, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
+			for _, v := range setBack_map {
+				printMultiLookupResult(testId, t, v.resp.Body)
+			}
+		}
+	}
+}
+func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
+	assert := assert.New(t)
+	var i = 0
+	status := binary.BigEndian.Uint16(body[i:])
+	i = i + 2
+	len := int(binary.BigEndian.Uint32(body[i:]))
+	i = i + 4
+	fmt.Println("SUBDOC_MULTI_LOOKUP response:")
+	if len > 0 {
+		xattr := body[i : i+len]
+		fmt.Printf("status=%v, XATTR=%s\n", status, xattr)
+		i = i + len
+	}
+	status = binary.BigEndian.Uint16(body[i:])
+	i = i + 2
+	len = int(binary.BigEndian.Uint32(body[i:]))
+	i = i + 4
+	assert.Greater(len, 0, fmt.Sprintf("Test %d failed", testId))
+	doc := body[i : i+len]
+	fmt.Printf("status=%v, Document=%s\n", status, doc)
+}
+
+func TestconstructCustomCRXattr(t *testing.T) {
+	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
+	defer fmt.Println("============== Test case end: TestNegNoCompressionXmemNozzle =================")
+	bucketName := "customCR"
+	utilsNotUsed, _, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+
+	assert := assert.New(t)
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	cv, err := base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
+
+	body := make([]byte, 1000)
+
+	// Test 1. First change, no existing _xdcr
+	CCRMeta, err := newCustomCRMeta(xmem.sourceClusterId, cv, nil, nil, nil, nil, 0)
+	assert.Nil(err)
+	pos, err := CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
+	assert.Nil(err)
+	assert.Equal("_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0x0b0085b25e8d1416\"}\x00", string(body[4:pos]))
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 2: New change cas > cv, expected to have updated id, cv, and pcas
+	oldXattr := "_xdcr\x00{\"id\":\"Cluster4\",\"cv\":\"0x0b0085b25e8d1416\"}\x00"
+	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, nil, len(oldXattr))
+	assert.Nil(err)
+	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
+	assert.Nil(err)
+	newXattr := "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":{\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
+	assert.Equal(newXattr, string(body[4:pos]))
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 3: New change (cas=cv+1000) with existing XATTR (pc):
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	oldXattr = "_xdcr\x00{\"id\":\"Cluster4\",\"cv\":\"0x0b0085b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
+	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		[]byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil, len(oldXattr))
+	assert.Nil(err)
+	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
+	assert.Nil(err)
+	newXattr = "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\",\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
+	assert.Contains(string(body[4:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
+	assert.Contains(string(body[4:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(body[4:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(body[4:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(body[4:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 4: New change (cas=cv+1000) with existing XATTR (mv):
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		nil, []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), len(oldXattr))
+	assert.Nil(err)
+	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
+	assert.Contains(string(body[0:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
+	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 5: New change (cas=cv+1000) with existing XATTR(pcas and mv):
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		[]byte("{\"Cluster1\":\"FhSITdr4AAA\"}"), []byte("{\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), len(oldXattr))
+	assert.Nil(err)
+	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
+	assert.Contains(string(body[0:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
+	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 }

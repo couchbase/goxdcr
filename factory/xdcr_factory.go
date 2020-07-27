@@ -202,6 +202,10 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		// resolution and target side conflict resolution yield consistent results
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
 	}
+	// TODO (MB-39012): Remove this when we actually have bucket with custom CR
+	if xdcrf.xdcr_topology_svc.IsMyClusterDeveloperPreview() {
+		sourceCRMode = base.CRMode_Custom
+	}
 
 	var specForConstruction metadata.GenericSpecification
 	var partTopic string = topic
@@ -389,6 +393,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		get_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.GetReceivedEventListener, i),
+			pipeline.Topic(), logger_ctx)
 		get_meta_received_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.GetMetaReceivedEventListener, i),
 			pipeline.Topic(), logger_ctx)
@@ -400,6 +407,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle := targets[index]
 			out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.GetReceived, get_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_meta_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataThrottled, data_throttled_event_listener)
 		}
@@ -566,6 +574,13 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
 	xdcrf.logger.Infof("Target topology retrieved. kvVBMap = %v\n", kvVBMap)
 
+	var sourceClusterUuid string
+	if sourceCRMode == base.CRMode_Custom {
+		if sourceClusterUuid, err = xdcrf.xdcr_topology_svc.MyClusterUuid(); err != nil {
+			return
+		}
+	}
+
 	var vbCouchApiBaseMap map[uint16]string
 
 	// For each destination host (kvaddr) and its vbucvket list that it has (kvVBList)
@@ -609,7 +624,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				outNozzle = xdcrf.constructXMEMNozzle(topic, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList)
+				outNozzle = xdcrf.constructXMEMNozzle(topic, sourceClusterUuid, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList)
 			}
 
 			// Add the created nozzle to the collective map of outNozzles to be returned
@@ -667,6 +682,7 @@ func (xdcrf *XDCRFactory) getOutNozzleType(targetClusterRef *metadata.RemoteClus
 }
 
 func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
+	sourceClusterUuid string,
 	targetClusterUuid string,
 	kvaddr string,
 	sourceBucketName string,
@@ -682,7 +698,7 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
 	vbList []uint16) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, sourceClusterUuid, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
 		targetBucketUuid, username, password, sourceCRMode, logger_ctx, xdcrf.utils, vbList)
 	return nozzle
 }

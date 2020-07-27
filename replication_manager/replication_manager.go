@@ -31,6 +31,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
+	"github.com/couchbase/goxdcr/functions"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
@@ -185,6 +186,11 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.upgradeRemoteClusterRefs()
 
 		replication_mgr.initMetadataChangeMonitor()
+
+		// Init and start Eventing Javascript Engine before admin port is started. This will start a few OS processes called js_evaluator
+		// TODO: Should we only start when it is in DP mode? To do that, we will need to handle user turning on DP mode, either restart
+		// http server gracefully with zero downtime or restart XDCR
+		functions.Init(sourceKVHost, xdcrRestPort)
 
 		// start adminport
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils)
