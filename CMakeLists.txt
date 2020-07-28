@@ -50,7 +50,7 @@ ENDIF ()
 
 IF (BUILD_ENTERPRISE)
    MESSAGE(STATUS "Building EE edition of XDCR")
-   SET (xdcrGoTags "pcre")
+   SET (xdcrGoTags "pcre enterprise")
 ELSE (BUILD_ENTERPRISE)
    MESSAGE(STATUS "Building CE edition of XDCR")
 ENDIF (BUILD_ENTERPRISE)
