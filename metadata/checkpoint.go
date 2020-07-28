@@ -442,6 +442,11 @@ func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
 	return ckpt_record_map
 }
 
+func (ckpt *CheckpointRecord) SetBrokenMappings(mappings CollectionNamespaceMapping) error {
+	ckpt.brokenMappings = mappings
+	return ckpt.PopulateBrokenMappingSha()
+}
+
 func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 	ckpt_doc := &CheckpointsDoc{Checkpoint_records: []*CheckpointRecord{},
 		SpecInternalId: specInternalId,

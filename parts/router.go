@@ -412,7 +412,7 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 		return
 	}
 
-	added, _, _, err := latestManifest.Diff(&lastKnownManifestClone)
+	added, _, removed, err := latestManifest.Diff(&lastKnownManifestClone)
 	if err != nil {
 		err = fmt.Errorf("Unable to diff manifests between %v and %v: %v", lastKnownManifestClone.Uid(), latestManifest.Uid(), err)
 		return
@@ -429,47 +429,106 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 		brokenMappingClone := c.brokenMapping.Clone()
 		c.brokenMapMtx.RUnlock()
 
-		if len(added) > 0 && len(c.brokenMapping) > 0 {
+		// If any source manifests are removed, then remove them from brokenmap
+		atLeastOneFound := checkIfRemovedSrcNamespacesExistInCurrentBrokenMap(removed, brokenMappingClone)
+		if atLeastOneFound {
+			brokenMappingClone = c.cleanBrokenMapWithRemovedEntries(brokenMappingClone, removed)
+		}
+
+		if len(added) > 0 && len(brokenMappingClone) > 0 {
 			// These are new target collections - see if the broken ones can be backfilled
 			fixedMapping = brokenMappingClone.GetSubsetBasedOnSpecifiedTargets(added)
+			brokenMappingClone = brokenMappingClone.Delete(fixedMapping)
 		}
 
 		if len(fixedMapping) > 0 {
-			c.brokenMapMtx.Lock()
-			if c.lastKnownManifest.Uid() != lastKnownManifestId || !c.brokenMapping.IsSame(brokenMappingClone) {
-				// something changed from underneath, abort
-				c.brokenMapMtx.Unlock()
+			abort := c.updateBrokenMapAndRoutingInfo(latestManifest, lastKnownManifestId, brokenMappingClone, fixedMapping, &routingInfo)
+			if abort {
 				return
 			}
-			c.lastKnownManifest = latestManifest
-			c.brokenMapping = c.brokenMapping.Delete(fixedMapping)
-			routingInfo.BrokenMap = c.brokenMapping.Clone()
-			routingInfo.BackfillMap = fixedMapping.Clone()
-			routingInfo.TargetManifestId = latestManifest.Uid()
-			if c.logger.GetLogLevel() > log.LogLevelDebug {
-				c.logger.Debugf("Based on target manifestID %v These mappings need backfilling: %v\n", latestManifest.Uid(), fixedMapping.String())
-			}
-			c.brokenMapMtx.Unlock()
 		} else {
 			// No need to raise fixed mapping event but still need to bubble the latest pair of {brokenMap, targetManifestId} to checkpoint manager
 			// This is so that checkpoint manager will have the "latest" possible manifest that goes with this brokenMap when checkpointing
-			c.brokenMapMtx.Lock()
-			if c.lastKnownManifest.Uid() != lastKnownManifestId || !c.brokenMapping.IsSame(brokenMappingClone) {
-				// something changed from underneath, abort
-				c.brokenMapMtx.Unlock()
+			abort := c.updateJustRoutingInfo(latestManifest, lastKnownManifestId, brokenMappingClone, routingInfo)
+			if abort {
 				return
 			}
-			c.lastKnownManifest = latestManifest
-			routingInfo.BrokenMap = c.brokenMapping.Clone()
-			routingInfo.TargetManifestId = latestManifest.Uid()
-			if c.logger.GetLogLevel() > log.LogLevelDebug {
-				c.logger.Debugf("Based on target manifestID %v These mappings are broken: %v\n", latestManifest.Uid(), routingInfo.BrokenMap.String())
-			}
-			c.brokenMapMtx.Unlock()
 		}
 	}
 
 	err = c.routingUpdater(routingInfo)
+	return
+}
+
+func (c *CollectionsRouter) cleanBrokenMapWithRemovedEntries(brokenMappingClone metadata.CollectionNamespaceMapping, removed metadata.ScopesMap) metadata.CollectionNamespaceMapping {
+	nameSpacesToBeDeleted := getNamespacesToBeDeletedFromBrokenMap(brokenMappingClone, removed)
+	c.brokenMapMtx.Lock()
+	c.brokenMapping = c.brokenMapping.Delete(nameSpacesToBeDeleted)
+	brokenMappingClone = c.brokenMapping.Clone()
+	c.brokenMapMtx.Unlock()
+	return brokenMappingClone
+}
+
+func (c *CollectionsRouter) updateJustRoutingInfo(latestManifest *metadata.CollectionsManifest, lastKnownManifestId uint64, brokenMappingClone metadata.CollectionNamespaceMapping, routingInfo CollectionsRoutingInfo) bool {
+	c.brokenMapMtx.Lock()
+	if c.lastKnownManifest.Uid() != lastKnownManifestId || !c.brokenMapping.IsSame(brokenMappingClone) {
+		// something changed from underneath, abort
+		c.brokenMapMtx.Unlock()
+		return true
+	}
+	c.lastKnownManifest = latestManifest
+	routingInfo.BrokenMap = c.brokenMapping.Clone()
+	routingInfo.TargetManifestId = latestManifest.Uid()
+	if c.logger.GetLogLevel() > log.LogLevelDebug {
+		c.logger.Debugf("Based on target manifestID %v These mappings are broken: %v\n", latestManifest.Uid(), routingInfo.BrokenMap.String())
+	}
+	c.brokenMapMtx.Unlock()
+	return false
+}
+
+func (c *CollectionsRouter) updateBrokenMapAndRoutingInfo(latestManifest *metadata.CollectionsManifest, lastKnownManifestId uint64, brokenMappingClone metadata.CollectionNamespaceMapping, fixedMapping metadata.CollectionNamespaceMapping, routingInfo *CollectionsRoutingInfo) bool {
+	c.brokenMapMtx.Lock()
+	if c.lastKnownManifest.Uid() != lastKnownManifestId {
+		// something changed from underneath, abort
+		c.brokenMapMtx.Unlock()
+		return true
+	}
+	c.lastKnownManifest = latestManifest
+	c.brokenMapping = brokenMappingClone.Clone()
+	routingInfo.BrokenMap = brokenMappingClone
+	routingInfo.BackfillMap = fixedMapping.Clone()
+	routingInfo.TargetManifestId = latestManifest.Uid()
+	if c.logger.GetLogLevel() > log.LogLevelDebug {
+		c.logger.Debugf("Based on target manifestID %v These mappings need backfilling: %v\n", latestManifest.Uid(), fixedMapping.String())
+	}
+	c.brokenMapMtx.Unlock()
+	return false
+}
+
+func getNamespacesToBeDeletedFromBrokenMap(brokenMappingClone metadata.CollectionNamespaceMapping, removed metadata.ScopesMap) metadata.CollectionNamespaceMapping {
+	nameSpacesToBeDeleted := make(metadata.CollectionNamespaceMapping)
+	for srcNs, tgtNs := range brokenMappingClone {
+		_, found := removed.GetCollectionByNames(srcNs.ScopeName, srcNs.CollectionName)
+		if found {
+			nameSpacesToBeDeleted.AddSingleMapping(srcNs, tgtNs[0])
+		}
+	}
+	return nameSpacesToBeDeleted
+}
+
+func checkIfRemovedSrcNamespacesExistInCurrentBrokenMap(removed metadata.ScopesMap, brokenMappingClone metadata.CollectionNamespaceMapping) (atLeastOneFound bool) {
+	for scopeName, scopeMap := range removed {
+		for collectionName, _ := range scopeMap.Collections {
+			_, _, exists := brokenMappingClone.Get(&base.CollectionNamespace{
+				ScopeName:      scopeName,
+				CollectionName: collectionName,
+			})
+			if exists {
+				atLeastOneFound = true
+				return
+			}
+		}
+	}
 	return
 }
 

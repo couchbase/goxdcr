@@ -77,6 +77,7 @@ func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc
 		xdcrTopologySvc:        xdcrTopologySvc,
 		metakvSvc:              metakvSvc,
 	}
+	svc.SetMetadataChangeHandlerCallback(checkpointsSvc.CollectionsManifestChangeCb)
 	return svc, svc.start()
 }
 
@@ -200,13 +201,13 @@ func (c *CollectionsManifestService) ReplicationSpecChangeCallback(id string, ol
 
 func (c *CollectionsManifestService) getAgent(spec *metadata.ReplicationSpecification) (*CollectionsManifestAgent, error) {
 	if spec == nil {
-		return nil, base.ErrorInvalidInput
+		return nil, fmt.Errorf("Nil spec given for getting agent")
 	}
 	c.agentsMtx.RLock()
 	agent, ok := c.agentsMap[spec.Id]
 	c.agentsMtx.RUnlock()
 	if !ok {
-		return nil, base.ErrorInvalidInput
+		return nil, fmt.Errorf("Cannot find agent for spec %v", spec.Id)
 	}
 	return agent, nil
 }

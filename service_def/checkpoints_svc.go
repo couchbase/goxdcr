@@ -24,4 +24,7 @@ type CheckpointsService interface {
 	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
 	PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error
 	UpsertBrokenMapping(replicationId string, specInternalId string) error
+
+	CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
+	ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
 }

@@ -1,0 +1,157 @@
+# Copyright (c) 2019-2020 Couchbase, Inc.
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the
+# License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific language governing permissions
+# and limitations under the License.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+#pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
+#declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	waitForBgJobs
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+function cleanupTestCaseInternalSettings {
+	resetCustomManifestRefreshInterval "C1"
+}
+
+BROKEN_MSG="The followings are collection mappings that are newly broken"
+REPAIR_MSG="The followings are collection mappings that are now repaired"
+BACKFILL_MSG="These collections need to backfill"
+BACKFILL_APPEND_MSG="These collections need to append backfill"
+VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
+CKPT_MAPPINGS_CHANGED_MSG="checkpoints mapping changed due to collections manifest changes"
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running brokenmapping cleanup test case"
+	echo "============================================================================"
+	testForClusterRun
+	if (( $? != 0 ));then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (( $? != 0 ));then
+		exit $?
+	fi
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap cleanupTestCaseInternalSettings EXIT
+
+	# Get current instance
+	local -i currentBrokenInstanceCnt
+	local -i currentRepairedInstanceCnt
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+
+	local currentClusterLog
+	currentClusterLog=`getClusterLogs "C1"`
+	currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
+	currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+
+	local currentXdcrLog
+	currentXdcrLog=`getInternalNodeXdcrLog "C1"`
+	currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
+	currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
+	currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+	currentCkptMappingsChangedCnt=`echo "$currentXdcrLog" | grep -c "$CKPT_MAPPINGS_CHANGED_MSG"`
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+
+	echo "Waiting 5 seconds before checking item count first pass"
+	sleep 5
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" 0
+
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+
+    # Once broken map is confirmed, restart pipeline to force checkpoint
+    pauseReplication "C1" "B1" "C2" "B2"
+    echo "Waiting 10 secs for replication to pause..."
+    sleep 10
+    resumeReplication "C1" "B1" "C2" "B2"
+    echo "Waiting 10 secs for replication to resume..."
+    sleep 10
+    waitForChangesLeft0 "C1" "B1" "C2" "B2"
+    # Rewriting the I/O shouldn't cause anymore broken msg
+	runDataLoad
+	sleep 5
+    waitForChangesLeft0 "C1" "B1" "C2" "B2"
+    # broken msg shouldn't have increased
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+	# mappingChanged msg should not have occurred
+	validateLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(( $currentCkptMappingsChangedCnt ))
+
+    echo "Deleting collection on source cluster C1:B1:S1:col1"
+    deleteCollection "C1" "B1" "S1" "col1"
+	printGlobalScopeAndCollectionInfo
+
+	echo "Sleeping 10 seconds for collectionsManifestSvc to pull new manifest"
+    sleep 10
+	validateInternalLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(( $currentCkptMappingsChangedCnt + 1 ))
+
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+ 	cleanupBuckets
+ 	cleanupRemoteClusterRefs
+ 	cleanupTestCaseInternalSettings
+ 	# remove trap as no longer needed
+ 	trap - EXIT
+}

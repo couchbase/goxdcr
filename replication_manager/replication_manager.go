@@ -366,6 +366,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillReplSvc.ReplicationSpecChangeCallback)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillMgr.ReplicationSpecChangeCallback)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.checkpoint_svc.ReplicationSpecChangeCallback)
 
 	mcm.Start()
 }

@@ -56,6 +56,20 @@ func (_m *CheckpointsService) CheckpointsDocs(replicationId string, brokenMappin
 	return r0, r1
 }
 
+// CollectionsManifestChangeCb provides a mock function with given fields: metadataId, oldMetadata, newMetadata
+func (_m *CheckpointsService) CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error {
+	ret := _m.Called(metadataId, oldMetadata, newMetadata)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}) error); ok {
+		r0 = rf(metadataId, oldMetadata, newMetadata)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // DelCheckpointsDoc provides a mock function with given fields: replicationId, vbno
 func (_m *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16) error {
 	ret := _m.Called(replicationId, vbno)
@@ -135,6 +149,20 @@ func (_m *CheckpointsService) PreUpsertBrokenMapping(replicationId string, specI
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, *metadata.CollectionNamespaceMapping) error); ok {
 		r0 = rf(replicationId, specInternalId, oneBrokenMapping)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ReplicationSpecChangeCallback provides a mock function with given fields: metadataId, oldMetadata, newMetadata
+func (_m *CheckpointsService) ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}) error {
+	ret := _m.Called(metadataId, oldMetadata, newMetadata)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}) error); ok {
+		r0 = rf(metadataId, oldMetadata, newMetadata)
 	} else {
 		r0 = ret.Error(0)
 	}
