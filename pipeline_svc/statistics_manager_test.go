@@ -3,6 +3,9 @@ package pipeline_svc
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"testing"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	commonReal "github.com/couchbase/goxdcr/common"
 	common "github.com/couchbase/goxdcr/common/mocks"
@@ -15,8 +18,6 @@ import (
 	"github.com/rcrowley/go-metrics"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"testing"
 )
 
 var pipelineTopic string = "topic"
@@ -148,6 +149,7 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 func setupInnerMock(runtimeCtx *common.PipelineRuntimeContext,
 	ckptManager *CheckpointManager) {
 	runtimeCtx.On("Service", "CheckpointManager").Return(ckptManager)
+	runtimeCtx.On("Service", "ConflictManager").Return(nil)
 }
 
 func setupCheckpointMgr(

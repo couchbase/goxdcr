@@ -598,7 +598,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 		count := batch.count()
 
 		// A map of documents that should not be replicated
-		var bigDoc_noRep_map map[string]bool
+		var bigDoc_noRep_map map[string]NeedSendStatus
 		// Populate no replication map to optimize data bandwidth before actually sending
 		bigDoc_noRep_map, err = capi.batchGetMeta(batch.vbno, batch.getMeta_map)
 		if err != nil {
@@ -624,7 +624,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
  * Returns a map of all the keys that are fed in bigDoc_map, with a boolean value
  * The boolean value == true meaning that the document referred by key should *not* be replicated
  */
-func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) (map[string]bool, error) {
+func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) (map[string]NeedSendStatus, error) {
 	if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
 		capi.Logger().Debugf("%v batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v%v%v\n", capi.Id(), vbno, len(bigDoc_map), base.UdTagBegin, bigDoc_map, base.UdTagEnd)
 	}
@@ -712,13 +712,13 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 			docKey := string(req.Req.Key)
 			if _, ok = bigDoc_rep_map[docKey]; !ok {
 				// true -> failed CR
-				bigDoc_noRep_map[id] = true
+				bigDoc_noRep_map[id] = Not_Send_Failed_CR
 			}
 		} else {
 			// if id is not found in sent_id_map, it must have been de-duped
 			// do not send it to target
-			// true -> failed CR  -- consider it to have failed CR with other source side mutations
-			bigDoc_noRep_map[id] = true
+			// consider it to have failed CR with other source side mutations
+			bigDoc_noRep_map[id] = Not_Send_Failed_CR
 		}
 	}
 

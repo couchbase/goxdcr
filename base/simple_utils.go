@@ -20,10 +20,6 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/gomemcached"
-	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbaselabs/gojsonsm"
 	"io/ioutil"
 	"math"
 	mrand "math/rand"
@@ -36,6 +32,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/couchbase/gomemcached"
+	mc "github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbaselabs/gojsonsm"
 )
 
 type Action func() error
@@ -1506,6 +1508,14 @@ func ValidateAndConvertStringToJsonType(value string) (map[string]interface{}, e
 	return outMap, err
 }
 
+func FindSourceBodyWithoutXattr(req *mc.MCRequest) []byte {
+	if req.DataType&mcc.XattrDataType == 0 {
+		return req.Body
+	}
+	xattrLen := binary.BigEndian.Uint32(req.Body[0:4])
+	return req.Body[4+xattrLen:]
+}
+
 /*
  * resp is expected to be a subdoc_multi_lookup response where we only lookup
  * _xdcr plus body, the body is the second path. Each path has:
@@ -1519,4 +1529,108 @@ func FindTargetBodyWithoutXattr(resp *gomemcached.MCResponse) []byte {
 	} else {
 		return body[6+xattrlen+6:]
 	}
+}
+
+/*
+ * vv is a version vector in the form {"key":"value","key":"value",...}. It is either PCAS or MV.
+ * Key is clusterID. Value is Cas encoded with base64.
+ * returns the Cas value converted back to uint64 if found for the key
+ * returns 0 if not found
+ */
+func findItemInVV(vv []byte, key []byte) (cas uint64, err error) {
+	if len(vv) == 0 {
+		return 0, nil
+	}
+	it, err := NewCCRXattrFieldIterator(vv)
+	if err != nil {
+		return 0, err
+	}
+	for it.HasNext() {
+		itemKey, itemValue, err := it.Next()
+		if err != nil {
+			return 0, err
+		}
+		if bytes.Equal(itemKey, key) {
+			return Base64ToUint64(itemValue)
+		}
+	}
+	return 0, nil
+}
+
+// This will find the custom CR XATTR from the req body
+func FindSourceCustomCRXattr(req *mc.MCRequest, sourceId []byte) (crMeta *CustomCRMeta, err error) {
+	cas := binary.BigEndian.Uint64(req.Extras[16:24])
+	if req.DataType&mcc.XattrDataType == 0 {
+		return NewCustomCRMeta(sourceId, cas, nil, nil, nil, nil)
+	}
+	body := req.Body
+	var pos uint32 = 0
+	pos = pos + 4
+	xattrIter, err := NewXattrIterator(body)
+	if err != nil {
+		return
+	}
+	var key, value []byte
+	var xattr []byte
+	for xattrIter.HasNext() {
+		key, value, err = xattrIter.Next()
+		if err != nil {
+			return
+		}
+		if Equals(key, XATTR_XDCR) {
+			xattr = value
+			break
+		}
+	}
+	if xattr == nil {
+		// Source does not have _xdcr XATTR
+		return NewCustomCRMeta(sourceId, cas, nil, nil, nil, nil)
+	}
+	// Found _xdcr XATTR. Now find the fields
+	id, cv, pcas, mv, err := findCustomCRXattrFields(xattr)
+	return NewCustomCRMeta(sourceId, cas, id, cv, pcas, mv)
+}
+
+/*
+ * resp is expected to be a subdoc_multi_lookup response. Since we only lookup
+ * _xdcr or _xdcr plus body, the response is at the beginning of the response body:
+ * 2 byte status, 4 byte lengh, value payload start at byte 6
+ */
+func FindTargetCustomCRXattr(resp *mc.MCResponse, targetId []byte) (crMeta *CustomCRMeta, err error) {
+	status := mc.Status(binary.BigEndian.Uint16(resp.Body[0:2]))
+	// If _xdcr XATTR exists, the status will be mc.SUCCESS. Otherwise there is no _xdcr and no id, cv, pcas, mv since they are sub path of _xdcr
+	if status == mc.SUCCESS {
+		xattrlen := int(binary.BigEndian.Uint32(resp.Body[2:6]))
+		xattr := resp.Body[6 : 6+xattrlen]
+		id, cv, pcas, mv, err := findCustomCRXattrFields(xattr)
+		if err != nil {
+			return nil, err
+		}
+		return NewCustomCRMeta(targetId, resp.Cas, id, cv, pcas, mv)
+	}
+	return NewCustomCRMeta(targetId, resp.Cas, nil, nil, nil, nil)
+}
+
+func findCustomCRXattrFields(xattr []byte) (clusterId, cv, pcas, mv []byte, err error) {
+	it, err := NewCCRXattrFieldIterator(xattr)
+	if err != nil {
+		return
+	}
+	for it.HasNext() {
+		var key, value []byte
+		key, value, err = it.Next()
+		if err != nil {
+			return
+		}
+		if Equals(key, XATTR_ID) {
+			clusterId = value
+		} else if Equals(key, XATTR_CV) {
+			cv = value
+		} else if Equals(key, XATTR_PCAS) {
+			pcas = value
+		} else if Equals(key, XATTR_MV) {
+			mv = value
+		}
+	}
+	return
 }

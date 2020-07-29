@@ -100,7 +100,8 @@ type replicationManager struct {
 	//internal settings service
 	internal_settings_svc service_def.InternalSettingsSvc
 	// Mockable utils object
-	utils utilities.UtilsIface
+	utils        utilities.UtilsIface
+	resolver_svc *service_def.ResolverSvcIface
 	// Collections Manifests service
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	// Backfill replication service
@@ -143,6 +144,7 @@ func StartReplicationManager(sourceKVHost string,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	resolver_svc service_def.ResolverSvcIface,
 	utilitiesIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
 	backfillReplSvc service_def.BackfillReplSvc) {
@@ -161,7 +163,7 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
 			audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
-			throughput_throttler_svc, collectionsManifestSvc, backfillReplSvc)
+			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -198,6 +200,8 @@ func StartReplicationManager(sourceKVHost string,
 		logger_rm.Info("Admin port has been launched")
 		// add adminport as children of replication manager supervisor
 		replication_mgr.GenericSupervisor.AddChild(adminport)
+
+		resolver_svc.Start()
 
 		logger_rm.Info("ReplicationManager is running")
 
@@ -434,6 +438,7 @@ func (rm *replicationManager) init(
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	resolverSvc service_def.ResolverSvcIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
 	backfillReplSvc service_def.BackfillReplSvc) {
 
@@ -457,7 +462,7 @@ func (rm *replicationManager) init(
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
-		rm, rm.utils, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc)
+		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc)
 
 	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc)
 	rm.pipelineMgr = pipelineMgrObj

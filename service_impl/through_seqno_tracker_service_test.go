@@ -2,6 +2,8 @@ package service_impl
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -13,7 +15,6 @@ import (
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"testing"
 )
 
 func makeCommonEvent(eventType common.ComponentEventType, uprEvent *mcc.UprEvent) *common.Event {
@@ -54,6 +55,7 @@ func setupMocks(pipeline *commonMock.Pipeline,
 	sourceMap["dummy"] = sourceNozzle
 
 	runtimeCtxMock.On("Service", base.PIPELINE_SUPERVISOR_SVC).Return(pipelineSupervisorSvc)
+	runtimeCtxMock.On("Service", "ConflictManager").Return(nil)
 
 	pipeline.On("Topic").Return("UnitTest")
 	pipeline.On("Sources").Return(sourceMap)

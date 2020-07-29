@@ -12,10 +12,11 @@ package base
 import (
 	"errors"
 	"fmt"
-	mc "github.com/couchbase/gomemcached"
 	"regexp"
 	"sync"
 	"time"
+
+	mc "github.com/couchbase/gomemcached"
 )
 
 //constants
@@ -119,8 +120,8 @@ var UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
 // Custom conflict resolution related constants
-var JSEngineWorkersPerNode = 1
-var JSEngineThreadsPerWorker = 2
+var JSEngineWorkersPerNode = 2
+var JSEngineThreadsPerWorker = 3
 
 // constants for ipv6 addresses
 const Ipv6AddressSeparator = ":"
@@ -198,6 +199,7 @@ const (
 	TOPOLOGY_CHANGE_DETECT_SVC string = "TopologyChangeDetectSvc"
 	BANDWIDTH_THROTTLER_SVC    string = "BandwidthThrottlerSvc"
 	BACKFILL_MGR_SVC           string = "BackfillMgrSvc"
+	CONFLICT_MANAGER_SVC       string = "ConflictManager"
 )
 
 // supervisor related constants
@@ -423,14 +425,16 @@ const (
 var MaxVBReps = "max_vbreps"
 
 const (
-	GET                 = mc.CommandCode(0x00)
-	GET_WITH_META       = mc.CommandCode(0xa0)
-	SET_WITH_META       = mc.CommandCode(0xa2)
-	ADD_WITH_META       = mc.CommandCode(0xa4)
-	DELETE_WITH_META    = mc.CommandCode(0xa8)
-	SET_TIME_SYNC       = mc.CommandCode(0xc1)
-	SUBDOC_GET          = mc.CommandCode(0xc5)
-	SUBDOC_MULTI_LOOKUP = mc.CommandCode(0xd0)
+	GET                   = mc.CommandCode(0x00)
+	GET_WITH_META         = mc.CommandCode(0xa0)
+	SET_WITH_META         = mc.CommandCode(0xa2)
+	ADD_WITH_META         = mc.CommandCode(0xa4)
+	DELETE_WITH_META      = mc.CommandCode(0xa8)
+	SET_TIME_SYNC         = mc.CommandCode(0xc1)
+	SUBDOC_GET            = mc.CommandCode(0xc5)
+	SUBDOC_DICT_UPSERT    = mc.CommandCode(0xc8)
+	SUBDOC_MULTI_LOOKUP   = mc.CommandCode(0xd0)
+	SUBDOC_MULTI_MUTATION = mc.CommandCode(0xd1)
 )
 
 // Flags for SUBDOC commands
@@ -438,12 +442,15 @@ const (
 	// Document level flag
 	SUBDOC_DOC_FLAG_ACCESS_DELETED = 0x04
 	// Path level flag
-	SUBDOC_FLAG_XATTR = 0x04
+	SUBDOC_FLAG_MKDIR_P       = 0x01
+	SUBDOC_FLAG_XATTR         = 0x04
+	SUBDOC_FLAG_EXPAND_MACROS = 0x10
 )
 
 // Return status for operations that has not been added to gomemcached
 const (
 	XATTR_EINVAL           = 0x87 // There is something wrong with the XATTR
+	SUBDOC_INVALID_COMBO   = 0xcb
 	SUBDOC_SUCCESS_DELETED = 0xcd
 )
 const (
@@ -473,6 +480,7 @@ const (
 	RouterStatsCollector     = "RouterStatsCollector"
 	CheckpointStatsCollector = "CheckpointStatsCollector"
 	ThroughSeqnoTracker      = "ThroughSeqnoTracker"
+	ConflictMgrCollector     = "ConflictManagerCollector"
 )
 
 var CouchbaseBucketType = "membase"
@@ -1153,3 +1161,17 @@ var ActiveTxnRecordRegexp *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("%v%v%
 const TransactionXattrKey = "txn"
 
 const BackfillPipelineTopicPrefix = "backfill_"
+
+const (
+	CAS_MACRO_EXPANSION = "\"${Mutation.CAS}\"" // The value for the cv field when setting back to source
+	XATTR_ID            = "id"                  // The cluster ID field in _xdcr
+	XATTR_CV            = "cv"                  // The Cas field in _xdcr
+	XATTR_MV            = "mv"                  // the MV field in _xdcr
+	XATTR_PCAS          = "pc"                  // The Pcas field in _xdcr
+	XATTR_XDCR          = "_xdcr"               // The XDCR XATTR
+
+	XATTR_ID_PATH   = "_xdcr.id"
+	XATTR_CV_PATH   = "_xdcr.cv"
+	XATTR_MV_PATH   = "_xdcr.mv"
+	XATTR_PCAS_PATH = "_xdcr.pc"
+)

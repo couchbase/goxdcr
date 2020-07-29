@@ -58,6 +58,7 @@ type XDCRFactory struct {
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
 	collectionsManifestSvc   service_def.CollectionsManifestSvc
 	backfillReplSvc          service_def.BackfillReplSvc
+	resolverSvc              service_def.ResolverSvcIface
 
 	getBackfillMgr BackfillMgrGetter
 
@@ -85,6 +86,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler,
 	utilsIn utilities.UtilsIface,
+	resolver_svc service_def.ResolverSvcIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
 	getBackfillMgr BackfillMgrGetter,
 	backfillReplSvc service_def.BackfillReplSvc) *XDCRFactory {
@@ -101,6 +103,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		pipeline_failure_handler: pipeline_failure_handler,
 		logger:                   log.NewLogger("XDCRFactory", factory_logger_ctx),
 		utils:                    utilsIn,
+		resolverSvc:              resolver_svc,
 		collectionsManifestSvc:   collectionsManifestSvc,
 		getBackfillMgr:           getBackfillMgr,
 		backfillReplSvc:          backfillReplSvc,
@@ -309,7 +312,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	pipeline.SetRuntimeContext(pipelineContext)
 
 	registerCb := func(mainPipeline *common.Pipeline) error {
-		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, isTargetES, mainPipeline)
+		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, isTargetES, mainPipeline, sourceCRMode)
 	}
 	return pipeline, registerCb, nil
 }
@@ -1041,12 +1044,26 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string, targetBucketName string,
 	target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference,
-	targetClusterVersion int, isCapi bool, isTargetES bool, mainPipeline *common.Pipeline) error {
+	targetClusterVersion int, isCapi bool, isTargetES bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode) error {
 
 	ctx := pipeline.RuntimeContext()
 	var parentCtx common.PipelineRuntimeContext
 	if mainPipeline != nil {
 		parentCtx = (*mainPipeline).RuntimeContext()
+	}
+
+	if crMode == base.CRMode_Custom {
+		if isCapi {
+			return errors.New("Custom conflict resolution cannot be used with Capi nozzle.")
+		}
+		conflictMgr := pipeline_svc.NewConflictManager(xdcrf.resolverSvc, pipeline.Specification().GetReplicationSpec().Id, xdcrf.xdcr_topology_svc, xdcrf.utils)
+		err := ctx.RegisterService(base.CONFLICT_MANAGER_SVC, conflictMgr)
+		if err != nil {
+			return err
+		}
+		for _, target := range pipeline.Targets() {
+			target.(*parts.XmemNozzle).SetConflictManager(conflictMgr)
+		}
 	}
 
 	//register pipeline supervisor

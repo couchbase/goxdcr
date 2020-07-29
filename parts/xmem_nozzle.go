@@ -559,201 +559,6 @@ func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
 }
 
 /************************************
-/* struct xmemClient
-*************************************/
-var badConnectionError = errors.New("Connection is bad")
-var connectionClosedError = errors.New("Connection is closed")
-var fatalError = errors.New("Fatal")
-
-type xmemClient struct {
-	name      string
-	memClient mcc.ClientIface
-	//the count of continuous read\write failure on this client
-	continuous_write_failure_counter int
-	//the count of continuous successful read\write
-	success_counter int
-	//the maximum allowed continuous read\write failure on this client
-	//exceed this limit, would consider this client's health is ruined.
-	max_continuous_write_failure int
-	max_downtime                 time.Duration
-	downtime_start               time.Time
-	lock                         sync.RWMutex
-	read_timeout                 time.Duration
-	write_timeout                time.Duration
-	logger                       *log.CommonLogger
-	healthy                      bool
-	num_of_repairs               int
-	last_failure                 time.Time
-	backoff_factor               int
-}
-
-func newXmemClient(name string, read_timeout, write_timeout time.Duration,
-	client mcc.ClientIface, max_continuous_failure int, max_downtime time.Duration, logger *log.CommonLogger) *xmemClient {
-	logger.Infof("xmem client %v is created with read_timeout=%v, write_timeout=%v, retry_limit=%v", name, read_timeout, write_timeout, max_continuous_failure)
-	return &xmemClient{name: name,
-		memClient:                        client,
-		continuous_write_failure_counter: 0,
-		success_counter:                  0,
-		logger:                           logger,
-		read_timeout:                     read_timeout,
-		write_timeout:                    write_timeout,
-		max_downtime:                     max_downtime,
-		max_continuous_write_failure:     max_continuous_failure,
-		healthy:                          true,
-		num_of_repairs:                   0,
-		lock:                             sync.RWMutex{},
-		backoff_factor:                   0,
-		downtime_start:                   time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
-	}
-}
-
-func (client *xmemClient) curWriteFailureCounter() int {
-	client.lock.RLock()
-	defer client.lock.RUnlock()
-	return client.continuous_write_failure_counter
-}
-
-func (client *xmemClient) reportOpFailure(readOp bool) {
-	client.lock.Lock()
-	defer client.lock.Unlock()
-
-	client.success_counter = 0
-
-	if client.downtime_start.IsZero() {
-		client.downtime_start = time.Now()
-	}
-
-	if !readOp {
-		client.continuous_write_failure_counter++
-	}
-	if client.continuous_write_failure_counter > client.max_continuous_write_failure || time.Since(client.downtime_start) > client.max_downtime {
-		client.healthy = false
-	}
-}
-
-func (client *xmemClient) reportOpSuccess() {
-	client.lock.Lock()
-	defer client.lock.Unlock()
-
-	client.downtime_start = time.Time{}
-	client.continuous_write_failure_counter = 0
-	client.success_counter++
-	if client.success_counter > client.max_continuous_write_failure && client.backoff_factor > 0 {
-		client.backoff_factor--
-		client.success_counter = client.success_counter - client.max_continuous_write_failure
-	}
-	client.healthy = true
-
-}
-
-func (client *xmemClient) isConnHealthy() bool {
-	client.lock.RLock()
-	defer client.lock.RUnlock()
-	return client.healthy
-}
-
-func (client *xmemClient) getMemClient() mcc.ClientIface {
-	client.lock.RLock()
-	defer client.lock.RUnlock()
-	return client.memClient
-}
-
-/**
- * Gets the raw io ReadWriteCloser from the memClient, so that xmemClient has complete control,
- * and also sets whether or not the xmemClient will have read/write timeout as part of returning the connection
- */
-func (client *xmemClient) getConn(readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
-	client.lock.RLock()
-	defer client.lock.RUnlock()
-
-	if client.memClient == nil {
-		return nil, client.num_of_repairs, errors.New("memcached client is not set")
-	}
-
-	if !client.healthy {
-		return nil, client.num_of_repairs, badConnectionError
-	}
-
-	conn := client.memClient.Hijack()
-	if readTimeout {
-		client.setReadTimeout(client.read_timeout)
-	}
-
-	if writeTimeout {
-		client.setWriteTimeout(client.write_timeout)
-	}
-	return conn, client.num_of_repairs, nil
-}
-
-func (client *xmemClient) setReadTimeout(read_timeout_duration time.Duration) {
-	conn := client.memClient.Hijack()
-	conn.(net.Conn).SetReadDeadline(time.Now().Add(read_timeout_duration))
-}
-
-func (client *xmemClient) setWriteTimeout(write_timeout_duration time.Duration) {
-	conn := client.memClient.Hijack()
-	conn.(net.Conn).SetWriteDeadline(time.Now().Add(write_timeout_duration))
-}
-
-func (client *xmemClient) repairConn(memClient mcc.ClientIface, repair_count_at_error int, xmem_id string, finish_ch chan bool) bool {
-	client.lock.Lock()
-	defer client.lock.Unlock()
-
-	if client.num_of_repairs == repair_count_at_error {
-		if time.Since(client.last_failure) < 1*time.Minute {
-			client.backoff_factor++
-		} else {
-			client.backoff_factor = 0
-		}
-
-		client.memClient.Close()
-		client.memClient = memClient
-		client.continuous_write_failure_counter = 0
-		client.num_of_repairs++
-		client.healthy = true
-		return true
-	} else {
-		client.logger.Infof("client %v for %v has been repaired (num_of_repairs=%v, repair_count_at_error=%v), the repair request is ignored\n", client.name, xmem_id, client.num_of_repairs, repair_count_at_error)
-		return false
-	}
-}
-
-func (client *xmemClient) markConnUnhealthy() {
-	client.lock.Lock()
-	defer client.lock.Unlock()
-	client.healthy = false
-}
-
-func (client *xmemClient) close() {
-	client.lock.RLock()
-	defer client.lock.RUnlock()
-	client.memClient.Close()
-}
-
-func (client *xmemClient) repairCount() int {
-	client.lock.RLock()
-	defer client.lock.RUnlock()
-
-	return client.num_of_repairs
-}
-
-func (client *xmemClient) getBackOffFactor() int {
-	client.lock.RLock()
-	defer client.lock.RUnlock()
-
-	return client.backoff_factor
-}
-
-func (client *xmemClient) incrementBackOffFactor() {
-	client.lock.Lock()
-	defer client.lock.Unlock()
-
-	if client.backoff_factor < base.XmemMaxBackoffFactor {
-		client.backoff_factor++
-	}
-}
-
-/************************************
 /* struct XmemNozzle
 *************************************/
 type XmemNozzle struct {
@@ -780,8 +585,8 @@ type XmemNozzle struct {
 	dataChan_control  chan bool
 
 	//memcached client connected to the target bucket
-	client_for_setMeta *xmemClient
-	client_for_getMeta *xmemClient
+	client_for_setMeta *base.XmemClient
+	client_for_getMeta *base.XmemClient
 
 	//configurable parameter
 	config xmemConfig
@@ -843,6 +648,7 @@ type XmemNozzle struct {
 	setMetaUserAgent string
 
 	bandwidthThrottler service_def.BandwidthThrottlerSvc
+	conflictMgr        service_def.ConflictManagerIface
 	compressionSetting base.CompressionType
 	utils              utilities.UtilsIface
 
@@ -1201,7 +1007,8 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				goto done
 			}
 
-			var noRep_map map[string]bool
+			var noRep_map map[string]NeedSendStatus
+			var setBack_map map[string]RequestToResponse
 			if xmem.source_cr_mode != base.CRMode_Custom {
 				//batch get meta to find what needs to be not sent via the noRep map
 				noRep_map, err = xmem.batchGetMeta(batch.getMeta_map)
@@ -1221,7 +1028,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					xmem.handleGeneralError(err)
 				}
 				if len(getDoc_map) > 0 {
-					conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
+					setBack_map, err = xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
 					if err != nil {
 						if err == PartStoppedError {
 							goto done
@@ -1230,9 +1037,6 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					}
 					if len(setBack_map) > 0 {
 						// go xmem.setBack(setBack_map)
-					}
-					if len(conflict_map) > 0 {
-						// go xmem.mergeAndSet(conflict_map)
 					}
 				}
 				batch.bigDoc_noRep_map = noRep_map
@@ -1245,7 +1049,6 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 
 				xmem.handleGeneralError(err)
 			}
-			// TODO: Wait for setBack/mergeAndSet to finish
 			xmem.recordBatchSize(batch.count())
 		case <-xmem.getBatchNonEmptyCh():
 			if xmem.validateRunningState() != nil {
@@ -1303,11 +1106,11 @@ func (xmem *XmemNozzle) finalCleanup() {
 	//cleanup
 	client_for_setMeta := xmem.getClient(true /*isSetMeta*/)
 	if client_for_setMeta != nil {
-		client_for_setMeta.close()
+		client_for_setMeta.Close()
 	}
 	client_for_getMeta := xmem.getClient(false /*isSetMeta*/)
 	if client_for_getMeta != nil {
-		client_for_getMeta.close()
+		client_for_getMeta.Close()
 	}
 
 	//recycle all the bufferred MCRequest to object pool
@@ -1388,6 +1191,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					reqs_bytes = [][]byte{}
 					index_reservation_list = make([][]uint16, base.XmemMaxBatchSize+1)
 				}
+			} else if needSendStatus == Not_Send_Need_To_Resolve {
+				// Do nothing here
 			} else {
 				if needSendStatus == Not_Send_Failed_CR {
 					//lost on conflict resolution on source side
@@ -1400,7 +1205,6 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				}
-
 				xmem.recycleDataObj(item)
 			}
 		}
@@ -1465,11 +1269,11 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 				}
 				body, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
 				if err != nil {
-					xmem.Logger().Infof("preprocessMCRequest received error '%v' calling GetByteSlice with length %v", err, maxEncodedLen)
 					body = make([]byte, maxEncodedLen)
 					xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+				} else {
+					req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
 				}
-				req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
 				body = snappy.Encode(body, mc_req.Body)
 				mc_req.Body = body
 				mc_req.DataType = mc_req.DataType | mcc.SnappyDataType
@@ -1556,14 +1360,14 @@ func resolveConflictByXattr(doc_meta_source documentMetadata,
 	}
 }
 
-func (xmem *XmemNozzle) sendWithRetry(client *xmemClient, numOfRetry int, item_byte [][]byte) error {
+func (xmem *XmemNozzle) sendWithRetry(client *base.XmemClient, numOfRetry int, item_byte [][]byte) error {
 
 	var err error
 	for j := 0; j < numOfRetry; j++ {
 		err, rev := xmem.writeToClient(client, item_byte, true)
 		if err == nil {
 			return nil
-		} else if err == badConnectionError {
+		} else if err == base.BadConnectionError {
 			xmem.repairConn(client, err.Error(), rev)
 		}
 	}
@@ -1603,7 +1407,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 				xmem.Logger().Errorf("%v %v receiver recovered from err = %v", xmem.Id(), batchGetStr, errMsg)
 
 				//repair the connection
-				xmem.repairConn(xmem.client_for_getMeta, errMsg, xmem.client_for_getMeta.repairCount())
+				xmem.repairConn(xmem.client_for_getMeta, errMsg, xmem.client_for_getMeta.RepairCount())
 			}
 		}
 		close(return_ch)
@@ -1620,7 +1424,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 
 			response, err, rev := xmem.readFromClient(xmem.client_for_getMeta, true)
 			if err != nil {
-				if err == fatalError {
+				if err == base.FatalError {
 					// if possible, log info about the corresponding request to facilitate debugging
 					if response != nil {
 						keySeqno, ok := opaque_keySeqno_map[response.Opaque]
@@ -1634,7 +1438,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							}
 						}
 					}
-				} else if err == badConnectionError || err == connectionClosedError {
+				} else if err == base.BadConnectionError || err == base.ConnectionClosedError {
 					xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
 				}
 
@@ -1672,9 +1476,9 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							receivedEvent = common.GetReceived
 						}
 						xmem.RaiseEvent(common.NewEvent(receivedEvent, nil, xmem, nil, additionalInfo))
-						if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) && !isTemporaryMCError(response.Status) &&
-							!isCollectionMappingError(response.Status) {
-							if isTopologyChangeMCError(response.Status) {
+						if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response) && !base.IsTemporaryMCError(response.Status) &&
+							!base.IsCollectionMappingError(response.Status) {
+							if base.IsTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
 								xmem.handleVBError(vbno, vb_err)
 							} else {
@@ -1708,7 +1512,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
  * Returns a map of all the keys that are fed in bigDoc_map, with a boolean value
  * The boolean value == true meaning that the document referred by key should *not* be replicated
  */
-func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]bool, error) {
+func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]NeedSendStatus, error) {
 	bigDoc_noRep_map := make(BigDocNoRepMap)
 
 	//if the bigDoc_map size is 0, return
@@ -1800,16 +1604,16 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]b
 					docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
 					xmem.Logger().Debugf("%v doc %v%v%v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 				}
-				bigDoc_noRep_map[wrappedReq.UniqueKey] = true
+				bigDoc_noRep_map[wrappedReq.UniqueKey] = Not_Send_Failed_CR
 			} else if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 				docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
 				docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
 				xmem.Logger().Debugf("%v doc %v%v%v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 			}
-		} else if ok && isTopologyChangeMCError(resp.Status) {
-			bigDoc_noRep_map[wrappedReq.UniqueKey] = false
+		} else if ok && base.IsTopologyChangeMCError(resp.Status) {
+			bigDoc_noRep_map[wrappedReq.UniqueKey] = Not_Send_Other
 
-		} else if ok && isCollectionMappingError(resp.Status) {
+		} else if ok && base.IsCollectionMappingError(resp.Status) {
 			if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 				xmem.Logger().Debugf("%v batchGetMeta: doc %v%s%v could not be mapped to on target even though manifest says it exists. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd)
 			}
@@ -1935,6 +1739,8 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 	for _, packet := range reqs_bytes_list {
 		err = xmem.sendWithRetry(xmem.client_for_getMeta, retry, packet)
 		if err != nil {
+			// kill the receiver and return
+			close(receiver_fin_ch)
 			return
 		}
 	}
@@ -1951,8 +1757,8 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
  * This routine returns noRep_Map which contains the mutations that should not be replicated,
  * and getDoc_map which contains the mutations that need target documents for further process.
  */
-func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) (noRep_map map[string]bool, getDoc_map base.McRequestMap, err error) {
-	noRep_map = make(map[string]bool)
+func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) (noRep_map map[string]NeedSendStatus, getDoc_map base.McRequestMap, err error) {
+	noRep_map = make(map[string]NeedSendStatus)
 	getDoc_map = make(base.McRequestMap)
 
 	for i := 0; i < xmem.config.maxRetry; i++ {
@@ -1966,9 +1772,10 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 		for uniqueKey, wrappedReq := range getMeta_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
+			// Here we are sending SUBDOC_MULTI_LOOKUP command.
 			// SUBDOC_BAD_MULTI is returned when XATTR _xdcr does not exist. This is expected for new documents that XDCR
 			// with custom CR never set. We will continue with detectConflictWithXattr() since it handles _xdcr nil value
-			// SYBDOC_MULTI_PATH_FAILURE_DELETED is the same but on a deleted document
+			// SUBDOC_MULTI_PATH_FAILURE_DELETED is the same but on a deleted document
 			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI ||
 				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED) {
 				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
@@ -1980,15 +1787,19 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 						wrappedReq.Req.Cas = resp.Cas
 					}
 				case TargetDominate:
-					noRep_map[uniqueKey] = true
+					noRep_map[uniqueKey] = Not_Send_Failed_CR
 				case Conflict:
-					noRep_map[uniqueKey] = true
+					noRep_map[uniqueKey] = Not_Send_Need_To_Resolve
 					getDoc_map[uniqueKey] = wrappedReq
 				case TargetSetBack:
-					noRep_map[uniqueKey] = true
+					noRep_map[uniqueKey] = Not_Send_Need_To_Resolve
 					getDoc_map[uniqueKey] = wrappedReq
 				}
 				keys_to_be_deleted[uniqueKey] = true
+			} else if resp != nil {
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					xmem.Logger().Debugf("Received response status %v for key %v", resp.Status, key)
+				}
 			}
 		}
 		if len(keys_to_be_deleted) == len(getMeta_map) {
@@ -2027,131 +1838,14 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(key string, vb uint16, opaque
 		Opcode: base.SUBDOC_MULTI_LOOKUP}
 }
 
-const (
-	XATTR_XDCR = "_xdcr" // The XDCR XATTR
-	XATTR_ID   = "id"    // The cluster ID field in _xdcr
-	XATTR_CV   = "cv"    // The Cas field in _xdcr
-	XATTR_PCAS = "pc"    // The Pcas field in _xdcr
-	XATTR_MV   = "mv"    // the MV field in _xdcr
-)
-
-// This will find the custom CR XATTR from the req body
-func (xmem *XmemNozzle) findSourceCustomCRXattr(req *mc.MCRequest) (crMeta *CustomCRMeta, err error) {
-	cas := binary.BigEndian.Uint64(req.Extras[16:24])
-	if req.DataType&mcc.XattrDataType == 0 {
-		return newCustomCRMeta(xmem.sourceClusterId, cas, nil, nil, nil, nil, 0)
-	}
-	body := req.Body
-	var pos uint32 = 0
-	pos = pos + 4
-
-	xattrIter, err := base.NewXattrIterator(body)
-	if err != nil {
-		xmem.Logger().Errorf("findSourceCustomCRXattr received error %v from NewXattrIterator for body %v. Datatype %v", err, body, req.DataType)
-		return
-	}
-	var key, value []byte
-	var xattr []byte
-	for xattrIter.HasNext() {
-		key, value, err = xattrIter.Next()
-		if err != nil {
-			xmem.Logger().Errorf("findSourceCustomCRXattr received error %v from NewXattrIterator for body %v", err, body)
-			return
-		}
-		if base.Equals(key, XATTR_XDCR) {
-			xattr = value
-			break
-		}
-	}
-	if xattr == nil {
-		// Source does not have _xdcr XATTR
-		return newCustomCRMeta(xmem.sourceClusterId, cas, nil, nil, nil, nil, 0)
-	}
-	// Found _xdcr XATTR. Now find the fields
-	id, cv, pcas, mv, err := xmem.findCustomCRXattrFields(xattr)
-	return newCustomCRMeta(xmem.sourceClusterId, cas, id, cv, pcas, mv, len(xattr))
-}
-
-/*
- * resp is expected to be a subdoc_multi_lookup response. Since we only lookup
- * _xdcr or _xdcr plus body, the response is at the beginning of the body:
- * 2 byte status, 4 byte lengh, value payload start at byte 6
- */
-func (xmem *XmemNozzle) findTargetCustomCRXattr(resp *mc.MCResponse) (crMeta *CustomCRMeta, err error) {
-	status := mc.Status(binary.BigEndian.Uint16(resp.Body[0:2]))
-	if status == mc.SUCCESS {
-		xattrlen := int(binary.BigEndian.Uint32(resp.Body[2:6]))
-		xattr := resp.Body[6 : 6+xattrlen]
-		id, cv, pcas, mv, err := xmem.findCustomCRXattrFields(xattr)
-		if err != nil {
-			return nil, err
-		}
-		return newCustomCRMeta(xmem.targetClusterId, resp.Cas, id, cv, pcas, mv, xattrlen)
-	}
-	return newCustomCRMeta(xmem.targetClusterId, resp.Cas, nil, nil, nil, nil, 0)
-}
-
-func (xmem *XmemNozzle) findCustomCRXattrFields(xattr []byte) (clusterId, cv, pcas, mv []byte, err error) {
-	it, err := base.NewCCRXattrFieldIterator(xattr)
-	if err != nil {
-		xmem.Logger().Errorf("findCustomCRXattrFields received error %v create XattrFieldIterator for %s", err, xattr)
-		return
-	}
-	for it.HasNext() {
-		var key, value []byte
-		key, value, err = it.Next()
-		if err != nil {
-			xmem.Logger().Errorf("findCustomCRXattrFields received error '%v' iterating through %s", err, xattr)
-			return
-		}
-		if base.Equals(key, XATTR_ID) {
-			clusterId = value
-		} else if base.Equals(key, XATTR_CV) {
-			cv = value
-		} else if base.Equals(key, XATTR_PCAS) {
-			pcas = value
-		} else if base.Equals(key, XATTR_MV) {
-			mv = value
-		}
-	}
-	return
-}
-
-/*
- * vv is a version vector in the form {"key":"value","key":"value",...}. It is either PCAS or MV.
- * Key is clusterID. Value is Cas encoded with base64.
- * returns the value converted back to uint64 if found.
- * returns 0 if not found
- */
-func findItemInVV(vv []byte, key []byte) (cas uint64, err error) {
-	if len(vv) == 0 {
-		return 0, nil
-	}
-	it, err := base.NewCCRXattrFieldIterator(vv)
-	if err != nil {
-		return 0, err
-	}
-	for it.HasNext() {
-		itemKey, itemValue, err := it.Next()
-		if err != nil {
-			return 0, err
-		}
-		if bytes.Equal(itemKey, key) {
-			return base.Base64ToUint64(itemValue)
-		}
-	}
-	return 0, nil
-}
-
 /**
  * batch call to memcached subdoc_get command for documents that needs target document for custom CR
  */
-func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]bool) (conflict_map, setBack_map map[string]RequestToResponse, err error) {
-	conflict_map = make(map[string]RequestToResponse)
+func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]NeedSendStatus) (setBack_map map[string]RequestToResponse, err error) {
 	setBack_map = make(map[string]RequestToResponse)
-
+	var respMap base.MCResponseMap
 	for i := 0; i < xmem.config.maxRetry; i++ {
-		respMap, err := xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
+		respMap, err = xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
 		if err != nil {
 			xmem.Logger().Errorf(err.Error())
 		}
@@ -2176,7 +1870,11 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 				case TargetDominate:
 					// We don't need to merge or set back to source. The source mutation is already in noRep_map. Do nothing
 				case Conflict:
-					conflict_map[uniqueKey] = RequestToResponse{wrappedReq, resp}
+					// Call conflictMgr to resolve conflict
+					err = xmem.conflictMgr.ResolveConflict(wrappedReq, resp, xmem.sourceClusterId, xmem.targetClusterId)
+					if err != nil {
+						return
+					}
 				case TargetSetBack:
 					// This is the case where target has smaller CAS but it dominates source MV.
 					setBack_map[uniqueKey] = RequestToResponse{wrappedReq, resp}
@@ -2186,7 +1884,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 		}
 		if len(keys_to_be_deleted) == len(getDoc_map) {
 			// Got response for all
-			return conflict_map, setBack_map, nil
+			return setBack_map, nil
 		} else {
 			for uniqueKey, _ := range keys_to_be_deleted {
 				delete(getDoc_map, uniqueKey)
@@ -2197,198 +1895,6 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 		err = errors.New(fmt.Sprintf("Failed to get XATTR and document body from target for %v documents after %v retries", len(getDoc_map), xmem.config.maxRetry))
 	}
 	return
-}
-
-type CustomCRMeta struct {
-	senderId []byte // The source cluster that sent the document to XDCR
-	cas      uint64 // The Cas in the document metadata
-	cvId     []byte // _xdcr.id in XATTR
-	cv       uint64 // _xdcr.cv in XATTR
-	pcas     []byte // _xdcr.pc in XATTR
-	mv       []byte // _xdcr.mv in XATTR
-	xattrlen int    // The length of this xattribute
-}
-
-func newCustomCRMeta(sourceId []byte, cas uint64, id, cvHex, pcas, mv []byte, xattrlen int) (*CustomCRMeta, error) {
-	if len(cvHex) == 0 {
-		return &CustomCRMeta{
-			senderId: sourceId,
-			cas:      cas,
-			cvId:     nil,
-			cv:       0,
-			pcas:     nil,
-			mv:       nil,
-			xattrlen: xattrlen,
-		}, nil
-	}
-	cv, err := base.HexLittleEndianToUint64(cvHex)
-	if err != nil {
-		return nil, err
-	}
-	return &CustomCRMeta{
-		senderId: sourceId,
-		cas:      cas,
-		cvId:     id,
-		cv:       cv,
-		pcas:     pcas,
-		mv:       mv,
-	}, nil
-}
-
-func (doc *CustomCRMeta) isMergedDoc() bool {
-	if doc.mv != nil && doc.cas == doc.cv {
-		return true
-	} else {
-		return false
-	}
-}
-
-func (doc *CustomCRMeta) docId() []byte {
-	if doc.cas > doc.cv {
-		// New change in sending cluster so that's the id
-		return doc.senderId
-	} else {
-		return doc.cvId
-	}
-}
-
-func (doc *CustomCRMeta) docCas() uint64 {
-	return doc.cas
-}
-
-func (doc *CustomCRMeta) containsVersion(targetId []byte, targetCas uint64) (bool, error) {
-	if doc.cas > doc.cv && bytes.Equal(doc.senderId, targetId) {
-		if doc.cas >= targetCas {
-			return true, nil
-		} else {
-			return false, nil
-		}
-	}
-	if bytes.Equal(doc.cvId, targetId) {
-		if doc.cv >= targetCas {
-			return true, nil
-		} else {
-			return false, nil
-		}
-	}
-	if doc.pcas != nil {
-		casInVV, err := findItemInVV(doc.pcas, targetId)
-		if err != nil {
-			return false, err
-		}
-		if casInVV >= targetCas {
-			return true, nil
-		}
-	}
-	if doc.mv != nil {
-		casInVV, err := findItemInVV(doc.mv, targetId)
-		if err != nil {
-			return false, err
-		}
-		if casInVV >= targetCas {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-func (doc *CustomCRMeta) containsVV(vv []byte) (bool, error) {
-	it, err := base.NewCCRXattrFieldIterator(vv)
-	if err != nil {
-		return false, err
-	}
-	for it.HasNext() {
-		var key, value []byte
-		key, value, err = it.Next()
-		if err != nil {
-			return false, err
-		}
-		cas, err := base.Base64ToUint64(value)
-		if err != nil {
-			return false, err
-		}
-		if res, err := doc.containsVersion(key, cas); err != nil || res == false {
-			return false, err
-		}
-	}
-	return true, nil
-}
-
-// This routine construct XATTR _xdcr{...} if there is new change (doc.cas > doc.cv)
-func (doc *CustomCRMeta) constructCustomCRXattr(body []byte, startPos int, logger *log.CommonLogger) (pos int, err error) {
-	if doc.cas <= doc.cv {
-		return 0, errors.New("constructCustomCRXattr cannot be called when there has been no change")
-	}
-	pos = startPos + 4
-	copy(body[pos:], []byte(XATTR_XDCR))
-	pos = pos + len(XATTR_XDCR)
-	body[pos] = '\x00'
-	pos++
-	if len(doc.senderId) == 0 {
-		return 0, errors.New("Cannot format XATTR for custom CR because the sender ID is empty")
-	}
-	body, pos = base.WriteJsonRawMsg(body, []byte(XATTR_ID), pos, base.WriteJsonKey, len(XATTR_ID), true /*firstKey*/)
-	body, pos = base.WriteJsonRawMsg(body, doc.senderId, pos, base.WriteJsonValue, len(doc.senderId), false /*firstKey*/)
-
-	cvHex := base.Uint64ToHexLittleEndian(doc.cas)
-	body, pos = base.WriteJsonRawMsg(body, []byte(XATTR_CV), pos, base.WriteJsonKey, len(XATTR_CV), false /*firstKey*/)
-	body, pos = base.WriteJsonRawMsg(body, cvHex, pos, base.WriteJsonValue, len(cvHex), false /*firstKey*/)
-
-	pcas := make(map[string][]byte)
-	if doc.cvId != nil {
-		pcas[string(doc.cvId)] = base.Uint64ToBase64(doc.cv)
-	}
-	if doc.pcas != nil {
-		it, err := base.NewCCRXattrFieldIterator(doc.pcas)
-		if err != nil {
-			logger.Errorf("constructCustomCRXattr() encountered error '%v' calling NewCCRXattrFieldIterator() for pcas '%s'. Will truncate it from new pcas. This may cause unnecessary merge.", err, doc.pcas)
-		} else {
-			for it.HasNext() {
-				key, value, err := it.Next()
-				if err != nil {
-					logger.Errorf("constructCustomCRXattr() had error '%v' iterating through '%s'. Will truncate it from new pcas. This may cause unnecessary merges.", err, doc.pcas)
-					break
-				}
-				pcas[string(key)] = value
-			}
-		}
-	}
-	if doc.mv != nil {
-		it, err := base.NewCCRXattrFieldIterator(doc.mv)
-		if err != nil {
-			logger.Errorf("constructCustomCRXattr() encountered error '%v' calling NewCCRXattrFieldIterator() for mv '%s'. Will truncate it from new pcas. This may cause false conflict.", err, doc.mv)
-		} else {
-			for it.HasNext() {
-				key, value, err := it.Next()
-				if err != nil {
-					logger.Errorf("constructCustomCRXattr() had error '%v' iterating through '%s'. Will truncate it from new pcas. This may cause unnecessary merges.", err, doc.mv)
-					break
-				}
-				// pcas should not have any entry that's in mv
-				pcas[string(key)] = value
-			}
-		}
-	}
-
-	if len(pcas) > 0 {
-		body, pos = base.WriteJsonRawMsg(body, []byte(XATTR_PCAS), pos, base.WriteJsonKey, len(XATTR_PCAS), false /*firstKey*/)
-
-		first := true
-		for k, v := range pcas {
-			if base.Equals(doc.senderId, k) == false { // sender is already in _xdcr.id
-				body, pos = base.WriteJsonRawMsg(body, []byte(k), pos, base.WriteJsonKey, len(k), first /*firstKey*/)
-				body, pos = base.WriteJsonRawMsg(body, v, pos, base.WriteJsonValue, len(v), false /*firstKey*/)
-				first = false
-			}
-		}
-		body[pos] = '}'
-		pos++
-	}
-	body[pos] = '}'
-	pos++
-	body[pos] = '\x00'
-	pos++
-	binary.BigEndian.PutUint32(body[startPos:startPos+4], uint32(pos-(startPos+4)))
-	return pos, nil
 }
 
 // This is called after getting the target document. So we have both source and target XATTRs
@@ -2410,29 +1916,29 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, target *mc
 		// LWW when either document is deleted
 		return SourceDominate
 	}
-	targetMeta, err := xmem.findTargetCustomCRXattr(target)
+	targetMeta, err := base.FindTargetCustomCRXattr(target, xmem.targetClusterId)
 	if err != nil {
-		xmem.Logger().Errorf("detectConflictWithXattr received error %v calling findTargetCustomCRXattr()", err)
+		xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v calling FindTargetCustomCRXattr()", xmem.Id(), err)
 		return Conflict
 	}
-	sourceMeta, err := xmem.findSourceCustomCRXattr(source)
+	sourceMeta, err := base.FindSourceCustomCRXattr(source, xmem.sourceClusterId)
 	if err != nil {
-		xmem.Logger().Errorf("detectConflictWithXattr received error %v calling findSourceCustomCRXattr()", err)
+		xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v calling FindSourceCustomCRXattr()", xmem.Id(), err)
 		return Conflict
 	}
-	if targetMeta.isMergedDoc() {
-		res, err := sourceMeta.containsVV(targetMeta.mv)
+	if targetMeta.IsMergedDoc() {
+		res, err := sourceMeta.ContainsVV(targetMeta.GetMv())
 		if err != nil {
-			xmem.Logger().Errorf("detectConflictWithXattr received error %v", err)
+			xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v", xmem.Id(), err)
 			return Conflict
 		}
 		if res == true {
 			return SourceDominate
 		}
 	} else {
-		res, err := sourceMeta.containsVersion(targetMeta.docId(), targetMeta.docCas())
+		res, err := sourceMeta.ContainsVersion(targetMeta.Updater(), targetMeta.GetCas())
 		if err != nil {
-			xmem.Logger().Errorf("detectConflictWithXattr received error %v", err)
+			xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v", xmem.Id(), err)
 			return Conflict
 		}
 		if res == true {
@@ -2440,10 +1946,10 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, target *mc
 		}
 	}
 	// Now target has a smaller CAS but source does not dominate. Let's check if target dominates source MV
-	if sourceMeta.isMergedDoc() {
-		res, err := targetMeta.containsVV(sourceMeta.mv)
+	if sourceMeta.IsMergedDoc() {
+		res, err := targetMeta.ContainsVV(sourceMeta.GetMv())
 		if err != nil {
-			xmem.Logger().Errorf("detectConflictWithXattr received error %v", err)
+			xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v", xmem.Id(), err)
 			return Conflict
 		}
 		if res == true {
@@ -2464,30 +1970,22 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, target *mc
 	}
 }
 
-func (xmem *XmemNozzle) findBodyWithoutXattr(req *mc.MCRequest) (body []byte) {
-	if req.DataType&mcc.XattrDataType == 0 {
-		return req.Body
-	}
-	xattrLen := binary.BigEndian.Uint32(req.Body[0:4])
-	return req.Body[4+xattrLen:]
-}
-
 func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCRequest) (err error) {
 	req := wrappedReq.Req
 	body := req.Body
-	CCRMeta, err := xmem.findSourceCustomCRXattr(req)
+	CCRMeta, err := base.FindSourceCustomCRXattr(req, xmem.sourceClusterId)
 	if err != nil {
-		xmem.Logger().Errorf("findSourceCustomCRXattr returned %v, err: %v", CCRMeta, err)
+		xmem.Logger().Errorf("%v: FindSourceCustomCRXattr returned %v, err: %v", xmem.Id(), CCRMeta, err)
 		return
 	}
 
 	// First find if we need to update. We don't need to update if CAS has not changed from cv.CAS
-	if CCRMeta.cas == CCRMeta.cv {
+	if CCRMeta.GetCas() == CCRMeta.GetCv() {
 		return
 	}
 
 	// Now we have new change.
-	// The max increase in body length is adding 2 uint42 and _xdcr\x00{"id":"<clusterId>","cv":"<18bytes>"}\x00
+	// The max increase in body length is adding 2 uint32 and _xdcr\x00{"id":"<clusterId>","cv":"<18bytes>"}\x00
 	var maxBodyIncrease = 8 + 24 + len(xmem.sourceClusterId) + 18
 	newbodyLen := len(body) + maxBodyIncrease
 	if wrappedReq.SlicesToBeReleased == nil {
@@ -2495,31 +1993,31 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 	}
 	newbody, err := xmem.dataPool.GetByteSlice(uint64(newbodyLen))
 	if err != nil {
-		xmem.Logger().Infof("updateCustomCRXattrForTarget received error '%v' calling GetByteSlice with length %v", err, newbodyLen)
 		newbody = make([]byte, newbodyLen)
 		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+	} else {
+		wrappedReq.SlicesToBeReleased = append(wrappedReq.SlicesToBeReleased, newbody)
 	}
-	wrappedReq.SlicesToBeReleased = append(wrappedReq.SlicesToBeReleased, newbody)
-
-	pos, err := CCRMeta.constructCustomCRXattr(newbody, 4, xmem.Logger())
+	// Only call constructCustomCRXattr when cas > cv
+	pos, err := CCRMeta.ConstructCustomCRXattr(newbody, 4)
 	if err != nil {
-		xmem.Logger().Errorf("constructCustomCRXattr returned err: '%v'", err)
-		return
+		// TODO: Remove before shipping. This should never happen unless we badly formated _xdcr.pc/_xdcr_mv..
+		panic(fmt.Sprintf("%v, updateCustomCRXattrForTarget encountered error %v. This may cause unnecessary merge.", xmem.Id(), err))
 	}
 
 	if req.DataType&mcc.XattrDataType > 0 {
 		it, err := base.NewXattrIterator(body)
 		if err != nil {
-			xmem.Logger().Errorf("updateCustomCRXattrForTarget received error '%v' from NewXattrIterator for body %v", err, body)
+			xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' from NewXattrIterator for body %v", xmem.Id(), err, body)
 			return err
 		}
 		for it.HasNext() {
 			key, value, err := it.Next()
 			if err != nil {
-				xmem.Logger().Errorf("updateCustomCRXattrForTarget received error '%v' iterating through XATTR for body %v,", err, body)
+				xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' iterating through XATTR for body %v,", xmem.Id(), err, body)
 				return err
 			}
-			if base.Equals(key, XATTR_XDCR) {
+			if base.Equals(key, base.XATTR_XDCR) {
 				continue
 			}
 			binary.BigEndian.PutUint32(newbody[pos:pos+4], uint32(len(key)+len(value)+2))
@@ -2535,7 +2033,7 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 		}
 	}
 	binary.BigEndian.PutUint32(newbody[0:4], uint32(pos-4))
-	docWithoutXattr := xmem.findBodyWithoutXattr(req)
+	docWithoutXattr := base.FindSourceBodyWithoutXattr(req)
 	copy(newbody[pos:], docWithoutXattr)
 	pos = pos + len(docWithoutXattr)
 	req.Body = newbody[0:pos]
@@ -2550,8 +2048,9 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 	}
 	if req.Req.DataType&mcc.SnappyDataType > 0 {
 		if req.SlicesToBeReleased == nil {
-			// We need up to 3 byte slices, one to decompress, one for body with new XATTR, one to compress
-			req.SlicesToBeReleased = make([][]byte, 0, 3)
+			// For target we need up to 3 byte slices, 1 to decompress, 1 for body with new XATTR, 1 to compress
+			// For merge back to source, we need up to 4 byte slices, 1 to decompress, 2 to format pcas and mv, 1 for new body and XATTR
+			req.SlicesToBeReleased = make([][]byte, 0, 4)
 		}
 		decodedLen, err := snappy.DecodedLen(req.Req.Body)
 		if err != nil {
@@ -2559,11 +2058,11 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 		}
 		body, err := xmem.dataPool.GetByteSlice(uint64(decodedLen))
 		if err != nil {
-			xmem.Logger().Infof("isChangesFromTarget received error '%v' calling GetByteSlice with length %v", err, decodedLen)
 			body = make([]byte, decodedLen)
 			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+		} else {
+			req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
 		}
-		req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
 		body, err = snappy.Decode(body, req.Req.Body)
 		if err != nil {
 			return false, err
@@ -2572,11 +2071,11 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 		req.Req.DataType = req.Req.DataType &^ mcc.SnappyDataType
 	}
 
-	ccrMeta, err := xmem.findSourceCustomCRXattr(req.Req)
+	ccrMeta, err := base.FindSourceCustomCRXattr(req.Req, xmem.sourceClusterId)
 	if err != nil {
 		return false, err
 	}
-	if ccrMeta.cas == ccrMeta.cv && bytes.Equal(ccrMeta.cvId, xmem.targetClusterId) {
+	if bytes.Equal(ccrMeta.Updater(), xmem.targetClusterId) {
 		return true, nil
 	}
 	return false, nil
@@ -2590,7 +2089,7 @@ func (xmem *XmemNozzle) sendSingleSetMeta(bytesList [][]byte, numOfRetry int) er
 			if err == nil {
 				atomic.AddUint64(&xmem.counter_resend, 1)
 				return nil
-			} else if err == badConnectionError {
+			} else if err == base.BadConnectionError {
 				xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 			}
 		}
@@ -2668,10 +2167,10 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		return
 	}
 
-	xmem.setClient(newXmemClient(SetMetaClientName, xmem.config.readTimeout,
+	xmem.setClient(base.NewXmemClient(SetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger()), true /*isSetMeta*/)
-	xmem.setClient(newXmemClient(GetMetaClientName, xmem.config.readTimeout,
+	xmem.setClient(base.NewXmemClient(GetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_getMeta,
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger()), false /*isSetMeta*/)
 
@@ -2738,7 +2237,7 @@ func (xmem *XmemNozzle) initializeCompressionSettings(settings metadata.Replicat
 	compressionVal, ok := settings[SETTING_COMPRESSION_TYPE].(base.CompressionType)
 	if !ok {
 		// Unusual case
-		xmem.Logger().Warnf("%v missing compression type setting. Defaulting to ForceUncompress")
+		xmem.Logger().Warnf("%v missing compression type setting. Defaulting to ForceUncompress", xmem.Id())
 		compressionVal = base.CompressionTypeForceUncompress
 	}
 
@@ -2776,6 +2275,7 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 			xmem.Logger().Errorf("Cannot convert target cluster %v UUID to base64. Error: %v", xmem.targetClusterUuid, err)
 			return err
 		}
+		xmem.Logger().Infof("%v: Using %s and %s as source and target cluster IDs for custom conflict resolution.", xmem.Id(), xmem.sourceClusterId, xmem.targetClusterId)
 	}
 	xmem.setDataChan(make(chan *base.WrappedMCRequest, xmem.config.maxCount*10))
 	xmem.bytes_in_dataChan = 0
@@ -2835,7 +2335,7 @@ func (xmem *XmemNozzle) setDataChan(dataChan chan *base.WrappedMCRequest) {
 	xmem.dataChan = dataChan
 }
 
-func (xmem *XmemNozzle) getClient(isSetMeta bool) *xmemClient {
+func (xmem *XmemNozzle) getClient(isSetMeta bool) *base.XmemClient {
 	xmem.stateLock.RLock()
 	defer xmem.stateLock.RUnlock()
 	if isSetMeta {
@@ -2845,7 +2345,7 @@ func (xmem *XmemNozzle) getClient(isSetMeta bool) *xmemClient {
 	}
 }
 
-func (xmem *XmemNozzle) setClient(client *xmemClient, isSetMeta bool) {
+func (xmem *XmemNozzle) setClient(client *base.XmemClient, isSetMeta bool) {
 	xmem.stateLock.Lock()
 	defer xmem.stateLock.Unlock()
 	if isSetMeta {
@@ -2873,7 +2373,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			if err != nil {
 				if err == PartStoppedError {
 					goto done
-				} else if err == fatalError {
+				} else if err == base.FatalError {
 					// if possible, log the corresponding request to facilitate debugging
 					if response != nil {
 						pos := xmem.getPosFromOpaque(response.Opaque)
@@ -2886,24 +2386,24 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						}
 					}
 					goto done
-				} else if err == badConnectionError || err == connectionClosedError {
+				} else if err == base.BadConnectionError || err == base.ConnectionClosedError {
 					xmem.Logger().Errorf("%v The connection is ruined. Repair the connection and retry.", xmem.Id())
 					xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 				}
 			} else if response == nil {
 				errMsg := fmt.Sprintf("%v readFromClient returned nil error and nil response. Ignoring it", xmem.Id())
 				xmem.Logger().Warn(errMsg)
-			} else if response.Status != mc.SUCCESS && !isIgnorableMCResponse(response) {
-				if isMutationLockedError(response.Status) {
+			} else if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response) {
+				if base.IsMutationLockedError(response.Status) {
 					// if target mutation is currently locked, resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
 					atomic.AddUint64(&xmem.counter_locked, 1)
 					// set the mutationLocked flag on the corresponding bufferedMCRequest
 					// which will allow resendIfTimeout() method to perform resend with exponential backoff with appropriate settings
 					_, err = xmem.buf.modSlot(pos, xmem.setMutationLockedFlag)
-				} else if isTemporaryMCError(response.Status) {
+				} else if base.IsTemporaryMCError(response.Status) {
 					// target may be overloaded. increase backoff factor to alleviate stress on target
-					xmem.client_for_setMeta.incrementBackOffFactor()
+					xmem.client_for_setMeta.IncrementBackOffFactor()
 
 					// error is temporary. resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -2922,10 +2422,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						seqno = wrappedReq.Seqno
 						if req != nil && req.Opaque == response.Opaque {
 							// found matching request
-							if isTopologyChangeMCError(response.Status) {
+							if base.IsTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
-							} else if isCollectionMappingError(response.Status) {
+							} else if base.IsCollectionMappingError(response.Status) {
 								xmem.upstreamErrReporter(wrappedReq)
 								if xmem.buf.evictSlot(pos) != nil {
 									panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
@@ -3031,94 +2531,12 @@ func (xmem *XmemNozzle) adjustMaxIdleCount(factor float64) {
 	atomic.StoreUint32(&xmem.config.maxIdleCount, new_maxIdleCount)
 }
 
-func isNetError(err error) bool {
-	if err == nil {
-		return false
-	}
-	_, ok := err.(*net.OpError)
-	return ok
-}
-
 func isNetTimeoutError(err error) bool {
 	if err == nil {
 		return false
 	}
 	netError, ok := err.(*net.OpError)
 	return ok && netError.Timeout()
-}
-
-// check if memcached response status indicates topology change,
-// in which case we defer pipeline restart to topology change detector
-func isTopologyChangeMCError(resp_status mc.Status) bool {
-	switch resp_status {
-	case mc.NO_BUCKET:
-		fallthrough
-	case mc.NOT_MY_VBUCKET:
-		return true
-	default:
-		return false
-	}
-}
-
-func isCollectionMappingError(resp_status mc.Status) bool {
-	switch resp_status {
-	case mc.UNKNOWN_COLLECTION:
-		return true
-	default:
-		return false
-	}
-}
-
-// check if memcached response status indicates error of temporary nature, which requires retrying corresponding requests
-func isTemporaryMCError(resp_status mc.Status) bool {
-	switch resp_status {
-	case mc.TMPFAIL:
-		fallthrough
-	case mc.ENOMEM:
-		fallthrough
-	case mc.EBUSY:
-		fallthrough
-	case mc.NOT_INITIALIZED:
-		fallthrough
-		// this used to be remapped to and handled in the same way as TMPFAIL
-		// keep the same behavior for now
-	case mc.SYNC_WRITE_IN_PROGRESS:
-		return true
-	default:
-		return false
-	}
-}
-
-// check if memcached response status indicates mutation locked error, which requires resending the corresponding request
-func isMutationLockedError(resp_status mc.Status) bool {
-	switch resp_status {
-	case mc.LOCKED:
-		return true
-	default:
-		return false
-	}
-}
-
-// check if memcached response status indicates ignorable error, which requires no corrective action at all
-func isIgnorableMCResponse(resp *mc.MCResponse) bool {
-	if resp == nil {
-		return false
-	}
-
-	switch resp.Status {
-	case mc.KEY_ENOENT:
-		return true
-	case mc.KEY_EEXISTS:
-		return true
-	case mc.SUBDOC_BAD_MULTI:
-		return true
-	case base.SUBDOC_SUCCESS_DELETED:
-		return true
-	case mc.SUBDOC_MULTI_PATH_FAILURE_DELETED:
-		return true
-	}
-
-	return false
 }
 
 // get max idle count adjusted by backoff_factor
@@ -3129,7 +2547,7 @@ func (xmem *XmemNozzle) getMaxIdleCount() uint32 {
 // get max idle count adjusted by backoff_factor
 func (xmem *XmemNozzle) getAdjustedMaxIdleCount() uint32 {
 	max_idle_count := xmem.getMaxIdleCount()
-	backoff_factor := math.Max(float64(xmem.client_for_getMeta.getBackOffFactor()), float64(xmem.client_for_setMeta.getBackOffFactor()))
+	backoff_factor := math.Max(float64(xmem.client_for_getMeta.GetBackOffFactor()), float64(xmem.client_for_setMeta.GetBackOffFactor()))
 
 	//if client_for_getMeta.backoff_factor > 0 or client_for_setMeta.backoff_factor > 0, it means the target system is possibly under load, need to be more patient before
 	//declare the stuckness.
@@ -3192,8 +2610,8 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			if xmem_count_sent == sent_count && xmem_count_ignored == ignored_count &&
 				int(buffer_count) == resp_waitingConfirm_count &&
 				(len(xmem.dataChan) > 0 || buffer_count != 0) &&
-				repairCount_setMeta == xmem.client_for_setMeta.repairCount() &&
-				repairCount_getMeta == xmem.client_for_getMeta.repairCount() {
+				repairCount_setMeta == xmem.client_for_setMeta.RepairCount() &&
+				repairCount_getMeta == xmem.client_for_getMeta.RepairCount() {
 				// Increment freeze_counter if there is data waiting and the count hasn't increased since last time we checked
 				freeze_counter++
 			} else {
@@ -3204,8 +2622,8 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			sent_count = xmem_count_sent
 			ignored_count = xmem_count_ignored
 			resp_waitingConfirm_count = int(buffer_count)
-			repairCount_setMeta = xmem.client_for_setMeta.repairCount()
-			repairCount_getMeta = xmem.client_for_getMeta.repairCount()
+			repairCount_setMeta = xmem.client_for_setMeta.RepairCount()
+			repairCount_getMeta = xmem.client_for_getMeta.RepairCount()
 			if count == 10 {
 				xmem.Logger().Debugf("%v- freeze_counter=%v, xmem.counter_sent=%v, xmem.counter_ignored=%v, len(xmem.dataChan)=%v, receive_count-%v, cur_batch_count=%v\n", xmem_id, freeze_counter, xmem_count_sent, xmem_count_ignored, len(dataChan), received_count, atomic.LoadUint32(&xmem.cur_batch_count))
 				xmem.Logger().Debugf("%v open=%v checking..., %v item unsent, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(xmem.dataChan), int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
@@ -3213,12 +2631,12 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			}
 			max_idle_count := xmem.getAdjustedMaxIdleCount()
 			if freeze_counter > max_idle_count {
-				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem_id, max_idle_count, len(dataChan), buffer_count <= xmem.buf.notify_threshold, xmem.client_for_setMeta.continuous_write_failure_counter, xmem.client_for_setMeta.getBackOffFactor(), xmem.client_for_getMeta.getBackOffFactor())
+				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem_id, max_idle_count, len(dataChan), buffer_count <= xmem.buf.notify_threshold, xmem.client_for_setMeta.GetContinuousWriteFailureCounter(), xmem.client_for_setMeta.GetBackOffFactor(), xmem.client_for_getMeta.GetBackOffFactor())
 				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, ignored %v item, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(dataChan), received_count, xmem_count_sent, xmem_count_ignored, int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
 				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
-				xmem.client_for_setMeta.markConnUnhealthy()
-				xmem.client_for_getMeta.markConnUnhealthy()
+				xmem.client_for_setMeta.MarkConnUnhealthy()
+				xmem.client_for_getMeta.MarkConnUnhealthy()
 				xmem.handleGeneralError(ErrorXmemIsStuck)
 				goto done
 			}
@@ -3293,7 +2711,7 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 			req.lock.Unlock()
 
 			if !lastErrIsDueToCollectionMapping {
-				xmem.repairConn(xmem.client_for_setMeta, err.Error(), xmem.client_for_setMeta.repairCount())
+				xmem.repairConn(xmem.client_for_setMeta, err.Error(), xmem.client_for_setMeta.RepairCount())
 			}
 			return true, err
 		}
@@ -3478,7 +2896,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			xmem.buf.itemCountInBuffer(), len(xmem.dataChan),
 			atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(),
 			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend), atomic.LoadUint64(&xmem.counter_locked),
-			xmem.client_for_getMeta.repairCount(), xmem.client_for_setMeta.repairCount())
+			xmem.client_for_getMeta.RepairCount(), xmem.client_for_setMeta.RepairCount())
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -3512,10 +2930,10 @@ func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
 	if setMeta {
 		// For setMeta, negotiate compression, if it is set
 		features.CompressionType = xmem.compressionSetting
-		return xmem.utils.SendHELOWithFeatures(xmem.client_for_setMeta.getMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
+		return xmem.utils.SendHELOWithFeatures(xmem.client_for_setMeta.GetMemClient(), xmem.setMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
 	} else {
 		// Since compression is value only, getMeta does not benefit from it. Use a non-compressed connection
-		return xmem.utils.SendHELOWithFeatures(xmem.client_for_getMeta.getMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
+		return xmem.utils.SendHELOWithFeatures(xmem.client_for_getMeta.GetMemClient(), xmem.getMetaUserAgent, xmem.config.readTimeout, xmem.config.writeTimeout, features, xmem.Logger())
 	}
 }
 
@@ -3545,14 +2963,14 @@ func (xmem *XmemNozzle) composeUserAgentForClient(setMeta bool) {
 
 /**
  * Gets the raw ioConnection (io.go ReadWriteCloser) and the number of repairs done on this connection (revisions)
- * Also sets the read/write timeout for the xmemClient (client)
+ * Also sets the read/write timeout for the XmemClient (client)
  */
-func (xmem *XmemNozzle) getConn(client *xmemClient, readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
+func (xmem *XmemNozzle) getConn(client *base.XmemClient, readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
 	err := xmem.validateRunningState()
 	if err != nil {
-		return nil, client.repairCount(), err
+		return nil, client.RepairCount(), err
 	}
-	return client.getConn(readTimeout, writeTimeout)
+	return client.GetConn(readTimeout, writeTimeout)
 }
 
 func (xmem *XmemNozzle) validateRunningState() error {
@@ -3563,7 +2981,7 @@ func (xmem *XmemNozzle) validateRunningState() error {
 	return nil
 }
 
-func (xmem *XmemNozzle) writeToClient(client *xmemClient, bytesList [][]byte, renewTimeout bool) (err error, rev int) {
+func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byte, renewTimeout bool) (err error, rev int) {
 	if len(bytesList) == 0 {
 		// should not happen. just to be safe
 		return nil, 0
@@ -3706,8 +3124,8 @@ func computeNumberOfBytesUsingBytesAllowed(bytesList [][]byte, bytesAllowed int6
 	return
 }
 
-func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes []byte, renewTimeout bool) (error, int) {
-	backoffFactor := client.getBackOffFactor()
+func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *base.XmemClient, bytes []byte, renewTimeout bool) (error, int) {
+	backoffFactor := client.GetBackOffFactor()
 	if backoffFactor > 0 {
 		time.Sleep(time.Duration(backoffFactor) * base.XmemBackoffWaitTime)
 	}
@@ -3720,7 +3138,7 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes
 	n, err := conn.Write(bytes)
 
 	if err == nil {
-		client.reportOpSuccess()
+		client.ReportOpSuccess()
 		return err, rev
 	} else {
 		xmem.Logger().Errorf("%v writeToClient error: %s\n", xmem.Id(), fmt.Sprint(err))
@@ -3731,26 +3149,26 @@ func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *xmemClient, bytes
 		if xmem.utils.IsSeriousNetError(err) || (n != 0 && n != len(bytes)) {
 			xmem.repairConn(client, err.Error(), rev)
 
-		} else if isNetError(err) {
-			client.reportOpFailure(false)
+		} else if base.IsNetError(err) {
+			client.ReportOpFailure(false)
 		}
 
 		return err, rev
 	}
 }
 
-func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool) (*mc.MCResponse, error, int) {
+func (xmem *XmemNozzle) readFromClient(client *base.XmemClient, resetReadTimeout bool) (*mc.MCResponse, error, int) {
 
 	// Gets a connection and also set whether or not to reset the readTimeOut
 	_, rev, err := xmem.getConn(client, resetReadTimeout, false)
 	if err != nil {
-		client.logger.Errorf("%v Can't read from client %v, failed to get connection, err=%v", xmem.Id(), client.name, err)
+		client.Logger().Errorf("%v Can't read from client %v, failed to get connection, err=%v", xmem.Id(), client.Name(), err)
 		return nil, err, rev
 	}
 
-	memClient := client.getMemClient()
+	memClient := client.GetMemClient()
 	if memClient == nil {
-		return nil, errors.New("memcached client is not set"), client.repairCount()
+		return nil, errors.New("memcached client is not set"), client.RepairCount()
 	}
 	response, err := memClient.Receive()
 
@@ -3765,17 +3183,17 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 
 		if !isAppErr {
 			if err == io.EOF {
-				return nil, connectionClosedError, rev
+				return nil, base.ConnectionClosedError, rev
 			} else if xmem.utils.IsSeriousNetError(err) {
-				return nil, badConnectionError, rev
-			} else if isNetError(err) {
-				client.reportOpFailure(true)
+				return nil, base.BadConnectionError, rev
+			} else if base.IsNetError(err) {
+				client.ReportOpFailure(true)
 				return response, err, rev
 			} else if strings.HasPrefix(errMsg, "bad magic") {
 				//the connection to couchbase server is ruined. it is not supposed to return response with bad magic number
 				//now the only sensible thing to do is to repair the connection, then retry
-				client.logger.Warnf("%v err=%v\n", xmem.Id(), err)
-				return nil, badConnectionError, rev
+				client.Logger().Warnf("%v err=%v\n", xmem.Id(), err)
+				return nil, base.BadConnectionError, rev
 			}
 		} else {
 			//response.Status != SUCCESSFUL, in this case, gomemcached return the response as err as well
@@ -3785,19 +3203,19 @@ func (xmem *XmemNozzle) readFromClient(client *xmemClient, resetReadTimeout bool
 		}
 	} else {
 		//if no error, reset the client retry counter
-		client.reportOpSuccess()
+		client.ReportOpSuccess()
 	}
 	return response, err, rev
 }
 
-func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) error {
+func (xmem *XmemNozzle) repairConn(client *base.XmemClient, reason string, rev int) error {
 
 	if xmem.validateRunningState() != nil {
 		xmem.Logger().Infof("%v is not running, no need to repairConn", xmem.Id())
 		return nil
 	}
 
-	xmem.Logger().Errorf("%v connection %v is broken due to %v, try to repair...\n", xmem.Id(), client.name, reason)
+	xmem.Logger().Errorf("%v connection %v is broken due to %v, try to repair...\n", xmem.Id(), client.Name(), reason)
 	pool, err := xmem.getConnPool()
 	if err != nil {
 		xmem.handleGeneralError(err)
@@ -3807,18 +3225,18 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 	memClient, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, false /*initializing*/, xmem.Logger())
 	if err != nil {
 		xmem.handleGeneralError(err)
-		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
+		xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.Name(), err)
 		return err
 	}
 
-	repaired := client.repairConn(memClient, rev, xmem.Id(), xmem.finish_ch)
+	repaired := client.RepairConn(memClient, rev, xmem.Id(), xmem.finish_ch)
 	if repaired {
 		var features utilities.HELOFeatures
 		if client == xmem.client_for_setMeta {
 			features, err = xmem.sendHELO(true /*setMeta*/)
 			if err != nil {
 				xmem.handleGeneralError(err)
-				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
+				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.Name(), err)
 				return err
 			}
 
@@ -3835,11 +3253,11 @@ func (xmem *XmemNozzle) repairConn(client *xmemClient, reason string, rev int) e
 			_, err = xmem.sendHELO(false /*setMeta*/)
 			if err != nil {
 				xmem.handleGeneralError(err)
-				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.name, err)
+				xmem.Logger().Errorf("%v - Failed to repair connections for %v. err=%v\n", xmem.Id(), client.Name(), err)
 				return err
 			}
 		}
-		xmem.Logger().Infof("%v - The connection for %v has been repaired\n", xmem.Id(), client.name)
+		xmem.Logger().Infof("%v - The connection for %v has been repaired\n", xmem.Id(), client.Name())
 	}
 	return nil
 }
@@ -4025,4 +3443,8 @@ func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
 
 func (xmem *XmemNozzle) SetUpstreamErrReporter(reporter func(interface{})) {
 	xmem.upstreamErrReporter = reporter
+}
+
+func (xmem *XmemNozzle) SetConflictManager(conflictMgr service_def.ConflictManagerIface) {
+	xmem.conflictMgr = conflictMgr
 }

@@ -15,8 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/gomemcached"
-	mcc "github.com/couchbase/gomemcached/client"
 	mrand "math/rand"
 	"reflect"
 	"sort"
@@ -24,6 +22,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
 )
 
 type SettingDef struct {
@@ -1313,3 +1314,393 @@ type StoppedPipelineCallback func() error
 type StoppedPipelineErrCallback func(err error)
 
 type PipelineMgrStopCbType func(string, StoppedPipelineCallback, StoppedPipelineErrCallback) error
+
+type CustomCRMeta struct {
+	senderId []byte // The source cluster that sent the document to XDCR
+	cas      uint64 // The Cas in the document metadata
+	cvId     []byte // _xdcr.id in XATTR
+	cv       uint64 // _xdcr.cv in XATTR
+	pcas     []byte // _xdcr.pc in XATTR
+	mv       []byte // _xdcr.mv in XATTR
+}
+
+func NewCustomCRMeta(sourceId []byte, cas uint64, id, cvHex, pcas, mv []byte) (*CustomCRMeta, error) {
+	if len(cvHex) == 0 {
+		return &CustomCRMeta{
+			senderId: sourceId,
+			cas:      cas,
+			cvId:     id,
+			cv:       0,
+			pcas:     pcas,
+			mv:       mv,
+		}, nil
+	}
+	cv, err := HexLittleEndianToUint64(cvHex)
+	if err != nil {
+		return nil, err
+	}
+	return &CustomCRMeta{
+		senderId: sourceId,
+		cas:      cas,
+		cvId:     id,
+		cv:       cv,
+		pcas:     pcas,
+		mv:       mv,
+	}, nil
+}
+
+func (meta *CustomCRMeta) GetCas() uint64 {
+	return meta.cas
+}
+
+func (meta *CustomCRMeta) GetCv() uint64 {
+	return meta.cv
+}
+func (meta *CustomCRMeta) GetMv() []byte {
+	return meta.mv
+}
+
+func (meta *CustomCRMeta) GetPcas() []byte {
+	return meta.pcas
+}
+
+func (meta *CustomCRMeta) GetCvId() []byte {
+	return meta.cvId
+}
+
+// Returns the id of the cluster that last updated this document
+func (meta *CustomCRMeta) Updater() []byte {
+	if meta.cas > meta.cv {
+		// New change in sending cluster so that's the id
+		return meta.senderId
+	} else {
+		return meta.cvId
+	}
+}
+
+func (meta *CustomCRMeta) IsMergedDoc() bool {
+	if meta.mv != nil && meta.cas == meta.cv {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (meta CustomCRMeta) ContainsVersion(targetId []byte, targetCas uint64) (bool, error) {
+	if meta.cas > meta.cv && bytes.Equal(meta.senderId, targetId) {
+		if meta.cas >= targetCas {
+			return true, nil
+		} else {
+			return false, nil
+		}
+	}
+	if bytes.Equal(meta.cvId, targetId) {
+		if meta.cv >= targetCas {
+			return true, nil
+		} else {
+			return false, nil
+		}
+	}
+	if meta.pcas != nil {
+		casInVV, err := findItemInVV(meta.pcas, targetId)
+		if err != nil {
+			return false, err
+		}
+		if casInVV >= targetCas {
+			return true, nil
+		}
+	}
+	if meta.mv != nil {
+		casInVV, err := findItemInVV(meta.mv, targetId)
+		if err != nil {
+			return false, err
+		}
+		if casInVV >= targetCas {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// This routine checks if meta contains the version vector passed in.
+func (meta *CustomCRMeta) ContainsVV(vv []byte) (bool, error) {
+	it, err := NewCCRXattrFieldIterator(vv)
+	if err != nil {
+		return false, err
+	}
+	for it.HasNext() {
+		var key, value []byte
+		key, value, err = it.Next()
+		if err != nil {
+			return false, err
+		}
+		cas, err := Base64ToUint64(value)
+		if err != nil {
+			return false, err
+		}
+		if res, err := meta.ContainsVersion(key, cas); err != nil || res == false {
+			return false, err
+		}
+	}
+	// Looped through all items in vv and meta contains all of them
+	return true, nil
+}
+
+// This routine returns a version vector but in the form map[clusterId]CAS.
+// If the document is a merge, the map will have a length > 1 where all source of the merge will be included. This is the MV
+// If the document is not a merge, the map will have a length of 1 with the cluster ID/CAS of the last update.
+func (meta *CustomCRMeta) currentVersions() (map[string]uint64, error) {
+	currentVersions := make(map[string]uint64)
+	if meta.cas > meta.cv {
+		currentVersions[string(meta.senderId)] = meta.cas
+	} else if meta.mv == nil {
+		currentVersions[string(meta.cvId)] = meta.cv
+	} else {
+		it, err := NewCCRXattrFieldIterator(meta.mv)
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return nil, err
+			}
+			cas, err := Base64ToUint64(v)
+			if err != nil {
+				return nil, err
+			}
+			currentVersions[string(k)] = cas
+		}
+	}
+	return currentVersions, nil
+}
+
+// This routine returns the updated PCAS in the form map[clusterId]CAS
+func (meta *CustomCRMeta) previousVersions() (map[string]uint64, error) {
+	if meta.cv == 0 {
+		return nil, nil
+	}
+	previousVersions := make(map[string]uint64)
+	if meta.pcas != nil {
+		it, err := NewCCRXattrFieldIterator(meta.pcas)
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return nil, err
+			}
+			cas, err := Base64ToUint64(v)
+			if err != nil {
+				return nil, err
+			}
+			previousVersions[string(k)] = cas
+		}
+	}
+	if meta.cas > meta.cv {
+		if meta.mv == nil {
+			// Update since cv was set. Need to add it to previous versions
+			v, ok := previousVersions[string(meta.cvId)]
+			if !ok || meta.cv > v {
+				previousVersions[string(meta.cvId)] = meta.cv
+			}
+		} else {
+			// Update since last merge. Need to add mv to previous versions
+			it, err := NewCCRXattrFieldIterator(meta.mv)
+			if err != nil {
+				return nil, err
+			}
+			for it.HasNext() {
+				k, v, err := it.Next()
+				if err != nil {
+					return nil, err
+				}
+				cas, err := Base64ToUint64(v)
+				if err != nil {
+					return nil, err
+				}
+				i, ok := previousVersions[string(k)]
+				if !ok || cas > i {
+					previousVersions[string(k)] = cas
+				}
+			}
+		}
+	}
+	return previousVersions, nil
+}
+
+// This routine construct XATTR _xdcr{...} if there is new change (meta.cas > meta.cv)
+func (meta *CustomCRMeta) ConstructCustomCRXattr(body []byte, startPos int) (pos int, err error) {
+	if meta.cas <= meta.cv {
+		return startPos, errors.New("ConstructCustomCRXattr cannot be called when there has been no change")
+	}
+	pos = startPos + 4
+	copy(body[pos:], []byte(XATTR_XDCR))
+	pos = pos + len(XATTR_XDCR)
+	body[pos] = '\x00'
+	pos++
+	if len(meta.senderId) == 0 {
+		return startPos, errors.New("Cannot format XATTR for custom CR because the sender ID is empty")
+	}
+	body, pos = WriteJsonRawMsg(body, []byte(XATTR_ID), pos, WriteJsonKey, len(XATTR_ID), true /*firstKey*/)
+	body, pos = WriteJsonRawMsg(body, meta.senderId, pos, WriteJsonValue, len(meta.senderId), false /*firstKey*/)
+
+	cvHex := Uint64ToHexLittleEndian(meta.cas)
+	body, pos = WriteJsonRawMsg(body, []byte(XATTR_CV), pos, WriteJsonKey, len(XATTR_CV), false /*firstKey*/)
+	body, pos = WriteJsonRawMsg(body, cvHex, pos, WriteJsonValue, len(cvHex), false /*firstKey*/)
+
+	pcas := make(map[string][]byte)
+	if meta.cvId != nil {
+		pcas[string(meta.cvId)] = Uint64ToBase64(meta.cv)
+	}
+	if meta.pcas != nil {
+		it, err := NewCCRXattrFieldIterator(meta.pcas)
+		if err != nil {
+			// This should never happen unless there is software bug where we formatted the _xdcr.pcas badly.
+			return startPos, fmt.Errorf("Error '%v' calling NewCCRXattrFieldIterator() for pcas '%s'. Will truncate it from new pcas.", err, meta.pcas)
+		} else {
+			for it.HasNext() {
+				key, value, err := it.Next()
+				if err != nil {
+					return startPos, fmt.Errorf("Error '%v' iterating through '%s'. Will truncate it from new pcas.", err, meta.pcas)
+				}
+				pcas[string(key)] = value
+			}
+		}
+	}
+	if meta.mv != nil {
+		it, err := NewCCRXattrFieldIterator(meta.mv)
+		if err != nil {
+			return startPos, fmt.Errorf("Error '%v' calling NewCCRXattrFieldIterator() for mv '%s'. Will truncate it from new pcas.", err, meta.mv)
+		} else {
+			for it.HasNext() {
+				key, value, err := it.Next()
+				if err != nil {
+					return startPos, fmt.Errorf("Error '%v' iterating through '%s'. Will truncate it from new pcas.", err, meta.mv)
+				}
+				// pcas should not have any entry that's in mv
+				pcas[string(key)] = value
+			}
+		}
+	}
+
+	if len(pcas) > 0 {
+		body, pos = WriteJsonRawMsg(body, []byte(XATTR_PCAS), pos, WriteJsonKey, len(XATTR_PCAS), false /*firstKey*/)
+
+		first := true
+		for k, v := range pcas {
+			if Equals(meta.senderId, k) == false { // sender is already in _xdcr.id
+				body, pos = WriteJsonRawMsg(body, []byte(k), pos, WriteJsonKey, len(k), first /*firstKey*/)
+				body, pos = WriteJsonRawMsg(body, v, pos, WriteJsonValue, len(v), false /*firstKey*/)
+				first = false
+			}
+		}
+		body[pos] = '}'
+		pos++
+	}
+	body[pos] = '}'
+	pos++
+	body[pos] = '\x00'
+	pos++
+	binary.BigEndian.PutUint32(body[startPos:startPos+4], uint32(pos-(startPos+4)))
+	return pos, nil
+}
+
+// This routine combines source and target meta and puts the new MV/PCAS in the mergedMvSlice/mergedPcasSlice
+//   It finds the current versions (MV) of the two documents, combine them into new MV.
+//   It finds the previous versions (PCAS) of the two documents, combine them into new PCAS
+//   It then remove any duplicates and format them in the provided slices
+func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mergedPcasSlice []byte) (mvlen int, pcaslen int, err error) {
+	currentVersions, err := meta.currentVersions()
+	if err != nil {
+		return 0, 0, err
+	}
+	targetCurrentVersions, err := targetMeta.currentVersions()
+	if err != nil {
+		return 0, 0, err
+	}
+	// merge current versions
+	for key, value := range targetCurrentVersions {
+		v, ok := currentVersions[key]
+		if !ok || value > v {
+			currentVersions[key] = value
+		}
+	}
+	previousVersions, err := meta.previousVersions()
+	if err != nil {
+		return 0, 0, err
+	}
+	targetPreviousVersions, err := targetMeta.previousVersions()
+	if err != nil {
+		return 0, 0, err
+	}
+	// merge previous versions
+	for key, value := range targetPreviousVersions {
+		v, ok := previousVersions[key]
+		if !ok || value > v {
+			previousVersions[key] = value
+		}
+	}
+	// Remove any redundant entries
+	for key, value := range currentVersions {
+		v, ok := previousVersions[key]
+		if ok {
+			if value > v {
+				delete(previousVersions, key)
+			} else {
+				delete(currentVersions, key)
+			}
+		}
+	}
+	// Construct MV
+	firstKey := true
+	for key, cas := range currentVersions {
+		value := Uint64ToBase64(cas)
+		mergedMvSlice, mvlen = WriteJsonRawMsg(mergedMvSlice, []byte(key), mvlen, WriteJsonKey, len(key), firstKey /*firstKey*/)
+		mergedMvSlice, mvlen = WriteJsonRawMsg(mergedMvSlice, value, mvlen, WriteJsonValue, len(value), false /*firstKey*/)
+		firstKey = false
+	}
+	if mvlen > 0 {
+		// We have MV. Finish it with '}'
+		mergedMvSlice[mvlen] = '}'
+		mvlen++
+	}
+	// Construct PCAS
+	firstKey = true
+	for key, cas := range previousVersions {
+		value := Uint64ToBase64(cas)
+		mergedPcasSlice, pcaslen = WriteJsonRawMsg(mergedPcasSlice, []byte(key), pcaslen, WriteJsonKey, len(key), firstKey /*firstKey*/)
+		mergedPcasSlice, pcaslen = WriteJsonRawMsg(mergedPcasSlice, value, pcaslen, WriteJsonValue, len(value), false /*firstKey*/)
+		firstKey = false
+	}
+	if pcaslen > 0 {
+		// We have PCAS. Finish it with '}
+		mergedPcasSlice[pcaslen] = '}'
+		pcaslen++
+	}
+	return mvlen, pcaslen, nil
+}
+func (meta *CustomCRMeta) String() string {
+	return fmt.Sprintf("senderId: %s, cas: %v, cvId: %s, cv: %v, pcas: %s, mv: %s",
+		meta.senderId, meta.cas, meta.cvId, meta.cv, meta.pcas, meta.mv)
+}
+
+type ConflictParams struct {
+	Source         *WrappedMCRequest
+	Target         *gomemcached.MCResponse
+	SourceId       []byte
+	TargetId       []byte
+	BucketName     string
+	ResultNotifier MergeResultNotifier
+}
+
+type MergeInputAndResult struct {
+	Input  *ConflictParams
+	Result interface{}
+	Err    error
+}
+
+type MergeResultNotifier interface {
+	NotifyMergeResult(input *ConflictParams, mergeResult interface{}, mergeError error)
+}

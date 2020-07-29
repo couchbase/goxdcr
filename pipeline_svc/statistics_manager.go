@@ -13,6 +13,12 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"sort"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -27,11 +33,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
-	"sort"
-	"strconv"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const (
@@ -40,16 +41,17 @@ const (
 )
 
 // stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
-var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
+var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_MERGED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
 	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
-	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_LATENCY_METRIC}
+	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_LATENCY_METRIC, service_def.MERGE_LATENCY_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
 // 2. internal stats that are not visible on UI
 var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC,
 	service_def.TIME_COMMITING_METRIC, service_def.NUM_FAILEDCKPTS_METRIC, service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC,
-	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_LATENCY_METRIC}
+	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_LATENCY_METRIC,
+	service_def.MERGE_LATENCY_METRIC}
 
 // keys for metrics in overview
 var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.DOCS_CHECKED_METRIC, service_def.DOCS_WRITTEN_METRIC, service_def.EXPIRY_DOCS_WRITTEN_METRIC, service_def.DELETION_DOCS_WRITTEN_METRIC,
@@ -59,7 +61,8 @@ var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.D
 	service_def.TIME_COMMITING_METRIC, service_def.DOCS_OPT_REPD_METRIC, service_def.DOCS_RECEIVED_DCP_METRIC, service_def.EXPIRY_RECEIVED_DCP_METRIC,
 	service_def.DELETION_RECEIVED_DCP_METRIC, service_def.SET_RECEIVED_DCP_METRIC, service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC,
 	service_def.RESP_WAIT_METRIC, service_def.META_LATENCY_METRIC, service_def.DCP_DISPATCH_TIME_METRIC, service_def.DCP_DATACH_LEN, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC,
-	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.GET_LATENCY_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC}
+	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.GET_LATENCY_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC,
+	service_def.DOCS_MERGED_METRIC, service_def.DATA_MERGED_METRIC, service_def.EXPIRY_DOCS_MERGED_METRIC, service_def.MERGE_LATENCY_METRIC}
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
 
@@ -185,7 +188,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		utils:                     utilsIn,
 		remoteClusterSvc:          remoteClusterSvc,
 	}
-	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}}
+	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 
 	stats_mgr.initialize()
 	return stats_mgr
@@ -977,6 +980,86 @@ type MetricsCollector interface {
 	Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error
 	OnEvent(event *common.Event)
 	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
+}
+
+//metrics collector for custom conflict manager
+type conflictMgrCollector struct {
+	id        string
+	stats_mgr *StatisticsManager
+	common.AsyncComponentEventHandler
+	// key of outer map: component id
+	// key of inner map: metric name
+	// value of inner map: metric value
+	component_map map[string]map[string]interface{}
+}
+
+func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
+	conflictMgrSvc := pipeline.RuntimeContext().Service(base.CONFLICT_MANAGER_SVC)
+	if conflictMgrSvc == nil {
+		return nil
+	}
+	conflictManager := conflictMgrSvc.(*ConflictManager)
+	conflictMgr_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.ConflictMgrCollector)
+	conflictMgr_collector.stats_mgr = stats_mgr
+	conflictMgr_collector.component_map = make(map[string]map[string]interface{})
+	registry := stats_mgr.getOrCreateRegistry(conflictManager.Id())
+	docs_merged := metrics.NewCounter()
+	registry.Register(service_def.DOCS_MERGED_METRIC, docs_merged)
+	data_merged := metrics.NewCounter()
+	registry.Register(service_def.DATA_MERGED_METRIC, data_merged)
+	expiry_docs_merged := metrics.NewCounter()
+	registry.Register(service_def.EXPIRY_DOCS_MERGED_METRIC, expiry_docs_merged)
+	merge_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+	registry.Register(service_def.MERGE_LATENCY_METRIC, merge_latency)
+	resp_wait := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+	registry.Register(service_def.RESP_WAIT_METRIC, resp_wait)
+
+	metric_map := make(map[string]interface{})
+	metric_map[service_def.DOCS_MERGED_METRIC] = docs_merged
+	metric_map[service_def.DATA_MERGED_METRIC] = data_merged
+	metric_map[service_def.EXPIRY_DOCS_MERGED_METRIC] = expiry_docs_merged
+	metric_map[service_def.MERGE_LATENCY_METRIC] = merge_latency
+	metric_map[service_def.RESP_WAIT_METRIC] = resp_wait
+	conflictMgr_collector.component_map[conflictManager.Id()] = metric_map
+
+	conflictManager.RegisterComponentEventListener(common.DataMerged, conflictMgr_collector)
+
+	return nil
+}
+
+func (conflictMgr_collector *conflictMgrCollector) Id() string {
+	return conflictMgr_collector.id
+}
+
+func (conflictMgr_collector *conflictMgrCollector) OnEvent(event *common.Event) {
+	conflictMgr_collector.ProcessEvent(event)
+}
+
+func (conflictMgr_collector *conflictMgrCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
+	// Nothing
+	return
+}
+
+func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Event) error {
+	metric_map := conflictMgr_collector.component_map[event.Component.Id()]
+	if event.EventType == common.DataMerged {
+		event_otherInfo := event.OtherInfos.(DataMergedEventAdditional)
+		req_size := event_otherInfo.Req_size
+		commit_time := event_otherInfo.Commit_time
+		resp_wait_time := event_otherInfo.Resp_wait_time
+		metric_map[service_def.DOCS_MERGED_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.DATA_MERGED_METRIC].(metrics.Counter).Inc(int64(req_size))
+
+		expiry_set := event_otherInfo.IsExpirySet
+		if expiry_set {
+			metric_map[service_def.EXPIRY_DOCS_MERGED_METRIC].(metrics.Counter).Inc(1)
+		}
+
+		metric_map[service_def.MERGE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metric_map[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
+	}
+
+	return nil
 }
 
 //metrics collector for XMem/CapiNozzle

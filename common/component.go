@@ -9,8 +9,6 @@
 
 package common
 
-import ()
-
 //ComponentEventType is the common event type that Component can raise during its lifecycle
 //It is not required for Component to raise all those event
 type ComponentEventType int
@@ -27,6 +25,8 @@ const (
 	DataProcessed ComponentEventType = iota
 	//data sent to and acknowledged by the target system
 	DataSent ComponentEventType = iota
+	// Data merged and send to and acknowledged by source bucket
+	DataMerged ComponentEventType = iota
 	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
 	//data is unable to be successfully parsed to be filtered

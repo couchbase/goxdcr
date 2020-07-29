@@ -14,12 +14,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync/atomic"
+	"time"
+
 	mc "github.com/couchbase/gomemcached"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"sync/atomic"
-	"time"
 )
 
 const (
@@ -53,9 +54,10 @@ const (
 type NeedSendStatus int
 
 const (
-	Send               NeedSendStatus = iota
-	Not_Send_Failed_CR NeedSendStatus = iota
-	Not_Send_Other     NeedSendStatus = iota
+	Send                     NeedSendStatus = iota
+	Not_Send_Failed_CR       NeedSendStatus = iota
+	Not_Send_Need_To_Resolve NeedSendStatus = iota
+	Not_Send_Other           NeedSendStatus = iota
 )
 
 /************************************
@@ -214,7 +216,7 @@ type dataBatch struct {
 	// value of the map has two possible values:
 	// 1. true - docs failed source side conflict resolution. in this case the docs will be counted in docs_failed_cr_source stats
 	// 2. false - docs that will get rejected by target for other reasons, e.g., since target no longer owns the vbucket involved. in this case the docs will not be counted in docs_failed_cr_source stats
-	bigDoc_noRep_map  map[string]bool
+	bigDoc_noRep_map  map[string]NeedSendStatus
 	curCount          uint32
 	curSize           uint32
 	capacity_count    uint32
@@ -232,7 +234,7 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
 		getMeta_map:       make(base.McRequestMap),
-		bigDoc_noRep_map:  make(map[string]bool),
+		bigDoc_noRep_map:  make(map[string]NeedSendStatus),
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
 		logger:            logger}
@@ -296,10 +298,8 @@ func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLo
 	failedCR, ok := batch.bigDoc_noRep_map[req.UniqueKey]
 	if !ok {
 		return Send, nil
-	} else if failedCR {
-		return Not_Send_Failed_CR, nil
 	} else {
-		return Not_Send_Other, nil
+		return failedCR, nil
 	}
 }
 
@@ -317,7 +317,7 @@ func decodeSetMetaReq(wrapped_req *base.WrappedMCRequest) documentMetadata {
 	return ret
 }
 
-type BigDocNoRepMap map[string]bool
+type BigDocNoRepMap map[string]NeedSendStatus
 
 func (norepMap BigDocNoRepMap) Clone() BigDocNoRepMap {
 	var clonedMap BigDocNoRepMap = make(BigDocNoRepMap)

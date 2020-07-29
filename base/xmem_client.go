@@ -1,0 +1,311 @@
+package base
+
+import (
+	"errors"
+	"io"
+	"net"
+	"sync"
+	"time"
+
+	"github.com/couchbase/gomemcached"
+
+	mcc "github.com/couchbase/gomemcached/client"
+	memcached "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/log"
+)
+
+/************************************
+/* struct XmemClient
+*************************************/
+var BadConnectionError = errors.New("Connection is bad")
+var ConnectionClosedError = errors.New("Connection is closed")
+var FatalError = errors.New("Fatal")
+
+type XmemClient struct {
+	name      string
+	memClient memcached.ClientIface
+	//the count of continuous read\write failure on this client
+	continuous_write_failure_counter int
+	//the count of continuous successful read\write
+	success_counter int
+	//the maximum allowed continuous read\write failure on this client
+	//exceed this limit, would consider this client's health is ruined.
+	max_continuous_write_failure int
+	max_downtime                 time.Duration
+	downtime_start               time.Time
+	lock                         sync.RWMutex
+	read_timeout                 time.Duration
+	write_timeout                time.Duration
+	logger                       *log.CommonLogger
+	healthy                      bool
+	num_of_repairs               int
+	last_failure                 time.Time
+	backoff_factor               int
+}
+
+func NewXmemClient(name string, read_timeout, write_timeout time.Duration,
+	client mcc.ClientIface, max_continuous_failure int, max_downtime time.Duration, logger *log.CommonLogger) *XmemClient {
+	logger.Infof("xmem client %v is created with read_timeout=%v, write_timeout=%v, retry_limit=%v", name, read_timeout, write_timeout, max_continuous_failure)
+	return &XmemClient{name: name,
+		memClient:                        client,
+		continuous_write_failure_counter: 0,
+		success_counter:                  0,
+		logger:                           logger,
+		read_timeout:                     read_timeout,
+		write_timeout:                    write_timeout,
+		max_downtime:                     max_downtime,
+		max_continuous_write_failure:     max_continuous_failure,
+		healthy:                          true,
+		num_of_repairs:                   0,
+		lock:                             sync.RWMutex{},
+		backoff_factor:                   0,
+		downtime_start:                   time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
+	}
+}
+
+func (client *XmemClient) curWriteFailureCounter() int {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+	return client.continuous_write_failure_counter
+}
+
+func (client *XmemClient) ReportOpFailure(readOp bool) {
+	client.lock.Lock()
+	defer client.lock.Unlock()
+
+	client.success_counter = 0
+
+	if client.downtime_start.IsZero() {
+		client.downtime_start = time.Now()
+	}
+
+	if !readOp {
+		client.continuous_write_failure_counter++
+	}
+	if client.continuous_write_failure_counter > client.max_continuous_write_failure || time.Since(client.downtime_start) > client.max_downtime {
+		client.healthy = false
+	}
+}
+
+func (client *XmemClient) ReportOpSuccess() {
+	client.lock.Lock()
+	defer client.lock.Unlock()
+
+	client.downtime_start = time.Time{}
+	client.continuous_write_failure_counter = 0
+	client.success_counter++
+	if client.success_counter > client.max_continuous_write_failure && client.backoff_factor > 0 {
+		client.backoff_factor--
+		client.success_counter = client.success_counter - client.max_continuous_write_failure
+	}
+	client.healthy = true
+
+}
+
+func (client *XmemClient) isConnHealthy() bool {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+	return client.healthy
+}
+
+func (client *XmemClient) GetMemClient() mcc.ClientIface {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+	return client.memClient
+}
+
+/**
+ * Gets the raw io ReadWriteCloser from the memClient, so that XmemClient has complete control,
+ * and also sets whether or not the XmemClient will have read/write timeout as part of returning the connection
+ */
+func (client *XmemClient) GetConn(readTimeout bool, writeTimeout bool) (io.ReadWriteCloser, int, error) {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
+	if client.memClient == nil {
+		return nil, client.num_of_repairs, errors.New("memcached client is not set")
+	}
+
+	if !client.healthy {
+		return nil, client.num_of_repairs, BadConnectionError
+	}
+
+	conn := client.memClient.Hijack()
+	if readTimeout {
+		client.setReadTimeout(client.read_timeout)
+	}
+
+	if writeTimeout {
+		client.setWriteTimeout(client.write_timeout)
+	}
+	return conn, client.num_of_repairs, nil
+}
+
+func (client *XmemClient) setReadTimeout(read_timeout_duration time.Duration) {
+	conn := client.memClient.Hijack()
+	conn.(net.Conn).SetReadDeadline(time.Now().Add(read_timeout_duration))
+}
+
+func (client *XmemClient) setWriteTimeout(write_timeout_duration time.Duration) {
+	conn := client.memClient.Hijack()
+	conn.(net.Conn).SetWriteDeadline(time.Now().Add(write_timeout_duration))
+}
+
+func (client *XmemClient) RepairConn(memClient mcc.ClientIface, repair_count_at_error int, xmem_id string, finish_ch chan bool) bool {
+	client.lock.Lock()
+	defer client.lock.Unlock()
+
+	if client.num_of_repairs == repair_count_at_error {
+		if time.Since(client.last_failure) < 1*time.Minute {
+			client.backoff_factor++
+		} else {
+			client.backoff_factor = 0
+		}
+
+		client.memClient.Close()
+		client.memClient = memClient
+		client.continuous_write_failure_counter = 0
+		client.num_of_repairs++
+		client.healthy = true
+		return true
+	} else {
+		client.logger.Infof("client %v for %v has been repaired (num_of_repairs=%v, repair_count_at_error=%v), the repair request is ignored\n", client.name, xmem_id, client.num_of_repairs, repair_count_at_error)
+		return false
+	}
+}
+
+func (client *XmemClient) MarkConnUnhealthy() {
+	client.lock.Lock()
+	defer client.lock.Unlock()
+	client.healthy = false
+}
+
+func (client *XmemClient) Close() {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+	client.memClient.Close()
+}
+
+func (client *XmemClient) RepairCount() int {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
+	return client.num_of_repairs
+}
+
+func (client *XmemClient) GetBackOffFactor() int {
+	client.lock.RLock()
+	defer client.lock.RUnlock()
+
+	return client.backoff_factor
+}
+
+func (client *XmemClient) IncrementBackOffFactor() {
+	client.lock.Lock()
+	defer client.lock.Unlock()
+
+	if client.backoff_factor < XmemMaxBackoffFactor {
+		client.backoff_factor++
+	}
+}
+
+func (client *XmemClient) Name() string {
+	return client.name
+}
+func (client *XmemClient) Logger() *log.CommonLogger {
+	return client.logger
+}
+
+func (client *XmemClient) GetContinuousWriteFailureCounter() int {
+	return client.continuous_write_failure_counter
+}
+
+func IsNetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	_, ok := err.(*net.OpError)
+	return ok
+}
+
+// check if memcached response status indicates ignorable error, which requires no corrective action at all
+func IsIgnorableMCResponse(resp *gomemcached.MCResponse) bool {
+	if resp == nil {
+		return false
+	}
+
+	switch resp.Status {
+	case gomemcached.KEY_ENOENT:
+		return true
+	case gomemcached.KEY_EEXISTS:
+		return true
+	case gomemcached.SUBDOC_BAD_MULTI: // This means at least one path failed for subdoc_multi_ commands. Only ignorable for multi_lookup.
+		if resp.Opcode == SUBDOC_MULTI_LOOKUP {
+			return true
+		} else { // SUBDOC_MULTI_MUTATION
+			return false
+		}
+	case SUBDOC_SUCCESS_DELETED:
+		return true
+	case gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED: // Same as SUBDOC_BAD_MULTI but on a deleted document
+		if resp.Opcode == SUBDOC_MULTI_LOOKUP {
+			return true
+		} else { // SUBDOC_MULTI_MUTATION
+			return false
+		}
+	}
+
+	return false
+}
+
+// check if memcached response status indicates mutation locked error, which requires resending the corresponding request
+func IsMutationLockedError(resp_status gomemcached.Status) bool {
+	switch resp_status {
+	case gomemcached.LOCKED:
+		return true
+	default:
+		return false
+	}
+}
+
+// check if memcached response status indicates error of temporary nature, which requires retrying corresponding requests
+func IsTemporaryMCError(resp_status gomemcached.Status) bool {
+	switch resp_status {
+	case gomemcached.TMPFAIL:
+		fallthrough
+	case gomemcached.ENOMEM:
+		fallthrough
+	case gomemcached.EBUSY:
+		fallthrough
+	case gomemcached.NOT_INITIALIZED:
+		fallthrough
+		// this used to be remapped to and handled in the same way as TMPFAIL
+		// keep the same behavior for now
+	case gomemcached.SYNC_WRITE_IN_PROGRESS:
+		return true
+	default:
+		return false
+	}
+}
+
+// check if memcached response status indicates topology change,
+// in which case we defer pipeline restart to topology change detector
+func IsTopologyChangeMCError(resp_status gomemcached.Status) bool {
+	switch resp_status {
+	case gomemcached.NO_BUCKET:
+		fallthrough
+	case gomemcached.NOT_MY_VBUCKET:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsCollectionMappingError(resp_status gomemcached.Status) bool {
+	switch resp_status {
+	case gomemcached.UNKNOWN_COLLECTION:
+		return true
+	default:
+		return false
+	}
+}

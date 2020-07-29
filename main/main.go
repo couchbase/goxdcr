@@ -12,6 +12,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"runtime"
+	"time"
+
 	base "github.com/couchbase/goxdcr/base"
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata_svc"
@@ -19,9 +23,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"os"
-	"runtime"
-	"time"
 )
 
 var done = make(chan bool)
@@ -192,6 +193,7 @@ func main() {
 			bucketSettings_svc,
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
+			service_impl.NewResolverSvc(utils),
 			utils,
 			collectionsManifestService,
 			backfillReplService)

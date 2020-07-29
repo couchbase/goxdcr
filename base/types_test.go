@@ -1,11 +1,13 @@
 package base
 
 import (
+	"encoding/binary"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestUleb128EncoderDecoder(t *testing.T) {
@@ -241,4 +243,209 @@ func TestWrappedFlags(t *testing.T) {
 
 	wrappedUpr.Flags.SetCollectionDNE()
 	assert.True(wrappedUpr.Flags.CollectionDNE())
+}
+
+func TestConstructCustomCRXattr(t *testing.T) {
+	fmt.Println("============== Test case start: TestConstructCustomCRXattr =================")
+	defer fmt.Println("============== Test case end: TestConstructCustomCRXattr =================")
+
+	assert := assert.New(t)
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	cv, err := HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
+
+	sourceClusterId := []byte("SourceCluster")
+	//targetClusterId := []byte("TargetCluster")
+
+	body := make([]byte, 1000)
+
+	// Test 1. First change, no existing _xdcr
+	CCRMeta, err := NewCustomCRMeta(sourceClusterId, cv, nil, nil, nil, nil)
+	assert.Nil(err)
+	pos, err := CCRMeta.ConstructCustomCRXattr(body, 0)
+	assert.Nil(err)
+	assert.Equal("_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0x0b0085b25e8d1416\"}\x00", string(body[4:pos]))
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 2: New change cas > cv, expected to have updated id, cv, and pcas
+	// oldXattr = "_xdcr\x00{\"id\":\"Cluster4\",\"cv\":\"0x0b0085b25e8d1416\"}\x00"
+	CCRMeta, err = NewCustomCRMeta(sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, nil)
+	assert.Nil(err)
+	pos, err = CCRMeta.ConstructCustomCRXattr(body, 0)
+	assert.Nil(err)
+	newXattr := "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":{\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
+	assert.Equal(newXattr, string(body[4:pos]))
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 3: New change (cas=cv+1000) with existing XATTR (pc):
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	// oldXattr = "_xdcr\x00{\"id\":\"Cluster4\",\"cv\":\"0x0b0085b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
+	CCRMeta, err = NewCustomCRMeta(sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		[]byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
+	assert.Nil(err)
+	pos, err = CCRMeta.ConstructCustomCRXattr(body, 0)
+	assert.Nil(err)
+	newXattr = "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\",\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
+	assert.Contains(string(body[4:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
+	assert.Contains(string(body[4:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(body[4:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(body[4:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(body[4:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 4: New change (cas=cv+1000) with existing XATTR (mv):
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	CCRMeta, err = NewCustomCRMeta(sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		nil, []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"))
+	assert.Nil(err)
+	pos, err = CCRMeta.ConstructCustomCRXattr(body, 0)
+	assert.Nil(err)
+	assert.Contains(string(body[0:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
+	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+
+	// Test 5: New change (cas=cv+1000) with existing XATTR(pcas and mv):
+	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	CCRMeta, err = NewCustomCRMeta(sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		[]byte("{\"Cluster1\":\"FhSITdr4AAA\"}"), []byte("{\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"))
+	assert.Nil(err)
+	pos, err = CCRMeta.ConstructCustomCRXattr(body, 0)
+	assert.Nil(err)
+	assert.Contains(string(body[0:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
+	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(body[0:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
+}
+
+func TestMergeMeta(t *testing.T) {
+	fmt.Println("============== Test case start: TestMergeMeta =================")
+	defer fmt.Println("============== Test case end: TestMergeMeta =================")
+
+	sourceClusterId := []byte("SourceCluster")
+	targetClusterId := []byte("TargetCluster")
+
+	mergedMvSlice := make([]byte, 1000)
+	mergedPcasSlice := make([]byte, 1000)
+	assert := assert.New(t)
+	cv, err := HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
+	assert.Nil(err)
+
+	/*
+	 * 1. New at both source and target. Make sure we have MV but not PCAS.
+	 */
+	sourceMeta, err := NewCustomCRMeta(sourceClusterId, cv+20000, nil, nil, nil, nil)
+	assert.Nil(err)
+	targetMeta, err := NewCustomCRMeta(targetClusterId, cv+10000, nil, nil, nil, nil)
+	assert.Nil(err)
+	mvlen, pcaslen, err := sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	//assert.Equal(xmem.sourceClusterId, mergedMeta.Cvid)
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"SourceCluster\":\"FhSNXrKFTis\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"TargetCluster\":\"FhSNXrKFJxs\"")
+	assert.Equal(0, pcaslen)
+
+	/*
+	 * 2. Source and target both updated the same old document (from Cluster4)
+	 *    The two pcas should be combined with id/cv
+	 * oldXattr = "_xdcr\x00{\"id\":\"Cluster4\",\"cv\":\"0x0b0085b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
+	 */
+	sourceMeta, err = NewCustomCRMeta(sourceClusterId, cv+20000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		[]byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv+10000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
+		[]byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
+	assert.Nil(err)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"SourceCluster\":\"FhSNXrKFTis\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"TargetCluster\":\"FhSNXrKFJxs\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+
+	/*
+	 * 3. Source and target contain conflict with updates from other clusters. Both have different pcas
+	 * Source cluster contains changes coming from cluster4: "_xdcr\x00{\"id\":\"Cluster4\",\"Cv\":\"0x0b0085b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\"}}\x00"
+	 * Target cluster contains changes coming from cluster5: "_xdcr\x00{\"id\":\"Cluster5\"Cv\":\"0x0b0085b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
+	 */
+	cv, _ = HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
+	sourceMeta, err = NewCustomCRMeta(sourceClusterId, cv, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\"FhSITdr4AAA\"}"), nil)
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv, []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
+	assert.Nil(err)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster5\":\"FhSNXrKFAAs\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster3\":\"FhSITdr4ACA\"")
+
+	/*
+	 * 4. Source and target both updated. Both have pcas, one has mv
+	 */
+	cv, _ = HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
+	sourceMeta, err = NewCustomCRMeta(sourceClusterId, cv+20000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\"FhSITdr4AAA\"}"), []byte("{\"Cluster3\":\"FhSITdr4ACA\",\"Cluster2\":\"FhSITdr4ABU\"}"))
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv+10000, []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\"}"), nil)
+	assert.Nil(err)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"SourceCluster\":\"FhSNXrKFTis\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"TargetCluster\":\"FhSNXrKFJxs\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster3\":\"FhSITdr4ACA\"")
+
+	/*
+	 * 5. Source is a merged doc. Target is an update with pcas
+	 */
+	cv, _ = HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
+	c1 := Uint64ToBase64(1591046436336173056)
+	c2 := Uint64ToBase64(1591046436336173056 - 10000)
+	sourceMeta, err = NewCustomCRMeta(sourceClusterId, cv, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("{\"Cluster1\":\""+string(c1)+"\",\"Cluster3\":\"FhSITdr4ACA\"}"))
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv+10000, []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\""+string(c2)+"\",\"Cluster2\":\"FhSITdr4ABU\"}"), nil)
+	assert.Nil(err)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"TargetCluster\":\"FhSNXrKFJxs\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster5\":\"FhSNXrKFAAs\"")
+
+	/*
+	 * 6. Target is a merged doc. Source is an update with Pcas and Mv
+	 */
+	sourceMeta, err = NewCustomCRMeta(sourceClusterId, cv+10000, []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\""+string(c2)+"\",\"Cluster2\":\"FhSITdr4ABU\"}"), nil)
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("{\"Cluster1\":\""+string(c1)+"\",\"Cluster3\":\"FhSITdr4ACA\"}"))
+	assert.Nil(err)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"SourceCluster\":\"FhSNXrKFJxs\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster5\":\"FhSNXrKFAAs\"")
+
+	/*
+	 * 7. Both are merged docs.
+	 */
+	sourceMeta, err = NewCustomCRMeta(sourceClusterId, cv, []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), nil, []byte("{\"Cluster1\":\""+string(c2)+"\",\"Cluster2\":\"FhSITdr4ABU\"}"))
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("{\"Cluster1\":\""+string(c1)+"\",\"Cluster3\":\"FhSITdr4ACA\"}"))
+	assert.Nil(err)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Equal(0, pcaslen)
 }

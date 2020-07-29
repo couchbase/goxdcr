@@ -12,6 +12,11 @@ package service_impl
 import (
 	"errors"
 	"fmt"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
@@ -24,10 +29,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"reflect"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type ThroughSeqnoTrackerSvc struct {
@@ -335,6 +336,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFilteredEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataReceivedEventListener, tsTracker)
 
+	conflictMgr := pipeline.RuntimeContext().Service(base.CONFLICT_MANAGER_SVC)
+	if conflictMgr != nil {
+		conflictMgr.(*pipeline_svc.ConflictManager).RegisterComponentEventListener(common.DataMerged, tsTracker)
+	}
+
 	//register pipeline supervisor as through seqno service's error handler
 	supervisor := pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
 	if supervisor == nil {
@@ -421,6 +427,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
 		manifestId := event.OtherInfos.(parts.DataSentEventAdditional).ManifestId
+		tsTracker.addSentSeqno(vbno, seqno)
+		tsTracker.addManifestId(vbno, seqno, manifestId)
+	case common.DataMerged:
+		vbno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).VBucket
+		seqno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).Seqno
+		manifestId := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).ManifestId
 		tsTracker.addSentSeqno(vbno, seqno)
 		tsTracker.addManifestId(vbno, seqno, manifestId)
 	case common.DataFiltered:

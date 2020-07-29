@@ -5,6 +5,10 @@ package parts
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
+	"testing"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
 	base "github.com/couchbase/goxdcr/base"
@@ -16,9 +20,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	gocb "gopkg.in/couchbase/gocb.v1"
-	"net"
-	"testing"
-	"time"
 )
 
 const targetClusterName = "C2"
@@ -140,6 +141,13 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 	xmem.targetClusterId = []byte("TargetCluster")
 }
 
+func setupMocksConflictMgr(xmem *XmemNozzle) *serviceDefMocks.ConflictManagerIface {
+	conflictMgr := &serviceDefMocks.ConflictManagerIface{}
+	conflictMgr.On("ResolveConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	xmem.SetConflictManager(conflictMgr)
+	return conflictMgr
+}
 func TestPositiveXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
@@ -329,6 +337,7 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+	conflictMgr := setupMocksConflictMgr(xmem)
 
 	// Need to find the actual running targetBucketUUID
 	bucketInfo, err := realUtils.GetBucketInfo(connString, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
@@ -373,6 +382,8 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	 */
 	fmt.Println("Test 4: Both has changes (CAS > cv), source has PCAS but does not dominate. Conflict")
 	getXattrForCustomCR(4, t, "testdata/customCR/kingarthur4_pcasNoTarget_cas3.json", xmem, router, Conflict)
+	assert.True(conflictMgr.AssertNumberOfCalls(t, "ResolveConflict", 1))
+
 	/*
 	 * Test 5: Both has local changes and source pcas that dominates target change
 	 * Source: kingarthur5_pcasDominateTargetCas.json:
@@ -400,6 +411,8 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	 */
 	fmt.Println("Test 7: Target is a merged doc, source PCAS does not dominates. Conflict.")
 	getXattrForCustomCR(7, t, "testdata/customCR/kingarthur7_pcasNotDominateMv.json", xmem, router, Conflict)
+	assert.True(conflictMgr.AssertNumberOfCalls(t, "ResolveConflict", 2))
+
 	/*
 	 * Test 8: Target does not have _xdcr, Source pcas dominates target
 	 * Source: kingarthur8_pcasDominateTargetCas1
@@ -441,17 +454,12 @@ func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNo
 		assert.Equal(1, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
 	}
 	if len(getDoc_map) > 0 {
-		conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
+		setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
 		assert.Nil(err)
 		if expectedResult == Conflict {
-			assert.Equal(1, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
 			assert.Equal(0, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
-			for _, v := range conflict_map {
-				printMultiLookupResult(testId, t, v.resp.Body)
-			}
 		}
 		if expectedResult == TargetSetBack {
-			assert.Equal(0, len(conflict_map), fmt.Sprintf("Test %d failed", testId))
 			assert.Equal(1, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
 			for _, v := range setBack_map {
 				printMultiLookupResult(testId, t, v.resp.Body)
@@ -479,80 +487,4 @@ func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
 	assert.Greater(len, 0, fmt.Sprintf("Test %d failed", testId))
 	doc := body[i : i+len]
 	fmt.Printf("status=%v, Document=%s\n", status, doc)
-}
-
-func TestconstructCustomCRXattr(t *testing.T) {
-	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	defer fmt.Println("============== Test case end: TestNegNoCompressionXmemNozzle =================")
-	bucketName := "customCR"
-	utilsNotUsed, _, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
-	realUtils := utilsReal.NewUtilities()
-	xmem.utils = realUtils
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
-
-	assert := assert.New(t)
-	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	cv, err := base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
-
-	body := make([]byte, 1000)
-
-	// Test 1. First change, no existing _xdcr
-	CCRMeta, err := newCustomCRMeta(xmem.sourceClusterId, cv, nil, nil, nil, nil, 0)
-	assert.Nil(err)
-	pos, err := CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
-	assert.Nil(err)
-	assert.Equal("_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0x0b0085b25e8d1416\"}\x00", string(body[4:pos]))
-	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
-
-	// Test 2: New change cas > cv, expected to have updated id, cv, and pcas
-	oldXattr := "_xdcr\x00{\"id\":\"Cluster4\",\"cv\":\"0x0b0085b25e8d1416\"}\x00"
-	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, nil, len(oldXattr))
-	assert.Nil(err)
-	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
-	assert.Nil(err)
-	newXattr := "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":{\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
-	assert.Equal(newXattr, string(body[4:pos]))
-	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
-
-	// Test 3: New change (cas=cv+1000) with existing XATTR (pc):
-	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	oldXattr = "_xdcr\x00{\"id\":\"Cluster4\",\"cv\":\"0x0b0085b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
-	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		[]byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil, len(oldXattr))
-	assert.Nil(err)
-	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
-	assert.Nil(err)
-	newXattr = "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\",\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
-	assert.Contains(string(body[4:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
-	assert.Contains(string(body[4:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
-	assert.Contains(string(body[4:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
-	assert.Contains(string(body[4:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
-	assert.Contains(string(body[4:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
-	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
-
-	// Test 4: New change (cas=cv+1000) with existing XATTR (mv):
-	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		nil, []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), len(oldXattr))
-	assert.Nil(err)
-	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
-	assert.Contains(string(body[0:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
-	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
-	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
-	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
-	assert.Contains(string(body[0:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
-	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
-
-	// Test 5: New change (cas=cv+1000) with existing XATTR(pcas and mv):
-	// _xdcr:{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	CCRMeta, err = newCustomCRMeta(xmem.sourceClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		[]byte("{\"Cluster1\":\"FhSITdr4AAA\"}"), []byte("{\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), len(oldXattr))
-	assert.Nil(err)
-	pos, err = CCRMeta.constructCustomCRXattr(body, 0, xmem.Logger())
-	assert.Contains(string(body[0:pos]), "_xdcr\x00{\"id\":\"SourceCluster\",\"cv\":\"0xf30385b25e8d1416\",\"pc\":")
-	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
-	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
-	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
-	assert.Contains(string(body[0:pos]), "\"Cluster4\":\"FhSNXrKFAAs\"")
-	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 }

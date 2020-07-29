@@ -2,16 +2,19 @@ package parts
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/stretchr/testify/assert"
-	gocb "gopkg.in/couchbase/gocb.v1"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/stretchr/testify/assert"
+	gocb "gopkg.in/couchbase/gocb.v1"
 )
 
 /**
@@ -25,6 +28,7 @@ const sourceConnStr = "http://127.0.0.1:9000"
 const targetConnStr = "http://127.0.0.1:9001"
 const targetCluster = "C2"
 const urlCreateReplication = "http://127.0.0.1:9000/controller/createReplication"
+const urlFunctionsFmt = "http://127.0.0.1:13000/functions/v1/libraries/xdcr/functions/%v"
 
 func createBucket(connStr, bucketName string) (bucket *gocb.Bucket, err error) {
 	cluster, err := gocb.Connect(connStr)
@@ -40,14 +44,17 @@ func createBucket(connStr, bucketName string) (bucket *gocb.Bucket, err error) {
 	bucketSettings := gocb.BucketSettings{false, false, bucketName, "", 100, 0, gocb.Couchbase}
 	_ = cm.InsertBucket(&bucketSettings)
 
-	bucket, err = cluster.OpenBucket(bucketName, "")
-	for i := 0; i < 5 && err != nil; i++ {
-		time.Sleep(1 * time.Second)
+	for i := 0; i < 6; i++ {
 		bucket, err = cluster.OpenBucket(bucketName, "")
+		if err == nil {
+			fmt.Printf("Created bucket %v\n", bucketName)
+			return
+		}
+		time.Sleep(1 * time.Second)
 	}
-	fmt.Printf("Created bucket %v\n", bucketName)
 	return
 }
+
 func waitForBucketReady(t *testing.T, bucket *gocb.Bucket) {
 	var err error
 	key := "waitForBucket"
@@ -75,15 +82,17 @@ func createReplication(t *testing.T, bucketName string) {
 	data.Add("toCluster", targetCluster)
 	data.Add("toBucket", bucketName)
 	data.Add("replicationType", "continuous")
-	req, err := http.NewRequest("POST", urlCreateReplication, bytes.NewBufferString(data.Encode()))
+	data.Add("logLevel", "Debug")
+	req, err := http.NewRequest(base.MethodPost, urlCreateReplication, bytes.NewBufferString(data.Encode()))
 	assert.Nil(err)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; param=value")
+	req.Header.Set(base.ContentType, base.DefaultContentType)
 	i := 0
 	var bodyBytes []byte
 	for ; i <= 5; i++ {
 		req.SetBasicAuth(username, password)
 		resp, err := client.Do(req)
 		assert.Nil(err)
+		assert.NotNil(resp)
 		bodyBytes, err := ioutil.ReadAll(resp.Body)
 		assert.Nil(err)
 		resp.Body.Close()
@@ -101,8 +110,6 @@ func createReplication(t *testing.T, bucketName string) {
 // This routine will wait for replication and verify source/target CAS are the same
 // This routine will wait for replication and verify source/target CAS are the same
 func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
-	//var value interface{}
-
 	sourceDoc, err := source.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
 	if sourceDoc == nil {
 		fmt.Printf("source lookup failed for key")
@@ -111,14 +118,36 @@ func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
 	targetDoc, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
 
 	var i int
-	for i = 0; i < 60 && (targetDoc == nil || sourceDoc.Cas() != targetDoc.Cas()); i++ {
+	for i = 0; i < 60; i++ {
+		if targetDoc != nil {
+			if sourceDoc.Cas() == targetDoc.Cas() {
+				return nil
+			}
+		}
 		time.Sleep(1 * time.Second)
 		targetDoc, err = target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
 	}
-	if sourceDoc.Cas() != targetDoc.Cas() {
-		return fmt.Errorf("Document '%s' with cas %v has not replicated to target after %v seconds. Target cas %v\n", key, sourceDoc.Cas(), i, targetDoc.Cas())
+	if targetDoc != nil && sourceDoc.Cas() == targetDoc.Cas() {
+		return nil
+	} else {
+		return fmt.Errorf("Document '%s' with source %v has not replicated to target after %v seconds. Target  %v\n", key, sourceDoc, i, targetDoc)
 	}
-	return nil
+}
+
+// Verify that document has an XATTR with mv.
+func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucket) {
+	var value interface{}
+	var err error
+	newCas := cas
+	start := time.Now()
+	for i := 0; i < 120 && (err != nil || cas == newCas); i++ {
+		newCas, err = bucket.Get(key, value)
+		time.Sleep(1 * time.Second)
+	}
+	if newCas == cas {
+		t.Errorf("Document '%s' with cas %v has not changed in %v\n", key, cas, time.Since(start))
+		t.FailNow()
+	}
 }
 
 // Verify _xdcr.cv == CAS
@@ -148,9 +177,35 @@ func getPathValue(key string, path string, target *gocb.Bucket) (value interface
 	err = frag.Content(path, &value)
 	return value, err
 }
+func createMergeFunction(t *testing.T, bucketName string) {
+	assert := assert.New(t)
+	//codeBody := "function " + bucketName + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) " +
+	//	" {let tmp1 = JSON.parse(sourceDoc); let tmp2 = JSON.parse(targetDoc); let res = {\"key\": key, \"source\": tmp1, \"sourceCas\": sourceCas, \"sourceId\": sourceId, " +
+	//	"\"target\": tmp2, \"targetCas\": targetCas, \"targetId\": targetId}; return JSON.stringify(res)}"
+	codeBody := "function " + bucketName + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) " +
+		" {let res = {\"key\": key, \"sourceCas\": sourceCas, \"sourceId\": sourceId, " +
+		" \"targetCas\": targetCas, \"targetId\": targetId}; return JSON.stringify(res)}"
+
+	reqBody, err := json.Marshal(map[string]string{
+		"name": bucketName,
+		"code": codeBody,
+	})
+	urlFunctions := fmt.Sprintf(urlFunctionsFmt, bucketName)
+	req, err := http.NewRequest(base.MethodPost, urlFunctions, bytes.NewBuffer(reqBody))
+	assert.Nil(err)
+	req.Header.Set(base.ContentType, base.JsonContentType)
+	req.SetBasicAuth(username, password)
+	response, err := http.DefaultClient.Do(req)
+	assert.Nil(err)
+	assert.Equal(response.StatusCode, 200)
+}
 func TestCcrXattrAfterRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestCcrXattrAfterRep =================")
 	defer fmt.Println("============== Test case end: TestCcrXattrAfterRep =================")
+	if os.Getenv("CUSTOM_CR") == "" {
+		fmt.Println("Skipping test: $CUSTOM_CR is not set")
+		return
+	}
 	bucketName := "TestCcrXattrAfterRep"
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -165,17 +220,19 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	}
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
+	waitForBucketReady(t, targetBucket)
 	createReplication(t, bucketName)
 
 	/*
 	 * Test 1: New doc at source. Expect to format _xdcr at target with cv and id.
 	 */
-	key := time.Now().String()
+	key := time.Now().Format(time.RFC3339)
 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
-	sourceBucket.Upsert(key,
+	_, err = sourceBucket.Upsert(key,
 		User{Id: "kingarthur",
 			Email:     "kingarthur@couchbase.com",
 			Interests: []string{"Holy Grail", "African Swallows"}}, expire)
+	assert.Nil(err)
 	err = waitForReplication(key, sourceBucket, targetBucket)
 	assert.Nil(err)
 	err = verifyCv(key, targetBucket)
@@ -265,12 +322,15 @@ func TestCcrXattrAfterRep(t *testing.T) {
 func TestCustomCRDeletedDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
+	if os.Getenv("CUSTOM_CR") == "" {
+		fmt.Println("Skipping test: $CUSTOM_CR is not set")
+		return
+	}
 	bucketName := "TestCustomCRDeletedDocs"
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
 	if err != nil {
 		fmt.Printf("TestCustomCRDeletedDocs skipped because source cluster is not ready. Error: %v\n", err)
-		return
 	}
 	targetBucket, err := createBucket(targetConnStr, bucketName)
 	if err != nil {
@@ -281,6 +341,7 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
 	createReplication(t, bucketName)
+
 	key := time.Now().Format(time.RFC3339)
 	var expire uint32 = 24 * 60 * 60
 	srcInsCas, err := sourceBucket.Upsert(key,
@@ -308,6 +369,10 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 func TestCustomCRBinaryDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRBinaryDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRBinaryDocs =================")
+	if os.Getenv("CUSTOM_CR") == "" {
+		fmt.Println("Skipping test: $CUSTOM_CR is not set")
+		return
+	}
 	bucketName := "TestCustomCRBinaryDocs"
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -358,3 +423,69 @@ func TestCustomCRBinaryDocs(t *testing.T) {
 	err = waitForReplication(key, sourceBucket, targetBucket)
 	assert.Nil(err)
 }
+
+func TestCcrXattrAfterMerge(t *testing.T) {
+	fmt.Println("============== Test case start: TestCcrXattrAfterMerge =================")
+	defer fmt.Println("============== Test case end: TestCcrXattrAfterMerge =================")
+	if os.Getenv("CUSTOM_CR") == "" {
+		fmt.Println("Skipping test: $CUSTOM_CR is not set")
+		return
+	}
+	bucketName := "TestCcrXattrAfterMerge"
+	assert := assert.New(t)
+	sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCcrXattrAfterRep skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCcrXattrAfterRep skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	waitForBucketReady(t, targetBucket)
+	createMergeFunction(t, bucketName)
+	createReplication(t, bucketName)
+
+	// Create documents at target and then at source to get conflicts
+	key := time.Now().Format(time.RFC3339)
+	var expire uint32 = 60 * 60 * 24 // expires in 1 day
+	numDoc := 100
+	for i := 0; i < numDoc; i++ {
+		_, err = targetBucket.Upsert(fmt.Sprintf("%v_%v", key, i),
+			User{Id: "kingarthur",
+				Email:     "kingarthur@couchbase.com",
+				Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
+		assert.Nil(err)
+	}
+	fmt.Printf("Created %v target documents\n", numDoc)
+	cas := make([]gocb.Cas, numDoc)
+	for i := 0; i < numDoc; i++ {
+		cas[i], err = sourceBucket.Upsert(fmt.Sprintf("%v_%v", key, i),
+			User{Id: "kingarthur",
+				Email:     "kingarthur@couchbase.com",
+				Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
+		assert.Nil(err)
+	}
+	fmt.Printf("Created %v source documents\n", numDoc)
+	fmt.Println("Wait for merge to finish")
+	lastKey := fmt.Sprintf("%v_%v", key, numDoc-1)
+	waitForCasChange(t, lastKey, cas[numDoc-1], sourceBucket)
+	fmt.Printf("Verifying merge and replication of merged doc for %v documents\n", numDoc)
+	for i := 0; i < numDoc; i++ {
+		key_i := fmt.Sprintf("%v_%v", key, i)
+		_, err = sourceBucket.LookupIn(key_i).GetEx("_xdcr.mv", gocb.SubdocFlagXattr).Execute()
+		assert.Nil(err, "_xdcr.mv lookup failed for key %v", key_i)
+		err = verifyCv(key_i, sourceBucket)
+		assert.Nil(err)
+
+		err = waitForReplication(key_i, sourceBucket, targetBucket)
+		assert.Nil(err)
+		err = verifyCv(key_i, targetBucket)
+		assert.Nil(err)
+	}
+}
+
+// TODO: Error test, create a function with typo, like "function bucketName (a, b) return b}" and make sure we have a way to recover

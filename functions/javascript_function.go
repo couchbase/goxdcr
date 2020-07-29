@@ -13,11 +13,13 @@ package functions
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
+
 	"github.com/couchbase/eventing-ee/js-evaluator/defs"
 	"github.com/couchbase/eventing-ee/js-evaluator/impl"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"net/http"
 )
 
 var logger *log.CommonLogger = log.NewLogger("Functions", log.DefaultLoggerContext)
@@ -62,8 +64,7 @@ func Execute(libraryName string, functionName string, params []interface{}) (int
 	options := map[defs.Option]interface{}{defs.Timeout: 1000000 /* time in nanosecond for function to run */}
 	res, err := evaluator.Evaluate(libraryName, functionName, options, params)
 	if err.Err != nil {
-		logger.Errorf("%v %v", err.Err, err.Details)
-		return nil, err.Err
+		return nil, fmt.Errorf("Javascript Evaluate() returned error: %v, error details: %v", err.Err, err.Details)
 	} else {
 		return res, nil
 	}
