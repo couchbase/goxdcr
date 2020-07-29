@@ -16,16 +16,17 @@ var ErrQueueMaxed error = errors.New("The requested action has been persisted in
 var SerializerStoppedErr error = errors.New("Pipeline Manager is shutting down. The requested action is unable to be processed.")
 
 const (
-	PipelineGetOrCreate      PipelineMgtOpType = iota
-	PipelineInit             PipelineMgtOpType = iota
-	PipelineUpdate           PipelineMgtOpType = iota
-	PipelineUpdateWStoppedCb PipelineMgtOpType = iota
-	PipelineDeletion         PipelineMgtOpType = iota
-	PipelineReinitStream     PipelineMgtOpType = iota
-	PipelineAutoPause        PipelineMgtOpType = iota
-	BackfillPipelineStart    PipelineMgtOpType = iota
-	BackfillPipelineStop     PipelineMgtOpType = iota
-	BackfillPipelineClean    PipelineMgtOpType = iota
+	PipelineGetOrCreate            PipelineMgtOpType = iota
+	PipelineInit                   PipelineMgtOpType = iota
+	PipelineUpdate                 PipelineMgtOpType = iota
+	PipelineUpdateWStoppedCb       PipelineMgtOpType = iota
+	PipelineDeletion               PipelineMgtOpType = iota
+	PipelineReinitStream           PipelineMgtOpType = iota
+	PipelineAutoPause              PipelineMgtOpType = iota
+	BackfillPipelineStart          PipelineMgtOpType = iota
+	BackfillPipelineStop           PipelineMgtOpType = iota
+	BackfillPipelineStopWStoppedCb PipelineMgtOpType = iota
+	BackfillPipelineClean          PipelineMgtOpType = iota
 )
 
 func (p PipelineMgtOpType) String() string {
@@ -67,6 +68,7 @@ type PipelineOpSerializerIface interface {
 	// Async Backfill APIs
 	StartBackfill(topic string) error
 	StopBackfill(topic string) error
+	StopBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, cb2 base.StoppedPipelineErrCallback) error
 	CleanBackfill(topic string) error
 
 	// Synchronous User APIs - call and get data from a channel
@@ -209,6 +211,20 @@ func (serializer *PipelineOpSerializer) StopBackfill(topic string) error {
 	var stopBackfillJob Job
 	stopBackfillJob.jobType = BackfillPipelineStop
 	stopBackfillJob.pipelineTopic = topic
+
+	return serializer.distributeJob(stopBackfillJob)
+}
+
+func (serializer *PipelineOpSerializer) StopBackfillWithCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	if serializer.isStopped() {
+		return SerializerStoppedErr
+	}
+
+	var stopBackfillJob Job
+	stopBackfillJob.jobType = BackfillPipelineStopWStoppedCb
+	stopBackfillJob.pipelineTopic = topic
+	stopBackfillJob.callbackForWhenPipelineIsStopped = cb
+	stopBackfillJob.errorCbForFailedStoppedOp = errCb
 
 	return serializer.distributeJob(stopBackfillJob)
 }
@@ -382,6 +398,11 @@ forloop:
 				err := serializer.pipelineMgr.StopBackfill(job.pipelineTopic)
 				if err != nil {
 					serializer.logger.Warnf("Error stopping backfill pipeline %v. err=%v", job.pipelineTopic, err)
+				}
+			case BackfillPipelineStopWStoppedCb:
+				err := serializer.pipelineMgr.StopBackfillWithStoppedCb(job.pipelineTopic, job.callbackForWhenPipelineIsStopped, job.errorCbForFailedStoppedOp)
+				if err != nil {
+					serializer.logger.Warnf("Error stopping backfill pipeline with callback %v. err=%v", job.pipelineTopic, err)
 				}
 			case BackfillPipelineClean:
 				err := serializer.pipelineMgr.CleanupBackfillPipeline(job.pipelineTopic)

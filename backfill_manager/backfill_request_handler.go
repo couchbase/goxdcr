@@ -204,7 +204,7 @@ func (b *BackfillRequestHandler) run() {
 				err := b.handleBackfillRequestInternal(reqAndResp)
 				b.handlePersist(reqAndResp, err, requestPersistFunc)
 			case reflect.TypeOf(metadata.CollectionNamespaceMappingsDiffPair{}):
-				err := b.handleBackfillRequestExplicitDiff(reqAndResp)
+				err := b.handleBackfillRequestDiffPair(reqAndResp)
 				b.handlePersist(reqAndResp, err, requestPersistFunc)
 			case nil:
 				// This is when stop() is called and the channel is closed
@@ -702,7 +702,7 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 // When explicit mapping is edited on the main replication, any backfills that are affected needs to be updated
 // This means the backfill spec needs to be updated with newly added backfills from 0 to the "latest"
 // and any removed mappings need to be removed from the explicit backfills
-func (b *BackfillRequestHandler) handleBackfillRequestExplicitDiff(resp ReqAndResp) error {
+func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) error {
 	pair := resp.Request.(metadata.CollectionNamespaceMappingsDiffPair)
 
 	if len(pair.Removed) > 0 && b.cachedBackfillSpec != nil {

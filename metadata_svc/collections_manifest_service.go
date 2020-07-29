@@ -77,7 +77,6 @@ func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc
 		xdcrTopologySvc:        xdcrTopologySvc,
 		metakvSvc:              metakvSvc,
 	}
-	svc.SetMetadataChangeHandlerCallback(checkpointsSvc.CollectionsManifestChangeCb)
 	return svc, svc.start()
 }
 

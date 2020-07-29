@@ -356,6 +356,33 @@ func (v *VBTasksMapType) RemoveNamespaceMappings(removed CollectionNamespaceMapp
 	return
 }
 
+func (v *VBTasksMapType) GetTopTasksOnly() VBTasksMapType {
+	retMap := make(VBTasksMapType)
+	if v == nil || len(*v) == 0 {
+		return retMap
+	}
+
+	for vb, tasks := range *v {
+		var subTasksList BackfillTasks
+		if tasks != nil && len(*tasks) > 0 {
+			subTask := (*tasks)[0].Clone()
+			subTasksList = append(subTasksList, &subTask)
+		}
+		retMap[vb] = &subTasksList
+	}
+	return retMap
+}
+
+func (v VBTasksMapType) DebugString() string {
+	var buffer bytes.Buffer
+	for i := uint16(0); i < base.NumberOfVbs; i++ {
+		if tasks, exists := v[i]; exists {
+			buffer.WriteString(fmt.Sprintf("VB %v : %v", i, tasks.PrettyPrint()))
+		}
+	}
+	return buffer.String()
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks []*BackfillTask
 
@@ -410,10 +437,10 @@ func (b BackfillTasks) PrettyPrint() string {
 	}
 
 	var buffer bytes.Buffer
-	buffer.WriteString(fmt.Sprintf("BackfillTasks composed of %v tasks:\n", len(b)))
+	buffer.WriteString(fmt.Sprintf("%v Backfill tasks: ", len(b)))
 	for _, task := range b {
 		buffer.WriteString(task.String())
-		buffer.WriteString("\n")
+		buffer.WriteString("|")
 	}
 
 	return buffer.String()
@@ -616,18 +643,59 @@ func (b *BackfillTask) AddCollectionNamespaceMapping(nsMapping CollectionNamespa
 	b.RequestedCollectionsShas = append(b.RequestedCollectionsShas, incomingShaStr)
 }
 
-func (b *BackfillTask) RemoveCollectionNamespaceMapping(nsMapping CollectionNamespaceMapping) (found bool) {
+func (b *BackfillTask) RemoveCollectionNamespaceMapping(nsMapping CollectionNamespaceMapping) (modified bool) {
 	var i int
 	var oneMapping CollectionNamespaceMapping
+
+	// There are 3 cases of removal
+	// 1. nsMapping contains the same exact mapping as the one in backfillTask
+	// 2. nsMapping is a subset of the one in backfillTask
+	// 3. nsMapping is a superset of the one in backfillTask
+
+	// First, take care of case 1 - because it requires changing b.requestedCollections_
 	for i, oneMapping = range b.requestedCollections_ {
 		if oneMapping.IsSame(nsMapping) {
-			found = true
+			modified = true
 			break
 		}
 	}
 
-	if found {
+	if modified {
 		b.requestedCollections_ = append(b.requestedCollections_[:i], b.requestedCollections_[i+1:]...)
+	}
+
+	// Then look for case 3 - because it also requires modification
+	var foundCase3Match = true
+	for foundCase3Match {
+		foundCase3Match = false
+		for i, oneMapping = range b.requestedCollections_ {
+			if oneMapping.IsSubset(nsMapping) {
+				modified = true
+				foundCase3Match = true
+				break
+			}
+		}
+		if foundCase3Match {
+			b.requestedCollections_ = append(b.requestedCollections_[:i], b.requestedCollections_[i+1:]...)
+		}
+	}
+
+	// Finally, look for case 2, which does not require slice modification
+	toBeModifiedMap := make(map[int]*CollectionNamespaceMapping)
+	for i, oneMapping = range b.requestedCollections_ {
+		if nsMapping.IsSubset(oneMapping) {
+			cleanedUpMapping := oneMapping.Delete(nsMapping)
+			toBeModifiedMap[i] = &cleanedUpMapping
+		}
+	}
+	if len(toBeModifiedMap) > 0 {
+		modified = true
+		for i, cleanedUpMapping := range toBeModifiedMap {
+			b.requestedCollections_[i] = *cleanedUpMapping
+		}
+	}
+
+	if modified {
 		b.RequestedCollectionsShas = generateShas(b.requestedCollections_)
 	}
 	return

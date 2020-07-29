@@ -774,3 +774,29 @@ func TestExplicitMapping(t *testing.T) {
 	_, _, exists := explicitMap.Get(checkNamespace)
 	assert.False(exists)
 }
+
+func TestListIsSubset(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestListIsSubset =================")
+	defer fmt.Println("============== Test case end: TestListIsSubset =================")
+
+	namespace1 := &base.CollectionNamespace{
+		ScopeName:      "S1",
+		CollectionName: "Col1",
+	}
+
+	namespace2 := &base.CollectionNamespace{
+		ScopeName:      "S2",
+		CollectionName: "Col2",
+	}
+
+	var list1 CollectionNamespaceList
+	var list2 CollectionNamespaceList
+	list1 = append(list1, namespace1)
+	list1 = append(list1, namespace2)
+	list2 = append(list2, namespace1)
+
+	assert.True(list2.IsSubset(list1))
+	assert.False(list1.IsSubset(list2))
+	assert.False(list1.IsSame(list2))
+}

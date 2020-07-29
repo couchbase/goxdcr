@@ -182,8 +182,13 @@ func (b *BackfillMgr) Start() error {
 
 	b.pipelineSvc.backfillMgr = b
 
+	// TODO - once consistent metakv is in, these should all be moved into a metadata_change_monitor
 	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.collectionsManifestChangeCb)
 	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.backfillReplSpecChangeHandlerCallback)
+	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.checkpointsSvc.BackfillReplicationSpecChangeCallback)
+	// CheckpointSvc performs checkpoint clean up when manifests changes, so this should be at the end
+	// once all pipelines have restarted and stabilized
+	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.checkpointsSvc.CollectionsManifestChangeCb)
 
 	err := b.initCache()
 	if err != nil {
@@ -391,11 +396,51 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			return err
 		}
 	} else {
-		// If any replication spec changes occurred, and the backfill spec's pointer has changed
-		// then the main replication pipeline will restart. When main pipeline restarts, the backfill pipeline
-		// will also restart alongside with it, and backfill pipelines will restart with the new settings
+		if oldSpec.SameAs(newSpec) {
+			// This means only the ptr to parent replicationSpec changed
+			// If any replication spec changes occurred, and the backfill spec's pointer has changed
+			// then the main replication pipeline will restart. When main pipeline restarts, the backfill pipeline
+			// will also restart alongside with it, and backfill pipelines will restart with the new settings
+		} else {
+			// If the top task (aka the one that's supposed to be running) are different because the mappingNamespaces
+			// has changed, and the pipeline is active, then restart the backfill pipeline
+			// This occurs if:
+			// 1. Explicit mapping changed and some backfill tasks mappings are no longer required
+			// 2. Both Implicit and Explicit mapping: if source collections that were part of the backfill tasks have
+			//    been deleted, then the top tasks' mappings will be modified
+			oldTopTasks := oldSpec.VBTasksMap.GetTopTasksOnly()
+			newTopTasks := newSpec.VBTasksMap.GetTopTasksOnly()
+			oldNamespaceMappings := oldTopTasks.GetAllCollectionNamespaceMappings()
+			newNamespaceMappings := newTopTasks.GetAllCollectionNamespaceMappings()
+			if !oldNamespaceMappings.SameAs(newNamespaceMappings) && newSpec.ReplicationSpec().Settings.Active {
+				removedScopesMap := b.populateRemovedScopesMap(newNamespaceMappings, oldNamespaceMappings)
+				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(base.CompileBackfillPipelineSpecId(newSpec.Id), newSpec.InternalId, removedScopesMap)
+				err := b.pipelineMgr.HaltBackfillWithCb(changedSpecId, cb, errCb)
+				if err != nil {
+					b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - backfill pipeline may be executing out of date backfills", changedSpecId, err)
+					return err
+				}
+				err = b.pipelineMgr.RequestBackfill(changedSpecId)
+				if err != nil {
+					b.logger.Errorf("Unable to request backfill pipeline to start for %v : %v - may require manual restart of pipeline", changedSpecId, err)
+					return err
+				}
+			}
+		}
+
 	}
 	return nil
+}
+
+func (b *BackfillMgr) populateRemovedScopesMap(newNamespaceMappings metadata.ShaToCollectionNamespaceMap, oldNamespaceMappings metadata.ShaToCollectionNamespaceMap) metadata.ScopesMap {
+	removedScopesMap := make(metadata.ScopesMap)
+	_, removedShaMappings := newNamespaceMappings.Diff(oldNamespaceMappings)
+	for _, collectionNsMapping := range removedShaMappings {
+		for src, _ := range *collectionNsMapping {
+			removedScopesMap.AddNamespace(src.ScopeName, src.CollectionName)
+		}
+	}
+	return removedScopesMap
 }
 
 func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
@@ -482,6 +527,22 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 			}
 			added, removed := newMapping.Diff(oldMapping)
 			err = b.handleExplicitMapChangeBackfillReq(specId, added, removed)
+			if err != nil {
+				return err
+			}
+
+			// If pipeline was active during this callback's lifetime, then it means the ckpts created by the pipeline has outdated mappings. clean those up
+			if oldSettings.Active {
+				removedScopesMap := make(metadata.ScopesMap)
+				for src, _ := range removed {
+					removedScopesMap.AddNamespace(src.ScopeName, src.CollectionName)
+				}
+				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(specId, internalSpecId, removedScopesMap)
+				err = cb()
+				if err != nil {
+					errCb(err)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -743,66 +804,107 @@ func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, n
 	modes := spec.Settings.GetCollectionModes()
 
 	var backfillReq interface{}
+	var skipRaiseBackfillReq bool
 	if modes.IsExplicitMapping() {
 		if newTargetManifest == nil {
 			b.logger.Errorf("%v Unable to do explicit mapping if target manifest is nil", spec.Id)
 			return
 		}
-		if oldSourceManifest != nil && oldTargetManifest != nil && newSourceManifest != nil && newTargetManifest != nil {
-			// Both changed
-			diffPair, err := b.compileExplicitBackfillReq(spec, modes, oldSourceManifest, oldTargetManifest, newSourceManifest, newTargetManifest)
-			if err != nil {
-				return
-			}
-			backfillReq = diffPair
-		} else if oldTargetManifest != nil && newTargetManifest != nil {
-			// Only target changed
-			sourceManifest := b.getLatestSourceManifestClone(replId)
-			if sourceManifest == nil {
-				return
-			}
-			diffPair, err := b.compileExplicitBackfillReq(spec, modes, sourceManifest, oldTargetManifest, sourceManifest, newTargetManifest)
-			if err != nil {
-				return
-			}
-			backfillReq = diffPair
-		} else if newTargetManifest != nil {
-			// potentially brand new target manifest change - backfill everything
-			sourceManifest := b.getLatestSourceManifestClone(replId)
-			if sourceManifest == nil {
-				return
-			}
-			manifestsPair := metadata.CollectionsManifestPair{
-				Source: sourceManifest,
-				Target: newTargetManifest,
-			}
-			explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules())
-			if err != nil {
-				panic("FIME")
-			}
-			diffPair := metadata.CollectionNamespaceMappingsDiffPair{
-				Added:   explicitMapping,
-				Removed: nil,
-			}
-			backfillReq = diffPair
-		} else {
-			// Invalid function call
-			panic("Invalid functionc call")
-		}
+		backfillReq, skipRaiseBackfillReq = b.populateBackfillReqForExplicitMapping(replId, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest, spec, modes, backfillReq)
 	} else {
-		backfillMapping, err := newTargetManifest.ImplicitGetBackfillCollections(oldTargetManifest, newSourceManifest)
-		if err != nil {
-			b.logger.Errorf("%v handleSrcAndTgtChanges error: %v", spec.Id, err)
-			return
-		}
-		if len(backfillMapping) == 0 {
-			// If no backfill is needed such as when collections get del' on the target, don't raise backfill request
-			return
-		}
-		backfillReq = backfillMapping
+		backfillReq, skipRaiseBackfillReq = b.populateBackfillReqForImplicitMapping(newTargetManifest, oldTargetManifest, newSourceManifest, spec)
+	}
+	if !skipRaiseBackfillReq {
+		b.raiseBackfillReq(replId, backfillReq)
 	}
 
-	b.raiseBackfillReq(replId, backfillReq)
+	if !modes.IsExplicitMapping() {
+		// For implicit mapping, see if there are things that need to be cleaned up
+		b.cleanupInvalidImplicitBackfillMappings(replId, oldSourceManifest, newSourceManifest)
+	}
+}
+
+func (b *BackfillMgr) cleanupInvalidImplicitBackfillMappings(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest) bool {
+	_, _, removed, err := newSourceManifest.Diff(oldSourceManifest)
+	if err != nil {
+		b.logger.Errorf("Unable to perform cleanup due to err %v", err)
+		return true
+	}
+	if len(removed) > 0 {
+		cleanupNamespace := metadata.CollectionNamespaceMapping{}
+		for scopeName, scopeDetail := range removed {
+			for collectionName, _ := range scopeDetail.Collections {
+				implicitMappingNamespace := &base.CollectionNamespace{
+					ScopeName:      scopeName,
+					CollectionName: collectionName,
+				}
+				cleanupNamespace.AddSingleMapping(implicitMappingNamespace, implicitMappingNamespace)
+			}
+		}
+		cleanupPair := metadata.CollectionNamespaceMappingsDiffPair{
+			Removed: cleanupNamespace,
+		}
+		b.raiseBackfillReq(replId, cleanupPair)
+	}
+	return false
+}
+
+func (b *BackfillMgr) populateBackfillReqForImplicitMapping(newTargetManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, spec *metadata.ReplicationSpecification) (metadata.CollectionNamespaceMapping, bool) {
+	backfillMapping, err := newTargetManifest.ImplicitGetBackfillCollections(oldTargetManifest, newSourceManifest)
+	if err != nil {
+		b.logger.Errorf("%v handleSrcAndTgtChanges error: %v", spec.Id, err)
+		return nil, true
+	}
+	if len(backfillMapping) == 0 {
+		// If no backfill is needed such as when collections get del' on the target, don't raise backfill request
+		return nil, true
+	}
+	return backfillMapping, false
+}
+
+func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newTargetManifest *metadata.CollectionsManifest, spec *metadata.ReplicationSpecification, modes base.CollectionsMgtType, backfillReq interface{}) (interface{}, bool) {
+	if oldSourceManifest != nil && oldTargetManifest != nil && newSourceManifest != nil && newTargetManifest != nil {
+		// Both changed
+		diffPair, err := b.compileExplicitBackfillReq(spec, modes, oldSourceManifest, oldTargetManifest, newSourceManifest, newTargetManifest)
+		if err != nil {
+			return nil, true
+		}
+		backfillReq = diffPair
+	} else if oldTargetManifest != nil && newTargetManifest != nil {
+		// Only target changed
+		sourceManifest := b.getLatestSourceManifestClone(replId)
+		if sourceManifest == nil {
+			return nil, true
+		}
+		diffPair, err := b.compileExplicitBackfillReq(spec, modes, sourceManifest, oldTargetManifest, sourceManifest, newTargetManifest)
+		if err != nil {
+			return nil, true
+		}
+		backfillReq = diffPair
+	} else if newTargetManifest != nil {
+		// potentially brand new target manifest change - backfill everything
+		sourceManifest := b.getLatestSourceManifestClone(replId)
+		if sourceManifest == nil {
+			return nil, true
+		}
+		manifestsPair := metadata.CollectionsManifestPair{
+			Source: sourceManifest,
+			Target: newTargetManifest,
+		}
+		explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules())
+		if err != nil {
+			panic("FIME")
+		}
+		diffPair := metadata.CollectionNamespaceMappingsDiffPair{
+			Added:   explicitMapping,
+			Removed: nil,
+		}
+		backfillReq = diffPair
+	} else {
+		// Invalid function call
+		panic("Invalid functionc call")
+	}
+	return backfillReq, false
 }
 
 func (b *BackfillMgr) getLatestSourceManifestClone(replId string) *metadata.CollectionsManifest {
@@ -860,6 +962,7 @@ func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}) {
 	err := handler.HandleBackfillRequest(backfillReq)
 	if err != nil {
 		b.logger.Errorf("%v Backfill Handler returned err %v while raising backfill request", replId, err)
+		// TODO MB-40692 - fix this
 		b.logger.Fatalf(base.GetBackfillFatalDataLossError(replId).Error())
 		b.pipelineMgr.ReInitStreams(replId)
 	}

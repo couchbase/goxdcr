@@ -605,6 +605,21 @@ func (s ScopesMap) GetCollectionByNames(scopeName, collectionName string) (col C
 	return
 }
 
+// Note - this is for temporary internal use only, no ID used
+func (s ScopesMap) AddNamespace(scopeName, collectionName string) {
+	scope, found := s[scopeName]
+	if !found {
+		scope = Scope{Name: scopeName, Collections: make(CollectionsMap)}
+		s[scopeName] = scope
+	}
+	_, found = scope.Collections[collectionName]
+	if !found {
+		scope.Collections[collectionName] = Collection{
+			Name: collectionName,
+		}
+	}
+}
+
 type Scope struct {
 	Uid         uint32 `json:"Uid"`
 	Name        string `json:"Name"`
@@ -932,6 +947,35 @@ func (c CollectionNamespaceList) IsSame(other CollectionNamespaceList) bool {
 	return true
 }
 
+// If other contains everything in C
+func (c CollectionNamespaceList) IsSubset(other CollectionNamespaceList) bool {
+	if len(c) > len(other) {
+		return false
+	}
+
+	cList := SortCollectionsNamespaceList(c)
+	otherList := SortCollectionsNamespaceList(other)
+
+	i := 0 // for other
+	j := 0 // for c
+	for i = 0; i < len(cList); i++ {
+		var oneElemFound bool
+		for j < len(otherList) {
+			if c[i].IsSameAs(*(other[j])) {
+				oneElemFound = true
+			}
+			j++
+			if oneElemFound {
+				break
+			}
+		}
+		if !oneElemFound {
+			return false
+		}
+	}
+	return true
+}
+
 func (c CollectionNamespaceList) Clone() (other CollectionNamespaceList) {
 	for _, j := range c {
 		ns := &base.CollectionNamespace{}
@@ -1229,6 +1273,11 @@ func (c *CollectionNamespaceMapping) GetSubsetBasedOnSpecifiedTargets(targetScop
 }
 
 func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
+	return c.IsSubset(other) && other.IsSubset(c)
+}
+
+// This means if other contains everything in c
+func (c CollectionNamespaceMapping) IsSubset(other CollectionNamespaceMapping) bool {
 	for src, tgtList := range c {
 		_, otherTgtList, exists := other.Get(src)
 		if !exists {
@@ -1533,6 +1582,11 @@ func (s ShaToCollectionNamespaceMap) Diff(older ShaToCollectionNamespaceMap) (ad
 	}
 
 	return
+}
+
+func (s ShaToCollectionNamespaceMap) SameAs(other ShaToCollectionNamespaceMap) bool {
+	added, removed := s.Diff(other)
+	return len(added) == 0 && len(removed) == 0
 }
 
 type CompressedColNamespaceMapping struct {

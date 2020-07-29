@@ -268,9 +268,26 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 	fmt.Println("============== Test case start: TestMergeTasksIntoSpec =================")
 	assert := assert.New(t)
 
-	namespaceMapping := make(CollectionNamespaceMapping)
 	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	namespace2 := &base.CollectionNamespace{"scope2", "collection2"}
+	namespace3 := &base.CollectionNamespace{"scope3", "collection3"}
+
+	namespaceMapping := make(CollectionNamespaceMapping)
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
+	namespaceMapping.AddSingleMapping(namespace2, namespace2)
+
+	defaultNamespaceMapping := make(CollectionNamespaceMapping)
+	defaultNamespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
+
+	namespace2Mapping := make(CollectionNamespaceMapping)
+	namespace2Mapping.AddSingleMapping(namespace2, namespace2)
+
+	assert.True(namespace2Mapping.IsSubset(namespaceMapping))
+	assert.False(namespace2Mapping.IsSame(namespaceMapping))
+	assert.True(namespace2Mapping.IsSame(namespace2Mapping))
+
+	superSetMapping := namespaceMapping.Clone()
+	superSetMapping.AddSingleMapping(namespace3, namespace3)
 
 	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
 	ts0 := &BackfillVBTimestamps{
@@ -336,6 +353,10 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 	oldShaMap := testSpec.VBTasksMap.GetAllCollectionNamespaceMappings()
 	assert.Equal(1, len(oldShaMap))
 
+	// Make backups for tests
+	testSpec2 := testSpec.Clone()
+	testSpec3 := testSpec.Clone()
+
 	assert.True(testSpec.VBTasksMap.RemoveNamespaceMappings(namespaceMapping))
 	// Since all the VBTasksMap only contain the namespaceMapping, removing it means the whole
 	// backfill spec should be nil
@@ -344,6 +365,20 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 	assert.Equal(0, len(newShaMap))
 	assert.Equal(0, len(testSpec.VBTasksMap))
 
-	//namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
+	// Test remove a subset of the namespace mapping
+	assert.True(testSpec2.VBTasksMap.RemoveNamespaceMappings(defaultNamespaceMapping))
+	checkMapping := testSpec2.VBTasksMap[0].GetAllCollectionNamespaceMappings()
+	assert.Equal(1, len(checkMapping))
+	for _, v := range checkMapping {
+		assert.True(v.IsSame(namespace2Mapping))
+	}
+
+	// Test remove a superset
+	assert.True(testSpec3.VBTasksMap.RemoveNamespaceMappings(superSetMapping))
+	assert.Nil(testSpec3.VBTasksMap[0])
+	newShaMap = testSpec3.VBTasksMap.GetAllCollectionNamespaceMappings()
+	assert.Equal(0, len(newShaMap))
+	assert.Equal(0, len(testSpec3.VBTasksMap))
+
 	fmt.Println("============== Test case end: TestMergeTasksIntoSpec =================")
 }

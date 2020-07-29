@@ -67,6 +67,9 @@ type CheckpointsService struct {
 
 	specsMtx    sync.RWMutex
 	cachedSpecs map[string]*metadata.ReplicationSpecification
+
+	backfillSpecsMtx    sync.RWMutex
+	cachedBackfillSpecs map[string]*metadata.BackfillReplicationSpec
 }
 
 func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *CheckpointsService {
@@ -75,6 +78,7 @@ func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log
 		logger:               logger,
 		ShaRefCounterService: NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger),
 		cachedSpecs:          make(map[string]*metadata.ReplicationSpecification),
+		cachedBackfillSpecs:  make(map[string]*metadata.BackfillReplicationSpec),
 	}
 }
 
@@ -493,6 +497,28 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(id string, old
 	return nil
 }
 
+func (ckpt_svc *CheckpointsService) BackfillReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}) error {
+	oldSpec, ok := oldVal.(*metadata.BackfillReplicationSpec)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+	newSpec, ok := newVal.(*metadata.BackfillReplicationSpec)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	if oldSpec != nil && newSpec == nil {
+		ckpt_svc.backfillSpecsMtx.Lock()
+		delete(ckpt_svc.cachedBackfillSpecs, oldSpec.Id)
+		ckpt_svc.backfillSpecsMtx.Unlock()
+	} else {
+		ckpt_svc.backfillSpecsMtx.Lock()
+		ckpt_svc.cachedBackfillSpecs[newSpec.Id] = newSpec
+		ckpt_svc.backfillSpecsMtx.Unlock()
+	}
+	return nil
+}
+
 // If source namespaces are removed, then any mentioning of the source namespaces can be removed
 // from the checkpoints
 func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId string, internalId string, sources metadata.ScopesMap) (mappingChanged bool, err error) {
@@ -563,6 +589,17 @@ func (ckpt_svc *CheckpointsService) getReplicationSpec(id string) (*metadata.Rep
 	}
 }
 
+func (ckpt_svc *CheckpointsService) getBackfillReplSpec(id string) (*metadata.BackfillReplicationSpec, error) {
+	ckpt_svc.backfillSpecsMtx.RLock()
+	defer ckpt_svc.backfillSpecsMtx.RUnlock()
+	origSpec, exists := ckpt_svc.cachedBackfillSpecs[id]
+	if !exists {
+		return nil, base.ErrorNotFound
+	} else {
+		return origSpec.Clone(), nil
+	}
+}
+
 func (ckpt_svc *CheckpointsService) handleManifestsChange(spec *metadata.ReplicationSpecification, oldManifests, newManifests *metadata.CollectionsManifestPair) error {
 	if oldManifests.Source == nil || newManifests.Source == nil {
 		return base.ErrorInvalidInput
@@ -580,7 +617,6 @@ func (ckpt_svc *CheckpointsService) handleManifestsChange(spec *metadata.Replica
 	}
 
 	// If there are source namespaces that are removed, then any of the mappings need to be removed as well
-	// TODO MB-40689 - need to be done for backfill portion too
 	changed, err := ckpt_svc.removeMappingFromCkptDocs(spec.Id, spec.InternalId, removed)
 	if changed {
 		ckpt_svc.logger.Infof("Replication %v checkpoints mapping changed due to collections manifest changes", spec.Id)
@@ -588,5 +624,36 @@ func (ckpt_svc *CheckpointsService) handleManifestsChange(spec *metadata.Replica
 	if err != nil {
 		ckpt_svc.logger.Warnf("Unable to remove mappings %v from ckpt docs due to err %v", removed.String(), err)
 	}
-	return err
+
+	// Do the same for any checkpoints related to backfill replication
+	backfillSpec, err2 := ckpt_svc.getBackfillReplSpec(spec.Id)
+	if err2 == nil && backfillSpec != nil {
+		backfillSpecId := base.CompileBackfillPipelineSpecId(spec.Id)
+		changed, err2 := ckpt_svc.removeMappingFromCkptDocs(backfillSpecId, backfillSpec.InternalId, removed)
+		if changed {
+			ckpt_svc.logger.Infof("Backfill Replication %v checkpoints mapping changed due to collections manifest changes", backfillSpecId)
+		}
+		if err2 != nil {
+			ckpt_svc.logger.Warnf("Unable to remove mappings %v from backfill ckpt docs due to err %v", removed.String(), err2)
+		}
+	}
+	if err != nil {
+		return err
+	} else if err2 != nil {
+		return err2
+	} else {
+		return nil
+	}
+}
+
+func (ckpt_svc *CheckpointsService) GetCkptsMappingsCleanupCallback(specId, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
+	cb := func() error {
+		_, err := ckpt_svc.removeMappingFromCkptDocs(specId, specInternalId, toBeRemoved)
+		return err
+	}
+	errCb := func(err error) {
+		// checkpoint cleanup err is fine, they'll get rolled over
+		ckpt_svc.logger.Warnf("Unable to remove mappings %v from backfill ckpt docs due to err %v", toBeRemoved.String(), err)
+	}
+	return cb, errCb
 }

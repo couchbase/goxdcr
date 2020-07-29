@@ -103,6 +103,7 @@ type PipelineMgrForSerializer interface {
 	CleanupPipeline(topic string) error
 	StartBackfill(topic string) error
 	StopBackfill(topic string) error
+	StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	CleanupBackfillPipeline(topic string) error
 	UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 }
@@ -112,6 +113,7 @@ type PipelineMgrBackfillIface interface {
 	GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error)
 	RequestBackfill(topic string) error
 	HaltBackfill(topic string) error
+	HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	CleanupBackfillCkpts(topic string) error
 	ReInitStreams(pipelineName string) error
 }
@@ -228,6 +230,12 @@ func (pipelineMgr *PipelineManager) RequestBackfill(pipelineName string) error {
 
 func (pipelineMgr *PipelineManager) HaltBackfill(pipelineName string) error {
 	return pipelineMgr.serializer.StopBackfill(pipelineName)
+}
+
+// If backfill pipeline dne or is stopped, callbacks will be called
+// Only if backfill pipeline is not stopped, will the callback be skipped
+func (pipelineMgr *PipelineManager) HaltBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	return pipelineMgr.serializer.StopBackfillWithCb(pipelineName, cb, errCb)
 }
 
 func (pipelineMgr *PipelineManager) CleanupBackfillCkpts(topic string) error {
@@ -715,35 +723,18 @@ func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, c
 
 // Should be called internally from serializer's Update()
 func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
-	// Since this Update call should be serialized, and no one else should with this pipeline name
-	// should be calling GetOrCreate, it's ok to call GetOrCreate directly
-	rep_status, retErr := pipelineMgr.GetOrCreateReplicationStatus(topic, cur_err)
-	if rep_status == nil {
-		combinedRetErr := errors.New(ReplicationStatusNotFound.Error() + " Cause: " + retErr.Error())
-		return combinedRetErr
-	} else if retErr != nil {
-		return retErr
+	updater, rep_status, err := pipelineMgr.getUpdater(topic, cur_err)
+	if err != nil {
+		return err
 	}
 
-	updaterObj := rep_status.Updater()
-	if updaterObj == nil {
-		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in update()", topic)
-		return errors.New(errorStr)
+	// if update is not initiated by error
+	// trigger updater to update immediately, not to wait for the retry interval
+	if cur_err != nil {
+		rep_status.AddError(cur_err)
+		updater.refreshPipelineDueToErr(cur_err)
 	} else {
-		updater, ok := updaterObj.(*PipelineUpdater)
-		if updater == nil || !ok {
-			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
-			return errors.New(errorStr)
-		}
-
-		// if update is not initiated by error
-		// trigger updater to update immediately, not to wait for the retry interval
-		if cur_err != nil {
-			rep_status.AddError(cur_err)
-			updater.refreshPipelineDueToErr(cur_err)
-		} else {
-			updater.refreshPipelineManually()
-		}
+		updater.refreshPipelineManually()
 	}
 	return nil
 }
@@ -753,35 +744,20 @@ func (pipelineMgr *PipelineManager) Update(topic string, cur_err error) error {
 // start up again
 // If the callback fails with a non-nil error, then the errCb() function is called as a result
 func (pipelineMgr *PipelineManager) UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
-	rep_status, retErr := pipelineMgr.GetOrCreateReplicationStatus(topic, nil)
-	if rep_status == nil {
-		combinedRetErr := errors.New(ReplicationStatusNotFound.Error() + " Cause: " + retErr.Error())
-		return combinedRetErr
-	} else if retErr != nil {
-		return retErr
+	updater, _, err := pipelineMgr.getUpdater(topic, nil)
+	if err != nil {
+		return err
 	}
-
-	updaterObj := rep_status.Updater()
-	if updaterObj == nil {
-		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in update()", topic)
-		return errors.New(errorStr)
-	} else {
-		updater, ok := updaterObj.(*PipelineUpdater)
-		if updater == nil || !ok {
-			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
-			return errors.New(errorStr)
-		}
-		err := updater.registerPipelineStoppedCb(updaterIntermediateCb{
-			callback: callback,
-			errCb:    errCb,
-		})
-		if err != nil {
-			// Unable to register the callback - this means the callback will not get to execute
-			// and thus the errCb() will need to be called
-			errCb(err)
-		}
+	err = updater.registerPipelineStoppedCb(updaterIntermediateCb{
+		callback: callback,
+		errCb:    errCb,
+	})
+	if err != nil {
+		// Unable to register the callback - this means the callback will not get to execute
+		// and thus the errCb() will need to be called
+		errCb(err)
 	}
-	return nil
+	return err
 }
 
 // Should be called internally from serializer's Pause()
@@ -811,47 +787,70 @@ func (pipelineMgr *PipelineManager) ForceTargetRefreshManifest(spec *metadata.Re
 }
 
 func (pipelineMgr *PipelineManager) StartBackfill(topic string) error {
-	repStatus, _ := pipelineMgr.ReplicationStatus(topic)
-	if repStatus == nil {
-		return fmt.Errorf("Cannot start backfill for %v if main replication status does not exist", topic)
+	updater, _, err := pipelineMgr.getUpdater(topic, nil)
+	if err != nil {
+		return err
 	}
 
-	updaterObj := repStatus.Updater()
-	if updaterObj == nil {
-		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in StartBackfill()", topic)
-		return errors.New(errorStr)
-	} else {
-		updater, ok := updaterObj.(*PipelineUpdater)
-		if updater == nil || !ok {
-			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
-			return errors.New(errorStr)
-		}
-
-		updater.startBackfillPipeline()
-	}
+	updater.startBackfillPipeline()
 	return nil
 }
 
 func (pipelineMgr *PipelineManager) StopBackfill(topic string) error {
-	repStatus, _ := pipelineMgr.ReplicationStatus(topic)
+	updater, _, err := pipelineMgr.getUpdater(topic, nil)
+	if err != nil {
+		return err
+	}
+	updater.stopBackfillPipeline()
+	return nil
+}
+
+func (pipelineMgr *PipelineManager) getUpdater(topic string, curErr error) (*PipelineUpdater, *pipeline.ReplicationStatus, error) {
+	repStatus, _ := pipelineMgr.GetOrCreateReplicationStatus(topic, curErr)
 	if repStatus == nil {
-		return fmt.Errorf("Cannot stop backfill for %v if main replication status does not exist", topic)
+		return nil, nil, fmt.Errorf("replication status for %v does not exist", topic)
 	}
 
+	var updater *PipelineUpdater
 	updaterObj := repStatus.Updater()
 	if updaterObj == nil {
 		errorStr := fmt.Sprintf("Failed to get updater from replication status in topic %v in StopBackfill()", topic)
-		return errors.New(errorStr)
+		return nil, repStatus, errors.New(errorStr)
 	} else {
-		updater, ok := updaterObj.(*PipelineUpdater)
+		var ok bool
+		updater, ok = updaterObj.(*PipelineUpdater)
 		if updater == nil || !ok {
 			errorStr := fmt.Sprintf("Unable to cast updaterObj as type PipelineUpdater in topic %v", topic)
-			return errors.New(errorStr)
+			return nil, repStatus, errors.New(errorStr)
 		}
-
-		updater.stopBackfillPipeline()
 	}
-	return nil
+	return updater, repStatus, nil
+}
+
+func (pipelineMgr *PipelineManager) StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+	updater, _, err := pipelineMgr.getUpdater(topic, nil)
+	if err != nil {
+		return err
+	}
+	err = updater.registerBackfillPipelineStoppedCb(updaterIntermediateCb{
+		callback: cb,
+		errCb:    errCb,
+	})
+	if err != nil {
+		// Unable to register the callback - this means the callback will not get to execute
+		// and thus the errCb() will need to be called
+		errCb(err)
+	}
+	if err != nil {
+		return err
+	}
+
+	errMap := pipelineMgr.StopBackfillPipeline(topic)
+	if len(errMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	} else {
+		return nil
+	}
 }
 
 func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.ErrorMap {
@@ -915,17 +914,16 @@ func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.Erro
 	var errMap base.ErrorMap = make(base.ErrorMap)
 
 	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s\n", topic)
-	repStatusKey := fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)
-	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
-	if rep_status == nil {
-		// This should not be nil as updater should be the only one calling this and
-		// it would have created a rep_status way before here
-		errMap[repStatusKey] = errors.New("Error: Replication Status is missing when stopping pipeline.")
+	updater, rep_status, err := pipelineMgr.getUpdater(topic, nil)
+	if err != nil {
+		errMap["StopBackfillPipeline"] = err
 		return errMap
 	}
 
-	bp := rep_status.BackfillPipeline()
+	// Execute callback regardless from this point on
+	defer updater.executeQueuedBackfillCallbacks()
 
+	bp := rep_status.BackfillPipeline()
 	if bp == nil {
 		pipelineMgr.logger.Infof("Backfill pipeline for %v does not exist. Nothing to stop", topic)
 		return nil
@@ -1088,6 +1086,8 @@ type PipelineUpdater struct {
 	update_err_map_ch chan base.ErrorMap
 	// Specialized request channel for cosumers asking for callback during updates
 	updateWithCb chan updaterIntermediateCb
+	// Specialized request channel for cosumers asking for callback during updates for backfill pipelines only
+	backfillUpdateWithCb chan updaterIntermediateCb
 	// channel indicating whether updater is really done
 	done_ch chan bool
 	// startBackfillChannel
@@ -1214,6 +1214,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error,
 		update_now_ch:          make(chan bool, 1),
 		update_err_map_ch:      make(chan base.ErrorMap, 1),
 		updateWithCb:           make(chan updaterIntermediateCb, MaxNonblockingQueueJobs),
+		backfillUpdateWithCb:   make(chan updaterIntermediateCb, MaxNonblockingQueueJobs),
 		backfillStartCh:        make(chan bool, 1),
 		backfillStopCh:         make(chan bool, 1),
 		backfillErrMapCh:       make(chan base.ErrorMap, 1),
@@ -1340,7 +1341,7 @@ func (r *PipelineUpdater) checkIfNeedToReUpdate(retErrMap base.ErrorMap, retErr 
 }
 
 func (r *PipelineUpdater) callbacksStillRemain() bool {
-	return len(r.updateWithCb) > 0
+	return len(r.updateWithCb) > 0 || len(r.backfillUpdateWithCb) > 0
 }
 
 func allErrorsAreAllowed(errMap base.ErrorMap) bool {
@@ -1838,11 +1839,38 @@ func (r *PipelineUpdater) registerPipelineStoppedCb(cb updaterIntermediateCb) er
 	}
 }
 
+func (r *PipelineUpdater) registerBackfillPipelineStoppedCb(cb updaterIntermediateCb) error {
+	select {
+	case r.backfillUpdateWithCb <- cb:
+		r.logger.Infof("pipeline %v updater received backfill callback registration. Current backfill callback count: %v", r.pipeline_name, len(r.backfillUpdateWithCb))
+		return nil
+	default:
+		r.logger.Errorf("pipeline %v updater unable to register callback because channel is full")
+		return base.ErrorMaxReached
+	}
+}
+
 func (r *PipelineUpdater) executeQueuedCallbacks() {
+	defer r.executeQueuedBackfillCallbacks()
 	for {
 		select {
 		case cb := <-r.updateWithCb:
 			r.logger.Infof("%v calling one callback...", r.pipeline_name)
+			err := cb.callback()
+			if err != nil {
+				cb.errCb(err)
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (r *PipelineUpdater) executeQueuedBackfillCallbacks() {
+	for {
+		select {
+		case cb := <-r.backfillUpdateWithCb:
+			r.logger.Infof("%v calling one backfill callback...", r.pipeline_name)
 			err := cb.callback()
 			if err != nil {
 				cb.errCb(err)

@@ -10,6 +10,7 @@
 package service_def
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -27,4 +28,7 @@ type CheckpointsService interface {
 
 	CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
 	ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
+	BackfillReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
+
+	GetCkptsMappingsCleanupCallback(specId, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 }
