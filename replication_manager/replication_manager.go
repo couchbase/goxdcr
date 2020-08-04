@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2013-2020 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -723,8 +723,21 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 			stats.Set(repId, statsForPipeline)
 		}
 	}
-	logger_rm.Debugf("stats=%v\n", stats)
+	logger_rm.Debugf("stats=%v\n", stats.String())
 
+	return stats, nil
+}
+
+func GetAllStatistics() (*expvar.Map, error) {
+	repIds := replication_mgr.pipelineMgr.AllReplications()
+
+	stats := new(expvar.Map).Init()
+	for _, repId := range repIds {
+		statsForPipeline, err := pipeline_svc.GetStatisticsForPipeline(repId)
+		if err == nil && statsForPipeline != nil {
+			stats.Set(repId, statsForPipeline)
+		}
+	}
 	return stats, nil
 }
 
@@ -860,8 +873,8 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 
 func validateStatsMap(statsMap map[string]interface{}) {
 	missingStats := make([]string, 0)
-	if _, ok := statsMap[pipeline_svc.CHANGES_LEFT_METRIC]; !ok {
-		missingStats = append(missingStats, pipeline_svc.CHANGES_LEFT_METRIC)
+	if _, ok := statsMap[service_def.CHANGES_LEFT_METRIC]; !ok {
+		missingStats = append(missingStats, service_def.CHANGES_LEFT_METRIC)
 	}
 	if len(missingStats) > 0 {
 		logger_rm.Errorf("Stats missing when constructing replication infos: %v", missingStats)

@@ -32,18 +32,20 @@ var ErrorsKey = "errors"
 
 // constants used for parsing url path
 const (
-	CreateReplicationPath    = "controller/createReplication"
-	StatisticsPrefix         = "stats/buckets"
-	RegexpValidationPrefix   = "controller/regexpValidation"
-	AllReplicationsPath      = "pools/default/replications"
-	AllReplicationInfosPath  = "pools/default/replicationInfos"
-	DeleteReplicationPrefix  = "controller/cancelXDCR"
-	SettingsReplicationsPath = "settings/replications"
-	MemStatsPath             = "stats/mem"
-	BlockProfileStartPath    = "profile/block/start"
-	BlockProfileStopPath     = "profile/block/stop"
-	BucketSettingsPrefix     = "controller/bucketSettings"
-	XDCRInternalSettingsPath = "xdcr/internalSettings"
+	CreateReplicationPath       = "controller/createReplication"
+	StatisticsPrefix            = "stats/buckets"
+	RegexpValidationPrefix      = "controller/regexpValidation"
+	AllReplicationsPath         = "pools/default/replications"
+	AllReplicationInfosPath     = "pools/default/replicationInfos"
+	DeleteReplicationPrefix     = "controller/cancelXDCR"
+	SettingsReplicationsPath    = "settings/replications"
+	MemStatsPath                = "stats/mem"
+	BlockProfileStartPath       = "profile/block/start"
+	BlockProfileStopPath        = "profile/block/stop"
+	BucketSettingsPrefix        = "controller/bucketSettings"
+	XDCRInternalSettingsPath    = "xdcr/internalSettings"
+	XDCRPrometheusStatsPath     = "xdcr/_prometheusMetrics"
+	XDCRPrometheusStatsHighPath = "xdcr/_prometheusMetricsHigh"
 
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
@@ -1001,6 +1003,10 @@ func EncodeByteArrayIntoResponse(data []byte) (*ap.Response, error) {
 // encode a byte array into Response object with specified status code
 func EncodeByteArrayIntoResponseWithStatusCode(data []byte, statusCode int) (*ap.Response, error) {
 	return &ap.Response{StatusCode: statusCode, Body: data}, nil
+}
+
+func EncodeByteArrayIntoPrometheusResponseWithStatusCode(data []byte, statusCode int) (*ap.Response, error) {
+	return &ap.Response{StatusCode: statusCode, ContentType: ap.ContentTypePrometheusText, Body: data}, nil
 }
 
 // encode an arbitrary object into Response object with default status code of StatusOK

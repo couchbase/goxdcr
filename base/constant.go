@@ -346,11 +346,13 @@ var PlaceHolderFieldKey = "_"
 
 // http request related constants
 const (
-	ContentType        = "Content-Type"
-	DefaultContentType = "application/x-www-form-urlencoded"
-	JsonContentType    = "application/json"
-	ContentLength      = "Content-Length"
-	UserAgent          = "User-Agent"
+	ContentType               = "Content-Type"
+	DefaultContentType        = "application/x-www-form-urlencoded"
+	JsonContentType           = "application/json"
+	PlainTextContentType      = "text/plain"
+	PrometheusTextContentType = "; version=0.0.4"
+	ContentLength             = "Content-Length"
+	UserAgent                 = "User-Agent"
 )
 
 //constant for replication tasklist status
@@ -500,6 +502,7 @@ const (
 	PermissionBucketDataReadSuffix    = "].data!read"
 	PermissionXDCRInternalRead        = "cluster.admin.internal.xdcr!read"
 	PermissionXDCRInternalWrite       = "cluster.admin.internal.xdcr!write"
+	PermissionXDCRPrometheusRead      = "cluster.admin.internal.stats!read"
 )
 
 // constants for parsing conflict resolution type setting in bucket metadata

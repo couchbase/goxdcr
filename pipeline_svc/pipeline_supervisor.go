@@ -329,7 +329,7 @@ func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings metadata.R
 		pipelineSupervisor.Logger().Infof("%v Updated log level to %v\n", pipelineSupervisor.Id(), logLevel)
 	}
 
-	updateIntervalObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, PUBLISH_INTERVAL)
+	updateIntervalObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, service_def.PUBLISH_INTERVAL)
 	if updateIntervalObj != nil {
 		pipelineSupervisor.setMaxDcpMissCount(settings)
 	}

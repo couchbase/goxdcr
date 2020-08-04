@@ -9,6 +9,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
+	service_def2 "github.com/couchbase/goxdcr/service_def"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	utilities "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/rcrowley/go-metrics"
@@ -216,65 +217,65 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 
-	assert.Equal(1, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
-	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(1, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	seqnoCommitMap := make(map[uint16]uint64)
 	seqnoCommitMap[uprEvent.VBucket] = uprEvent.Seqno
 
-	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 	routerCollector.HandleLatestThroughSeqnos(seqnoCommitMap)
-	assert.Equal(int64(1), (routerCollector.vbBasedMetric[uprEvent.VBucket][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
-	assert.Equal(0, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(1), (routerCollector.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(0, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
 
 	metricsMap, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
 	assert.NotNil(metricsMap)
 
-	count, ok := metricsMap[DOCS_FILTERED_METRIC]
+	count, ok := metricsMap[service_def2.DOCS_FILTERED_METRIC]
 	assert.True(ok)
 	assert.Equal(int64(1), count)
 	// Simulate overview registry updated
-	metric_overview := statsMgr.getOverviewRegistry().Get(DOCS_FILTERED_METRIC)
+	metric_overview := statsMgr.getOverviewRegistry().Get(service_def2.DOCS_FILTERED_METRIC)
 	metric_overview.(metrics.Counter).Inc(count)
 
-	count = metricsMap[DOCS_UNABLE_TO_FILTER_METRIC]
+	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(0), count)
-	metric_overview = statsMgr.getOverviewRegistry().Get(DOCS_UNABLE_TO_FILTER_METRIC)
+	metric_overview = statsMgr.getOverviewRegistry().Get(service_def2.DOCS_UNABLE_TO_FILTER_METRIC)
 	metric_overview.(metrics.Counter).Inc(count)
 
 	// Validate overview stats
-	count, err = statsMgr.GetCountMetrics(DOCS_FILTERED_METRIC)
+	count, err = statsMgr.GetCountMetrics(service_def2.DOCS_FILTERED_METRIC)
 	assert.Nil(err)
 	assert.Equal(int64(1), count)
 
 	// Try setting something else
 	metricKVs := make(map[string]int64)
-	metricKVs[DOCS_UNABLE_TO_FILTER_METRIC] = 10
+	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 10
 	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, metricKVs)
 	assert.Nil(err)
 
 	// Set some other vbucket
 	metricKVs = make(map[string]int64)
-	metricKVs[DOCS_UNABLE_TO_FILTER_METRIC] = 12
+	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 12
 	err = statsMgr.SetVBCountMetrics(102, metricKVs)
 	assert.Nil(err)
 
 	// Test setting something else
 	metricKVs = make(map[string]int64)
-	metricKVs[DOCS_FILTERED_METRIC] = 4
+	metricKVs[service_def2.DOCS_FILTERED_METRIC] = 4
 	err = statsMgr.SetVBCountMetrics(102, metricKVs)
 	assert.Nil(err)
 
 	// verify
 	metricsMap, err = statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
-	count = metricsMap[DOCS_UNABLE_TO_FILTER_METRIC]
+	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(10), count)
 
 	metricsMap, err = statsMgr.GetVBCountMetrics(102)
 	assert.Nil(err)
-	count = metricsMap[DOCS_UNABLE_TO_FILTER_METRIC]
+	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(12), count)
 
 	dcpRegistry := statsMgr.registries[testDCPPart]
@@ -282,25 +283,25 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	routerRegistry := statsMgr.registries[testRouter]
 	assert.NotNil(routerRegistry)
 
-	counter, ok := routerRegistry.Get(DOCS_UNABLE_TO_FILTER_METRIC).(metrics.Counter)
+	counter, ok := routerRegistry.Get(service_def2.DOCS_UNABLE_TO_FILTER_METRIC).(metrics.Counter)
 	assert.True(ok)
 	assert.NotNil(counter)
 	assert.Equal(int64(22), counter.Count())
 
 	// Pretend that a rollback occurred for a VB and the number decreased
 	metricKVs = make(map[string]int64)
-	metricKVs[DOCS_UNABLE_TO_FILTER_METRIC] = 9
+	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 9
 	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, metricKVs)
 	assert.Nil(err)
 
 	// validate difference calculation
 	metricsMap, err = statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
-	count = metricsMap[DOCS_UNABLE_TO_FILTER_METRIC]
+	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(9), count)
 
 	routerRegistry = statsMgr.registries[testRouter]
-	counter, ok = routerRegistry.Get(DOCS_UNABLE_TO_FILTER_METRIC).(metrics.Counter)
+	counter, ok = routerRegistry.Get(service_def2.DOCS_UNABLE_TO_FILTER_METRIC).(metrics.Counter)
 	assert.True(ok)
 	assert.NotNil(counter)
 	assert.Equal(int64(21), counter.Count())
@@ -352,16 +353,16 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	passedEvent.Data = uprEvent
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
-	assert.Equal(int64(1), (routerCollector.component_map[testRouter][EXPIRY_FILTERED_METRIC]).(metrics.Counter).Count())
-	assert.Equal(int64(1), (routerCollector.component_map[testRouter][DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.EXPIRY_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	passedEvent.EventType = commonReal.DataReceived
 	fakeComponent.On("Id").Return(testDCPPart)
 	passedEvent.Component = fakeComponent
 
 	assert.Nil(dcpCollector.ProcessEvent(passedEvent))
-	assert.Equal(int64(1), (dcpCollector.component_map[testDCPPart][EXPIRY_RECEIVED_DCP_METRIC]).(metrics.Counter).Count())
-	assert.Equal(int64(1), (dcpCollector.component_map[testDCPPart][DOCS_RECEIVED_DCP_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(1), (dcpCollector.component_map[testDCPPart][service_def2.EXPIRY_RECEIVED_DCP_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(1), (dcpCollector.component_map[testDCPPart][service_def2.DOCS_RECEIVED_DCP_METRIC]).(metrics.Counter).Count())
 
 	fmt.Println("============== Test case end: TestStatsMgrWithExpiration =================")
 }

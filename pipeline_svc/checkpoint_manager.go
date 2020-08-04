@@ -1588,11 +1588,11 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	// Get stats that need to persist
 	vbCountMetrics, err := ckmgr.statsMgr.GetVBCountMetrics(vbno)
 	if err != nil {
-		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", DOCS_FILTERED_METRIC)
+		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", service_def.DOCS_FILTERED_METRIC)
 		return
 	}
-	filteredItems := vbCountMetrics[DOCS_FILTERED_METRIC]
-	filterFailed := vbCountMetrics[DOCS_UNABLE_TO_FILTER_METRIC]
+	filteredItems := vbCountMetrics[service_def.DOCS_FILTERED_METRIC]
+	filterFailed := vbCountMetrics[service_def.DOCS_UNABLE_TO_FILTER_METRIC]
 
 	// Collection-Related items
 	srcManifestId, ok := srcManifestIds[vbno]

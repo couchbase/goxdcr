@@ -35,112 +35,33 @@ import (
 )
 
 const (
-	// the number of docs written/sent to target cluster
-	DOCS_WRITTEN_METRIC          = "docs_written"
-	EXPIRY_DOCS_WRITTEN_METRIC   = "expiry_docs_written"
-	DELETION_DOCS_WRITTEN_METRIC = "deletion_docs_written"
-	SET_DOCS_WRITTEN_METRIC      = "set_docs_written"
-	ADD_DOCS_WRITTEN_METRIC      = "add_docs_written"
-
-	// the number of docs processed by pipeline
-	DOCS_PROCESSED_METRIC  = "docs_processed"
-	DATA_REPLICATED_METRIC = "data_replicated"
-	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
-	DOCS_REP_QUEUE_METRIC  = base.DocsRepQueueStats
-
-	DOCS_FILTERED_METRIC         = "docs_filtered"
-	DOCS_UNABLE_TO_FILTER_METRIC = "docs_unable_to_filter"
-	EXPIRY_FILTERED_METRIC       = "expiry_filtered"
-	DELETION_FILTERED_METRIC     = "deletion_filtered"
-	SET_FILTERED_METRIC          = "set_filtered"
-	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
-
-	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
-	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
-	EXPIRY_FAILED_CR_SOURCE_METRIC   = "expiry_failed_cr_source"
-	DELETION_FAILED_CR_SOURCE_METRIC = "deletion_failed_cr_source"
-	SET_FAILED_CR_SOURCE_METRIC      = "set_failed_cr_source"
-
-	CHANGES_LEFT_METRIC = base.ChangesLeftStats
-	DOCS_LATENCY_METRIC = "wtavg_docs_latency"
-	GET_LATENCY_METRIC  = "wtavg_get_latency"
-	META_LATENCY_METRIC = "wtavg_meta_latency"
-	RESP_WAIT_METRIC    = "resp_wait_time"
-
-	//checkpointing related statistics
-	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
-	NUM_CHECKPOINTS_METRIC = "num_checkpoints"
-	TIME_COMMITING_METRIC  = "time_committing"
-	NUM_FAILEDCKPTS_METRIC = "num_failedckpts"
-	RATE_DOC_CHECKS_METRIC = "rate_doc_checks"
-	//optimistic replication replated statistics
-	DOCS_OPT_REPD_METRIC = "docs_opt_repd"
-	RATE_OPT_REPD_METRIC = "rate_doc_opt_repd"
-
-	DOCS_RECEIVED_DCP_METRIC = base.DocsFromDcpStats
-	RATE_RECEIVED_DCP_METRIC = "rate_received_from_dcp"
-
-	EXPIRY_RECEIVED_DCP_METRIC   = "expiry_received_from_dcp"
-	DELETION_RECEIVED_DCP_METRIC = "deletion_received_from_dcp"
-	SET_RECEIVED_DCP_METRIC      = "set_received_from_dcp"
-
-	DCP_DISPATCH_TIME_METRIC = "dcp_dispatch_time"
-	DCP_DATACH_LEN           = "dcp_datach_length"
-
-	// latency caused by bandwidth throttling
-	THROTTLE_LATENCY_METRIC = "throttle_latency"
-
-	// latency caused by throughput throttling
-	THROUGHPUT_THROTTLE_LATENCY_METRIC = "throughput_throttle_latency"
-
-	//	TIME_COMMITTING_METRIC = "time_committing"
-	//rate
-	RATE_REPLICATED_METRIC = "rate_replicated"
-	BANDWIDTH_USAGE_METRIC = "bandwidth_usage"
-
-	VB_HIGHSEQNO_PREFIX = "vb_highseqno_"
-
-	OVERVIEW_METRICS_KEY = "Overview"
-
-	//statistics_manager's setting
-	SOURCE_NODE_ADDR     = "source_host_addr"
-	SOURCE_NODE_USERNAME = "source_host_username"
-	SOURCE_NODE_PASSWORD = "source_host_password"
-	SAMPLE_SIZE          = "sample_size"
-	PUBLISH_INTERVAL     = "publish_interval"
-
-	// Memory related statistics
-	DP_GET_FAIL_METRIC = "datapool_failed_gets"
-)
-
-const (
 	default_sample_size     = 1000
 	default_update_interval = 1000
 )
 
 // stats to initialize for paused replications that have never been run -- mostly the stats visible from UI
-var StatsToInitializeForPausedReplications = []string{DOCS_WRITTEN_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, DOCS_FILTERED_METRIC,
-	RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC, RATE_REPLICATED_METRIC,
-	BANDWIDTH_USAGE_METRIC, DOCS_LATENCY_METRIC, GET_LATENCY_METRIC, META_LATENCY_METRIC}
+var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
+	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
+	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_LATENCY_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
 // 2. internal stats that are not visible on UI
-var StatsToClearForPausedReplications = []string{SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC, META_LATENCY_METRIC,
-	TIME_COMMITING_METRIC, NUM_FAILEDCKPTS_METRIC, RATE_DOC_CHECKS_METRIC, RATE_OPT_REPD_METRIC, RATE_RECEIVED_DCP_METRIC,
-	RATE_REPLICATED_METRIC, BANDWIDTH_USAGE_METRIC, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC}
+var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC,
+	service_def.TIME_COMMITING_METRIC, service_def.NUM_FAILEDCKPTS_METRIC, service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC,
+	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_LATENCY_METRIC}
 
 // keys for metrics in overview
-var OverviewMetricKeys = []string{CHANGES_LEFT_METRIC, DOCS_CHECKED_METRIC, DOCS_WRITTEN_METRIC, EXPIRY_DOCS_WRITTEN_METRIC, DELETION_DOCS_WRITTEN_METRIC,
-	SET_DOCS_WRITTEN_METRIC, ADD_DOCS_WRITTEN_METRIC, DOCS_PROCESSED_METRIC, DOCS_FAILED_CR_SOURCE_METRIC, EXPIRY_FAILED_CR_SOURCE_METRIC,
-	DELETION_FAILED_CR_SOURCE_METRIC, SET_FAILED_CR_SOURCE_METRIC, DATA_REPLICATED_METRIC, DOCS_FILTERED_METRIC, DOCS_UNABLE_TO_FILTER_METRIC,
-	EXPIRY_FILTERED_METRIC, DELETION_FILTERED_METRIC, SET_FILTERED_METRIC, NUM_CHECKPOINTS_METRIC, NUM_FAILEDCKPTS_METRIC,
-	TIME_COMMITING_METRIC, DOCS_OPT_REPD_METRIC, DOCS_RECEIVED_DCP_METRIC, EXPIRY_RECEIVED_DCP_METRIC,
-	DELETION_RECEIVED_DCP_METRIC, SET_RECEIVED_DCP_METRIC, SIZE_REP_QUEUE_METRIC, DOCS_REP_QUEUE_METRIC, DOCS_LATENCY_METRIC,
-	RESP_WAIT_METRIC, GET_LATENCY_METRIC, META_LATENCY_METRIC, DCP_DISPATCH_TIME_METRIC, DCP_DATACH_LEN, THROTTLE_LATENCY_METRIC, THROUGHPUT_THROTTLE_LATENCY_METRIC,
-	DP_GET_FAIL_METRIC, EXPIRY_STRIPPED_METRIC}
+var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.DOCS_CHECKED_METRIC, service_def.DOCS_WRITTEN_METRIC, service_def.EXPIRY_DOCS_WRITTEN_METRIC, service_def.DELETION_DOCS_WRITTEN_METRIC,
+	service_def.SET_DOCS_WRITTEN_METRIC, service_def.DOCS_PROCESSED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.EXPIRY_FAILED_CR_SOURCE_METRIC,
+	service_def.DELETION_FAILED_CR_SOURCE_METRIC, service_def.SET_FAILED_CR_SOURCE_METRIC, service_def.DATA_REPLICATED_METRIC, service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC,
+	service_def.EXPIRY_FILTERED_METRIC, service_def.DELETION_FILTERED_METRIC, service_def.SET_FILTERED_METRIC, service_def.NUM_CHECKPOINTS_METRIC, service_def.NUM_FAILEDCKPTS_METRIC,
+	service_def.TIME_COMMITING_METRIC, service_def.DOCS_OPT_REPD_METRIC, service_def.DOCS_RECEIVED_DCP_METRIC, service_def.EXPIRY_RECEIVED_DCP_METRIC,
+	service_def.DELETION_RECEIVED_DCP_METRIC, service_def.SET_RECEIVED_DCP_METRIC, service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC,
+	service_def.RESP_WAIT_METRIC, service_def.META_LATENCY_METRIC, service_def.DCP_DISPATCH_TIME_METRIC, service_def.DCP_DATACH_LEN, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC,
+	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.GET_LATENCY_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC}
 
-var VBMetricKeys = []string{DOCS_FILTERED_METRIC, DOCS_UNABLE_TO_FILTER_METRIC}
+var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
 
 func MakeVBCountMetricMap() service_def.VBCountMetricMap {
 	newMap := make(service_def.VBCountMetricMap)
@@ -160,16 +81,16 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) se
 	record := ckptDoc.Checkpoint_records[agreedIndex]
 
 	vbStatMap := make(service_def.VBCountMetricMap)
-	vbStatMap[DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
-	vbStatMap[DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
+	vbStatMap[service_def.DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
+	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
 	return vbStatMap
 }
 
 // keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
 var NonIncreasingMetricKeyMap = map[string]bool{
-	SIZE_REP_QUEUE_METRIC: true,
-	DOCS_REP_QUEUE_METRIC: true,
-	DCP_DATACH_LEN:        true}
+	service_def.SIZE_REP_QUEUE_METRIC: true,
+	service_def.DOCS_REP_QUEUE_METRIC: true,
+	service_def.DCP_DATACH_LEN:        true}
 
 // the fixed user agent string for connections to collect stats for paused replications
 // it is possible to construct the user agent string dynamically by adding source and target bucket info to it
@@ -545,16 +466,16 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 
 	// save existing values in overview registry for rate stats calculation
 	oldSample := stats_mgr.getOverviewRegistry()
-	docs_written_old := oldSample.Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
-	docs_received_dcp_old := oldSample.Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
-	docs_opt_repd_old := oldSample.Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
-	data_replicated_old := oldSample.Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
-	docs_checked_old_var := oldSample.Get(DOCS_CHECKED_METRIC)
+	docs_written_old := oldSample.Get(service_def.DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
+	docs_received_dcp_old := oldSample.Get(service_def.DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
+	docs_opt_repd_old := oldSample.Get(service_def.DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
+	data_replicated_old := oldSample.Get(service_def.DATA_REPLICATED_METRIC).(metrics.Counter).Count()
+	docs_checked_old_var := oldSample.Get(service_def.DOCS_CHECKED_METRIC)
 	var docs_checked_old int64 = 0
 	if docs_checked_old_var != nil {
 		docs_checked_old = docs_checked_old_var.(metrics.Counter).Count()
 	}
-	changes_left_old_var := oldSample.Get(CHANGES_LEFT_METRIC)
+	changes_left_old_var := oldSample.Get(service_def.CHANGES_LEFT_METRIC)
 	var changes_left_old int64 = 0
 	if changes_left_old_var != nil {
 		changes_left_old = changes_left_old_var.(metrics.Counter).Count()
@@ -565,7 +486,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	sample_stats_list_map := make(map[string][]*SampleStats)
 
 	for registry_name, registry := range stats_mgr.registries {
-		if registry_name != OVERVIEW_METRICS_KEY {
+		if registry_name != service_def.OVERVIEW_METRICS_KEY {
 			map_for_registry := new(expvar.Map).Init()
 
 			orig_registry := rs.GetStats(registry_name, stats_mgr.pipeline.Type())
@@ -664,7 +585,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	docs_processed := stats_mgr.calculateDocsProcessed()
 	docs_processed_var := new(expvar.Int)
 	docs_processed_var.Set(docs_processed)
-	overview_expvar_map.Set(DOCS_PROCESSED_METRIC, docs_processed_var)
+	overview_expvar_map.Set(service_def.DOCS_PROCESSED_METRIC, docs_processed_var)
 
 	//calculate changes_left
 	changes_left_val, err := stats_mgr.calculateChangesLeft(docs_processed)
@@ -674,46 +595,46 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	}
 	changes_left_var := new(expvar.Int)
 	changes_left_var.Set(changes_left_val)
-	overview_expvar_map.Set(CHANGES_LEFT_METRIC, changes_left_var)
+	overview_expvar_map.Set(service_def.CHANGES_LEFT_METRIC, changes_left_var)
 	// also update the value in overview registry since we need it at the next stats computation time
-	setCounter(stats_mgr.getOverviewRegistry().Get(CHANGES_LEFT_METRIC).(metrics.Counter), int(changes_left_val))
+	setCounter(stats_mgr.getOverviewRegistry().Get(service_def.CHANGES_LEFT_METRIC).(metrics.Counter), int(changes_left_val))
 
 	//calculate rate_replication
-	docs_written := stats_mgr.getOverviewRegistry().Get(DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
+	docs_written := stats_mgr.getOverviewRegistry().Get(service_def.DOCS_WRITTEN_METRIC).(metrics.Counter).Count()
 	interval_in_sec := stats_mgr.getUpdateInterval().Seconds()
 	rate_replicated := float64(docs_written-docs_written_old) / interval_in_sec
 	rate_replicated_var := new(expvar.Float)
 	rate_replicated_var.Set(rate_replicated)
-	overview_expvar_map.Set(RATE_REPLICATED_METRIC, rate_replicated_var)
+	overview_expvar_map.Set(service_def.RATE_REPLICATED_METRIC, rate_replicated_var)
 
 	//calculate rate_received_from_dcp
-	docs_received_dcp := stats_mgr.getOverviewRegistry().Get(DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
+	docs_received_dcp := stats_mgr.getOverviewRegistry().Get(service_def.DOCS_RECEIVED_DCP_METRIC).(metrics.Counter).Count()
 	rate_received_dcp := float64(docs_received_dcp-docs_received_dcp_old) / interval_in_sec
 	rate_received_dcp_var := new(expvar.Float)
 	rate_received_dcp_var.Set(rate_received_dcp)
-	overview_expvar_map.Set(RATE_RECEIVED_DCP_METRIC, rate_received_dcp_var)
+	overview_expvar_map.Set(service_def.RATE_RECEIVED_DCP_METRIC, rate_received_dcp_var)
 
 	//calculate rate_doc_opt_repd
-	docs_opt_repd := stats_mgr.getOverviewRegistry().Get(DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
+	docs_opt_repd := stats_mgr.getOverviewRegistry().Get(service_def.DOCS_OPT_REPD_METRIC).(metrics.Counter).Count()
 	rate_opt_repd := float64(docs_opt_repd-docs_opt_repd_old) / interval_in_sec
 	rate_opt_repd_var := new(expvar.Float)
 	rate_opt_repd_var.Set(rate_opt_repd)
-	overview_expvar_map.Set(RATE_OPT_REPD_METRIC, rate_opt_repd_var)
+	overview_expvar_map.Set(service_def.RATE_OPT_REPD_METRIC, rate_opt_repd_var)
 
 	//calculate bandwidth_usage
-	data_replicated := stats_mgr.getOverviewRegistry().Get(DATA_REPLICATED_METRIC).(metrics.Counter).Count()
+	data_replicated := stats_mgr.getOverviewRegistry().Get(service_def.DATA_REPLICATED_METRIC).(metrics.Counter).Count()
 	// bandwidth_usage is in the unit of MB/second, where 1 MB = 1024*1024 bytes instead of 1000*1000 bytes
 	bandwidth_usage := float64(data_replicated-data_replicated_old) / (interval_in_sec * 1.024 * 1.024)
 	bandwidth_usage_var := new(expvar.Float)
 	bandwidth_usage_var.Set(bandwidth_usage)
-	overview_expvar_map.Set(BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
+	overview_expvar_map.Set(service_def.BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
 
 	//calculate docs_checked
 	docs_checked := stats_mgr.calculateDocsChecked()
 	docs_checked_var := new(expvar.Int)
 	docs_checked_var.Set(int64(docs_checked))
-	overview_expvar_map.Set(DOCS_CHECKED_METRIC, docs_checked_var)
-	setCounter(stats_mgr.getOverviewRegistry().Get(DOCS_CHECKED_METRIC).(metrics.Counter), int(docs_checked))
+	overview_expvar_map.Set(service_def.DOCS_CHECKED_METRIC, docs_checked_var)
+	setCounter(stats_mgr.getOverviewRegistry().Get(service_def.DOCS_CHECKED_METRIC).(metrics.Counter), int(docs_checked))
 
 	//calculate rate_doc_checks
 	var rate_doc_checks float64
@@ -725,7 +646,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	}
 	rate_doc_checks_var := new(expvar.Float)
 	rate_doc_checks_var.Set(rate_doc_checks)
-	overview_expvar_map.Set(RATE_DOC_CHECKS_METRIC, rate_doc_checks_var)
+	overview_expvar_map.Set(service_def.RATE_DOC_CHECKS_METRIC, rate_doc_checks_var)
 	return nil
 }
 
@@ -801,7 +722,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeftBackfillPipeline(docs_pr
 }
 
 func (stats_mgr *StatisticsManager) getOverviewRegistry() metrics.Registry {
-	return stats_mgr.registries[OVERVIEW_METRICS_KEY]
+	return stats_mgr.registries[service_def.OVERVIEW_METRICS_KEY]
 }
 
 func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, name string, i interface{}, includeDetails bool) {
@@ -871,7 +792,7 @@ func (stats_mgr *StatisticsManager) composeUserAgent() {
 }
 
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
-	if overview_registry, ok := stats_mgr.registries[OVERVIEW_METRICS_KEY]; ok {
+	if overview_registry, ok := stats_mgr.registries[service_def.OVERVIEW_METRICS_KEY]; ok {
 		// reset all counters to 0
 		for _, overview_metric_key := range OverviewMetricKeys {
 			overview_registry.Get(overview_metric_key).(metrics.Counter).Clear()
@@ -879,13 +800,13 @@ func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	} else {
 		// create new overview_registry and initialize all counters to 0 except for DOCS_CHECKED_METRIC
 		overview_registry = metrics.NewRegistry()
-		stats_mgr.registries[OVERVIEW_METRICS_KEY] = overview_registry
+		stats_mgr.registries[service_def.OVERVIEW_METRICS_KEY] = overview_registry
 		for _, overview_metric_key := range OverviewMetricKeys {
-			if overview_metric_key == DOCS_CHECKED_METRIC {
+			if overview_metric_key == service_def.DOCS_CHECKED_METRIC {
 				// use a negative value to indicate that an old value of docs_checked does not exist
 				docs_checked_counter := metrics.NewCounter()
 				setCounter(docs_checked_counter, -1)
-				overview_registry.Register(DOCS_CHECKED_METRIC, docs_checked_counter)
+				overview_registry.Register(service_def.DOCS_CHECKED_METRIC, docs_checked_counter)
 			} else {
 				overview_registry.Register(overview_metric_key, metrics.NewCounter())
 			}
@@ -927,7 +848,7 @@ func (stats_mgr *StatisticsManager) initializeConfig(settings metadata.Replicati
 
 	var update_interval int
 	var update_interval_duration time.Duration
-	if update_interval_obj, ok := settings[PUBLISH_INTERVAL]; ok {
+	if update_interval_obj, ok := settings[service_def.PUBLISH_INTERVAL]; ok {
 		update_interval, ok = update_interval_obj.(int)
 		if !ok {
 			return fmt.Errorf("%v update_interval in settings map is not of integer type. update_interval=%v\n", stats_mgr.pipeline.InstanceId(), update_interval_obj)
@@ -1022,7 +943,7 @@ func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.Replication
 		stats_mgr.logger.Debugf("%v Updating settings on stats manager. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings.CloneAndRedact())
 	}
 
-	update_interval, err := stats_mgr.utils.GetIntSettingFromSettings(settings, PUBLISH_INTERVAL)
+	update_interval, err := stats_mgr.utils.GetIntSettingFromSettings(settings, service_def.PUBLISH_INTERVAL)
 	if err != nil {
 		return err
 	}
@@ -1069,64 +990,63 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
 		size_rep_queue := metrics.NewCounter()
-		registry.Register(SIZE_REP_QUEUE_METRIC, size_rep_queue)
+		registry.Register(service_def.SIZE_REP_QUEUE_METRIC, size_rep_queue)
 		docs_rep_queue := metrics.NewCounter()
-		registry.Register(DOCS_REP_QUEUE_METRIC, docs_rep_queue)
+		registry.Register(service_def.DOCS_REP_QUEUE_METRIC, docs_rep_queue)
 		docs_written := metrics.NewCounter()
-		registry.Register(DOCS_WRITTEN_METRIC, docs_written)
+		registry.Register(service_def.DOCS_WRITTEN_METRIC, docs_written)
 		expiry_docs_written := metrics.NewCounter()
-		registry.Register(EXPIRY_DOCS_WRITTEN_METRIC, expiry_docs_written)
+		registry.Register(service_def.EXPIRY_DOCS_WRITTEN_METRIC, expiry_docs_written)
 		deletion_docs_written := metrics.NewCounter()
-		registry.Register(DELETION_DOCS_WRITTEN_METRIC, deletion_docs_written)
+		registry.Register(service_def.DELETION_DOCS_WRITTEN_METRIC, deletion_docs_written)
 		set_docs_written := metrics.NewCounter()
-		registry.Register(SET_DOCS_WRITTEN_METRIC, set_docs_written)
+		registry.Register(service_def.SET_DOCS_WRITTEN_METRIC, set_docs_written)
 		add_docs_written := metrics.NewCounter()
-		registry.Register(ADD_DOCS_WRITTEN_METRIC, add_docs_written)
+		registry.Register(service_def.ADD_DOCS_WRITTEN_METRIC, add_docs_written)
 		docs_failed_cr := metrics.NewCounter()
-		registry.Register(DOCS_FAILED_CR_SOURCE_METRIC, docs_failed_cr)
+		registry.Register(service_def.DOCS_FAILED_CR_SOURCE_METRIC, docs_failed_cr)
 		expiry_failed_cr := metrics.NewCounter()
-		registry.Register(EXPIRY_FAILED_CR_SOURCE_METRIC, expiry_failed_cr)
+		registry.Register(service_def.EXPIRY_FAILED_CR_SOURCE_METRIC, expiry_failed_cr)
 		deletion_failed_cr := metrics.NewCounter()
-		registry.Register(DELETION_FAILED_CR_SOURCE_METRIC, deletion_failed_cr)
+		registry.Register(service_def.DELETION_FAILED_CR_SOURCE_METRIC, deletion_failed_cr)
 		set_failed_cr := metrics.NewCounter()
-		registry.Register(SET_FAILED_CR_SOURCE_METRIC, set_failed_cr)
+		registry.Register(service_def.SET_FAILED_CR_SOURCE_METRIC, set_failed_cr)
 		data_replicated := metrics.NewCounter()
-		registry.Register(DATA_REPLICATED_METRIC, data_replicated)
+		registry.Register(service_def.DATA_REPLICATED_METRIC, data_replicated)
 		docs_opt_repd := metrics.NewCounter()
-		registry.Register(DOCS_OPT_REPD_METRIC, docs_opt_repd)
+		registry.Register(service_def.DOCS_OPT_REPD_METRIC, docs_opt_repd)
 		docs_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry.Register(DOCS_LATENCY_METRIC, docs_latency)
+		registry.Register(service_def.DOCS_LATENCY_METRIC, docs_latency)
 		resp_wait := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry.Register(RESP_WAIT_METRIC, resp_wait)
+		registry.Register(service_def.RESP_WAIT_METRIC, resp_wait)
 		meta_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry.Register(GET_LATENCY_METRIC, meta_latency)
-		get_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry.Register(META_LATENCY_METRIC, meta_latency)
+		registry.Register(service_def.META_LATENCY_METRIC, meta_latency)
 		throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry.Register(THROTTLE_LATENCY_METRIC, throttle_latency)
+		registry.Register(service_def.THROTTLE_LATENCY_METRIC, throttle_latency)
 		dp_failed := metrics.NewCounter()
-		registry.Register(DP_GET_FAIL_METRIC, dp_failed)
+		registry.Register(service_def.DP_GET_FAIL_METRIC, dp_failed)
+		get_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
+		registry.Register(service_def.META_LATENCY_METRIC, meta_latency)
 
 		metric_map := make(map[string]interface{})
-		metric_map[SIZE_REP_QUEUE_METRIC] = size_rep_queue
-		metric_map[DOCS_REP_QUEUE_METRIC] = docs_rep_queue
-		metric_map[DOCS_WRITTEN_METRIC] = docs_written
-		metric_map[EXPIRY_DOCS_WRITTEN_METRIC] = expiry_docs_written
-		metric_map[DELETION_DOCS_WRITTEN_METRIC] = deletion_docs_written
-		metric_map[SET_DOCS_WRITTEN_METRIC] = set_docs_written
-		metric_map[ADD_DOCS_WRITTEN_METRIC] = add_docs_written
-		metric_map[DOCS_FAILED_CR_SOURCE_METRIC] = docs_failed_cr
-		metric_map[EXPIRY_FAILED_CR_SOURCE_METRIC] = expiry_failed_cr
-		metric_map[DELETION_FAILED_CR_SOURCE_METRIC] = deletion_failed_cr
-		metric_map[SET_FAILED_CR_SOURCE_METRIC] = set_failed_cr
-		metric_map[DATA_REPLICATED_METRIC] = data_replicated
-		metric_map[DOCS_OPT_REPD_METRIC] = docs_opt_repd
-		metric_map[DOCS_LATENCY_METRIC] = docs_latency
-		metric_map[RESP_WAIT_METRIC] = resp_wait
-		metric_map[GET_LATENCY_METRIC] = get_latency
-		metric_map[META_LATENCY_METRIC] = meta_latency
-		metric_map[THROTTLE_LATENCY_METRIC] = throttle_latency
-		metric_map[DP_GET_FAIL_METRIC] = dp_failed
+		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
+		metric_map[service_def.DOCS_REP_QUEUE_METRIC] = docs_rep_queue
+		metric_map[service_def.DOCS_WRITTEN_METRIC] = docs_written
+		metric_map[service_def.EXPIRY_DOCS_WRITTEN_METRIC] = expiry_docs_written
+		metric_map[service_def.DELETION_DOCS_WRITTEN_METRIC] = deletion_docs_written
+		metric_map[service_def.SET_DOCS_WRITTEN_METRIC] = set_docs_written
+		metric_map[service_def.ADD_DOCS_WRITTEN_METRIC] = add_docs_written
+		metric_map[service_def.DOCS_FAILED_CR_SOURCE_METRIC] = docs_failed_cr
+		metric_map[service_def.EXPIRY_FAILED_CR_SOURCE_METRIC] = expiry_failed_cr
+		metric_map[service_def.DELETION_FAILED_CR_SOURCE_METRIC] = deletion_failed_cr
+		metric_map[service_def.SET_FAILED_CR_SOURCE_METRIC] = set_failed_cr
+		metric_map[service_def.DATA_REPLICATED_METRIC] = data_replicated
+		metric_map[service_def.DOCS_OPT_REPD_METRIC] = docs_opt_repd
+		metric_map[service_def.DOCS_LATENCY_METRIC] = docs_latency
+		metric_map[service_def.RESP_WAIT_METRIC] = resp_wait
+		metric_map[service_def.META_LATENCY_METRIC] = meta_latency
+		metric_map[service_def.THROTTLE_LATENCY_METRIC] = throttle_latency
+		metric_map[service_def.GET_LATENCY_METRIC] = get_latency
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -1162,67 +1082,67 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	if event.EventType == common.StatsUpdate {
 		queue_size := event.OtherInfos.([]int)[0]
 		queue_size_bytes := event.OtherInfos.([]int)[1]
-		setCounter(metric_map[DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
-		setCounter(metric_map[SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
+		setCounter(metric_map[service_def.DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
+		setCounter(metric_map[service_def.SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
 	} else if event.EventType == common.DataSent {
 		event_otherInfo := event.OtherInfos.(parts.DataSentEventAdditional)
 		req_size := event_otherInfo.Req_size
 		opti_replicated := event_otherInfo.IsOptRepd
 		commit_time := event_otherInfo.Commit_time
 		resp_wait_time := event_otherInfo.Resp_wait_time
-		metric_map[DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
-		metric_map[DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
+		metric_map[service_def.DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
 		if opti_replicated {
-			metric_map[DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
 		}
 
 		expiry_set := event_otherInfo.IsExpirySet
 		if expiry_set {
-			metric_map[EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		}
 
 		req_opcode := event_otherInfo.Opcode
 		if req_opcode == base.DELETE_WITH_META {
-			metric_map[DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == base.SET_WITH_META {
-			metric_map[SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == base.ADD_WITH_META {
-			metric_map[ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id())
 		}
 
-		metric_map[DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
-		metric_map[RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
+		metric_map[service_def.DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metric_map[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataFailedCRSource {
-		metric_map[DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		event_otherInfos := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional)
 		expiry_set := event_otherInfos.IsExpirySet
 		if expiry_set {
-			metric_map[EXPIRY_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.EXPIRY_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		}
 
 		req_opcode := event_otherInfos.Opcode
 		if req_opcode == base.DELETE_WITH_META {
-			metric_map[DELETION_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.DELETION_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		} else if req_opcode == base.SET_WITH_META {
-			metric_map[SET_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.SET_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id())
 		}
 	} else if event.EventType == common.GetReceived {
 		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
-		metric_map[GET_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metric_map[service_def.GET_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.GetMetaReceived {
 		event_otherInfos := event.OtherInfos.(parts.GetMetaReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
-		metric_map[META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metric_map[service_def.META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataThrottled {
 		throttle_latency := event.OtherInfos.(time.Duration)
-		metric_map[THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
+		metric_map[service_def.THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataPoolGetFail {
-		metric_map[DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
+		metric_map[service_def.DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
 	}
 
 	return nil
@@ -1250,25 +1170,25 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 	for _, dcp_part := range dcp_parts {
 		registry := stats_mgr.getOrCreateRegistry(dcp_part.Id())
 		docs_received_dcp := metrics.NewCounter()
-		registry.Register(DOCS_RECEIVED_DCP_METRIC, docs_received_dcp)
+		registry.Register(service_def.DOCS_RECEIVED_DCP_METRIC, docs_received_dcp)
 		expiry_received_dcp := metrics.NewCounter()
-		registry.Register(EXPIRY_RECEIVED_DCP_METRIC, expiry_received_dcp)
+		registry.Register(service_def.EXPIRY_RECEIVED_DCP_METRIC, expiry_received_dcp)
 		deletion_received_dcp := metrics.NewCounter()
-		registry.Register(DELETION_RECEIVED_DCP_METRIC, deletion_received_dcp)
+		registry.Register(service_def.DELETION_RECEIVED_DCP_METRIC, deletion_received_dcp)
 		set_received_dcp := metrics.NewCounter()
-		registry.Register(SET_RECEIVED_DCP_METRIC, set_received_dcp)
+		registry.Register(service_def.SET_RECEIVED_DCP_METRIC, set_received_dcp)
 		dcp_dispatch_time := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry.Register(DCP_DISPATCH_TIME_METRIC, dcp_dispatch_time)
+		registry.Register(service_def.DCP_DISPATCH_TIME_METRIC, dcp_dispatch_time)
 		dcp_datach_len := metrics.NewCounter()
-		registry.Register(DCP_DATACH_LEN, dcp_datach_len)
+		registry.Register(service_def.DCP_DATACH_LEN, dcp_datach_len)
 
 		metric_map := make(map[string]interface{})
-		metric_map[DOCS_RECEIVED_DCP_METRIC] = docs_received_dcp
-		metric_map[EXPIRY_RECEIVED_DCP_METRIC] = expiry_received_dcp
-		metric_map[DELETION_RECEIVED_DCP_METRIC] = deletion_received_dcp
-		metric_map[SET_RECEIVED_DCP_METRIC] = set_received_dcp
-		metric_map[DCP_DISPATCH_TIME_METRIC] = dcp_dispatch_time
-		metric_map[DCP_DATACH_LEN] = dcp_datach_len
+		metric_map[service_def.DOCS_RECEIVED_DCP_METRIC] = docs_received_dcp
+		metric_map[service_def.EXPIRY_RECEIVED_DCP_METRIC] = expiry_received_dcp
+		metric_map[service_def.DELETION_RECEIVED_DCP_METRIC] = deletion_received_dcp
+		metric_map[service_def.SET_RECEIVED_DCP_METRIC] = set_received_dcp
+		metric_map[service_def.DCP_DISPATCH_TIME_METRIC] = dcp_dispatch_time
+		metric_map[service_def.DCP_DATACH_LEN] = dcp_datach_len
 		dcp_collector.component_map[dcp_part.Id()] = metric_map
 
 		dcp_part.RegisterComponentEventListener(common.StatsUpdate, dcp_collector)
@@ -1297,17 +1217,17 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	switch event.EventType {
 	case common.DataReceived:
 		uprEvent := event.Data.(*mcc.UprEvent)
-		metric_map[DOCS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.DOCS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
-			metric_map[EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {
-			metric_map[DELETION_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.DELETION_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
-			metric_map[SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.SET_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
-			metric_map[EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.EXPIRY_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.IsSystemEvent() {
 			// ignore system events
 		} else {
@@ -1315,10 +1235,10 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 		}
 	case common.DataProcessed:
 		dcp_dispatch_time := event.OtherInfos.(float64)
-		metric_map[DCP_DISPATCH_TIME_METRIC].(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
+		metric_map[service_def.DCP_DISPATCH_TIME_METRIC].(metrics.Histogram).Sample().Update(int64(dcp_dispatch_time))
 	case common.StatsUpdate:
 		dcp_datach_len := event.OtherInfos.(int)
-		setCounter(metric_map[DCP_DATACH_LEN].(metrics.Counter), dcp_datach_len)
+		setCounter(metric_map[service_def.DCP_DATACH_LEN].(metrics.Counter), dcp_datach_len)
 	}
 
 	return nil
@@ -1396,31 +1316,31 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		conn := dcp_part.Connector()
 		registry_router := stats_mgr.getOrCreateRegistry(conn.Id())
 		docs_filtered := metrics.NewCounter()
-		registry_router.Register(DOCS_FILTERED_METRIC, docs_filtered)
+		registry_router.Register(service_def.DOCS_FILTERED_METRIC, docs_filtered)
 		docs_unable_to_filter := metrics.NewCounter()
-		registry_router.Register(DOCS_UNABLE_TO_FILTER_METRIC, docs_unable_to_filter)
+		registry_router.Register(service_def.DOCS_UNABLE_TO_FILTER_METRIC, docs_unable_to_filter)
 		expiry_filtered := metrics.NewCounter()
-		registry_router.Register(EXPIRY_FILTERED_METRIC, expiry_filtered)
+		registry_router.Register(service_def.EXPIRY_FILTERED_METRIC, expiry_filtered)
 		deletion_filtered := metrics.NewCounter()
-		registry_router.Register(DELETION_FILTERED_METRIC, deletion_filtered)
+		registry_router.Register(service_def.DELETION_FILTERED_METRIC, deletion_filtered)
 		set_filtered := metrics.NewCounter()
-		registry_router.Register(SET_FILTERED_METRIC, set_filtered)
+		registry_router.Register(service_def.SET_FILTERED_METRIC, set_filtered)
 		dp_failed := metrics.NewCounter()
-		registry_router.Register(DP_GET_FAIL_METRIC, dp_failed)
+		registry_router.Register(service_def.DP_GET_FAIL_METRIC, dp_failed)
 		throughput_throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry_router.Register(THROUGHPUT_THROTTLE_LATENCY_METRIC, throughput_throttle_latency)
+		registry_router.Register(service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, throughput_throttle_latency)
 		expiry_stripped := metrics.NewCounter()
-		registry_router.Register(EXPIRY_STRIPPED_METRIC, expiry_stripped)
+		registry_router.Register(service_def.EXPIRY_STRIPPED_METRIC, expiry_stripped)
 
 		metric_map := make(map[string]interface{})
-		metric_map[DOCS_FILTERED_METRIC] = docs_filtered
-		metric_map[DOCS_UNABLE_TO_FILTER_METRIC] = docs_unable_to_filter
-		metric_map[EXPIRY_FILTERED_METRIC] = expiry_filtered
-		metric_map[DELETION_FILTERED_METRIC] = deletion_filtered
-		metric_map[SET_FILTERED_METRIC] = set_filtered
-		metric_map[DP_GET_FAIL_METRIC] = dp_failed
-		metric_map[THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
-		metric_map[EXPIRY_STRIPPED_METRIC] = expiry_stripped
+		metric_map[service_def.DOCS_FILTERED_METRIC] = docs_filtered
+		metric_map[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = docs_unable_to_filter
+		metric_map[service_def.EXPIRY_FILTERED_METRIC] = expiry_filtered
+		metric_map[service_def.DELETION_FILTERED_METRIC] = deletion_filtered
+		metric_map[service_def.SET_FILTERED_METRIC] = set_filtered
+		metric_map[service_def.DP_GET_FAIL_METRIC] = dp_failed
+		metric_map[service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
+		metric_map[service_def.EXPIRY_STRIPPED_METRIC] = expiry_stripped
 
 		// VB specific stats
 		listOfVbs := dcp_part.ResponsibleVBs()
@@ -1451,9 +1371,9 @@ func (r_collector *routerCollector) Id() string {
 
 func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey string) error {
 	switch metricKey {
-	case DOCS_FILTERED_METRIC:
+	case service_def.DOCS_FILTERED_METRIC:
 		fallthrough
-	case DOCS_UNABLE_TO_FILTER_METRIC:
+	case service_def.DOCS_UNABLE_TO_FILTER_METRIC:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		vbucket := uprEvent.VBucket
 		seqno := uprEvent.Seqno
@@ -1503,34 +1423,34 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	switch event.EventType {
 	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
-		metric_map[DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.DOCS_FILTERED_METRIC].(metrics.Counter).Inc(1)
 
 		if uprEvent.Expiry != 0 {
-			metric_map[EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {
-			metric_map[DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
-			metric_map[SET_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.SET_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
-			metric_map[EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			metric_map[service_def.EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		} else {
 			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
 
 		// Handle VB specific tasks
-		err = r_collector.handleVBEvent(event, DOCS_FILTERED_METRIC)
+		err = r_collector.handleVBEvent(event, service_def.DOCS_FILTERED_METRIC)
 	case common.DataUnableToFilter:
-		metric_map[DOCS_UNABLE_TO_FILTER_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.DOCS_UNABLE_TO_FILTER_METRIC].(metrics.Counter).Inc(1)
 		// Handle VB specific tasks
-		err = r_collector.handleVBEvent(event, DOCS_UNABLE_TO_FILTER_METRIC)
+		err = r_collector.handleVBEvent(event, service_def.DOCS_UNABLE_TO_FILTER_METRIC)
 	case common.DataPoolGetFail:
-		metric_map[DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
+		metric_map[service_def.DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
 	case common.DataThroughputThrottled:
 		throughput_throttle_latency := event.OtherInfos.(time.Duration)
-		metric_map[THROUGHPUT_THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throughput_throttle_latency.Nanoseconds() / 1000000)
+		metric_map[service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throughput_throttle_latency.Nanoseconds() / 1000000)
 	case common.ExpiryFieldStripped:
-		metric_map[EXPIRY_STRIPPED_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.EXPIRY_STRIPPED_METRIC].(metrics.Counter).Inc(1)
 	}
 
 	return err
@@ -1567,9 +1487,9 @@ func (ckpt_collector *checkpointMgrCollector) Mount(pipeline common.Pipeline, st
 
 func (ckpt_collector *checkpointMgrCollector) initRegistry() {
 	registry_ckpt := ckpt_collector.stats_mgr.getOrCreateRegistry("CkptMgr")
-	registry_ckpt.Register(TIME_COMMITING_METRIC, metrics.NewHistogram(metrics.NewUniformSample(ckpt_collector.stats_mgr.sample_size)))
-	registry_ckpt.Register(NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
-	registry_ckpt.Register(NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
+	registry_ckpt.Register(service_def.TIME_COMMITING_METRIC, metrics.NewHistogram(metrics.NewUniformSample(ckpt_collector.stats_mgr.sample_size)))
+	registry_ckpt.Register(service_def.NUM_CHECKPOINTS_METRIC, metrics.NewCounter())
+	registry_ckpt.Register(service_def.NUM_FAILEDCKPTS_METRIC, metrics.NewCounter())
 
 }
 
@@ -1580,7 +1500,7 @@ func (ckpt_collector *checkpointMgrCollector) HandleLatestThroughSeqnos(SeqnoMap
 func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
 	registry := ckpt_collector.stats_mgr.registries["CkptMgr"]
 	if event.EventType == common.ErrorEncountered {
-		registry.Get(NUM_FAILEDCKPTS_METRIC).(metrics.Counter).Inc(1)
+		registry.Get(service_def.NUM_FAILEDCKPTS_METRIC).(metrics.Counter).Inc(1)
 
 	} else if event.EventType == common.CheckpointDoneForVB {
 		vbno := event.OtherInfos.(uint16)
@@ -1589,8 +1509,8 @@ func (ckpt_collector *checkpointMgrCollector) OnEvent(event *common.Event) {
 
 	} else if event.EventType == common.CheckpointDone {
 		time_commit := event.OtherInfos.(time.Duration).Seconds() * 1000
-		registry.Get(NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
-		registry.Get(TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
+		registry.Get(service_def.NUM_CHECKPOINTS_METRIC).(metrics.Counter).Inc(1)
+		registry.Get(service_def.TIME_COMMITING_METRIC).(metrics.Histogram).Sample().Update(int64(time_commit))
 	}
 }
 
@@ -1763,8 +1683,8 @@ func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, s
 	}
 
 	overview_stats := new(expvar.Map).Init()
-	overview_stats.Add(DOCS_PROCESSED_METRIC, int64(docs_processed))
-	overview_stats.Add(CHANGES_LEFT_METRIC, changes_left)
+	overview_stats.Add(service_def.DOCS_PROCESSED_METRIC, int64(docs_processed))
+	overview_stats.Add(service_def.CHANGES_LEFT_METRIC, changes_left)
 	for _, statsToInitialize := range StatsToInitializeForPausedReplications {
 		overview_stats.Add(statsToInitialize, 0)
 	}
@@ -1868,7 +1788,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 
 	var backfillDocsProcessed uint64
 	if sameList {
-		docs_processed, err = strconv.ParseInt(overview_stats.Get(DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
+		docs_processed, err = strconv.ParseInt(overview_stats.Get(service_def.DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			return err
 		}
@@ -1892,7 +1812,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 
 		docs_processed_var := new(expvar.Int)
 		docs_processed_var.Set(docs_processed)
-		overview_stats.Set(DOCS_PROCESSED_METRIC, docs_processed_var)
+		overview_stats.Set(service_def.DOCS_PROCESSED_METRIC, docs_processed_var)
 
 		repl_status.SetVbList(cur_vb_list)
 	}
@@ -1916,7 +1836,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 	changes_left_var := new(expvar.Int)
 	changes_left_var.Set(changes_left)
 
-	overview_stats.Set(CHANGES_LEFT_METRIC, changes_left_var)
+	overview_stats.Set(service_def.CHANGES_LEFT_METRIC, changes_left_var)
 
 	if backfillSpec != nil {
 		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v (totalBackfillDocs=%v), docs_processed=%v (totalBackfillDocsProcessed=%v), changes_left=%v\n",
@@ -1929,14 +1849,14 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 
 func StatsUpdateInterval(settings metadata.ReplicationSettingsMap) time.Duration {
 	update_interval := default_update_interval
-	if _, ok := settings[PUBLISH_INTERVAL]; ok {
-		update_interval = settings[PUBLISH_INTERVAL].(int)
+	if _, ok := settings[service_def.PUBLISH_INTERVAL]; ok {
+		update_interval = settings[service_def.PUBLISH_INTERVAL].(int)
 	}
 	return time.Duration(update_interval) * time.Millisecond
 }
 
 func (stats_mgr *StatisticsManager) GetCountMetrics(key string) (int64, error) {
-	overviewRegistry, ok := stats_mgr.registries[OVERVIEW_METRICS_KEY]
+	overviewRegistry, ok := stats_mgr.registries[service_def.OVERVIEW_METRICS_KEY]
 	if !ok || overviewRegistry == nil {
 		return 0, base.ErrorResourceDoesNotExist
 	}

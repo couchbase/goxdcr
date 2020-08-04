@@ -142,7 +142,7 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
 		}
-		w.Header().Set(base.ContentType, base.JsonContentType)
+		w.Header().Set(base.ContentType, v.ContentType.String())
 		w.WriteHeader(v.StatusCode)
 		w.Write(v.Body)
 	}

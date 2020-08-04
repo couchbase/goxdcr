@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
@@ -32,7 +33,7 @@ import (
 
 import _ "net/http/pprof"
 
-var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
@@ -45,8 +46,9 @@ type Adminport struct {
 	xdcrRestPort uint16
 	kvAdminPort  uint16
 	gen_server.GenServer
-	finch chan bool
-	utils utilities.UtilsIface
+	finch              chan bool
+	utils              utilities.UtilsIface
+	prometheusExporter pipeline_utils.ExpVarExporter
 }
 
 func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface) *Adminport {
@@ -60,12 +62,13 @@ func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan boo
 		&exit_callback_func, &error_handler_func, log.DefaultLoggerContext, "Adminport", utilsIn)
 
 	adminport := &Adminport{
-		sourceKVHost: laddr,
-		xdcrRestPort: xdcrRestPort,
-		kvAdminPort:  kvAdminPort,
-		GenServer:    server, /*gen_server.GenServer*/
-		finch:        finch,
-		utils:        utilsIn,
+		sourceKVHost:       laddr,
+		xdcrRestPort:       xdcrRestPort,
+		kvAdminPort:        kvAdminPort,
+		GenServer:          server, /*gen_server.GenServer*/
+		finch:              finch,
+		utils:              utilsIn,
+		prometheusExporter: pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable),
 	}
 
 	msg_callback_func = adminport.processRequest
@@ -207,6 +210,10 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doViewXDCRInternalSettingsRequest(request)
 	case XDCRInternalSettingsPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doChangeXDCRInternalSettingsRequest(request)
+	case XDCRPrometheusStatsPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doGetPrometheusStatsRequest(request, false)
+	case XDCRPrometheusStatsHighPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doGetPrometheusStatsRequest(request, true)
 	default:
 		errOutput := base.InvalidPathInHttpRequestError(key)
 		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
@@ -949,4 +956,34 @@ func (adminport *Adminport) doChangeXDCRInternalSettingsRequest(request *http.Re
 	}
 
 	return NewXDCRInternalSettingsResponse(internalSettings)
+}
+
+func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, highCardinality bool) (*ap.Response, error) {
+	if highCardinality {
+		logger_ap.Debugf("doGetPrometheusStatsRequest high\n")
+	} else {
+		logger_ap.Debugf("doGetPrometheusStatsRequest\n")
+	}
+
+	response, err := authWebCreds(request, base.PermissionXDCRPrometheusRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
+	if highCardinality {
+		// XDCR currently has no high-cardinality stats
+		return EncodeByteArrayIntoPrometheusResponseWithStatusCode([]byte{}, http.StatusOK)
+	}
+
+	expVarMap, err := GetAllStatistics()
+	if err != nil {
+		return nil, err
+	}
+
+	adminport.prometheusExporter.LoadExpVarMap(expVarMap)
+	outputBytes, err := adminport.prometheusExporter.Export()
+	if err != nil {
+		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
+	}
+	return EncodeByteArrayIntoPrometheusResponseWithStatusCode(outputBytes, http.StatusOK)
 }

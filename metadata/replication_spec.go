@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -171,6 +172,11 @@ func IsReplicationIdForTargetBucket(replicationId string, targetBucketName strin
 	} else {
 		return replBucketName == targetBucketName, nil
 	}
+}
+
+func IsAReplicationId(replicationId string) bool {
+	matched, _ := regexp.MatchString(fmt.Sprintf("^[[:alnum:]]+%v[[:alnum:]]+%v[[:alnum:]]+$", base.KeyPartsDelimiter, base.KeyPartsDelimiter), replicationId)
+	return matched
 }
 
 func GetSourceBucketNameFromReplicationId(replicationId string) (string, error) {

@@ -14,6 +14,8 @@ package adminport
 
 import (
 	"errors"
+	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"net/http"
 )
 
@@ -58,10 +60,32 @@ type RequestHandler interface {
 	GetServer() Server
 }
 
+type ContentType int
+
+const (
+	ContentTypeJson           ContentType = iota
+	ContentTypeText           ContentType = iota
+	ContentTypePrometheusText ContentType = iota
+)
+
+func (ct ContentType) String() string {
+	switch ct {
+	case ContentTypeJson:
+		return base.JsonContentType
+	case ContentTypeText:
+		return base.PlainTextContentType
+	case ContentTypePrometheusText:
+		return fmt.Sprintf("%v%v", base.PlainTextContentType, base.PrometheusTextContentType)
+	default:
+		panic("FIXME")
+	}
+}
+
 // response returned from request handler
 type Response struct {
-	StatusCode int
-	Body       []byte
+	StatusCode  int
+	Body        []byte
+	ContentType ContentType
 
 	// If set, then the body contains sensitive data and should be redacted in debug log
 	TagPrintingBody bool

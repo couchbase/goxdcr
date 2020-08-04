@@ -2144,7 +2144,7 @@ func TestDNSSrv(t *testing.T) {
 		fmt.Printf("Local DNS look up failed for %v, skipping DNSSRV unit test\n", dnsSrvHostname)
 		return
 	}
-	fmt.Printf("ND: Lookup cname: %v, addrs: %v, err: %v\n", cname, addrs, err)
+	fmt.Printf("Lookup cname: %v, addrs: %v, err: %v\n", cname, addrs, err)
 	for _, addr := range addrs {
 		fmt.Printf("Address: %v port: %v, priority: %v weight: %v\n", addr.Target, addr.Port, addr.Priority, addr.Weight)
 	}
