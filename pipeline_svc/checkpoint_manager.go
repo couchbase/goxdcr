@@ -1205,19 +1205,6 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		}
 	}
 
-	// if target vb opaque has not changed, persist checkpoint record
-	ckptRecordTargetSeqno := remote_seqno
-	// Item 2:
-	// Get the failover_UUID here
-	ckRecordFailoverUuid, failoverUuidErr := ckmgr.getFailoverUUIDForSeqno(vbno, through_seqno)
-	if failoverUuidErr != nil {
-		// if we cannot find uuid for the checkpoint seqno, the checkpoint seqno is unusable
-		// skip checkpointing of this vb
-		// return nil so that we can continue to checkpoint the next vb
-		ckmgr.logger.Warnf("%v\n", failoverUuidErr.Error())
-		return nil
-	}
-
 	// Go through the local snapshot records repository and figure out which snapshot contains this latest sequence number
 	// Item: 5 and 6
 	ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, snapErr := ckmgr.getSnapshotForSeqno(vbno, through_seqno)
@@ -1228,6 +1215,19 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		// The logic is in ep-engine/src/failover-table.cc
 		// log the problem and proceed
 		ckmgr.logger.Warnf("%v\n", snapErr.Error())
+	}
+
+	// if target vb opaque has not changed, persist checkpoint record
+	ckptRecordTargetSeqno := remote_seqno
+	// Item 2:
+	// Get the failover_UUID here
+	ckRecordFailoverUuid, failoverUuidErr := ckmgr.getFailoverUUIDForSeqno(vbno, ckRecordDcpSnapEndSeqno)
+	if failoverUuidErr != nil {
+		// if we cannot find uuid for the checkpoint seqno, the checkpoint seqno is unusable
+		// skip checkpointing of this vb
+		// return nil so that we can continue to checkpoint the next vb
+		ckmgr.logger.Warnf("%v\n", failoverUuidErr.Error())
+		return nil
 	}
 
 	xattr_seqno, err := ckmgr.getXattrSeqno(vbno, xattr_seqno_map, through_seqno)
@@ -1388,7 +1388,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 
 }
 
-func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint64) (uint64, error) {
+func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, snapEndSeqNo uint64) (uint64, error) {
 	failoverlog_obj, ok1 := ckmgr.failoverlog_map[vbno]
 	if ok1 {
 		failoverlog_obj.lock.RLock()
@@ -1399,7 +1399,7 @@ func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint6
 			for _, entry := range *flog {
 				failover_uuid := entry[0]
 				starting_seqno := entry[1]
-				if seqno >= starting_seqno {
+				if snapEndSeqNo >= starting_seqno {
 					return failover_uuid, nil
 				}
 			}
@@ -1409,7 +1409,7 @@ func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, seqno uint6
 		ckmgr.handleGeneralError(err)
 		return 0, err
 	}
-	return 0, fmt.Errorf("%v Failed to find vbuuid for vb=%v, seqno=%v\n", ckmgr.pipeline.Topic(), vbno, seqno)
+	return 0, fmt.Errorf("%v Failed to find vbuuid for vb=%v, snapEndSeqNo=%v\n", ckmgr.pipeline.Topic(), vbno, snapEndSeqNo)
 }
 
 // find the snapshot to which the checkpoint seqno belongs
