@@ -867,7 +867,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	}
 
 	mainPipeline := rep_status.Pipeline()
-	if mainPipeline.State() != common.Pipeline_Running && mainPipeline.State() != common.Pipeline_Starting {
+	if mainPipeline == nil || (mainPipeline.State() != common.Pipeline_Running && mainPipeline.State() != common.Pipeline_Starting) {
 		pipelineMgr.logger.Warnf("Replication %v's main pipeline is not running. Backfill pipeline will not start")
 		errMap[repStatusKey] = MainPipelineNotRunning
 		return errMap
@@ -911,7 +911,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 }
 
 func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.ErrorMap {
-	var errMap base.ErrorMap = make(base.ErrorMap)
+	errMap := make(base.ErrorMap)
 
 	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s\n", topic)
 	updater, rep_status, err := pipelineMgr.getUpdater(topic, nil)
@@ -1275,7 +1275,7 @@ func (r *PipelineUpdater) run() {
 		case <-r.backfillStartCh:
 			r.logger.Infof("Replication %v's backfill Pipeline is starting\n", r.pipeline_name)
 			r.cancelFutureBackfillStart()
-			retErrMap = r.pipelineMgr.StartBackfillPipeline(r.rep_status.Pipeline().Topic())
+			retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
 			if len(retErrMap) > 0 && !retErrMap.HasError(MainPipelineNotRunning) {
 				r.logger.Infof("Replication %v backfill start experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 				r.setLastUpdateFailure(retErrMap)
@@ -1288,7 +1288,7 @@ func (r *PipelineUpdater) run() {
 				r.logger.Warnf("Backfill pipeline for %v is already stopped", r.pipeline_name)
 			} else {
 				r.logger.Infof("Replication %v's backfill Pipeline is stopping\n", r.pipeline_name)
-				retErrMap = r.pipelineMgr.StopBackfillPipeline(r.rep_status.Pipeline().Topic())
+				retErrMap = r.pipelineMgr.StopBackfillPipeline(r.pipeline_name)
 				if len(retErrMap) > 0 {
 					r.logger.Infof("Replication %v backfill stop experienced error(s): %v. Will let it die\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 				}
@@ -1298,7 +1298,7 @@ func (r *PipelineUpdater) run() {
 			if r.getLastResult() {
 				// Last time update succeeded, so this error then triggers an immediate update
 				r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v), re-starting now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
-				retErrMap = r.pipelineMgr.StartBackfillPipeline(r.rep_status.Pipeline().Topic())
+				retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
 				r.cancelFutureRefresh()
 				if len(retErrMap) > 0 && !retErrMap.HasError(MainPipelineNotRunning) {
 					updateAgain = true
