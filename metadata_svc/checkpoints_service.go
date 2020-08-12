@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -449,11 +450,13 @@ func (ckpt_svc *CheckpointsService) GetVbnosFromCheckpointDocs(replicationId str
 func (ckpt_svc *CheckpointsService) CollectionsManifestChangeCb(replId string, oldVal interface{}, newVal interface{}) error {
 	oldManifests, ok := oldVal.(*metadata.CollectionsManifestPair)
 	if !ok {
+		ckpt_svc.logger.Errorf("%v expected collections manifest pair, got %v", reflect.TypeOf(oldVal))
 		return base.ErrorInvalidInput
 	}
 
 	newManifests, ok := newVal.(*metadata.CollectionsManifestPair)
 	if !ok {
+		ckpt_svc.logger.Errorf("%v expected new collections manifest pair, got %v", reflect.TypeOf(newVal))
 		return base.ErrorInvalidInput
 	}
 
@@ -602,7 +605,7 @@ func (ckpt_svc *CheckpointsService) getBackfillReplSpec(id string) (*metadata.Ba
 
 func (ckpt_svc *CheckpointsService) handleManifestsChange(spec *metadata.ReplicationSpecification, oldManifests, newManifests *metadata.CollectionsManifestPair) error {
 	if oldManifests.Source == nil || newManifests.Source == nil {
-		return base.ErrorInvalidInput
+		return nil
 	}
 
 	// Only need to handle source changes
