@@ -31,6 +31,9 @@ var LocalHostNameIpv6 = "[::1]"
 var DefaultAdminPort uint16 = 8091
 var DefaultAdminPortSSL uint16 = 18091
 
+const RESTInvalidPath = "Invalid path"
+const RESTHttpReq = "in http request"
+
 // Exponential backoff factor
 var MetaKvBackoffFactor = 2
 

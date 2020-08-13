@@ -316,7 +316,7 @@ func InvalidValueError(expectedType string, minVal, maxVal interface{}) error {
 }
 
 func InvalidPathInHttpRequestError(path string) error {
-	return errors.New(fmt.Sprintf("Invalid path, %v, in http request.", path))
+	return errors.New(fmt.Sprintf("%v, %v, %v.", RESTInvalidPath, path, RESTHttpReq))
 }
 
 func DeepCopyUint64Array(in []uint64) []uint64 {
