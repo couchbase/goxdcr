@@ -153,7 +153,11 @@ func (adminport *Adminport) handleRequest(
 
 	key, err := adminport.GetMessageKeyFromRequest(request)
 	if err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), base.RESTInvalidPath) && strings.Contains(err.Error(), base.RESTHttpReq) {
+			return EncodeObjectIntoResponseWithStatusCode(err.Error(), http.StatusNotFound)
+		} else {
+			return nil, err
+		}
 	}
 	logger_ap.Debugf("MessageKey=%v\n", key)
 
@@ -204,7 +208,8 @@ func (adminport *Adminport) handleRequest(
 	case XDCRInternalSettingsPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doChangeXDCRInternalSettingsRequest(request)
 	default:
-		err = ap.ErrorInvalidRequest
+		errOutput := base.InvalidPathInHttpRequestError(key)
+		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
 	}
 	return response, err
 }
