@@ -441,7 +441,7 @@ func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNo
 		assert.Equal(1, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
 	}
 	if len(getDoc_map) > 0 {
-		conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map)
+		conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
 		assert.Nil(err)
 		if expectedResult == Conflict {
 			assert.Equal(1, len(conflict_map), fmt.Sprintf("Test %d failed", testId))

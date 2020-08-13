@@ -12,6 +12,7 @@ package parts
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	mc "github.com/couchbase/gomemcached"
@@ -1219,7 +1220,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					xmem.handleGeneralError(err)
 				}
 				if len(getDoc_map) > 0 {
-					conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map)
+					conflict_map, setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
 					if err != nil {
 						if err == PartStoppedError {
 							goto done
@@ -2144,7 +2145,7 @@ func findItemInVV(vv []byte, key []byte) (cas uint64, err error) {
 /**
  * batch call to memcached subdoc_get command for documents that needs target document for custom CR
  */
-func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap) (conflict_map, setBack_map map[string]RequestToResponse, err error) {
+func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]bool) (conflict_map, setBack_map map[string]RequestToResponse, err error) {
 	conflict_map = make(map[string]RequestToResponse)
 	setBack_map = make(map[string]RequestToResponse)
 
@@ -2162,8 +2163,10 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap) (co
 				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED) {
 				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
 				case SourceDominate:
-					// This should not happen, since getDoc_map contains source mutation that does not dominate
-					// Set the CAS locking value
+					// Based on XATTR only, we have determined that the document is in conflict.
+					// After getting the document body, we may find target is not json. So LWW has to be used.
+					// So we have to remove it from noRep_map
+					delete(noRep_map, wrappedReq.UniqueKey)
 					if resp.Status == mc.KEY_ENOENT {
 						wrappedReq.Req.Cas = 0
 					} else {
@@ -2398,6 +2401,14 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, target *mc
 		// We can only replicate from larger CAS to smaller
 		return TargetDominate
 	}
+	if source.DataType&mcc.JSONDataType == 0 {
+		// Use LWW if source is not json.
+		return SourceDominate
+	}
+	if target.Status == base.SUBDOC_SUCCESS_DELETED || target.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED || encodeOpCode(source, true) == base.DELETE_WITH_META {
+		// LWW when either document is deleted
+		return SourceDominate
+	}
 	targetMeta, err := xmem.findTargetCustomCRXattr(target)
 	if err != nil {
 		xmem.Logger().Errorf("detectConflictWithXattr received error %v calling findTargetCustomCRXattr()", err)
@@ -2438,7 +2449,18 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, target *mc
 			return TargetSetBack
 		}
 	}
-	return Conflict
+	// Check if target is JSON. If not, we will have to use LWW
+	targeBody := base.FindTargetBodyWithoutXattr(target)
+	if len(targeBody) == 0 {
+		return Conflict
+	}
+	var value interface{}
+	err = json.Unmarshal(targeBody, &value)
+	if err == nil {
+		return Conflict
+	} else {
+		return SourceDominate
+	}
 }
 
 func (xmem *XmemNozzle) findBodyWithoutXattr(req *mc.MCRequest) (body []byte) {

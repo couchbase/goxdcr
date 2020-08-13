@@ -45,7 +45,27 @@ func createBucket(connStr, bucketName string) (bucket *gocb.Bucket, err error) {
 		time.Sleep(1 * time.Second)
 		bucket, err = cluster.OpenBucket(bucketName, "")
 	}
+	fmt.Printf("Created bucket %v\n", bucketName)
 	return
+}
+func waitForBucketReady(t *testing.T, bucket *gocb.Bucket) {
+	var err error
+	key := "waitForBucket"
+	for i := 0; i < 60; i++ {
+		_, err := bucket.Upsert(key,
+			User{Id: "kingarthur",
+				Email:     "kingarthur@couchbase.com",
+				Interests: []string{"Holy Grail", "African Swallows"}}, 0)
+		if err != gocb.ErrTmpFail && err != gocb.ErrTimeout {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	bucket.Remove(key, 0)
+	if err != nil {
+		t.FailNow()
+	}
+	fmt.Println("Buckets are ready")
 }
 func createReplication(t *testing.T, bucketName string) {
 	assert := assert.New(t)
@@ -69,6 +89,7 @@ func createReplication(t *testing.T, bucketName string) {
 		resp.Body.Close()
 		created := !strings.Contains(string(bodyBytes), "error") || strings.Contains(string(bodyBytes), "already exists")
 		if created {
+			fmt.Printf("Created replication for bucket %v\n", bucketName)
 			return
 		}
 		time.Sleep(2 * time.Second)
@@ -78,24 +99,24 @@ func createReplication(t *testing.T, bucketName string) {
 }
 
 // This routine will wait for replication and verify source/target CAS are the same
+// This routine will wait for replication and verify source/target CAS are the same
 func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
-	var value interface{}
-	cas1, err := source.Get(key, value)
-	if err != nil {
+	//var value interface{}
+
+	sourceDoc, err := source.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
+	if sourceDoc == nil {
+		fmt.Printf("source lookup failed for key")
 		return
 	}
-	cas2, err := target.Get(key, value)
+	targetDoc, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
 
 	var i int
-	for i = 0; i < 60 && (err != nil || cas1 != cas2); i++ {
+	for i = 0; i < 60 && (targetDoc == nil || sourceDoc.Cas() != targetDoc.Cas()); i++ {
 		time.Sleep(1 * time.Second)
-		cas2, err = target.Get(key, value)
-		if cas2 == cas1 {
-			break
-		}
+		targetDoc, err = target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
 	}
-	if cas1 != cas2 {
-		return fmt.Errorf("Document '%s' with cas %v has not replicated to target after %v seconds. Target cas %v\n", key, cas1, i, cas2)
+	if sourceDoc.Cas() != targetDoc.Cas() {
+		return fmt.Errorf("Document '%s' with cas %v has not replicated to target after %v seconds. Target cas %v\n", key, sourceDoc.Cas(), i, targetDoc.Cas())
 	}
 	return nil
 }
@@ -103,8 +124,8 @@ func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
 // Verify _xdcr.cv == CAS
 func verifyCv(key string, target *gocb.Bucket) (err error) {
 	var cvHex string
-	frag, err := target.LookupIn(key).GetEx("_xdcr.cv", gocb.SubdocFlagXattr).Execute()
-	if err != nil {
+	frag, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr.cv", gocb.SubdocFlagXattr).Execute()
+	if err != nil && err != gocb.ErrSubDocSuccessDeleted {
 		return
 	}
 	if err = frag.Content("_xdcr.cv", &cvHex); err != nil {
@@ -241,8 +262,99 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.NotNil(err)
 }
 
-/*
- * TODO
-func TestCcrXattrAfterMerge(t *t.Testing) {
+func TestCustomCRDeletedDocs(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
+	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
+	bucketName := "TestCustomCRDeletedDocs"
+	assert := assert.New(t)
+	sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRDeletedDocs skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRDeletedDocs skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	waitForBucketReady(t, targetBucket)
+	createReplication(t, bucketName)
+	key := time.Now().Format(time.RFC3339)
+	var expire uint32 = 24 * 60 * 60
+	srcInsCas, err := sourceBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
+	assert.Nil(err)
+	// Target dominate. Nothing should happen when replicating from source to target
+	_, err = targetBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
+	assert.Nil(err)
+	_, err = sourceBucket.Remove(key, srcInsCas)
+	// The deleted document should be replicated
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+	// verify deleted document has the expected XATTR
+	targetDoc, err := targetBucket.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
+	assert.True(targetDoc.Exists("id"))
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
 }
-*/
+
+func TestCustomCRBinaryDocs(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCRBinaryDocs =================")
+	defer fmt.Println("============== Test case end: TestCustomCRBinaryDocs =================")
+	bucketName := "TestCustomCRBinaryDocs"
+	assert := assert.New(t)
+	sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRBinaryDocs skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRBinaryDocs skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	waitForBucketReady(t, targetBucket)
+	createReplication(t, bucketName)
+
+	fmt.Println("Test 1. Create target binary doc, create source binary doc. Source wins.")
+	key := "sourceAndTargetBinary"
+	var expire uint32 = 24 * 60 * 60
+	_, err = targetBucket.Upsert(key, "Target document", expire)
+	assert.Nil(err)
+	_, err = sourceBucket.Upsert(key, fmt.Sprintf("Source document for key %v", key), expire)
+	assert.Nil(err)
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+
+	fmt.Println("Test 2. Create target json doc, create source binary doc. Source wins.")
+	key = "sourceBinaryTargetJson"
+	_, err = targetBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "target"}}, expire)
+	assert.Nil(err)
+	_, err = sourceBucket.Upsert(key, fmt.Sprintf("Source document for key %v", key), expire)
+	assert.Nil(err)
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+
+	fmt.Println("Test 3. Create target binary doc, create source json doc. Source wins.")
+	key = "sourceJsonTargetBinary"
+	_, err = targetBucket.Upsert(key, "target document", expire)
+	assert.Nil(err)
+	_, err = sourceBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+}

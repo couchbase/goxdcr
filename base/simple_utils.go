@@ -20,6 +20,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbaselabs/gojsonsm"
@@ -1497,4 +1498,19 @@ func ValidateAndConvertStringToJsonType(value string) (map[string]interface{}, e
 	err := json.Unmarshal([]byte(value), &outMap)
 
 	return outMap, err
+}
+
+/*
+ * resp is expected to be a subdoc_multi_lookup response where we only lookup
+ * _xdcr plus body, the body is the second path. Each path has:
+ * 2 byte status, 4 byte length, value payload start at byte 6
+ */
+func FindTargetBodyWithoutXattr(resp *gomemcached.MCResponse) []byte {
+	body := resp.Body
+	xattrlen := binary.BigEndian.Uint32(body[2:6])
+	if len(body) == int(xattrlen) + 6 {
+		return nil
+	} else {
+		return body[6+xattrlen+6:]
+	}
 }
