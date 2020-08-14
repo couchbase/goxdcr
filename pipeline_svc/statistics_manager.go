@@ -192,13 +192,19 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 }
 
 //Statistics of a pipeline which may or may not be running
-func GetStatisticsForPipeline(topic string) (*expvar.Map, error) {
+//Returns a list of expVar.Map where the idx corresponds to the pipeline Type, so it's possible for one elem to be nil
+func GetStatisticsForPipeline(topic string) []*expvar.Map {
+	var allPipelinesStats []*expvar.Map
 	repl_status, _ := pipeline_manager.ReplicationStatus(topic)
 	if repl_status == nil {
-		return nil, nil
+		return allPipelinesStats
 	}
 
-	return repl_status.GetOverviewStats(common.MainPipeline), nil
+	for pipelineType := common.PipelineTypeBegin; pipelineType < common.PipelineTypeInvalidEnd; pipelineType++ {
+		oneStats := repl_status.GetOverviewStats(pipelineType)
+		allPipelinesStats = append(allPipelinesStats, oneStats)
+	}
+	return allPipelinesStats
 }
 
 func (stats_mgr *StatisticsManager) initialize() {

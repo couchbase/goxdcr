@@ -31,6 +31,9 @@ type PipelineType int
 const (
 	MainPipeline     PipelineType = iota
 	BackfillPipeline PipelineType = iota
+
+	PipelineTypeBegin      = MainPipeline
+	PipelineTypeInvalidEnd = BackfillPipeline + 1
 )
 
 func (p PipelineType) String() string {

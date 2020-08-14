@@ -718,9 +718,13 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
-		statsForPipeline, err := pipeline_svc.GetStatisticsForPipeline(repId)
-		if err == nil && statsForPipeline != nil {
-			stats.Set(repId, statsForPipeline)
+		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId)
+		for i, oneStats := range statsForPipeline {
+			if oneStats == nil {
+				continue
+			}
+			fullReplicationId := common.ComposeFullTopic(repId, common.PipelineType(i))
+			stats.Set(fullReplicationId, oneStats)
 		}
 	}
 	logger_rm.Debugf("stats=%v\n", stats.String())
@@ -733,9 +737,13 @@ func GetAllStatistics() (*expvar.Map, error) {
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
-		statsForPipeline, err := pipeline_svc.GetStatisticsForPipeline(repId)
-		if err == nil && statsForPipeline != nil {
-			stats.Set(repId, statsForPipeline)
+		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId)
+		for i, oneStats := range statsForPipeline {
+			if oneStats == nil {
+				continue
+			}
+			fullReplicationId := common.ComposeFullTopic(repId, common.PipelineType(i))
+			stats.Set(fullReplicationId, oneStats)
 		}
 	}
 	return stats, nil
@@ -829,46 +837,69 @@ func processErrorMsgForUI(errStr string) string {
 
 // get info of all running replications - serves back to consumers who call the REST end point, i.e. UI
 func GetReplicationInfos() ([]base.ReplicationInfo, error) {
-	replInfos := make([]base.ReplicationInfo, 0)
+	combinedRepls := make([]base.ReplicationInfo, 0)
 
 	replIds := replication_mgr.pipelineMgr.AllReplications()
 
 	for _, replId := range replIds {
-		replInfo := base.ReplicationInfo{}
-		replInfo.Id = replId
-		replInfo.StatsMap = make(map[string]interface{})
-		replInfo.ErrorList = make([]base.ErrorInfo, 0)
+		var replInfos []base.ReplicationInfo
 
 		rep_status, _ := replication_mgr.pipelineMgr.ReplicationStatus(replId)
 		if rep_status != nil {
-			// set stats map
-			expvarMap, err := pipeline_svc.GetStatisticsForPipeline(replId)
-			if err == nil && expvarMap != nil {
-				replInfo.StatsMap = replication_mgr.utils.GetMapFromExpvarMap(expvarMap)
-				validateStatsMap(replInfo.StatsMap)
-			}
-
-			// set error list
-			errs := rep_status.Errors()
-			if len(errs) > 0 {
-				for _, pipeline_error := range errs {
-					if !bypassUIErrorCodes(pipeline_error.ErrMsg) {
-						err_msg := processErrorMsgForUI(pipeline_error.ErrMsg)
-						errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
-						replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
-					}
-				}
-			}
+			replInfos = populateReplInfos(replId, rep_status)
 		}
 
 		// set maxVBReps stats to 0 when replication has never been run or has been paused to ensure that ns_server gets the correct replication status
 		if rep_status == nil || rep_status.RuntimeStatus(true) == pipeline.Paused {
-			replInfo.StatsMap[base.MaxVBReps] = 0
+			for _, replInfo := range replInfos {
+				replInfo.StatsMap[base.MaxVBReps] = 0
+			}
+		}
+
+		combinedRepls = append(combinedRepls, replInfos...)
+	}
+	return combinedRepls, nil
+}
+
+func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (replInfos []base.ReplicationInfo) {
+	// set stats map
+	expvarMaps := pipeline_svc.GetStatisticsForPipeline(replId)
+
+	for i, expvarMap := range expvarMaps {
+		if expvarMap == nil {
+			continue
+		}
+		fullReplId := common.ComposeFullTopic(replId, common.PipelineType(i))
+		replInfo := base.ReplicationInfo{
+			Id:        fullReplId,
+			StatsMap:  replication_mgr.utils.GetMapFromExpvarMap(expvarMap),
+			ErrorList: make([]base.ErrorInfo, 0),
+		}
+		validateStatsMap(replInfo.StatsMap)
+
+		if common.PipelineType(i) == common.MainPipeline {
+			// set error list
+			fillReplInfoWithErr(rep_status, replInfo)
 		}
 
 		replInfos = append(replInfos, replInfo)
 	}
-	return replInfos, nil
+	return replInfos
+}
+
+func fillReplInfoWithErr(rep_status *pipeline.ReplicationStatus, replInfo base.ReplicationInfo) {
+	errs := rep_status.Errors()
+	if len(errs) == 0 {
+		return
+	}
+	for _, pipeline_error := range errs {
+		if bypassUIErrorCodes(pipeline_error.ErrMsg) {
+			continue
+		}
+		err_msg := processErrorMsgForUI(pipeline_error.ErrMsg)
+		errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
+		replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
+	}
 }
 
 func validateStatsMap(statsMap map[string]interface{}) {
