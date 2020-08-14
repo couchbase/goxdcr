@@ -56,9 +56,12 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	var params []interface{}
 	var mask uint64 = (1 << 16) - 1
 	sourceTime := time.Unix(0, int64(source.Req.Cas & ^mask)).String()
-	targetTime := time.Unix(0, int64(target.Cas & ^mask)).String()
+	targetTime := time.Unix(0, int64(target.Resp.Cas & ^mask)).String()
 	sourceBody := base.FindSourceBodyWithoutXattr(source.Req)
-	targetBody := base.FindTargetBodyWithoutXattr(target)
+	targetBody, err := target.FindTargetBodyWithoutXattr()
+	if err != nil {
+		input.ResultNotifier.NotifyMergeResult(input, nil, err)
+	}
 
 	params = append(params, string(source.Req.Key))
 	params = append(params, string(sourceBody))

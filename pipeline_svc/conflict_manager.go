@@ -149,7 +149,7 @@ func (c *ConflictManager) IsSharable() bool {
 func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	return nil
 }
-func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *mc.MCResponse, sourceId, targetId []byte) error {
+func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte) error {
 	aConflict := base.ConflictParams{source,
 		target,
 		sourceId,
@@ -354,10 +354,10 @@ func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byt
 			c.pipeline.FullTopic(), err, base.UdTagBegin, source.Body, base.UdTagEnd)
 		return nil, nil, err
 	}
-	targetMeta, err := base.FindTargetCustomCRXattr(input.Target, input.TargetId)
+	targetMeta, err := input.Target.FindTargetCustomCRXattr(input.TargetId)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for document body %v%v%v. Target document XATTR '_xdcr' ignored. This may cause unnecessary merge.",
-			c.pipeline.FullTopic(), err, base.UdTagBegin, input.Target.Body, base.UdTagEnd)
+			c.pipeline.FullTopic(), err, base.UdTagBegin, input.Target.Resp.Body, base.UdTagEnd)
 		return nil, nil, err
 	}
 	// "mv":{"<sourceId>":"<B64>","targetId>":"<B64>",...}

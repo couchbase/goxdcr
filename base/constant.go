@@ -1165,11 +1165,12 @@ const BackfillPipelineTopicPrefix = "backfill_"
 
 const (
 	CAS_MACRO_EXPANSION = "\"${Mutation.CAS}\"" // The value for the cv field when setting back to source
-	XATTR_ID            = "id"                  // The cluster ID field in _xdcr
-	XATTR_CV            = "cv"                  // The Cas field in _xdcr
-	XATTR_MV            = "mv"                  // the MV field in _xdcr
-	XATTR_PCAS          = "pc"                  // The Pcas field in _xdcr
-	XATTR_XDCR          = "_xdcr"               // The XDCR XATTR
+	XATTR_DATATYPE      = "$document.datatype"
+	XATTR_ID            = "id"    // The cluster ID field in _xdcr
+	XATTR_CV            = "cv"    // The Cas field in _xdcr
+	XATTR_MV            = "mv"    // the MV field in _xdcr
+	XATTR_PCAS          = "pc"    // The Pcas field in _xdcr
+	XATTR_XDCR          = "_xdcr" // The XDCR XATTR
 
 	XATTR_ID_PATH   = "_xdcr.id"
 	XATTR_CV_PATH   = "_xdcr.cv"

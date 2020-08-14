@@ -1688,7 +1688,7 @@ func (meta *CustomCRMeta) String() string {
 
 type ConflictParams struct {
 	Source         *WrappedMCRequest
-	Target         *gomemcached.MCResponse
+	Target         *SubdocLookupResponse
 	SourceId       []byte
 	TargetId       []byte
 	BucketName     string

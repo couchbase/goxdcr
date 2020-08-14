@@ -33,7 +33,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/log"
@@ -1516,19 +1515,90 @@ func FindSourceBodyWithoutXattr(req *mc.MCRequest) []byte {
 	return req.Body[4+xattrLen:]
 }
 
-/*
- * resp is expected to be a subdoc_multi_lookup response where we only lookup
- * _xdcr plus body, the body is the second path. Each path has:
- * 2 byte status, 4 byte length, value payload start at byte 6
- */
-func FindTargetBodyWithoutXattr(resp *gomemcached.MCResponse) []byte {
+type SubdocLookupPathSpec struct {
+	Opcode mc.CommandCode
+	Flags  uint8
+	Path   []byte
+}
+
+func (spec *SubdocLookupPathSpec) Size() int {
+	// 1B opcode, 1B flags, 2B path len
+	return 4 + len(spec.Path)
+}
+
+// resp is a response to subdoc_multi_lookup based on the path specs
+type SubdocLookupResponse struct {
+	Specs []SubdocLookupPathSpec
+	Resp  *mc.MCResponse
+}
+
+// This routine loop through lookup spec, find the path in the spec and return its lookup value.
+// If the path doesn't exist in the target document, the return value is nil.
+// If the path is not included in the lookup, return error.
+// The path name for document body is empty string
+func (lookupResp *SubdocLookupResponse) responseForAPath(path string) ([]byte, error) {
+	resp := lookupResp.Resp
 	body := resp.Body
-	xattrlen := binary.BigEndian.Uint32(body[2:6])
-	if len(body) == int(xattrlen)+6 {
-		return nil
-	} else {
-		return body[6+xattrlen+6:]
+	pos := 0
+	for i := 0; i < len(lookupResp.Specs); i++ {
+		spec := lookupResp.Specs[i]
+		if Equals(spec.Path, path) {
+			// Found the path.
+			status := mc.Status(binary.BigEndian.Uint16(resp.Body[pos : pos+2]))
+			if status == mc.SUCCESS {
+				pos = pos + 2
+				len := int(binary.BigEndian.Uint32(body[pos : pos+4]))
+				pos = pos + 4
+				return body[pos : pos+len], nil
+			} else {
+				// Target document does not have this path. This is not an error. Return nil
+				return nil, nil
+			}
+		} else {
+			// Not the path. Skip it.
+			pos = pos + 2
+			len := int(binary.BigEndian.Uint32(body[pos : pos+4]))
+			pos = pos + 4 + len
+		}
 	}
+	return nil, errors.New("SUBDOC_MULTI_LOOKUP does not include this path")
+}
+
+func (lookupResp *SubdocLookupResponse) FindTargetBodyWithoutXattr() ([]byte, error) {
+	return lookupResp.responseForAPath("")
+}
+
+func (lookupResp *SubdocLookupResponse) IsTargetJson() (bool, error) {
+	value, err := lookupResp.responseForAPath(XATTR_DATATYPE)
+	if err != nil {
+		return false, err
+	}
+	if value == nil {
+		// Response for datatype virtual XATTR should not be nil. This should never happen
+		return false, errors.New("Lookup for datatype virtual xattrs received nil response")
+	}
+	res, err := regexp.Match("json", value)
+	if err == nil && res == true {
+		return true, nil
+	} else {
+		return false, nil
+	}
+}
+
+func (lookupResp *SubdocLookupResponse) FindTargetCustomCRXattr(targetId []byte) (crMeta *CustomCRMeta, err error) {
+	xattr, err := lookupResp.responseForAPath(XATTR_XDCR)
+	if err != nil {
+		return nil, err
+	}
+	if xattr == nil {
+		return NewCustomCRMeta(targetId, lookupResp.Resp.Cas, nil, nil, nil, nil)
+	}
+
+	id, cv, pcas, mv, err := findCustomCRXattrFields(xattr)
+	if err != nil {
+		return nil, err
+	}
+	return NewCustomCRMeta(targetId, lookupResp.Resp.Cas, id, cv, pcas, mv)
 }
 
 /*
@@ -1589,26 +1659,6 @@ func FindSourceCustomCRXattr(req *mc.MCRequest, sourceId []byte) (crMeta *Custom
 	// Found _xdcr XATTR. Now find the fields
 	id, cv, pcas, mv, err := findCustomCRXattrFields(xattr)
 	return NewCustomCRMeta(sourceId, cas, id, cv, pcas, mv)
-}
-
-/*
- * resp is expected to be a subdoc_multi_lookup response. Since we only lookup
- * _xdcr or _xdcr plus body, the response is at the beginning of the response body:
- * 2 byte status, 4 byte lengh, value payload start at byte 6
- */
-func FindTargetCustomCRXattr(resp *mc.MCResponse, targetId []byte) (crMeta *CustomCRMeta, err error) {
-	status := mc.Status(binary.BigEndian.Uint16(resp.Body[0:2]))
-	// If _xdcr XATTR exists, the status will be mc.SUCCESS. Otherwise there is no _xdcr and no id, cv, pcas, mv since they are sub path of _xdcr
-	if status == mc.SUCCESS {
-		xattrlen := int(binary.BigEndian.Uint32(resp.Body[2:6]))
-		xattr := resp.Body[6 : 6+xattrlen]
-		id, cv, pcas, mv, err := findCustomCRXattrFields(xattr)
-		if err != nil {
-			return nil, err
-		}
-		return NewCustomCRMeta(targetId, resp.Cas, id, cv, pcas, mv)
-	}
-	return NewCustomCRMeta(targetId, resp.Cas, nil, nil, nil, nil)
 }
 
 func findCustomCRXattrFields(xattr []byte) (clusterId, cv, pcas, mv []byte, err error) {

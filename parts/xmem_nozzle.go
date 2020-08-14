@@ -12,7 +12,6 @@ package parts
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1678,10 +1677,10 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque u
 	return req
 }
 
-func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int, include_doc bool) (respMap base.MCResponseMap, err error) {
+func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int, include_doc bool) (respMap base.MCResponseMap, specs []base.SubdocLookupPathSpec, err error) {
 	// if input size is 0, then we are done
 	if len(get_map) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	respMap = make(base.MCResponseMap, xmem.config.maxCount)
@@ -1703,17 +1702,27 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 	opaque := getOpaque(0, sequence)
 	sent_key_map := make(map[string]bool, len(get_map))
 
+	// This is the spec for the lookup paths
+	specs = make([]base.SubdocLookupPathSpec, 0, 3)
+	spec := base.SubdocLookupPathSpec{base.SUBDOC_GET, base.SUBDOC_FLAG_XATTR, []byte(base.XATTR_XDCR)}
+	specs = append(specs, spec)
+	spec = base.SubdocLookupPathSpec{base.SUBDOC_GET, base.SUBDOC_FLAG_XATTR, []byte(base.XATTR_DATATYPE)}
+	specs = append(specs, spec)
+	if include_doc {
+		spec = base.SubdocLookupPathSpec{base.GET, 0, nil}
+		specs = append(specs, spec)
+	}
 	// Add each req in reqs_bytes_list and set sent_key_map for each doc key
 	for _, originalReq := range get_map {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
 			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, getMeta_map=%v%v%v", xmem.Id(),
 				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, get_map, base.UdTagEnd)
-			return respMap, errors.New(xmem.Id() + " received empty docKey.")
+			return respMap, specs, errors.New(xmem.Id() + " received empty docKey.")
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
-			req := xmem.composeRequestForSubdocGet(docKey, originalReq.Req.VBucket, opaque, include_doc)
+			req := xmem.composeRequestForSubdocGet(specs, docKey, originalReq.Req.VBucket, opaque)
 			// .Bytes() returns data ready to be fed over the wire
 			reqs_bytes = append(reqs_bytes, req.Bytes())
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
@@ -1765,7 +1774,7 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 	noRep_map = make(map[string]NeedSendStatus)
 	getDoc_map = make(base.McRequestMap)
 	for i := 0; i < xmem.config.maxRetry; i++ {
-		respMap, err := xmem.sendBatchGetRequest(getMeta_map, xmem.config.maxRetry, false /* include_doc */)
+		respMap, specs, err := xmem.sendBatchGetRequest(getMeta_map, xmem.config.maxRetry, false /* include_doc */)
 		if err != nil {
 			// Log the error. We will retry maxRetry times.
 			xmem.Logger().Errorf("sentBatchGetRequest returned error '%v'. Retry number %v", err, i)
@@ -1781,7 +1790,14 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 			// SUBDOC_MULTI_PATH_FAILURE_DELETED is the same but on a deleted document
 			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI ||
 				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED) {
-				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
+				var res ConflictResult
+				res, err = xmem.detectConflictWithXattr(wrappedReq.Req, &base.SubdocLookupResponse{specs, resp})
+				if err != nil {
+					// Log the error. We will retry
+					xmem.Logger().Errorf("%v Custom CR: '%v'", xmem.Id(), err)
+					continue
+				}
+				switch res {
 				case SourceDominate:
 					// Set the expected CAS value at target
 					if resp.Status == mc.KEY_ENOENT {
@@ -1820,25 +1836,36 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 	return
 }
 
-// Request to get _xdcr XATTR
-func (xmem *XmemNozzle) composeRequestForSubdocGet(key string, vb uint16, opaque uint32, include_doc bool) *mc.MCRequest {
-	var body []byte
-	if include_doc {
-		// body contains path spec, in the form:
-		// commandCode (1B) flag (1B) length (2B) path, and repeat
-		body = []byte{uint8(base.SUBDOC_GET), base.SUBDOC_FLAG_XATTR, 0, 0, '_', 'x', 'd', 'c', 'r',
-			uint8(base.GET), 0, 0, 0}
-	} else {
-		body = []byte{uint8(base.SUBDOC_GET), base.SUBDOC_FLAG_XATTR, 0, 0, '_', 'x', 'd', 'c', 'r'}
+// Request to get _xdcr XATTR. If document body is included, it must be the last path
+func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPathSpec, key string, vb uint16, opaque uint32) *mc.MCRequest {
+	bodylen := 0
+	for i := 0; i < len(specs); i++ {
+		bodylen = bodylen + specs[i].Size()
 	}
-	binary.BigEndian.PutUint16(body[2:], uint16(len("_xdcr")))
-	return &mc.MCRequest{VBucket: vb,
-		Key:    []byte(key),
-		Opaque: opaque,
-		// We want the XATTR even if the document is deleted
-		Extras: []byte{base.SUBDOC_DOC_FLAG_ACCESS_DELETED},
-		Body:   body,
-		Opcode: base.SUBDOC_MULTI_LOOKUP}
+	body := make([]byte, bodylen)
+
+	pos := 0
+	for i := 0; i < len(specs); i++ {
+		body[pos] = uint8(specs[i].Opcode)
+		pos++
+		body[pos] = specs[i].Flags
+		pos++
+		binary.BigEndian.PutUint16(body[pos:pos+2], uint16(len(specs[i].Path)))
+		pos = pos + 2
+		if len(specs[i].Path) > 0 {
+			n := copy(body[pos:], specs[i].Path)
+			pos = pos + n
+		}
+	}
+
+	return &mc.MCRequest{
+		VBucket: vb,
+		Key:     []byte(key),
+		Opaque:  opaque,
+		Extras:  []byte{base.SUBDOC_DOC_FLAG_ACCESS_DELETED},
+		Body:    body,
+		Opcode:  base.SUBDOC_MULTI_LOOKUP,
+	}
 }
 
 /**
@@ -1847,8 +1874,9 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(key string, vb uint16, opaque
 func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]NeedSendStatus) (setBack_map map[string]RequestToResponse, err error) {
 	setBack_map = make(map[string]RequestToResponse)
 	var respMap base.MCResponseMap
+	var specs []base.SubdocLookupPathSpec
 	for i := 0; i < xmem.config.maxRetry; i++ {
-		respMap, err = xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
+		respMap, specs, err = xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
 		if err != nil {
 			xmem.Logger().Errorf(err.Error())
 		}
@@ -1859,7 +1887,15 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 			resp, ok := respMap[key]
 			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI ||
 				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED) {
-				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
+				var res ConflictResult
+				lookupResp := &base.SubdocLookupResponse{specs, resp}
+				res, err = xmem.detectConflictWithXattr(wrappedReq.Req, lookupResp)
+				if err != nil {
+					// Log the error. We will retry
+					xmem.Logger().Errorf("%v Custom CR: '%v'", xmem.Id(), err)
+					continue
+				}
+				switch res {
 				case SourceDominate:
 					// Based on XATTR only, we have determined that the document is in conflict.
 					// After getting the document body, we may find target is not json. So LWW has to be used.
@@ -1874,7 +1910,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 					// We don't need to merge or set back to source. The source mutation is already in noRep_map. Do nothing
 				case Conflict:
 					// Call conflictMgr to resolve conflict
-					err = xmem.conflictMgr.ResolveConflict(wrappedReq, resp, xmem.sourceClusterId, xmem.targetClusterId)
+					err = xmem.conflictMgr.ResolveConflict(wrappedReq, lookupResp, xmem.sourceClusterId, xmem.targetClusterId)
 					if err != nil {
 						return
 					}
@@ -1900,77 +1936,70 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 	return
 }
 
-// This is called after getting the target document. So we have both source and target XATTRs
+// This is called after getting the target document based on the lookup spec. We should have both source and target XATTRs
 // If target doesn't exist (target.Status == KEY_ENOENT), return SourceDominate
-func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, target *mc.MCResponse) ConflictResult {
+func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, lookupResp *base.SubdocLookupResponse) (ConflictResult, error) {
+	target := lookupResp.Resp
 	if target.Status == mc.KEY_ENOENT {
 		// Target doesn't exist
-		return SourceDominate
+		return SourceDominate, nil
 	}
 	if target.Cas > source.Cas {
 		// We can only replicate from larger CAS to smaller
-		return TargetDominate
+		return TargetDominate, nil
 	}
 	if source.DataType&mcc.JSONDataType == 0 {
 		// Use LWW if source is not json.
-		return SourceDominate
+		return SourceDominate, nil
+	}
+	isJson, err := lookupResp.IsTargetJson()
+	if err != nil {
+		return Conflict, err
+	}
+	if isJson == false {
+		// use LWW if target is not json
+		return SourceDominate, nil
 	}
 	if target.Status == base.SUBDOC_SUCCESS_DELETED || target.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED || encodeOpCode(source, true) == base.DELETE_WITH_META {
 		// LWW when either document is deleted
-		return SourceDominate
+		return SourceDominate, nil
 	}
-	targetMeta, err := base.FindTargetCustomCRXattr(target, xmem.targetClusterId)
+	targetMeta, err := lookupResp.FindTargetCustomCRXattr(xmem.targetClusterId)
 	if err != nil {
-		xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v calling FindTargetCustomCRXattr()", xmem.Id(), err)
-		return Conflict
+		return Conflict, fmt.Errorf("detectConflictWithXattr for %v%s%v received error %v calling FindTargetCustomCRXattr()", base.UdTagBegin, target.Key, base.UdTagEnd, err)
 	}
 	sourceMeta, err := base.FindSourceCustomCRXattr(source, xmem.sourceClusterId)
 	if err != nil {
-		xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v calling FindSourceCustomCRXattr()", xmem.Id(), err)
-		return Conflict
+		return Conflict, fmt.Errorf("detectConflictWithXattr for %v%s%v received error %v calling FindTargetCustomCRXattr()", base.UdTagBegin, source.Key, base.UdTagEnd, err)
 	}
 	if targetMeta.IsMergedDoc() {
 		res, err := sourceMeta.ContainsVV(targetMeta.GetMv())
 		if err != nil {
-			xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v", xmem.Id(), err)
-			return Conflict
+			return Conflict, fmt.Errorf("detectConflictWithXattr for document %v%s%v received error %v", base.UdTagBegin, source.Key, base.UdTagEnd, err)
 		}
 		if res == true {
-			return SourceDominate
+			return SourceDominate, nil
 		}
 	} else {
 		res, err := sourceMeta.ContainsVersion(targetMeta.Updater(), targetMeta.GetCas())
 		if err != nil {
-			xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v", xmem.Id(), err)
-			return Conflict
+			return Conflict, fmt.Errorf("detectConflictWithXattr for %v%s%v received error %v", base.UdTagBegin, source.Key, base.UdTagEnd, err)
 		}
 		if res == true {
-			return SourceDominate
+			return SourceDominate, nil
 		}
 	}
 	// Now target has a smaller CAS but source does not dominate. Let's check if target dominates source MV
 	if sourceMeta.IsMergedDoc() {
 		res, err := targetMeta.ContainsVV(sourceMeta.GetMv())
 		if err != nil {
-			xmem.Logger().Errorf("%v: detectConflictWithXattr received error %v", xmem.Id(), err)
-			return Conflict
+			return Conflict, fmt.Errorf("detectConflictWithXattr for %v%s%v received error %v", base.UdTagBegin, source.Key, base.UdTagEnd, err)
 		}
 		if res == true {
-			return TargetSetBack
+			return TargetSetBack, nil
 		}
 	}
-	// Check if target is JSON. If not, we will have to use LWW
-	targeBody := base.FindTargetBodyWithoutXattr(target)
-	if len(targeBody) == 0 {
-		return Conflict
-	}
-	var value interface{}
-	err = json.Unmarshal(targeBody, &value)
-	if err == nil {
-		return Conflict
-	} else {
-		return SourceDominate
-	}
+	return Conflict, nil
 }
 
 func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCRequest) (err error) {
