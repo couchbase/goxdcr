@@ -587,15 +587,19 @@ func TestManifestFindBackfill(t *testing.T) {
 	newCol.Uid++
 	target2.uid++
 	target2.scopes["S1"].Collections["col1"] = newCol
+	target2.generateReverseLookupMap()
 
 	output, err := target2.ImplicitGetBackfillCollections(&target, &source)
 	assert.Nil(err)
 	assert.Equal(1, len(output))
 
+	var oneMoreCollectionName = "Extraneous"
+
 	// target 3 is target 2 but with one more collection
 	target3 := target2.Clone()
-	testCol := Collection{Uid: 1234, Name: "Extraneous"}
-	target3.scopes["S1"].Collections["testNewCol"] = testCol
+	testCol := Collection{Uid: 1234, Name: oneMoreCollectionName}
+	target3.scopes["S1"].Collections[oneMoreCollectionName] = testCol
+	target3.generateReverseLookupMap()
 
 	// However, there should not be a backfill YET because source doesn't have a matching "Extraneous" collection
 	output, err = target3.ImplicitGetBackfillCollections(&target, &source)
@@ -604,8 +608,9 @@ func TestManifestFindBackfill(t *testing.T) {
 
 	// Source creates the same collection but diff UID, now it should be backfilled
 	source2 := source.Clone()
-	testSrcCol := Collection{Uid: 2345, Name: "Extraneous"}
-	source2.scopes["S1"].Collections["testNewCol"] = testSrcCol
+	testSrcCol := Collection{Uid: 2345, Name: oneMoreCollectionName}
+	source2.scopes["S1"].Collections[oneMoreCollectionName] = testSrcCol
+	source2.generateReverseLookupMap()
 
 	output, err = target3.ImplicitGetBackfillCollections(&target, &source2)
 	assert.Nil(err)

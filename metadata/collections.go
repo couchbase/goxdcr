@@ -95,12 +95,13 @@ func NewCollectionsManifestPair(source, target *CollectionsManifest) *Collection
 
 // Manifest structure representing the JSON returned from ns_server's endpoint
 type CollectionsManifest struct {
-	uid    uint64
-	scopes ScopesMap
+	uid                        uint64
+	scopes                     ScopesMap
+	collectionIdToNamespaceMap CollectionsManifestReverseLookupMap
 }
 
 func UnitTestGenerateCollManifest(uid uint64, scopes ScopesMap) *CollectionsManifest {
-	return &CollectionsManifest{uid, scopes}
+	return &CollectionsManifest{uid: uid, scopes: scopes}
 }
 
 func (c *CollectionsManifest) String() string {
@@ -119,16 +120,15 @@ func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint32) (sc
 		err = base.ErrorInvalidInput
 		return
 	}
-	for _, scope := range c.Scopes() {
-		for _, collection := range scope.Collections {
-			if collection.Uid == collectionId {
-				scopeName = scope.Name
-				collectionName = collection.Name
-				return
-			}
-		}
+
+	namespace, exists := c.collectionIdToNamespaceMap[collectionId]
+	if !exists {
+		err = base.ErrorNotFound
+		return
 	}
-	err = base.ErrorNotFound
+
+	scopeName = namespace.ScopeName
+	collectionName = namespace.CollectionName
 	return
 }
 
@@ -136,16 +136,17 @@ func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) 
 	if c == nil {
 		return 0, base.ErrorInvalidInput
 	}
-	for _, scope := range c.Scopes() {
-		if scopeName == scope.Name {
-			for _, collection := range scope.Collections {
-				if collection.Name == collectionName {
-					return collection.Uid, nil
-				}
-			}
-		}
+	scope, exists := c.Scopes()[scopeName]
+	if !exists {
+		return 0, base.ErrorNotFound
 	}
-	return 0, base.ErrorNotFound
+
+	collection, exists := scope.Collections[collectionName]
+	if !exists {
+		return 0, base.ErrorNotFound
+	}
+
+	return collection.Uid, nil
 }
 
 func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, source *CollectionsManifest) (backfillsNeeded CollectionNamespaceMapping, err error) {
@@ -171,6 +172,32 @@ func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, so
 	return
 }
 
+func (c *CollectionsManifest) generateReverseLookupMap() {
+	if c == nil {
+		return
+	}
+	c.collectionIdToNamespaceMap = make(CollectionsManifestReverseLookupMap)
+
+	for _, scope := range c.Scopes() {
+		for _, collection := range scope.Collections {
+			c.collectionIdToNamespaceMap[collection.Uid] = base.CollectionNamespace{
+				ScopeName:      scope.Name,
+				CollectionName: collection.Name,
+			}
+		}
+	}
+}
+
+type CollectionsManifestReverseLookupMap map[uint32]base.CollectionNamespace
+
+func (c CollectionsManifestReverseLookupMap) Clone() CollectionsManifestReverseLookupMap {
+	clonedMap := make(CollectionsManifestReverseLookupMap)
+	for k, v := range c {
+		clonedMap[k] = v.Clone()
+	}
+	return clonedMap
+}
+
 // Actual obj stored in metakv
 type collectionsMetaObj struct {
 	// data for unmarshalling and parsing
@@ -193,6 +220,7 @@ func NewDefaultCollectionsManifest() CollectionsManifest {
 
 	defaultManifest.scopes[base.DefaultScopeCollectionName] = defaultScope
 
+	defaultManifest.generateReverseLookupMap()
 	return defaultManifest
 }
 
@@ -216,12 +244,14 @@ func NewCollectionsManifestFromMap(manifestInfo map[string]interface{}) (Collect
 	if err != nil {
 		return manifest, err
 	}
+	manifest.generateReverseLookupMap()
 	return manifest, nil
 }
 
 func NewCollectionsManifestFromBytes(data []byte) (CollectionsManifest, error) {
 	var manifest CollectionsManifest
 	err := manifest.LoadBytes(data)
+	manifest.generateReverseLookupMap()
 	return manifest, err
 }
 
@@ -230,14 +260,16 @@ func TestNewCollectionsManifestFromBytesWithCustomUid(data []byte, uid uint64) (
 	var manifest CollectionsManifest
 	err := manifest.LoadBytes(data)
 	manifest.uid = uid
+	manifest.generateReverseLookupMap()
 	return manifest, err
 }
 
 // Does not clone temporary variables
 func (c CollectionsManifest) Clone() CollectionsManifest {
 	return CollectionsManifest{
-		uid:    c.uid,
-		scopes: c.scopes.Clone(),
+		uid:                        c.uid,
+		scopes:                     c.scopes.Clone(),
+		collectionIdToNamespaceMap: c.collectionIdToNamespaceMap.Clone(),
 	}
 }
 
@@ -356,6 +388,7 @@ func (c *CollectionsManifest) Load(collectionsMeta *collectionsMetaObj) error {
 			return base.ErrorInvalidInput
 		}
 	}
+	c.generateReverseLookupMap()
 	return nil
 }
 

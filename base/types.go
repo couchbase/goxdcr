@@ -200,6 +200,13 @@ func (c CollectionNamespace) IsSameAs(other CollectionNamespace) bool {
 	return c.ScopeName == other.ScopeName && c.CollectionName == other.CollectionName
 }
 
+func (c CollectionNamespace) Clone() CollectionNamespace {
+	return CollectionNamespace{
+		ScopeName:      c.ScopeName,
+		CollectionName: c.CollectionName,
+	}
+}
+
 type CollectionNamespacePtrList []*CollectionNamespace
 
 func (c CollectionNamespacePtrList) Len() int           { return len(c) }
