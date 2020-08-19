@@ -310,6 +310,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.ManifestRefreshSrcIntervalKey].(int),
 		internal_settings.Values[metadata.ManifestRefreshTgtIntervalKey].(int),
 		time.Duration(internal_settings.Values[metadata.BackfillPersistIntervalKey].(int64))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.TimeoutHttpsPortLookupKey].(int))*time.Second,
 	)
 }
 

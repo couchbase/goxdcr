@@ -159,6 +159,7 @@ const (
 	TimeoutPartsStopKey           = "TimeoutPartsStop"
 	TimeoutDcpCloseUprStreamsKey  = "TimeoutDcpCloseUprStreams"
 	TimeoutDcpCloseUprFeedKey     = "TimeoutDcpCloseUprFeed"
+	TimeoutHttpsPortLookupKey     = "TimeoutHttpsPortLookup"
 
 	/* --Resource menagement related settings ---*/
 
@@ -284,6 +285,7 @@ var TimeoutPartsStartConfig = &SettingsConfig{30, &Range{1, 3600}}
 var TimeoutPartsStopConfig = &SettingsConfig{10, &Range{1, 3600}}
 var TimeoutDcpCloseUprStreamsConfig = &SettingsConfig{3, &Range{1, 3600}}
 var TimeoutDcpCloseUprFeedConfig = &SettingsConfig{3, &Range{1, 3600}}
+var TimeoutHttpsPortLookupConfig = &SettingsConfig{int(base.HttpsPortLookupTimeout / time.Second), &Range{1, 3600}}
 var CpuCollectionIntervalConfig = &SettingsConfig{2000, &Range{10, 3600000}}
 var ResourceManagementIntervalConfig = &SettingsConfig{1000, &Range{10, 3600000}}
 var ResourceManagementStatsIntervalConfig = &SettingsConfig{10000, &Range{10, 3600000}}
@@ -376,6 +378,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TimeoutPartsStopKey:                           TimeoutPartsStopConfig,
 	TimeoutDcpCloseUprStreamsKey:                  TimeoutDcpCloseUprStreamsConfig,
 	TimeoutDcpCloseUprFeedKey:                     TimeoutDcpCloseUprFeedConfig,
+	TimeoutHttpsPortLookupKey:                     TimeoutHttpsPortLookupConfig,
 	CpuCollectionIntervalKey:                      CpuCollectionIntervalConfig,
 	ResourceManagementIntervalKey:                 ResourceManagementIntervalConfig,
 	ResourceManagementStatsIntervalKey:            ResourceManagementStatsIntervalConfig,

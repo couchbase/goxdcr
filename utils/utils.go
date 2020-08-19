@@ -1065,7 +1065,7 @@ func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger)
 	externalSSLErr = base.ErrorNoPortNumber
 
 	portInfo := make(map[string]interface{})
-	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodGet, "", nil, 0, &portInfo, nil, false, logger)
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.SSLPortsPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodGet, "", nil, base.HttpsPortLookupTimeout, &portInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusUnauthorized {
 		// SSLPorts request normally do not require any user credentials
 		// the only place unauthorized error could be returned is when target is elasticsearch cluster

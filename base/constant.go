@@ -697,6 +697,10 @@ var DefaultHttpTimeout = 180 * time.Second
 // to be shorter than that of the first one, which is currently 30 seconds. (seconds)
 var ShortHttpTimeout = 20 * time.Second
 
+// When contacting the remote cluster's NS server for getting HTTPS ports, it should not take long. But if necessary,
+// this can be changed
+var HttpsPortLookupTimeout = 2 * time.Second
+
 // max retry for live updating of pipelines
 var MaxRetryForLiveUpdatePipeline = 5
 
@@ -994,7 +998,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	filteringInternalKey string, filteringInternalXattr string,
 	remoteClusterAlternateAddrChangeCnt int,
 	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
-	backfillPersistInterval time.Duration) {
+	backfillPersistInterval time.Duration,
+	httpsPortLookupTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1104,6 +1109,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ManifestRefreshSrcInterval = manifestRefreshSrcInterval
 	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
 	BackfillPersistInterval = backfillPersistInterval
+	HttpsPortLookupTimeout = httpsPortLookupTimeout
 }
 
 // Need to escape the () to result in "META().xattrs" literal
