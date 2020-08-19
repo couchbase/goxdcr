@@ -176,7 +176,7 @@ func IsReplicationIdForTargetBucket(replicationId string, targetBucketName strin
 
 func IsAReplicationId(replicationId string) bool {
 	// The replication ID could have "backfill_" in front of it, or not... so don't enforce a ^ at the beginning
-	matched, _ := regexp.MatchString(fmt.Sprintf("[[:alnum:]]+%v[[:alnum:]]+%v[[:alnum:]]+$", base.KeyPartsDelimiter, base.KeyPartsDelimiter), replicationId)
+	matched, _ := regexp.MatchString("[[:alnum:]]+/[A-Za-z0-9._%-]+/[A-Za-z0-9._%-]+$", replicationId)
 	return matched
 }
 
