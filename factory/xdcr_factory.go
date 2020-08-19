@@ -467,8 +467,7 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 			}
 
 			dcpNozzle := parts.NewDcpNozzle(id,
-				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils,
-				service_def.CollectionsManifestReqFunc(getterFunc))
+				spec.SourceBucketName, spec.TargetBucketName, vbList, xdcrf.xdcr_topology_svc, isCapiReplication, logger_ctx, xdcrf.utils, getterFunc)
 			sourceNozzles[dcpNozzle.Id()] = dcpNozzle
 			xdcrf.logger.Debugf("Constructed source nozzle %v with vbList = %v \n", dcpNozzle.Id(), vbList)
 		}
@@ -975,10 +974,6 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
-	getterFunc := func(manifestUid uint64) (*metadata.CollectionsManifest, error) {
-		return xdcrf.collectionsManifestSvc.GetSpecificSourceManifest(spec, manifestUid)
-	}
-	dcpNozzleSettings[parts.DCP_Manifest_Getter] = service_def.CollectionsManifestReqFunc(getterFunc)
 
 	if repSettings.IsCapi() {
 		// For CAPI nozzle, do not allow DCP to have compression

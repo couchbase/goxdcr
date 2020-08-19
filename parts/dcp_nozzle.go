@@ -603,11 +603,6 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		return errors.New("setting 'stats_interval' is missing")
 	}
 
-	getterRaw, exists := settings[DCP_Manifest_Getter]
-	if exists {
-		dcp.specificManifestGetter = getterRaw.(service_def.CollectionsManifestReqFunc)
-	}
-
 	if !dcp.CollectionEnabled() {
 		if dcp.is_capi {
 			dcp.Logger().Warnf("Collections is not supported due to the use of CAPI nozzle - only the default collection on the source will be used for replication")
@@ -1083,7 +1078,6 @@ func (dcp *DcpNozzle) vbStreamEndIsOk(vbno uint16) bool {
 	return true
 }
 
-// TODO - MB-37984
 func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprEvent, error) {
 	if m.IsSystemEvent() || !m.IsCollectionType() || !dcp.CollectionEnabled() {
 		// Collection not used
@@ -1092,14 +1086,9 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 		return wrappedEvent, nil
 	}
 
-	if dcp.specificManifestGetter == nil {
-		// This is very odd error
-		dcp.Logger().Errorf("Collection seems to be not enabled but DCP is sending down collection information for vb %v seqno %v", m.VBucket, m.Seqno)
-		return nil, base.ErrorSourceCollectionsNotSupported
-	}
-
-	var mappedScopeName string = base.DefaultScopeCollectionName
-	var mappedColName string = base.DefaultScopeCollectionName
+	var mappedScopeName = base.DefaultScopeCollectionName
+	var mappedColName = base.DefaultScopeCollectionName
+	var collectionDNE bool
 
 	topManifestUid := atomic.LoadUint64(&dcp.vbHighestManifestUidArray[m.VBucket])
 	if m.CollectionId > 0 {
@@ -1127,7 +1116,10 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 			// VB events comes in sequence order, so the latest manifest must have the info for this collection data
 			manifest, err := dcp.specificManifestGetter(topManifestUid)
 			if err != nil {
-				dcp.Logger().Errorf("Vbno %v Asking for manifest %v got error: %v\n", m.VBucket, topManifestUid, err)
+				if err != PartStoppedError {
+					// When replication spec gets deleted, the spec may return this err while DCP is trying to finish up
+					dcp.Logger().Errorf("Vbno %v Asking for manifest %v got error: %v\n", m.VBucket, topManifestUid, err)
+				}
 				return nil, err
 			}
 			if manifest == nil {
@@ -1138,12 +1130,21 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 				dcp.Logger().Errorf("Vbno %v Asking for manifest %v got %v\n", m.VBucket, topManifestUid, manifest.Uid())
 				return nil, err
 			}
-			// TODO - need to change for explicit mapping
 			mappedScopeName, mappedColName, err = manifest.GetScopeAndCollectionName(m.CollectionId)
 			if err != nil {
-				err = fmt.Errorf("Document %v%v%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v returned err %v",
-					base.UdTagBegin, string(m.Key), base.UdTagEnd, m.VBucket, topManifestUid, manifest, m.CollectionId, err)
-				return nil, err
+				if manifest.Uid() > topManifestUid {
+					// When we request version X and then the manifest service sent us back version Y, where X < Y
+					// then it means that the service couldn't go back in time to give us what should have existed.
+					// If the collection ID does not exist in Y, but we think it should exist in X, then it means that
+					// the collection ID has been deleted between X and Y. This mutation should be skipped.
+					// This should be a very rare race condition but theoretically could occur
+					collectionDNE = true
+					err = nil
+				} else {
+					err = fmt.Errorf("Document %v%v%v: vb %v topManifestID: %v manifest: %v asking for collectionId: %v returned err %v",
+						base.UdTagBegin, string(m.Key), base.UdTagEnd, m.VBucket, topManifestUid, manifest, m.CollectionId, err)
+					return nil, err
+				}
 			}
 		}
 	}
@@ -1158,6 +1159,9 @@ func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprE
 	wrappedEvent := dcp.wrappedUprPool.Get()
 	wrappedEvent.UprEvent = m
 	wrappedEvent.ColNamespace = colInfo
+	if collectionDNE {
+		wrappedEvent.Flags.SetCollectionDNE()
+	}
 	return wrappedEvent, nil
 }
 

@@ -206,7 +206,7 @@ func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettings
 type dataBatch struct {
 	// The documents that need target metadata for source side conflict resolution.
 	// They can be documents larger than optimistic replication threshold or
-	// documents that needs source side custom conflict resolution. 
+	// documents that needs source side custom conflict resolution.
 	// Key of the map is the document unique key
 	getMeta_map base.McRequestMap
 	// tracks big docs that do not need to be replicated

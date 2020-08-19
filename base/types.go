@@ -221,6 +221,25 @@ func SortCollectionNamespacePtrList(list CollectionNamespacePtrList) CollectionN
 type WrappedUprEvent struct {
 	UprEvent     *mcc.UprEvent
 	ColNamespace *CollectionNamespace
+	Flags        WrappedUprEventFlag
+}
+
+type WrappedUprEventFlag uint64
+
+const (
+	WrappedUprCollectionDNE = 0x1
+)
+
+func (w WrappedUprEventFlag) IsSet() bool {
+	return uint64(w) > uint64(0)
+}
+
+func (w WrappedUprEventFlag) CollectionDNE() bool {
+	return w&WrappedUprCollectionDNE > 0
+}
+
+func (w *WrappedUprEventFlag) SetCollectionDNE() {
+	*w |= WrappedUprCollectionDNE
 }
 
 type TargetCollectionInfo struct {

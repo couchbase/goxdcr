@@ -230,3 +230,15 @@ func TestExplicitMatchFunc(t *testing.T) {
 	srcNamespace = &CollectionNamespace{ScopeName: "S3", CollectionName: "C1"}
 	assert.True(rules.ExplicitlyDenied(srcNamespace))
 }
+
+func TestWrappedFlags(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestWrappedFlags =================")
+	defer fmt.Println("============== Test case end: TestWrappedFlags =================")
+
+	wrappedUpr := WrappedUprEvent{}
+	assert.False(wrappedUpr.Flags.CollectionDNE())
+
+	wrappedUpr.Flags.SetCollectionDNE()
+	assert.True(wrappedUpr.Flags.CollectionDNE())
+}

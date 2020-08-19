@@ -1101,6 +1101,15 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		}
 	}
 
+	if wrappedUpr.Flags.IsSet() {
+		// Special flag handling here
+		if wrappedUpr.Flags.CollectionDNE() {
+			err := fmt.Errorf("collection ID %v no longer exists, so the data is not to be replicated", wrappedUpr.UprEvent.CollectionId)
+			router.RaiseEvent(common.NewEvent(common.DataNotReplicated, uprEvent, router, []interface{}{err}, nil))
+			return result, nil
+		}
+	}
+
 	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
 	router.dcpObjRecycler(wrappedUpr)
 	if err != nil {

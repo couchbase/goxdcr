@@ -782,10 +782,10 @@ func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uin
 	a.srcMtx.RLock()
 	manifest, ok := a.sourceCache[manifestVersion]
 	if !ok || manifest == nil {
-		var needEmergencyPull bool = true
+		var needEmergencyPull = true
 		if manifestVersion <= a.lastSourcePull {
 			// It is possible that when XDCR starts up, the collections manifest for a bucket is already at version Y
-			// If there's no checkpoint, DCP starts from 0 and could send down mutations that refer to manifest X
+			// If there's no checkpoint, DCP starts from 0 and could send down mutations that refer to manifest X, where X < Y
 			// If some collections exist in X but not in Y because they got deleted, those mutations will not be streamed
 			// by DCP.
 			// So if someone asks for X, and we don't have it, it should be safe to return Y
