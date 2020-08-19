@@ -44,8 +44,8 @@ const (
 	BlockProfileStopPath        = "profile/block/stop"
 	BucketSettingsPrefix        = "controller/bucketSettings"
 	XDCRInternalSettingsPath    = "xdcr/internalSettings"
-	XDCRPrometheusStatsPath     = "xdcr/_prometheusMetrics"
-	XDCRPrometheusStatsHighPath = "xdcr/_prometheusMetricsHigh"
+	XDCRPrometheusStatsPath     = "_prometheusMetrics"
+	XDCRPrometheusStatsHighPath = "_prometheusMetricsHigh"
 
 	// Some url paths are not static and have variable contents, e.g., settings/replications/$replication_id
 	// The message keys for such paths are constructed by appending the dynamic suffix below to the static portion of the path.
