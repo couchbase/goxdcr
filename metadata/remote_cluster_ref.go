@@ -86,7 +86,7 @@ type RemoteClusterReference struct {
 	mutex sync.RWMutex
 
 	// In-memory flag of whether or not the HostName_ field is a DNS SRV entry
-	hostNameIsDnsSrv bool
+	hostnameSRVType HostNameSrvType
 	// srv related things that need to be used by remote cluster agent
 	dnsSrvHelper baseH.DnsSrvHelperIface
 	srvEntries   SrvEntriesType
@@ -95,18 +95,51 @@ type RemoteClusterReference struct {
 	connectivityStatus string
 }
 
+type HostNameSrvType int
+
+const (
+	HostNameNonSRV    HostNameSrvType = iota
+	HostNameSRV       HostNameSrvType = iota
+	HostNameSecureSRV HostNameSrvType = iota
+)
+
+func (h *HostNameSrvType) SetSRV(secure bool) {
+	if secure {
+		*h = HostNameSecureSRV
+	} else {
+		*h = HostNameSRV
+	}
+}
+
+func (h *HostNameSrvType) ClearSRV() {
+	*h = HostNameNonSRV
+}
+
 type SrvEntriesType []SrvEntryType
 
 type SrvEntryType struct {
 	srv *net.SRV
 }
 
-func (s SrvEntryType) GetTarget() string {
+// Note - this method will return the port
+// For couchbase/couchbases service, the port is KV port
+// For now, return standard ports until MB-41083 is implemented
+func (s SrvEntryType) GetTargetConnectionString(srvType HostNameSrvType) (string, error) {
 	if s.srv == nil {
-		return ""
+		return "", base.ErrorInvalidSRVFormat
 	}
 	// SRV target always end with an extra period
-	return strings.TrimSuffix(s.srv.Target, ".")
+	hostname := strings.TrimSuffix(s.srv.Target, ".")
+	switch srvType {
+	case HostNameNonSRV:
+		return "", base.ErrorInvalidSRVFormat
+	case HostNameSRV:
+		return fmt.Sprintf("%v:%v", hostname, base.DefaultAdminPort), nil
+	case HostNameSecureSRV:
+		return fmt.Sprintf("%v:%v", hostname, base.DefaultAdminPortSSL), nil
+	default:
+		return "", base.ErrorInvalidSRVFormat
+	}
 }
 
 // Because Remote Cluster Reference doesn't care about weight or priority
@@ -251,7 +284,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterName] = ref.Name_
 	outputMap[base.RemoteClusterUri] = uri
 	outputMap[base.RemoteClusterValidateUri] = validateUri
-	outputMap[base.RemoteClusterHostName] = ref.HostName_
+	outputMap[base.RemoteClusterHostName] = ref.getHostNameForOutputNoLock()
 	outputMap[base.RemoteClusterUserName] = ref.UserName_
 	outputMap[base.RemoteClusterDeleted] = false
 	outputMap[base.RemoteClusterSecureType] = ref.SecureTypeString()
@@ -290,7 +323,7 @@ func (ref *RemoteClusterReference) IsSame(ref2 *RemoteClusterReference) bool {
 		defer ref2.mutex.RUnlock()
 		return reflect.DeepEqual(ref.revision, ref2.revision) && ref.HttpsHostName_ == ref2.HttpsHostName_ &&
 			ref.ActiveHostName_ == ref2.ActiveHostName_ && ref.ActiveHttpsHostName_ == ref2.ActiveHttpsHostName_ &&
-			ref.hostNameIsDnsSrv == ref2.hostNameIsDnsSrv && ref.srvEntries.SameAs(ref2.srvEntries)
+			ref.hostnameSRVType == ref2.hostnameSRVType && ref.srvEntries.SameAs(ref2.srvEntries)
 	}
 }
 
@@ -390,7 +423,7 @@ func (ref *RemoteClusterReference) LoadFrom(inRef *RemoteClusterReference) {
 	ref.loadNonActivesFromNoLock(inRef)
 	ref.ActiveHostName_ = inRef.ActiveHostName()
 	ref.ActiveHttpsHostName_ = inRef.ActiveHttpsHostName()
-	ref.hostNameIsDnsSrv = inRef.hostNameIsDnsSrv
+	ref.hostnameSRVType = inRef.hostnameSRVType
 	ref.srvEntries = inRef.srvEntries.Clone()
 	ref.dnsSrvHelper = inRef.dnsSrvHelper
 }
@@ -485,10 +518,10 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		HostnameMode_:      ref.HostnameMode_,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
-		revision:         ref.revision,
-		dnsSrvHelper:     ref.dnsSrvHelper,
-		hostNameIsDnsSrv: ref.hostNameIsDnsSrv,
-		srvEntries:       ref.srvEntries.Clone(),
+		revision:        ref.revision,
+		dnsSrvHelper:    ref.dnsSrvHelper,
+		hostnameSRVType: ref.hostnameSRVType,
+		srvEntries:      ref.srvEntries.Clone(),
 	}
 }
 
@@ -739,21 +772,27 @@ func (ref *RemoteClusterReference) Unmarshal(value []byte) error {
 func (ref *RemoteClusterReference) IsDnsSRV() bool {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
-	return ref.hostNameIsDnsSrv
+	return ref.isDnsSrvNoLock()
+}
+
+func (ref *RemoteClusterReference) isDnsSrvNoLock() bool {
+	return ref.hostnameSRVType != HostNameNonSRV
 }
 
 func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
 
-	if !ref.hostNameIsDnsSrv || len(ref.srvEntries) == 0 {
+	if !ref.isDnsSrvNoLock() || len(ref.srvEntries) == 0 {
 		return
 	}
 
 	for _, oneEntry := range ref.srvEntries {
-		// SRV entries always have end with a "."
-		targetHostname := strings.TrimSuffix(oneEntry.srv.Target, ".")
-		hostnameList = append(hostnameList, fmt.Sprintf("%v:%v", targetHostname, oneEntry.srv.Port))
+		connStr, err := oneEntry.GetTargetConnectionString(ref.hostnameSRVType)
+		if err != nil {
+			continue
+		}
+		hostnameList = append(hostnameList, connStr)
 	}
 	return
 }
@@ -781,26 +820,34 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(retryOnErr bool) {
 
 	var entries []*net.SRV
 	var err error
+	var lookupName string
+	var isSecure bool
 	for i := 0; i < 5; i++ {
 		// Dns srv lookup shouldn't fail - try 5 times
-		entries, err = ref.dnsSrvHelper.DnsSrvLookup(ref.getSRVLookupHostnameNoLock())
+		lookupName, err = ref.getSRVLookupHostnameNoLock()
+		if err != nil {
+			ref.hostnameSRVType.ClearSRV()
+			return
+		}
+		entries, isSecure, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
 		if err == nil || !retryOnErr {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	if err != nil {
-		ref.hostNameIsDnsSrv = false
+		ref.hostnameSRVType.ClearSRV()
 		return
 	}
-	ref.hostNameIsDnsSrv = true
+	ref.hostnameSRVType.SetSRV(isSecure)
 	for _, entry := range entries {
 		ref.srvEntries = append(ref.srvEntries, SrvEntryType{entry})
 	}
+
 	return
 }
 
-func (ref *RemoteClusterReference) getSRVLookupHostnameNoLock() string {
+func (ref *RemoteClusterReference) getSRVLookupHostnameNoLock() (string, error) {
 	lookupHostname := ref.HostName_
 
 	// Replication Manager should have called validate already, so hostname should be valid IPv4/IPv6/FQDN
@@ -808,14 +855,14 @@ func (ref *RemoteClusterReference) getSRVLookupHostnameNoLock() string {
 	if err == nil {
 		if portNumber != base.DefaultAdminPort && portNumber != base.DefaultAdminPortSSL {
 			// If port number is non-8091, not going to be a valid DnsSRV
-			return lookupHostname
+			return "", base.ErrorInvalidSRVFormat
 		} else {
 			// If 8091, strip it before DNS-SRV lookup. We assume that the user has set up DNS SRV correctly
 			// i.e. if they specified 18091, they should have DNS SRV entry pointing to the SSL adminport of the target
 			lookupHostname = base.GetHostName(lookupHostname)
 		}
 	}
-	return lookupHostname
+	return lookupHostname, nil
 }
 
 var ErrorNonSRV error = fmt.Errorf("Cannot call RefreshSRVEntries on a non-SRV entry")
@@ -828,13 +875,20 @@ func (ref *RemoteClusterReference) RefreshSRVEntries() (added, removed []*net.SR
 		err = ErrorNonSRV
 		return
 	}
+
+	var pulledEntries []*net.SRV
+	var latestIsSecure bool
+
 	ref.mutex.RLock()
-	pulledEntries, err := ref.dnsSrvHelper.DnsSrvLookup(ref.getSRVLookupHostnameNoLock())
+	lookupName, err := ref.getSRVLookupHostnameNoLock()
+	if err == nil {
+		pulledEntries, latestIsSecure, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
+	}
 	ref.mutex.RUnlock()
-	if err != nil {
+	if err != nil && err != base.ErrorInvalidSRVFormat {
 		for i := 0; i < 5; i++ {
 			ref.mutex.RLock()
-			pulledEntries, err = ref.dnsSrvHelper.DnsSrvLookup(ref.getSRVLookupHostnameNoLock())
+			pulledEntries, _, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
 			ref.mutex.RUnlock()
 			if err == nil {
 				break
@@ -844,26 +898,38 @@ func (ref *RemoteClusterReference) RefreshSRVEntries() (added, removed []*net.SR
 
 	ref.mutex.Lock()
 	defer ref.mutex.Unlock()
-	if ref.hostNameIsDnsSrv && err != nil {
-		ref.hostNameIsDnsSrv = false
+	if ref.isDnsSrvNoLock() && err != nil {
+		ref.hostnameSRVType.ClearSRV()
 		ref.srvEntries = ref.srvEntries[:0]
 		return
 	}
 
-	for _, oneEntry := range pulledEntries {
-		var found bool
+	// Check if secure type changed - if changed, refresh all the entries
+	if (ref.hostnameSRVType == HostNameSecureSRV && !latestIsSecure) ||
+		(ref.hostnameSRVType == HostNameSRV && latestIsSecure) {
+		ref.hostnameSRVType.SetSRV(latestIsSecure)
+		// Replace all the entries
 		for _, existingEntry := range ref.srvEntries {
-			if *oneEntry == *existingEntry.srv {
-				found = true
-				break
-			}
+			removed = append(removed, existingEntry.srv)
 		}
-		if !found {
-			added = append(added, oneEntry)
-			ref.srvEntries = append(ref.srvEntries, SrvEntryType{srv: oneEntry})
+		ref.srvEntries = SrvEntriesType{}
+		for _, pulledEntry := range pulledEntries {
+			added = append(added, pulledEntry)
+			ref.srvEntries = append(ref.srvEntries, SrvEntryType{srv: pulledEntry})
 		}
+		totalSRVEntries = len(ref.srvEntries)
+		return
 	}
 
+	added = ref.populateAddedEntries(pulledEntries, added)
+
+	removed = ref.populateRemovedEntries(pulledEntries, removed)
+
+	totalSRVEntries = len(ref.srvEntries)
+	return
+}
+
+func (ref *RemoteClusterReference) populateRemovedEntries(pulledEntries []*net.SRV, removed []*net.SRV) []*net.SRV {
 	var toRemove []*SrvEntryType
 	for _, existingEntry := range ref.srvEntries {
 		var found bool
@@ -891,9 +957,24 @@ func (ref *RemoteClusterReference) RefreshSRVEntries() (added, removed []*net.SR
 			ref.srvEntries = append(ref.srvEntries[:index], ref.srvEntries[index+1:]...)
 		}
 	}
+	return removed
+}
 
-	totalSRVEntries = len(ref.srvEntries)
-	return
+func (ref *RemoteClusterReference) populateAddedEntries(pulledEntries []*net.SRV, added []*net.SRV) []*net.SRV {
+	for _, oneEntry := range pulledEntries {
+		var found bool
+		for _, existingEntry := range ref.srvEntries {
+			if *oneEntry == *existingEntry.srv {
+				found = true
+				break
+			}
+		}
+		if !found {
+			added = append(added, oneEntry)
+			ref.srvEntries = append(ref.srvEntries, SrvEntryType{srv: oneEntry})
+		}
+	}
+	return added
 }
 
 var ErrorNoBootableSRVEntryFound = fmt.Errorf("None of the SRV entries are bootstrappable")
@@ -913,7 +994,14 @@ OUTERFOR:
 		for _, pair := range nodeAddressesList {
 			regHostName := base.GetHostName(pair.GetFirstString())
 			sslHostName := base.GetHostName(pair.GetSecondString())
-			if entry.GetTarget() == regHostName || entry.GetTarget() == sslHostName {
+			srvRegEntry, err := entry.GetTargetConnectionString(HostNameSRV)
+			srvSecureEntry, err2 := entry.GetTargetConnectionString(HostNameSecureSRV)
+			if err != nil || err2 != nil {
+				continue
+			}
+
+			// The nodeAddressesList should contain the port #, so does GetTargetConnectionString()
+			if srvRegEntry == regHostName || srvSecureEntry == sslHostName {
 				bootable = true
 				break OUTERFOR
 			}
@@ -948,7 +1036,10 @@ func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, lo
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(clonedEntries), func(i, j int) { clonedEntries[i], clonedEntries[j] = clonedEntries[j], clonedEntries[i] })
 	for _, entry := range clonedEntries {
-		hostAddr := entry.GetTarget()
+		hostAddr, err := entry.GetTargetConnectionString(ref.hostnameSRVType)
+		if err != nil {
+			continue
+		}
 		checkUuid, err := getter(hostAddr, ref.UserName_, ref.Password_, ref.HttpAuthMech_, ref.Certificate_, ref.SANInCertificate_, ref.ClientCertificate_, ref.ClientKey_, logger)
 		if err != nil {
 			// Skip and check a next one
@@ -980,4 +1071,16 @@ func (ref *RemoteClusterReference) UnitTestSetSRVHelper(helper baseH.DnsSrvHelpe
 	ref.mutex.Lock()
 	defer ref.mutex.Unlock()
 	ref.dnsSrvHelper = helper
+}
+
+func (ref *RemoteClusterReference) getHostNameForOutputNoLock() interface{} {
+	if ref.isDnsSrvNoLock() {
+		portNumber, err := base.GetPortNumber(ref.HostName_)
+		if err != nil {
+			return ref.HostName_
+		}
+		return strings.TrimSuffix(ref.HostName_, fmt.Sprintf("%v%v", base.UrlPortNumberDelimiter, portNumber))
+	} else {
+		return ref.HostName_
+	}
 }

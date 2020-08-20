@@ -220,6 +220,12 @@ const (
 var ParseIntBase = 10
 var ParseIntBitSize = 64
 
+const CouchbaseDnsServiceName = "couchbase"
+const CouchbaseSecureDnsServiceName = "couchbases"
+
+var CouchbaseUri = fmt.Sprintf("%v://", CouchbaseDnsServiceName)
+var CouchbaseSecureUri = fmt.Sprintf("%v://", CouchbaseSecureDnsServiceName)
+
 // Various error messages
 var ErrorNotResponding = errors.New("Not responding")
 var ErrorNotOK = errors.New("Not OK")
@@ -271,6 +277,8 @@ var ErrorRouterRequestRetry = errors.New("Request is in retry queue")
 var ErrorIgnoreRequest = errors.New("Request should be ignored")
 var ErrorXmemCollectionSubErr = errors.New(StringTargetCollectionMappingErr)
 var ErrorRequestAlreadyIgnored = errors.New("Request has been marked ignored")
+var ErrorInvalidSRVFormat = errors.New("hostname format is not SRV")
+var ErrorSdkUriNotSupported = fmt.Errorf("XDCR currently does not support %v or %v URI. If using DNS SRV, remove the URI prefix", CouchbaseUri, CouchbaseSecureUri)
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -512,7 +520,7 @@ const (
 	ConflictResolutionType_Lww   = "lww"
 )
 
-var UnexpectedEOF = "unexpected EOF"
+const EOFString = "EOF"
 
 // flag for memcached to enable lww to lww bucket replication
 var FORCE_ACCEPT_WITH_META_OPS uint32 = 0x02

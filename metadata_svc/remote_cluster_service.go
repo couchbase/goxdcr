@@ -2448,6 +2448,10 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 			// we will need to retrieve https port from target and compute https address
 			refHttpsHostName, _, err = service.getHttpsRemoteHostAddr(refHostName)
 			if err != nil {
+				if strings.Contains(err.Error(), base.EOFString) {
+					err = fmt.Errorf("%v; %v", err.Error(),
+						"This could be due to the target cluster does not allow half-encryption. Try with full encryption instead")
+				}
 				return err
 			}
 		} else {
@@ -2537,6 +2541,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 
 	ref.SetSANInCertificate(refSANInCertificate)
 	service.logger.Infof("Set hostName=%v, httpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
+
 	return nil
 }
 
@@ -2546,7 +2551,7 @@ func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (st
 		if err.Error() == base.ErrorUnauthorized.Error() {
 			return "", "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
 		} else {
-			return "", "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. err=%v", hostName, err))
+			return "", "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port. err=%v", err))
 		}
 	}
 

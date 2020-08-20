@@ -1074,7 +1074,11 @@ func (u *Utilities) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger)
 		return
 	}
 	if err != nil || statusCode != http.StatusOK {
-		internalSSLErr = fmt.Errorf("Failed on calling %v on host %v, err=%v, statusCode=%v", base.SSLPortsPath, hostAddr, err, statusCode)
+		if strings.Contains(err.Error(), hostAddr) {
+			internalSSLErr = fmt.Errorf("failed on err=%v, statusCode=%v", err, statusCode)
+		} else {
+			internalSSLErr = fmt.Errorf("failed on calling %v on host %v, err=%v, statusCode=%v", base.SSLPortsPath, hostAddr, err, statusCode)
+		}
 		return
 	}
 

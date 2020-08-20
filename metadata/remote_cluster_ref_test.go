@@ -15,19 +15,21 @@ import (
 var dnsSrvHostname string = "xdcr.couchbase.target.local"
 var invalidHostName = fmt.Sprintf("%v:%v", dnsSrvHostname, 12345)
 
+const localhostIP = "192.168.0.1"
+
 func setupDNSMocks() *baseH.DnsSrvHelperIface {
 	helper := &baseH.DnsSrvHelperIface{}
 	oneEntry := &net.SRV{
 		// NOTE - SRV entries for "name" will end with a .
 		// See actual output in DnsSrvHelper in base package
-		Target: "192.168.0.1.",
+		Target: localhostIP,
 		Port:   9001,
 	}
 	var entryList []*net.SRV
 	var emptyList []*net.SRV
 	entryList = append(entryList, oneEntry)
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, nil)
-	helper.On("DnsSrvLookup", invalidHostName).Return(emptyList, fmt.Errorf("Invalid"))
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, false, nil)
+	helper.On("DnsSrvLookup", invalidHostName).Return(emptyList, false, fmt.Errorf("Invalid"))
 	return helper
 }
 
@@ -36,31 +38,47 @@ func setupDNS2Nodes() *baseH.DnsSrvHelperIface {
 	oneEntry := &net.SRV{
 		// NOTE - SRV entries for "name" will end with a .
 		// See actual output in DnsSrvHelper in base package
-		Target: "192.168.0.1.",
+		Target: localhostIP,
 		Port:   9001,
 	}
 	secondEntry := &net.SRV{
-		Target: "192.168.0.1.",
+		Target: localhostIP,
 		Port:   9002,
 	}
 	var entryList []*net.SRV
 	entryList = append(entryList, oneEntry)
 	entryList = append(entryList, secondEntry)
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, nil)
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, false, nil)
 	return helper
 }
 
 func setupEmptyDNS() *baseH.DnsSrvHelperIface {
 	helper := &baseH.DnsSrvHelperIface{}
 	var emptyList []*net.SRV
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, nil)
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, false, nil)
 	return helper
 }
 
 func setupErrDNS() *baseH.DnsSrvHelperIface {
 	helper := &baseH.DnsSrvHelperIface{}
 	var emptyList []*net.SRV
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, fmt.Errorf("Dummy"))
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, false, fmt.Errorf("Dummy"))
+	return helper
+}
+
+func setupDNSSecureMocks() *baseH.DnsSrvHelperIface {
+	helper := &baseH.DnsSrvHelperIface{}
+	oneEntry := &net.SRV{
+		// NOTE - SRV entries for "name" will end with a .
+		// See actual output in DnsSrvHelper in base package
+		Target: localhostIP,
+		Port:   19001,
+	}
+	var entryList []*net.SRV
+	var emptyList []*net.SRV
+	entryList = append(entryList, oneEntry)
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, true, nil)
+	helper.On("DnsSrvLookup", invalidHostName).Return(emptyList, false, fmt.Errorf("Invalid"))
 	return helper
 }
 
@@ -95,7 +113,26 @@ func TestNewRefWithDNSSrv(t *testing.T) {
 	assert.NotEqual(0, len(ref.srvEntries))
 
 	hostnameList := ref.GetSRVHostNames()
-	assert.Equal("192.168.0.1:9001", hostnameList[0])
+	//assert.Equal("192.168.0.1:9001", hostnameList[0])
+	// Ensure that 8091 is returned because Couchbase DNS SRV record ports are KV ports (MB-41083)
+	assert.Equal(fmt.Sprintf("%v:%v", localhostIP, base.DefaultAdminPort), hostnameList[0])
+
+	// test GetTargetConnectionString() to return the correct one
+	for _, entry := range ref.srvEntries {
+		assert.NotEqual(uint16(8091), entry.srv.Port)
+		targetConnStr, err := entry.GetTargetConnectionString(HostNameSRV)
+		assert.Nil(err)
+		portNo, err := base.GetPortNumber(targetConnStr)
+		assert.Nil(err)
+		assert.Equal(base.DefaultAdminPort, portNo)
+		targetHostname := base.GetHostName(targetConnStr)
+		assert.Equal(localhostIP, targetHostname)
+		targetConnStr, err = entry.GetTargetConnectionString(HostNameSecureSRV)
+		assert.Nil(err)
+		portNo, err = base.GetPortNumber(targetConnStr)
+		assert.Nil(err)
+		assert.Equal(base.DefaultAdminPortSSL, portNo)
+	}
 
 	added, removed, totalCnt, err := ref.RefreshSRVEntries()
 	assert.Equal(0, len(removed))
@@ -160,4 +197,27 @@ func TestNewRefWithDNSSrvInvalidPort(t *testing.T) {
 	assert.False(ref.IsDnsSRV())
 	assert.Equal(0, len(ref.srvEntries))
 	fmt.Println("============== Test case end: TestDNSSrvInvalidPort =================")
+}
+
+func TestNewRefWithDNSSrvSecure(t *testing.T) {
+	fmt.Println("============== Test case start: TestNewRefWithDNSSrvSecure =================")
+	defer fmt.Println("============== Test case done: TestNewRefWithDNSSrvSecure =================")
+
+	assert := assert.New(t)
+
+	helper := setupDNSSecureMocks()
+
+	ref, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
+		"", false, "", nil, nil, nil, helper)
+
+	ref.PopulateDnsSrvIfNeeded(true)
+
+	// Test SameAs
+	assert.True(ref.IsDnsSRV())
+	assert.NotEqual(0, len(ref.srvEntries))
+
+	hostnameList := ref.GetSRVHostNames()
+	assert.Equal(fmt.Sprintf("%v:%v", localhostIP, base.DefaultAdminPortSSL), hostnameList[0])
+	assert.Equal(HostNameSecureSRV, ref.hostnameSRVType)
+
 }

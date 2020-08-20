@@ -13,15 +13,28 @@ package base
 import "net"
 
 type DnsSrvHelperIface interface {
-	DnsSrvLookup(hostname string) (srvEntries []*net.SRV, err error)
+	DnsSrvLookup(hostname string) (srvEntries []*net.SRV, isSecure bool, err error)
 }
 
 type DnsSrvHelper struct{}
 
+const CouchbaseService = "couchbase"
+const CouchbaseSecureService = "couchbases"
+const TCPProto = "tcp"
+
 // NOTE - SRV entries for "name" will end with a .
 // i.e. 192.168.0.1.
-func (dsh *DnsSrvHelper) DnsSrvLookup(hostname string) (srvEntries []*net.SRV, err error) {
-	_, addrs, err := net.LookupSRV("", "", hostname)
+func (dsh *DnsSrvHelper) DnsSrvLookup(hostname string) (srvEntries []*net.SRV, isSecure bool, err error) {
+	// First look up regular
+	_, addrs, err := net.LookupSRV(CouchbaseService, TCPProto, hostname)
+	if err == nil {
+		srvEntries = addrs
+		return
+	}
+
+	// Then secure
+	isSecure = true
+	_, addrs, err = net.LookupSRV(CouchbaseSecureService, TCPProto, hostname)
 	srvEntries = addrs
 	return
 }

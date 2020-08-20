@@ -12,7 +12,7 @@ type DnsSrvHelperIface struct {
 }
 
 // DnsSrvLookup provides a mock function with given fields: hostname
-func (_m *DnsSrvHelperIface) DnsSrvLookup(hostname string) ([]*net.SRV, error) {
+func (_m *DnsSrvHelperIface) DnsSrvLookup(hostname string) ([]*net.SRV, bool, error) {
 	ret := _m.Called(hostname)
 
 	var r0 []*net.SRV
@@ -24,12 +24,19 @@ func (_m *DnsSrvHelperIface) DnsSrvLookup(hostname string) ([]*net.SRV, error) {
 		}
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
+	var r1 bool
+	if rf, ok := ret.Get(1).(func(string) bool); ok {
 		r1 = rf(hostname)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(bool)
 	}
 
-	return r0, r1
+	var r2 error
+	if rf, ok := ret.Get(2).(func(string) error); ok {
+		r2 = rf(hostname)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }

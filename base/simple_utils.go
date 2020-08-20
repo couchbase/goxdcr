@@ -570,6 +570,12 @@ func GetPortNumber(hostAddr string) (uint16, error) {
 
 // validate host address [provided by user at remote cluster reference creation time]
 func ValidateHostAddr(hostAddr string) (string, error) {
+	// Make sure users do not use SDK URI until XDCR can support full CCCP bootstrap
+	// TODO - MB-41083
+	if strings.HasPrefix(hostAddr, CouchbaseUri) || strings.HasPrefix(hostAddr, CouchbaseSecureUri) {
+		return "", ErrorSdkUriNotSupported
+	}
+
 	// validate port number
 	_, err := GetPortNumber(hostAddr)
 	if err != nil {
@@ -1508,7 +1514,7 @@ func ValidateAndConvertStringToJsonType(value string) (map[string]interface{}, e
 func FindTargetBodyWithoutXattr(resp *gomemcached.MCResponse) []byte {
 	body := resp.Body
 	xattrlen := binary.BigEndian.Uint32(body[2:6])
-	if len(body) == int(xattrlen) + 6 {
+	if len(body) == int(xattrlen)+6 {
 		return nil
 	} else {
 		return body[6+xattrlen+6:]
