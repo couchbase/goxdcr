@@ -174,10 +174,54 @@ func IsReplicationIdForTargetBucket(replicationId string, targetBucketName strin
 	}
 }
 
+// Looks for both:
+// 136082a7c89ccdc9aed81cb04a97720f/B1/B2
+// and
+// backfill_136082a7c89ccdc9aed81cb04a97720f/B1/B2
+const ReplicationIdRegexpStr = "([a-z]+_)*([[:alnum:]]+)/([A-Za-z0-9._%-]+)/([A-Za-z0-9._%-]+)$"
+
+var replicationRegexpGroupCount = 5
+
 func IsAReplicationId(replicationId string) bool {
 	// The replication ID could have "backfill_" in front of it, or not... so don't enforce a ^ at the beginning
-	matched, _ := regexp.MatchString("[[:alnum:]]+/[A-Za-z0-9._%-]+/[A-Za-z0-9._%-]+$", replicationId)
+	matched, _ := regexp.MatchString(ReplicationIdRegexpStr, replicationId)
 	return matched
+}
+
+type ReplIdComposition struct {
+	TargetClusterUUID string
+	SourceBucketName  string
+	TargetBucketName  string
+	PipelineType      string
+}
+
+var decompositionRegexp = regexp.MustCompile(ReplicationIdRegexpStr)
+
+func DecomposeReplicationId(replicationId string, reuseStruct *ReplIdComposition) *ReplIdComposition {
+	if !IsAReplicationId(replicationId) {
+		return reuseStruct
+	}
+
+	var compositionStruct = reuseStruct
+	if compositionStruct == nil {
+		compositionStruct = &ReplIdComposition{}
+	}
+
+	submatches := decompositionRegexp.FindStringSubmatch(replicationId)
+	if len(submatches) != replicationRegexpGroupCount {
+		panic("FIXME")
+	}
+
+	if len(submatches[1]) > 0 {
+		// For now, only backfill
+		compositionStruct.PipelineType = "Backfill"
+	} else {
+		compositionStruct.PipelineType = "Main"
+	}
+	compositionStruct.TargetClusterUUID = submatches[2]
+	compositionStruct.SourceBucketName = submatches[3]
+	compositionStruct.TargetBucketName = submatches[4]
+	return compositionStruct
 }
 
 func GetSourceBucketNameFromReplicationId(replicationId string) (string, error) {

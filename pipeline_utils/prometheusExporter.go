@@ -24,10 +24,16 @@ type ExpVarExporter interface {
 }
 
 const (
-	PrometheusReplIdLabel = "repl_id"
+	PrometheusTargetClusterUuidLabel = "targetClusterUUID"
+	PrometheusSourceBucketLabel      = "sourceBucketName"
+	PrometheusTargetBucketLabel      = "targetBucketName"
+	PrometheusPipelineTypeLabel      = "pipelineType"
 )
 
-var PrometheusReplIdLabelBytes = []byte(PrometheusReplIdLabel)
+var PrometheusTargetClusterUuidBytes = []byte(PrometheusTargetClusterUuidLabel)
+var PrometheusSourceBucketBytes = []byte(PrometheusSourceBucketLabel)
+var PrometheusTargetBucketBytes = []byte(PrometheusTargetBucketLabel)
+var PrometheusPipelineTypeBytes = []byte(PrometheusPipelineTypeLabel)
 
 type PrometheusExporter struct {
 	// Read only
@@ -144,24 +150,55 @@ type ReplicationStatsMap map[string]*PerReplicationStatType
 
 // Prometheus only stores numerical values - ns_server request them to be in float64
 type PerReplicationStatType struct {
-	Properties        service_def.StatsProperty
-	Value             interface{}
-	OutputBuffer      []byte
-	outputValueBuffer []byte
+	Properties                service_def.StatsProperty
+	Value                     interface{}
+	OutputBuffer              []byte
+	outputValueBuffer         []byte
+	ReplIdDecompositionStruct *metadata.ReplIdComposition
 }
 
 func (t *PerReplicationStatType) UpdateOutputBuffer(metricName []byte, replId string) {
 	// Output looks like:
-	// metric_name {label_name=\"<replId>\"} <value>
+	// metric_name {label_name=\"<labelVal>\", ...} <value>
 	// Ends with a newline, but won't output it here
 	t.OutputBuffer = t.OutputBuffer[:0]
 	t.OutputBuffer = append(t.OutputBuffer, metricName...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte(" {")...)
-	t.OutputBuffer = append(t.OutputBuffer, PrometheusReplIdLabelBytes...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte(replId)...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("\"} ")...)
+	t.appendLabels(replId)
 	t.appendOutputBufferWithValue()
+}
+
+func (t *PerReplicationStatType) appendLabels(replId string) {
+	// {
+	t.OutputBuffer = append(t.OutputBuffer, []byte(" {")...)
+
+	t.ReplIdDecompositionStruct = metadata.DecomposeReplicationId(replId, t.ReplIdDecompositionStruct)
+
+	// { targetClusterUUID="abcdef",
+	t.OutputBuffer = append(t.OutputBuffer, PrometheusTargetClusterUuidBytes...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.TargetClusterUUID)...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("\", ")...)
+
+	// { targetClusterUUID="abcdef", sourceBucketName="b1",
+	t.OutputBuffer = append(t.OutputBuffer, PrometheusSourceBucketBytes...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.SourceBucketName)...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("\", ")...)
+
+	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2",
+	t.OutputBuffer = append(t.OutputBuffer, PrometheusTargetBucketBytes...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.TargetBucketName)...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("\", ")...)
+
+	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main"
+	t.OutputBuffer = append(t.OutputBuffer, PrometheusPipelineTypeBytes...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.PipelineType)...)
+	t.OutputBuffer = append(t.OutputBuffer, []byte("\"")...)
+
+	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main"}
+	t.OutputBuffer = append(t.OutputBuffer, []byte("} ")...)
 }
 
 func (t *PerReplicationStatType) GetValueBaseUnit() interface{} {
