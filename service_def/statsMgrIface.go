@@ -206,6 +206,7 @@ func (sm StatisticsPropertyMap) GetPrometheusMetricType(internalConst string) (s
 // Anything else that should belong in statsMgr but is not meant for exporting should not be here
 // Note, the statsMgr OVERVIEW stats must include the metric as a prerequisite
 // UTF-8 for the Description but do not include backslash "\" nor newline char
+// ns_server prefers that any "calculated" stats not to be exported (i.e. rate)
 var GlobalStatsTable = StatisticsPropertyMap{
 	DOCS_WRITTEN_METRIC:          StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of docs written/sent to target cluster"},
 	EXPIRY_DOCS_WRITTEN_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of expiry written to target"},
@@ -240,13 +241,13 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	NUM_CHECKPOINTS_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The number of times checkpoint operation has completed successfully since this XDCR process instance is made aware of this replication"},
 	TIME_COMMITING_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes for a checkpoint operation to complete"},
 	NUM_FAILEDCKPTS_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The number of times checkpoint operation has encountered an error since this XDCR process instance is made aware of this replication"},
-	RATE_DOC_CHECKS_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which documents are being checkpointed"},
+	//RATE_DOC_CHECKS_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which documents are being checkpointed"},
 
 	DOCS_OPT_REPD_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents optimistically replicated to the target"},
-	RATE_OPT_REPD_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which documents are being replicated optimistically"},
+	//RATE_OPT_REPD_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which documents are being replicated optimistically"},
 
 	DOCS_RECEIVED_DCP_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The number of set operations received from DCP"},
-	RATE_RECEIVED_DCP_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which XDCR is receiving documents from DCP for this replication"},
+	//RATE_RECEIVED_DCP_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which XDCR is receiving documents from DCP for this replication"},
 
 	EXPIRY_RECEIVED_DCP_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The subset of documents received from DCP that either 1.) Is a DCP expiration or 2) Is a document that contains an expiration time"},
 	DELETION_RECEIVED_DCP_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The subset of documents received from DCP that is a Delete action"},
@@ -259,8 +260,8 @@ var GlobalStatsTable = StatisticsPropertyMap{
 
 	THROUGHPUT_THROTTLE_LATENCY_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average of the latency time introduced due to throughput throttler"},
 
-	RATE_REPLICATED_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which documents from this node are being replicated to target nodes"},
-	BANDWIDTH_USAGE_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMegaBytesPerSecond}, LowCardinality, "The data rate at which documents from this node are being replicated to target nodes"},
+	//RATE_REPLICATED_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which documents from this node are being replicated to target nodes"},
+	//BANDWIDTH_USAGE_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMegaBytesPerSecond}, LowCardinality, "The data rate at which documents from this node are being replicated to target nodes"},
 
 	DP_GET_FAIL_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation"},
 }
