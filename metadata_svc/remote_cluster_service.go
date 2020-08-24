@@ -50,6 +50,7 @@ var RefreshAlreadyActive = errors.New("There is a refresh that is ongoing")
 var RefreshAborted = errors.New("Refresh instance was called to be aborted")
 var DeleteAlreadyIssued = errors.New("Underlying remote cluster reference has been already deleted manually")
 var WriteToMetakvErrString = "Error writing to metakv"
+var NoSuchHostRecommendationString = " Check to see if firewall config is incorrect, or if Couchbase Cloud, check to see if source IP is allowed"
 
 func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
@@ -2347,6 +2348,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			}
 		}
 	}
+
 	// get remote cluster uuid from the map
 	if updateRef {
 		actualUuid, ok := clusterInfo[base.RemoteClusterUuid]
@@ -2437,9 +2439,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 			refHostName = srvHosts[0]
 		}
 	}
-	var externalRefHttpsHostName string
 	var err error
-	var err1 error
 
 	if refHttpsHostName == "" {
 		if !ref.IsFullEncryption() {
@@ -2462,34 +2462,12 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 	}
 
-	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err, refHttpsHostName := service.getDefaultPoolInfoAndAuthMech(ref, refHostName, refHttpsHostName)
 	if err != nil {
-		if !ref.IsFullEncryption() {
-			return wrapAsInvalidRemoteClusterError(err.Error())
+		if strings.Contains(err.Error(), base.RESTNoSuchHost) {
+			err = wrapNoSuchHostRecommendationError(err.Error())
 		}
-
-		// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
-		// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
-		refHttpsHostName, externalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
-		if err1 != nil {
-			// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
-			errMsg := fmt.Sprintf("Cannot use HostName, %v, as a https address or a http address. Error when using it as a https address=%v\n. Error when using it as a http address=%v\n", ref.HostName(), err, err1)
-			return wrapAsInvalidRemoteClusterError(errMsg)
-		}
-
-		// now we potentially have valid https address, re-do security settings retrieval
-		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
-		if err != nil {
-			if len(externalRefHttpsHostName) > 0 {
-				// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
-				// as a last resort, try that for a third time
-				refHttpsHostName = externalRefHttpsHostName
-				refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
-			}
-			if err != nil {
-				return wrapAsInvalidRemoteClusterError(err.Error())
-			}
-		}
+		return err
 	}
 
 	// by now defaultPoolInfo contains valid info
@@ -2543,6 +2521,135 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 	service.logger.Infof("Set hostName=%v, httpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
 
 	return nil
+}
+
+// For full encryption mode, uses can either enter hostname:<nonSecurePort> or hostname:<securePort>
+// The procedure is try to establish conn and get defaultPoolInfo using whatever has been entered
+// If the user entered securePort, all is well. However, if they entered a non-secure port (or didn't enter anything at all)
+// then the call below will fail, and we'll need to figure out the SSL port by using getHttpsRemoteHostAddr(), if it's possible
+// The second part of "figuring out https" if the first fails, can be done in parallel to save time
+// This method lets both go at the same time, and whoever comes back first with a valid result wins
+func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata.RemoteClusterReference, refHostName string, refHttpsHostNameIn string) (bool, base.HttpAuthMech, map[string]interface{}, error, string) {
+	// Synchronization primitives for racing
+	firstWinnerCh := make(chan bool)
+	secondWinnerCh := make(chan bool)
+	finCh := make(chan bool)
+
+	shouldBail := func() bool {
+		select {
+		case <-finCh:
+			return true
+		default:
+			return false
+		}
+	}
+
+	// First go-routine
+	var refSANInCertificate bool
+	var refHttpAuthMech base.HttpAuthMech
+	var defaultPoolInfo map[string]interface{}
+	var refHttpsHostName = refHttpsHostNameIn
+	var err error
+
+	// second go-routine
+	var bgSANInCertificate bool
+	var bgRefHttpAuthMech base.HttpAuthMech
+	var bgDefaultPoolInfo map[string]interface{}
+	var bgRefHttpsHostName = refHttpsHostNameIn
+	var bgExternalRefHttpsHostName string
+	var bgErr error
+
+	go func() {
+		defer close(firstWinnerCh)
+		// Attempt to retrieve defaultPoolInfo with what the user initially entered
+		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+	}()
+
+	// If half-mode, no need to do the following to look up ports, etc
+	if ref.IsFullEncryption() {
+		portNo, err := base.GetPortNumber(refHostName)
+		tryDefaultSSLAdminPort := err == nil && portNo == base.DefaultAdminPort
+		go func() {
+			defer close(secondWinnerCh)
+			// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
+			// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
+			var err1 error
+			bgRefHttpsHostName, bgExternalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
+			if err1 != nil && !tryDefaultSSLAdminPort {
+				// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
+				bgErr = err1
+				return
+			}
+			if tryDefaultSSLAdminPort {
+				bgExternalRefHttpsHostName = ""
+				bgRefHttpsHostName = base.GetHostAddr(base.GetHostName(refHostName), base.DefaultAdminPortSSL)
+			}
+
+			if shouldBail() {
+				return
+			}
+
+			// now we potentially have valid https address, re-do security settings retrieval
+			bgSANInCertificate, bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+			if bgErr != nil {
+				if len(bgExternalRefHttpsHostName) > 0 {
+					if shouldBail() {
+						return
+					}
+					// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
+					// as a last resort, try that for a third time
+					bgRefHttpsHostName = bgExternalRefHttpsHostName
+					bgSANInCertificate, bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+				}
+			}
+			return
+		}()
+	}
+
+	// When returning, always close finCh
+	defer close(finCh)
+
+	select {
+	case <-firstWinnerCh:
+		if err != nil {
+			if !ref.IsFullEncryption() {
+				// There is no second go-routine
+				close(secondWinnerCh)
+				return false, 0, nil, wrapAsInvalidRemoteClusterError(err.Error()), ""
+			}
+			select {
+			case <-secondWinnerCh:
+				if bgErr != nil {
+					bgErr = getCombinedError(ref, err, bgErr)
+				}
+				return bgSANInCertificate, bgRefHttpAuthMech, bgDefaultPoolInfo, bgErr, bgRefHttpsHostName
+			}
+		} else {
+			// The original entered reference hostname was successful
+			return refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err, refHttpsHostName
+		}
+	case <-secondWinnerCh:
+		if bgErr != nil {
+			select {
+			case <-firstWinnerCh:
+				if err != nil {
+					bgErr = getCombinedError(ref, err, bgErr)
+					return bgSANInCertificate, bgRefHttpAuthMech, bgDefaultPoolInfo, bgErr, bgRefHttpsHostName
+				} else {
+					return refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err, refHttpsHostName
+				}
+			}
+		} else {
+			// Second path succeeded - return immediately and don't wait for the first path
+			return bgSANInCertificate, bgRefHttpAuthMech, bgDefaultPoolInfo, bgErr, bgRefHttpsHostName
+		}
+	}
+}
+
+func getCombinedError(ref *metadata.RemoteClusterReference, err error, bgErr error) error {
+	errMsg := fmt.Sprintf("cannot use HostName, %v, as a https address or a http address. Error when using it as a http address=%v, and https address=%v\n", ref.HostName(), err, bgErr)
+	bgErr = wrapAsInvalidRemoteClusterError(errMsg)
+	return bgErr
 }
 
 func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (string, string, error) {
@@ -2867,6 +2974,10 @@ func wrapAsInvalidRemoteClusterError(errMsg string) error {
 // wrap/mark an error as invalid remote cluster operation error - by adding "invalid remote cluster operation" message to the front
 func wrapAsInvalidRemoteClusterOperationError(errMsg string) error {
 	return errors.New(InvalidRemoteClusterOperationErrorMessage + errMsg)
+}
+
+func wrapNoSuchHostRecommendationError(errMsg string) error {
+	return errors.New(errMsg + NoSuchHostRecommendationString)
 }
 
 func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error) (bool, error) {

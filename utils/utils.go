@@ -2605,7 +2605,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	targetHasScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
 	if scramShaEnabled && targetHasScramShaSupport && httpAuthMech != base.HttpAuthMechScramSha {
 		// do not fall back to https if target is vulcan and up
-		return false, base.HttpAuthMechPlain, nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v using SCRAM-SHA authentication. Please check whether SCRAM-SHA is enabled on target.", hostAddr)
+		return false, base.HttpAuthMechPlain, nil, statusCode, fmt.Errorf("Failed to retrieve security settings from host=%v using SCRAM-SHA authentication. Please check whether SCRAM-SHA is enabled on target.", hostAddr)
 	}
 
 	if scramShaEnabled && !targetHasScramShaSupport && httpAuthMech == base.HttpAuthMechScramSha {
@@ -2634,7 +2634,7 @@ func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password
 		// return a specific error to allow caller to fall back to https
 		return nil, statusCode, TargetMayNotSupportScramShaError
 	} else {
-		return nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v using scram sha, err=%v, statusCode=%v", hostAddr, err, statusCode)
+		return nil, statusCode, fmt.Errorf("Failed to retrieve security settings from host=%v using scram sha, err=%v, statusCode=%v", hostAddr, err, statusCode)
 	}
 }
 
@@ -2659,12 +2659,12 @@ func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, passwo
 				return nil, statusCode, u.getUnauthorizedError(username)
 			} else {
 				// if the second try still fails, return error
-				return nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
+				return nil, statusCode, fmt.Errorf("Failed to retrieve security settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
 			}
 		} else if statusCode == http.StatusUnauthorized {
 			return nil, statusCode, u.getUnauthorizedError(username)
 		} else {
-			return nil, statusCode, fmt.Errorf("Failed to retrieve secruity settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
+			return nil, statusCode, fmt.Errorf("Failed to retrieve security settings from host=%v, err=%v, statusCode=%v", hostHttpsAddr, err, statusCode)
 		}
 	}
 }

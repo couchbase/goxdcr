@@ -33,6 +33,7 @@ var DefaultAdminPortSSL uint16 = 18091
 
 const RESTInvalidPath = "Invalid path"
 const RESTHttpReq = "in http request"
+const RESTNoSuchHost = "no such host"
 
 // Exponential backoff factor
 var MetaKvBackoffFactor = 2

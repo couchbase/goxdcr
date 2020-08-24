@@ -98,12 +98,18 @@ func setupMocksRCS(uiLogSvcMock *service_def.UILogSvc,
 	// metakv mock
 	setupMetaSvcMockGeneric(metadataSvcMock, remoteClusterRef)
 
+	setupXDCRTopologyMock(xdcrTopologyMock)
+
 	// utils mock
 	utilsMockFunc()
 
 	// UI svc
 	uiLogSvcMock.On("Write", mock.Anything).Return(nil)
 
+}
+
+func setupXDCRTopologyMock(topologyMock *service_def.XDCRCompTopologySvc) {
+	topologyMock.On("IsMyClusterEnterprise").Return(true, nil)
 }
 
 func setupMetaSvcMockGeneric(metadataSvcMock *service_def.MetadataSvc, remoteClusterRef *metadata.RemoteClusterReference) {
@@ -446,6 +452,14 @@ func createRemoteClusterReferenceIntOnly(id string) *metadata.RemoteClusterRefer
 func createRemoteClusterReferenceDNSSRV(id string, helper base2.DnsSrvHelperIface) *metadata.RemoteClusterReference {
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, dnsSrvHostname, "", "", metadata.HostnameMode_Internal, false, "", nil, nil,
 		nil, helper)
+	aRef.SetId(id)
+	return aRef
+}
+
+var dummySelfSignedCert = []byte("-----BEGIN CERTIFICATE-----\nMIIB/TCCAWagAwIBAgIIFi5FqJcUd6AwDQYJKoZIhvcNAQELBQAwJDEiMCAGA1UE\nAxMZQ291Y2hiYXNlIFNlcnZlciAxN2ViMGZjZDAeFw0xMzAxMDEwMDAwMDBaFw00\nOTEyMzEyMzU5NTlaMCQxIjAgBgNVBAMTGUNvdWNoYmFzZSBTZXJ2ZXIgMTdlYjBm\nY2QwgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAL2wCiFGsxdn4Uw95KxlcCJt\nfdzl5N8NNRbDTmeONJjb7nmYIsGQgyBJAEpRFkGqbCaPi1MrQ5KTAWnA7OE5Puhu\npHHUaSFg74Ns3+5L05Rwj4pemQkFlNeX37b3uB8S6T4XoXi12bGWScE+s1twKM2p\nC8BUYyjP/o8NwH6/eEk3AgMBAAGjODA2MA4GA1UdDwEB/wQEAwICpDATBgNVHSUE\nDDAKBggrBgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4GB\nACZJN5HlJBimKNbD/Mzfy3vuEWRf9R3vA7QSSUlvckGcTh8v0HjdkxP6PO8+rulY\n1356Mi3S7Nw0DAXu/uRHMXA8MUMfsS3Lco1if2pjc9XjY7KeMDk7J13Xy3VoMSg5\nqpUM/4CL4gK0f4gbkV2vQC2+b8PRx3dhn8twGWW378YY\n-----END CERTIFICATE-----\n")
+
+func createSSLRemoteClusterRef(id string, helper base2.DnsSrvHelperIface) *metadata.RemoteClusterReference {
+	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "username", "passworD", metadata.HostnameMode_Internal, true, metadata.EncryptionType_Full, dummySelfSignedCert, nil, nil, helper)
 	aRef.SetId(id)
 	return aRef
 }
@@ -2246,4 +2260,86 @@ func TestConnHelper(t *testing.T) {
 	assert.Equal(ConnDegraded, helper.GetOverallStatus())
 
 	fmt.Println("============== Test case end: TestConnHelper =================")
+}
+
+func setupUtilsAdminBlockedAndSSLIsOK(utilitiesMock *utilsMock.UtilsIface) {
+	// Simulate time it takes for the network to respond saying it's blocked
+	blockedTime := 500 * time.Millisecond
+	utilitiesMock.On("GetClusterInfo", hostname, base.DefaultPoolPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(blockedTime) }).Return(nil, fmt.Errorf("AdminPortBlocked"))
+	utilitiesMock.On("GetExternalMgtHostAndPort", mock.Anything, mock.Anything).Return("", -1, base.ErrorNoPortNumber)
+
+	// Default port blocks TLS handshake but can return internal SSL port
+	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, "", nil)
+
+	defaultPoolInfo, _ := getClusterInfoMockInt()
+	// SSL port is ok to get it
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Return(false, base.HttpAuthMechHttps, defaultPoolInfo, http.StatusOK, nil)
+	// Non-SSL port on security default pool, block it
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Run(func(arguments mock.Arguments) { time.Sleep(blockedTime) }).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
+
+	// These are proxy calls to actual real utils
+	nodeList, _ := testUtils.GetNodeListFromInfoMap(defaultPoolInfo, nil)
+	utilitiesMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(nodeList, nil)
+	nodeAddressesList, _ := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, hostname, true, nil, false)
+	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", nodeList, hostname, true, mock.Anything, false).Return(nodeAddressesList, nil)
+	clusterInfo, _ := getPools70()
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostnameSSL, base.PoolsPath, mock.Anything, mock.Anything, base.HttpAuthMechHttps, dummySelfSignedCert, false, mock.Anything, mock.Anything, mock.Anything).Return(clusterInfo, nil, http.StatusOK)
+}
+
+func TestParallelSecureGet(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestParallelSecureGet =================")
+	defer fmt.Println("============== Test case done: TestParallelSecureGet =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	// 8091 is blocked but 18091 is ok
+	utilsMockFunc := func() {
+		setupUtilsAdminBlockedAndSSLIsOK(utilitiesMock)
+	}
+
+	idAndName := "test"
+
+	ref := createSSLRemoteClusterRef(idAndName, nil)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	assert.Nil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
+}
+
+func setupUtilsBothAdminPortsBlocked(utilitiesMock *utilsMock.UtilsIface) {
+	// Simulate time it takes for the network to respond saying it's blocked
+	blockedTime := 500 * time.Millisecond
+	utilitiesMock.On("GetClusterInfo", hostname, base.DefaultPoolPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(blockedTime) }).Return(nil, fmt.Errorf("AdminPortBlocked"))
+	utilitiesMock.On("GetExternalMgtHostAndPort", mock.Anything, mock.Anything).Return("", -1, base.ErrorNoPortNumber)
+
+	// Default port blocks TLS handshake but can return internal SSL port
+	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, "", nil)
+
+	// Block both
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Run(func(arguments mock.Arguments) { time.Sleep(blockedTime) }).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
+}
+
+func TestParallelSecureGetFail(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestParallelSecureGetFail =================")
+	defer fmt.Println("============== Test case done: TestParallelSecureGetFail =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	// 8091 and 18091 both blocked
+	utilsMockFunc := func() {
+		setupUtilsBothAdminPortsBlocked(utilitiesMock)
+	}
+
+	idAndName := "test"
+
+	ref := createSSLRemoteClusterRef(idAndName, nil)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	assert.NotNil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
 }
