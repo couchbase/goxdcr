@@ -165,6 +165,10 @@ type DataFilteredAdditional struct {
 	ManifestId uint64
 }
 
+type SentCasChangedEventAdditional struct {
+	Opcode mc.CommandCode
+}
+
 // does not return error since the assumption is that settings have been validated prior
 func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettingsMap) {
 	if val, ok := settings[SETTING_BATCHSIZE]; ok {

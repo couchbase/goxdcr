@@ -57,6 +57,13 @@ type DataMergedEventAdditional struct {
 	ManifestId     uint64
 }
 
+type DataMergeCasChangedEventAdditional struct {
+	Seqno       uint64
+	IsExpirySet bool
+	VBucket     uint16
+	ManifestId  uint64
+}
+
 type ConflictManager struct {
 	*component.AbstractComponent
 	pipeline          common.Pipeline
@@ -244,7 +251,7 @@ func (c *ConflictManager) formatResultAndSend(id int, input *base.ConflictParams
 	specs = append(specs, spec)
 
 	newbody := make([]byte, bodylen)
-	req := c.composeRequestForSubdocMutation(specs, input.Source.Req, newbody)
+	req := c.composeRequestForSubdocMutation(specs, input.Source.Req, newbody, true)
 
 retry:
 	select {
@@ -293,6 +300,20 @@ retry:
 			} else if base.IsCollectionMappingError(response.Status) {
 				// TODO: MB-41120. Need to call upstreamErrReporter here similar to XMEM
 				return
+			} else if base.IsEExistsError(response.Status) {
+				// request failed because source Cas changed. We can ignore it since it will converge to new mutation.
+				req := input.Source.Req
+				isExpirySet := false
+				if len(req.Extras) >= 4 {
+					isExpirySet = (binary.BigEndian.Uint32(req.Extras[:4]) != 0)
+				}
+				additionalInfo := DataMergeCasChangedEventAdditional{
+					Seqno:       input.Source.Seqno,
+					IsExpirySet: isExpirySet,
+					VBucket:     req.VBucket,
+					ManifestId:  input.Source.GetManifestId(),
+				}
+				c.RaiseEvent(common.NewEvent(common.MergeCasChanged, nil, c, nil, additionalInfo))
 			} else {
 				c.Logger().Errorf("%v formatResultAndSend(id %v): received error response from subdoc_multi_mutation client for custom CR. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n",
 					c.pipeline.FullTopic(), id, response.Status, response.Opcode, input.Source.Seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
@@ -301,12 +322,17 @@ retry:
 				goto retry
 			}
 		} else {
+			req := input.Source.Req
+			isExpirySet := false
+			if len(req.Extras) >= 4 {
+				isExpirySet = (binary.BigEndian.Uint32(req.Extras[:4]) != 0)
+			}
 			additionalInfo := DataMergedEventAdditional{
 				Seqno:          input.Source.Seqno,
 				Commit_time:    time.Since(input.Source.Start_time), // time from routing to merged and acknowledged by source cluster
 				Resp_wait_time: time.Since(sent_time),
 				Opcode:         req.Opcode,
-				IsExpirySet:    false, //TODO: MB-40825: Make sure expiry is set correctly
+				IsExpirySet:    isExpirySet,
 				VBucket:        req.VBucket,
 				Req_size:       req.Size(),
 				ManifestId:     input.Source.GetManifestId(),
@@ -405,8 +431,9 @@ func (c *ConflictManager) getPoolName() string {
 	return c.pipeline.Topic() + "conflictManager/"
 }
 
-// If document body is included, it must be specified as the last path in the specs
-func (c *ConflictManager) composeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, bodyslice []byte) *mc.MCRequest {
+// If document body is included, it must be specified as the last path in the specs.
+// If caslock is true, source.Cas must match the document. Otherwise it will fail with KEY_EEXIST
+func (c *ConflictManager) composeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, bodyslice []byte, caslock bool) *mc.MCRequest {
 	// Each path has: 1B Opcode -> 1B flag -> 2B path length -> 4B value length -> path -> value
 	pos := 0
 	for i := 0; i < len(specs); i++ {
@@ -423,11 +450,19 @@ func (c *ConflictManager) composeRequestForSubdocMutation(specs []SubdocMutation
 		n = copy(bodyslice[pos:], specs[i].value)
 		pos = pos + n
 	}
-
+	var cas uint64 = 0
+	if caslock {
+		cas = source.Cas
+	}
+	var extras []byte
+	if binary.BigEndian.Uint32(source.Extras[4:8]) != 0 {
+		extras = source.Extras[4:8]
+	}
 	req := mc.MCRequest{Opcode: base.SUBDOC_MULTI_MUTATION,
 		VBucket: source.VBucket,
 		Key:     source.Key,
-		Opaque:  source.Opaque,
+		Cas:     cas,
+		Extras:  extras,
 		Body:    bodyslice[:pos]}
 	return &req
 }

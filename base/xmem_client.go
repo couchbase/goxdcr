@@ -229,7 +229,8 @@ func IsNetError(err error) bool {
 }
 
 // check if memcached response status indicates ignorable error, which requires no corrective action at all
-func IsIgnorableMCResponse(resp *gomemcached.MCResponse) bool {
+// If caslock is true, resp.Status will be KEY_EEXISTS if cas does not match
+func IsIgnorableMCResponse(resp *gomemcached.MCResponse, caslock bool) bool {
 	if resp == nil {
 		return false
 	}
@@ -238,7 +239,11 @@ func IsIgnorableMCResponse(resp *gomemcached.MCResponse) bool {
 	case gomemcached.KEY_ENOENT:
 		return true
 	case gomemcached.KEY_EEXISTS:
-		return true
+		if caslock {
+			return false
+		} else {
+			return true
+		}
 	case gomemcached.SUBDOC_BAD_MULTI: // This means at least one path failed for subdoc_multi_ commands. Only ignorable for multi_lookup.
 		if resp.Opcode == SUBDOC_MULTI_LOOKUP {
 			return true
@@ -304,6 +309,15 @@ func IsTopologyChangeMCError(resp_status gomemcached.Status) bool {
 func IsCollectionMappingError(resp_status gomemcached.Status) bool {
 	switch resp_status {
 	case gomemcached.UNKNOWN_COLLECTION:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsEExistsError(resp_status gomemcached.Status) bool {
+	switch resp_status {
+	case gomemcached.KEY_EEXISTS:
 		return true
 	default:
 		return false

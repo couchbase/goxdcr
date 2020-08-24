@@ -95,6 +95,8 @@ func GetErrorXmemTargetUnknownCollection(mcr *base.WrappedMCRequest) error {
 
 var ErrorXmemIsStuck = errors.New("Xmem is stuck")
 
+var ErrorBufferInvalidState = errors.New("xmem buffer is in invalid state")
+
 type ConflictResolver func(doc_metadata_source documentMetadata, doc_metadata_target documentMetadata, source_cr_mode base.ConflictResolutionMode, xattrEnabled bool, logger *log.CommonLogger) bool
 
 var GetMetaClientName = "client_getMeta"
@@ -1476,7 +1478,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							receivedEvent = common.GetReceived
 						}
 						xmem.RaiseEvent(common.NewEvent(receivedEvent, nil, xmem, nil, additionalInfo))
-						if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response) && !base.IsTemporaryMCError(response.Status) &&
+						if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, false) && !base.IsTemporaryMCError(response.Status) &&
 							!base.IsCollectionMappingError(response.Status) {
 							if base.IsTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
@@ -1490,6 +1492,8 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 								// no need to wait further since connection has been reset
 								return
 							}
+						} else if base.IsTemporaryMCError(response.Status) && !isGetMeta {
+							xmem.client_for_getMeta.IncrementBackOffFactor()
 						}
 					} else {
 						panic("KeySeqno list is not formated as expected [string, uint64, time]")
@@ -1760,7 +1764,6 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) (noRep_map map[string]NeedSendStatus, getDoc_map base.McRequestMap, err error) {
 	noRep_map = make(map[string]NeedSendStatus)
 	getDoc_map = make(base.McRequestMap)
-
 	for i := 0; i < xmem.config.maxRetry; i++ {
 		respMap, err := xmem.sendBatchGetRequest(getMeta_map, xmem.config.maxRetry, false /* include_doc */)
 		if err != nil {
@@ -2393,7 +2396,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			} else if response == nil {
 				errMsg := fmt.Sprintf("%v readFromClient returned nil error and nil response. Ignoring it", xmem.Id())
 				xmem.Logger().Warn(errMsg)
-			} else if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response) {
+			} else if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, xmem.source_cr_mode == base.CRMode_Custom) {
 				if base.IsMutationLockedError(response.Status) {
 					// if target mutation is currently locked, resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -2412,6 +2415,22 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					//resend and reset the retry=0 as retry is an indicator of network status,
 					//here we have received the response, so reset retry=0
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
+				} else if base.IsEExistsError(response.Status) && xmem.source_cr_mode == base.CRMode_Custom {
+					// request failed because target Cas changed. Raise event.
+					pos := xmem.getPosFromOpaque(response.Opaque)
+					wrappedReq, _, err := xmem.buf.slotWithSentTime(pos)
+					if err != nil {
+						xmem.Logger().Errorf("%v xmem buffer is in invalid state", xmem.Id())
+						xmem.handleGeneralError(ErrorBufferInvalidState)
+						goto done
+					}
+					additionalInfo := SentCasChangedEventAdditional{
+						Opcode: wrappedReq.Req.Opcode,
+					}
+					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, nil, additionalInfo))
+
+					// Put it back to the next batch so we can retry conflict resolution
+					xmem.accumuBatch(wrappedReq)
 				} else {
 					var req *mc.MCRequest = nil
 					var seqno uint64
@@ -2455,7 +2474,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				wrappedReq, sent_time, err := xmem.buf.slotWithSentTime(pos)
 				if err != nil {
 					xmem.Logger().Errorf("%v xmem buffer is in invalid state", xmem.Id())
-					xmem.handleGeneralError(errors.New("xmem buffer is in invalid state"))
+					xmem.handleGeneralError(ErrorBufferInvalidState)
 					goto done
 				}
 				var req *mc.MCRequest

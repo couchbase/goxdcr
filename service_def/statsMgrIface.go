@@ -32,16 +32,21 @@ type StatsMgrIface interface {
 
 const (
 	// the number of docs written/sent to target cluster
-	DOCS_WRITTEN_METRIC          = "docs_written"
-	EXPIRY_DOCS_WRITTEN_METRIC   = "expiry_docs_written"
-	DELETION_DOCS_WRITTEN_METRIC = "deletion_docs_written"
-	SET_DOCS_WRITTEN_METRIC      = "set_docs_written"
-	ADD_DOCS_WRITTEN_METRIC      = "add_docs_written"
+	DOCS_WRITTEN_METRIC              = "docs_written"
+	EXPIRY_DOCS_WRITTEN_METRIC       = "expiry_docs_written"
+	DELETION_DOCS_WRITTEN_METRIC     = "deletion_docs_written"
+	SET_DOCS_WRITTEN_METRIC          = "set_docs_written"
+	ADD_DOCS_WRITTEN_METRIC          = "add_docs_written"
+	DELETION_DOCS_CAS_CHANGED_METRIC = "deletion_docs_cas_changed"
+	SET_DOCS_CAS_CHANGED_METRIC      = "set_docs_cas_changed"
+	ADD_DOCS_CAS_CHANGED_METRIC      = "add_docs_cas_changed"
 
 	// the number of docs merged and sent to source cluster
-	DOCS_MERGED_METRIC        = "docs_merged"
-	DATA_MERGED_METRIC        = "data_merged"
-	EXPIRY_DOCS_MERGED_METRIC = "expiry_docs_merged"
+	DOCS_MERGED_METRIC              = "docs_merged"
+	DATA_MERGED_METRIC              = "data_merged"
+	EXPIRY_DOCS_MERGED_METRIC       = "expiry_docs_merged"
+	DOCS_MERGE_CAS_CHANGED_METRIC   = "docs_merge_cas_changed"
+	EXPIRY_MERGE_CAS_CHANGED_METRIC = "expiry_merge_cas_changed"
 
 	// the number of docs processed by pipeline
 	DOCS_PROCESSED_METRIC  = "docs_processed"
@@ -221,9 +226,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	SET_DOCS_WRITTEN_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of sets written to target"},
 	ADD_DOCS_WRITTEN_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of adds successfully written to target, meaning that target does not have the identical doc by name"},
 
-	DOCS_MERGED_METRIC:        StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of conflicting docs successfully merged"},
-	EXPIRY_DOCS_MERGED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of expiry merged and written to source"},
-	DATA_MERGED_METRIC:        StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data merged for a replication"},
+	DELETION_DOCS_CAS_CHANGED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of deletion failed because target cas changed"},
+	SET_DOCS_CAS_CHANGED_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of set failed because target cas changed"},
+	ADD_DOCS_CAS_CHANGED_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of add failed because target cas changed"},
+
+	DOCS_MERGED_METRIC:              StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of conflicting docs successfully merged"},
+	EXPIRY_DOCS_MERGED_METRIC:       StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of expiry merged and written to source"},
+	DATA_MERGED_METRIC:              StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data merged for a replication"},
+	DOCS_MERGE_CAS_CHANGED_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of merges failed because source cas changed"},
+	EXPIRY_MERGE_CAS_CHANGED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of expiry merges failed because source cas changed"},
 
 	DOCS_PROCESSED_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of docs processed for a replication"},
 	DATA_REPLICATED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data replicated for a replication"},

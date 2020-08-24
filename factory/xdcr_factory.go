@@ -404,6 +404,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		data_throttled_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataThrottledEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		data_sent_cas_changed_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentCasChangedEventListener, i),
+			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			out_nozzle := targets[index]
@@ -412,6 +415,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.GetReceived, get_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_meta_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataThrottled, data_throttled_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.DataSentCasChanged, data_sent_cas_changed_event_listener)
 		}
 	}
 }

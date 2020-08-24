@@ -339,6 +339,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	conflictMgr := pipeline.RuntimeContext().Service(base.CONFLICT_MANAGER_SVC)
 	if conflictMgr != nil {
 		conflictMgr.(*pipeline_svc.ConflictManager).RegisterComponentEventListener(common.DataMerged, tsTracker)
+		conflictMgr.(*pipeline_svc.ConflictManager).RegisterComponentEventListener(common.MergeCasChanged, tsTracker)
 	}
 
 	//register pipeline supervisor as through seqno service's error handler
@@ -427,6 +428,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
 		manifestId := event.OtherInfos.(parts.DataSentEventAdditional).ManifestId
+		tsTracker.addSentSeqno(vbno, seqno)
+		tsTracker.addManifestId(vbno, seqno, manifestId)
+	case common.MergeCasChanged:
+		// Cas changed count as sent. We will converge to new mutation in the source
+		vbno := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).VBucket
+		seqno := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).Seqno
+		manifestId := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).ManifestId
 		tsTracker.addSentSeqno(vbno, seqno)
 		tsTracker.addManifestId(vbno, seqno, manifestId)
 	case common.DataMerged:

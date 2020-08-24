@@ -1013,6 +1013,10 @@ func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipelin
 	registry.Register(service_def.MERGE_LATENCY_METRIC, merge_latency)
 	resp_wait := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
 	registry.Register(service_def.RESP_WAIT_METRIC, resp_wait)
+	docs_merge_cas_changed := metrics.NewCounter()
+	registry.Register(service_def.DOCS_MERGE_CAS_CHANGED_METRIC, docs_merge_cas_changed)
+	expiry_merge_cas_changed := metrics.NewCounter()
+	registry.Register(service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC, expiry_merge_cas_changed)
 
 	metric_map := make(map[string]interface{})
 	metric_map[service_def.DOCS_MERGED_METRIC] = docs_merged
@@ -1020,9 +1024,12 @@ func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipelin
 	metric_map[service_def.EXPIRY_DOCS_MERGED_METRIC] = expiry_docs_merged
 	metric_map[service_def.MERGE_LATENCY_METRIC] = merge_latency
 	metric_map[service_def.RESP_WAIT_METRIC] = resp_wait
+	metric_map[service_def.DOCS_MERGE_CAS_CHANGED_METRIC] = docs_merge_cas_changed
+	metric_map[service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC] = expiry_merge_cas_changed
 	conflictMgr_collector.component_map[conflictManager.Id()] = metric_map
 
 	conflictManager.RegisterComponentEventListener(common.DataMerged, conflictMgr_collector)
+	conflictManager.RegisterComponentEventListener(common.MergeCasChanged, conflictMgr_collector)
 
 	return nil
 }
@@ -1058,7 +1065,14 @@ func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Ev
 		metric_map[service_def.MERGE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 		metric_map[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
 	}
+	if event.EventType == common.MergeCasChanged {
+		event_otherInfo := event.OtherInfos.(DataMergeCasChangedEventAdditional)
+		metric_map[service_def.DOCS_MERGE_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
 
+		if event_otherInfo.IsExpirySet {
+			metric_map[service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		}
+	}
 	return nil
 }
 
@@ -1117,7 +1131,13 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		dp_failed := metrics.NewCounter()
 		registry.Register(service_def.DP_GET_FAIL_METRIC, dp_failed)
 		get_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
-		registry.Register(service_def.META_LATENCY_METRIC, meta_latency)
+		registry.Register(service_def.META_LATENCY_METRIC, get_latency)
+		deletion_cas_changed := metrics.NewCounter()
+		registry.Register(service_def.DELETION_DOCS_CAS_CHANGED_METRIC, deletion_cas_changed)
+		set_cas_changed := metrics.NewCounter()
+		registry.Register(service_def.SET_DOCS_CAS_CHANGED_METRIC, set_cas_changed)
+		add_cas_changed := metrics.NewCounter()
+		registry.Register(service_def.ADD_DOCS_CAS_CHANGED_METRIC, add_cas_changed)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1138,6 +1158,9 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.META_LATENCY_METRIC] = meta_latency
 		metric_map[service_def.THROTTLE_LATENCY_METRIC] = throttle_latency
 		metric_map[service_def.GET_LATENCY_METRIC] = get_latency
+		metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC] = deletion_cas_changed
+		metric_map[service_def.SET_DOCS_CAS_CHANGED_METRIC] = set_cas_changed
+		metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC] = add_cas_changed
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -1151,6 +1174,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetMetaReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentCasChangedEventListener, outNozzle_collector)
 
 	return nil
 }
@@ -1234,6 +1258,16 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		metric_map[service_def.THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
 	} else if event.EventType == common.DataPoolGetFail {
 		metric_map[service_def.DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
+	} else if event.EventType == common.DataSentCasChanged {
+		event_otherInfos := event.OtherInfos.(parts.SentCasChangedEventAdditional)
+		opcode := event_otherInfos.Opcode
+		if opcode == base.DELETE_WITH_META {
+			metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		} else if opcode == base.SET_WITH_META {
+			metric_map[service_def.SET_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		} else if opcode == base.ADD_WITH_META {
+			metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		}
 	}
 
 	return nil

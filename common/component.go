@@ -25,8 +25,12 @@ const (
 	DataProcessed ComponentEventType = iota
 	//data sent to and acknowledged by the target system
 	DataSent ComponentEventType = iota
+	//data sent failed because of Cas change
+	DataSentCasChanged ComponentEventType = iota
 	// Data merged and send to and acknowledged by source bucket
 	DataMerged ComponentEventType = iota
+	// set merge result failed because source Cas changed
+	MergeCasChanged ComponentEventType = iota
 	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
 	//data is unable to be successfully parsed to be filtered

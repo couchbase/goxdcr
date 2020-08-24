@@ -466,6 +466,7 @@ const (
 	DataProcessedEventListener           = "DataProcessedEventListener"
 	DataFilteredEventListener            = "DataFilteredEventListener"
 	DataSentEventListener                = "DataSentEventListener"
+	DataSentCasChangedEventListener      = "DataSentCasChangedEventListener"
 	DataFailedCREventListener            = "DataFailedCREventListener"
 	GetReceivedEventListener             = "GetReceivedEventListener"
 	GetMetaReceivedEventListener         = "GetMetaReceivedEventListener"
