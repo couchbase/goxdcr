@@ -285,7 +285,7 @@ func TestBackfillMgrSourceCollectionCleanedUp(t *testing.T) {
 	for _, tasks := range v9BackfillTaskMap {
 		mappings := tasks.GetAllCollectionNamespaceMappings()
 		for _, mapping := range mappings {
-			_, _, exists := mapping.Get(checkSourceNs)
+			_, _, _, exists := mapping.Get(checkSourceNs)
 			assert.False(exists)
 		}
 	}

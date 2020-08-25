@@ -1,0 +1,95 @@
+# Copyright (c) 2019-2020 Couchbase, Inc.
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the
+# License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific language governing permissions
+# and limitations under the License.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+# Replicate US filter to target B2:S3:col1
+# Replicate NonUS to target B2:S3:col2
+US_filter='(country == \"United States\" OR country = \"Canada\") AND type=\"brewery\"'
+NonUS_filter='country != \"United States\" AND country != \"Canada\" AND type=\"brewery\"'
+
+mappingRule="{\"$US_filter\":\"S3:col1\",\"$NonUS_filter\":\"S3:col2\"}"
+
+declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 \
+ ["collectionsExplicitMapping"]=true ["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B2"]="S3")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+
+function runDataLoad {
+	beerSample=`locate beer-sample.zip | grep install | grep samples | head -n 1`
+	runDocLoader "C1" "B1" "$beerSample"
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running basic collections migration test case"
+	echo "============================================================================"
+	testForClusterRun
+	if (( $? != 0 ));then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (( $? != 0 ));then
+		exit $?
+	fi
+	
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+
+	echo "Loading beer sample on source cluster..."
+	runDataLoad
+
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+
+	createBucketReplication "C1" "B1" "C2" "B2" MigrationReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	#echo "Waiting 5 seconds before checking item count first pass"
+	#sleep 5
+	#checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	#checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+ 	cleanupBuckets
+ 	cleanupRemoteClusterRefs
+}

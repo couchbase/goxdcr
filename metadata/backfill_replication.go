@@ -787,7 +787,13 @@ func (b BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (s
 	var filterCollectionList []uint32
 	for _, requestedCollection := range b.RequestedCollections() {
 		for sourceNamespace, _ := range requestedCollection {
-			cid, err := latestSrcManifest.GetCollectionId(sourceNamespace.ScopeName, sourceNamespace.CollectionName)
+			var scopeName string = sourceNamespace.ScopeName
+			var collectionName string = sourceNamespace.CollectionName
+			if sourceNamespace.GetType() == SourceDefaultCollectionFilter {
+				scopeName = base.DefaultScopeCollectionName
+				collectionName = base.DefaultScopeCollectionName
+			}
+			cid, err := latestSrcManifest.GetCollectionId(scopeName, collectionName)
 			if err != nil {
 				errMap[fmt.Sprintf("Manifest %v looking up %v:%v", latestSrcManifest.Uid(), sourceNamespace.ScopeName, sourceNamespace.CollectionName)] = err
 				continue

@@ -406,7 +406,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.Colle
 		// Check to see if this source namespace has already been marked denied, which means
 		// it wasn't even in the rules to be matched
 		c.brokenDenyMtx.RLock()
-		_, _, exists := c.denyMapping.Get(namespace)
+		_, _, _, exists := c.denyMapping.Get(namespace)
 		c.brokenDenyMtx.RUnlock()
 		if exists {
 			err = base.ErrorIgnoreRequest
@@ -517,7 +517,7 @@ func (c *CollectionsRouter) implicitMap(namespace *base.CollectionNamespace, lat
 	if err == base.ErrorNotFound {
 
 		c.brokenDenyMtx.RLock()
-		_, _, exists := c.brokenMapping.Get(namespace)
+		_, _, _, exists := c.brokenMapping.Get(namespace)
 		c.brokenDenyMtx.RUnlock()
 
 		if exists {
@@ -533,11 +533,11 @@ func (c *CollectionsRouter) implicitMap(namespace *base.CollectionNamespace, lat
 func (c *CollectionsRouter) explicitMap(srcNamespace *base.CollectionNamespace, latestTargetManifest *metadata.CollectionsManifest) (manifestId uint64, colId uint32, err error) {
 	manifestId = latestTargetManifest.Uid()
 	c.mappingMtx.RLock()
-	_, tgtCollections, exists := c.explicitMappings.Get(srcNamespace)
+	_, _, tgtCollections, exists := c.explicitMappings.Get(srcNamespace)
 	c.mappingMtx.RUnlock()
 	if !exists || len(tgtCollections) == 0 {
 		c.brokenDenyMtx.RLock()
-		_, _, exists := c.brokenMapping.Get(srcNamespace)
+		_, _, _, exists := c.brokenMapping.Get(srcNamespace)
 		c.brokenDenyMtx.RUnlock()
 
 		if exists {
@@ -558,7 +558,7 @@ func (c *CollectionsRouter) explicitMap(srcNamespace *base.CollectionNamespace, 
 		colId, err = latestTargetManifest.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
 		if err == base.ErrorNotFound {
 			c.brokenDenyMtx.RLock()
-			_, _, exists := c.brokenMapping.Get(srcNamespace)
+			_, _, _, exists := c.brokenMapping.Get(srcNamespace)
 			c.brokenDenyMtx.RUnlock()
 
 			if exists {
@@ -702,7 +702,7 @@ func getNamespacesToBeDeletedFromBrokenMap(brokenMappingClone metadata.Collectio
 	for srcNs, tgtNs := range brokenMappingClone {
 		_, found := removed.GetCollectionByNames(srcNs.ScopeName, srcNs.CollectionName)
 		if found {
-			nameSpacesToBeDeleted.AddSingleMapping(srcNs, tgtNs[0])
+			nameSpacesToBeDeleted.AddSingleMapping(srcNs.CollectionNamespace, tgtNs[0])
 		}
 	}
 	return nameSpacesToBeDeleted
@@ -711,7 +711,7 @@ func getNamespacesToBeDeletedFromBrokenMap(brokenMappingClone metadata.Collectio
 func checkIfRemovedSrcNamespacesExistInCurrentBrokenMap(removed metadata.ScopesMap, brokenMappingClone metadata.CollectionNamespaceMapping) (atLeastOneFound bool) {
 	for scopeName, scopeMap := range removed {
 		for collectionName, _ := range scopeMap.Collections {
-			_, _, exists := brokenMappingClone.Get(&base.CollectionNamespace{
+			_, _, _, exists := brokenMappingClone.Get(&base.CollectionNamespace{
 				ScopeName:      scopeName,
 				CollectionName: collectionName,
 			})

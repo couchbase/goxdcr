@@ -39,7 +39,6 @@ const (
 	EVENT_DCP_DATACH_LEN    = "dcp_datach_length"
 	DCP_Stats_Interval      = "stats_interval"
 	DCP_Priority            = "dcpPriority"
-	DCP_Manifest_Getter     = "dcpManifestGetter"
 	DCP_VBTasksMap          = "VBTaskMap"
 )
 
@@ -359,7 +358,7 @@ type DcpNozzle struct {
 
 	collectionEnabled uint32
 	// If backfill pipeline, then could be passed in a vb task map
-	backfillVBTasks metadata.VBTasksMapType
+	specificVBTasks metadata.VBTasksMapType
 
 	// Datapools for reusing memory
 	wrappedUprPool          utilities.WrappedUprPoolIface
@@ -615,24 +614,49 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 	vbTasksRaw, exists := settings[DCP_VBTasksMap]
 	if exists {
-		dcp.backfillVBTasks = vbTasksRaw.(metadata.VBTasksMapType)
+		dcp.specificVBTasks = vbTasksRaw.(metadata.VBTasksMapType)
 		// Take out any vb's that are not part of the tasks
 		var newVbList []uint16
 		for _, vbno := range dcp.vbnos {
-			_, exists := dcp.backfillVBTasks[vbno]
+			_, exists := dcp.specificVBTasks[vbno]
 			if exists {
 				newVbList = append(newVbList, vbno)
 			}
 		}
 		dcp.vbnos = newVbList
 
+		var atLeastOneMigrationTask bool
+		var allMigrationTasks bool
+
 		outputEndSeqnoMap := make(map[uint16]uint64)
-		for vb, vbTasks := range dcp.backfillVBTasks {
+		for vb, vbTasks := range dcp.specificVBTasks {
 			if vbTasks != nil && len(*vbTasks) > 0 {
-				outputEndSeqnoMap[vb] = (*vbTasks)[0].Timestamps.EndingTimestamp.Seqno
+				endSeqno := (*vbTasks)[0].Timestamps.EndingTimestamp.Seqno
+				outputEndSeqnoMap[vb] = endSeqno
+				for _, task := range *vbTasks {
+					for _, colNsMapping := range task.RequestedCollections() {
+						for srcMapping, _ := range colNsMapping {
+							if !atLeastOneMigrationTask && srcMapping.GetType() == metadata.SourceDefaultCollectionFilter {
+								atLeastOneMigrationTask = true
+								allMigrationTasks = true // until it isn't
+							} else if atLeastOneMigrationTask && srcMapping.GetType() == metadata.SourceCollectionNamespace {
+								allMigrationTasks = false
+							}
+						}
+					}
+				}
 			}
 		}
-		dcp.Logger().Infof("%v Received backfill tasks for vb to endSeqno: %v", dcp.Id(), outputEndSeqnoMap)
+
+		if !atLeastOneMigrationTask {
+			dcp.Logger().Infof("%v Received backfill tasks for vb to endSeqno: %v", dcp.Id(), outputEndSeqnoMap)
+		} else {
+			if !allMigrationTasks {
+				// TODO: Before shipping CC - remove this panic and change it to a log msg
+				panic(fmt.Sprintf("Weird mix of VBTasks - some are migration and some are not: %v", dcp.specificVBTasks.DebugString()))
+			}
+			dcp.Logger().Infof("%v Received non-ending migration tasks", dcp.Id())
+		}
 	}
 	return
 }
@@ -1065,7 +1089,7 @@ func (dcp *DcpNozzle) vbStreamEndIsOk(vbno uint16) bool {
 		return false
 	}
 
-	tasks, exists := dcp.backfillVBTasks[vbno]
+	tasks, exists := dcp.specificVBTasks[vbno]
 	if !exists {
 		return false
 	}
@@ -1293,15 +1317,15 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 // Have an internal so we can control the opaque and version being passed in
 func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, version uint16) (err error) {
 	flags := uint32(0)
-	seqEnd := uint64(0xFFFFFFFFFFFFFFFF)
+	seqEnd := base.DcpSeqnoEnd
 	var filter *mcc.CollectionsFilter
 	// filter for main pipeline if resuming from a checkpoint
 	if vbts.Seqno > 0 {
 		filter = &mcc.CollectionsFilter{UseManifestUid: true, ManifestUid: vbts.ManifestIDs.SourceManifestId}
 	}
 
-	if len(dcp.backfillVBTasks) > 0 {
-		vbTasks := dcp.backfillVBTasks[vbno]
+	if len(dcp.specificVBTasks) > 0 {
+		vbTasks := dcp.specificVBTasks[vbno]
 		if vbTasks == nil || len(*vbTasks) == 0 {
 			// TODO MB-39566 - validate end state
 			dcp.Logger().Infof("vbno %v has no task. Exiting")

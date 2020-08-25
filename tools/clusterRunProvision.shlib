@@ -435,6 +435,13 @@ function setupBuckets {
 	done
 }
 
+function deleteBucket {
+  local port=$1
+  local bucketName=$2
+
+  $CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName > /dev/null 2>&1
+}
+
 function cleanupBuckets {
 	for clusterName in `echo ${!CLUSTER_NAME_BUCKET_MAP[@]}`
 	do
@@ -443,7 +450,7 @@ function cleanupBuckets {
 		for bucketName in `echo ${bucketNames[@]}`
 		do
 		echo "For cluster $clusterName DELETING bucket $bucketName"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName > /dev/null 2>&1
+		deleteBucket "$port" "$bucketName"
 		done
 	done
 	CLUSTER_NAME_BUCKET_DONE_MAP=()

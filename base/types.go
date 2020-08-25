@@ -165,6 +165,11 @@ type CollectionNamespace struct {
 	CollectionName string
 }
 
+var DefaultCollectionNamespace = CollectionNamespace{
+	ScopeName:      DefaultScopeCollectionName,
+	CollectionName: DefaultScopeCollectionName,
+}
+
 // The specificStr should follow the format of: "<scope>:<collection>"
 func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, error) {
 	if !CollectionNamespaceRegex.MatchString(specificStr) {

@@ -367,7 +367,7 @@ func TestMarshalUnmarshalCollectionsNamespaceMapping(t *testing.T) {
 	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
 	var nslist CollectionNamespaceList
 	nslist = append(nslist, &defaultNamespace)
-	nsMap[&defaultNamespace] = nslist
+	nsMap[NewSourceCollectionNamespace(&defaultNamespace)] = nslist
 
 	marshalledData, err := nsMap.MarshalJSON()
 	assert.Nil(err)
@@ -387,26 +387,29 @@ func TestCollectionsNsConsolidate(t *testing.T) {
 	nsMap := make(CollectionNamespaceMapping)
 	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
 	c1Ns := base.CollectionNamespace{"C1", "C1"}
+	c1NsSrc := NewSourceCollectionNamespace(&c1Ns)
 	c2Ns := base.CollectionNamespace{"C2", "C2"}
 	c3Ns := base.CollectionNamespace{"C3", "C3"}
 	var nslist CollectionNamespaceList
 	nslist = append(nslist, &c1Ns)
 	nslist = append(nslist, &c3Ns)
-	nsMap[&defaultNamespace] = nslist
+	newDefaultSourceNs := NewSourceCollectionNamespace(&defaultNamespace)
+	nsMap[newDefaultSourceNs] = nslist
 	assert.Equal(1, len(nsMap))
-	assert.Equal(2, len(nsMap[&defaultNamespace]))
+	assert.Equal(2, len(nsMap[newDefaultSourceNs]))
 
 	nsMap2 := make(CollectionNamespaceMapping)
 	var nslist2 CollectionNamespaceList
 	nslist2 = append(nslist2, &c2Ns)
 	nslist2 = append(nslist2, &c3Ns)
-	nsMap2[&defaultNamespace] = nslist2
+	defaultSourceNs := NewSourceCollectionNamespace(&defaultNamespace)
+	nsMap2[defaultSourceNs] = nslist2
 	var nslist3 CollectionNamespaceList
 	nslist3 = append(nslist3, &defaultNamespace)
-	nsMap2[&c1Ns] = nslist3
+	nsMap2[c1NsSrc] = nslist3
 	assert.Equal(2, len(nsMap2))
-	assert.Equal(2, len(nsMap2[&defaultNamespace]))
-	assert.Equal(1, len(nsMap2[&c1Ns]))
+	assert.Equal(2, len(nsMap2[defaultSourceNs]))
+	assert.Equal(1, len(nsMap2[c1NsSrc]))
 
 	//nsmap1
 	//SOURCE ||Scope: _default Collection: _default|| -> |Scope: C1 Collection: C1| |Scope: C3 Collection: C3| |Scope: C2 Collection: C2|
@@ -423,13 +426,19 @@ func TestCollectionsNsConsolidate(t *testing.T) {
 
 	nsMap.Consolidate(nsMap2)
 	assert.Equal(2, len(nsMap))
-	assert.Equal(3, len(nsMap[&defaultNamespace]))
-	assert.Equal(1, len(nsMap[&c1Ns]))
+	_, _, tgtList, exists := nsMap.Get(&defaultNamespace)
+	assert.True(exists)
+	assert.Equal(3, len(tgtList))
+	_, _, tgtList, exists = nsMap.Get(&c1Ns)
+	assert.True(exists)
+	assert.Equal(1, len(nsMap[c1NsSrc]))
 
 	added, removed := nsMap.Diff(nsMap2)
 	assert.Equal(0, len(added))
 	assert.Equal(1, len(removed))
-	assert.Equal(1, len(removed[&defaultNamespace]))
+	_, _, tgtList, exists = removed.Get(&defaultNamespace)
+	assert.True(exists)
+	assert.Equal(1, len(tgtList))
 	fmt.Println("============== Test case end: TestCollectionsNsConsolidate =================")
 }
 
@@ -441,6 +450,7 @@ func TestCollectionNsMappingsDocMarshaller(t *testing.T) {
 	nsMapPrime := make(CollectionNamespaceMapping)
 
 	defaultNamespace := base.CollectionNamespace{"_default", "_default"}
+	defaultSrcNamespace := NewSourceCollectionNamespace(&defaultNamespace)
 	c1Ns := base.CollectionNamespace{"C1", "C1"}
 	c3Ns := base.CollectionNamespace{"C3", "C3"}
 
@@ -452,8 +462,8 @@ func TestCollectionNsMappingsDocMarshaller(t *testing.T) {
 	nslistPrime = append(nslistPrime, &c3Ns)
 	nslistPrime = append(nslistPrime, &c1Ns)
 
-	nsMap[&defaultNamespace] = nslist
-	nsMapPrime[&defaultNamespace] = nslistPrime
+	nsMap[defaultSrcNamespace] = nslist
+	nsMapPrime[defaultSrcNamespace] = nslistPrime
 
 	// Two map's snappy compressed content are different but sha should be the same
 	snappy1, err := nsMap.ToSnappyCompressed()
@@ -687,7 +697,7 @@ func TestExplicitMapping(t *testing.T) {
 		ScopeName:      "S1",
 		CollectionName: "col1",
 	}
-	_, tgtCheckList, ok := explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok := explicitMap.Get(&sourceNamespace)
 	assert.True(ok)
 	assert.Equal(1, len(tgtCheckList))
 	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
@@ -695,13 +705,13 @@ func TestExplicitMapping(t *testing.T) {
 	// Check a diff collection
 	sourceNamespace.CollectionName = "col2"
 	targetNamespace.CollectionName = "col2"
-	_, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
 	assert.True(ok)
 	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
 
 	// Last one is unmapped
 	sourceNamespace.CollectionName = "col3"
-	_, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
 	assert.False(ok)
 
 	// Test blacklist
@@ -717,7 +727,7 @@ func TestExplicitMapping(t *testing.T) {
 	sourceNamespace.CollectionName = "col1"
 	targetNamespace.ScopeName = "S2"
 	targetNamespace.CollectionName = "col1"
-	_, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
 	assert.True(ok)
 	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
 
@@ -776,7 +786,7 @@ func TestExplicitMapping(t *testing.T) {
 		ScopeName:      "s1",
 		CollectionName: "col1",
 	}
-	_, _, exists := explicitMap.Get(checkNamespace)
+	_, _, _, exists := explicitMap.Get(checkNamespace)
 	assert.False(exists)
 }
 
@@ -804,4 +814,45 @@ func TestListIsSubset(t *testing.T) {
 	assert.True(list2.IsSubset(list1))
 	assert.False(list1.IsSubset(list2))
 	assert.False(list1.IsSame(list2))
+}
+
+//      "name": "S2",
+//          "name": "col3",
+//          "name": "col2",
+//          "name": "col1",
+//      "name": "S1",
+//          "name": "col2",
+//          "name": "col1",
+//      "name": "_default",
+//          "name": "_default",
+func TestMigrationMapping(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestMigrationMapping =================")
+	defer fmt.Println("============== Test case end: TestMigrationMapping =================")
+
+	data, err := ioutil.ReadFile(provisionedFile)
+	assert.Nil(err)
+	target, _ := NewCollectionsManifestFromBytes(data)
+	source := NewDefaultCollectionsManifest()
+	manifestPair := CollectionsManifestPair{
+		Source: &source,
+		Target: &target,
+	}
+
+	var mappingMode base.CollectionsMgtType
+	mappingMode.SetExplicitMapping(true)
+	mappingMode.SetMigration(true)
+
+	rules := make(base.CollectionsMappingRulesType)
+	// Make a rule that says if the doc key starts with "S1_"
+	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
+	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
+
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	assert.Nil(err)
+	assert.NotNil(explicitMap)
+
+	for src, _ := range explicitMap {
+		assert.Equal(SourceDefaultCollectionFilter, src.GetType())
+	}
 }

@@ -846,15 +846,8 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pi
 		dcpSettings[parts.DCP_Stats_Interval] = statsInterval
 	}
 
-	dcpPriority, ok := settings[parts.DCP_Priority]
-	if ok {
-		dcpSettings[parts.DCP_Priority] = dcpPriority
-	}
-
-	vbTasksMap, ok := settings[parts.DCP_VBTasksMap]
-	if ok {
-		dcpSettings[parts.DCP_VBTasksMap] = vbTasksMap
-	}
+	repSettings := pipeline.Specification().GetReplicationSpec().Settings
+	constructSharedSettingsForDcpNozzle(settings, dcpSettings, repSettings)
 	return dcpSettings
 }
 
@@ -1001,17 +994,54 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		}
 	}
 
+	constructSharedSettingsForDcpNozzle(settings, dcpNozzleSettings, repSettings)
+	return dcpNozzleSettings, nil
+}
+
+func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMap, dcpNozzleSettings metadata.ReplicationSettingsMap, repSettings *metadata.ReplicationSettings) {
 	// dcp priority settings could have been set through replStatus.customSettings.
 	dcpPriority, ok := settings[parts.DCP_Priority]
 	if ok {
 		dcpNozzleSettings[parts.DCP_Priority] = dcpPriority
 	}
 
-	vbTasksMap, ok := settings[parts.DCP_VBTasksMap]
-	if ok {
+	vbTasksMap, vbTasksMapExists := settings[parts.DCP_VBTasksMap]
+	if vbTasksMapExists {
 		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap
 	}
-	return dcpNozzleSettings, nil
+
+	modes := repSettings.GetCollectionModes()
+	if modes.IsMigrationOn() && !vbTasksMapExists {
+		// Main pipeline that requires DCP to run a gomemcached filter of just the default collection
+		dcpNozzleSettings[parts.DCP_VBTasksMap] = createMigrationVBTasksMap()
+	}
+}
+
+func createMigrationVBTasksMap() interface{} {
+	//type VBTasksMapType map[uint16]*BackfillTasks
+	migrationTasksMap := make(metadata.VBTasksMapType)
+	// DCP will do its own filtering based on the VBs it owns
+	for vbno := uint16(0); vbno < base.NumberOfVbs; vbno++ {
+		startTs := &base.VBTimestamp{
+			Vbno:        vbno,
+			Seqno:       0,
+			ManifestIDs: base.CollectionsManifestIdPair{},
+		}
+		endTs := &base.VBTimestamp{
+			Vbno:        vbno,
+			Seqno:       base.DcpSeqnoEnd,
+			ManifestIDs: base.CollectionsManifestIdPair{},
+		}
+		defaultMigrationMapping := metadata.NewDefaultCollectionMigrationMapping()
+		task := metadata.NewBackfillTask(&metadata.BackfillVBTimestamps{
+			StartingTimestamp: startTs,
+			EndingTimestamp:   endTs,
+		}, []metadata.CollectionNamespaceMapping{defaultMigrationMapping})
+
+		migrationTasksMap[vbno] = &metadata.BackfillTasks{task}
+	}
+
+	return migrationTasksMap
 }
 
 func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {

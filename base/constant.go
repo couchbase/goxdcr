@@ -1176,3 +1176,5 @@ const (
 	XATTR_MV_PATH   = "_xdcr.mv"
 	XATTR_PCAS_PATH = "_xdcr.pc"
 )
+
+const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)

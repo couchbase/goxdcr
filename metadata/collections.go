@@ -14,7 +14,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
+	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbaselabs/gojsonsm"
 	"github.com/golang/snappy"
 	"reflect"
 	"sort"
@@ -1103,10 +1104,72 @@ func newCollectionNsMetaObj() *collectionNsMetaObj {
 	}
 }
 
+type SourceNamespaceType int
+
+const (
+	SourceCollectionNamespace     SourceNamespaceType = iota
+	SourceDefaultCollectionFilter SourceNamespaceType = iota
+)
+
+type SourceNamespace struct {
+	*base.CollectionNamespace
+	nsType SourceNamespaceType
+
+	filterString string
+	filter       *gojsonsm.Matcher
+}
+
+func NewSourceCollectionNamespace(colNs *base.CollectionNamespace) *SourceNamespace {
+	return &SourceNamespace{
+		nsType:              SourceCollectionNamespace,
+		CollectionNamespace: colNs,
+	}
+}
+
+func NewSourceMigrationNamespace(expr string, filter *gojsonsm.Matcher) *SourceNamespace {
+	return &SourceNamespace{
+		CollectionNamespace: &base.CollectionNamespace{
+			ScopeName:      base.DefaultScopeCollectionName,
+			CollectionName: expr,
+		},
+		nsType:       SourceDefaultCollectionFilter,
+		filter:       filter,
+		filterString: expr,
+	}
+}
+
+func (s *SourceNamespace) GetCollectionNamespace() *base.CollectionNamespace {
+	switch s.nsType {
+	case SourceCollectionNamespace:
+		return s.CollectionNamespace
+	case SourceDefaultCollectionFilter:
+		// For collections filter for migration, every source namespace is flat
+		// so put everything at a collection-level
+		return &base.CollectionNamespace{
+			ScopeName:      base.DefaultScopeCollectionName,
+			CollectionName: s.filterString,
+		}
+	default:
+		panic("Implement me")
+	}
+}
+
+func (s *SourceNamespace) GetType() SourceNamespaceType {
+	return s.nsType
+}
+
 // This is used for namespace mapping that transcends over manifest lifecycles
 // Need to use pointers because of golang hash map support of indexable type
 // This means rest needs to do some gymanistics, instead of just simply checking for pointers
-type CollectionNamespaceMapping map[*base.CollectionNamespace]CollectionNamespaceList
+type CollectionNamespaceMapping map[*SourceNamespace]CollectionNamespaceList
+
+// Note - this constructor should be used carefully - given there is no filter
+func NewDefaultCollectionMigrationMapping() CollectionNamespaceMapping {
+	defaultMapping := make(CollectionNamespaceMapping)
+	defaultSourceNs := NewSourceMigrationNamespace("", nil)
+	defaultMapping.AddSingleSourceNsMapping(defaultSourceNs, &base.DefaultCollectionNamespace)
+	return defaultMapping
+}
 
 func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules base.CollectionsMappingRulesType) (CollectionNamespaceMapping, error) {
 	if manifestsPair.Source == nil || manifestsPair.Target == nil {
@@ -1157,12 +1220,29 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 			}
 			return outputMapping, nil
 		case true:
-			// TODO - MB-40474
-			panic("TODO")
-			return CollectionNamespaceMapping{}, fmt.Errorf("Not implemented")
+			outputMapping := CollectionNamespaceMapping{}
+			for filterExpr, targetNamespaceRaw := range rules {
+				// ValidateMigrateRules() should have been called
+				targetNamespaceStr := targetNamespaceRaw.(string)
+				filter, _ := base.GoJsonsmGetFilterExprMatcher(filterExpr)
+				targetNamespace, _ := base.NewCollectionNamespaceFromString(targetNamespaceStr)
+
+				sourceNs := NewSourceMigrationNamespace(filterExpr, &filter)
+				outputMapping.AddSingleSourceNsMapping(sourceNs, &targetNamespace)
+			}
+			return outputMapping, nil
 		}
 	}
 	return CollectionNamespaceMapping{}, base.ErrorInvalidInput
+}
+
+func (c *CollectionNamespaceMapping) AppendToTarget(srcPtr, target *base.CollectionNamespace) {
+	for k, _ := range *c {
+		if k.CollectionNamespace.IsSameAs(*srcPtr) {
+			(*c)[k] = append((*c)[k], target)
+			return
+		}
+	}
 }
 
 func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
@@ -1170,13 +1250,16 @@ func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 
 	var unsortedKeys []*base.CollectionNamespace
 	for k, _ := range *c {
-		unsortedKeys = append(unsortedKeys, k)
+		unsortedKeys = append(unsortedKeys, k.GetCollectionNamespace())
 	}
 	sortedKeys := base.SortCollectionNamespacePtrList(unsortedKeys)
 
 	for i, k := range sortedKeys {
 		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
-		metaObj.IndirectTargetMap[uint64(i)] = (*c)[k]
+		_, _, value, exists := c.Get(k)
+		if exists {
+			metaObj.IndirectTargetMap[uint64(i)] = value
+		}
 	}
 
 	return json.Marshal(metaObj)
@@ -1195,7 +1278,7 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 	}
 
 	if (*c) == nil {
-		(*c) = make(CollectionNamespaceMapping)
+		*c = make(CollectionNamespaceMapping)
 	}
 
 	var i uint64
@@ -1205,7 +1288,7 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 		if !ok {
 			return fmt.Errorf("Unable to unmarshal CollectionNamespaceMapping raw: %v", metaObj)
 		}
-		(*c)[sourceCol] = targetCols
+		(*c)[NewSourceCollectionNamespace(sourceCol)] = targetCols
 	}
 	return nil
 }
@@ -1221,7 +1304,7 @@ func (c *CollectionNamespaceMapping) String() string {
 func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 	clone = make(CollectionNamespaceMapping)
 	for k, v := range c {
-		srcClone := &base.CollectionNamespace{}
+		srcClone := &SourceNamespace{}
 		*srcClone = *k
 		clone[srcClone] = v.Clone()
 	}
@@ -1230,17 +1313,18 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 
 // The input "src" does not have to match the actual key pointer in the map, just the right matching values
 // Returns the srcPtr for referring to the exact tgtList
-func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
+func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *SourceNamespace, srcNamespacePtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
 	if src == nil {
 		panic("Nil source")
 		return
 	}
 
 	for k, v := range *c {
-		if *k == *src {
+		if *(k.CollectionNamespace) == *src {
 			// found
-			tgt = v
 			srcPtr = k
+			tgt = v
+			srcNamespacePtr = k.CollectionNamespace
 			exists = true
 			return
 		}
@@ -1248,7 +1332,7 @@ func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr 
 	return
 }
 
-func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
+func (c *CollectionNamespaceMapping) AddSingleSourceNsMapping(src *SourceNamespace, tgt *base.CollectionNamespace) (alreadyExists bool) {
 	if src == nil || tgt == nil {
 		panic("Invalid input")
 		return
@@ -1257,7 +1341,7 @@ func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionN
 		panic("Empty source namespace")
 	}
 
-	srcPtr, tgtList, found := c.Get(src)
+	_, srcPtr, tgtList, found := c.Get(src.CollectionNamespace)
 
 	if !found {
 		// Just use these as entries
@@ -1271,9 +1355,13 @@ func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionN
 			return
 		}
 
-		(*c)[srcPtr] = append((*c)[srcPtr], tgt)
+		c.AppendToTarget(srcPtr, tgt)
 	}
 	return
+}
+
+func (c *CollectionNamespaceMapping) AddSingleMapping(src, tgt *base.CollectionNamespace) (alreadyExists bool) {
+	return c.AddSingleSourceNsMapping(NewSourceCollectionNamespace(src), tgt)
 }
 
 // Given a scope and collection, see if it exists as one of the targets in the mapping
@@ -1298,7 +1386,7 @@ func (c *CollectionNamespaceMapping) GetSubsetBasedOnSpecifiedTargets(targetScop
 		for _, tgt := range tgtList {
 			_, found := targetScopeCollections.GetCollectionByNames(tgt.ScopeName, tgt.CollectionName)
 			if found {
-				retMap.AddSingleMapping(src, tgt)
+				retMap.AddSingleMapping(src.CollectionNamespace, tgt)
 			}
 		}
 	}
@@ -1312,7 +1400,7 @@ func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) boo
 // This means if other contains everything in c
 func (c CollectionNamespaceMapping) IsSubset(other CollectionNamespaceMapping) bool {
 	for src, tgtList := range c {
-		_, otherTgtList, exists := other.Get(src)
+		_, _, otherTgtList, exists := other.Get(src.CollectionNamespace)
 		if !exists {
 			return false
 		}
@@ -1329,7 +1417,7 @@ func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (
 
 	// Subtract B from A
 	for aSrc, aTgtList := range *c {
-		_, bTgtList, exists := subset.Get(aSrc)
+		_, _, bTgtList, exists := subset.Get(aSrc.CollectionNamespace)
 		if !exists {
 			// No need to delete
 			result[aSrc] = aTgtList
@@ -1355,7 +1443,7 @@ func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (
 
 func (c *CollectionNamespaceMapping) Consolidate(other CollectionNamespaceMapping) {
 	for otherSrc, otherTgtList := range other {
-		srcPtr, tgtList, exists := c.Get(otherSrc)
+		srcPtr, _, tgtList, exists := c.Get(otherSrc.CollectionNamespace)
 		if !exists {
 			(*c)[otherSrc] = otherTgtList.Clone()
 		} else if !tgtList.IsSame(otherTgtList) {
@@ -1370,31 +1458,31 @@ func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (add
 	removed = make(CollectionNamespaceMapping)
 	// First, populated "removed"
 	for src, tgtList := range *c {
-		_, oTgtList, exists := other.Get(src)
+		_, _, oTgtList, exists := other.Get(src.CollectionNamespace)
 		if !exists {
 			removed[src] = tgtList
 		} else if !tgtList.IsSame(oTgtList) {
 			listAdded, listRemoved := tgtList.Diff(oTgtList)
 			for _, addedNamespace := range listAdded {
-				added.AddSingleMapping(src, addedNamespace)
+				added.AddSingleMapping(src.CollectionNamespace, addedNamespace)
 			}
 			for _, removedNamespace := range listRemoved {
-				removed.AddSingleMapping(src, removedNamespace)
+				removed.AddSingleMapping(src.CollectionNamespace, removedNamespace)
 			}
 			// Need to do reverse check
 			listRemoved, listAdded = oTgtList.Diff(tgtList)
 			for _, addedNamespace := range listAdded {
-				added.AddSingleMapping(src, addedNamespace)
+				added.AddSingleMapping(src.CollectionNamespace, addedNamespace)
 			}
 			for _, removedNamespace := range listRemoved {
-				removed.AddSingleMapping(src, removedNamespace)
+				removed.AddSingleMapping(src.CollectionNamespace, removedNamespace)
 			}
 		}
 	}
 
 	// Then populate added
 	for oSrc, oTgtList := range other {
-		_, _, exists := c.Get(oSrc)
+		_, _, _, exists := c.Get(oSrc.CollectionNamespace)
 		if !exists {
 			added[oSrc] = oTgtList
 			// No else - any potential intersections would have been captured above
@@ -1530,17 +1618,6 @@ func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap)
 		if colNsMap == nil {
 			continue
 		}
-		// do sanity check - TODO remove before CC is shipped
-		checkSha, err := colNsMap.Sha256()
-		if err != nil {
-			panic(err)
-			continue
-		}
-		checkShaStr := fmt.Sprintf("%x", checkSha[:])
-		if sha != checkShaStr {
-			errorMap[sha] = fmt.Errorf("Before storing, sanity check failed - expected %v got %v", sha, checkShaStr)
-		}
-
 		compressedMapping, err := colNsMap.ToSnappyCompressed()
 		if err != nil {
 			errorMap[sha] = err

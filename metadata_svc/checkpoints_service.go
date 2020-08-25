@@ -549,7 +549,7 @@ func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId stri
 					continue
 				}
 				// The source instance from "sources" exists in broken map and should be removed
-				toBeDelNamespace.AddSingleMapping(sourceNs, targetNsList[0])
+				toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNsList[0])
 			}
 			if len(toBeDelNamespace) > 0 {
 				incFunc, err := ckpt_svc.GetIncrementerFunc(replicationId)
