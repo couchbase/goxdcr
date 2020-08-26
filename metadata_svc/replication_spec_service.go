@@ -1107,11 +1107,29 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 		delete(service.srcGcMap, oldSpec.Id)
 		delete(service.tgtGcMap, oldSpec.Id)
 		service.gcMtx.Unlock()
+		// If a same replication is created and then deleted almost simultaneously on one node,
+		// IIRC, the other node's metakv listener is not guaranteed to send the add + delete in order
+		// If that is the case, this request/unrequest could leak
+		// The fix of it is to kill goxdcr process, or remote the cluster ref and re-add it
 		service.remote_cluster_svc.UnRequestRemoteMonitoring(oldSpec)
 	}
 
 	if updated && oldSpec == nil && newSpec != nil {
-		service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
+		// In automated test environment where remote cluster reference and spec is created
+		// almost simultaneously, there's no guarantee that the remote cluster ref created
+		// on an active node has propagated to a non-active node before the new spec is propagated to the said
+		// non-acive node.
+		// Because of this operation requires that the ref be present first, and it must not fail as
+		// other components like collections manifest service depends on this, retry up to 3 seconds
+		retryOp := func() error {
+			return service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
+		}
+		err = service.utils.ExponentialBackoffExecutor("RequestRemoteMonitoring", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
+		if err != nil {
+			// Worst case scenario even after 3 seconds, panic and XDCR process will reload everything in order from metakv
+			// as in, load the remote cluster reference first, then load the specs
+			panic("Cannot continue without requesting remote monitoring")
+		}
 	}
 
 	var sumErr error

@@ -52,6 +52,11 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	metadataSvcMock.On("GetAllMetadataFromCatalog", replicationSpecsCatalogKey).Return(emptyCacheEntries, nil)
 	utilitiesMock.On("ExponentialBackoffExecutor", "GetAllMetadataFromCatalogReplicationSpec", mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything).Return(nil)
+	utilitiesMock.On("ExponentialBackoffExecutor", "RequestRemoteMonitoring", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Run(func(args mock.Arguments) {
+		actualFunc := args.Get(4).(utilities.ExponentialOpFunc)
+		actualFunc()
+	}).Return(nil)
 
 	replSpecSvc, _ := NewReplicationSpecService(uiLogSvcMock,
 		remoteClusterMock,
@@ -130,7 +135,7 @@ func setupMocks(srcResolutionType string,
 	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(mockRemoteClusterRef, nil)
 	remoteClusterMock.On("ValidateRemoteCluster", mockRemoteClusterRef).Return(nil)
 	remoteClusterMock.On("ShouldUseAlternateAddress", mock.Anything).Return(false, nil)
-	remoteClusterMock.On("RequestRemoteMonitoring", mock.Anything).Return(nil)
+	remoteClusterMock.On("RequestRemoteMonitoring", mock.Anything).Run(func(arg mock.Arguments) { fmt.Printf("RequestRemoteMonitoring...\n") }).Return(nil)
 	remoteClusterMock.On("UnRequestRemoteMonitoring", mock.Anything).Return(nil)
 
 	// Compression features for utils mock
