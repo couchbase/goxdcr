@@ -203,6 +203,8 @@ type CollectionsRouter struct {
 	lastKnownSrcManifest *metadata.CollectionsManifest
 
 	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
+
+	migrationFilters *metadata.CollectionNamespaceMapping
 }
 
 // A collection router is critically important to not only route to the target collection, but
@@ -310,6 +312,11 @@ func (c *CollectionsRouter) Start() error {
 		Source: curSrcMan,
 		Target: curTgtMan,
 	}
+	err = c.initializeInternals(curSrcMan, err, pair, modes, rules)
+	return err
+}
+
+func (c *CollectionsRouter) initializeInternals(curSrcMan *metadata.CollectionsManifest, err error, pair metadata.CollectionsManifestPair, modes base.CollectionsMgtType, rules base.CollectionsMappingRulesType) error {
 	c.mappingMtx.Lock()
 	c.lastKnownSrcManifest = curSrcMan
 	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules)
@@ -390,7 +397,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 }
 
 // No-Concurrent call
-func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.CollectionNamespace) (colId uint32, manifestId uint64, backfillPersistHadErr bool, err error) {
+func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest) (colId uint32, manifestId uint64, backfillPersistHadErr bool, err error) {
 	if !c.IsRunning() {
 		err = PartStoppedError
 		return
@@ -398,6 +405,8 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(namespace *base.Colle
 	c.mappingMtx.RLock()
 	isExplicitMapping := c.explicitMappings != nil
 	c.mappingMtx.RUnlock()
+
+	namespace := wrappedMCReq.ColNamespace
 
 	var latestSourceManifest *metadata.CollectionsManifest
 	var latestTargetManifest *metadata.CollectionsManifest
@@ -496,12 +505,13 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 	// 2. Get the latest seqnos from ckpts
 	// 3. Create backfill request based on the latest seqnos
 	// 4. Start pipelines
-	added, removed := explicitMap.Diff(c.explicitMappings)
+	added, removed := c.explicitMappings.Diff(explicitMap)
 	pair := metadata.CollectionNamespaceMappingsDiffPair{
 		Added:   added,
 		Removed: removed,
 	}
 	c.explicitMapChangeHandler(pair)
+	// TODO NEIL - continue here
 
 	// It's possible pipeline may take some time to get to the stop/start part
 	// so in the meantime, update the mapping and write to the right target collection for the ongoing stream
@@ -1168,7 +1178,7 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 		colId = 0
 	} else {
 		var backfillPersistHadErr bool
-		colId, manifestId, backfillPersistHadErr, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest.ColNamespace)
+		colId, manifestId, backfillPersistHadErr, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest)
 		// If backfillPersistHadErr is set, then it is:
 		// 1. Safe to re-raise routingUpdate, as each routingUpdate will try to persist again
 		// 2. NOT safe to ignore data - as ignoring data means throughSeqno will move forward

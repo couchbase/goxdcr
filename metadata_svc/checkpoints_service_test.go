@@ -60,7 +60,7 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 	newMap, _, _, upsertMappingDocSlice := getUpsertMap()
 	newMapShaSlice, _ := newMap.Sha256()
 	newMapSha := fmt.Sprintf("%x", newMapShaSlice)
-	assert.Equal("1c114ee13481db638c2002c7e247b6f28a00c965eb06dacd0be88f36dfa98f68", newMapSha)
+	assert.Equal("67d24325ed5df4d1f04c425606b4d40575032663de206e49a76033ced5dc15ee", newMapSha)
 
 	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice)
 

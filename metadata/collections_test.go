@@ -851,8 +851,144 @@ func TestMigrationMapping(t *testing.T) {
 	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
+	assert.Equal(2, len(explicitMap))
 
 	for src, _ := range explicitMap {
 		assert.Equal(SourceDefaultCollectionFilter, src.GetType())
+	}
+}
+func TestMigrationDiff(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestMigrationDiff =================")
+	defer fmt.Println("============== Test case end: TestMigrationDiff =================")
+
+	defaultManifest := NewDefaultCollectionsManifest()
+	rules := make(base.CollectionsMappingRulesType)
+	// Make a rule that says if the doc key starts with "S1_"
+	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
+	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
+
+	manifestPair := CollectionsManifestPair{
+		Source: &defaultManifest,
+		Target: &defaultManifest,
+	}
+
+	var mappingMode base.CollectionsMgtType
+	mappingMode.SetExplicitMapping(true)
+	mappingMode.SetMigration(true)
+
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	assert.Nil(err)
+	assert.NotNil(explicitMap)
+	assert.Equal(0, len(explicitMap))
+
+	// Now target has all the collections made
+	data, err := ioutil.ReadFile(provisionedFile)
+	assert.Nil(err)
+	target, _ := NewCollectionsManifestFromBytes(data)
+
+	newPair := CollectionsManifestPair{
+		Source: &defaultManifest,
+		Target: &target,
+	}
+	newExplicitMap, err := NewCollectionNamespaceMappingFromRules(newPair, mappingMode, rules)
+	assert.Nil(err)
+	assert.NotNil(explicitMap)
+	assert.Equal(2, len(newExplicitMap))
+	assert.False(newExplicitMap.IsSame(explicitMap))
+
+	added, removed := explicitMap.Diff(newExplicitMap)
+	assert.Equal(0, len(removed))
+	assert.Equal(2, len(added))
+}
+
+func TestCollectionNsMappingsDocMarshallerWithMigration(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCollectionNsMappingsDocMarshallerWithMigration =================")
+	defer fmt.Println("============== Test case end: TestCollectionNsMappingsDocMarshallerWithMigration =================")
+	// Test out of order list will have the same sha
+	nsMap := make(CollectionNamespaceMapping)
+	nsMapPrime := make(CollectionNamespaceMapping)
+
+	expr := "REGEXP_CONTAINS(META().id, \"^S1_\")"
+	filter, err := base.GoJsonsmGetFilterExprMatcher(expr)
+	assert.Nil(err)
+
+	defaultSrcNamespace := NewSourceMigrationNamespace(expr, &filter)
+
+	c1Ns := base.CollectionNamespace{"C1", "C1"}
+	c3Ns := base.CollectionNamespace{"C3", "C3"}
+
+	var nslist CollectionNamespaceList
+	nslist = append(nslist, &c1Ns)
+	nslist = append(nslist, &c3Ns)
+
+	var nslistPrime CollectionNamespaceList
+	nslistPrime = append(nslistPrime, &c3Ns)
+	nslistPrime = append(nslistPrime, &c1Ns)
+
+	nsMap[defaultSrcNamespace] = nslist
+	nsMapPrime[defaultSrcNamespace] = nslistPrime
+
+	// Two map's snappy compressed content are different but sha should be the same
+	snappy1, err := nsMap.ToSnappyCompressed()
+	assert.Nil(err)
+	snappy2, err := nsMapPrime.ToSnappyCompressed()
+	assert.Nil(err)
+	assert.False(reflect.DeepEqual(snappy1, snappy2))
+	sha1, err := nsMap.Sha256()
+	assert.Nil(err)
+	sha2, err := nsMapPrime.Sha256()
+	assert.Nil(err)
+	assert.True(reflect.DeepEqual(sha1[:], sha2[:]))
+
+	// Load from compressed data
+	validate1, err := NewCollectionNamespaceMappingFromSnappyData(snappy1)
+	assert.Nil(err)
+	validate2, err := NewCollectionNamespaceMappingFromSnappyData(snappy2)
+	assert.Nil(err)
+	assert.True(validate1.IsSame(*validate2))
+
+	// This is just running through "getUpsertMap() from checkpoints_service
+	newUpsertingMap := make(CollectionNamespaceMapping)
+	newUpsertingMap[defaultSrcNamespace] = nslist
+	newUpsertingMap[defaultSrcNamespace] = nslistPrime
+	checkLen := len(newUpsertingMap)
+	shaForNewUpsertMap, err := newUpsertingMap.Sha256()
+	assert.Nil(err)
+
+	compressedMap, err := newUpsertingMap.ToSnappyCompressed()
+	assert.Nil(err)
+
+	mappingRecord := CompressedColNamespaceMapping{
+		CompressedMapping: compressedMap,
+		Sha256Digest:      fmt.Sprintf("%x", shaForNewUpsertMap[:]),
+	}
+
+	var mappingRecords CompressedColNamespaceMappingList
+	mappingRecords.SortedInsert(&mappingRecord)
+	mappingDoc := &CollectionNsMappingsDoc{
+		NsMappingRecords: mappingRecords,
+		SpecInternalId:   "random",
+	}
+	mappingsDocMarshalled, err := json.Marshal(mappingDoc)
+	assert.Nil(err)
+
+	var checkDoc CollectionNsMappingsDoc
+	err = json.Unmarshal(mappingsDocMarshalled, &checkDoc)
+	assert.Nil(err)
+
+	shaMap, err := checkDoc.ToShaMap()
+	assert.Nil(err)
+	assert.Equal(checkLen, len(shaMap))
+
+	for _, nsMapping := range shaMap {
+		for source, _ := range *nsMapping {
+			assert.Equal(SourceDefaultCollectionFilter, source.GetType())
+			assert.Equal(base.DefaultScopeCollectionName, source.ScopeName)
+			assert.NotEqual(base.DefaultScopeCollectionName, source.CollectionName)
+			assert.NotNil(source.filter)
+			assert.NotEqual(0, len(source.filterString))
+		}
 	}
 }

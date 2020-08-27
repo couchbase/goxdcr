@@ -1095,12 +1095,14 @@ func (c *CollectionNamespaceList) diffOrConsolidate(other CollectionNamespaceLis
 type collectionNsMetaObj struct {
 	SourceCollections CollectionNamespaceList `json:SourceCollections`
 	// keys are integers of the index above
-	IndirectTargetMap map[uint64]CollectionNamespaceList `json:IndirectTargetMap`
+	IndirectTargetMap      map[uint64]CollectionNamespaceList `json:IndirectTargetMap`
+	SourceNamespaceTypeMap map[uint64]SourceNamespaceType     `json:SourceNamespaceTypeMap`
 }
 
 func newCollectionNsMetaObj() *collectionNsMetaObj {
 	return &collectionNsMetaObj{
-		IndirectTargetMap: make(map[uint64]CollectionNamespaceList),
+		IndirectTargetMap:      make(map[uint64]CollectionNamespaceList),
+		SourceNamespaceTypeMap: make(map[uint64]SourceNamespaceType),
 	}
 }
 
@@ -1156,6 +1158,17 @@ func (s *SourceNamespace) GetCollectionNamespace() *base.CollectionNamespace {
 
 func (s *SourceNamespace) GetType() SourceNamespaceType {
 	return s.nsType
+}
+
+func (s *SourceNamespace) String() string {
+	switch s.nsType {
+	case SourceCollectionNamespace:
+		return fmt.Sprintf("Scope: %v Collection: %v", s.ScopeName, s.CollectionName)
+	case SourceDefaultCollectionFilter:
+		return fmt.Sprintf("%v", s.filterString)
+	default:
+		return "?? (SourceNamespace)"
+	}
 }
 
 // This is used for namespace mapping that transcends over manifest lifecycles
@@ -1228,7 +1241,11 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 				targetNamespace, _ := base.NewCollectionNamespaceFromString(targetNamespaceStr)
 
 				sourceNs := NewSourceMigrationNamespace(filterExpr, &filter)
-				outputMapping.AddSingleSourceNsMapping(sourceNs, &targetNamespace)
+				// Look to see if the targetNamespace exists on the target manifest
+				_, err := manifestsPair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
+				if err == nil {
+					outputMapping.AddSingleSourceNsMapping(sourceNs, &targetNamespace)
+				}
 			}
 			return outputMapping, nil
 		}
@@ -1256,9 +1273,10 @@ func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 
 	for i, k := range sortedKeys {
 		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
-		_, _, value, exists := c.Get(k)
+		srcNamespacePtr, _, value, exists := c.Get(k)
 		if exists {
 			metaObj.IndirectTargetMap[uint64(i)] = value
+			metaObj.SourceNamespaceTypeMap[uint64(i)] = srcNamespacePtr.GetType()
 		}
 	}
 
@@ -1281,22 +1299,45 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 		*c = make(CollectionNamespaceMapping)
 	}
 
+	errMap := make(base.ErrorMap)
 	var i uint64
 	for i = 0; i < uint64(len(metaObj.SourceCollections)); i++ {
 		sourceCol := metaObj.SourceCollections[i]
 		targetCols, ok := metaObj.IndirectTargetMap[i]
+		errKey := fmt.Sprintf("%v:%v", sourceCol.ScopeName, sourceCol.CollectionName)
 		if !ok {
 			return fmt.Errorf("Unable to unmarshal CollectionNamespaceMapping raw: %v", metaObj)
 		}
-		(*c)[NewSourceCollectionNamespace(sourceCol)] = targetCols
+		srcNamespaceType, ok := metaObj.SourceNamespaceTypeMap[i]
+		if !ok {
+			srcNamespaceType = SourceCollectionNamespace
+		}
+		switch srcNamespaceType {
+		case SourceCollectionNamespace:
+			(*c)[NewSourceCollectionNamespace(sourceCol)] = targetCols
+		case SourceDefaultCollectionFilter:
+			filterExpr := sourceCol.CollectionName
+			filter, err := base.GoJsonsmGetFilterExprMatcher(filterExpr)
+			if err != nil {
+				errMap[errKey] = fmt.Errorf("trying to create filterExpr with %v resulted in %v", filterExpr, err)
+				continue
+			}
+			(*c)[NewSourceMigrationNamespace(filterExpr, &filter)] = targetCols
+		default:
+			errMap[errKey] = fmt.Errorf("invalid type %v", err)
+		}
 	}
-	return nil
+	if len(errMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	} else {
+		return nil
+	}
 }
 
 func (c *CollectionNamespaceMapping) String() string {
 	var buffer bytes.Buffer
 	for src, tgtList := range *c {
-		buffer.WriteString(fmt.Sprintf("SOURCE ||Scope: %v Collection: %v|| -> TARGET(s) %v\n", src.ScopeName, src.CollectionName, CollectionNamespaceList(tgtList).String()))
+		buffer.WriteString(fmt.Sprintf("SOURCE ||%v|| -> TARGET(s) %v\n", src.String(), CollectionNamespaceList(tgtList).String()))
 	}
 	return buffer.String()
 }

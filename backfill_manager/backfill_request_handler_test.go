@@ -12,6 +12,7 @@ import (
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"io/ioutil"
 	"sync"
 	"testing"
 	"time"
@@ -429,4 +430,70 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	go rh.OnEvent(backfillEvent)
 	err = <-syncCh
 	assert.Nil(err)
+}
+
+func TestHandleMigrationDiff(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestHandleMigrationDiff =================")
+	defer fmt.Println("============== Test case end: TestHandleMigrationDiff =================")
+
+	logger, _ := setupBRHBoilerPlate()
+	spec := createTestSpec()
+	vbsGetter := createVBsGetter()
+	seqnoGetter := createSeqnoGetterFunc(100)
+	mainPipelineSeqnoGetter := createSeqnoGetterFunc(500)
+	var addCount int
+	var setCount int
+	var delCount int
+	// Make a dummy namespacemapping
+	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	dummyNs := &base.CollectionNamespace{"dummy", "dummy"}
+	requestMapping := make(metadata.CollectionNamespaceMapping)
+	requestMapping.AddSingleMapping(collectionNs, dummyNs)
+
+	backfillReplSvc := &service_def.BackfillReplSvc{}
+	brhMockBackfillReplSvcCommon(backfillReplSvc)
+	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
+	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
+
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil)
+
+	assert.NotNil(rh)
+	assert.Nil(rh.Start())
+
+	// Create an "Added" one"
+	var provisionedFile string = testDir + "provisionedManifest.json"
+	data, err := ioutil.ReadFile(provisionedFile)
+	assert.Nil(err)
+	target, _ := metadata.NewCollectionsManifestFromBytes(data)
+	source := metadata.NewDefaultCollectionsManifest()
+	manifestPair := metadata.CollectionsManifestPair{
+		Source: &source,
+		Target: &target,
+	}
+
+	var mappingMode base.CollectionsMgtType
+	mappingMode.SetExplicitMapping(true)
+	mappingMode.SetMigration(true)
+
+	rules := make(base.CollectionsMappingRulesType)
+	// Make a rule that says if the doc key starts with "S1_"
+	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
+	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
+
+	explicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	assert.Nil(err)
+	assert.NotNil(explicitMap)
+	assert.Equal(2, len(explicitMap))
+
+	assert.Nil(rh.cachedBackfillSpec)
+	// Test remove when there's no spec
+	pair := metadata.CollectionNamespaceMappingsDiffPair{
+		Added:   explicitMap,
+		Removed: nil,
+	}
+	err = rh.HandleBackfillRequest(pair)
+	assert.Nil(err)
+	assert.NotNil(rh.cachedBackfillSpec)
 }
