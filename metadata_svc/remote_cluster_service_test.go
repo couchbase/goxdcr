@@ -1448,6 +1448,18 @@ func getPools70() (map[string]interface{}, error) {
 	return retMap, err
 }
 
+func getCloudNodeList() ([]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testExtDataDir, "cloudNodeList.json")
+	byteSlice, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		panic(err)
+	}
+	var unmarshalledIface interface{}
+	err = json.Unmarshal(byteSlice, &unmarshalledIface)
+
+	return unmarshalledIface.([]interface{}), nil
+}
+
 func TestAddressPreference(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreference =================")
 	assert := assert.New(t)
@@ -2342,4 +2354,23 @@ func TestParallelSecureGetFail(t *testing.T) {
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.NotNil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
+
+	agent, _, err := remoteClusterSvc.getOrStartNewAgent(ref, true, false)
+	assert.Nil(err)
+	assert.NotNil(agent)
+
+	nodeList, err := getCloudNodeList()
+	assert.Nil(err)
+	assert.NotNil(nodeList)
+
+	agent.utils = testUtils
+	hostname := "cb-0000.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com"
+	isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, hostname, true)
+	assert.Nil(err)
+	assert.True(isExternal)
+
+	hostname = "cb-0000.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:8091"
+	isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, hostname, true)
+	assert.Nil(err)
+	assert.True(isExternal)
 }

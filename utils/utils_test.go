@@ -6,10 +6,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/couchbaselabs/gojsonsm"
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbaselabs/gojsonsm"
 	"github.com/stretchr/testify/assert"
 	gocb "gopkg.in/couchbase/gocb.v1"
 	"io/ioutil"
@@ -201,6 +201,35 @@ func getXattrValueMock() (map[string]interface{}, []byte, error) {
 func getTargetVBucketMockAlt() (map[string]interface{}, []byte, error) {
 	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "targetBucketInfo_alt.json")
 	return readJsonHelper(fileName)
+}
+
+func getCloudTargetBucketInfo() (map[string]interface{}, []byte, error) {
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "cloudBucketInfo.json")
+	return readJsonHelper(fileName)
+}
+
+func getCloudNodeList() ([]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "cloudNodeList.json")
+	byteSlice, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		panic(err)
+	}
+	var unmarshalledIface interface{}
+	err = json.Unmarshal(byteSlice, &unmarshalledIface)
+
+	return unmarshalledIface.([]interface{}), nil
+}
+
+func getInitCloudNodeList() ([]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testExternalDataDir, "initCloudData.json")
+	byteSlice, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		panic(err)
+	}
+	var unmarshalledIface interface{}
+	err = json.Unmarshal(byteSlice, &unmarshalledIface)
+
+	return unmarshalledIface.([]interface{}), nil
 }
 
 func MakeSlicesBuf() [][]byte {
@@ -1037,4 +1066,53 @@ func TestGetServerVBucketsMapAfterReplacingRefNode(t *testing.T) {
 	assert.NotEqual(0, len(kvVBMap))
 
 	fmt.Println("============== Test case end: TestGetServerVBucketsMapAfterReplacingRefNode =================")
+}
+
+func TestUtilsCloudBucketInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestCloudBucketInfo =================")
+	defer fmt.Println("============== Test case end: TestCloudBucketInfo=================")
+	assert := assert.New(t)
+
+	cloudBucketInfo, _, err := getCloudTargetBucketInfo()
+	assert.Nil(err)
+	assert.NotNil(cloudBucketInfo)
+
+	retPortMap, err := testUtils.getMemcachedSSLPortMapInternal("", cloudBucketInfo, logger, false)
+	assert.Nil(err)
+	assert.NotNil(retPortMap)
+
+	for _, port := range retPortMap {
+		assert.Equal(uint16(11207), port)
+	}
+
+	// Try with external
+	retPortMap, err = testUtils.getMemcachedSSLPortMapInternal("", cloudBucketInfo, logger, true)
+	for _, port := range retPortMap {
+		assert.Equal(uint16(11207), port)
+	}
+
+}
+
+func TestUtilsCloudNodeInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestCloudNodeInfo =================")
+	defer fmt.Println("============== Test case end: TestCloudNodeInfo =================")
+	assert := assert.New(t)
+
+	cloudNodeList, _ := getCloudNodeList()
+
+	for _, nodeInfo := range cloudNodeList {
+		hostAddr, portNumber, portErr := testUtils.GetExternalMgtHostAndPort(nodeInfo.(map[string]interface{}), true)
+		assert.Nil(portErr)
+		assert.Equal(18091, portNumber)
+		assert.NotEqual("", hostAddr)
+	}
+
+	cloudNodeList, _ = getInitCloudNodeList()
+	for _, nodeInfo := range cloudNodeList {
+		hostAddr, portNumber, portErr := testUtils.GetExternalMgtHostAndPort(nodeInfo.(map[string]interface{}), true)
+		assert.Nil(portErr)
+		assert.Equal(18091, portNumber)
+		assert.NotEqual("", hostAddr)
+	}
+
 }

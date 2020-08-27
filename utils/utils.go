@@ -940,14 +940,21 @@ func (u *Utilities) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInf
 // This method is used to get the SSL port for target nodes - will use alternate fields if requested
 func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool,
 	clientCertificate []byte, clientKey []byte, bucket string, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
-	ret := make(base.SSLPortMap)
-
 	logger.Infof("GetMemcachedSSLPort, connStr=%v\n", connStr)
 	bucketInfo, err := u.GetClusterInfo(connStr, base.BPath+bucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 	if err != nil {
 		return nil, err
 	}
 
+	portMap, err := u.getMemcachedSSLPortMapInternal(connStr, bucketInfo, logger, useExternal)
+	if err != nil {
+		return nil, err
+	}
+
+	return portMap, nil
+}
+
+func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo map[string]interface{}, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
 	nodesExt, ok := bucketInfo[base.NodeExtKey]
 	if !ok {
 		return nil, u.BucketInfoParseError(bucketInfo, logger)
@@ -959,6 +966,8 @@ func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, a
 	}
 
 	var hostName string
+	var err error
+	portMap := make(base.SSLPortMap)
 	for _, nodeExt := range nodesExtArray {
 		var portNumberToUse uint16
 		nodeExtMap, ok := nodeExt.(map[string]interface{})
@@ -1025,11 +1034,10 @@ func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, a
 			}
 		}
 
-		ret[hostAddr] = portNumberToUse
+		portMap[hostAddr] = portNumberToUse
 	}
-	logger.Infof("memcached ssl port map=%v\n", ret)
-
-	return ret, nil
+	logger.Infof("memcached ssl port map=%v\n", portMap)
+	return portMap, nil
 }
 
 func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonLogger) error {
