@@ -15,15 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	mc "github.com/couchbase/gomemcached"
-	mcc "github.com/couchbase/gomemcached/client"
-	base "github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
-	utilities "github.com/couchbase/goxdcr/utils"
-	"github.com/golang/snappy"
 	"io"
 	"math"
 	"math/rand"
@@ -34,6 +25,16 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	mc "github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
+	base "github.com/couchbase/goxdcr/base"
+	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/golang/snappy"
 )
 
 //configuration settings for XmemNozzle
@@ -1968,8 +1969,8 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 			// SUBDOC_BAD_MULTI is returned when XATTR _xdcr does not exist. This is expected for new documents that XDCR
 			// with custom CR never set. We will continue with detectConflictWithXattr() since it handles _xdcr nil value
 			// SYBDOC_MULTI_PATH_FAILURE_DELETED is the same but on a deleted document
-			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI) ||
-				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED {
+			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI ||
+				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED) {
 				switch xmem.detectConflictWithXattr(wrappedReq.Req, resp) {
 				case SourceDominate:
 					// Set the expected CAS value at target

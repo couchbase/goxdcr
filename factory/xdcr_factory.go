@@ -3,6 +3,10 @@ package factory
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/capi_utils"
 	"github.com/couchbase/goxdcr/common"
@@ -17,9 +21,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"math"
-	"strconv"
-	"time"
 )
 
 const (
@@ -203,10 +204,6 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		// for xmem replication, sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
 		// resolution and target side conflict resolution yield consistent results
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
-	}
-	// TODO (MB-39012): Remove this when we actually have bucket with custom CR
-	if xdcrf.xdcr_topology_svc.IsMyClusterDeveloperPreview() {
-		sourceCRMode = base.CRMode_Custom
 	}
 
 	var specForConstruction metadata.GenericSpecification
