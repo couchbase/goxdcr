@@ -597,11 +597,12 @@ func (service *ReplicationSpecService) validateCompressionTarget(errorMap base.E
 	if targetClusterRef.IsFullEncryption() {
 		// Full encryption needs TLS connection with special inputs
 		var connStr string
+		var useExternal bool
 		connStr, err = targetClusterRef.MyConnectionStr()
 		if err != nil {
 			return err
 		}
-		useExternal, err := service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
+		useExternal, err = service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
 		if err != nil {
 			return err
 		}

@@ -1118,6 +1118,40 @@ func getNodeListWithMinInfoMock(external bool, portGiven bool) ([]interface{}, e
 	}
 }
 
+func getPoolsDefaultPre70() (map[string]interface{}, error) {
+	return getClusterInfoMockInt()
+}
+
+func getPoolsDefault70() (map[string]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testIntDataDir, "pools_default_7.0.json")
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
+}
+
+func getPoolsPre70() (map[string]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testIntDataDir, "pools.json")
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
+}
+
+func getPools70() (map[string]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testIntDataDir, "pools_7.0.json")
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
+}
+
+func getCloudNodeList() ([]interface{}, error) {
+	fileName := fmt.Sprintf("%v%v", testExtDataDir, "cloudNodeList.json")
+	byteSlice, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		panic(err)
+	}
+	var unmarshalledIface interface{}
+	err = json.Unmarshal(byteSlice, &unmarshalledIface)
+
+	return unmarshalledIface.([]interface{}), nil
+}
+
 func TestAddressPreference(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreference =================")
 	assert := assert.New(t)
@@ -1346,5 +1380,5 @@ func TestAddressPreferenceChange(t *testing.T) {
 	refList2, _ := remoteClusterSvc.GetRefListForRestartAndClearState()
 	assert.Equal(0, len(refList2))
 
-	fmt.Println("============== Test case start: TestAddressPreferenceChange =================")
+	fmt.Println("============== Test case end: TestAddressPreferenceChange =================")
 }

@@ -751,6 +751,12 @@ func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface
 	pendingHostname := base.GetHostName(hostname)
 	pendingPort, portErr := base.GetPortNumber(hostname)
 
+	if pendingPort == base.DefaultAdminPort {
+		// Because 8091 is always tagged on automatically if user did not enter a port
+		// So, if pendingPort is 8091, then categorize it as user did not enter port number
+		portErr = base.ErrorNoPortNumber
+	}
+
 	for _, node := range nodeList {
 		nodeInfoMap, ok := node.(map[string]interface{})
 		if !ok {
@@ -780,7 +786,7 @@ func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface
 				// Since alternate address did not provide mgmt port number, and user provided
 				// port number, it means that the user did not intend to use external address
 				// Special case - if user specified 8091, then it is the same as didn't specifying
-				if pendingPort == base.DefaultAdminPort {
+				if pendingPort == base.DefaultAdminPort || pendingPort == base.DefaultAdminPortSSL {
 					matched = true
 				}
 			default:
@@ -794,9 +800,14 @@ func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface
 			case base.ErrorNoPortNumber:
 				// User did not enter port number
 				// User's intention is to use the original default internal port
-				if extHost == pendingHostname && extPort == int(base.DefaultAdminPort) {
+				if extHost == pendingHostname {
 					// Only allow this if the alternate port is also the default admin port
-					matched = true
+					if !isHttps && extPort == int(base.DefaultAdminPort) {
+						matched = true
+					}
+					if isHttps && extPort == int(base.DefaultAdminPortSSL) {
+						matched = true
+					}
 				}
 			case nil:
 				// User entered port number
@@ -1555,6 +1566,7 @@ func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.Rem
 			}
 		}
 	}
+
 	return
 }
 

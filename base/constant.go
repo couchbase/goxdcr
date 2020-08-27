@@ -29,6 +29,7 @@ var LocalHostName = "127.0.0.1"
 var LocalHostNameIpv6 = "[::1]"
 
 var DefaultAdminPort uint16 = 8091
+var DefaultAdminPortSSL uint16 = 18091
 
 // Exponential backoff factor
 var MetaKvBackoffFactor = 2
