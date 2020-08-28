@@ -840,10 +840,10 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(retryOnErr bool) {
 		return
 	}
 	ref.hostnameSRVType.SetSRV(isSecure)
+	ref.srvEntries = ref.srvEntries[:0]
 	for _, entry := range entries {
 		ref.srvEntries = append(ref.srvEntries, SrvEntryType{entry})
 	}
-
 	return
 }
 
@@ -912,7 +912,7 @@ func (ref *RemoteClusterReference) RefreshSRVEntries() (added, removed []*net.SR
 		for _, existingEntry := range ref.srvEntries {
 			removed = append(removed, existingEntry.srv)
 		}
-		ref.srvEntries = SrvEntriesType{}
+		ref.srvEntries = ref.srvEntries[:0]
 		for _, pulledEntry := range pulledEntries {
 			added = append(added, pulledEntry)
 			ref.srvEntries = append(ref.srvEntries, SrvEntryType{srv: pulledEntry})

@@ -1483,7 +1483,7 @@ func TestAddressPreference(t *testing.T) {
 	agent.utils = testUtils
 	assert.Equal(agent.pendingAddressPreference, Uninitialized)
 	agent.stageNewReferenceNoLock(ref, false /*user initiated*/)
-	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode()))
+	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode(), nil))
 	assert.Equal(agent.addressPreference, External)
 
 	// test2 - specified no port and alternate address gives port
@@ -1494,7 +1494,7 @@ func TestAddressPreference(t *testing.T) {
 	agent.utils = testUtils
 	assert.Equal(agent.pendingAddressPreference, Uninitialized)
 	agent.stageNewReferenceNoLock(ref, false /*user initiated*/)
-	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode()))
+	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode(), nil))
 	assert.Equal(agent.addressPreference, Internal)
 
 	// test3 - specified port and alternate address gives port
@@ -1505,7 +1505,7 @@ func TestAddressPreference(t *testing.T) {
 	agent.utils = testUtils
 	assert.Equal(agent.pendingAddressPreference, Uninitialized)
 	agent.stageNewReferenceNoLock(ref, false /*user initiated*/)
-	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode()))
+	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode(), nil))
 	assert.Equal(agent.addressPreference, External)
 
 	usesExt, err := agent.UsesAlternateAddress()
@@ -1584,7 +1584,7 @@ func TestAddressPreferenceForceExt(t *testing.T) {
 	agent.utils = testUtils
 	assert.Equal(agent.pendingAddressPreference, Uninitialized)
 	agent.stageNewReferenceNoLock(ref, false /*user initiated*/)
-	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode()))
+	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode(), nil))
 	assert.Equal(agent.addressPreference, External)
 
 	// test2 - specified no port and alternate address gives port
@@ -1595,7 +1595,7 @@ func TestAddressPreferenceForceExt(t *testing.T) {
 	agent.utils = testUtils
 	assert.Equal(agent.pendingAddressPreference, Uninitialized)
 	agent.stageNewReferenceNoLock(ref, false /*user initiated*/)
-	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode()))
+	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode(), nil))
 	assert.Equal(agent.addressPreference, External)
 
 	// test3 - specified port and alternate address gives port
@@ -1606,7 +1606,7 @@ func TestAddressPreferenceForceExt(t *testing.T) {
 	agent.utils = testUtils
 	assert.Equal(agent.pendingAddressPreference, Uninitialized)
 	agent.stageNewReferenceNoLock(ref, false /*user initiated*/)
-	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode()))
+	assert.Nil(agent.initAddressPreference(nodeList, ref.HostName(), ref.IsHttps(), ref.HostnameMode(), nil))
 	assert.Equal(agent.addressPreference, External)
 
 	usesExt, err := agent.UsesAlternateAddress()
@@ -2365,12 +2365,56 @@ func TestParallelSecureGetFail(t *testing.T) {
 
 	agent.utils = testUtils
 	hostname := "cb-0000.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com"
-	isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, hostname, true)
+	isExternal, err := agent.checkIfHostnameIsAlternate(nodeList, hostname, true, nil)
 	assert.Nil(err)
 	assert.True(isExternal)
 
 	hostname = "cb-0000.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:8091"
-	isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, hostname, true)
+	isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, hostname, true, nil)
 	assert.Nil(err)
 	assert.True(isExternal)
+}
+
+// Given a DNS SRV with a list of SRV entries, retrieve external intent
+func TestDNSSRVReturnAlternate(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestDNSSRVReturnAlternate =================")
+	defer fmt.Println("============== Test case done: TestDNSSRVReturnAlternate =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	// 8091 and 18091 both blocked
+	utilsMockFunc := func() {
+		setupUtilsBothAdminPortsBlocked(utilitiesMock)
+	}
+
+	idAndName := "test"
+
+	ref := createSSLRemoteClusterRef(idAndName, nil)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	assert.NotNil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
+
+	agent, _, err := remoteClusterSvc.getOrStartNewAgent(ref, true, false)
+	assert.Nil(err)
+	assert.NotNil(agent)
+
+	// agent to use a real utils for the following test
+	agent.utils = testUtils
+
+	nodeList, err := getCloudNodeList()
+	assert.Nil(err)
+	assert.NotNil(nodeList)
+
+	// Note 8091 is tagged on automatically
+	srvName := "ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:8091"
+	srvNodeList := []string{
+		"cb-0000.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:18091",
+		"cb-0001.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:18091",
+		"cb-0002.ead75783-adbe-42ac-8937-e187da9abf80.dp.cloud.couchbase.com:18091",
+	}
+	isExteranal, err := agent.checkIfHostnameIsAlternate(nodeList, srvName, true, srvNodeList)
+	assert.Nil(err)
+	assert.True(isExteranal)
 }

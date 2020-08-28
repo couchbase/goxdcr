@@ -728,7 +728,7 @@ func (rctx *refreshContext) checkUserIntent(nodeList []interface{}) {
 		return
 	}
 
-	isExternal, err := rctx.agent.checkIfHostnameIsAlternate(nodeList, rctx.hostName, rctx.refCache.IsFullEncryption())
+	isExternal, err := rctx.agent.checkIfHostnameIsAlternate(nodeList, rctx.hostName, rctx.refCache.IsFullEncryption(), rctx.refCache.GetSRVHostNames())
 	if err != nil {
 		rctx.agent.logger.Warnf("Unable to figure out if hostname %v is alternate or not", rctx.hostName)
 		return
@@ -952,7 +952,7 @@ func (rctx *refreshContext) initAlternateAddress() (bool, error) {
 		return useExternal, err
 	}
 
-	useExternal, err = rctx.agent.checkIfHostnameIsAlternate(nodeList, rctx.refCache.HostName(), rctx.refCache.IsHttps())
+	useExternal, err = rctx.agent.checkIfHostnameIsAlternate(nodeList, rctx.refCache.HostName(), rctx.refCache.IsHttps(), rctx.refCache.GetSRVHostNames())
 	if err != nil {
 		return useExternal, err
 	}
@@ -1193,18 +1193,19 @@ func (agent *RemoteClusterAgent) updatePendingAddress(nodeList []interface{}, rc
 	pendingRefIsHttps := agent.pendingRef.IsHttps()
 	hostnameMode := agent.pendingRef.HostnameMode()
 	skipPrefUpdate := agent.shouldSkipAddressPrefNoLock(rctx)
+	srvEntries := agent.pendingRef.GetSRVHostNames()
 	agent.refMtx.RUnlock()
 
 	useExternal = agentPref == External
 	if agentPref == Uninitialized {
-		err = agent.initAddressPreference(nodeList, pendingHostName, pendingRefIsHttps, hostnameMode)
+		err = agent.initAddressPreference(nodeList, pendingHostName, pendingRefIsHttps, hostnameMode, srvEntries)
 		if err != nil {
 			return
 		}
 		useExternal = agent.getAddressPreference() == External
 	} else if !skipPrefUpdate {
 		var isExternal bool
-		isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, agent.pendingRef.HostName(), agent.pendingRef.IsHttps())
+		isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, pendingHostName, pendingRefIsHttps, srvEntries)
 		if err != nil {
 			return
 		}
@@ -1250,12 +1251,12 @@ func (agent *RemoteClusterAgent) updatePendingAddress(nodeList []interface{}, rc
 // the cluster (i.e. missing setting up alt address/port for certain nodes in the cluster)
 // as long as the specified node still belongs in the cluster, we can use that node's alternate
 // address setup as the source for the user's intent
-func (agent *RemoteClusterAgent) initAddressPreference(nodeList []interface{}, hostname string, isHttps bool, hostnameMode string) error {
+func (agent *RemoteClusterAgent) initAddressPreference(nodeList []interface{}, hostname string, isHttps bool, hostnameMode string, srvHostNames []string) error {
 	isExternal := hostnameMode == metadata.HostnameMode_External
 	var err error
 
 	if hostnameMode == metadata.HostnameMode_None {
-		isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, hostname, isHttps)
+		isExternal, err = agent.checkIfHostnameIsAlternate(nodeList, hostname, isHttps, srvHostNames)
 		if err != nil {
 			return err
 		}
@@ -1295,7 +1296,8 @@ func (agent *RemoteClusterAgent) setAddressPreference(external bool, lock bool, 
 	}
 }
 
-func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface{}, hostname string, isHttps bool) (bool, error) {
+// If len(srvHostNames) > 0, then hostname will be treated as an SRV entry
+func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface{}, hostname string, isHttps bool, srvHostNames []string) (bool, error) {
 	var isExternal bool
 
 	if len(hostname) == 0 {
@@ -1309,6 +1311,21 @@ func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface
 		// Because 8091 is always tagged on automatically if user did not enter a port
 		// So, if pendingPort is 8091, then categorize it as user did not enter port number
 		portErr = base.ErrorNoPortNumber
+	}
+
+	matchesExtHostName := func(extHost string) bool {
+		if len(srvHostNames) == 0 {
+			return extHost == pendingHostname
+		} else {
+			// Check SRV entries
+			for _, srvHostNameAndPort := range srvHostNames {
+				srvHostName := base.GetHostName(srvHostNameAndPort)
+				if extHost == srvHostName {
+					return true
+				}
+			}
+			return false
+		}
 	}
 
 	for _, node := range nodeList {
@@ -1333,9 +1350,7 @@ func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface
 				// User did not enter port number
 				// This means that the external hostname sitting on default port is
 				// the user's intention, since user did not specify a non-default port
-				if extHost == pendingHostname {
-					matched = true
-				}
+				matched = matchesExtHostName(extHost)
 			case nil:
 				// Since alternate address did not provide mgmt port number, and user provided
 				// port number, it means that the user did not intend to use external address
@@ -1354,7 +1369,7 @@ func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface
 			case base.ErrorNoPortNumber:
 				// User did not enter port number
 				// User's intention is to use the original default internal port
-				if extHost == pendingHostname {
+				if matchesExtHostName(extHost) {
 					// Only allow this if the alternate port is also the default admin port
 					if !isHttps && extPort == int(base.DefaultAdminPort) {
 						matched = true
@@ -1366,7 +1381,7 @@ func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface
 			case nil:
 				// User entered port number
 				// User's intention to use external iff both match
-				if extHost == pendingHostname && extPort == int(pendingPort) {
+				if matchesExtHostName(extHost) && extPort == int(pendingPort) {
 					matched = true
 				}
 			default:
