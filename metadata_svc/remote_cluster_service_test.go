@@ -374,12 +374,12 @@ func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) base.String
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField2, hostnameList, nil)
-	//utilitiesMock.On("GetClusterInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-	//	mock.Anything).Return(nonEmptyMap, nil)
-	//utilitiesMock.On("GetClusterInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-	//	mock.Anything).Return(emptyMap, nil)
-	//utilitiesMock.On("GetClusterInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-	//	mock.Anything).Return(emptyMap, nil)
+	utilitiesMock.On("GetClusterInfo", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Return(nonEmptyMap, nil)
+	utilitiesMock.On("GetClusterInfo", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Return(emptyMap, nil)
+	utilitiesMock.On("GetClusterInfo", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Return(emptyMap, nil)
 	utilitiesMock.On("GetClusterInfoWStatusCode", hostname3, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nonEmptyMap, nil, http.StatusOK)
 	utilitiesMock.On("GetClusterInfoWStatusCode", hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
 	utilitiesMock.On("GetClusterInfoWStatusCode", hostname2, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(emptyMap, nil, http.StatusOK)
@@ -1913,19 +1913,19 @@ func TestCapabilityStruct(t *testing.T) {
 	assert.Nil(err)
 	err = capability.LoadFromDefaultPoolInfo(pre70poolsDefault, nil /* logger*/)
 	assert.Nil(err)
-	assert.False(capability.Collection)
+	assert.False(capability.HasCollectionSupport())
 
 	cloneTest := capability.Clone()
-	assert.False(cloneTest.Collection)
+	assert.False(cloneTest.HasCollectionSupport())
 
 	on70poolsDefault, err := getPoolsDefault70()
 	assert.Nil(err)
 	err = capability.LoadFromDefaultPoolInfo(on70poolsDefault, nil /* logger*/)
 	assert.Nil(err)
-	assert.True(capability.Collection)
+	assert.True(capability.HasCollectionSupport())
 
 	cloneTest = capability.Clone()
-	assert.True(cloneTest.Collection)
+	assert.True(cloneTest.HasCollectionSupport())
 
 	fmt.Println("============== Test case end: TestCapabilityStruct =================")
 }
@@ -1952,7 +1952,7 @@ func TestCapabilityChange(t *testing.T) {
 	capability, err := remoteClusterSvc.GetCapability(ref)
 	assert.Nil(err)
 	// Madhatter does not have collections support
-	assert.False(capability.Collection)
+	assert.False(capability.HasCollectionSupport())
 	refListChanged, err := remoteClusterSvc.GetRefListForRestartAndClearState()
 	assert.Nil(err)
 	assert.Equal(0, len(refListChanged))
@@ -1976,7 +1976,7 @@ func TestCapabilityChange(t *testing.T) {
 	capability, err = remoteClusterSvc.GetCapability(ref)
 	assert.Nil(err)
 	// CheshireCat does have collections support
-	assert.True(capability.Collection)
+	assert.True(capability.HasCollectionSupport())
 	refListChanged, err = remoteClusterSvc.GetRefListForRestartAndClearState()
 	assert.Nil(err)
 	assert.Equal(1, len(refListChanged))
@@ -2111,7 +2111,8 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 
 	// resetup utilitiesMock knowing this info
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true,
+		clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	// First bootstrap agent with a reference that refers to the external hostname
@@ -2138,7 +2139,8 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 
 	// Now, all the nodes will return internal
 	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
-	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true,
+		clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
 	for i := 0; i <= base.RemoteClusterAlternateAddrChangeCnt-1; i++ {
@@ -2155,10 +2157,10 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	assert.Nil(err)
 	assert.False(useAlternate)
 
-	// flag should not have been raised and a reference returned
+	// flag should not have been raised and no reference returned
 	refList, _ := remoteClusterSvc.GetRefListForRestartAndClearState()
 	assert.Equal(0, len(refList))
-	fmt.Println("============== Test case start: TestAddressPreferenceChangeWithDefaultMode =================")
+	fmt.Println("============== Test case end: TestAddressPreferenceChangeWithDefaultMode =================")
 }
 
 func TestDNSSrv(t *testing.T) {

@@ -926,8 +926,10 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 	stats_mgr.cachedCapability = rcCapability
 
 	var features utilities.HELOFeatures
-	if !rcCapability.Collection {
+	if !rcCapability.HasCollectionSupport() {
 		// If remote cluster does not support collection, then only get stats for default collection
+		// This is reverse logic because to only get stat for the default collection, we need to enable collection
+		// so we can ask specifically for a subset, aka the default collection
 		features.Collections = true
 	}
 
@@ -1607,7 +1609,7 @@ func initEmptyConnections(bucket_kv_mem_clients map[string]map[string]mcc.Client
 func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]mcc.ClientIface, srcBucketName string,
 	remoteClusterCapability metadata.Capability) map[string]mcc.ClientIface {
 	var connsShouldHaveCollectionsEnabled bool
-	if !remoteClusterCapability.Collection {
+	if !remoteClusterCapability.HasCollectionSupport() {
 		// When remote cluster does not support collection, it means legacy replication mode
 		// Legacy replication means only replicate default collections and only show stats with
 		// default collection data - don't do the regular high vb stats
@@ -1715,7 +1717,9 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 
 	var features utilities.HELOFeatures
 	var collectionIds []uint32
-	if !remoteClusterCapability.Collection {
+	if !remoteClusterCapability.HasCollectionSupport() {
+		// This is reverse logic because to only get stat for the default collection, we need to enable collection
+		// so we can ask specifically for a subset, aka the default collection
 		features.Collections = true
 		collectionIds = append(collectionIds, base.DefaultCollectionId)
 	}

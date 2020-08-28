@@ -640,8 +640,13 @@ func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string) (
 func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification) error {
 	src, tgt, err := b.collectionsManifestSvc.GetLatestManifests(spec)
 	if err != nil {
-		b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
-		return err
+		if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
+			defaultManifest := metadata.NewDefaultCollectionsManifest()
+			tgt = &defaultManifest
+		} else {
+			b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
+			return err
+		}
 	}
 
 	b.cacheMtx.Lock()

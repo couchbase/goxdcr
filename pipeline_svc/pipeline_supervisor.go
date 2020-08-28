@@ -405,7 +405,9 @@ func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[stri
 	for _, serverAddr := range nodes {
 		// If the remote cluster does not support collections, then only get the stat for default collection
 		var features utilities.HELOFeatures
-		if !rcCapability.Collection {
+		if !rcCapability.HasCollectionSupport() {
+			// This is reverse logic because to only get stat for the default collection, we need to enable collection
+			// so we can ask specifically for a subset, aka the default collection
 			features.Collections = true
 		}
 		client, err := pipelineSupervisor.utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, base.KeepAlivePeriod, pipelineSupervisor.Logger(), features)

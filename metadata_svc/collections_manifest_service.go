@@ -316,6 +316,7 @@ type AgentPersistResult struct {
 // replication. The Service will make decisions and handle book-keeping based on what
 // the agents' information
 type CollectionsManifestAgent struct {
+	id                string
 	checkpointsSvc    service_def.CheckpointsService
 	logger            *log.CommonLogger
 	utilities         utils.UtilsIface
@@ -328,6 +329,9 @@ type CollectionsManifestAgent struct {
 
 	// The target side manifest getter
 	remoteClusterSvc service_def.RemoteClusterSvc
+
+	remoteClusterRefPopulated uint32
+	remoteClusterRef          *metadata.RemoteClusterReference
 
 	// Last pulled manifest
 	srcMtx         sync.RWMutex
@@ -359,17 +363,9 @@ type CollectionsManifestAgent struct {
 	singlePersistResp      chan AgentPersistResult
 }
 
-func NewCollectionsManifestAgent(name string,
-	remoteClusterSvc service_def.RemoteClusterSvc,
-	checkpointsSvc service_def.CheckpointsService,
-	logger *log.CommonLogger,
-	utilities utils.UtilsIface,
-	replicationSpec *metadata.ReplicationSpecification,
-	manifestOps service_def.CollectionsManifestOps,
-	srcManifestGetter AgentSrcManifestGetter,
-	metakvSvc service_def.ManifestsService,
-	metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
+func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
 	manifestAgent := &CollectionsManifestAgent{
+		id:                     name,
 		remoteClusterSvc:       remoteClusterSvc,
 		checkpointsSvc:         checkpointsSvc,
 		logger:                 logger,
@@ -679,8 +675,26 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr err
 	return
 }
 
+func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() {
+	// For a spec to exist, the reference must exist also
+	retryOp := func() error {
+		var getErr error
+		a.remoteClusterRef, getErr = a.remoteClusterSvc.RemoteClusterByUuid(a.replicationSpec.TargetClusterUUID, false)
+		return getErr
+	}
+	err := a.utilities.ExponentialBackoffExecutor("CollectionsManifestSvcHandleNewReplSpec",
+		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
+	if err != nil {
+		// Worst case scenario even after 3 seconds, panic and XDCR process will reload everything in order from metakv
+		// as in, load the remote cluster reference first, then load the specs
+		panic("Cannot continue without retrieving remote cluster reference")
+	}
+	atomic.StoreUint32(&a.remoteClusterRefPopulated, 1)
+}
+
 // These should not block
 func (a *CollectionsManifestAgent) Start() error {
+
 	var refreshImmediately bool
 	if atomic.CompareAndSwapUint32(&a.started, 0, 1) {
 		srcErr, tgtErr := a.loadManifestsFromMetakv()
@@ -699,6 +713,7 @@ func (a *CollectionsManifestAgent) Start() error {
 			return nil
 		}
 
+		go a.populateRemoteClusterRefOnce()
 		go a.runPeriodicRefresh(refreshImmediately)
 		go a.runPersistRequestHandler()
 		return nil
@@ -961,6 +976,13 @@ func (a *CollectionsManifestAgent) refreshTargetNoLock(force bool) (*metadata.Co
 func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTime time.Duration, maxRetry int) (oldManifest, newManifest *metadata.CollectionsManifest, err error) {
 	if a.isStopped() {
 		return nil, nil, parts.PartStoppedError
+	}
+
+	hasSupport, err := a.remoteClusterHasNoCollectionsCapability()
+	if err != nil {
+		return nil, nil, err
+	} else if !hasSupport {
+		return nil, nil, base.ErrorTargetCollectionsNotSupported
 	}
 
 	var manifest *metadata.CollectionsManifest
@@ -1269,4 +1291,17 @@ func (a *CollectionsManifestAgent) testGetMetaLists(srcUids, tgtUids []uint64) (
 		tgtList = append(tgtList, a.targetCache[uid])
 	}
 	return
+}
+
+func (a *CollectionsManifestAgent) remoteClusterHasNoCollectionsCapability() (bool, error) {
+	if atomic.LoadUint32(&a.remoteClusterRefPopulated) == 0 {
+		return false, fmt.Errorf("%v - RemoteClusterReference has not finished populating", a.id)
+	}
+
+	capability, err := a.remoteClusterSvc.GetCapability(a.remoteClusterRef)
+	if err != nil {
+		return false, fmt.Errorf("%v getting capability: %v", a.id, err)
+	}
+
+	return capability.HasCollectionSupport(), nil
 }

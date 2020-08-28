@@ -947,7 +947,7 @@ func (xdcrf *XDCRFactory) disableCollectionIfNeeded(incomingSettings, filteredSe
 		return err
 	}
 
-	if !capability.Collection {
+	if !capability.HasCollectionSupport() {
 		filteredSettings[parts.ForceCollectionDisableKey] = true
 	}
 

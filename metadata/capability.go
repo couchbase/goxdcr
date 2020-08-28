@@ -12,35 +12,47 @@ package metadata
 import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"sync/atomic"
 )
 
 /**
  * Capabilities of a remote cluster
  */
 type Capability struct {
-	Collection bool
+	initialized uint32
+	// We don't anticipate future clusters upgrades having deprecated capabilities
+	// So use atomics to roll-forward and avoid locking
+	collection uint32
 }
 
 func (c *Capability) Reset() {
-	c.Collection = false
+	atomic.StoreUint32(&c.collection, 0)
 }
 
 func (c Capability) Clone() (newCap Capability) {
-	// No slices or other reference types so simple assignment is fine
-	newCap = c
+	newCap.LoadFromOther(c)
 	return
+}
+
+func (c Capability) HasInitialized() bool {
+	return atomic.LoadUint32(&c.initialized) > 0
+}
+
+func (c Capability) HasCollectionSupport() bool {
+	return atomic.LoadUint32(&c.collection) > 0
 }
 
 func (c Capability) IsSameAs(otherCap Capability) bool {
 	// No slices or other reference types so simple comparison
-	return c == otherCap
+	return c.HasCollectionSupport() == otherCap.HasCollectionSupport()
 }
 
 func (c *Capability) LoadFromOther(otherCap Capability) {
 	// CollectionEnabled can only roll forward
-	if otherCap.Collection {
-		c.Collection = otherCap.Collection
+	if otherCap.HasCollectionSupport() {
+		atomic.StoreUint32(&c.collection, 1)
 	}
+	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 }
 
 func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interface{}, logger *log.CommonLogger) error {
@@ -54,8 +66,11 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 		return err
 	}
 
-	// Check different versions here
-	c.Collection = base.IsClusterCompatible(clusterCompatibility, base.VersionForCollectionSupport)
+	// Roll forward collection if necessary
+	if !c.HasCollectionSupport() && base.IsClusterCompatible(clusterCompatibility, base.VersionForCollectionSupport) {
+		atomic.StoreUint32(&c.collection, 1)
+	}
 
+	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 	return nil
 }

@@ -51,6 +51,7 @@ var RefreshAborted = errors.New("Refresh instance was called to be aborted")
 var DeleteAlreadyIssued = errors.New("Underlying remote cluster reference has been already deleted manually")
 var WriteToMetakvErrString = "Error writing to metakv"
 var NoSuchHostRecommendationString = " Check to see if firewall config is incorrect, or if Couchbase Cloud, check to see if source IP is allowed"
+var ErrorRemoteClusterNoCollectionsCapability = errors.New("remote cluster has no collections capability")
 
 func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
@@ -260,8 +261,9 @@ type RemoteClusterAgent struct {
 	pendingAddressPreference AddressType
 	pendingAddressPrefCnt    int
 	configurationChanged     bool
+
 	// As the remote cluster is upgraded, certain features will automatically become enabled
-	currentCapability *metadata.Capability
+	currentCapability metadata.Capability
 
 	// function pointer to callback
 	metadataChangeCallback base.MetadataChangeHandlerCallback
@@ -441,13 +443,14 @@ func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, res
 // This is used as a helper context during each refresh operation
 type refreshContext struct {
 	// For comparison and editing
-	refOrig            *metadata.RemoteClusterReference
-	refCache           *metadata.RemoteClusterReference
-	cachedRefNodesList base.StringPairList
-	origCapability     metadata.Capability
-	cachedCapability   metadata.Capability
-	capabilityLoaded   bool
-	nodeListUpdated    bool
+	refOrig              *metadata.RemoteClusterReference
+	refCache             *metadata.RemoteClusterReference
+	cachedRefNodesList   base.StringPairList
+	origCapability       metadata.Capability
+	origCapabilityLoaded bool
+	cachedCapability     metadata.Capability
+	capabilityLoaded     bool
+	nodeListUpdated      bool
 
 	// connection related
 	connStr       string
@@ -481,8 +484,9 @@ func (rctx *refreshContext) initialize() {
 	rctx.cachedRefNodesList = base.DeepCopyStringPairList(rctx.agent.refNodesList)
 	// addressType
 	rctx.origAddressPref = rctx.agent.addressPreference
-	if rctx.agent.currentCapability != nil {
+	if rctx.agent.currentCapability.HasInitialized() {
 		rctx.origCapability = rctx.agent.currentCapability.Clone()
+		rctx.origCapabilityLoaded = true
 	}
 	rctx.agent.refMtx.RUnlock()
 
@@ -747,7 +751,7 @@ func (rctx *refreshContext) checkUserIntent(nodeList []interface{}) {
 }
 
 func (rctx *refreshContext) capabilityChanged() bool {
-	return rctx.capabilityLoaded && !rctx.origCapability.IsSameAs(rctx.cachedCapability)
+	return rctx.capabilityLoaded && rctx.origCapabilityLoaded && !rctx.origCapability.IsSameAs(rctx.cachedCapability)
 }
 
 func (agent *RemoteClusterAgent) Refresh() error {
@@ -1412,9 +1416,7 @@ func (agent *RemoteClusterAgent) UsesAlternateAddress() (bool, error) {
 }
 
 func (agent *RemoteClusterAgent) GetCapability() (capability metadata.Capability, err error) {
-	agent.refMtx.RLock()
-	defer agent.refMtx.RUnlock()
-	if agent.currentCapability == nil {
+	if !agent.currentCapability.HasInitialized() {
 		err = fmt.Errorf("Remote cluster %v has not initialized capability yet", agent.reference.Name())
 		return
 	}
@@ -1427,11 +1429,7 @@ func (agent *RemoteClusterAgent) SetCapability(capability metadata.Capability) {
 	agent.refMtx.Lock()
 	defer agent.refMtx.Unlock()
 
-	if agent.currentCapability == nil {
-		agent.currentCapability = &capability
-	} else {
-		agent.currentCapability.LoadFromOther(capability)
-	}
+	agent.currentCapability.LoadFromOther(capability)
 }
 
 func (agent *RemoteClusterAgent) runPeriodicRefresh() {
@@ -1504,7 +1502,7 @@ func (agent *RemoteClusterAgent) commitStagedChanges(rctx *refreshContext) {
 	}
 
 	// Update capability if it was successfully initialized and it has changed
-	if agent.currentCapability != nil && rctx != nil && rctx.capabilityChanged() {
+	if agent.currentCapability.HasInitialized() && rctx != nil && rctx.capabilityChanged() {
 		agent.currentCapability.LoadFromOther(rctx.cachedCapability)
 		agent.configurationChanged = true
 	}
@@ -1891,11 +1889,20 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*m
 	}
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate,
 		clientKey, err := agent.reference.MyCredentials()
-	agent.refMtx.RUnlock()
-
 	if err != nil {
 		agent.logger.Errorf("Unable to get credentials with err: %v\n", err)
+		agent.refMtx.RUnlock()
 		return nil, err
+	}
+	agent.refMtx.RUnlock()
+
+	capabilityClone, err := agent.GetCapability()
+	if err != nil {
+		agent.logger.Errorf("Unable to get capability with err: %v\n", err)
+		return nil, err
+	}
+	if !capabilityClone.HasCollectionSupport() {
+		return nil, ErrorRemoteClusterNoCollectionsCapability
 	}
 
 	return agent.utils.GetCollectionsManifest(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
@@ -1903,6 +1910,12 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*m
 
 // refreshIfPossible to prevent overwhelming target outside of refresh interval
 func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossible bool) *metadata.CollectionsManifest {
+	// Avoid get to avoid clone since this is a high-volume call
+	if !agent.currentCapability.HasInitialized() || !agent.currentCapability.HasCollectionSupport() {
+		// Upper level should have protection against not having collection support
+		return nil
+	}
+
 	agent.bucketMtx.RLock()
 	getter, ok := agent.bucketManifestGetters[bucketName]
 	if !ok {
@@ -3191,21 +3204,17 @@ func (service *RemoteClusterService) agentCacheMapsAreSynced() bool {
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()
 	if len(service.agentMap) != len(service.agentCacheRefNameMap) {
-		fmt.Printf("AgentMap: %v\nAgentCacheRefNameMap: %v\n", service.agentMap, service.agentCacheRefNameMap)
 		return false
 	}
 	if len(service.agentMap) != len(service.agentCacheUuidMap) {
-		fmt.Printf("AgentMap: %v\nAgentCacheUuidMap: %v\n", service.agentMap, service.agentCacheUuidMap)
 		return false
 	}
 
 	for _, agent := range service.agentMap {
 		if service.agentCacheRefNameMap[agent.reference.Name()] != agent {
-			fmt.Printf("AgentCacheRefNameMap mismatch name: %v\n", agent.reference.Name())
 			return false
 		}
 		if service.agentCacheUuidMap[agent.reference.Uuid()] != agent {
-			fmt.Printf("AgentCacheUuidMap mismatch\n")
 			return false
 		}
 	}

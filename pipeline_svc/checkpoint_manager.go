@@ -1370,7 +1370,11 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	var tgtManifestIds map[uint16]uint64
 	if !ckmgr.isTargetES {
 		// get through seqnos for all vbuckets in the pipeline
-		through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
+		if ckmgr.collectionEnabled() {
+			through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
+		} else {
+			through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
+		}
 		// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
 		ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
 		// get high seqno and vbuuid for all vbuckets in the pipeline
@@ -1380,11 +1384,18 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	}
 	var total_committing_time int64
 
-	ckmgr.PreCommitBrokenMapping()
+	if ckmgr.collectionEnabled() {
+		ckmgr.PreCommitBrokenMapping()
+	}
+
 	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.getCheckpointInterval(), through_seqno_map, high_seqno_and_vbuuid_map,
 		xattr_seqno_map, &total_committing_time, srcManifestIds, tgtManifestIds)
-	ckmgr.CommitBrokenMappingUpdates()
-	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
+
+	if ckmgr.collectionEnabled() {
+		ckmgr.CommitBrokenMappingUpdates()
+		ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
+	}
+
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
 }
@@ -1595,25 +1606,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	filterFailed := vbCountMetrics[service_def.DOCS_UNABLE_TO_FILTER_METRIC]
 
 	// Collection-Related items
-	srcManifestId, ok := srcManifestIds[vbno]
-	if !ok {
-		ckmgr.logger.Warnf("Unable to find Source manifest ID for vb %v", vbno)
-	}
-	tgtManifestId, ok := tgtManifestIds[vbno]
-	if !ok {
-		ckmgr.logger.Warnf("Unable to find Target manifest ID for vb %v", vbno)
-	}
-
-	ckmgr.cachedBrokenMap.lock.RLock()
-	brokenMapping := ckmgr.cachedBrokenMap.brokenMap.Clone()
-	// It is possible that Router has already raised IgnoreEvent() to throughseqtrakcer service
-	// If that's the case, the manifestID returned by it will not be correct to pair with the broken map
-	// If the brokenMapping is present, then ensure that the checkpoint will store the corresponding
-	// manifestID so future backfill will be created
-	if len(ckmgr.cachedBrokenMap.brokenMap) > 0 && ckmgr.cachedBrokenMap.correspondingTargetManifest > 0 {
-		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
-	}
-	ckmgr.cachedBrokenMap.lock.RUnlock()
+	srcManifestId, tgtManifestId, brokenMapping := ckmgr.getCollectionItemsIfEnabled(vbno, ok, srcManifestIds, tgtManifestIds)
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
@@ -1638,6 +1631,33 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	// no error fall through. return nil here to keep checkpointing/replication going.
 	// if there is a need to stop checkpointing/replication, it needs to be done in a separate return statement
 	return
+}
+
+func (ckmgr *CheckpointManager) getCollectionItemsIfEnabled(vbno uint16, ok bool, srcManifestIds map[uint16]uint64, tgtManifestIds map[uint16]uint64) (uint64, uint64, metadata.CollectionNamespaceMapping) {
+	if !ckmgr.collectionEnabled() {
+		return 0, 0, metadata.CollectionNamespaceMapping{}
+	}
+
+	srcManifestId, ok := srcManifestIds[vbno]
+	if !ok {
+		ckmgr.logger.Warnf("Unable to find Source manifest ID for vb %v", vbno)
+	}
+	tgtManifestId, ok := tgtManifestIds[vbno]
+	if !ok {
+		ckmgr.logger.Warnf("Unable to find Target manifest ID for vb %v", vbno)
+	}
+
+	ckmgr.cachedBrokenMap.lock.RLock()
+	brokenMapping := ckmgr.cachedBrokenMap.brokenMap.Clone()
+	// It is possible that Router has already raised IgnoreEvent() to throughseqtrakcer service
+	// If that's the case, the manifestID returned by it will not be correct to pair with the broken map
+	// If the brokenMapping is present, then ensure that the checkpoint will store the corresponding
+	// manifestID so future backfill will be created
+	if len(ckmgr.cachedBrokenMap.brokenMap) > 0 && ckmgr.cachedBrokenMap.correspondingTargetManifest > 0 {
+		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
+	}
+	ckmgr.cachedBrokenMap.lock.RUnlock()
+	return srcManifestId, tgtManifestId, brokenMapping
 }
 
 func (ckmgr *CheckpointManager) getThroughSeqno(vbno uint16, through_seqno_map map[uint16]uint64) (uint64, error) {
