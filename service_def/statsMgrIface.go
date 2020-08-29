@@ -214,13 +214,13 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	SET_DOCS_WRITTEN_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of sets written to target"},
 	ADD_DOCS_WRITTEN_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of adds successfully written to target, meaning that target does not have the identical doc by name"},
 
-	DOCS_PROCESSED_METRIC:  StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of docs processed for a replication"},
+	DOCS_PROCESSED_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of docs processed for a replication"},
 	DATA_REPLICATED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data replicated for a replication"},
 	SIZE_REP_QUEUE_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrBytes}, LowCardinality, "Amount of data being queued to be sent in an out nozzle"},
 	DOCS_REP_QUEUE_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of documents being queued to be sent in an out nozzle"},
 
-	DOCS_FILTERED_METRIC:         StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Total number of documents filtered and not replicated due to any type of filtering"},
-	DOCS_UNABLE_TO_FILTER_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated"},
+	DOCS_FILTERED_METRIC:         StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Total number of documents filtered and not replicated due to any type of filtering"},
+	DOCS_UNABLE_TO_FILTER_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of documents that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated"},
 	EXPIRY_FILTERED_METRIC:       StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents filtered that had expiry flag set"},
 	DELETION_FILTERED_METRIC:     StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents filtered that was of a DCP deletion"},
 	SET_FILTERED_METRIC:          StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents filtered that was of a DCP mutation"},
