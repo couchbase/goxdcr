@@ -629,8 +629,8 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 
 	//calculate bandwidth_usage
 	data_replicated := stats_mgr.getOverviewRegistry().Get(service_def.DATA_REPLICATED_METRIC).(metrics.Counter).Count()
-	// bandwidth_usage is in the unit of MB/second, where 1 MB = 1024*1024 bytes instead of 1000*1000 bytes
-	bandwidth_usage := float64(data_replicated-data_replicated_old) / (interval_in_sec * 1.024 * 1.024)
+	// bandwidth_usage is in the unit of bytes/second
+	bandwidth_usage := float64(data_replicated-data_replicated_old) / interval_in_sec
 	bandwidth_usage_var := new(expvar.Float)
 	bandwidth_usage_var.Set(bandwidth_usage)
 	overview_expvar_map.Set(service_def.BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)

@@ -261,7 +261,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	THROUGHPUT_THROTTLE_LATENCY_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average of the latency time introduced due to throughput throttler"},
 
 	//RATE_REPLICATED_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, LowCardinality, "The rate at which documents from this node are being replicated to target nodes"},
-	//BANDWIDTH_USAGE_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMegaBytesPerSecond}, LowCardinality, "The data rate at which documents from this node are being replicated to target nodes"},
+	//BANDWIDTH_USAGE_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrBytesPerSecond}, LowCardinality, "The data rate at which documents from this node are being replicated to target nodes"},
 
 	DP_GET_FAIL_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation"},
 }
