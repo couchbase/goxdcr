@@ -4,8 +4,10 @@ package parts
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -25,7 +27,23 @@ var dummyDownStream string = "dummy"
 var collectionsCap = metadata.UnitTestGetCollectionsCapability()
 var nonCollectionsCap = metadata.UnitTestGetDefaultCapability()
 
-func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock utilities.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc) {
+//func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock utilities.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc) {
+func RetrieveUprFile(fileName string) (*mcc.UprEvent, error) {
+	data, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	var uprEvent mcc.UprEvent
+	err = json.Unmarshal(data, &uprEvent)
+	if err != nil {
+		return nil, err
+	}
+
+	return &uprEvent, nil
+}
+
+func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock *UtilitiesMock.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc) {
 	routerId = "routerUnitTest"
 
 	downStreamParts = make(map[string]common.Part)
@@ -34,6 +52,7 @@ func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]commo
 	crMode = base.CRMode_RevId
 	loggerCtx = log.DefaultLoggerContext
 	utilsMock = &UtilitiesMock.UtilsIface{}
+	utilsMock.On("NewDataPool").Return(base.NewFakeDataPool())
 	throughputThrottlerSvc = &service_def_mocks.ThroughputThrottlerSvc{}
 	throughputThrottlerSvc.On("CanSend", mock.Anything).Return(true)
 	needToThrottle = false
@@ -305,7 +324,8 @@ var testDir string = "../metadata/testData/"
 var targetv8 string = testDir + "diffTargetv8.json"
 var targetv9 string = testDir + "diffTargetv9.json"
 
-var bigMutationFile = "testData/" + "edgyMB-33583.json"
+var filterPath = "../base/filter/testData/"
+var bigMutationFile = filterPath + "edgyMB-33583.json"
 
 func TestRouterManifestChange(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterManifestChange =================")
@@ -409,7 +429,7 @@ func TestRouterTargetCollectionDNE(t *testing.T) {
 		ColInfo:      &base.TargetCollectionInfo{},
 	}
 
-	assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream))
+	assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream, nil))
 	assert.Equal(1, ignoreCnt)
 	fmt.Println("============== Test case end: TargetCollectionDNE =================")
 }
@@ -469,7 +489,7 @@ func TestRouterTargetCollectionDNEPersistErr(t *testing.T) {
 	}
 
 	// Even if persist has problem, routeCollection should return a non-nil error to prevent forwarding to xmem
-	assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream))
+	assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream, nil))
 	// The ignore count should be 0 to indicate that throughSeqno will not move foward
 	assert.Equal(0, ignoreCnt)
 	fmt.Println("============== Test case end: TargetCollectionDNEPersistErr =================")
@@ -527,13 +547,13 @@ func TestRouterExplicitMode(t *testing.T) {
 		ColNamespace: sourceNs,
 		ColInfo:      &base.TargetCollectionInfo{},
 	}
-	err = router.RouteCollection(dummyData, dummyDownStream)
+	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	// Right now target cluster gave back "default manifest"
 	assert.Equal(base.ErrorIgnoreRequest, err)
 	assert.Equal(1, ignoreCnt)
 	assert.Equal(1, len(collectionsRouter.brokenMapping))
 	// Second one should be already ignored
-	err = router.RouteCollection(dummyData, dummyDownStream)
+	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	assert.Equal(base.ErrorRequestAlreadyIgnored, err)
 	assert.Equal(2, ignoreCnt)
 	assert.Equal(1, len(collectionsRouter.brokenMapping))
@@ -546,7 +566,7 @@ func TestRouterExplicitMode(t *testing.T) {
 	collectionsRouter.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, mappingMode, rules)
 	assert.Nil(err)
 
-	err = router.RouteCollection(dummyData, dummyDownStream)
+	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	assert.Nil(err)
 	//targetNs := &base.CollectionNamespace{"S2", "col1"}
 
@@ -600,7 +620,7 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 	}
 
 	origKey := base.DeepCopyByteArray(delEvent.Key)
-	err = router.RouteCollection(dummyData, dummyDownStream)
+	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	assert.Nil(err)
 	assert.False(reflect.DeepEqual(origKey, dummyData.Req.Key))
 
@@ -625,7 +645,7 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 		ColNamespace: sourceNs,
 		ColInfo:      &base.TargetCollectionInfo{},
 	}
-	err = router.RouteCollection(dummyData, dummyDownStream)
+	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	assert.Nil(err)
 	assert.True(reflect.DeepEqual(origKey, dummyData.Req.Key))
 }

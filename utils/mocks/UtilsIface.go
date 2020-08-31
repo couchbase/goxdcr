@@ -198,18 +198,18 @@ func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, u
 }
 
 // CheckForTransactionXattrsInUprEvent provides a mock function with given fields: uprEvent, dp, slicesToBeReleased, needToFilterBody
-func (_m *UtilsIface) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp utils.DataPoolIface, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, []byte, int, error, string, int64) {
+func (_m *UtilsIface) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, []byte, int, error, string, int64) {
 	ret := _m.Called(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, utils.DataPoolIface, *[][]byte, bool) bool); ok {
+	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) bool); ok {
 		r0 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
 	var r1 []byte
-	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, utils.DataPoolIface, *[][]byte, bool) []byte); ok {
+	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) []byte); ok {
 		r1 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
 		if ret.Get(1) != nil {
@@ -218,28 +218,28 @@ func (_m *UtilsIface) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.Up
 	}
 
 	var r2 int
-	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, utils.DataPoolIface, *[][]byte, bool) int); ok {
+	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) int); ok {
 		r2 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
 		r2 = ret.Get(2).(int)
 	}
 
 	var r3 error
-	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, utils.DataPoolIface, *[][]byte, bool) error); ok {
+	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) error); ok {
 		r3 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
 		r3 = ret.Error(3)
 	}
 
 	var r4 string
-	if rf, ok := ret.Get(4).(func(*memcached.UprEvent, utils.DataPoolIface, *[][]byte, bool) string); ok {
+	if rf, ok := ret.Get(4).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) string); ok {
 		r4 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
 		r4 = ret.Get(4).(string)
 	}
 
 	var r5 int64
-	if rf, ok := ret.Get(5).(func(*memcached.UprEvent, utils.DataPoolIface, *[][]byte, bool) int64); ok {
+	if rf, ok := ret.Get(5).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) int64); ok {
 		r5 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 	} else {
 		r5 = ret.Get(5).(int64)
@@ -1753,6 +1753,22 @@ func (_m *UtilsIface) LocalPool(localConnectStr string) (couchbase.Pool, error) 
 	return r0, r1
 }
 
+// NewDataPool provides a mock function with given fields:
+func (_m *UtilsIface) NewDataPool() base.DataPool {
+	ret := _m.Called()
+
+	var r0 base.DataPool
+	if rf, ok := ret.Get(0).(func() base.DataPool); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.DataPool)
+		}
+	}
+
+	return r0
+}
+
 // NewEnhancedError provides a mock function with given fields: msg, err
 func (_m *UtilsIface) NewEnhancedError(msg string, err error) error {
 	ret := _m.Called(msg, err)
@@ -1810,11 +1826,11 @@ func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]st
 }
 
 // ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, body, endBodyPos, dp, flags, slicesBuf
-func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, dp utils.DataPoolIface, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64) {
+func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, dp base.DataPool, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64) {
 	ret := _m.Called(uprEvent, body, endBodyPos, dp, flags, slicesBuf)
 
 	var r0 []byte
-	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, []byte, int, utils.DataPoolIface, base.FilterFlagType, *[][]byte) []byte); ok {
+	if rf, ok := ret.Get(0).(func(*memcached.UprEvent, []byte, int, base.DataPool, base.FilterFlagType, *[][]byte) []byte); ok {
 		r0 = rf(uprEvent, body, endBodyPos, dp, flags, slicesBuf)
 	} else {
 		if ret.Get(0) != nil {
@@ -1823,21 +1839,21 @@ func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, 
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, []byte, int, utils.DataPoolIface, base.FilterFlagType, *[][]byte) error); ok {
+	if rf, ok := ret.Get(1).(func(*memcached.UprEvent, []byte, int, base.DataPool, base.FilterFlagType, *[][]byte) error); ok {
 		r1 = rf(uprEvent, body, endBodyPos, dp, flags, slicesBuf)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	var r2 string
-	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, []byte, int, utils.DataPoolIface, base.FilterFlagType, *[][]byte) string); ok {
+	if rf, ok := ret.Get(2).(func(*memcached.UprEvent, []byte, int, base.DataPool, base.FilterFlagType, *[][]byte) string); ok {
 		r2 = rf(uprEvent, body, endBodyPos, dp, flags, slicesBuf)
 	} else {
 		r2 = ret.Get(2).(string)
 	}
 
 	var r3 int64
-	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, []byte, int, utils.DataPoolIface, base.FilterFlagType, *[][]byte) int64); ok {
+	if rf, ok := ret.Get(3).(func(*memcached.UprEvent, []byte, int, base.DataPool, base.FilterFlagType, *[][]byte) int64); ok {
 		r3 = rf(uprEvent, body, endBodyPos, dp, flags, slicesBuf)
 	} else {
 		r3 = ret.Get(3).(int64)

@@ -11,6 +11,7 @@ declare -a outputs
 
 DIRS_WITH_UT=(
 base
+base/filter
 backfill_manager
 pipeline
 pipeline_svc
@@ -35,10 +36,11 @@ totalTasks=0
 for directory in ${DIRS_WITH_UT[@]}
 do
 	cd ${ROOT_DIR}/${directory}
-	go test  > /tmp/${directory}.out 2>&1 &
+	fileFriendlyFileName=`echo "${directory}" | sed 's/\//_/g'`
+	go test  > /tmp/${fileFriendlyFileName}.out 2>&1 &
 	lastPid="$!"
 	echo "Test $directory with background PID $lastPid"
-	outputs[$lastPid]="/tmp/${directory}.out"
+	outputs[$lastPid]="/tmp/${fileFriendlyFileName}.out"
 	pids+=" $lastPid"
 	totalTasks=$(( $totalTasks + 1 ))
 	pcreTestsFound=false
@@ -50,11 +52,12 @@ do
 		fi
 	done
 	if [[ "$pcreTestsFound" == "true" ]];then
-		go test -tags=pcre > /tmp/${directory}_pcre.out 2>&1 &
+		fileFriendlyFileName=`echo "${directory}" | sed 's/\//_/g'`
+		go test -tags=pcre > /tmp/${fileFriendlyFileName}_pcre.out 2>&1 &
 		lastPid2="$!"
 		echo "Test $directory PCRE tests with background PID $lastPid2"
 		pids+=" $lastPid2"
-		outputs[$lastPid2]="/tmp/${directory}_pcre.out"
+		outputs[$lastPid2]="/tmp/${fileFriendlyFileName}_pcre.out"
 		totalTasks=$(( $totalTasks + 1 ))
 	fi
 done

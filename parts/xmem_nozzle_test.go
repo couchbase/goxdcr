@@ -41,6 +41,7 @@ func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
 	*serviceDefMocks.CollectionsManifestSvc) {
 
 	utilitiesMock := &utilsMock.UtilsIface{}
+	utilitiesMock.On("NewDataPool").Return(base.NewFakeDataPool())
 	var vbList []uint16
 	for i := 0; i < 1024; i++ {
 		vbList = append(vbList, uint16(i))

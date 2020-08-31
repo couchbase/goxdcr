@@ -1,55 +1,31 @@
-// Copyright (c) 2018-2019 Couchbase, Inc.
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
-// except in compliance with the License. You may obtain a copy of the License at
-//   http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software distributed under the
-// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-// either express or implied. See the License for the specific language governing permissions
-// and limitations under the License.
-
-package parts
+package filter
 
 import (
 	"fmt"
-	"github.com/couchbaselabs/gojsonsm"
-	mc "github.com/couchbase/gomemcached"
-	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/gomemcached"
+	"github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
-	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbaselabs/gojsonsm"
 )
-
-type FilterIface interface {
-	// Returns:
-	// 1. bool - Whether or not it was a match
-	// 2. err code
-	// 3. If err is not nil, additional description
-	// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
-	FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64)
-}
 
 const collateErrDesc = " Collate was used to determine outcome"
 
-type Filter struct {
+type FilterImpl struct {
 	id                       string
 	hasFilterExpression      bool
 	filterExpressionInternal string
-	utils                    utilities.UtilsIface
+	utils                    FilterUtils
 	matcher                  gojsonsm.Matcher
-	dp                       utilities.DataPoolIface
+	dp                       base.DataPool
 	flags                    base.FilterFlagType
 	slicesToBeReleasedBuf    [][]byte
 }
 
-func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (*Filter, error) {
-	dpPtr := utilities.NewDataPool()
-	if dpPtr == nil {
-		return nil, base.ErrorNoDataPool
-	}
-
-	filter := &Filter{
+func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool) (*FilterImpl, error) {
+	filter := &FilterImpl{
 		id:                    id,
 		utils:                 utils,
-		dp:                    dpPtr,
+		dp:                    dp,
 		slicesToBeReleasedBuf: make([][]byte, 0, 2),
 	}
 
@@ -85,7 +61,20 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 	return filter, nil
 }
 
-func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64) {
+func NewFilter(id string, filterExpression string, utils FilterUtils) (*FilterImpl, error) {
+	dpPtr := utils.NewDataPool()
+	if dpPtr == nil {
+		return nil, base.ErrorNoDataPool
+	}
+
+	return NewFilterWithSharedDP(id, filterExpression, utils, dpPtr)
+}
+
+func (filter *FilterImpl) GetInternalExpr() string {
+	return filter.filterExpressionInternal
+}
+
+func (filter *FilterImpl) FilterUprEvent(uprEvent *memcached.UprEvent) (bool, error, string, int64) {
 	if uprEvent == nil {
 		return false, base.ErrorInvalidInput, "UprEvent is nil", 0
 	}
@@ -134,7 +123,7 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 // In this scenario body is a newly allocated byte slice, which holds the decompressed document body,
 // and also contains extra bytes to accommodate key, so that it can be reused by advanced filtering later.
 // In other scenarios body is nil and endBodyPos is -1
-func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64) {
+func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64) {
 	if base.Equals(uprEvent.Key, base.TransactionClientRecordKey) {
 		// filter out transaction client records
 		return false, nil, 0, nil, "", 0
@@ -146,12 +135,12 @@ func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, s
 		return false, nil, 0, nil, "", 0
 	}
 
-	if uprEvent.Opcode == mc.UPR_DELETION || uprEvent.Opcode == mc.UPR_EXPIRATION {
+	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
 		// these mutations do not have xattrs and do not need xattr processing
 		return true, nil, 0, nil, "", 0
 	}
 
-	if uprEvent.DataType&mcc.XattrDataType == 0 {
+	if uprEvent.DataType&memcached.XattrDataType == 0 {
 		// no xattrs, no op
 		return true, nil, 0, nil, "", 0
 	}
@@ -177,8 +166,8 @@ func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, s
 // 2. err code
 // 3. If err is not nil, additional description
 // 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
-func (filter *Filter) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, endBodyPos int, slicesToBeReleased *[][]byte) (bool, error, string, int64) {
-	if uprEvent.Opcode == mc.UPR_DELETION || uprEvent.Opcode == mc.UPR_EXPIRATION {
+func (filter *FilterImpl) filterUprEvent(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, slicesToBeReleased *[][]byte) (bool, error, string, int64) {
+	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
 		// For now, pass through
 		return true, nil, "", 0
 	}
@@ -203,7 +192,7 @@ func (filter *Filter) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, endBod
 	return matched, err, errDesc, failedDpCnt
 }
 
-func (filter *Filter) FilterByteSlice(slice []byte) (matched bool, status int, err error) {
+func (filter *FilterImpl) FilterByteSlice(slice []byte) (matched bool, status int, err error) {
 	defer filter.matcher.Reset()
 	return base.MatchWrapper(filter.matcher, slice)
 }

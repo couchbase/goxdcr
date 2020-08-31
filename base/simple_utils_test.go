@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-const testFilteringDataDir = "../utils/testFilteringData/"
+const testFilteringDataDir = "filter/testFilteringData/"
 
 func getXattrValueMock() (map[string]interface{}, []byte, error) {
 	fileName := fmt.Sprintf("%v%v", testFilteringDataDir, "xattrSlice.bin")

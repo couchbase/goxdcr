@@ -1,11 +1,10 @@
-package parts
+package filter
 
 import (
 	"encoding/json"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
-	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"strings"
@@ -13,8 +12,8 @@ import (
 )
 
 var filterId string = "testFilter"
-var realUtil *utilities.Utilities = utilities.NewUtilities()
-var dp utilities.DataPoolIface = utilities.NewDataPool()
+var realUtil = &FilterUtilsImpl{}
+var dp base.DataPool = base.NewDataPool()
 
 func TestFilter(t *testing.T) {
 	fmt.Println("============== Test case start: TestFilterCreation =================")
@@ -162,10 +161,10 @@ func TestKeyPanic(t *testing.T) {
 func TestFilterUtilsMethods(t *testing.T) {
 	fmt.Println("============== Test case end: TestFilterUtilsMethod =================")
 	assert := assert.New(t)
-	unCompressedFile := "../utils/testInternalData/uprNotCompress.json"
-	compressedFile := "../utils/testInternalData/uprCompression.json"
-	xAttrUncompressedFile := "../utils/testInternalData/uprXattrNotCompress.json"
-	xAttrCompressedFile := "../utils/testInternalData/uprXattrCompress.json"
+	unCompressedFile := "../../utils/testInternalData/uprNotCompress.json"
+	compressedFile := "../../utils/testInternalData/uprCompression.json"
+	xAttrUncompressedFile := "../../utils/testInternalData/uprXattrNotCompress.json"
+	xAttrCompressedFile := "../../utils/testInternalData/uprXattrCompress.json"
 
 	uprEvent, err := base.RetrieveUprJsonAndConvert(unCompressedFile)
 	assert.Nil(err)
@@ -214,7 +213,7 @@ func TestActiveTxnRecordFiltering(t *testing.T) {
 	fmt.Println("============== Test case start: TestActiveTxnRecordFiltering =================")
 	assert := assert.New(t)
 
-	activeTxnRecordFile := "../utils/testInternalData/uprActiveTxnRecordNotCompressV2.json"
+	activeTxnRecordFile := "../../utils/testInternalData/uprActiveTxnRecordNotCompressV2.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(activeTxnRecordFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -235,7 +234,7 @@ func TestTxnClientRecordFiltering(t *testing.T) {
 	fmt.Println("============== Test case start: TestTxnClientRecordFiltering =================")
 	assert := assert.New(t)
 
-	txnClientRecordFile := "../utils/testInternalData/uprTxnClientRecordNotCompressV2.json"
+	txnClientRecordFile := "../../utils/testInternalData/uprTxnClientRecordNotCompressV2.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(txnClientRecordFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -256,7 +255,7 @@ func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestTransXattrOnlyFilteringWithoutCompression =================")
 	assert := assert.New(t)
 
-	transXattrFile := "../utils/testInternalData/uprTransXattrOnlyNotCompress.json"
+	transXattrFile := "../../utils/testInternalData/uprTransXattrOnlyNotCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -276,7 +275,7 @@ func TestTransXattrOnlyFilteringWithCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestTransXattrOnlyFilteringWithCompression =================")
 	assert := assert.New(t)
 
-	transXattrFile := "../utils/testInternalData/uprTransXattrOnlyCompress.json"
+	transXattrFile := "../../utils/testInternalData/uprTransXattrOnlyCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -296,7 +295,7 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestMixedXattrFilteringWithCompression =================")
 	assert := assert.New(t)
 
-	transXattrCompressedFile := "../utils/testInternalData/uprTransXattrCompress.json"
+	transXattrCompressedFile := "../../utils/testInternalData/uprTransXattrCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -315,7 +314,7 @@ func TestMixedTransXattrFilteringWithoutCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestMixedTransXattrFilteringWithoutCompression =================")
 	assert := assert.New(t)
 
-	transXattrNotCompressedFile := "../utils/testInternalData/uprTransXattrNotCompress.json"
+	transXattrNotCompressedFile := "../../utils/testInternalData/uprTransXattrNotCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrNotCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -336,7 +335,7 @@ func TestNonTransXattrFilteringWithoutCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithoutCompression =================")
 	assert := assert.New(t)
 
-	xattrNotCompressedFile := "../utils/testInternalData/uprXattrNotCompress.json"
+	xattrNotCompressedFile := "../../utils/testInternalData/uprXattrNotCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrNotCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -357,7 +356,7 @@ func TestNonTransXattrFilteringWithoutCompressionNegative(t *testing.T) {
 	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithoutCompressionNegative =================")
 	assert := assert.New(t)
 
-	xattrNotCompressedFile := "../utils/testInternalData/uprXattrNotCompress.json"
+	xattrNotCompressedFile := "../../utils/testInternalData/uprXattrNotCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrNotCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -378,7 +377,7 @@ func TestNonTransXattrFilteringWithCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithCompression =================")
 	assert := assert.New(t)
 
-	xattrCompressedFile := "../utils/testInternalData/uprXattrCompress.json"
+	xattrCompressedFile := "../../utils/testInternalData/uprXattrCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -399,7 +398,7 @@ func TestNonTransXattrFilteringWithCompressionNegative(t *testing.T) {
 	fmt.Println("============== Test case start: TestNonTransXattrFilteringWithCompressionNegative =================")
 	assert := assert.New(t)
 
-	xattrCompressedFile := "../utils/testInternalData/uprXattrCompress.json"
+	xattrCompressedFile := "../../utils/testInternalData/uprXattrCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(xattrCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -558,7 +557,7 @@ func TestCompressionXattrKeyFiltering(t *testing.T) {
 	fmt.Println("============== Test case start: TestCompressionXattrKeyFiltering =================")
 	assert := assert.New(t)
 
-	xAttrCompressedFile := "../utils/testInternalData/uprXattrCompress.json"
+	xAttrCompressedFile := "../../utils/testInternalData/uprXattrCompress.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(xAttrCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -578,7 +577,7 @@ func TestCompressionKeyFiltering(t *testing.T) {
 	fmt.Println("============== Test case start: TestCompressionXattrKeyFiltering =================")
 	assert := assert.New(t)
 
-	compressedFile := "../utils/testInternalData/uprCompression.json"
+	compressedFile := "../../utils/testInternalData/uprCompression.json"
 	uprEvent, err := base.RetrieveUprJsonAndConvert(compressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)

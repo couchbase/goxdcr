@@ -664,7 +664,7 @@ type XmemNozzle struct {
 
 	collectionEnabled uint32
 
-	dataPool utilities.DataPoolIface
+	dataPool base.DataPool
 
 	upstreamObjRecycler utilities.RecycleObjFunc
 
@@ -735,7 +735,7 @@ func NewXmemNozzle(id string,
 	xmem.config.connPoolSize = connPoolConnSize
 
 	if source_cr_mode == base.CRMode_Custom {
-		xmem.dataPool = utilities.NewDataPool()
+		xmem.dataPool = base.NewDataPool()
 	}
 	return xmem
 

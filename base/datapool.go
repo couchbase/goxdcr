@@ -1,7 +1,6 @@
-package utils
+package base
 
 import (
-	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"math/rand"
 	"sort"
@@ -9,11 +8,6 @@ import (
 )
 
 const NumOfSizes = 20
-
-type DataPoolIface interface {
-	GetByteSlice(sizeRequested uint64) ([]byte, error)
-	PutByteSlice(doneSlice []byte)
-}
 
 // Fake data pool used to simulate returning a byte slice filled with garbage
 type FakeDataPool struct {
@@ -32,16 +26,16 @@ func (fd *FakeDataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 // Nothing
 func (fd *FakeDataPool) PutByteSlice(doneSlice []byte) {}
 
-type DataPool struct {
+type DataPoolImpl struct {
 	byteSlicePoolClasses [NumOfSizes]uint64
 	byteSlicePools       [NumOfSizes]sync.Pool
 
 	logger_utils *log.CommonLogger
 }
 
-func NewDataPool() *DataPool {
-	newPool := &DataPool{
-		logger_utils: log.NewLogger("DataPool", log.DefaultLoggerContext),
+func NewDataPool() *DataPoolImpl {
+	newPool := &DataPoolImpl{
+		logger_utils: log.NewLogger("DataPoolImpl", log.DefaultLoggerContext),
 	}
 
 	newPool.byteSlicePoolClasses = [NumOfSizes]uint64{
@@ -93,7 +87,7 @@ func NewDataPool() *DataPool {
 	return newPool
 }
 
-func (p *DataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
+func (p *DataPoolImpl) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 	i := sort.Search(NumOfSizes, func(i int) bool {
 		return p.byteSlicePoolClasses[i] >= sizeRequested
 	})
@@ -101,10 +95,10 @@ func (p *DataPool) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 	if i >= 0 && i < NumOfSizes {
 		return p.byteSlicePools[i].Get().([]byte), nil
 	}
-	return nil, base.ErrorSizeExceeded
+	return nil, ErrorSizeExceeded
 }
 
-func (p *DataPool) PutByteSlice(doneSlice []byte) {
+func (p *DataPoolImpl) PutByteSlice(doneSlice []byte) {
 	sliceCap := uint64(cap(doneSlice))
 	i := sort.Search(NumOfSizes, func(i int) bool {
 		return sliceCap <= p.byteSlicePoolClasses[i]
@@ -113,4 +107,9 @@ func (p *DataPool) PutByteSlice(doneSlice []byte) {
 	if i >= 0 && i < NumOfSizes {
 		p.byteSlicePools[i].Put(doneSlice)
 	}
+}
+
+type DataPool interface {
+	GetByteSlice(sizeRequested uint64) ([]byte, error)
+	PutByteSlice(doneSlice []byte)
 }

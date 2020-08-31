@@ -14,8 +14,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbaselabs/gojsonsm"
+	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/golang/snappy"
 	"reflect"
 	"sort"
@@ -1118,7 +1119,7 @@ type SourceNamespace struct {
 	nsType SourceNamespaceType
 
 	filterString string
-	filter       *gojsonsm.Matcher
+	filter       filter.Filter
 }
 
 func NewSourceCollectionNamespace(colNs *base.CollectionNamespace) *SourceNamespace {
@@ -1128,16 +1129,24 @@ func NewSourceCollectionNamespace(colNs *base.CollectionNamespace) *SourceNamesp
 	}
 }
 
-func NewSourceMigrationNamespace(expr string, filter *gojsonsm.Matcher) *SourceNamespace {
+// Since the filterUtils do not need mocking, use this global
+var utils = &filter.FilterUtilsImpl{}
+
+func NewSourceMigrationNamespace(expr string, dp base.DataPool) (*SourceNamespace, error) {
+	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp)
+	if err != nil {
+		return nil, err
+	}
+
 	return &SourceNamespace{
 		CollectionNamespace: &base.CollectionNamespace{
 			ScopeName:      base.DefaultScopeCollectionName,
 			CollectionName: expr,
 		},
 		nsType:       SourceDefaultCollectionFilter,
-		filter:       filter,
+		filter:       filterPtr,
 		filterString: expr,
-	}
+	}, nil
 }
 
 func (s *SourceNamespace) GetCollectionNamespace() *base.CollectionNamespace {
@@ -1179,7 +1188,7 @@ type CollectionNamespaceMapping map[*SourceNamespace]CollectionNamespaceList
 // Note - this constructor should be used carefully - given there is no filter
 func NewDefaultCollectionMigrationMapping() CollectionNamespaceMapping {
 	defaultMapping := make(CollectionNamespaceMapping)
-	defaultSourceNs := NewSourceMigrationNamespace("", nil)
+	defaultSourceNs, _ := NewSourceMigrationNamespace("", nil)
 	defaultMapping.AddSingleSourceNsMapping(defaultSourceNs, &base.DefaultCollectionNamespace)
 	return defaultMapping
 }
@@ -1234,15 +1243,19 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 			return outputMapping, nil
 		case true:
 			outputMapping := CollectionNamespaceMapping{}
+			// Use a single shared datapool
+			sharedDp := base.NewDataPool()
 			for filterExpr, targetNamespaceRaw := range rules {
 				// ValidateMigrateRules() should have been called
 				targetNamespaceStr := targetNamespaceRaw.(string)
-				filter, _ := base.GoJsonsmGetFilterExprMatcher(filterExpr)
 				targetNamespace, _ := base.NewCollectionNamespaceFromString(targetNamespaceStr)
-
-				sourceNs := NewSourceMigrationNamespace(filterExpr, &filter)
+				sourceNs, err := NewSourceMigrationNamespace(filterExpr, sharedDp)
+				if err != nil {
+					// should have already validated and thus shouldn't be possible here
+					continue
+				}
 				// Look to see if the targetNamespace exists on the target manifest
-				_, err := manifestsPair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
+				_, err = manifestsPair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
 				if err == nil {
 					outputMapping.AddSingleSourceNsMapping(sourceNs, &targetNamespace)
 				}
@@ -1299,6 +1312,8 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 		*c = make(CollectionNamespaceMapping)
 	}
 
+	var sharedDp base.DataPool
+
 	errMap := make(base.ErrorMap)
 	var i uint64
 	for i = 0; i < uint64(len(metaObj.SourceCollections)); i++ {
@@ -1317,12 +1332,15 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 			(*c)[NewSourceCollectionNamespace(sourceCol)] = targetCols
 		case SourceDefaultCollectionFilter:
 			filterExpr := sourceCol.CollectionName
-			filter, err := base.GoJsonsmGetFilterExprMatcher(filterExpr)
+			if sharedDp == nil {
+				sharedDp = base.NewDataPool()
+			}
+			sourceNs, err := NewSourceMigrationNamespace(filterExpr, sharedDp)
 			if err != nil {
 				errMap[errKey] = fmt.Errorf("trying to create filterExpr with %v resulted in %v", filterExpr, err)
 				continue
 			}
-			(*c)[NewSourceMigrationNamespace(filterExpr, &filter)] = targetCols
+			(*c)[sourceNs] = targetCols
 		default:
 			errMap[errKey] = fmt.Errorf("invalid type %v", err)
 		}
@@ -1368,6 +1386,27 @@ func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr 
 			srcNamespacePtr = k.CollectionNamespace
 			exists = true
 			return
+		}
+	}
+	return
+}
+
+func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(uprEvent *mcc.UprEvent) (tgt CollectionNamespaceList, err error) {
+	if c == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+
+	for k, v := range *c {
+		if k.GetType() != SourceDefaultCollectionFilter {
+			continue
+		}
+
+		// TODO - error handling for whatever is necessary
+		match, _, _, _ := k.filter.FilterUprEvent(uprEvent)
+		if match {
+			// TODO - need to handle one source mutation write to multiple targets?
+			tgt = append(tgt, v...)
 		}
 	}
 	return

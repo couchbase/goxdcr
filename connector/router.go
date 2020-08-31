@@ -11,6 +11,7 @@ package connector
 
 import (
 	"errors"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
@@ -30,7 +31,7 @@ var ErrorInvalidRoutingResult = errors.New("Invalid results from routing algorit
 // @Return - a map of partId to data to the routed to that part
 type Routing_Callback_Func func(data interface{}) (map[string]interface{}, error)
 
-type CollectionsRerouteFunc func(data interface{}, partId string) error
+type CollectionsRerouteFunc func(data interface{}, partId string, preData *mcc.UprEvent) error
 
 /**
  * This is an inner router struct that XDCR router (parts/router) will inherit

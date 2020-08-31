@@ -16,6 +16,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	baseFilter "github.com/couchbase/goxdcr/base/filter"
 	common "github.com/couchbase/goxdcr/common"
 	connector "github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/log"
@@ -99,7 +100,7 @@ type RouterIface interface {
 	Start() error
 	Stop() error
 	Route(data interface{}) (map[string]interface{}, error)
-	RouteCollection(interface{}, string) error
+	RouteCollection(data interface{}, partId string, eventForMigration *mcc.UprEvent) error
 }
 
 // XDCR Router does two things:
@@ -108,7 +109,7 @@ type RouterIface interface {
 type Router struct {
 	id string
 	*connector.Router
-	filter     *Filter
+	filter     baseFilter.Filter
 	routingMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	topic      string
 	// whether lww conflict resolution mode has been enabled
@@ -129,7 +130,7 @@ type Router struct {
 	// Instead of wasting memory, use these datapools
 	dcpObjRecycler    utilities.RecycleObjFunc
 	targetColInfoPool utilities.TargetCollectionInfoPoolIface
-	dataPool          utilities.DataPoolIface
+	dataPool          base.DataPool
 	mcRequestPool     *base.MCRequestPool
 
 	// When DataFiltered events are raised, instead of looking up the latest manifestID
@@ -304,25 +305,27 @@ func (c *CollectionsRouter) Start() error {
 	c.mappingMtx.RUnlock()
 
 	if !modes.IsExplicitMapping() {
-		c.logger.Infof("CollectionsRouter %v started in implicit mapping mode", c.spec.Id)
+		c.logger.Infof("CollectionsRouter %v started in implicit mapping mode with rules %v", c.spec.Id, rules)
 		return nil
+	} else if modes.IsMigrationOn() {
+		c.logger.Infof("CollectionsRouter %v started in migration mode with rules %v", c.spec.Id, rules)
 	}
 
 	pair := metadata.CollectionsManifestPair{
 		Source: curSrcMan,
 		Target: curTgtMan,
 	}
-	err = c.initializeInternals(curSrcMan, err, pair, modes, rules)
+	err = c.initializeInternals(pair, modes, rules)
 	return err
 }
 
-func (c *CollectionsRouter) initializeInternals(curSrcMan *metadata.CollectionsManifest, err error, pair metadata.CollectionsManifestPair, modes base.CollectionsMgtType, rules base.CollectionsMappingRulesType) error {
+func (c *CollectionsRouter) initializeInternals(pair metadata.CollectionsManifestPair, modes base.CollectionsMgtType, rules base.CollectionsMappingRulesType) error {
+	var err error
 	c.mappingMtx.Lock()
-	c.lastKnownSrcManifest = curSrcMan
+	c.lastKnownSrcManifest = pair.Source
 	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules)
 	c.collectionMode = c.spec.Settings.GetCollectionModes()
 	c.cachedRules = rules
-	c.logger.Infof("CollectionsRouter %v started in explicit mapping mode with rules: %v", c.spec.Id, rules)
 	c.mappingMtx.Unlock()
 	return err
 }
@@ -397,13 +400,14 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 }
 
 // No-Concurrent call
-func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest) (colId uint32, manifestId uint64, backfillPersistHadErr bool, err error) {
+func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest, eventForMigration *mcc.UprEvent) (colId uint32, manifestId uint64, backfillPersistHadErr bool, err error) {
 	if !c.IsRunning() {
 		err = PartStoppedError
 		return
 	}
 	c.mappingMtx.RLock()
 	isExplicitMapping := c.explicitMappings != nil
+	isMigrationMode := c.collectionMode.IsMigrationOn()
 	c.mappingMtx.RUnlock()
 
 	namespace := wrappedMCReq.ColNamespace
@@ -412,14 +416,18 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 	var latestTargetManifest *metadata.CollectionsManifest
 
 	if isExplicitMapping {
-		// Check to see if this source namespace has already been marked denied, which means
-		// it wasn't even in the rules to be matched
-		c.brokenDenyMtx.RLock()
-		_, _, _, exists := c.denyMapping.Get(namespace)
-		c.brokenDenyMtx.RUnlock()
-		if exists {
-			err = base.ErrorIgnoreRequest
-			return
+		if !isMigrationMode {
+			// Check to see if this source namespace has already been marked denied, which means
+			// it wasn't even in the rules to be matched
+			c.brokenDenyMtx.RLock()
+			_, _, _, exists := c.denyMapping.Get(namespace)
+			c.brokenDenyMtx.RUnlock()
+			if exists {
+				err = base.ErrorIgnoreRequest
+				return
+			}
+		} else {
+			// Migration mode means all data is coming from default source collection, thus no denyMapping
 		}
 		latestSourceManifest, latestTargetManifest, err = c.collectionsManifestSvc.GetLatestManifests(c.spec)
 	} else {
@@ -452,7 +460,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 	}
 
 	if isExplicitMapping {
-		manifestId, colId, err = c.explicitMap(namespace, latestTargetManifest)
+		manifestId, colId, err = c.explicitMap(wrappedMCReq, latestTargetManifest, eventForMigration)
 	} else {
 		manifestId, colId, err = c.implicitMap(namespace, latestTargetManifest)
 	}
@@ -511,7 +519,6 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 		Removed: removed,
 	}
 	c.explicitMapChangeHandler(pair)
-	// TODO NEIL - continue here
 
 	// It's possible pipeline may take some time to get to the stop/start part
 	// so in the meantime, update the mapping and write to the right target collection for the ongoing stream
@@ -540,23 +547,26 @@ func (c *CollectionsRouter) implicitMap(namespace *base.CollectionNamespace, lat
 	return manifestId, colId, err
 }
 
-func (c *CollectionsRouter) explicitMap(srcNamespace *base.CollectionNamespace, latestTargetManifest *metadata.CollectionsManifest) (manifestId uint64, colId uint32, err error) {
+func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, latestTargetManifest *metadata.CollectionsManifest, eventForMigration *mcc.UprEvent) (manifestId uint64, colId uint32, err error) {
+	namespace := wrappedMCReq.ColNamespace
 	manifestId = latestTargetManifest.Uid()
-	c.mappingMtx.RLock()
-	_, _, tgtCollections, exists := c.explicitMappings.Get(srcNamespace)
-	c.mappingMtx.RUnlock()
-	if !exists || len(tgtCollections) == 0 {
-		c.brokenDenyMtx.RLock()
-		_, _, _, exists := c.brokenMapping.Get(srcNamespace)
-		c.brokenDenyMtx.RUnlock()
+	var tgtCollections metadata.CollectionNamespaceList
 
-		if exists {
-			err = base.ErrorIgnoreRequest
-		} else {
-			err = fmt.Errorf("current explicit mapping does not include target destination given source scope %v collection %v - this mapping may need to be backfilled", srcNamespace.ScopeName, srcNamespace.CollectionName)
-			c.logger.Warnf(err.Error())
+	if !c.collectionMode.IsMigrationOn() {
+		tgtCollections, err = c.regularExplicitMap(namespace)
+		if err != nil {
+			return 0, 0, err
 		}
-		return
+	} else {
+		tgtCollections, err = c.migrationExplicitMap(eventForMigration)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+
+	// TODO - need to worry about 0 or >1 tgtCollections in migration case
+	if len(tgtCollections) == 0 {
+		return 0, 0, base.ErrorIgnoreRequest
 	}
 
 	// For now, only one target map
@@ -568,7 +578,7 @@ func (c *CollectionsRouter) explicitMap(srcNamespace *base.CollectionNamespace, 
 		colId, err = latestTargetManifest.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
 		if err == base.ErrorNotFound {
 			c.brokenDenyMtx.RLock()
-			_, _, _, exists := c.brokenMapping.Get(srcNamespace)
+			_, _, _, exists := c.brokenMapping.Get(namespace)
 			c.brokenDenyMtx.RUnlock()
 
 			if exists {
@@ -580,6 +590,28 @@ func (c *CollectionsRouter) explicitMap(srcNamespace *base.CollectionNamespace, 
 		}
 	}
 	return
+}
+
+func (c *CollectionsRouter) regularExplicitMap(namespace *base.CollectionNamespace) (metadata.CollectionNamespaceList, error) {
+	c.mappingMtx.RLock()
+	_, _, tgtCollections, exists := c.explicitMappings.Get(namespace)
+	c.mappingMtx.RUnlock()
+
+	if !exists || len(tgtCollections) == 0 {
+		c.brokenDenyMtx.RLock()
+		_, _, _, exists := c.brokenMapping.Get(namespace)
+		c.brokenDenyMtx.RUnlock()
+
+		var err error
+		if exists {
+			err = base.ErrorIgnoreRequest
+		} else {
+			err = fmt.Errorf("current explicit mapping does not include target destination given source scope %v collection %v - this mapping may need to be backfilled", namespace.ScopeName, namespace.CollectionName)
+			c.logger.Warnf(err.Error())
+		}
+		return nil, err
+	}
+	return tgtCollections, nil
 }
 
 func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.CollectionsManifest) (err error) {
@@ -794,6 +826,12 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	c.ignoreDataFunc(wrappedMcr)
 }
 
+func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent) (metadata.CollectionNamespaceList, error) {
+	c.mappingMtx.RLock()
+	defer c.mappingMtx.RUnlock()
+	return c.explicitMappings.GetTargetUsingMigrationFilter(uprEvent)
+}
+
 // Key - xmem nozzle ID
 type CollectionsRoutingMap map[string]*CollectionsRouter
 
@@ -873,16 +911,16 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		filterExpression = ""
 	}
 
-	var filter *Filter
+	var filter *baseFilter.FilterImpl
 	var err error
 	var filterPrintMsg string = "<nil>"
 
-	filter, err = NewFilter(id, filterExpression, utilsIn)
+	filter, err = baseFilter.NewFilter(id, filterExpression, utilsIn)
 	if err != nil {
 		return nil, err
 	}
 	if len(filterExpression) > 0 {
-		filterPrintMsg = fmt.Sprintf("%v%v%v", base.UdTagBegin, filter.filterExpressionInternal, base.UdTagEnd)
+		filterPrintMsg = fmt.Sprintf("%v%v%v", base.UdTagBegin, filter.GetInternalExpr(), base.UdTagEnd)
 	}
 
 	router := &Router{
@@ -897,7 +935,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		collectionsRouting:       make(CollectionsRoutingMap),
 		dcpObjRecycler:           dcpObjRecycler,
 		targetColInfoPool:        utilities.NewTargetCollectionInfoPool(),
-		dataPool:                 utilities.NewDataPool(),
+		dataPool:                 base.NewDataPool(),
 		mcRequestPool:            base.NewMCRequestPool(spec.Id, nil /*logger*/),
 		explicitMapChangeHandler: explicitMapChangeHandler,
 		remoteClusterCapability:  remoteClusterCapability,
@@ -1137,7 +1175,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 	}
 
 	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
-	router.dcpObjRecycler(wrappedUpr)
+	defer router.dcpObjRecycler(wrappedUpr)
 	if err != nil {
 		return nil, router.utils.NewEnhancedError("Error creating new memcached request.", err)
 	}
@@ -1145,7 +1183,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("Unable to create new mcRequest")
 	}
 
-	err = router.RouteCollection(mcRequest, partId)
+	err = router.RouteCollection(mcRequest, partId, wrappedUpr.UprEvent)
 	if err != nil {
 		return result, err
 	}
@@ -1156,7 +1194,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 	return result, nil
 }
 
-func (router *Router) RouteCollection(data interface{}, partId string) error {
+func (router *Router) RouteCollection(data interface{}, partId string, eventForMigration *mcc.UprEvent) error {
 	if !router.remoteClusterCapability.HasCollectionSupport() {
 		// collections is not being used
 		return nil
@@ -1178,7 +1216,7 @@ func (router *Router) RouteCollection(data interface{}, partId string) error {
 		colId = 0
 	} else {
 		var backfillPersistHadErr bool
-		colId, manifestId, backfillPersistHadErr, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest)
+		colId, manifestId, backfillPersistHadErr, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest, eventForMigration)
 		// If backfillPersistHadErr is set, then it is:
 		// 1. Safe to re-raise routingUpdate, as each routingUpdate will try to persist again
 		// 2. NOT safe to ignore data - as ignoring data means throughSeqno will move forward

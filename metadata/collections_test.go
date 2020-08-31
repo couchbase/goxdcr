@@ -911,10 +911,8 @@ func TestCollectionNsMappingsDocMarshallerWithMigration(t *testing.T) {
 	nsMapPrime := make(CollectionNamespaceMapping)
 
 	expr := "REGEXP_CONTAINS(META().id, \"^S1_\")"
-	filter, err := base.GoJsonsmGetFilterExprMatcher(expr)
+	defaultSrcNamespace, err := NewSourceMigrationNamespace(expr, nil)
 	assert.Nil(err)
-
-	defaultSrcNamespace := NewSourceMigrationNamespace(expr, &filter)
 
 	c1Ns := base.CollectionNamespace{"C1", "C1"}
 	c3Ns := base.CollectionNamespace{"C3", "C3"}
