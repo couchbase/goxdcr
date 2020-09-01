@@ -137,6 +137,8 @@ type Router struct {
 	lastSuccessfulManifestId uint64
 
 	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
+
+	remoteClusterCapability metadata.Capability
 }
 
 /**
@@ -852,7 +854,7 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.Col
  * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
  * 3+ Rest should be relatively obv
  */
-func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)) (*Router, error) {
+func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, ok := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -888,13 +890,15 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		dataPool:                 utilities.NewDataPool(),
 		mcRequestPool:            base.NewMCRequestPool(spec.Id, nil /*logger*/),
 		explicitMapChangeHandler: explicitMapChangeHandler,
+		remoteClusterCapability:  remoteClusterCapability,
 	}
 
 	router.expDelMode.Set(filterExpDelType)
 
 	startable := true
 	// CAPI mode doesn't have any need to start connector
-	if spec.Settings.IsCapi() {
+	// If target doesn't support collections, then also do not start
+	if spec.Settings.IsCapi() || !router.remoteClusterCapability.HasCollectionSupport() {
 		// Note startable can be changed by UpdateSettings() during pipeline startup
 		startable = false
 	}
@@ -942,13 +946,17 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		router.RaiseEvent(common.NewEvent(common.ErrorEncountered, data, router, nil, err))
 	}
 
-	router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(),
-		routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler)
+	if router.remoteClusterCapability.HasCollectionSupport() {
+		router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(),
+			routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler)
 
-	modes := spec.Settings.GetCollectionModes()
-	router.collectionModes = CollectionsMgtAtomicType(modes)
+		modes := spec.Settings.GetCollectionModes()
+		router.collectionModes = CollectionsMgtAtomicType(modes)
+		router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v, filter=%v, collectionMode=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg, modes.String())
+	} else {
+		router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v, filter=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg)
+	}
 
-	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v, filter=%v, collectionMode=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg, modes.String())
 	return router, nil
 }
 
@@ -1029,13 +1037,21 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 // So they should not block and the operations underneath should be innocuous if not
 // stopped in time
 func (router *Router) Start() error {
-	router.Logger().Infof("Router %v started", router.Id())
-	return router.collectionsRouting.StartAll()
+	if len(router.collectionsRouting) > 0 {
+		router.Logger().Infof("Router %v started", router.Id())
+		return router.collectionsRouting.StartAll()
+	} else {
+		return nil
+	}
 }
 
 func (router *Router) Stop() error {
-	router.Logger().Infof("Router %v stopped", router.Id())
-	return router.collectionsRouting.StopAll()
+	if len(router.collectionsRouting) > 0 {
+		router.Logger().Infof("Router %v stopped", router.Id())
+		return router.collectionsRouting.StopAll()
+	} else {
+		return nil
+	}
 }
 
 func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent) interface{} {
@@ -1131,7 +1147,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 }
 
 func (router *Router) RouteCollection(data interface{}, partId string) error {
-	if router.collectionsRouting == nil {
+	if !router.remoteClusterCapability.HasCollectionSupport() {
 		// collections is not being used
 		return nil
 	}

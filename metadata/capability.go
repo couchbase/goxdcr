@@ -74,3 +74,12 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 	return nil
 }
+
+// Unit Test Only
+func UnitTestGetDefaultCapability() Capability {
+	return Capability{1, 0}
+}
+
+func UnitTestGetCollectionsCapability() Capability {
+	return Capability{1, 1}
+}

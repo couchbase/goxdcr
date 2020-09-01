@@ -665,13 +665,24 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 		}
 	}
 
+	// Get the current remote cluster capability. Note - if remote cluster capability changes, pipelines
+	// based on the target reference will restart
+	ref, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		return nil, err
+	}
+	remoteClusterCapability, err := xdcrf.remote_cluster_svc.GetCapability(ref)
+	if err != nil {
+		return nil, err
+	}
+
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
 	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
 		logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc,
 		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(),
-		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler)
+		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler, remoteClusterCapability)
 
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
