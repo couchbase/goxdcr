@@ -265,6 +265,9 @@ type WrappedMCRequest struct {
 	ColNamespace       *CollectionNamespace
 	ColInfo            *TargetCollectionInfo
 	SlicesToBeReleased [][]byte
+
+	// If a single source mutation is translated to multiple target requests, the additional ones are listed here
+	SiblingReqs []*WrappedMCRequest
 }
 
 func (req *WrappedMCRequest) ConstructUniqueKey() {
@@ -272,6 +275,14 @@ func (req *WrappedMCRequest) ConstructUniqueKey() {
 	buffer.Write(req.Req.Key)
 	buffer.Write(req.Req.Extras[8:16])
 	req.UniqueKey = buffer.String()
+
+	if len(req.SiblingReqs) > 0 {
+		for _, sibling := range req.SiblingReqs {
+			if sibling != nil {
+				sibling.ConstructUniqueKey()
+			}
+		}
+	}
 }
 
 // Returns 0 if no collection is used
@@ -972,7 +983,8 @@ func (c CollectionsMappingRulesType) checkCase3(srcNamespace, tgtNamespace *Coll
 
 // Returns non-nil error if this collection was never meant to be replicated given the rules
 // Returns nil error and nil namespace if it's denied replication
-func (c CollectionsMappingRulesType) GetPotentialTargetNamespace(sourceNs *CollectionNamespace) (*CollectionNamespace, error) {
+func (c CollectionsMappingRulesType) GetPotentialTargetNamespaces(sourceNs *CollectionNamespace) ([]*CollectionNamespace, error) {
+	var returnNamespaces []*CollectionNamespace
 	// Check case 1 or 2
 	rule1Key := fmt.Sprintf("%v:%v", sourceNs.ScopeName, sourceNs.CollectionName)
 	targetRule, exists := c[rule1Key]
@@ -982,7 +994,8 @@ func (c CollectionsMappingRulesType) GetPotentialTargetNamespace(sourceNs *Colle
 		} else {
 			// Should not return error
 			retNs, err := NewCollectionNamespaceFromString(targetRule.(string))
-			return &retNs, err
+			returnNamespaces = append(returnNamespaces, &retNs)
+			return returnNamespaces, err
 		}
 	}
 
@@ -997,7 +1010,9 @@ func (c CollectionsMappingRulesType) GetPotentialTargetNamespace(sourceNs *Colle
 		return nil, nil
 	} else {
 		// case 3
-		return &CollectionNamespace{ScopeName: targetRule.(string), CollectionName: sourceNs.CollectionName}, nil
+		retNs := &CollectionNamespace{ScopeName: targetRule.(string), CollectionName: sourceNs.CollectionName}
+		returnNamespaces = append(returnNamespaces, retNs)
+		return returnNamespaces, nil
 	}
 }
 

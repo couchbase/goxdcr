@@ -108,6 +108,13 @@ type ThroughSeqnoTrackerSvc struct {
 	// 1: StreamEnd received
 	// 2: ThroughSeqno Reached
 	vbBackfillHelperDoneMap map[uint16]*base.SeqnoWithLock
+
+	// If a source mutation is cloned multiple times to be sent to multiple different target namespaces
+	// this tracker will keep track of all the cloned instances. Once all the cloned instances are processed
+	// then the seqno is removed
+	// The first list stores the seqno
+	// Second list's corresponding element stores the number of outstanding cloned requests that have not been processed
+	vbClonedTracker map[uint16]*DualSortedSeqnoListWithLock
 }
 
 // struct containing two seqno lists that need to be accessed and locked together
@@ -140,7 +147,7 @@ func (list_obj *DualSortedSeqnoListWithLock) getLengthOfSeqnoLists() int {
 }
 
 // append seqnos to the end of seqno_lists
-func (list_obj *DualSortedSeqnoListWithLock) appendSeqnos(seqno_1 uint64, seqno_2 uint64, logger *log.CommonLogger) {
+func (list_obj *DualSortedSeqnoListWithLock) appendSeqnos(seqno_1 uint64, seqno_2 uint64) {
 	list_obj.lock.Lock()
 	defer list_obj.lock.Unlock()
 	list_obj.seqno_list_1 = append(list_obj.seqno_list_1, seqno_1)
@@ -299,6 +306,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext) *ThroughSeqnoTrack
 		vbTgtSeqnoManifestMap:       make(SeqnoManifestsMapType),
 		vbBackfillLastDCPSeqnoMap:   make(map[uint16]*base.SeqnoWithLock),
 		vbBackfillHelperDoneMap:     make(map[uint16]*base.SeqnoWithLock),
+		vbClonedTracker:             make(map[uint16]*DualSortedSeqnoListWithLock),
 	}
 	return tsTracker
 }
@@ -321,6 +329,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 		tsTracker.vbTgtSeqnoManifestMap[vbno] = newDualSortedSeqnoListWithLock()
 		tsTracker.vbBackfillLastDCPSeqnoMap[vbno] = base.NewSeqnoWithLock()
 		tsTracker.vbBackfillHelperDoneMap[vbno] = base.NewSeqnoWithLock()
+		tsTracker.vbClonedTracker[vbno] = newDualSortedSeqnoListWithLock()
 	}
 }
 
@@ -335,6 +344,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFailedCREventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFilteredEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataReceivedEventListener, tsTracker)
+	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataClonedEventListener, tsTracker)
 
 	conflictMgr := pipeline.RuntimeContext().Service(base.CONFLICT_MANAGER_SVC)
 	if conflictMgr != nil {
@@ -423,6 +433,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		tsTracker.logger.Tracef("Pipeline %s is no longer running, skip ProcessEvent for %v\n", tsTracker.rep_id, event)
 	}
 
+	shouldProceed := tsTracker.preProcessEvent(event)
+	if !shouldProceed {
+		return nil
+	}
+
 	switch event.EventType {
 	case common.DataSent:
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
@@ -489,6 +504,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			return err
 		}
 		tsTracker.handleBackfillStreamEnd(vbno)
+	case common.DataCloned:
+		data := event.Data.([]interface{})
+		vbno := data[0].(uint16)
+		seqno := data[1].(uint64)
+		totalCount := data[2].(int)
+		tsTracker.handleDataClonedEvent(vbno, seqno, totalCount)
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
 
@@ -628,13 +649,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 
 	if last_seen_seqno < current_seqno-1 {
 		// If the current sequence number is not consecutive, then this means we have hit a gap. Store it in gap list.
-		tsTracker.vb_gap_seqno_list_map[vbno].appendSeqnos(last_seen_seqno+1, current_seqno-1, tsTracker.logger)
+		tsTracker.vb_gap_seqno_list_map[vbno].appendSeqnos(last_seen_seqno+1, current_seqno-1)
 	}
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addSystemSeqno(vbno uint16, systemEventSeqno, manifestId uint64) {
 	tsTracker.validateVbno(vbno, "addSystemSeqno")
-	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId, tsTracker.logger)
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) addManifestId(vbno uint16, seqno, manifestId uint64) {
@@ -650,6 +671,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) truncateSeqnoLists(vbno uint16, through
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].truncateSeqno1Floor(through_seqno)
 	tsTracker.vbIgnoredSeqnoListMap[vbno].TruncateSeqnos(through_seqno)
 	tsTracker.vbTgtSeqnoManifestMap[vbno].truncateSeqno1Floor(through_seqno)
+	tsTracker.vbClonedTracker[vbno].truncateSeqno1Floor(through_seqno)
 }
 
 /**
@@ -999,4 +1021,74 @@ func (tsTracker *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	tsTracker.logger.Infof("%v time_spent=%v num_vb=%v max_sent=%v avg_sent=%v max_filtered=%v avg_filtered=%v max_failed_cr=%v avg_failed_cr=%v max_gap=%v avg_gap=%v\n",
 		tsTracker.id, time.Since(start_time), count, max_sent, sum_sent/count, max_filtered, sum_filtered/count, max_failed_cr, sum_failed_cr/count,
 		max_gap, sum_gap/count)
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) handleDataClonedEvent(vbno uint16, reqSeqno uint64, totalInstances int) {
+	if totalInstances < 2 {
+		return
+	}
+	tracker, exists := tsTracker.vbClonedTracker[vbno]
+	if !exists {
+		// not my vb
+		return
+	}
+	tracker.lock.Lock()
+	_, found := base.SearchUint64List(tracker.seqno_list_1, reqSeqno)
+	if found {
+		panic(fmt.Sprintf("tsTracker received same seqno %v of %v total cloned events", reqSeqno, totalInstances))
+	}
+	tracker.lock.Unlock()
+
+	tracker.appendSeqnos(reqSeqno, uint64(totalInstances))
+}
+
+// Returns false if there are cloned events still outstanding to prevent throughSeqno from being moved
+func (tsTracker *ThroughSeqnoTrackerSvc) preProcessEvent(event *common.Event) bool {
+	if !event.EventType.IsOutNozzleThroughSeqnoRelated() {
+		return true
+	}
+
+	var seqno uint64
+	var vbno uint16
+
+	switch event.EventType {
+	case common.DataFailedCRSource:
+		seqno = event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
+		vbno = event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
+	case common.DataSent:
+		vbno = event.OtherInfos.(parts.DataSentEventAdditional).VBucket
+		seqno = event.OtherInfos.(parts.DataSentEventAdditional).Seqno
+	case common.DataNotReplicated:
+		wrappedMcr := event.Data.(*base.WrappedMCRequest)
+		vbno = wrappedMcr.Req.VBucket
+		seqno = wrappedMcr.Seqno
+	default:
+		panic("Implement me")
+	}
+
+	tracker, exists := tsTracker.vbClonedTracker[vbno]
+	if !exists {
+		// not my vb
+		return true
+	}
+
+	tracker.lock.Lock()
+	defer tracker.lock.Unlock()
+
+	index, found := base.SearchUint64List(tracker.seqno_list_1, seqno)
+	if !found {
+		return true
+	}
+
+	if tracker.seqno_list_2[index] == 0 {
+		panic("Received more events than originally marked duplicated")
+	}
+
+	tracker.seqno_list_2[index]--
+
+	if tracker.seqno_list_2[index] == 0 {
+		return true
+	}
+
+	return false
 }

@@ -112,6 +112,8 @@ const (
 
 	// Memory related statistics
 	DP_GET_FAIL_METRIC = "datapool_failed_gets"
+
+	DOCS_CLONED_METRIC = "docs_cloned"
 )
 
 const (
@@ -287,4 +289,6 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	//BANDWIDTH_USAGE_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrBytesPerSecond}, LowCardinality, "The data rate at which documents from this node are being replicated to target nodes"},
 
 	DP_GET_FAIL_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation"},
+
+	DOCS_CLONED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The number of times a source mutation is cloned to be written to different target namespace"},
 }

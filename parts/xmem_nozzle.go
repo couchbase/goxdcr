@@ -888,6 +888,13 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 		xmem.handleGeneralError(err)
 	}
 
+	for _, siblingReq := range request.SiblingReqs {
+		err = xmem.accumuBatch(siblingReq)
+		if err != nil {
+			xmem.handleGeneralError(err)
+		}
+	}
+
 	return err
 }
 
@@ -1466,7 +1473,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 
 						// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
 						additionalInfo := GetReceivedEventAdditional{Key: key,
-							Seqno:       seqno,
+							Seqno:       seqno, // field is used only for CAPI nozzle
 							Commit_time: time.Since(start_time),
 							ManifestId:  manifestId,
 						}
@@ -2530,7 +2537,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						Resp_wait_time: resp_wait_time,
 						ManifestId:     manifestId,
 					}
-
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 
 					//feedback the most current commit_time to xmem.config.respTimeout

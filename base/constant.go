@@ -472,6 +472,7 @@ const (
 	DataThrottledEventListener           = "DataThrottledEventListener"
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"
 	CollectionRoutingEventListener       = "CollectionRoutingEventListener"
+	DataClonedEventListener              = "DataClonedEventListener"
 )
 
 const (

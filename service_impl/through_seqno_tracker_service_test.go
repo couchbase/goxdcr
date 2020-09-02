@@ -2,8 +2,6 @@ package service_impl
 
 import (
 	"fmt"
-	"testing"
-
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -15,6 +13,7 @@ import (
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"testing"
 )
 
 func makeCommonEvent(eventType common.ComponentEventType, uprEvent *mcc.UprEvent) *common.Event {
@@ -117,10 +116,10 @@ func TestTruncateFloor(t *testing.T) {
 	fmt.Println("============== Test case start: TestTruncateFloor =================")
 
 	testList := newDualSortedSeqnoListWithLock()
-	testList.appendSeqnos(0, 1, nil)
-	testList.appendSeqnos(2, 3, nil)
-	testList.appendSeqnos(4, 6, nil)
-	testList.appendSeqnos(7, 9, nil)
+	testList.appendSeqnos(0, 1)
+	testList.appendSeqnos(2, 3)
+	testList.appendSeqnos(4, 6)
+	testList.appendSeqnos(7, 9)
 
 	list2No, err := testList.getList2BasedonList1Floor(2)
 	assert.Nil(err)
@@ -137,10 +136,10 @@ func TestTruncateFloor(t *testing.T) {
 	assert.Equal(2, len(testList.seqno_list_2))
 
 	testList = newDualSortedSeqnoListWithLock()
-	testList.appendSeqnos(0, 1, nil)
-	testList.appendSeqnos(2, 3, nil)
-	testList.appendSeqnos(4, 6, nil)
-	testList.appendSeqnos(7, 9, nil)
+	testList.appendSeqnos(0, 1)
+	testList.appendSeqnos(2, 3)
+	testList.appendSeqnos(4, 6)
+	testList.appendSeqnos(7, 9)
 
 	testList.truncateSeqno1Floor(2)
 	assert.Equal(3, len(testList.seqno_list_1))
@@ -326,4 +325,45 @@ func TestOutofOrderSent(t *testing.T) {
 	assert.Equal(svc.vbTgtSeqnoManifestMap[vbno].seqno_list_2[list2Len-1], laterManifest)
 
 	fmt.Println("============== Test case end: TestOutofOrderSent =================")
+}
+
+func TestClonedData(t *testing.T) {
+	fmt.Println("============== Test case start: TestClonedData =================")
+	defer fmt.Println("============== Test case end: TestClonedData =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+
+	mutationEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VBucket = 1
+
+	mutationEvent.Seqno = 1
+	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Pretend a event has 1 cloned sibling
+
+	var data []interface{}
+	data = append(data, uint16(1)) // vbno
+	data = append(data, mutationEvent.Seqno)
+	data = append(data, 2) // total (1 main + 1 sibling)
+	clonedEvent := common.NewEvent(common.DataCloned, data, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(clonedEvent))
+
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// The main req + one single sibling req means that seqno shouldn't move since until both events are heard back
+	assert.Equal(uint64(0), svc.GetThroughSeqno(1))
+
+	// Second sent event should cause the seqno to move
+	assert.Nil(svc.ProcessEvent(sentEvent))
+	assert.Equal(uint64(1), svc.GetThroughSeqno(1))
 }

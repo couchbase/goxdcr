@@ -649,3 +649,68 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 	assert.Nil(err)
 	assert.True(reflect.DeepEqual(origKey, dummyData.Req.Key))
 }
+
+// Given one mutation, usually would translate into one MCRequest
+// But with migration, one mutation can translate into multiple target collections
+// This test to ensure siblig requests are parsed correctly
+func TestRouterExplicitMigrationSiblingReq(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterExplicitMigrationSiblingReq =================")
+	defer fmt.Println("============== Test case end: TestRouterExplicitMigrationSiblingReq =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+
+	mappingMode := spec.Settings.GetCollectionModes()
+	mappingMode.SetExplicitMapping(true)
+	mappingMode.SetMigration(true)
+	rules := spec.Settings.GetCollectionsRoutingRules()
+	rules["REGEXP_CONTAINS(META().id, \"d1\")"] = "S2:col1"
+	rules["META().id == \"d1\""] = "S2:col2"
+
+	updatedMap := make(map[string]interface{})
+	updatedMap[metadata.CollectionsMgtMultiKey] = mappingMode
+	updatedMap[metadata.CollectionsMappingRulesKey] = rules
+	_, errMap := spec.Settings.UpdateSettingsFromMap(updatedMap)
+	assert.Equal(0, len(errMap))
+
+	setupCollectionManifestsSvcRouter(collectionsManifestSvc)
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap)
+
+	assert.Nil(err)
+	modes := router.collectionModes.Get()
+	assert.True(modes.IsExplicitMapping())
+	assert.True(modes.IsMigrationOn())
+
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+	assert.Nil(collectionsRouter.Start())
+
+	// routing updater receiver
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+		return nil
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+
+	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+
+	uprEvent, err := RetrieveUprFile("./testdata/MB-33010Upr.json")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	wrappedEvent := &base.WrappedUprEvent{}
+	wrappedEvent.UprEvent = uprEvent
+
+	wrappedMCR, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+
+	err = router.RouteCollection(wrappedMCR, dummyDownStream, wrappedEvent)
+	assert.Nil(err)
+
+	assert.Equal(1, len(wrappedMCR.SiblingReqs))
+}

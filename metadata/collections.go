@@ -17,6 +17,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/golang/snappy"
 	"reflect"
 	"sort"
@@ -1391,22 +1392,34 @@ func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr 
 	return
 }
 
-func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(uprEvent *mcc.UprEvent) (tgt CollectionNamespaceList, err error) {
+func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(uprEvent *mcc.UprEvent, mcReq *base.WrappedMCRequest, logger *log.CommonLogger) (matchedNamespaces CollectionNamespaceMapping, errMap base.ErrorMap, errMCReqMap map[string]*base.WrappedMCRequest) {
 	if c == nil {
-		err = base.ErrorInvalidInput
+		errMap = make(base.ErrorMap)
+		errMap["GetTargetUsingMigrationFilter"] = base.ErrorInvalidInput
 		return
 	}
 
+	matchedNamespaces = make(CollectionNamespaceMapping)
 	for k, v := range *c {
 		if k.GetType() != SourceDefaultCollectionFilter {
 			continue
 		}
+		match, matchErr, errDesc, _ := k.filter.FilterUprEvent(uprEvent)
+		if matchErr != nil {
+			if logger != nil && logger.GetLogLevel() >= log.LogLevelDebug {
+				logger.Errorf("Document %v%v%v failed filtering with err: %v - %v", base.UdTagBegin, string(uprEvent.Key),
+					base.UdTagEnd, matchErr, errDesc)
+			}
+			if errMap == nil {
+				errMap = make(base.ErrorMap)
+				errMCReqMap = make(map[string]*base.WrappedMCRequest)
+			}
+			errMap[string(uprEvent.Key)] = matchErr
+			errMCReqMap[string(uprEvent.Key)] = mcReq
+		}
 
-		// TODO - error handling for whatever is necessary
-		match, _, _, _ := k.filter.FilterUprEvent(uprEvent)
 		if match {
-			// TODO - need to handle one source mutation write to multiple targets?
-			tgt = append(tgt, v...)
+			matchedNamespaces[k] = v
 		}
 	}
 	return

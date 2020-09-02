@@ -1,7 +1,7 @@
 package mocks
 
 import (
-	mcc "github.com/couchbase/gomemcached/client"
+	base "github.com/couchbase/goxdcr/base"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -33,13 +33,13 @@ func (_m *RouterIface) Route(data interface{}) (map[string]interface{}, error) {
 	return r0, r1
 }
 
-// RouteCollection provides a mock function with given fields: _a0, _a1
-func (_m *RouterIface) RouteCollection(data interface{}, partId string, eventForMigration *mcc.UprEvent) error {
-	ret := _m.Called(_a0, _a1)
+// RouteCollection provides a mock function with given fields: data, partId, origUprEvent
+func (_m *RouterIface) RouteCollection(data interface{}, partId string, origUprEvent *base.WrappedUprEvent) error {
+	ret := _m.Called(data, partId, origUprEvent)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(interface{}, string) error); ok {
-		r0 = rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(interface{}, string, *base.WrappedUprEvent) error); ok {
+		r0 = rf(data, partId, origUprEvent)
 	} else {
 		r0 = ret.Error(0)
 	}

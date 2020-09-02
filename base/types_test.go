@@ -181,50 +181,50 @@ func TestExplicitMatchFunc(t *testing.T) {
 	srcNamespace := &CollectionNamespace{ScopeName: "S1", CollectionName: "C1"}
 	tgtNamespace := &CollectionNamespace{ScopeName: "S1T", CollectionName: "C1T"}
 	assert.True(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err := rules.GetPotentialTargetNamespace(srcNamespace)
+	tgtNamespaceCheck, err := rules.GetPotentialTargetNamespaces(srcNamespace)
 	assert.Nil(err)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck))
+	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
 	assert.False(rules.ExplicitlyDenied(srcNamespace))
 
 	srcNamespace = &CollectionNamespace{ScopeName: "S1", CollectionName: "C1T"}
 	tgtNamespace = &CollectionNamespace{"S1TT", "C1T"}
 	assert.True(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespace(srcNamespace)
+	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
 	assert.Nil(err)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck))
+	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
 	assert.False(rules.ExplicitlyDenied(srcNamespace))
 
 	srcNamespace = &CollectionNamespace{ScopeName: "S2", CollectionName: "C3"}
 	tgtNamespace = &CollectionNamespace{"S2T", "C3"}
 	assert.True(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespace(srcNamespace)
+	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
 	assert.Nil(err)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck))
+	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
 	assert.False(rules.ExplicitlyDenied(srcNamespace))
 
 	srcNamespace = &CollectionNamespace{ScopeName: "S2", CollectionName: "C3"}
 	tgtNamespace = &CollectionNamespace{"S2T", "C3T"}
 	assert.False(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespace(srcNamespace)
+	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
 	assert.Nil(err)
-	assert.False(tgtNamespace.IsSameAs(*tgtNamespaceCheck))
+	assert.False(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
 	tgtNamespace.ScopeName = "S2T"
 	tgtNamespace.CollectionName = "C3"
-	tgtNamespaceCheck, _ = rules.GetPotentialTargetNamespace(srcNamespace)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck))
+	tgtNamespaceCheck, _ = rules.GetPotentialTargetNamespaces(srcNamespace)
+	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
 	assert.False(rules.ExplicitlyDenied(srcNamespace))
 
 	srcNamespace = &CollectionNamespace{ScopeName: "S2", CollectionName: "C1"}
 	tgtNamespace = &CollectionNamespace{"S2T", "C1"}
 	assert.False(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespace(srcNamespace)
+	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
 	assert.Nil(err)
 	assert.Nil(tgtNamespaceCheck)
 	assert.True(rules.ExplicitlyDenied(srcNamespace))
 
 	// Invalid one just for kicks
 	srcNamespace = &CollectionNamespace{ScopeName: "FOO", CollectionName: "BAR"}
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespace(srcNamespace)
+	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
 	assert.NotNil(err)
 	assert.Nil(tgtNamespaceCheck)
 	assert.False(rules.ExplicitlyDenied(srcNamespace))

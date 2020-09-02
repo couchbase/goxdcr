@@ -357,6 +357,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 		collection_routing_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.CollectionRoutingEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		data_cloned_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataClonedEventListener, i),
+			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			// Get the source DCP nozzle
@@ -376,6 +379,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			conn.RegisterComponentEventListener(common.DataThroughputThrottled, data_throughput_throttled_event_listener)
 			conn.RegisterComponentEventListener(common.DataNotReplicated, data_filtered_event_listener)
 			conn.RegisterComponentEventListener(common.FixedRoutingUpdateEvent, collection_routing_event_listener)
+			conn.RegisterComponentEventListener(common.DataCloned, data_cloned_event_listener)
 		}
 	}
 }

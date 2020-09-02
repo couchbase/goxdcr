@@ -73,7 +73,22 @@ const (
 	DataNotReplicated ComponentEventType = iota
 	// When a backfill pipeline ends, throughSeqnoTrackerSvc will raise this once the last seen DCP seqno has been processed
 	LastSeenSeqnoDoneProcessed ComponentEventType = iota
+	// When a source mutation is translated into multiple target mutations for different target namespaces
+	DataCloned ComponentEventType = iota
 )
+
+func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
+	switch c {
+	case DataFailedCRSource:
+		return true
+	case DataSent:
+		return true
+	case DataNotReplicated:
+		return true
+	default:
+		return false
+	}
+}
 
 type Event struct {
 	//the type of component event
