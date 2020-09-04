@@ -67,12 +67,12 @@ const (
 	DELETION_FAILED_CR_SOURCE_METRIC = "deletion_failed_cr_source"
 	SET_FAILED_CR_SOURCE_METRIC      = "set_failed_cr_source"
 
-	CHANGES_LEFT_METRIC  = base.ChangesLeftStats
-	DOCS_LATENCY_METRIC  = "wtavg_docs_latency"
-	MERGE_LATENCY_METRIC = "wtavg_merge_latency"
-	META_LATENCY_METRIC  = "wtavg_meta_latency"
-	GET_LATENCY_METRIC   = "wtavg_get_latency"
-	RESP_WAIT_METRIC     = "resp_wait_time"
+	CHANGES_LEFT_METRIC    = base.ChangesLeftStats
+	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
+	MERGE_LATENCY_METRIC   = "wtavg_merge_latency"
+	META_LATENCY_METRIC    = "wtavg_meta_latency"
+	GET_DOC_LATENCY_METRIC = "wtavg_get_doc_latency"
+	RESP_WAIT_METRIC       = "resp_wait_time"
 
 	//checkpointing related statistics
 	DOCS_CHECKED_METRIC    = "docs_checked" //calculated
@@ -253,12 +253,12 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	DELETION_FAILED_CR_SOURCE_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that were delete operations"},
 	SET_FAILED_CR_SOURCE_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that were set operations"},
 
-	CHANGES_LEFT_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Given the VBs of this node, the number of seqnos that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the VBs"},
-	DOCS_LATENCY_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes for the source cluster to receive the acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be processed by the XDCR outnozzle"},
-	META_LATENCY_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes once a getMeta command is composed to be sent to the time the request is handled once the target node has responded"},
-	GET_LATENCY_METRIC:   StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes once a get command is composed to be sent to the time the request is handled once the target node has responded"},
-	RESP_WAIT_METRIC:     StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write"},
-	MERGE_LATENCY_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes from routing, conflict detection and resolution, to receive the acknowledgement of merge"},
+	CHANGES_LEFT_METRIC:    StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Given the VBs of this node, the number of seqnos that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the VBs"},
+	DOCS_LATENCY_METRIC:    StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes for the source cluster to receive the acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be processed by the XDCR outnozzle"},
+	META_LATENCY_METRIC:    StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes once a getMeta command is composed to be sent to the time the request is handled once the target node has responded"},
+	GET_DOC_LATENCY_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes once a get document command is composed to be sent to the time the request is handled once the target node has responded"},
+	RESP_WAIT_METRIC:       StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write"},
+	MERGE_LATENCY_METRIC:   StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes from routing, conflict detection and resolution, to receive the acknowledgement of merge"},
 
 	DOCS_CHECKED_METRIC:    StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Across VBs for this node, the sum of all seqnos that have been considered to be checkpointed"},
 	NUM_CHECKPOINTS_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The number of times checkpoint operation has completed successfully since this XDCR process instance is made aware of this replication"},

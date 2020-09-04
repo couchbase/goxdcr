@@ -1392,7 +1392,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 // Launched as a part of the batchGetMeta, batchGetXattrForCustomCR and batchGetDocForCustomCR,
 // which will fire off the requests and this is the handler to decrypt the info coming back
 func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_ch chan bool,
-	opaque_keySeqno_map opaqueKeySeqnoMap, respMap base.MCResponseMap, logger *log.CommonLogger, isGetMeta bool) {
+	opaque_keySeqno_map opaqueKeySeqnoMap, respMap base.MCResponseMap, logger *log.CommonLogger, isGetMeta bool, includeDoc bool) {
 	var batchGetStr string
 	if isGetMeta {
 		batchGetStr = "batchGetMeta"
@@ -1465,16 +1465,16 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 						respMap[key] = response
 
 						// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
-						additionalInfo := GetMetaReceivedEventAdditional{Key: key,
+						additionalInfo := GetReceivedEventAdditional{Key: key,
 							Seqno:       seqno,
 							Commit_time: time.Since(start_time),
 							ManifestId:  manifestId,
 						}
 						var receivedEvent common.ComponentEventType
-						if isGetMeta {
-							receivedEvent = common.GetMetaReceived
+						if !isGetMeta && includeDoc {
+							receivedEvent = common.GetDocReceived
 						} else {
-							receivedEvent = common.GetReceived
+							receivedEvent = common.GetMetaReceived
 						}
 						xmem.RaiseEvent(common.NewEvent(receivedEvent, nil, xmem, nil, additionalInfo))
 						if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, false) && !base.IsTemporaryMCError(response.Status) &&
@@ -1575,7 +1575,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 	}
 
 	// launch the receiver - passing channel and maps in are fine since they are "reference types"
-	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), true)
+	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), true, false)
 
 	//send the requests
 	for _, packet := range reqs_bytes_list {
@@ -1746,7 +1746,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 	}
 
 	// launch the receiver - passing channel and maps in are fine since they are "reference types"
-	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), true /* isGetMeta */)
+	go xmem.batchGetMetaHandler(len(opaque_keySeqno_map), receiver_fin_ch, receiver_return_ch, opaque_keySeqno_map, respMap, xmem.Logger(), false /* isGetMeta */, include_doc)
 
 	//send the requests
 	for _, packet := range reqs_bytes_list {

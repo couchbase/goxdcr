@@ -43,9 +43,9 @@ const (
 	CheckpointDoneForVB ComponentEventType = iota
 	//checkpointing succeed
 	CheckpointDone ComponentEventType = iota
-	// get response received from target cluster
-	GetReceived ComponentEventType = iota
-	// get meta response received from target cluster
+	// response received from target cluster for subdoc_multi_lookup for XATTR and document body
+	GetDocReceived ComponentEventType = iota
+	// get meta response received from target cluster, or if custom CR, subdoc_multi_lookup for XATTR received
 	GetMetaReceived ComponentEventType = iota
 	//data failed conflict resolution on source cluster side due to optimistic replication
 	DataFailedCRSource ComponentEventType = iota

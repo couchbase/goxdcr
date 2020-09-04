@@ -17,12 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	mc "github.com/couchbase/gomemcached"
-	base "github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	utilities "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -32,6 +26,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	mc "github.com/couchbase/gomemcached"
+	base "github.com/couchbase/goxdcr/base"
+	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 const (
@@ -690,7 +691,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 
 	// Update stats
 	for key, seqnostarttime := range key_seqnostarttime_map {
-		additionalInfo := GetMetaReceivedEventAdditional{Key: key,
+		additionalInfo := GetReceivedEventAdditional{Key: key,
 			Seqno:       seqnostarttime[0].(uint64),
 			Commit_time: time.Since(seqnostarttime[1].(time.Time))}
 		capi.RaiseEvent(common.NewEvent(common.GetMetaReceived, nil, capi, nil, additionalInfo))

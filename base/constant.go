@@ -469,7 +469,6 @@ const (
 	DataSentCasChangedEventListener      = "DataSentCasChangedEventListener"
 	DataFailedCREventListener            = "DataFailedCREventListener"
 	GetReceivedEventListener             = "GetReceivedEventListener"
-	GetMetaReceivedEventListener         = "GetMetaReceivedEventListener"
 	DataThrottledEventListener           = "DataThrottledEventListener"
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"
 	CollectionRoutingEventListener       = "CollectionRoutingEventListener"
