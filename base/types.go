@@ -782,6 +782,12 @@ func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMapping
 		return CollectionsMappingRulesType{}, fmt.Errorf("JSON string passed in did not pass re-encode test. Are there potentially duplicated keys?")
 	}
 
+	// Because adv filtering won't work if space is removed - jsonMap should be the original version
+	jsonMap, err = ValidateAndConvertStringToJsonType(value)
+	if err != nil {
+		return nil, err
+	}
+
 	return ValidateAndConvertJsonMapToRuleType(jsonMap)
 }
 

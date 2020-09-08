@@ -785,14 +785,6 @@ func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, n
 		}
 	}
 
-	if newSourceManifest.Uid() == 0 {
-		// Source manifest 0 means only default collection is being replicated
-		// If it's implicit mapping, no-op
-		// TODO MB-40588 - this section will change for explicit mapping and/or upgrade
-		b.logger.Infof("Repl %v shows default source manifest, thus no backfill would be created", replId)
-		return
-	}
-
 	// Update cache
 	b.cacheMtx.Lock()
 	if sourceChanged {
@@ -807,6 +799,12 @@ func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, n
 		return
 	}
 	modes := spec.Settings.GetCollectionModes()
+
+	if newSourceManifest.Uid() == 0 && !modes.IsMigrationOn() && !modes.IsExplicitMapping() {
+		// Source manifest 0 means only default collection is being replicated
+		b.logger.Infof("Repl %v shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created", replId)
+		return
+	}
 
 	var backfillReq interface{}
 	var skipRaiseBackfillReq bool
