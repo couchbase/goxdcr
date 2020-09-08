@@ -768,7 +768,8 @@ func (c *CollectionsMgtType) SetMigration(val bool) {
 const CollectionsMappingRulesKey = "colMappingRules"
 
 func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMappingRulesType, error) {
-	jsonMap, err := ValidateAndConvertStringToJsonType(value)
+	trimmedValue := strings.Replace(value, " ", "", -1)
+	jsonMap, err := ValidateAndConvertStringToJsonType(trimmedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -777,7 +778,7 @@ func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMapping
 	if err != nil {
 		return CollectionsMappingRulesType{}, err
 	}
-	if len(testMarshal) != len([]byte(value)) {
+	if len(testMarshal) != len([]byte(trimmedValue)) {
 		return CollectionsMappingRulesType{}, fmt.Errorf("JSON string passed in did not pass re-encode test. Are there potentially duplicated keys?")
 	}
 

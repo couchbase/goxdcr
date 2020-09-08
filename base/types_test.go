@@ -76,6 +76,10 @@ func TestCollectionMigrateRuleValidation(t *testing.T) {
 	doubleKey := "{\"key\":\"val\",\"key\":\"val2\"}"
 	rules, err = ValidateAndConvertStringToMappingRuleType(doubleKey)
 	assert.NotNil(err)
+
+	perfKeyWSpaces := "{\"scope-1:collection-1\" : \"scope-2:collection-2\"}"
+	rules, err = ValidateAndConvertStringToMappingRuleType(perfKeyWSpaces)
+	assert.Nil(err)
 }
 
 func TestExplicitMappingValidatorParseRule(t *testing.T) {
