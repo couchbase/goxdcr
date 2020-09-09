@@ -19,7 +19,9 @@ import (
 	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
 	"reflect"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 var dummyDownStream string = "dummy"
@@ -43,7 +45,7 @@ func RetrieveUprFile(fileName string) (*mcc.UprEvent, error) {
 	return &uprEvent, nil
 }
 
-func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock *UtilitiesMock.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc) {
+func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock *UtilitiesMock.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc, connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) {
 	routerId = "routerUnitTest"
 
 	downStreamParts = make(map[string]common.Part)
@@ -63,6 +65,10 @@ func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]commo
 		// Do nothing
 	}
 
+	// Happy
+	connectivityStatusGetter = func() (metadata.ConnectivityStatus, error) {
+		return metadata.ConnValid, nil
+	}
 	return
 }
 
@@ -123,9 +129,8 @@ func TestRouterRouteFunc(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterRouteFunc =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler := setupBoilerPlateRouter()
-
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil)
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -168,9 +173,8 @@ func TestRouterInitialNone(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterInitialNone =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
-
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil)
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -184,11 +188,9 @@ func TestRouterSkipDeletion(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterSkipDeletion =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
-
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
 	expDelMode = base.FilterExpDelSkipDeletes
-
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -216,11 +218,9 @@ func TestRouterSkipExpiration(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterSkipExpiration =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
-
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
 	expDelMode = base.FilterExpDelSkipExpiration
-
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -248,11 +248,11 @@ func TestRouterSkipDeletesStripTTL(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterSkipExpiryStripTTL =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelSkipExpiration | base.FilterExpDelStripExpiration
 
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil, nil)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -283,11 +283,9 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterExpDelAllMode =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
-
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
 	expDelMode = base.FilterExpDelAll
-
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -331,13 +329,13 @@ func TestRouterManifestChange(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterManifestChange =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, connectivity := setupBoilerPlateRouter()
 
 	setupCollectionManifestsSvcRouter(collectionsManifestSvc)
 
 	expDelMode = base.FilterExpDelAll
 
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, connectivity)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -388,13 +386,13 @@ func TestRouterTargetCollectionDNE(t *testing.T) {
 	fmt.Println("============== Test case start: TargetCollectionDNE =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, connectivity := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelAll
 
 	mockTargetCollectionDNE(collectionsManifestSvc)
 
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, connectivity)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -424,9 +422,10 @@ func TestRouterTargetCollectionDNE(t *testing.T) {
 
 	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
 	dummyData := &base.WrappedMCRequest{
-		ColNamespace: implicitNamespace,
-		Req:          mcReq,
-		ColInfo:      &base.TargetCollectionInfo{},
+		SrcColNamespace: implicitNamespace,
+		Req:             mcReq,
+		// use 123 to indicate a colID that tgt manifest doesn't have
+		ColInfo: &base.TargetCollectionInfo{ColId: 123},
 	}
 
 	assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream, nil))
@@ -448,13 +447,13 @@ func TestRouterTargetCollectionDNEPersistErr(t *testing.T) {
 	fmt.Println("============== Test case start: TargetCollectionDNEPersistErr =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, connectivity := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelAll
 
 	mockTargetCollectionDNE(collectionsManifestSvc)
 
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, connectivity)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -483,9 +482,9 @@ func TestRouterTargetCollectionDNEPersistErr(t *testing.T) {
 	mcReq := getMutationMCReq(err, assert)
 	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
 	dummyData := &base.WrappedMCRequest{
-		ColNamespace: implicitNamespace,
-		Req:          mcReq,
-		ColInfo:      &base.TargetCollectionInfo{},
+		SrcColNamespace: implicitNamespace,
+		Req:             mcReq,
+		ColInfo:         &base.TargetCollectionInfo{},
 	}
 
 	// Even if persist has problem, routeCollection should return a non-nil error to prevent forwarding to xmem
@@ -500,7 +499,7 @@ func TestRouterExplicitMode(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestRouterExplicitMode =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
 
 	mappingMode := spec.Settings.GetCollectionModes()
 	mappingMode.SetExplicitMapping(true)
@@ -514,7 +513,7 @@ func TestRouterExplicitMode(t *testing.T) {
 
 	setupCollectionManifestsSvcRouterWithDefaultTarget(collectionsManifestSvc)
 
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, nil)
 
 	assert.Nil(err)
 	modes := router.collectionModes.Get()
@@ -543,9 +542,10 @@ func TestRouterExplicitMode(t *testing.T) {
 		Keylen: len("testKey"),
 	}
 	dummyData := &base.WrappedMCRequest{
-		Req:          mcReq,
-		ColNamespace: sourceNs,
-		ColInfo:      &base.TargetCollectionInfo{},
+		Req:             mcReq,
+		SrcColNamespace: sourceNs,
+		// use 123 to indicate a colID that tgt manifest doesn't have
+		ColInfo: &base.TargetCollectionInfo{ColId: 123},
 	}
 	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	// Right now target cluster gave back "default manifest"
@@ -581,12 +581,12 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestRouterImplicitWithDiffCapabilities =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
 	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc)
 
 	expDelMode = base.FilterExpDelAll
 
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, nil)
 
 	assert.Nil(err)
 	assert.NotNil(router)
@@ -615,9 +615,9 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 		Keylen: len(delEvent.Key),
 	}
 	dummyData := &base.WrappedMCRequest{
-		Req:          mcReq,
-		ColNamespace: sourceNs,
-		ColInfo:      &base.TargetCollectionInfo{},
+		Req:             mcReq,
+		SrcColNamespace: sourceNs,
+		ColInfo:         &base.TargetCollectionInfo{},
 	}
 
 	origKey := base.DeepCopyByteArray(delEvent.Key)
@@ -626,9 +626,9 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 	assert.False(reflect.DeepEqual(origKey, dummyData.Req.Key))
 
 	// Now try with no-collections capability - key should not be modified
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ = setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ = setupBoilerPlateRouter()
 	setupCollectionManifestsSvcRouter(collectionsManifestSvc)
-	router, err = NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil)
+	router, err = NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, nonCollectionsCap, nil, nil)
 	assert.Nil(err)
 	assert.NotNil(router)
 	assert.Nil(router.Start())
@@ -642,9 +642,9 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 		Keylen: len(delEvent2.Key),
 	}
 	dummyData = &base.WrappedMCRequest{
-		Req:          mcReq,
-		ColNamespace: sourceNs,
-		ColInfo:      &base.TargetCollectionInfo{},
+		Req:             mcReq,
+		SrcColNamespace: sourceNs,
+		ColInfo:         &base.TargetCollectionInfo{},
 	}
 	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	assert.Nil(err)
@@ -659,7 +659,7 @@ func TestRouterExplicitMigrationSiblingReq(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestRouterExplicitMigrationSiblingReq =================")
 	assert := assert.New(t)
 
-	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _ := setupBoilerPlateRouter()
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
 
 	mappingMode := spec.Settings.GetCollectionModes()
 	mappingMode.SetExplicitMapping(true)
@@ -676,7 +676,7 @@ func TestRouterExplicitMigrationSiblingReq(t *testing.T) {
 
 	setupCollectionManifestsSvcRouter(collectionsManifestSvc)
 
-	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil)
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, nil)
 
 	assert.Nil(err)
 	modes := router.collectionModes.Get()
@@ -714,4 +714,181 @@ func TestRouterExplicitMigrationSiblingReq(t *testing.T) {
 	assert.Nil(err)
 
 	assert.Equal(1, len(wrappedMCR.SiblingReqs))
+}
+
+func TestRouterRaceyBrokenMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterRaceyBrokenMap =================")
+	defer fmt.Println("============== Test case end: TestRouterRaceyBrokenMap =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, connectivityGetter := setupBoilerPlateRouter()
+	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc)
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, connectivityGetter)
+	assert.Nil(err)
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+	assert.Nil(collectionsRouter.Start())
+	collectionsRouter.targetManifestRefresh = 1 * time.Second
+
+	uprEvent, err := RetrieveUprFile("./testdata/MB-33010Upr.json")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: uprEvent,
+		ColNamespace: &base.CollectionNamespace{
+			ScopeName:      "S1",
+			CollectionName: "col1",
+		},
+	}
+	wrappedEvent.UprEvent = uprEvent
+
+	wrappedMCR, err := router.ComposeMCRequest(wrappedEvent)
+	wrappedMCR.ColInfo = &base.TargetCollectionInfo{
+		ManifestId:          0,
+		ColId:               0,
+		ColIDPrefixedKey:    nil,
+		ColIDPrefixedKeyLen: 0,
+		TargetNamespace: &base.CollectionNamespace{
+			ScopeName:      "S1",
+			CollectionName: "col1",
+		},
+	}
+	assert.Nil(err)
+
+	// routing updater receiver
+	var lastCalledBackfillMap metadata.CollectionNamespaceMapping
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+		lastCalledBackfillMap = info.BackfillMap
+		return nil
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+
+	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent.UprEvent)
+	assert.Nil(lastCalledBackfillMap)
+
+	collectionsRouter.recordUnroutableRequest(wrappedMCR)
+	assert.Equal(1, ignoreCnt)
+	assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
+	assert.Nil(lastCalledBackfillMap)
+	assert.Equal(1, len(collectionsRouter.brokenMapping))
+
+	time.Sleep(1 * time.Second)
+	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent.UprEvent)
+	assert.Equal(1, ignoreCnt)
+	assert.Nil(collectionsRouter.brokenMapDblChkTicker)
+	assert.NotNil(lastCalledBackfillMap)
+	assert.Equal(0, len(collectionsRouter.brokenMapping))
+}
+
+// The idle is where we allow the timer to kick off and self-heal
+func TestRouterRaceyBrokenMapIdle(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterRaceyBrokenMapIdle =================")
+	defer fmt.Println("============== Test case end: TestRouterRaceyBrokenMapIdle =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
+	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc)
+
+	var connectivityReturnHealthy = true
+	var connectivityGetCnt uint32
+	connectivityGetter := func() (metadata.ConnectivityStatus, error) {
+		atomic.AddUint32(&connectivityGetCnt, 1)
+		if connectivityReturnHealthy {
+			return metadata.ConnValid, nil
+		} else {
+			return metadata.ConnDegraded, nil
+		}
+	}
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, connectivityGetter)
+	assert.Nil(err)
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+	assert.Nil(collectionsRouter.Start())
+	collectionsRouter.targetManifestRefresh = 100 * time.Millisecond
+
+	uprEvent, err := RetrieveUprFile("./testdata/MB-33010Upr.json")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: uprEvent,
+		ColNamespace: &base.CollectionNamespace{
+			ScopeName:      "S1",
+			CollectionName: "col1",
+		},
+	}
+	wrappedEvent.UprEvent = uprEvent
+
+	wrappedMCR, err := router.ComposeMCRequest(wrappedEvent)
+	wrappedMCR.ColInfo = &base.TargetCollectionInfo{
+		ManifestId:          0,
+		ColId:               0,
+		ColIDPrefixedKey:    nil,
+		ColIDPrefixedKeyLen: 0,
+		TargetNamespace: &base.CollectionNamespace{
+			ScopeName:      "S1",
+			CollectionName: "col1",
+		},
+	}
+	assert.Nil(err)
+
+	// routing updater receiver
+	var lastCalledBackfillMap metadata.CollectionNamespaceMapping
+	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
+		lastCalledBackfillMap = info.BackfillMap
+		return nil
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+
+	collectionsRouter.routingUpdater = newRoutingUpdater
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent.UprEvent)
+	assert.Nil(lastCalledBackfillMap)
+
+	collectionsRouter.recordUnroutableRequest(wrappedMCR)
+	assert.Equal(1, ignoreCnt)
+	assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
+	assert.NotNil(collectionsRouter.brokenMapDblChkKicker)
+	assert.Nil(lastCalledBackfillMap)
+	assert.Equal(1, len(collectionsRouter.brokenMapping))
+
+	time.Sleep(1 * time.Second)
+	assert.Equal(1, ignoreCnt)
+	assert.Nil(collectionsRouter.brokenMapDblChkTicker)
+	assert.NotNil(lastCalledBackfillMap)
+	assert.Equal(0, len(collectionsRouter.brokenMapping))
+	assert.Nil(collectionsRouter.brokenMapDblChkKicker)
+	assert.Equal(1, int(atomic.LoadUint32(&connectivityGetCnt)))
+
+	// Now, let's pretend the cluster is unhealthy and the same ignore request should not be serviced
+	connectivityReturnHealthy = false
+	lastCalledBackfillMap = nil
+	collectionsRouter.recordUnroutableRequest(wrappedMCR)
+	assert.Equal(2, ignoreCnt)
+	time.Sleep(1 * time.Second)
+	assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
+	assert.Nil(lastCalledBackfillMap)
+	assert.NotEqual(0, len(collectionsRouter.brokenMapping))
+	assert.NotNil(collectionsRouter.brokenMapDblChkKicker)
+	assert.NotEqual(1, int(atomic.LoadUint32(&connectivityGetCnt)))
+
+	// Now let's say cluster is healthy again
+	connectivityReturnHealthy = true
+	lastCalledBackfillMap = nil
+	time.Sleep(500 * time.Millisecond)
+	assert.Nil(collectionsRouter.brokenMapDblChkTicker)
+	assert.NotNil(lastCalledBackfillMap)
+	assert.Equal(0, len(collectionsRouter.brokenMapping))
+	assert.Nil(collectionsRouter.brokenMapDblChkKicker)
 }

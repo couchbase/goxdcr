@@ -256,10 +256,16 @@ func (w *WrappedUprEventFlag) SetCollectionDNE() {
 type TargetCollectionInfo struct {
 	// The manifestID used when retrying
 	ManifestId uint64
+	ColId      uint32
 	// Temporary storage space to avoid memmove
 	ColIDPrefixedKey []byte
 	// The len is needed because slice returned from datapool can have garbage
 	ColIDPrefixedKeyLen int
+
+	// For migration, since given WrappedMCRequest's SrcColNamespace, there is no way to look up the actual
+	// target namespace given migration rules, this is needed for error handling
+	// For non-migration use cases, this is not to be used
+	TargetNamespace *CollectionNamespace
 }
 
 type WrappedMCRequest struct {
@@ -267,7 +273,7 @@ type WrappedMCRequest struct {
 	Req                *gomemcached.MCRequest
 	Start_time         time.Time
 	UniqueKey          string
-	ColNamespace       *CollectionNamespace
+	SrcColNamespace    *CollectionNamespace
 	ColInfo            *TargetCollectionInfo
 	SlicesToBeReleased [][]byte
 

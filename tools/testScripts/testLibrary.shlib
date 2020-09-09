@@ -246,10 +246,13 @@ function killGoXdcr {
 # 1 - cluster name
 # 2 - String to look for
 # 3 - Number of occurrences
+# 4 - Max number of occurrences
 function validateLogWithInstance {
 	local clusterName=$1
 	local grepStr="$2"
 	local instanceCnt=$3
+	local maxInstanceCnt=${4:-}
+
 
 	logs=`getClusterLogs "$clusterName"`
 	if ! (( $? == 0 ));then
@@ -259,8 +262,15 @@ function validateLogWithInstance {
 
 	count=`echo "$logs" | grep -c "$grepStr"`
 	if (( $count != $instanceCnt ));then
-		echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
-		exit 1
+	  if [[ ! -z "$maxInstanceCnt" ]] && (( $count > $maxInstanceCnt ));then
+      echo "Error - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, but found $count"
+      exit 1
+    elif [[ ! -z "$maxInstanceCnt" ]];then
+      echo "Warning - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, found $count"
+    else
+      echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+      exit 1
+	  fi
 	else
 		echo "Found exactly $instanceCnt of \"$grepStr\""
 	fi
@@ -353,10 +363,12 @@ function getInternalNodeXdcrLog {
 # 1 - cluster name
 # 2 - String to look for
 # 3 - Number of occurrences
+# 4 - Max number of occurrences
 function validateInternalLogWithInstance {
 	local clusterName=$1
 	local grepStr="$2"
 	local instanceCnt=$3
+	local maxInstanceCnt=${4:-}
 
 	logs=`getInternalNodeXdcrLog "$clusterName"`
 	if ! (( $? == 0 ));then
@@ -366,8 +378,15 @@ function validateInternalLogWithInstance {
 
 	count=`echo "$logs" | grep -c "$grepStr"`
 	if (( $count != $instanceCnt ));then
-		echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
-		exit 1
+	  if [[ ! -z "$maxInstanceCnt" ]] && (( $count > $maxInstanceCnt ));then
+      echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
+      exit 1
+    elif [[ ! -z "$maxInstanceCnt" ]];then
+      echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count"
+    else
+      echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+      exit 1
+    fi
 	else
 		echo "Found exactly $instanceCnt of \"$grepStr\""
 	fi

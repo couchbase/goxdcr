@@ -146,8 +146,9 @@ function runTestCase {
 	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+    # Due to collections router being able to catch xmem race conditions, there may be multiple backfill requests
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(( $currentBackfillInstanceCnt + 1 )) $(( $currentBackfillInstanceCnt + 3 ))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 )) $(( $currentVBTasksDoneInstanceCnt + 3 ))
 
 	echo "============================================================================"
 	echo "PASSED"

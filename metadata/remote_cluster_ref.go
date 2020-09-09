@@ -1090,3 +1090,31 @@ func (ref *RemoteClusterReference) getHostNameForOutputNoLock() interface{} {
 		return ref.HostName_
 	}
 }
+
+type ConnectivityStatus int
+
+const (
+	// Nothing wrong yet
+	ConnValid ConnectivityStatus = iota
+	// If any remote cluster node returned authentication error
+	ConnAuthErr ConnectivityStatus = iota
+	// If this node experienced connectivity issues to a least one remote cluster nodes
+	ConnDegraded ConnectivityStatus = iota
+	// If this node cannot contact every single remote cluster nodes
+	ConnError ConnectivityStatus = iota
+)
+
+func (c ConnectivityStatus) String() string {
+	switch c {
+	case ConnValid:
+		return "RC_OK"
+	case ConnAuthErr:
+		return "RC_AUTH_ERR"
+	case ConnDegraded:
+		return "RC_DEGRADED"
+	case ConnError:
+		return "RC_ERROR"
+	default:
+		return "?? (ConnectivityStatus)"
+	}
+}

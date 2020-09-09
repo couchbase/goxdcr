@@ -74,4 +74,7 @@ type RemoteClusterSvc interface {
 
 	// Gets the last pulled manifest
 	GetManifestByUuid(uuid, bucketName string, forceRefresh, restAPIQuery bool) (manifest *metadata.CollectionsManifest, err error)
+
+	// Get the last-known connectivity status
+	GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error)
 }

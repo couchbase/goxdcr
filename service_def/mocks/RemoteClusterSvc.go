@@ -112,6 +112,27 @@ func (_m *RemoteClusterSvc) GetConnectionStringForRemoteCluster(ref *metadata.Re
 	return r0, r1
 }
 
+// GetConnectivityStatus provides a mock function with given fields: ref
+func (_m *RemoteClusterSvc) GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error) {
+	ret := _m.Called(ref)
+
+	var r0 metadata.ConnectivityStatus
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) metadata.ConnectivityStatus); ok {
+		r0 = rf(ref)
+	} else {
+		r0 = ret.Get(0).(metadata.ConnectivityStatus)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.RemoteClusterReference) error); ok {
+		r1 = rf(ref)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetManifestByUuid provides a mock function with given fields: uuid, bucketName, forceRefresh, restAPIQuery
 func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(uuid, bucketName, forceRefresh, restAPIQuery)

@@ -86,37 +86,9 @@ func (a *AddressType) Set(external bool) {
 	}
 }
 
-type ConnectivityStatus int
-
-const (
-	// Nothing wrong yet
-	ConnValid ConnectivityStatus = iota
-	// If any remote cluster node returned authentication error
-	ConnAuthErr ConnectivityStatus = iota
-	// If this node experienced connectivity issues to a least one remote cluster nodes
-	ConnDegraded ConnectivityStatus = iota
-	// If this node cannot contact every single remote cluster nodes
-	ConnError ConnectivityStatus = iota
-)
-
-func (c ConnectivityStatus) String() string {
-	switch c {
-	case ConnValid:
-		return "RC_OK"
-	case ConnAuthErr:
-		return "RC_AUTH_ERR"
-	case ConnDegraded:
-		return "RC_DEGRADED"
-	case ConnError:
-		return "RC_ERROR"
-	default:
-		return "?? (ConnectivityStatus)"
-	}
-}
-
 func NewConnectivityHelper(refreshInterval time.Duration) *ConnectivityHelper {
 	return &ConnectivityHelper{
-		nodeStatus:              make(map[string]ConnectivityStatus),
+		nodeStatus:              make(map[string]metadata.ConnectivityStatus),
 		nodeHeartbeatStatus:     make(map[string]map[string]base.HeartbeatStatus),
 		nodeHeartbeatCleanupMap: make(map[string]*time.Timer),
 		refreshInterval:         refreshInterval,
@@ -124,7 +96,7 @@ func NewConnectivityHelper(refreshInterval time.Duration) *ConnectivityHelper {
 }
 
 type ConnectivityHelper struct {
-	nodeStatus              map[string]ConnectivityStatus
+	nodeStatus              map[string]metadata.ConnectivityStatus
 	nodeHeartbeatStatus     map[string]map[string]base.HeartbeatStatus // each remote node's view of the cluster
 	nodeHeartbeatCleanupMap map[string]*time.Timer
 	mtx                     sync.RWMutex
@@ -142,12 +114,12 @@ func (c *ConnectivityHelper) String() string {
 }
 
 // Returns true if node has existed and state has been changed
-func (c *ConnectivityHelper) MarkNode(nodeName string, status ConnectivityStatus) (changedState, authErrFixed bool) {
+func (c *ConnectivityHelper) MarkNode(nodeName string, status metadata.ConnectivityStatus) (changedState, authErrFixed bool) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	if curStatus, exists := c.nodeStatus[nodeName]; exists && curStatus != status {
 		changedState = true
-		if curStatus == ConnAuthErr && status == ConnValid {
+		if curStatus == metadata.ConnAuthErr && status == metadata.ConnValid {
 			authErrFixed = true
 		}
 	}
@@ -182,15 +154,15 @@ func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
 	for _, nodePair := range nodeList {
 		_, exists := c.nodeStatus[nodePair.GetFirstString()]
 		if !exists {
-			c.nodeStatus[nodePair.GetFirstString()] = ConnValid
+			c.nodeStatus[nodePair.GetFirstString()] = metadata.ConnValid
 		}
 	}
 
 	// For the rest, if this func is called, it means that target has returned a valid nodeList
 	// Reset any auth errors
 	for key, status := range c.nodeStatus {
-		if status == ConnAuthErr {
-			c.nodeStatus[key] = ConnValid
+		if status == metadata.ConnAuthErr {
+			c.nodeStatus[key] = metadata.ConnValid
 		}
 	}
 
@@ -198,7 +170,7 @@ func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
 	// fixing the connError state when the node is contacted for refresh and returned successfully
 }
 
-func (c *ConnectivityHelper) GetOverallStatus() ConnectivityStatus {
+func (c *ConnectivityHelper) GetOverallStatus() metadata.ConnectivityStatus {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 
@@ -206,23 +178,23 @@ func (c *ConnectivityHelper) GetOverallStatus() ConnectivityStatus {
 	var connErrCount int
 
 	for _, status := range c.nodeStatus {
-		if status == ConnAuthErr {
+		if status == metadata.ConnAuthErr {
 			// Any auth error means the whole cluster is auth errored
-			return ConnAuthErr
+			return metadata.ConnAuthErr
 		}
-		if status == ConnError {
+		if status == metadata.ConnError {
 			connErrCount++
 		}
 	}
 
 	if connErrCount == totalCount {
-		return ConnError
+		return metadata.ConnError
 	} else if connErrCount > 0 {
-		return ConnDegraded
+		return metadata.ConnDegraded
 	} else if !c.isRemoteClusterHeartbeatHealthyNoLock() {
-		return ConnDegraded
+		return metadata.ConnDegraded
 	} else {
-		return ConnValid
+		return metadata.ConnValid
 	}
 }
 
@@ -770,19 +742,19 @@ func (rctx *refreshContext) markNodeWithStatus(statusCode int) {
 	markedHostname := rctx.hostName
 
 	if statusCode == http.StatusUnauthorized {
-		changed, _ := rctx.agent.connectivityHelper.MarkNode(markedHostname, ConnAuthErr)
+		changed, _ := rctx.agent.connectivityHelper.MarkNode(markedHostname, metadata.ConnAuthErr)
 		if changed {
 			// This rctx will not get to be able to update the agent's reference, so log the error now
 			rctx.agent.uiLogSvc.Write(fmt.Sprintf("The remote cluster reference node %v returned authentication error. Please check the remote cluster credentials", markedHostname))
 		}
 	} else if statusCode == http.StatusOK {
-		_, authErrFixed := rctx.agent.connectivityHelper.MarkNode(markedHostname, ConnValid)
+		_, authErrFixed := rctx.agent.connectivityHelper.MarkNode(markedHostname, metadata.ConnValid)
 		if authErrFixed {
 			rctx.agent.uiLogSvc.Write(fmt.Sprintf("The remote cluster credentials that includes node %v have now been fixed", markedHostname))
 		}
 	} else {
 		// Any non-OK return code
-		rctx.agent.connectivityHelper.MarkNode(markedHostname, ConnError)
+		rctx.agent.connectivityHelper.MarkNode(markedHostname, metadata.ConnError)
 	}
 }
 
@@ -3418,6 +3390,10 @@ func (agent *RemoteClusterAgent) waitForRefreshOngoing() {
 	}
 }
 
+/**
+End Unit test functions
+*/
+
 var coolDownPeriod = 10 * time.Second
 var coolDownError = fmt.Errorf("This remote cluster has recently just serviced manifest retrieval request and is currently in cool down. Please wait %v", coolDownPeriod)
 
@@ -3476,4 +3452,20 @@ func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(bucketName strin
 	}
 
 	return manifest, nil
+}
+
+func (service *RemoteClusterService) GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error) {
+	if ref == nil {
+		return metadata.ConnError, base.ErrorInvalidInput
+	}
+
+	service.agentMutex.RLock()
+	agent := service.agentMap[ref.Id()]
+	if agent == nil {
+		service.agentMutex.RUnlock()
+		return metadata.ConnError, getUnknownCluster("refId", ref.Id())
+	}
+	service.agentMutex.RUnlock()
+
+	return agent.connectivityHelper.GetOverallStatus(), nil
 }

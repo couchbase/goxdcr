@@ -2267,29 +2267,29 @@ func TestConnHelper(t *testing.T) {
 	dummyHeartbeatMap := make(map[string]base.HeartbeatStatus)
 	dummyHeartbeatMap[nodeName] = base.HeartbeatHealthy
 	helper.MarkNodeHeartbeatStatus(nodeName, dummyHeartbeatMap)
-	helper.MarkNode("testNode0", ConnValid)
-	helper.MarkNode("testNode1", ConnValid)
-	assert.Equal(ConnValid, helper.GetOverallStatus())
+	helper.MarkNode("testNode0", metadata.ConnValid)
+	helper.MarkNode("testNode1", metadata.ConnValid)
+	assert.Equal(metadata.ConnValid, helper.GetOverallStatus())
 
 	time.Sleep(120 * time.Millisecond)
 	dummyHeartbeatMap[nodeName] = base.HeartbeatUnhealthy
 	helper.MarkNodeHeartbeatStatus(nodeName, dummyHeartbeatMap)
-	assert.Equal(ConnDegraded, helper.GetOverallStatus())
+	assert.Equal(metadata.ConnDegraded, helper.GetOverallStatus())
 	time.Sleep(120 * time.Millisecond)
 
-	helper.MarkNode("testNode1", ConnError)
-	assert.Equal(ConnDegraded, helper.GetOverallStatus())
+	helper.MarkNode("testNode1", metadata.ConnError)
+	assert.Equal(metadata.ConnDegraded, helper.GetOverallStatus())
 
-	helper.MarkNode("testNode0", ConnAuthErr)
-	assert.Equal(ConnAuthErr, helper.GetOverallStatus())
+	helper.MarkNode("testNode0", metadata.ConnAuthErr)
+	assert.Equal(metadata.ConnAuthErr, helper.GetOverallStatus())
 
 	// Test that if one node is good, one node has connection error, overall state is degraded
-	helper.MarkNode("testNode0", ConnValid)
-	helper.MarkNode("testNode1", ConnValid)
-	assert.Equal(ConnValid, helper.GetOverallStatus())
-	helper.MarkNode("testNode1", ConnError)
+	helper.MarkNode("testNode0", metadata.ConnValid)
+	helper.MarkNode("testNode1", metadata.ConnValid)
+	assert.Equal(metadata.ConnValid, helper.GetOverallStatus())
+	helper.MarkNode("testNode1", metadata.ConnError)
 	helper.SyncWithValidList(base.StringPairList{base.StringPair{"testNode0", ""}, base.StringPair{"testNode1", ""}})
-	assert.Equal(ConnDegraded, helper.GetOverallStatus())
+	assert.Equal(metadata.ConnDegraded, helper.GetOverallStatus())
 
 	fmt.Println("============== Test case end: TestConnHelper =================")
 }

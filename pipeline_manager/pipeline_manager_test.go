@@ -881,7 +881,7 @@ func TestCollectionsRefreshError(t *testing.T) {
 
 	dummyNs := &base.CollectionNamespace{"dummyScope", "dummyCollection"}
 	dummyColInfo := &base.TargetCollectionInfo{ManifestId: 500}
-	dummyReq := &base.WrappedMCRequest{ColNamespace: dummyNs, ColInfo: dummyColInfo}
+	dummyReq := &base.WrappedMCRequest{SrcColNamespace: dummyNs, ColInfo: dummyColInfo}
 	xmemErr := parts.GetErrorXmemTargetUnknownCollection(dummyReq)
 
 	errMap := make(base.ErrorMap)

@@ -116,7 +116,7 @@ function deleteAndRecreateBackfillMultiples {
 		echo "Waiting 15 seconds to check broken mapping message"
 		sleep 15
 		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
-                validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
+        validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
 
 		echo "RECREATING COLLECTION `date`"
 		createCollection "C2" "B2" "S1" "col1"
@@ -125,9 +125,10 @@ function deleteAndRecreateBackfillMultiples {
 		printGlobalScopeAndCollectionInfo | grep "col1"
 		echo "Waiting for 30 seconds until discovery and automatic backfill"
 		sleep 30
-		validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
+        # Due to collections router being able to catch xmem race conditions, there may be multiple backfill requests
+		validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 )) $(( $currentBackfillInstanceCnt + 2 ))
 		checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-		validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+		validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentBackfillInstanceCnt + 1 )) $(( $currentVBTasksDoneInstanceCnt + 2 ))
 
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
 		sleep 15 
@@ -135,7 +136,6 @@ function deleteAndRecreateBackfillMultiples {
         validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 		# Broken message should have remained constant
 		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
-
 		grepForPanics
 	done
 }

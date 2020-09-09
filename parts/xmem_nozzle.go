@@ -89,7 +89,7 @@ var UninitializedReseverationNumber = -1
 
 func GetErrorXmemTargetUnknownCollection(mcr *base.WrappedMCRequest) error {
 	return fmt.Errorf("%v scope %v collection %v given known manifest ID %v", base.StringTargetCollectionMappingErr,
-		mcr.ColNamespace.ScopeName, mcr.ColNamespace.CollectionName, mcr.ColInfo.ManifestId)
+		mcr.SrcColNamespace.ScopeName, mcr.SrcColNamespace.CollectionName, mcr.ColInfo.ManifestId)
 }
 
 var ErrorXmemIsStuck = errors.New("Xmem is stuck")
@@ -3504,7 +3504,7 @@ func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
 
 // Should only be done during pipeline construction
 func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
-	xmem.upstreamObjRecycler = utilities.RecycleObjFunc(recycler)
+	xmem.upstreamObjRecycler = recycler
 }
 
 func (xmem *XmemNozzle) SetUpstreamErrReporter(reporter func(interface{})) {

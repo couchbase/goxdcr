@@ -92,9 +92,12 @@ func (t *TargetCollectionInfoPool) Get() *base.TargetCollectionInfo {
 	colInfo := t.pool.Get().(*base.TargetCollectionInfo)
 	colInfo.ManifestId = 0
 	colInfo.ColIDPrefixedKey = nil
+	colInfo.TargetNamespace = nil
 	return colInfo
 }
 
 func (t *TargetCollectionInfoPool) Put(tc *base.TargetCollectionInfo) {
+	tc.ColIDPrefixedKey = nil
+	tc.TargetNamespace = nil
 	t.pool.Put(tc)
 }

@@ -154,6 +154,10 @@ type CheckpointManager struct {
 	bpVbHasCkpt        map[uint16]bool
 
 	backfillReplSvc service_def.BackfillReplSvc
+
+	backfillUILogMtx    sync.Mutex
+	backfillLastAdded   metadata.CollectionNamespaceMapping
+	backfillLastRemoved metadata.CollectionNamespaceMapping
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -1860,6 +1864,12 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 
 	added, removed := olderMap.Diff(newerMap)
 
+	if ckmgr.pipeline.Type() != common.MainPipeline {
+		// BackfillPipeline should not log anything, since any of these events coming from backfill pipeline means they
+		// are from xmem race conditions
+		return
+	}
+
 	if len(added) > 0 || len(removed) > 0 {
 		spec := ckmgr.pipeline.Specification().GetReplicationSpec()
 		ref, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
@@ -1870,7 +1880,25 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 		}
 		buffer.WriteString(fmt.Sprintf("XDCR SourceBucket %v to Target Cluster %v Bucket %v\n",
 			spec.SourceBucketName, ref.Name(), spec.TargetBucketName))
-		needToRaiseUI = true
+		ckmgr.backfillUILogMtx.Lock()
+		if len(added) > 0 && ckmgr.backfillLastAdded.IsSame(added) {
+			added = nil
+		} else {
+			ckmgr.backfillLastAdded = added
+			if ckmgr.backfillLastRemoved != nil && added != nil {
+				ckmgr.backfillLastRemoved = ckmgr.backfillLastRemoved.Delete(added)
+			}
+		}
+		if len(removed) > 0 && ckmgr.backfillLastRemoved.IsSame(removed) {
+			removed = nil
+		} else {
+			ckmgr.backfillLastRemoved = removed
+			if ckmgr.backfillLastAdded != nil && removed != nil {
+				ckmgr.backfillLastAdded = ckmgr.backfillLastAdded.Delete(removed)
+			}
+		}
+		ckmgr.backfillUILogMtx.Unlock()
+		needToRaiseUI = len(added) > 0 || len(removed) > 0
 	}
 
 	if len(added) > 0 {
