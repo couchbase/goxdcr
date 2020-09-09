@@ -577,6 +577,11 @@ func PreUpdateValidate(settingsMap map[string]interface{}) error {
 		if val.IsMirroringOn() && val.IsMigrationOn() {
 			return fmt.Errorf("Migration and mirroring cannot both be on")
 		}
+
+		// Mirroring mode is not supported in 7.0. For now, reject mirroring mode
+		if val.IsMirroringOn() {
+			return fmt.Errorf("Mirroring mode is currently not supported for this Couchbase release")
+		}
 	}
 	return nil
 }
