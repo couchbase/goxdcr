@@ -1219,7 +1219,7 @@ func TestAddThenSetConcurrent(t *testing.T) {
 	waitGrp.Wait()
 
 	assert.Nil(addErr)
-	assert.Equal(SetDisabledUntilInit, setErr)
+	assert.Equal(RefreshNotEnabledYet, setErr)
 	assert.True(setTimeTaken < addTimeTaken)
 
 	fmt.Println("============== Test case end: TestAddThenSetConcurrent =================")

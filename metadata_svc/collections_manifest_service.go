@@ -997,8 +997,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 		}
 		return nil
 	}
-	err = a.utilities.ExponentialBackoffExecutor(targetRefreshStr, base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
-		base.RemoteMcRetryFactor, getRetry)
+	err = a.utilities.ExponentialBackoffExecutor(targetRefreshStr, waitTime, maxRetry, base.RemoteMcRetryFactor, getRetry)
 	if err != nil || manifest == nil {
 		a.logger.Errorf("refreshTarget returned err: %v\n", err)
 		if lock {

@@ -69,6 +69,38 @@ type BackfillMgr struct {
 	startStopMtx sync.Mutex
 
 	utils utils.UtilsIface
+
+	replSpecHandlerMtx sync.Mutex
+	replSpecHandlerMap map[string]*replSpecHandler
+}
+
+type replSpecHandler struct {
+	spec                         *metadata.ReplicationSpecification
+	finCh                        chan bool
+	initManifestsFunc            func(*metadata.ReplicationSpecification, chan bool) error
+	createBackfillReqHandlerFunc func(*metadata.ReplicationSpecification) error
+	cleanupFunc                  func(specId string)
+}
+
+// This must not fail - unless finCh hits
+func (r *replSpecHandler) HandleNewSpec() {
+	err := r.initManifestsFunc(r.spec, r.finCh)
+	if err != nil {
+		// Panic here and the normal startup should take over
+		panic(fmt.Sprintf("Unable to establish starting manifests for %v", r.spec.Id))
+	}
+	r.createBackfillReqHandlerFunc(r.spec)
+	r.cleanupFunc(r.spec.Id)
+}
+
+func NewReplSpecHandler(b *BackfillMgr, newSpec *metadata.ReplicationSpecification) *replSpecHandler {
+	return &replSpecHandler{
+		spec:                         newSpec.Clone(),
+		finCh:                        make(chan bool),
+		initManifestsFunc:            b.initNewReplStartingManifests,
+		createBackfillReqHandlerFunc: b.createBackfillRequestHandler,
+		cleanupFunc:                  b.cleanupSpecHandlerCb,
+	}
 }
 
 // Pipeline SvcWrapper is a way for backfill manager to pretend to be a pipeline service
@@ -169,6 +201,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		pipelineSvc:            &pipelineSvcWrapper{},
 		checkpointsSvc:         checkpointsSvc,
 		utils:                  utils.NewUtilities(),
+		replSpecHandlerMap:     make(map[string]*replSpecHandler),
 	}
 
 	return backfillMgr
@@ -264,7 +297,7 @@ func (b *BackfillMgr) initCache() error {
 			b.cacheSpecSourceMap[replId] = &defaultManifest
 			b.cacheSpecTargetMap[replId] = &defaultManifest
 			b.cacheMtx.Unlock()
-			// TODO - MB-38868
+			// Default with default manifest in case of error
 		}
 		b.createBackfillRequestHandler(spec)
 	}
@@ -459,15 +492,27 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		newSpecObj.(*metadata.ReplicationSpecification) != nil {
 		// As part of new replication created, pull the source and target manifest and store them as the starting point
 		newSpec := newSpecObj.(*metadata.ReplicationSpecification)
-		err = b.initNewReplStartingManifests(newSpec)
-		if err != nil {
-			return err
+		b.replSpecHandlerMtx.Lock()
+		defer b.replSpecHandlerMtx.Unlock()
+		_, exists := b.replSpecHandlerMap[newSpec.Id]
+		if exists {
+			errMsg := fmt.Sprintf("%v - A duplicate spec creation is under way", newSpec.Id)
+			b.logger.Errorf(errMsg)
+			return fmt.Errorf(errMsg)
 		}
-		b.createBackfillRequestHandler(newSpec)
+		b.replSpecHandlerMap[newSpec.Id] = NewReplSpecHandler(b, newSpec)
+		go b.replSpecHandlerMap[newSpec.Id].HandleNewSpec()
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
 		oldSpec := oldSpecObj.(*metadata.ReplicationSpecification)
 		// Delete internal caches
+		b.replSpecHandlerMtx.Lock()
+		handler, exists := b.replSpecHandlerMap[oldSpec.Id]
+		if exists {
+			close(handler.finCh)
+		}
+		b.replSpecHandlerMtx.Unlock()
+
 		b.cacheMtx.Lock()
 		delete(b.cacheSpecSourceMap, changedSpecId)
 		delete(b.cacheSpecTargetMap, changedSpecId)
@@ -637,16 +682,27 @@ func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string) (
 	return maxSeqnoMap, nil
 }
 
-func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification) error {
-	src, tgt, err := b.collectionsManifestSvc.GetLatestManifests(spec)
-	if err != nil {
-		if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
-			defaultManifest := metadata.NewDefaultCollectionsManifest()
-			tgt = &defaultManifest
-		} else {
-			b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
-			return err
+func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification, finCh chan bool) error {
+	var err error
+	var src *metadata.CollectionsManifest
+	var tgt *metadata.CollectionsManifest
+
+	retryOp := func(interface{}) (interface{}, error) {
+		src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec)
+		if err != nil {
+			if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
+				defaultManifest := metadata.NewDefaultCollectionsManifest()
+				tgt = &defaultManifest
+				err = nil
+			} else {
+				b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
+			}
 		}
+		return nil, err
+	}
+	_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("BackfillInit", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp, nil, finCh)
+	if err != nil {
+		return err
 	}
 
 	b.cacheMtx.Lock()
@@ -1026,4 +1082,11 @@ func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added me
 		}
 	}
 	return err
+}
+
+func (b *BackfillMgr) cleanupSpecHandlerCb(specId string) {
+	b.replSpecHandlerMtx.Lock()
+	defer b.replSpecHandlerMtx.Unlock()
+
+	delete(b.replSpecHandlerMap, specId)
 }

@@ -45,7 +45,6 @@ var InitInProgress = errors.New("Initialization is already in progress")
 var SetInProgress = errors.New("An user-driven setRemoteClusterReference event is already in progress")
 var HostNameEmpty = errors.New("Hostname is empty")
 var RefreshNotEnabledYet = errors.New("The initial reference update hasn't finished yet, refresh is not enabled and pipelines cannot be started yet")
-var SetDisabledUntilInit = errors.New("The reference has not finished initializing yet. SetRemoteCluster is disabled")
 var RefreshAlreadyActive = errors.New("There is a refresh that is ongoing")
 var RefreshAborted = errors.New("Refresh instance was called to be aborted")
 var DeleteAlreadyIssued = errors.New("Underlying remote cluster reference has been already deleted manually")
@@ -1880,6 +1879,10 @@ func (agent *RemoteClusterAgent) UnRegisterBucketRefresh(bucketName string) erro
 
 // Implements CollectionsManifestOps interface
 func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*metadata.CollectionsManifest, error) {
+	if atomic.LoadUint32(&agent.initDone) == 0 {
+		return nil, RefreshNotEnabledYet
+	}
+
 	agent.refMtx.RLock()
 	connStr, err := agent.reference.MyConnectionStr()
 	if err != nil {
@@ -1909,23 +1912,28 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*m
 }
 
 // refreshIfPossible to prevent overwhelming target outside of refresh interval
-func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossible bool) *metadata.CollectionsManifest {
+func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossible bool) (*metadata.CollectionsManifest, error) {
 	// Avoid get to avoid clone since this is a high-volume call
-	if !agent.currentCapability.HasInitialized() || !agent.currentCapability.HasCollectionSupport() {
+	if !agent.currentCapability.HasInitialized() || atomic.LoadUint32(&agent.initDone) == 0 {
+		return nil, RefreshNotEnabledYet
+	}
+
+	if !agent.currentCapability.HasCollectionSupport() {
 		// Upper level should have protection against not having collection support
-		return nil
+		return nil, nil
 	}
 
 	agent.bucketMtx.RLock()
 	getter, ok := agent.bucketManifestGetters[bucketName]
 	if !ok {
-		agent.logger.Warnf("Unable to find manifest getter for bucket %v", bucketName)
+		errMsg := fmt.Sprintf("Unable to find manifest getter for bucket %v", bucketName)
+		agent.logger.Warnf(errMsg)
 		agent.bucketMtx.RUnlock()
-		return nil
+		return nil, fmt.Errorf(errMsg)
 	}
 	agent.bucketMtx.RUnlock()
 
-	return getter.GetManifest()
+	return getter.GetManifest(), nil
 }
 
 func (agent *RemoteClusterAgent) refreshBucketsManifests() {
@@ -2065,8 +2073,9 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 	}
 	service.agentMutex.RUnlock()
 
+	var err error
 	if refresh {
-		err := agent.Refresh()
+		err = agent.Refresh()
 		if err != nil {
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refId))
@@ -2075,11 +2084,15 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 				return nil, RefreshNotEnabledYet
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(refId, err))
+				// Non-init related refresh error is ignorable
+				err = nil
 			}
 		}
+	} else {
+		err = agent.getErrIfNotInit()
 	}
 
-	return agent.GetReferenceClone(), nil
+	return agent.GetReferenceClone(), err
 }
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	ref, _, err := service.remoteClusterByRefNameWithAgent(refName, refresh)
@@ -2095,8 +2108,9 @@ func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName str
 	}
 	service.agentMutex.RUnlock()
 
+	var err error
 	if refresh {
-		err := agent.Refresh()
+		err = agent.Refresh()
 		if err != nil {
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(refName))
@@ -2105,11 +2119,15 @@ func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName str
 				return nil, agent, RefreshNotEnabledYet
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(refName, err))
+				// Non-init related refresh error is ignorable
+				err = nil
 			}
 		}
+	} else {
+		err = agent.getErrIfNotInit()
 	}
 
-	return agent.GetReferenceClone(), agent, nil
+	return agent.GetReferenceClone(), agent, err
 }
 
 func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
@@ -2121,8 +2139,9 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 	}
 	service.agentMutex.RUnlock()
 
+	var err error
 	if refresh {
-		err := agent.Refresh()
+		err = agent.Refresh()
 		if err != nil {
 			if err == BootStrapNodeHasMovedError {
 				service.logger.Errorf(getBootStrapNodeHasMovedErrorMsg(uuid))
@@ -2131,11 +2150,15 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 				return nil, RefreshNotEnabledYet
 			} else {
 				service.logger.Warnf(getRefreshErrorMsg(uuid, err))
+				// Non-init related refresh error is ignorable
+				err = nil
 			}
 		}
+	} else {
+		err = agent.getErrIfNotInit()
 	}
 
-	return agent.GetReferenceClone(), nil
+	return agent.GetReferenceClone(), err
 }
 
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error {
@@ -2274,11 +2297,6 @@ func (service *RemoteClusterService) validateSetRemoteClusterWithAgent(refName s
 	oldRef, agent, err := service.remoteClusterByRefNameWithAgent(refName, false)
 	if err != nil {
 		return agent, err
-	}
-
-	if !agent.InitDone() {
-		// If a set is called before the first RPC call has finished, then do not allow the set to continue
-		return agent, SetDisabledUntilInit
 	}
 
 	err = service.validateRemoteCluster(ref, true)
@@ -3251,8 +3269,7 @@ func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, 
 		return nil, fmt.Errorf("Unable to find remote cluster agent given cluster UUID: %v\n", uuid)
 	}
 
-	manifest := agent.GetManifest(bucketName, forceRefresh)
-	return manifest, nil
+	return agent.GetManifest(bucketName, forceRefresh)
 }
 
 func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
@@ -3300,6 +3317,14 @@ func (service *RemoteClusterService) waitForRefreshEnabled(ref *metadata.RemoteC
 func (agent *RemoteClusterAgent) waitForRefreshEnabled() {
 	for initDone := atomic.LoadUint32(&agent.initDone) == 1; !initDone; initDone = atomic.LoadUint32(&agent.initDone) == 1 {
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (agent *RemoteClusterAgent) getErrIfNotInit() error {
+	if atomic.LoadUint32(&agent.initDone) == 1 {
+		return nil
+	} else {
+		return RefreshNotEnabledYet
 	}
 }
 
