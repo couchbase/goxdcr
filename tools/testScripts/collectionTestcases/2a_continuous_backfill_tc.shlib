@@ -132,7 +132,7 @@ function deleteAndRecreateBackfillMultiples {
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
 		sleep 15 
 		# Main pipeline should show repaired message
-                validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
+        validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 		# Broken message should have remained constant
 		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
 

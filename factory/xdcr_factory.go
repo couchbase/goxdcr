@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/couchbase/goxdcr/base"
@@ -258,7 +259,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	}
 	progress_recorder(fmt.Sprintf("%v target nozzles have been constructed", len(outNozzles)))
 
-	// TODO construct queue parts. This will affect vbMap in router. may need an additional outNozzle -> downStreamPart/queue map in constructRouter
+	var logOncePerPipeline sync.Once
+	colMigrationMultiTargetUIRaiser := xdcrf.getUILogOnceMessenger(logOncePerPipeline)
 
 	// construct routers to be able to connect the nozzles
 	for _, sourceNozzle := range sourceNozzles {
@@ -278,7 +280,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		}
 
 		// Construct a router - each Source nozzle has a router.
-		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, (utilities.RecycleObjFunc)(sourceNozzle.RecycleDataObj))
+		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -653,12 +655,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 	return
 }
 
-func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification,
-	downStreamParts map[string]common.Part,
-	vbNozzleMap map[uint16]string,
-	sourceCRMode base.ConflictResolutionMode,
-	logger_ctx *log.LoggerContext,
-	srcNozzleObjRecycler utilities.RecycleObjFunc) (*parts.Router, error) {
+func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, vbNozzleMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_ctx *log.LoggerContext, srcNozzleObjRecycler utilities.RecycleObjFunc, migrationUIMsgRaiser func(string)) (*parts.Router, error) {
 	routerId := "Router" + PART_NAME_DELIMITER + id
 
 	// When router detects a diff, it simply calls this function and this will handle the rest
@@ -687,7 +684,8 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
 		logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc,
 		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(),
-		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler, remoteClusterCapability)
+		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler, remoteClusterCapability,
+		migrationUIMsgRaiser)
 
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
@@ -1374,4 +1372,16 @@ func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteC
 // This should only be called at consumer initiation and only called once (thus no lock)
 func (xdcrf *XDCRFactory) SetPipelineStopCallback(stopCb base.PipelineMgrStopCbType) {
 	xdcrf.pipelineMgrStopCallback = stopCb
+}
+
+// This method returns a callback method that will only work once to raise a single UI message
+// It's meant to be used among multiple parts where a message can be raised multiple times but
+// should be displayed only once
+func (xdcrf *XDCRFactory) getUILogOnceMessenger(logOncePerPipeline sync.Once) func(string) {
+	callbackFunc := func(message string) {
+		logOncePerPipeline.Do(func() {
+			xdcrf.uilog_svc.Write(message)
+		})
+	}
+	return callbackFunc
 }

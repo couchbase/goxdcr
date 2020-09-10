@@ -54,6 +54,8 @@ function runDataLoad {
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
+MULTITARGET_MSG="a single source mutation is replicated to multiple target collections"
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Running collections migration multi-targets test case"
@@ -72,6 +74,13 @@ function runTestCase {
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 
+
+	# Get current instance
+	local -i currMultiTargetMsgCnt
+    local currentClusterLog
+    currentClusterLog=`getClusterLogs "C1"`
+    currMultiTargetMsgCnt=`echo "$currentClusterLog" | grep -c "$MULTITARGET_MSG"`
+
 	echo "Loading beer sample on source cluster..."
 	runDataLoad
 
@@ -85,7 +94,8 @@ function runTestCase {
 	echo "Waiting 15 seconds before checking item count first pass"
 	sleep 15
 	checkItemCnt "C2" "B2" 2824
-	
+    validateLogWithInstance "C1" "$MULTITARGET_MSG" $(( $currMultiTargetMsgCnt + 1 ))
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

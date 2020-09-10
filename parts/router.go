@@ -141,6 +141,8 @@ type Router struct {
 	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
 
 	remoteClusterCapability metadata.Capability
+
+	migrationUIRaiser func(string)
 }
 
 /**
@@ -205,8 +207,7 @@ type CollectionsRouter struct {
 	lastKnownSrcManifest *metadata.CollectionsManifest
 
 	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
-
-	migrationFilters *metadata.CollectionNamespaceMapping
+	migrationUIRaiser        func(message string)
 }
 
 // A collection router is critically important to not only route to the target collection, but
@@ -279,7 +280,7 @@ type CollectionsRouter struct {
 //	   a. Any future checkpoints will no longer contain broken maps.
 //	5. Now, mutation y+2 will be routed successfully.
 
-func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)) *CollectionsRouter {
+func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string)) *CollectionsRouter {
 	return &CollectionsRouter{
 		collectionsManifestSvc:   colManifestSvc,
 		spec:                     spec,
@@ -290,6 +291,7 @@ func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc, spe
 		ignoreDataFunc:           ignoreDataFunc,
 		fatalErrorFunc:           fatalErrorFunc,
 		explicitMapChangeHandler: explicitMapChangeHandler,
+		migrationUIRaiser:        migrationUIRaiser,
 	}
 }
 
@@ -628,6 +630,13 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 		}
 	}
 
+	if c.collectionMode.IsMigrationOn() && len(matchedNamespaces) > 1 {
+		msg := fmt.Sprintf("This collection migration pipeline instance for spec %v has experienced a situation where "+
+			"a single source mutation is replicated to multiple target collections due to at least one document matching multiple "+
+			" migration mapping rules. Please check the migration logic if this was not intended.", c.spec.Id)
+		c.migrationUIRaiser(msg)
+	}
+
 	if len(unmappedNamespaces) == 0 {
 		// happy path - all targets mapped
 		return
@@ -954,11 +963,11 @@ func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *
 // Key - xmem nozzle ID
 type CollectionsRoutingMap map[string]*CollectionsRouter
 
-func (c CollectionsRoutingMap) Init(downStreamParts map[string]common.Part, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)) error {
+func (c CollectionsRoutingMap) Init(downStreamParts map[string]common.Part, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string)) error {
 	for partId, outNozzlePart := range downStreamParts {
 		collectionRouter, exists := c[partId]
 		if !exists {
-			collectionRouter = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc, explicitMapChangeHandler)
+			collectionRouter = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc, explicitMapChangeHandler, migrationUIRaiser)
 			c[partId] = collectionRouter
 		}
 		outNozzle, ok := outNozzlePart.(common.OutNozzle)
@@ -1020,7 +1029,7 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.Col
  * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
  * 3+ Rest should be relatively obv
  */
-func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability) (*Router, error) {
+func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability, migrationUIRaiser func(string)) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, ok := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -1057,6 +1066,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		mcRequestPool:            base.NewMCRequestPool(spec.Id, nil /*logger*/),
 		explicitMapChangeHandler: explicitMapChangeHandler,
 		remoteClusterCapability:  remoteClusterCapability,
+		migrationUIRaiser:        migrationUIRaiser,
 	}
 
 	router.expDelMode.Set(filterExpDelType)
@@ -1114,7 +1124,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 
 	if router.remoteClusterCapability.HasCollectionSupport() {
 		router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(),
-			routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler)
+			routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser)
 
 		modes := spec.Settings.GetCollectionModes()
 		router.collectionModes = CollectionsMgtAtomicType(modes)
