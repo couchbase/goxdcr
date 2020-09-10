@@ -14,15 +14,16 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/golang/snappy"
-	"reflect"
-	"sort"
-	"strconv"
-	"strings"
 )
 
 type ManifestsDoc struct {
@@ -1846,22 +1847,17 @@ func (c *CompressedColNamespaceMappingList) SortedInsert(elem *CompressedColName
 }
 
 func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMappingRulesType, error) {
-	trimmedValue := strings.Replace(value, " ", "", -1)
-	jsonMap, err := base.ValidateAndConvertStringToJsonType(trimmedValue)
-	if err != nil {
-		return nil, err
-	}
 	// Check for duplicated keys
-	testMarshal, err := json.Marshal(jsonMap)
+	res, err := base.JsonStringReEncodeTest(value)
 	if err != nil {
 		return CollectionsMappingRulesType{}, err
 	}
-	if len(testMarshal) != len([]byte(trimmedValue)) {
+	if res == false {
 		return CollectionsMappingRulesType{}, fmt.Errorf("JSON string passed in did not pass re-encode test. Are there potentially duplicated keys?")
 	}
 
 	// Because adv filtering won't work if space is removed - jsonMap should be the original version
-	jsonMap, err = base.ValidateAndConvertStringToJsonType(value)
+	jsonMap, err := base.ValidateAndConvertStringToJsonType(value)
 	if err != nil {
 		return nil, err
 	}

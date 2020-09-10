@@ -36,3 +36,7 @@ func (rs *ResolverSvc) Start(sourceKVHost string, xdcrRestPort uint16) {
 func (rs *ResolverSvc) Started() bool {
 	return false
 }
+
+func (rs *ResolverSvc) CheckMergeFunction(string) error {
+	return nil
+}

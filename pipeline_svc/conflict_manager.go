@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,6 +78,7 @@ type ConflictManager struct {
 	resolverSvc       service_def.ResolverSvcIface
 	utils             utilities.UtilsIface
 	sourceBucketName  string
+	mergeFunction     string
 	userAgent         string
 }
 
@@ -97,9 +99,11 @@ func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string,
 		top_svc:           top_svc,
 		resolverSvc:       resolverSvc,
 		utils:             utils,
+		finish_ch:         make(chan bool, 1),
 		collectionEnabled: 1, // TODO: MB-41120. Custom CR collection support. subdoc command will all fail with KEY_ENOENT if this is 0
 	}
 }
+
 func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (err error) {
 	// ConflictManager depends on ResolverSvc to do the merge
 	if c.resolverSvc.Started() == false {
@@ -112,9 +116,19 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	}
 	c.sourceBucketName = c.pipeline.Specification().GetReplicationSpec().SourceBucketName
 
+	// At replication creation, we verify that the merge function is created. Here we only get its name from setting
+	if mergeFunctionMapping, exists := settingsMap[base.MergeFunctionMappingKey]; exists {
+		if f, ok := mergeFunctionMapping.(base.MergeFunctionMappingType); ok {
+			c.mergeFunction = f[base.BucketMergeFunctionKey]
+		} else {
+			c.Logger().Errorf("Type of mergeFunctionMapping is %v", reflect.TypeOf(mergeFunctionMapping))
+		}
+	}
+	if c.mergeFunction == "" {
+		return fmt.Errorf("%v: Default merge function is not set for the pipeline.", c.pipeline.FullTopic())
+	}
 	c.result_ch = make(chan *base.MergeInputAndResult, resultChannelsize)
 	c.conflict_ch = make(chan *base.ConflictParams, conflictChannelSize)
-	c.finish_ch = make(chan bool, 1)
 	for i := 0; i < numConflictManagerWorkers; i++ {
 		c.wait_grp.Add(1)
 		go c.conflictManagerWorker(i)
@@ -122,13 +136,14 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	// Start the goroutine that will move data from conflict_ch to Resolver
 	c.wait_grp.Add(1)
 	go c.sendToResolverSvc()
-	c.Logger().Infof("%v: ConflictManager started.", c.pipeline.FullTopic())
+	c.Logger().Infof("%v: ConflictManager started with merge function %v.", c.pipeline.FullTopic(), c.mergeFunction)
 	return nil
 }
 func (c *ConflictManager) Stop() error {
 	// c.result_ch/c.conflict_ch are not closed since ResolverSvc/XMEM could still be sending.
 	// c.result_ch will be garbage collected once ResolverSvc is done with the items in its input channel from this pipeline
 	// c.conflict_ch will be garbage collected Once XMEM is done
+	c.Logger().Infof("%v: ConflictManager Stopping.", c.pipeline.FullTopic())
 	close(c.finish_ch)
 	c.wait_grp.Wait()
 	base.ConnPoolMgr().RemovePool(c.getPoolName())
@@ -158,7 +173,7 @@ func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target 
 		target,
 		sourceId,
 		targetId,
-		c.sourceBucketName,
+		c.mergeFunction,
 		c,
 	}
 	// Send to the larger conflict channel instead of ResolverSvc input channel so XMEM will not block

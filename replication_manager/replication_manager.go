@@ -199,9 +199,6 @@ func StartReplicationManager(sourceKVHost string,
 		// add adminport as children of replication manager supervisor
 		replication_mgr.GenericSupervisor.AddChild(adminport)
 
-		// Create the default merge function after adminport is started
-		resolver_svc.InitDefaultFunc()
-
 		logger_rm.Info("ReplicationManager is running")
 
 	})

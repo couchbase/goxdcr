@@ -63,6 +63,7 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 		metadataSvcMock,
 		xdcrTopologyMock,
 		clusterInfoSvcMock,
+		nil,
 		log.DefaultLoggerContext,
 		utilitiesMock)
 

@@ -13,10 +13,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
 	"reflect"
 	"strconv"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 )
 
 var logger_sc *log.CommonLogger = log.NewLogger("SettingsCommon", log.DefaultLoggerContext)
@@ -38,7 +39,7 @@ type SpecialSettingValue interface {
 	SameAs(other interface{}) bool
 }
 
-var SpecialSettingKeys = []string{CollectionsMappingRulesKey}
+var SpecialSettingKeys = []string{CollectionsMappingRulesKey, MergeFunctionMappingKey}
 
 func CheckIfKeyIsSpecialSetting(key string) bool {
 	for _, checkKey := range SpecialSettingKeys {

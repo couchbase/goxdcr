@@ -346,9 +346,9 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	uuid, ok := bucketInfo["uuid"].(string)
 	assert.True(ok)
 	xmem.targetBucketUuid = uuid
-
 	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
 	settings[ForceCollectionDisableKey] = true
+	xmem.Logger().LoggerContext().SetLogLevel(log.LogLevelDebug)
 	err = xmem.Start(settings)
 	assert.Nil(err)
 	/*

@@ -1146,6 +1146,8 @@ const FilterExpKey = "filterExpiration"
 const FilterDelKey = "filterDeletion"
 const BypassExpiryKey = "filterBypassExpiry"
 
+const MergeFunctionMappingKey = "mergeFunctionMapping"
+
 // UI+ns_server returned document content, keyed by special keys
 const (
 	BucketDocBodyKey  = "json"
@@ -1183,6 +1185,7 @@ const (
 	DefaultMergeFunc       = "defaultLWW"
 	DefaultMergeFuncBodyCC = "function " + DefaultMergeFunc + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) {" +
 		"if (sourceCas >= targetCas) {return sourceDoc; } else {return targetDoc; } } "
+	BucketMergeFunctionKey = "default"
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)

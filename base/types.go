@@ -12,6 +12,7 @@ package base
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	mrand "math/rand"
@@ -770,6 +771,68 @@ func (c *CollectionsMgtType) SetMigration(val bool) {
 
 const CollectionsMappingRulesKey = "colMappingRules"
 
+type MergeFunctionMappingType map[string]string
+
+func (mf MergeFunctionMappingType) SameAs(otherRaw interface{}) bool {
+	other, ok := otherRaw.(MergeFunctionMappingType)
+	if !ok {
+		return false
+	}
+	if len(mf) != len(other) {
+		return false
+	}
+	for k, v := range mf {
+		v2, exists := other[k]
+		if !exists {
+			return false
+		}
+		if v != v2 {
+			return false
+		}
+	}
+	return true
+}
+
+func ValidateAndConvertStringToMergeFunctionMappingType(value string) (MergeFunctionMappingType, error) {
+	jsonMap := make(map[string]string)
+	err := json.Unmarshal([]byte(value), &jsonMap)
+	if err != nil {
+		return MergeFunctionMappingType{}, err
+	}
+	// Check for duplicated keys
+	res, err := JsonStringReEncodeTest(value)
+	if err != nil {
+		return MergeFunctionMappingType{}, err
+	}
+	if res == false {
+		return MergeFunctionMappingType{}, fmt.Errorf("JSON string passed in for merge function did not pass re-encode test. Are there potentially duplicated keys?")
+	}
+	mergeFunc := make(MergeFunctionMappingType, len(jsonMap))
+	for k, v := range jsonMap {
+		mergeFunc[k] = v
+	}
+	return mergeFunc, nil
+}
+
+// Return true if re-encode has the same length as passed in value with space trimmed
+func JsonStringReEncodeTest(value string) (bool, error) {
+	trimmedValue := []byte(strings.Replace(value, " ", "", -1))
+	jsonMap := make(map[string]interface{})
+	err := json.Unmarshal([]byte(trimmedValue), &jsonMap)
+	if err != nil {
+		return false, err
+	}
+	testMarshal, err := json.Marshal(jsonMap)
+	if err != nil {
+		return false, err
+	}
+	if len(testMarshal) != len([]byte(trimmedValue)) {
+		return false, nil
+	} else {
+		return true, nil
+	}
+}
+
 type XattrIterator struct {
 	body []byte
 	// end position of xattrs
@@ -1476,7 +1539,7 @@ type ConflictParams struct {
 	Target         *SubdocLookupResponse
 	SourceId       []byte
 	TargetId       []byte
-	BucketName     string
+	MergeFunction  string
 	ResultNotifier MergeResultNotifier
 }
 

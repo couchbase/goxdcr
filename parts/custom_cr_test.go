@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -74,7 +73,7 @@ func waitForBucketReady(t *testing.T, bucket *gocb.Bucket) {
 	}
 	fmt.Println("Buckets are ready")
 }
-func createReplication(t *testing.T, bucketName string) {
+func createReplication(t *testing.T, bucketName string, mergeFunction string) {
 	assert := assert.New(t)
 	client := &http.Client{}
 	data := url.Values{}
@@ -82,6 +81,7 @@ func createReplication(t *testing.T, bucketName string) {
 	data.Add("toCluster", targetCluster)
 	data.Add("toBucket", bucketName)
 	data.Add("replicationType", "continuous")
+	data.Add("mergeFunctionMapping", "{\""+base.BucketMergeFunctionKey+"\":\""+mergeFunction+"\"}")
 	data.Add("logLevel", "Debug")
 	req, err := http.NewRequest(base.MethodPost, urlCreateReplication, bytes.NewBufferString(data.Encode()))
 	assert.Nil(err)
@@ -96,6 +96,7 @@ func createReplication(t *testing.T, bucketName string) {
 		bodyBytes, err := ioutil.ReadAll(resp.Body)
 		assert.Nil(err)
 		resp.Body.Close()
+		fmt.Printf("CreateReplication response: %s\n", bodyBytes)
 		created := !strings.Contains(string(bodyBytes), "error") || strings.Contains(string(bodyBytes), "already exists")
 		if created {
 			fmt.Printf("Created replication for bucket %v\n", bucketName)
@@ -202,10 +203,6 @@ func createMergeFunction(t *testing.T, bucketName string) {
 func TestCcrXattrAfterRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestCcrXattrAfterRep =================")
 	defer fmt.Println("============== Test case end: TestCcrXattrAfterRep =================")
-	if os.Getenv("CUSTOM_CR") == "" {
-		fmt.Println("Skipping test: $CUSTOM_CR is not set")
-		return
-	}
 	bucketName := "TestCcrXattrAfterRep"
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -221,7 +218,7 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName)
+	createReplication(t, bucketName, base.DefaultMergeFunc)
 
 	/*
 	 * Test 1: New doc at source. Expect to format _xdcr at target with cv and id.
@@ -322,10 +319,6 @@ func TestCcrXattrAfterRep(t *testing.T) {
 func TestCustomCRDeletedDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
-	if os.Getenv("CUSTOM_CR") == "" {
-		fmt.Println("Skipping test: $CUSTOM_CR is not set")
-		return
-	}
 	bucketName := "TestCustomCRDeletedDocs"
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -340,7 +333,7 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName)
+	createReplication(t, bucketName, base.DefaultMergeFunc)
 
 	key := time.Now().Format(time.RFC3339)
 	var expire uint32 = 24 * 60 * 60
@@ -369,10 +362,6 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 func TestCustomCRBinaryDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRBinaryDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRBinaryDocs =================")
-	if os.Getenv("CUSTOM_CR") == "" {
-		fmt.Println("Skipping test: $CUSTOM_CR is not set")
-		return
-	}
 	bucketName := "TestCustomCRBinaryDocs"
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -388,7 +377,7 @@ func TestCustomCRBinaryDocs(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName)
+	createReplication(t, bucketName, base.DefaultMergeFunc)
 
 	fmt.Println("Test 1. Create target binary doc, create source binary doc. Source wins.")
 	key := "sourceAndTargetBinary"
@@ -427,10 +416,6 @@ func TestCustomCRBinaryDocs(t *testing.T) {
 func TestCcrXattrAfterMerge(t *testing.T) {
 	fmt.Println("============== Test case start: TestCcrXattrAfterMerge =================")
 	defer fmt.Println("============== Test case end: TestCcrXattrAfterMerge =================")
-	if os.Getenv("CUSTOM_CR") == "" {
-		fmt.Println("Skipping test: $CUSTOM_CR is not set")
-		return
-	}
 	bucketName := "TestCcrXattrAfterMerge"
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -447,7 +432,7 @@ func TestCcrXattrAfterMerge(t *testing.T) {
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
 	createMergeFunction(t, bucketName)
-	createReplication(t, bucketName)
+	createReplication(t, bucketName, bucketName)
 
 	// Create documents at target and then at source to get conflicts
 	key := time.Now().Format(time.RFC3339)

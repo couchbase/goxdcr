@@ -13,17 +13,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"reflect"
+	"sort"
+	"strconv"
+
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
 	base2 "github.com/couchbase/goxdcr/base/helpers"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"io/ioutil"
-	"net/http"
-	"reflect"
-	"sort"
-	"strconv"
 )
 
 // xdcr prefix for internal settings keys
@@ -84,6 +85,7 @@ const (
 	CollectionsMirrorKey           = base.CollectionsMirrorKey
 	CollectionsMigrateKey          = base.CollectionsMigrateKey
 	CollectionsMappingRulesKey     = base.CollectionsMappingRulesKey
+	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
 )
 
 // constants for parsing create replication response
@@ -167,6 +169,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CollectionsMigrateKey:          metadata.CollectionsMgtMigrateKey,
 	CollectionsMirrorKey:           metadata.CollectionsMgtMirrorKey,
 	CollectionsMappingRulesKey:     metadata.CollectionsMappingRulesKey,
+	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -198,6 +201,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CollectionsMgtMigrateKey:          CollectionsMigrateKey,
 	metadata.CollectionsMgtMirrorKey:           CollectionsMirrorKey,
 	metadata.CollectionsMappingRulesKey:        CollectionsMappingRulesKey,
+	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
@@ -576,6 +580,11 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	if err != nil {
 		errorsMap[CollectionsMappingRulesKey] = err
 	}
+
+	err = validateMergeFunctionMapping(settings)
+	if err != nil {
+		errorsMap[MergeFunctionMappingKey] = err
+	}
 	return
 }
 
@@ -641,6 +650,21 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 	}
 }
 
+func validateMergeFunctionMapping(settings metadata.ReplicationSettingsMap) error {
+	mergeFunctionMapping, exists := settings[metadata.MergeFunctionMappingKey]
+	if !exists {
+		return nil
+	}
+	mergeFunctions, ok := mergeFunctionMapping.(base.MergeFunctionMappingType)
+	if !ok {
+		return fmt.Errorf("Invalid merge function mapping %v", mergeFunctionMapping)
+	}
+	if len(mergeFunctions) > 1 || mergeFunctions[base.BucketMergeFunctionKey] == "" {
+		return fmt.Errorf("Only bucket level merge function can be specified.")
+	}
+	return nil
+}
+
 func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings metadata.ReplicationSettingsMap, errorsMap base.ErrorMap) {
 	errorsMap = make(base.ErrorMap)
 
@@ -692,7 +716,10 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	if err != nil {
 		errorsMap[CollectionsMappingRulesKey] = err
 	}
-
+	err = validateMergeFunctionMapping(settings)
+	if err != nil {
+		errorsMap[MergeFunctionMappingKey] = err
+	}
 	return
 }
 

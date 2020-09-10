@@ -99,6 +99,7 @@ type ReplicationSpecService struct {
 	uilog_svc                service_def.UILogSvc
 	remote_cluster_svc       service_def.RemoteClusterSvc
 	cluster_info_svc         service_def.ClusterInfoSvc
+	resolver_svc             service_def.ResolverSvcIface
 	cache                    *MetadataCache
 	cache_lock               *sync.Mutex
 	logger                   *log.CommonLogger
@@ -114,6 +115,7 @@ type ReplicationSpecService struct {
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
 	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
+	resolver_svc service_def.ResolverSvcIface,
 	logger_ctx *log.LoggerContext, utilities_in utilities.UtilsIface) (*ReplicationSpecService, error) {
 	logger := log.NewLogger("ReplSpecSvc", logger_ctx)
 	svc := &ReplicationSpecService{
@@ -122,6 +124,7 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		remote_cluster_svc:     remote_cluster_svc,
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
 		cluster_info_svc:       cluster_info_svc,
+		resolver_svc:           resolver_svc,
 		cache:                  nil,
 		cache_lock:             &sync.Mutex{},
 		logger:                 logger,
@@ -471,6 +474,21 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			err = base.ValidateAdvFilter(filter)
 			if err != nil {
 				return err, warnings
+			}
+		}
+	}
+
+	// If merge function is specified, check that it exists
+	if mergeFunctions, ok := settings[base.MergeFunctionMappingKey].(base.MergeFunctionMappingType); ok {
+		for _, f := range mergeFunctions {
+			err = service.resolver_svc.CheckMergeFunction(f)
+			if err != nil {
+				if f != base.DefaultMergeFunc {
+					return err, warnings
+				} else {
+					// Create the default merge function if it is not there
+					service.resolver_svc.InitDefaultFunc()
+				}
 			}
 		}
 	}

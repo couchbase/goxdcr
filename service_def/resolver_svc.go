@@ -7,4 +7,5 @@ type ResolverSvcIface interface {
 	InitDefaultFunc()
 	Start(sourceKVHost string, xdcrRestPort uint16)
 	Started() bool
+	CheckMergeFunction(fname string) error
 }

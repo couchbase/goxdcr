@@ -18,16 +18,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/couchbase/eventing-ee/js-evaluator/impl"
-
-	"github.com/couchbase/eventing-ee/js-evaluator/defs"
-
 	"github.com/couchbase/cbauth"
-
-	"github.com/couchbase/goxdcr/service_def"
-
+	"github.com/couchbase/eventing-ee/js-evaluator/defs"
+	"github.com/couchbase/eventing-ee/js-evaluator/impl"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/service_def"
 )
 
 const EVENTING_FUNCTION_LIB = "xdcr"
@@ -50,7 +46,7 @@ type ResolverSvc struct {
 }
 
 func NewResolverSvc(top_svc service_def.XDCRCompTopologySvc) *ResolverSvc {
-	return &ResolverSvc{top_svc: top_svc, logger: log.NewLogger("ResolverSvc", nil)}
+	return &ResolverSvc{top_svc: top_svc, logger: log.NewLogger("ResolverSvc", nil), started: false}
 }
 
 func (rs *ResolverSvc) ResolveAsync(aConflict *base.ConflictParams, finish_ch chan bool) {
@@ -110,6 +106,30 @@ func (rs *ResolverSvc) InitDefaultFunc() {
 	}
 }
 
+func (rs *ResolverSvc) CheckMergeFunction(fname string) error {
+	functionUrl := fmt.Sprintf("%v/%v", rs.functionUrl, fname)
+	req, err := http.NewRequest(base.MethodGet, functionUrl, nil)
+	req.Header.Set(base.ContentType, base.JsonContentType)
+	conn_str, err := rs.top_svc.MyMemcachedAddr()
+	if err != nil {
+		return err
+	}
+	username, password, err := cbauth.GetMemcachedServiceAuth(conn_str)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(username, password)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode == http.StatusOK {
+		return nil
+	} else {
+		return fmt.Errorf("CheckMergeFunction received http.Status %v for merge function %v", response.Status, fname)
+	}
+}
+
 func (rs *ResolverSvc) Start(sourceKVHost string, xdcrRestPort uint16) {
 	err := rs.initEvaluator(sourceKVHost, xdcrRestPort)
 	if err != nil {
@@ -155,7 +175,7 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	params = append(params, string(targetBody))
 	params = append(params, targetTime)
 	params = append(params, string(input.TargetId))
-	res, err := rs.execute(EVENTING_FUNCTION_LIB, input.BucketName, params)
+	res, err := rs.execute(EVENTING_FUNCTION_LIB, input.MergeFunction, params)
 	input.ResultNotifier.NotifyMergeResult(input, res, err)
 }
 

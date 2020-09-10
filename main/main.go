@@ -127,7 +127,7 @@ func main() {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil, utils)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -151,7 +151,9 @@ func main() {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil, utils)
+		resolver_svc := service_impl.NewResolverSvc(top_svc)
+
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, resolver_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -193,7 +195,7 @@ func main() {
 			bucketSettings_svc,
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
-			service_impl.NewResolverSvc(top_svc),
+			resolver_svc,
 			utils,
 			collectionsManifestService,
 			backfillReplService)

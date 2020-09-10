@@ -11,9 +11,11 @@ package metadata
 
 import (
 	"fmt"
+	"reflect"
+	"strconv"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"strconv"
 )
 
 // keys for replication settings
@@ -56,6 +58,9 @@ const (
 	CollectionsMgtMigrateKey = base.CollectionsMigrateKey
 
 	CollectionsMappingRulesKey = base.CollectionsMappingRulesKey
+
+	// custom CR settings
+	MergeFunctionMappingKey = base.MergeFunctionMappingKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -118,6 +123,8 @@ var FilterSkipRestreamConfig = &SettingsConfig{false, nil}
 
 var CollectionsMappingRulesConfig = &SettingsConfig{CollectionsMappingRulesType{}, nil}
 
+var MergeFunctionMappingConfig = &SettingsConfig{base.MergeFunctionMappingType{}, nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
@@ -140,6 +147,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	FilterExpDelKey:                   FilterExpDelConfig,
 	CollectionsMgtMultiKey:            CollectionsMgtConfig,
 	CollectionsMappingRulesKey:        CollectionsMappingRulesConfig,
+	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -537,6 +545,10 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 			s.Values[CollectionsMappingRulesKey], _ = ValidateAndConvertJsonMapToRuleType(mappingRules.(map[string]interface{}))
 		}
 
+		mergeFunctions := s.Values[MergeFunctionMappingKey]
+		if mergeFunctions != nil {
+			s.Values[MergeFunctionMappingKey], _ = ValidateAndConvertJsonMapToMergeFunctionMapping(mergeFunctions.(map[string]interface{}))
+		}
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
 	}
 	s.UpgradeFilterIfNeeded()
@@ -941,12 +953,35 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 		if err != nil {
 			return
 		}
+	case MergeFunctionMappingKey:
+		convertedValue, err = base.ValidateAndConvertStringToMergeFunctionMappingType(value)
+		if err != nil {
+			return
+		}
+
 	default:
 		// generic cases that can be handled by ValidateAndConvertSettingsValue
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
 	}
 
 	return
+}
+
+func ValidateAndConvertJsonMapToMergeFunctionMapping(jsonMap map[string]interface{}) (base.MergeFunctionMappingType, error) {
+	mergeFunctions := make(base.MergeFunctionMappingType)
+	for k, v := range jsonMap {
+		if v == nil {
+			mergeFunctions[k] = ""
+			continue
+		} else {
+			vString, ok := v.(string)
+			if !ok {
+				return nil, fmt.Errorf("value for key %v is the wrong type: %v", k, reflect.TypeOf(v))
+			}
+			mergeFunctions[k] = vString
+		}
+	}
+	return mergeFunctions, nil
 }
 
 // check if the default value of the specified settings can be changed through rest api
