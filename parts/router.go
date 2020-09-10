@@ -630,7 +630,7 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 		}
 	}
 
-	if c.collectionMode.IsMigrationOn() && len(matchedNamespaces) > 1 {
+	if c.collectionMode.IsMigrationOn() && len(matchedNamespaces) > 1 && c.migrationUIRaiser != nil {
 		msg := fmt.Sprintf("This collection migration pipeline instance for spec %v has experienced a situation where "+
 			"a single source mutation is replicated to multiple target collections due to at least one document matching multiple "+
 			" migration mapping rules. Please check the migration logic if this was not intended.", c.spec.Id)
