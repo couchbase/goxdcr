@@ -16,15 +16,14 @@ type mcops struct {
 	moved, success, errored [257]uint64
 }
 
-func addToMap(m map[string]uint64, i int, counters [257]uint64) {
-	v := atomic.LoadUint64(&counters[i])
-	if v > 0 {
+func addToMap(m map[string]uint64, i int, cnt uint64) {
+	if cnt > 0 {
 		k := "unknown"
 		if i < 256 {
 			k = gomemcached.CommandCode(i).String()
 		}
-		m[k] = v
-		m["total"] += v
+		m[k] = cnt
+		m["total"] += cnt
 	}
 }
 
@@ -33,9 +32,9 @@ func (m *mcops) String() string {
 	ops := map[string]uint64{}
 	errs := map[string]uint64{}
 	for i := range m.moved {
-		addToMap(bytes, i, m.moved)
-		addToMap(ops, i, m.success)
-		addToMap(errs, i, m.errored)
+		addToMap(bytes, i, atomic.LoadUint64(&m.moved[i]))
+		addToMap(ops, i, atomic.LoadUint64(&m.success[i]))
+		addToMap(errs, i, atomic.LoadUint64(&m.errored[i]))
 	}
 	j := map[string]interface{}{"bytes": bytes, "ops": ops, "errs": errs}
 	b, err := json.Marshal(j)
