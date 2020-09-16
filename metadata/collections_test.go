@@ -682,7 +682,7 @@ func TestExplicitMapping(t *testing.T) {
 	var mappingMode base.CollectionsMgtType
 	mappingMode.SetExplicitMapping(true)
 
-	rules := make(base.CollectionsMappingRulesType)
+	rules := make(CollectionsMappingRulesType)
 	rules["S2"] = "S1"
 	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
 	assert.Nil(err)
@@ -715,7 +715,7 @@ func TestExplicitMapping(t *testing.T) {
 	assert.False(ok)
 
 	// Test blacklist
-	rules = make(base.CollectionsMappingRulesType)
+	rules = make(CollectionsMappingRulesType)
 	rules["S1"] = "S2"
 	rules["S1:col2"] = nil
 	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
@@ -772,7 +772,7 @@ func TestExplicitMapping(t *testing.T) {
 		scopes: customTgtScopes,
 	}
 
-	rules = make(base.CollectionsMappingRulesType)
+	rules = make(CollectionsMappingRulesType)
 	rules["s1"] = "s2"
 	rules["s1:col1"] = "s2:col3"
 	customManifestPair := CollectionsManifestPair{
@@ -843,7 +843,7 @@ func TestMigrationMapping(t *testing.T) {
 	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 
-	rules := make(base.CollectionsMappingRulesType)
+	rules := make(CollectionsMappingRulesType)
 	// Make a rule that says if the doc key starts with "S1_"
 	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
 	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
@@ -863,7 +863,7 @@ func TestMigrationDiff(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestMigrationDiff =================")
 
 	defaultManifest := NewDefaultCollectionsManifest()
-	rules := make(base.CollectionsMappingRulesType)
+	rules := make(CollectionsMappingRulesType)
 	// Make a rule that says if the doc key starts with "S1_"
 	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
 	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
@@ -989,4 +989,37 @@ func TestCollectionNsMappingsDocMarshallerWithMigration(t *testing.T) {
 			assert.NotEqual(0, len(source.filterString))
 		}
 	}
+}
+
+func TestCollectionMigrateRuleValidation(t *testing.T) {
+	fmt.Println("============== Test case start: TestCollectionMigrateRuleValidation =================")
+	defer fmt.Println("============== Test case end: TestCollectionMigrateRuleValidation =================")
+	assert := assert.New(t)
+
+	validRules := make(map[string]interface{})
+	validRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1:targetCol1"
+	validRules[fmt.Sprintf("doc.Value == %v%v%v AND doc.Value2 != %v%v%v", "\"", "abc", "\"", "\"", "def", "\"")] = "targetScope2:targetCol2"
+
+	rules, err := ValidateAndConvertJsonMapToRuleType(validRules)
+	assert.Nil(err)
+	err = rules.ValidateMigrateRules()
+	assert.Nil(err)
+
+	invalidRules := make(map[string]interface{})
+	// Incorrect target namespace
+	invalidRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1*"
+	// Incorrect filter
+	invalidRules[fmt.Sprintf("WRONGREGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1*"
+	rules, err = ValidateAndConvertJsonMapToRuleType(invalidRules)
+	assert.Nil(err)
+	err = rules.ValidateMigrateRules()
+	assert.NotNil(err)
+
+	doubleKey := "{\"key\":\"val\",\"key\":\"val2\"}"
+	rules, err = ValidateAndConvertStringToMappingRuleType(doubleKey)
+	assert.NotNil(err)
+
+	perfKeyWSpaces := "{\"scope-1:collection-1\" : \"scope-2:collection-2\"}"
+	rules, err = ValidateAndConvertStringToMappingRuleType(perfKeyWSpaces)
+	assert.Nil(err)
 }

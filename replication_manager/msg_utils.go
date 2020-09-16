@@ -619,7 +619,7 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 		return nil
 	}
 
-	mappingRules, ok := mappingRulesObj.(base.CollectionsMappingRulesType)
+	mappingRules, ok := mappingRulesObj.(metadata.CollectionsMappingRulesType)
 	if !ok {
 		return fmt.Errorf("Invalid mapping rule type: %v", reflect.TypeOf(mappingRules))
 	}

@@ -175,6 +175,15 @@ func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, so
 	return
 }
 
+func (c CollectionsManifest) GetAllCollectionsGivenScopeRO(scopeName string) (CollectionsMap, error) {
+	scope, found := c.scopes[scopeName]
+	if !found {
+		return nil, base.ErrorNotFound
+	}
+
+	return scope.Collections, nil
+}
+
 func (c *CollectionsManifest) generateReverseLookupMap() {
 	if c == nil {
 		return
@@ -1194,7 +1203,7 @@ func NewDefaultCollectionMigrationMapping() CollectionNamespaceMapping {
 	return defaultMapping
 }
 
-func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules base.CollectionsMappingRulesType) (CollectionNamespaceMapping, error) {
+func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules CollectionsMappingRulesType) (CollectionNamespaceMapping, error) {
 	if manifestsPair.Source == nil || manifestsPair.Target == nil {
 		return CollectionNamespaceMapping{}, fmt.Errorf("creating collection namespace mapping pair contains at least one nil element")
 	}
@@ -1207,41 +1216,7 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 		// Explicit mapping
 		switch mappingMode.IsMigrationOn() {
 		case false:
-			outputMapping := make(CollectionNamespaceMapping)
-			// Not very efficient - but this should only happens with manifest change - so not too often
-			for _, sourceScope := range manifestsPair.Source.Scopes() {
-				for _, sourceCollection := range sourceScope.Collections {
-					for _, targetScope := range manifestsPair.Target.Scopes() {
-						for _, targetCollection := range targetScope.Collections {
-							srcNamespace := &base.CollectionNamespace{
-								ScopeName:      sourceScope.Name,
-								CollectionName: sourceCollection.Name,
-							}
-							tgtNamespace := &base.CollectionNamespace{
-								ScopeName:      targetScope.Name,
-								CollectionName: targetCollection.Name,
-							}
-							matched := rules.ExplicitMatch(srcNamespace, tgtNamespace)
-							if matched {
-								outputMapping.AddSingleMapping(srcNamespace, tgtNamespace)
-							}
-						}
-					}
-				}
-			}
-			// Handle denied entries
-			for _, sourceScope := range manifestsPair.Source.Scopes() {
-				for _, sourceCollection := range sourceScope.Collections {
-					srcNamespace := &base.CollectionNamespace{
-						ScopeName:      sourceScope.Name,
-						CollectionName: sourceCollection.Name,
-					}
-					if rules.ExplicitlyDenied(srcNamespace) {
-						outputMapping.AddSingleMapping(srcNamespace, &base.CollectionNamespace{})
-					}
-				}
-			}
-			return outputMapping, nil
+			return rules.GetOutputMapping(manifestsPair, mappingMode)
 		case true:
 			outputMapping := CollectionNamespaceMapping{}
 			// Use a single shared datapool
@@ -1373,7 +1348,8 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 
 // The input "src" does not have to match the actual key pointer in the map, just the right matching values
 // Returns the srcPtr for referring to the exact tgtList
-func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *SourceNamespace, srcNamespacePtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
+func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *SourceNamespace,
+	srcNamespacePtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
 	if src == nil {
 		panic("Nil source")
 		return
@@ -1844,4 +1820,280 @@ func (c *CompressedColNamespaceMappingList) SortedInsert(elem *CompressedColName
 	*c = append(*c, nil)
 	copy((*c)[i+1:], (*c)[i:])
 	(*c)[i] = elem
+}
+
+func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMappingRulesType, error) {
+	trimmedValue := strings.Replace(value, " ", "", -1)
+	jsonMap, err := base.ValidateAndConvertStringToJsonType(trimmedValue)
+	if err != nil {
+		return nil, err
+	}
+	// Check for duplicated keys
+	testMarshal, err := json.Marshal(jsonMap)
+	if err != nil {
+		return CollectionsMappingRulesType{}, err
+	}
+	if len(testMarshal) != len([]byte(trimmedValue)) {
+		return CollectionsMappingRulesType{}, fmt.Errorf("JSON string passed in did not pass re-encode test. Are there potentially duplicated keys?")
+	}
+
+	// Because adv filtering won't work if space is removed - jsonMap should be the original version
+	jsonMap, err = base.ValidateAndConvertStringToJsonType(value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ValidateAndConvertJsonMapToRuleType(jsonMap)
+}
+
+func ValidateAndConvertJsonMapToRuleType(jsonMap map[string]interface{}) (CollectionsMappingRulesType, error) {
+	rulesOut := make(CollectionsMappingRulesType)
+	for k, v := range jsonMap {
+		if v == nil {
+			rulesOut[k] = nil
+			continue
+		}
+		vString, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("value for key %v is the wrong type: %v", k, reflect.TypeOf(v))
+		}
+		rulesOut[k] = vString
+	}
+	return rulesOut, nil
+}
+
+type CollectionsMappingRulesType map[string]interface{}
+
+func (c CollectionsMappingRulesType) Clone() CollectionsMappingRulesType {
+	clonedCopy := make(CollectionsMappingRulesType)
+	for k, v := range c {
+		clonedCopy[k] = v
+	}
+	return clonedCopy
+}
+
+func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
+	errorMap := make(base.ErrorMap)
+	for filterExpr, targetNamespaceRaw := range c {
+		// filterExpr must be a valid gojsonsm expression
+		_, err := base.GoJsonsmGetFilterExprMatcher(filterExpr)
+		if err != nil {
+			errorMap[filterExpr] = err
+		}
+
+		// targetnamespace must be a string type, no nil allowed
+		targetNamespace, ok := targetNamespaceRaw.(string)
+		if !ok {
+			errorMap[fmt.Sprintf("%v (value)", filterExpr)] = fmt.Errorf("Invalid value type specified: %v", reflect.TypeOf(targetNamespaceRaw))
+		}
+
+		// targetnamespace must be a specific form of ScopeName:CollectionName
+		_, err = base.NewCollectionNamespaceFromString(targetNamespace)
+		if err != nil {
+			errorMap[targetNamespace] = err
+		}
+	}
+
+	if len(errorMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errorMap))
+	} else {
+		return nil
+	}
+}
+
+func (c CollectionsMappingRulesType) ValidateExplicitMapping() error {
+	validator := base.NewExplicitMappingValidator()
+	for k, v := range c {
+		err := validator.ValidateKV(k, v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c CollectionsMappingRulesType) SameAs(otherRaw interface{}) bool {
+	other, ok := otherRaw.(CollectionsMappingRulesType)
+	if !ok {
+		return false
+	}
+	if len(c) != len(other) {
+		return false
+	}
+	for k, v := range c {
+		v2, exists := other[k]
+		if !exists {
+			return false
+		}
+		if v != v2 {
+			return false
+		}
+	}
+	return true
+}
+
+// Returns non-nil error if this collection was never meant to be replicated given the rules
+// Returns nil error and nil namespace if it's denied replication
+func (c CollectionsMappingRulesType) GetPotentialTargetNamespaces(sourceNs *base.CollectionNamespace) ([]*base.CollectionNamespace, error) {
+	var returnNamespaces []*base.CollectionNamespace
+	// Check case 1 or 2
+	rule1Key := fmt.Sprintf("%v:%v", sourceNs.ScopeName, sourceNs.CollectionName)
+	targetRule, exists := c[rule1Key]
+	if exists {
+		if targetRule == nil {
+			return nil, nil
+		} else {
+			// Should not return error
+			retNs, err := base.NewCollectionNamespaceFromString(targetRule.(string))
+			returnNamespaces = append(returnNamespaces, &retNs)
+			return returnNamespaces, err
+		}
+	}
+
+	// This means the rules did not have S:C listed. Check just "S"
+	targetRule, exists = c[sourceNs.ScopeName]
+	if !exists {
+		return nil, base.ErrorInvalidInput
+	}
+
+	if targetRule == nil {
+		// case 4
+		return nil, nil
+	} else {
+		// case 3
+		retNs := &base.CollectionNamespace{ScopeName: targetRule.(string), CollectionName: sourceNs.CollectionName}
+		returnNamespaces = append(returnNamespaces, retNs)
+		return returnNamespaces, nil
+	}
+}
+
+// Match in this priority
+// 1. S:C -> TS:TC
+// 2. S:C -> nil
+// 3. S -> TS
+// 4. S -> nil
+func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPair, mode base.CollectionsMgtType) (CollectionNamespaceMapping, error) {
+	if mode.IsMigrationOn() {
+		return nil, base.ErrorInvalidInput
+	}
+
+	outNamespace := make(CollectionNamespaceMapping)
+	emptyNamespace := &base.CollectionNamespace{}
+	// At this stage, rules should have already been validated
+
+	// First populate rule 1 - S:C -> S:C
+	sourceNamespacesWithNoTarget := make(map[string]string)
+	for ruleKey, ruleValRaw := range c {
+		ruleVal, ok := ruleValRaw.(string)
+		if !ok || !strings.Contains(ruleKey, base.ScopeCollectionDelimiter) || !strings.Contains(ruleVal, base.ScopeCollectionDelimiter) {
+			continue
+		}
+
+		sourceNamespace, err := base.NewCollectionNamespaceFromString(ruleKey)
+		if err != nil {
+			return nil, err
+		}
+		targetNamespace, err := base.NewCollectionNamespaceFromString(ruleVal)
+		if err != nil {
+			return nil, err
+		}
+
+		_, sourceFoundErr := pair.Source.GetCollectionId(sourceNamespace.ScopeName, sourceNamespace.CollectionName)
+		_, targetFoundErr := pair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
+		if sourceFoundErr != nil {
+			// TODO MB-41445 - change srcNotFound to error
+			continue
+		}
+		if targetFoundErr != nil {
+			sourceNamespacesWithNoTarget[sourceNamespace.ScopeName] = sourceNamespace.CollectionName
+			continue
+		}
+
+		outNamespace.AddSingleMapping(&sourceNamespace, &targetNamespace)
+	}
+
+	// Then populate rule2 S:C -> null
+	for ruleKey, ruleValRaw := range c {
+		if !strings.Contains(ruleKey, base.ScopeCollectionDelimiter) || ruleValRaw != nil {
+			continue
+		}
+
+		sourceNamespace, err := base.NewCollectionNamespaceFromString(ruleKey)
+		if err != nil {
+			return nil, err
+		}
+		outNamespace.AddSingleMapping(&sourceNamespace, emptyNamespace)
+	}
+
+	// Populate S -> S'
+	for ruleKey, ruleValRaw := range c {
+		ruleVal, ok := ruleValRaw.(string)
+		if !ok || strings.Contains(ruleKey, base.ScopeCollectionDelimiter) || strings.Contains(ruleVal, base.ScopeCollectionDelimiter) {
+			continue
+		}
+		sourceScopeName := ruleKey
+		sourceCollections, err := pair.Source.GetAllCollectionsGivenScopeRO(sourceScopeName)
+		if err == base.ErrorNotFound {
+			continue
+		}
+
+		targetScopeName := ruleVal
+		targetCollections, err := pair.Target.GetAllCollectionsGivenScopeRO(targetScopeName)
+		if err == base.ErrorNotFound {
+			continue
+		}
+
+		for sourceColName, _ := range sourceCollections {
+			targetCol, targetFound := targetCollections[sourceColName]
+			if !targetFound {
+				continue
+			}
+
+			sourceNamespace := &base.CollectionNamespace{
+				ScopeName:      sourceScopeName,
+				CollectionName: sourceColName,
+			}
+			targetNamespace := &base.CollectionNamespace{
+				ScopeName:      targetScopeName,
+				CollectionName: targetCol.Name,
+			}
+
+			// Only add if S:C doesn't exist, because any S:C is higher priority than plain S -> *
+			alreadyExistsColName, scopeExists := sourceNamespacesWithNoTarget[sourceScopeName]
+			if scopeExists && alreadyExistsColName == sourceColName {
+				continue
+			}
+
+			outNamespace.AddSingleMapping(sourceNamespace, targetNamespace)
+		}
+	}
+
+	// Populate S -> null
+	for ruleKey, ruleValRaw := range c {
+		if strings.Contains(ruleKey, base.ScopeCollectionDelimiter) || ruleValRaw != nil {
+			continue
+		}
+
+		scopeName := ruleKey
+		sourceCollections, err := pair.Source.GetAllCollectionsGivenScopeRO(scopeName)
+		if err == base.ErrorNotFound {
+			continue
+		}
+
+		for sourceColName, _ := range sourceCollections {
+			sourceNamespace := &base.CollectionNamespace{
+				ScopeName:      scopeName,
+				CollectionName: sourceColName,
+			}
+
+			// Only add if S:C doesn't exist, because any S:C is higher priority than plain S -> *
+			alreadyExistsColName, scopeExists := sourceNamespacesWithNoTarget[scopeName]
+			if scopeExists && alreadyExistsColName == sourceColName {
+				continue
+			}
+			outNamespace.AddSingleMapping(sourceNamespace, emptyNamespace)
+		}
+	}
+
+	return outNamespace, nil
 }

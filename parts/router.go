@@ -203,7 +203,7 @@ type CollectionsRouter struct {
 	mappingMtx           sync.RWMutex
 	explicitMappings     metadata.CollectionNamespaceMapping // nil for implicit mapping
 	collectionMode       base.CollectionsMgtType
-	cachedRules          base.CollectionsMappingRulesType
+	cachedRules          metadata.CollectionsMappingRulesType
 	lastKnownSrcManifest *metadata.CollectionsManifest
 
 	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
@@ -308,7 +308,8 @@ func (c *CollectionsRouter) Start() error {
 	c.mappingMtx.RUnlock()
 
 	if !modes.IsExplicitMapping() {
-		c.logger.Infof("CollectionsRouter %v started in implicit mapping mode with rules %v", c.spec.Id, rules)
+		//c.logger.Infof("CollectionsRouter %v started in implicit mapping mode with rules %v", c.spec.Id, rules)
+		c.logger.Infof("CollectionsRouter %v started in explicit mapping mode with rules %v", c.spec.Id, rules)
 		return nil
 	} else if modes.IsMigrationOn() {
 		c.logger.Infof("CollectionsRouter %v started in migration mode with rules %v", c.spec.Id, rules)
@@ -322,7 +323,7 @@ func (c *CollectionsRouter) Start() error {
 	return err
 }
 
-func (c *CollectionsRouter) initializeInternals(pair metadata.CollectionsManifestPair, modes base.CollectionsMgtType, rules base.CollectionsMappingRulesType) error {
+func (c *CollectionsRouter) initializeInternals(pair metadata.CollectionsManifestPair, modes base.CollectionsMgtType, rules metadata.CollectionsMappingRulesType) error {
 	var err error
 	c.mappingMtx.Lock()
 	c.lastKnownSrcManifest = pair.Source
@@ -1214,7 +1215,8 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 // stopped in time
 func (router *Router) Start() error {
 	if len(router.collectionsRouting) > 0 {
-		router.Logger().Infof("Router %v started", router.Id())
+		defer router.Logger().Infof("Router %v started", router.Id())
+		router.Logger().Infof("Router %v starting...", router.Id())
 		return router.collectionsRouting.StartAll()
 	} else {
 		return nil
@@ -1223,7 +1225,8 @@ func (router *Router) Start() error {
 
 func (router *Router) Stop() error {
 	if len(router.collectionsRouting) > 0 {
-		router.Logger().Infof("Router %v stopped", router.Id())
+		defer router.Logger().Infof("Router %v stopped", router.Id())
+		router.Logger().Infof("Router %v stopping...", router.Id())
 		return router.collectionsRouting.StopAll()
 	} else {
 		return nil

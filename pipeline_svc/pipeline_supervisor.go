@@ -203,7 +203,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 			pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
 			return nil
 		case <-health_check_ticker.C:
-			err := base.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
+			err := base.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 10*time.Second, pipelineSupervisor.Logger())
 			if err != nil {
 				if err == base.ErrorExecutionTimedOut {
 					// ignore timeout error and continue

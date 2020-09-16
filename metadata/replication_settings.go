@@ -116,7 +116,7 @@ var CollectionsMgtConfig = &SettingsConfig{base.CollectionsMgtDefault, &Range{in
 var FilterVersionConfig = &SettingsConfig{base.FilterVersionKeyOnly, nil}
 var FilterSkipRestreamConfig = &SettingsConfig{false, nil}
 
-var CollectionsMappingRulesConfig = &SettingsConfig{base.CollectionsMappingRulesType{}, nil}
+var CollectionsMappingRulesConfig = &SettingsConfig{CollectionsMappingRulesType{}, nil}
 
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
@@ -534,7 +534,7 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 
 		mappingRules := s.Values[CollectionsMappingRulesKey]
 		if mappingRules != nil {
-			s.Values[CollectionsMappingRulesKey], _ = base.ValidateAndConvertJsonMapToRuleType(mappingRules.(map[string]interface{}))
+			s.Values[CollectionsMappingRulesKey], _ = ValidateAndConvertJsonMapToRuleType(mappingRules.(map[string]interface{}))
 		}
 
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
@@ -752,12 +752,12 @@ func (s *ReplicationSettings) GetCollectionModes() base.CollectionsMgtType {
 	return val.(base.CollectionsMgtType)
 }
 
-func (s *ReplicationSettings) GetCollectionsRoutingRules() base.CollectionsMappingRulesType {
+func (s *ReplicationSettings) GetCollectionsRoutingRules() CollectionsMappingRulesType {
 	val, _ := s.GetSettingValueOrDefaultValue(CollectionsMappingRulesKey)
 	if val == nil {
-		return make(base.CollectionsMappingRulesType)
+		return make(CollectionsMappingRulesType)
 	} else {
-		return val.(base.CollectionsMappingRulesType)
+		return val.(CollectionsMappingRulesType)
 	}
 }
 
@@ -937,7 +937,7 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 	case CollectionsMappingRulesKey:
-		convertedValue, err = base.ValidateAndConvertStringToMappingRuleType(value)
+		convertedValue, err = ValidateAndConvertStringToMappingRuleType(value)
 		if err != nil {
 			return
 		}

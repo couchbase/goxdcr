@@ -477,7 +477,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 
-	rules := make(base.CollectionsMappingRulesType)
+	rules := make(metadata.CollectionsMappingRulesType)
 	// Make a rule that says if the doc key starts with "S1_"
 	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
 	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"

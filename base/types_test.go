@@ -49,39 +49,6 @@ func TestCollectionNamespaceFromString(t *testing.T) {
 	assert.NotNil(err)
 }
 
-func TestCollectionMigrateRuleValidation(t *testing.T) {
-	fmt.Println("============== Test case start: TestCollectionMigrateRuleValidation =================")
-	defer fmt.Println("============== Test case end: TestCollectionMigrateRuleValidation =================")
-	assert := assert.New(t)
-
-	validRules := make(map[string]interface{})
-	validRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1:targetCol1"
-	validRules[fmt.Sprintf("doc.Value == %v%v%v AND doc.Value2 != %v%v%v", "\"", "abc", "\"", "\"", "def", "\"")] = "targetScope2:targetCol2"
-
-	rules, err := ValidateAndConvertJsonMapToRuleType(validRules)
-	assert.Nil(err)
-	err = rules.ValidateMigrateRules()
-	assert.Nil(err)
-
-	invalidRules := make(map[string]interface{})
-	// Incorrect target namespace
-	invalidRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1*"
-	// Incorrect filter
-	invalidRules[fmt.Sprintf("WRONGREGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1*"
-	rules, err = ValidateAndConvertJsonMapToRuleType(invalidRules)
-	assert.Nil(err)
-	err = rules.ValidateMigrateRules()
-	assert.NotNil(err)
-
-	doubleKey := "{\"key\":\"val\",\"key\":\"val2\"}"
-	rules, err = ValidateAndConvertStringToMappingRuleType(doubleKey)
-	assert.NotNil(err)
-
-	perfKeyWSpaces := "{\"scope-1:collection-1\" : \"scope-2:collection-2\"}"
-	rules, err = ValidateAndConvertStringToMappingRuleType(perfKeyWSpaces)
-	assert.Nil(err)
-}
-
 func TestExplicitMappingValidatorParseRule(t *testing.T) {
 	fmt.Println("============== Test case start: TestExplicitMappingValidatorParseRule =================")
 	defer fmt.Println("============== Test case end: TestExplicitMappingValidatorParseRule =================")
@@ -168,73 +135,6 @@ func TestExplicitMappingValidatorRules(t *testing.T) {
 	key = "ScopeRedundant2"
 	value = "ScopeTRedundant2"
 	assert.Nil(validator.ValidateKV(key, value))
-}
-
-func TestExplicitMatchFunc(t *testing.T) {
-	fmt.Println("============== Test case start: TestExplicitMatchFunc =================")
-	defer fmt.Println("============== Test case end: TestExplicitMatchFunc =================")
-	assert := assert.New(t)
-
-	rules := make(CollectionsMappingRulesType)
-	rules["S1:C1"] = "S1T:C1T"
-	rules["S1"] = "S1TT"
-	rules["S2"] = "S2T"
-	rules["S2:C1"] = nil
-	rules["S3"] = nil
-
-	srcNamespace := &CollectionNamespace{ScopeName: "S1", CollectionName: "C1"}
-	tgtNamespace := &CollectionNamespace{ScopeName: "S1T", CollectionName: "C1T"}
-	assert.True(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err := rules.GetPotentialTargetNamespaces(srcNamespace)
-	assert.Nil(err)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
-	assert.False(rules.ExplicitlyDenied(srcNamespace))
-
-	srcNamespace = &CollectionNamespace{ScopeName: "S1", CollectionName: "C1T"}
-	tgtNamespace = &CollectionNamespace{"S1TT", "C1T"}
-	assert.True(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
-	assert.Nil(err)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
-	assert.False(rules.ExplicitlyDenied(srcNamespace))
-
-	srcNamespace = &CollectionNamespace{ScopeName: "S2", CollectionName: "C3"}
-	tgtNamespace = &CollectionNamespace{"S2T", "C3"}
-	assert.True(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
-	assert.Nil(err)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
-	assert.False(rules.ExplicitlyDenied(srcNamespace))
-
-	srcNamespace = &CollectionNamespace{ScopeName: "S2", CollectionName: "C3"}
-	tgtNamespace = &CollectionNamespace{"S2T", "C3T"}
-	assert.False(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
-	assert.Nil(err)
-	assert.False(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
-	tgtNamespace.ScopeName = "S2T"
-	tgtNamespace.CollectionName = "C3"
-	tgtNamespaceCheck, _ = rules.GetPotentialTargetNamespaces(srcNamespace)
-	assert.True(tgtNamespace.IsSameAs(*tgtNamespaceCheck[0]))
-	assert.False(rules.ExplicitlyDenied(srcNamespace))
-
-	srcNamespace = &CollectionNamespace{ScopeName: "S2", CollectionName: "C1"}
-	tgtNamespace = &CollectionNamespace{"S2T", "C1"}
-	assert.False(rules.ExplicitMatch(srcNamespace, tgtNamespace))
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
-	assert.Nil(err)
-	assert.Nil(tgtNamespaceCheck)
-	assert.True(rules.ExplicitlyDenied(srcNamespace))
-
-	// Invalid one just for kicks
-	srcNamespace = &CollectionNamespace{ScopeName: "FOO", CollectionName: "BAR"}
-	tgtNamespaceCheck, err = rules.GetPotentialTargetNamespaces(srcNamespace)
-	assert.NotNil(err)
-	assert.Nil(tgtNamespaceCheck)
-	assert.False(rules.ExplicitlyDenied(srcNamespace))
-
-	srcNamespace = &CollectionNamespace{ScopeName: "S3", CollectionName: "C1"}
-	assert.True(rules.ExplicitlyDenied(srcNamespace))
 }
 
 func TestWrappedFlags(t *testing.T) {
