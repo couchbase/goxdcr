@@ -1293,23 +1293,29 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		}
 	}
 
+	var raiseDataNotReplicated bool
 	if wrappedUpr.Flags.IsSet() {
 		// Special flag handling here
 		if wrappedUpr.Flags.CollectionDNE() {
-			err := fmt.Errorf("collection ID %v no longer exists, so the data is not to be replicated", wrappedUpr.UprEvent.CollectionId)
-			router.RaiseEvent(common.NewEvent(common.DataNotReplicated, uprEvent, router, []interface{}{err}, nil))
-			return result, nil
+			raiseDataNotReplicated = true
 		}
 	}
 
 	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
-	defer router.dcpObjRecycler(wrappedUpr)
 	if err != nil {
 		return nil, router.utils.NewEnhancedError("Error creating new memcached request.", err)
 	}
 	if mcRequest == nil {
 		return nil, fmt.Errorf("Unable to create new mcRequest")
 	}
+
+	if raiseDataNotReplicated {
+		err := fmt.Errorf("collection ID %v no longer exists, so the data is not to be replicated", wrappedUpr.UprEvent.CollectionId)
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{err}, nil))
+		return result, nil
+	}
+
+	defer router.dcpObjRecycler(wrappedUpr)
 
 	err = router.RouteCollection(mcRequest, partId, wrappedUpr)
 	if err != nil {
