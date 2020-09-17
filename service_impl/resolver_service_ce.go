@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Couchbase, Inc.
+// Copyright (c) 2020 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -9,11 +9,30 @@
 
 // +build !enterprise
 
-package functions
+package service_impl
 
-func Init(sourceKVHost string, xdcrRestPort uint16) {
+import (
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/service_def"
+)
+
+type ResolverSvc struct {
 }
 
-func Execute(libraryName string, functionName string, params []interface{}) (interface{}, error) {
-	return nil, nil
+func NewResolverSvc(service_def.XDCRCompTopologySvc) *ResolverSvc {
+	return &ResolverSvc{}
+}
+func (rs *ResolverSvc) ResolveAsync(params *base.ConflictParams, finish_ch chan bool) {
+	return
+}
+func (rs *ResolverSvc) InitDefaultFunc() {
+	return
+}
+
+func (rs *ResolverSvc) Start(sourceKVHost string, xdcrRestPort uint16) {
+	return
+}
+
+func (rs *ResolverSvc) Started() bool {
+	return false
 }

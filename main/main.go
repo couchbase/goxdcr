@@ -193,7 +193,7 @@ func main() {
 			bucketSettings_svc,
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
-			service_impl.NewResolverSvc(utils),
+			service_impl.NewResolverSvc(top_svc),
 			utils,
 			collectionsManifestService,
 			backfillReplService)

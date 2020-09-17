@@ -31,7 +31,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/factory"
-	"github.com/couchbase/goxdcr/functions"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
@@ -159,6 +158,10 @@ func StartReplicationManager(sourceKVHost string,
 		// Take in utilities
 		replication_mgr.utils = utilitiesIn
 
+		// Start resolver_svc before the adminport and before starting any pipeline,
+		// since it will initialize the javascript function handler and start the resolverSvc that the pipeline needs
+		resolver_svc.Start(sourceKVHost, xdcrRestPort)
+
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
@@ -189,11 +192,6 @@ func StartReplicationManager(sourceKVHost string,
 
 		replication_mgr.initMetadataChangeMonitor()
 
-		// Init and start Eventing Javascript Engine before admin port is started. This will start a few OS processes called js_evaluator
-		// TODO: Should we only start when it is in DP mode? To do that, we will need to handle user turning on DP mode, either restart
-		// http server gracefully with zero downtime or restart XDCR
-		functions.Init(sourceKVHost, xdcrRestPort)
-
 		// start adminport
 		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils)
 		go adminport.Start()
@@ -201,7 +199,8 @@ func StartReplicationManager(sourceKVHost string,
 		// add adminport as children of replication manager supervisor
 		replication_mgr.GenericSupervisor.AddChild(adminport)
 
-		resolver_svc.Start()
+		// Create the default merge function after adminport is started
+		resolver_svc.InitDefaultFunc()
 
 		logger_rm.Info("ReplicationManager is running")
 

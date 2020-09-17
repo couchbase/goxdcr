@@ -1164,6 +1164,7 @@ const TransactionXattrKey = "txn"
 
 const BackfillPipelineTopicPrefix = "backfill_"
 
+// Custom CR related constants
 const (
 	CAS_MACRO_EXPANSION = "\"${Mutation.CAS}\"" // The value for the cv field when setting back to source
 	XATTR_DATATYPE      = "$document.datatype"
@@ -1177,6 +1178,11 @@ const (
 	XATTR_CV_PATH   = "_xdcr.cv"
 	XATTR_MV_PATH   = "_xdcr.mv"
 	XATTR_PCAS_PATH = "_xdcr.pc"
+
+	FunctionUrlFmt         = "http://%v:%v/functions/v1/libraries/xdcr/functions"
+	DefaultMergeFunc       = "defaultLWW"
+	DefaultMergeFuncBodyCC = "function " + DefaultMergeFunc + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) {" +
+		"if (sourceCas >= targetCas) {return sourceDoc; } else {return targetDoc; } } "
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)

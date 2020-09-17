@@ -101,6 +101,10 @@ func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string,
 	}
 }
 func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (err error) {
+	// ConflictManager depends on ResolverSvc to do the merge
+	if c.resolverSvc.Started() == false {
+		return fmt.Errorf("%v: Cannot start ConflictManager because ResolverSvc is not running.", c.pipeline.FullTopic())
+	}
 	c.conn_str, err = c.top_svc.MyMemcachedAddr()
 	if err != nil {
 		c.Logger().Errorf("%v: Failed to start conflictManager because MyMemcachedAddr returned error %v", c.pipeline.FullTopic(), err)
