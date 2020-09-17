@@ -69,7 +69,7 @@ func TestExplicitMappingValidatorParseRule(t *testing.T) {
 	// Invalid names
 	key = "#%(@&#FJ"
 	value = "scope"
-	assert.Equal(explicitRuleInvalid, validator.parseRule(key, value))
+	assert.Equal(explicitRuleInvalidScopeName, validator.parseRule(key, value))
 }
 
 func TestExplicitMappingValidatorRules(t *testing.T) {
@@ -78,8 +78,18 @@ func TestExplicitMappingValidatorRules(t *testing.T) {
 	assert := assert.New(t)
 
 	validator := NewExplicitMappingValidator()
-	key := "Scope"
-	value := "TargetScope"
+	// First do negative test case
+	key := "_invalidScopeName"
+	value := "validTargetScopeName"
+	assert.NotNil(validator.ValidateKV(key, value))
+
+	key = "validScopeName"
+	value = "%invalidScopeName"
+	assert.NotNil(validator.ValidateKV(key, value))
+
+	// Positive test cases
+	key = "Scope"
+	value = "TargetScope"
 	assert.Nil(validator.ValidateKV(key, value))
 
 	key = "Scope2"

@@ -950,9 +950,10 @@ type ExplicitMappingValidator struct {
 type explicitValidatingType int
 
 const (
-	explicitRuleInvalid      explicitValidatingType = iota
-	explicitRuleOneToOne     explicitValidatingType = iota
-	explicitRuleScopeToScope explicitValidatingType = iota
+	explicitRuleInvalid          explicitValidatingType = iota
+	explicitRuleInvalidScopeName explicitValidatingType = iota
+	explicitRuleOneToOne         explicitValidatingType = iota
+	explicitRuleScopeToScope     explicitValidatingType = iota
 )
 
 func NewExplicitMappingValidator() *ExplicitMappingValidator {
@@ -987,12 +988,20 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 	// At this point, name has to be a scope name
 	matched := CollectionNameValidationRegex.MatchString(k)
 	if !matched {
-		return explicitRuleInvalid
+		if strings.Contains(k, ScopeCollectionDelimiter) {
+			return explicitRuleInvalid
+		} else {
+			return explicitRuleInvalidScopeName
+		}
 	}
 	if vIsString {
 		matched = CollectionNameValidationRegex.MatchString(vStr)
 		if !matched {
-			return explicitRuleInvalid
+			if strings.Contains(k, ScopeCollectionDelimiter) {
+				return explicitRuleInvalid
+			} else {
+				return explicitRuleInvalidScopeName
+			}
 		}
 	} else if v != nil {
 		// Can only be string type or nil type
@@ -1016,6 +1025,8 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 	switch ruleType {
 	case explicitRuleInvalid:
 		return fmt.Errorf("invalid rule: %v:%v", k, v)
+	case explicitRuleInvalidScopeName:
+		return fmt.Errorf("Invalid scope or collection name for one or both of %v:%v", k, v)
 	case explicitRuleOneToOne:
 		// Shouldn't have duplicated keys, but check anyway
 		_, exists := e.oneToOneRules[k]

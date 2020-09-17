@@ -105,11 +105,12 @@ const ScopeCollectionDelimiter = ":"
 // The prefix character of a user’s collection name however is restricted. It cannot be _ or %
 // Note that XDCR doesn't care if it is system vs user. It just replicates
 const CollectionValidNameCharClass = "[0-9A-Za-z-_%]"
+const CollectionValidPrefixNameClass = "[0-9A-Za-z-]"
 
 var CollectionNamespaceRegexExpr = fmt.Sprintf("^(?P<scope>%v+):(?P<collection>%v+)$", CollectionValidNameCharClass, CollectionValidNameCharClass)
 var CollectionNamespaceRegex, _ = regexp.Compile(CollectionNamespaceRegexExpr)
 
-var CollectionNameValidationRegex, _ = regexp.Compile(fmt.Sprintf("^%v+$", CollectionValidNameCharClass))
+var CollectionNameValidationRegex, _ = regexp.Compile(fmt.Sprintf("^%v%v*$", CollectionValidPrefixNameClass, CollectionValidNameCharClass))
 
 var DefaultCollectionId uint32 = 0
 
