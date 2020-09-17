@@ -565,6 +565,7 @@ func TestRouterExplicitMode(t *testing.T) {
 	// TODO - change this to use actual update call
 	collectionsRouter.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, mappingMode, rules)
 	assert.Nil(err)
+	collectionsRouter.explicitMappingIdx = collectionsRouter.explicitMappings.CreateLookupIndex()
 
 	err = router.RouteCollection(dummyData, dummyDownStream, nil)
 	assert.Nil(err)

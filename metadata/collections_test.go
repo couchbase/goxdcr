@@ -426,17 +426,17 @@ func TestCollectionsNsConsolidate(t *testing.T) {
 
 	nsMap.Consolidate(nsMap2)
 	assert.Equal(2, len(nsMap))
-	_, _, tgtList, exists := nsMap.Get(&defaultNamespace)
+	_, _, tgtList, exists := nsMap.Get(&defaultNamespace, nil)
 	assert.True(exists)
 	assert.Equal(3, len(tgtList))
-	_, _, tgtList, exists = nsMap.Get(&c1Ns)
+	_, _, tgtList, exists = nsMap.Get(&c1Ns, nil)
 	assert.True(exists)
 	assert.Equal(1, len(nsMap[c1NsSrc]))
 
 	added, removed := nsMap.Diff(nsMap2)
 	assert.Equal(0, len(added))
 	assert.Equal(1, len(removed))
-	_, _, tgtList, exists = removed.Get(&defaultNamespace)
+	_, _, tgtList, exists = removed.Get(&defaultNamespace, nil)
 	assert.True(exists)
 	assert.Equal(1, len(tgtList))
 	fmt.Println("============== Test case end: TestCollectionsNsConsolidate =================")
@@ -687,6 +687,7 @@ func TestExplicitMapping(t *testing.T) {
 	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
+	explicitMapIdx := explicitMap.CreateLookupIndex()
 
 	assert.Equal(2, len(explicitMap))
 	sourceNamespace := base.CollectionNamespace{
@@ -697,7 +698,13 @@ func TestExplicitMapping(t *testing.T) {
 		ScopeName:      "S1",
 		CollectionName: "col1",
 	}
-	_, _, tgtCheckList, ok := explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok := explicitMap.Get(&sourceNamespace, nil)
+	assert.True(ok)
+	assert.Equal(1, len(tgtCheckList))
+	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
+
+	// Using index
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace, explicitMapIdx)
 	assert.True(ok)
 	assert.Equal(1, len(tgtCheckList))
 	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
@@ -705,13 +712,21 @@ func TestExplicitMapping(t *testing.T) {
 	// Check a diff collection
 	sourceNamespace.CollectionName = "col2"
 	targetNamespace.CollectionName = "col2"
-	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace, nil)
+	assert.True(ok)
+	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
+
+	// using index
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace, explicitMapIdx)
 	assert.True(ok)
 	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
 
 	// Last one is unmapped
 	sourceNamespace.CollectionName = "col3"
-	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace, nil)
+	assert.False(ok)
+	// using index
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace, explicitMapIdx)
 	assert.False(ok)
 
 	// Test blacklist
@@ -721,13 +736,18 @@ func TestExplicitMapping(t *testing.T) {
 	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
+	explicitMapIdx = explicitMap.CreateLookupIndex()
 
 	assert.Equal(2, len(explicitMap))
 	sourceNamespace.ScopeName = "S1"
 	sourceNamespace.CollectionName = "col1"
 	targetNamespace.ScopeName = "S2"
 	targetNamespace.CollectionName = "col1"
-	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace)
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace, nil)
+	assert.True(ok)
+	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
+	// with index
+	_, _, tgtCheckList, ok = explicitMap.Get(&sourceNamespace, explicitMapIdx)
 	assert.True(ok)
 	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
 
@@ -782,11 +802,15 @@ func TestExplicitMapping(t *testing.T) {
 	explicitMap, err = NewCollectionNamespaceMappingFromRules(customManifestPair, mappingMode, rules)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
+	explicitMapIdx = explicitMap.CreateLookupIndex()
+
 	checkNamespace := &base.CollectionNamespace{
 		ScopeName:      "s1",
 		CollectionName: "col1",
 	}
-	_, _, _, exists := explicitMap.Get(checkNamespace)
+	_, _, _, exists := explicitMap.Get(checkNamespace, nil)
+	assert.False(exists)
+	_, _, _, exists = explicitMap.Get(checkNamespace, explicitMapIdx)
 	assert.False(exists)
 }
 

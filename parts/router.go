@@ -192,7 +192,9 @@ type CollectionsRouter struct {
 	// Collectively, these are the mappings that this collectionsRouter has seen broken
 	brokenDenyMtx        sync.RWMutex
 	brokenMapping        metadata.CollectionNamespaceMapping
+	brokenMappingIdx     metadata.CollectionNamespaceMappingIdx
 	denyMapping          metadata.CollectionNamespaceMapping
+	denyMappingIdx       metadata.CollectionNamespaceMappingIdx
 	lastKnownTgtManifest *metadata.CollectionsManifest // should be associated with a brokenMap
 	routingUpdater       CollectionsRoutingUpdater
 	ignoreDataFunc       IgnoreDataEventer
@@ -202,6 +204,7 @@ type CollectionsRouter struct {
 	// Collections Mapping related
 	mappingMtx           sync.RWMutex
 	explicitMappings     metadata.CollectionNamespaceMapping // nil for implicit mapping
+	explicitMappingIdx   metadata.CollectionNamespaceMappingIdx
 	collectionMode       base.CollectionsMgtType
 	cachedRules          metadata.CollectionsMappingRulesType
 	lastKnownSrcManifest *metadata.CollectionsManifest
@@ -328,6 +331,7 @@ func (c *CollectionsRouter) initializeInternals(pair metadata.CollectionsManifes
 	c.mappingMtx.Lock()
 	c.lastKnownSrcManifest = pair.Source
 	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules)
+	c.explicitMappingIdx = c.explicitMappings.CreateLookupIndex()
 	c.collectionMode = c.spec.Settings.GetCollectionModes()
 	c.cachedRules = rules
 	c.mappingMtx.Unlock()
@@ -383,6 +387,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 			// things were same as before
 			c.lastKnownTgtManifest = manifest
 			c.brokenMapping = *brokenMappings
+			c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
 		} else if checkManifestId == targetManifestId {
 			// Target manifest got bumped up between the rlock and lock
 			needToUpdate2 = true
@@ -424,7 +429,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 			// Check to see if this source namespace has already been marked denied, which means
 			// it wasn't even in the rules to be matched
 			c.brokenDenyMtx.RLock()
-			_, _, _, exists := c.denyMapping.Get(namespace)
+			_, _, _, exists := c.denyMapping.Get(namespace, c.denyMappingIdx)
 			c.brokenDenyMtx.RUnlock()
 			if exists {
 				err = base.ErrorIgnoreRequest
@@ -530,6 +535,7 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 	// so in the meantime, update the mapping and write to the right target collection for the ongoing stream
 	c.mappingMtx.Lock()
 	c.explicitMappings = explicitMap
+	c.explicitMappingIdx = c.explicitMappings.CreateLookupIndex()
 	c.mappingMtx.Unlock()
 	return nil
 }
@@ -540,7 +546,7 @@ func (c *CollectionsRouter) implicitMap(namespace *base.CollectionNamespace, lat
 	if err == base.ErrorNotFound {
 
 		c.brokenDenyMtx.RLock()
-		_, _, _, exists := c.brokenMapping.Get(namespace)
+		_, _, _, exists := c.brokenMapping.Get(namespace, c.brokenMappingIdx)
 		c.brokenDenyMtx.RUnlock()
 
 		if exists {
@@ -658,12 +664,12 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 
 func (c *CollectionsRouter) regularExplicitMap(namespace *base.CollectionNamespace) (metadata.CollectionNamespaceList, error) {
 	c.mappingMtx.RLock()
-	_, _, tgtCollections, exists := c.explicitMappings.Get(namespace)
+	_, _, tgtCollections, exists := c.explicitMappings.Get(namespace, c.explicitMappingIdx)
 	c.mappingMtx.RUnlock()
 
 	if !exists || len(tgtCollections) == 0 {
 		c.brokenDenyMtx.RLock()
-		_, _, _, exists := c.brokenMapping.Get(namespace)
+		_, _, _, exists := c.brokenMapping.Get(namespace, c.brokenMappingIdx)
 		c.brokenDenyMtx.RUnlock()
 
 		var err error
@@ -776,6 +782,7 @@ func (c *CollectionsRouter) cleanBrokenMapWithRemovedEntries(brokenMappingClone 
 	nameSpacesToBeDeleted := getNamespacesToBeDeletedFromBrokenMap(brokenMappingClone, removed)
 	c.brokenDenyMtx.Lock()
 	c.brokenMapping = c.brokenMapping.Delete(nameSpacesToBeDeleted)
+	c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
 	brokenMappingClone = c.brokenMapping.Clone()
 	c.brokenDenyMtx.Unlock()
 	return brokenMappingClone
@@ -812,6 +819,7 @@ func (c *CollectionsRouter) updateBrokenMapAndRoutingInfo(latestManifest *metada
 	rollbackCallback := func() {
 		c.brokenDenyMtx.Lock()
 		c.brokenMapping = rbPrevBrokenMapping
+		c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
 		c.lastKnownTgtManifest = &rbPrevKnownTgtManifest
 		c.brokenDenyMtx.Unlock()
 		c.logger.Warnf("Due to error, %v has rolled back to prev brokenMap %v and prev target manifest %v", rbPrevBrokenMapping.String(), rbPrevKnownTgtManifest.Uid())
@@ -819,6 +827,7 @@ func (c *CollectionsRouter) updateBrokenMapAndRoutingInfo(latestManifest *metada
 
 	c.lastKnownTgtManifest = latestManifest
 	c.brokenMapping = brokenMappingClone.Clone()
+	c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
 	routingInfo.BrokenMap = brokenMappingClone
 	routingInfo.BackfillMap = fixedMapping.Clone()
 	routingInfo.TargetManifestId = latestManifest.Uid()
@@ -847,7 +856,7 @@ func checkIfRemovedSrcNamespacesExistInCurrentBrokenMap(removed metadata.ScopesM
 			_, _, _, exists := brokenMappingClone.Get(&base.CollectionNamespace{
 				ScopeName:      scopeName,
 				CollectionName: collectionName,
-			})
+			}, nil)
 			if exists {
 				atLeastOneFound = true
 				return
@@ -893,6 +902,7 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 			// marked to be replicated
 			c.brokenDenyMtx.Lock()
 			c.denyMapping.AddSingleMapping(sourceNamespace, emptyTargetNamespace)
+			c.denyMappingIdx = c.denyMapping.CreateLookupIndex()
 			c.brokenDenyMtx.Unlock()
 			// When the collection rule changes occur (via set replication)
 			// the pipeline will be restarted, which means a router starts off with a clean denyMapping and
@@ -926,9 +936,17 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 			c.logger.Debugf("Based on target manifest %v brokenmap: %v", wrappedMcr.ColInfo.ManifestId, c.brokenMapping.String())
 		}
 	}
+	if !allAlreadyExist {
+		c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
+	}
+	var routingInfo CollectionsRoutingInfo
+	routingInfo.BrokenMap = c.brokenMapping.Clone()
+	routingInfo.TargetManifestId = wrappedMcr.ColInfo.ManifestId
+	c.brokenDenyMtx.Unlock()
 
-	err := c.raiseRoutingUpdate(wrappedMcr.ColInfo.ManifestId)
+	err := c.routingUpdater(routingInfo)
 	if err != nil {
+		c.logger.Errorf("%v - %v", BackfillPersistErrKey, err)
 		return
 	}
 
@@ -936,18 +954,6 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 		// Once a routing broken event is successfully raised, then allow the data to be ignored
 		c.ignoreDataFunc(wrappedMcr)
 	}
-}
-
-func (c *CollectionsRouter) raiseRoutingUpdate(manifestId uint64) error {
-	var routingInfo CollectionsRoutingInfo
-	routingInfo.BrokenMap = c.brokenMapping.Clone()
-	routingInfo.TargetManifestId = manifestId
-	c.brokenDenyMtx.Unlock()
-	err := c.routingUpdater(routingInfo)
-	if err != nil {
-		c.logger.Errorf("%v - %v", BackfillPersistErrKey, err)
-	}
-	return err
 }
 
 func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *base.WrappedMCRequest) (metadata.CollectionNamespaceMapping, base.ErrorMap, map[string]*base.WrappedMCRequest) {

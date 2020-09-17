@@ -42,6 +42,11 @@ testCasesDirectory="collectionTestcases"
 if [[ -z "$testCaseNumber" ]];then
 	for testcase in `ls $testCasesDirectory`
 	do
+		if [[ "$testcase" =~ _idle_ ]];then
+			# test cases with _idle_ in the filename means they take too long for the whole suite
+			# and should be run on an individual basis only
+			continue
+		fi
 		. $testCasesDirectory/$testcase
 		runTestCase
 	done

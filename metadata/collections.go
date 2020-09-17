@@ -1262,7 +1262,7 @@ func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 
 	for i, k := range sortedKeys {
 		metaObj.SourceCollections = append(metaObj.SourceCollections, k)
-		srcNamespacePtr, _, value, exists := c.Get(k)
+		srcNamespacePtr, _, value, exists := c.Get(k, nil)
 		if exists {
 			metaObj.IndirectTargetMap[uint64(i)] = value
 			metaObj.SourceNamespaceTypeMap[uint64(i)] = srcNamespacePtr.GetType()
@@ -1348,22 +1348,32 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 
 // The input "src" does not have to match the actual key pointer in the map, just the right matching values
 // Returns the srcPtr for referring to the exact tgtList
-func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace) (srcPtr *SourceNamespace,
-	srcNamespacePtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
+// compiledIndex is optional, and will be used if passed in
+func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace, compiledIndex CollectionNamespaceMappingIdx) (srcPtr *SourceNamespace, srcNamespacePtr *base.CollectionNamespace, tgt CollectionNamespaceList, exists bool) {
 	if src == nil {
 		panic("Nil source")
 		return
 	}
 
-	for k, v := range *c {
-		if *(k.CollectionNamespace) == *src {
-			// found
-			srcPtr = k
-			tgt = v
-			srcNamespacePtr = k.CollectionNamespace
-			exists = true
+	if compiledIndex == nil {
+		for k, v := range *c {
+			if *(k.CollectionNamespace) == *src {
+				// found
+				srcPtr = k
+				tgt = v
+				srcNamespacePtr = k.CollectionNamespace
+				exists = true
+				return
+			}
+		}
+	} else {
+		lookupString := src.ToIndexString()
+		srcPtr, exists = compiledIndex[lookupString]
+		if !exists {
 			return
 		}
+		srcNamespacePtr = srcPtr.CollectionNamespace
+		tgt, exists = (*c)[srcPtr]
 	}
 	return
 }
@@ -1410,7 +1420,7 @@ func (c *CollectionNamespaceMapping) AddSingleSourceNsMapping(src *SourceNamespa
 		panic("Empty source namespace")
 	}
 
-	_, srcPtr, tgtList, found := c.Get(src.CollectionNamespace)
+	_, srcPtr, tgtList, found := c.Get(src.CollectionNamespace, nil)
 
 	if !found {
 		// Just use these as entries
@@ -1469,7 +1479,7 @@ func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) boo
 // This means if other contains everything in c
 func (c CollectionNamespaceMapping) IsSubset(other CollectionNamespaceMapping) bool {
 	for src, tgtList := range c {
-		_, _, otherTgtList, exists := other.Get(src.CollectionNamespace)
+		_, _, otherTgtList, exists := other.Get(src.CollectionNamespace, nil)
 		if !exists {
 			return false
 		}
@@ -1486,7 +1496,7 @@ func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (
 
 	// Subtract B from A
 	for aSrc, aTgtList := range *c {
-		_, _, bTgtList, exists := subset.Get(aSrc.CollectionNamespace)
+		_, _, bTgtList, exists := subset.Get(aSrc.CollectionNamespace, nil)
 		if !exists {
 			// No need to delete
 			result[aSrc] = aTgtList
@@ -1512,7 +1522,7 @@ func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (
 
 func (c *CollectionNamespaceMapping) Consolidate(other CollectionNamespaceMapping) {
 	for otherSrc, otherTgtList := range other {
-		srcPtr, _, tgtList, exists := c.Get(otherSrc.CollectionNamespace)
+		srcPtr, _, tgtList, exists := c.Get(otherSrc.CollectionNamespace, nil)
 		if !exists {
 			(*c)[otherSrc] = otherTgtList.Clone()
 		} else if !tgtList.IsSame(otherTgtList) {
@@ -1527,7 +1537,7 @@ func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (add
 	removed = make(CollectionNamespaceMapping)
 	// First, populated "removed"
 	for src, tgtList := range *c {
-		_, _, oTgtList, exists := other.Get(src.CollectionNamespace)
+		_, _, oTgtList, exists := other.Get(src.CollectionNamespace, nil)
 		if !exists {
 			removed[src] = tgtList
 		} else if !tgtList.IsSame(oTgtList) {
@@ -1551,7 +1561,7 @@ func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (add
 
 	// Then populate added
 	for oSrc, oTgtList := range other {
-		_, _, _, exists := c.Get(oSrc.CollectionNamespace)
+		_, _, _, exists := c.Get(oSrc.CollectionNamespace, nil)
 		if !exists {
 			added[oSrc] = oTgtList
 			// No else - any potential intersections would have been captured above
@@ -1590,6 +1600,19 @@ func (c *CollectionNamespaceMapping) ToSnappyCompressed() ([]byte, error) {
 		return nil, err
 	}
 	return snappy.Encode(nil, marshalledJson), nil
+}
+
+// A collection namespace Mapping Index - The key will be simply "Scope:Collection"
+type CollectionNamespaceMappingIdx map[string]*SourceNamespace
+
+func (c CollectionNamespaceMapping) CreateLookupIndex() CollectionNamespaceMappingIdx {
+	idx := make(CollectionNamespaceMappingIdx)
+
+	for srcNs, _ := range c {
+		idx[srcNs.ToIndexString()] = srcNs
+	}
+
+	return idx
 }
 
 func NewCollectionNamespaceMappingFromSnappyData(data []byte) (*CollectionNamespaceMapping, error) {
