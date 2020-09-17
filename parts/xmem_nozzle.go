@@ -1780,7 +1780,9 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) (noRep_map map[string]NeedSendStatus, getDoc_map base.McRequestMap, err error) {
 	noRep_map = make(map[string]NeedSendStatus)
 	getDoc_map = make(base.McRequestMap)
-	for i := 0; i < xmem.config.maxRetry; i++ {
+	var hasTmpErr bool
+	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
+		hasTmpErr = false
 		respMap, specs, err := xmem.sendBatchGetRequest(getMeta_map, xmem.config.maxRetry, false /* include_doc */)
 		if err != nil {
 			// Log the error. We will retry maxRetry times.
@@ -1823,6 +1825,9 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 				}
 				keys_to_be_deleted[uniqueKey] = true
 			} else if resp != nil {
+				if base.IsTemporaryMCError(resp.Status) {
+					hasTmpErr = true
+				}
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 					xmem.Logger().Debugf("Received response status %v for key %v", resp.Status, key)
 				}
@@ -1882,7 +1887,9 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 	setBack_map = make(map[string]RequestToResponse)
 	var respMap base.MCResponseMap
 	var specs []base.SubdocLookupPathSpec
-	for i := 0; i < xmem.config.maxRetry; i++ {
+	var hasTmpErr bool
+	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
+		hasTmpErr = false
 		respMap, specs, err = xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
 		if err != nil {
 			xmem.Logger().Errorf(err.Error())
@@ -1926,6 +1933,13 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 					setBack_map[uniqueKey] = RequestToResponse{wrappedReq, resp}
 				}
 				keys_to_be_deleted[uniqueKey] = true
+			} else if resp != nil {
+				if base.IsTemporaryMCError(resp.Status) {
+					hasTmpErr = true
+				}
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					xmem.Logger().Debugf("Received response status %v for key %v", resp.Status, key)
+				}
 			}
 		}
 		if len(keys_to_be_deleted) == len(getDoc_map) {
