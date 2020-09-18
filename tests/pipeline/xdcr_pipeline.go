@@ -192,7 +192,7 @@ func test() {
 
 	defer testcommon.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
 
-	topic, errorsMap, err := replication_manager.CreateReplication(false, options.source_bucket, options.remoteName, options.target_bucket, settings, &service_def.RealUserId{})
+	topic, errorsMap, err := replication_manager.CreateReplication(false, options.source_bucket, options.remoteName, options.target_bucket, settings, &service_def.RealUserId{}, nil)
 	if err != nil {
 		fail(fmt.Sprintf("%v", err))
 	} else if len(errorsMap) != 0 {
@@ -200,7 +200,7 @@ func test() {
 	}
 	//delete the replication before we go
 	defer func() {
-		err = replication_manager.DeleteReplication(topic, &service_def.RealUserId{})
+		err = replication_manager.DeleteReplication(topic, &service_def.RealUserId{}, nil)
 		if err != nil {
 			fail(fmt.Sprintf("%v", err))
 		}
@@ -237,13 +237,13 @@ func test() {
 		fail(fmt.Sprintf("No checkpointing happended as it is supposed to"))
 	}
 	settings[metadata.Active] = false
-	replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{})
+	replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{}, nil)
 
 	logger.Infof("Replication %s is paused\n", topic)
 	time.Sleep(100 * time.Millisecond)
 
 	settings[metadata.Active] = true
-	errMap, err := replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{})
+	errMap, err := replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{}, nil)
 	if err != nil || len(errMap) > 0 {
 		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
 	}

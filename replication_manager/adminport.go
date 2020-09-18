@@ -24,6 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"net"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -268,7 +269,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
-			go writeRemoteClusterAuditEvent(service_def.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			go writeRemoteClusterAuditEvent(service_def.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -312,7 +313,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
-			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request))
+			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
@@ -362,7 +363,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 		return EncodeRemoteClusterErrorIntoResponse(err)
 	}
 
-	go writeRemoteClusterAuditEvent(service_def.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request))
+	go writeRemoteClusterAuditEvent(service_def.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 
 	return NewOKResponse()
 }
@@ -422,7 +423,8 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 	logger_ap.Infof("Request parameters: justValidate=%v, fromBucket=%v, toCluster=%v, toBucket=%v, settings=%v\n",
 		justValidate, fromBucket, toCluster, toBucket, settings.CloneAndRedact())
 
-	replicationId, errorsMap, err, warnings := CreateReplication(justValidate, fromBucket, toCluster, toBucket, settings, getRealUserIdFromRequest(request))
+	replicationId, errorsMap, err, warnings := CreateReplication(justValidate, fromBucket, toCluster, toBucket, settings,
+		getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 
 	if err != nil {
 		return EncodeReplicationSpecErrorIntoResponse(err)
@@ -450,7 +452,7 @@ func (adminport *Adminport) doDeleteReplicationRequest(request *http.Request) (*
 		return response, err
 	}
 
-	err = DeleteReplication(replicationId, getRealUserIdFromRequest(request))
+	err = DeleteReplication(replicationId, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 
 	if err != nil {
 		return EncodeReplicationSpecErrorIntoResponse(err)
@@ -498,7 +500,7 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap.CloneAndRedact())
 
 	if !justValidate {
-		errorsMap, err := UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request))
+		errorsMap, err := UpdateDefaultSettings(settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 		if err != nil {
 			return nil, err
 		} else if len(errorsMap) > 0 {
@@ -590,7 +592,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return NewEmptyArrayResponse()
 	}
 
-	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request))
+	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -783,9 +785,9 @@ func constructBucketPermission(bucketName, suffix string) string {
 	return base.PermissionBucketPrefix + bucketName + suffix
 }
 
-func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId) {
+func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) {
 	event := &service_def.RemoteClusterRefEvent{
-		GenericFields:         service_def.GenericFields{log.FormatTimeWithMilliSecondPrecision(time.Now()), *realUserId},
+		GenericFields:         service_def.GenericFields{Timestamp: log.FormatTimeWithMilliSecondPrecision(time.Now()), RealUserid: *realUserId, LocalRemoteIPs: *ips},
 		RemoteClusterName:     remoteClusterRef.Name(),
 		RemoteClusterHostname: remoteClusterRef.HostName(),
 		IsEncrypted:           remoteClusterRef.DemandEncryption(),
@@ -804,6 +806,79 @@ func getRealUserIdFromRequest(request *http.Request) *service_def.RealUserId {
 	}
 
 	return &service_def.RealUserId{creds.Domain(), creds.Name()}
+}
+
+func getLocalAndRemoteIps(request *http.Request) *service_def.LocalRemoteIPs {
+	// remote - refers to the machine (ip and port) that caused the event to be triggered
+	// The request.RemoteAddr should always be in IP:port format according to go documentation
+	remoteIP := base.GetHostName(request.RemoteAddr)
+	remotePortNo, _ := base.GetPortNumber(request.RemoteAddr)
+
+	// local - refers to the machine (ip and port) that generated the audit event (the one XDCR is sitting on)
+	hostNameWithoutPort := base.GetHostName(request.Host)
+	port, portErr := base.GetPortNumber(request.Host)
+	if portErr != nil {
+		// request.Host should contain portNo. If err, then use default admin port
+		port = base.DefaultAdminPort
+	}
+
+	var localIP string
+	var localPort uint16
+	ipCheck := net.ParseIP(hostNameWithoutPort)
+	if ipCheck != nil {
+		// The hostname being used is already an IP
+		localIP = hostNameWithoutPort
+		localPort = port
+	} else {
+		ipLookup, err := net.LookupIP(hostNameWithoutPort)
+		if err != nil || len(ipLookup) == 0 {
+			// Error case - just manually find the local IP and admin port
+			ifaces, err := net.Interfaces()
+			if err == nil {
+			FINDIPLOOP:
+				for _, i := range ifaces {
+					addrs, err := i.Addrs()
+					if err == nil {
+						for _, addr := range addrs {
+							var ip net.IP
+							switch v := addr.(type) {
+							case *net.IPNet:
+								ip = v.IP
+							case *net.IPAddr:
+								ip = v.IP
+							}
+							localIP = ip.String()
+							localPort = port
+							break FINDIPLOOP
+						}
+					}
+				}
+			}
+			if localIP == "" {
+				// worst case scenario - empty fields
+				localIP = ""
+				localPort = 1
+			}
+		} else {
+			localIP = ipLookup[0].String()
+			localPort = port
+		}
+	}
+
+	remote := &service_def.IpAndPort{
+		Ip:   remoteIP,
+		Port: remotePortNo,
+	}
+
+	local := &service_def.IpAndPort{
+		Ip:   localIP,
+		Port: localPort,
+	}
+	iPsToReturn := &service_def.LocalRemoteIPs{
+		Remote: remote,
+		Local:  local,
+	}
+	return iPsToReturn
 }
 
 func (adminport *Adminport) IsReadyForHeartBeat() bool {
@@ -912,7 +987,7 @@ func (adminport *Adminport) doBucketSettingsChangeRequest(request *http.Request)
 	logger_ap.Infof("Request params: bucketName=%v, lwwEnabled=%v\n",
 		bucketName, lwwEnabled)
 
-	bucketSettingsMap, err := setBucketSettings(bucketName, lwwEnabled, getRealUserIdFromRequest(request))
+	bucketSettingsMap, err := setBucketSettings(bucketName, lwwEnabled, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 	if err != nil {
 		if err == adminport.utils.GetNonExistentBucketError() {
 			// if bucket does not exist, it is a validation error and not an internal error

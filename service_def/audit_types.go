@@ -70,6 +70,7 @@ type GenericReplicationEvent struct {
 type GenericFields struct {
 	Timestamp  string     `json:"timestamp"`
 	RealUserid RealUserId `json:"real_userid"`
+	LocalRemoteIPs
 }
 
 // fields applicable to all replication related events
@@ -94,6 +95,16 @@ func (userId *RealUserId) Redact() {
 	if !base.IsStringRedacted(userId.Username) {
 		userId.Username = base.TagUD(userId.Username)
 	}
+}
+
+type IpAndPort struct {
+	Ip   string `json:"ip""`
+	Port uint16 `json:"port""`
+}
+
+type LocalRemoteIPs struct {
+	Remote *IpAndPort `json:"remote"`
+	Local  *IpAndPort `json:"local"`
 }
 
 func (generics *GenericFields) Redact() {
