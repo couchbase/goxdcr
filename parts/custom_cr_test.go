@@ -96,7 +96,6 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string) {
 		bodyBytes, err := ioutil.ReadAll(resp.Body)
 		assert.Nil(err)
 		resp.Body.Close()
-		fmt.Printf("CreateReplication response: %s\n", bodyBytes)
 		created := !strings.Contains(string(bodyBytes), "error") || strings.Contains(string(bodyBytes), "already exists")
 		if created {
 			fmt.Printf("Created replication for bucket %v\n", bucketName)
@@ -135,7 +134,7 @@ func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
 	}
 }
 
-// Verify that document has an XATTR with mv.
+// Verify that document cas has changed from the cas passed in.
 func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucket) {
 	var value interface{}
 	var err error
@@ -149,6 +148,24 @@ func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucke
 		t.Errorf("Document '%s' with cas %v has not changed in %v\n", key, cas, time.Since(start))
 		t.FailNow()
 	}
+}
+
+func waitForMV(key string, expectedMV []byte, bucket *gocb.Bucket) (err error) {
+	mv := make([]byte, 2*len(expectedMV))
+	for i := 0; i < 120; i++ {
+		frag, err := bucket.LookupIn(key).GetEx("_xdcr.mv", gocb.SubdocFlagXattr).Execute()
+		if err != nil {
+			return err
+		}
+		if err = frag.Content("_xdcr.mv", &mv); err != nil {
+			return err
+		}
+		if bytes.Equal(mv, expectedMV) {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("MV %s is not expected %s\n", mv, expectedMV)
 }
 
 // Verify _xdcr.cv == CAS
@@ -420,12 +437,12 @@ func TestCcrXattrAfterMerge(t *testing.T) {
 	assert := assert.New(t)
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
 	if err != nil {
-		fmt.Printf("TestCcrXattrAfterRep skipped because source cluster is not ready. Error: %v\n", err)
+		fmt.Printf("TestCcrXattrAfterMerge skipped because source cluster is not ready. Error: %v\n", err)
 		return
 	}
 	targetBucket, err := createBucket(targetConnStr, bucketName)
 	if err != nil {
-		fmt.Printf("TestCcrXattrAfterRep skipped because target cluster is not ready. Error: %v\n", err)
+		fmt.Printf("TestCcrXattrAfterMerge skipped because target cluster is not ready. Error: %v\n", err)
 		return
 	}
 	assert.NotNil(sourceBucket)
@@ -471,6 +488,78 @@ func TestCcrXattrAfterMerge(t *testing.T) {
 		err = verifyCv(key_i, targetBucket)
 		assert.Nil(err)
 	}
+}
+
+func TestCcrXattrSetBack(t *testing.T) {
+	fmt.Println("============== Test case start: TestCcrXattrSetBack =================")
+	defer fmt.Println("============== Test case end: TestCcrXattrSetBack =================")
+	assert := assert.New(t)
+	bucketName := "CCRSetBack"
+	sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCcrXattrAfterMerge skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCcrXattrAfterMerge skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	waitForBucketReady(t, targetBucket)
+	createReplication(t, bucketName, base.DefaultMergeFunc)
+
+	key := time.Now().Format(time.RFC3339) + "_setback"
+	var expire uint32 = 60 * 60 * 24 // expires in 1 day
+
+	// Create documents at target that looks like merge from 3 clusters
+	_, err = targetBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
+	assert.Nil(err)
+
+	pcasTarget := make(map[string]string, 3)
+	pcasTarget["Cluster1"] = "FhSITdr4AAA"
+	pcasTarget["Cluster2"] = "FhSITdr4ABU"
+	pcasTarget["Cluster3"] = "FhSITdr4ACA"
+	_, err = targetBucket.MutateIn(key, 0, 0).
+		UpsertEx("_xdcr.cv", "${Mutation.CAS}", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath|0x10).
+		UpsertEx("_xdcr.id", "SourceCluster", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
+		UpsertEx("_xdcr.mv", pcasTarget, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
+		Execute()
+	assert.Nil(err)
+	fmt.Printf("Created target document\n")
+
+	// Create documents at target that looks like merge from 2 clusters
+	_, err = sourceBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
+	assert.Nil(err)
+	pcasSource := make(map[string]string, 3)
+	pcasSource["Cluster1"] = "FhSITdr4AAA"
+	pcasSource["Cluster2"] = "FhSITdr4ABU"
+	_, err = sourceBucket.MutateIn(key, 0, 0).
+		UpsertEx("_xdcr.cv", "${Mutation.CAS}", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath|0x10).
+		UpsertEx("_xdcr.id", "SourceCluster", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
+		UpsertEx("_xdcr.mv", pcasSource, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
+		Execute()
+	assert.Nil(err)
+	fmt.Printf("Created source document\n")
+	fmt.Println("Wait for target document set back to source.")
+	mv := []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}")
+	err = waitForMV(key, mv, sourceBucket)
+	assert.Nil(err)
+	err = verifyCv(key, sourceBucket)
+	assert.Nil(err)
+
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+
 }
 
 // TODO: Error test, create a function with typo, like "function bucketName (a, b) return b}" and make sure we have a way to recover

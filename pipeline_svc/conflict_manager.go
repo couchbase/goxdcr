@@ -214,32 +214,98 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 	for {
 		select {
 		case v := <-c.result_ch:
-			input := v.Input
-			err := v.Err
-			result := v.Result
-			mergedDoc, ok := result.(string)
-			if err != nil || !ok {
-				// TODO: Conflict feed
-				c.Logger().Errorf("TODO: MB-39033. Custom CR: merge failed with error '%v' and Result %v. Add to conflict feed or stop replication", err, v.Result)
-				continue
+			if v.Action == base.SetMergeToSource {
+				err := v.Err
+				result := v.Result
+				mergedDoc, ok := result.(string)
+				if err != nil || !ok {
+					// TODO: Conflict feed
+					c.Logger().Errorf("TODO: MB-39033. Custom CR: merge failed with error '%v' and Result %v. Add to conflict feed or stop replication", err, v.Result)
+					continue
+				}
+				// set to source
+				if c.Logger().GetLogLevel() >= log.LogLevelDebug {
+					c.Logger().Debugf("%v: conflictManagerWorker %v received key %v for format and set", c.pipeline.FullTopic(), id, v.Input.Source.Req.Key)
+					continue
+				}
+				req := c.formatMergedDoc(v.Input, []byte(mergedDoc))
+				// TODO (MB-40143): Remove before CC shipping. The req should never be nil unless there are bugs in xattrs format.
+				if req == nil {
+					sourceMeta, _ := base.FindSourceCustomCRXattr(v.Input.Source.Req, v.Input.SourceId)
+					targetMeta, _ := v.Input.Target.FindTargetCustomCRXattr(v.Input.TargetId)
+					c.Logger().Errorf("formatMergedDoc Failed failed. err: %v, sourceMeta: %v, targetMeta: %v", err, sourceMeta, targetMeta)
+					panic("mergeXattr failed")
+				}
+				c.sendDocument(id, v.Input, req, client)
+			} else if v.Action == base.SetTargetToSource {
+				req := c.formatTargetDoc(v.Input)
+				c.sendDocument(id, v.Input, req, client)
 			}
-			// set to source
-			if c.Logger().GetLogLevel() >= log.LogLevelDebug {
-				c.Logger().Debugf("%v: conflictManagerWorker %v received key %v for format and set", c.pipeline.FullTopic(), id, input.Source.Req.Key)
-				continue
-			}
-			c.formatResultAndSend(id, input, []byte(mergedDoc), client)
 		case <-c.finish_ch:
 			return
 		}
 	}
 }
+func (c *ConflictManager) formatTargetDoc(input *base.ConflictParams) *mc.MCRequest {
+	bodylen := 0
+	var spec SubdocMutationPathSpec
+	specs := make([]SubdocMutationPathSpec, 0, 5)
+	targetMeta, err := input.Target.FindTargetCustomCRXattr(input.TargetId)
+	if err != nil {
+		// TODO: MB-40143: Remove before CC shipping
+		panic(fmt.Sprintf("error '%v' getting target meta", err))
+	}
+	// ID path
+	id := append([]byte("\""), targetMeta.GetCvId()...)
+	id = append(id, '"')
+	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_ID_PATH), id}
+	specs = append(specs, spec)
+	bodylen = bodylen + spec.size()
 
-func (c *ConflictManager) formatResultAndSend(id int, input *base.ConflictParams, mergedDoc []byte, client *base.XmemClient) {
+	// CV path. We use macro expansion to match the new CAS.
+	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(base.XATTR_CV_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	specs = append(specs, spec)
+	bodylen = bodylen + spec.size()
+
+	// MV path
+	mv := targetMeta.GetMv()
+	if mv != nil {
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MV_PATH), mv}
+	} else {
+		// TODO: MB-40143: Remove before CC shipping
+		panic("Missing MV for setback")
+	}
+	specs = append(specs, spec)
+	bodylen = bodylen + spec.size()
+	// PCAS path
+	pcas := targetMeta.GetPcas()
+	if pcas != nil {
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_PCAS_PATH), pcas}
+		specs = append(specs, spec)
+		bodylen = bodylen + spec.size()
+	}
+	// body path
+	body, _ := input.Target.ResponseForAPath("")
+	if body != nil {
+		spec = SubdocMutationPathSpec{uint8(mc.SET), uint8(0), []byte(""), body}
+	} else {
+		spec = SubdocMutationPathSpec{uint8(mc.DELETE), uint8(0), []byte(""), nil}
+		c.Logger().Errorf("%v: Unexpected empty target document for key %v%v%v. LWW should have been used.", c.pipeline.FullTopic(), base.UdTagBegin, input.Target.Resp.Key, base.UdTagEnd)
+		// TODO (MB-40143). Remove before CC shipping
+		panic("Empty doc SetBack to source")
+	}
+	specs = append(specs, spec)
+	bodylen = bodylen + spec.size()
+	// TODO(MB-41808): data pool
+	newbody := make([]byte, bodylen)
+	req := c.composeRequestForSubdocMutation(specs, input.Source.Req, newbody, true)
+	return req
+}
+
+func (c *ConflictManager) formatMergedDoc(input *base.ConflictParams, mergedDoc []byte) *mc.MCRequest {
 	mv, pcas, err := c.mergeXattr(input)
 	if err != nil {
-		c.Logger().Errorf("TODO: MB-39033. Custom CR: merge failed with error '%v' when merging Xattr. This should not happen. Add to conflict feed or stop replication", err)
-		return
+		return nil
 	}
 	bodylen := 0
 	specs := make([]SubdocMutationPathSpec, 0, 5)
@@ -268,10 +334,12 @@ func (c *ConflictManager) formatResultAndSend(id int, input *base.ConflictParams
 	spec = SubdocMutationPathSpec{uint8(mc.SET), uint8(0), nil, mergedDoc}
 	bodylen = bodylen + spec.size()
 	specs = append(specs, spec)
-
+	// TODO(MB-41808): data pool
 	newbody := make([]byte, bodylen)
 	req := c.composeRequestForSubdocMutation(specs, input.Source.Req, newbody, true)
-
+	return req
+}
+func (c *ConflictManager) sendDocument(id int, input *base.ConflictParams, req *mc.MCRequest, client *base.XmemClient) {
 retry:
 	select {
 	case <-c.finish_ch:
@@ -319,8 +387,9 @@ retry:
 			} else if base.IsCollectionMappingError(response.Status) {
 				// TODO: MB-41120. Need to call upstreamErrReporter here similar to XMEM
 				return
-			} else if base.IsEExistsError(response.Status) {
-				// request failed because source Cas changed. We can ignore it since it will converge to new mutation.
+			} else if base.IsEExistsError(response.Status) || base.IsENoEntError(response.Status) {
+				// request failed because source Cas changed or document no longer exist. We can ignore it since it will converge to new mutation.
+				// TODO (MB-41102): This is cas locking failure. We need to make sure the newer mutation will not get rolled back
 				req := input.Source.Req
 				isExpirySet := false
 				if len(req.Extras) >= 4 {
@@ -334,7 +403,7 @@ retry:
 				}
 				c.RaiseEvent(common.NewEvent(common.MergeCasChanged, nil, c, nil, additionalInfo))
 			} else {
-				c.Logger().Errorf("%v formatResultAndSend(id %v): received error response from subdoc_multi_mutation client for custom CR. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n",
+				c.Logger().Errorf("%v sendDocument(id %v): received error response from subdoc_multi_mutation client for custom CR. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n",
 					c.pipeline.FullTopic(), id, response.Status, response.Opcode, input.Source.Seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 				err = fmt.Errorf("error response with startus %v from memcached", response.Status)
 				c.repairConn(client, err.Error())
@@ -358,8 +427,8 @@ retry:
 			}
 			c.RaiseEvent(common.NewEvent(common.DataMerged, nil, c, nil, additionalInfo))
 			if c.Logger().GetLogLevel() >= log.LogLevelDebug {
-				c.Logger().Debugf("%v: formatResultAndSend(id %v): Custom CR: sent merged document '%s' (key %s) to source bucket %v. Cas %v. VBucket %v Return status %v",
-					c.pipeline.FullTopic(), id, mergedDoc, req.Key, c.sourceBucketName, req.Cas, req.VBucket, response.Status)
+				c.Logger().Debugf("%v: sendDocument(id %v): Custom CR: sent document (key %s) to source bucket %v. Cas %v. VBucket %v Return status %v",
+					c.pipeline.FullTopic(), id, req.Key, c.sourceBucketName, req.Cas, req.VBucket, response.Status)
 			}
 		}
 	}
@@ -369,20 +438,20 @@ func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byt
 	source := input.Source.Req
 	sourceMeta, err := base.FindSourceCustomCRXattr(source, input.SourceId)
 	if err != nil {
-		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for document body %v%v%v. Source document XATTR '_xdcr' ignored. This may cause unnecessary merge.",
+		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for source document body %v%v%v.",
 			c.pipeline.FullTopic(), err, base.UdTagBegin, source.Body, base.UdTagEnd)
 		return nil, nil, err
 	}
 	targetMeta, err := input.Target.FindTargetCustomCRXattr(input.TargetId)
 	if err != nil {
-		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for document body %v%v%v. Target document XATTR '_xdcr' ignored. This may cause unnecessary merge.",
+		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for target document body %v%v%v.",
 			c.pipeline.FullTopic(), err, base.UdTagBegin, input.Target.Resp.Body, base.UdTagEnd)
 		return nil, nil, err
 	}
 	// "mv":{"<sourceId>":"<B64>","targetId>":"<B64>",...}
 	sourceCasB64 := base.Uint64ToBase64(sourceMeta.GetCas())
 	mvlen := 2*(len(sourceCasB64)+len(input.SourceId)+6) + 7 + len(sourceMeta.GetMv()) + len(targetMeta.GetMv())
-	// TODO: data pool
+	// TODO (MB-41808): data pool
 	mergedMvSlice := make([]byte, mvlen)
 	pcaslen := len(sourceMeta.GetPcas()) + len(targetMeta.GetPcas())
 	mergedPcasSlice := make([]byte, pcaslen)
@@ -473,6 +542,9 @@ func (c *ConflictManager) composeRequestForSubdocMutation(specs []SubdocMutation
 	if caslock {
 		cas = source.Cas
 	}
+	// We don't need ACCESS_DELETED in this command since we use LWW for deleted docs and the expected source doc should never be deleted here.
+	// If user deleted it before we setback, we will get ENOENT error which is correct.
+	// Set expiry
 	var extras []byte
 	if binary.BigEndian.Uint32(source.Extras[4:8]) != 0 {
 		extras = source.Extras[4:8]
@@ -627,7 +699,16 @@ func (c *ConflictManager) handleVBError(vbno uint16, err error) {
 
 func (c *ConflictManager) NotifyMergeResult(input *base.ConflictParams, mergedResult interface{}, mergeError error) {
 	select {
-	case c.result_ch <- &base.MergeInputAndResult{input, mergedResult, mergeError}:
+	case c.result_ch <- &base.MergeInputAndResult{base.SetMergeToSource, input, mergedResult, mergeError}:
 	case <-c.finish_ch:
+	}
+}
+
+func (c *ConflictManager) SetBackToSource(input *base.ConflictParams) error {
+	select {
+	case c.result_ch <- &base.MergeInputAndResult{base.SetTargetToSource, input, nil, nil}:
+		return nil
+	case <-c.finish_ch:
+		return parts.PartStoppedError
 	}
 }

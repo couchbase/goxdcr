@@ -1016,7 +1016,6 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 			}
 
 			var noRep_map map[string]NeedSendStatus
-			var setBack_map map[string]RequestToResponse
 			if xmem.source_cr_mode != base.CRMode_Custom {
 				//batch get meta to find what needs to be not sent via the noRep map
 				noRep_map, err = xmem.batchGetMeta(batch.getMeta_map)
@@ -1036,15 +1035,12 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					xmem.handleGeneralError(err)
 				}
 				if len(getDoc_map) > 0 {
-					setBack_map, err = xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
+					err = xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
 					if err != nil {
 						if err == PartStoppedError {
 							goto done
 						}
 						xmem.handleGeneralError(err)
-					}
-					if len(setBack_map) > 0 {
-						// go xmem.setBack(setBack_map)
 					}
 				}
 				batch.bigDoc_noRep_map = noRep_map
@@ -1883,8 +1879,7 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPath
 /**
  * batch call to memcached subdoc_get command for documents that needs target document for custom CR
  */
-func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]NeedSendStatus) (setBack_map map[string]RequestToResponse, err error) {
-	setBack_map = make(map[string]RequestToResponse)
+func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]NeedSendStatus) (err error) {
 	var respMap base.MCResponseMap
 	var specs []base.SubdocLookupPathSpec
 	var hasTmpErr bool
@@ -1930,7 +1925,10 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 					}
 				case TargetSetBack:
 					// This is the case where target has smaller CAS but it dominates source MV.
-					setBack_map[uniqueKey] = RequestToResponse{wrappedReq, resp}
+					err = xmem.conflictMgr.SetBackToSource(&base.ConflictParams{Source: wrappedReq, Target: lookupResp})
+					if err != nil {
+						return
+					}
 				}
 				keys_to_be_deleted[uniqueKey] = true
 			} else if resp != nil {
@@ -1944,7 +1942,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 		}
 		if len(keys_to_be_deleted) == len(getDoc_map) {
 			// Got response for all
-			return setBack_map, nil
+			return nil
 		} else {
 			for uniqueKey, _ := range keys_to_be_deleted {
 				delete(getDoc_map, uniqueKey)

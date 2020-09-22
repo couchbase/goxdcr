@@ -1564,7 +1564,7 @@ type SubdocLookupResponse struct {
 // If the path doesn't exist in the target document, the return value is nil.
 // If the path is not included in the lookup, return error.
 // The path name for document body is empty string
-func (lookupResp *SubdocLookupResponse) responseForAPath(path string) ([]byte, error) {
+func (lookupResp *SubdocLookupResponse) ResponseForAPath(path string) ([]byte, error) {
 	resp := lookupResp.Resp
 	body := resp.Body
 	pos := 0
@@ -1593,11 +1593,11 @@ func (lookupResp *SubdocLookupResponse) responseForAPath(path string) ([]byte, e
 }
 
 func (lookupResp *SubdocLookupResponse) FindTargetBodyWithoutXattr() ([]byte, error) {
-	return lookupResp.responseForAPath("")
+	return lookupResp.ResponseForAPath("")
 }
 
 func (lookupResp *SubdocLookupResponse) IsTargetJson() (bool, error) {
-	value, err := lookupResp.responseForAPath(XATTR_DATATYPE)
+	value, err := lookupResp.ResponseForAPath(XATTR_DATATYPE)
 	if err != nil {
 		return false, err
 	}
@@ -1614,7 +1614,7 @@ func (lookupResp *SubdocLookupResponse) IsTargetJson() (bool, error) {
 }
 
 func (lookupResp *SubdocLookupResponse) FindTargetCustomCRXattr(targetId []byte) (crMeta *CustomCRMeta, err error) {
-	xattr, err := lookupResp.responseForAPath(XATTR_XDCR)
+	xattr, err := lookupResp.ResponseForAPath(XATTR_XDCR)
 	if err != nil {
 		return nil, err
 	}

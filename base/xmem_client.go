@@ -323,3 +323,12 @@ func IsEExistsError(resp_status gomemcached.Status) bool {
 		return false
 	}
 }
+
+func IsENoEntError(resp_status gomemcached.Status) bool {
+	switch resp_status {
+	case gomemcached.KEY_ENOENT:
+		return true
+	default:
+		return false
+	}
+}

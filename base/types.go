@@ -1544,7 +1544,16 @@ type ConflictParams struct {
 	ResultNotifier MergeResultNotifier
 }
 
+type ConflictManagerAction int
+
+const (
+	SetMergeToSource  ConflictManagerAction = iota
+	SetTargetToSource ConflictManagerAction = iota
+	SetToConflictFeed ConflictManagerAction = iota
+)
+
 type MergeInputAndResult struct {
+	Action ConflictManagerAction
 	Input  *ConflictParams
 	Result interface{}
 	Err    error

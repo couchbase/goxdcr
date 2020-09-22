@@ -146,6 +146,7 @@ func setupMocksConflictMgr(xmem *XmemNozzle) *serviceDefMocks.ConflictManagerIfa
 	conflictMgr := &serviceDefMocks.ConflictManagerIface{}
 	conflictMgr.On("ResolveConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	conflictMgr.On("SetBackToSource", mock.Anything).Return(nil)
 	xmem.SetConflictManager(conflictMgr)
 	return conflictMgr
 }
@@ -431,6 +432,7 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	 */
 	fmt.Println("Test 9: Source larger CAS, but target MV dominates source MV. TargetSetBack.")
 	getXattrForCustomCR(9, t, "testdata/customCR/kingarthur6_largerCasSmallerMv.json", xmem, router, TargetSetBack)
+	assert.True(conflictMgr.AssertNumberOfCalls(t, "SetBackToSource", 1))
 }
 func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
 	assert := assert.New(t)
@@ -455,17 +457,8 @@ func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNo
 		assert.Equal(1, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
 	}
 	if len(getDoc_map) > 0 {
-		setBack_map, err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
+		err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
 		assert.Nil(err)
-		if expectedResult == Conflict {
-			assert.Equal(0, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
-		}
-		if expectedResult == TargetSetBack {
-			assert.Equal(1, len(setBack_map), fmt.Sprintf("Test %d failed", testId))
-			for _, v := range setBack_map {
-				printMultiLookupResult(testId, t, v.resp.Body)
-			}
-		}
 	}
 }
 func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
