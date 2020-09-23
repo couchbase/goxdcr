@@ -278,7 +278,7 @@ func (pipelineMgr *PipelineManager) AllReplicationSpecsForTargetCluster(targetCl
 	ret := make(map[string]*metadata.ReplicationSpecification)
 	for topic, rep_status := range pipelineMgr.ReplicationStatusMap() {
 		spec := rep_status.Spec()
-		if spec.TargetClusterUUID == targetClusterUuid {
+		if spec != nil && spec.TargetClusterUUID == targetClusterUuid {
 			ret[topic] = spec
 		}
 	}
@@ -289,7 +289,8 @@ func (pipelineMgr *PipelineManager) AllReplicationSpecsForTargetCluster(targetCl
 func (pipelineMgr *PipelineManager) AllReplicationsForTargetCluster(targetClusterUuid string) []string {
 	ret := make([]string, 0)
 	for topic, rep_status := range pipelineMgr.ReplicationStatusMap() {
-		if rep_status.Spec().TargetClusterUUID == targetClusterUuid {
+		spec := rep_status.Spec()
+		if spec != nil && spec.TargetClusterUUID == targetClusterUuid {
 			ret = append(ret, topic)
 		}
 	}
@@ -1382,9 +1383,12 @@ func (r *PipelineUpdater) checkAndDisableProblematicFeatures() {
 			// Xmem is stuck or collection error can only be declared after an elongated period of xmem timeout
 			// It's more frequent than regular refresh interval, but not too frequent to bombard target ns_server
 			// May need to revisit if XDCR number of replication scales to a lot and all of them have the same issue
-			err := r.pipelineMgr.ForceTargetRefreshManifest(r.rep_status.Spec())
-			if err != nil {
-				r.logger.Errorf("Unable to force target to refresh collections manifest: %v", err)
+			spec := r.rep_status.Spec()
+			if spec != nil {
+				err := r.pipelineMgr.ForceTargetRefreshManifest(spec)
+				if err != nil {
+					r.logger.Errorf("Unable to force target to refresh collections manifest: %v", err)
+				}
 			}
 		}
 	}
@@ -1609,6 +1613,9 @@ func (r *PipelineUpdater) raiseXattrWarningIfNeeded() {
 func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {
 	if r.disabledFeatures > 0 && (r.disabledFeatures&disabledCompression > 0) {
 		spec := r.rep_status.Spec()
+		if spec == nil {
+			return
+		}
 		var errMsg string
 		switch r.disabledCompressionReason {
 		case DCIncompatible:
