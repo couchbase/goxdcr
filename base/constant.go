@@ -117,7 +117,8 @@ var DefaultCollectionId uint32 = 0
 var CollectionsUidBase int = 16
 
 // URL related constants
-var UrlDelimiter = "/"
+const UrlDelimiter = "/"
+
 var UrlPortNumberDelimiter = ":"
 
 // Custom conflict resolution related constants
@@ -325,6 +326,7 @@ const (
 	Pools                          = "pools"
 	RemoteClusterHostnameMode      = "network_type"
 	ConnectivityStatus             = "connectivityStatus"
+	RemoteBucketManifest           = "remoteBucketManifest"
 )
 
 // secure type for remote cluster reference

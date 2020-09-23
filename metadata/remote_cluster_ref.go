@@ -93,6 +93,9 @@ type RemoteClusterReference struct {
 
 	// If requested by REST, this field will be non-Empty
 	connectivityStatus string
+
+	// If specifically requested, this will contain fetched remote bucket manifest
+	TargetBucketManifest map[string]*CollectionsManifest
 }
 
 type HostNameSrvType int
@@ -300,6 +303,9 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	}
 	if ref.connectivityStatus != "" {
 		outputMap[base.ConnectivityStatus] = ref.connectivityStatus
+	}
+	if len(ref.TargetBucketManifest) > 0 {
+		outputMap[base.RemoteBucketManifest] = ref.TargetBucketManifest
 	}
 
 	return outputMap

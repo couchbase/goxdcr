@@ -112,13 +112,13 @@ func (_m *RemoteClusterSvc) GetConnectionStringForRemoteCluster(ref *metadata.Re
 	return r0, r1
 }
 
-// GetManifestByUuid provides a mock function with given fields: uuid, bucketName, forceRefresh
-func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, forceRefresh bool) (*metadata.CollectionsManifest, error) {
-	ret := _m.Called(uuid, bucketName, forceRefresh)
+// GetManifestByUuid provides a mock function with given fields: uuid, bucketName, forceRefresh, restAPIQuery
+func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
+	ret := _m.Called(uuid, bucketName, forceRefresh, restAPIQuery)
 
 	var r0 *metadata.CollectionsManifest
-	if rf, ok := ret.Get(0).(func(string, string, bool) *metadata.CollectionsManifest); ok {
-		r0 = rf(uuid, bucketName, forceRefresh)
+	if rf, ok := ret.Get(0).(func(string, string, bool, bool) *metadata.CollectionsManifest); ok {
+		r0 = rf(uuid, bucketName, forceRefresh, restAPIQuery)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*metadata.CollectionsManifest)
@@ -126,8 +126,8 @@ func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, fo
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, bool) error); ok {
-		r1 = rf(uuid, bucketName, forceRefresh)
+	if rf, ok := ret.Get(1).(func(string, string, bool, bool) error); ok {
+		r1 = rf(uuid, bucketName, forceRefresh, restAPIQuery)
 	} else {
 		r1 = ret.Error(1)
 	}

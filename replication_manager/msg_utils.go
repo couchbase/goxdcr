@@ -305,7 +305,7 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 }
 
 // decode parameters from create remote cluster request
-func DecodeCreateRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
+func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
 	var err1 error
 	var demandEncryption bool

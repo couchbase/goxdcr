@@ -44,6 +44,31 @@ func (_m *Pipeline) GetAsyncListenerMap() map[string]common.AsyncComponentEventL
 	return r0
 }
 
+// GetBrokenMapRO provides a mock function with given fields:
+func (_m *Pipeline) GetBrokenMapRO() (metadata.CollectionNamespaceMapping, func()) {
+	ret := _m.Called()
+
+	var r0 metadata.CollectionNamespaceMapping
+	if rf, ok := ret.Get(0).(func() metadata.CollectionNamespaceMapping); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(metadata.CollectionNamespaceMapping)
+		}
+	}
+
+	var r1 func()
+	if rf, ok := ret.Get(1).(func() func()); ok {
+		r1 = rf()
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(func())
+		}
+	}
+
+	return r0, r1
+}
+
 // InstanceId provides a mock function with given fields:
 func (_m *Pipeline) InstanceId() string {
 	ret := _m.Called()
@@ -82,6 +107,11 @@ func (_m *Pipeline) RuntimeContext() common.PipelineRuntimeContext {
 // SetAsyncListenerMap provides a mock function with given fields: _a0
 func (_m *Pipeline) SetAsyncListenerMap(_a0 map[string]common.AsyncComponentEventListener) {
 	_m.Called(_a0)
+}
+
+// SetBrokenMap provides a mock function with given fields: brokenMap
+func (_m *Pipeline) SetBrokenMap(brokenMap metadata.CollectionNamespaceMapping) {
+	_m.Called(brokenMap)
 }
 
 // SetProgressRecorder provides a mock function with given fields: recorder

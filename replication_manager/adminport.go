@@ -230,12 +230,63 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 		return response, err
 	}
 
-	remoteClusters, err := RemoteClusterService().RemoteClusters()
-	if err != nil {
-		return nil, err
+	remoteClusterGetOpts := parseGetRemoteClusterRequestQuery(request)
+
+	var remoteClusters map[string]*metadata.RemoteClusterReference
+	if remoteClusterGetOpts.ShouldPopulateRemoteBucketManifest() {
+		rcClone, err := RemoteClusterService().RemoteClusterByUuid(remoteClusterGetOpts.RemoteClusterUuid, false)
+		if err != nil {
+			return EncodeRemoteClusterErrorIntoResponse(err)
+		}
+		manifest, err := RemoteClusterService().GetManifestByUuid(remoteClusterGetOpts.RemoteClusterUuid, remoteClusterGetOpts.BucketManifestBucketName, false, true)
+		if err != nil {
+			return EncodeRemoteClusterErrorIntoResponse(err)
+		}
+
+		rcClone.TargetBucketManifest = make(map[string]*metadata.CollectionsManifest)
+		rcClone.TargetBucketManifest[remoteClusterGetOpts.BucketManifestBucketName] = manifest
+		remoteClusters = make(map[string]*metadata.RemoteClusterReference)
+		remoteClusters[rcClone.Id()] = rcClone
+	} else {
+		remoteClusters, err = RemoteClusterService().RemoteClusters()
+		if err != nil {
+			return EncodeRemoteClusterErrorIntoResponse(err)
+		}
+	}
+	return NewGetRemoteClustersResponse(remoteClusters)
+}
+
+type getRemoteClusterOpts struct {
+	BucketManifestBucketName string
+	RemoteClusterUuid        string
+}
+
+func (g getRemoteClusterOpts) ShouldPopulateRemoteBucketManifest() bool {
+	return g.BucketManifestBucketName != "" && g.RemoteClusterUuid != ""
+}
+
+func parseGetRemoteClusterRequestQuery(request *http.Request) getRemoteClusterOpts {
+	var opt getRemoteClusterOpts
+	if request == nil {
+		return opt
 	}
 
-	return NewGetRemoteClustersResponse(remoteClusters)
+	query := request.URL.Query()
+	if query == nil || len(query) == 0 {
+		return opt
+	}
+
+	for key, valArr := range query {
+		if key == base.RemoteBucketManifest && len(valArr) == 1 {
+			// Should be in the format of <remoteClusteRUUID>/<Bucketname>
+			uuidAndBucketName := strings.Split(valArr[0], base.UrlDelimiter)
+			if len(uuidAndBucketName) == 2 {
+				opt.RemoteClusterUuid = uuidAndBucketName[0]
+				opt.BucketManifestBucketName = uuidAndBucketName[1]
+			}
+		}
+	}
+	return opt
 }
 
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
@@ -250,7 +301,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 
 	remoteClusterService := RemoteClusterService()
 
-	justValidate, remoteClusterRef, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
+	justValidate, remoteClusterRef, errorsMap, err := DecodeRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -292,7 +343,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 
 	logger_ap.Infof("Request params: remoteClusterName=%v\n", remoteClusterName)
 
-	justValidate, remoteClusterRef, errorsMap, err := DecodeCreateRemoteClusterRequest(request)
+	justValidate, remoteClusterRef, errorsMap, err := DecodeRemoteClusterRequest(request)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {

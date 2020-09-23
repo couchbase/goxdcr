@@ -73,5 +73,5 @@ type RemoteClusterSvc interface {
 	GetRefListForRestartAndClearState() ([]*metadata.RemoteClusterReference, error)
 
 	// Gets the last pulled manifest
-	GetManifestByUuid(uuid, bucketName string, forceRefresh bool) (manifest *metadata.CollectionsManifest, err error)
+	GetManifestByUuid(uuid, bucketName string, forceRefresh, restAPIQuery bool) (manifest *metadata.CollectionsManifest, err error)
 }

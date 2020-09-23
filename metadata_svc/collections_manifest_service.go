@@ -990,8 +990,8 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 	getRetry := func() error {
 		clusterUuid := a.replicationSpec.TargetClusterUUID
 		bucketName := a.replicationSpec.TargetBucketName
-		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, force)
-		if err != nil {
+		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, force, false)
+		if err != nil && err != ErrorRemoteClusterNoCollectionsCapability {
 			a.logger.Errorf("RemoteClusterService GetManifest on %v for bucket %v returned %v\n", clusterUuid, bucketName, err)
 			return err
 		}

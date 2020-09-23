@@ -322,6 +322,10 @@ type RemoteClusterAgent struct {
 
 	// To be able to return remote cluster status
 	connectivityHelper *ConnectivityHelper
+
+	// To prevent malicious actors, for REST querying of target bucket manifest
+	// this is set to non-0 if in cool down period
+	restQueryCoolDown uint32
 }
 
 const (
@@ -1912,7 +1916,7 @@ func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*m
 }
 
 // refreshIfPossible to prevent overwhelming target outside of refresh interval
-func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossible bool) (*metadata.CollectionsManifest, error) {
+func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossible bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
 	// Avoid get to avoid clone since this is a high-volume call
 	if !agent.currentCapability.HasInitialized() || atomic.LoadUint32(&agent.initDone) == 0 {
 		return nil, RefreshNotEnabledYet
@@ -1920,18 +1924,25 @@ func (agent *RemoteClusterAgent) GetManifest(bucketName string, refreshIfPossibl
 
 	if !agent.currentCapability.HasCollectionSupport() {
 		// Upper level should have protection against not having collection support
-		return nil, nil
+		return nil, ErrorRemoteClusterNoCollectionsCapability
 	}
 
 	agent.bucketMtx.RLock()
 	getter, ok := agent.bucketManifestGetters[bucketName]
-	if !ok {
+	if !ok && !restAPIQuery {
 		errMsg := fmt.Sprintf("Unable to find manifest getter for bucket %v", bucketName)
 		agent.logger.Warnf(errMsg)
 		agent.bucketMtx.RUnlock()
 		return nil, fmt.Errorf(errMsg)
 	}
 	agent.bucketMtx.RUnlock()
+
+	if !ok && restAPIQuery {
+		// When REST path is asking for a manifest, it's most likely UI trying to get the manifest so it can display information
+		// It also means that the replication to the said target bucket should not already exist
+		// So we will need a one time getter for this purpose
+		return agent.OneTimeGetRemoteBucketManifest(bucketName)
+	}
 
 	return getter.GetManifest(), nil
 }
@@ -3047,6 +3058,10 @@ func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error)
 			return true, errors.New(errMsg[len(InvalidRemoteClusterOperationErrorMessage):])
 		} else if strings.HasPrefix(err.Error(), UnknownRemoteClusterErrorMessage) {
 			return true, err
+		} else if strings.HasSuffix(err.Error(), utilities.NonExistentBucketError.Error()) {
+			return true, utilities.NonExistentBucketError
+		} else if err == coolDownError {
+			return true, coolDownError
 		} else {
 			return false, err
 		}
@@ -3260,7 +3275,7 @@ func (service *RemoteClusterService) updateMetaSvc(metaSvc service_def.MetadataS
 	}
 }
 
-func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, forceRefresh bool) (*metadata.CollectionsManifest, error) {
+func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, forceRefresh, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
 	service.agentMutex.RLock()
 	agent, ok := service.agentCacheUuidMap[uuid]
 	service.agentMutex.RUnlock()
@@ -3269,7 +3284,7 @@ func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, 
 		return nil, fmt.Errorf("Unable to find remote cluster agent given cluster UUID: %v\n", uuid)
 	}
 
-	return agent.GetManifest(bucketName, forceRefresh)
+	return agent.GetManifest(bucketName, forceRefresh, restAPIQuery)
 }
 
 func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
@@ -3336,4 +3351,64 @@ func (agent *RemoteClusterAgent) waitForRefreshOngoing() {
 		agent.refreshMtx.Unlock()
 		time.Sleep(50 * time.Nanosecond)
 	}
+}
+
+var coolDownPeriod = 10 * time.Second
+var coolDownError = fmt.Errorf("This remote cluster has recently just serviced manifest retrieval request and is currently in cool down. Please wait %v", coolDownPeriod)
+
+func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(bucketName string) (*metadata.CollectionsManifest, error) {
+	if atomic.LoadUint32(&agent.restQueryCoolDown) > 0 {
+		return nil, coolDownError
+	}
+
+	agent.refMtx.RLock()
+	userName := agent.reference.UserName()
+	password := agent.reference.Password()
+	authMech := agent.reference.HttpAuthMech()
+	cert := agent.reference.Certificate()
+	sanInCert := agent.reference.SANInCertificate()
+	clientCert := agent.reference.ClientCertificate()
+	clientKey := agent.reference.ClientKey()
+	connStr, err := agent.reference.MyConnectionStr()
+	agent.refMtx.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	useExternal, err := agent.UsesAlternateAddress()
+	if err != nil {
+		return nil, err
+	}
+
+	atomic.StoreUint32(&agent.restQueryCoolDown, 1)
+	defer func() {
+		go func() {
+			time.Sleep(coolDownPeriod)
+			atomic.StoreUint32(&agent.restQueryCoolDown, 0)
+		}()
+	}()
+
+	_, _, _, _, _, _, err = agent.utils.RemoteBucketValidationInfo(connStr, bucketName, userName, password, authMech, cert, sanInCert, clientCert, clientKey, agent.logger, useExternal)
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = agent.RegisterBucketRequest(bucketName)
+	if err != nil {
+		return nil, err
+	}
+	agent.bucketMtx.RLock()
+	manifestGetter, ok := agent.bucketManifestGetters[bucketName]
+	if !ok {
+		panic("Getter should be found")
+	}
+	agent.bucketMtx.RUnlock()
+	manifest := manifestGetter.GetManifest()
+	agent.UnRegisterBucketRefresh(bucketName)
+
+	if manifest == nil {
+		manifest = &defaultManifest
+	}
+
+	return manifest, nil
 }
