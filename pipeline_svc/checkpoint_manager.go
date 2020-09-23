@@ -968,6 +968,8 @@ func (ckmgr *CheckpointManager) loadBrokenMapFromCkptDocs(ckptDocs map[uint16]*m
 			}
 		}
 	}
+
+	go ckmgr.updateReplStatusBrokenMap()
 }
 
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
@@ -1839,6 +1841,7 @@ func (ckmgr *CheckpointManager) OnEvent(event *common.Event) {
 			go ckmgr.logBrokenMapUpdatesToUI(olderMap, newerMap)
 			// Just in case checkpoint operations may use this, ensure that this belongs
 			go ckmgr.preUpsertBrokenMapTask(newerMap)
+			go ckmgr.updateReplStatusBrokenMap()
 		}
 		syncCh <- nil
 		close(syncCh)
@@ -2031,4 +2034,12 @@ func (ckgr *CheckpointManager) IsSharable() bool {
 
 func (ckmgr *CheckpointManager) Detach(pipeline common.Pipeline) error {
 	return base.ErrorNotSupported
+}
+
+func (ckmgr *CheckpointManager) updateReplStatusBrokenMap() {
+	ckmgr.cachedBrokenMap.lock.RLock()
+	brokenMapClone := ckmgr.cachedBrokenMap.brokenMap.Clone()
+	ckmgr.cachedBrokenMap.lock.RUnlock()
+
+	ckmgr.pipeline.SetBrokenMap(brokenMapClone)
 }

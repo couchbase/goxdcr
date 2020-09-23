@@ -104,4 +104,7 @@ type Pipeline interface {
 
 	GetAsyncListenerMap() map[string]AsyncComponentEventListener
 	SetAsyncListenerMap(map[string]AsyncComponentEventListener)
+
+	GetBrokenMapRO() (brokenMapReadOnly metadata.CollectionNamespaceMapping, callOnceDone func())
+	SetBrokenMap(brokenMap metadata.CollectionNamespaceMapping)
 }

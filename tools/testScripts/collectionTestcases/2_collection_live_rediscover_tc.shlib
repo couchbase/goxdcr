@@ -144,6 +144,6 @@ function runTestCase {
  	cleanupBuckets
  	cleanupRemoteClusterRefs
  	cleanupTestCaseInternalSettings
- 	# remove trap as no longer needed
+	# remove trap as no longer needed
  	trap - EXIT
 }

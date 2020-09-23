@@ -115,6 +115,9 @@ type GenericPipeline struct {
 
 	instance_id       int
 	progress_recorder common.PipelineProgressRecorder
+
+	brokenMapMtx sync.RWMutex
+	brokenMap    metadata.CollectionNamespaceMapping
 }
 
 //Get the runtime context of this pipeline
@@ -907,6 +910,21 @@ func (genericPipeline *GenericPipeline) SetAsyncListenerMap(asyncListenerMap map
 
 func (genericPipeline *GenericPipeline) Type() common.PipelineType {
 	return genericPipeline.pipelineType
+}
+
+// The map itself is not cloned, so to prevent concurrent modification, the caller must call the unlock func once done
+func (genericPipeline *GenericPipeline) GetBrokenMapRO() (metadata.CollectionNamespaceMapping, func()) {
+	genericPipeline.brokenMapMtx.RLock()
+	unlockFunc := func() {
+		genericPipeline.brokenMapMtx.RUnlock()
+	}
+	return genericPipeline.brokenMap, unlockFunc
+}
+
+func (genericPipeline *GenericPipeline) SetBrokenMap(brokenMap metadata.CollectionNamespaceMapping) {
+	genericPipeline.brokenMapMtx.Lock()
+	defer genericPipeline.brokenMapMtx.Unlock()
+	genericPipeline.brokenMap = brokenMap
 }
 
 //enforcer for GenericPipeline to implement Pipeline

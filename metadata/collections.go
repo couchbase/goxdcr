@@ -1183,7 +1183,7 @@ func (s *SourceNamespace) GetType() SourceNamespaceType {
 func (s *SourceNamespace) String() string {
 	switch s.nsType {
 	case SourceCollectionNamespace:
-		return fmt.Sprintf("Scope: %v Collection: %v", s.ScopeName, s.CollectionName)
+		return s.ToIndexString()
 	case SourceDefaultCollectionFilter:
 		return fmt.Sprintf("%v", s.filterString)
 	default:
@@ -1601,6 +1601,20 @@ func (c *CollectionNamespaceMapping) ToSnappyCompressed() ([]byte, error) {
 		return nil, err
 	}
 	return snappy.Encode(nil, marshalledJson), nil
+}
+
+func (c *CollectionNamespaceMapping) ToExternalMap() map[string][]string {
+	if c == nil || len(*c) == 0 {
+		return nil
+	}
+
+	externalMap := make(map[string][]string)
+	for k, v := range *c {
+		for _, oneV := range v {
+			externalMap[k.String()] = append(externalMap[k.String()], oneV.ToIndexString())
+		}
+	}
+	return externalMap
 }
 
 // A collection namespace Mapping Index - The key will be simply "Scope:Collection"

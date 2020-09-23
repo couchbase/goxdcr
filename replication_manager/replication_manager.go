@@ -872,11 +872,14 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 			continue
 		}
 		fullReplId := common.ComposeFullTopic(replId, common.PipelineType(i))
+		brokenMap, brokenMapDoneFunc := rep_status.Pipeline().GetBrokenMapRO()
 		replInfo := base.ReplicationInfo{
-			Id:        fullReplId,
-			StatsMap:  replication_mgr.utils.GetMapFromExpvarMap(expvarMap),
-			ErrorList: make([]base.ErrorInfo, 0),
+			Id:                      fullReplId,
+			StatsMap:                replication_mgr.utils.GetMapFromExpvarMap(expvarMap),
+			BrokenCollectionMapping: brokenMap.ToExternalMap(),
+			ErrorList:               make([]base.ErrorInfo, 0),
 		}
+		brokenMapDoneFunc()
 		validateStatsMap(replInfo.StatsMap)
 
 		if common.PipelineType(i) == common.MainPipeline {

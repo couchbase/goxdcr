@@ -147,9 +147,10 @@ type ClusterConnectionInfoProvider interface {
 }
 
 type ReplicationInfo struct {
-	Id        string
-	StatsMap  map[string]interface{}
-	ErrorList []ErrorInfo
+	Id                      string
+	StatsMap                map[string]interface{}
+	BrokenCollectionMapping map[string][]string
+	ErrorList               []ErrorInfo
 }
 
 type ErrorInfo struct {
