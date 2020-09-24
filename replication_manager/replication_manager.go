@@ -513,6 +513,10 @@ func InternalSettingsService() service_def.InternalSettingsSvc {
 	return replication_mgr.internal_settings_svc
 }
 
+func CollectionsManifestService() service_def.CollectionsManifestSvc {
+	return replication_mgr.collectionsManifestSvc
+}
+
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
 func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (string, map[string]error, error, []string) {

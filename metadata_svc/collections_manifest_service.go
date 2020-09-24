@@ -211,17 +211,35 @@ func (c *CollectionsManifestService) getAgent(spec *metadata.ReplicationSpecific
 	return agent, nil
 }
 
-func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.ReplicationSpecification) (src, tgt *metadata.CollectionsManifest, err error) {
-	var agent service_def.CollectionsManifestAgentIface
+func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.ReplicationSpecification, specMayNotExist bool) (src, tgt *metadata.CollectionsManifest, err error) {
+	var agent *CollectionsManifestAgent
 	agent, err = c.getAgent(spec)
-	if err != nil {
+	if err != nil && !specMayNotExist {
 		return
+	}
+
+	var agentIsTemporary bool
+	if agent == nil && specMayNotExist {
+		tempBucketManifestGetter := NewBucketManifestGetter(spec.SourceBucketName, c, time.Duration(base.ManifestRefreshSrcInterval)*time.Second)
+		agent = NewCollectionsManifestAgent(spec.Id,
+			c.remoteClusterSvc, c.checkpointsSvc, c.logger, c.utilities, spec,
+			c, tempBucketManifestGetter.GetManifest, c.metakvSvc, nil)
+		agent.SetTempAgent()
+		agentIsTemporary = true
+		err = agent.Start()
+		if err != nil {
+			return
+		}
 	}
 
 	src, srcErr := agent.GetSourceManifest()
 	tgt, tgtErr := agent.GetTargetManifest()
 	if srcErr != nil || tgtErr != nil {
 		err = fmt.Errorf("GetLatestManifest - sourceErr: %v targetError: %v", srcErr, tgtErr)
+	}
+
+	if agentIsTemporary {
+		agent.Stop()
 	}
 	return
 }
@@ -361,6 +379,9 @@ type CollectionsManifestAgent struct {
 	singlePersistReq       chan bool
 	singlePersistResultReq chan bool
 	singlePersistResp      chan AgentPersistResult
+
+	// If agent is used as part of spec creation/validation process, then this is considered a tempAgent
+	tempAgent bool
 }
 
 func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
@@ -409,6 +430,10 @@ func (a *CollectionsManifestAgent) refreshAndNotify(refreshImmediately bool) {
 }
 
 func (a *CollectionsManifestAgent) notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt *metadata.CollectionsManifest) {
+	if a.tempAgent {
+		// tempAgents do not notify manifest change
+		return
+	}
 	oldPair := metadata.NewCollectionsManifestPair(oldSrc, oldTgt)
 	newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
 	err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
@@ -694,28 +719,32 @@ func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() {
 
 // These should not block
 func (a *CollectionsManifestAgent) Start() error {
-
-	var refreshImmediately bool
 	if atomic.CompareAndSwapUint32(&a.started, 0, 1) {
-		srcErr, tgtErr := a.loadManifestsFromMetakv()
-		if srcErr == service_def.MetadataNotFoundErr {
-			refreshImmediately = true
-			srcErr = nil
-		}
-		if tgtErr == service_def.MetadataNotFoundErr {
-			refreshImmediately = true
-			tgtErr = nil
-		}
+		if a.tempAgent {
+			a.populateRemoteClusterRefOnce()
+			a.refreshAndNotify(true)
+		} else {
+			var refreshImmediately bool
+			srcErr, tgtErr := a.loadManifestsFromMetakv()
+			if srcErr == service_def.MetadataNotFoundErr {
+				refreshImmediately = true
+				srcErr = nil
+			}
+			if tgtErr == service_def.MetadataNotFoundErr {
+				refreshImmediately = true
+				tgtErr = nil
+			}
 
-		if srcErr != nil || tgtErr != nil {
-			a.logger.Warnf("CollectionsManifestAgent %v starting sourceErr: %v tgtErr: %v", a.replicationSpec.Id, srcErr, tgtErr)
-			// For now - since collections isn't officially supported, just log the warning and return nil
-			return nil
-		}
+			if srcErr != nil || tgtErr != nil {
+				a.logger.Warnf("CollectionsManifestAgent %v starting sourceErr: %v tgtErr: %v", a.replicationSpec.Id, srcErr, tgtErr)
+				// For now - since collections isn't officially supported, just log the warning and return nil
+				return nil
+			}
 
-		go a.populateRemoteClusterRefOnce()
-		go a.runPeriodicRefresh(refreshImmediately)
-		go a.runPersistRequestHandler()
+			go a.populateRemoteClusterRefOnce()
+			go a.runPeriodicRefresh(refreshImmediately)
+			go a.runPersistRequestHandler()
+		}
 		return nil
 	}
 	return parts.PartAlreadyStartedError
@@ -990,7 +1019,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 	getRetry := func() error {
 		clusterUuid := a.replicationSpec.TargetClusterUUID
 		bucketName := a.replicationSpec.TargetBucketName
-		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, force, false)
+		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, force, a.tempAgent)
 		if err != nil && err != ErrorRemoteClusterNoCollectionsCapability {
 			a.logger.Errorf("RemoteClusterService GetManifest on %v for bucket %v returned %v\n", clusterUuid, bucketName, err)
 			return err
@@ -1279,6 +1308,10 @@ func (a *CollectionsManifestAgent) ForceTargetManifestRefresh() error {
 		a.notifyManifestsChange(nil /*oldSrc*/, nil /*newSrc*/, oldTgt, newTgt)
 	}
 	return err
+}
+
+func (a *CollectionsManifestAgent) SetTempAgent() {
+	a.tempAgent = true
 }
 
 // Unit test func

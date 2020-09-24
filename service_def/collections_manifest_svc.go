@@ -52,7 +52,8 @@ type CollectionsManifestSvc interface {
 	CollectionsManifestOps
 
 	// When pipelines start without resuming from checkpoints, use this to load the latest manifests
-	GetLatestManifests(spec *metadata.ReplicationSpecification) (src, tgt *metadata.CollectionsManifest, err error)
+	// Also for validating mapping when creating/changing specs, use specMayNotExist
+	GetLatestManifests(spec *metadata.ReplicationSpecification, specMayNotExist bool) (src, tgt *metadata.CollectionsManifest, err error)
 
 	// Persist all manifests that are needed by this replication
 	PersistNeededManifests(spec *metadata.ReplicationSpecification) error
@@ -87,4 +88,5 @@ type CollectionsManifestAgentIface interface {
 	GetSpecificTargetManifest(manifestVersion uint64) (*metadata.CollectionsManifest, error)
 	PersistNeededManifests() (error, error, bool, bool)
 	GetLastPersistedManifests() (*metadata.CollectionsManifestPair, error)
+	SetTempAgent()
 }

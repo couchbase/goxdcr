@@ -57,7 +57,8 @@ const (
 	CollectionsMgtMirrorKey  = base.CollectionsMirrorKey
 	CollectionsMgtMigrateKey = base.CollectionsMigrateKey
 
-	CollectionsMappingRulesKey = base.CollectionsMappingRulesKey
+	CollectionsMappingRulesKey    = base.CollectionsMappingRulesKey
+	CollectionsSkipSourceCheckKey = base.CollectionsSkipSourceCheckKey
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey
@@ -71,13 +72,17 @@ const (
 )
 
 // settings whose default values cannot be viewed or changed through rest apis
-var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey}
+var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
+	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey, CollectionsMgtMappingKey, CollectionsMgtMigrateKey}
 
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = []string{}
 
 // settings that are internal and should be hidden from outside
-var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey}
+var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey}
+
+// Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
+var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey}
 
 // settings that are externally multiple values, but internally single value
 var MultiValueMap map[string]string = map[string]string{
@@ -125,6 +130,8 @@ var CollectionsMappingRulesConfig = &SettingsConfig{CollectionsMappingRulesType{
 
 var MergeFunctionMappingConfig = &SettingsConfig{base.MergeFunctionMappingType{}, nil}
 
+var CollectionsSkipSrcCheckConfig = &SettingsConfig{false, nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
@@ -148,6 +155,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CollectionsMgtMultiKey:            CollectionsMgtConfig,
 	CollectionsMappingRulesKey:        CollectionsMappingRulesConfig,
 	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
+	CollectionsSkipSourceCheckKey:     CollectionsSkipSrcCheckConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -871,6 +879,8 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 			return
 		}
 		convertedValue = value
+	case CollectionsSkipSourceCheckKey:
+		fallthrough
 	case FilterSkipRestreamKey:
 		var skip bool
 		skip, err = strconv.ParseBool(value)
@@ -1004,4 +1014,13 @@ func IsSettingValueMutable(key string) bool {
 		}
 	}
 	return true
+}
+
+func IsSettingValueTemporary(key string) bool {
+	for _, setting := range TemporaryValidationSettings {
+		if setting == key {
+			return true
+		}
+	}
+	return false
 }

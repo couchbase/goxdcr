@@ -553,7 +553,7 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 		} else if !oldRoutingRules.SameAs(newRoutingRules) {
 			// Explicit mapping and explicit mapping rules have changed
 			specForId := metadata.ReplicationSpecification{Id: specId} /* only need the spec for the Id */
-			srcMan, tgtMan, err := b.collectionsManifestSvc.GetLatestManifests(&specForId)
+			srcMan, tgtMan, err := b.collectionsManifestSvc.GetLatestManifests(&specForId, false)
 			if err != nil {
 				b.logger.Errorf("error - Unable to retrieve manifests for spec %v due to %v - recommended to restream", specId, err)
 				return err
@@ -562,11 +562,11 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 				Source: srcMan,
 				Target: tgtMan,
 			}
-			newMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, newCollectionMode, newRoutingRules)
+			newMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, newCollectionMode, newRoutingRules, false)
 			if err != nil {
 				return err
 			}
-			oldMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, oldCollectionMode, oldRoutingRules)
+			oldMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, oldCollectionMode, oldRoutingRules, false)
 			if err != nil {
 				return err
 			}
@@ -688,7 +688,7 @@ func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpe
 	var tgt *metadata.CollectionsManifest
 
 	retryOp := func(interface{}) (interface{}, error) {
-		src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec)
+		src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec, false)
 		if err != nil {
 			if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
 				defaultManifest := metadata.NewDefaultCollectionsManifest()
@@ -950,7 +950,7 @@ func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSo
 			Source: sourceManifest,
 			Target: newTargetManifest,
 		}
-		explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules())
+		explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules(), false)
 		if err != nil {
 			panic("FIME")
 		}
@@ -985,7 +985,7 @@ func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpeci
 		Source: oldSourceManifest,
 		Target: oldTargetManifest,
 	}
-	oldExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules())
+	oldExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules(), false)
 	if err != nil {
 		b.logger.Errorf("%v Error compiling old explicit map: %v", spec.Id, err)
 		panic("FIXME")
@@ -993,7 +993,7 @@ func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpeci
 	}
 	pair.Source = newSourceManifest
 	pair.Target = newTargetManifest
-	newExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules())
+	newExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules(), false)
 	if err != nil {
 		b.logger.Errorf("%v Error compiling new explicit map: %v", spec.Id, err)
 		panic("FIXME")

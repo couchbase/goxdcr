@@ -576,7 +576,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 		errorsMap[FilterExpression] = err
 	}
 
-	err = validateCollectionsMappingRule(settings, base.CollectionsMgtDefault)
+	err = validateCollectionsMappingRule(settings, base.CollectionsMgtDefault, fromBucket, toBucket, toCluster)
 	if err != nil {
 		errorsMap[CollectionsMappingRulesKey] = err
 	}
@@ -585,6 +585,7 @@ func DecodeCreateReplicationRequest(request *http.Request) (justValidate bool, f
 	if err != nil {
 		errorsMap[MergeFunctionMappingKey] = err
 	}
+	cleanupTempReplicationSettingKeys(settings)
 	return
 }
 
@@ -622,7 +623,7 @@ func filterExpressionVariousChecks(settings metadata.ReplicationSettingsMap, cre
 	return nil
 }
 
-func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, currentMode base.CollectionsMgtType) error {
+func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, currentMode base.CollectionsMgtType, srcBucket, targetBucketName, targetClusterName string) error {
 	mappingRulesObj, exists := settings[metadata.CollectionsMappingRulesKey]
 	if !exists {
 		return nil
@@ -653,8 +654,47 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 		}
 		return mappingRules.ValidateMigrateRules()
 	} else {
-		return mappingRules.ValidateExplicitMapping()
+		err := mappingRules.ValidateExplicitMapping()
+		if err != nil {
+			return err
+		}
+		if skipSrcCheck, ok := settings[metadata.CollectionsSkipSourceCheckKey].(bool); ok && skipSrcCheck {
+			return nil
+		}
+
+		err = validateSrcNamespacesExist(targetClusterName, srcBucket, targetBucketName, rulesToCheck, mappingRules)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+//Validate source mapping - which means we need to get manifests
+func validateSrcNamespacesExist(targetClusterName string, srcBucket string, targetBucketName string, rulesToCheck base.CollectionsMgtType, mappingRules metadata.CollectionsMappingRulesType) error {
+	if targetBucketName == "" || srcBucket == "" || targetClusterName == "" {
+		return base.ErrorInvalidInput
+	}
+
+	var err error
+	ref, err := RemoteClusterService().RemoteClusterByRefName(targetClusterName, false)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve remote cluster reference by name %v to validate source collection mapping", err)
+	}
+	getterSpec, err := metadata.NewReplicationSpecification(srcBucket, "", ref.Uuid(), targetBucketName, "")
+	if err != nil {
+		return fmt.Errorf("unable to generate spec for validating source mapping: %v", err)
+	}
+	srcManifest, tgtManifest, err := CollectionsManifestService().GetLatestManifests(getterSpec, true)
+	manifestsPair := metadata.CollectionsManifestPair{
+		Source: srcManifest,
+		Target: tgtManifest,
+	}
+	_, err = metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, rulesToCheck, mappingRules, true)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func validateMergeFunctionMapping(settings metadata.ReplicationSettingsMap) error {
@@ -688,6 +728,7 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	var isDefaultSettings bool
 	var isCapi bool
 	var currentCollectionMode = base.CollectionsMgtDefault
+	var spec *metadata.ReplicationSpecification
 	if len(replicationId) == 0 {
 		// empty replicationId indicates that we are handling default settings that are not replication specific
 		isDefaultSettings = true
@@ -695,7 +736,7 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 		isCapi = false
 	} else {
 		isDefaultSettings = false
-		spec, err := ReplicationSpecService().ReplicationSpec(replicationId)
+		spec, err = ReplicationSpecService().ReplicationSpec(replicationId)
 		if err != nil {
 			// if err is not nil, replicationId is likely invalid
 			// simply return. validation error will be raised downstream
@@ -719,7 +760,23 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 		errorsMap[FilterExpression] = err
 	}
 
-	err = validateCollectionsMappingRule(settings, currentCollectionMode)
+	var srcBucket string
+	var tgtBucket string
+	var tgtClusterName string
+	if !isDefaultSettings {
+		if spec == nil {
+			panic("Should not be nil")
+		}
+		srcBucket = spec.SourceBucketName
+		tgtBucket = spec.TargetBucketName
+		ref, err := RemoteClusterService().RemoteClusterByUuid(spec.TargetClusterUUID, false)
+		if err != nil {
+			errorsMap[base.PlaceHolderFieldKey] = err
+			return
+		}
+		tgtClusterName = ref.Name()
+	}
+	err = validateCollectionsMappingRule(settings, currentCollectionMode, srcBucket, tgtBucket, tgtClusterName)
 	if err != nil {
 		errorsMap[CollectionsMappingRulesKey] = err
 	}
@@ -727,7 +784,16 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	if err != nil {
 		errorsMap[MergeFunctionMappingKey] = err
 	}
+	cleanupTempReplicationSettingKeys(settings)
 	return
+}
+
+func cleanupTempReplicationSettingKeys(settings metadata.ReplicationSettingsMap) {
+	for key, _ := range settings {
+		if metadata.IsSettingValueTemporary(key) {
+			delete(settings, key)
+		}
+	}
 }
 
 // decode replicationId from create replication response

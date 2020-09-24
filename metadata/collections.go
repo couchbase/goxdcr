@@ -1204,7 +1204,7 @@ func NewDefaultCollectionMigrationMapping() CollectionNamespaceMapping {
 	return defaultMapping
 }
 
-func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules CollectionsMappingRulesType) (CollectionNamespaceMapping, error) {
+func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules CollectionsMappingRulesType, ensureSourceExists bool) (CollectionNamespaceMapping, error) {
 	if manifestsPair.Source == nil || manifestsPair.Target == nil {
 		return CollectionNamespaceMapping{}, fmt.Errorf("creating collection namespace mapping pair contains at least one nil element")
 	}
@@ -1217,7 +1217,7 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 		// Explicit mapping
 		switch mappingMode.IsMigrationOn() {
 		case false:
-			return rules.GetOutputMapping(manifestsPair, mappingMode)
+			return rules.GetOutputMapping(manifestsPair, mappingMode, ensureSourceExists)
 		case true:
 			outputMapping := CollectionNamespaceMapping{}
 			// Use a single shared datapool
@@ -2005,14 +2005,20 @@ func (c CollectionsMappingRulesType) GetPotentialTargetNamespaces(sourceNs *base
 // 2. S:C -> nil
 // 3. S -> TS
 // 4. S -> nil
-func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPair, mode base.CollectionsMgtType) (CollectionNamespaceMapping, error) {
+func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPair, mode base.CollectionsMgtType, ensureSourceExists bool) (CollectionNamespaceMapping, error) {
 	if mode.IsMigrationOn() {
 		return nil, base.ErrorInvalidInput
 	}
+	var sourceNotFoundErr = fmt.Errorf("the specific source namespace does not exist")
 
 	outNamespace := make(CollectionNamespaceMapping)
 	emptyNamespace := &base.CollectionNamespace{}
 	// At this stage, rules should have already been validated
+
+	var sourceDNEmap base.ErrorMap
+	if ensureSourceExists {
+		sourceDNEmap = make(base.ErrorMap)
+	}
 
 	// First populate rule 1 - S:C -> S:C
 	sourceNamespacesWithNoTarget := make(map[string]string)
@@ -2034,7 +2040,9 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 		_, sourceFoundErr := pair.Source.GetCollectionId(sourceNamespace.ScopeName, sourceNamespace.CollectionName)
 		_, targetFoundErr := pair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
 		if sourceFoundErr != nil {
-			// TODO MB-41445 - change srcNotFound to error
+			if ensureSourceExists {
+				sourceDNEmap[sourceNamespace.ToIndexString()] = sourceNotFoundErr
+			}
 			continue
 		}
 		if targetFoundErr != nil {
@@ -2067,6 +2075,9 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 		sourceScopeName := ruleKey
 		sourceCollections, err := pair.Source.GetAllCollectionsGivenScopeRO(sourceScopeName)
 		if err == base.ErrorNotFound {
+			if ensureSourceExists {
+				sourceDNEmap[sourceScopeName] = sourceNotFoundErr
+			}
 			continue
 		}
 
@@ -2110,6 +2121,9 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 		scopeName := ruleKey
 		sourceCollections, err := pair.Source.GetAllCollectionsGivenScopeRO(scopeName)
 		if err == base.ErrorNotFound {
+			if ensureSourceExists {
+				sourceDNEmap[scopeName] = sourceNotFoundErr
+			}
 			continue
 		}
 
@@ -2126,6 +2140,10 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 			}
 			outNamespace.AddSingleMapping(sourceNamespace, emptyNamespace)
 		}
+	}
+
+	if len(sourceDNEmap) > 0 {
+		return nil, fmt.Errorf(base.FlattenErrorMap(sourceDNEmap))
 	}
 
 	return outNamespace, nil

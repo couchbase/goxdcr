@@ -1201,6 +1201,9 @@ func (u *Utilities) GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defa
 // get bucket info
 // a specialized case of GetClusterInfo
 func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	if bucketName == "" {
+		return nil, fmt.Errorf("Bucket name cannot be empty")
+	}
 	bucketInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {

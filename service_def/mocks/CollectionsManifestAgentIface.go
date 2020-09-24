@@ -174,6 +174,11 @@ func (_m *CollectionsManifestAgentIface) PersistNeededManifests() (error, error,
 	return r0, r1, r2, r3
 }
 
+// SetTempAgent provides a mock function with given fields:
+func (_m *CollectionsManifestAgentIface) SetTempAgent() {
+	_m.Called()
+}
+
 // Start provides a mock function with given fields:
 func (_m *CollectionsManifestAgentIface) Start() error {
 	ret := _m.Called()

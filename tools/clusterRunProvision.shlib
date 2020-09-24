@@ -211,6 +211,7 @@ function insertPropertyIntoBucketReplPropertyMap {
 	local targetBucket=$4
 	local -n incomingMap=$5
 
+  BUCKET_REPL_PROPERTIES_MAP=()
 	for key in ${!incomingMap[@]}
 	do
 		BUCKET_REPL_PROPERTIES_MAP[${sourceCluster},${sourceBucket},${targetCluster},${targetBucket},${key}]=${incomingMap[$key]}
@@ -267,7 +268,9 @@ function getPropertiesFromBucketReplPropertyMap {
 	local sourceBucket=$2
 	local targetCluster=$3
 	local targetBucket=$4
-	
+
+	BUCKET_REPL_PROPERTIES_OUTPUT_MAP=()
+
 	local checkString="${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}"
 	# key is bucketName,Property
 	for bp in ${!BUCKET_REPL_PROPERTIES_MAP[@]}

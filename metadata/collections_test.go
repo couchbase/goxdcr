@@ -684,7 +684,7 @@ func TestExplicitMapping(t *testing.T) {
 
 	rules := make(CollectionsMappingRulesType)
 	rules["S2"] = "S1"
-	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	explicitMapIdx := explicitMap.CreateLookupIndex()
@@ -733,7 +733,7 @@ func TestExplicitMapping(t *testing.T) {
 	rules = make(CollectionsMappingRulesType)
 	rules["S1"] = "S2"
 	rules["S1:col2"] = nil
-	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	explicitMapIdx = explicitMap.CreateLookupIndex()
@@ -799,7 +799,7 @@ func TestExplicitMapping(t *testing.T) {
 		Source: &customSrcManifest,
 		Target: &customTgtManifest,
 	}
-	explicitMap, err = NewCollectionNamespaceMappingFromRules(customManifestPair, mappingMode, rules)
+	explicitMap, err = NewCollectionNamespaceMappingFromRules(customManifestPair, mappingMode, rules, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	explicitMapIdx = explicitMap.CreateLookupIndex()
@@ -872,7 +872,7 @@ func TestMigrationMapping(t *testing.T) {
 	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
 	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
 
-	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	assert.Equal(2, len(explicitMap))
@@ -901,7 +901,7 @@ func TestMigrationDiff(t *testing.T) {
 	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 
-	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules)
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	assert.Equal(0, len(explicitMap))
@@ -915,7 +915,7 @@ func TestMigrationDiff(t *testing.T) {
 		Source: &defaultManifest,
 		Target: &target,
 	}
-	newExplicitMap, err := NewCollectionNamespaceMappingFromRules(newPair, mappingMode, rules)
+	newExplicitMap, err := NewCollectionNamespaceMappingFromRules(newPair, mappingMode, rules, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	assert.Equal(2, len(newExplicitMap))

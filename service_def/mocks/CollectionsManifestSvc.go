@@ -72,13 +72,13 @@ func (_m *CollectionsManifestSvc) GetLastPersistedManifests(spec *metadata.Repli
 	return r0, r1
 }
 
-// GetLatestManifests provides a mock function with given fields: spec
-func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
-	ret := _m.Called(spec)
+// GetLatestManifests provides a mock function with given fields: spec, specMayNotExist
+func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationSpecification, specMayNotExist bool) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
+	ret := _m.Called(spec, specMayNotExist)
 
 	var r0 *metadata.CollectionsManifest
-	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) *metadata.CollectionsManifest); ok {
-		r0 = rf(spec)
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, bool) *metadata.CollectionsManifest); ok {
+		r0 = rf(spec, specMayNotExist)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*metadata.CollectionsManifest)
@@ -86,8 +86,8 @@ func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationS
 	}
 
 	var r1 *metadata.CollectionsManifest
-	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification) *metadata.CollectionsManifest); ok {
-		r1 = rf(spec)
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, bool) *metadata.CollectionsManifest); ok {
+		r1 = rf(spec, specMayNotExist)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(*metadata.CollectionsManifest)
@@ -95,8 +95,8 @@ func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationS
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func(*metadata.ReplicationSpecification) error); ok {
-		r2 = rf(spec)
+	if rf, ok := ret.Get(2).(func(*metadata.ReplicationSpecification, bool) error); ok {
+		r2 = rf(spec, specMayNotExist)
 	} else {
 		r2 = ret.Error(2)
 	}

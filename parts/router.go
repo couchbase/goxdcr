@@ -302,7 +302,7 @@ func (c *CollectionsRouter) Start() error {
 	atomic.StoreUint32(&c.started, 1)
 	c.mappingMtx.RLock()
 	modes := c.spec.Settings.GetCollectionModes()
-	curSrcMan, curTgtMan, err := c.collectionsManifestSvc.GetLatestManifests(c.spec)
+	curSrcMan, curTgtMan, err := c.collectionsManifestSvc.GetLatestManifests(c.spec, false)
 	if err != nil {
 		c.mappingMtx.RUnlock()
 		return err
@@ -330,7 +330,7 @@ func (c *CollectionsRouter) initializeInternals(pair metadata.CollectionsManifes
 	var err error
 	c.mappingMtx.Lock()
 	c.lastKnownSrcManifest = pair.Source
-	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules)
+	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules, false)
 	c.explicitMappingIdx = c.explicitMappings.CreateLookupIndex()
 	c.collectionMode = c.spec.Settings.GetCollectionModes()
 	c.cachedRules = rules
@@ -438,7 +438,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 		} else {
 			// Migration mode means all data is coming from default source collection, thus no denyMapping
 		}
-		latestSourceManifest, latestTargetManifest, err = c.collectionsManifestSvc.GetLatestManifests(c.spec)
+		latestSourceManifest, latestTargetManifest, err = c.collectionsManifestSvc.GetLatestManifests(c.spec, false)
 	} else {
 		latestTargetManifest, err = c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, math.MaxUint64)
 	}
@@ -505,7 +505,7 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 		Target: latestTargetManifest,
 	}
 
-	explicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, mappingMode, rules)
+	explicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, mappingMode, rules, false)
 	if err != nil {
 		c.logger.Errorf("Unable to create explicit mapping from rules given manifests %v and %v", manifestsPair.Source.Uid(), manifestsPair.Target.Uid())
 		return err

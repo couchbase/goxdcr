@@ -711,9 +711,11 @@ func (a FilterExpDelType) LogString() string {
 type CollectionsMgtType int
 
 const (
-	CollectionsMappingKey = "collectionsExplicitMapping"
-	CollectionsMirrorKey  = "collectionsMirroringMode"
-	CollectionsMigrateKey = "collectionsMigrationMode"
+	CollectionsMappingKey         = "collectionsExplicitMapping"
+	CollectionsMirrorKey          = "collectionsMirroringMode"
+	CollectionsMigrateKey         = "collectionsMigrationMode"
+	CollectionsMappingRulesKey    = "colMappingRules"
+	CollectionsSkipSourceCheckKey = "collectionsSkipSrcValidation"
 )
 
 const (
@@ -769,8 +771,6 @@ func (c *CollectionsMgtType) SetMigration(val bool) {
 		*c ^= 1 << colMgtMigrateN
 	}
 }
-
-const CollectionsMappingRulesKey = "colMappingRules"
 
 type MergeFunctionMappingType map[string]string
 
