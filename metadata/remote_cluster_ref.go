@@ -289,6 +289,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterValidateUri] = validateUri
 	outputMap[base.RemoteClusterHostName] = ref.getHostNameForOutputNoLock()
 	outputMap[base.RemoteClusterUserName] = ref.UserName_
+	outputMap[base.RemoteClusterDeleted] = false
 	outputMap[base.RemoteClusterSecureType] = ref.SecureTypeString()
 	// To be deprecated
 	if ref.IsEncryptionEnabled() {
