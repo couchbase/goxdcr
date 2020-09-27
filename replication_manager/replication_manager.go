@@ -1128,7 +1128,7 @@ func writeCreateReplicationEvent(spec *metadata.ReplicationSpecification, realUs
 }
 
 func writeUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, localRemoteIPs *service_def.LocalRemoteIPs) {
-	event, err := constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId, localRemoteIPs)
+	event, err := constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId, localRemoteIPs, true)
 	if err == nil {
 		err = AuditService().Write(service_def.UpdateDefaultReplicationSettingsEventId, event)
 	}
@@ -1139,7 +1139,7 @@ func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification
 	replicationSpecificFields, err := constructReplicationSpecificFieldsFromSpec(spec)
 	if err == nil {
 		var updateDefaultReplicationSettingsEvent *service_def.UpdateDefaultReplicationSettingsEvent
-		updateDefaultReplicationSettingsEvent, err = constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId, localRemoteIPs)
+		updateDefaultReplicationSettingsEvent, err = constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId, localRemoteIPs, false)
 		if err == nil {
 			updateReplicationSettingsEvent := &service_def.UpdateReplicationSettingsEvent{
 				ReplicationSpecificFields:             *replicationSpecificFields,
@@ -1192,8 +1192,12 @@ func constructGenericReplicationEvent(spec *metadata.ReplicationSpecification, r
 		ReplicationSpecificFields: *replicationSpecificFields}, nil
 }
 
-func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, localRemoteIPs *service_def.LocalRemoteIPs) (*service_def.UpdateDefaultReplicationSettingsEvent, error) {
-	logger_rm.Info("Start constructUpdateDefaultReplicationSettingsEvent....")
+func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, localRemoteIPs *service_def.LocalRemoteIPs, forDefaultReplication bool) (*service_def.UpdateDefaultReplicationSettingsEvent, error) {
+	var eventName = "constructUpdateDefaultReplicationSettingsEvent"
+	if !forDefaultReplication {
+		eventName = "constructUpdateReplicationSettingsEvent"
+	}
+	logger_rm.Infof("Start %v....", eventName)
 	genericReplicationFields, err := constructGenericReplicationFields(realUserId, localRemoteIPs)
 	if err != nil {
 		return nil, err
@@ -1208,7 +1212,7 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata
 			convertedSettingsMap[SettingsKeyToRestKeyMap[key]] = value
 		}
 	}
-	logger_rm.Info("Done constructUpdateDefaultReplicationSettingsEvent....")
+	logger_rm.Infof("Done %v....", eventName)
 
 	return &service_def.UpdateDefaultReplicationSettingsEvent{
 		GenericReplicationFields: *genericReplicationFields,
