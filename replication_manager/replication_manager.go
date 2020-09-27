@@ -1034,7 +1034,7 @@ func writeCreateReplicationEvent(spec *metadata.ReplicationSpecification, realUs
 }
 
 func writeUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) {
-	event, err := constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId)
+	event, err := constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId, true)
 	if err == nil {
 		err = AuditService().Write(service_def.UpdateDefaultReplicationSettingsEventId, event)
 	}
@@ -1045,7 +1045,7 @@ func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification
 	replicationSpecificFields, err := constructReplicationSpecificFieldsFromSpec(spec)
 	if err == nil {
 		var updateDefaultReplicationSettingsEvent *service_def.UpdateDefaultReplicationSettingsEvent
-		updateDefaultReplicationSettingsEvent, err = constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId)
+		updateDefaultReplicationSettingsEvent, err = constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap, realUserId, false)
 		if err == nil {
 			updateReplicationSettingsEvent := &service_def.UpdateReplicationSettingsEvent{
 				ReplicationSpecificFields:             *replicationSpecificFields,
@@ -1098,8 +1098,12 @@ func constructGenericReplicationEvent(spec *metadata.ReplicationSpecification, r
 		ReplicationSpecificFields: *replicationSpecificFields}, nil
 }
 
-func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId) (*service_def.UpdateDefaultReplicationSettingsEvent, error) {
-	logger_rm.Info("Start constructUpdateDefaultReplicationSettingsEvent....")
+func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, forDefaultReplication bool) (*service_def.UpdateDefaultReplicationSettingsEvent, error) {
+	var eventName = "constructUpdateDefaultReplicationSettingsEvent"
+	if !forDefaultReplication {
+		eventName = "constructUpdateReplicationSettingsEvent"
+	}
+	logger_rm.Infof("Start %v....", eventName)
 	genericReplicationFields, err := constructGenericReplicationFields(realUserId)
 	if err != nil {
 		return nil, err
@@ -1114,7 +1118,7 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata
 			convertedSettingsMap[SettingsKeyToRestKeyMap[key]] = value
 		}
 	}
-	logger_rm.Info("Done constructUpdateDefaultReplicationSettingsEvent....")
+	logger_rm.Infof("Done %v....", eventName)
 
 	return &service_def.UpdateDefaultReplicationSettingsEvent{
 		GenericReplicationFields: *genericReplicationFields,
