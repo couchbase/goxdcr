@@ -1390,7 +1390,7 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 		return nil, errors.New(errMsg)
 	}
 
-	// only return the nodes that are active
+	// only return the nodes that are active and has KV service
 	activeNodeList := make([]interface{}, 0)
 	for _, node := range nodeList {
 		nodeInfoMap, ok := node.(map[string]interface{})
@@ -1399,6 +1399,26 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 			logger.Error(errMsg)
 			return nil, errors.New(errMsg)
 		}
+
+		// To be conservative - any errors parsing service section, if it is missing, etc, just let it pass
+		servicesObj, ok := nodeInfoMap[ServicesKey]
+		if ok {
+			servicesList, ok := servicesObj.([]interface{})
+			if ok {
+				var hasKV bool
+				for _, serviceRaw := range servicesList {
+					service, ok := serviceRaw.(string)
+					if !ok /* being conservative */ || ok && service == KVPortKey {
+						hasKV = true
+						break
+					}
+				}
+				if !hasKV {
+					continue
+				}
+			}
+		}
+
 		clusterMembershipObj, ok := nodeInfoMap[ClusterMembershipKey]
 		if !ok {
 			// this could happen when target is elastic search cluster (or maybe very old couchbase cluster?)

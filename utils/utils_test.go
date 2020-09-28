@@ -214,6 +214,15 @@ func getInitCloudNodeList() ([]interface{}, error) {
 	return unmarshalledIface.([]interface{}), nil
 }
 
+func getDefaultPoolMixedCluster() (map[string]interface{}, error) {
+	var fileName string
+	var poolsNodesFile = "pools_default_incl_nonkv_node.json"
+	fileName = fmt.Sprintf("%v%v", testInternalDataDir, poolsNodesFile)
+	retMap, _, err := readJsonHelper(fileName)
+	return retMap, err
+
+}
+
 func TestGetNodeListWithMinInfo(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetNodeListWithMinInfo =================")
 	assert := assert.New(t)
@@ -733,4 +742,15 @@ func TestUtilsCloudNodeInfo(t *testing.T) {
 		assert.NotEqual("", hostAddr)
 	}
 
+}
+
+func TestUtilsMixedKVWithNonKVDefaultPoolsInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestUtilsMixedKVWithNonKVDefaultPoolsInfo =================")
+	defer fmt.Println("============== Test case end: TestUtilsMixedKVWithNonKVDefaultPoolsInfo =================")
+	assert := assert.New(t)
+
+	defaultPool, _ := getDefaultPoolMixedCluster()
+	nodeList, err := testUtils.GetNodeListFromInfoMap(defaultPool, nil)
+	assert.Nil(err)
+	assert.Equal(1, len(nodeList))
 }
