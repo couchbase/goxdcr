@@ -1562,3 +1562,46 @@ type MergeInputAndResult struct {
 type MergeResultNotifier interface {
 	NotifyMergeResult(input *ConflictParams, mergeResult interface{}, mergeError error)
 }
+
+// So on pool details and bucket details "status":
+// "healthy" currently means node recently sent heartbeat. It indicates that distributed erlang facility works between current
+//     node and node which status is shown. And that erlang functions reasonably well there.
+//     If there are buckets defined it also implies that all buckets are ready state. I.e. available for data ops.
+// "status": "unhealthy" means that we haven't seen heartbeats from this node. Either node is down or it's sufficiently
+//     unhealthy to be unable to send heartbeats. Or network is down.
+// "status": "warmup" means that there are bucket(s) on this node that are either being warmed up or otherwise unavailable.
+//     Internally we're doing gen_server call with timeout of 5 seconds to find out if per-bucket memcached can respond and if it thinks that bucket is warmed up. If call either times out or ns_memcached is dead (not created yet or recently crashed) or if ns_memcached is fine but bucket is warming up, then we'll mark entire node as "warmup".
+type HeartbeatStatus int
+
+const (
+	HeartbeatHealthy   HeartbeatStatus = iota
+	HeartbeatUnhealthy HeartbeatStatus = iota
+	HeartbeatWarmup    HeartbeatStatus = iota
+	HeartbeatInvalid   HeartbeatStatus = iota
+)
+
+func NewHeartbeatStatusFromString(statusString string) (HeartbeatStatus, error) {
+	switch statusString {
+	case "healthy":
+		return HeartbeatHealthy, nil
+	case "warmup":
+		return HeartbeatWarmup, nil
+	case "unhealthy":
+		return HeartbeatUnhealthy, nil
+	default:
+		return HeartbeatInvalid, fmt.Errorf("invalid heartbeat string: %v", statusString)
+	}
+}
+
+func (h HeartbeatStatus) String() string {
+	switch h {
+	case HeartbeatHealthy:
+		return "healthy"
+	case HeartbeatWarmup:
+		return "warmup"
+	case HeartbeatUnhealthy:
+		return "unhealthy"
+	default:
+		return "?? (HeartbeatStatus)"
+	}
+}

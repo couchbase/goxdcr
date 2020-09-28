@@ -1448,6 +1448,43 @@ func (u *Utilities) GetClusterCompatibilityFromNodeList(nodeList []interface{}) 
 	return base.GetClusterCompatibilityFromNodeList(nodeList)
 }
 
+// Returns a map of hostname: status from the perspective of the node that contains the nodelist
+// The key of the map will be "local" hostnames, since it is from the perspective of the node's nodelist
+func (u *Utilities) GetClusterHeartbeatStatusFromNodeList(nodeList []interface{}) (map[string]base.HeartbeatStatus, error) {
+	if len(nodeList) > 0 {
+		heartbeatMap := make(map[string]base.HeartbeatStatus)
+		for _, nodeInfoRaw := range nodeList {
+			nodeInfo, ok := nodeInfoRaw.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("nodeInfo is of type %v", reflect.TypeOf(nodeInfoRaw))
+			}
+			statusRaw, ok := nodeInfo[base.StatusKey]
+			if !ok {
+				return nil, fmt.Errorf("%v does not exist", base.StatusKey)
+			}
+			statusString, ok := statusRaw.(string)
+			if !ok {
+				return nil, fmt.Errorf("status is of type %v", reflect.TypeOf(statusRaw))
+			}
+			hostnameRaw, ok := nodeInfo[base.HostNameKey]
+			if !ok {
+				return nil, fmt.Errorf("%v does not exist", base.HostNameKey)
+			}
+			hostname, ok := hostnameRaw.(string)
+			if !ok {
+				return nil, fmt.Errorf("hostname is of type %v", reflect.TypeOf(hostnameRaw))
+			}
+			var err error
+			heartbeatMap[hostname], err = base.NewHeartbeatStatusFromString(statusString)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return heartbeatMap, nil
+	}
+	return nil, nil
+}
+
 // Used externally only - returns a list of nodes for management access
 // if needHttps is true, returns both http addresses and https addresses
 // if needHttps is false, returns http addresses and empty https addresses

@@ -607,6 +607,29 @@ func (_m *UtilsIface) GetClusterCompatibilityFromNodeList(nodeList []interface{}
 	return r0, r1
 }
 
+// GetClusterHeartbeatStatusFromNodeList provides a mock function with given fields: nodeList
+func (_m *UtilsIface) GetClusterHeartbeatStatusFromNodeList(nodeList []interface{}) (map[string]base.HeartbeatStatus, error) {
+	ret := _m.Called(nodeList)
+
+	var r0 map[string]base.HeartbeatStatus
+	if rf, ok := ret.Get(0).(func([]interface{}) map[string]base.HeartbeatStatus); ok {
+		r0 = rf(nodeList)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]base.HeartbeatStatus)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func([]interface{}) error); ok {
+		r1 = rf(nodeList)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetClusterInfo provides a mock function with given fields: hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetClusterInfo(hostAddr string, path string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	ret := _m.Called(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)

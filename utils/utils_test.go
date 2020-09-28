@@ -754,3 +754,18 @@ func TestUtilsMixedKVWithNonKVDefaultPoolsInfo(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(1, len(nodeList))
 }
+
+func TestHeartbeatMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestHeartbeatMap =================")
+	defer fmt.Println("============== Test case end: TestHeartbeatMap =================")
+	assert := assert.New(t)
+
+	nodeList, _ := getNodeListWithMinInfoMockK8()
+
+	heartbeatMap, err := testUtils.GetClusterHeartbeatStatusFromNodeList(nodeList)
+	assert.Nil(err)
+	assert.Equal(3, len(heartbeatMap))
+	for _, status := range heartbeatMap {
+		assert.Equal(base.HeartbeatHealthy, status)
+	}
+}

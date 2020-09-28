@@ -114,15 +114,21 @@ func (c ConnectivityStatus) String() string {
 	}
 }
 
-func NewConnectivityHelper() *ConnectivityHelper {
+func NewConnectivityHelper(refreshInterval time.Duration) *ConnectivityHelper {
 	return &ConnectivityHelper{
-		nodeStatus: make(map[string]ConnectivityStatus),
+		nodeStatus:              make(map[string]ConnectivityStatus),
+		nodeHeartbeatStatus:     make(map[string]map[string]base.HeartbeatStatus),
+		nodeHeartbeatCleanupMap: make(map[string]*time.Timer),
+		refreshInterval:         refreshInterval,
 	}
 }
 
 type ConnectivityHelper struct {
-	nodeStatus map[string]ConnectivityStatus
-	mtx        sync.RWMutex
+	nodeStatus              map[string]ConnectivityStatus
+	nodeHeartbeatStatus     map[string]map[string]base.HeartbeatStatus // each remote node's view of the cluster
+	nodeHeartbeatCleanupMap map[string]*time.Timer
+	mtx                     sync.RWMutex
+	refreshInterval         time.Duration
 }
 
 func (c *ConnectivityHelper) String() string {
@@ -213,9 +219,61 @@ func (c *ConnectivityHelper) GetOverallStatus() ConnectivityStatus {
 		return ConnError
 	} else if connErrCount > 0 {
 		return ConnDegraded
+	} else if !c.isRemoteClusterHeartbeatHealthyNoLock() {
+		return ConnDegraded
 	} else {
 		return ConnValid
 	}
+}
+
+var heartbeatCleanupInterval = 5
+
+func (c *ConnectivityHelper) MarkNodeHeartbeatStatus(nodeName string, heartbeatMap map[string]base.HeartbeatStatus) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.nodeHeartbeatStatus[nodeName] = heartbeatMap
+
+	currentCleanupTimer, exists := c.nodeHeartbeatCleanupMap[nodeName]
+	if exists {
+		tooLate := currentCleanupTimer.Stop()
+		if tooLate {
+			// The cleanup func has kicked off and will remove the heartbeatMap from the overall map
+			// We'll have to wait a few sec and try adding it back
+			go func() {
+				time.Sleep(3 * time.Second)
+				c.MarkNodeHeartbeatStatus(nodeName, heartbeatMap)
+			}()
+			return
+		}
+	}
+
+	// Given total # of nodes in a cluster, and one node out of the total is picked at random every interval second,
+	// give it heartbeatCleanupInterval times the window for the same current nodeName to be picked to be refreshed
+	// If not picked after this many tries, then the node entry in the map will be GC'ed
+	intervalForCleanup := int(c.refreshInterval.Seconds()) * len(heartbeatMap) * heartbeatCleanupInterval
+	intervalDuration := time.Duration(intervalForCleanup) * time.Second
+	cleanupFunc := func() {
+		c.mtx.Lock()
+		defer c.mtx.Unlock()
+		delete(c.nodeHeartbeatCleanupMap, nodeName)
+		delete(c.nodeHeartbeatStatus, nodeName)
+	}
+	c.nodeHeartbeatCleanupMap[nodeName] = time.AfterFunc(intervalDuration, cleanupFunc)
+}
+
+// Returns true if all remote cluster nodes' last known status seems to be healthy
+func (c *ConnectivityHelper) isRemoteClusterHeartbeatHealthyNoLock() bool {
+	for _, heartbeatViewMap := range c.nodeHeartbeatStatus {
+		for _, heartbeatStatus := range heartbeatViewMap {
+			if heartbeatStatus == base.HeartbeatInvalid || heartbeatStatus == base.HeartbeatWarmup {
+				continue
+			}
+			if heartbeatStatus != base.HeartbeatHealthy {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 /**
@@ -510,7 +568,6 @@ func (rctx *refreshContext) initialize() {
 		// Randomize the list of hosts to walk through
 		base.ShuffleStringPairList(rctx.cachedRefNodesList)
 	}
-
 }
 
 func (rctx *refreshContext) setHostNamesAndConnStr(pair base.StringPair) {
@@ -799,8 +856,8 @@ func (agent *RemoteClusterAgent) Refresh() error {
 		} else {
 			// rctx.hostname is in the cluster and is available - make it the activeHost
 			rctx.checkAndUpdateActiveHost()
-
 			rctx.checkUserIntent(nodeList)
+			rctx.updateHeartbeatMap(nodeList)
 
 			nodeAddressesList, err = agent.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, rctx.connStr, rctx.refCache.IsEncryptionEnabled(), agent.logger, useExternal)
 			if err == nil {
@@ -998,6 +1055,14 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.Stri
 		}
 	}
 	rctx.agent.logger.Warnf("Error: Unable to replace bootstrap node in RemoteClusterReference. It may be invalid if XDCR restarts")
+}
+
+func (rctx *refreshContext) updateHeartbeatMap(nodeList []interface{}) {
+	heartbeatMap, err := rctx.agent.utils.GetClusterHeartbeatStatusFromNodeList(nodeList)
+	if err != nil {
+		rctx.agent.logger.Warnf("unable to parse heartbeatMap: %v", err)
+	}
+	rctx.agent.connectivityHelper.MarkNodeHeartbeatStatus(rctx.hostName, heartbeatMap)
 }
 
 /**
@@ -2818,7 +2883,7 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		bucketRefCnt:           make(map[string]uint32),
 		bucketManifestGetters:  make(map[string]*BucketManifestGetter),
 		agentFinCh:             make(chan bool, 1),
-		connectivityHelper:     NewConnectivityHelper(),
+		connectivityHelper:     NewConnectivityHelper(base.RefreshRemoteClusterRefInterval),
 	}
 	newAgent.refreshCv = &sync.Cond{L: &newAgent.refreshMtx}
 	return newAgent

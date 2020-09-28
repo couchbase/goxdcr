@@ -92,6 +92,7 @@ var ExternalKey = "external"
 var CapiPortKey = "capi"
 var CapiSSLPortKey = "capiSSL"
 var DeveloperPreviewKey = "isDeveloperPreview"
+var StatusKey = "status"
 
 // Collection consts
 const UIDKey = "uid"
