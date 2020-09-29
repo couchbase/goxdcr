@@ -1089,7 +1089,9 @@ func EncodeValidationErrorIntoResponse(err error, withErrorsWrapper bool) (*ap.R
 // encode the error message of an error, without any wrapping, into Response object.
 func EncodeErrorMessageIntoResponse(err error, statusCode int) (*ap.Response, error) {
 	if err != nil {
-		return EncodeByteArrayIntoResponseWithStatusCode([]byte(err.Error()), statusCode)
+		errMap := make(map[string]interface{})
+		errMap[base.PlaceHolderFieldKey] = err.Error()
+		return EncodeObjectIntoResponseWithStatusCode(errMap, statusCode)
 	} else {
 		return NewEmptyArrayResponse()
 	}

@@ -757,7 +757,7 @@ func authenticateRequest(request *http.Request) (cbauth.Creds, error) {
 func authorizeRequest(creds cbauth.Creds, permission string) (bool, error) {
 	allowed, err := creds.IsAllowed(permission)
 	if err != nil {
-		logger_ap.Errorf("Error occured when checking for permission %v for creds %v%v%v. err=%v\n", permission, base.UdTagBegin, creds.Name(), base.UdTagEnd, err)
+		logger_ap.Errorf("Error occurred when checking for permission %v for creds %v%v%v. err=%v\n", permission, base.UdTagBegin, creds.Name(), base.UdTagEnd, err)
 	}
 
 	return allowed, err
@@ -768,11 +768,7 @@ func authWebCreds(request *http.Request, permission string) (*ap.Response, error
 	creds, err := authenticateRequest(request)
 
 	if err != nil {
-		if err == cbauth.ErrNoAuth {
-			return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
-		} else {
-			return nil, err
-		}
+		return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
 	}
 
 	allowed, err := authorizeRequest(creds, permission)
@@ -791,11 +787,7 @@ func authWebCredsForReplication(request *http.Request, replicationId string, per
 	creds, err := authenticateRequest(request)
 
 	if err != nil {
-		if err == cbauth.ErrNoAuth {
-			return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
-		} else {
-			return nil, err
-		}
+		return EncodeErrorMessageIntoResponse(err, http.StatusUnauthorized)
 	}
 
 	sourceBucket, err := metadata.GetSourceBucketNameFromReplicationId(replicationId)
