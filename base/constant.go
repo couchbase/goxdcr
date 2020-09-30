@@ -524,7 +524,15 @@ const (
 var UdTagBeginBytes = []byte(UdTagBegin)
 var UdTagEndBytes = []byte(UdTagEnd)
 
-const HttpReqUserKey = "Menelaus-Auth-User"
+const (
+	HttpReqUserKey   = "Menelaus-Auth-User"
+	AuthorizationKey = "Authorization"
+	CBOnBehalfOfKey  = "Cb-On-Behalf-Of"
+)
+
+var HttpRedactKeys = []string{HttpReqUserKey, AuthorizationKey, CBOnBehalfOfKey}
+
+const AuthorizationKeyRedactPrefix = "Basic "
 
 // retry interval for setDerivedObj op
 var RetryIntervalSetDerivedObj = 100 * time.Millisecond
