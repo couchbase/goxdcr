@@ -869,27 +869,35 @@ func CloneAndTagHttpRequest(r *http.Request) *http.Request {
 			clonedReq.URL.User = redactedUserInfo
 		}
 
-		// Take care of Header that may have user information
-		v := r.Header.Get(HttpReqUserKey)
-		if len(v) > 0 {
-			// First make a clone
-			h2 := make(http.Header, len(r.Header))
-			for k, vv := range r.Header {
-				vv2 := make([]string, len(vv))
-				copy(vv2, vv)
-				h2[k] = vv2
+		h2 := make(http.Header, len(r.Header))
+		for k, vv := range r.Header {
+			var needToRedact bool
+			for _, redactKey := range HttpRedactKeys {
+				if k == redactKey {
+					needToRedact = true
+					break
+				}
 			}
 
-			valueSlice := make([]string, len(v))
-			for i := 0; i < len(v); i++ {
-				valueSlice[i] = TagUD(v[i])
+			var vv2 []string
+			if needToRedact {
+				for _, v := range vv {
+					var redactedV = fmt.Sprintf("%v%v%v", UdTagBegin, v, UdTagEnd)
+					// Special case handling - this is a encoded password
+					// Authorization:[Basic <abcdef123456...>]
+					if k == AuthorizationKey && strings.HasPrefix(v, AuthorizationKeyRedactPrefix) {
+						redactedV = fmt.Sprintf("%v%v", AuthorizationKeyRedactPrefix, "xxxxx")
+					}
+					vv2 = append(vv2, redactedV)
+				}
+			} else {
+				vv2 = make([]string, len(vv))
+				copy(vv2, vv)
 			}
-			h2[HttpReqUserKey] = valueSlice
-			clonedReq.Header = h2
-		} else {
-			clonedReq.Header = r.Header
+			h2[k] = vv2
 		}
 
+		clonedReq.Header = h2
 		return clonedReq
 	}
 	return r
