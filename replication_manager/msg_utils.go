@@ -644,6 +644,13 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 	}
 
 	if rulesToCheck.IsMigrationOn() {
+		isEnterprise, err := XDCRCompTopologyService().IsMyClusterEnterprise()
+		if err != nil {
+			return err
+		}
+		if !isEnterprise {
+			return base.ErrorColMigrationEnterpriseOnly
+		}
 		return mappingRules.ValidateMigrateRules()
 	} else {
 		return mappingRules.ValidateExplicitMapping()

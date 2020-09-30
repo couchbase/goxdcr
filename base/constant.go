@@ -284,6 +284,7 @@ var ErrorXmemCollectionSubErr = errors.New(StringTargetCollectionMappingErr)
 var ErrorRequestAlreadyIgnored = errors.New("Request has been marked ignored")
 var ErrorInvalidSRVFormat = errors.New("hostname format is not SRV")
 var ErrorSdkUriNotSupported = fmt.Errorf("XDCR currently does not support %v or %v URI. If using DNS SRV, remove the URI prefix", CouchbaseUri, CouchbaseSecureUri)
+var ErrorColMigrationEnterpriseOnly = errors.New("Collections migration is supported in Enterprise edition only")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
