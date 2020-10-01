@@ -277,11 +277,17 @@ func (r *ReplicationMultiValueHelper) CheckAndConvertMultiValue(key string, valA
 	switch restKey {
 	case FilterExpDelKey:
 		newVal, err = r.handleFilterExpDelKey(r.activeConfig[settingsConfigKey].(base.FilterExpDelType), key, valArr[0])
+		if err != nil {
+			return
+		}
 		// Need to set it using newVal to persist because we're passing interface references
 		r.activeConfig[settingsConfigKey] = newVal
 		outValArr[0] = newVal.(base.FilterExpDelType).String()
 	case CollectionsMgtMultiKey:
 		newVal, err = r.handleCollectionsMgtKey(r.activeConfig[settingsConfigKey].(base.CollectionsMgtType), key, valArr[0])
+		if err != nil {
+			return
+		}
 		// Need to set it using newVal to persist because we're passing interface references
 		r.activeConfig[settingsConfigKey] = newVal
 		outValArr[0] = newVal.(base.CollectionsMgtType).String()
@@ -330,7 +336,7 @@ func (r *ReplicationMultiValueHelper) handleFilterExpDelKey(curConfig base.Filte
 func (r *ReplicationMultiValueHelper) parseBoolAndMarkSet(key, val string) (bool, error) {
 	boolVal, err := strconv.ParseBool(val)
 	if err != nil {
-		err = base.IncorrectValueTypeError("a boolean")
+		err = fmt.Errorf("unable to parse %v into a boolean", val)
 		return false, err
 	}
 	r.flagKeyIssued[key] = boolVal

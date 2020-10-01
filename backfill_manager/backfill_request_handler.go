@@ -321,11 +321,12 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
 	seqnosMap, err := b.getThroughSeqno()
 	if err != nil {
-		b.logger.Errorf("%v unable to get seqno as part of handling backfill pipeline request")
+		b.logger.Errorf("%v unable to get seqno as part of handling backfill pipeline request", b.Id())
 		return err
 	}
 	myVBs, err := b.vbsGetter()
 	if err != nil {
+		b.logger.Errorf("%v unable to get VBs", b.Id())
 		return err
 	}
 

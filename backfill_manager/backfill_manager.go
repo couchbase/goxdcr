@@ -570,7 +570,7 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 			if err != nil {
 				return err
 			}
-			added, removed := newMapping.Diff(oldMapping)
+			added, removed := oldMapping.Diff(newMapping)
 			err = b.handleExplicitMapChangeBackfillReq(specId, added, removed)
 			if err != nil {
 				return err

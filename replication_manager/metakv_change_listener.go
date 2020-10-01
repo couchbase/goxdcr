@@ -202,8 +202,9 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 				}
 				return err
 			}
-			rscl.logger.Infof("Restarting pipeline %v since the changes to replication spec are critical\n", topic)
-			if callback, errCb, needCb := needSpecialCallbackUpdate(topic, newSpec.InternalId, oldSettings, newSpec.Settings); needCb {
+			callback, errCb, needCb := needSpecialCallbackUpdate(topic, newSpec.InternalId, oldSettings, newSpec.Settings)
+			rscl.logger.Infof("Restarting pipeline %v since the changes to replication spec are critical: needSpecialCallback? %v", topic, needCb)
+			if needCb {
 				return replication_mgr.pipelineMgr.UpdatePipelineWithStoppedCb(topic, callback, errCb)
 			} else {
 				return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
