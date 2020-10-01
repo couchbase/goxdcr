@@ -904,7 +904,12 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 
 	pipelineMgr.logger.Infof("Backfill Pipeline %v is constructed. Starting it.", bp.InstanceId())
 	bp.SetProgressRecorder(rep_status.RecordBackfillProgress)
-	errMap = bp.Start(rep_status.SettingsMap())
+
+	// Backfill pipeline should always run in low priority
+	settings := rep_status.SettingsMap()
+	settings[metadata.PriorityKey] = base.PriorityTypeLow
+
+	errMap = bp.Start(settings)
 	if len(errMap) > 0 {
 		pipelineMgr.logger.Errorf("Failed to start the backfill pipeline %v", bp.InstanceId())
 	}

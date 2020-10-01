@@ -141,6 +141,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 // Given a primary pipeline, create a secondary/child pipeline that supplements the primary
 func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline common.Pipeline, progress_recorder common.PipelineProgressRecorder, pipelineType common.PipelineType) (common.Pipeline, error) {
 	spec := primaryPipeline.Specification().GetReplicationSpec()
+	spec.Settings.Values[metadata.PriorityKey] = base.PriorityTypeLow
 
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
