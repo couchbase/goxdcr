@@ -888,7 +888,6 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 			Id:                      fullReplId,
 			StatsMap:                replication_mgr.utils.GetMapFromExpvarMap(expvarMap),
 			BrokenCollectionMapping: brokenExternalMap,
-			ErrorList:               make([]base.ErrorInfo, 0),
 		}
 		if brokenMapDoneFunc != nil {
 			brokenMapDoneFunc()
@@ -897,7 +896,7 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 
 		if common.PipelineType(i) == common.MainPipeline {
 			// set error list
-			fillReplInfoWithErr(rep_status, replInfo)
+			fillReplInfoWithErr(rep_status, &replInfo)
 		}
 
 		replInfos = append(replInfos, replInfo)
@@ -905,7 +904,7 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 	return replInfos
 }
 
-func fillReplInfoWithErr(rep_status *pipeline.ReplicationStatus, replInfo base.ReplicationInfo) {
+func fillReplInfoWithErr(rep_status *pipeline.ReplicationStatus, replInfo *base.ReplicationInfo) {
 	errs := rep_status.Errors()
 	if len(errs) == 0 {
 		return
@@ -916,7 +915,7 @@ func fillReplInfoWithErr(rep_status *pipeline.ReplicationStatus, replInfo base.R
 		}
 		err_msg := processErrorMsgForUI(pipeline_error.ErrMsg)
 		errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
-		replInfo.ErrorList = append(replInfo.ErrorList, errInfo)
+		(*replInfo).ErrorList = append((*replInfo).ErrorList, errInfo)
 	}
 }
 

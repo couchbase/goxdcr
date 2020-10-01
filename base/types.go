@@ -726,7 +726,7 @@ const (
 
 const (
 	colMgtMappingN   = 0 // Non-Set bit if implicit, Set bit if explicit
-	colMgtMirroringN = 1 // Non-Set bit if mirrirng off, set bit if mirroring on
+	colMgtMirroringN = 1 // Non-Set bit if mirroring off, set bit if mirroring on
 	colMgtMigrateN   = 2 // Non-set if traditional, set bit if migration mode
 )
 

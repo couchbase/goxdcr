@@ -31,6 +31,7 @@ var ReplicationSpecNotActive error = errors.New("Replication specification not f
 var ReplicationStatusNotFound error = errors.New("Replication Status not found")
 var UpdaterStoppedError error = errors.New("Updater already stopped")
 var MainPipelineNotRunning error = errors.New("Main pipeline is not running")
+var ErrorExplicitMappingWoRules = errors.New("specified explicit mapping but no rule is found")
 
 var default_failure_restart_interval = 10
 
@@ -439,6 +440,14 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 	if err != nil {
 		pipelineMgr.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
 		return err
+	}
+
+	collectionsMode := spec.Settings.GetCollectionModes()
+	collectionsMappingRules := spec.Settings.GetCollectionsRoutingRules()
+	if collectionsMode.IsExplicitMapping() && len(collectionsMappingRules) == 0 {
+		errString := fmt.Sprintf("spec %v - %v", spec.Id, ErrorExplicitMappingWoRules.Error())
+		pipelineMgr.logger.Error(errString)
+		return fmt.Errorf(errString)
 	}
 
 	// refresh remote cluster reference when retrieving it, hence making sure that all fields,
@@ -1141,6 +1150,9 @@ type PipelineUpdater struct {
 
 	stopped     bool
 	stoppedLock sync.Mutex
+
+	humanRecoveryThresholdMtx   sync.Mutex
+	humanRecoveryThresholdTimer *time.Timer
 }
 
 type pmErrMapType struct {
@@ -1787,6 +1799,19 @@ func (r *PipelineUpdater) setLastUpdateSuccess() {
 	r.pipelineUpdaterLock.Lock()
 	defer r.pipelineUpdaterLock.Unlock()
 	r.lastSuccessful = true
+	r.clearHumanRecoveryTimer()
+}
+
+func (r *PipelineUpdater) clearHumanRecoveryTimer() {
+	r.humanRecoveryThresholdMtx.Lock()
+	if r.humanRecoveryThresholdTimer != nil {
+		stoppedInTime := r.humanRecoveryThresholdTimer.Stop()
+		r.humanRecoveryThresholdTimer = nil
+		if !stoppedInTime {
+			r.logger.Warnf("%v human recovery timer did not stop in time. Will need to restart pipeline manually")
+		}
+	}
+	r.humanRecoveryThresholdMtx.Unlock()
 }
 
 func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
@@ -1794,6 +1819,19 @@ func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
 	defer r.pipelineUpdaterLock.Unlock()
 	r.lastSuccessful = false
 	r.currentErrors.LoadErrMap(errs)
+	if r.humanRecoverableTransitionalErrors(errs) {
+		r.humanRecoveryThresholdMtx.Lock()
+		if r.humanRecoveryThresholdTimer == nil {
+			r.humanRecoveryThresholdTimer = time.AfterFunc(humanRecoveryThreshold, func() {
+				errMsg := fmt.Sprintf("Replication %v cannot continue after %v because of the errors that require manual recovery (%v). Please fix them and then restart the replication",
+					r.pipeline_name, humanRecoveryThreshold, base.FlattenErrorMap(errs))
+				r.logger.Warnf(errMsg)
+				r.pipelineMgr.GetLogSvc().Write(errMsg)
+				r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
+			})
+		}
+		r.humanRecoveryThresholdMtx.Unlock()
+	}
 }
 
 // Stopped == true means that we stopped it in time
@@ -1891,4 +1929,16 @@ func (r *PipelineUpdater) executeQueuedBackfillCallbacks() {
 			return
 		}
 	}
+}
+
+var humanRecoveryThreshold = 5 * time.Minute
+
+// Only if errors are recoverable by humans, and that these errors could be part of management transitions
+// For example, users could turn explicit mapping on without rules, and then take some time to actually get
+// the mappings set. If the human doesn't recover these actions after a period of time, then stop the pipeline
+func (r *PipelineUpdater) humanRecoverableTransitionalErrors(errMap base.ErrorMap) bool {
+	if base.CheckErrorMapForError(errMap, ErrorExplicitMappingWoRules, false) {
+		return true
+	}
+	return false
 }

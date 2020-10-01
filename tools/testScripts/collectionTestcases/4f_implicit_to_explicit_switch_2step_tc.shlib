@@ -117,9 +117,9 @@ function runTestCase {
 	sleep 5
 	checkItemCnt "C2" "B2" $newCount
 
-	# Backfill should not have been raised - because these would have triggered restream and checkpoint deletion
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+	# Backfill should not have been raised - because XDCR prevents pipeline from starting if explicit mapping was empty
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt ))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt ))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
