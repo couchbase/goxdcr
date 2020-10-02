@@ -116,8 +116,8 @@ function runTestCase {
 	# Run data load again
 	oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
 	runDataLoad
-	echo "Waiting 5 seconds before checking item count"
-	sleep 5
+	echo "Waiting 10 seconds before checking item count"
+	sleep 10
 	# The mapping should have remained broken and changes would have immediately not been replicated
 	# Changes left should go to 0
 	checkUnidirectionalChangesLeft

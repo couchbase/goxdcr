@@ -77,8 +77,8 @@ function runTestCase {
 
 	runDataLoad
 
-	echo "Waiting 5 seconds before checking item count first pass"
-	sleep 5
+	echo "Waiting 10 seconds before checking item count first pass"
+	sleep 10
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	

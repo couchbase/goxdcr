@@ -66,6 +66,8 @@ declare -A CLUSTER_NAME_BUCKET_DONE_MAP
 declare -A BUCKET_NAME_SCOPE_DONE_MAP
 declare -A SCOPE_NAME_COLLECTION_DONE_MAP
 
+REST_MAX_RETRY=5
+
 # Input
 # 0: ClusterName
 # 1: Bucket Name
@@ -1179,10 +1181,13 @@ function getStats {
 		return 1
 	fi
 
+  local counter=0
 	statsOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName}`
-	if (( $? != 0 ));then
-		return $?
-	fi
+	while (((( $? != 0 )) && (( $counter < $REST_MAX_RETRY ))))
+	do
+  	counter=$(( $counter + 1 ))
+  	statsOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName}`
+	done
 
   # Stats output should only be only one stats with one node. Rolling window where last number is the latest:
   # {"samplesCount":60,"isPersistent":true,"lastTStamp":1595364466482,"interval":1000,
