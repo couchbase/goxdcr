@@ -451,6 +451,12 @@ func (stats_mgr *StatisticsManager) logStatsOnce() error {
 
 		// log through seqno service summary
 		stats_mgr.through_seqno_tracker_svc.PrintStatusSummary()
+
+		// Conflict Manager
+		if conflict_mgr := stats_mgr.pipeline.RuntimeContext().Service(base.CONFLICT_MANAGER_SVC); conflict_mgr != nil {
+			conflict_mgr.(*ConflictManager).PrintStatusSummary()
+		}
+
 	}
 	return nil
 }

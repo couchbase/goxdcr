@@ -80,6 +80,13 @@ type ConflictManager struct {
 	sourceBucketName  string
 	mergeFunction     string
 	userAgent         string
+
+	counter_conflict_ch_waittime uint64 // time waiting to put conflict into conflict_ch
+	counter_resolver_waittime    uint64 // time waiting to put conflict to resolver's input_ch
+	counter_result_ch_waittime   uint64 // time waiting to put result into result_ch
+	counter_conflict_ch_sent     uint64 // items sent to conflict_ch
+	counter_resolver_sent        uint64 // items sent to resolver
+	counter_result_ch_sent       uint64 // items sent to result_ch
 }
 
 type SubdocMutationPathSpec struct {
@@ -95,12 +102,18 @@ func (spec *SubdocMutationPathSpec) size() int {
 }
 func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string, top_svc service_def.XDCRCompTopologySvc, utils utilities.UtilsIface) *ConflictManager {
 	return &ConflictManager{
-		AbstractComponent: component.NewAbstractComponentWithLogger(replId, log.NewLogger("ConflictManager", log.DefaultLoggerContext)),
-		top_svc:           top_svc,
-		resolverSvc:       resolverSvc,
-		utils:             utils,
-		finish_ch:         make(chan bool, 1),
-		collectionEnabled: 1, // TODO: MB-41120. Custom CR collection support. subdoc command will all fail with KEY_ENOENT if this is 0
+		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, log.NewLogger("ConflictManager", log.DefaultLoggerContext)),
+		top_svc:                      top_svc,
+		resolverSvc:                  resolverSvc,
+		utils:                        utils,
+		finish_ch:                    make(chan bool, 1),
+		collectionEnabled:            1, // TODO: MB-41120. Custom CR collection support. subdoc command will all fail with KEY_ENOENT if this is 0
+		counter_conflict_ch_waittime: 0,
+		counter_resolver_waittime:    0,
+		counter_result_ch_waittime:   0,
+		counter_conflict_ch_sent:     0,
+		counter_resolver_sent:        0,
+		counter_result_ch_sent:       0,
 	}
 }
 
@@ -177,8 +190,11 @@ func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target 
 		c,
 	}
 	// Send to the larger conflict channel instead of ResolverSvc input channel so XMEM will not block
+	start := time.Now()
 	select {
 	case c.conflict_ch <- &aConflict:
+		atomic.AddUint64(&c.counter_conflict_ch_waittime, uint64(time.Since(start).Nanoseconds()/1000))
+		atomic.AddUint64(&c.counter_conflict_ch_sent, 1)
 	case <-c.finish_ch:
 		return parts.PartStoppedError
 	}
@@ -189,7 +205,10 @@ func (c *ConflictManager) sendToResolverSvc() {
 	for {
 		select {
 		case aConflict := <-c.conflict_ch:
+			start := time.Now()
 			c.resolverSvc.ResolveAsync(aConflict, c.finish_ch)
+			atomic.AddUint64(&c.counter_resolver_waittime, uint64(time.Since(start).Nanoseconds()/1000))
+			atomic.AddUint64(&c.counter_resolver_sent, 1)
 		case <-c.finish_ch:
 			return
 		}
@@ -698,17 +717,51 @@ func (c *ConflictManager) handleVBError(vbno uint16, err error) {
 }
 
 func (c *ConflictManager) NotifyMergeResult(input *base.ConflictParams, mergedResult interface{}, mergeError error) {
+	start := time.Now()
 	select {
 	case c.result_ch <- &base.MergeInputAndResult{base.SetMergeToSource, input, mergedResult, mergeError}:
+		atomic.AddUint64(&c.counter_result_ch_waittime, uint64(time.Since(start).Nanoseconds()/1000))
+		atomic.AddUint64(&c.counter_result_ch_sent, 1)
 	case <-c.finish_ch:
 	}
 }
 
 func (c *ConflictManager) SetBackToSource(input *base.ConflictParams) error {
+	start := time.Now()
 	select {
 	case c.result_ch <- &base.MergeInputAndResult{base.SetTargetToSource, input, nil, nil}:
+		atomic.AddUint64(&c.counter_result_ch_waittime, uint64(time.Since(start).Nanoseconds()/1000))
+		atomic.AddUint64(&c.counter_result_ch_sent, 1)
 		return nil
 	case <-c.finish_ch:
 		return parts.PartStoppedError
+	}
+}
+
+func (c *ConflictManager) PrintStatusSummary() {
+	if c.pipeline.State() == common.Pipeline_Running {
+		var conflict_ch_avg float64 = 0
+		conflict_ch_waittime := atomic.LoadUint64(&c.counter_conflict_ch_waittime)
+		conflict_ch_sent := atomic.LoadUint64(&c.counter_resolver_sent)
+		if conflict_ch_sent > 0 {
+			conflict_ch_avg = float64(conflict_ch_waittime) / float64(conflict_ch_sent)
+		}
+		var resolver_avg float64 = 0
+		resolver_waittime := atomic.LoadUint64(&c.counter_resolver_waittime)
+		resolver_sent := atomic.LoadUint64(&c.counter_resolver_sent)
+		if resolver_sent > 0 {
+			resolver_avg = float64(resolver_waittime) / float64(resolver_sent)
+		}
+		var result_ch_avg float64 = 0
+		result_ch_waittime := atomic.LoadUint64(&c.counter_result_ch_waittime)
+		result_ch_sent := atomic.LoadUint64(&c.counter_result_ch_sent)
+		if result_ch_sent > 0 {
+			result_ch_avg = float64(result_ch_waittime) / float64(result_ch_sent)
+		}
+		c.Logger().Infof("%v wait for conflict_ch: %v (avg %v), wait for resolver: %v (avg %v), wait for result_ch: %v (avg %v), len(conflict_ch): %v, len(result_ch): %v", c.pipeline.FullTopic(),
+			conflict_ch_waittime, conflict_ch_avg, resolver_waittime, resolver_avg, result_ch_waittime, result_ch_avg,
+			len(c.conflict_ch), len(c.result_ch))
+	} else {
+		c.Logger().Infof("%v state = %v", c.pipeline.FullTopic(), c.pipeline.State())
 	}
 }
