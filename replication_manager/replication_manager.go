@@ -879,8 +879,9 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 		var brokenMap metadata.CollectionNamespaceMapping
 		var brokenMapDoneFunc func()
 		var brokenExternalMap map[string][]string
-		if rep_status.Pipeline() != nil {
-			brokenMap, brokenMapDoneFunc = rep_status.Pipeline().GetBrokenMapRO()
+		pipeline := rep_status.Pipeline()
+		if pipeline != nil {
+			brokenMap, brokenMapDoneFunc = pipeline.GetBrokenMapRO()
 			brokenExternalMap = brokenMap.ToExternalMap()
 		}
 		replInfo := base.ReplicationInfo{
