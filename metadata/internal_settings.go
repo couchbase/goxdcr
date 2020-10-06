@@ -1,10 +1,11 @@
 package metadata
 
 import (
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
 	"math"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 )
 
 var logger_is *log.CommonLogger = log.NewLogger("InternalSetting", log.DefaultLoggerContext)
@@ -218,6 +219,10 @@ const (
 	ManifestRefreshTgtIntervalKey = "ManifestRefreshTgtInterval"
 
 	BackfillPersistIntervalKey = "BackfillPersistInterval"
+
+	// Conflict Resolver related setting
+	JSEngineWorkersPerNodeKey   = "JSEngineWorkersPerNode"
+	JSEngineThreadsPerWorkerKey = "JSEngineThreadsPerWorker"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -311,6 +316,8 @@ var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterA
 var ManifestRefreshSrcIntervalConfig = &SettingsConfig{base.ManifestRefreshSrcInterval, &Range{1, 10000}}
 var ManifestRefreshTgtIntervalConfig = &SettingsConfig{base.ManifestRefreshTgtInterval, &Range{1, 10000}}
 var BackfillPersistIntervalConfig = &SettingsConfig{int64(base.BackfillPersistInterval / time.Millisecond), &Range{1, 10000}}
+var JSEngineWorkersPerNodeConfig = &SettingsConfig{base.JSEngineWorkersPerNode, &Range{1, 10}}
+var JSEngineThreadsPerWorkerConfig = &SettingsConfig{base.JSEngineThreadsPerWorker, &Range{1, 10}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -404,6 +411,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ManifestRefreshSrcIntervalKey:                 ManifestRefreshSrcIntervalConfig,
 	ManifestRefreshTgtIntervalKey:                 ManifestRefreshTgtIntervalConfig,
 	BackfillPersistIntervalKey:                    BackfillPersistIntervalConfig,
+	JSEngineWorkersPerNodeKey:                     JSEngineWorkersPerNodeConfig,
+	JSEngineThreadsPerWorkerKey:                   JSEngineThreadsPerWorkerConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

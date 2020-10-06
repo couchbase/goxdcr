@@ -1030,7 +1030,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	remoteClusterAlternateAddrChangeCnt int,
 	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
 	backfillPersistInterval time.Duration,
-	httpsPortLookupTimeout time.Duration) {
+	httpsPortLookupTimeout time.Duration,
+	jsEngineWorkersPerNode int, jsEngineThreadsPerWorker int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1141,6 +1142,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
 	BackfillPersistInterval = backfillPersistInterval
 	HttpsPortLookupTimeout = httpsPortLookupTimeout
+	JSEngineWorkersPerNode = jsEngineWorkersPerNode
+	JSEngineThreadsPerWorker = jsEngineThreadsPerWorker
 }
 
 // Need to escape the () to result in "META().xattrs" literal

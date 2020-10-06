@@ -16,18 +16,30 @@ set -u
 # bi-directional replication
 
 # main logic all exist elsewhere
-(cd .. && . ./clusterRunProvision.shlib)
+. ./clusterRunProvision.shlib
 if (( $? != 0 ));then
 	echo "Provision failed"
 	exit $?
 fi
+
+. ./testLibrary.shlib
+if (( $? != 0 ));then
+  echo "testLibrary.shlib failed"
+  exit $?
+fi
+
+DEFAULT_ADMIN="Administrator"
+DEFAULT_PW="wewewe"
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 
 function eventingFunctionUIHandlerTest {
 	echo "====== Test eventing function UIHandler ======"
 	echo "=== Create library math function sub at XDCR admin port ==="
 	curl -X POST \
 	  http://localhost:13000/functions/v1/libraries/math/functions/sub \
-	  -u Administrator:wewewe \
+	  -u $DEFAULT_ADMIN:$DEFAULT_PW \
 	  -H 'content-type: application/json' \
 	  -d '{
 	  		"name": "sub",
@@ -41,17 +53,16 @@ function eventingFunctionUIHandlerTest {
 
 	echo "=== Get library math function sub at XDCR admin port ==="
 	curl -s -X GET http://localhost:13000/functions/v1/libraries/math/functions/sub \
-	  -u Administrator:wewewe
+	  -u $DEFAULT_ADMIN:$DEFAULT_PW
 
 	if (($? != 0)); then
 		echo "Failed to GET function"
 		exit $?
 	fi
-	echo
 
 	echo "=== Delete library math function sub at XDCR admin port ==="
 	curl -s -X DELETE http://localhost:13000/functions/v1/libraries/math/functions/sub \
-	  -u Administrator:wewewe
+	  -u $DEFAULT_ADMIN:$DEFAULT_PW
 
 	if (($? != 0)); then
 		echo "Failed to DELETE function"
@@ -59,4 +70,25 @@ function eventingFunctionUIHandlerTest {
 	fi
 }
 
+function configureResolver {
+  echo "=== Configure Resolver ==="
+  WorkersPerNode=2
+  ThreadsPerWorker=4
+  setInternalSettings "C1" "JSEngineWorkersPerNode"=$WorkersPerNode "JSEngineThreadsPerWorker"=$ThreadsPerWorker
+  echo "Setting JSEngineWorkersPerNode and JSEngineThreadsPerWorker. Sleep 10 seconds for XDCR to reboot"
+  sleep 10
+  setting=`getSpecificInternalSettings "C1" "JSEngineWorkersPerNode"`
+  if (( $setting != $WorkersPerNode ));then
+    echo "JSEngineWorkersPerNode is $setting, expected $WorkersPerNode"
+  else
+    echo "JSEngineWorkersPerNode is set to $setting"
+  fi
+  setting=`getSpecificInternalSettings "C1" "JSEngineThreadsPerWorker"`
+  if (( $setting != $ThreadsPerWorker ));then
+    echo "JSEngineThreadsPerWorker is $setting, expected $ThreadsPerWorker"
+  else
+    echo "JSEngineThreadsPerWorker is set to $setting"
+  fi
+}
 eventingFunctionUIHandlerTest
+configureResolver
