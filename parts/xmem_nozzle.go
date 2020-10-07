@@ -2472,11 +2472,21 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						xmem.handleGeneralError(ErrorBufferInvalidState)
 						goto done
 					}
+					if wrappedReq == nil || wrappedReq.Req == nil {
+						err = fmt.Errorf("Send failed because target Cas change (EEXISTS). The request is not found in the buffer")
+						xmem.handleGeneralError(err)
+						goto done
+					} else {
+						xmem.Logger().Infof("%v Resend %v%v%v because target Cas has changed (EEXISTS).", xmem.Id(), base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd)
+					}
 					additionalInfo := SentCasChangedEventAdditional{
 						Opcode: wrappedReq.Req.Opcode,
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataSentCasChanged, nil, xmem, nil, additionalInfo))
 
+					if xmem.buf.evictSlot(pos) != nil {
+						panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
+					}
 					// Put it back to the next batch so we can retry conflict resolution
 					xmem.accumuBatch(wrappedReq)
 				} else {
