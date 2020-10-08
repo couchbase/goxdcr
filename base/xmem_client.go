@@ -332,3 +332,12 @@ func IsENoEntError(resp_status gomemcached.Status) bool {
 		return false
 	}
 }
+
+func IsEAccessError(resp_status gomemcached.Status) bool {
+	switch resp_status {
+	case gomemcached.EACCESS:
+		return true
+	default:
+		return false
+	}
+}

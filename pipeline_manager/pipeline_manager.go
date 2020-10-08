@@ -12,6 +12,11 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -21,10 +26,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"reflect"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
@@ -1455,6 +1456,13 @@ func (r *PipelineUpdater) update() base.ErrorMap {
 
 	if r.currentErrors.IsEmpty() {
 		r.logger.Infof("Try to start/restart Pipeline %v. \n", r.pipeline_name)
+	} else if r.currentErrors.ContainsError(base.ErrorEAccess, false) {
+		err := fmt.Sprintf("Replication %v cannot continue because remote user does not have enough permission.", r.pipeline_name)
+		r.logger.Errorf(err)
+		r.pipelineMgr.GetLogSvc().Write(err)
+		r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
+		r.clearErrors()
+		return nil
 	} else {
 		r.logger.Infof("Try to fix Pipeline %v. Current error(s)=%v \n", r.pipeline_name, r.currentErrors.String())
 		r.checkAndDisableProblematicFeatures()

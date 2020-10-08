@@ -28,67 +28,83 @@ if (( $? != 0 ));then
   exit $?
 fi
 
+. ./ccr_tests.shlib
+if (( $? != 0 ));then
+  echo "ccr_tests.shlib failed"
+  exit $?
+fi
+
+testCase="${1:-}"
+
+if [[ "$testCase" != "eventingFunctionUIHandlerTest" ]] && [[ "$testCase" != "configureResolver" ]] \
+&& [[ "$testCase" != "remoteClusterUserPermission" ]] && [[ "$testCase" != "dataLoad" ]] && [[ "$testCase" != "" ]]
+then
+  echo "Only the following test cases are available:"
+  echo   eventingFunctionUIHandlerTest
+  echo   configureResolver
+  echo   remoteClusterUserPermission
+  echo   dataLoad
+  exit 1
+fi
+
 DEFAULT_ADMIN="Administrator"
 DEFAULT_PW="wewewe"
 
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2")
 
-function eventingFunctionUIHandlerTest {
-	echo "====== Test eventing function UIHandler ======"
-	echo "=== Create library math function sub at XDCR admin port ==="
-	curl -X POST \
-	  http://localhost:13000/functions/v1/libraries/math/functions/sub \
-	  -u $DEFAULT_ADMIN:$DEFAULT_PW \
-	  -H 'content-type: application/json' \
-	  -d '{
-	  		"name": "sub",
-	  		"code": "function sub(a,b) { return helper(a,b); }\n function helper(a,b) { return a - b; }"
-		  }'
+declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active")
+for bucket in ${CLUSTER_NAME_BUCKET_MAP[@]}
+do
+  insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
+done
 
-	if (($? != 0)); then
-		echo "Failed to create function"
-		exit $?
-	fi
+testForClusterRun
+if (( $? != 0 ));then
+  exit $?
+fi
 
-	echo "=== Get library math function sub at XDCR admin port ==="
-	curl -s -X GET http://localhost:13000/functions/v1/libraries/math/functions/sub \
-	  -u $DEFAULT_ADMIN:$DEFAULT_PW
+setupTopologies -d
+if (( $? != 0 ));then
+  echo "setupTopologies failed"
+	exit $?
+fi
 
-	if (($? != 0)); then
-		echo "Failed to GET function"
-		exit $?
-	fi
+sleep 5
+#setupBuckets
+#if (( $? != 0 ));then
+#  echo "setupBuckets failed"
+#	exit $?
+#fi
+#sleep 5
 
-	echo "=== Delete library math function sub at XDCR admin port ==="
-	curl -s -X DELETE http://localhost:13000/functions/v1/libraries/math/functions/sub \
-	  -u $DEFAULT_ADMIN:$DEFAULT_PW
+declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto" ["mergeFunctionMapping"]='{"default":"defaultLWW"}')
+#declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto")
 
-	if (($? != 0)); then
-		echo "Failed to DELETE function"
-		exit $?
-	fi
-}
+for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}
+do
+    bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+    for cluster2 in ${!CLUSTER_NAME_PORT_MAP[@]}
+    do
+      bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
+      if [[ "$cluster1" != "$cluster2" ]];then
+        echo "createRemoteClusterReference $cluster1 $cluster2"
+        createRemoteClusterReference $cluster1 $cluster2
+        createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties
+      fi
+    done
+done
 
-function configureResolver {
-  echo "=== Configure Resolver ==="
-  WorkersPerNode=2
-  ThreadsPerWorker=4
-  setInternalSettings "C1" "JSEngineWorkersPerNode"=$WorkersPerNode "JSEngineThreadsPerWorker"=$ThreadsPerWorker
-  echo "Setting JSEngineWorkersPerNode and JSEngineThreadsPerWorker. Sleep 10 seconds for XDCR to reboot"
-  sleep 10
-  setting=`getSpecificInternalSettings "C1" "JSEngineWorkersPerNode"`
-  if (( $setting != $WorkersPerNode ));then
-    echo "JSEngineWorkersPerNode is $setting, expected $WorkersPerNode"
-  else
-    echo "JSEngineWorkersPerNode is set to $setting"
-  fi
-  setting=`getSpecificInternalSettings "C1" "JSEngineThreadsPerWorker"`
-  if (( $setting != $ThreadsPerWorker ));then
-    echo "JSEngineThreadsPerWorker is $setting, expected $ThreadsPerWorker"
-  else
-    echo "JSEngineThreadsPerWorker is set to $setting"
-  fi
-}
-eventingFunctionUIHandlerTest
-configureResolver
+if [[ "$testCase" == "" ]];then
+    eventingFunctionUIHandlerTest
+    configureResolver
+    remoteClusterUserPermission
+    dataLoad
+else
+    $testCase
+fi
+
+cleanupBucketReplications
+cleanupBuckets
+cleanupRemoteClusterRefs

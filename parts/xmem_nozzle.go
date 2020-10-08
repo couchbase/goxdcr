@@ -1485,6 +1485,9 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							if base.IsTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
 								xmem.handleVBError(vbno, vb_err)
+							} else if base.IsEAccessError(response.Status) {
+								xmem.handleGeneralError(base.ErrorEAccess)
+								return
 							} else {
 								// log the corresponding request to facilitate debugging
 								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%v%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
@@ -1778,6 +1781,10 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 	getDoc_map = make(base.McRequestMap)
 	var hasTmpErr bool
 	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
+		err = xmem.validateRunningState()
+		if err != nil {
+			return nil, nil, err
+		}
 		hasTmpErr = false
 		respMap, specs, err := xmem.sendBatchGetRequest(getMeta_map, xmem.config.maxRetry, false /* include_doc */)
 		if err != nil {
@@ -1884,6 +1891,10 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 	var specs []base.SubdocLookupPathSpec
 	var hasTmpErr bool
 	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
+		err = xmem.validateRunningState()
+		if err != nil {
+			return err
+		}
 		hasTmpErr = false
 		respMap, specs, err = xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
 		if err != nil {

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -u
+
+# Copyright (c) 2020 Couchbase, Inc.
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the
+# License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific language governing permissions
+# and limitations under the License.
+
+function eventingFunctionUIHandlerTest {
+	echo "====== Test eventing function UIHandler ======"
+	echo "=== Create library math function sub at XDCR admin port ==="
+	curl -X POST \
+	  http://localhost:13000/functions/v1/libraries/math/functions/sub \
+	  -u $DEFAULT_ADMIN:$DEFAULT_PW \
+	  -H 'content-type: application/json' \
+	  -d '{
+	  		"name": "sub",
+	  		"code": "function sub(a,b) { return helper(a,b); }\n function helper(a,b) { return a - b; }"
+		  }'
+
+	if (($? != 0)); then
+		echo "Failed to create function"
+		exit $?
+	fi
+
+	echo "=== Get library math function sub at XDCR admin port ==="
+	curl -s -X GET http://localhost:13000/functions/v1/libraries/math/functions/sub \
+	  -u $DEFAULT_ADMIN:$DEFAULT_PW
+
+	if (($? != 0)); then
+		echo "Failed to GET function"
+		exit $?
+	fi
+
+	echo "=== Delete library math function sub at XDCR admin port ==="
+	curl -s -X DELETE http://localhost:13000/functions/v1/libraries/math/functions/sub \
+	  -u $DEFAULT_ADMIN:$DEFAULT_PW
+
+	if (($? != 0)); then
+		echo "Failed to DELETE function"
+		exit $?
+	fi
+}
+
+function configureResolver {
+    echo "====== Configure Resolver ======"
+    WorkersPerNode=2
+    ThreadsPerWorker=4
+    setInternalSettings "C1" "JSEngineWorkersPerNode"=$WorkersPerNode "JSEngineThreadsPerWorker"=$ThreadsPerWorker
+    echo "Setting JSEngineWorkersPerNode and JSEngineThreadsPerWorker. Sleep 10 seconds for XDCR to reboot"
+    sleep 10
+    setting=`getSpecificInternalSettings "C1" "JSEngineWorkersPerNode"`
+    if (( $setting != $WorkersPerNode ));then
+        echo "JSEngineWorkersPerNode is $setting, expected $WorkersPerNode"
+    else
+        echo "JSEngineWorkersPerNode is set to $setting"
+    fi
+    setting=`getSpecificInternalSettings "C1" "JSEngineThreadsPerWorker"`
+    if (( $setting != $ThreadsPerWorker ));then
+        echo "JSEngineThreadsPerWorker is $setting, expected $ThreadsPerWorker"
+    else
+        echo "JSEngineThreadsPerWorker is set to $setting"
+    fi
+}
+
+function remoteClusterUserPermission {
+    echo "========================================="
+    echo "====== remoteClusterUserPermission ======"
+    echo "========================================="
+    result=0
+    echo "Create target user with only replication_target role"
+    curl -X  PUT -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9001/settings/rbac/users/local/tmpuser -d password=wewewe -d roles=replication_target[*]
+    echo "change remote cluster ref to use tmpuser"
+    curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters/C2 -d name=C2 -d hostname=127.0.0.1:9001 -d username=tmpuser -d password=wewewe
+    echo "Add document at C1"
+    /Users/lileichen/Code/dev/install/bin/cbworkloadgen -i 10 -j -r 1 -n 127.0.0.1:9000 -b CCR1 -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=new
+    restID=`getBucketReplicationRestID "C1" "CCR1" "C2" "CCR2"`
+    echo "Wait 10 seconds for replication to stop because of EACCESS"
+    sleep 10
+    echo "Get replication status"
+    curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/settings/replications/$restID | jq | grep '"pauseRequested": true'
+    if (( $? != 0 ));then
+        echo "Replication should be paused because of EACCESS error, but it is not."
+        result=1
+    fi
+    echo "Add data reader to tmpuser"
+    curl  -X  PUT -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9001/settings/rbac/users/local/tmpuser -d password=wewewe -d 'roles=data_reader[*],replication_target[*]'
+    echo "Resume replication"
+    curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/settings/replications/$restID -d pauseRequested=false
+    # echo "Wait for changes_left to go down to 0"
+    # This fails here: checkChangesLeftInternal "C1" "CCR1" "C2" "CCR2"
+    echo "Wait 10 seconds and get replication status"
+    sleep 10
+    curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/settings/replications/$restID | jq | grep '"pauseRequested": false'
+    if (( $? != 0 ));then
+        echo "Replication should be running, but it is not."
+        result=1
+    fi
+    echo "Change remote cluster ref to admin user"
+    curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters/C2 -d name=C2 -d hostname=127.0.0.1:9001 -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+    # Delete tmpuser
+    curl  -X  DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9001/settings/rbac/users/local/tmpuser
+    if (( $result != 0 ));then
+        echo
+        echo "================================================"
+        echo "====== remoteClusterUserPermission FAILED ======"
+        echo "================================================"
+        return $result
+    fi
+    echo
+    echo "================================================"
+    echo "====== remoteClusterUserPermission PASSED ======"
+    echo "================================================"
+}
+
+function dataLoad {
+    for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}
+    do
+        bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+        echo runCbWorkloadGenBucket $cluster1 $bucket1
+        runCbWorkloadGenBucket $cluster1 $bucket1 &
+    done
+
+    sleep 10
+    checkChangesLeftInternal "C1" "CCR1" "C2" "CCR2"
+    checkChangesLeftInternal "C2" "CCR2" "C1" "CCR1"
+}
