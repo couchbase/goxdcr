@@ -146,7 +146,8 @@ func (c *CollectionsManifestService) handleDelReplSpec(oldSpec *metadata.Replica
 	c.agentsMtx.Unlock()
 
 	if ok {
-		agent.DeleteManifests()
+		// metakv call can happen in the bg
+		go agent.DeleteManifests()
 		agent.Stop()
 	}
 
