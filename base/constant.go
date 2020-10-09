@@ -531,9 +531,10 @@ const (
 
 // constants for parsing conflict resolution type setting in bucket metadata
 const (
-	ConflictResolutionTypeKey    = "conflictResolutionType"
-	ConflictResolutionType_Seqno = "seqno"
-	ConflictResolutionType_Lww   = "lww"
+	ConflictResolutionTypeKey     = "conflictResolutionType"
+	ConflictResolutionType_Seqno  = "seqno"
+	ConflictResolutionType_Lww    = "lww"
+	ConflictResolutionType_Custom = "custom"
 )
 
 const EOFString = "EOF"

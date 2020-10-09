@@ -28,6 +28,7 @@ const targetConnStr = "http://127.0.0.1:9001"
 const targetCluster = "C2"
 const urlCreateReplication = "http://127.0.0.1:9000/controller/createReplication"
 const urlFunctionsFmt = "http://127.0.0.1:13000/functions/v1/libraries/xdcr/functions/%v"
+const bucketPath = "/pools/default/buckets"
 
 func createBucket(connStr, bucketName string) (bucket *gocb.Bucket, err error) {
 	cluster, err := gocb.Connect(connStr)
@@ -38,11 +39,28 @@ func createBucket(connStr, bucketName string) (bucket *gocb.Bucket, err error) {
 		Username: username,
 		Password: password,
 	})
-	// Create a bucket if it doesn't exist
-	cm := cluster.Manager(username, password)
-	bucketSettings := gocb.BucketSettings{false, false, bucketName, "", 100, 0, gocb.Couchbase}
-	_ = cm.InsertBucket(&bucketSettings)
-
+	// Create a bucket if it doesn't exist. Custom CR bucket can only be created using rest API
+	// curl -X POST http://localhost:9000/pools/default/buckets -u Administrator:asdasd -d 'name=CCRBucket&bucketType=membase&conflictResolutionType=custom&ramQuotaMB=100'
+	client := &http.Client{}
+	data := url.Values{}
+	data.Set("name", bucketName)
+	data.Add("bucketType", "membase")
+	data.Add("conflictResolutionType", "custom")
+	data.Add("ramQuotaMB", "100")
+	req, err := http.NewRequest(base.MethodPost, connStr+bucketPath, bytes.NewBufferString(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(base.ContentType, base.DefaultContentType)
+	req.SetBasicAuth(username, password)
+	_, err = client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	// Don't check the response here since it may fail because it was created before
+	//if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+	//	return nil, fmt.Errorf("create bucket returned status %v", resp.Status)
+	//}
 	for i := 0; i < 6; i++ {
 		bucket, err = cluster.OpenBucket(bucketName, "")
 		if err == nil {

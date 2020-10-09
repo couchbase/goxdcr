@@ -401,6 +401,8 @@ func GenerateRandomId(length, maxRetry int) (string, error) {
 func GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType string) ConflictResolutionMode {
 	if conflictResolutionType == ConflictResolutionType_Lww {
 		return CRMode_LWW
+	} else if conflictResolutionType == ConflictResolutionType_Custom {
+		return CRMode_Custom
 	}
 	return CRMode_RevId
 }

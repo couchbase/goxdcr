@@ -209,16 +209,6 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		// for xmem replication, sourceCRMode is LWW if and only if target bucket is LWW enabled, so as to ensure that source side conflict
 		// resolution and target side conflict resolution yield consistent results
 		sourceCRMode = base.GetCRModeFromConflictResolutionTypeSetting(conflictResolutionType)
-
-		// TODO: MB-39012: Change this when we have custom CR buckets
-		// For now using custom CR if merge function is defined
-		value, _ := spec.Settings.GetSettingValueOrDefaultValue(base.MergeFunctionMappingKey)
-		if value != nil {
-			functionMapping := value.(base.MergeFunctionMappingType)
-			if _, ok := functionMapping[base.BucketMergeFunctionKey]; ok {
-				sourceCRMode = base.CRMode_Custom
-			}
-		}
 	}
 
 	var specForConstruction metadata.GenericSpecification

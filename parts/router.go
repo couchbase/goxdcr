@@ -13,6 +13,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -23,12 +30,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"math"
-	"reflect"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 var ErrorInvalidDataForRouter = errors.New("Input data to Router is invalid.")
@@ -1347,8 +1348,9 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 			// if source bucket is of lww type, add FORCE_ACCEPT_WITH_META_OPS options for memcached
 			options |= base.FORCE_ACCEPT_WITH_META_OPS
 		} else if router.sourceCRMode == base.CRMode_Custom {
-			// TODO (MB-39012): Review this once KV has the proper CR mode. Right now without set FORCE_ACCEPT_WITH_META_OPS, KV has to be RevId CR to test custom CR
+			// Custom conflict resolution behaves the same as LWW in KV.
 			options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
+			options |= base.FORCE_ACCEPT_WITH_META_OPS
 		}
 		if event.Opcode == mc.UPR_EXPIRATION {
 			options |= base.IS_EXPIRATION

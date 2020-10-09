@@ -413,6 +413,15 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, errorMap, nil, nil
 	}
 
+	if sourceConflictResolutionType == base.ConflictResolutionType_Custom {
+		if _, ok := settings[metadata.MergeFunctionMappingKey]; !ok {
+			errMsg := fmt.Sprintf("Replication setting %v is required for custom conflict resolution.", base.MergeFunctionMappingKey)
+			service.logger.Errorf(errMsg)
+			errorMap[base.PlaceHolderFieldKey] = errors.New(errMsg)
+			return "", "", nil, errorMap, nil, nil
+		}
+	}
+
 	base.ConcatenateStringSlices(warnings, esWarnings)
 
 	if warnings != nil {

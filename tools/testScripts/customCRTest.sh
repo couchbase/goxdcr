@@ -54,7 +54,8 @@ CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2")
 
-declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active")
+# See MB-39731 for conflictResolutionType=custom
+declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active" ["conflictResolutionType"]="custom")
 for bucket in ${CLUSTER_NAME_BUCKET_MAP[@]}
 do
   insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
@@ -72,15 +73,8 @@ if (( $? != 0 ));then
 fi
 
 sleep 5
-#setupBuckets
-#if (( $? != 0 ));then
-#  echo "setupBuckets failed"
-#	exit $?
-#fi
-#sleep 5
 
 declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto" ["mergeFunctionMapping"]='{"default":"defaultLWW"}')
-#declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto")
 
 for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}
 do
