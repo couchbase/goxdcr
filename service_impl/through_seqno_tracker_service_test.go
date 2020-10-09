@@ -66,7 +66,7 @@ func setupMocks(pipeline *commonMock.Pipeline,
 
 	replSpecSvc.On("GetDerivedObj", mock.Anything).Return(nil, nil)
 
-	svc := NewThroughSeqnoTrackerSvc(log.DefaultLoggerContext)
+	svc := NewThroughSeqnoTrackerSvc(log.DefaultLoggerContext, nil)
 	svc.unitTesting = true
 	svc.Attach(pipeline)
 	return svc
@@ -282,7 +282,6 @@ func TestIgnoredEventThroughSeqno(t *testing.T) {
 	commonEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 	through_seqno = svc.GetThroughSeqno(1)
-	//	svc.truncateSeqnoLists(1, through_seqno)
 	assert.Equal(uint64(10), through_seqno)
 
 	fmt.Println("============== Test case end: TestIgnoredEventThroughSeqno =================")
@@ -366,4 +365,467 @@ func TestClonedData(t *testing.T) {
 	// Second sent event should cause the seqno to move
 	assert.Nil(svc.ProcessEvent(sentEvent))
 	assert.Equal(uint64(1), svc.GetThroughSeqno(1))
+}
+
+func TestOsoModeSimple(t *testing.T) {
+	fmt.Println("============== Test case start: TestOsoModeSimple =================")
+	defer fmt.Println("============== Test case end: TestOsoModeSimple =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+
+	var osoSnapshotSeqnoCheck uint64
+	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
+		// When raising raising a snapshot, the seqno should equal the throughSeqno
+		assert.Equal(snapshotSeqno, osoSnapshotSeqnoCheck)
+	}
+
+	mutationEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VBucket = 1
+
+	mutationEvent.Seqno = 1
+	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Happy path, seqno is at 1
+	through_seqno := svc.GetThroughSeqno(1)
+	assert.Equal(uint64(1), through_seqno)
+
+	// Turn on OSO mode now, nothing is supposed to go past what was seen last, which was 1
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// seqno 2 received
+	mutationEvent.Seqno = 2
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(1), through_seqno)
+
+	// Finish things up, say DCP turns off OSO
+	osoSnapshotSeqnoCheck = 2
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(1), through_seqno)
+
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(2), through_seqno)
+}
+
+func TestOsoMode(t *testing.T) {
+	fmt.Println("============== Test case start: TestOsoMode =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+
+	var osoSnapshotSeqnoCheck uint64
+	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
+		// When raising raising a snapshot, the seqno should equal the throughSeqno
+		assert.Equal(snapshotSeqno, osoSnapshotSeqnoCheck)
+	}
+
+	mutationEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VBucket = 1
+
+	mutationEvent.Seqno = 1
+	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	mutationEvent.Seqno = 2
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Happy path, seqno is at 2
+	through_seqno := svc.GetThroughSeqno(1)
+	assert.Equal(uint64(2), through_seqno)
+
+	// Turn on OSO mode now, nothing is supposed to go past what was seen last, which was 2
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Now let's pretend DCP is sending things out of order, in the order of 4, 3, 7
+	mutationEvent.Seqno = 4
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+	fmt.Printf("%v\n", svc.vbOsoModeSessionDCPTracker.Debug(1))
+
+	// oso mode is on - which means throughSeqno must not go past the last seen seqno when oso mode was on
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(2), through_seqno)
+
+	mutationEvent.Seqno = 3
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+	fmt.Printf("%v\n", svc.vbOsoModeSessionDCPTracker.Debug(1))
+
+	mutationEvent.Seqno = 7
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	fmt.Printf("%v\n", svc.vbOsoModeSessionDCPTracker.Debug(1))
+
+	// Before 7 is has been sent acknowledged, osomode is turned off
+	osoSnapshotSeqnoCheck = 7
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Just for sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(2), through_seqno)
+
+	// At this point, we're waiting for seqno 7 to be handled. Once it's handled, throughSeqno should move to 7
+	// Inject some future seqnos to throw it off
+	mutationEvent.Seqno = 10
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Just for sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(2), through_seqno)
+
+	// Lets start a new OSO session for fun, before the 7 has been handled
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// And say DCP sends down a seqno of 11
+	mutationEvent.Seqno = 11
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Just for sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(2), through_seqno)
+
+	// Now 7 is handled, throughSeqno should move to 10, as it has been sent and also as 7 was the missing piece
+	mutationEvent.Seqno = 7
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// After DataSent, the throughSeqno should move
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(10), through_seqno)
+
+	// Finish things up, say DCP turns off OSO
+	osoSnapshotSeqnoCheck = 11
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(10), through_seqno)
+
+	// Then we finally sent the seqno of 10
+	mutationEvent.Seqno = 11
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// After DataSent, the throughSeqno should move
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(11), through_seqno)
+
+	fmt.Println("============== Test case end: TestOsoMode =================")
+}
+
+func TestOsoModeWaitingForSlowDataSent(t *testing.T) {
+	fmt.Println("============== Test case start: TestOsoModeWaitingForSlowDataSent =================")
+	defer fmt.Println("============== Test case end: TestOsoModeWaitingForSlowDataSent =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+
+	var osoSnapshotSeqnoCheck uint64
+	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
+		// When raising raising a snapshot, the seqno should equal the throughSeqno
+		assert.Equal(snapshotSeqno, osoSnapshotSeqnoCheck)
+	}
+
+	mutationEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VBucket = 1
+
+	mutationEvent.Seqno = 1
+	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	mutationEvent.Seqno = 2
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Happy path, seqno is at 2
+	through_seqno := svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(2), through_seqno)
+
+	// Turn on OSO mode now, nothing is supposed to go past what was seen last, which was 2
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// DCP sends seqno 3
+	mutationEvent.Seqno = 3
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+
+	osoSnapshotSeqnoCheck = 3
+	// OSO mode is off - we're still waiting for seqno3 to hear back from Downstream part
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(2), through_seqno)
+
+	// Say seqno 5 is now heard from DCP but we're still waiting for seqno 3 to come back from downstream
+	mutationEvent.Seqno = 5
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+
+	// seqno 3 is now finally heard back, and 5 too
+	mutationEvent.Seqno = 3
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// When 5 is heard, the snapshot raised should be of seqno 5
+	osoSnapshotSeqnoCheck = 5
+	mutationEvent.Seqno = 5
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(5), through_seqno)
+	// gap is truncated per truncate call
+	//gap1, gap2 = svc.vb_gap_seqno_list_map[1].getSortedSeqnoLists(1, "")
+	//assert.Equal(0, len(gap1))
+	//assert.Equal(0, len(gap2))
+
+	//==========================
+	// Worst case scenario test - from this point on, multiple sessions, and data sent does not occur until the very end
+	// DCP will first send seqno 6 (not OSO)
+	// Part1: send session 1:  OSO_Start, 10, 8, 9, OSO_end (gap from 6 to 7, eventually)
+	// Part2: send non-session: seqno 11
+	// Part3: send session 2: OSO_Start, 13, 15, 14 OSO_end (gap from 12, 13, eventually)
+	//
+	// After DCP has finished everything, then slowly data sent go through the above in reverse order of whatever DCP sent
+	// Check along the way to make sure
+
+	mutationEvent.Seqno = 6
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// sanity check - to make sure that it is not logged into a session since all session should be done
+	lastSeenSeqno := svc.vb_last_seen_seqno_map[1].GetSeqno()
+	assert.Equal(uint64(6), lastSeenSeqno)
+	gap1, gap2 := svc.vb_gap_seqno_list_map[1].getSortedSeqnoLists(1, "")
+	assert.Equal(0, len(gap1))
+	assert.Equal(0, len(gap2))
+
+	// Part1: Session 1 begins
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 10
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 8
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 9
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Session 1 ends
+	osoSnapshotSeqnoCheck = 10
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(5), through_seqno)
+
+	// Part2: non-session seqno11
+	mutationEvent.Seqno = 11
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(5), through_seqno)
+
+	// Part3: Session 2 begins
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 13
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 15
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	mutationEvent.Seqno = 14
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Session 2 ends
+	osoSnapshotSeqnoCheck = 15
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(5), through_seqno)
+
+	// Now, XMEM sends everything out in reverse order
+	mutationEvent.Seqno = 14
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	mutationEvent.Seqno = 15
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	mutationEvent.Seqno = 13
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(5), through_seqno)
+
+	mutationEvent.Seqno = 11
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Sanity check
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(5), through_seqno)
+
+	mutationEvent.Seqno = 9
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	mutationEvent.Seqno = 8
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Throwing in another OSO session here for good measure to try to see if the system should still behave correctly
+	// This section tests to make sure that the new session's lastSeenDcpSeqno should reflect that of the previous session's
+	// maxDCPSeen
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	mutationEvent.Seqno = 17
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// With 10 sent last, it'll raise a snapshot for 15
+	// It's ok to raise the snapshot now even though throughSeq hasn't moved yet
+	osoSnapshotSeqnoCheck = 15
+	mutationEvent.Seqno = 10
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// The very first seqno that was received from DCP. ThroughSeqno should have moved after this
+	mutationEvent.Seqno = 6
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(15), through_seqno)
+
+	// simulate slow KV - where 17 is handled and then OSO end comes
+	mutationEvent.Seqno = 17
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Session is technically not "done" yet, so throughSeqno should remain
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(15), through_seqno)
+
+	// OSO now ends -
+	osoSnapshotSeqnoCheck = 17
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, nil, uint16(1))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// and throughSeqno should have moved
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(17), through_seqno)
 }

@@ -372,6 +372,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			dcp_part.RegisterComponentEventListener(common.DataReceived, data_received_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
 			dcp_part.RegisterComponentEventListener(common.SystemEventReceived, data_received_event_listener)
+			dcp_part.RegisterComponentEventListener(common.OsoSnapshotReceived, data_received_event_listener)
 
 			dcp_part.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)
@@ -1012,15 +1013,32 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 		dcpNozzleSettings[parts.DCP_Priority] = dcpPriority
 	}
 
+	var checkIfNeedOso bool
+	var osoCheckMap metadata.VBTasksMapType
 	vbTasksMap, vbTasksMapExists := settings[parts.DCP_VBTasksMap]
 	if vbTasksMapExists {
 		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap
+		checkIfNeedOso = true
+		osoCheckMap = vbTasksMap.(metadata.VBTasksMapType)
 	}
 
 	modes := repSettings.GetCollectionModes()
 	if modes.IsMigrationOn() && !vbTasksMapExists {
 		// Main pipeline that requires DCP to run a gomemcached filter of just the default collection
-		dcpNozzleSettings[parts.DCP_VBTasksMap] = createMigrationVBTasksMap()
+		vbTasksMap = createMigrationVBTasksMap()
+		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap
+		checkIfNeedOso = true
+		osoCheckMap = vbTasksMap.(metadata.VBTasksMapType)
+	}
+
+	if checkIfNeedOso {
+		// Oso would only work if DCP is serving a single collection, and has to start from seqno 0
+		// Thus, check the backfill tasks and ensure that it only contains one source collections
+		shaToCollectionsMap := osoCheckMap.GetAllCollectionNamespaceMappings()
+		vbTasksMap := osoCheckMap.GetTopTasksOnly()
+		if len(shaToCollectionsMap) == 1 && vbTasksMap.AllStartsWithSeqno0() {
+			dcpNozzleSettings[parts.DCP_EnableOSO] = true
+		}
 	}
 }
 
@@ -1132,7 +1150,8 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	// through seqno tracker needs to be initialized after pipeline supervisor
 	// since it uses the latter as error handler
-	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx)
+	osoSnapshotRaiser := xdcrf.MakeOSOSnapshotRaiser(pipeline)
+	through_seqno_tracker_svc := service_impl.NewThroughSeqnoTrackerSvc(logger_ctx, osoSnapshotRaiser)
 	through_seqno_tracker_svc.Attach(pipeline)
 
 	//Create pipeline statistics manager.
@@ -1389,4 +1408,14 @@ func (xdcrf *XDCRFactory) getUILogOnceMessenger(logOncePerPipeline sync.Once) fu
 		})
 	}
 	return callbackFunc
+}
+
+func (xdcrf *XDCRFactory) MakeOSOSnapshotRaiser(pipeline common.Pipeline) func(vbno uint16, seqno uint64) {
+	sourceNozzles := pipeline.Sources()
+	// For raising OSO snapshot, since checkpoint manager is the only listener, doesn't matter who raises it
+	for _, oneNozzle := range sourceNozzles {
+		dcpNozzle := oneNozzle.(*parts.DcpNozzle)
+		return dcpNozzle.GetOSOSeqnoRaiser()
+	}
+	return nil
 }

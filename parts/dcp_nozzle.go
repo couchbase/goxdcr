@@ -40,6 +40,7 @@ const (
 	DCP_Stats_Interval      = "stats_interval"
 	DCP_Priority            = "dcpPriority"
 	DCP_VBTasksMap          = "VBTaskMap"
+	DCP_EnableOSO           = "enableOSO"
 )
 
 type DcpStreamState int
@@ -365,6 +366,8 @@ type DcpNozzle struct {
 	collectionNamespacePool utilities.CollectionNamespacePoolIface
 
 	endSeqnoForDcp map[uint16]*base.SeqnoWithLock
+
+	osoRequested bool
 }
 
 func NewDcpNozzle(id string,
@@ -518,6 +521,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.DcpPriority = dcp.getDcpPrioritySetting()
 		uprFeatures.IncludeDeletionTime = true
 		uprFeatures.EnableExpiry = true
+		uprFeatures.EnableOso = dcp.osoRequested
 		feed := dcp.getUprFeed()
 		if feed == nil {
 			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
@@ -657,6 +661,11 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 			}
 			dcp.Logger().Infof("%v Received non-ending migration tasks", dcp.Id())
 		}
+	}
+
+	osoMode, exists := settings[DCP_EnableOSO]
+	if exists {
+		dcp.osoRequested = osoMode.(bool)
 	}
 	return
 }
@@ -1007,6 +1016,13 @@ func (dcp *DcpNozzle) processData() (err error) {
 			} else if m.IsSystemEvent() {
 				dcp.handleSystemEvent(m)
 				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+			} else if m.IsOsoSnapshot() {
+				osoBegins, err := m.GetOsoBegin()
+				if err != nil {
+					// TODO - remove this
+					panic("err with oso")
+				}
+				dcp.RaiseEvent(common.NewEvent(common.OsoSnapshotReceived, osoBegins, dcp, nil, m.VBucket))
 			} else {
 				// Regular mutations coming in from DCP stream
 				if dcp.IsOpen() {
@@ -1913,5 +1929,16 @@ func (dcp *DcpNozzle) RecycleDataObj(req interface{}) {
 		}
 	default:
 		panic("Coding error")
+	}
+}
+
+func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
+	return func(vbno uint16, seqno uint64) {
+		m := &mcc.UprEvent{
+			VBucket:      vbno,
+			SnapstartSeq: seqno,
+			SnapendSeq:   seqno,
+		}
+		dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 	}
 }

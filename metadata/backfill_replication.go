@@ -383,6 +383,25 @@ func (v VBTasksMapType) DebugString() string {
 	return buffer.String()
 }
 
+func (v VBTasksMapType) AllStartsWithSeqno0() bool {
+	for _, tasks := range v {
+		if tasks == nil {
+			continue
+		}
+
+		for _, task := range *tasks {
+			if task.Timestamps == nil || task.Timestamps.StartingTimestamp == nil {
+				// Very odd
+				continue
+			}
+			if task.Timestamps.StartingTimestamp.Seqno > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks []*BackfillTask
 

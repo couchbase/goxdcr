@@ -75,6 +75,8 @@ const (
 	LastSeenSeqnoDoneProcessed ComponentEventType = iota
 	// When a source mutation is translated into multiple target mutations for different target namespaces
 	DataCloned ComponentEventType = iota
+	// DCP may send OSO snapshot marker if XDCR requested only one collection
+	OsoSnapshotReceived ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
