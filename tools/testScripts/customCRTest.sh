@@ -50,9 +50,9 @@ fi
 DEFAULT_ADMIN="Administrator"
 DEFAULT_PW="wewewe"
 
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
-CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2")
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2" ["C3"]="CCR3")
 
 # See MB-39731 for conflictResolutionType=custom
 declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active" ["conflictResolutionType"]="custom")

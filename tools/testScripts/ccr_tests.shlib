@@ -126,6 +126,16 @@ function dataLoad {
     done
 
     sleep 10
-    checkChangesLeftInternal "C1" "CCR1" "C2" "CCR2"
-    checkChangesLeftInternal "C2" "CCR2" "C1" "CCR1"
+    for cluster1 in ${!CLUSTER_NAME_BUCKET_MAP[@]}
+    do
+        bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+        for cluster2 in ${!CLUSTER_NAME_BUCKET_MAP[@]}
+        do
+            if [[ $cluster1 != $cluster2 ]];then
+                bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
+                echo "checkChangesLeftInternal $cluster1 $bucket1 $cluster2 $bucket2"
+                checkChangesLeftInternal "$cluster1" "$bucket1" "$cluster2" "$bucket2"
+            fi
+        done
+    done
 }

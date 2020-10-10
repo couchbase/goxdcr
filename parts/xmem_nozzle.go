@@ -57,10 +57,11 @@ const (
 type ConflictResult uint32
 
 const (
-	TargetDominate ConflictResult = iota // Source CAS is smaller. Skip
-	SourceDominate ConflictResult = iota // Source CAS is larger and it contains target. Send
-	Conflict       ConflictResult = iota // Source CAS is larger and they don't contain each other. Merge
-	TargetSetBack  ConflictResult = iota // Source CAS is larger but target dominates source MV. Set target back to source
+	TargetDominate     ConflictResult = iota // Source CAS is smaller. Skip
+	SourceDominate     ConflictResult = iota // Source CAS is larger and it contains target. Send
+	Conflict           ConflictResult = iota // Source CAS is larger and they don't contain each other. Merge
+	TargetSetBack      ConflictResult = iota // Source CAS is larger but target dominates source MV. Set target back to source
+	SourceEqualsTarget ConflictResult = iota
 )
 
 type RequestToResponse struct {
@@ -1817,6 +1818,8 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 					} else {
 						wrappedReq.Req.Cas = resp.Cas
 					}
+				case SourceEqualsTarget:
+					noRep_map[uniqueKey] = Not_Send_Failed_CR
 				case TargetDominate:
 					noRep_map[uniqueKey] = Not_Send_Failed_CR
 				case Conflict:
@@ -1917,17 +1920,17 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 				}
 				switch res {
 				case SourceDominate:
-					// Based on XATTR only, we have determined that the document is in conflict.
-					// After getting the document body, we may find target is not json. So LWW has to be used.
-					// So we have to remove it from noRep_map
-					delete(noRep_map, wrappedReq.UniqueKey)
+					// We are here because we have a conflict based on XATTR. Now the same source dominates. Maybe target had a rollback?
+					delete(noRep_map, uniqueKey)
 					if resp.Status == mc.KEY_ENOENT {
 						wrappedReq.Req.Cas = 0
 					} else {
 						wrappedReq.Req.Cas = resp.Cas
 					}
+				case SourceEqualsTarget:
+					noRep_map[uniqueKey] = Not_Send_Failed_CR
 				case TargetDominate:
-					// We don't need to merge or set back to source. The source mutation is already in noRep_map. Do nothing
+					noRep_map[uniqueKey] = Not_Send_Failed_CR
 				case Conflict:
 					// Call conflictMgr to resolve conflict
 					err = xmem.conflictMgr.ResolveConflict(wrappedReq, lookupResp, xmem.sourceClusterId, xmem.targetClusterId)
@@ -1966,9 +1969,19 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 	return
 }
 
+func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, lookupResp *base.SubdocLookupResponse) (ConflictResult, error) {
+	res, err := xmem.detectConflictWithXattr_internal(source, lookupResp)
+	if err == nil && res == SourceDominate && source.Cas == lookupResp.Resp.Cas {
+		// When CAS are the same, they are either the same document, or they are updated by different clusters at the exact same time.
+		// Since source contains target, they can't be updated at the same time.
+		return SourceEqualsTarget, nil
+	}
+	return res, err
+}
+
 // This is called after getting the target document based on the lookup spec. We should have both source and target XATTRs
 // If target doesn't exist (target.Status == KEY_ENOENT), return SourceDominate
-func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, lookupResp *base.SubdocLookupResponse) (ConflictResult, error) {
+func (xmem *XmemNozzle) detectConflictWithXattr_internal(source *mc.MCRequest, lookupResp *base.SubdocLookupResponse) (ConflictResult, error) {
 	target := lookupResp.Resp
 	if target.Status == mc.KEY_ENOENT {
 		// Target doesn't exist
