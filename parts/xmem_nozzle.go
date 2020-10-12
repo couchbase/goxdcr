@@ -871,7 +871,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 	err := xmem.validateRunningState()
 	if err != nil {
-		xmem.Logger().Warnf("%v is in %v state, Recieve did no-op", xmem.Id(), xmem.State())
+		xmem.Logger().Warnf("%v is in %v state, Receive did no-op", xmem.Id(), xmem.State())
 		return err
 	}
 
@@ -2013,7 +2013,7 @@ func (xmem *XmemNozzle) detectConflictWithXattr_internal(source *mc.MCRequest, l
 	}
 	sourceMeta, err := base.FindSourceCustomCRXattr(source, xmem.sourceClusterId)
 	if err != nil {
-		return Conflict, fmt.Errorf("detectConflictWithXattr for %v%s%v received error %v calling FindTargetCustomCRXattr()", base.UdTagBegin, source.Key, base.UdTagEnd, err)
+		return Conflict, fmt.Errorf("detectConflictWithXattr for %v%s%v received error %v calling FindSourceCustomCRXattr()", base.UdTagBegin, source.Key, base.UdTagEnd, err)
 	}
 	if targetMeta.IsMergedDoc() {
 		res, err := sourceMeta.ContainsVV(targetMeta.GetMv())
@@ -2501,7 +2501,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						xmem.handleGeneralError(err)
 						goto done
 					} else {
-						xmem.Logger().Infof("%v Resend %v%v%v because target Cas has changed (EEXISTS).", xmem.Id(), base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd)
+						xmem.Logger().Infof("%v Retry conflict resolution for %v%v%v because target Cas has changed (EEXISTS).", xmem.Id(), base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd)
 					}
 					additionalInfo := SentCasChangedEventAdditional{
 						Opcode: wrappedReq.Req.Opcode,
@@ -2510,6 +2510,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 					if xmem.buf.evictSlot(pos) != nil {
 						panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
+					}
+					// If it is ADD_WITH_META, it needs to be SET_WITH_META in the next try because target now has the doc
+					if wrappedReq.Req.Opcode == base.ADD_WITH_META {
+						wrappedReq.Req.Opcode = base.SET_WITH_META
 					}
 					// Put it back to the next batch so we can retry conflict resolution
 					xmem.accumuBatch(wrappedReq)

@@ -705,7 +705,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	max_sent_seqno := maxSeqno(sent_seqno_list)
 	filtered_seqno_list := tsTracker.vb_filtered_seqno_list_map[vbno].GetSortedSeqnoList(false)
 	max_filtered_seqno := maxSeqno(filtered_seqno_list)
-	failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].GetSortedSeqnoList(false)
+	failed_cr_seqno_list := tsTracker.vb_failed_cr_seqno_list_map[vbno].GetSortedSeqnoList(true)
 	max_failed_cr_seqno := maxSeqno(failed_cr_seqno_list)
 	gap_seqno_list_1, gap_seqno_list_2 := tsTracker.vb_gap_seqno_list_map[vbno].getSortedSeqnoLists(vbno, "gap")
 	max_end_gap_seqno := maxSeqno(gap_seqno_list_2)
