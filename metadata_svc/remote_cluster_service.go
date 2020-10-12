@@ -2076,6 +2076,10 @@ func (service *RemoteClusterService) loadFromMetaKV() error {
 	for _, KVentry := range KVsFromMetaKV {
 		ref, err = constructRemoteClusterReference(KVentry.Value, KVentry.Rev)
 
+		if ref.Uuid() == "" || ref.Name() == "" || ref.Id() == "" {
+			service.logger.Warnf("Loading from metakv showed potentially problematic reference %v", ref.String())
+		}
+
 		if err != nil {
 			service.logger.Errorf("Unable to construct remote cluster %v from metaKV's data. err: %v. value: %v\n", KVentry.Key, base.TagUDBytes(KVentry.Value), err)
 			continue
@@ -2961,6 +2965,11 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 	if ref == nil {
 		return base.ErrorInvalidInput
 	}
+
+	if ref.Uuid() == "" || ref.Id() == "" || ref.Name() == "" {
+		service.logger.Warnf("adding an invalid ref: %v", ref.String())
+	}
+
 	/**
 	 * Check to see if there is a local existance of this copy of the reference.
 	 * This is still subjected to conflict if user adds a same reference in >1 locations simultaneously,
@@ -3118,6 +3127,9 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 		if err != nil {
 			service.logger.Errorf("Error marshaling remote cluster. value=%v, err=%v\n", base.TagUDBytes(value), err)
 			return err
+		}
+		if newRef.Uuid() == "" {
+			service.logger.Warnf("RemoteClusterReference %v loaded from metakv has no uuid", newRef.Id())
 		}
 	}
 

@@ -319,10 +319,8 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 func (rm *replicationManager) initMetadataChangeMonitor() {
 	mcm := NewMetadataChangeMonitor()
 
-	// the sequence of the listener registration matters
-	// for example, replicationSpecChangeListener will get all active replications started
-	// this requires replication settings and remote cluster reference to be initialized
-	// that is why it needs to be registered and started after the other listeners
+	// The listeners here in order are subjected to how metakv's callback triggers the callbacks
+	// There is no guarantee that metakv callback will call these callbacks in the order created
 
 	globalSettingChangeListener := NewGlobalSettingChangeListener(
 		rm.global_setting_svc,

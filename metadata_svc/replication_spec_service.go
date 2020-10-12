@@ -1143,27 +1143,47 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 	}
 
 	if updated && oldSpec == nil && newSpec != nil {
-		// In automated test environment where remote cluster reference and spec is created
-		// almost simultaneously, there's no guarantee that the remote cluster ref created
-		// on an active node has propagated to a non-active node before the new spec is propagated to the said
-		// non-acive node.
-		// Because of this operation requires that the ref be present first, and it must not fail as
-		// other components like collections manifest service depends on this, retry up to 3 seconds
-		retryOp := func() error {
-			return service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
+		if service.remote_cluster_svc.RequestRemoteMonitoring(newSpec) != nil {
+			// Do the following in a separate go-routine since this call path is synchronized by a single
+			// go-routine handling all the metakv listeners
+			go func() {
+				// In automated test environment where remote cluster reference and spec is created
+				// almost simultaneously, there's no guarantee that the remote cluster ref created
+				// on an active node has propagated to a non-active node before the new spec is propagated to the said
+				// non-acive node.
+				// Because of this operation requires that the ref be present first, and it must not fail as
+				// other components like collections manifest service depends on this, retry up to 3 seconds
+				retryOp := func() error {
+					return service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
+				}
+				err = service.utils.ExponentialBackoffExecutor("RequestRemoteMonitoring", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
+				if err != nil {
+					// Worst case scenario even after 3 seconds, panic and XDCR process will reload everything in order from metakv
+					// as in, load the remote cluster reference first, then load the specs
+					panic("Cannot continue without requesting remote monitoring")
+				}
+				service.callMetadataChangeCb(specId, newSpec, oldSpec)
+			}()
+			// Skip the metadatachangeCb for now as gofunc above will call it later
+			return nil
 		}
-		err = service.utils.ExponentialBackoffExecutor("RequestRemoteMonitoring", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
-		if err != nil {
-			// Worst case scenario even after 3 seconds, panic and XDCR process will reload everything in order from metakv
-			// as in, load the remote cluster reference first, then load the specs
-			panic("Cannot continue without requesting remote monitoring")
-		}
+
 	}
 
 	var sumErr error
+	if updated {
+		sumErr = service.callMetadataChangeCb(specId, newSpec, oldSpec)
+	}
+
+	return sumErr
+}
+
+func (service *ReplicationSpecService) callMetadataChangeCb(specId string, newSpec *metadata.ReplicationSpecification, oldSpec *metadata.ReplicationSpecification) error {
 	service.metadataChangeMtx.RLock()
 	defer service.metadataChangeMtx.RUnlock()
-	if updated && len(service.metadata_change_callback) > 0 {
+	var err error
+	var sumErr error
+	if len(service.metadata_change_callback) > 0 {
 		for _, callback := range service.metadata_change_callback {
 			err = callback(specId, oldSpec, newSpec)
 			if err != nil {
@@ -1176,7 +1196,6 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 			}
 		}
 	}
-
 	return sumErr
 }
 
