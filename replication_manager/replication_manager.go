@@ -888,6 +888,7 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 			Id:                      fullReplId,
 			StatsMap:                replication_mgr.utils.GetMapFromExpvarMap(expvarMap),
 			BrokenCollectionMapping: brokenExternalMap,
+			ErrorList:               make([]base.ErrorInfo, 0),
 		}
 		if brokenMapDoneFunc != nil {
 			brokenMapDoneFunc()
