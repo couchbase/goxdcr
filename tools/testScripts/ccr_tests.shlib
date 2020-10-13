@@ -77,7 +77,8 @@ function remoteClusterUserPermission {
     echo "change remote cluster ref to use tmpuser"
     curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters/C2 -d name=C2 -d hostname=127.0.0.1:9001 -d username=tmpuser -d password=wewewe
     echo "Add document at C1"
-    /Users/lileichen/Code/dev/install/bin/cbworkloadgen -i 10 -j -r 1 -n 127.0.0.1:9000 -b CCR1 -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=new
+    runCbWorkloadGenBucket "C1" "CCR1" 10 "eaccess_test"
+
     restID=`getBucketReplicationRestID "C1" "CCR1" "C2" "CCR2"`
     echo "Wait 10 seconds for replication to stop because of EACCESS"
     sleep 10
@@ -118,11 +119,20 @@ function remoteClusterUserPermission {
 }
 
 function dataLoad {
+    echo "========================================"
+    echo "=============== dataLoad ==============="
+    echo "========================================"
     for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}
     do
         bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
         echo runCbWorkloadGenBucket $cluster1 $bucket1
         runCbWorkloadGenBucket $cluster1 $bucket1 &
+    done
+    for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}
+    do
+        bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+        echo runCbWorkloadGenBucket $cluster1 $bucket1 1000 "common"
+        runCbWorkloadGenBucket $cluster1 $bucket1 1000 "common" &
     done
 
     sleep 10
@@ -138,4 +148,9 @@ function dataLoad {
             fi
         done
     done
+    grepForPanics
+    
+    echo "========================================="
+    echo "============ dataLoad PASSED ============"
+    echo "========================================="
 }

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	mrand "math/rand"
 	"reflect"
 	"sort"
@@ -1556,6 +1557,23 @@ func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mer
 func (meta *CustomCRMeta) String() string {
 	return fmt.Sprintf("senderId: %s, cas: %v, cvId: %s, cv: %v, pcas: %s, mv: %s",
 		meta.senderId, meta.cas, meta.cvId, meta.cv, meta.pcas, meta.mv)
+}
+
+func MergedPcasLength(sourceMeta, targetMeta *CustomCRMeta) int {
+	return len(sourceMeta.GetPcas()) + len(targetMeta.GetPcas()) + 2 + // maximum combined PCAS + 2 seperators ','
+		len(sourceMeta.GetMv()) + len(targetMeta.GetMv()) + 2 + // maximum combined MV rolled into to PCAS + 2 seperators ','
+		len(sourceMeta.GetCvId()) + 3 + // quotes and separators "...":
+		len(targetMeta.GetCvId()) + 3 + // quotes and separators "...":
+		2*(MaxBase64CASLength+3) + 2 // quotes and separators "...", plus '{' and '}'
+}
+
+var MaxBase64CASLength = len(Uint64ToBase64(math.MaxUint64))
+
+func MergedMvLength(sourceMeta, targetMeta *CustomCRMeta) int {
+	return len(sourceMeta.GetMv()) + len(targetMeta.GetMv()) + 2 + // maximumn combined MV + 2 seperators ','
+		len(sourceMeta.Updater()) + 3 + // quotes and separators "...":
+		len(targetMeta.Updater()) + 3 + // quotes and separators "...":
+		2*(MaxBase64CASLength+3) + 2 // quotes and separators "...", plus '{' and '}'
 }
 
 type ConflictParams struct {

@@ -468,11 +468,10 @@ func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byt
 		return nil, nil, err
 	}
 	// "mv":{"<sourceId>":"<B64>","targetId>":"<B64>",...}
-	sourceCasB64 := base.Uint64ToBase64(sourceMeta.GetCas())
-	mvlen := 2*(len(sourceCasB64)+len(input.SourceId)+6) + 7 + len(sourceMeta.GetMv()) + len(targetMeta.GetMv())
+	mvlen := base.MergedMvLength(sourceMeta, targetMeta)
+	pcaslen := base.MergedPcasLength(sourceMeta, targetMeta)
 	// TODO (MB-41808): data pool
 	mergedMvSlice := make([]byte, mvlen)
-	pcaslen := len(sourceMeta.GetPcas()) + len(targetMeta.GetPcas())
 	mergedPcasSlice := make([]byte, pcaslen)
 	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
 	if err != nil {
