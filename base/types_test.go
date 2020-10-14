@@ -40,10 +40,10 @@ func TestCollectionNamespaceFromString(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCollectionNamespaceFromString =================")
 
 	assert := assert.New(t)
-	namespace, err := NewCollectionNamespaceFromString("a123:_123b")
+	namespace, err := NewCollectionNamespaceFromString("a123:123b")
 	assert.Nil(err)
 	assert.Equal("a123", namespace.ScopeName)
-	assert.Equal("_123b", namespace.CollectionName)
+	assert.Equal("123b", namespace.CollectionName)
 
 	_, err = NewCollectionNamespaceFromString("abcdef")
 	assert.NotNil(err)
@@ -362,4 +362,23 @@ func TestMergeMeta(t *testing.T) {
 	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster2\":\"FhSITdr4ABU\"")
 	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster3\":\"FhSITdr4ACA\"")
 	assert.Equal(0, pcaslen)
+}
+
+func TestDefaultNs(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestDefaultNS =================")
+	defer fmt.Println("============== Test case end: TestDefaultNS =================")
+
+	validator := NewExplicitMappingValidator()
+	assert.Equal(explicitRuleScopeToScope, validator.parseRule("_default", "_default"))
+	assert.Equal(explicitRuleScopeToScope, validator.parseRule("_default", nil))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:_default", nil))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:_default", "_default:_default"))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:testCol", nil))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:testCol", "_default:_default"))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope:testCol", nil))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope:testCol", "_default:nonDefCol"))
+
+	assert.Equal(explicitRuleInvalid, validator.parseRule("testScope:testCol", "_nonDefault:nonDefCol"))
+
 }

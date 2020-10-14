@@ -174,12 +174,23 @@ var DefaultCollectionNamespace = CollectionNamespace{
 // The specificStr should follow the format of: "<scope>:<collection>"
 func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, error) {
 	if !CollectionNamespaceRegex.MatchString(specificStr) {
-		return CollectionNamespace{}, fmt.Errorf("Invalid CollectionNamespace format")
+		return CollectionNamespace{}, ErrorInvalidColNamespaceFormat
 	} else {
 		names := CollectionNamespaceRegex.FindStringSubmatch(specificStr)
 		if len(names) != 3 {
 			return CollectionNamespace{}, fmt.Errorf("Invalid capture for CollectionNameSpaces")
 		}
+
+		for i := 1; i <= 2; i++ {
+			valid := names[i] == DefaultScopeCollectionName
+			if !valid {
+				valid = CollectionNameValidationRegex.MatchString(names[i])
+			}
+			if !valid {
+				return CollectionNamespace{}, ErrorInvalidColNamespaceFormat
+			}
+		}
+
 		return CollectionNamespace{
 			ScopeName:      names[1],
 			CollectionName: names[2],
@@ -1056,7 +1067,10 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 	}
 
 	// At this point, name has to be a scope name
-	matched := CollectionNameValidationRegex.MatchString(k)
+	matched := k == DefaultScopeCollectionName
+	if !matched {
+		matched = CollectionNameValidationRegex.MatchString(k)
+	}
 	if !matched {
 		if strings.Contains(k, ScopeCollectionDelimiter) {
 			return explicitRuleInvalid
@@ -1065,7 +1079,10 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 		}
 	}
 	if vIsString {
-		matched = CollectionNameValidationRegex.MatchString(vStr)
+		matched = vStr == DefaultScopeCollectionName
+		if !matched {
+			matched = CollectionNameValidationRegex.MatchString(vStr)
+		}
 		if !matched {
 			if strings.Contains(k, ScopeCollectionDelimiter) {
 				return explicitRuleInvalid
