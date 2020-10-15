@@ -2022,6 +2022,7 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 
 	// First populate rule 1 - S:C -> S:C
 	sourceNamespacesWithNoTarget := make(map[string]string)
+	specificNamespaceAlreadyAssigned := make(map[string]string) // key - scopeName, value - collectionName
 	for ruleKey, ruleValRaw := range c {
 		ruleVal, ok := ruleValRaw.(string)
 		if !ok || !strings.Contains(ruleKey, base.ScopeCollectionDelimiter) || !strings.Contains(ruleVal, base.ScopeCollectionDelimiter) {
@@ -2049,8 +2050,8 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 			sourceNamespacesWithNoTarget[sourceNamespace.ScopeName] = sourceNamespace.CollectionName
 			continue
 		}
-
 		outNamespace.AddSingleMapping(&sourceNamespace, &targetNamespace)
+		specificNamespaceAlreadyAssigned[sourceNamespace.ScopeName] = sourceNamespace.CollectionName
 	}
 
 	// Then populate rule2 S:C -> null
@@ -2063,7 +2064,9 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 		if err != nil {
 			return nil, err
 		}
+
 		outNamespace.AddSingleMapping(&sourceNamespace, emptyNamespace)
+		specificNamespaceAlreadyAssigned[sourceNamespace.ScopeName] = sourceNamespace.CollectionName
 	}
 
 	// Populate S -> S'
@@ -2093,6 +2096,10 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 				continue
 			}
 
+			if sourceColNameCheck, ok := specificNamespaceAlreadyAssigned[sourceScopeName]; ok && sourceColName == sourceColNameCheck {
+				continue
+			}
+
 			sourceNamespace := &base.CollectionNamespace{
 				ScopeName:      sourceScopeName,
 				CollectionName: sourceColName,
@@ -2118,23 +2125,27 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 			continue
 		}
 
-		scopeName := ruleKey
-		sourceCollections, err := pair.Source.GetAllCollectionsGivenScopeRO(scopeName)
+		sourceScopeName := ruleKey
+		sourceCollections, err := pair.Source.GetAllCollectionsGivenScopeRO(sourceScopeName)
 		if err == base.ErrorNotFound {
 			if ensureSourceExists {
-				sourceDNEmap[scopeName] = sourceNotFoundErr
+				sourceDNEmap[sourceScopeName] = sourceNotFoundErr
 			}
 			continue
 		}
 
 		for sourceColName, _ := range sourceCollections {
+			if sourceColNameCheck, ok := specificNamespaceAlreadyAssigned[sourceScopeName]; ok && sourceColName == sourceColNameCheck {
+				continue
+			}
+
 			sourceNamespace := &base.CollectionNamespace{
-				ScopeName:      scopeName,
+				ScopeName:      sourceScopeName,
 				CollectionName: sourceColName,
 			}
 
 			// Only add if S:C doesn't exist, because any S:C is higher priority than plain S -> *
-			alreadyExistsColName, scopeExists := sourceNamespacesWithNoTarget[scopeName]
+			alreadyExistsColName, scopeExists := sourceNamespacesWithNoTarget[sourceScopeName]
 			if scopeExists && alreadyExistsColName == sourceColName {
 				continue
 			}

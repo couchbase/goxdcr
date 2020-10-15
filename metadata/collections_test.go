@@ -1047,3 +1047,40 @@ func TestCollectionMigrateRuleValidation(t *testing.T) {
 	rules, err = ValidateAndConvertStringToMappingRuleType(perfKeyWSpaces)
 	assert.Nil(err)
 }
+
+func TestDenylistMapping(t *testing.T) {
+	fmt.Println("============== Test case start: TestDenylistMapping =================")
+	defer fmt.Println("============== Test case end: TestDenylistMapping =================")
+	assert := assert.New(t)
+
+	validRules := make(map[string]interface{})
+	validRules["S1"] = "S1"
+	validRules["S1:col1"] = nil
+
+	data, err := ioutil.ReadFile(provisionedFile)
+	assert.Nil(err)
+	provisionedManifest, err := NewCollectionsManifestFromBytes(data)
+	assert.Nil(err)
+	manifestsPair := CollectionsManifestPair{
+		Source: &provisionedManifest,
+		Target: &provisionedManifest,
+	}
+
+	rules, err := ValidateAndConvertJsonMapToRuleType(validRules)
+	assert.Nil(err)
+
+	var mode base.CollectionsMgtType
+	mode.SetExplicitMapping(true)
+
+	mapping, err := rules.GetOutputMapping(manifestsPair, mode, true)
+	assert.Nil(err)
+
+	assert.Equal(2, len(mapping))
+	for k, v := range mapping {
+		assert.Equal(1, len(v))
+		if k.CollectionName == "col1" {
+			assert.True(v[0].IsEmpty())
+		}
+	}
+
+}
