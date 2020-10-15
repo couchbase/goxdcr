@@ -215,6 +215,7 @@ func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.Replicati
 	var agent *CollectionsManifestAgent
 	agent, err = c.getAgent(spec)
 	if err != nil && !specMayNotExist {
+		c.logger.Warnf("Unable to find agent given spec %v - %v", spec, err)
 		return
 	}
 

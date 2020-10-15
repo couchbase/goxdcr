@@ -778,10 +778,11 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 			return
 		}
 		tgtClusterName = ref.Name()
-	}
-	err = validateCollectionsMappingRule(settings, currentCollectionMode, srcBucket, tgtBucket, tgtClusterName)
-	if err != nil {
-		errorsMap[CollectionsMappingRulesKey] = err
+
+		err = validateCollectionsMappingRule(settings, currentCollectionMode, srcBucket, tgtBucket, tgtClusterName)
+		if err != nil {
+			errorsMap[CollectionsMappingRulesKey] = err
+		}
 	}
 	err = validateMergeFunctionMapping(settings)
 	if err != nil {
