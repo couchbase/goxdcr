@@ -228,6 +228,7 @@ func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.Replicati
 		agentIsTemporary = true
 		err = agent.Start()
 		if err != nil {
+			c.logger.Errorf("Unable to start temp agent for %v to get manifests - %v", spec.Id, err)
 			return
 		}
 	}
@@ -700,7 +701,7 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr err
 	return
 }
 
-func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() {
+func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() error {
 	// For a spec to exist, the reference must exist also
 	retryOp := func() error {
 		var getErr error
@@ -710,18 +711,26 @@ func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() {
 	err := a.utilities.ExponentialBackoffExecutor("CollectionsManifestSvcHandleNewReplSpec",
 		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
 	if err != nil {
+		if a.tempAgent {
+			// tempagent do not panic just return error
+			return err
+		}
 		// Worst case scenario even after 3 seconds, panic and XDCR process will reload everything in order from metakv
 		// as in, load the remote cluster reference first, then load the specs
 		panic("Cannot continue without retrieving remote cluster reference")
 	}
 	atomic.StoreUint32(&a.remoteClusterRefPopulated, 1)
+	return nil
 }
 
 // These should not block
 func (a *CollectionsManifestAgent) Start() error {
 	if atomic.CompareAndSwapUint32(&a.started, 0, 1) {
 		if a.tempAgent {
-			a.populateRemoteClusterRefOnce()
+			err := a.populateRemoteClusterRefOnce()
+			if err != nil {
+				return fmt.Errorf("Temp agent %v unable to populate remote cluster reference %v", a.id, err)
+			}
 			a.refreshAndNotify(true)
 		} else {
 			var refreshImmediately bool

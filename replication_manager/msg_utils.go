@@ -686,6 +686,9 @@ func validateSrcNamespacesExist(targetClusterName string, srcBucket string, targ
 		return fmt.Errorf("unable to generate spec for validating source mapping: %v", err)
 	}
 	srcManifest, tgtManifest, err := CollectionsManifestService().GetLatestManifests(getterSpec, true)
+	if err != nil {
+		return err
+	}
 	manifestsPair := metadata.CollectionsManifestPair{
 		Source: srcManifest,
 		Target: tgtManifest,
