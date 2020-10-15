@@ -1,9 +1,10 @@
 package base
 
 import (
+	"sync"
+
 	"github.com/couchbase/gomemcached"
 	"github.com/couchbase/goxdcr/log"
-	"sync"
 )
 
 type MCRequestPool struct {
@@ -50,6 +51,7 @@ func (pool *MCRequestPool) cleanReq(req *WrappedMCRequest) *WrappedMCRequest {
 	req.Req = pool.cleanMCReq(req.Req)
 	req.Seqno = 0
 	req.SiblingReqs = req.SiblingReqs[:0]
+	req.RetryCRCount = 0
 	return req
 }
 

@@ -616,11 +616,15 @@ type XmemNozzle struct {
 
 	finish_ch chan bool
 
-	counter_sent                uint64
+	counter_sent                uint64 // sent item count going through dataChan. sent = received - from_target + retry_cr
 	counter_received            uint64
 	counter_ignored             uint64
 	counter_compressed_received uint64
 	counter_compressed_sent     uint64
+	counter_retry_cr            uint64
+	counter_to_resolve          uint64
+	counter_to_setback          uint64
+	counter_from_target         uint64
 	counter_waittime            uint64
 	counter_batches             int64
 	start_time                  time.Time
@@ -906,6 +910,8 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 		return err
 	}
 
+	xmem.checkAndUpdateReceivedStats(request)
+
 	// For custom CR, we don't need to send document if target is the source of change.
 	fromTarget, err := xmem.isChangesFromTarget(request)
 	if err != nil {
@@ -914,14 +920,15 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 			xmem.Id(), err, base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
 	} else if fromTarget {
 		// Change is from target. Don't replicate back
-		additionalInfo := DataFailedCRSourceEventAdditional{Seqno: request.Seqno,
+		additionalInfo := TargetDataSkippedEventAdditional{Seqno: request.Seqno,
 			Opcode:      encodeOpCode(request.Req, xmem.source_cr_mode == base.CRMode_Custom),
 			IsExpirySet: (binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
 			VBucket:     request.Req.VBucket,
 			ManifestId:  request.GetManifestId(),
 		}
-		xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
+		xmem.RaiseEvent(common.NewEvent(common.TargetDataSkipped, nil, xmem, nil, additionalInfo))
 		xmem.recycleDataObj(request)
+		atomic.AddUint64(&xmem.counter_from_target, 1)
 		return nil
 	}
 	xmem.batch_lock <- true
@@ -931,8 +938,6 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 	if err != nil {
 		return err
 	}
-
-	xmem.checkAndUpdateReceivedStats(request)
 
 	curCount, _, isFull, err := xmem.batch.accumuBatch(request, xmem.optimisticRep)
 	if err != nil {
@@ -952,6 +957,9 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 }
 
 func (xmem *XmemNozzle) checkAndUpdateReceivedStats(request *base.WrappedMCRequest) {
+	if request.RetryCRCount > 0 {
+		return
+	}
 	atomic.AddUint64(&xmem.counter_received, 1)
 	if checkBool, err := base.IsRequestCompressedType(request, base.CompressionTypeSnappy); checkBool && err == nil {
 		atomic.AddUint64(&xmem.counter_compressed_received, 1)
@@ -1036,13 +1044,15 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					xmem.handleGeneralError(err)
 				}
 				if len(getDoc_map) > 0 {
-					err = xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
+					batch.cr_resp_map, err = xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
 					if err != nil {
 						if err == PartStoppedError {
 							goto done
 						}
 						xmem.handleGeneralError(err)
 					}
+				} else {
+					batch.cr_resp_map = nil
 				}
 				batch.bigDoc_noRep_map = noRep_map
 			}
@@ -1126,7 +1136,7 @@ func (xmem *XmemNozzle) finalCleanup() {
 			xmem.cleanupBufferedMCRequest(bufferredReq)
 		}
 	}
-
+	xmem.conflictMgr = nil
 }
 
 func (xmem *XmemNozzle) cleanupBufferedMCRequest(req *bufferedMCRequest) {
@@ -1196,8 +1206,32 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					reqs_bytes = [][]byte{}
 					index_reservation_list = make([][]uint16, base.XmemMaxBatchSize+1)
 				}
-			} else if needSendStatus == Not_Send_Need_To_Resolve {
-				// Do nothing here
+			} else if needSendStatus == Not_Send_Detecting {
+				xmem.Logger().Errorf("%v document %v%s%v has a unexpected Not_Send_Detecting status after conflict detection has finished", xmem.Id(),
+					base.UdTagBegin, bytes.Trim(item.Req.Key, "\x00"), base.UdTagEnd)
+				panic("Unexpected needSendStatus")
+			} else if needSendStatus == To_Resolve {
+				// Call conflictMgr to resolve conflict
+				atomic.AddUint64(&xmem.counter_to_resolve, 1)
+				lookupResp := batch.cr_resp_map[item.UniqueKey]
+				if lookupResp == nil {
+					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
+				}
+				err = xmem.conflictMgr.ResolveConflict(item, lookupResp, xmem.sourceClusterId, xmem.targetClusterId, xmem.recycleDataObj)
+				if err != nil {
+					return err
+				}
+			} else if needSendStatus == To_Setback {
+				atomic.AddUint64(&xmem.counter_to_setback, 1)
+				lookupResp := batch.cr_resp_map[item.UniqueKey]
+				if lookupResp == nil {
+					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
+				}
+				// This is the case where target has smaller CAS but it dominates source MV.
+				err = xmem.conflictMgr.SetBackToSource(item, lookupResp, xmem.sourceClusterId, xmem.targetClusterId, xmem.recycleDataObj)
+				if err != nil {
+					return err
+				}
 			} else {
 				if needSendStatus == Not_Send_Failed_CR {
 					//lost on conflict resolution on source side
@@ -1823,10 +1857,10 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 				case TargetDominate:
 					noRep_map[uniqueKey] = Not_Send_Failed_CR
 				case Conflict:
-					noRep_map[uniqueKey] = Not_Send_Need_To_Resolve
+					noRep_map[uniqueKey] = Not_Send_Detecting
 					getDoc_map[uniqueKey] = wrappedReq
 				case TargetSetBack:
-					noRep_map[uniqueKey] = Not_Send_Need_To_Resolve
+					noRep_map[uniqueKey] = Not_Send_Detecting
 					getDoc_map[uniqueKey] = wrappedReq
 				}
 				keys_to_be_deleted[uniqueKey] = true
@@ -1889,14 +1923,15 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPath
 /**
  * batch call to memcached subdoc_get command for documents that needs target document for custom CR
  */
-func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]NeedSendStatus) (err error) {
+func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noRep_map map[string]NeedSendStatus) (lookUpRespMap map[string]*base.SubdocLookupResponse, err error) {
 	var respMap base.MCResponseMap
 	var specs []base.SubdocLookupPathSpec
 	var hasTmpErr bool
+	lookUpRespMap = make(map[string]*base.SubdocLookupResponse)
 	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
 		err = xmem.validateRunningState()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		hasTmpErr = false
 		respMap, specs, err = xmem.sendBatchGetRequest(getDoc_map, xmem.config.maxRetry, true /* include_doc */)
@@ -1932,17 +1967,11 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 				case TargetDominate:
 					noRep_map[uniqueKey] = Not_Send_Failed_CR
 				case Conflict:
-					// Call conflictMgr to resolve conflict
-					err = xmem.conflictMgr.ResolveConflict(wrappedReq, lookupResp, xmem.sourceClusterId, xmem.targetClusterId)
-					if err != nil {
-						return
-					}
+					noRep_map[uniqueKey] = To_Resolve
+					lookUpRespMap[uniqueKey] = lookupResp
 				case TargetSetBack:
-					// This is the case where target has smaller CAS but it dominates source MV.
-					err = xmem.conflictMgr.SetBackToSource(wrappedReq, lookupResp, xmem.sourceClusterId, xmem.targetClusterId)
-					if err != nil {
-						return
-					}
+					noRep_map[uniqueKey] = To_Setback
+					lookUpRespMap[uniqueKey] = lookupResp
 				}
 				keys_to_be_deleted[uniqueKey] = true
 			} else if resp != nil {
@@ -1956,7 +1985,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 		}
 		if len(keys_to_be_deleted) == len(getDoc_map) {
 			// Got response for all
-			return nil
+			return lookUpRespMap, nil
 		} else {
 			for uniqueKey, _ := range keys_to_be_deleted {
 				delete(getDoc_map, uniqueKey)
@@ -2179,13 +2208,14 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 		req.Req.Body = body
 		req.Req.DataType = req.Req.DataType &^ mcc.SnappyDataType
 	}
-
-	ccrMeta, err := base.FindSourceCustomCRXattr(req.Req, xmem.sourceClusterId)
-	if err != nil {
-		return false, err
-	}
-	if bytes.Equal(ccrMeta.Updater(), xmem.targetClusterId) {
-		return true, nil
+	if req.RetryCRCount == 0 {
+		ccrMeta, err := base.FindSourceCustomCRXattr(req.Req, xmem.sourceClusterId)
+		if err != nil {
+			return false, err
+		}
+		if bytes.Equal(ccrMeta.Updater(), xmem.targetClusterId) {
+			return true, nil
+		}
 	}
 	return false, nil
 }
@@ -2555,12 +2585,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						if xmem.buf.evictSlot(pos) != nil {
 							panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
 						}
-						// If it is ADD_WITH_META, it needs to be SET_WITH_META in the next try because target now has the doc
-						if wrappedReq.Req.Opcode == base.ADD_WITH_META {
-							wrappedReq.Req.Opcode = base.SET_WITH_META
-						}
-						// Put it back to the next batch so we can retry conflict resolution
-						xmem.accumuBatch(wrappedReq)
+						// Put it back to the next batch so we can retry conflict resolution Do this in the background.
+						// Otherwise xmem may go into deadlock if receiveResponse is blocked because dataChan is full
+						go xmem.retryAfterCasLockingFailure(wrappedReq)
 					}
 				} else {
 					var req *mc.MCRequest = nil
@@ -2658,6 +2685,24 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 done:
 	xmem.Logger().Infof("%v receiveResponse exits\n", xmem.Id())
+}
+
+func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) {
+	// If it is ADD_WITH_META, it needs to be SET_WITH_META in the next try because target now has the doc
+	if req.Req.Opcode == base.ADD_WITH_META {
+		req.Req.Opcode = base.SET_WITH_META
+	}
+	req.Req.Opaque = 0
+	req.Req.Cas = binary.BigEndian.Uint64(req.Req.Extras[16:24])
+	// Don't free the slices from datapool since that's the mutation body.
+	req.RetryCRCount++
+	err := xmem.accumuBatch(req)
+	if err != nil {
+		xmem.Logger().Errorf("%v Retry conflict resolution for %v%s%v failed accumuBatch call with error %v", xmem.Id(), base.UdTagBegin, bytes.Trim(req.Req.Key, "\x00"), base.UdTagEnd, err)
+		xmem.handleGeneralError(err)
+		return
+	}
+	atomic.AddUint64(&xmem.counter_retry_cr, 1)
 }
 
 func (xmem *XmemNozzle) handleVBError(vbno uint16, err error) {
@@ -3038,14 +3083,16 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v\n",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
-			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_ignored),
+			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
 			xmem.buf.itemCountInBuffer(), len(xmem.dataChan),
 			atomic.LoadUint32(&xmem.cur_batch_count), avg_wait_time, xmem.getLastTenBatchSize(),
-			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend), atomic.LoadUint64(&xmem.counter_locked),
-			xmem.client_for_getMeta.RepairCount(), xmem.client_for_setMeta.RepairCount())
+			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend),
+			atomic.LoadUint64(&xmem.counter_locked),
+			xmem.client_for_getMeta.RepairCount(), xmem.client_for_setMeta.RepairCount(),
+			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve), atomic.LoadUint64(&xmem.counter_to_setback))
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}

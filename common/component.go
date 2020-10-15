@@ -49,6 +49,8 @@ const (
 	GetMetaReceived ComponentEventType = iota
 	//data failed conflict resolution on source cluster side due to optimistic replication
 	DataFailedCRSource ComponentEventType = iota
+	// data skipped because it is from target
+	TargetDataSkipped ComponentEventType = iota
 	// generic stats update event for the component
 	StatsUpdate ComponentEventType = iota
 	//received snapshot marker from dcp
@@ -82,6 +84,8 @@ const (
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
 	switch c {
 	case DataFailedCRSource:
+		return true
+	case TargetDataSkipped:
 		return true
 	case DataSent:
 		return true

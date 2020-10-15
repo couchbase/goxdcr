@@ -723,6 +723,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataSentEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFailedCREventListener, tsTracker)
+	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.TargetDataSkippedEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataFilteredEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataReceivedEventListener, tsTracker)
 	pipeline_utils.RegisterAsyncComponentEventHandler(asyncListenerMap, base.DataClonedEventListener, tsTracker)
@@ -884,6 +885,17 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		seqno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
 		vbno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
 		manifestId := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).ManifestId
+		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if !shouldProcessAsOSO {
+			tsTracker.addFailedCRSeqno(vbno, seqno)
+			tsTracker.addManifestId(vbno, seqno, manifestId)
+		} else {
+			tsTracker.markOsoProcessed(vbno, seqno, manifestId, osoSessionIdx)
+		}
+	case common.TargetDataSkipped:
+		seqno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Seqno
+		vbno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).VBucket
+		manifestId := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).ManifestId
 		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
@@ -1508,6 +1520,9 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 	var vbno uint16
 
 	switch event.EventType {
+	case common.TargetDataSkipped:
+		seqno = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Seqno
+		vbno = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).VBucket
 	case common.DataFailedCRSource:
 		seqno = event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
 		vbno = event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket

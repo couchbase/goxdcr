@@ -400,6 +400,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		data_failed_cr_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataFailedCREventListener, i),
 			pipeline.Topic(), logger_ctx)
+		target_data_skipped_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.TargetDataSkippedEventListener, i),
+			pipeline.Topic(), logger_ctx)
 		data_sent_event_listener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentEventListener, i),
 			pipeline.Topic(), logger_ctx)
@@ -417,6 +420,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle := targets[index]
 			out_nozzle.RegisterComponentEventListener(common.DataSent, data_sent_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataFailedCRSource, data_failed_cr_event_listener)
+			out_nozzle.RegisterComponentEventListener(common.TargetDataSkipped, target_data_skipped_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetDocReceived, get_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.GetMetaReceived, get_received_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataThrottled, data_throttled_event_listener)
@@ -1119,6 +1123,15 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		parentCtx = (*mainPipeline).RuntimeContext()
 	}
 
+	//register pipeline supervisor
+	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
+		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils, xdcrf.remote_cluster_svc)
+	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
+	if err != nil {
+		return err
+	}
+
+	// Register ConflictManager after pipeline supervisor
 	if crMode == base.CRMode_Custom {
 		if isCapi {
 			return errors.New("Custom conflict resolution cannot be used with Capi nozzle.")
@@ -1131,14 +1144,6 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		for _, target := range pipeline.Targets() {
 			target.(*parts.XmemNozzle).SetConflictManager(conflictMgr)
 		}
-	}
-
-	//register pipeline supervisor
-	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
-		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils, xdcrf.remote_cluster_svc)
-	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
-	if err != nil {
-		return err
 	}
 
 	// Register BackfillMgr as a pipeline service

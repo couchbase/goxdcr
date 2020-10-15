@@ -290,7 +290,8 @@ type WrappedMCRequest struct {
 	SlicesToBeReleased [][]byte
 
 	// If a single source mutation is translated to multiple target requests, the additional ones are listed here
-	SiblingReqs []*WrappedMCRequest
+	SiblingReqs  []*WrappedMCRequest
+	RetryCRCount int
 }
 
 func (req *WrappedMCRequest) ConstructUniqueKey() {
@@ -1211,6 +1212,10 @@ func NewCustomCRMeta(sourceId []byte, cas uint64, id, cvHex, pcas, mv []byte) (*
 	if err != nil {
 		return nil, err
 	}
+	if cv > cas {
+		// cv is initially the same as cas. Cas may increase later. So cv should never be greather than cas
+		return nil, fmt.Errorf("cv>cas, cv=%v,cas=%v,cvHex=%s,pcas=%s,mv=%s", cv, cas, cvHex, pcas, mv)
+	}
 	return &CustomCRMeta{
 		senderId: sourceId,
 		cas:      cas,
@@ -1405,7 +1410,7 @@ func (meta *CustomCRMeta) previousVersions() (map[string]uint64, error) {
 // This routine construct XATTR _xdcr{...} if there is new change (meta.cas > meta.cv)
 func (meta *CustomCRMeta) ConstructCustomCRXattr(body []byte, startPos int) (pos int, err error) {
 	if meta.cas <= meta.cv {
-		return startPos, errors.New("ConstructCustomCRXattr cannot be called when there has been no change")
+		return startPos, fmt.Errorf("ConstructCustomCRXattr cannot be called when there has been no change. cas=%v, cv=%v", meta.cas, meta.cv)
 	}
 	pos = startPos + 4
 	copy(body[pos:], []byte(XATTR_XDCR))
@@ -1626,6 +1631,7 @@ type ConflictParams struct {
 	TargetId       []byte
 	MergeFunction  string
 	ResultNotifier MergeResultNotifier
+	ObjectRecycler func(request *WrappedMCRequest) // for source WrappedMCRequest cleanup
 }
 
 type ConflictManagerAction int

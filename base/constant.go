@@ -481,6 +481,7 @@ const (
 	DataSentEventListener                = "DataSentEventListener"
 	DataSentCasChangedEventListener      = "DataSentCasChangedEventListener"
 	DataFailedCREventListener            = "DataFailedCREventListener"
+	TargetDataSkippedEventListener       = "TargetDataSkippedEventListener"
 	GetReceivedEventListener             = "GetReceivedEventListener"
 	DataThrottledEventListener           = "DataThrottledEventListener"
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"

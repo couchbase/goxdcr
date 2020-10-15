@@ -5,6 +5,6 @@ import (
 )
 
 type ConflictManagerIface interface {
-	ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte) error
-	SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte) error
+	ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte, recycler func(*base.WrappedMCRequest)) error
+	SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte, recycler func(*base.WrappedMCRequest)) error
 }

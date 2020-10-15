@@ -54,10 +54,12 @@ const (
 type NeedSendStatus int
 
 const (
-	Send                     NeedSendStatus = iota
-	Not_Send_Failed_CR       NeedSendStatus = iota
-	Not_Send_Need_To_Resolve NeedSendStatus = iota
-	Not_Send_Other           NeedSendStatus = iota
+	Send               NeedSendStatus = iota
+	Not_Send_Failed_CR NeedSendStatus = iota
+	Not_Send_Detecting NeedSendStatus = iota // Still doing the conflict detection
+	To_Resolve         NeedSendStatus = iota
+	To_Setback         NeedSendStatus = iota
+	Not_Send_Other     NeedSendStatus = iota
 )
 
 /************************************
@@ -147,6 +149,8 @@ type DataFailedCRSourceEventAdditional struct {
 	ManifestId  uint64
 }
 
+type TargetDataSkippedEventAdditional DataFailedCRSourceEventAdditional
+
 type DataSentEventAdditional struct {
 	Seqno          uint64
 	IsOptRepd      bool
@@ -221,6 +225,7 @@ type dataBatch struct {
 	// 1. true - docs failed source side conflict resolution. in this case the docs will be counted in docs_failed_cr_source stats
 	// 2. false - docs that will get rejected by target for other reasons, e.g., since target no longer owns the vbucket involved. in this case the docs will not be counted in docs_failed_cr_source stats
 	bigDoc_noRep_map  map[string]NeedSendStatus
+	cr_resp_map       map[string]*base.SubdocLookupResponse
 	curCount          uint32
 	curSize           uint32
 	capacity_count    uint32

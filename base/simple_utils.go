@@ -1688,6 +1688,10 @@ func FindSourceCustomCRXattr(req *mc.MCRequest, sourceId []byte) (crMeta *Custom
 	}
 	// Found _xdcr XATTR. Now find the fields
 	id, cv, pcas, mv, err := findCustomCRXattrFields(xattr)
+	if err != nil {
+		// TODO: MB-40143: Remove before CC shipping
+		panic(err.Error())
+	}
 	return NewCustomCRMeta(sourceId, cas, id, cv, pcas, mv)
 }
 

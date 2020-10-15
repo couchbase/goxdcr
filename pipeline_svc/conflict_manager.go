@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/couchbase/goxdcr/pipeline_utils"
+
 	"github.com/couchbase/goxdcr/parts"
 
 	mcc "github.com/couchbase/gomemcached/client"
@@ -88,6 +90,7 @@ type ConflictManager struct {
 	counter_conflict_ch_sent     uint64 // items sent to conflict_ch
 	counter_resolver_sent        uint64 // items sent to resolver
 	counter_result_ch_sent       uint64 // items sent to result_ch
+	counter_setback              uint64
 }
 
 type SubdocMutationPathSpec struct {
@@ -164,11 +167,24 @@ func (c *ConflictManager) Stop() error {
 	c.Logger().Infof("%v: ConflictManager stopped.", c.pipeline.FullTopic())
 	return nil
 }
-func (c *ConflictManager) Attach(pipeline common.Pipeline) error {
+func (c *ConflictManager) Attach(pipeline common.Pipeline) (err error) {
 	c.Logger().Infof("Attach conflictManager with %v pipeline %v\n", pipeline.Type().String(), pipeline.FullTopic())
 	c.Id()
 	c.pipeline = pipeline
 	c.userAgent = fmt.Sprintf("Goxdcr customCR bucket: %s", c.sourceBucketName)
+	// register pipeline supervisor as conflict manager's error handler
+	supervisor := c.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
+	if supervisor == nil {
+		return errors.New("Pipeline supervisor not found")
+	}
+	err = c.RegisterComponentEventListener(common.ErrorEncountered, supervisor.(*PipelineSupervisor))
+	if err != nil {
+		return err
+	}
+	err = c.RegisterComponentEventListener(common.VBErrorEncountered, supervisor.(*PipelineSupervisor))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 func (c *ConflictManager) Detach(pipeline common.Pipeline) error {
@@ -182,13 +198,17 @@ func (c *ConflictManager) IsSharable() bool {
 func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	return nil
 }
-func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte) error {
+func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte, recycler func(*base.WrappedMCRequest)) error {
+	if !pipeline_utils.IsPipelineRunning(c.pipeline.State()) {
+		return parts.PartStoppedError
+	}
 	aConflict := base.ConflictParams{source,
 		target,
 		sourceId,
 		targetId,
 		c.mergeFunction,
 		c,
+		recycler,
 	}
 	// Send to the larger conflict channel instead of ResolverSvc input channel so XMEM will not block
 	start := time.Now()
@@ -370,98 +390,104 @@ func (c *ConflictManager) formatMergedDoc(input *base.ConflictParams, mergedDoc 
 	return req
 }
 func (c *ConflictManager) sendDocument(id int, input *base.ConflictParams, req *mc.MCRequest, client *base.XmemClient) {
-retry:
-	select {
-	case <-c.finish_ch:
-		return
-	default:
-		sent_time := time.Now()
-		err := c.sendWithRetry(client, base.XmemMaxRetry, req.Bytes())
-		if err != nil {
-			high_level_err := "Error writing documents to memcached in source cluster for custom CR."
-			c.Logger().Errorf("%v: formatResultAndSend(id %v): %v. err=%v", c.pipeline.FullTopic(), id, high_level_err, err)
-			c.handleGeneralError(errors.New(high_level_err))
+	defer input.ObjectRecycler(input.Source)
+	isTmpErr := false
+	// TODO (MB-41122): We need to have a monitoring thread and receive response thread similar to XMEM.
+	for i := 0; i < base.XmemMaxRetry || isTmpErr; i++ { // for look retry by default to make sure we don't lose any mutation
+		isTmpErr = false
+		select {
+		case <-c.finish_ch:
 			return
-		}
-		// TODO: MB-41122, the response handling below should be shared with XMEM
-		response, err, _ := c.readFromClient(client, true)
-		if err != nil {
-			if err == base.FatalError {
-				if response != nil {
-					c.Logger().Warnf("%v: formatResultAndSend(id %v): received fatal error from subdoc_multi_mutation client for custom CR. req=%v, seqno=%v, response=%v\n", c.pipeline.FullTopic(), id, req, input.Source.Seqno, response)
-				}
-				c.handleGeneralError(err)
+		default:
+			sent_time := time.Now()
+			err := c.sendWithRetry(client, base.XmemMaxRetry, req.Bytes())
+			if err != nil {
+				high_level_err := "Error writing documents to memcached in source cluster for custom CR."
+				c.Logger().Errorf("%v: formatResultAndSend(id %v): %v. err=%v", c.pipeline.FullTopic(), id, high_level_err, err)
+				c.handleGeneralError(errors.New(high_level_err))
 				return
-			} else if err == base.BadConnectionError || err == base.ConnectionClosedError {
-				c.Logger().Errorf("%v: formatResultAndSend(id %v): The subdoc_multi_mutation connection for custom CR is ruined. Repair the connection and retry.", c.pipeline.FullTopic(), id)
-				c.repairConn(client, err.Error())
-				goto retry
-			} else {
-				// Don't expect to go here.
-				client.IncrementBackOffFactor()
-				c.Logger().Errorf("%v: formatResultAndSend(id %v): subdoc_multi_mutation received error %v", c.pipeline.FullTopic(), id, err)
-				goto retry
 			}
-		} else if response.Status != mc.SUCCESS {
-			// The errors defined in base.IsIgnorableMCResponse() cannot be ignored here
-			if base.IsMutationLockedError(response.Status) {
-				goto retry
-			} else if base.IsTemporaryMCError(response.Status) {
-				client.IncrementBackOffFactor()
-				c.Logger().Warnf("%v: formatResultAndSend(id %v): Received temporary error in subdoc_multi_mutation response for custom CR. Response status=%v, err=%v, response=%v%v%v\n",
-					c.pipeline.FullTopic(), id, response.Status, err, base.UdTagBegin, response, base.UdTagEnd)
-				goto retry
-			} else if base.IsTopologyChangeMCError(response.Status) {
-				vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
-				c.handleVBError(req.VBucket, vb_err)
-			} else if base.IsCollectionMappingError(response.Status) {
-				// TODO: MB-41120. Need to call upstreamErrReporter here similar to XMEM
-				return
-			} else if base.IsEExistsError(response.Status) || base.IsENoEntError(response.Status) {
-				// request failed because source Cas changed or document no longer exist. We can ignore it since it will converge to new mutation.
-				// TODO (MB-41102): This is cas locking failure. We need to make sure the newer mutation will not get rolled back
+			// TODO: MB-41122, the response handling below should be shared with XMEM
+			response, err, _ := c.readFromClient(client, true)
+			if err != nil {
+				if err == base.FatalError {
+					if response != nil {
+						c.Logger().Warnf("%v: formatResultAndSend(id %v): received fatal error from subdoc_multi_mutation client for custom CR. req=%v, seqno=%v, response=%v\n", c.pipeline.FullTopic(), id, req, input.Source.Seqno, response)
+					}
+					c.handleGeneralError(err)
+					return
+				} else if err == base.BadConnectionError || err == base.ConnectionClosedError {
+					c.Logger().Errorf("%v: formatResultAndSend(id %v): The subdoc_multi_mutation connection for custom CR is ruined. Repair the connection and retry.", c.pipeline.FullTopic(), id)
+					c.repairConn(client, err.Error())
+				} else {
+					// Don't expect to go here.
+					client.IncrementBackOffFactor()
+					c.Logger().Errorf("%v: formatResultAndSend(id %v): subdoc_multi_mutation received error %v", c.pipeline.FullTopic(), id, err)
+				}
+			} else if response.Status != mc.SUCCESS {
+				// The errors defined in base.IsIgnorableMCResponse() cannot be ignored here
+				if base.IsMutationLockedError(response.Status) {
+					// no op. Will retry in the for loop
+				} else if base.IsTemporaryMCError(response.Status) {
+					isTmpErr = true
+					client.IncrementBackOffFactor()
+					c.Logger().Warnf("%v: formatResultAndSend(id %v): Received temporary error in subdoc_multi_mutation response for custom CR. Response status=%v, err=%v, response=%v%v%v\n",
+						c.pipeline.FullTopic(), id, response.Status, err, base.UdTagBegin, response, base.UdTagEnd)
+				} else if base.IsTopologyChangeMCError(response.Status) {
+					vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
+					c.handleVBError(req.VBucket, vb_err)
+				} else if base.IsCollectionMappingError(response.Status) {
+					// TODO: MB-41120. Need to call upstreamErrReporter here similar to XMEM
+					panic("collection not supported")
+				} else if base.IsEExistsError(response.Status) || base.IsENoEntError(response.Status) {
+					// request failed because source Cas changed or document no longer exist. We can ignore it since it will converge to new mutation.
+					// TODO (MB-41102): This is cas locking failure. We need to make sure the newer mutation will not get rolled back
+					req := input.Source.Req
+					isExpirySet := false
+					if len(req.Extras) >= 4 {
+						isExpirySet = (binary.BigEndian.Uint32(req.Extras[:4]) != 0)
+					}
+					additionalInfo := DataMergeCasChangedEventAdditional{
+						Seqno:       input.Source.Seqno,
+						IsExpirySet: isExpirySet,
+						VBucket:     req.VBucket,
+						ManifestId:  input.Source.GetManifestId(),
+					}
+					c.RaiseEvent(common.NewEvent(common.MergeCasChanged, nil, c, nil, additionalInfo))
+					return
+				} else {
+					c.Logger().Errorf("%v sendDocument(id %v): received error response from subdoc_multi_mutation client for custom CR. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n",
+						c.pipeline.FullTopic(), id, response.Status, response.Opcode, input.Source.Seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
+					err = fmt.Errorf("error response with startus %v from memcached", response.Status)
+					c.repairConn(client, err.Error())
+				}
+			} else {
 				req := input.Source.Req
 				isExpirySet := false
 				if len(req.Extras) >= 4 {
 					isExpirySet = (binary.BigEndian.Uint32(req.Extras[:4]) != 0)
 				}
-				additionalInfo := DataMergeCasChangedEventAdditional{
-					Seqno:       input.Source.Seqno,
-					IsExpirySet: isExpirySet,
-					VBucket:     req.VBucket,
-					ManifestId:  input.Source.GetManifestId(),
+				additionalInfo := DataMergedEventAdditional{
+					Seqno:          input.Source.Seqno,
+					Commit_time:    time.Since(input.Source.Start_time), // time from routing to merged and acknowledged by source cluster
+					Resp_wait_time: time.Since(sent_time),
+					Opcode:         req.Opcode,
+					IsExpirySet:    isExpirySet,
+					VBucket:        req.VBucket,
+					Req_size:       req.Size(),
+					ManifestId:     input.Source.GetManifestId(),
 				}
-				c.RaiseEvent(common.NewEvent(common.MergeCasChanged, nil, c, nil, additionalInfo))
-			} else {
-				c.Logger().Errorf("%v sendDocument(id %v): received error response from subdoc_multi_mutation client for custom CR. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n",
-					c.pipeline.FullTopic(), id, response.Status, response.Opcode, input.Source.Seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
-				err = fmt.Errorf("error response with startus %v from memcached", response.Status)
-				c.repairConn(client, err.Error())
-				goto retry
-			}
-		} else {
-			req := input.Source.Req
-			isExpirySet := false
-			if len(req.Extras) >= 4 {
-				isExpirySet = (binary.BigEndian.Uint32(req.Extras[:4]) != 0)
-			}
-			additionalInfo := DataMergedEventAdditional{
-				Seqno:          input.Source.Seqno,
-				Commit_time:    time.Since(input.Source.Start_time), // time from routing to merged and acknowledged by source cluster
-				Resp_wait_time: time.Since(sent_time),
-				Opcode:         req.Opcode,
-				IsExpirySet:    isExpirySet,
-				VBucket:        req.VBucket,
-				Req_size:       req.Size(),
-				ManifestId:     input.Source.GetManifestId(),
-			}
-			c.RaiseEvent(common.NewEvent(common.DataMerged, nil, c, nil, additionalInfo))
-			if c.Logger().GetLogLevel() >= log.LogLevelDebug {
-				c.Logger().Debugf("%v: sendDocument(id %v): Custom CR: sent document (key %s) to source bucket %v. Cas %v. VBucket %v Return status %v",
-					c.pipeline.FullTopic(), id, req.Key, c.sourceBucketName, req.Cas, req.VBucket, response.Status)
+				c.RaiseEvent(common.NewEvent(common.DataMerged, nil, c, nil, additionalInfo))
+				if c.Logger().GetLogLevel() >= log.LogLevelDebug {
+					c.Logger().Debugf("%v: sendDocument(id %v): Custom CR: sent document (key %s) to source bucket %v. Cas %v. VBucket %v Return status %v",
+						c.pipeline.FullTopic(), id, req.Key, c.sourceBucketName, req.Cas, req.VBucket, response.Status)
+				}
+				return
 			}
 		}
 	}
+	err := fmt.Errorf("Send resolved document back to source failed after %v retry", base.XmemMaxRetry)
+	c.handleGeneralError(err)
 }
 
 func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byte, err error) {
@@ -608,7 +634,7 @@ func (c *ConflictManager) sendWithRetry(client *base.XmemClient, numOfRetry int,
 }
 
 func (c *ConflictManager) repairConn(client *base.XmemClient, reason string) (err error) {
-	if c.pipeline.State() != common.Pipeline_Running {
+	if !pipeline_utils.IsPipelineRunning(c.pipeline.State()) {
 		c.Logger().Infof("%v is not running, no need to RepairConn", c.pipeline.FullTopic())
 		return nil
 	}
@@ -739,18 +765,23 @@ func (c *ConflictManager) NotifyMergeResult(input *base.ConflictParams, mergedRe
 	}
 }
 
-func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte) error {
+func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte, recycler func(*base.WrappedMCRequest)) error {
+	if !pipeline_utils.IsPipelineRunning(c.pipeline.State()) {
+		return parts.PartStoppedError
+	}
 	start := time.Now()
 	input := base.ConflictParams{
-		Source:   source,
-		Target:   target,
-		SourceId: sourceId,
-		TargetId: targetId,
+		Source:         source,
+		Target:         target,
+		SourceId:       sourceId,
+		TargetId:       targetId,
+		ObjectRecycler: recycler,
 	}
 	select {
 	case c.result_ch <- &base.MergeInputAndResult{base.SetTargetToSource, &input, nil, nil}:
 		atomic.AddUint64(&c.counter_result_ch_waittime, uint64(time.Since(start).Nanoseconds()/1000))
 		atomic.AddUint64(&c.counter_result_ch_sent, 1)
+		atomic.AddUint64(&c.counter_setback, 1)
 		return nil
 	case <-c.finish_ch:
 		return parts.PartStoppedError
@@ -761,7 +792,7 @@ func (c *ConflictManager) PrintStatusSummary() {
 	if c.pipeline.State() == common.Pipeline_Running {
 		var conflict_ch_avg float64 = 0
 		conflict_ch_waittime := atomic.LoadUint64(&c.counter_conflict_ch_waittime)
-		conflict_ch_sent := atomic.LoadUint64(&c.counter_resolver_sent)
+		conflict_ch_sent := atomic.LoadUint64(&c.counter_conflict_ch_sent)
 		if conflict_ch_sent > 0 {
 			conflict_ch_avg = float64(conflict_ch_waittime) / float64(conflict_ch_sent)
 		}
@@ -777,10 +808,11 @@ func (c *ConflictManager) PrintStatusSummary() {
 		if result_ch_sent > 0 {
 			result_ch_avg = float64(result_ch_waittime) / float64(result_ch_sent)
 		}
-		c.Logger().Infof("%v wait for conflict_ch: %v (avg %v), wait for resolver: %v (avg %v), wait for result_ch: %v (avg %v), len(conflict_ch): %v, len(result_ch): %v, conflict_ch sent: %v, result_ch sent: %v",
+		c.Logger().Infof("%v conflict_ch: wait %v (avg %v), len %v, sent %v; resolver: wait %v (avg %v), sent %v; result_ch: wait %v (avg %v), len %v, sent %v(setback: %v)",
 			c.pipeline.FullTopic(),
-			conflict_ch_waittime, conflict_ch_avg, resolver_waittime, resolver_avg, result_ch_waittime, result_ch_avg,
-			len(c.conflict_ch), len(c.result_ch), conflict_ch_sent, result_ch_sent)
+			conflict_ch_waittime, conflict_ch_avg, len(c.conflict_ch), conflict_ch_sent,
+			resolver_waittime, resolver_avg, resolver_sent,
+			result_ch_waittime, result_ch_avg, len(c.result_ch), result_ch_sent, atomic.LoadUint64(&c.counter_setback))
 	} else {
 		c.Logger().Infof("%v state = %v", c.pipeline.FullTopic(), c.pipeline.State())
 	}

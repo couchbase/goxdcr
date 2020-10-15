@@ -62,10 +62,14 @@ const (
 	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
-	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
-	EXPIRY_FAILED_CR_SOURCE_METRIC   = "expiry_failed_cr_source"
-	DELETION_FAILED_CR_SOURCE_METRIC = "deletion_failed_cr_source"
-	SET_FAILED_CR_SOURCE_METRIC      = "set_failed_cr_source"
+	DOCS_FAILED_CR_SOURCE_METRIC        = "docs_failed_cr_source"
+	EXPIRY_FAILED_CR_SOURCE_METRIC      = "expiry_failed_cr_source"
+	DELETION_FAILED_CR_SOURCE_METRIC    = "deletion_failed_cr_source"
+	SET_FAILED_CR_SOURCE_METRIC         = "set_failed_cr_source"
+	TARGET_DOCS_SKIPPED_METRIC          = "target_docs_skipped"
+	EXPIRY_TARGET_DOCS_SKIPPED_METRIC   = "expiry_target_docs_skipped"
+	DELETION_TARGET_DOCS_SKIPPED_METRIC = "deletion_target_docs_skipped"
+	SET_TARGET_DOCS_SKIPPED_METRIC      = "set_target_docs_skipped"
 
 	CHANGES_LEFT_METRIC    = base.ChangesLeftStats
 	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
@@ -254,6 +258,11 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	EXPIRY_FAILED_CR_SOURCE_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that specifically had expiry flag set"},
 	DELETION_FAILED_CR_SOURCE_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that were delete operations"},
 	SET_FAILED_CR_SOURCE_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that were set operations"},
+
+	TARGET_DOCS_SKIPPED_METRIC:          StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents that was not replicated to the target because they originated from the target"},
+	EXPIRY_TARGET_DOCS_SKIPPED_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that originated from the target that specifically had expiry flag set"},
+	DELETION_TARGET_DOCS_SKIPPED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that originated from the target that were delete operations"},
+	SET_TARGET_DOCS_SKIPPED_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that originated from the target that were set operations"},
 
 	CHANGES_LEFT_METRIC:    StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Given the VBs of this node, the number of seqnos that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the VBs"},
 	DOCS_LATENCY_METRIC:    StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrMilliSecond}, LowCardinality, "The rolling average amount of time it takes for the source cluster to receive the acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be processed by the XDCR outnozzle"},

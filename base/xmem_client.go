@@ -229,7 +229,7 @@ func IsNetError(err error) bool {
 }
 
 // check if memcached response status indicates ignorable error, which requires no corrective action at all
-// If caslock is true, resp.Status will be KEY_EEXISTS if cas does not match
+// If caslock is true, resp.Status will be KEY_EEXISTS/KEY_ENOENT if cas does not match
 func IsIgnorableMCResponse(resp *gomemcached.MCResponse, caslock bool) bool {
 	if resp == nil {
 		return false
@@ -237,7 +237,11 @@ func IsIgnorableMCResponse(resp *gomemcached.MCResponse, caslock bool) bool {
 
 	switch resp.Status {
 	case gomemcached.KEY_ENOENT:
-		return true
+		if caslock {
+			return false
+		} else {
+			return true
+		}
 	case gomemcached.KEY_EEXISTS:
 		if caslock {
 			return false
