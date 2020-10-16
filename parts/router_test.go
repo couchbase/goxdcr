@@ -886,7 +886,7 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	// Now let's say cluster is healthy again
 	connectivityReturnHealthy = true
 	lastCalledBackfillMap = nil
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 	assert.Nil(collectionsRouter.brokenMapDblChkTicker)
 	assert.NotNil(lastCalledBackfillMap)
 	assert.Equal(0, len(collectionsRouter.brokenMapping))
