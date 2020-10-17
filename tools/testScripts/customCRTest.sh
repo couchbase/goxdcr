@@ -19,19 +19,19 @@ set -u
 . ./clusterRunProvision.shlib
 if (( $? != 0 ));then
 	echo "Provision failed"
-	exit $?
+	exit 1
 fi
 
 . ./testLibrary.shlib
 if (( $? != 0 ));then
   echo "testLibrary.shlib failed"
-  exit $?
+  exit 1
 fi
 
 . ./ccr_tests.shlib
 if (( $? != 0 ));then
   echo "ccr_tests.shlib failed"
-  exit $?
+  exit 1
 fi
 
 testCase="${1:-}"
@@ -50,9 +50,9 @@ fi
 DEFAULT_ADMIN="Administrator"
 DEFAULT_PW="wewewe"
 
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002)
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002)
-CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2" ["C3"]="CCR3")
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002 ["C4"]=9003)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002 ["C4"]=13003)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2" ["C3"]="CCR3" ["C4"]="CCR4")
 
 # See MB-39731 for conflictResolutionType=custom
 declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active" ["conflictResolutionType"]="custom")
@@ -63,13 +63,13 @@ done
 
 testForClusterRun
 if (( $? != 0 ));then
-  exit $?
+  exit 1
 fi
 
 setupTopologies -d
 if (( $? != 0 ));then
   echo "setupTopologies failed"
-	exit $?
+	exit 1
 fi
 
 sleep 5
@@ -86,6 +86,10 @@ do
         echo "createRemoteClusterReference $cluster1 $cluster2"
         createRemoteClusterReference $cluster1 $cluster2
         createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties
+        if (( $? != 0 ));then
+          echo "Failed: createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties"
+          exit 1
+        fi
       fi
     done
 done

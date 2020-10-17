@@ -1508,11 +1508,15 @@ func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mer
 	if err != nil {
 		return 0, 0, err
 	}
-	// merge previous versions
-	for key, value := range targetPreviousVersions {
-		v, ok := previousVersions[key]
-		if !ok || value > v {
-			previousVersions[key] = value
+	if previousVersions == nil {
+		previousVersions = targetPreviousVersions
+	} else {
+		// merge previous versions
+		for key, value := range targetPreviousVersions {
+			v, ok := previousVersions[key]
+			if !ok || value > v {
+				previousVersions[key] = value
+			}
 		}
 	}
 	// Remove any redundant entries

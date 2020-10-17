@@ -378,8 +378,8 @@ func TestMergeMeta(t *testing.T) {
 	assert.Nil(err)
 	targetMeta, err = NewCustomCRMeta(targetClusterId, cv, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("{\"Cluster1\":\""+string(c1)+"\",\"Cluster3\":\"FhSITdr4ACA\"}"))
 	assert.Nil(err)
-	mvlen = len(sourceMeta.GetMv()) + len(targetMeta.GetMv())
-	pcaslen = len(sourceMeta.GetPcas()) + len(targetMeta.GetPcas())
+	mvlen = MergedMvLength(sourceMeta, targetMeta)
+	pcaslen = MergedPcasLength(sourceMeta, targetMeta)
 	mergedMvSlice = make([]byte, mvlen)
 	mergedPcasSlice = make([]byte, pcaslen)
 	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
@@ -388,6 +388,25 @@ func TestMergeMeta(t *testing.T) {
 	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster2\":\"FhSITdr4ABU\"")
 	assert.Contains(string(mergedMvSlice[:mvlen]), "\"Cluster3\":\"FhSITdr4ACA\"")
 	assert.Equal(0, pcaslen)
+
+	/*
+	 * 8. Source is a new change. Target has a history
+	 */
+	sourceMeta, err = NewCustomCRMeta(sourceClusterId, cv+2000, nil, nil, nil, nil)
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\""+string(c1)+"\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
+	assert.Nil(err)
+	mvlen = MergedMvLength(sourceMeta, targetMeta)
+	pcaslen = MergedPcasLength(sourceMeta, targetMeta)
+	mergedMvSlice = make([]byte, mvlen)
+	mergedPcasSlice = make([]byte, pcaslen)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	assert.Nil(err)
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(mergedPcasSlice[:pcaslen]), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"SourceCluster\":\"FhSNXrKFB9s\"")
+	assert.Contains(string(mergedMvSlice[:mvlen]), "\"TargetCluster\":\"FhSNXrKFA/M\"")
 }
 
 func TestDefaultNs(t *testing.T) {
