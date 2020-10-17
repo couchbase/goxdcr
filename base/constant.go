@@ -288,6 +288,7 @@ var ErrorSdkUriNotSupported = fmt.Errorf("XDCR currently does not support %v or 
 var ErrorColMigrationEnterpriseOnly = errors.New("Collections migration is supported in Enterprise edition only")
 var ErrorEAccess = errors.New("Remote user received EACCESS error")
 var ErrorInvalidColNamespaceFormat = fmt.Errorf("Invalid CollectionNamespace format")
+var ErrorCAPIDeprecated = errors.New("CAPI replication mode is now deprecated")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

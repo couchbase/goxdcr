@@ -868,7 +868,9 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 	switch key {
 	// special cases
 	case ReplicationTypeKey:
-		if value != ReplicationTypeXmem && value != ReplicationTypeCapi {
+		if value == ReplicationTypeCapi {
+			err = base.ErrorCAPIDeprecated
+		} else if value != ReplicationTypeXmem {
 			err = base.GenericInvalidValueError(errorKey)
 		} else {
 			convertedValue = value

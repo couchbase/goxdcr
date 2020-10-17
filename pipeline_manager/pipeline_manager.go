@@ -33,6 +33,7 @@ var ReplicationStatusNotFound error = errors.New("Replication Status not found")
 var UpdaterStoppedError error = errors.New("Updater already stopped")
 var MainPipelineNotRunning error = errors.New("Main pipeline is not running")
 var ErrorExplicitMappingWoRules = errors.New("specified explicit mapping but no rule is found")
+var ErrorCAPIReplicationDeprecated = errors.New("CAPI replication is now deprecated. The pipeline will be paused. Please edit the replication via REST and change the replication type to XMEM")
 
 var default_failure_restart_interval = 10
 
@@ -443,6 +444,12 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 		return err
 	}
 
+	// Deprecate CAPI replication
+	if spec.Settings.RepType == metadata.ReplicationTypeCapi {
+		return ErrorCAPIReplicationDeprecated
+	}
+
+	// Explicit mapping mode on means that there should be rules accompanying it
 	collectionsMode := spec.Settings.GetCollectionModes()
 	collectionsMappingRules := spec.Settings.GetCollectionsRoutingRules()
 	if collectionsMode.IsExplicitMapping() && len(collectionsMappingRules) == 0 {
@@ -1222,6 +1229,15 @@ func (em *pmErrMapType) ContainsError(checkErr error, exactMatch bool) bool {
 	return base.CheckErrorMapForError(em.errMap, checkErr, exactMatch)
 }
 
+func (em *pmErrMapType) ContainsMustStopError(replId string) (bool, string) {
+	if em.ContainsError(base.ErrorEAccess, false) {
+		return true, fmt.Sprintf("Replication %v cannot continue because remote user does not have enough permission.", replId)
+	} else if em.ContainsError(ErrorCAPIReplicationDeprecated, false) {
+		return true, fmt.Sprintf("Replication %v cannot continue - %v", replId, ErrorCAPIReplicationDeprecated.Error())
+	}
+	return false, ""
+}
+
 func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error, rep_status_in pipeline.ReplicationStatusIface, logger *log.CommonLogger, pipelineMgr_in *PipelineManager) *PipelineUpdater {
 	if rep_status_in == nil {
 		panic("nil ReplicationStatus")
@@ -1456,10 +1472,9 @@ func (r *PipelineUpdater) update() base.ErrorMap {
 
 	if r.currentErrors.IsEmpty() {
 		r.logger.Infof("Try to start/restart Pipeline %v. \n", r.pipeline_name)
-	} else if r.currentErrors.ContainsError(base.ErrorEAccess, false) {
-		err := fmt.Sprintf("Replication %v cannot continue because remote user does not have enough permission.", r.pipeline_name)
-		r.logger.Errorf(err)
-		r.pipelineMgr.GetLogSvc().Write(err)
+	} else if containsMustStopErr, errStr := r.currentErrors.ContainsMustStopError(r.pipeline_name); containsMustStopErr {
+		r.logger.Errorf(errStr)
+		r.pipelineMgr.GetLogSvc().Write(errStr)
 		r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
 		r.clearErrors()
 		return nil
