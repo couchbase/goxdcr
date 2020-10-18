@@ -172,7 +172,7 @@ var DefaultCollectionNamespace = CollectionNamespace{
 	CollectionName: DefaultScopeCollectionName,
 }
 
-// The specificStr should follow the format of: "<scope>:<collection>"
+// The specificStr should follow the format of: "<scope>.<collection>"
 func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, error) {
 	if !CollectionNamespaceRegex.MatchString(specificStr) {
 		return CollectionNamespace{}, ErrorInvalidColNamespaceFormat
@@ -1023,7 +1023,7 @@ func (list_obj *SortedSeqnoListWithLock) TruncateSeqnos(through_seqno uint64) {
 type Uleb128 []byte
 
 type ExplicitMappingValidator struct {
-	// S:C -> S:C || S:C -> nil
+	// S.C -> S.C || S.C -> nil
 	oneToOneRules map[string]interface{}
 	// S -> S || S -> nil
 	scopeToScopeRules map[string]interface{}
@@ -1099,8 +1099,8 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 }
 
 // Rules in descending priority:
-// 1. S:C -> S':C'
-// 2. S:C -> null
+// 1. S.C -> S'.C'
+// 2. S.C -> null
 // 3. S -> S'
 // 4. S -> null
 //
@@ -1131,19 +1131,19 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 		targetScope, exists := e.scopeToScopeRules[sourceScopeName]
 		if v == nil {
 			if exists && targetScope == nil {
-				// S -> null already exists. S:C -> null is redundant
-				return fmt.Errorf("The rule %v:%v is redundant", k, v)
+				// S -> null already exists. S.C -> null is redundant
+				return fmt.Errorf("The rule %v%v%v is redundant", k, ScopeCollectionDelimiter, v)
 			}
 		} else {
 			submatches2 := CollectionNamespaceRegex.FindStringSubmatch(v.(string))
 			targetCollectionName := submatches2[2]
 			if exists && targetScope != nil {
 				if sourceCollectionName == targetCollectionName {
-					// S -> S2 already exists, S:C -> S2:C is redundant
-					return fmt.Errorf("The rule %v:%v is redundant", k, v)
+					// S -> S2 already exists, S.C -> S2.C is redundant
+					return fmt.Errorf("The rule %v%v%v is redundant", k, ScopeCollectionDelimiter, v)
 				} else {
-					// S -> S2 exists, but S:C -> S2:C2 will have higher priority
-					// (S:C -> S2:C will not take place as the more specific rule takes higher precedence)
+					// S -> S2 exists, but S.C -> S2.C2 will have higher priority
+					// (S.C -> S2.C will not take place as the more specific rule takes higher precedence)
 				}
 			}
 		}
@@ -1162,17 +1162,16 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 			sourceCollectionName := submatches[2]
 			if sourceScopeName == checkK {
 				if v == nil && checkV == nil {
-					// S1:C1 -> nil already exists
-					return fmt.Errorf("The rule %v:%v is redundant", checkK, checkV)
+					// S1.C1 -> nil already exists
+					return fmt.Errorf("The rule %v%v%v is redundant", checkK, ScopeCollectionDelimiter, checkV)
 				} else if v != nil && checkV != nil {
-					//targetNamespace, _ := NewCollectionNamespaceFromString(checkV.(string))
 					submatches2 := CollectionNamespaceRegex.FindStringSubmatch(checkV.(string))
 					targetColName := submatches2[2]
 					if sourceCollectionName == targetColName {
-						// S1:C1 -> S2:C1 exists, and trying to enter rule S1 -> S2
-						return fmt.Errorf("The rule %v:%v is redundant", checkK, checkV)
+						// S1.C1 -> S2.C1 exists, and trying to enter rule S1 -> S2
+						return fmt.Errorf("The rule %v%v%v is redundant", checkK, ScopeCollectionDelimiter, checkV)
 					} else {
-						// S1:C1 -> S2:C3 exists, and can coexist with S1 -> S2
+						// S1.C1 -> S2.C3 exists, and can coexist with S1 -> S2
 					}
 				}
 			}

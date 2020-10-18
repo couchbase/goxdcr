@@ -1617,7 +1617,7 @@ func (c *CollectionNamespaceMapping) ToExternalMap() map[string][]string {
 	return externalMap
 }
 
-// A collection namespace Mapping Index - The key will be simply "Scope:Collection"
+// A collection namespace Mapping Index - The key will be simply "Scope.Collection"
 type CollectionNamespaceMappingIdx map[string]*SourceNamespace
 
 func (c CollectionNamespaceMapping) CreateLookupIndex() CollectionNamespaceMappingIdx {
@@ -1920,7 +1920,7 @@ func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 			errorMap[fmt.Sprintf("%v (value)", filterExpr)] = fmt.Errorf("Invalid value type specified: %v", reflect.TypeOf(targetNamespaceRaw))
 		}
 
-		// targetnamespace must be a specific form of ScopeName:CollectionName
+		// targetnamespace must be a specific form of ScopeName.CollectionName
 		_, err = base.NewCollectionNamespaceFromString(targetNamespace)
 		if err != nil {
 			errorMap[targetNamespace] = err
@@ -1970,7 +1970,7 @@ func (c CollectionsMappingRulesType) SameAs(otherRaw interface{}) bool {
 func (c CollectionsMappingRulesType) GetPotentialTargetNamespaces(sourceNs *base.CollectionNamespace) ([]*base.CollectionNamespace, error) {
 	var returnNamespaces []*base.CollectionNamespace
 	// Check case 1 or 2
-	rule1Key := fmt.Sprintf("%v:%v", sourceNs.ScopeName, sourceNs.CollectionName)
+	rule1Key := fmt.Sprintf("%v%v%v", sourceNs.ScopeName, base.ScopeCollectionDelimiter, sourceNs.CollectionName)
 	targetRule, exists := c[rule1Key]
 	if exists {
 		if targetRule == nil {
@@ -1983,7 +1983,7 @@ func (c CollectionsMappingRulesType) GetPotentialTargetNamespaces(sourceNs *base
 		}
 	}
 
-	// This means the rules did not have S:C listed. Check just "S"
+	// This means the rules did not have S.C listed. Check just "S"
 	targetRule, exists = c[sourceNs.ScopeName]
 	if !exists {
 		return nil, base.ErrorInvalidInput
@@ -2001,8 +2001,8 @@ func (c CollectionsMappingRulesType) GetPotentialTargetNamespaces(sourceNs *base
 }
 
 // Match in this priority
-// 1. S:C -> TS:TC
-// 2. S:C -> nil
+// 1. S.C -> TS.TC
+// 2. S.C -> nil
 // 3. S -> TS
 // 4. S -> nil
 func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPair, mode base.CollectionsMgtType, ensureSourceExists bool) (CollectionNamespaceMapping, error) {
@@ -2020,7 +2020,7 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 		sourceDNEmap = make(base.ErrorMap)
 	}
 
-	// First populate rule 1 - S:C -> S:C
+	// First populate rule 1 - S.C -> S.C
 	sourceNamespacesWithNoTarget := make(map[string]string)
 	specificNamespaceAlreadyAssigned := make(map[string]string) // key - scopeName, value - collectionName
 	for ruleKey, ruleValRaw := range c {
@@ -2054,7 +2054,7 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 		specificNamespaceAlreadyAssigned[sourceNamespace.ScopeName] = sourceNamespace.CollectionName
 	}
 
-	// Then populate rule2 S:C -> null
+	// Then populate rule2 S.C -> null
 	for ruleKey, ruleValRaw := range c {
 		if !strings.Contains(ruleKey, base.ScopeCollectionDelimiter) || ruleValRaw != nil {
 			continue
@@ -2109,7 +2109,7 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 				CollectionName: targetCol.Name,
 			}
 
-			// Only add if S:C doesn't exist, because any S:C is higher priority than plain S -> *
+			// Only add if S.C doesn't exist, because any S.C is higher priority than plain S -> *
 			alreadyExistsColName, scopeExists := sourceNamespacesWithNoTarget[sourceScopeName]
 			if scopeExists && alreadyExistsColName == sourceColName {
 				continue
@@ -2144,7 +2144,7 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 				CollectionName: sourceColName,
 			}
 
-			// Only add if S:C doesn't exist, because any S:C is higher priority than plain S -> *
+			// Only add if S.C doesn't exist, because any S.C is higher priority than plain S -> *
 			alreadyExistsColName, scopeExists := sourceNamespacesWithNoTarget[sourceScopeName]
 			if scopeExists && alreadyExistsColName == sourceColName {
 				continue

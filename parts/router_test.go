@@ -669,8 +669,8 @@ func TestRouterExplicitMigrationSiblingReq(t *testing.T) {
 	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 	rules := spec.Settings.GetCollectionsRoutingRules()
-	rules["REGEXP_CONTAINS(META().id, \"d1\")"] = "S2:col1"
-	rules["META().id == \"d1\""] = "S2:col2"
+	rules["REGEXP_CONTAINS(META().id, \"d1\")"] = "S2.col1"
+	rules["META().id == \"d1\""] = "S2.col2"
 
 	updatedMap := make(map[string]interface{})
 	updatedMap[metadata.CollectionsMgtMultiKey] = mappingMode

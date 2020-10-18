@@ -409,3 +409,7 @@ function validateXDCRCheckpoints {
 		exit 1
 	fi
 }
+
+function killAllBgJobs {
+    jobs -l | awk '{print $2}' | xargs kill
+}

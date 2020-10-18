@@ -24,13 +24,13 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-# Replicate US filter to target B2:S3:col1
-# Replicate NonUS to target B2:S3:col2
+# Replicate US filter to target B2.S3.col1
+# Replicate NonUS to target B2.S3.col2
 US_filter='(country == \"United States\" OR country = \"Canada\") AND type=\"brewery\"'
 NonUS_filter='country != \"United States\" AND country != \"Canada\" AND type=\"brewery\"'
 Brewery_filter='type=\"brewery\"'
 
-mappingRule="{\"$US_filter\":\"S3:col1\",\"$NonUS_filter\":\"S3:col2\",\"$Brewery_filter\":\"S3:col3\"}"
+mappingRule="{\"$US_filter\":\"S3.col1\",\"$NonUS_filter\":\"S3.col2\",\"$Brewery_filter\":\"S3.col3\"}"
 
 declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 \
  ["collectionsExplicitMapping"]=true ["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")

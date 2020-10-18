@@ -73,7 +73,7 @@ function runTestCase {
 	printGlobalScopeAndCollectionInfo
 	
 	echo "Setting explicit mapping to true and creating explicit mapping rules"
-	setReplicationSettings "C1" "B1" "C2" "B2" "collectionsExplicitMapping=true" 'colMappingRules={"S1:col1":"S3:col3"}'
+	setReplicationSettings "C1" "B1" "C2" "B2" "collectionsExplicitMapping=true" 'colMappingRules={"S1.col1":"S3.col3"}'
 
 	runDataLoad
 

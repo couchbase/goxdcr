@@ -27,7 +27,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1:col1":"S3:col3","S1:col3":null}' ["collectionsSkipSrcValidation"]="true")
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3","S1.col3":null}' ["collectionsSkipSrcValidation"]="true")
 
 # Bucket -> Scopes
 # -----------------
@@ -45,7 +45,7 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
-	# Run this job as "background noise" since S1:col2 isn't explicitly mapped, it should raise no warning and cause no brokenMap
+	# Run this job as "background noise" since S1.col2 isn't explicitly mapped, it should raise no warning and cause no brokenMap
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
 	# This col3 should be on the deny list
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
@@ -109,9 +109,9 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
-	# 3x because there is white noise writing to S1:col2, and one more S1:col3 on the deny list
+	# 3x because there is white noise writing to S1.col2, and one more S1.col3 on the deny list
 	checkItemCnt "C1" "B1" $(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 3 ))
-	# currently, there is no S3:col3 on target
+	# currently, there is no S3.col3 on target
 	checkItemCnt "C2" "B2" 0
 
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))

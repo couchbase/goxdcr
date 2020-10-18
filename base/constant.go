@@ -99,7 +99,7 @@ const UIDKey = "uid"
 const NameKey = "name"
 const CollectionsKey = "collections"
 const DefaultScopeCollectionName = "_default"
-const ScopeCollectionDelimiter = ":"
+const ScopeCollectionDelimiter = "."
 
 // From KV design doc:
 // A user’s collection can only contain characters A-Z, a-z, 0-9 and the following symbols _ - %
@@ -108,7 +108,7 @@ const ScopeCollectionDelimiter = ":"
 const CollectionValidNameCharClass = "[0-9A-Za-z-_%]"
 const CollectionValidPrefixNameClass = "[0-9A-Za-z-]"
 
-var CollectionNamespaceRegexExpr = fmt.Sprintf("^(?P<scope>%v+):(?P<collection>%v+)$", CollectionValidNameCharClass, CollectionValidNameCharClass)
+var CollectionNamespaceRegexExpr = fmt.Sprintf("^(?P<scope>%v+)[%v](?P<collection>%v+)$", CollectionValidNameCharClass, ScopeCollectionDelimiter, CollectionValidNameCharClass)
 var CollectionNamespaceRegex, _ = regexp.Compile(CollectionNamespaceRegexExpr)
 
 var CollectionNameValidationRegex, _ = regexp.Compile(fmt.Sprintf("^%v%v*$", CollectionValidPrefixNameClass, CollectionValidNameCharClass))

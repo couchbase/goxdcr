@@ -40,7 +40,7 @@ func TestCollectionNamespaceFromString(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCollectionNamespaceFromString =================")
 
 	assert := assert.New(t)
-	namespace, err := NewCollectionNamespaceFromString("a123:123b")
+	namespace, err := NewCollectionNamespaceFromString("a123.123b")
 	assert.Nil(err)
 	assert.Equal("a123", namespace.ScopeName)
 	assert.Equal("123b", namespace.CollectionName)
@@ -61,8 +61,8 @@ func TestExplicitMappingValidatorParseRule(t *testing.T) {
 	assert.Equal(explicitRuleScopeToScope, validator.parseRule(key, value))
 	assert.Equal(explicitRuleScopeToScope, validator.parseRule(key, nil))
 
-	key = "Scope:collection"
-	value = "scope2:collection2"
+	key = "Scope.collection"
+	value = "scope2.collection2"
 	assert.Equal(explicitRuleOneToOne, validator.parseRule(key, value))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule(key, nil))
 
@@ -96,49 +96,49 @@ func TestExplicitMappingValidatorRules(t *testing.T) {
 	value = "TargetScope2"
 	assert.Nil(validator.ValidateKV(key, value))
 
-	key = "AnotherScope:AnotherCollection"
-	value = "AnotherTargetScope:AnotherTargetCollection"
+	key = "AnotherScope.AnotherCollection"
+	value = "AnotherTargetScope.AnotherTargetCollection"
 	assert.Nil(validator.ValidateKV(key, value))
 
-	key = "AnotherScope2:AnotherCollection2"
-	value = "AnotherTargetScope2:AnotherTargetCollection2"
+	key = "AnotherScope2.AnotherCollection2"
+	value = "AnotherTargetScope2.AnotherTargetCollection2"
 	assert.Nil(validator.ValidateKV(key, value))
 
 	// Adding non-duplicating blacklist rules
 	key = "Scope3"
 	assert.Nil(validator.ValidateKV(key, nil))
 
-	key = "Scope:Collection"
+	key = "Scope.Collection"
 	assert.Nil(validator.ValidateKV(key, nil))
 
 	// Adding duplicating blacklist rules
-	key = "Scope3:Collection3"
+	key = "Scope3.Collection3"
 	assert.NotNil(validator.ValidateKV(key, nil))
 
 	key = "Scope"
 	assert.NotNil(validator.ValidateKV(key, nil))
 
 	// Test complex mapping - one specific collection will have special mapping, everything else implicit under scope
-	// 1. ScopeRedundant:ColRedundant -> ScopeTRedundant:ColTRedundant
+	// 1. ScopeRedundant.ColRedundant -> ScopeTRedundant.ColTRedundant
 	// 2. ScopeRedundant -> ScopeTRedundant
 	key = "ScopeRedundant"
 	value = "ScopeTRedundant"
 	assert.Nil(validator.ValidateKV(key, value))
 
 	// This is not redundant
-	key = "ScopeRedundant:ColRedundant"
-	value = "ScopeTRedundant:ColTRedundant"
+	key = "ScopeRedundant.ColRedundant"
+	value = "ScopeTRedundant.ColTRedundant"
 	assert.Nil(validator.ValidateKV(key, value))
 
 	// This is redundant
-	key = "ScopeRedundant:ColRedundant"
-	value = "ScopeTRedundant:ColRedundant"
+	key = "ScopeRedundant.ColRedundant"
+	value = "ScopeTRedundant.ColRedundant"
 	assert.NotNil(validator.ValidateKV(key, value))
 
 	// ** Converse of above
 	// Not Redundant
-	key = "ScopeRedundant2:ColRedundant2"
-	value = "ScopeTRedundant2:ColTRedundant2"
+	key = "ScopeRedundant2.ColRedundant2"
+	value = "ScopeTRedundant2.ColTRedundant2"
 	assert.Nil(validator.ValidateKV(key, value))
 
 	// Combining both should be fine
@@ -483,13 +483,13 @@ func TestDefaultNs(t *testing.T) {
 	validator := NewExplicitMappingValidator()
 	assert.Equal(explicitRuleScopeToScope, validator.parseRule("_default", "_default"))
 	assert.Equal(explicitRuleScopeToScope, validator.parseRule("_default", nil))
-	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:_default", nil))
-	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:_default", "_default:_default"))
-	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:testCol", nil))
-	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default:testCol", "_default:_default"))
-	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope:testCol", nil))
-	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope:testCol", "_default:nonDefCol"))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default._default", nil))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default._default", "_default._default"))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default.testCol", nil))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default.testCol", "_default._default"))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope.testCol", nil))
+	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope.testCol", "_default.nonDefCol"))
 
-	assert.Equal(explicitRuleInvalid, validator.parseRule("testScope:testCol", "_nonDefault:nonDefCol"))
+	assert.Equal(explicitRuleInvalid, validator.parseRule("testScope.testCol", "_nonDefault.nonDefCol"))
 
 }

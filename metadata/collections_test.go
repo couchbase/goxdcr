@@ -732,7 +732,7 @@ func TestExplicitMapping(t *testing.T) {
 	// Test blacklist
 	rules = make(CollectionsMappingRulesType)
 	rules["S1"] = "S2"
-	rules["S1:col2"] = nil
+	rules["S1.col2"] = nil
 	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
@@ -751,11 +751,11 @@ func TestExplicitMapping(t *testing.T) {
 	assert.True(ok)
 	assert.True(tgtCheckList[0].IsSameAs(targetNamespace))
 
-	// Src: s1:col1
-	// Tgt: s2:col1
-	//      s2:col2
-	// rule: s1:col1 -> s2:col3
-	// In this case, s1:col1 should *not* have a corresponding target
+	// Src: s1.col1
+	// Tgt: s2.col1
+	//      s2.col2
+	// rule: s1.col1 -> s2.col3
+	// In this case, s1.col1 should *not* have a corresponding target
 	customSrcColMap := make(CollectionsMap)
 	customSrcColMap["col1"] = Collection{
 		Uid:  1,
@@ -794,7 +794,7 @@ func TestExplicitMapping(t *testing.T) {
 
 	rules = make(CollectionsMappingRulesType)
 	rules["s1"] = "s2"
-	rules["s1:col1"] = "s2:col3"
+	rules["s1.col1"] = "s2.col3"
 	customManifestPair := CollectionsManifestPair{
 		Source: &customSrcManifest,
 		Target: &customTgtManifest,
@@ -869,8 +869,8 @@ func TestMigrationMapping(t *testing.T) {
 
 	rules := make(CollectionsMappingRulesType)
 	// Make a rule that says if the doc key starts with "S1_"
-	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
-	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
+	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1.col1"
+	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2.col1"
 
 	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
 	assert.Nil(err)
@@ -889,8 +889,8 @@ func TestMigrationDiff(t *testing.T) {
 	defaultManifest := NewDefaultCollectionsManifest()
 	rules := make(CollectionsMappingRulesType)
 	// Make a rule that says if the doc key starts with "S1_"
-	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1:col1"
-	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2:col1"
+	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1.col1"
+	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2.col1"
 
 	manifestPair := CollectionsManifestPair{
 		Source: &defaultManifest,
@@ -1021,8 +1021,8 @@ func TestCollectionMigrateRuleValidation(t *testing.T) {
 	assert := assert.New(t)
 
 	validRules := make(map[string]interface{})
-	validRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1:targetCol1"
-	validRules[fmt.Sprintf("doc.Value == %v%v%v AND doc.Value2 != %v%v%v", "\"", "abc", "\"", "\"", "def", "\"")] = "targetScope2:targetCol2"
+	validRules[fmt.Sprintf("REGEXP_CONTAINS(META().id, %v%v%v)", "\"", "^_abc", "\"")] = "targetScope1.targetCol1"
+	validRules[fmt.Sprintf("doc.Value == %v%v%v AND doc.Value2 != %v%v%v", "\"", "abc", "\"", "\"", "def", "\"")] = "targetScope2.targetCol2"
 
 	rules, err := ValidateAndConvertJsonMapToRuleType(validRules)
 	assert.Nil(err)
@@ -1043,7 +1043,7 @@ func TestCollectionMigrateRuleValidation(t *testing.T) {
 	rules, err = ValidateAndConvertStringToMappingRuleType(doubleKey)
 	assert.NotNil(err)
 
-	perfKeyWSpaces := "{\"scope-1:collection-1\" : \"scope-2:collection-2\"}"
+	perfKeyWSpaces := "{\"scope-1.collection-1\" : \"scope-2.collection-2\"}"
 	rules, err = ValidateAndConvertStringToMappingRuleType(perfKeyWSpaces)
 	assert.Nil(err)
 }
@@ -1055,7 +1055,7 @@ func TestDenylistMapping(t *testing.T) {
 
 	validRules := make(map[string]interface{})
 	validRules["S1"] = "S1"
-	validRules["S1:col1"] = nil
+	validRules["S1.col1"] = nil
 
 	data, err := ioutil.ReadFile(provisionedFile)
 	assert.Nil(err)
