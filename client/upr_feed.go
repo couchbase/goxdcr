@@ -117,6 +117,7 @@ type UprFeatures struct {
 	DcpPriority         PriorityType
 	EnableExpiry        bool
 	EnableStreamId      bool
+	EnableOso           bool
 }
 
 /**
@@ -601,6 +602,20 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 		activatedFeatures.EnableStreamId = true
 	}
 
+	if features.EnableOso {
+		rq := &gomemcached.MCRequest{
+			Opcode: gomemcached.UPR_CONTROL,
+			Key:    []byte("enable_out_of_order_snapshots"),
+			Body:   []byte("true"),
+			Opaque: getUprOpenCtrlOpaque(),
+		}
+		err = sendMcRequestSync(feed.conn, rq)
+		if err != nil {
+			return
+		}
+		activatedFeatures.EnableOso = true
+	}
+
 	// everything is ok so far, set upr feed to open state
 	feed.activatedFeatures = activatedFeatures
 	feed.setOpen()
@@ -971,6 +986,12 @@ loop:
 				case gomemcached.UPR_FAILOVERLOG:
 					logging.Infof("Failover log for vb %d received: %v", vb, pkt)
 				case gomemcached.DCP_SEQNO_ADV:
+					if stream == nil {
+						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
+						break loop
+					}
+					event = makeUprEvent(pkt, stream, bytes)
+				case gomemcached.DCP_OSO_SNAPSHOT:
 					if stream == nil {
 						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 						break loop

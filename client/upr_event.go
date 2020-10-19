@@ -153,6 +153,8 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFrom
 		event.PopulateEvent(rq.Extras)
 	} else if event.IsSeqnoAdv() {
 		event.PopulateSeqnoAdv(rq.Extras)
+	} else if event.IsOsoSnapshot() {
+		event.PopulateOso(rq.Extras)
 	}
 
 	return event
@@ -208,6 +210,10 @@ func (event *UprEvent) IsSeqnoAdv() bool {
 	return event.Opcode == gomemcached.DCP_SEQNO_ADV
 }
 
+func (event *UprEvent) IsOsoSnapshot() bool {
+	return event.Opcode == gomemcached.DCP_OSO_SNAPSHOT
+}
+
 func (event *UprEvent) PopulateEvent(extras []byte) {
 	if len(extras) < dcpSystemEventExtraLen {
 		// Wrong length, don't parse
@@ -227,6 +233,14 @@ func (event *UprEvent) PopulateSeqnoAdv(extras []byte) {
 	}
 
 	event.Seqno = binary.BigEndian.Uint64(extras[:8])
+}
+
+func (event *UprEvent) PopulateOso(extras []byte) {
+	if len(extras) < dcpSeqnoAdvExtraLen {
+		// Wrong length, don't parse
+		return
+	}
+	event.Flags = binary.BigEndian.Uint32(extras[:4])
 }
 
 func (event *UprEvent) GetSystemEventName() (string, error) {
@@ -342,6 +356,23 @@ func (event *UprEvent) GetMaxTTL() (uint32, error) {
 		return binary.BigEndian.Uint32(event.Value[12:16]), nil
 	default:
 		return 0, ErrorInvalidOp
+	}
+}
+
+// Only if error is nil:
+// Returns true if event states oso begins
+// Return false if event states oso ends
+func (event *UprEvent) GetOsoBegin() (bool, error) {
+	if !event.IsOsoSnapshot() {
+		return false, ErrorInvalidOp
+	}
+
+	if event.Flags == 1 {
+		return true, nil
+	} else if event.Flags == 2 {
+		return false, nil
+	} else {
+		return false, ErrorInvalidOp
 	}
 }
 

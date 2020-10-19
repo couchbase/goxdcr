@@ -104,6 +104,7 @@ const (
 
 	DCP_SYSTEM_EVENT = CommandCode(0x5f) // A system event has occurred
 	DCP_SEQNO_ADV    = CommandCode(0x64) // Sent when the vb seqno has advanced due to an unsubscribed event
+	DCP_OSO_SNAPSHOT = CommandCode(0x65) // Marks the begin and end of out-of-sequence-number stream
 )
 
 // command codes that are counted toward DCP control buffer
@@ -117,6 +118,7 @@ var BufferedCommandCodeMap = map[CommandCode]bool{
 	UPR_EXPIRATION:   true,
 	DCP_SYSTEM_EVENT: true,
 	DCP_SEQNO_ADV:    true,
+	DCP_OSO_SNAPSHOT: true,
 }
 
 // Status field for memcached response.
