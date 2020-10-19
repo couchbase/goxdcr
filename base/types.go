@@ -1372,13 +1372,7 @@ func (meta *CustomCRMeta) previousVersions() (map[string]uint64, error) {
 		}
 	}
 	if meta.cas > meta.cv {
-		if meta.mv == nil {
-			// Update since cv was set. Need to add it to previous versions
-			v, ok := previousVersions[string(meta.cvId)]
-			if !ok || meta.cv > v {
-				previousVersions[string(meta.cvId)] = meta.cv
-			}
-		} else {
+		if meta.mv != nil {
 			// Update since last merge. Need to add mv to previous versions
 			it, err := NewCCRXattrFieldIterator(meta.mv)
 			if err != nil {
@@ -1398,6 +1392,12 @@ func (meta *CustomCRMeta) previousVersions() (map[string]uint64, error) {
 					previousVersions[string(k)] = cas
 				}
 			}
+		}
+		// Update since cv was set. Need to add cv/cvid to previousVersions.
+		// Missing items from previousVersions will cause false conflict and possibly ping-pong
+		v, ok := previousVersions[string(meta.cvId)]
+		if !ok || meta.cv > v {
+			previousVersions[string(meta.cvId)] = meta.cv
 		}
 	}
 	return previousVersions, nil
@@ -1480,6 +1480,51 @@ func (meta *CustomCRMeta) ConstructCustomCRXattr(body []byte, startPos int) (pos
 	return pos, nil
 }
 
+// Called when target has a smaller CAS but its xattrs dominates
+// This routine receives the target CustomCRMeta and returns an updated pcas and mv to be used to send subdoc_multi_mutation to source.
+// Target with smaller CAS can only dominate source if source document is a merged document.
+func (meta *CustomCRMeta) UpdateMetaForSetBack() (pcas, mv []byte, err error) {
+	if meta.IsMergedDoc() {
+		// This is a merged doc. Setback will just take the same pcas and mv. The calling routine will generate new CV/CvID/CAS at source
+		// as if source is doing the same merge
+		return meta.GetPcas(), meta.GetMv(), nil
+	} else {
+		// There has been changes since previous merges. The document history needs to be all in PCAS.
+		// This history includes everything in PCAS, MV, cv/cvid, and cas/senderId
+		previousVersions, err := meta.previousVersions()
+		if err != nil {
+			return nil, nil, err
+		}
+		// Need to add the current sender/CAS and cv/cvId to previous version since setback will generate new CAS/cv
+		v, ok := previousVersions[string(meta.cvId)]
+		if !ok || v < meta.cv {
+			previousVersions[string(meta.cvId)] = meta.cv
+		}
+		v, ok = previousVersions[string(meta.senderId)]
+		if ok || v < meta.cas {
+			previousVersions[string(meta.senderId)] = meta.cas
+		}
+		pcaslen := 0
+		for key, _ := range previousVersions {
+			pcaslen = pcaslen + len(key) + MaxBase64CASLength + 6 // quotes and sepeartors
+		}
+		pcaslen = pcaslen + 2 // { and }
+		// TODO(MB-41808): data pool
+		pcas = make([]byte, pcaslen)
+		firstKey := true
+		pos := 0
+		for key, cas := range previousVersions {
+			value := Uint64ToBase64(cas)
+			pcas, pos = WriteJsonRawMsg(pcas, []byte(key), pos, WriteJsonKey, len(key), firstKey /*firstKey*/)
+			pcas, pos = WriteJsonRawMsg(pcas, value, pos, WriteJsonValue, len(value), false /*firstKey*/)
+			firstKey = false
+		}
+		pcas[pos] = '}'
+		pos++
+		return pcas[:pos], nil, nil
+	}
+}
+
 // This routine combines source and target meta and puts the new MV/PCAS in the mergedMvSlice/mergedPcasSlice
 //   It finds the current versions (MV) of the two documents, combine them into new MV.
 //   It finds the previous versions (PCAS) of the two documents, combine them into new PCAS
@@ -1519,15 +1564,10 @@ func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mer
 			}
 		}
 	}
-	// Remove any redundant entries
-	for key, value := range currentVersions {
-		v, ok := previousVersions[key]
-		if ok {
-			if value > v {
-				delete(previousVersions, key)
-			} else {
-				delete(currentVersions, key)
-			}
+	// Remove any redundant entries in previousVersions that already in currentVersions
+	for key, _ := range currentVersions {
+		if _, ok := previousVersions[key]; ok {
+			delete(previousVersions, key)
 		}
 	}
 	// Construct MV

@@ -24,13 +24,13 @@ func (_m *ConflictManagerIface) ResolveConflict(source *base.WrappedMCRequest, t
 	return r0
 }
 
-// SetBackToSource provides a mock function with given fields: input
-func (_m *ConflictManagerIface) SetBackToSource(input *base.ConflictParams) error {
-	ret := _m.Called(input)
+// SetBackToSource provides a mock function with given fields: source, target, sourceId, targetId
+func (_m *ConflictManagerIface) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId []byte, targetId []byte) error {
+	ret := _m.Called(source, target, sourceId, targetId)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*base.ConflictParams) error); ok {
-		r0 = rf(input)
+	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *base.SubdocLookupResponse, []byte, []byte) error); ok {
+		r0 = rf(source, target, sourceId, targetId)
 	} else {
 		r0 = ret.Error(0)
 	}

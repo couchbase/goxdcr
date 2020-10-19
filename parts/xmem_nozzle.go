@@ -1939,7 +1939,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 					}
 				case TargetSetBack:
 					// This is the case where target has smaller CAS but it dominates source MV.
-					err = xmem.conflictMgr.SetBackToSource(&base.ConflictParams{Source: wrappedReq, Target: lookupResp})
+					err = xmem.conflictMgr.SetBackToSource(wrappedReq, lookupResp, xmem.sourceClusterId, xmem.targetClusterId)
 					if err != nil {
 						return
 					}
@@ -2802,8 +2802,8 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 		}
 		if req.num_of_retry > maxRetry {
 			req.timedout = true
-			err = errors.New(fmt.Sprintf("%v Failed to resend document %s, has tried to resend it %v, maximum retry %v reached",
-				xmem.Id(), req.req.Req.Key, req.num_of_retry, maxRetry))
+			err = errors.New(fmt.Sprintf("%v Failed to resend document %v%s%v, has tried to resend it %v, maximum retry %v reached",
+				xmem.Id(), base.UdTagBegin, bytes.Trim(req.req.Req.Key, "\x00"), base.UdTagEnd, req.num_of_retry, maxRetry))
 			xmem.Logger().Error(err.Error())
 
 			lastErrIsDueToCollectionMapping := req.collectionMapErr

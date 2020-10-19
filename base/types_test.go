@@ -409,6 +409,72 @@ func TestMergeMeta(t *testing.T) {
 	assert.Contains(string(mergedMvSlice[:mvlen]), "\"TargetCluster\":\"FhSNXrKFA/M\"")
 }
 
+func TestUpdateMetaForSetBack(t *testing.T) {
+	fmt.Println("============== Test case start: TestUpdateMetaForSetBack =================")
+	defer fmt.Println("============== Test case end: TestUpdateMetaForSetBack =================")
+
+	targetClusterId := []byte("TargetCluster")
+	assert := assert.New(t)
+	/*
+	 * 1. Target has a PCAS, no MV, and no new update. cv/cvid and cas/senderId are added to pcas
+	 */
+	cvHex := []byte("0x0b0085b25e8d1416")
+	cv, err := HexLittleEndianToUint64(cvHex)
+	assert.Nil(err)
+	targetMeta, err := NewCustomCRMeta(targetClusterId, cv, []byte("Cluster4"), []byte(cvHex), []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
+	assert.Nil(err)
+	pcas, mv, err := targetMeta.UpdateMetaForSetBack()
+	assert.Nil(err)
+	assert.Nil(mv)
+	assert.Contains(string(pcas), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(pcas), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(pcas), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Contains(string(pcas), "\"TargetCluster\":\"FhSNXrKFAAs\"")
+
+	/*
+	 * 2. Target has a PCAS, no MV, and new update. cv/cvid and cas/senderId are added to pcas
+	 */
+	cvHex = []byte("0x0b0085b25e8d1416")
+	cv, err = HexLittleEndianToUint64(cvHex)
+	assert.Nil(err)
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv+1000, []byte("Cluster4"), []byte(cvHex), []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
+	assert.Nil(err)
+	pcas, mv, err = targetMeta.UpdateMetaForSetBack()
+	assert.Nil(err)
+	assert.Nil(mv)
+	assert.Contains(string(pcas), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(pcas), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(pcas), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Contains(string(pcas), "\"TargetCluster\":\"FhSNXrKFA/M\"")
+
+	/*
+	 * 3. Target is a merged docs with no new change.
+	 */
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster3\":\"FhSITdr4ACA\"}"))
+	assert.Nil(err)
+
+	pcas, mv, err = targetMeta.UpdateMetaForSetBack()
+	assert.Nil(err)
+	assert.Nil(pcas)
+	assert.Contains(string(mv), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(mv), "\"Cluster3\":\"FhSITdr4ACA\"")
+
+	/*
+	 * 4. Target is a merged docs with new change.
+	 */
+	targetMeta, err = NewCustomCRMeta(targetClusterId, cv+1000, []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster2\":\"FhSITdr4ABU\"}"), []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster3\":\"FhSITdr4ACA\"}"))
+	assert.Nil(err)
+
+	pcas, mv, err = targetMeta.UpdateMetaForSetBack()
+	assert.Nil(err)
+	assert.Nil(mv)
+	assert.Contains(string(pcas), "\"Cluster1\":\"FhSITdr4AAA\"")
+	assert.Contains(string(pcas), "\"Cluster2\":\"FhSITdr4ABU\"")
+	assert.Contains(string(pcas), "\"Cluster3\":\"FhSITdr4ACA\"")
+	assert.Contains(string(pcas), "\"Cluster4\":\"FhSNXrKFAAs\"")
+	assert.Contains(string(pcas), "\"TargetCluster\":\"FhSNXrKFA/M\"")
+}
+
 func TestDefaultNs(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestDefaultNS =================")

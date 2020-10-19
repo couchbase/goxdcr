@@ -146,7 +146,7 @@ func setupMocksConflictMgr(xmem *XmemNozzle) *serviceDefMocks.ConflictManagerIfa
 	conflictMgr := &serviceDefMocks.ConflictManagerIface{}
 	conflictMgr.On("ResolveConflict", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	conflictMgr.On("SetBackToSource", mock.Anything).Return(nil)
+	conflictMgr.On("SetBackToSource", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	xmem.SetConflictManager(conflictMgr)
 	return conflictMgr
 }

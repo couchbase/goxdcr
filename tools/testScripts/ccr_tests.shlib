@@ -24,7 +24,7 @@ function eventingFunctionUIHandlerTest {
 
 	if (($? != 0)); then
 		echo "Failed to create function"
-		exit $?
+		exit 1
 	fi
 
 	echo "=== Get library math function sub at XDCR admin port ==="
@@ -33,7 +33,7 @@ function eventingFunctionUIHandlerTest {
 
 	if (($? != 0)); then
 		echo "Failed to GET function"
-		exit $?
+		exit 1
 	fi
 
 	echo "=== Delete library math function sub at XDCR admin port ==="
@@ -42,7 +42,7 @@ function eventingFunctionUIHandlerTest {
 
 	if (($? != 0)); then
 		echo "Failed to DELETE function"
-		exit $?
+		exit 1
 	fi
 }
 
@@ -131,11 +131,16 @@ function dataLoad {
     for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}
     do
         bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+        # These are the data that will generate conflicts for each run
         echo runCbWorkloadGenBucket $cluster1 $bucket1 1000 "common"
         runCbWorkloadGenBucket $cluster1 $bucket1 1000 "common" &
     done
-
-    sleep 10
+    # wait for cbworkloadgen to finish
+    wait
+    # With 4 clusters, changes_left takes longer to go down to 0
+    sleepTime=90
+    echo "Sleep $sleepTime seconds to wait for replication to finish"
+    sleep $sleepTime
     for cluster1 in ${!CLUSTER_NAME_BUCKET_MAP[@]}
     do
         bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
@@ -149,7 +154,10 @@ function dataLoad {
         done
     done
     grepForPanics
-    
+    if (($? != 0)); then
+        exit 1
+    fi
+
     echo "========================================="
     echo "============ dataLoad PASSED ============"
     echo "========================================="

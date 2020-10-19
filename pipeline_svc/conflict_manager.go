@@ -1,6 +1,7 @@
 package pipeline_svc
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -265,6 +266,11 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 		}
 	}
 }
+
+// This is called when target document dominates source even though its CAS is smaller.
+// This can only happen when source is a merged doc.
+// Target may or may not have MV. It just needs to contain everything source has. It may have merged everything that
+// source have merged, plus new updates.
 func (c *ConflictManager) formatTargetDoc(input *base.ConflictParams) *mc.MCRequest {
 	bodylen := 0
 	var spec SubdocMutationPathSpec
@@ -274,9 +280,19 @@ func (c *ConflictManager) formatTargetDoc(input *base.ConflictParams) *mc.MCRequ
 		// TODO: MB-40143: Remove before CC shipping
 		panic(fmt.Sprintf("error '%v' getting target meta", err))
 	}
-	// ID path
-	id := append([]byte("\""), targetMeta.GetCvId()...)
-	id = append(id, '"')
+	sourceMeta, err := base.FindSourceCustomCRXattr(input.Source.Req, input.SourceId)
+	pcas, mv, err := targetMeta.UpdateMetaForSetBack()
+	if err != nil || sourceMeta.IsMergedDoc() == false {
+		// TODO: MB-40143: Remove before CC shipping
+		c.Logger().Errorf("Setback err=%v, isMergedDoc=%v, source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
+			err, sourceMeta.IsMergedDoc(),
+			sourceMeta.GetCas(), sourceMeta.GetCv(), sourceMeta.GetCvId(), sourceMeta.GetPcas(), sourceMeta.GetMv(),
+			targetMeta.GetCas(), targetMeta.GetCv(), targetMeta.GetCvId(), targetMeta.GetPcas(), targetMeta.GetMv())
+		panic("setback unexpected values")
+	}
+
+	// ID path. It is a new update (subdoc_multi_mutation) at source. So ID is source
+	id := []byte("\"" + string(input.SourceId) + "\"")
 	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_ID_PATH), id}
 	specs = append(specs, spec)
 	bodylen = bodylen + spec.size()
@@ -286,18 +302,13 @@ func (c *ConflictManager) formatTargetDoc(input *base.ConflictParams) *mc.MCRequ
 	specs = append(specs, spec)
 	bodylen = bodylen + spec.size()
 
-	// MV path
-	mv := targetMeta.GetMv()
+	// MV path. Target MV could be nil as long as its PCAS dominates.
 	if mv != nil {
 		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MV_PATH), mv}
-	} else {
-		// TODO: MB-40143: Remove before CC shipping
-		panic("Missing MV for setback")
+		specs = append(specs, spec)
+		bodylen = bodylen + spec.size()
 	}
-	specs = append(specs, spec)
-	bodylen = bodylen + spec.size()
 	// PCAS path
-	pcas := targetMeta.GetPcas()
 	if pcas != nil {
 		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_PCAS_PATH), pcas}
 		specs = append(specs, spec)
@@ -475,7 +486,10 @@ func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byt
 	mergedPcasSlice := make([]byte, pcaslen)
 	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
 	if err != nil {
-		c.Logger().Errorf("%v: Custom CR: failed to merge metadata for document key %v, error: %v", c.pipeline.FullTopic(), input.Source.Req.Key, err)
+		c.Logger().Errorf("%v: Custom CR: failed to merge metadata for document key %s, error: %v source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
+			c.pipeline.FullTopic(), bytes.Trim(input.Source.Req.Key, "\x00"), err,
+			sourceMeta.GetCas(), sourceMeta.GetCv(), sourceMeta.GetCvId(), sourceMeta.GetPcas(), sourceMeta.GetMv(),
+			targetMeta.GetCas(), targetMeta.GetCv(), targetMeta.GetCvId(), targetMeta.GetPcas(), targetMeta.GetMv())
 	} else {
 		mv = mergedMvSlice[:mvlen]
 		pcas = mergedPcasSlice[:pcaslen]
@@ -529,7 +543,7 @@ func (c *ConflictManager) initializeClient() (*base.XmemClient, error) {
 		return nil, err
 	}
 	xmemClient := base.NewXmemClient("conflictManager", base.XmemReadTimeout,
-		base.XmemReadTimeout, client,
+		base.XmemWriteTimeout, client,
 		base.XmemMaxRetry, base.XmemMaxReadDownTime, c.Logger())
 	return xmemClient, nil
 }
@@ -725,10 +739,16 @@ func (c *ConflictManager) NotifyMergeResult(input *base.ConflictParams, mergedRe
 	}
 }
 
-func (c *ConflictManager) SetBackToSource(input *base.ConflictParams) error {
+func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte) error {
 	start := time.Now()
+	input := base.ConflictParams{
+		Source:   source,
+		Target:   target,
+		SourceId: sourceId,
+		TargetId: targetId,
+	}
 	select {
-	case c.result_ch <- &base.MergeInputAndResult{base.SetTargetToSource, input, nil, nil}:
+	case c.result_ch <- &base.MergeInputAndResult{base.SetTargetToSource, &input, nil, nil}:
 		atomic.AddUint64(&c.counter_result_ch_waittime, uint64(time.Since(start).Nanoseconds()/1000))
 		atomic.AddUint64(&c.counter_result_ch_sent, 1)
 		return nil
@@ -757,9 +777,10 @@ func (c *ConflictManager) PrintStatusSummary() {
 		if result_ch_sent > 0 {
 			result_ch_avg = float64(result_ch_waittime) / float64(result_ch_sent)
 		}
-		c.Logger().Infof("%v wait for conflict_ch: %v (avg %v), wait for resolver: %v (avg %v), wait for result_ch: %v (avg %v), len(conflict_ch): %v, len(result_ch): %v", c.pipeline.FullTopic(),
+		c.Logger().Infof("%v wait for conflict_ch: %v (avg %v), wait for resolver: %v (avg %v), wait for result_ch: %v (avg %v), len(conflict_ch): %v, len(result_ch): %v, conflict_ch sent: %v, result_ch sent: %v",
+			c.pipeline.FullTopic(),
 			conflict_ch_waittime, conflict_ch_avg, resolver_waittime, resolver_avg, result_ch_waittime, result_ch_avg,
-			len(c.conflict_ch), len(c.result_ch))
+			len(c.conflict_ch), len(c.result_ch), conflict_ch_sent, result_ch_sent)
 	} else {
 		c.Logger().Infof("%v state = %v", c.pipeline.FullTopic(), c.pipeline.State())
 	}
