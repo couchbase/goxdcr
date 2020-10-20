@@ -29,6 +29,7 @@ import (
 
 var errorStopped error = fmt.Errorf("BackfillReqHandler is stopping")
 var errorSyncDel error = fmt.Errorf("Synchronous deletion took place")
+var errorVbAlreadyDone error = fmt.Errorf("VBDone from DCP already called")
 
 type PersistType int
 
@@ -489,11 +490,8 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 		return err
 	}
 	if vbIsAlreadyDone {
-		err := fmt.Errorf("BackfillReqHandler %v attached to pipeline %v already marked vb %v done",
-			b.Id(), pipeline.FullTopic(), vbno)
-		b.raisePipelineErrors[i](err)
 		b.pipelinesMtx.Unlock()
-		return err
+		return errorVbAlreadyDone
 	}
 	b.backfillPipelineVBsDone[vbno] = true
 	b.backfillPipelineTotalVBsDone++
@@ -597,7 +595,7 @@ func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 
 	b.pipelines = append(b.pipelines, pipeline)
 	errFunc := func(err error) {
-		supervisor.OnEvent(common.NewEvent(common.ErrorEncountered, nil /*data*/, nil /*component*/, nil /*derivedData*/, err))
+		supervisor.OnEvent(common.NewEvent(common.ErrorEncountered, nil /*data*/, b /*component*/, nil /*derivedData*/, err))
 	}
 	b.raisePipelineErrors = append(b.raisePipelineErrors, errFunc)
 
@@ -705,7 +703,7 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			return err
 		}
 		err := b.HandleVBTaskDone(vbno)
-		if err != nil && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {
+		if err != nil && err != errorVbAlreadyDone && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {
 			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), vbno, err)
 			// When err is not nil, the backfill job needs to be redone
 			_, i := b.getPipeline(common.BackfillPipeline)
