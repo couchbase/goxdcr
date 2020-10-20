@@ -43,7 +43,7 @@ func TestReplicationStatusErrorMap(t *testing.T) {
 
 	oneMap := make(base.ErrorMap)
 	for i := 0; i < 5; i++ {
-		oneMap[string(i)] = errors.New(string(i))
+		oneMap[fmt.Sprintf("%v", i)] = errors.New(fmt.Sprintf("%v", i))
 	}
 
 	repStatus.AddErrorsFromMap(oneMap)
@@ -60,7 +60,7 @@ func TestReplicationStatusErrorMapFull(t *testing.T) {
 
 	fullMap := make(base.ErrorMap)
 	for i := 0; i < PipelineErrorMaxEntries+1; i++ {
-		fullMap[string(i)] = errors.New(string(i))
+		fullMap[fmt.Sprintf("%v", i)] = errors.New(fmt.Sprintf("%v", i))
 	}
 
 	repStatus.AddErrorsFromMap(fullMap)
