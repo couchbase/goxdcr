@@ -28,6 +28,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1227,7 +1228,8 @@ func TestAddThenSetConcurrent(t *testing.T) {
 	waitGrp.Wait()
 
 	assert.Nil(addErr)
-	assert.Equal(RefreshNotEnabledYet, setErr)
+	setErrPass := setErr != nil && (setErr == RefreshNotEnabledYet || strings.Contains(setErr.Error(), UnknownRemoteClusterErrorMessage))
+	assert.True(setErrPass)
 	assert.True(setTimeTaken < addTimeTaken)
 
 	fmt.Println("============== Test case end: TestAddThenSetConcurrent =================")
