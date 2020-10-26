@@ -68,4 +68,7 @@ GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   INSTALL_PATH bin OUTPUT goxdcr
   GOVERSION 1.11.5)
 
-ADD_DEPENDENCIES(goxdcr sigar js-evaluator n1ql-yacc)
+ADD_DEPENDENCIES(goxdcr sigar n1ql-yacc)
+IF (BUILD_ENTERPRISE)
+  ADD_DEPENDENCIES (goxdcr js-evaluator)
+ENDIF ()
