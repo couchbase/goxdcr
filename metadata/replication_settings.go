@@ -59,6 +59,7 @@ const (
 
 	CollectionsMappingRulesKey    = base.CollectionsMappingRulesKey
 	CollectionsSkipSourceCheckKey = base.CollectionsSkipSourceCheckKey
+	CollectionsPendingBackfillKey = "pendingBackfill"
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey

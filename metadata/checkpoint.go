@@ -17,19 +17,20 @@ import (
 )
 
 const (
-	FailOverUUID            string = "failover_uuid"
-	Seqno                   string = "seqno"
-	DcpSnapshotSeqno        string = "dcp_snapshot_seqno"
-	DcpSnapshotEndSeqno     string = "dcp_snapshot_end_seqno"
-	TargetVbOpaque          string = "target_vb_opaque"
-	TargetSeqno             string = "target_seqno"
-	TargetVbUuid            string = "target_vb_uuid"
-	StartUpTime             string = "startup_time"
-	FilteredCnt             string = "filtered_items_cnt"
-	FilteredFailedCnt       string = "filtered_failed_cnt"
-	SourceManifest          string = "source_manifest"
-	TargetManifest          string = "target_manifest"
-	BrokenCollectionsMapSha string = "brokenCollectionsMapSha256"
+	FailOverUUID                 string = "failover_uuid"
+	Seqno                        string = "seqno"
+	DcpSnapshotSeqno             string = "dcp_snapshot_seqno"
+	DcpSnapshotEndSeqno          string = "dcp_snapshot_end_seqno"
+	TargetVbOpaque               string = "target_vb_opaque"
+	TargetSeqno                  string = "target_seqno"
+	TargetVbUuid                 string = "target_vb_uuid"
+	StartUpTime                  string = "startup_time"
+	FilteredCnt                  string = "filtered_items_cnt"
+	FilteredFailedCnt            string = "filtered_failed_cnt"
+	SourceManifestForDCP         string = "source_manifest_dcp"
+	SourceManifestForBackfillMgr string = "source_manifest_backfill_mgr"
+	TargetManifest               string = "target_manifest"
+	BrokenCollectionsMapSha      string = "brokenCollectionsMapSha256"
 )
 
 type CheckpointRecord struct {
@@ -50,8 +51,9 @@ type CheckpointRecord struct {
 	// Number of items failed filter
 	Filtered_Failed_Cnt uint64 `json:"filtered_failed_cnt"`
 	// Manifests uid corresponding to this checkpoint
-	SourceManifest uint64 `json:"source_manifest"`
-	TargetManifest uint64 `json:"target_manifest"`
+	SourceManifestForDCP         uint64 `json:"source_manifest_dcp"`
+	SourceManifestForBackfillMgr uint64 `json:"source_manifest_backfill_mgr"`
+	TargetManifest               uint64 `json:"target_manifest"`
 	// BrokenMapping SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMapping above
 	BrokenMappingSha256 string `json:"brokenCollectionsMapSha256"`
 	// Broken mapping (if any) associated with the checkpoint - this is populated automatically by checkpointsService
@@ -77,22 +79,25 @@ func (c *CheckpointRecord) Size() int {
 	return totalSize
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed,
-	srcManifest, tgtManifest uint64, brokenMappings CollectionNamespaceMapping) (*CheckpointRecord, error) {
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed, srcManifestForDCP, srcManifestForBackfill, tgtManifest uint64, brokenMappings CollectionNamespaceMapping) (*CheckpointRecord, error) {
 	record := &CheckpointRecord{
-		Failover_uuid:          failoverUuid,
-		Seqno:                  seqno,
-		Dcp_snapshot_seqno:     dcpSnapSeqno,
-		Dcp_snapshot_end_seqno: dcpSnapEnd,
-		Target_Seqno:           targetSeqno,
-		Filtered_Items_Cnt:     filteredItems,
-		Filtered_Failed_Cnt:    filterFailed,
-		SourceManifest:         srcManifest,
-		TargetManifest:         tgtManifest,
-		brokenMappings:         brokenMappings,
+		Failover_uuid:                failoverUuid,
+		Seqno:                        seqno,
+		Dcp_snapshot_seqno:           dcpSnapSeqno,
+		Dcp_snapshot_end_seqno:       dcpSnapEnd,
+		Target_Seqno:                 targetSeqno,
+		Filtered_Items_Cnt:           filteredItems,
+		Filtered_Failed_Cnt:          filterFailed,
+		SourceManifestForDCP:         srcManifestForDCP,
+		SourceManifestForBackfillMgr: srcManifestForBackfill,
+		TargetManifest:               tgtManifest,
+		brokenMappings:               brokenMappings,
 	}
 	err := record.PopulateBrokenMappingSha()
-	return record, err
+	if err != nil {
+		return nil, err
+	}
+	return record, nil
 }
 
 func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
@@ -123,7 +128,8 @@ func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
 		ckptRecord.Target_Seqno == new_record.Target_Seqno &&
 		ckptRecord.Filtered_Failed_Cnt == new_record.Filtered_Failed_Cnt &&
 		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt &&
-		ckptRecord.SourceManifest == new_record.SourceManifest &&
+		ckptRecord.SourceManifestForDCP == new_record.SourceManifestForDCP &&
+		ckptRecord.SourceManifestForBackfillMgr == new_record.SourceManifestForBackfillMgr &&
 		ckptRecord.TargetManifest == new_record.TargetManifest &&
 		ckptRecord.BrokenMappingSha256 == new_record.BrokenMappingSha256 {
 		return true
@@ -144,7 +150,8 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.Target_Seqno = other.Target_Seqno
 	ckptRecord.Filtered_Items_Cnt = other.Filtered_Items_Cnt
 	ckptRecord.Filtered_Failed_Cnt = other.Filtered_Failed_Cnt
-	ckptRecord.SourceManifest = other.SourceManifest
+	ckptRecord.SourceManifestForDCP = other.SourceManifestForDCP
+	ckptRecord.SourceManifestForBackfillMgr = other.SourceManifestForBackfillMgr
 	ckptRecord.TargetManifest = other.TargetManifest
 	ckptRecord.LoadBrokenMapping(other.brokenMappings)
 }
@@ -210,9 +217,14 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 		ckptRecord.Filtered_Failed_Cnt = uint64(filteredFailedCnt.(float64))
 	}
 
-	srcManifest, ok := fieldMap[SourceManifest]
+	srcManifest, ok := fieldMap[SourceManifestForDCP]
 	if ok {
-		ckptRecord.SourceManifest = uint64(srcManifest.(float64))
+		ckptRecord.SourceManifestForDCP = uint64(srcManifest.(float64))
+	}
+
+	srcManifestForBackfill, ok := fieldMap[SourceManifestForBackfillMgr]
+	if ok {
+		ckptRecord.SourceManifestForBackfillMgr = uint64(srcManifestForBackfill.(float64))
 	}
 
 	tgtManifest, ok := fieldMap[TargetManifest]
@@ -393,9 +405,9 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 }
 
 func (ckpt_record *CheckpointRecord) String() string {
-	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifest=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMapping=%v}",
+	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMapping=%v}",
 		ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
-		ckpt_record.Target_Seqno, ckpt_record.SourceManifest, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
+		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
 }
 
 type CheckpointsDoc struct {

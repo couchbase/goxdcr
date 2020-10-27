@@ -128,8 +128,6 @@ function runTestCase {
 	sleep 10
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
 
-	# TODO - need to think if this is an issue. Because router didn't receive any I/O, it won't log
-	# the message. Now with I/O, it'll ask for a backfill when it was already done
 	# Under normal I/O load, these should happen closely together
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 2 ))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 2 ))
@@ -140,6 +138,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
+
 	cleanupBucketReplications
  	cleanupBuckets
  	cleanupRemoteClusterRefs

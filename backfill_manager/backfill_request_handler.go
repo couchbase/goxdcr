@@ -91,6 +91,7 @@ type ReqAndResp struct {
 	Request         interface{}
 	HandleResponse  chan error
 	PersistResponse chan error
+	Force           bool
 }
 
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, vbsGetter MyVBsGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func()) *BackfillRequestHandler {
@@ -244,8 +245,6 @@ func (b *BackfillRequestHandler) run() {
 				}()
 				if err != nil && persistType != DelOp {
 					b.logger.Errorf("%v experienced error when persisting - %v", b.id, err.Error())
-					b.logger.Fatalf(base.GetBackfillFatalDataLossError(b.id).Error())
-					b.restreamPipelineFatalFunc()
 				}
 				// Return the error code to all the callers that are waiting
 				for _, respCh := range b.queuedResps {
@@ -271,6 +270,10 @@ func (b *BackfillRequestHandler) IsStopped() bool {
 }
 
 func (b *BackfillRequestHandler) HandleBackfillRequest(req interface{}) error {
+	return b.handleBackfillRequestWithArgs(req, false)
+}
+
+func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, forceFlag bool) error {
 	if b.IsStopped() {
 		return errorStopped
 	}
@@ -279,6 +282,7 @@ func (b *BackfillRequestHandler) HandleBackfillRequest(req interface{}) error {
 	reqAndResp.Request = req
 	reqAndResp.PersistResponse = make(chan error, 1)
 	reqAndResp.HandleResponse = make(chan error, 1)
+	reqAndResp.Force = forceFlag
 
 	// Serialize the requests - goes to handleBackfillRequestInternal()
 	b.incomingReqCh <- reqAndResp
@@ -343,7 +347,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 		return err
 	}
 
-	err = b.updateBackfillSpec(reqAndResp.PersistResponse, vbTasksMap, req, seqnosMap)
+	err = b.updateBackfillSpec(reqAndResp.PersistResponse, vbTasksMap, req, seqnosMap, reqAndResp.Force)
 	if err != nil {
 		b.logger.Errorf(err.Error())
 		return err
@@ -351,16 +355,32 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 	return nil
 }
 
-func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap metadata.VBTasksMapType, req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) error {
+func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap metadata.VBTasksMapType, req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64, force bool) error {
 	clonedSpec := b.spec.Clone()
+
 	exists := b.cachedBackfillSpec != nil
+
+	if force {
+		// Force means that backfillSpec is being forced updated either in a severe metakv error, or if user is raising it manually
+		// We need to ensure AddOp is used if currently it doesn't exist in metakv
+		_, err := b.backfillReplSvc.BackfillReplSpec(b.id)
+		if err != nil {
+			exists = false
+		}
+	}
 	if !exists {
 		backfillSpec := metadata.NewBackfillReplicationSpec(clonedSpec.Id, clonedSpec.InternalId, vbTasksMap, clonedSpec)
 		b.cachedBackfillSpec = backfillSpec
 		b.logNewBackfillMsg(req, seqnosMap)
 		b.requestPersistence(AddOp, persistResponse)
 	} else {
-		if b.cachedBackfillSpec.Contains(vbTasksMap) {
+		if force {
+			// Force means remove all previous mapping so it can be re-added
+			nameSpaceMappingForIncomingTask := vbTasksMap.GetAllCollectionNamespaceMappings()
+			for _, collectionNamespaceMapping := range nameSpaceMappingForIncomingTask {
+				b.cachedBackfillSpec.VBTasksMap.RemoveNamespaceMappings(*collectionNamespaceMapping)
+			}
+		} else if b.cachedBackfillSpec.Contains(vbTasksMap) {
 			// already handled - redundant request
 			// Just request persistence to ensure synchronization
 			b.requestPersistence(SetOp, persistResponse)
@@ -755,7 +775,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 		if err != nil {
 			return err
 		}
-		err = b.updateBackfillSpec(resp.PersistResponse, vbTasksMap, pair.Added, maxSeqnos)
+		err = b.updateBackfillSpec(resp.PersistResponse, vbTasksMap, pair.Added, maxSeqnos, resp.Force)
 		return err
 	} else {
 		if b.cachedBackfillSpec == nil {

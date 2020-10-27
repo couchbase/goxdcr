@@ -158,6 +158,8 @@ type CheckpointManager struct {
 	backfillUILogMtx    sync.Mutex
 	backfillLastAdded   metadata.CollectionNamespaceMapping
 	backfillLastRemoved metadata.CollectionNamespaceMapping
+
+	getBackfillMgr func() service_def.BackfillMgrIface
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -190,14 +192,7 @@ type brokenMappingWithLock struct {
 	lock                        sync.RWMutex
 }
 
-func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
-	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc,
-	xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
-	active_vbs map[string][]uint16, target_username, target_password string, target_bucket_name string,
-	target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference,
-	target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface,
-	uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc) (*CheckpointManager, error) {
+func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username, target_password, target_bucket_name string, target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference, target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface, uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, getBackfillMgr func() service_def.BackfillMgrIface) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -235,6 +230,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		collectionsManifestSvc:    collectionsManifestSvc,
 		backfillStartingTs:        make(map[uint16]*base.VBTimestamp),
 		backfillReplSvc:           backfillReplSvc,
+		getBackfillMgr:            getBackfillMgr,
 	}, nil
 }
 
@@ -794,7 +790,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
-	ckmgr.loadBrokenMapFromCkptDocs(ckptDocs)
+	ckmgr.loadCollectionMappingsFromCkptDocs(ckptDocs)
 	ckmgr.logger.Infof("Found %v checkpoint documents for replication %v\n", len(ckptDocs), topic)
 
 	ckmgr.initBpMapIfNeeded(ckptDocs)
@@ -867,6 +863,8 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	// shuffles listOfVbs so as to load balance vbs for each outnozzle across startSeqnoGetters
 	// this way, if a startSeqnoGetter executes faster than others, it won't overload one particular outnozzle
 	base.ShuffleVbList(listOfVbs)
+	var lowestLastSuccessfulSourceManifestId uint64
+	var vbtsStartedWithNon0 uint32
 
 	for {
 		end_index := start_index + workload
@@ -875,7 +873,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 		vbs_for_getter := listOfVbs[start_index:end_index]
 		getter_wait_grp.Add(1)
-		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, getter_wait_grp, err_ch)
+		go ckmgr.startSeqnoGetter(getter_id, vbs_for_getter, ckptDocs, getter_wait_grp, err_ch, &lowestLastSuccessfulSourceManifestId, &vbtsStartedWithNon0)
 
 		start_index = end_index
 		if start_index >= len(listOfVbs) {
@@ -896,8 +894,12 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 	}
 
-	ckmgr.logger.Infof("Done with setting starting seqno for %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+	// If vbts starts at 0, it means it's a clean slate and no backfill is needed
+	if ckmgr.pipeline.Type() == common.MainPipeline && vbtsStartedWithNon0 > 0 {
+		go ckmgr.getBackfillMgr().SetLastSuccessfulSourceManifestId(ckmgr.pipeline.Topic(), lowestLastSuccessfulSourceManifestId, false /*rollback*/, ckmgr.finish_ch)
+	}
 
+	ckmgr.logger.Infof("Done with setting starting seqno for %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 	return nil
 }
 
@@ -945,13 +947,14 @@ func (ckmgr *CheckpointManager) postDelCheckpointsDocWrapper(topic string, ckptD
 	}
 }
 
-func (ckmgr *CheckpointManager) loadBrokenMapFromCkptDocs(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
+func (ckmgr *CheckpointManager) loadCollectionMappingsFromCkptDocs(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
 	// When loading, just get the biggest brokenmap "fishing net" possible
+	ckmgr.loadBrokenMappings(ckptDocs)
+}
+
+func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
 	var highestManifestId uint64
-
 	ckmgr.cachedBrokenMap.lock.Lock()
-	defer ckmgr.cachedBrokenMap.lock.Unlock()
-
 	for _, ckptDoc := range ckptDocs {
 		if ckptDoc == nil {
 			continue
@@ -966,13 +969,14 @@ func (ckmgr *CheckpointManager) loadBrokenMapFromCkptDocs(ckptDocs map[uint16]*m
 				if ckmgr.cachedBrokenMap.brokenMap == nil {
 					ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
 				}
+				highestManifestId = record.TargetManifest
 			} else if record.TargetManifest == highestManifestId {
 				// Same version - consolidate it into a bigger fishing net
 				ckmgr.cachedBrokenMap.brokenMap.Consolidate(*record.BrokenMappings())
 			}
 		}
 	}
-
+	ckmgr.cachedBrokenMap.lock.Unlock()
 	go ckmgr.updateReplStatusBrokenMap()
 }
 
@@ -1005,14 +1009,13 @@ func (ckmgr *CheckpointManager) restoreBrokenMappingManifestsToRouter(brokenMapp
 	ckmgr.pipeline.UpdateSettings(settings)
 }
 
-func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc,
-	waitGrp *sync.WaitGroup, err_ch chan interface{}) {
+func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint16, ckptDocs map[uint16]*metadata.CheckpointsDoc, waitGrp *sync.WaitGroup, err_ch chan interface{}, sharedLowestSuccessfulManifestId *uint64, vbtsStartedNon0 *uint32) {
 	ckmgr.logger.Infof("%v %v StartSeqnoGetter %v is started to do _pre_prelicate for vbs %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), getter_id, listOfVbs)
 	defer waitGrp.Done()
 
 	for _, vbno := range listOfVbs {
 		// use math.MaxUint64 as max_seqno to make all checkpoint records eligible
-		vbts, vbStats, brokenMapping, targetManifestId, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], math.MaxUint64)
+		vbts, vbStats, brokenMapping, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], math.MaxUint64)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
 			err_ch <- err_info
@@ -1032,12 +1035,28 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 			err_ch <- err_info
 			return
 		}
+		if vbts.Seqno > 0 {
+			atomic.CompareAndSwapUint32(vbtsStartedNon0, 0, 1)
+		}
+		if ckmgr.pipeline.Type() == common.MainPipeline {
+			for true {
+				curAtomicVal := atomic.LoadUint64(sharedLowestSuccessfulManifestId)
+				if curAtomicVal == 0 && lastSuccessfulBackfillMgrSrcManifestId > 0 || lastSuccessfulBackfillMgrSrcManifestId < curAtomicVal {
+					swapped := atomic.CompareAndSwapUint64(sharedLowestSuccessfulManifestId, curAtomicVal, lastSuccessfulBackfillMgrSrcManifestId)
+					if swapped {
+						break
+					}
+				} else {
+					break
+				}
+			}
+		}
 	}
 }
 
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, service_def.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, error) {
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, service_def.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)
@@ -1072,7 +1091,7 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 					goto POPULATE
 				} else {
 					ckmgr.logger.Errorf("%v %v Pre_replicate failed for %v. err=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, err)
-					return nil, nil, nil, 0, err
+					return nil, nil, nil, 0, 0, err
 				}
 			}
 
@@ -1090,12 +1109,12 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 		} // end if remote_vb_status
 	}
 POPULATE:
-	vbts, brokenMappings, targetManifestId, err := ckmgr.populateDataFromCkptDoc(ckptDoc, agreedIndex, vbno)
+	vbts, brokenMappings, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.populateDataFromCkptDoc(ckptDoc, agreedIndex, vbno)
 	if err != nil {
-		return vbts, nil, nil, 0, err
+		return vbts, nil, nil, 0, 0, err
 	}
 	vbStatMap := NewVBStatsMapFromCkpt(ckptDoc, agreedIndex)
-	return vbts, vbStatMap, brokenMappings, targetManifestId, err
+	return vbts, vbStatMap, brokenMappings, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err
 }
 
 /**
@@ -1158,11 +1177,12 @@ func (ckmgr *CheckpointManager) retrieveCkptDoc(vbno uint16) (*metadata.Checkpoi
 	return ckmgr.checkpoints_svc.CheckpointsDoc(ckmgr.pipeline.FullTopic(), vbno)
 }
 
-func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) (*base.VBTimestamp, *metadata.CollectionNamespaceMapping, uint64, error) {
+func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.CheckpointsDoc, agreedIndex int, vbno uint16) (*base.VBTimestamp, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
 	vbts := &base.VBTimestamp{Vbno: vbno}
 	var brokenMapping *metadata.CollectionNamespaceMapping
 	var targetManifestId uint64
 	var backfillBypassAgreedIndex bool
+	var lastSucccessfulBackfillMgrSrcManifestId uint64
 	if agreedIndex > -1 {
 		ckpt_records := ckptDoc.GetCheckpointRecords()
 		if len(ckpt_records) < agreedIndex+1 {
@@ -1184,11 +1204,12 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 				vbts.SnapshotEnd = vbts.Seqno
 			}
 
-			vbts.ManifestIDs.SourceManifestId = ckpt_record.SourceManifest
+			vbts.ManifestIDs.SourceManifestId = ckpt_record.SourceManifestForDCP
 			vbts.ManifestIDs.TargetManifestId = ckpt_record.TargetManifest
 
 			brokenMapping = ckpt_record.BrokenMappings()
 			targetManifestId = ckpt_record.TargetManifest
+			lastSucccessfulBackfillMgrSrcManifestId = ckpt_record.SourceManifestForBackfillMgr
 		}
 	} else if ckmgr.pipeline.Type() == common.BackfillPipeline {
 		// Check to see if there's a starting point to use instead of 0
@@ -1225,9 +1246,9 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 	} else {
 		err := fmt.Errorf("%v %v Calling populateDataFromCkptDoc on vb=%v which is not in MyVBList", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 		ckmgr.handleGeneralError(err)
-		return nil, nil, 0, err
+		return nil, nil, 0, 0, err
 	}
-	return vbts, brokenMapping, targetManifestId, nil
+	return vbts, brokenMapping, targetManifestId, lastSucccessfulBackfillMgrSrcManifestId, nil
 }
 
 func (ckmgr *CheckpointManager) checkpointing() {
@@ -1612,11 +1633,10 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	filterFailed := vbCountMetrics[service_def.DOCS_UNABLE_TO_FILTER_METRIC]
 
 	// Collection-Related items
-	srcManifestId, tgtManifestId, brokenMapping := ckmgr.getCollectionItemsIfEnabled(vbno, ok, srcManifestIds, tgtManifestIds)
+	srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping := ckmgr.getCollectionItemsIfEnabled(vbno, ok, srcManifestIds, tgtManifestIds)
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
-	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno,
-		uint64(filteredItems), uint64(filterFailed), srcManifestId, tgtManifestId, brokenMapping)
+	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno, uint64(filteredItems), uint64(filterFailed), srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping)
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
 		err = nil
@@ -1639,9 +1659,9 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	return
 }
 
-func (ckmgr *CheckpointManager) getCollectionItemsIfEnabled(vbno uint16, ok bool, srcManifestIds map[uint16]uint64, tgtManifestIds map[uint16]uint64) (uint64, uint64, metadata.CollectionNamespaceMapping) {
+func (ckmgr *CheckpointManager) getCollectionItemsIfEnabled(vbno uint16, ok bool, srcManifestIds map[uint16]uint64, tgtManifestIds map[uint16]uint64) (uint64, uint64, uint64, metadata.CollectionNamespaceMapping) {
 	if !ckmgr.collectionEnabled() {
-		return 0, 0, metadata.CollectionNamespaceMapping{}
+		return 0, 0, 0, metadata.CollectionNamespaceMapping{}
 	}
 
 	srcManifestId, ok := srcManifestIds[vbno]
@@ -1663,7 +1683,13 @@ func (ckmgr *CheckpointManager) getCollectionItemsIfEnabled(vbno uint16, ok bool
 		tgtManifestId = ckmgr.cachedBrokenMap.correspondingTargetManifest
 	}
 	ckmgr.cachedBrokenMap.lock.RUnlock()
-	return srcManifestId, tgtManifestId, brokenMapping
+
+	backfillMgr := ckmgr.getBackfillMgr()
+	lastBackfillSuccessfulId, err := backfillMgr.GetLastSuccessfulSourceManifestId(ckmgr.pipeline.Topic())
+	if err != nil {
+		ckmgr.logger.Warnf("Unable to get last successful source manifest Id for %v - %v", ckmgr.pipeline.Topic(), err)
+	}
+	return srcManifestId, lastBackfillSuccessfulId, tgtManifestId, brokenMapping
 }
 
 func (ckmgr *CheckpointManager) getThroughSeqno(vbno uint16, through_seqno_map map[uint16]uint64) (uint64, error) {
@@ -2008,7 +2034,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	ckmgr.logger.Infof("%v vb=%v, current_start_seqno=%v, max_seqno=%v\n", ckmgr.pipeline.FullTopic(), vbno, pipeline_start_seqno.Seqno, max_seqno)
 
-	vbts, vbStats, brokenMappings, targetManifestId, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno)
+	vbts, vbStats, brokenMappings, targetManifestId, lastsuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, checkpointDoc, max_seqno)
 	if err != nil {
 		return nil, err
 	}
@@ -2023,8 +2049,12 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	if err != nil {
 		ckmgr.logger.Warnf("%v setting vbStat for vb %v returned error %v Stats: %v\n", ckmgr.pipeline.FullTopic(), vbno, err, vbStats)
 	}
-	ckmgr.logger.Infof("%v Rolled back startSeqno to %v for vb=%v\n", ckmgr.pipeline.FullTopic(), vbts.Seqno, vbno)
 
+	if ckmgr.pipeline.Type() == common.MainPipeline {
+		go ckmgr.getBackfillMgr().SetLastSuccessfulSourceManifestId(ckmgr.pipeline.Topic(), lastsuccessfulBackfillMgrSrcManifestId, true, ckmgr.finish_ch)
+	}
+
+	ckmgr.logger.Infof("%v Rolled back startSeqno to %v for vb=%v\n", ckmgr.pipeline.FullTopic(), vbts.Seqno, vbno)
 	ckmgr.logger.Infof("%v Retry vbts=%v\n", ckmgr.pipeline.FullTopic(), vbts)
 
 	return vbts, nil

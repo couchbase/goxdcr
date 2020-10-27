@@ -106,9 +106,13 @@ func setupCollectionManifestsSvcRouterWithDefaultTarget(collectionsManifestSvc *
 	collectionsManifestSvc.On("GetLatestManifests", mock.Anything, mock.Anything).Return(&manifest, &defaultManifest, nil)
 }
 
-func setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc) (pair metadata.CollectionsManifestPair) {
+func setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, version int) (pair metadata.CollectionsManifestPair) {
 	manifestFileDir := "../metadata/testdata"
 	manifestFileName := "provisionedManifest.json"
+
+	if version == 2 {
+		manifestFileName = "provisionedManifestv2.json"
+	}
 
 	data, err := ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileName))
 	if err != nil {
@@ -582,7 +586,7 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
-	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc)
+	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc, 1)
 
 	expDelMode = base.FilterExpDelAll
 
@@ -722,7 +726,7 @@ func TestRouterRaceyBrokenMap(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, connectivityGetter := setupBoilerPlateRouter()
-	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc)
+	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc, 1)
 
 	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, connectivityGetter)
 	assert.Nil(err)
@@ -794,7 +798,7 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
-	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc)
+	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc, 1)
 
 	var connectivityReturnHealthy = true
 	var connectivityGetCnt uint32

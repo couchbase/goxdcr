@@ -220,6 +220,9 @@ type CollectionsRouter struct {
 	explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair)
 	migrationUIRaiser        func(message string)
 	connectivityStatusGetter func() (metadata.ConnectivityStatus, error)
+
+	waitingForFirstMutation uint32
+	startIdleKicker         *time.Timer
 }
 
 // A collection router is critically important to not only route to the target collection, but
@@ -358,6 +361,7 @@ func (c *CollectionsRouter) IsRunning() bool {
 	return atomic.LoadUint32(&c.started) != 0
 }
 
+// When router is started, this method loads the broken map pair
 func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.CollectionNamespaceMapping, targetManifestId uint64) {
 	if !c.IsRunning() || brokenMappings == nil || len(*brokenMappings) == 0 {
 		return
@@ -417,6 +421,14 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 		}
 		c.brokenDenyMtx.Unlock()
 	}
+
+	atomic.StoreUint32(&c.waitingForFirstMutation, 1)
+	c.startIdleKicker = time.AfterFunc(10*time.Second, func() {
+		latestTargetManifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, math.MaxUint64)
+		if err == nil {
+			c.handleNewManifestChanges(latestTargetManifest)
+		}
+	})
 }
 
 // No-Concurrent call
@@ -425,6 +437,9 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 		err = PartStoppedError
 		return
 	}
+
+	c.checkAndDisableFirstMutationKicker()
+
 	c.mappingMtx.RLock()
 	isExplicitMapping := c.explicitMappings != nil
 	isMigrationMode := c.collectionMode.IsMigrationOn()
@@ -813,7 +828,9 @@ func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestManifest *metadat
 	err := c.routingUpdater(routingInfo)
 	if err != nil {
 		// If routing updater had error, it means that the potentially either or both ckpt mgr and backfill mgr
-		// do not have the most up-to-date brokenmap/repairedmap (routingInfo). Because we've introduced the concept of
+		// do not have the most up-to-date brokenmap/repairedmap (routingInfo).
+		// Most likely though, it means that backfill was not able to be persisted correctly.
+		// Because we've introduced the concept of
 		// partial replication (where a source maps to >1 targets, but only can replicate to a subset of them)
 		// the broken map in this collection router needs to be rolled back so that the next time a routingInfo pair
 		// can be re-raised again to both ckpt mgr and backfill mgr to ensure that any missed subset of targets can
@@ -1104,6 +1121,7 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 	c.brokenDenyMtx.Unlock()
 
 	if raiseBrokenEvent {
+		// This essentially tells checkpoint manager of the latest broken map so that when it can be restored when resuming pipeline
 		err := c.routingUpdater(routingInfo)
 		if err != nil {
 			c.logger.Errorf("%v - %v", BackfillPersistErrKey, err)
@@ -1126,6 +1144,12 @@ func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *
 	c.mappingMtx.RLock()
 	defer c.mappingMtx.RUnlock()
 	return c.explicitMappings.GetTargetUsingMigrationFilter(uprEvent, mcReq, c.logger)
+}
+
+func (c *CollectionsRouter) checkAndDisableFirstMutationKicker() {
+	if atomic.LoadUint32(&c.waitingForFirstMutation) == 1 && atomic.CompareAndSwapUint32(&c.waitingForFirstMutation, 1, 0) {
+		c.startIdleKicker.Stop()
+	}
 }
 
 // Key - xmem nozzle ID

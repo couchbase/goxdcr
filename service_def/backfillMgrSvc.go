@@ -26,6 +26,8 @@ type BackfillMgrIface interface {
 	// When explicit mapping changes, this callback should be used in between updates once pipelines have stopped
 	GetExplicitMappingChangeHandler(specId, internalSpecId string, oldSettings, newSettings *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 	GetRouterMappingChangeHandler(specId, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
+	GetLastSuccessfulSourceManifestId(specId string) (uint64, error)
+	SetLastSuccessfulSourceManifestId(specId string, manifestId uint64, dcpRollbackScenario bool, finCh chan bool) error
 }
 
 type BackfillMgrComponentListenerGetter interface {

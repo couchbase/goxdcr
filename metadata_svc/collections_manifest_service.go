@@ -266,7 +266,7 @@ func (c *CollectionsManifestService) PersistNeededManifests(spec *metadata.Repli
 
 	srcErr, tgtErr, _, _ := agent.PersistNeededManifests()
 	if srcErr != nil || tgtErr != nil {
-		return fmt.Errorf("SourceManifest persist err: %v TargetManifest persist err: %v", srcErr.Error(), tgtErr.Error())
+		return fmt.Errorf("SourceManifestForDCP persist err: %v TargetManifest persist err: %v", srcErr.Error(), tgtErr.Error())
 	}
 	return nil
 }
@@ -1102,8 +1102,11 @@ func (a *CollectionsManifestAgent) getAllManifestsUids() (srcManifestUids, tgtMa
 			if ckptRecord == nil {
 				continue
 			}
-			if ckptRecord.SourceManifest > 0 {
-				srcDedupMap[ckptRecord.SourceManifest] = true
+			if ckptRecord.SourceManifestForDCP > 0 {
+				srcDedupMap[ckptRecord.SourceManifestForDCP] = true
+			}
+			if ckptRecord.SourceManifestForBackfillMgr > 0 {
+				srcDedupMap[ckptRecord.SourceManifestForBackfillMgr] = true
 			}
 			if ckptRecord.TargetManifest > 0 {
 				tgtDedupMap[ckptRecord.TargetManifest] = true

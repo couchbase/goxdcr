@@ -20,9 +20,11 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Checkpoint manager can only persist a manifest if and only if any broken maps have already been
@@ -56,9 +58,10 @@ type BackfillMgr struct {
 	// Collections Manifest Service will send down the latest changes from what it sees
 	// Backfill Manager still needs to make decisions based on what it knows from last
 	// time depending on source and target. These are what the caches are used for
-	cacheMtx           sync.RWMutex
-	cacheSpecSourceMap map[string]*metadata.CollectionsManifest
-	cacheSpecTargetMap map[string]*metadata.CollectionsManifest
+	cacheMtx                          sync.RWMutex
+	cacheSpecSourceMap                map[string]*metadata.CollectionsManifest
+	cacheSpecLastSuccessfulManifestId map[string]uint64
+	cacheSpecTargetMap                map[string]*metadata.CollectionsManifest
 
 	// Request Handlers are responsible for handling a specific replication's backfill
 	// request operations, like persisting, optimizing, stop/start, etc
@@ -72,6 +75,10 @@ type BackfillMgr struct {
 
 	replSpecHandlerMtx sync.Mutex
 	replSpecHandlerMap map[string]*replSpecHandler
+
+	errorRetryQMtx  sync.RWMutex
+	errorRetryQueue []BackfillRetryRequest
+	finCh           chan bool
 }
 
 type replSpecHandler struct {
@@ -134,7 +141,14 @@ func (p *pipelineSvcWrapper) Stop() error {
 }
 
 func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	// no op
+	backfillMapping, exists := settings[metadata.CollectionsPendingBackfillKey].(metadata.CollectionNamespaceMapping)
+	topic, exists2 := settings[base.NameKey].(string)
+	if exists && exists2 {
+		err := p.backfillMgr.RequestOnDemandBackfill(topic, backfillMapping)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -179,6 +193,14 @@ func (p *pipelineSvcWrapper) GetComponentEventListener(pipeline common.Pipeline)
 	return handler, nil
 }
 
+type BackfillRetryRequest struct {
+	replId                     string
+	req                        interface{}
+	force                      bool
+	correspondingSrcManifestId uint64
+	handler                    *BackfillRequestHandler
+}
+
 func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
 	replSpecSvc service_def.ReplicationSpecSvc,
 	backfillReplSvc service_def.BackfillReplSvc,
@@ -188,20 +210,22 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 	checkpointsSvc service_def.CheckpointsService) *BackfillMgr {
 
 	backfillMgr := &BackfillMgr{
-		collectionsManifestSvc: collectionsManifestSvc,
-		replSpecSvc:            replSpecSvc,
-		backfillReplSvc:        backfillReplSvc,
-		logger:                 log.NewLogger("BackfillMgr", log.DefaultLoggerContext),
-		cacheSpecSourceMap:     make(map[string]*metadata.CollectionsManifest),
-		cacheSpecTargetMap:     make(map[string]*metadata.CollectionsManifest),
-		pipelineMgr:            pipelineMgr,
-		specToReqHandlerMap:    make(map[string]*BackfillRequestHandler),
-		clusterInfoSvc:         clusterInfoSvc,
-		xdcrTopologySvc:        xdcrTopologySvc,
-		pipelineSvc:            &pipelineSvcWrapper{},
-		checkpointsSvc:         checkpointsSvc,
-		utils:                  utils.NewUtilities(),
-		replSpecHandlerMap:     make(map[string]*replSpecHandler),
+		collectionsManifestSvc:            collectionsManifestSvc,
+		replSpecSvc:                       replSpecSvc,
+		backfillReplSvc:                   backfillReplSvc,
+		logger:                            log.NewLogger("BackfillMgr", log.DefaultLoggerContext),
+		cacheSpecSourceMap:                make(map[string]*metadata.CollectionsManifest),
+		cacheSpecLastSuccessfulManifestId: make(map[string]uint64),
+		cacheSpecTargetMap:                make(map[string]*metadata.CollectionsManifest),
+		pipelineMgr:                       pipelineMgr,
+		specToReqHandlerMap:               make(map[string]*BackfillRequestHandler),
+		clusterInfoSvc:                    clusterInfoSvc,
+		xdcrTopologySvc:                   xdcrTopologySvc,
+		pipelineSvc:                       &pipelineSvcWrapper{},
+		checkpointsSvc:                    checkpointsSvc,
+		utils:                             utils.NewUtilities(),
+		replSpecHandlerMap:                make(map[string]*replSpecHandler),
+		finCh:                             make(chan bool),
 	}
 
 	return backfillMgr
@@ -228,6 +252,8 @@ func (b *BackfillMgr) Start() error {
 		return err
 	}
 
+	go b.startRetryMonitor()
+
 	b.logger.Infof("BackfillMgr Started")
 	return nil
 }
@@ -242,6 +268,7 @@ func (b *BackfillMgr) Stop() {
 		b.logger.Errorf("Stopping handlers returned: %v\n", errMap)
 	}
 	b.pipelineSvc.backfillMgr = nil
+	close(b.finCh)
 	b.logger.Infof("BackfillMgr Stopped")
 }
 
@@ -295,6 +322,8 @@ func (b *BackfillMgr) initCache() error {
 			b.cacheMtx.Lock()
 			defaultManifest := metadata.NewDefaultCollectionsManifest()
 			b.cacheSpecSourceMap[replId] = &defaultManifest
+			// Create a map entry - setting this value depends on when pipeline starts
+			b.cacheSpecLastSuccessfulManifestId[replId] = 0
 			b.cacheSpecTargetMap[replId] = &defaultManifest
 			b.cacheMtx.Unlock()
 			// Default with default manifest in case of error
@@ -400,6 +429,7 @@ func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSp
 	b.logger.Infof("Backfill Manager for replication %v received last persisted manifests of %v and %v",
 		spec.Id, manifestPair.Source, manifestPair.Target)
 	b.cacheSpecSourceMap[spec.Id] = manifestPair.Source
+	b.cacheSpecLastSuccessfulManifestId[spec.Id] = 0
 	b.cacheSpecTargetMap[spec.Id] = manifestPair.Target
 	b.cacheMtx.Unlock()
 	return nil
@@ -516,6 +546,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 		b.cacheMtx.Lock()
 		delete(b.cacheSpecSourceMap, changedSpecId)
 		delete(b.cacheSpecTargetMap, changedSpecId)
+		delete(b.cacheSpecLastSuccessfulManifestId, changedSpecId)
 		b.cacheMtx.Unlock()
 
 		err := b.deleteBackfillRequestHandler(oldSpec.Id, oldSpec.InternalId)
@@ -707,6 +738,7 @@ func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpe
 
 	b.cacheMtx.Lock()
 	b.cacheSpecSourceMap[spec.Id] = src
+	b.cacheSpecLastSuccessfulManifestId[spec.Id] = src.Uid()
 	b.cacheSpecTargetMap[spec.Id] = tgt
 	b.cacheMtx.Unlock()
 	return nil
@@ -797,7 +829,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 	}
 	modes := spec.Settings.GetCollectionModes()
 	if !modes.IsExplicitMapping() {
-		// Nothing to do for implicit mapping
+		b.markNewSourceManifest(replId, newSourceManifest.Uid())
 		return
 	}
 
@@ -822,7 +854,40 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		b.logger.Errorf("%v Error compiling explicit backfillReq: %v", spec.Id, err)
 		return
 	}
-	b.raiseBackfillReq(replId, diffPair)
+	err = b.raiseBackfillReq(replId, diffPair, false, newSourceManifest.Uid())
+	if errMeansReqNeedsToBeRetried(err) {
+		req := BackfillRetryRequest{
+			replId:                     replId,
+			req:                        diffPair,
+			force:                      false,
+			correspondingSrcManifestId: newSourceManifest.Uid(),
+			handler:                    b.internalGetHandler(replId),
+		}
+		b.retryBackfillRequest(req)
+	} else {
+		b.markNewSourceManifest(replId, newSourceManifest.Uid())
+	}
+}
+
+func (b *BackfillMgr) internalGetHandler(replId string) *BackfillRequestHandler {
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[replId]
+	b.specReqHandlersMtx.RUnlock()
+	if handler == nil {
+		b.logger.Errorf("Unable to find handler for spec %v", replId)
+		retErr := base.GetBackfillFatalDataLossError(replId).Error()
+		b.logger.Fatalf(retErr)
+		b.pipelineMgr.ReInitStreams(replId)
+	}
+	return handler
+}
+
+func (b *BackfillMgr) markNewSourceManifest(replId string, newSourceManifestId uint64) {
+	b.cacheMtx.Lock()
+	if newSourceManifestId > b.cacheSpecLastSuccessfulManifestId[replId] {
+		b.cacheSpecLastSuccessfulManifestId[replId] = newSourceManifestId
+	}
+	b.cacheMtx.Unlock()
 }
 
 func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest *metadata.CollectionsManifest) {
@@ -849,6 +914,10 @@ func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, n
 	b.cacheSpecTargetMap[replId] = newTargetManifest
 	b.cacheMtx.Unlock()
 
+	b.diffManifestsAndRaiseBackfill(replId, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest)
+}
+
+func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newTargetManifest *metadata.CollectionsManifest) {
 	spec, err := b.replSpecSvc.ReplicationSpec(replId)
 	if err != nil {
 		b.logger.Errorf("Unable to retrieve repl spec %v to determine whether it is implicit or explicit mapping", replId)
@@ -874,13 +943,29 @@ func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, n
 		backfillReq, skipRaiseBackfillReq = b.populateBackfillReqForImplicitMapping(newTargetManifest, oldTargetManifest, newSourceManifest, spec)
 	}
 	if !skipRaiseBackfillReq {
-		b.raiseBackfillReq(replId, backfillReq)
+		err = b.raiseBackfillReq(replId, backfillReq, false, newSourceManifest.Uid())
+	}
+	if errMeansReqNeedsToBeRetried(err) {
+		req := BackfillRetryRequest{
+			replId:                     replId,
+			req:                        backfillReq,
+			force:                      false,
+			correspondingSrcManifestId: newSourceManifest.Uid(),
+			handler:                    b.internalGetHandler(replId),
+		}
+		b.retryBackfillRequest(req)
+	} else {
+		b.markNewSourceManifest(replId, newSourceManifest.Uid())
 	}
 
 	if !modes.IsExplicitMapping() {
 		// For implicit mapping, see if there are things that need to be cleaned up
 		b.cleanupInvalidImplicitBackfillMappings(replId, oldSourceManifest, newSourceManifest)
 	}
+}
+
+func errMeansReqNeedsToBeRetried(err error) bool {
+	return err != nil && err != QueuedForRetry && err != errorStopped
 }
 
 func (b *BackfillMgr) cleanupInvalidImplicitBackfillMappings(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest) bool {
@@ -903,7 +988,17 @@ func (b *BackfillMgr) cleanupInvalidImplicitBackfillMappings(replId string, oldS
 		cleanupPair := metadata.CollectionNamespaceMappingsDiffPair{
 			Removed: cleanupNamespace,
 		}
-		b.raiseBackfillReq(replId, cleanupPair)
+		err = b.raiseBackfillReq(replId, cleanupPair, false, newSourceManifest.Uid())
+		if errMeansReqNeedsToBeRetried(err) {
+			req := BackfillRetryRequest{
+				replId:                     replId,
+				req:                        cleanupPair,
+				force:                      false,
+				correspondingSrcManifestId: newSourceManifest.Uid(),
+				handler:                    b.internalGetHandler(replId),
+			}
+			b.retryBackfillRequest(req)
+		}
 	}
 	return false
 }
@@ -1007,23 +1102,28 @@ func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpeci
 	return diffPair, nil
 }
 
-func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}) {
-	b.specReqHandlersMtx.RLock()
-	handler := b.specToReqHandlerMap[replId]
-	b.specReqHandlersMtx.RUnlock()
-	if handler == nil {
-		b.logger.Errorf("Unable to find handler for spec %v", replId)
-		b.logger.Fatalf(base.GetBackfillFatalDataLossError(replId).Error())
-		b.pipelineMgr.ReInitStreams(replId)
-		return
-	}
+var QueuedForRetry = fmt.Errorf("queued a job for retry")
 
-	err := handler.HandleBackfillRequest(backfillReq)
-	if err != nil {
-		b.logger.Errorf("%v Backfill Handler returned err %v while raising backfill request", replId, err)
-		// TODO MB-40692 - fix this
-		b.logger.Fatalf(base.GetBackfillFatalDataLossError(replId).Error())
-		b.pipelineMgr.ReInitStreams(replId)
+func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, overridePreviousBackfills bool, newSourceManifestId uint64) error {
+	handler := b.internalGetHandler(replId)
+	b.errorRetryQMtx.RLock()
+	if len(b.errorRetryQueue) > 0 {
+		// Don't jump ahead of queue
+		b.errorRetryQMtx.RUnlock()
+		b.errorRetryQMtx.Lock()
+		defer b.errorRetryQMtx.Unlock()
+		newRetryJob := BackfillRetryRequest{
+			replId:                     replId,
+			req:                        backfillReq,
+			force:                      overridePreviousBackfills,
+			correspondingSrcManifestId: newSourceManifestId,
+			handler:                    handler,
+		}
+		b.errorRetryQueue = append(b.errorRetryQueue, newRetryJob)
+		return QueuedForRetry
+	} else {
+		b.errorRetryQMtx.RUnlock()
+		return handler.handleBackfillRequestWithArgs(backfillReq, overridePreviousBackfills)
 	}
 }
 
@@ -1089,4 +1189,217 @@ func (b *BackfillMgr) cleanupSpecHandlerCb(specId string) {
 	defer b.replSpecHandlerMtx.Unlock()
 
 	delete(b.replSpecHandlerMap, specId)
+}
+
+func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings metadata.CollectionNamespaceMapping) error {
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[specId]
+	b.specReqHandlersMtx.RUnlock()
+	if handler == nil {
+		b.logger.Errorf("Unable to find handler for spec %v", specId)
+		return base.ErrorNotFound
+	}
+
+	b.cacheMtx.RLock()
+	currentCachedManifest, ok := b.cacheSpecSourceMap[specId]
+	if !ok {
+		// should not be the case
+		b.logger.Errorf("Unable to find cached manifest for %v", specId)
+		return base.ErrorNotFound
+	}
+	clonedSourceManifest := currentCachedManifest.Clone()
+	currentCachedManifest, ok = b.cacheSpecTargetMap[specId]
+	if !ok {
+		// should not be the case
+		b.logger.Errorf("Unable to find cached target manifest for %v", specId)
+		return base.ErrorNotFound
+	}
+	clonedTargetManifest := currentCachedManifest.Clone()
+	b.cacheMtx.RUnlock()
+
+	spec, err := b.replSpecSvc.ReplicationSpec(specId)
+	if err != nil {
+		b.logger.Errorf("Unable to retrieve repl spec %v to determine whether it is implicit or explicit mapping", specId)
+		return base.ErrorNotFound
+	}
+
+	modes := spec.Settings.GetCollectionModes()
+
+	if clonedSourceManifest.Uid() == 0 && !modes.IsMigrationOn() && !modes.IsExplicitMapping() {
+		// Source manifest 0 means only default collection is being replicated
+		b.logger.Infof("Repl %v shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created", specId)
+		return nil
+	}
+
+	var backfillReq interface{}
+	// Backfill everything means comparing to an empty/default manifest
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	if modes.IsExplicitMapping() {
+		backfillReq, _ = b.populateBackfillReqForExplicitMapping(specId, &defaultManifest /*oldSrc*/, &clonedSourceManifest, &defaultManifest /*oldTgt*/, &clonedTargetManifest, spec, modes, backfillReq)
+	} else {
+		backfillReq, _ = b.populateBackfillReqForImplicitMapping(&clonedTargetManifest, &defaultManifest /*oldTarget*/, &clonedSourceManifest, spec)
+	}
+
+	backfillReq = b.filterBackfillReqBasedOnRequestedNamespaces(backfillReq, pendingMappings)
+
+	err = b.raiseBackfillReq(specId, backfillReq, true, 0)
+	if err == base.GetBackfillFatalDataLossError(specId) {
+		// fatal error means restream is happening - everything is deleted, so let it pass
+		err = nil
+	}
+	if err != nil {
+		b.logger.Errorf("raising pending backfill - %v", err)
+	}
+	return err
+}
+
+func (b *BackfillMgr) filterBackfillReqBasedOnRequestedNamespaces(backfillReq interface{}, pendingMappings metadata.CollectionNamespaceMapping) interface{} {
+	if nsMapping, ok := backfillReq.(metadata.CollectionNamespaceMapping); ok {
+		nsMapping = checkAndDeletePendingMappingsFromNsMappings(nsMapping, pendingMappings)
+		return nsMapping
+	} else if diffPair, ok := backfillReq.(metadata.CollectionNamespaceMappingsDiffPair); ok {
+		// Only worry about added
+		diffPair.Added = checkAndDeletePendingMappingsFromNsMappings(diffPair.Added, pendingMappings)
+		return diffPair
+	} else {
+		b.logger.Errorf(fmt.Sprintf("invalid type: %v", reflect.TypeOf(backfillReq)))
+		return backfillReq
+	}
+}
+
+func checkAndDeletePendingMappingsFromNsMappings(nsMapping metadata.CollectionNamespaceMapping, pendingMappings metadata.CollectionNamespaceMapping) metadata.CollectionNamespaceMapping {
+	subsetToDelete := make(metadata.CollectionNamespaceMapping)
+	for srcNs, tgts := range nsMapping {
+		_, _, _, exists := pendingMappings.Get(srcNs.CollectionNamespace, nil)
+		if !exists {
+			subsetToDelete[srcNs] = tgts
+		}
+	}
+
+	if len(subsetToDelete) > 0 {
+		nsMapping = nsMapping.Delete(subsetToDelete)
+	}
+	return nsMapping
+}
+
+func (b *BackfillMgr) GetLastSuccessfulSourceManifestId(specId string) (uint64, error) {
+	b.cacheMtx.RLock()
+	defer b.cacheMtx.RUnlock()
+
+	id, found := b.cacheSpecLastSuccessfulManifestId[specId]
+	if !found {
+		return 0, base.ErrorNotFound
+	}
+	return id, nil
+}
+
+func (b *BackfillMgr) SetLastSuccessfulSourceManifestId(specId string, manifestId uint64, dcpRollbackScenario bool, finCh chan bool) error {
+	// When backfill mgr receives a new replication spec, it goes off and creates the cache structures on its own go-routine
+	// This method is called by checkpoint mgr when resuming a pipeline... and if somehow the pipeline checkpoint resumes
+	// before the init process has been completed, then this needs to wait to ensure a proper diff
+	setFunc := func(interface{}) (interface{}, error) {
+		b.cacheMtx.Lock()
+
+		_, found := b.cacheSpecLastSuccessfulManifestId[specId]
+		if !found {
+			// Means this spec hasn't been initialized yet
+			b.cacheMtx.Unlock()
+			return nil, base.ErrorNotFound
+		}
+
+		var updated bool
+		if dcpRollbackScenario {
+			// rollback scenario set only if lower
+			if manifestId < b.cacheSpecLastSuccessfulManifestId[specId] {
+				updated = true
+				b.cacheSpecLastSuccessfulManifestId[specId] = manifestId
+			}
+		} else {
+			// non rollback scenario set only if non-0
+			updated = true
+			b.cacheSpecLastSuccessfulManifestId[specId] = manifestId
+		}
+		currentSourceManifest := b.cacheSpecSourceMap[specId].Clone()
+		currentTargetManifest := b.cacheSpecTargetMap[specId].Clone()
+		b.cacheMtx.Unlock()
+
+		if updated && manifestId < currentSourceManifest.Uid() {
+			tempSpec := &metadata.ReplicationSpecification{
+				Id: specId,
+			}
+			oldSourceManifest, err := b.collectionsManifestSvc.GetSpecificSourceManifest(tempSpec, manifestId)
+			if err != nil {
+				if manifestId > 0 {
+					b.logger.Warnf("Unable to find old source manifest %v for version %v, diffing against default collection", manifestId)
+				}
+				defaultManifest := metadata.NewDefaultCollectionsManifest()
+				oldSourceManifest = &defaultManifest
+			}
+
+			b.diffManifestsAndRaiseBackfill(specId, oldSourceManifest, &currentSourceManifest, &currentTargetManifest, &currentTargetManifest)
+		}
+		return nil, nil
+	}
+
+	_, err := b.utils.ExponentialBackoffExecutorWithFinishSignal("SetLastSuccessfulSourceManifestId", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, setFunc, nil, finCh)
+	if err != nil && !strings.Contains(err.Error(), base.FinClosureStr) {
+		panic("timeout trying to resume set source manifestID. May result in data loss")
+	}
+	return err
+}
+
+func (b *BackfillMgr) startRetryMonitor() {
+	periodicRetryTimer := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case <-b.finCh:
+			periodicRetryTimer.Stop()
+			return
+		case <-periodicRetryTimer.C:
+			b.errorRetryQMtx.RLock()
+			if len(b.errorRetryQueue) == 0 {
+				// No jobs to retry
+				b.errorRetryQMtx.RUnlock()
+			} else {
+				b.errorRetryQMtx.RUnlock()
+				b.errorRetryQMtx.Lock()
+				// First, find the smalles manifestId to process
+				var unableToBeProcessedQueue []BackfillRetryRequest
+				for len(b.errorRetryQueue) > 0 {
+					// Find the earliest job first to process, according to the srcManifestsID it is supposed to set
+					var minSourceManifestId uint64 = math.MaxUint64
+					var minIdx int
+					for i := 0; i < len(b.errorRetryQueue); i++ {
+						if b.errorRetryQueue[i].correspondingSrcManifestId < minSourceManifestId {
+							minIdx = i
+							minSourceManifestId = b.errorRetryQueue[i].correspondingSrcManifestId
+						}
+					}
+					job := b.errorRetryQueue[minIdx]
+					// Unlock before doing metakv ops - in the meantime, queue may be appended but minIdx location should not be affected
+					b.errorRetryQMtx.Unlock()
+					handler := job.handler
+					err := handler.handleBackfillRequestWithArgs(job.req, job.force)
+					if err != nil {
+						b.logger.Errorf("Retrying job %v failed due to %v - will try again next cycle", job.req, err)
+						unableToBeProcessedQueue = append(unableToBeProcessedQueue, job)
+					} else {
+						b.markNewSourceManifest(job.replId, job.correspondingSrcManifestId)
+					}
+					b.errorRetryQMtx.Lock()
+					b.errorRetryQueue = append(b.errorRetryQueue[:minIdx], b.errorRetryQueue[minIdx+1:]...)
+				}
+				b.errorRetryQueue = unableToBeProcessedQueue
+				b.errorRetryQMtx.Unlock()
+			}
+		}
+	}
+}
+
+func (b *BackfillMgr) retryBackfillRequest(req BackfillRetryRequest) {
+	b.errorRetryQMtx.Lock()
+	defer b.errorRetryQMtx.Unlock()
+
+	b.logger.Infof("BackfillMgr queued up to retry backfill request for replId %v with req %v", req.replId, req.req)
+	b.errorRetryQueue = append(b.errorRetryQueue, req)
 }

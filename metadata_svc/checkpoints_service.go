@@ -161,7 +161,9 @@ func (ckpt_svc *CheckpointsService) PostDelCheckpointsDoc(replicationId string, 
 			continue
 		}
 		shaInRecord := ckptRecord.BrokenMappingSha256
-		decrementerFunc(shaInRecord)
+		if shaInRecord != "" {
+			decrementerFunc(shaInRecord)
+		}
 		modified = true
 	}
 
@@ -239,7 +241,7 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 		} else {
 			ckpt_svc.logger.Debugf("Wrote checkpoint doc key=%v, Size=%v\n", key, ckpt_doc.Size())
 			size = ckpt_doc.Size()
-			err = ckpt_svc.RecordBrokenMappings(replicationId, ckpt_record, removedRecords)
+			err = ckpt_svc.RecordMappings(replicationId, ckpt_record, removedRecords)
 			if err != nil {
 				ckpt_svc.logger.Errorf("Failed to record broken mapping err=%v\n", err)
 			}
@@ -287,11 +289,7 @@ func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (me
 // When each vb does checkpointing and adds a new checkpoint record
 // Ensure that the old, bumped out ones are refcounted correctly
 // And do refcount for the newly added record's count as well
-func (ckpt_svc *CheckpointsService) RecordBrokenMappings(replicationId string, ckptRecord *metadata.CheckpointRecord, removedRecords []*metadata.CheckpointRecord) error {
-	if ckptRecord.BrokenMappings() == nil || len(*(ckptRecord.BrokenMappings())) == 0 {
-		return nil
-	}
-
+func (ckpt_svc *CheckpointsService) RecordMappings(replicationId string, ckptRecord *metadata.CheckpointRecord, removedRecords []*metadata.CheckpointRecord) error {
 	incrementerFunc, err := ckpt_svc.GetIncrementerFunc(replicationId)
 	if err != nil {
 		return err
@@ -301,11 +299,12 @@ func (ckpt_svc *CheckpointsService) RecordBrokenMappings(replicationId string, c
 		return err
 	}
 
-	incrementerFunc(ckptRecord.BrokenMappingSha256, ckptRecord.BrokenMappings())
-
-	for _, removedRecord := range removedRecords {
-		if removedRecord != nil && len(removedRecord.BrokenMappingSha256) > 0 {
-			decrementerFunc(removedRecord.BrokenMappingSha256)
+	if ckptRecord.BrokenMappings() != nil && len(*(ckptRecord.BrokenMappings())) > 0 {
+		incrementerFunc(ckptRecord.BrokenMappingSha256, ckptRecord.BrokenMappings())
+		for _, removedRecord := range removedRecords {
+			if removedRecord != nil && len(removedRecord.BrokenMappingSha256) > 0 {
+				decrementerFunc(removedRecord.BrokenMappingSha256)
+			}
 		}
 	}
 	return nil
@@ -419,8 +418,8 @@ func (ckpt_svc *CheckpointsService) populateActualMapping(doc *metadata.Checkpoi
 		if record == nil {
 			continue
 		}
-		mapping, exists := shaToActualMapping[record.BrokenMappingSha256]
-		if exists {
+		mapping, brokenMapExists := shaToActualMapping[record.BrokenMappingSha256]
+		if brokenMapExists {
 			record.LoadBrokenMapping(*mapping)
 		}
 	}
@@ -539,17 +538,8 @@ func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId stri
 				continue
 			}
 			toBeDelNamespace := make(metadata.CollectionNamespaceMapping)
-			for sourceNs, targetNsList := range *brokenMappings {
-				scope, scopeExists := sources[sourceNs.ScopeName]
-				if !scopeExists {
-					continue
-				}
-				_, collectionExists := scope.Collections[sourceNs.CollectionName]
-				if !collectionExists {
-					continue
-				}
-				// The source instance from "sources" exists in broken map and should be removed
-				toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNsList[0])
+			if brokenMappings != nil {
+				populateToDelNamespaces(brokenMappings, sources, toBeDelNamespace)
 			}
 			if len(toBeDelNamespace) > 0 {
 				incFunc, err := ckpt_svc.GetIncrementerFunc(replicationId)
@@ -558,27 +548,53 @@ func (ckpt_svc *CheckpointsService) removeMappingFromCkptDocs(replicationId stri
 					ckpt_svc.logger.Errorf("Unable to get increment or decrement func for %v when removing mapping", replicationId)
 					continue
 				}
-				origShaSlice, _ := brokenMappings.Sha256()
-				origSha := fmt.Sprintf("%x", origShaSlice[:])
-
-				newBrokenMapping := brokenMappings.Delete(toBeDelNamespace)
-				newShaSlice, _ := newBrokenMapping.Sha256()
-				newSha := fmt.Sprintf("%x", newShaSlice[:])
-				err = record.SetBrokenMappings(newBrokenMapping)
-				if err != nil {
-					ckpt_svc.logger.Warnf("when setting brokenMapping SHA: %v", err)
-					continue
+				err = ckpt_svc.removeNamespacesFromCkpt(brokenMappings, toBeDelNamespace, record, incFunc, decFunc)
+				if err == nil {
+					mappingChanged = true
 				}
-				incFunc(newSha, &newBrokenMapping)
-				decFunc(origSha)
-				mappingChanged = true
 			}
 		}
 	}
 	if mappingChanged {
-		err = ckpt_svc.UpsertBrokenMapping(replicationId, internalId)
+		err = ckpt_svc.UpsertMapping(replicationId, internalId)
 	}
 	return
+}
+
+func (ckpt_svc *CheckpointsService) removeNamespacesFromCkpt(incomingMapping *metadata.CollectionNamespaceMapping, toBeDelNamespace metadata.CollectionNamespaceMapping, record *metadata.CheckpointRecord, incFunc IncrementerFunc, decFunc DecrementerFunc) error {
+	var err error
+	origShaSlice, _ := incomingMapping.Sha256()
+	origSha := fmt.Sprintf("%x", origShaSlice[:])
+	if incomingMapping != nil && len(*incomingMapping) > 0 {
+		newBrokenMapping := incomingMapping.Delete(toBeDelNamespace)
+		newShaSlice, _ := newBrokenMapping.Sha256()
+		newSha := fmt.Sprintf("%x", newShaSlice[:])
+		err = record.SetBrokenMappings(newBrokenMapping)
+		if err != nil {
+			ckpt_svc.logger.Warnf("when setting brokenMapping SHA: %v", err)
+		} else {
+			incFunc(newSha, &newBrokenMapping)
+			if origSha != "" {
+				decFunc(origSha)
+			}
+		}
+	}
+	return err
+}
+
+func populateToDelNamespaces(mappingToCheck *metadata.CollectionNamespaceMapping, sources metadata.ScopesMap, toBeDelNamespace metadata.CollectionNamespaceMapping) {
+	for sourceNs, targetNsList := range *mappingToCheck {
+		scope, scopeExists := sources[sourceNs.ScopeName]
+		if !scopeExists {
+			continue
+		}
+		_, collectionExists := scope.Collections[sourceNs.CollectionName]
+		if !collectionExists {
+			continue
+		}
+		// The source instance from "sources" exists in broken map and should be removed
+		toBeDelNamespace.AddSingleMapping(sourceNs.CollectionNamespace, targetNsList[0])
+	}
 }
 
 func (ckpt_svc *CheckpointsService) getReplicationSpec(id string) (*metadata.ReplicationSpecification, error) {
