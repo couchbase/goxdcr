@@ -26,6 +26,7 @@ const opaqueOpen = 0xBEAF0001
 const opaqueFailover = 0xDEADBEEF
 const opaqueGetSeqno = 0xDEADBEEF
 const uprDefaultNoopInterval = 120
+const dcpOsoExtraLen = 4
 
 // Counter on top of opaqueOpen that others can draw from for open and control msgs
 var opaqueOpenCtrlWell uint32 = opaqueOpen

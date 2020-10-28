@@ -236,7 +236,7 @@ func (event *UprEvent) PopulateSeqnoAdv(extras []byte) {
 }
 
 func (event *UprEvent) PopulateOso(extras []byte) {
-	if len(extras) < dcpSeqnoAdvExtraLen {
+	if len(extras) < dcpOsoExtraLen {
 		// Wrong length, don't parse
 		return
 	}
