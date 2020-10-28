@@ -643,9 +643,9 @@ func (t *SeqnoManifestsMapType) GetManifestId(vbno uint16, seqno uint64) (uint64
 	}
 
 	listsObj.lock.RLock()
-	defer listsObj.lock.RUnlock()
-
-	if len(listsObj.seqno_list_1) == 0 && len(listsObj.seqno_list_2) == 0 {
+	emptyList := len(listsObj.seqno_list_1) == 0 && len(listsObj.seqno_list_2) == 0
+	listsObj.lock.RUnlock()
+	if emptyList {
 		return 0, nil
 	}
 
