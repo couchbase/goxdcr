@@ -59,7 +59,7 @@ const (
 
 	CollectionsMappingRulesKey    = base.CollectionsMappingRulesKey
 	CollectionsSkipSourceCheckKey = base.CollectionsSkipSourceCheckKey
-	CollectionsPendingBackfillKey = "pendingBackfill"
+	CollectionsManualBackfillKey  = base.ManualBackfillKey
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey
@@ -74,16 +74,17 @@ const (
 
 // settings whose default values cannot be viewed or changed through rest apis
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
-	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey, CollectionsMgtMappingKey, CollectionsMgtMigrateKey}
+	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,
+	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsManualBackfillKey}
 
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = []string{}
 
 // settings that are internal and should be hidden from outside
-var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey}
+var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
-var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey}
+var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey}
 
 // settings that are externally multiple values, but internally single value
 var MultiValueMap map[string]string = map[string]string{
@@ -133,6 +134,8 @@ var MergeFunctionMappingConfig = &SettingsConfig{base.MergeFunctionMappingType{}
 
 var CollectionsSkipSrcCheckConfig = &SettingsConfig{false, nil}
 
+var CollectionsManualBackfillConfig = &SettingsConfig{"", nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
@@ -157,6 +160,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CollectionsMappingRulesKey:        CollectionsMappingRulesConfig,
 	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
 	CollectionsSkipSourceCheckKey:     CollectionsSkipSrcCheckConfig,
+	CollectionsManualBackfillKey:      CollectionsManualBackfillConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead

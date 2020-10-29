@@ -141,7 +141,7 @@ func (p *pipelineSvcWrapper) Stop() error {
 }
 
 func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	backfillMapping, exists := settings[metadata.CollectionsPendingBackfillKey].(metadata.CollectionNamespaceMapping)
+	backfillMapping, exists := settings[metadata.CollectionsManualBackfillKey].(metadata.CollectionNamespaceMapping)
 	topic, exists2 := settings[base.NameKey].(string)
 	if exists && exists2 {
 		err := p.backfillMgr.RequestOnDemandBackfill(topic, backfillMapping)
@@ -1235,17 +1235,24 @@ func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings met
 	// Backfill everything means comparing to an empty/default manifest
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
 	if modes.IsExplicitMapping() {
+		b.logger.Infof("Forced backfill for explicit mapping, given source manifest version %v target manifest version %v and rules: %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), spec.Settings.GetCollectionsRoutingRules(), pendingMappings.String())
 		backfillReq, _ = b.populateBackfillReqForExplicitMapping(specId, &defaultManifest /*oldSrc*/, &clonedSourceManifest, &defaultManifest /*oldTgt*/, &clonedTargetManifest, spec, modes, backfillReq)
 	} else {
+		b.logger.Infof("Forced backfill for implicit mapping, given source manifest version %v target manifest version %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), pendingMappings.String())
 		backfillReq, _ = b.populateBackfillReqForImplicitMapping(&clonedTargetManifest, &defaultManifest /*oldTarget*/, &clonedSourceManifest, spec)
 	}
 
-	backfillReq = b.filterBackfillReqBasedOnRequestedNamespaces(backfillReq, pendingMappings)
+	// Given backfillReq contains everything that needs to be backfilled, we only want to care about the source namespace of pendingMappings
+	backfillReq, isEmpty := b.filterBackfillReqBasedOnRequestedNamespaces(backfillReq, pendingMappings)
 
-	err = b.raiseBackfillReq(specId, backfillReq, true, 0)
-	if err == base.GetBackfillFatalDataLossError(specId) {
-		// fatal error means restream is happening - everything is deleted, so let it pass
-		err = nil
+	if isEmpty {
+		b.logger.Warnf("the given pending request %v does not translate into a valid backfillRequest given current rules and manifests", pendingMappings.String())
+	} else {
+		err = b.raiseBackfillReq(specId, backfillReq, true, 0)
+		if err == base.GetBackfillFatalDataLossError(specId) {
+			// fatal error means restream is happening - everything is deleted, so let it pass
+			err = nil
+		}
 	}
 	if err != nil {
 		b.logger.Errorf("raising pending backfill - %v", err)
@@ -1253,21 +1260,22 @@ func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings met
 	return err
 }
 
-func (b *BackfillMgr) filterBackfillReqBasedOnRequestedNamespaces(backfillReq interface{}, pendingMappings metadata.CollectionNamespaceMapping) interface{} {
+// Given backfillReq, take out everything that is not based on the source namespace within the pendingMappings
+func (b *BackfillMgr) filterBackfillReqBasedOnRequestedNamespaces(backfillReq interface{}, pendingMappings metadata.CollectionNamespaceMapping) (interface{}, bool) {
 	if nsMapping, ok := backfillReq.(metadata.CollectionNamespaceMapping); ok {
-		nsMapping = checkAndDeletePendingMappingsFromNsMappings(nsMapping, pendingMappings)
-		return nsMapping
+		nsMapping = deleteNonPendingMappingsFromNsMapping(nsMapping, pendingMappings)
+		return nsMapping, len(nsMapping) == 0
 	} else if diffPair, ok := backfillReq.(metadata.CollectionNamespaceMappingsDiffPair); ok {
 		// Only worry about added
-		diffPair.Added = checkAndDeletePendingMappingsFromNsMappings(diffPair.Added, pendingMappings)
-		return diffPair
+		diffPair.Added = deleteNonPendingMappingsFromNsMapping(diffPair.Added, pendingMappings)
+		return diffPair, len(diffPair.Added) == 0
 	} else {
 		b.logger.Errorf(fmt.Sprintf("invalid type: %v", reflect.TypeOf(backfillReq)))
-		return backfillReq
+		return backfillReq, true
 	}
 }
 
-func checkAndDeletePendingMappingsFromNsMappings(nsMapping metadata.CollectionNamespaceMapping, pendingMappings metadata.CollectionNamespaceMapping) metadata.CollectionNamespaceMapping {
+func deleteNonPendingMappingsFromNsMapping(nsMapping metadata.CollectionNamespaceMapping, pendingMappings metadata.CollectionNamespaceMapping) metadata.CollectionNamespaceMapping {
 	subsetToDelete := make(metadata.CollectionNamespaceMapping)
 	for srcNs, tgts := range nsMapping {
 		_, _, _, exists := pendingMappings.Get(srcNs.CollectionNamespace, nil)

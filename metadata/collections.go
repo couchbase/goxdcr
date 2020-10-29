@@ -1909,7 +1909,7 @@ func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 	errorMap := make(base.ErrorMap)
 	for filterExpr, targetNamespaceRaw := range c {
 		// filterExpr must be a valid gojsonsm expression
-		_, err := base.GoJsonsmGetFilterExprMatcher(filterExpr)
+		_, err := base.ValidateAndGetAdvFilter(filterExpr)
 		if err != nil {
 			errorMap[filterExpr] = err
 		}

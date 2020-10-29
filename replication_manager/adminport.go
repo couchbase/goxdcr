@@ -643,6 +643,16 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return NewEmptyArrayResponse()
 	}
 
+	backfillRequest, manualBackfillRequest := settingsMap[metadata.CollectionsManualBackfillKey]
+	if manualBackfillRequest {
+		logger_ap.Infof("force manual backfill has been requested")
+		err = ForceManualBackfillRequest(replicationId, backfillRequest.(string))
+		if err != nil {
+			return EncodeReplicationSpecErrorIntoResponse(err)
+		}
+	}
+	cleanupTempReplicationSettingKeys(settingsMap)
+
 	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
 	if err != nil {
 		return nil, err
@@ -658,6 +668,45 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	}
 	logger_ap.Info("Done with doChangeReplicationSettingsRequest")
 	return NewReplicationSettingsResponse(replSpec.Settings)
+}
+
+func ForceManualBackfillRequest(replId string, incomingReq string) error {
+	replSpec, err := ReplicationSpecService().ReplicationSpec(replId)
+	if err != nil {
+		return err
+	}
+
+	// Validate the incoming request
+	var sourceNamespace *metadata.SourceNamespace
+	collectionMode := replSpec.Settings.GetCollectionModes()
+	if collectionMode.IsMigrationOn() {
+		//NewSourceMigrationNamespace
+		var fakeDP base.FakeDataPool
+		sourceNamespace, err = metadata.NewSourceMigrationNamespace(incomingReq, &fakeDP)
+		if err != nil {
+			return fmt.Errorf("Unable to validate migration rule: %v", err)
+		}
+	} else {
+		// NonMigration means incoming request should be a specific namespace
+		collectionNamespace, err := base.NewCollectionNamespaceFromString(incomingReq)
+		if err != nil {
+			return fmt.Errorf("Unable to validate collection namespace: %v", err)
+		}
+		sourceNamespace = metadata.NewSourceCollectionNamespace(&collectionNamespace)
+	}
+
+	// Translate into a mapping where the manual backfill logic only cares about source namespace
+	backfillMapping := make(metadata.CollectionNamespaceMapping)
+	backfillMapping.AddSingleSourceNsMapping(sourceNamespace, &base.CollectionNamespace{})
+
+	settingsMap := make(map[string]interface{})
+	settingsMap[base.NameKey] = replId
+	settingsMap[metadata.CollectionsManualBackfillKey] = backfillMapping
+	err = BackfillManager().GetPipelineSvc().UpdateSettings(settingsMap)
+	if err != nil {
+		logger_ap.Warnf("force backfill returned %v\n", err)
+	}
+	return nil
 }
 
 // get statistics for all running replications

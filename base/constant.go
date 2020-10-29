@@ -100,6 +100,7 @@ const NameKey = "name"
 const CollectionsKey = "collections"
 const DefaultScopeCollectionName = "_default"
 const ScopeCollectionDelimiter = "."
+const ManualBackfillKey = "manualBackfill"
 
 // From KV design doc:
 // A user’s collection can only contain characters A-Z, a-z, 0-9 and the following symbols _ - %

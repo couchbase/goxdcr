@@ -86,6 +86,7 @@ const (
 	CollectionsMigrateKey          = base.CollectionsMigrateKey
 	CollectionsMappingRulesKey     = base.CollectionsMappingRulesKey
 	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
+	ManualBackfillRequested        = base.ManualBackfillKey
 )
 
 // constants for parsing create replication response
@@ -170,6 +171,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CollectionsMirrorKey:           metadata.CollectionsMgtMirrorKey,
 	CollectionsMappingRulesKey:     metadata.CollectionsMappingRulesKey,
 	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
+	ManualBackfillRequested:        metadata.CollectionsManualBackfillKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -202,6 +204,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CollectionsMgtMirrorKey:           CollectionsMirrorKey,
 	metadata.CollectionsMappingRulesKey:        CollectionsMappingRulesKey,
 	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
+	metadata.CollectionsManualBackfillKey:      ManualBackfillRequested,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
@@ -788,7 +791,6 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	if err != nil {
 		errorsMap[MergeFunctionMappingKey] = err
 	}
-	cleanupTempReplicationSettingKeys(settings)
 	return
 }
 
