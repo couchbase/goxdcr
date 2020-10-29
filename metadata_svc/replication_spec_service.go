@@ -32,7 +32,6 @@ const (
 )
 
 var ReplicationSpecAlreadyExistErrorMessage = "Replication to the same remote cluster and bucket already exists"
-var ReplicationSpecNotFoundErrorMessage = "Requested resource not found"
 var InvalidReplicationSpecError = errors.New("Invalid Replication spec")
 
 //replication spec and its derived object
@@ -168,15 +167,15 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 func (service *ReplicationSpecService) replicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
 	val, ok := service.getCache().Get(replicationId)
 	if !ok {
-		return nil, ReplNotFoundErr
+		return nil, base.ReplNotFoundErr
 	}
 	replSpecVal, ok := val.(*ReplicationSpecVal)
 	if !ok || replSpecVal == nil {
-		return nil, ReplNotFoundErr
+		return nil, base.ReplNotFoundErr
 	}
 	replSpec, ok := replSpecVal.spec.(*metadata.ReplicationSpecification)
 	if !ok || replSpec == nil {
-		return nil, ReplNotFoundErr
+		return nil, base.ReplNotFoundErr
 	}
 	return replSpec, nil
 }
@@ -817,7 +816,7 @@ func (service *ReplicationSpecService) DelReplicationSpec(replicationId string) 
 func (service *ReplicationSpecService) DelReplicationSpecWithReason(replicationId string, reason string) (*metadata.ReplicationSpecification, error) {
 	spec, err := service.replicationSpec(replicationId)
 	if err != nil {
-		return nil, errors.New(ReplicationSpecNotFoundErrorMessage)
+		return nil, errors.New(base.ReplicationSpecNotFoundErrorMessage)
 	}
 
 	key := getKeyFromReplicationId(replicationId)
@@ -1225,7 +1224,7 @@ func (service *ReplicationSpecService) writeUiLogWithAdditionalInfo(spec *metada
 
 func (service *ReplicationSpecService) IsReplicationValidationError(err error) bool {
 	if err != nil {
-		return strings.HasPrefix(err.Error(), ReplicationSpecAlreadyExistErrorMessage) || strings.HasPrefix(err.Error(), ReplicationSpecNotFoundErrorMessage)
+		return strings.HasPrefix(err.Error(), ReplicationSpecAlreadyExistErrorMessage) || strings.HasPrefix(err.Error(), base.ReplicationSpecNotFoundErrorMessage)
 	} else {
 		return false
 	}
@@ -1437,7 +1436,7 @@ func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj i
 	cache := service.getCache()
 	cachedVal, ok := cache.Get(specId)
 	if !ok || cachedVal == nil {
-		return fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
+		return fmt.Errorf(base.ReplicationSpecNotFoundErrorMessage)
 	}
 	cachedObj, ok := cachedVal.(*ReplicationSpecVal)
 	if !ok {
@@ -1467,7 +1466,7 @@ func (service *ReplicationSpecService) GetDerivedObj(specId string) (interface{}
 
 	cachedVal, ok := service.getCache().Get(specId)
 	if !ok || cachedVal == nil {
-		return nil, fmt.Errorf(ReplicationSpecNotFoundErrorMessage)
+		return nil, fmt.Errorf(base.ReplicationSpecNotFoundErrorMessage)
 	}
 
 	cachedObj, ok := cachedVal.(*ReplicationSpecVal)

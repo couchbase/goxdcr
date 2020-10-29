@@ -101,6 +101,8 @@ const CollectionsKey = "collections"
 const DefaultScopeCollectionName = "_default"
 const ScopeCollectionDelimiter = "."
 const ManualBackfillKey = "manualBackfill"
+const CollectionsDelAllBackfillKey = "delAllBackfills"
+const CollectionsDelSingleVBBackfillKey = "delSpecificBackfillForVb"
 
 // From KV design doc:
 // A user’s collection can only contain characters A-Z, a-z, 0-9 and the following symbols _ - %
@@ -290,6 +292,8 @@ var ErrorColMigrationEnterpriseOnly = errors.New("Collections migration is suppo
 var ErrorEAccess = errors.New("Remote user received EACCESS error")
 var ErrorInvalidColNamespaceFormat = fmt.Errorf("Invalid CollectionNamespace format")
 var ErrorCAPIDeprecated = errors.New("CAPI replication mode is now deprecated")
+var ReplicationSpecNotFoundErrorMessage = "requested resource not found"
+var ReplNotFoundErr = errors.New(ReplicationSpecNotFoundErrorMessage)
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

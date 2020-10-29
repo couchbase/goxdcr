@@ -336,7 +336,7 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	// check the backfillSpec - should not be there
 	backfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMap(), dummySpec)
 	checkSpec, err := backfillReplSvc.backfillSpec(specName)
-	assert.Equal(ReplNotFoundErr, err)
+	assert.Equal(base.ReplNotFoundErr, err)
 	assert.Nil(checkSpec)
 
 	assert.Nil(backfillReplSvc.AddBackfillReplSpec(backfillSpec))
@@ -360,7 +360,7 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	var newNilSpec *metadata.ReplicationSpecification
 	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(specName, oldSpec, newNilSpec))
 	_, err = backfillReplSvc.backfillSpec(specName)
-	assert.Equal(ReplNotFoundErr, err)
+	assert.Equal(base.ReplNotFoundErr, err)
 
 	// Random delete of another entity that does not have backfill replication associated should be nil error
 	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(randomSpecName, oldSpec, newNilSpec))

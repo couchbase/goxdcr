@@ -208,6 +208,9 @@ func (b *BackfillRequestHandler) run() {
 			case reflect.TypeOf(metadata.CollectionNamespaceMappingsDiffPair{}):
 				err := b.handleBackfillRequestDiffPair(reqAndResp)
 				b.handlePersist(reqAndResp, err, requestPersistFunc)
+			case reflect.TypeOf(internalDelBackfillReq{}):
+				err := b.handleSpecialDelBackfill(reqAndResp)
+				b.handlePersist(reqAndResp, err, requestPersistFunc)
 			case nil:
 				// This is when stop() is called and the channel is closed
 			default:
@@ -285,7 +288,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, 
 	reqAndResp.HandleResponse = make(chan error, 1)
 	reqAndResp.Force = forceFlag
 
-	// Serialize the requests - goes to handleBackfillRequestInternal()
+	// Serialize the requests - goes to run()
 	b.incomingReqCh <- reqAndResp
 
 	err := <-reqAndResp.HandleResponse
@@ -794,4 +797,60 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 			return nil
 		}
 	}
+}
+
+type internalDelBackfillReq struct {
+	specificVBRequested bool
+	vbno                uint16
+}
+
+func (b *BackfillRequestHandler) DelAllBackfills() error {
+	var delBackfillReq internalDelBackfillReq
+	return b.HandleBackfillRequest(delBackfillReq)
+}
+
+func (b *BackfillRequestHandler) handleSpecialDelBackfill(reqAndResp ReqAndResp) error {
+	req, ok := reqAndResp.Request.(internalDelBackfillReq)
+	if !ok {
+		panic(fmt.Sprintf("Wrong type: %v\n", reflect.TypeOf(req)))
+	}
+
+	if req.specificVBRequested {
+		// This should have been called during pipeline stopped
+		if b.cachedBackfillSpec == nil {
+			return fmt.Errorf("No backfill spec")
+		}
+		_, vbExists := b.cachedBackfillSpec.VBTasksMap[req.vbno]
+		if !vbExists {
+			return fmt.Errorf("VB does not exist")
+		}
+		delete(b.cachedBackfillSpec.VBTasksMap, req.vbno)
+
+		return b.requestPersistence(SetOp, reqAndResp.PersistResponse)
+	} else {
+		b.logger.Infof("%v - handling delete all backfill request", b.id)
+		b.delOpBackfillId = b.id
+		b.cachedBackfillSpec = nil
+		delErr := b.requestPersistence(DelOp, reqAndResp.PersistResponse)
+		if delErr == nil {
+			return errorSyncDel
+		} else {
+			return delErr
+		}
+	}
+}
+
+func (b *BackfillRequestHandler) GetDelVBSpecificBackfillCb(vbno uint16) (cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) {
+	cb = func() error {
+		delReq := internalDelBackfillReq{
+			specificVBRequested: true,
+			vbno:                vbno,
+		}
+		return b.HandleBackfillRequest(delReq)
+	}
+
+	errCb = func(err error) {
+		b.logger.Errorf("Unable to delete vbSpecificRequest due to %v. Extraneous backfill may occur", err)
+	}
+	return cb, errCb
 }

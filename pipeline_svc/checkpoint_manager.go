@@ -307,7 +307,6 @@ func (ckmgr *CheckpointManager) populateBackfillStartingTs(spec *metadata.Backfi
 
 // When rolling back, if rollback is requesting a seqno that is earlier than the backfill task, then
 // allow that to happen by removing the startingTs
-// TODO MB-39584 - if rollback to 0 is requested by DCP, then ensure that all the backfill tasks are merged
 func (ckmgr *CheckpointManager) clearBackfillStartingTsIfNeeded(vbno uint16, rollbackSeqno uint64) {
 	var needToRemove bool
 	ckmgr.backfillStartingTsMtx.RLock()
@@ -323,6 +322,11 @@ func (ckmgr *CheckpointManager) clearBackfillStartingTsIfNeeded(vbno uint16, rol
 		ckmgr.backfillStartingTsMtx.Lock()
 		delete(ckmgr.backfillStartingTs, vbno)
 		ckmgr.backfillStartingTsMtx.Unlock()
+	}
+
+	if rollbackSeqno == 0 {
+		// rollback to 0 means no backfill needs to be done anymore
+		ckmgr.NotifyBackfillMgrRollbackTo0(vbno)
 	}
 }
 
@@ -2100,4 +2104,15 @@ func (ckmgr *CheckpointManager) updateReplStatusBrokenMap() {
 	ckmgr.cachedBrokenMap.lock.RUnlock()
 
 	ckmgr.pipeline.SetBrokenMap(brokenMapClone)
+}
+
+func (ckmgr *CheckpointManager) NotifyBackfillMgrRollbackTo0(vbno uint16) {
+	topic := ckmgr.pipeline.Topic()
+
+	backfillMgrPipelineSvc := ckmgr.pipeline.RuntimeContext().Service(base.BACKFILL_MGR_SVC)
+
+	settingsMap := make(map[string]interface{})
+	settingsMap[base.NameKey] = topic
+	settingsMap[metadata.CollectionsDelVbBackfillKey] = int(vbno)
+	backfillMgrPipelineSvc.UpdateSettings(settingsMap)
 }

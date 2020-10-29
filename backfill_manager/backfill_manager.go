@@ -15,7 +15,6 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/metadata_svc"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -141,15 +140,40 @@ func (p *pipelineSvcWrapper) Stop() error {
 }
 
 func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	errMap := make(base.ErrorMap)
+
+	topic, exists := settings[base.NameKey].(string)
+	_, exists2 := settings[metadata.CollectionsDelAllBackfillKey].(bool)
+	if exists && exists2 {
+		err := p.backfillMgr.DelAllBackfills(topic)
+		if err != nil {
+			errMap[metadata.CollectionsDelAllBackfillKey] = err
+		}
+	}
+
+	topic, exists = settings[base.NameKey].(string)
+	vbno, exists2 := settings[metadata.CollectionsDelVbBackfillKey].(int)
+	if exists && exists2 && vbno >= 0 {
+		err := p.backfillMgr.DelBackfillForVB(topic, uint16(vbno))
+		if err != nil {
+			errMap[metadata.CollectionsDelVbBackfillKey] = err
+		}
+	}
+
 	backfillMapping, exists := settings[metadata.CollectionsManualBackfillKey].(metadata.CollectionNamespaceMapping)
-	topic, exists2 := settings[base.NameKey].(string)
+	topic, exists2 = settings[base.NameKey].(string)
 	if exists && exists2 {
 		err := p.backfillMgr.RequestOnDemandBackfill(topic, backfillMapping)
 		if err != nil {
-			return err
+			errMap[metadata.CollectionsManualBackfillKey] = err
 		}
 	}
-	return nil
+
+	if len(errMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	} else {
+		return nil
+	}
 }
 
 func (p *pipelineSvcWrapper) IsSharable() bool {
@@ -644,7 +668,7 @@ func (b *BackfillMgr) checkUpToDateSpec(specId string, internalSpecId string) (e
 	// First, get most up-to-date spec to ensure this call is not out of date
 	spec, err := b.replSpecSvc.ReplicationSpec(specId)
 	if err != nil {
-		if err == metadata_svc.ReplNotFoundErr {
+		if err == base.ReplNotFoundErr {
 			// This is ok - this callback was too late
 			return nil, false
 		} else {
@@ -1410,4 +1434,46 @@ func (b *BackfillMgr) retryBackfillRequest(req BackfillRetryRequest) {
 
 	b.logger.Infof("BackfillMgr queued up to retry backfill request for replId %v with req %v", req.replId, req.req)
 	b.errorRetryQueue = append(b.errorRetryQueue, req)
+
+}
+
+func (b *BackfillMgr) DelAllBackfills(topic string) error {
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[topic]
+	b.specReqHandlersMtx.RUnlock()
+
+	if handler == nil {
+		// This should not happen
+		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		b.logger.Errorf(err.Error())
+		return err
+	}
+
+	return handler.DelAllBackfills()
+}
+
+func (b *BackfillMgr) DelBackfillForVB(topic string, vbno uint16) error {
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[topic]
+	b.specReqHandlersMtx.RUnlock()
+
+	if handler == nil {
+		// This should not happen
+		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		b.logger.Errorf(err.Error())
+		return err
+	}
+
+	cb, errCb := handler.GetDelVBSpecificBackfillCb(vbno)
+	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb)
+	if err != nil {
+		b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - backfill for VB %v may occur", topic, err, vbno)
+		return err
+	}
+	err = b.pipelineMgr.RequestBackfill(topic)
+	if err != nil {
+		b.logger.Errorf("Unable to request backfill pipeline to start for %v : %v - may require manual restart of pipeline", topic, err)
+		return err
+	}
+	return nil
 }

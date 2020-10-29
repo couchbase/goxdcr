@@ -11,7 +11,6 @@ package metadata_svc
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -234,20 +233,18 @@ func (b *BackfillReplicationService) updateCacheInternalNoLock(specId string, ne
 	return oldSpec, updated, err
 }
 
-var ReplNotFoundErr = errors.New(ReplicationSpecNotFoundErrorMessage)
-
 func (b *BackfillReplicationService) backfillSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	val, ok := b.getCache().Get(replicationId)
 	if !ok {
-		return nil, ReplNotFoundErr
+		return nil, base.ReplNotFoundErr
 	}
 	replSpecVal, ok := val.(*ReplicationSpecVal)
 	if !ok || replSpecVal == nil {
-		return nil, ReplNotFoundErr
+		return nil, base.ReplNotFoundErr
 	}
 	backfillReplSpec, ok := replSpecVal.spec.(*metadata.BackfillReplicationSpec)
 	if !ok || backfillReplSpec == nil {
-		return nil, ReplNotFoundErr
+		return nil, base.ReplNotFoundErr
 	}
 
 	return backfillReplSpec, nil
@@ -610,7 +607,7 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 		if err == nil {
 			b.logger.Infof("Deleted backfill replication %v", id)
 		}
-		if err == ReplNotFoundErr {
+		if err == base.ReplNotFoundErr {
 			err = nil
 		}
 		if err == nil {
@@ -621,7 +618,7 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 		// It's possible that changes have gone into the original replication spec
 		backfillSpec, err := b.backfillSpec(id)
 		if err != nil {
-			if err == ReplNotFoundErr {
+			if err == base.ReplNotFoundErr {
 				// It's possible backfill replications don't exist yet
 				err = nil
 			}

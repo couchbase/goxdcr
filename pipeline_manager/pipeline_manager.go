@@ -1311,7 +1311,18 @@ func (r *PipelineUpdater) run() {
 			r.logger.Infof("Replication %v's backfill Pipeline is starting\n", r.pipeline_name)
 			r.cancelFutureBackfillStart()
 			retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
-			if len(retErrMap) > 0 && !retErrMap.HasError(MainPipelineNotRunning) {
+			var successful = true
+			if len(retErrMap) > 0 {
+				if retErrMap.HasError(MainPipelineNotRunning) {
+					r.logger.Infof("Replication %v backfill pipeline is not starting because the main pipeline is currently paused", r.pipeline_name)
+				} else if retErrMap.HasError(base.ReplNotFoundErr) {
+					r.logger.Infof("Replication %v backfill pipeline is not starting because there is currently no backfill spec", r.pipeline_name)
+				} else {
+					successful = false
+				}
+			}
+
+			if !successful {
 				r.logger.Infof("Replication %v backfill start experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 				r.setLastUpdateFailure(retErrMap)
 				r.sendBackfillStartErrMap(retErrMap)

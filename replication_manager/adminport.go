@@ -643,13 +643,9 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return NewEmptyArrayResponse()
 	}
 
-	backfillRequest, manualBackfillRequest := settingsMap[metadata.CollectionsManualBackfillKey]
-	if manualBackfillRequest {
-		logger_ap.Infof("force manual backfill has been requested")
-		err = ForceManualBackfillRequest(replicationId, backfillRequest.(string))
-		if err != nil {
-			return EncodeReplicationSpecErrorIntoResponse(err)
-		}
+	err = adminport.performOnetimeUserActions(settingsMap, replicationId)
+	if err != nil {
+		return EncodeReplicationSpecErrorIntoResponse(err)
 	}
 	cleanupTempReplicationSettingKeys(settingsMap)
 
@@ -680,7 +676,7 @@ func ForceManualBackfillRequest(replId string, incomingReq string) error {
 	var sourceNamespace *metadata.SourceNamespace
 	collectionMode := replSpec.Settings.GetCollectionModes()
 	if collectionMode.IsMigrationOn() {
-		//NewSourceMigrationNamespace
+		// incomingReq should be a rule
 		var fakeDP base.FakeDataPool
 		sourceNamespace, err = metadata.NewSourceMigrationNamespace(incomingReq, &fakeDP)
 		if err != nil {
@@ -707,6 +703,59 @@ func ForceManualBackfillRequest(replId string, incomingReq string) error {
 		logger_ap.Warnf("force backfill returned %v\n", err)
 	}
 	return nil
+}
+
+func (adminport *Adminport) performOnetimeUserActions(settingsMap metadata.ReplicationSettingsMap, replicationId string) error {
+	var err error
+	backfillRequest, manualBackfillRequest := settingsMap[metadata.CollectionsManualBackfillKey]
+	if manualBackfillRequest {
+		logger_ap.Infof("force manual backfill has been requested given %v", backfillRequest.(string))
+		err = ForceManualBackfillRequest(replicationId, backfillRequest.(string))
+		if err != nil {
+			return err
+		}
+	}
+
+	vbno, delSpecificVbBackfillRequested := settingsMap[metadata.CollectionsDelVbBackfillKey]
+	if delSpecificVbBackfillRequested {
+		logger_ap.Infof("delete specific vb %v backfill has been requested", vbno.(int))
+		err = DelSpecificBackfillRequest(replicationId, vbno.(int))
+		if err != nil {
+			return err
+		}
+	}
+
+	_, delBackfillsRequested := settingsMap[metadata.CollectionsDelAllBackfillKey]
+	if delBackfillsRequested {
+		logger_ap.Infof("delete backfills has been requested")
+		err = DelAllBackfillsRequest(replicationId)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func DelSpecificBackfillRequest(replId string, vbno int) error {
+	settingsMap := make(map[string]interface{})
+	settingsMap[base.NameKey] = replId
+	settingsMap[metadata.CollectionsDelVbBackfillKey] = vbno
+	err := BackfillManager().GetPipelineSvc().UpdateSettings(settingsMap)
+	if err != nil {
+		logger_ap.Warnf("del specific backfill returned %v\n", err)
+	}
+	return err
+}
+
+func DelAllBackfillsRequest(replId string) error {
+	settingsMap := make(map[string]interface{})
+	settingsMap[base.NameKey] = replId
+	settingsMap[metadata.CollectionsDelAllBackfillKey] = true
+	err := BackfillManager().GetPipelineSvc().UpdateSettings(settingsMap)
+	if err != nil {
+		logger_ap.Warnf("del backfill returned %v\n", err)
+	}
+	return err
 }
 
 // get statistics for all running replications

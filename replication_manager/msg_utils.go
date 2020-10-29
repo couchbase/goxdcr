@@ -87,6 +87,8 @@ const (
 	CollectionsMappingRulesKey     = base.CollectionsMappingRulesKey
 	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
 	ManualBackfillRequested        = base.ManualBackfillKey
+	CollectionsDelAllBackfillKey   = base.CollectionsDelAllBackfillKey
+	CollectionsDelVbBackfillKey    = base.CollectionsDelSingleVBBackfillKey
 )
 
 // constants for parsing create replication response
@@ -172,6 +174,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CollectionsMappingRulesKey:     metadata.CollectionsMappingRulesKey,
 	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
 	ManualBackfillRequested:        metadata.CollectionsManualBackfillKey,
+	CollectionsDelAllBackfillKey:   metadata.CollectionsDelAllBackfillKey,
+	CollectionsDelVbBackfillKey:    metadata.CollectionsDelVbBackfillKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -205,6 +209,8 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CollectionsMappingRulesKey:        CollectionsMappingRulesKey,
 	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
 	metadata.CollectionsManualBackfillKey:      ManualBackfillRequested,
+	metadata.CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillKey,
+	metadata.CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
