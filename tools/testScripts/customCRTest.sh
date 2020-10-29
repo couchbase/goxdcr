@@ -36,14 +36,11 @@ fi
 
 testCase="${1:-}"
 
-if [[ "$testCase" != "eventingFunctionUIHandlerTest" ]] && [[ "$testCase" != "configureResolver" ]] \
-&& [[ "$testCase" != "remoteClusterUserPermission" ]] && [[ "$testCase" != "dataLoad" ]] && [[ "$testCase" != "" ]]
-then
-  echo "Only the following test cases are available:"
-  echo   eventingFunctionUIHandlerTest
-  echo   configureResolver
-  echo   remoteClusterUserPermission
-  echo   dataLoad
+declare -a TESTLIST=( eventingFunctionUIHandlerTest configureResolver remoteClusterUserPermission dataLoad dataLoadLoop )
+
+if [[ "$testCase" != "" ]] && [[ ! " ${TESTLIST[*]} " =~ " ${testCase} " ]]; then
+  echo "${testCase} is not in the list of supproted tests:"
+  echo ${TESTLIST[*]}
   exit 1
 fi
 
@@ -56,7 +53,7 @@ CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2" ["C3"]="CCR3" ["C4"]="CCR4
 
 # See MB-39731 for conflictResolutionType=custom
 declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active" ["conflictResolutionType"]="custom")
-for bucket in ${CLUSTER_NAME_BUCKET_MAP[@]}
+for bucket in "${CLUSTER_NAME_BUCKET_MAP[@]}"
 do
   insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
 done
@@ -76,15 +73,25 @@ sleep 5
 
 declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto" ["mergeFunctionMapping"]='{"default":"defaultLWW"}')
 
-for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}
+for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"
 do
     bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
-    for cluster2 in ${!CLUSTER_NAME_PORT_MAP[@]}
+    for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"
     do
       bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
       if [[ "$cluster1" != "$cluster2" ]];then
-        echo "createRemoteClusterReference $cluster1 $cluster2"
         createRemoteClusterReference $cluster1 $cluster2
+      fi
+    done
+done
+
+for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"
+do
+    bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+    for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"
+    do
+      bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
+      if [[ "$cluster1" != "$cluster2" ]];then
         createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties
         if (( $? != 0 ));then
           echo "Failed: createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties"
@@ -102,6 +109,8 @@ if [[ "$testCase" == "" ]];then
 else
     $testCase
 fi
+
+grepForPanics
 
 cleanupBucketReplications
 cleanupBuckets

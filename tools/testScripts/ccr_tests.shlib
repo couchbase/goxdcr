@@ -138,7 +138,7 @@ function dataLoad {
     # wait for cbworkloadgen to finish
     wait
     # With 4 clusters, changes_left takes longer to go down to 0
-    sleepTime=90
+    sleepTime=30
     echo "Sleep $sleepTime seconds to wait for replication to finish"
     sleep $sleepTime
     for cluster1 in ${!CLUSTER_NAME_BUCKET_MAP[@]}
@@ -161,4 +161,21 @@ function dataLoad {
     echo "========================================="
     echo "============ dataLoad PASSED ============"
     echo "========================================="
+}
+
+function dataLoadLoop {
+    i=1
+
+    while :
+    do
+      echo
+      echo "=========== Start dataLoad run $i ==========="
+      dataLoad
+      if (( $? != 0 ));then
+        exit 1
+      fi
+      echo "=========== end dataLoad run $i ==========="
+      echo
+      i=$(( $i + 1))
+    done
 }
