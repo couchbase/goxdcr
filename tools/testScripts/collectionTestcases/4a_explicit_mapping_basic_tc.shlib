@@ -27,7 +27,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3"}')
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3", "S2.col1":"S3.col1"}')
 
 # Bucket -> Scopes
 # -----------------
@@ -43,9 +43,12 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S2" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S2" "col2" &
 	waitForBgJobs
 }
+
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
@@ -64,16 +67,23 @@ function runTestCase {
 		exit $?
 	fi
 
+    local -i checkCount
+    local -i targetCheckCount
+    checkCount=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 3 ))
+    targetCheckCount=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 ))
+
 	# Get current instance
     local -i currentBackfillInstanceCnt
     local -i currentVBTasksDoneInstanceCnt
 	local -i currentBackfillAppendInstanceCnt
+	local -i currentOsoModeCnt
 	local currentXdcrLog
 
     currentXdcrLog=`getInternalNodeXdcrLog "C1"`
     currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
     currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
     currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+    currentOsoModeCnt=`echo "$currentXdcrLog" | grep -c "$OSO_MODE_MSG"`
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -91,8 +101,8 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C1" "B1" $checkCount
+	checkItemCnt "C2" "B2" $targetCheckCount
 
 	# No backfill should be raised for first pass
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $currentBackfillInstanceCnt
@@ -102,21 +112,17 @@ function runTestCase {
 	# The backfill should kick in and fill in all the data to the new collection
 	# resulting in twice the number of items on the target bucket
 	echo "Changing explicit mapping - new target collection should now receive backfill"
-	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S3.col2"}'
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S2.col2":"S3.col2"}'
 
 	echo "Waiting 5 seconds before checking item count for backfill"
 	sleep 5
-	newCount=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 ))
-	checkItemCnt "C2" "B2" $newCount
-
-	validateCbWorkloadGenCollection "C2" "B2" "S3" "col2" "C1" "B1" "S1" "col1"
-	echo "VALIDATING data"
-	sleep 5
-	checkItemCnt "C2" "B2" $newCount
+	checkItemCnt "C2" "B2" $checkCount
 
 	# Backfill should have been raised
-	#validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-	#validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+	# 2 oso mode because one for each DCP nozzle
+	#validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(( $currentOsoModeCnt + 2 ))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

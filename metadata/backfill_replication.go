@@ -824,7 +824,7 @@ func (b BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (s
 		err = fmt.Errorf(base.FlattenErrorMap(errMap))
 	}
 	filter = &mcc.CollectionsFilter{
-		UseManifestUid:  true,
+		UseManifestUid:  b.Timestamps.StartingTimestamp.Seqno > 0,
 		ManifestUid:     b.Timestamps.StartingTimestamp.ManifestIDs.SourceManifestId,
 		CollectionsList: filterCollectionList,
 	}

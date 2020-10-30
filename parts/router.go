@@ -1316,9 +1316,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	}
 
 	if router.remoteClusterCapability.HasCollectionSupport() {
-		router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(),
-			routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser,
-			connectivityStatusGetter)
+		router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(), routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter)
 
 		modes := spec.Settings.GetCollectionModes()
 		router.collectionModes = CollectionsMgtAtomicType(modes)

@@ -522,6 +522,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.IncludeDeletionTime = true
 		uprFeatures.EnableExpiry = true
 		uprFeatures.EnableOso = dcp.osoRequested
+		uprFeatures.EnableStreamId = false
 		feed := dcp.getUprFeed()
 		if feed == nil {
 			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
@@ -588,11 +589,6 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	dcp.initializeUprHandshakeHelpers()
 
 	err = dcp.initializeMemcachedClient(settings)
-	if err != nil {
-		return err
-	}
-
-	err = dcp.initializeUprFeed()
 	if err != nil {
 		return err
 	}
@@ -666,6 +662,14 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	osoMode, exists := settings[DCP_EnableOSO]
 	if exists {
 		dcp.osoRequested = osoMode.(bool)
+		if dcp.osoRequested {
+			dcp.Logger().Infof("%v with OSO mode requested", dcp.Id())
+		}
+	}
+
+	err = dcp.initializeUprFeed()
+	if err != nil {
+		return err
 	}
 	return
 }
@@ -1017,12 +1021,16 @@ func (dcp *DcpNozzle) processData() (err error) {
 				dcp.handleSystemEvent(m)
 				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 			} else if m.IsOsoSnapshot() {
-				osoBegins, err := m.GetOsoBegin()
-				if err != nil {
-					// TODO - remove this
-					panic("err with oso")
+				osoBegins, _ := m.GetOsoBegin()
+				var helperItems = make([]interface{}, 2)
+				helperItems[0] = m.VBucket
+				syncCh := make(chan bool)
+				helperItems[1] = syncCh
+				dcp.RaiseEvent(common.NewEvent(common.OsoSnapshotReceived, osoBegins, dcp, helperItems, nil))
+				select {
+				case <-syncCh:
+					break
 				}
-				dcp.RaiseEvent(common.NewEvent(common.OsoSnapshotReceived, osoBegins, dcp, nil, m.VBucket))
 			} else {
 				// Regular mutations coming in from DCP stream
 				if dcp.IsOpen() {
@@ -1336,7 +1344,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 	seqEnd := base.DcpSeqnoEnd
 	var filter *mcc.CollectionsFilter
 	// filter for main pipeline if resuming from a checkpoint
-	if vbts.Seqno > 0 {
+	if len(dcp.specificVBTasks) == 0 && vbts.Seqno > 0 {
 		filter = &mcc.CollectionsFilter{UseManifestUid: true, ManifestUid: vbts.ManifestIDs.SourceManifestId}
 	}
 

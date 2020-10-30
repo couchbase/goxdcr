@@ -12,6 +12,7 @@ package service_impl
 import (
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -248,21 +249,7 @@ func (t *OSOSeqnoTrackerMapType) StartNewOSOSession(tsTracker *ThroughSeqnoTrack
 	}
 
 	sessionTracker := (*t)[vbno]
-	sessionTracker.RegisterNewSession(lastSeenSeqno, lastSeenManifestId)
-}
-
-func (t *OSOSeqnoTrackerMapType) MarkSeqnoReceived(vbno uint16, seqno uint64, manifestId uint64, sessionIdx int) {
-	sessionTracker := (*t)[vbno]
-	sessionTracker.MarkSeqnoReceived(seqno, manifestId, sessionIdx)
-}
-
-func (t *OSOSeqnoTrackerMapType) MarkSeqnoProcessed(tsTracker *ThroughSeqnoTrackerSvc, vbno uint16, seqno uint64, manifestId uint64, sessionIdx int) (sessionFinished bool) {
-	sessionTracker := (*t)[vbno]
-	sessionFinished = sessionTracker.MarkSeqnoProcessed(seqno, manifestId, sessionIdx)
-	if sessionFinished {
-		sessionTracker.PlaybackOntoTsTracker(tsTracker, vbno, sessionIdx, true)
-	}
-	return
+	sessionTracker.RegisterNewSession(lastSeenSeqno, lastSeenManifestId, &tsTracker.osoCntReceivedFromDCP)
 }
 
 func (t *OSOSeqnoTrackerMapType) GetStartingSeqno(vbno uint16) (seqno uint64, osoAcive bool) {
@@ -270,19 +257,24 @@ func (t *OSOSeqnoTrackerMapType) GetStartingSeqno(vbno uint16) (seqno uint64, os
 	return sessionTracker.GetStartingSeqno()
 }
 
-func (t *OSOSeqnoTrackerMapType) EndOSOSessionReceived(tsTracker *ThroughSeqnoTrackerSvc, vbno uint16) {
+func (t *OSOSeqnoTrackerMapType) EndOSOSessionReceived(tsTracker *ThroughSeqnoTrackerSvc, vbno uint16) (bool, *OsoSession) {
 	sessionTracker := (*t)[vbno]
-	sessionTracker.RegisterSessionEnd(vbno, tsTracker)
+	return sessionTracker.RegisterSessionEnd(vbno, tsTracker)
 }
 
-func (t *OSOSeqnoTrackerMapType) ShouldProcessAsOso(vbno uint16, seqno uint64) (bool, int) {
+func (t *OSOSeqnoTrackerMapType) ShouldProcessAsOSO(vbno uint16, seqno uint64) (bool, *OsoSession) {
 	sessionTracker := (*t)[vbno]
-	return sessionTracker.ShouldProcessAsOso(seqno)
+	return sessionTracker.ShouldProcessAsOSO(seqno)
 }
 
-func (t *OSOSeqnoTrackerMapType) ShouldReceiveAsOso(vbno uint16, seqno uint64) (bool, int) {
+func (t *OSOSeqnoTrackerMapType) ShouldReceiveAsOso(vbno uint16) (bool, *OsoSession) {
 	sessionTracker := (*t)[vbno]
-	return sessionTracker.ShouldReceiveAsOso(seqno)
+	return sessionTracker.ShouldReceiveAsOso()
+}
+
+func (t *OSOSeqnoTrackerMapType) TruncateSession(vbno uint16, session *OsoSession) {
+	sessionTracker := (*t)[vbno]
+	sessionTracker.TruncateSessionViaPtr(session)
 }
 
 type OsoSessionsTracker struct {
@@ -290,7 +282,7 @@ type OsoSessionsTracker struct {
 	sessions []*OsoSession
 }
 
-func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenManifestId uint64) {
+func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenManifestId uint64, cumulativeCnt *uint64) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 
@@ -299,34 +291,13 @@ func (o *OsoSessionsTracker) RegisterNewSession(lastSeenSeqno uint64, lastSeenMa
 		dcpSeqnoWhenSessionStarts:      lastSeenSeqno,
 		dcpManifestIdWhenSessionStarts: lastSeenManifestId,
 		dcpSentOsoEnd:                  false,
+		maxSeqnoFromDCP:                0,
+		minSeqnoFromDCP:                math.MaxUint64,
+		unsureBufferedProcessedSeqnos:  newDualSortedSeqnoListWithLock(),
+		cumulativeCnt:                  cumulativeCnt,
 	}
 
 	o.sessions = append(o.sessions, newSession)
-}
-
-func (o *OsoSessionsTracker) MarkSeqnoReceived(seqno uint64, manifestId uint64, sessionIdx int) {
-	o.lock.RLock()
-	defer o.lock.RUnlock()
-
-	// Mark it with the latest session, since DCP must close a session before starting a new one
-	session := o.sessions[sessionIdx]
-
-	if session.IsDone() {
-		panic("latestSession is done but we are calling markSeqnoReceived")
-	}
-
-	session.MarkSeqnoReceived(seqno, manifestId)
-}
-
-// Once a session is opened, seqnos received from the DCP OSO need to be marked processed
-// Once the last seqno has been processed, the sessionCompleted will be tru
-func (o *OsoSessionsTracker) MarkSeqnoProcessed(seqno uint64, manifestId uint64, sessionIdx int) (sessionCompleted bool) {
-	o.lock.RLock()
-	defer o.lock.RUnlock()
-
-	session := o.sessions[sessionIdx]
-	sessionCompleted = session.MarkSeqnoProcessed(seqno, manifestId)
-	return
 }
 
 // If a latest session is in progress and DCP hasn't sent an end to this session
@@ -357,7 +328,7 @@ func (o *OsoSessionsTracker) GetStartingSeqno() (seqno uint64, osoActive bool) {
 // Used when DCP sends a OSO snapshot end marker
 // Only the last session will be "open"
 // When a session is ended, the session is now considered "closed" but potentially not yet done
-func (o *OsoSessionsTracker) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrackerSvc) {
+func (o *OsoSessionsTracker) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrackerSvc) (bool, *OsoSession) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 	// Only the last session should be active
@@ -366,21 +337,8 @@ func (o *OsoSessionsTracker) RegisterSessionEnd(vbno uint16, tsTracker *ThroughS
 		panic("idxErr")
 	}
 	latestSession := o.sessions[idx]
-	latestSession.RegisterSessionEnd(vbno, tsTracker)
-	if latestSession.IsDone() {
-		// Potentially this latest session needed to trigger a playback
-		o.PlaybackOntoTsTracker(tsTracker, vbno, idx, false)
-	}
-}
-
-func (o *OsoSessionsTracker) PlaybackOntoTsTracker(tsTracker *ThroughSeqnoTrackerSvc, vbno uint16, sessionIdx int, needLock bool) {
-	if needLock {
-		o.lock.Lock()
-		defer o.lock.Unlock()
-	}
-	o.sessions[sessionIdx].PlaybackOntoTsTracker(tsTracker, vbno)
-	// After synchronizing, we can truncate un-needed trackers
-	o.TruncateSessionsNoLock(sessionIdx)
+	isDone := latestSession.RegisterSessionEnd(vbno, tsTracker)
+	return isDone, latestSession
 }
 
 func (o *OsoSessionsTracker) TruncateSessionsNoLock(lastIdx int) {
@@ -391,32 +349,59 @@ func (o *OsoSessionsTracker) TruncateSessionsNoLock(lastIdx int) {
 	o.sessions = append(o.sessions[0:lastIdx], o.sessions[lastIdx+1:]...)
 }
 
-func (o *OsoSessionsTracker) ShouldProcessAsOso(seqno uint64) (shouldProcessAsOSO bool, sessionIdx int) {
+func (o *OsoSessionsTracker) ShouldProcessAsOSO(seqno uint64) (shouldProcessAsOSO bool, sessionPtr *OsoSession) {
 	o.lock.RLock()
 	defer o.lock.RUnlock()
 
-	for idx := len(o.sessions) - 1; idx >= 0; idx-- {
-		session := o.sessions[idx]
-		if session.ShouldProcessAsOSO(seqno) {
-			return true, idx
+	// Go from the beginning to the end
+	// If the end session is not closed yet, then process it as an "unsure" seqno
+	for idx := 0; idx < len(o.sessions); idx++ {
+		sessionPtr = o.sessions[idx]
+		shouldProcessAsOSO = sessionPtr.ShouldProcessAsOSO(seqno)
+		if shouldProcessAsOSO {
+			return
 		}
 	}
-
-	return false, -1
+	return
 }
 
-func (o *OsoSessionsTracker) ShouldReceiveAsOso(seqno uint64) (shouldReceiveAsOSO bool, sessionIdx int) {
+func (o *OsoSessionsTracker) ShouldReceiveAsOso() (shouldReceiveAsOSO bool, sessionPtr *OsoSession) {
 	o.lock.RLock()
 	defer o.lock.RUnlock()
 
-	sessionIdx = len(o.sessions) - 1
-	if sessionIdx < 0 {
+	lastSessionIdx := len(o.sessions) - 1
+	if lastSessionIdx < 0 {
 		return
 	}
 
-	sessionIsDone := o.sessions[sessionIdx].ReceivedOSOEnd()
+	sessionPtr = o.sessions[lastSessionIdx]
+	sessionIsDone := sessionPtr.ReceivedOSOEnd()
 	shouldReceiveAsOSO = !sessionIsDone
 	return
+}
+
+func (o *OsoSessionsTracker) MarkManifestReceived(manifestId uint64, sessionIdx int) {
+	o.lock.RLock()
+	defer o.lock.RUnlock()
+	session := o.sessions[sessionIdx]
+
+	if session.IsDone() {
+		panic("latestSession is done but we are calling MarkManifestReceived")
+	}
+
+	session.MarkManifestReceived(manifestId)
+}
+
+func (o *OsoSessionsTracker) TruncateSessionViaPtr(session *OsoSession) {
+	o.lock.Lock()
+	defer o.lock.Unlock()
+
+	for i := 0; i < len(o.sessions); i++ {
+		if o.sessions[i] == session {
+			o.sessions = append(o.sessions[:i], o.sessions[i+1:]...)
+			return
+		}
+	}
 }
 
 func newOsoSessionTracker() *OsoSessionsTracker {
@@ -433,9 +418,15 @@ type OsoSession struct {
 	dcpSentOsoEnd                  bool
 	seqnosFromDCPCnt               uint64
 	seqnosHandledCnt               uint64
+	minSeqnoFromDCP                uint64
 	maxSeqnoFromDCP                uint64
 	maxManifestIdFromDCP           uint64
 	maxManifestIdProcessed         uint64
+	cumulativeCnt                  *uint64
+	// first list keeps track of seqnos that are unsure
+	// second list keeps the manifestID that corresponds to the seqno
+	// Each session will potentially have max base.EventChanSize unsure seqnos
+	unsureBufferedProcessedSeqnos *DualSortedSeqnoListWithLock
 }
 
 func (s *OsoSession) IsDone() bool {
@@ -456,40 +447,60 @@ func (s *OsoSession) ReceivedOSOEnd() bool {
 // during this session has been processed by downstream parts
 func (s *OsoSession) isDoneNoLock() bool {
 	if s.dcpSentOsoEnd &&
-		s.seqnosFromDCPCnt > 0 &&
 		s.seqnosFromDCPCnt == s.seqnosHandledCnt {
 		return true
 	}
 	return false
 }
 
-func (s *OsoSession) MarkSeqnoReceived(seqno uint64, manifestId uint64) {
+func (s *OsoSession) MarkSeqnoReceived(seqno uint64) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	atomic.AddUint64(s.cumulativeCnt, 1)
 	s.seqnosFromDCPCnt++
 
+	if seqno < s.minSeqnoFromDCP {
+		s.minSeqnoFromDCP = seqno
+	}
 	if seqno > s.maxSeqnoFromDCP {
 		s.maxSeqnoFromDCP = seqno
 	}
-
-	if manifestId > s.maxManifestIdFromDCP {
-		s.maxManifestIdFromDCP = manifestId
-	}
 }
 
-func (s *OsoSession) MarkSeqnoProcessed(seqno uint64, manifestId uint64) (isDone bool) {
+func (s *OsoSession) MarkSeqnoProcessed(vbno uint16, seqno uint64, manifestId uint64, tracker *ThroughSeqnoTrackerSvc) (isDone bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	if s.isDoneNoLock() {
+		// if session is already done then it's a very very tight race condition
+		// Originally, this seqno would have gone into unsureList, but because now we're sure it's not
+		// part of OSO, just mark it done
+		// Because OSO session Start will be synchronized, it guarantees that if this session (*s) is called
+		// it means that isDone was false when this session was open
+		tracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+		return
+	}
+
+	if !s.seqnoIsWithinRange(seqno) {
+		// This sent seqno may or may not be within this oso session
+		// Because the OnEvent() is async, we're not sure until a OSO end is received
+		s.unsureBufferedProcessedSeqnos.appendSeqnos(seqno, manifestId)
+		return
+	}
+
+	s.markSeqnoProcessedInternal(manifestId)
+
+	isDone = s.isDoneNoLock()
+	return
+}
+
+func (s *OsoSession) markSeqnoProcessedInternal(manifestId uint64) {
 	s.seqnosHandledCnt++
 
 	if manifestId > s.maxManifestIdProcessed {
 		s.maxManifestIdProcessed = manifestId
 	}
-
-	isDone = s.isDoneNoLock()
-	return
 }
 
 func (s *OsoSession) GetStartingSeqno() uint64 {
@@ -508,7 +519,7 @@ func (s *OsoSession) GetStartingSeqno() uint64 {
 // until all the seqnos that DCP has sent has been processed by downstream parts
 // When a session has ended, the seqno's in this session will now be introduced into tsTracker as a singular seqno,
 // essentially creating a gap, pretending that deduping occurred
-func (s *OsoSession) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrackerSvc) {
+func (s *OsoSession) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrackerSvc) (isDone bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -521,9 +532,13 @@ func (s *OsoSession) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrac
 		tsTracker.logger.Warnf("oso snapshot raiser is nil")
 	}
 
+	s.processUnsureBuffer(vbno, tsTracker)
+
 	// When a session is done, we will treat the whole OSO session as a single gap
 	// from lastSeqnoSeen+1 to maxProcessed, it will be as if there's a big gap
 	tsTracker.processGapSeqnos(vbno, s.maxSeqnoFromDCP)
+
+	return s.isDoneNoLock()
 }
 
 // Essentially, the session kept track of the seqno at the session's registration/inception
@@ -569,20 +584,57 @@ func (s *OsoSession) GetMaxDCPSeenSeqno() uint64 {
 // it has been heard from DCP
 // Given a seqnoToBeProcessed, if this session is not done, and this session contains the seqnoToBeProcessed that is waiting to be processed,
 // then this seqnoToBeProcessed should be handled the OSO way
-func (s *OsoSession) ShouldProcessAsOSO(seqnoToBeProcessed uint64) bool {
+func (s *OsoSession) ShouldProcessAsOSO(seqnoToBeProcessed uint64) (shouldProcessAsOSO bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-
-	// If the session is done, there's no way that seqnoToBeProcessed is part of this session
+	// If this session is done, there's no way that seqnoToBeProcessed is part of this session
 	if s.isDoneNoLock() {
-		return false
+		return
 	}
 
-	if seqnoToBeProcessed > s.dcpSeqnoWhenSessionStarts && seqnoToBeProcessed <= s.maxSeqnoFromDCP {
+	if s.seqnoIsWithinRange(seqnoToBeProcessed) {
 		// seqnoToBeProcessed essentially falls within the gap range that's currently covered in this session
-		return true
+		shouldProcessAsOSO = true
+		return
 	}
-	return false
+
+	if !s.dcpSentOsoEnd {
+		// We may or may not be sure if this processSeqno is within this range yet
+		shouldProcessAsOSO = true
+		return
+	}
+	return
+}
+
+// Lock needs to be held
+func (s *OsoSession) seqnoIsWithinRange(seqnoToBeProcessed uint64) bool {
+	return seqnoToBeProcessed >= s.minSeqnoFromDCP && seqnoToBeProcessed <= s.maxSeqnoFromDCP
+}
+
+func (s *OsoSession) MarkManifestReceived(manifestId uint64) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if manifestId > s.maxManifestIdFromDCP {
+		s.maxManifestIdFromDCP = manifestId
+	}
+}
+
+// Lock is held
+// When a session is closed, the "unsure" list of seqnos can now be checked against the range
+// Anything not against the range can be marked as non-OSO processed seqnos and fill in the gaps
+func (s *OsoSession) processUnsureBuffer(vbno uint16, tracker *ThroughSeqnoTrackerSvc) {
+	listsLen := s.unsureBufferedProcessedSeqnos.getLengthOfSeqnoLists()
+
+	for i := 0; i < listsLen; i++ {
+		seqno := s.unsureBufferedProcessedSeqnos.seqno_list_1[i]
+		manifestId := s.unsureBufferedProcessedSeqnos.seqno_list_2[i]
+		if s.seqnoIsWithinRange(seqno) {
+			s.markSeqnoProcessedInternal(manifestId)
+		} else {
+			tracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+		}
+	}
 }
 
 type SeqnoManifestsMapType map[uint16]*DualSortedSeqnoListWithLock
@@ -825,47 +877,56 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno := event.OtherInfos.(parts.DataSentEventAdditional).Seqno
 		manifestId := event.OtherInfos.(parts.DataSentEventAdditional).ManifestId
-		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
+		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
-			tsTracker.addSentSeqno(vbno, seqno)
-			tsTracker.addManifestId(vbno, seqno, manifestId)
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
 		} else {
-			tsTracker.markOsoProcessed(vbno, seqno, manifestId, osoSessionIdx)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
 		}
 	case common.MergeCasChanged:
 		// Cas changed count as sent. We will converge to new mutation in the source
 		vbno := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).VBucket
 		seqno := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).Seqno
 		manifestId := event.OtherInfos.(pipeline_svc.DataMergeCasChangedEventAdditional).ManifestId
-		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
+		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
-			tsTracker.addSentSeqno(vbno, seqno)
-			tsTracker.addManifestId(vbno, seqno, manifestId)
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
 		} else {
-			tsTracker.markOsoProcessed(vbno, seqno, manifestId, osoSessionIdx)
+			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
 		}
 	case common.DataMerged:
 		vbno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).VBucket
 		seqno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).Seqno
 		manifestId := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).ManifestId
-		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
-		if !shouldProcessAsOSO {
-			tsTracker.addSentSeqno(vbno, seqno)
-			tsTracker.addManifestId(vbno, seqno, manifestId)
+		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if !processedAsOSO {
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
 		} else {
-			tsTracker.markOsoProcessed(vbno, seqno, manifestId, osoSessionIdx)
+			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
 		}
 	case common.DataFiltered:
 		uprEvent := event.Data.(*mcc.UprEvent)
 		vbno := uprEvent.VBucket
 		seqno := uprEvent.Seqno
 		manifestId := event.OtherInfos.(parts.DataFilteredAdditional).ManifestId
-		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
-		if !shouldProcessAsOSO {
+		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if !processedAsOSO {
 			tsTracker.markUprEventAsFiltered(uprEvent)
 			tsTracker.addManifestId(uprEvent.VBucket, uprEvent.Seqno, manifestId)
 		} else {
-			tsTracker.markOsoProcessed(vbno, seqno, manifestId, osoSessionIdx)
+			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
 		}
 	case common.DataUnableToFilter:
 		err := event.DerivedData[0].(error)
@@ -874,45 +935,54 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			uprEvent := event.Data.(*mcc.UprEvent)
 			vbno := uprEvent.VBucket
 			seqno := uprEvent.Seqno
-			shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
-			if !shouldProcessAsOSO {
+			processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+			if !processedAsOSO {
 				tsTracker.markUprEventAsFiltered(uprEvent)
 			} else {
-				tsTracker.markOsoProcessed(vbno, seqno, 0, osoSessionIdx)
+				done := session.MarkSeqnoProcessed(0, seqno, 0, tsTracker)
+				if done {
+					tsTracker.HandleDoneSession(vbno, session)
+				}
 			}
 		}
 	case common.DataFailedCRSource:
 		seqno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
 		vbno := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
 		manifestId := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).ManifestId
-		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
-		if !shouldProcessAsOSO {
+		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if !processedAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
 			tsTracker.addManifestId(vbno, seqno, manifestId)
 		} else {
-			tsTracker.markOsoProcessed(vbno, seqno, manifestId, osoSessionIdx)
+			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
 		}
 	case common.TargetDataSkipped:
 		seqno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Seqno
 		vbno := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).VBucket
 		manifestId := event.OtherInfos.(parts.TargetDataSkippedEventAdditional).ManifestId
-		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldProcessAsOso(vbno, seqno)
+		shouldProcessAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !shouldProcessAsOSO {
 			tsTracker.addFailedCRSeqno(vbno, seqno)
 			tsTracker.addManifestId(vbno, seqno, manifestId)
 		} else {
-			tsTracker.markOsoProcessed(vbno, seqno, manifestId, osoSessionIdx)
+			done := session.MarkSeqnoProcessed(vbno, seqno, manifestId, tsTracker)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
 		}
 	case common.DataReceived:
 		upr_event := event.Data.(*mcc.UprEvent)
 		seqno := upr_event.Seqno
 		vbno := upr_event.VBucket
 		// Sets last sequence number, and should the sequence number skip due to gap, this will take care of it
-		shouldProcessAsOSO, osoSessionIdx := tsTracker.shouldReceiveAsOso(vbno, seqno)
-		if !shouldProcessAsOSO {
+		receiveAsOSO, session := tsTracker.shouldReceiveAsOso(vbno)
+		if !receiveAsOSO {
 			tsTracker.processGapSeqnos(vbno, seqno)
 		} else {
-			tsTracker.MarkSeqnoReceived(vbno, seqno, 0, osoSessionIdx)
+			session.MarkSeqnoReceived(seqno)
 		}
 	case common.SystemEventReceived:
 		uprEvent := event.Data.(*mcc.UprEvent)
@@ -921,22 +991,27 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		// SystemEventReceived should not be OSO related, because system events tell of a subscriber of a collection creation/drop
 		// When OSO is used, it is only used on a single collection - thus no reason why it would receive an system event
 		// But just in case, have the handler here implemented
-		shouldProcessAsOSO, sessionIdx := tsTracker.shouldReceiveAsOso(vbno, seqno)
-		if !shouldProcessAsOSO {
+		processedAsOSO, session := tsTracker.shouldReceiveAsOso(vbno)
+		if !processedAsOSO {
 			tsTracker.processGapSeqnos(vbno, seqno)
 			tsTracker.markSystemEvent(uprEvent)
 		} else {
 			manifestId, _ := uprEvent.GetManifestId()
-			tsTracker.MarkSeqnoReceived(vbno, seqno, manifestId, sessionIdx)
+			session.MarkManifestReceived(manifestId)
 		}
 	case common.DataNotReplicated:
 		wrappedMcr := event.Data.(*base.WrappedMCRequest)
 		vbno := wrappedMcr.Req.VBucket
 		seqno := wrappedMcr.Seqno
 		recycler, ok := event.OtherInfos.(utilities.RecycleObjFunc)
-		shouldProcessAsOSO, _ := tsTracker.shouldProcessAsOso(vbno, seqno)
-		if !shouldProcessAsOSO {
+		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if !processedAsOSO {
 			tsTracker.markMCRequestAsIgnored(wrappedMcr)
+		} else {
+			done := session.MarkSeqnoProcessed(0, seqno, 0, nil)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
 		}
 		if ok {
 			recycler(wrappedMcr)
@@ -949,7 +1024,15 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			tsTracker.handleGeneralError(err)
 			return err
 		}
-		tsTracker.handleBackfillStreamEnd(vbno)
+		receiveAsOSO, _ := tsTracker.shouldReceiveAsOso(vbno)
+		if !receiveAsOSO {
+			tsTracker.handleBackfillStreamEnd(vbno)
+		} else {
+			err := fmt.Errorf("Received streamEND before receiving oso end")
+			tsTracker.logger.Errorf(err.Error())
+			tsTracker.handleGeneralError(err)
+			return err
+		}
 	case common.DataCloned:
 		data := event.Data.([]interface{})
 		vbno := data[0].(uint16)
@@ -958,13 +1041,24 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		tsTracker.handleDataClonedEvent(vbno, seqno, totalCount)
 	case common.OsoSnapshotReceived:
 		mode := event.Data.(bool)
-		vbno := event.OtherInfos.(uint16)
-		tsTracker.ProcessOsoMode(mode, vbno)
+		helper := event.DerivedData
+		vbno := helper[0].(uint16)
+		syncCh := helper[1].(chan bool)
+		isDone, session := tsTracker.ProcessOsoMode(mode, vbno)
+		close(syncCh)
+		if isDone {
+			tsTracker.HandleDoneSession(vbno, session)
+		}
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
 
 	}
 	return nil
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqnoAndManifestId(vbno uint16, seqno uint64, manifestId uint64) {
+	tsTracker.addSentSeqno(vbno, seqno)
+	tsTracker.addManifestId(vbno, seqno, manifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamEnd(vbno uint16) {
@@ -1564,39 +1658,34 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 	return false
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) ProcessOsoMode(active bool, vbno uint16) {
+func (tsTracker *ThroughSeqnoTrackerSvc) ProcessOsoMode(active bool, vbno uint16) (bool, *OsoSession) {
 	if active {
 		// Turn OSO tracking on
 		atomic.StoreUint32(&tsTracker.osoModeActive, 1)
 		tsTracker.vbOsoModeSessionDCPTracker.StartNewOSOSession(tsTracker, vbno)
+		return false, nil
 	} else {
-		tsTracker.vbOsoModeSessionDCPTracker.EndOSOSessionReceived(tsTracker, vbno)
+		return tsTracker.vbOsoModeSessionDCPTracker.EndOSOSessionReceived(tsTracker, vbno)
 	}
 }
 
-// manifestId is non-0 if the event has a valid manifestID tagged with it
-func (tsTracker *ThroughSeqnoTrackerSvc) markOsoProcessed(vbno uint16, seqno uint64, manifestId uint64, sessionIdx int) {
-	tsTracker.vbOsoModeSessionDCPTracker.MarkSeqnoProcessed(tsTracker, vbno, seqno, manifestId, sessionIdx)
-}
-
-// manifestId is non-0 if the msg received is a system event
-func (tsTracker *ThroughSeqnoTrackerSvc) MarkSeqnoReceived(vbno uint16, seqno uint64, manifestId uint64, sessionIdx int) {
-	tsTracker.vbOsoModeSessionDCPTracker.MarkSeqnoReceived(vbno, seqno, manifestId, sessionIdx)
-	atomic.AddUint64(&tsTracker.osoCntReceivedFromDCP, 1)
-}
-
-func (tsTracker *ThroughSeqnoTrackerSvc) shouldReceiveAsOso(vbno uint16, seqno uint64) (shouldReceiveAsOSO bool, sessionIdx int) {
+func (tsTracker *ThroughSeqnoTrackerSvc) shouldReceiveAsOso(vbno uint16) (shouldReceiveAsOSO bool, sessionPtr *OsoSession) {
 	if atomic.LoadUint32(&tsTracker.osoModeActive) == 0 {
-		return false, 0
+		return false, nil
 	}
 
-	return tsTracker.vbOsoModeSessionDCPTracker.ShouldReceiveAsOso(vbno, seqno)
+	return tsTracker.vbOsoModeSessionDCPTracker.ShouldReceiveAsOso(vbno)
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) shouldProcessAsOso(vbno uint16, seqno uint64) (shouldProcessAsOSO bool, sessionIdx int) {
+func (tsTracker *ThroughSeqnoTrackerSvc) shouldProcessAsOso(vbno uint16, seqno uint64) (processedAsOso bool, sessionPtr *OsoSession) {
 	if atomic.LoadUint32(&tsTracker.osoModeActive) == 0 {
-		return false, 0
+		return
 	}
 
-	return tsTracker.vbOsoModeSessionDCPTracker.ShouldProcessAsOso(vbno, seqno)
+	return tsTracker.vbOsoModeSessionDCPTracker.ShouldProcessAsOSO(vbno, seqno)
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) HandleDoneSession(vbno uint16, session *OsoSession) {
+	session.PlaybackOntoTsTracker(tsTracker, vbno)
+	tsTracker.vbOsoModeSessionDCPTracker.TruncateSession(vbno, session)
 }

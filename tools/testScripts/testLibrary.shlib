@@ -15,6 +15,7 @@ BACKFILL_APPEND_MSG="These collections need to append backfill"
 VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
 TIMEDOUT_TYPE1_MSG="Executing Action timed out"
 TIMEDOUT_TYPE2_MSG="Executing Action2 timed out"
+OSO_MODE_MSG="with OSO mode requested"
 
 # These should be imported after clusterRunProvision script
 

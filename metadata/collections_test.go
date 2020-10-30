@@ -1084,3 +1084,61 @@ func TestDenylistMapping(t *testing.T) {
 	}
 
 }
+
+func TestPerfWeirdMappingChange(t *testing.T) {
+	fmt.Println("============== Test case start: TestPerfWeirdMappingChange =================")
+	defer fmt.Println("============== Test case end: TestPerfWeirdMappingChange =================")
+	assert := assert.New(t)
+
+	oldRules := make(map[string]interface{})
+	oldRules["S2.col1"] = "S2.col1"
+	oldRules["S2.col2"] = "S2.col2"
+
+	newRules := make(map[string]interface{})
+	newRules["S2.col3"] = "S2.col3"
+
+	data, err := ioutil.ReadFile(provisionedFile)
+	assert.Nil(err)
+	var provisionedManifest CollectionsManifest
+	err = provisionedManifest.LoadBytes(data)
+	assert.Nil(err)
+	manifestPair := CollectionsManifestPair{
+		Source: &provisionedManifest,
+		Target: &provisionedManifest,
+	}
+
+	mode := base.CollectionsMgtType(0)
+	mode.SetExplicitMapping(true)
+
+	oldMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, oldRules, false)
+	assert.Nil(err)
+	newMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, newRules, false)
+	assert.Nil(err)
+
+	added, removed := oldMapping.Diff(newMapping)
+	assert.Equal(1, len(added))
+	assert.Equal(2, len(removed))
+
+	var testBackfillSpec BackfillReplicationSpec
+	testBackfillSpec.VBTasksMap = make(VBTasksMapType)
+
+	testBackfillSpec.VBTasksMap.RemoveNamespaceMappings(removed)
+	assert.False(testBackfillSpec.VBTasksMap.ContainsAtLeastOneTask())
+
+	var vbs []uint16
+	vbs = append(vbs, 0)
+	endSeqos := make(map[uint16]uint64)
+	endSeqos[0] = 100
+
+	newTasks, err := NewBackfillVBTasksMap(added, vbs, endSeqos)
+	assert.Nil(err)
+
+	testBackfillSpec.MergeNewTasks(newTasks, true)
+	checkMapping := testBackfillSpec.VBTasksMap.GetAllCollectionNamespaceMappings()
+	assert.Equal(1, len(checkMapping))
+
+	_, filter, err := ((*testBackfillSpec.VBTasksMap[0])[0]).ToDcpNozzleTask(&provisionedManifest)
+	assert.Nil(err)
+	assert.False(filter.UseManifestUid)
+	assert.Equal(1, len(filter.CollectionsList))
+}

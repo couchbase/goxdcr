@@ -691,11 +691,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
-	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
-		logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc,
-		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(),
-		xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler, remoteClusterCapability,
-		migrationUIMsgRaiser, connectivityStatusGetter)
+	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc, spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(), xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler, remoteClusterCapability, migrationUIMsgRaiser, connectivityStatusGetter)
 
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
@@ -1041,7 +1037,8 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 		shaToCollectionsMap := osoCheckMap.GetAllCollectionNamespaceMappings()
 		vbTasksMap := osoCheckMap.GetTopTasksOnly()
 		if len(shaToCollectionsMap) == 1 && vbTasksMap.AllStartsWithSeqno0() {
-			dcpNozzleSettings[parts.DCP_EnableOSO] = true
+			// MB-42273 - OSO not sending streamend
+			//dcpNozzleSettings[parts.DCP_EnableOSO] = true
 		}
 	}
 }
