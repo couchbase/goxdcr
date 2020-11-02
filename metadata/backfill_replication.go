@@ -402,6 +402,33 @@ func (v VBTasksMapType) AllStartsWithSeqno0() bool {
 	return true
 }
 
+func (v VBTasksMapType) GetDeduplicatedSourceNamespaces() []*SourceNamespace {
+	var retList []*SourceNamespace
+	var dedupMap = make(CollectionNamespaceMapping)
+
+	for _, backfillTasks := range v {
+		if backfillTasks == nil {
+			continue
+		}
+		for _, backfillTask := range *backfillTasks {
+			if backfillTask == nil {
+				continue
+			}
+
+			for _, requestedCollection := range backfillTask.RequestedCollections() {
+				for srcNamespace, _ := range requestedCollection {
+					dedupMap.AddSingleSourceNsMapping(srcNamespace, &base.CollectionNamespace{})
+				}
+			}
+		}
+	}
+
+	for srcNs, _ := range dedupMap {
+		retList = append(retList, srcNs)
+	}
+	return retList
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks []*BackfillTask
 

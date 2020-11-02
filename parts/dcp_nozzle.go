@@ -367,7 +367,10 @@ type DcpNozzle struct {
 
 	endSeqnoForDcp map[uint16]*base.SeqnoWithLock
 
-	osoRequested bool
+	osoRequested           bool
+	getHighSeqnoOneAtATime chan bool
+	vbHighSeqnoMap         map[uint16]*base.SeqnoWithLock
+	savedMcReqFeatures     utilities.HELOFeatures
 }
 
 func NewDcpNozzle(id string,
@@ -404,7 +407,12 @@ func NewDcpNozzle(id string,
 		setTsCheckedManifests:    make(map[uint64]bool),
 		specificManifestGetter:   specificManifestGetter,
 		endSeqnoForDcp:           make(map[uint16]*base.SeqnoWithLock),
+		getHighSeqnoOneAtATime:   make(chan bool, 1),
+		vbHighSeqnoMap:           make(map[uint16]*base.SeqnoWithLock),
 	}
+
+	// Allow one caller the ability to execute
+	dcp.getHighSeqnoOneAtATime <- true
 
 	for _, vbno := range vbnos {
 		dcp.cur_ts[vbno] = &vbtsWithLock{lock: &sync.RWMutex{}, ts: nil}
@@ -414,6 +422,7 @@ func NewDcpNozzle(id string,
 			dcp.vb_xattr_seqno_map[vbno] = &xattr_seqno
 		}
 		dcp.endSeqnoForDcp[vbno] = base.NewSeqnoWithLock()
+		dcp.vbHighSeqnoMap[vbno] = base.NewSeqnoWithLock()
 	}
 
 	dcp.composeUserAgent()
@@ -474,6 +483,7 @@ func (dcp *DcpNozzle) initializeMemcachedClient(settings metadata.ReplicationSet
 	}
 
 	dcpMcReqFeatures.CompressionType = dcp.memcachedCompressionSetting
+	dcp.savedMcReqFeatures = dcpMcReqFeatures
 
 	dcp.client, respondedFeatures, err = dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcpMcReqFeatures, dcp.Logger())
 
@@ -1324,6 +1334,12 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 	// randomizes the sequence of vbs to start, so that each outnozzle gets roughly even initial load
 	base.ShuffleVbList(streams_to_start)
 
+	err := dcp.getHighSeqnosIfNecessary(streams_to_start)
+	if err != nil {
+		dcp.Logger().Errorf("Getting HighSeqno for %v resulted in %v", streams_to_start, err)
+		return err
+	}
+
 	for _, vbno := range streams_to_start {
 		vbts, err := dcp.getTS(vbno, true)
 		if err == nil && vbts != nil {
@@ -1373,6 +1389,13 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 			err = fmt.Errorf("Error converting VBTask to DCP Nozzle Task %v", err)
 			return err
 		}
+
+		// Given a task, we should technically only end at a correct seqno. Check the vbSeqnos to ensure that those seqnos are correct
+		checkSeqEnd := dcp.vbHighSeqnoMap[vbno].GetSeqno()
+		if checkSeqEnd > 0 && checkSeqEnd < seqEnd {
+			seqEnd = checkSeqEnd
+		}
+
 		// In a corner case where startSeq == endSeqno, DCP will not send down a streamEnd and instead just
 		// close the connection. Mark the endSeqno here first to check if this is the case
 		dcp.endSeqnoForDcp[vbno].SetSeqno(seqEnd)
@@ -1949,4 +1972,86 @@ func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
 		}
 		dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 	}
+}
+
+func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
+	if len(dcp.specificVBTasks) == 0 {
+		// Main pipeline, no need to get high Seqno
+		return nil
+	}
+
+	topTasks := dcp.specificVBTasks.GetTopTasksOnly()
+	for _, vbno := range vbnos {
+		_, exists := topTasks[vbno]
+		if !exists {
+			return fmt.Errorf("Requesting vb %v but specific VBTasks does not contain such VB", vbno)
+		}
+	}
+
+	sourceCollectionNamespaces := topTasks.GetDeduplicatedSourceNamespaces()
+	if len(sourceCollectionNamespaces) == 0 {
+		return fmt.Errorf("Toptasks has no source collection namespaces")
+	}
+
+	latestManifest, err := dcp.specificManifestGetter(math.MaxUint64)
+	if err != nil {
+		return fmt.Errorf("Unable to get latest manifest %v", err)
+	}
+
+	var collectionIds []uint32
+	for _, sourceNs := range sourceCollectionNamespaces {
+		colId, err := latestManifest.GetCollectionId(sourceNs.ScopeName, sourceNs.CollectionName)
+		if err != nil {
+			dcp.Logger().Warnf("getHighSeqno could not find collection ID for %v", sourceNs.String())
+		} else {
+			collectionIds = append(collectionIds, colId)
+		}
+	}
+
+	if len(collectionIds) == 0 {
+		return fmt.Errorf("Unable to find any collection ID for getHighSeqno")
+	}
+
+	select {
+	case <-dcp.getHighSeqnoOneAtATime:
+		defer func() { dcp.getHighSeqnoOneAtATime <- true }()
+
+		addr, err := dcp.xdcr_topology_svc.MyMemcachedAddr()
+		if err != nil {
+			return err
+		}
+
+		client, _, err := dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcp.savedMcReqFeatures, dcp.Logger())
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		mccContext := &mcc.ClientContext{}
+		var vbSeqnoMap map[uint16]uint64
+
+		for _, vb := range dcp.vbnos {
+			dcp.vbHighSeqnoMap[vb].SetSeqno(0)
+		}
+
+		for _, collectionId := range collectionIds {
+			mccContext.CollId = collectionId
+			vbSeqnoMap, err = client.GetAllVbSeqnos(vbSeqnoMap, mccContext)
+			if err != nil {
+				return fmt.Errorf("Unable to GetAllVbSeqnos %v\n", err)
+			}
+
+			for _, vb := range dcp.vbnos {
+				highSeqno, exists := vbSeqnoMap[vb]
+				if !exists {
+					dcp.Logger().Warnf("DCP VBHighSeqno for colID %v did not return vb %v", collectionId, vb)
+				} else {
+					if dcp.vbHighSeqnoMap[vb].GetSeqno() < highSeqno {
+						dcp.vbHighSeqnoMap[vb].SetSeqno(highSeqno)
+					}
+				}
+			}
+		}
+	}
+	return nil
 }

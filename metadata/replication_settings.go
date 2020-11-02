@@ -56,6 +56,7 @@ const (
 	CollectionsMgtMappingKey = base.CollectionsMappingKey
 	CollectionsMgtMirrorKey  = base.CollectionsMirrorKey
 	CollectionsMgtMigrateKey = base.CollectionsMigrateKey
+	CollectionsMgtOsoKey     = base.CollectionsOsoKey
 
 	CollectionsMappingRulesKey    = base.CollectionsMappingRulesKey
 	CollectionsSkipSourceCheckKey = base.CollectionsSkipSourceCheckKey
@@ -77,7 +78,7 @@ const (
 // settings whose default values cannot be viewed or changed through rest apis
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
 	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,
-	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey, CollectionsDelVbBackfillKey}
+	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsMgtOsoKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey, CollectionsDelVbBackfillKey}
 
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = []string{}
@@ -96,6 +97,7 @@ var MultiValueMap map[string]string = map[string]string{
 	CollectionsMgtMappingKey: CollectionsMgtMultiKey,
 	CollectionsMgtMirrorKey:  CollectionsMgtMultiKey,
 	CollectionsMgtMigrateKey: CollectionsMgtMultiKey,
+	CollectionsMgtOsoKey:     CollectionsMgtMultiKey,
 }
 
 var MaxBatchCount = 10000
@@ -321,6 +323,8 @@ func (r *ReplicationMultiValueHelper) handleCollectionsMgtKey(curConfig base.Col
 		curConfig.SetMirroring(boolVal)
 	case CollectionsMgtMigrateKey:
 		curConfig.SetMigration(boolVal)
+	case CollectionsMgtOsoKey:
+		curConfig.SetOSO(boolVal)
 	}
 	retVal = curConfig
 	return
@@ -399,6 +403,9 @@ func (r *ReplicationMultiValueHelper) handleCollectionsMgtKeyImport(s *Replicati
 	}
 	if val, ok := r.flagKeyIssued[CollectionsMgtMappingKey]; ok {
 		curVal.SetExplicitMapping(val)
+	}
+	if val, ok := r.flagKeyIssued[CollectionsMgtOsoKey]; ok {
+		curVal.SetOSO(val)
 	}
 
 	sm[CollectionsMgtMultiKey] = curVal
@@ -588,6 +595,7 @@ func (s *ReplicationSettings) exportFlagTypeValues() {
 	s.Values[CollectionsMgtMappingKey] = collectionModes.IsExplicitMapping()
 	s.Values[CollectionsMgtMirrorKey] = collectionModes.IsMirroringOn()
 	s.Values[CollectionsMgtMigrateKey] = collectionModes.IsMigrationOn()
+	s.Values[CollectionsMgtOsoKey] = collectionModes.IsOsoOn()
 }
 
 func (s *ReplicationSettings) PreprocessReplMultiValues(settingsMap map[string]interface{}) error {

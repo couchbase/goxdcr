@@ -27,7 +27,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3", "S2.col1":"S3.col1"}')
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["collectionsOSOMode"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3", "S2.col1":"S3.col1"}')
 
 # Bucket -> Scopes
 # -----------------
@@ -54,7 +54,7 @@ declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running basic explicit mapping test case - new explicit map replication without OSO"
+	echo "Running basic explicit mapping test case - new explicit map replication with OSO mode on"
 	echo "============================================================================"
 	testForClusterRun
 	if (( $? != 0 ));then
@@ -121,8 +121,8 @@ function runTestCase {
 	# Backfill should have been raised
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
-	# oso mode is disabled
-	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(( $currentOsoModeCnt + 0 ))
+	# 2 oso mode because one for each DCP nozzle
+	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(( $currentOsoModeCnt + 2 ))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

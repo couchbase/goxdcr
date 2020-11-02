@@ -1142,3 +1142,40 @@ func TestPerfWeirdMappingChange(t *testing.T) {
 	assert.False(filter.UseManifestUid)
 	assert.Equal(1, len(filter.CollectionsList))
 }
+
+func TestGetDeduplicatedSourceNamespaces(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetDeduplicatedSourceNamespaces =================")
+	defer fmt.Println("============== Test case end: TestGetDeduplicatedSourceNamespaces =================")
+	assert := assert.New(t)
+
+	testMap := make(VBTasksMapType)
+	for i := uint16(1); i < uint16(10); i++ {
+		backfillTasks := &BackfillTasks{}
+		for j := uint16(0); j < i; j++ {
+			var namespaceMapping []CollectionNamespaceMapping
+			oneNamespace := make(CollectionNamespaceMapping)
+			srcNs := NewSourceCollectionNamespace(&base.CollectionNamespace{
+				ScopeName:      "S1",
+				CollectionName: fmt.Sprintf("Col%v", j),
+			})
+			oneNamespace.AddSingleSourceNsMapping(srcNs, &base.CollectionNamespace{})
+			namespaceMapping = append(namespaceMapping, oneNamespace)
+
+			timestamps := BackfillVBTimestamps{
+				StartingTimestamp: &base.VBTimestamp{},
+				EndingTimestamp:   &base.VBTimestamp{},
+			}
+			backfillTask := &BackfillTask{
+				Timestamps:               &timestamps,
+				requestedCollections_:    namespaceMapping,
+				RequestedCollectionsShas: []string{"test"},
+			}
+			*backfillTasks = append(*backfillTasks, backfillTask)
+		}
+		testMap[i] = backfillTasks
+	}
+
+	assert.NotNil(testMap)
+	deduplicatedSources := testMap.GetDeduplicatedSourceNamespaces()
+	assert.Equal(9, len(deduplicatedSources))
+}

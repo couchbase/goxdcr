@@ -733,6 +733,7 @@ const (
 	CollectionsMappingKey         = "collectionsExplicitMapping"
 	CollectionsMirrorKey          = "collectionsMirroringMode"
 	CollectionsMigrateKey         = "collectionsMigrationMode"
+	CollectionsOsoKey             = "collectionsOSOMode"
 	CollectionsMappingRulesKey    = "colMappingRules"
 	CollectionsSkipSourceCheckKey = "collectionsSkipSrcValidation"
 )
@@ -741,14 +742,16 @@ const (
 	colMgtMappingN   = 0 // Non-Set bit if implicit, Set bit if explicit
 	colMgtMirroringN = 1 // Non-Set bit if mirroring off, set bit if mirroring on
 	colMgtMigrateN   = 2 // Non-set if traditional, set bit if migration mode
+	colMgtOsoN       = 3 // Non-set if traditional, set bit to opt into OSO mode
 )
 
-var CollectionsMgtDefault CollectionsMgtType = 0 // Implicit, no mirror, no migration
+var CollectionsMgtDefault CollectionsMgtType = 0 // Implicit, no mirror, no migration, no OSO
 var CollectionsExplicitBit CollectionsMgtType = 1 << colMgtMappingN
 var CollectionsMirroringBit CollectionsMgtType = 1 << colMgtMirroringN
 var CollectionsMigrationBit CollectionsMgtType = 1 << colMgtMigrateN
+var CollectionsOSOBit CollectionsMgtType = 1 << colMgtOsoN
 
-var CollectionsMgtMax = CollectionsExplicitBit | CollectionsMirroringBit | CollectionsMigrationBit
+var CollectionsMgtMax = CollectionsExplicitBit | CollectionsMirroringBit | CollectionsMigrationBit | CollectionsOSOBit
 
 func (c CollectionsMgtType) String() string {
 	var output []string
@@ -758,6 +761,8 @@ func (c CollectionsMgtType) String() string {
 	output = append(output, fmt.Sprintf("%v", c.IsMirroringOn()))
 	output = append(output, "Migration:")
 	output = append(output, fmt.Sprintf("%v", c.IsMigrationOn()))
+	output = append(output, "OSO:")
+	output = append(output, fmt.Sprintf("%v", c.IsOsoOn()))
 	return strings.Join(output, " ")
 }
 
@@ -788,6 +793,16 @@ func (c *CollectionsMgtType) IsMigrationOn() bool {
 func (c *CollectionsMgtType) SetMigration(val bool) {
 	if c.IsMigrationOn() != val {
 		*c ^= 1 << colMgtMigrateN
+	}
+}
+
+func (c *CollectionsMgtType) IsOsoOn() bool {
+	return *c&CollectionsOSOBit > 0
+}
+
+func (c *CollectionsMgtType) SetOSO(val bool) {
+	if c.IsOsoOn() != val {
+		*c ^= 1 << colMgtOsoN
 	}
 }
 

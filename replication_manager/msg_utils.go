@@ -84,6 +84,7 @@ const (
 	CollectionsMappingKey          = base.CollectionsMappingKey
 	CollectionsMirrorKey           = base.CollectionsMirrorKey
 	CollectionsMigrateKey          = base.CollectionsMigrateKey
+	CollectionsOsoKey              = base.CollectionsOsoKey
 	CollectionsMappingRulesKey     = base.CollectionsMappingRulesKey
 	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
 	ManualBackfillRequested        = base.ManualBackfillKey
@@ -171,6 +172,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CollectionsMappingKey:          metadata.CollectionsMgtMappingKey,
 	CollectionsMigrateKey:          metadata.CollectionsMgtMigrateKey,
 	CollectionsMirrorKey:           metadata.CollectionsMgtMirrorKey,
+	CollectionsOsoKey:              metadata.CollectionsMgtOsoKey,
 	CollectionsMappingRulesKey:     metadata.CollectionsMappingRulesKey,
 	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
 	ManualBackfillRequested:        metadata.CollectionsManualBackfillKey,
@@ -206,6 +208,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CollectionsMgtMappingKey:          CollectionsMappingKey,
 	metadata.CollectionsMgtMigrateKey:          CollectionsMigrateKey,
 	metadata.CollectionsMgtMirrorKey:           CollectionsMirrorKey,
+	metadata.CollectionsMgtOsoKey:              CollectionsOsoKey,
 	metadata.CollectionsMappingRulesKey:        CollectionsMappingRulesKey,
 	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
 	metadata.CollectionsManualBackfillKey:      ManualBackfillRequested,

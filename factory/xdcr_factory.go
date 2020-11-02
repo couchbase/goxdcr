@@ -1031,14 +1031,17 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 		osoCheckMap = vbTasksMap.(metadata.VBTasksMapType)
 	}
 
+	if !modes.IsOsoOn() {
+		checkIfNeedOso = false
+	}
+
 	if checkIfNeedOso {
 		// Oso would only work if DCP is serving a single collection, and has to start from seqno 0
 		// Thus, check the backfill tasks and ensure that it only contains one source collections
 		shaToCollectionsMap := osoCheckMap.GetAllCollectionNamespaceMappings()
 		vbTasksMap := osoCheckMap.GetTopTasksOnly()
 		if len(shaToCollectionsMap) == 1 && vbTasksMap.AllStartsWithSeqno0() {
-			// MB-42273 - OSO not sending streamend
-			//dcpNozzleSettings[parts.DCP_EnableOSO] = true
+			dcpNozzleSettings[parts.DCP_EnableOSO] = true
 		}
 	}
 }
