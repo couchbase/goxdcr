@@ -2,7 +2,6 @@ package parts
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -116,7 +115,7 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string) {
 		resp.Body.Close()
 		created := !strings.Contains(string(bodyBytes), "error") || strings.Contains(string(bodyBytes), "already exists")
 		if created {
-			fmt.Printf("Created replication for bucket %v\n", bucketName)
+			fmt.Printf("Created replication for bucket %v with merge function %v\n", bucketName, mergeFunction)
 			return
 		}
 		time.Sleep(2 * time.Second)
@@ -136,7 +135,7 @@ func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
 	targetDoc, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
 
 	var i int
-	for i = 0; i < 60; i++ {
+	for i = 0; i < 120; i++ {
 		if targetDoc != nil {
 			if sourceDoc.Cas() == targetDoc.Cas() {
 				return nil
@@ -148,7 +147,7 @@ func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
 	if targetDoc != nil && sourceDoc.Cas() == targetDoc.Cas() {
 		return nil
 	} else {
-		return fmt.Errorf("Document '%s' with source %v has not replicated to target after %v seconds. Target  %v\n", key, sourceDoc, i, targetDoc)
+		return fmt.Errorf("Document '%s' with source cas %v has not replicated to target after %v seconds. Target cas %v\n", key, sourceDoc.Cas(), i, targetDoc.Cas())
 	}
 }
 
@@ -206,34 +205,33 @@ func verifyCv(key string, target *gocb.Bucket) (err error) {
 	return nil
 }
 func getPathValue(key string, path string, target *gocb.Bucket) (value interface{}, err error) {
-	frag, err := target.LookupIn(key).GetEx(path, gocb.SubdocFlagXattr).Execute()
-	if err != nil {
+	frag, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx(path, gocb.SubdocFlagXattr).Execute()
+	if err != nil && !strings.Contains(err.Error(), "document is soft-deleted") {
 		return
 	}
 	err = frag.Content(path, &value)
 	return value, err
 }
-func createMergeFunction(t *testing.T, bucketName string) {
+func createMergeFunction(t *testing.T, mergeFunction string) {
 	assert := assert.New(t)
-	//codeBody := "function " + bucketName + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) " +
-	//	" {let tmp1 = JSON.parse(sourceDoc); let tmp2 = JSON.parse(targetDoc); let res = {\"key\": key, \"source\": tmp1, \"sourceCas\": sourceCas, \"sourceId\": sourceId, " +
-	//	"\"target\": tmp2, \"targetCas\": targetCas, \"targetId\": targetId}; return JSON.stringify(res)}"
-	codeBody := "function " + bucketName + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) " +
-		" {let res = {\"key\": key, \"sourceCas\": sourceCas, \"sourceId\": sourceId, " +
-		" \"targetCas\": targetCas, \"targetId\": targetId}; return JSON.stringify(res)}"
-
-	reqBody, err := json.Marshal(map[string]string{
-		"name": bucketName,
-		"code": codeBody,
-	})
-	urlFunctions := fmt.Sprintf(urlFunctionsFmt, bucketName)
-	req, err := http.NewRequest(base.MethodPost, urlFunctions, bytes.NewBuffer(reqBody))
+	urlFunctions := fmt.Sprintf(urlFunctionsFmt, mergeFunction)
+	fileName := fmt.Sprintf("../tools/testScripts/customConflict/%v.js", mergeFunction)
+	f, err := ioutil.ReadFile(fileName)
+	assert.Nil(err)
+	f1 := strings.Replace(string(f), "\n", "", -1)
+	req, err := http.NewRequest(base.MethodPost, urlFunctions, bytes.NewBufferString(f1))
 	assert.Nil(err)
 	req.Header.Set(base.ContentType, base.JsonContentType)
 	req.SetBasicAuth(username, password)
 	response, err := http.DefaultClient.Do(req)
 	assert.Nil(err)
-	assert.Equal(response.StatusCode, 200)
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusOK {
+		fmt.Printf("Created merge function %v\n", mergeFunction)
+	} else {
+		fmt.Printf("create merge function returned %v for request %v\n", response.Status, req)
+		t.FailNow()
+	}
 }
 func TestCcrXattrAfterRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestCcrXattrAfterRep =================")
@@ -307,6 +305,7 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	mvMap := make(map[string]string)
 	mvMap["Cluster1"] = "FhSITdr4AAA"
+	mvMap["Cluster2"] = "FhSITdr4AAA"
 	mvMap[id.(string)] = string(base.Uint64ToBase64(cas))
 	_, err = sourceBucket.MutateIn(key, 0, expire).
 		UpsertEx("_xdcr.cv", "${Mutation.CAS}", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath|0x10).
@@ -344,11 +343,55 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	id, err = getPathValue(key, "_xdcr.id", targetBucket)
 	assert.Nil(err)
-	_, err = getPathValue(key, "_xdcr.pc", targetBucket)
+	pc, err := getPathValue(key, "_xdcr.pc", targetBucket)
 	assert.Nil(err)
-	assert.Nil(err)
-	_, err = getPathValue(key, "_xdcr.mv", targetBucket)
+	assert.Equal(2, len(pc.(map[string]interface{})))
+	mv, err = getPathValue(key, "_xdcr.mv", targetBucket)
 	assert.NotNil(err)
+	assert.Nil(mv)
+
+	/*
+	 * Test 5: Do an upsert without subdoc flags and check that xattrs are preserved
+	 */
+	_, err = sourceBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "New item"}}, expire)
+	assert.Nil(err)
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+	_, err = getPathValue(key, "_xdcr.id", targetBucket)
+	assert.Nil(err)
+	mv, err = getPathValue(key, "_xdcr.mv", sourceBucket)
+	assert.Nil(err)
+	assert.Equal(3, len(mv.(map[string]interface{})))
+
+	/*
+	 * Test 6. Delete the document and _xdcr is intact
+	 */
+	_, err = sourceBucket.Remove(key, 0)
+	assert.Nil(err)
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+	xdcr, err := getPathValue(key, "_xdcr", targetBucket)
+	assert.Nil(err)
+	assert.Equal(3, len(xdcr.(map[string]interface{})))
+
+	/*
+	 * Test 7. Recreate the document and old _xdcr is lost, unfortunately
+	 */
+	_, err = sourceBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail"}}, expire)
+	assert.Nil(err)
+	err = waitForReplication(key, sourceBucket, targetBucket)
+	assert.Nil(err)
+	xdcr, err = getPathValue(key, "_xdcr", targetBucket)
+	assert.Nil(err)
+	assert.Equal(2, len(xdcr.(map[string]interface{})))
 }
 
 func TestCustomCRDeletedDocs(t *testing.T) {
@@ -388,8 +431,17 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 	err = waitForReplication(key, sourceBucket, targetBucket)
 	assert.Nil(err)
 	// verify deleted document has the expected XATTR
-	targetDoc, err := targetBucket.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
-	assert.True(targetDoc.Exists("id"))
+	xdcr, err := getPathValue(key, "_xdcr", targetBucket)
+	assert.Nil(err)
+	xdcrMap := xdcr.(map[string]interface{})
+	if _, ok := xdcrMap["id"]; !ok {
+		fmt.Printf("XATTRS %s does not contain the expected id field", xdcrMap)
+		t.FailNow()
+	}
+	if _, ok := xdcrMap["cv"]; !ok {
+		fmt.Printf("XATTRS %s does not contain the expected cv field", xdcrMap)
+		t.FailNow()
+	}
 	err = verifyCv(key, targetBucket)
 	assert.Nil(err)
 }
@@ -466,8 +518,9 @@ func TestCcrXattrAfterMerge(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createMergeFunction(t, bucketName)
-	createReplication(t, bucketName, bucketName)
+	mergeFunc := "simpleMerge"
+	createMergeFunction(t, mergeFunc)
+	createReplication(t, bucketName, mergeFunc)
 
 	// Create documents at target and then at source to get conflicts
 	key := time.Now().Format(time.RFC3339)
@@ -515,12 +568,12 @@ func TestCcrXattrSetBack(t *testing.T) {
 	bucketName := "CCRSetBack"
 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
 	if err != nil {
-		fmt.Printf("TestCcrXattrAfterMerge skipped because source cluster is not ready. Error: %v\n", err)
+		fmt.Printf("TestCcrXattrSetBack skipped because source cluster is not ready. Error: %v\n", err)
 		return
 	}
 	targetBucket, err := createBucket(targetConnStr, bucketName)
 	if err != nil {
-		fmt.Printf("TestCcrXattrAfterMerge skipped because target cluster is not ready. Error: %v\n", err)
+		fmt.Printf("TestCcrXattrSetBack skipped because target cluster is not ready. Error: %v\n", err)
 		return
 	}
 	assert.NotNil(sourceBucket)

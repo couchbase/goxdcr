@@ -492,7 +492,8 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			err = service.resolver_svc.CheckMergeFunction(f)
 			if err != nil {
 				if f != base.DefaultMergeFunc {
-					return err, warnings
+					errorMap[base.MergeFunctionMappingKey] = err
+					return nil, warnings
 				} else {
 					// Create the default merge function if it is not there
 					service.resolver_svc.InitDefaultFunc()

@@ -12,36 +12,32 @@ set -u
 
 function eventingFunctionUIHandlerTest {
 	echo "====== Test eventing function UIHandler ======"
-	echo "=== Create library math function sub at XDCR admin port ==="
-	curl -X POST \
-		http://localhost:13000/functions/v1/libraries/math/functions/sub \
+
+	funcName="simpleMerge"
+	echo "=== Create library xdcr function $funcName at XDCR admin port ==="
+	curl -i -POST \
+		http://localhost:13000/functions/v1/libraries/xdcr/functions/$funcName \
 		-u $DEFAULT_ADMIN:$DEFAULT_PW \
 		-H 'content-type: application/json' \
-		-d '{
-	  		"name": "sub",
-	  		"code": "function sub(a,b) { return helper(a,b); }\n function helper(a,b) { return a - b; }"
-		  }'
-
+		-d @$funcName.js
 	if (($? != 0)); then
-		echo "Failed to create function"
+		echo "Failed to create function $funcName"
 		exit 1
 	fi
 
-	echo "=== Get library math function sub at XDCR admin port ==="
-	curl -s -X GET http://localhost:13000/functions/v1/libraries/math/functions/sub \
+	echo "=== Get library xdcr function $funcName at XDCR admin port ==="
+	curl -s -X GET http://localhost:13000/functions/v1/libraries/math/functions/$funcName \
 		-u $DEFAULT_ADMIN:$DEFAULT_PW
-
 	if (($? != 0)); then
 		echo "Failed to GET function"
 		exit 1
 	fi
 
-	echo "=== Delete library math function sub at XDCR admin port ==="
-	curl -s -X DELETE http://localhost:13000/functions/v1/libraries/math/functions/sub \
+	echo "=== Delete library math function $funcName at XDCR admin port ==="
+	curl -s -X DELETE http://localhost:13000/functions/v1/libraries/math/functions/$funcName \
 		-u $DEFAULT_ADMIN:$DEFAULT_PW
-
 	if (($? != 0)); then
-		echo "Failed to DELETE function"
+		echo "Failed to DELETE function $funcName"
 		exit 1
 	fi
 }
@@ -173,4 +169,19 @@ function dataLoadLoop {
 		echo
 		i=$(($i + 1))
 	done
+}
+
+function createMergeFunction {
+	local funcName=$1
+	local port=$2
+	curl -i -POST \
+		http://localhost:$port/functions/v1/libraries/xdcr/functions/$funcName \
+		-u $DEFAULT_ADMIN:$DEFAULT_PW \
+		-H 'content-type: application/json' \
+		-d @customConflict/$funcName.js
+
+	if (($? != 0)); then
+		echo "Failed to create function $funcName"
+		exit 1
+	fi
 }

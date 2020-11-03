@@ -28,7 +28,7 @@ if (($? != 0)); then
 	exit 1
 fi
 
-. ./ccr_tests.shlib
+. customConflict/ccr_tests.shlib
 if (($? != 0)); then
 	echo "ccr_tests.shlib failed"
 	exit 1
@@ -39,7 +39,7 @@ testCase="${1:-}"
 declare -a TESTLIST=(eventingFunctionUIHandlerTest configureResolver remoteClusterUserPermission dataLoad dataLoadLoop)
 
 if [[ "$testCase" != "" ]] && [[ ! " ${TESTLIST[*]} " =~ " ${testCase} " ]]; then
-	echo "${testCase} is not in the list of supproted tests:"
+	echo "${testCase} is not in the list of supported tests:"
 	echo ${TESTLIST[*]}
 	exit 1
 fi
@@ -69,8 +69,8 @@ if (($? != 0)); then
 fi
 
 sleep 5
-
-declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto" ["mergeFunctionMapping"]='{"default":"defaultLWW"}')
+mergeFunc="simpleMerge"
+declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto" ["mergeFunctionMapping"]='{"default":"simpleMerge"}')
 
 for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
 	bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
@@ -80,6 +80,15 @@ for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
 			createRemoteClusterReference $cluster1 $cluster2
 		fi
 	done
+done
+
+for port in "${CLUSTER_NAME_XDCR_PORT_MAP[@]}"; do
+	echo "createMergeFunction $mergeFunc $port"
+	createMergeFunction $mergeFunc $port
+	if (($? != 0)); then
+		echo "createMergeFunction $mergeFunc $port failed"
+		exit 1
+	fi
 done
 
 for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
