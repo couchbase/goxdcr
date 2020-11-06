@@ -158,6 +158,9 @@ const (
 	SUBDOC_PATH_NOT_FOUND             = Status(0xc0)
 	SUBDOC_BAD_MULTI                  = Status(0xcc)
 	SUBDOC_MULTI_PATH_FAILURE_DELETED = Status(0xd3)
+
+	// Not a Memcached status
+	UNKNOWN_STATUS = Status(0xffff)
 )
 
 // for log redaction
@@ -176,6 +179,10 @@ var isFatal = map[Status]bool{
 	EACCESS:       true,
 	ENOMEM:        true,
 	NOT_SUPPORTED: true,
+
+	// consider statuses coming from outside couchbase (eg OS errors) as fatal for the connection
+	// as there might be unread data left over on the wire
+	UNKNOWN_STATUS: true,
 }
 
 // the producer/consumer bit in dcp flags
