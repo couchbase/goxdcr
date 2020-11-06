@@ -859,7 +859,7 @@ func DecodeSettingsFromRequest(request *http.Request, isDefaultSettings bool, is
 	}
 
 	for key, valArr := range request.Form {
-		key, valArr, err := mvHelper.CheckAndConvertMultiValue(key, valArr)
+		key, valArr, err := mvHelper.CheckAndConvertMultiValue(key, valArr, isEnterprise)
 		if err != nil {
 			errorsMap[key] = err
 			continue

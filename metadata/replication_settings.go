@@ -261,7 +261,7 @@ func NewMultiValueHelper() *ReplicationMultiValueHelper {
 	}
 }
 
-func (r *ReplicationMultiValueHelper) CheckAndConvertMultiValue(key string, valArr []string) (restKey string, outValArr []string, err error) {
+func (r *ReplicationMultiValueHelper) CheckAndConvertMultiValue(key string, valArr []string, isEnterprise bool) (restKey string, outValArr []string, err error) {
 	var settingsConfigKey string
 	var newVal interface{}
 	for k, v := range MultiValueMap {
@@ -297,7 +297,7 @@ func (r *ReplicationMultiValueHelper) CheckAndConvertMultiValue(key string, valA
 		r.activeConfig[settingsConfigKey] = newVal
 		outValArr[0] = newVal.(base.FilterExpDelType).String()
 	case CollectionsMgtMultiKey:
-		newVal, err = r.handleCollectionsMgtKey(r.activeConfig[settingsConfigKey].(base.CollectionsMgtType), key, valArr[0])
+		newVal, err = r.handleCollectionsMgtKey(r.activeConfig[settingsConfigKey].(base.CollectionsMgtType), key, valArr[0], isEnterprise)
 		if err != nil {
 			return
 		}
@@ -310,7 +310,7 @@ func (r *ReplicationMultiValueHelper) CheckAndConvertMultiValue(key string, valA
 	return
 }
 
-func (r *ReplicationMultiValueHelper) handleCollectionsMgtKey(curConfig base.CollectionsMgtType, key, val string) (retVal interface{}, err error) {
+func (r *ReplicationMultiValueHelper) handleCollectionsMgtKey(curConfig base.CollectionsMgtType, key, val string, enterprise bool) (retVal interface{}, err error) {
 	boolVal, err := r.parseBoolAndMarkSet(key, val)
 	if err != nil {
 		return
@@ -318,10 +318,18 @@ func (r *ReplicationMultiValueHelper) handleCollectionsMgtKey(curConfig base.Col
 
 	switch key {
 	case CollectionsMgtMappingKey:
+		if !enterprise && boolVal {
+			err = base.ErrorExplicitMappingEnterpriseOnly
+			return
+		}
 		curConfig.SetExplicitMapping(boolVal)
 	case CollectionsMgtMirrorKey:
 		curConfig.SetMirroring(boolVal)
 	case CollectionsMgtMigrateKey:
+		if !enterprise && boolVal {
+			err = base.ErrorColMigrationEnterpriseOnly
+			return
+		}
 		curConfig.SetMigration(boolVal)
 	case CollectionsMgtOsoKey:
 		curConfig.SetOSO(boolVal)

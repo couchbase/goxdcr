@@ -168,14 +168,14 @@ func TestValidateSettingExpDelFlagPersist(t *testing.T) {
 	var valArr []string = []string{"true"}
 	var key string = FilterExpKey
 	checkValArr := valArr[0]
-	retKey, retValArr, err := helper.CheckAndConvertMultiValue(key, valArr)
+	retKey, retValArr, err := helper.CheckAndConvertMultiValue(key, valArr, false)
 	assert.Equal(base.FilterExpDelKey, retKey)
 	assert.NotEqual(retValArr[0], checkValArr)
 	assert.Nil(err)
 	assert.Equal(retValArr[0], base.FilterExpDelSkipExpiration.String())
 	key = FilterDelKey
 	valArr[0] = "true"
-	retKey, retValArr, err = helper.CheckAndConvertMultiValue(key, valArr)
+	retKey, retValArr, err = helper.CheckAndConvertMultiValue(key, valArr, false)
 	var checkVal base.FilterExpDelType
 	checkVal.SetSkipDeletes(true)
 	checkVal.SetSkipExpiration(true)
@@ -192,13 +192,13 @@ func TestMultiValueHelperCheckAndConvert(t *testing.T) {
 	// Assuming user passes in 2 flags, skipDel and skipExp
 	key := FilterExpKey
 	valArr = append(valArr, "true")
-	key, valArr, err := mvHelper.CheckAndConvertMultiValue(key, valArr)
+	key, valArr, err := mvHelper.CheckAndConvertMultiValue(key, valArr, false)
 	assert.Nil(err)
 	assert.NotEqual(FilterExpKey, key)
 	assert.NotEqual("true", valArr[0])
 	key = FilterDelKey
 	valArr[0] = "true"
-	key, valArr, err = mvHelper.CheckAndConvertMultiValue(key, valArr)
+	key, valArr, err = mvHelper.CheckAndConvertMultiValue(key, valArr, false)
 	assert.Nil(err)
 
 	// test export to settingsmap
@@ -223,13 +223,13 @@ func TestMultiValueHelperCheckAndConvert(t *testing.T) {
 	mvHelper = NewMultiValueHelper()
 	key = FilterExpKey
 	valArr[0] = "false"
-	mvHelper.CheckAndConvertMultiValue(key, valArr)
+	mvHelper.CheckAndConvertMultiValue(key, valArr, false)
 	key = FilterDelKey
 	valArr[0] = "true"
-	mvHelper.CheckAndConvertMultiValue(key, valArr)
+	mvHelper.CheckAndConvertMultiValue(key, valArr, false)
 	key = BypassExpiryKey
 	valArr[0] = "false"
-	mvHelper.CheckAndConvertMultiValue(key, valArr)
+	mvHelper.CheckAndConvertMultiValue(key, valArr, false)
 	mvHelper.ExportToSettingsMap(settingsMap)
 	assert.Equal(1, len(settingsMap))
 	replSettings.UpdateSettingsFromMap(settingsMap)
