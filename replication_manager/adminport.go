@@ -1029,7 +1029,7 @@ func (adminport *Adminport) IsReadyForHeartBeat() bool {
 func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doRegexpValidationRequest\n")
 
-	expression, docId, bucket, err := DecodeRegexpValidationRequest(request, adminport.utils)
+	expression, docId, bucket, collectionNs, err := DecodeRegexpValidationRequest(request)
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
 	}
@@ -1039,12 +1039,12 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 		return response, err
 	}
 
-	logger_ap.Infof("Request params: expression=%v%v%v docId=%v%v%v\n bucket=%v",
+	logger_ap.Infof("Request params: expression=%v%v%v docId=%v%v%v bucket=%v scope=%v collection=%v",
 		base.UdTagBegin, expression, base.UdTagEnd,
 		base.UdTagBegin, docId, base.UdTagEnd,
-		bucket)
+		bucket, collectionNs.ScopeName, collectionNs.CollectionName)
 
-	return NewRegexpValidationResponse(adminport.utils.FilterExpressionMatchesDoc(expression, docId, bucket, adminport.sourceKVHost, adminport.kvAdminPort))
+	return NewRegexpValidationResponse(adminport.utils.FilterExpressionMatchesDoc(expression, docId, bucket, collectionNs, adminport.sourceKVHost, adminport.kvAdminPort))
 }
 
 func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Response, error) {

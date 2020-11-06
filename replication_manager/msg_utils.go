@@ -24,7 +24,6 @@ import (
 	base2 "github.com/couchbase/goxdcr/base/helpers"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 // xdcr prefix for internal settings keys
@@ -104,6 +103,8 @@ const (
 	Expression = "expression"
 	DocID      = "docId"
 	Bucket     = "bucket"
+	Scope      = "scope"
+	Collection = "collection"
 	// Output
 	MatchResult = "result"
 	MatchError  = "error"
@@ -917,10 +918,14 @@ func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (metad
 	return settings, nil
 }
 
-func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsIface) (expression, docId, bucket string, err error) {
+func DecodeRegexpValidationRequest(request *http.Request) (expression, docId, bucket string, collectionNamespace *base.CollectionNamespace, err error) {
 	if err = request.ParseForm(); err != nil {
 		return
 	}
+
+	collectionNamespace = base.NewDefaultCollectionNamespace()
+	var scopeSpecified bool
+	var collectionSpecified bool
 
 	for key, valArr := range request.Form {
 		switch key {
@@ -930,6 +935,12 @@ func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsI
 			docId = getStringFromValArr(valArr)
 		case Bucket:
 			bucket = getStringFromValArr(valArr)
+		case Scope:
+			scopeSpecified = true
+			collectionNamespace.ScopeName = getStringFromValArr(valArr)
+		case Collection:
+			collectionSpecified = true
+			collectionNamespace.CollectionName = getStringFromValArr(valArr)
 		default:
 			// ignore other parameters
 		}
@@ -941,6 +952,10 @@ func DecodeRegexpValidationRequest(request *http.Request, utils utilities.UtilsI
 		err = base.MissingParameterError(DocID)
 	} else if len(bucket) == 0 {
 		err = base.MissingParameterError(Bucket)
+	} else if scopeSpecified && !collectionSpecified {
+		err = base.MissingParameterError(Collection)
+	} else if collectionSpecified && !scopeSpecified {
+		err = base.MissingParameterError(Scope)
 	}
 	return
 }

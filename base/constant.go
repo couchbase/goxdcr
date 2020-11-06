@@ -50,6 +50,8 @@ var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
 var DocsPath = "/docs/"
 var CollectionsManifestPath = "/collections"
+var ScopesPath = "/scopes/"
+var CollectionsPath = CollectionsManifestPath + "/"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"

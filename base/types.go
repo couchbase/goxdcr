@@ -199,6 +199,11 @@ func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, 
 	}
 }
 
+func NewDefaultCollectionNamespace() *CollectionNamespace {
+	ns, _ := NewCollectionNamespaceFromString(fmt.Sprintf("%v%v%v", DefaultScopeCollectionName, ScopeCollectionDelimiter, DefaultScopeCollectionName))
+	return &ns
+}
+
 func (c CollectionNamespace) ToIndexString() string {
 	return fmt.Sprintf("%v%v%v", c.ScopeName, ScopeCollectionDelimiter, c.CollectionName)
 }

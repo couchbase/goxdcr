@@ -371,7 +371,7 @@ func filterExpressionGetDocVal(bucket *gocb.Bucket, docId string) ([]byte, gocb.
 // Queries ns_server REST endpoint for a document content
 // ns_server returns the document in a special json format, so then massage the data into gojsonsm compatible format
 // and pass it through gojsonsm for testing
-func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, bucketName, addr string, port uint16) (result bool, err error) {
+func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, bucketName string, collectionNs *base.CollectionNamespace, addr string, port uint16) (result bool, err error) {
 	nsServerDocContent := make(map[string]interface{})
 	hostAddr := base.GetHostAddr(addr, port)
 	var statusCode int
@@ -381,8 +381,14 @@ func (u *Utilities) FilterExpressionMatchesDoc(expression, docId, bucketName, ad
 		return
 	}
 
+	if collectionNs == nil {
+		collectionNs = base.NewDefaultCollectionNamespace()
+	}
+
+	urlPath := u.composeNsServerDocGetPath(bucketName, collectionNs, docId)
+
 	retryOp := func() error {
-		err, statusCode = u.QueryRestApi(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.DocsPath+docId, false /*preservePathEncoding*/, base.MethodGet, "" /*contentType*/, nil, /*body*/
+		err, statusCode = u.QueryRestApi(hostAddr, urlPath, false /*preservePathEncoding*/, base.MethodGet, "" /*contentType*/, nil, /*body*/
 			0 /*timeout*/, &nsServerDocContent, u.logger_utils)
 
 		if err != nil {
@@ -2845,4 +2851,15 @@ func (u *Utilities) GetCollectionsManifest(hostAddr, bucketName, username, passw
 
 func (u *Utilities) NewDataPool() base.DataPool {
 	return base.NewDataPool()
+}
+
+func (u *Utilities) composeNsServerDocGetPath(bucketName string, ns *base.CollectionNamespace, docId string) string {
+	var path = base.DefaultPoolBucketsPath + bucketName
+	var docPath = base.DocsPath + docId
+	if ns.IsDefault() {
+		path += docPath
+	} else {
+		path += base.ScopesPath + ns.ScopeName + base.CollectionsPath + ns.CollectionName + docPath
+	}
+	return path
 }
