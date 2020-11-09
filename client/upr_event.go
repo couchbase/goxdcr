@@ -84,6 +84,7 @@ type UprEvent struct {
 	SysEventVersion uint8                   // Based on the version, the way Extra bytes is parsed is different
 	ValueLen        int                     // Cache it to avoid len() calls for performance
 	CollectionId    uint32                  // Valid if Collection is in use
+	StreamId        *uint16                 // Nil if not in use
 }
 
 // FailoverLog containing vvuid and sequnce number
@@ -162,6 +163,15 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFrom
 
 func (event *UprEvent) PopulateFieldsBasedOnStreamType(rq gomemcached.MCRequest, streamType DcpStreamType) {
 	switch streamType {
+	case CollectionsStreamId:
+		for _, extra := range rq.FramingExtras {
+			streamId, streamIdErr := extra.GetStreamId()
+			if streamIdErr == nil {
+				event.StreamId = &streamId
+			}
+		}
+		// After parsing streamID, still need to populate regular collectionID
+		fallthrough
 	case CollectionsNonStreamId:
 		switch rq.Opcode {
 		// Only these will have CID encoded within the key
@@ -175,9 +185,6 @@ func (event *UprEvent) PopulateFieldsBasedOnStreamType(rq gomemcached.MCRequest,
 		default:
 			event.Key = rq.Key
 		}
-	case CollectionsStreamId:
-		// TODO - not implemented
-		fallthrough
 	case NonCollectionStream:
 		// Let default behavior be legacy stream type
 		fallthrough
