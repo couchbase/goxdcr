@@ -1383,6 +1383,16 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 			seqEnd = checkSeqEnd
 		}
 
+		// In rare cases where seqEnd is set to lower than seqBegin, make sure the request is valid
+		if vbts.Seqno > seqEnd {
+			if seqEnd == 0 {
+				vbts.Seqno = 0
+				seqEnd = 1
+			} else {
+				vbts.Seqno = seqEnd - 1
+			}
+		}
+
 		// In a corner case where startSeq == endSeqno, DCP will not send down a streamEnd and instead just
 		// close the connection. Mark the endSeqno here first to check if this is the case
 		dcp.endSeqnoForDcp[vbno].SetSeqno(seqEnd)
