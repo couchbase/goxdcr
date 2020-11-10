@@ -17,7 +17,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -41,7 +41,6 @@ declare -a collection2Arr=("col1" "col2")
 declare -a collection3Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
@@ -63,13 +62,13 @@ function runTestCase {
 	echo "Running explicit mapping broken then repaired test case"
 	echo "============================================================================"
 	testForClusterRun
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 	# Before doing provisioning, get old internal settings
@@ -79,22 +78,22 @@ function runTestCase {
 	trap cleanupTestCaseInternalSettings EXIT
 
 	# Get current instance
-    local -i currentBrokenInstanceCnt
-    local -i currentRepairedInstanceCnt
-    local -i currentBackfillInstanceCnt
-    local -i currentVBTasksDoneInstanceCnt
-    local -i currentBackfillAppendInstanceCnt
+	local -i currentBrokenInstanceCnt
+	local -i currentRepairedInstanceCnt
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillAppendInstanceCnt
 
-    local currentClusterLog
-    currentClusterLog=`getClusterLogs "C1"`
-    currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
-    currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+	local currentClusterLog
+	currentClusterLog=$(getClusterLogs "C1")
+	currentBrokenInstanceCnt=$(echo "$currentClusterLog" | grep -c "$BROKEN_MSG")
+	currentRepairedInstanceCnt=$(echo "$currentClusterLog" | grep -c "$REPAIR_MSG")
 
-    local currentXdcrLog
-    currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-    currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
-    currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
-    currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+	local currentXdcrLog
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
+	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -104,20 +103,20 @@ function runTestCase {
 	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
-	
+
 	runDataLoad
 
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
 	# 3x because there is white noise writing to S1.col2, and one more S1.col3 on the deny list
-	checkItemCnt "C1" "B1" $(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 3 ))
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 	# currently, there is no S3.col3 on target
 	checkItemCnt "C2" "B2" 0
 
-	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 
 	# Then re-setup the explicit matching that matches
-    SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection3Arr[@]})
+	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection3Arr[@]})
 	setupTopologies
 	printGlobalScopeAndCollectionInfo
 	echo "Sleeping 30 seconds for discovery and automatic backfill"
@@ -126,18 +125,18 @@ function runTestCase {
 	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt + 1 ))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
 
 	# No append should occur
-	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG"  $(( $currentBackfillAppendInstanceCnt ))
+	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG" $(($currentBackfillAppendInstanceCnt))
 
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
 	cleanupBucketReplications
- 	cleanupBuckets
- 	cleanupRemoteClusterRefs
- 	# remove trap as no longer needed
- 	trap - EXIT
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	# remove trap as no longer needed
+	trap - EXIT
 }

@@ -17,7 +17,7 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
@@ -37,7 +37,7 @@ declare -a cluster1BucketsArr
 declare -a cluster2BucketsArr
 cluster1BucketsArr=("B0" "B1")
 cluster2BucketsArr=("B2" "B3")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]=${cluster2BucketsArr[@]})
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster2BucketsArr[@]})
 
 # Bucket properties
 declare -A BucketNoCompression=(["ramQuotaMB"]=100 ["compressionMode"]="off")
@@ -58,7 +58,6 @@ declare -A CompressionReplProperties=(["replicationType"]="continuous" ["checkpo
 #declare -a collection2Arr=("col1" "col2" "col3")
 #SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
 	# sleep 3 seconds before running
 	sleep 3
@@ -72,11 +71,10 @@ function runDataLoad {
 
 EXPECTED_CNT=20000
 
-
 #MAIN
 sleepTime=10
 testForClusterRun
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 sleep 1
@@ -90,10 +88,9 @@ function printTestCaseStats {
 
 	echo "FROM $srcCluster $srcBucket TO $targetCluster $targetBucket"
 	echo "-----------------------------------------------------------"
-	for key in "${statsKeys[@]}"
-	do
-		local data=`getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "$key"`
-		if (( $? != 0 ));then
+	for key in "${statsKeys[@]}"; do
+		local data=$(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "$key")
+		if (($? != 0)); then
 			continue
 		fi
 		echo "$key: $data"
@@ -109,34 +106,34 @@ function runTestCase {
 
 	echo "TEST CASE $testCaseName SourceBucket: $sourceBucketPolicy TargetBucket: $targetBucketPolicy CompressionMode: $replPolicy"
 	cleanupBucketNamePropertyMap
-	if [[ "$sourceBucketPolicy" == "Active" ]];then
+	if [[ "$sourceBucketPolicy" == "Active" ]]; then
 		insertPropertyIntoBucketNamePropertyMap "B0" BucketActiveCompression
 		insertPropertyIntoBucketNamePropertyMap "B1" BucketActiveCompression
-	elif [[ "$sourceBucketPolicy" == "Passive" ]];then
+	elif [[ "$sourceBucketPolicy" == "Passive" ]]; then
 		insertPropertyIntoBucketNamePropertyMap "B0" BucketPassiveCompression
 		insertPropertyIntoBucketNamePropertyMap "B1" BucketPassiveCompression
-	elif [[ "$sourceBucketPolicy" == "None" ]];then
+	elif [[ "$sourceBucketPolicy" == "None" ]]; then
 		insertPropertyIntoBucketNamePropertyMap "B0" BucketNoCompression
 		insertPropertyIntoBucketNamePropertyMap "B1" BucketNoCompression
 	fi
 
-	if [[ "$targetBucketPolicy" == "Active" ]];then
+	if [[ "$targetBucketPolicy" == "Active" ]]; then
 		insertPropertyIntoBucketNamePropertyMap "B2" BucketActiveCompression
 		insertPropertyIntoBucketNamePropertyMap "B3" BucketActiveCompression
-	elif [[ "$targetBucketPolicy" == "Passive" ]];then
+	elif [[ "$targetBucketPolicy" == "Passive" ]]; then
 		insertPropertyIntoBucketNamePropertyMap "B2" BucketPassiveCompression
 		insertPropertyIntoBucketNamePropertyMap "B3" BucketPassiveCompression
-	elif [[ "$targetBucketPolicy" == "None" ]];then
+	elif [[ "$targetBucketPolicy" == "None" ]]; then
 		insertPropertyIntoBucketNamePropertyMap "B2" BucketNoCompression
 		insertPropertyIntoBucketNamePropertyMap "B3" BucketNoCompression
 	fi
 
 	setupTopologies
-	if [[ "$testCaseName" == "1a" ]];then
+	if [[ "$testCaseName" == "1a" ]]; then
 		# create rC reference once
 		createRemoteClusterReference "C1" "C2"
 		createRemoteClusterReference "C2" "C1"
-		if (( $? != 0 ));then
+		if (($? != 0)); then
 			exit $?
 		fi
 	fi
@@ -146,12 +143,12 @@ function runTestCase {
 	runDataLoad
 	sleep 1
 
-	if [[ "$replPolicy" == "Auto" ]];then
+	if [[ "$replPolicy" == "Auto" ]]; then
 		createBucketReplication "C1" "B0" "C2" "B2" CompressionReplProperties
 		createBucketReplication "C1" "B1" "C2" "B3" CompressionReplProperties
 		createBucketReplication "C2" "B2" "C1" "B0" CompressionReplProperties
 		createBucketReplication "C2" "B3" "C1" "B1" CompressionReplProperties
-	elif [[ "$replPolicy" == "None" ]];then
+	elif [[ "$replPolicy" == "None" ]]; then
 		createBucketReplication "C1" "B0" "C2" "B2" NoCompressionReplProperties
 		createBucketReplication "C1" "B1" "C2" "B3" NoCompressionReplProperties
 		createBucketReplication "C2" "B2" "C1" "B0" NoCompressionReplProperties
@@ -178,7 +175,6 @@ function runTestCase {
 	cleanupBuckets
 	sleep $sleepTime
 }
-
 
 runTestCase "1a" "Active" "Active" "Auto"
 runTestCase "1b" "Active" "Active" "None"

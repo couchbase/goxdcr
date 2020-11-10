@@ -4,9 +4,7 @@ set -u
 # if nothing is specified, list all possible nodes to get or set internalSettings
 function listAllClusters {
 	echo "List of following available nodes to get or set internal settings:"
-	for cName in "${!CLUSTER_NAME_XDCR_PORT_MAP[@]}"
-	do
+	for cName in "${!CLUSTER_NAME_XDCR_PORT_MAP[@]}"; do
 		echo "Cluster Name: $cName port: ${CLUSTER_NAME_XDCR_PORT_MAP[$cName]}"
 	done
 }
-

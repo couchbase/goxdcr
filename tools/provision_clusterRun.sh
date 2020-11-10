@@ -17,7 +17,7 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
@@ -36,7 +36,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -61,25 +61,24 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-#	runCbWorkloadGenBucket "C1" "B0" &
+	#	runCbWorkloadGenBucket "C1" "B0" &
 	runCbWorkloadGenBucket "C1" "B1" &
-#	runCbWorkloadGenBucket "C2" "B2" &
+	#	runCbWorkloadGenBucket "C2" "B2" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "col_"
 	waitForBgJobs
 }
 
 #MAIN
 testForClusterRun
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 # NOTE: Sets up all clusters with developer preview to enable all features
 setupTopologies -d
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 # Wait for vbuckets and all the other things to propagate before XDCR provisioning

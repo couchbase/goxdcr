@@ -32,8 +32,8 @@ Brewery_filter='type=\"brewery\"'
 
 mappingRule="{\"$US_filter\":\"S3.col1\",\"$NonUS_filter\":\"S3.col2\",\"$Brewery_filter\":\"S3.col3\"}"
 
-declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 \
- ["collectionsExplicitMapping"]=true ["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
+declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+	["collectionsExplicitMapping"]=true ["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
 
 # Bucket -> Scopes
 # -----------------
@@ -46,9 +46,8 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
-	beerSample=`locate beer-sample.zip | grep install | grep samples | head -n 1`
+	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
 	runDocLoader "C1" "B1" "$beerSample"
 }
 
@@ -61,25 +60,24 @@ function runTestCase {
 	echo "Running collections migration multi-targets test case"
 	echo "============================================================================"
 	testForClusterRun
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
-	
+
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 
-
 	# Get current instance
 	local -i currMultiTargetMsgCnt
-    local currentClusterLog
-    currentClusterLog=`getClusterLogs "C1"`
-    currMultiTargetMsgCnt=`echo "$currentClusterLog" | grep -c "$MULTITARGET_MSG"`
+	local currentClusterLog
+	currentClusterLog=$(getClusterLogs "C1")
+	currMultiTargetMsgCnt=$(echo "$currentClusterLog" | grep -c "$MULTITARGET_MSG")
 
 	echo "Loading beer sample on source cluster..."
 	runDataLoad
@@ -94,12 +92,12 @@ function runTestCase {
 	echo "Waiting 15 seconds before checking item count first pass"
 	sleep 15
 	checkItemCnt "C2" "B2" 2824
-    validateLogWithInstance "C1" "$MULTITARGET_MSG" $(( $currMultiTargetMsgCnt + 1 ))
+	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1))
 
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
 	cleanupBucketReplications
- 	cleanupBuckets
- 	cleanupRemoteClusterRefs
+	cleanupBuckets
+	cleanupRemoteClusterRefs
 }

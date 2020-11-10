@@ -17,7 +17,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -40,7 +40,6 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
 declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
-
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
@@ -66,13 +65,13 @@ function runTestCase {
 	echo "Running brokenmapping cleanup test case"
 	echo "============================================================================"
 	testForClusterRun
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 	# Before doing provisioning, get old internal settings
@@ -88,16 +87,16 @@ function runTestCase {
 	local -i currentVBTasksDoneInstanceCnt
 
 	local currentClusterLog
-	currentClusterLog=`getClusterLogs "C1"`
-	currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
-	currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+	currentClusterLog=$(getClusterLogs "C1")
+	currentBrokenInstanceCnt=$(echo "$currentClusterLog" | grep -c "$BROKEN_MSG")
+	currentRepairedInstanceCnt=$(echo "$currentClusterLog" | grep -c "$REPAIR_MSG")
 
 	local currentXdcrLog
-	currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-	currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
-	currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
-	currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
-	currentCkptMappingsChangedCnt=`echo "$currentXdcrLog" | grep -c "$CKPT_MAPPINGS_CHANGED_MSG"`
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
+	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
+	currentCkptMappingsChangedCnt=$(echo "$currentXdcrLog" | grep -c "$CKPT_MAPPINGS_CHANGED_MSG")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -114,32 +113,32 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" 0
 
-	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 
-    # Once broken map is confirmed, restart pipeline to force checkpoint
-    pauseReplication "C1" "B1" "C2" "B2"
-    echo "Waiting 10 secs for replication to pause..."
-    sleep 10
-    resumeReplication "C1" "B1" "C2" "B2"
-    echo "Waiting 10 secs for replication to resume..."
-    sleep 10
-    waitForChangesLeft0 "C1" "B1" "C2" "B2"
-    # Rewriting the I/O shouldn't cause anymore broken msg
+	# Once broken map is confirmed, restart pipeline to force checkpoint
+	pauseReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 secs for replication to pause..."
+	sleep 10
+	resumeReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 secs for replication to resume..."
+	sleep 10
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# Rewriting the I/O shouldn't cause anymore broken msg
 	runDataLoad
 	sleep 5
-    waitForChangesLeft0 "C1" "B1" "C2" "B2"
-    # broken msg shouldn't have increased
-	validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# broken msg shouldn't have increased
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 	# mappingChanged msg should not have occurred
-	validateLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(( $currentCkptMappingsChangedCnt ))
+	validateLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(($currentCkptMappingsChangedCnt))
 
-    echo "Deleting collection on source cluster C1:B1:S1:col1"
-    deleteCollection "C1" "B1" "S1" "col1"
+	echo "Deleting collection on source cluster C1:B1:S1:col1"
+	deleteCollection "C1" "B1" "S1" "col1"
 	printGlobalScopeAndCollectionInfo
 
 	echo "Sleeping 10 seconds for collectionsManifestSvc to pull new manifest"
-    sleep 10
-	validateInternalLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(( $currentCkptMappingsChangedCnt + 1 ))
+	sleep 10
+	validateInternalLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(($currentCkptMappingsChangedCnt + 1))
 
 	grepForPanics
 	validateXDCRCheckpoints "C1"
@@ -149,9 +148,9 @@ function runTestCase {
 	echo "PASSED"
 	echo "============================================================================"
 	cleanupBucketReplications
- 	cleanupBuckets
- 	cleanupRemoteClusterRefs
- 	cleanupTestCaseInternalSettings
- 	# remove trap as no longer needed
- 	trap - EXIT
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	cleanupTestCaseInternalSettings
+	# remove trap as no longer needed
+	trap - EXIT
 }

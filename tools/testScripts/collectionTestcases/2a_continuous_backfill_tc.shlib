@@ -17,7 +17,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -41,10 +41,9 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoadContinuous {
-	while (( 1 ));do
-		runCbWorkloadGenCollectionCont "C1" "B1" "S1" "col1" > /dev/null 2>&1
+	while ((1)); do
+		runCbWorkloadGenCollectionCont "C1" "B1" "S1" "col1" >/dev/null 2>&1
 	done
 }
 
@@ -53,7 +52,7 @@ declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 declare -a BG_WORKLOAD_PID
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
-	if [[ ! -z "$BG_WORKLOAD_PID" ]];then
+	if [[ ! -z "$BG_WORKLOAD_PID" ]]; then
 		kill $BG_WORKLOAD_PID
 	fi
 	unset BG_WORKLOAD_PID
@@ -61,8 +60,8 @@ function cleanupTestCaseInternalSettings {
 
 function checkChangesLeftBackup {
 	local ongoingThreshold=30000
-	changesLeft=`getChangesLeft "C1" "B1" "C2" "B2"`
-	if (( $changesLeft > $ongoingThreshold ));then
+	changesLeft=$(getChangesLeft "C1" "B1" "C2" "B2")
+	if (($changesLeft > $ongoingThreshold)); then
 		echo "Changes left is $changesLeft"
 		echo "Killing workload"
 		kill $BG_WORKLOAD_PID
@@ -76,11 +75,10 @@ function deleteAndRecreateBackfillMultiples {
 	local total=$1
 	local i
 
-	for (( i=0; $i < $total; i=$(($i+1)) ))
-	do
+	for ((i = 0; $i < $total; i = $(($i + 1)))); do
 		echo "Sleeping 10 seconds before running another pass"
 		sleep 10
-		echo "Running multiple delete and recreate target collection $(( $i+1 )) out of $total"
+		echo "Running multiple delete and recreate target collection $(($i + 1)) out of $total"
 
 		# Get current instance
 		local -i currentBrokenInstanceCnt
@@ -89,14 +87,14 @@ function deleteAndRecreateBackfillMultiples {
 		local -i currentVBTasksDoneInstanceCnt
 
 		local currentClusterLog
-		currentClusterLog=`getClusterLogs "C1"`
-		currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
-		currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+		currentClusterLog=$(getClusterLogs "C1")
+		currentBrokenInstanceCnt=$(echo "$currentClusterLog" | grep -c "$BROKEN_MSG")
+		currentRepairedInstanceCnt=$(echo "$currentClusterLog" | grep -c "$REPAIR_MSG")
 
 		local currentXdcrLog
-		currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-		currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
-		currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+		currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+		currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+		currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 
 		echo "Waiting 5 seconds before checking item count first pass"
 		sleep 5
@@ -104,9 +102,9 @@ function deleteAndRecreateBackfillMultiples {
 		checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 		checkChangesLeftBackup
 
-		echo "BEFORE DELETING COLLECTION: `date`"
+		echo "BEFORE DELETING COLLECTION: $(date)"
 		printGlobalScopeAndCollectionInfo | grep "col1"
-		echo "DELETING COLLECTION: `date`"
+		echo "DELETING COLLECTION: $(date)"
 		deleteCollection "C2" "B2" "S1" "col1"
 		printGlobalScopeAndCollectionInfo | grep "col1"
 		# Bucket 2 should have 0 items since col1 just got deleted
@@ -115,27 +113,27 @@ function deleteAndRecreateBackfillMultiples {
 
 		echo "Waiting 15 seconds to check broken mapping message"
 		sleep 15
-		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
-        validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt ))
+		validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
+		validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt))
 
-		echo "RECREATING COLLECTION `date`"
+		echo "RECREATING COLLECTION $(date)"
 		createCollection "C2" "B2" "S1" "col1"
 		# Bucket 2 should have 0 items since col1 just got recreated
 		checkItemCnt "C2" "B2" 0
 		printGlobalScopeAndCollectionInfo | grep "col1"
 		echo "Waiting for 30 seconds until discovery and automatic backfill"
 		sleep 30
-        # Due to collections router being able to catch xmem race conditions, there may be multiple backfill requests
-		validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 )) $(( $currentBackfillInstanceCnt + 2 ))
+		# Due to collections router being able to catch xmem race conditions, there may be multiple backfill requests
+		validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
 		checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-		validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentBackfillInstanceCnt + 1 )) $(( $currentVBTasksDoneInstanceCnt + 2 ))
+		validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentVBTasksDoneInstanceCnt + 2))
 
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
-		sleep 15 
+		sleep 15
 		# Main pipeline should show repaired message
-        validateLogWithInstance "C1" "$REPAIR_MSG" $(( $currentRepairedInstanceCnt + 1 ))
+		validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
 		# Broken message should have remained constant
-		validateLogWithInstance "C1" "$BROKEN_MSG" $(( $currentBrokenInstanceCnt + 1 ))
+		validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 		grepForPanics
 	done
 }
@@ -145,13 +143,13 @@ function runTestCase {
 	echo "Running continuous and repeated backfill test"
 	echo "============================================================================"
 	testForClusterRun
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 	# Before doing provisioning, get old internal settings
@@ -168,7 +166,7 @@ function runTestCase {
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
-	
+
 	echo "Sleep 20 seconds before starting I/O for manifest to be pulled"
 	sleep 20
 	runDataLoadContinuous &
@@ -184,9 +182,9 @@ function runTestCase {
 	echo "PASSED"
 	echo "============================================================================"
 	cleanupBucketReplications
- 	cleanupBuckets
- 	cleanupRemoteClusterRefs
- 	cleanupTestCaseInternalSettings
- 	# remove trap as no longer needed
- 	trap - EXIT
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	cleanupTestCaseInternalSettings
+	# remove trap as no longer needed
+	trap - EXIT
 }

@@ -13,13 +13,13 @@ set -u
 function exportSingleVarMap {
 	local name=$1
 	#first see if it is exported validly
-	if (( `declare -p $name | grep -c "="` == 0 ));then
+	if (($(declare -p $name | grep -c "=") == 0)); then
 		return 1
 	fi
 
 	# First check if declare shows -Ax or just -A
-	flag=`declare -p $name| awk '{print $2}'`
-	if (( $? != 0 ));then
+	flag=$(declare -p $name | awk '{print $2}')
+	if (($? != 0)); then
 		return $?
 	fi
 	declare -p $name | sed "s/declare ${flag}/export -A/g"
@@ -27,8 +27,8 @@ function exportSingleVarMap {
 
 function exportSingleVar {
 	local name=$1
-	flag=`declare -p $name| awk '{print $2}'`
-	if (( $? != 0 ));then
+	flag=$(declare -p $name | awk '{print $2}')
+	if (($? != 0)); then
 		return $?
 	fi
 	declare -p $name | sed "s/declare ${flag}/export /g"
@@ -41,48 +41,44 @@ function exportProvisionedConfig {
 	local outputFile=$XDCR_HIDDEN_EXPORTFILE
 
 	# if running from tools/testScripts directory, export to just tools
-	if [[ `basename $PWD`  == "testScripts" ]];then
-	  outputFile="../${outputFile}"
-  fi
-
+	if [[ $(basename $PWD) == "testScripts" ]]; then
+		outputFile="../${outputFile}"
+	fi
 
 	for mapName in CLUSTER_NAME_PORT_MAP \
-					CLUSTER_NAME_XDCR_PORT_MAP \
-					CLUSTER_NAME_BUCKET_MAP \
-					BUCKET_NAME_RAMQUOTA_MAP \
-					BUCKET_NAME_SCOPE_MAP \
-					SCOPE_NAME_COLLECTION_MAP \
-					BUCKET_PROPERTIES_OUTPUT_MAP \
-					BUCKET_REPL_PROPERTIES_MAP \
-					BUCKET_REPL_PROPERTIES_OUTPUT_MAP \
-					BUCKET_REPL_EXPORT_MAP \
-					CLUSTER_NAME_BUCKET_DONE_MAP \
-					BUCKET_NAME_SCOPE_DONE_MAP \
-					SCOPE_NAME_COLLECTION_DONE_MAP
-	do
-		local outputStr=`exportSingleVarMap $mapName`
-		if (( $? == 0 ));then
+		CLUSTER_NAME_XDCR_PORT_MAP \
+		CLUSTER_NAME_BUCKET_MAP \
+		BUCKET_NAME_RAMQUOTA_MAP \
+		BUCKET_NAME_SCOPE_MAP \
+		SCOPE_NAME_COLLECTION_MAP \
+		BUCKET_PROPERTIES_OUTPUT_MAP \
+		BUCKET_REPL_PROPERTIES_MAP \
+		BUCKET_REPL_PROPERTIES_OUTPUT_MAP \
+		BUCKET_REPL_EXPORT_MAP \
+		CLUSTER_NAME_BUCKET_DONE_MAP \
+		BUCKET_NAME_SCOPE_DONE_MAP \
+		SCOPE_NAME_COLLECTION_DONE_MAP; do
+		local outputStr=$(exportSingleVarMap $mapName)
+		if (($? == 0)); then
 			outputArr+=("$outputStr")
 		fi
 	done
 
-	for varName in DEFAULT_ADMIN DEFAULT_PW
-	do
-		local outputStr=`exportSingleVar $varName`
-		if (( $? == 0 ));then
+	for varName in DEFAULT_ADMIN DEFAULT_PW; do
+		local outputStr=$(exportSingleVar $varName)
+		if (($? == 0)); then
 			outputArr+=("$outputStr")
 		fi
 	done
 
-	for oneLine in "${outputArr[@]}"
-	do
-		echo "$oneLine" >> $outputFile
+	for oneLine in "${outputArr[@]}"; do
+		echo "$oneLine" >>$outputFile
 	done
 }
 
 function importProvisionedConfig {
 	# Find the exported variables file
-	. $XDCR_HIDDEN_EXPORTFILE 2> /dev/null
+	. $XDCR_HIDDEN_EXPORTFILE 2>/dev/null
 }
 
 # Returns via stdout: REST id
@@ -93,18 +89,16 @@ function getRestIDFromExportedData {
 	local targetClusterName=$3
 	local targetBucketName=$4
 
-	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
-	do
-		local chkSourceCluster=`echo "$replKey" | cut -d, -f1`
-		local restID=`echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g'`
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
+		local chkSourceCluster=$(echo "$replKey" | cut -d, -f1)
+		local restID=$(echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g')
 		local chkSourcePort=${CLUSTER_NAME_PORT_MAP[$chkSourceCluster]:-}
-		local chkSourceBucket=`echo "$replKey" | cut -d, -f2`
-		local chkTargetCluster=`echo "$replKey" | cut -d, -f3`
-		local chkTargetBucket=`echo "$replKey" | cut -d, -f4`
+		local chkSourceBucket=$(echo "$replKey" | cut -d, -f2)
+		local chkTargetCluster=$(echo "$replKey" | cut -d, -f3)
+		local chkTargetBucket=$(echo "$replKey" | cut -d, -f4)
 
-		if [[ "$srcClusterName" == "$chkSourceCluster" ]] && [[ "$srcBucketName" == "$chkSourceBucket" ]] \
-		&& [[ "$targetClusterName" == "$chkTargetCluster" ]] && [[ "$targetBucketName" == "$chkTargetBucket" ]]
-		then
+		if [[ "$srcClusterName" == "$chkSourceCluster" ]] && [[ "$srcBucketName" == "$chkSourceBucket" ]] &&
+			[[ "$targetClusterName" == "$chkTargetCluster" ]] && [[ "$targetBucketName" == "$chkTargetBucket" ]]; then
 			echo "$restID"
 			return 0
 		fi

@@ -17,7 +17,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -49,13 +49,12 @@ function pauseAndResumeMultiples {
 	local total=$1
 	local i
 
-	for (( i=0; $i<$total; i=$(($i+1)) ))
-	do
+	for ((i = 0; $i < $total; i = $(($i + 1)))); do
 		echo "Sleeping 10 seconds before running another pass"
 		sleep 10
-		echo "Running multiple pause and resumes $(( $i+1 )) out of $total"
-		oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
-		oldDocsProcessed=`getDocsProcessed "C1" "B1" "C2" "B2"`
+		echo "Running multiple pause and resumes $(($i + 1)) out of $total"
+		oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
+		oldDocsProcessed=$(getDocsProcessed "C1" "B1" "C2" "B2")
 
 		echo "Pausing replication - current data replicated: $oldDataReplicated docs_processed: $oldDocsProcessed"
 		pauseReplication "C1" "B1" "C2" "B2"
@@ -81,16 +80,16 @@ function pauseAndResumeMultiples {
 		grepForPanics
 
 		# Run data load again
-		oldDataReplicated=`getDataReplicated "C1" "B1" "C2" "B2"`
+		oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
 		runDataLoad "$i"
 		# Changes left should go to 0
 		checkUnidirectionalChangesLeft
 		sleep 10
-		if (( `getDocsProcessed "C1" "B1" "C2" "B2"` == $oldDocsProcessed ));then
+		if (($(getDocsProcessed "C1" "B1" "C2" "B2") == $oldDocsProcessed)); then
 			echo "Data processed should not be the same after run"
 			exit 1
 		fi
-		if (( `getDataReplicated "C1" "B1" "C2" "B2"` == $oldDataReplicated ));then
+		if (($(getDataReplicated "C1" "B1" "C2" "B2") == $oldDataReplicated)); then
 			# Because broken mapping should have persisted
 			echo "Data replicated should not be the same after run"
 			exit 1
@@ -104,7 +103,7 @@ function runTestCase {
 	echo "Running pause and resume test case"
 	echo "============================================================================"
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning

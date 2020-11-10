@@ -17,12 +17,12 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 . ./testLibrary.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
@@ -32,17 +32,16 @@ DEFAULT_ADMIN="Administrator"
 DEFAULT_PW="wewewe"
 
 testForClusterRun
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 testCaseNumber="${1:-}"
 testCasesDirectory="collectionTestcases"
 
-if [[ -z "$testCaseNumber" ]];then
-	for testcase in `ls $testCasesDirectory`
-	do
-		if [[ "$testcase" =~ _idle_ ]];then
+if [[ -z "$testCaseNumber" ]]; then
+	for testcase in $(ls $testCasesDirectory); do
+		if [[ "$testcase" =~ _idle_ ]]; then
 			# test cases with _idle_ in the filename means they take too long for the whole suite
 			# and should be run on an individual basis only
 			continue
@@ -51,8 +50,8 @@ if [[ -z "$testCaseNumber" ]];then
 		runTestCase
 	done
 else
-	testCase=`find $testCasesDirectory/${testCaseNumber}*`
-	if [[ -z "$testCase" ]];then
+	testCase=$(find $testCasesDirectory/${testCaseNumber}*)
+	if [[ -z "$testCase" ]]; then
 		echo "Cannot find test case number $testCaseNumber"
 		exit 1
 	fi

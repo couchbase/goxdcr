@@ -31,8 +31,8 @@ NonUS_filter='country != \"United States\" AND country != \"Canada\" AND type=\"
 
 mappingRule="{\"$US_filter\":\"S3.col1\",\"$NonUS_filter\":\"S3.col2\"}"
 
-declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 \
- ["collectionsExplicitMapping"]=true ["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
+declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+	["collectionsExplicitMapping"]=true ["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
 
 # Bucket -> Scopes
 # -----------------
@@ -46,9 +46,8 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
-	beerSample=`locate beer-sample.zip | grep install | grep samples | head -n 1`
+	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
 	runDocLoader "C1" "B1" "$beerSample"
 }
 
@@ -63,38 +62,38 @@ function runTestCase {
 	echo "Running collections migration backfill test case"
 	echo "============================================================================"
 	testForClusterRun
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
-    # Before doing provisioning, get old internal settings
-    setCustomManifestRefreshInterval "C1"
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
 
-    # At this point, settings need to be restored IF the script was forced exited
-    trap cleanupTestCaseInternalSettings EXIT
+	# At this point, settings need to be restored IF the script was forced exited
+	trap cleanupTestCaseInternalSettings EXIT
 
-    # Get current instance
-    local -i currentBrokenInstanceCnt
-    local -i currentRepairedInstanceCnt
-    local -i currentBackfillInstanceCnt
-    local -i currentVBTasksDoneInstanceCnt
-    local -i currentBackfillAppendInstanceCnt
+	# Get current instance
+	local -i currentBrokenInstanceCnt
+	local -i currentRepairedInstanceCnt
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillAppendInstanceCnt
 
-    local currentClusterLog
-    currentClusterLog=`getClusterLogs "C1"`
-    currentBrokenInstanceCnt=`echo "$currentClusterLog" | grep -c "$BROKEN_MSG"`
-    currentRepairedInstanceCnt=`echo "$currentClusterLog" | grep -c "$REPAIR_MSG"`
+	local currentClusterLog
+	currentClusterLog=$(getClusterLogs "C1")
+	currentBrokenInstanceCnt=$(echo "$currentClusterLog" | grep -c "$BROKEN_MSG")
+	currentRepairedInstanceCnt=$(echo "$currentClusterLog" | grep -c "$REPAIR_MSG")
 
-    local currentXdcrLog
-    currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-    currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
-    currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
-    currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+	local currentXdcrLog
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
+	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -113,7 +112,7 @@ function runTestCase {
 	checkItemCnt "C2" "B2" 0
 
 	# Then re-setup the implicit matching that matches
-    BUCKET_NAME_SCOPE_MAP=(["B2"]=${scope1ArrFull[@]})
+	BUCKET_NAME_SCOPE_MAP=(["B2"]=${scope1ArrFull[@]})
 	setupTopologies
 	echo "Sleeping 30 seconds for discovery and automatic backfill"
 	sleep 30
@@ -122,16 +121,16 @@ function runTestCase {
 	# After sleeping, the backfill manager should have triggered the backfill
 	# 1412 items total for the above filters
 	checkItemCnt "C2" "B2" 1412
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt + 1 ))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
 
-    grepForPanics
-    validateXDCRCheckpoints "C1"
-    validateXDCRCheckpoints "C2"
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
 	cleanupBucketReplications
- 	cleanupBuckets
- 	cleanupRemoteClusterRefs
+	cleanupBuckets
+	cleanupRemoteClusterRefs
 }

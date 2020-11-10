@@ -17,7 +17,7 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
@@ -33,7 +33,7 @@ DEFAULT_PW="wewewe"
 # -----------------
 CLUSTER_NAME_PORT_MAP=(["HQ"]=9000 ["NA"]=9001 ["EU"]=9002)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
-CLUSTER_NAME_BUCKET_MAP=(["HQ"]="B1"  ["NA"]="B2" ["EU"]="B3")
+CLUSTER_NAME_BUCKET_MAP=(["HQ"]="B1" ["NA"]="B2" ["EU"]="B3")
 
 declare -A BucketProperty=(["ramQuotaMB"]=100)
 insertPropertyIntoBucketNamePropertyMap "B1" BucketProperty
@@ -47,7 +47,7 @@ declare -A NonUSRepl=(["filterExpression"]="$NonUS_filter" ["replicationType"]="
 
 function runDataLoad {
 	#export CBDOCLOADER="/Users/neil.huang/source/couchbase/install/bin/cbdocloader"
-	beerSample=`locate beer-sample.zip | grep install | grep samples | head -n 1`
+	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
 	runDocLoader "HQ" "B1" "$beerSample"
 }
 
@@ -60,7 +60,7 @@ function demoEcho {
 
 #MAIN
 testForClusterRun
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
@@ -81,4 +81,3 @@ demoEcho "6. Creating North-America replication with rule: $US_filter"
 createBucketReplication "HQ" "B1" "NA" "B2" USRepl
 demoEcho "7. Creating European replication with rule: $NonUS_filter"
 createBucketReplication "HQ" "B1" "EU" "B3" NonUSRepl
-

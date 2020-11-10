@@ -17,19 +17,19 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 . ./settingsCommon.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 importProvisionedConfig
 
 function usage {
-cat << EOF
+	cat <<EOF
 $0 [-h] -l | -g <ClusterName> -b <bucketName> | -n/-d <ClusterName> -b <bucketName> -s <ScopeName> [-c <CollectionName>]
 	h: This help page
 	l: List all available <clusterName> for setting and displaying
@@ -57,63 +57,63 @@ function listScopesAndCollections {
 }
 
 function checkBucket {
-	if (( $bucketEntered == 0 ));then
+	if (($bucketEntered == 0)); then
 		echo "Bucket is not specified"
 		exit 1
 	fi
 }
 
 function checkScope {
-	if (( $scopeEntered == 0 ));then
+	if (($scopeEntered == 0)); then
 		echo "Scope is not specified"
 		exit 1
 	fi
 }
 
-jqLocation=`which jq`
-if (( $? != 0 ));then
+jqLocation=$(which jq)
+if (($? != 0)); then
 	echo "Cannot run this script without jq"
 	exit 1
 fi
 
 while getopts ":hlg:n:d:b:s:c:" opt; do
-  case ${opt} in
-    h ) # process option h
-    	usage
-    	exit 0
-    	;;
-    l)
-    	listAllClusters
-    	exit 0
-    	;;
-    g)
-    	clusterName=$OPTARG
-    	if [[ $mode != "None" ]];then
-    		echo "Cannot do -g when -s is specified"
-    		exit 1
-    	fi
-    	mode="Get"
+	case ${opt} in
+	h) # process option h
+		usage
+		exit 0
+		;;
+	l)
+		listAllClusters
+		exit 0
+		;;
+	g)
+		clusterName=$OPTARG
+		if [[ $mode != "None" ]]; then
+			echo "Cannot do -g when -s is specified"
+			exit 1
+		fi
+		mode="Get"
 		;;
 	n)
-    	clusterName=$OPTARG
-    	if [[ $mode != "None" ]];then
-    		echo "Cannot do -n when -g or -d is specified"
-    		exit 1
-    	fi
-    	mode="Create"
-    	;;
+		clusterName=$OPTARG
+		if [[ $mode != "None" ]]; then
+			echo "Cannot do -n when -g or -d is specified"
+			exit 1
+		fi
+		mode="Create"
+		;;
 	d)
-    	clusterName=$OPTARG
-    	if [[ $mode != "None" ]];then
-    		echo "Cannot do -d when -g or -n is specified"
-    		exit 1
-    	fi
-    	mode="Delete"
-    	;;
-    b)
-    	bucketName=$OPTARG
-    	bucketEntered=1
-    	;;
+		clusterName=$OPTARG
+		if [[ $mode != "None" ]]; then
+			echo "Cannot do -d when -g or -n is specified"
+			exit 1
+		fi
+		mode="Delete"
+		;;
+	b)
+		bucketName=$OPTARG
+		bucketEntered=1
+		;;
 	s)
 		scopeName=$OPTARG
 		scopeEntered=1
@@ -122,26 +122,26 @@ while getopts ":hlg:n:d:b:s:c:" opt; do
 		collectionName=$OPTARG
 		collectionEntered=1
 		;;
-   esac
+	esac
 done
 
-if [[ "$mode" == "None" ]];then
+if [[ "$mode" == "None" ]]; then
 	usage
-elif [[ "$mode" == "Get" ]];then
+elif [[ "$mode" == "Get" ]]; then
 	checkBucket
 	listScopesAndCollections
-elif [[ "$mode" == "Create" ]];then
+elif [[ "$mode" == "Create" ]]; then
 	checkBucket
 	checkScope
-	if (( $collectionEntered == 0 ));then
+	if (($collectionEntered == 0)); then
 		createScope "$clusterName" "$bucketName" "$scopeName"
 	else
 		createCollection "$clusterName" "$bucketName" "$scopeName" "$collectionName"
 	fi
-elif [[ "$mode" == "Delete" ]];then
+elif [[ "$mode" == "Delete" ]]; then
 	checkBucket
 	checkScope
-	if (( $collectionEntered == 0 ));then
+	if (($collectionEntered == 0)); then
 		deleteScope "$clusterName" "$bucketName" "$scopeName"
 	else
 		deleteCollection "$clusterName" "$bucketName" "$scopeName" "$collectionName"

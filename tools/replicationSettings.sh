@@ -17,14 +17,14 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 importProvisionedConfig
 
 function usage {
-cat << EOF
+	cat <<EOF
 $0 [-h] -l | -g <ID> | -s <ID> -v "key=val" [-v...]
 	h: This help page
 	l: List all ID and configurations
@@ -47,24 +47,23 @@ function cycleThroughAllRepl {
 	local specifiedId=${1:-0}
 
 	local counter=1
-	if (( $specifiedId == 0 ));then
+	if (($specifiedId == 0)); then
 		echo "List of bucket replications:"
 		echo -e "ID \t SourceCluster \t SourceBucket \t TargetCluster \t TargetBucket \t REST"
 	fi
-	for bucketReplKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
-	do
-		local sourceCluster=`echo "$bucketReplKey" | cut -d, -f1`
-		local sourceBucket=`echo "$bucketReplKey" | cut -d, -f2`
-		local targetCluster=`echo "$bucketReplKey" | cut -d, -f3`
-		local targetBucket=`echo "$bucketReplKey" | cut -d, -f4`
+	for bucketReplKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
+		local sourceCluster=$(echo "$bucketReplKey" | cut -d, -f1)
+		local sourceBucket=$(echo "$bucketReplKey" | cut -d, -f2)
+		local targetCluster=$(echo "$bucketReplKey" | cut -d, -f3)
+		local targetBucket=$(echo "$bucketReplKey" | cut -d, -f4)
 		local replId=${BUCKET_REPL_EXPORT_MAP[$bucketReplKey]:-}
 		# Get rid of " in replId
-		replId=`echo "$replId" | sed 's/"//g'`
-		if (( $specifiedId == 0 ));then
+		replId=$(echo "$replId" | sed 's/"//g')
+		if (($specifiedId == 0)); then
 			echo -e "$counter \t\t $sourceCluster \t\t $sourceBucket \t\t $targetCluster \t\t $targetBucket \t $replId"
 		else
 			local port=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
-			if [[ -z "$port" ]];then
+			if [[ -z "$port" ]]; then
 				echo "Unable to find port"
 				return 1
 			fi
@@ -72,7 +71,7 @@ function cycleThroughAllRepl {
 			echo ${outArr[@]}
 			return 0
 		fi
-		counter=$(( $counter+1 ))
+		counter=$(($counter + 1))
 	done
 
 }
@@ -82,13 +81,13 @@ function listAllReplications {
 }
 
 function getReplInternalsPort {
-	lookupPair=(`cycleThroughAllRepl $id`)
-	if (( $? != 0 ));then
+	lookupPair=($(cycleThroughAllRepl $id))
+	if (($? != 0)); then
 		echo "$lookupPair"
 		return 1
 	fi
 	local port=${lookupPair[0]:-}
-	if [[ -z "{port:-}" ]];then
+	if [[ -z "{port:-}" ]]; then
 		echo "Unable to retrieve cluster port for ID $id"
 		return 1
 	fi
@@ -97,13 +96,13 @@ function getReplInternalsPort {
 }
 
 function getReplInternalsReplId {
-	lookupPair=(`cycleThroughAllRepl $id`)
-	if (( $? != 0 ));then
+	lookupPair=($(cycleThroughAllRepl $id))
+	if (($? != 0)); then
 		echo "$lookupPair"
 		return 1
 	fi
 	local replId=${lookupPair[1]:-}
-	if [[ -z "{replId:-}" ]];then
+	if [[ -z "{replId:-}" ]]; then
 		echo "Unable to retrieve replication ID for ID $id"
 		return 1
 	fi
@@ -113,12 +112,12 @@ function getReplInternalsReplId {
 
 # TODO - need to think about how to scale this for collections and scope
 function getReplicationSettings {
-	local port=`getReplInternalsPort`
-	if (( $? != 0 ));then
+	local port=$(getReplInternalsPort)
+	if (($? != 0)); then
 		return $?
 	fi
-	local replId=`getReplInternalsReplId`
-	if (( $? != 0 ));then
+	local replId=$(getReplInternalsReplId)
+	if (($? != 0)); then
 		return $?
 	fi
 
@@ -126,12 +125,12 @@ function getReplicationSettings {
 }
 
 function setReplicationSettings {
-	local port=`getReplInternalsPort`
-	if (( $? != 0 ));then
+	local port=$(getReplInternalsPort)
+	if (($? != 0)); then
 		return $?
 	fi
-	local replId=`getReplInternalsReplId`
-	if (( $? != 0 ));then
+	local replId=$(getReplInternalsReplId)
+	if (($? != 0)); then
 		return $?
 	fi
 
@@ -143,47 +142,47 @@ declare mode="None"
 declare -a keyVal
 declare jqStr
 
-jqLocation=`which jq`
-if (( $? == 0 ));then
+jqLocation=$(which jq)
+if (($? == 0)); then
 	jqStr="$jqLocation"
 fi
 
 while getopts ":hlg:s:v:" opt; do
-  case ${opt} in
-    h ) # process option a
-    	usage
-    	exit 0
-    	;;
-    l)
-    	listAllReplications
-    	exit 0
-    	;;
-    g)
-    	id=$OPTARG
-    	if [[ $mode != "None" ]];then
-    		echo "Cannot do -g when -s is specified"
-    		exit 1
-    	fi
-    	mode="Get"
+	case ${opt} in
+	h) # process option a
+		usage
+		exit 0
+		;;
+	l)
+		listAllReplications
+		exit 0
+		;;
+	g)
+		id=$OPTARG
+		if [[ $mode != "None" ]]; then
+			echo "Cannot do -g when -s is specified"
+			exit 1
+		fi
+		mode="Get"
 		;;
 	s)
-    	id=$OPTARG
-    	if [[ $mode != "None" ]];then
-    		echo "Cannot do -s when -g is specified"
-    		exit 1
-    	fi
-    	mode="Set"
-    	;;
-    v)
-    	keyVal+=("$OPTARG")
-    	;;
-   esac
+		id=$OPTARG
+		if [[ $mode != "None" ]]; then
+			echo "Cannot do -s when -g is specified"
+			exit 1
+		fi
+		mode="Set"
+		;;
+	v)
+		keyVal+=("$OPTARG")
+		;;
+	esac
 done
 
-if [[ "$mode" == "None" ]];then
+if [[ "$mode" == "None" ]]; then
 	usage
-elif [[ "$mode" == "Get" ]];then
+elif [[ "$mode" == "Get" ]]; then
 	getReplicationSettings
-elif [[ "$mode" == "Set" ]];then
+elif [[ "$mode" == "Set" ]]; then
 	setReplicationSettings
 fi

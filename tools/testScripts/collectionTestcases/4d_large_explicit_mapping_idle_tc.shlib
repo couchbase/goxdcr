@@ -18,7 +18,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -26,7 +26,6 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
-
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]=$colMappingRules)
@@ -41,15 +40,14 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
 #declare -a collection2Arr=("col1" "col2" "col3")
 #SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	for (( i=0; i < 50; i=(( $i+1 )) ));do
+	for ((i = 0; i < 50; i = (($i + 1)))); do
 		runCbWorkloadGenCollection "C1" "B1" "S1" "col$i" &
 	done
 }
 
-declare -i LOCAL_TEST_CBDOC_COUNT=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 50 ))
+declare -i LOCAL_TEST_CBDOC_COUNT=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 50))
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
@@ -59,30 +57,30 @@ function runTestCase {
 	echo "Running large scaled explicit mapping test case"
 	echo "============================================================================"
 	testForClusterRun
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
-	for (( i=1; i < 999; i=(( $i+1 )) ));do
+	for ((i = 1; i < 999; i = (($i + 1)))); do
 		collectionArray[${#collectionArray[@]}]="col$i"
 	done
 	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArray[@]})
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# Get current instance
-    local -i currentBackfillInstanceCnt
-    local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
 	local -i currentBackfillAppendInstanceCnt
 	local currentXdcrLog
 
-    currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-    currentTimedoutMsg1=`echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE1_MSG"`
-    currentTimedoutMsg2=`echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE2_MSG"`
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentTimedoutMsg1=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE1_MSG")
+	currentTimedoutMsg2=$(echo "$currentXdcrLog" | grep -c "$TIMEDOUT_TYPE2_MSG")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -99,8 +97,8 @@ function runTestCase {
 	echo "Waiting 60 seconds to see if pipeline start had errors"
 	sleep 60
 
-	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG"  $(( $currentTimedoutMsg1 ))
-	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG"  $(( $currentTimedoutMsg2 ))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE1_MSG" $(($currentTimedoutMsg1))
+	validateInternalLogWithInstance "C1" "$TIMEDOUT_TYPE2_MSG" $(($currentTimedoutMsg2))
 
 	grepForPanics
 
@@ -109,6 +107,6 @@ function runTestCase {
 	echo "============================================================================"
 	exportProvisionedConfig
 	cleanupBucketReplications
- 	cleanupBuckets
- 	cleanupRemoteClusterRefs
+	cleanupBuckets
+	cleanupRemoteClusterRefs
 }

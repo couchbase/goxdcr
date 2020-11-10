@@ -17,19 +17,19 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 . ./settingsCommon.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	exit $?
 fi
 
 importProvisionedConfig
 
 function usage {
-cat << EOF
+	cat <<EOF
 $0 [-h] -l | -g <ClusterName> | -s <ClusterName> -v "key=val" [-v... ]
 	h: This help page
 	l: List all available <clusterName> for setting and displaying
@@ -43,8 +43,8 @@ declare clusterName
 declare -a keyVal
 declare jqStr
 
-jqLocation=`which jq`
-if (( $? == 0 ));then
+jqLocation=$(which jq)
+if (($? == 0)); then
 	jqStr="$jqLocation"
 fi
 
@@ -60,41 +60,41 @@ function SetInternalSettings {
 }
 
 while getopts ":hlg:s:v:" opt; do
-  case ${opt} in
-    h ) # process option a
-    	usage
-    	exit 0
-    	;;
-    l)
-    	listAllClusters
-    	exit 0
-    	;;
-    g)
-    	clusterName=$OPTARG
-    	if [[ $mode != "None" ]];then
-    		echo "Cannot do -g when -s is specified"
-    		exit 1
-    	fi
-    	mode="Get"
+	case ${opt} in
+	h) # process option a
+		usage
+		exit 0
+		;;
+	l)
+		listAllClusters
+		exit 0
+		;;
+	g)
+		clusterName=$OPTARG
+		if [[ $mode != "None" ]]; then
+			echo "Cannot do -g when -s is specified"
+			exit 1
+		fi
+		mode="Get"
 		;;
 	s)
-    	clusterName=$OPTARG
-    	if [[ $mode != "None" ]];then
-    		echo "Cannot do -s when -g is specified"
-    		exit 1
-    	fi
-    	mode="Set"
-    	;;
-    v)
-    	keyVal+=("$OPTARG")
-    	;;
-   esac
+		clusterName=$OPTARG
+		if [[ $mode != "None" ]]; then
+			echo "Cannot do -s when -g is specified"
+			exit 1
+		fi
+		mode="Set"
+		;;
+	v)
+		keyVal+=("$OPTARG")
+		;;
+	esac
 done
 
-if [[ "$mode" == "None" ]];then
+if [[ "$mode" == "None" ]]; then
 	usage
-elif [[ "$mode" == "Get" ]];then
+elif [[ "$mode" == "Get" ]]; then
 	ListInternalSettings
-elif [[ "$mode" == "Set" ]];then
+elif [[ "$mode" == "Set" ]]; then
 	SetInternalSettings
 fi

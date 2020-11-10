@@ -26,16 +26,15 @@ function checkItemCnt {
 	local i
 
 	local previousItemCnt=0
-	for (( i=0; $i < 5; i=$(($i+1)) ))
-	do
-		itemCount=`getBucketItemCount "$cluster" "$bucket"`
-		if (( $itemCount == $expectedCnt ));then
+	for ((i = 0; $i < 5; i = $(($i + 1)))); do
+		itemCount=$(getBucketItemCount "$cluster" "$bucket")
+		if (($itemCount == $expectedCnt)); then
 			echo "Item count for cluster $cluster bucket $bucket: $itemCount"
 			return 0
 		else
-			if (( $itemCount != $previousItemCnt ));then
+			if (($itemCount != $previousItemCnt)); then
 				previousItemCnt=$itemCount
-				i=$(($i-1))
+				i=$(($i - 1))
 				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items. Items are increasing..."
 			else
 				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
@@ -50,20 +49,19 @@ function checkItemCnt {
 # Assumes running test script from this directory
 function getNsServerDir {
 	# i.e. Running from "/Users/neil.huang/source/couchbase/goproj/src/github.com/couchbase/goxdcr/tools/testScripts"
-	local srcTreeName=`pwd | cut -d/ -f6-`
+	local srcTreeName=$(pwd | cut -d/ -f6-)
 	# /Users/neil.huang/source/couchbase/
-	local couchbaseDir=`pwd | sed "s|$srcTreeName||g"`
+	local couchbaseDir=$(pwd | sed "s|$srcTreeName||g")
 	echo "${couchbaseDir}ns_server"
 	return 0
 }
 
 function grepForPanics {
-	local ns_serverDir=`getNsServerDir`
+	local ns_serverDir=$(getNsServerDir)
 	local logsDir="${ns_serverDir}/logs"
-	for dir in `ls $logsDir`
-	do
-		count=`grep -c panic ${logsDir}/${dir}/goxdcr.log`
-		if (( $count > 0 ));then
+	for dir in $(ls $logsDir); do
+		count=$(grep -c panic ${logsDir}/${dir}/goxdcr.log)
+		if (($count > 0)); then
 			echo "WARNING Found panics in ${logsDir}/${dir}"
 			exit 1
 		fi
@@ -72,15 +70,13 @@ function grepForPanics {
 }
 
 function grepForInvalidCommand {
-	local ns_serverDir=`getNsServerDir`
+	local ns_serverDir=$(getNsServerDir)
 	local logsDir="${ns_serverDir}/logs"
 
-	for dir in `ls $logsDir`
-	do
-		counts=`grep -crhn "Invalid format specified" ${logsDir}/${dir}`
-		for count in `echo "$counts"`
-		do
-			if (( $count > 0 ));then
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "Invalid format specified" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
 				echo "WARNING Found invalid format in ${logsDir}/${dir}"
 				exit 1
 			fi
@@ -95,7 +91,7 @@ function getDataReplicated {
 	local targetCluster=$3
 	local targetBucket=$4
 
-	echo `getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "data_replicated"`
+	echo $(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "data_replicated")
 }
 
 function getChangesLeft {
@@ -104,7 +100,7 @@ function getChangesLeft {
 	local targetCluster=$3
 	local targetBucket=$4
 
-	echo `getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "changes_left"`
+	echo $(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "changes_left")
 }
 
 function getDocsProcessed {
@@ -113,7 +109,7 @@ function getDocsProcessed {
 	local targetCluster=$3
 	local targetBucket=$4
 
-	echo `getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "docs_processed"`
+	echo $(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "docs_processed")
 
 }
 
@@ -124,10 +120,9 @@ function waitForChangesLeft0 {
 	local targetBucket=$4
 	local i
 
-	for (( i=0; $i < 3; i=$(($i+1)) ))
-	do
-		changesLeft=`getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
-		if (( $changesLeft > 0 ));then
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		if (($changesLeft > 0)); then
 			echo "Changes left $changesLeft is not 0 yet..."
 		else
 			break
@@ -146,24 +141,23 @@ function checkChangesLeftInternal {
 
 	local lastChangesLeft=0
 
-	for (( i=0; $i < 3; i=$(($i+1)) ))
-	do
-		changesLeft=`getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
-		if (( $changesLeft == 0 ));then
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		if (($changesLeft == 0)); then
 			echo "Node $srcCluster changes_left is 0"
 			return 0
 		else
-			if (( $changesLeft == $lastChangesLeft ));then
+			if (($changesLeft == $lastChangesLeft)); then
 				echo "Node $srcCluster Changes left is not 0. It is $changesLeft"
 			else
 				lastChangesLeft=$changesLeft
-				i=$(($i-1))
+				i=$(($i - 1))
 				echo "Node $srcCluster Changes left is not 0. It is $changesLeft... it is decreasing"
 			fi
 			sleep 10
 		fi
-    done
-    exit 1
+	done
+	exit 1
 }
 
 function checkUnidirectionalChangesLeft {
@@ -175,7 +169,6 @@ function checkBidirectionalChangesLeft {
 	checkChangesLeftInternal "C2" "B2" "C1" "B1"
 }
 
-
 function checkDataReplicatedIsZero {
 	local srcCluster=$1
 	local srcBucket=$2
@@ -184,12 +177,11 @@ function checkDataReplicatedIsZero {
 	local oldDataReplicated=$5
 	local i
 
-	for (( i=0; $i < 3; i=$(($i+1)) ))
-	do
-		dataReplicated=`getDataReplicated "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
-		if (( $dataReplicated > 0 ));then
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		dataReplicated=$(getDataReplicated "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		if (($dataReplicated > 0)); then
 			echo "Data replicated $dataReplicated is not 0 yet..."
-			if (( $dataReplicated != $oldDataReplicated));then
+			if (($dataReplicated != $oldDataReplicated)); then
 				echo "Error: Data replicated is different from previous replicated $oldDataReplicated"
 				break
 			fi
@@ -210,10 +202,9 @@ function checkDocsProcessed {
 	local docsProcessedCheck=$5
 	local i
 
-	for (( i=0; $i < 5; i=$(($i+1)) ))
-	do
-		docsProcessed=`getDocsProcessed "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket"`
-		if (( $docsProcessed != $docsProcessedCheck ));then
+	for ((i = 0; $i < 5; i = $(($i + 1)))); do
+		docsProcessed=$(getDocsProcessed "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		if (($docsProcessed != $docsProcessedCheck)); then
 			echo "DocsProcessed: $docsProcessed. Waiting for it to be $docsProcessedCheck..."
 		else
 			return 0
@@ -228,14 +219,14 @@ function getSpecificInternalSettings {
 	local clusterName=$1
 	local key=$2
 
-	echo `listInternalSettings "$clusterName" | jq ".$key"`
+	echo $(listInternalSettings "$clusterName" | jq ".$key")
 }
 
 function killGoXdcr {
 	local clusterName=$1
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
-	if [[ -z "$sourcePort" ]];then
+	if [[ -z "$sourcePort" ]]; then
 		echo "Unable to kill goxdcr as source port is not found"
 	fi
 
@@ -254,24 +245,23 @@ function validateLogWithInstance {
 	local instanceCnt=$3
 	local maxInstanceCnt=${4:-}
 
-
-	logs=`getClusterLogs "$clusterName"`
-	if ! (( $? == 0 ));then
+	logs=$(getClusterLogs "$clusterName")
+	if ! (($? == 0)); then
 		echo "Unable to get log for validation"
 		return 1
 	fi
 
-	count=`echo "$logs" | grep -c "$grepStr"`
-	if (( $count != $instanceCnt ));then
-	  if [[ ! -z "$maxInstanceCnt" ]] && (( $count > $maxInstanceCnt ));then
-      echo "Error - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, but found $count"
-      exit 1
-    elif [[ ! -z "$maxInstanceCnt" ]];then
-      echo "Warning - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, found $count"
-    else
-      echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
-      exit 1
-	  fi
+	count=$(echo "$logs" | grep -c "$grepStr")
+	if (($count != $instanceCnt)); then
+		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
+			echo "Error - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, but found $count"
+			exit 1
+		elif [[ ! -z "$maxInstanceCnt" ]]; then
+			echo "Warning - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, found $count"
+		else
+			echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+			exit 1
+		fi
 	else
 		echo "Found exactly $instanceCnt of \"$grepStr\""
 	fi
@@ -282,9 +272,8 @@ declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 function setCustomManifestRefreshInterval {
 	local cluster="$1"
 
-	for (( i=0; i < 2; i=$(( $i + 1 )) ))
-	do
-		ORIG_TARGET_MAN_PULL_INTERVAL=`getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval"`
+	for ((i = 0; i < 2; i = $(($i + 1)))); do
+		ORIG_TARGET_MAN_PULL_INTERVAL=$(getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval")
 		tempTargetManifestPullInterval="5"
 
 		echo "Temporarily updating targetManifestPull from $ORIG_TARGET_MAN_PULL_INTERVAL to $tempTargetManifestPullInterval"
@@ -292,8 +281,8 @@ function setCustomManifestRefreshInterval {
 
 		echo "Sleeping 10 seconds for XDCR to reboot before checking..."
 		sleep 10
-		chkTargetManifestPullInterval=`getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval"`
-		if (( $chkTargetManifestPullInterval == $tempTargetManifestPullInterval ));then
+		chkTargetManifestPullInterval=$(getSpecificInternalSettings "$cluster" "ManifestRefreshTgtInterval")
+		if (($chkTargetManifestPullInterval == $tempTargetManifestPullInterval)); then
 			return 0
 		else
 			echo "Error - unable to update pull interval - stuck at $chkTargetManifestPullInterval. Trying again..."
@@ -311,12 +300,12 @@ function resetCustomManifestRefreshInterval {
 function getInternalNsServerLogDir {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
+	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
 		return 1
 	fi
 
-	local lastDigit=`echo "${port: -1}"`
+	local lastDigit=$(echo "${port: -1}")
 	local logNodeDir="n_${lastDigit}"
 
 	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
@@ -328,16 +317,15 @@ function getInternalNsServerLogDir {
 function getInternalNodeMemcachedLog {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
+	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
 		return 1
 	fi
 
-	local logfileDir=`getInternalNsServerLogDir "$clusterName"`
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
 
 	local memcachedLog
-	for memcachedLog in `ls $logfileDir | grep memcached`
-	do
+	for memcachedLog in $(ls $logfileDir | grep memcached); do
 		cat ${logfileDir}/${memcachedLog}
 	done
 }
@@ -345,15 +333,15 @@ function getInternalNodeMemcachedLog {
 function getInternalNodeXdcrLog {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
+	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
 		return 1
 	fi
 
-	local logfileDir=`getInternalNsServerLogDir "$clusterName"`
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
 
 	local goxdcrLogFile=${logfileDir}/goxdcr.log
-	if ! [[ -f "$goxdcrLogFile" ]];then
+	if ! [[ -f "$goxdcrLogFile" ]]; then
 		echo "Unable to find file $goxdcrLogFile"
 		return 1
 	fi
@@ -371,23 +359,23 @@ function validateInternalLogWithInstance {
 	local instanceCnt=$3
 	local maxInstanceCnt=${4:-}
 
-	logs=`getInternalNodeXdcrLog "$clusterName"`
-	if ! (( $? == 0 ));then
+	logs=$(getInternalNodeXdcrLog "$clusterName")
+	if ! (($? == 0)); then
 		echo "Unable to get log for validation"
 		exit 1
 	fi
 
-	count=`echo "$logs" | grep -c "$grepStr"`
-	if (( $count != $instanceCnt ));then
-	  if [[ ! -z "$maxInstanceCnt" ]] && (( $count > $maxInstanceCnt ));then
-      echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
-      exit 1
-    elif [[ ! -z "$maxInstanceCnt" ]];then
-      echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count"
-    else
-      echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
-      exit 1
-    fi
+	count=$(echo "$logs" | grep -c "$grepStr")
+	if (($count != $instanceCnt)); then
+		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
+			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
+			exit 1
+		elif [[ ! -z "$maxInstanceCnt" ]]; then
+			echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count"
+		else
+			echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+			exit 1
+		fi
 	else
 		echo "Found exactly $instanceCnt of \"$grepStr\""
 	fi
@@ -396,21 +384,21 @@ function validateInternalLogWithInstance {
 function validateXDCRCheckpoints {
 	local cluster=$1
 
-	checkpointOutput=`getXDCRCheckpoints $cluster`
-	if ! (( $? == 0 ));then
+	checkpointOutput=$(getXDCRCheckpoints $cluster)
+	if ! (($? == 0)); then
 		echo "Unable to get checkpoint"
 		exit 1
 	fi
 
 	# validate
-	echo "$checkpointOutput" | jq type > /dev/null
-	if ! (( $? == 0 ));then
-		echo "$checkpointOutput" > /tmp/checkpoint.error
+	echo "$checkpointOutput" | jq type >/dev/null
+	if ! (($? == 0)); then
+		echo "$checkpointOutput" >/tmp/checkpoint.error
 		echo "Erroneous checkpoint output to /tmp/checkpoint.error"
 		exit 1
 	fi
 }
 
 function killAllBgJobs {
-    jobs -l | awk '{print $2}' | xargs kill
+	jobs -l | awk '{print $2}' | xargs kill
 }

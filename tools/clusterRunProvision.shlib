@@ -11,8 +11,8 @@ set -u
 # and limitations under the License.
 
 # BASH VERSION CHECK - since hash maps are implemented >= bash version 4
-bash_major_version=`echo ${BASH_VERSION}|cut -d. -f1`
-if (( $bash_major_version < 4 ));then
+bash_major_version=$(echo ${BASH_VERSION} | cut -d. -f1)
+if (($bash_major_version < 4)); then
 	echo "===================================================================="
 	echo "Bash version >= 4 is required. Current bash version: ${BASH_VERSION}. Script may fail"
 	echo "How to upgrade bash on MacOS:"
@@ -34,7 +34,6 @@ declare DEFAULT_PW
 CURL="curl -s"
 POOLS_DEFAULT_BUCKETS_PATH="pools/default/buckets"
 CBWORKLOAD_COLLECTION_NUM_ITEMS=10000
-
 
 # topological globals
 # -----------------
@@ -84,29 +83,25 @@ function checkNamespaceCreated {
 	local key
 	local key2
 
-	for chkClusterName in `echo ${!CLUSTER_NAME_BUCKET_DONE_MAP[@]}`
-	do
-		if [[ "$chkClusterName" == "$clusterName" ]];then
+	for chkClusterName in $(echo ${!CLUSTER_NAME_BUCKET_DONE_MAP[@]}); do
+		if [[ "$chkClusterName" == "$clusterName" ]]; then
 			bucketNames=(${CLUSTER_NAME_BUCKET_DONE_MAP[$clusterName]:-})
-			for chkBucketName in `echo ${bucketNames[@]}`
-			do
-				if [[ "$chkBucketName" == "$bucketName" ]];then
-					if [[ -z "${scopeName:-}" ]];then
+			for chkBucketName in $(echo ${bucketNames[@]}); do
+				if [[ "$chkBucketName" == "$bucketName" ]]; then
+					if [[ -z "${scopeName:-}" ]]; then
 						# User asked for clusterName:bucketName and it was done
 						return 0
 					fi
 					key="${chkClusterName},${chkBucketName}"
-					for chkScopeName in `echo ${BUCKET_NAME_SCOPE_DONE_MAP["$key"]:-}`
-					do
-						if [[ "$chkScopeName" == "$scopeName" ]];then
-							if [[ -z "${collectionName:-}" ]];then
+					for chkScopeName in $(echo ${BUCKET_NAME_SCOPE_DONE_MAP["$key"]:-}); do
+						if [[ "$chkScopeName" == "$scopeName" ]]; then
+							if [[ -z "${collectionName:-}" ]]; then
 								#User asked for cluster:bucket:scope and it's done
 								return 0
 							fi
 							key2="${chkClusterName},${chkBucketName},${chkScopeName}"
-							for chkColName in `echo ${SCOPE_NAME_COLLECTION_DONE_MAP["$key2"]:-}`
-							do
-								if [[ "$chkColName" == "$collectionName" ]];then
+							for chkColName in $(echo ${SCOPE_NAME_COLLECTION_DONE_MAP["$key2"]:-}); do
+								if [[ "$chkColName" == "$collectionName" ]]; then
 									return 0
 								fi
 							done
@@ -125,21 +120,21 @@ function recordNamespaceCreated {
 	local scopeName=${3:-}
 	local collectionName=${4:-}
 
-	if [[ -z "${scopeName:-}" ]];then
+	if [[ -z "${scopeName:-}" ]]; then
 		# bucket
 		local -a bucketArr
 		local key="${clusterName}"
-		if [[ -z ${CLUSTER_NAME_BUCKET_DONE_MAP[$key]:-} ]];then
+		if [[ -z ${CLUSTER_NAME_BUCKET_DONE_MAP[$key]:-} ]]; then
 			bucketArr=("$bucketName")
 		else
 			bucketArr=(${CLUSTER_NAME_BUCKET_DONE_MAP[$key]})
 			bucketArr[${#bucketArr[@]}]="$bucketName"
 		fi
 		CLUSTER_NAME_BUCKET_DONE_MAP[$key]=${bucketArr[@]}
-	elif [[ -z "${collectionName:-}" ]];then
+	elif [[ -z "${collectionName:-}" ]]; then
 		local -a scopeArr
 		local key="${clusterName},${bucketName}"
-		if [[ -z ${BUCKET_NAME_SCOPE_DONE_MAP[$key]:-} ]];then
+		if [[ -z ${BUCKET_NAME_SCOPE_DONE_MAP[$key]:-} ]]; then
 			scopeArr=("$scopeName")
 		else
 			scopeArr=(${BUCKET_NAME_SCOPE_DONE_MAP[$key]})
@@ -149,7 +144,7 @@ function recordNamespaceCreated {
 	else
 		local -a colArr
 		local key="${clusterName},${bucketName},${scopeName}"
-		if [[ -z ${SCOPE_NAME_COLLECTION_DONE_MAP[$key]:-} ]];then
+		if [[ -z ${SCOPE_NAME_COLLECTION_DONE_MAP[$key]:-} ]]; then
 			colArr=("$collectionName")
 		else
 			colArr=(${SCOPE_NAME_COLLECTION_DONE_MAP[$key]})
@@ -167,9 +162,8 @@ function recordNamespaceCreated {
 function insertPropertyIntoBucketNamePropertyMap {
 	local bucketName=$1
 	local -n incomingMap=$2
-	for key in ${!incomingMap[@]}
-	do
-		BUCKET_NAME_PROPERTIES_MAP[${bucketName},${key}]=${incomingMap[$key]}
+	for key in ${!incomingMap[@]}; do
+		BUCKET_NAME_PROPERTIES_MAP["${bucketName},${key}"]=${incomingMap[$key]}
 	done
 	export BUCKET_NAME_PROPERTIES_MAP
 }
@@ -188,11 +182,10 @@ function getPropertiesFromBucketNamePropertyMap {
 	BUCKET_PROPERTIES_OUTPUT_MAP=()
 
 	# key is bucketName,Property
-	for bp in ${!BUCKET_NAME_PROPERTIES_MAP[@]}
-	do
-		key=`echo "$bp" | cut -d, -f1`
-		property=`echo "$bp" | cut -d, -f2`
-		if [[ $key != $bucketName ]];then
+	for bp in ${!BUCKET_NAME_PROPERTIES_MAP[@]}; do
+		key=$(echo "$bp" | cut -d, -f1)
+		property=$(echo "$bp" | cut -d, -f2)
+		if [[ $key != $bucketName ]]; then
 			continue
 		fi
 		BUCKET_PROPERTIES_OUTPUT_MAP["$property"]=${BUCKET_NAME_PROPERTIES_MAP[$bp]}
@@ -213,10 +206,9 @@ function insertPropertyIntoBucketReplPropertyMap {
 	local targetBucket=$4
 	local -n incomingMap=$5
 
-  BUCKET_REPL_PROPERTIES_MAP=()
-	for key in ${!incomingMap[@]}
-	do
-		BUCKET_REPL_PROPERTIES_MAP[${sourceCluster},${sourceBucket},${targetCluster},${targetBucket},${key}]=${incomingMap[$key]}
+	BUCKET_REPL_PROPERTIES_MAP=()
+	for key in ${!incomingMap[@]}; do
+		BUCKET_REPL_PROPERTIES_MAP["${sourceCluster},${sourceBucket},${targetCluster},${targetBucket},${key}"]=${incomingMap[$key]}
 	done
 	export BUCKET_REPL_PROPERTIES_MAP
 }
@@ -234,7 +226,7 @@ function insertBucketReplIntoExportMap {
 	local targetBucket=$4
 	local replRestID=$5
 
-	BUCKET_REPL_EXPORT_MAP[${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}]=${replRestID}
+	BUCKET_REPL_EXPORT_MAP["${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}"]=${replRestID}
 	export BUCKET_REPL_EXPORT_MAP
 }
 
@@ -244,15 +236,14 @@ function getBucketReplicationRestID {
 	local chkTargetCluster=$3
 	local chkTargetBucket=$4
 
-	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
-	do
-		local sourceCluster=`echo "$replKey" | cut -d, -f1`
-		local restID=`echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g'`
-		local sourceBucket=`echo "$replKey" | cut -d, -f2`
-		local targetCluster=`echo "$replKey" | cut -d, -f3`
-		local targetBucket=`echo "$replKey" | cut -d, -f4`
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
+		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
+		local restID=$(echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g')
+		local sourceBucket=$(echo "$replKey" | cut -d, -f2)
+		local targetCluster=$(echo "$replKey" | cut -d, -f3)
+		local targetBucket=$(echo "$replKey" | cut -d, -f4)
 
-		if [[ "$chkSourceCluster" == "$sourceCluster" && "$chkSourceBucket" == "$sourceBucket" && "$chkTargetCluster" == "$targetCluster" && "$chkTargetBucket" == "$targetBucket" ]];then
+		if [[ "$chkSourceCluster" == "$sourceCluster" && "$chkSourceBucket" == "$sourceBucket" && "$chkTargetCluster" == "$targetCluster" && "$chkTargetBucket" == "$targetBucket" ]]; then
 			echo "$restID"
 			return 0
 		fi
@@ -275,18 +266,15 @@ function getPropertiesFromBucketReplPropertyMap {
 
 	local checkString="${sourceCluster},${sourceBucket},${targetCluster},${targetBucket}"
 	# key is bucketName,Property
-	for bp in ${!BUCKET_REPL_PROPERTIES_MAP[@]}
-	do
-		key=`echo "$bp" | cut -d, -f1-4`
-		property=`echo "$bp" | cut -d, -f5`
-		if [[ $key != $checkString ]];then
+	for bp in ${!BUCKET_REPL_PROPERTIES_MAP[@]}; do
+		key=$(echo "$bp" | cut -d, -f1-4)
+		property=$(echo "$bp" | cut -d, -f5)
+		if [[ $key != $checkString ]]; then
 			continue
 		fi
 		BUCKET_REPL_PROPERTIES_OUTPUT_MAP["$property"]=${BUCKET_REPL_PROPERTIES_MAP[$bp]}
 	done
 }
-
-
 
 function printBucketPropertiesResults {
 	declare -p BUCKET_PROPERTIES_OUTPUT_MAP | cut -d' ' -f3- | cut -d'=' -f2-
@@ -299,8 +287,7 @@ function printBucketReplPropertiesResults {
 declare -a getBucketOutArr
 function getBucketPropertiesRESTString {
 	getBucketOutArr=()
-	for property in "${!BUCKET_PROPERTIES_OUTPUT_MAP[@]}"
-	do
+	for property in "${!BUCKET_PROPERTIES_OUTPUT_MAP[@]}"; do
 		getBucketOutArr+=("-d")
 		getBucketOutArr+=("${property}=${BUCKET_PROPERTIES_OUTPUT_MAP[$property]}")
 	done
@@ -309,8 +296,7 @@ function getBucketPropertiesRESTString {
 declare -a getBucketReplOutArr
 function getBucketReplPropertiesRESTString {
 	getBucketReplOutArr=()
-	for property in "${!BUCKET_REPL_PROPERTIES_OUTPUT_MAP[@]}"
-	do
+	for property in "${!BUCKET_REPL_PROPERTIES_OUTPUT_MAP[@]}"; do
 		getBucketReplOutArr+=("-d")
 		getBucketReplOutArr+=("${property}=${BUCKET_REPL_PROPERTIES_OUTPUT_MAP[$property]}")
 	done
@@ -328,10 +314,10 @@ function getBucketInfo {
 	local clusterName=$1
 	local bucketName=$2
 
-	if (( `checkJQ` != 0 ));then
+	if (($(checkJQ) != 0)); then
 		getBucketInfoRaw $clusterName $bucketName
 	else
-		echo `getBucketInfoRaw $clusterName $bucketName` | jq
+		echo $(getBucketInfoRaw $clusterName $bucketName) | jq
 	fi
 }
 
@@ -341,23 +327,22 @@ function getBucketItemCount {
 	local maxRetry=3
 	local i
 
-	if (( `checkJQ` != 0 ));then
+	if (($(checkJQ) != 0)); then
 		echo "Cannot run $0 without jq"
 		return 1
 	fi
 
-	for (( i=0; $i < $maxRetry; i=$(($i+1)) ))
-	do
-		rawOutput=`getBucketInfoRaw $clusterName $bucketName`
-		if (( $? != 0 ));then
+	for ((i = 0; $i < $maxRetry; i = $(($i + 1)))); do
+		rawOutput=$(getBucketInfoRaw $clusterName $bucketName)
+		if (($? != 0)); then
 			continue
 		fi
-		basicStats=`echo "$rawOutput" | jq '.basicStats'`
-		if (( $? != 0 ));then
+		basicStats=$(echo "$rawOutput" | jq '.basicStats')
+		if (($? != 0)); then
 			continue
 		fi
-		itemCount=`echo "$basicStats" | jq '.itemCount'`
-		if (( $? == 0 ));then
+		itemCount=$(echo "$basicStats" | jq '.itemCount')
+		if (($? == 0)); then
 			echo "$itemCount"
 			break
 		fi
@@ -366,10 +351,9 @@ function getBucketItemCount {
 
 # Tests and see if "cluster_run -n x" has been run
 function testForClusterRun {
-	for port in ${CLUSTER_NAME_PORT_MAP[@]}
-		do
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/nodes/self/controller/settings > /dev/null 2>&1
-		if (( $? != 0 ));then
+	for port in ${CLUSTER_NAME_PORT_MAP[@]}; do
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
+		if (($? != 0)); then
 			echo "Node $port not found. Skipping cluster_run XDCR init"
 			return 1
 		fi
@@ -377,15 +361,14 @@ function testForClusterRun {
 }
 
 function setupCluster {
-	for clusterName in `echo ${!CLUSTER_NAME_PORT_MAP[@]}`
-	do
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		echo "SETTING up cluster name $clusterName on port $port"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings > /dev/null 2>&1
-		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname=127.0.0.1 > /dev/null 2>&1
-		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv > /dev/null 2>&1
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$port > /dev/null 2>&1
-		if (( $? != 0 ));then
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname=127.0.0.1 >/dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv >/dev/null 2>&1
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$port >/dev/null 2>&1
+		if (($? != 0)); then
 			return $?
 		fi
 		echo ""
@@ -393,13 +376,12 @@ function setupCluster {
 }
 
 function enableDeveloperPreview {
-	for clusterName in `echo ${!CLUSTER_NAME_PORT_MAP[@]}`
-	do
- 		# enable developer preview
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		# enable developer preview
 		echo -n "Enabling developer preview on $clusterName"
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/settings/developerPreview -d enabled="true"
-		if (( $? != 0 ));then
+		if (($? != 0)); then
 			return $?
 		fi
 		echo ""
@@ -407,16 +389,14 @@ function enableDeveloperPreview {
 }
 
 function setupBuckets {
-	for clusterName in `echo ${!CLUSTER_NAME_BUCKET_MAP[@]}`
-	do
+	for clusterName in $(echo ${!CLUSTER_NAME_BUCKET_MAP[@]}); do
 		local bucketNames=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-		for bucketName in `echo ${bucketNames[@]}`
-		do
+		for bucketName in $(echo ${bucketNames[@]}); do
 			getPropertiesFromBucketNamePropertyMap "$bucketName"
-			echo "For cluster $clusterName CREATING bucket $bucketName with properties `printBucketPropertiesResults`"
+			echo "For cluster $clusterName CREATING bucket $bucketName with properties $(printBucketPropertiesResults)"
 			local ramQuotaCheck=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
-			if [[ -z "$ramQuotaCheck" ]];then
+			if [[ -z "$ramQuotaCheck" ]]; then
 				echo "Missing ramQuota for $bucketName"
 				return 1
 			fi
@@ -424,16 +404,16 @@ function setupBuckets {
 
 			# Only run the bucket create command if it hasn't been executed before
 			checkNamespaceCreated "$clusterName" "$bucketName"
-			if (( ! $? == 0 ));then
-				$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]}  > /dev/null 2>&1
-				if (( $? != 0 ));then
+			if ((!$? == 0)); then
+				$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]} >/dev/null 2>&1
+				if (($? != 0)); then
 					return $?
 				fi
 				recordNamespaceCreated "$clusterName" "$bucketName"
 			fi
 
 			# If bucket has scopes
-			if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]];then
+			if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]]; then
 				setupScopes $clusterName $bucketName
 			fi
 		done
@@ -441,21 +421,19 @@ function setupBuckets {
 }
 
 function deleteBucket {
-  local port=$1
-  local bucketName=$2
+	local port=$1
+	local bucketName=$2
 
-  $CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName > /dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName >/dev/null 2>&1
 }
 
 function cleanupBuckets {
-	for clusterName in `echo ${!CLUSTER_NAME_BUCKET_MAP[@]}`
-	do
+	for clusterName in $(echo ${!CLUSTER_NAME_BUCKET_MAP[@]}); do
 		local bucketNames=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-		for bucketName in `echo ${bucketNames[@]}`
-		do
-		echo "For cluster $clusterName DELETING bucket $bucketName"
-		deleteBucket "$port" "$bucketName"
+		for bucketName in $(echo ${bucketNames[@]}); do
+			echo "For cluster $clusterName DELETING bucket $bucketName"
+			deleteBucket "$port" "$bucketName"
 		done
 	done
 	CLUSTER_NAME_BUCKET_DONE_MAP=()
@@ -470,7 +448,7 @@ function createScope {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName CREATING scope $scopeName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections -d name=$scopeName > /dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections -d name=$scopeName >/dev/null 2>&1
 }
 
 function deleteScope {
@@ -480,7 +458,7 @@ function deleteScope {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName DELETING scope $scopeName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/ > /dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/ >/dev/null 2>&1
 }
 
 # inputs
@@ -489,26 +467,25 @@ function deleteScope {
 function setupScopes {
 	local clusterName=$1
 	local bucketName=$2
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]];then
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 
 	local -a scopesArr=(${BUCKET_NAME_SCOPE_MAP[$bucketName]:-})
-	if [[ -z "${scopesArr:-}" ]];then
+	if [[ -z "${scopesArr:-}" ]]; then
 		echo "No scopes found for bucket $bucketName"
 		return 1
 	fi
 
-	for scopeName in `echo ${scopesArr[@]}`
-	do
+	for scopeName in $(echo ${scopesArr[@]}); do
 		checkNamespaceCreated "$clusterName" "$bucketName" "$scopeName"
-		if (( ! $? == 0 ));then
+		if ((!$? == 0)); then
 			createScope "$clusterName" "$bucketName" "$scopeName"
 			recordNamespaceCreated "$clusterName" "$bucketName" "$scopeName"
 		fi
 		# If scope has collections
-		if [[ ! -z "${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-}" ]];then
+		if [[ ! -z "${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-}" ]]; then
 			setupCollections $clusterName $bucketName $scopeName
 		fi
 	done
@@ -522,7 +499,7 @@ function createCollection {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName scope $scopeName CREATING collection $collectionName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName -d name=$collectionName > /dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName -d name=$collectionName >/dev/null 2>&1
 }
 
 function deleteCollection {
@@ -533,7 +510,7 @@ function deleteCollection {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName scope $scopeName DELETING collection $collectionName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/$collectionName > /dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/$collectionName >/dev/null 2>&1
 }
 
 # inputs
@@ -544,21 +521,20 @@ function setupCollections {
 	local clusterName=$1
 	local bucketName=$2
 	local scopeName=$3
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]];then
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 
 	local collectionsArr=(${SCOPE_NAME_COLLECTION_MAP[$scopeName]:-})
-	if [[ -z "${collectionsArr:-}" ]];then
+	if [[ -z "${collectionsArr:-}" ]]; then
 		echo "No collections found for scope $scopeName"
 		return 1
 	fi
 
-	for collectionName in `echo ${collectionsArr[@]}`
-	do
+	for collectionName in $(echo ${collectionsArr[@]}); do
 		checkNamespaceCreated "$clusterName" "$bucketName" "$scopeName" "$collectionName"
-		if (( ! $? == 0 ));then
+		if ((!$? == 0)); then
 			createCollection "$clusterName" "$bucketName" "$scopeName" "$collectionName"
 			recordNamespaceCreated "$clusterName" "$bucketName" "$scopeName" "$collectionName"
 		fi
@@ -568,33 +544,33 @@ function setupCollections {
 # Allow specific flags to be passed in:
 # -d : <developer mode>
 function setupTopologies {
-  local OPTIND
-  local d
-  local developerPreviewSet=0
-  local opt
+	local OPTIND
+	local d
+	local developerPreviewSet=0
+	local opt
 
-  while getopts "d" opt;do
-    case ${opt} in
-      d)
-       developerPreviewSet=1
-      ;;
-    esac
-  done
+	while getopts "d" opt; do
+		case ${opt} in
+		d)
+			developerPreviewSet=1
+			;;
+		esac
+	done
 
 	setupCluster
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		return $?
 	fi
 
-	if (( $developerPreviewSet == 1 ));then
-	  enableDeveloperPreview
-	  if (( $? != 0 ));then
-	    return $?
-	  fi
+	if (($developerPreviewSet == 1)); then
+		enableDeveloperPreview
+		if (($? != 0)); then
+			return $?
+		fi
 	fi
 
 	setupBuckets
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		return $?
 	fi
 }
@@ -605,7 +581,7 @@ function setupTopologies {
 function createRemoteClusterReference {
 	local source=$1
 	local target=$2
-	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]];then
+	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
@@ -623,12 +599,11 @@ function createReplicationInternal {
 	local i
 
 	# Under stressed systems, possible that replication creation could fail
-	for (( i=0; $i < 3; i=$(($i+1)) ))
-	do
-		replicationID=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${NODEPORTS[$sourceID]}/controller/createReplication -d fromBucket=${BUCKETNAMES[$sourceID]} -d toCluster=${CLUSTERNAMES[$targetID]} -d toBucket=${BUCKETNAMES[$targetID]} -d replicationType=continuous -d checkpointInterval=60 -d statsInterval=500`
-		if (( $? == 0 ));then
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		replicationID=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${NODEPORTS[$sourceID]}/controller/createReplication -d fromBucket=${BUCKETNAMES[$sourceID]} -d toCluster=${CLUSTERNAMES[$targetID]} -d toBucket=${BUCKETNAMES[$targetID]} -d replicationType=continuous -d checkpointInterval=60 -d statsInterval=500)
+		if (($? == 0)); then
 			echo "$replicationID"
-		elif (( $i != 2 ));then
+		elif (($i != 2)); then
 			echo "Replication creation returned error code. Will retry in 10 seconds..."
 			sleep 10
 		fi
@@ -637,10 +612,10 @@ function createReplicationInternal {
 
 # Check if jq is present. It is used for parsing JSON in a bash environment
 function checkJQ {
-	which jq > /dev/null 2>&1
-	if (( $? != 0 ));then
-		which brew > /dev/null 2>&1
-		if (( $? != 0 ));then
+	which jq >/dev/null 2>&1
+	if (($? != 0)); then
+		which brew >/dev/null 2>&1
+		if (($? != 0)); then
 			return $?
 		fi
 		echo "jq not found... installing from homebrew"
@@ -653,11 +628,11 @@ function checkJQ {
 function getKeyUsingJQ {
 	local arg=$1
 	local key=$2
-	if [[ -z "${arg:-}" ]];then
+	if [[ -z "${arg:-}" ]]; then
 		return 1
 	fi
 
-	echo $arg | jq ${key} 2> /dev/null
+	echo $arg | jq ${key} 2>/dev/null
 }
 
 function validateClusterBucket {
@@ -667,14 +642,13 @@ function validateClusterBucket {
 	local -a bucketsArr
 	bucketsArr=(${CLUSTER_NAME_BUCKET_MAP[$cluster]:-})
 	local found="false"
-	for checkBucket in `echo ${bucketsArr[@]}`
-	do
-		if [[ "$bucket" == "$checkBucket" ]];then
+	for checkBucket in $(echo ${bucketsArr[@]}); do
+		if [[ "$bucket" == "$checkBucket" ]]; then
 			found="true"
 			break
 		fi
 	done
-	if [[ "$found" == "false" ]];then
+	if [[ "$found" == "false" ]]; then
 		echo "Bucket $bucket is not defined for cluster $cluster"
 		return 1
 	fi
@@ -695,17 +669,17 @@ function createBucketReplication {
 	local -a replProperties=$5
 	local i
 
-	if [[ -z "${sourceCluster:-}" ]] || [[ -z "${sourceBucket:-}" ]] || [[ -z "${targetCluster:-}" ]] || [[ -z "${targetBucket:-}" ]] || [[ -z "${replProperties}" ]];then
+	if [[ -z "${sourceCluster:-}" ]] || [[ -z "${sourceBucket:-}" ]] || [[ -z "${targetCluster:-}" ]] || [[ -z "${targetBucket:-}" ]] || [[ -z "${replProperties}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 	# check if bucket belongs to cluster
 	validateClusterBucket $sourceCluster $sourceBucket
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		return $?
 	fi
 	validateClusterBucket $targetCluster $targetBucket
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		return $?
 	fi
 
@@ -715,16 +689,15 @@ function createBucketReplication {
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
 	getBucketReplPropertiesRESTString
 
-	for (( i=0; $i < 3; i=$(($i+1)) ))
-	do
-		repId=`$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}"`
-		if (( (( $? == 0 )) && (( `echo "$repId" | grep -c error` == 0 )) ));then
-			if (( `checkJQ` == 0 ));then
-				repIdReal=`getKeyUsingJQ "$repId" '.id'`
-				if [[ "$repIdReal" == "" ]];then
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
+		if (((($? == 0)) && (($(echo "$repId" | grep -c error) == 0)))); then
+			if (($(checkJQ) == 0)); then
+				repIdReal=$(getKeyUsingJQ "$repId" '.id')
+				if [[ "$repIdReal" == "" ]]; then
 					echo "Captured replicationID: $repId"
 				else
-					restFriendlyReplID=`echo $repIdReal | sed 's|/|%2F|g'`
+					restFriendlyReplID=$(echo $repIdReal | sed 's|/|%2F|g')
 					echo "ReplicationID: $repIdReal Rest-FriendlyID: $restFriendlyReplID"
 					insertBucketReplIntoExportMap "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket" "$restFriendlyReplID"
 				fi
@@ -732,7 +705,7 @@ function createBucketReplication {
 				echo "Captured replicationID: $repId"
 			fi
 			return 0
-		elif (( $i != 2 ));then
+		elif (($i != 2)); then
 			echo "Replication creation returned error code. Will retry in 10 seconds..."
 			sleep 10
 		fi
@@ -741,49 +714,47 @@ function createBucketReplication {
 }
 
 function cleanupRemoteClusterRefs {
-	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
-	do
-		local sourceCluster=`echo "$replKey" | cut -d, -f1`
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
+		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
 		local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
-		local targetCluster=`echo "$replKey" | cut -d, -f3`
+		local targetCluster=$(echo "$replKey" | cut -d, -f3)
 
 		echo "Deleting remote cluster reference $targetCluster on cluster $sourceCluster"
-		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$targetCluster > /dev/null 2>&1
+		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$targetCluster >/dev/null 2>&1
 	done
 }
 
 function cleanupBucketReplications {
-	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"
-	do
-		local sourceCluster=`echo "$replKey" | cut -d, -f1`
-		local restID=`echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g'`
+	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
+		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
+		local restID=$(echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g')
 		local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
-		local sourceBucket=`echo "$replKey" | cut -d, -f2`
-		local targetCluster=`echo "$replKey" | cut -d, -f3`
-		local targetBucket=`echo "$replKey" | cut -d, -f4`
+		local sourceBucket=$(echo "$replKey" | cut -d, -f2)
+		local targetCluster=$(echo "$replKey" | cut -d, -f3)
+		local targetBucket=$(echo "$replKey" | cut -d, -f4)
 
 		echo "DELETING replication from sourceCluster $sourceCluster sourceBucket $sourceBucket to targetCluster $targetCluster targetBucket $targetBucket..."
-		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/cancelXDCR/${restID} > /dev/null 2>&1
+		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
 	done
 }
 
 function findCbDocLoader {
-	if [[ ! -z "${CBDOCLOADER:-}" ]];then
+	if [[ ! -z "${CBDOCLOADER:-}" ]]; then
 		echo "$CBDOCLOADER"
 		return 0
 	fi
 
-	which locate > /dev/null 2>&1
-	if (( $? != 0 ));then
+	which locate >/dev/null 2>&1
+	if (($? != 0)); then
 		return $?
 	fi
 	# Just pick one
-	docloader=`locate cbdocloader | grep install | grep bin | head -n 1`
-	if (( $? != 0 ));then
+	docloader=$(locate cbdocloader | grep install | grep bin | head -n 1)
+	if (($? != 0)); then
 		echo ""
 		return 1
 	fi
-	if [[ -z "${CBDOCLOADER:-}" ]];then
+	if [[ -z "${CBDOCLOADER:-}" ]]; then
 		# set it in case needed it in future
 		export CBDOCLOADER=$docloader
 	fi
@@ -800,21 +771,21 @@ function runDocLoader {
 	local clusterName=$1
 	local bucketName=$2
 	local fileName=$3
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${fileName:-}" ]];then
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${fileName:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-	
-	docLoader=`findCbDocLoader`
-	if (( $? != 0 ));then
+
+	docLoader=$(findCbDocLoader)
+	if (($? != 0)); then
 		echo "Could not find docLoader"
 		return 1
 	fi
-	
+
 	getPropertiesFromBucketNamePropertyMap "$bucketName"
 	local ramQuota=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
-	if [[ -z "$ramQuota" ]];then
+	if [[ -z "$ramQuota" ]]; then
 		echo "Missing ramQuota for $bucketName"
 		return 1
 	fi
@@ -824,22 +795,22 @@ function runDocLoader {
 }
 
 function findCbWorkloadGen {
-	if [[ ! -z "${CBWORKLOADGEN:-}" ]];then
+	if [[ ! -z "${CBWORKLOADGEN:-}" ]]; then
 		echo "$CBWORKLOADGEN"
 		return 0
 	fi
 
-	which locate > /dev/null 2>&1
-	if (( $? != 0 ));then
+	which locate >/dev/null 2>&1
+	if (($? != 0)); then
 		return $?
 	fi
 	# Just pick one
-	workloadGen=`locate cbworkloadgen | grep build\/couchbase-cli | head -n 1`
-	if (( $? != 0 ));then
+	workloadGen=$(locate cbworkloadgen | grep build\/couchbase-cli | head -n 1)
+	if (($? != 0)); then
 		echo ""
 		return 1
 	fi
-	if [[ -z "$CBWORKLOADGEN" ]];then
+	if [[ -z "$CBWORKLOADGEN" ]]; then
 		# set it in case needed it in future
 		CBWORKLOADGEN=$workloadGen
 	fi
@@ -856,27 +827,26 @@ function runCbWorkloadGenBucket {
 	local numItems=${3:-10000}
 	local prefix="${4:-xdcrProv_$clusterName}"
 	local i
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]];then
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
-	workloadGen=`findCbWorkloadGen`
-	if (( $? != 0 )) || [[ -z "$workloadGen" ]];then
+	workloadGen=$(findCbWorkloadGen)
+	if (($? != 0)) || [[ -z "$workloadGen" ]]; then
 		echo "Could not find workload generator binary"
 		return 1
 	fi
 
-	for (( i=0; i < 3; i=$(( $i+1 ))))
-	do
+	for ((i = 0; i < 3; i = $(($i + 1)))); do
 		echo "Running cbworkloadGen on $clusterName bucket $bucketName"
 		# Run json documents with set/get ratio of 100%
 		echo $workloadGen -i $numItems -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix
 		$workloadGen -i $numItems -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix
-		if (( $? == 0 ));then
+		if (($? == 0)); then
 			return 0
-		elif (( $? != 0 )) && (( $i != 2 ));then
+		elif (($? != 0)) && (($i != 2)); then
 			echo "Workloadgen resulted in error. Possibly system is loaded. Retry in 10 seconds"
 			sleep 10
 		fi
@@ -897,27 +867,27 @@ function validateCbWorkloadGenCollection {
 	local collectionName=$8
 	local additionalPrefix${9:-}
 
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]] || \
-		[[ -z "${validateCluster:-}" ]] || [[ -z "${validateBucket:-}" ]] || [[ -z "${validateScope:-}" ]] || [[ -z "${validateCollection:-}" ]];then
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]] ||
+		[[ -z "${validateCluster:-}" ]] || [[ -z "${validateBucket:-}" ]] || [[ -z "${validateScope:-}" ]] || [[ -z "${validateCollection:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 
 	local port=${CLUSTER_NAME_PORT_MAP[$validateCluster]:-}
-	workloadGen=`findCbWorkloadGen`
-	if (( $? != 0 )) || [[ -z "$workloadGen" ]];then
+	workloadGen=$(findCbWorkloadGen)
+	if (($? != 0)) || [[ -z "$workloadGen" ]]; then
 		echo "Could not find workload generator binary"
 		return 1
 	fi
 
-	manifestOutput=`getManifest $validateCluster $validateBucket`
-	if (( $? != 0 ));then
+	manifestOutput=$(getManifest $validateCluster $validateBucket)
+	if (($? != 0)); then
 		echo "Error retrieving manifest for cluster $validateCluster bucket $validateBucket"
 		return 1
 	fi
 
-	collectionId=`getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$validateScope" "$validateCollection"`
-	if (( $? != 0 ));then
+	collectionId=$(getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$validateScope" "$validateCollection")
+	if (($? != 0)); then
 		echo "Error retrieving collection ID for scope $validateScope collection $validateCollection"
 		echo "Output: $manifestOutput"
 		return 1
@@ -925,20 +895,19 @@ function validateCbWorkloadGenCollection {
 
 	local prefix
 	local colIdHex
-	for (( i=0; i < 3; i=$(( $i+1 ))))
-	do
+	for ((i = 0; i < 3; i = $(($i + 1)))); do
 		echo "Validating on $validateCluster $validateBucket $validateScope $validateCollection by running same name as it was on $clusterName"
 		prefix=xdcrProv_$clusterName
-		if [[ ! -z "${additionalPrefix:-}" ]];then
+		if [[ ! -z "${additionalPrefix:-}" ]]; then
 			prefix=${prefix}_${additionalPrefix}
 		fi
 		# Run 10000 items of json documents with set/get ratio of 100%
 		echo "Running cbworkloadGen on port $port bucket $validateBucket collectionId $collectionId"
-		colIdHex=`printf '%x' $collectionId`
-		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $validateBucket -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex
-		if (( $? == 0 ));then
+		colIdHex=$(printf '%x' $collectionId)
+		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS -j -r 1 -n 127.0.0.1:$port -b $validateBucket -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex
+		if (($? == 0)); then
 			return 0
-		elif (( $? != 0 )) && (( $i != 2 ));then
+		elif (($? != 0)) && (($i != 2)); then
 			echo "Workloadgen resulted in error. Possibly system is loaded. Retry in 10 seconds"
 			sleep 10
 		fi
@@ -957,26 +926,26 @@ function runCbWorkloadGenCollection {
 	local i
 	local loopFlag=""
 
-	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]];then
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${scopeName:-}" ]] || [[ -z "${collectionName:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
-	workloadGen=`findCbWorkloadGen`
-	if (( $? != 0 )) || [[ -z "$workloadGen" ]];then
+	workloadGen=$(findCbWorkloadGen)
+	if (($? != 0)) || [[ -z "$workloadGen" ]]; then
 		echo "Could not find workload generator binary"
 		return 1
 	fi
 
-	manifestOutput=`getManifest $clusterName $bucketName`
-	if (( $? != 0 ));then
+	manifestOutput=$(getManifest $clusterName $bucketName)
+	if (($? != 0)); then
 		echo "Error retrieving manifest for cluster $clusterName bucket $bucketName"
 		return 1
 	fi
 
-	collectionId=`getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$scopeName" "$collectionName"`
-	if (( $? != 0 ));then
+	collectionId=$(getCollectionIdFromScopeAndCollectionName "$manifestOutput" "$scopeName" "$collectionName")
+	if (($? != 0)); then
 		echo "Error retrieving collection ID for scope $scopeName collection $collectionName"
 		echo "Output: $manifestOutput"
 		return 1
@@ -984,23 +953,22 @@ function runCbWorkloadGenCollection {
 
 	local prefix
 	local colIdHex
-	for (( i=0; i < 3; i=$(( $i+1 ))))
-	do
+	for ((i = 0; i < 3; i = $(($i + 1)))); do
 		echo "Running cbworkloadGen on $clusterName bucket $bucketName scope: $scopeName collection $collectionName (ID: $collectionId)"
 		prefix=xdcrProv_$clusterName
-		colIdHex=`printf '%x' $collectionId`
-		if [[ ! -z "$additionalPrefix" ]];then
+		colIdHex=$(printf '%x' $collectionId)
+		if [[ ! -z "$additionalPrefix" ]]; then
 			prefix=${prefix}_${additionalPrefix}
-			if [[ "$additionalPrefix" == "$CONTINUOUS_WORKLOAD_PREFIX" ]];then
+			if [[ "$additionalPrefix" == "$CONTINUOUS_WORKLOAD_PREFIX" ]]; then
 				echo "LOOPFLAG"
 				loopFlag="-l"
 			fi
 		fi
 		# Run 10000 items of json documents with set/get ratio of 100%
-		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS  -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex "$loopFlag"
-		if (( $? == 0 ));then
+		$workloadGen -i $CBWORKLOAD_COLLECTION_NUM_ITEMS -j -r 1 -n 127.0.0.1:$port -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex "$loopFlag"
+		if (($? == 0)); then
 			return 0
-		elif (( $? != 0 )) && (( $i != 2 ));then
+		elif (($? != 0)) && (($i != 2)); then
 			echo "Workloadgen resulted in error. Possibly system is loaded. Retry in 10 seconds"
 			sleep 10
 		fi
@@ -1019,11 +987,10 @@ function runCbWorkloadGenCollectionCont {
 
 function waitForBgJobs {
 	echo "Waiting for background jobs to finish..."
-	jobsCnt=`jobs -l | grep -c "Running"`
-	while (( $jobsCnt > 0 ))
-	do
+	jobsCnt=$(jobs -l | grep -c "Running")
+	while (($jobsCnt > 0)); do
 		sleep 1
-		jobsCnt=`jobs -l | grep -c "Running"`
+		jobsCnt=$(jobs -l | grep -c "Running")
 	done
 }
 
@@ -1034,7 +1001,7 @@ function getManifest {
 	local bucketName="$2"
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
-	if [[ -z "${port:-}" ]];then
+	if [[ -z "${port:-}" ]]; then
 		echo ""
 		return 1
 	fi
@@ -1046,7 +1013,7 @@ function getManifest {
 # Also converts them to upper case because bc only takes A-F for hex
 function hexStringToDec {
 	local hexString=$1
-	local hex=`echo "$hexString" | sed 's/"//g' | tr '[:lower:]' '[:upper:]'`
+	local hex=$(echo "$hexString" | sed 's/"//g' | tr '[:lower:]' '[:upper:]')
 
 	echo "obase=10; ibase=16; $hex" | bc
 }
@@ -1056,31 +1023,29 @@ function prettyPrintManifest {
 	local i
 
 	# get manifest version
-	local manifestVersion=`echo "$manifest" | jq '.uid'`
-	local manifestVersionDec=`hexStringToDec $manifestVersion`
+	local manifestVersion=$(echo "$manifest" | jq '.uid')
+	local manifestVersionDec=$(hexStringToDec $manifestVersion)
 	echo "Manifest version $manifestVersionDec"
 
 	#get all the scopes
-	local scopesList=`echo "$manifest" | jq '.scopes'`
-	local scopesListLen=`echo "$manifest" | jq '.scopes | length'`
+	local scopesList=$(echo "$manifest" | jq '.scopes')
+	local scopesListLen=$(echo "$manifest" | jq '.scopes | length')
 
-	for (( i=0; $i < $scopesListLen; i=$(($i+1)) ))
-	do
-		local scopeOutput=`echo "$scopesList" | jq .[$i]`
-		local scopeName=`echo "$scopeOutput" | jq '.name'`
-		local scopeUID=`echo "$scopeOutput" | jq '.uid'`
-		local scopeUIDdec=`hexStringToDec "$scopeUID"`
+	for ((i = 0; $i < $scopesListLen; i = $(($i + 1)))); do
+		local scopeOutput=$(echo "$scopesList" | jq .[$i])
+		local scopeName=$(echo "$scopeOutput" | jq '.name')
+		local scopeUID=$(echo "$scopeOutput" | jq '.uid')
+		local scopeUIDdec=$(hexStringToDec "$scopeUID")
 		echo "ScopeName $scopeName (UID $scopeUIDdec)"
 
 		# Get individual collections within this scope
-		local collectionsList=`echo "$scopeOutput" | jq '.collections'`
-		local collectionsListLen=`echo "$scopeOutput" | jq '.collections | length'`
-		for (( j=0; $j < $collectionsListLen; j=$(($j+1)) ))
-		do
-			local collectionsOutput=`echo "$collectionsList" | jq .[$j]`
-			local collectionName=`echo "$collectionsOutput" | jq '.name'`
-			local collectionUID=`echo "$collectionsOutput" | jq '.uid'`
-			local collectionUIDdec=`hexStringToDec "$collectionUID"`
+		local collectionsList=$(echo "$scopeOutput" | jq '.collections')
+		local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
+		for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
+			local collectionsOutput=$(echo "$collectionsList" | jq .[$j])
+			local collectionName=$(echo "$collectionsOutput" | jq '.name')
+			local collectionUID=$(echo "$collectionsOutput" | jq '.uid')
+			local collectionUIDdec=$(hexStringToDec "$collectionUID")
 			echo "ScopeName $scopeName CollectionName $collectionName (UID $collectionUIDdec)"
 		done
 	done
@@ -1093,25 +1058,23 @@ function getCollectionIdFromScopeAndCollectionName {
 	local requestedCollectionName=$3
 	local i
 
-	local scopesList=`echo "$manifest" | jq '.scopes'`
-	local scopesListLen=`echo "$manifest" | jq '.scopes | length'`
+	local scopesList=$(echo "$manifest" | jq '.scopes')
+	local scopesListLen=$(echo "$manifest" | jq '.scopes | length')
 
-	for (( i=0; $i < $scopesListLen; i=$(($i+1)) ))
-	do
-		local scopeOutput=`echo "$scopesList" | jq .[$i]`
+	for ((i = 0; $i < $scopesListLen; i = $(($i + 1)))); do
+		local scopeOutput=$(echo "$scopesList" | jq .[$i])
 		# Requested doesn't have double quotes, but manifest output does
-		local scopeName=`echo "$scopeOutput" | jq '.name' | sed 's/"//g'`
-		if [[ "$scopeName" == "$requestedScopeName" ]];then
-			local collectionsList=`echo "$scopeOutput" | jq '.collections'`
-			local collectionsListLen=`echo "$scopeOutput" | jq '.collections | length'`
-			for (( j=0; $j < $collectionsListLen; j=$(($j+1)) ))
-			do
-				local collectionsOutput=`echo "$collectionsList" | jq .[$j]`
+		local scopeName=$(echo "$scopeOutput" | jq '.name' | sed 's/"//g')
+		if [[ "$scopeName" == "$requestedScopeName" ]]; then
+			local collectionsList=$(echo "$scopeOutput" | jq '.collections')
+			local collectionsListLen=$(echo "$scopeOutput" | jq '.collections | length')
+			for ((j = 0; $j < $collectionsListLen; j = $(($j + 1)))); do
+				local collectionsOutput=$(echo "$collectionsList" | jq .[$j])
 				# Requested doesn't have double quotes, but manifest output does
-				local collectionName=`echo "$collectionsOutput" | jq '.name' | sed 's/"//g'`
-				local collectionUID=`echo "$collectionsOutput" | jq '.uid'`
-				local collectionUIDdec=`hexStringToDec "$collectionUID"`
-				if [[ "$collectionName" == "$requestedCollectionName" ]];then
+				local collectionName=$(echo "$collectionsOutput" | jq '.name' | sed 's/"//g')
+				local collectionUID=$(echo "$collectionsOutput" | jq '.uid')
+				local collectionUIDdec=$(hexStringToDec "$collectionUID")
+				if [[ "$collectionName" == "$requestedCollectionName" ]]; then
 					echo "$collectionUIDdec"
 					return 0
 				fi
@@ -1131,16 +1094,16 @@ function printSingleClusterBucketScopeAndCollection {
 	# Get the manifest for this bucket
 	local manifestOutput=""
 	local manifestVersion=""
-	manifestOutput=`getManifest $clusterName $bucketName`
-	if (( $? != 0 ));then
+	manifestOutput=$(getManifest $clusterName $bucketName)
+	if (($? != 0)); then
 		echo "Error retrieving manifest - Cluster $clusterName bucket $bucketName scope $scopeName"
 		continue
-	elif [[ -z "$manifestOutput" ]];then
+	elif [[ -z "$manifestOutput" ]]; then
 		echo "Retrieved empty manifest JSON - Cluster $clusterName bucket $bucketName scope $scopeName"
 		continue
 	fi
 
-	manifestVersion=`echo "$manifestOutput" | jq '.uid'`
+	manifestVersion=$(echo "$manifestOutput" | jq '.uid')
 	echo "Cluster $clusterName Bucket $bucketName collections manifest version: $manifestVersion"
 
 	prettyPrintManifest "$manifestOutput"
@@ -1149,17 +1112,15 @@ function printSingleClusterBucketScopeAndCollection {
 # Print a summary of all the topology setup -> scope and collection info
 # Uses the manifest REST API
 function printGlobalScopeAndCollectionInfo {
-	if (( `checkJQ` != 0 ));then
+	if (($(checkJQ) != 0)); then
 		echo "jq not found - cannot run $0"
 		return 1
 	fi
 
-	for clusterName in `echo ${!CLUSTER_NAME_PORT_MAP[@]}`
-	do
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		local -a buckets=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
-		for bucketName in `echo ${buckets[@]}`
-		do
+		for bucketName in $(echo ${buckets[@]}); do
 			printSingleClusterBucketScopeAndCollection "$clusterName" "$bucketName"
 		done
 	done
@@ -1175,33 +1136,32 @@ function getStats {
 	local targetBucketName=$4
 	local statsName=$5
 
-	restId=`getRestIDFromExportedData "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName"`
-	if (( $? != 0 ));then
+	restId=$(getRestIDFromExportedData "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName")
+	if (($? != 0)); then
 		return $?
 	fi
 
 	local port=${CLUSTER_NAME_PORT_MAP[$srcClusterName]}
-	if (( `checkJQ` != 0 ));then
+	if (($(checkJQ) != 0)); then
 		return 1
 	fi
 
-  local counter=0
-	statsOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName}`
-	while (((( $? != 0 )) && (( $counter < $REST_MAX_RETRY ))))
-	do
-  	counter=$(( $counter + 1 ))
-  	statsOutput=`$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName}`
+	local counter=0
+	statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
+	while (((($? != 0)) && (($counter < $REST_MAX_RETRY)))); do
+		counter=$(($counter + 1))
+		statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
 	done
 
-  # Stats output should only be only one stats with one node. Rolling window where last number is the latest:
-  # {"samplesCount":60,"isPersistent":true,"lastTStamp":1595364466482,"interval":1000,
-  # "timestamp":[1595364456473,1595364457474,1595364458475,1595364459476,1595364460477,1595364461478,1595364462478,1595364463479,1595364464480,1595364465481,1595364466482],
-  # "nodeStats":{"127.0.0.1:9000":[7168,1057,0,0,0,0,0,0,0,0,0]}}
-  # or
-  # '{"samplesCount":60,"isPersistent":true,"lastTStamp":1595369104271,"interval":1000,
-  # "timestamp":[1595369091258,1595369092259,1595369093260,1595369094261,1595369095262,1595369096263,1595369097264,1595369098265,1595369099266,1595369100267,1595369101268,1595369102269,1595369103270,1595369104271],
-  # "nodeStats":{"[::1]:9000":[7168,1799,0,0,0,38,0,0,0,0,0,0,0,0]}}'
-  echo "$statsOutput" | jq ".nodeStats" | jq '.[]' | jq '.[-1]'
+	# Stats output should only be only one stats with one node. Rolling window where last number is the latest:
+	# {"samplesCount":60,"isPersistent":true,"lastTStamp":1595364466482,"interval":1000,
+	# "timestamp":[1595364456473,1595364457474,1595364458475,1595364459476,1595364460477,1595364461478,1595364462478,1595364463479,1595364464480,1595364465481,1595364466482],
+	# "nodeStats":{"127.0.0.1:9000":[7168,1057,0,0,0,0,0,0,0,0,0]}}
+	# or
+	# '{"samplesCount":60,"isPersistent":true,"lastTStamp":1595369104271,"interval":1000,
+	# "timestamp":[1595369091258,1595369092259,1595369093260,1595369094261,1595369095262,1595369096263,1595369097264,1595369098265,1595369099266,1595369100267,1595369101268,1595369102269,1595369103270,1595369104271],
+	# "nodeStats":{"[::1]:9000":[7168,1799,0,0,0,38,0,0,0,0,0,0,0,0]}}'
+	echo "$statsOutput" | jq ".nodeStats" | jq '.[]' | jq '.[-1]'
 }
 
 function pauseReplication {
@@ -1210,19 +1170,19 @@ function pauseReplication {
 	local targetClusterName=$3
 	local targetBucketName=$4
 
-	restID=`getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName"`
-	if (( $? != 0 ));then
+	restID=$(getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName")
+	if (($? != 0)); then
 		echo "Unable to find REST ID"
 		return 1
 	fi
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$srcClusterName]:-}
-	if [[ -z "$sourcePort" ]];then
+	if [[ -z "$sourcePort" ]]; then
 		echo "Unable to find admin port for cluster $srcClusterName"
 		return 1
 	fi
 
 	echo "Pausing replication $restID"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=true > /dev/null 2>&1
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=true >/dev/null 2>&1
 }
 
 function resumeReplication {
@@ -1231,19 +1191,19 @@ function resumeReplication {
 	local targetClusterName=$3
 	local targetBucketName=$4
 
-	restID=`getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName"`
-	if (( $? != 0 ));then
+	restID=$(getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName")
+	if (($? != 0)); then
 		echo "Unable to find REST ID"
 		return 1
 	fi
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$srcClusterName]:-}
-	if [[ -z "$sourcePort" ]];then
+	if [[ -z "$sourcePort" ]]; then
 		echo "Unable to find admin port for cluster $srcClusterName"
 		return 1
 	fi
 
 	echo "Resuming replication $restID"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=false > /dev/null 2>&1
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=false >/dev/null 2>&1
 }
 
 declare INTERNAL_SETTINGS_REST_PATH="xdcr/internalSettings"
@@ -1251,19 +1211,19 @@ declare INTERNAL_SETTINGS_REST_PATH="xdcr/internalSettings"
 function listInternalSettings {
 	local clusterName=$1
 	local jqStr
-	jqLocation=`which jq`
-	if (( $? == 0 ));then
+	jqLocation=$(which jq)
+	if (($? == 0)); then
 		jqStr="$jqLocation"
 	fi
 	importProvisionedConfig
 
 	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
+	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
 		return 1
 	fi
 
-	if [[ ! -z "$jqStr" ]];then
+	if [[ ! -z "$jqStr" ]]; then
 		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH | $jqLocation
 	else
 		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH
@@ -1275,46 +1235,45 @@ function setInternalSettings {
 	local -a keyVal=("${@:2}")
 
 	local jqStr
-	jqLocation=`which jq`
-	if (( $? == 0 ));then
+	jqLocation=$(which jq)
+	if (($? == 0)); then
 		jqStr="$jqLocation"
 	fi
 	importProvisionedConfig
 
 	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
+	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
 		return 1
 	fi
 
 	# Because to do multiple -d keyvals, it's better to pass in a single array
 	local -a curlMultiArr
-	for kv in "${keyVal[@]}"
-	do
+	for kv in "${keyVal[@]}"; do
 		curlMultiArr+=(" -d ")
 		curlMultiArr+=("$kv")
 	done
 
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH ${curlMultiArr[@]} > /dev/null 2>&1
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH ${curlMultiArr[@]} >/dev/null 2>&1
 }
 
 function getClusterLogs {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]];then
+	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
 		return 1
 	fi
 
 	$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag 2>&1
 }
-	
+
 function getXDCRCheckpoints {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
-	checkpointOutput=`$CURL http://localhost:$port/diag/eval -d 'ns_server_testrunner_api:grab_all_goxdcr_checkpoints()' -u $DEFAULT_ADMIN:$DEFAULT_PW`
-	if (( $? != 0 ));then
+	checkpointOutput=$($CURL http://localhost:$port/diag/eval -d 'ns_server_testrunner_api:grab_all_goxdcr_checkpoints()' -u $DEFAULT_ADMIN:$DEFAULT_PW)
+	if (($? != 0)); then
 		return $?
 	fi
 	echo "$checkpointOutput"
@@ -1330,13 +1289,13 @@ function setReplicationSettings {
 	local -a keyVal=("${@:5}")
 	local port=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
 
-	replId=`getBucketReplicationRestID "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket"`
-	if ! (( $? == 0 ));then
+	replId=$(getBucketReplicationRestID "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket")
+	if ! (($? == 0)); then
 		echo "Unable to get replication ID"
 		return 1
 	fi
 
-	if [[ -z "${port:-}" ]];then
+	if [[ -z "${port:-}" ]]; then
 		echo "Cannot get port number"
 		return 1
 	fi
@@ -1352,18 +1311,17 @@ function setReplicationSettingsInternal {
 
 	# Because to do multiple -d keyvals, it's better to pass in a single array
 	local -a curlMultiArr
-	for kv in "${keyVal[@]}"
-	do
+	for kv in "${keyVal[@]}"; do
 		curlMultiArr+=(" -d ")
 		curlMultiArr+=("$kv")
 	done
 
-	jqLocation=`which jq`
-	if (( $? == 0 ));then
+	jqLocation=$(which jq)
+	if (($? == 0)); then
 		jqStr="$jqLocation"
 	fi
 
-	if [[ ! -z "${jqStr:-}" ]];then
+	if [[ ! -z "${jqStr:-}" ]]; then
 		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId} ${curlMultiArr[@]} | $jqStr
 	else
 		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId} ${curlMultiArr[@]}
@@ -1380,13 +1338,13 @@ function getReplicationSettings {
 	local targetBucket=$4
 	local port=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
 
-	replId=`getBucketReplicationRestID "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket"`
-	if ! (( $? == 0 ));then
+	replId=$(getBucketReplicationRestID "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket")
+	if ! (($? == 0)); then
 		echo "Unable to get replication ID"
 		return 1
 	fi
 
-	if [[ -z "${port:-}" ]];then
+	if [[ -z "${port:-}" ]]; then
 		echo "Cannot get port number"
 		return 1
 	fi
@@ -1399,16 +1357,15 @@ function getReplicationSettingsInternal {
 	local port=$2
 	local jqStr
 
-	jqLocation=`which jq`
-	if (( $? == 0 ));then
+	jqLocation=$(which jq)
+	if (($? == 0)); then
 		jqStr="$jqLocation"
 	fi
 
-	if [[ ! -z "${jqStr:-}" ]];then
+	if [[ ! -z "${jqStr:-}" ]]; then
 		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId} | $jqStr
 	else
 		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/replications/${replId}
 	fi
 
 }
-

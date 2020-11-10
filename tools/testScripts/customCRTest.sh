@@ -17,31 +17,31 @@ set -u
 
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
-if (( $? != 0 ));then
+if (($? != 0)); then
 	echo "Provision failed"
 	exit 1
 fi
 
 . ./testLibrary.shlib
-if (( $? != 0 ));then
-  echo "testLibrary.shlib failed"
-  exit 1
+if (($? != 0)); then
+	echo "testLibrary.shlib failed"
+	exit 1
 fi
 
 . ./ccr_tests.shlib
-if (( $? != 0 ));then
-  echo "ccr_tests.shlib failed"
-  exit 1
+if (($? != 0)); then
+	echo "ccr_tests.shlib failed"
+	exit 1
 fi
 
 testCase="${1:-}"
 
-declare -a TESTLIST=( eventingFunctionUIHandlerTest configureResolver remoteClusterUserPermission dataLoad dataLoadLoop )
+declare -a TESTLIST=(eventingFunctionUIHandlerTest configureResolver remoteClusterUserPermission dataLoad dataLoadLoop)
 
 if [[ "$testCase" != "" ]] && [[ ! " ${TESTLIST[*]} " =~ " ${testCase} " ]]; then
-  echo "${testCase} is not in the list of supproted tests:"
-  echo ${TESTLIST[*]}
-  exit 1
+	echo "${testCase} is not in the list of supproted tests:"
+	echo ${TESTLIST[*]}
+	exit 1
 fi
 
 DEFAULT_ADMIN="Administrator"
@@ -49,23 +49,22 @@ DEFAULT_PW="wewewe"
 
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001 ["C3"]=9002 ["C4"]=9003)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001 ["C3"]=13002 ["C4"]=13003)
-CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1"  ["C2"]="CCR2" ["C3"]="CCR3" ["C4"]="CCR4")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1" ["C2"]="CCR2" ["C3"]="CCR3" ["C4"]="CCR4")
 
 # See MB-39731 for conflictResolutionType=custom
 declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active" ["conflictResolutionType"]="custom")
-for bucket in "${CLUSTER_NAME_BUCKET_MAP[@]}"
-do
-  insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
+for bucket in "${CLUSTER_NAME_BUCKET_MAP[@]}"; do
+	insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
 done
 
 testForClusterRun
-if (( $? != 0 ));then
-  exit 1
+if (($? != 0)); then
+	exit 1
 fi
 
 setupTopologies -d
-if (( $? != 0 ));then
-  echo "setupTopologies failed"
+if (($? != 0)); then
+	echo "setupTopologies failed"
 	exit 1
 fi
 
@@ -73,41 +72,37 @@ sleep 5
 
 declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto" ["mergeFunctionMapping"]='{"default":"defaultLWW"}')
 
-for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"
-do
-    bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
-    for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"
-    do
-      bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
-      if [[ "$cluster1" != "$cluster2" ]];then
-        createRemoteClusterReference $cluster1 $cluster2
-      fi
-    done
+for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
+	bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+	for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
+		bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
+		if [[ "$cluster1" != "$cluster2" ]]; then
+			createRemoteClusterReference $cluster1 $cluster2
+		fi
+	done
 done
 
-for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"
-do
-    bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
-    for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"
-    do
-      bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
-      if [[ "$cluster1" != "$cluster2" ]];then
-        createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties
-        if (( $? != 0 ));then
-          echo "Failed: createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties"
-          exit 1
-        fi
-      fi
-    done
+for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
+	bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+	for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
+		bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
+		if [[ "$cluster1" != "$cluster2" ]]; then
+			createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties
+			if (($? != 0)); then
+				echo "Failed: createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties"
+				exit 1
+			fi
+		fi
+	done
 done
 
-if [[ "$testCase" == "" ]];then
-    eventingFunctionUIHandlerTest
-    configureResolver
-    remoteClusterUserPermission
-    dataLoad
+if [[ "$testCase" == "" ]]; then
+	eventingFunctionUIHandlerTest
+	configureResolver
+	remoteClusterUserPermission
+	dataLoad
 else
-    $testCase
+	$testCase
 fi
 
 grepForPanics

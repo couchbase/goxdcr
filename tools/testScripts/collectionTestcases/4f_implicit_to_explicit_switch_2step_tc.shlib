@@ -17,7 +17,7 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]}  ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -41,7 +41,6 @@ declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
-
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
@@ -55,26 +54,26 @@ function runTestCase {
 	echo "Running implicit switchover to explicit test case 2-step"
 	echo "============================================================================"
 	testForClusterRun
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
-	if (( $? != 0 ));then
+	if (($? != 0)); then
 		exit $?
 	fi
 
 	# Get current instance
-    local -i currentBackfillInstanceCnt
-    local -i currentVBTasksDoneInstanceCnt
+	local -i currentBackfillInstanceCnt
+	local -i currentVBTasksDoneInstanceCnt
 	local -i currentBackfillAppendInstanceCnt
 	local currentXdcrLog
 
-    currentXdcrLog=`getInternalNodeXdcrLog "C1"`
-    currentBackfillInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG"`
-    currentBackfillAppendInstanceCnt=`echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG"`
-    currentVBTasksDoneInstanceCnt=`echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG"`
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
+	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
+	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -84,7 +83,7 @@ function runTestCase {
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
-	
+
 	runDataLoad
 
 	echo "VALIDATING Data..."
@@ -109,7 +108,7 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count for backfill"
 	sleep 5
-	newCount=$(( $CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 ))
+	newCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" $newCount
 
 	validateCbWorkloadGenCollection "C2" "B2" "S3" "col2" "C1" "B1" "S1" "col1"
@@ -118,8 +117,8 @@ function runTestCase {
 	checkItemCnt "C2" "B2" $newCount
 
 	# Backfill should not have been raised - because XDCR prevents pipeline from starting if explicit mapping was empty
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG"  $(( $currentBackfillInstanceCnt ))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(( $currentVBTasksDoneInstanceCnt ))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
@@ -129,6 +128,6 @@ function runTestCase {
 	echo "============================================================================"
 	exportProvisionedConfig
 	cleanupBucketReplications
- 	cleanupBuckets
- 	cleanupRemoteClusterRefs
+	cleanupBuckets
+	cleanupRemoteClusterRefs
 }
