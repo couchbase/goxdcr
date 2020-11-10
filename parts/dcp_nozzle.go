@@ -371,6 +371,7 @@ type DcpNozzle struct {
 	getHighSeqnoOneAtATime chan bool
 	vbHighSeqnoMap         map[uint16]*base.SeqnoWithLock
 	savedMcReqFeatures     utilities.HELOFeatures
+	isCollectionsMigration bool
 }
 
 func NewDcpNozzle(id string,
@@ -661,9 +662,9 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		if !atLeastOneMigrationTask {
 			dcp.Logger().Infof("%v Received backfill tasks for vb to endSeqno: %v", dcp.Id(), outputEndSeqnoMap)
 		} else {
+			dcp.isCollectionsMigration = true
 			if !allMigrationTasks {
-				// TODO: Before shipping CC - remove this panic and change it to a log msg
-				panic(fmt.Sprintf("Weird mix of VBTasks - some are migration and some are not: %v", dcp.specificVBTasks.DebugString()))
+				dcp.Logger().Warnf(fmt.Sprintf("Weird mix of VBTasks - some are migration and some are not: %v", dcp.specificVBTasks.DebugString()))
 			}
 			dcp.Logger().Infof("%v Received non-ending migration tasks", dcp.Id())
 		}
@@ -1977,6 +1978,12 @@ func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
 func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 	if len(dcp.specificVBTasks) == 0 {
 		// Main pipeline, no need to get high Seqno
+		return nil
+	}
+
+	if dcp.isCollectionsMigration {
+		// Collections migration only has default collection so no need to high seqnos
+		// Moreover, the savedMCReq features would not have collections enabled
 		return nil
 	}
 
