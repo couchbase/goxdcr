@@ -118,6 +118,9 @@ var CollectionNamespaceRegex, _ = regexp.Compile(CollectionNamespaceRegexExpr)
 
 var CollectionNameValidationRegex, _ = regexp.Compile(fmt.Sprintf("^%v%v*$", CollectionValidPrefixNameClass, CollectionValidNameCharClass))
 
+const BasicFQDNCharClass = "[0-9A-Za-z-_]"
+var BasicFQDNRegex, _ = regexp.Compile(fmt.Sprintf("^(%v+\\.)+(%v+)$", BasicFQDNCharClass, BasicFQDNCharClass))
+
 var DefaultCollectionId uint32 = 0
 
 var CollectionsUidBase int = 16

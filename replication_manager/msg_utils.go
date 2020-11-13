@@ -339,9 +339,7 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 			}
 		case base.RemoteClusterName:
 			name = getStringFromValArr(valArr)
-			if !base.CollectionNameValidationRegex.MatchString(name) {
-				errorsMap[base.RemoteClusterName] = fmt.Errorf("Remote cluster name should only contain alpha-numeric characters")
-			}
+			base.ValidateRemoteClusterName(name, errorsMap)
 		case base.RemoteClusterHostName:
 			hostName = getStringFromValArr(valArr)
 		case base.RemoteClusterUserName:

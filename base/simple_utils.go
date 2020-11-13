@@ -1718,3 +1718,24 @@ func findCustomCRXattrFields(xattr []byte) (clusterId, cv, pcas, mv []byte, err 
 	}
 	return
 }
+
+func ValidateRemoteClusterName(name string, errorsMap map[string]error) {
+	// Name can be IPv4 or IPv6 based
+	if net.ParseIP(name) != nil {
+		// Parsable as IP address
+		return
+	}
+
+	// Name can be FQDN based - for now, just alphanumeric with dotted separated
+	if BasicFQDNRegex.MatchString(name) {
+		return
+	}
+
+	// Or - simply alphanumeric based, no special chars
+	if CollectionNameValidationRegex.MatchString(name) {
+		return
+	}
+
+	errorsMap[RemoteClusterName] = fmt.Errorf("Remote cluster name should only be IPv4, IPv6, or alpha-numeric characters")
+	return
+}

@@ -493,3 +493,23 @@ func TestDefaultNs(t *testing.T) {
 	assert.Equal(explicitRuleInvalid, validator.parseRule("testScope.testCol", "_nonDefault.nonDefCol"))
 
 }
+
+func TestValidRemoteClusterName(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestValidRemoteClusterName =================")
+	defer fmt.Println("============== Test case end: TestValidRemoteClusterName =================")
+
+	errMap := make(ErrorMap)
+
+	ValidateRemoteClusterName("abc.be_fd.com", errMap)
+	assert.Equal(0, len(errMap))
+
+	ValidateRemoteClusterName("abc", errMap)
+	assert.Equal(0, len(errMap))
+
+	ValidateRemoteClusterName("12.23.34.45", errMap)
+	assert.Equal(0, len(errMap))
+
+	ValidateRemoteClusterName("endwithaPeriod.com.", errMap)
+	assert.NotEqual(0, len(errMap))
+}
