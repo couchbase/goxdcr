@@ -312,13 +312,14 @@ func (b *BackfillReplicationService) getReplicationIdFromKey(key string) string 
 	return key[len(prefix):]
 }
 
+// Caller should clone the spec themselves if modification will be done onto it
 func (b *BackfillReplicationService) BackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	spec, err := b.backfillSpec(replicationId)
 	if err != nil {
 		return nil, err
 	}
 
-	return spec.Clone(), nil
+	return spec, nil
 }
 
 func (b *BackfillReplicationService) GetMyVBs(sourceBucketName string) ([]uint16, error) {

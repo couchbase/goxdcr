@@ -615,7 +615,7 @@ func (ckpt_svc *CheckpointsService) getBackfillReplSpec(id string) (*metadata.Ba
 	if !exists {
 		return nil, base.ErrorNotFound
 	} else {
-		return origSpec.Clone(), nil
+		return origSpec, nil
 	}
 }
 

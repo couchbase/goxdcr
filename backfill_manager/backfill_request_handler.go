@@ -121,7 +121,7 @@ func (b *BackfillRequestHandler) Start() error {
 
 		spec, err := b.backfillReplSvc.BackfillReplSpec(b.id)
 		if err == nil && spec != nil {
-			b.cachedBackfillSpec = spec
+			b.cachedBackfillSpec = spec.Clone()
 		}
 		b.childrenWaitgrp.Add(1)
 		go b.run()
