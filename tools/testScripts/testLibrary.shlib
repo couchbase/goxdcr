@@ -143,6 +143,9 @@ function checkChangesLeftInternal {
 
 	for ((i = 0; $i < 3; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
+		if [[ -z "${changesLeft:-}" ]]; then
+			changesLeft=999999
+		fi
 		if (($changesLeft == 0)); then
 			echo "Node $srcCluster changes_left is 0"
 			return 0
@@ -401,4 +404,21 @@ function validateXDCRCheckpoints {
 
 function killAllBgJobs {
 	jobs -l | awk '{print $2}' | xargs kill
+}
+
+function runXdcrDiffer {
+	local srcCluster=$1
+	local srcPort=${CLUSTER_NAME_PORT_MAP[$srcCluster]:-}
+	local srcBucket=$2
+	local tgtCluster=$3
+	local tgtBucket=$4
+
+	pushd $(pwd)
+
+	cd $xdcrDifferDir
+	$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "localhost:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c
+	retVal=$?
+
+	popd
+	return $retVal
 }

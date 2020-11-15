@@ -1127,6 +1127,29 @@ function printGlobalScopeAndCollectionInfo {
 }
 
 # Stats library
+function parseStatsOutput {
+	local statsOutput="${1:-}"
+
+	# Stats output should only be only one stats with one node. Rolling window where last number is the latest:
+	# {"samplesCount":60,"isPersistent":true,"lastTStamp":1595364466482,"interval":1000,
+	# "timestamp":[1595364456473,1595364457474,1595364458475,1595364459476,1595364460477,1595364461478,1595364462478,1595364463479,1595364464480,1595364465481,1595364466482],
+	# "nodeStats":{"127.0.0.1:9000":[7168,1057,0,0,0,0,0,0,0,0,0]}}
+	# or
+	# '{"samplesCount":60,"isPersistent":true,"lastTStamp":1595369104271,"interval":1000,
+	# "timestamp":[1595369091258,1595369092259,1595369093260,1595369094261,1595369095262,1595369096263,1595369097264,1595369098265,1595369099266,1595369100267,1595369101268,1595369102269,1595369103270,1595369104271],
+	# "nodeStats":{"[::1]:9000":[7168,1799,0,0,0,38,0,0,0,0,0,0,0,0]}}'
+
+	# results could fail if there is no stats yet, i.e.
+	# +++ statsOutput='{"samplesCount":60,"isPersistent":true,"lastTStamp":0,"interval":1000,"timestamp":[],"nodeStats":{"[::1]:9000":[]}}'
+	result=$(echo "$statsOutput" | jq ".nodeStats" | jq '.[]' | jq '.[-1]')
+	if [[ -z "${result:-}" || "$result" == "null" ]]; then
+		echo ""
+		return 1
+	fi
+
+	echo "$result"
+	return 0
+}
 
 # Gets the last reading of the stats output
 function getStats {
@@ -1135,6 +1158,7 @@ function getStats {
 	local targetClusterName=$3
 	local targetBucketName=$4
 	local statsName=$5
+	local result
 
 	restId=$(getRestIDFromExportedData "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName")
 	if (($? != 0)); then
@@ -1146,22 +1170,30 @@ function getStats {
 		return 1
 	fi
 
+	local curlResult=1
+	local parseResult=1
 	local counter=0
+	local result
 	statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
-	while (((($? != 0)) && (($counter < $REST_MAX_RETRY)))); do
+	curlResult=$?
+	if (($curlResult == 0)); then
+		result=$(parseStatsOutput "$statsOutput")
+		parseResult=$?
+	fi
+
+	while (((((($curlResult != 0)) || (($parseResult != 0)))) && (($counter < $REST_MAX_RETRY)))); do
 		counter=$(($counter + 1))
+		sleep 5
 		statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
+
+		curlResult=$?
+		if (($curlResult == 0)); then
+			result=$(parseStatsOutput "$statsOutput")
+			parseResult=$?
+		fi
 	done
 
-	# Stats output should only be only one stats with one node. Rolling window where last number is the latest:
-	# {"samplesCount":60,"isPersistent":true,"lastTStamp":1595364466482,"interval":1000,
-	# "timestamp":[1595364456473,1595364457474,1595364458475,1595364459476,1595364460477,1595364461478,1595364462478,1595364463479,1595364464480,1595364465481,1595364466482],
-	# "nodeStats":{"127.0.0.1:9000":[7168,1057,0,0,0,0,0,0,0,0,0]}}
-	# or
-	# '{"samplesCount":60,"isPersistent":true,"lastTStamp":1595369104271,"interval":1000,
-	# "timestamp":[1595369091258,1595369092259,1595369093260,1595369094261,1595369095262,1595369096263,1595369097264,1595369098265,1595369099266,1595369100267,1595369101268,1595369102269,1595369103270,1595369104271],
-	# "nodeStats":{"[::1]:9000":[7168,1799,0,0,0,38,0,0,0,0,0,0,0,0]}}'
-	echo "$statsOutput" | jq ".nodeStats" | jq '.[]' | jq '.[-1]'
+	echo "$result"
 }
 
 function pauseReplication {

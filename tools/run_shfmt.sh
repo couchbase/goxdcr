@@ -18,6 +18,10 @@ fi
 files=`find -f . | grep "\.sh" | grep -v $0 | grep -v "\.swp"`
 for file in `echo "$files"`
 do
+	if [[ -L "$file" ]];then
+		#symlnk
+		continue
+	fi
 	echo "Running shfmt on $file"
 	shfmt -w $file
 done
