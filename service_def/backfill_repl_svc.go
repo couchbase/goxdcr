@@ -25,4 +25,7 @@ type BackfillReplSvc interface {
 
 	// Callback for any replication spec changes from repl monitor to ensure synchronization between backfillRepl and its parent
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error
+
+	// In case of backfill mapping corruption, the backfillCallback is needed to capture a wide net of backfill
+	SetCompleteBackfillRaiser(backfillCallback func(specId string) error) error
 }

@@ -276,6 +276,8 @@ func (b *BackfillMgr) Start() error {
 		return err
 	}
 
+	b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
+
 	go b.startRetryMonitor()
 
 	b.logger.Infof("BackfillMgr Started")
@@ -1215,55 +1217,30 @@ func (b *BackfillMgr) cleanupSpecHandlerCb(specId string) {
 	delete(b.replSpecHandlerMap, specId)
 }
 
-func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings metadata.CollectionNamespaceMapping) error {
-	b.specReqHandlersMtx.RLock()
-	handler := b.specToReqHandlerMap[specId]
-	b.specReqHandlersMtx.RUnlock()
-	if handler == nil {
-		b.logger.Errorf("Unable to find handler for spec %v", specId)
-		return base.ErrorNotFound
-	}
-
-	b.cacheMtx.RLock()
-	currentCachedManifest, ok := b.cacheSpecSourceMap[specId]
-	if !ok {
-		// should not be the case
-		b.logger.Errorf("Unable to find cached manifest for %v", specId)
-		return base.ErrorNotFound
-	}
-	clonedSourceManifest := currentCachedManifest.Clone()
-	currentCachedManifest, ok = b.cacheSpecTargetMap[specId]
-	if !ok {
-		// should not be the case
-		b.logger.Errorf("Unable to find cached target manifest for %v", specId)
-		return base.ErrorNotFound
-	}
-	clonedTargetManifest := currentCachedManifest.Clone()
-	b.cacheMtx.RUnlock()
-
-	spec, err := b.replSpecSvc.ReplicationSpec(specId)
+func (b *BackfillMgr) RequestCompleteBackfill(specId string) error {
+	backfillReq, err := b.onDemandBackfillGetCompleteRequest(specId, nil)
 	if err != nil {
-		b.logger.Errorf("Unable to retrieve repl spec %v to determine whether it is implicit or explicit mapping", specId)
-		return base.ErrorNotFound
+		return err
 	}
 
-	modes := spec.Settings.GetCollectionModes()
-
-	if clonedSourceManifest.Uid() == 0 && !modes.IsMigrationOn() && !modes.IsExplicitMapping() {
-		// Source manifest 0 means only default collection is being replicated
-		b.logger.Infof("Repl %v shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created", specId)
+	if backfillReq == nil {
+		// This means nothing needs to be raised
 		return nil
 	}
 
-	var backfillReq interface{}
-	// Backfill everything means comparing to an empty/default manifest
-	defaultManifest := metadata.NewDefaultCollectionsManifest()
-	if modes.IsExplicitMapping() {
-		b.logger.Infof("Forced backfill for explicit mapping, given source manifest version %v target manifest version %v and rules: %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), spec.Settings.GetCollectionsRoutingRules(), pendingMappings.String())
-		backfillReq, _ = b.populateBackfillReqForExplicitMapping(specId, &defaultManifest /*oldSrc*/, &clonedSourceManifest, &defaultManifest /*oldTgt*/, &clonedTargetManifest, spec, modes, backfillReq)
-	} else {
-		b.logger.Infof("Forced backfill for implicit mapping, given source manifest version %v target manifest version %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), pendingMappings.String())
-		backfillReq, _ = b.populateBackfillReqForImplicitMapping(&clonedTargetManifest, &defaultManifest /*oldTarget*/, &clonedSourceManifest, spec)
+	err = b.onDemandBackfillRaiseRequest(specId, backfillReq)
+	return err
+}
+
+func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings metadata.CollectionNamespaceMapping) error {
+	backfillReq, err := b.onDemandBackfillGetCompleteRequest(specId, pendingMappings)
+	if err != nil {
+		return err
+	}
+
+	if backfillReq == nil {
+		// This means nothing needs to be raised
+		return nil
 	}
 
 	// Given backfillReq contains everything that needs to be backfilled, we only want to care about the source namespace of pendingMappings
@@ -1271,17 +1248,83 @@ func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings met
 
 	if isEmpty {
 		b.logger.Warnf("the given pending request %v does not translate into a valid backfillRequest given current rules and manifests", pendingMappings.String())
-	} else {
-		err = b.raiseBackfillReq(specId, backfillReq, true, 0)
-		if err == base.GetBackfillFatalDataLossError(specId) {
-			// fatal error means restream is happening - everything is deleted, so let it pass
-			err = nil
-		}
+		return nil
+	}
+
+	err = b.onDemandBackfillRaiseRequest(specId, backfillReq)
+	return err
+}
+
+func (b *BackfillMgr) onDemandBackfillRaiseRequest(specId string, backfillReq interface{}) error {
+	err := b.raiseBackfillReq(specId, backfillReq, true, 0)
+	if err == base.GetBackfillFatalDataLossError(specId) {
+		// fatal error means restream is happening - everything is deleted, so let it pass
+		err = nil
 	}
 	if err != nil {
 		b.logger.Errorf("raising pending backfill - %v", err)
 	}
 	return err
+}
+
+// If pendingMappings is not nil, it's requesting a subset
+// If pendingMappings is nil, it's requesting everything
+func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingMappings metadata.CollectionNamespaceMapping) (interface{}, error) {
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[specId]
+	b.specReqHandlersMtx.RUnlock()
+	if handler == nil {
+		b.logger.Errorf("Unable to find handler for spec %v", specId)
+		return nil, base.ErrorNotFound
+	}
+
+	b.cacheMtx.RLock()
+	currentCachedManifest, ok := b.cacheSpecSourceMap[specId]
+	if !ok {
+		// should not be the case
+		b.logger.Errorf("Unable to find cached manifest for %v", specId)
+		return nil, base.ErrorNotFound
+	}
+	clonedSourceManifest := currentCachedManifest.Clone()
+	currentCachedManifest, ok = b.cacheSpecTargetMap[specId]
+	if !ok {
+		// should not be the case
+		b.logger.Errorf("Unable to find cached target manifest for %v", specId)
+		return nil, base.ErrorNotFound
+	}
+	clonedTargetManifest := currentCachedManifest.Clone()
+	b.cacheMtx.RUnlock()
+
+	spec, err := b.replSpecSvc.ReplicationSpec(specId)
+	if err != nil {
+		b.logger.Errorf("Unable to retrieve repl spec %v to determine whether it is implicit or explicit mapping", specId)
+		return nil, base.ErrorNotFound
+	}
+
+	modes := spec.Settings.GetCollectionModes()
+
+	if clonedSourceManifest.Uid() == 0 && !modes.IsMigrationOn() && !modes.IsExplicitMapping() {
+		// Source manifest 0 means only default collection is being replicated
+		b.logger.Infof("Repl %v shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created", specId)
+		return nil, nil
+	}
+
+	requestingStr := "everything"
+	if len(pendingMappings) > 0 {
+		requestingStr = pendingMappings.String()
+	}
+
+	var backfillReq interface{}
+	// Backfill everything means comparing to an empty/default manifest
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	if modes.IsExplicitMapping() {
+		b.logger.Infof("Forced backfill for explicit mapping, given source manifest version %v target manifest version %v and rules: %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), spec.Settings.GetCollectionsRoutingRules(), requestingStr)
+		backfillReq, _ = b.populateBackfillReqForExplicitMapping(specId, &defaultManifest /*oldSrc*/, &clonedSourceManifest, &defaultManifest /*oldTgt*/, &clonedTargetManifest, spec, modes, backfillReq)
+	} else {
+		b.logger.Infof("Forced backfill for implicit mapping, given source manifest version %v target manifest version %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), requestingStr)
+		backfillReq, _ = b.populateBackfillReqForImplicitMapping(&clonedTargetManifest, &defaultManifest /*oldTarget*/, &clonedSourceManifest, spec)
+	}
+	return backfillReq, err
 }
 
 // Given backfillReq, take out everything that is not based on the source namespace within the pendingMappings

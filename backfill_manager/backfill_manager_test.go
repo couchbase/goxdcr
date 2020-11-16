@@ -73,6 +73,7 @@ func setupBackfillReplSvcMock(backfillReplSvc *service_def.BackfillReplSvc) {
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Return(nil)
+	backfillReplSvc.On("SetCompleteBackfillRaiser", mock.Anything).Return(nil)
 }
 
 func setupReplStartupSpecs(replSpecSvc *service_def.ReplicationSpecSvc,
@@ -193,7 +194,6 @@ func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 	assert.Nil(backfillMgr.Start())
 
 	// The thrid one should have default manifest
-	// TODO MB-38868 - backfill need to fire
 	backfillMgr.cacheMtx.RLock()
 	srcManifest, exists1 := backfillMgr.cacheSpecSourceMap[getSpecId(3)]
 	tgtManifest, exists2 := backfillMgr.cacheSpecTargetMap[getSpecId(3)]

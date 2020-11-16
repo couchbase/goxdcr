@@ -21,7 +21,9 @@ import (
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func setupBoilerPlateBRS() (*service_def.UILogSvc,
@@ -70,6 +72,8 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc,
 	var kvNodes []string
 	kvNodes = append(kvNodes, "localhost")
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
+
+	uiLogSvc.On("Write", mock.Anything).Return(nil)
 }
 
 type GetAllMetadataFromCatalogMockFunc func() []*serviceDefReal.MetadataEntry
@@ -366,4 +370,70 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(randomSpecName, oldSpec, newNilSpec))
 
 	fmt.Println("============== Test case end: TestBackfillReplSvcAddSetDel =================")
+}
+
+func setupMetakvUnrecoverableErr(metadataSvc *service_def.MetadataSvc, specId, internalId string, dummySpec *metadata.ReplicationSpecification) {
+	backfillMappingsKey := getBackfillMappingsDocKeyFunc(specId)
+	metadataSvc.On("Get", backfillMappingsKey).Return(nil, nil, serviceDefReal.MetadataNotFoundErr).Times(1)
+
+	// Delete should just return nil
+	metadataSvc.On("Del", backfillMappingsKey, mock.Anything).Return(nil)
+
+	// Set should be an empty doc - since the recovery effort is trying to have a clean slate
+	backfillReplKey := getBackfillReplicationDocKeyFunc(specId)
+	emptyBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, make(metadata.VBTasksMapType), nil)
+	marshalledData, err := json.Marshal(emptyBackfillSpec)
+	if err != nil {
+		panic(err)
+	}
+	metadataSvc.On("Set", backfillReplKey, marshalledData, mock.Anything).Return(nil)
+
+	// After set, gets revision
+	metadataSvc.On("Get", backfillReplKey).Return(nil, 0 /*dummyRev*/, nil)
+}
+
+func TestBackfillMappingError(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBackfillMappingError =================")
+	defer fmt.Println("============== Test case end: TestBackfillMappingError =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock := setupBoilerPlateBRS()
+
+	specName := "testSpec"
+	randInternalId, _ := base.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
+	metadataEntriesFunc := func() []*serviceDefReal.MetadataEntry {
+		var entries []*serviceDefReal.MetadataEntry
+		dummyEntry := &serviceDefReal.MetadataEntry{
+			Key:   fmt.Sprintf("%v/%v/%v", BackfillParentCatalogKey, specName, SpecKey),
+			Value: constructBackfillRevSlice(specName, randInternalId),
+		}
+		entries = append(entries, dummyEntry)
+		return entries
+	}
+	dummySpec := &metadata.ReplicationSpecification{Id: specName,
+		InternalId: randInternalId,
+		Settings:   metadata.DefaultReplicationSettings(),
+	}
+	specMap := make(map[string]*metadata.ReplicationSpecification)
+	specMap[specName] = dummySpec
+	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap)
+	setupMetakvUnrecoverableErr(metadataSvcMock, specName, randInternalId, nil)
+
+	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, clusterInfoSvcMock, xdcrTopologyMock)
+	assert.NotNil(backfillReplSvc)
+	backfillReplSvc.completeBackfillCbMtx.Lock()
+	var completeCbCnt uint32
+	backfillReplSvc.completeBackfillCb = func(replId string) error {
+		atomic.AddUint32(&completeCbCnt, 1)
+		return nil
+	}
+	backfillReplSvc.completeBackfillCbMtx.Unlock()
+
+	time.Sleep(1 * time.Second)
+	assert.True(backfillReplSvc.unitTestIsRecoveringBackfill())
+
+	for backfillReplSvc.unitTestIsRecoveringBackfill() {
+		time.Sleep(1 * time.Second)
+	}
+
+	assert.Equal(uint32(1), atomic.LoadUint32(&completeCbCnt))
 }

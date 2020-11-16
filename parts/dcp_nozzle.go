@@ -1368,25 +1368,19 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 	if len(dcp.specificVBTasks) > 0 {
 		vbTasks := dcp.specificVBTasks[vbno]
 		if vbTasks == nil || len(*vbTasks) == 0 {
-			// TODO MB-39566 - validate end state
 			dcp.Logger().Infof("vbno %v has no task. Exiting")
 			return nil
 		}
 		// Execute the first task
-		// Resuming from the vbtask's manifest ID because it is possible that source manifest refresh
-		// isn't quick enough to capture manifestIDs that was captured during DCP streaming when a checkpoint was made
-		// It just means that mirroring logic needs to handle out-of-date collection creation/drops
 		// Use the latest source manifest to look up collection ID for backfill
 		manifest, err := dcp.specificManifestGetter(math.MaxUint64)
 		if err != nil {
-			// TODO - MB-39567
 			err = fmt.Errorf("When resuming backfill, unable to retrieve latest manifest. Err - %v", err)
 			dcp.handleGeneralError(err)
 		}
 
 		seqEnd, filter, err = (*vbTasks)[0].ToDcpNozzleTask(manifest)
 		if err != nil {
-			// TODO - MB-39566 - invalid task means no collection to stream
 			err = fmt.Errorf("Error converting VBTask to DCP Nozzle Task %v", err)
 			return err
 		}

@@ -20,6 +20,8 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const BackfillKey = "backfill"
@@ -58,6 +60,11 @@ type BackfillReplicationService struct {
 
 	metadataChangeCallbacks []base.MetadataChangeHandlerCallback
 	metadataChangeCbMtx     sync.RWMutex
+
+	unrecoverableBackfillIds [][2]string
+	completeBackfillCbMtx    sync.RWMutex
+	completeBackfillCb       func(string) error
+	recoveringBackfill       uint32
 }
 
 func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc,
@@ -70,6 +77,7 @@ func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc,
 	logger := log.NewLogger("BackfillReplSvc", loggerCtx)
 	svc := &BackfillReplicationService{
 		ShaRefCounterService: NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger),
+		uiLogSvc:             uiLogSvc,
 		metadataSvc:          metadataSvc,
 		logger:               logger,
 		replSpecSvc:          replSpecSvc,
@@ -161,21 +169,21 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		b.InitTopicShaCounter(backfillSpec.Id)
 		mappingsDoc, err := b.GetMappingsDoc(backfillSpec.Id, false /*initIfNotFound*/)
 		if err != nil {
-			// TODO - MB-38506
-			b.logger.Errorf("Unable to retrieve mappingDoc for backfill replication %v - potential data loss", backfillSpec.Id)
+			b.logger.Errorf("Unable to retrieve mappingDoc for backfill replication %v", backfillSpec.Id)
+			b.appendUnrecoverableBackfillSpec(backfillSpec)
 			continue
 		}
 		shaMapping, err := b.GetShaToCollectionNsMap(backfillSpec.Id, mappingsDoc)
 		if err != nil {
-			// TODO - MB-38506
 			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v", err)
+			b.appendUnrecoverableBackfillSpec(backfillSpec)
 			continue
 		}
 
 		err = backfillSpec.VBTasksMap.LoadFromMappingsShaMap(shaMapping)
 		if err != nil {
-			// TODO - MB-38506
 			b.logger.Errorf("Error - unable to get shaToCollectionsMap %v", err)
+			b.appendUnrecoverableBackfillSpec(backfillSpec)
 			continue
 		}
 
@@ -183,7 +191,18 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		b.updateCacheInternal(replicationId, backfillSpec, false /*lock*/)
 	}
 
+	if len(b.unrecoverableBackfillIds) > 0 {
+		go b.handleUnrecoverableBackfills()
+	}
+
 	return nil
+}
+
+func (b *BackfillReplicationService) appendUnrecoverableBackfillSpec(backfillSpec *metadata.BackfillReplicationSpec) {
+	var backfillPair [2]string
+	backfillPair[0] = backfillSpec.Id
+	backfillPair[1] = backfillSpec.InternalId
+	b.unrecoverableBackfillIds = append(b.unrecoverableBackfillIds, backfillPair)
 }
 
 func (b *BackfillReplicationService) constructBackfillSpec(value []byte, rev interface{}, lock bool) (*metadata.BackfillReplicationSpec, error) {
@@ -191,7 +210,6 @@ func (b *BackfillReplicationService) constructBackfillSpec(value []byte, rev int
 		return nil, nil
 	}
 
-	// TODO - MB-38675 this will change
 	spec := &metadata.BackfillReplicationSpec{}
 	err := json.Unmarshal(value, spec)
 	if err != nil {
@@ -456,15 +474,9 @@ func (b *BackfillReplicationService) SetBackfillReplSpec(spec *metadata.Backfill
 		return err
 	}
 
-	key := getBackfillReplicationDocKeyFunc(spec.Id)
-	err = b.metadataSvc.Set(key, specValue, spec.Revision())
-	if err != nil {
-		return err
-	}
-
-	err = b.loadLatestMetakvRevisionIntoSpec(spec)
-	if err != nil {
-		return err
+	err2 := b.setBackfillSpecUsingMarshalledData(spec, specValue)
+	if err2 != nil {
+		return err2
 	}
 
 	err = b.updateCache(spec.Id, spec)
@@ -473,6 +485,20 @@ func (b *BackfillReplicationService) SetBackfillReplSpec(spec *metadata.Backfill
 	}
 
 	return err
+}
+
+func (b *BackfillReplicationService) setBackfillSpecUsingMarshalledData(spec *metadata.BackfillReplicationSpec, specValue []byte) error {
+	key := getBackfillReplicationDocKeyFunc(spec.Id)
+	err := b.metadataSvc.Set(key, specValue, spec.Revision())
+	if err != nil {
+		return err
+	}
+
+	err = b.loadLatestMetakvRevisionIntoSpec(spec)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec *metadata.BackfillReplicationSpec) error {
@@ -673,4 +699,84 @@ func (b *BackfillReplicationService) AllActiveBackfillSpecsReadOnly() (map[strin
 		}
 	}
 	return specs, nil
+}
+
+func (b *BackfillReplicationService) SetCompleteBackfillRaiser(backfillCallback func(specId string) error) error {
+	b.completeBackfillCbMtx.Lock()
+	defer b.completeBackfillCbMtx.Unlock()
+
+	b.completeBackfillCb = backfillCallback
+	return nil
+}
+
+// This method's job is to ensure that all of the unrecoverable backfills are able to be
+func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
+	atomic.StoreUint32(&b.recoveringBackfill, 1)
+	defer atomic.StoreUint32(&b.recoveringBackfill, 0)
+
+	// Wait 1 second for backfillCb to be registered
+	time.Sleep(1 * time.Second)
+
+	for len(b.unrecoverableBackfillIds) > 0 {
+		b.completeBackfillCbMtx.RLock()
+		if b.completeBackfillCb == nil {
+			// BackfillMgr hasn't had a chance to set the callback yet
+			time.Sleep(10 * time.Second)
+			b.completeBackfillCbMtx.RUnlock()
+			continue
+		}
+		// backfillMgr has had a chance to set the callback - begin recovery process
+
+		// The key point here is to ensure that an empty backfill spec still exists,
+		// but the erroneous mapping files are all cleared
+		// The ensures that if at any point during this handling process XDCR is restarted, or if the backfill raise fails,
+		// then the init call will see that there's a backfill but the corresponding mapping file isn't there, and we
+		// will hit this handleUnrecoverableBackfills() method again
+		for _, backfillPair := range b.unrecoverableBackfillIds {
+			backfillSpecId := backfillPair[0]
+			internalId := backfillPair[1]
+			err := b.CleanupMapping(backfillSpecId)
+			if err != nil {
+				b.logger.Warnf("handleUnrecoverableBackfills received err %v when cleaning up mappings. Backfill may not raise correctly", backfillSpecId)
+			}
+
+			// Ensure that backfillspecs are empty so raising the complete backfill will become the first task
+			emptyBackfillSpec := metadata.NewBackfillReplicationSpec(backfillSpecId, internalId, make(metadata.VBTasksMapType), nil)
+			marshalledData, err := json.Marshal(emptyBackfillSpec)
+			if err != nil {
+				b.logger.Warnf("handleUnrecoverableBackfills received err %v when marshalling empty backfill spec. Backfill may not raise correctly", backfillSpecId)
+			}
+			err = b.setBackfillSpecUsingMarshalledData(emptyBackfillSpec, marshalledData)
+			if err != nil {
+				b.logger.Warnf("handleUnrecoverableBackfills received err %v when setting empty backfill spec into metakv. Backfill may not raise correctly", backfillSpecId)
+			}
+		}
+
+		var replacementList [][2]string
+		// Once the mapping is cleared, then call the raiser to raise a complete backfill, which should be able to
+		// properly write the spec and the corresponding mappings correctly
+		for _, backfillPair := range b.unrecoverableBackfillIds {
+			backfillSpecId := backfillPair[0]
+			err := b.completeBackfillCb(backfillSpecId)
+			if err != nil {
+				b.logger.Errorf("Unable to raise complete backfill for %v - %v. Will try again in 10 seconds", backfillSpecId, err)
+				replacementList = append(replacementList, backfillPair)
+			} else {
+				msg := fmt.Sprintf("Backfill %v was not able to be loaded correctly. It has since been re-initialized and a thorough backfill has been raised to recover any missing data", backfillSpecId)
+				b.logger.Infof(msg)
+				b.uiLogSvc.Write(msg)
+			}
+		}
+
+		b.unrecoverableBackfillIds = replacementList
+		b.completeBackfillCbMtx.RUnlock()
+
+		if len(replacementList) > 0 {
+			time.Sleep(10 * time.Second)
+		}
+	}
+}
+
+func (b *BackfillReplicationService) unitTestIsRecoveringBackfill() bool {
+	return atomic.LoadUint32(&b.recoveringBackfill) == 1
 }

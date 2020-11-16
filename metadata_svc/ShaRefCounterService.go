@@ -107,7 +107,6 @@ func (s *ShaRefCounterService) GetShaToCollectionNsMap(topic string, doc *metada
 	if err != nil {
 		// Any error loading the sha to collectionNamespacemap is considered a fatal error
 		// This includes any mismatching sha256 - we cannot allow the pipeline to start
-		// TODO - MB-38506 - need to stop restarting if the error is not recoverable
 		s.logger.Errorf("CompiledShaNamespaceMap %v with error %v", topic, err)
 		return emptyS2CNsMap, err
 	}
