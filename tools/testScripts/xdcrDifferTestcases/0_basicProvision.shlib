@@ -63,6 +63,13 @@ function runTestCase {
 		return $retVal
 	fi
 
+	validateDifferResults 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

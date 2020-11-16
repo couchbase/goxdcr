@@ -422,3 +422,46 @@ function runXdcrDiffer {
 	popd
 	return $retVal
 }
+
+function validateDifferResults {
+	local expectedMismatchCnt=$1
+	local expectedMissingSrcCnt=$2
+	local expectedMissingTgtCnt=$3
+	local numOfMismatch
+	local numOfMissingSrc
+	local numOfMissingTgt
+	local resultOutput
+	local retVal=0
+
+	if [[ ! -f "$mutationDiffResults" ]]; then
+		echo "Error: Unable to find mutation results file: $mutationDiffResults"
+		return 1
+	fi
+
+	resultOutput=$(cat $mutationDiffResults)
+	numOfMismatch=$(echo "$resultOutput" | jq '.Mismatch' | jq length)
+	numOfMissingSrc=$(echo "$resultOutput" | jq '.MissingFromSource' | jq length)
+	numOfMissingTgt=$(echo "$resultOutput" | jq '.MissingFromTarget' | jq length)
+
+	if (($numOfMismatch != $expectedMismatchCnt)); then
+		echo "Expected $expectedMismatchCnt mismatch(es), but found $numOfMismatch"
+		retVal=1
+	fi
+
+	if (($numOfMissingSrc != $expectedMissingSrcCnt)); then
+		echo "Expected $expectedMissingSrcCnt missing from source, but found $numOfMissingSrc"
+		retVal=1
+	fi
+
+	if (($numOfMissingTgt != $expectedMissingTgtCnt)); then
+		echo "Expected $expectedMissingTgtCnt missing from target, but found $numOfMissingTgt"
+		retVal=1
+	fi
+
+	if (($retVal == 1)); then
+		echo "$resultOutput" | jq
+		echo ""
+	fi
+
+	return $retVal
+}

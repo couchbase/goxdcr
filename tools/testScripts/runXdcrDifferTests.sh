@@ -54,6 +54,9 @@ if [[ ! -f "$differSh" ]]; then
 	exit 1
 fi
 
+mutationDir="$xdcrDifferDir/mutationDiff"
+mutationDiffResults="$mutationDir/mutationDiffDetails"
+
 testCaseNumber="${2:-}"
 testCasesDirectory="xdcrDifferTestcases"
 
