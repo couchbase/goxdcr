@@ -351,12 +351,6 @@ type DcpNozzle struct {
 	// DCP will only bump the manifest (via a system event) if all older manifest has been sent
 	vbHighestManifestUidArray [base.NumberOfVbs]uint64
 
-	// When multiple SetTimestamps are called, this is used to ensure a specific version of the manifest
-	// is only validated once
-	setTsCheckedManifests map[uint64]bool
-	setTsCheckedMtx       sync.Mutex
-	setTsCleanOnce        sync.Once
-
 	collectionEnabled uint32
 	// If backfill pipeline, then could be passed in a vb task map
 	specificVBTasks metadata.VBTasksMapType
@@ -405,7 +399,6 @@ func NewDcpNozzle(id string,
 		dcpPrioritySetting:       mcc.PriorityDisabled,
 		wrappedUprPool:           utilities.NewWrappedUprPool(),
 		collectionNamespacePool:  utilities.NewCollectionNamespacePool(),
-		setTsCheckedManifests:    make(map[uint64]bool),
 		specificManifestGetter:   specificManifestGetter,
 		endSeqnoForDcp:           make(map[uint16]*base.SeqnoWithLock),
 		getHighSeqnoOneAtATime:   make(chan bool, 1),
@@ -986,7 +979,6 @@ func (dcp *DcpNozzle) processData() (err error) {
 							dcp.Logger().Errorf("%v %v", dcp.Id(), err)
 							dcp.handleGeneralError(err)
 							return err
-
 						}
 						dcp.startUprStream(vbno, updated_ts)
 					}
@@ -1611,49 +1603,17 @@ func (dcp *DcpNozzle) setTS(vbno uint16, ts *base.VBTimestamp, need_lock bool) e
 			defer ts_entry.lock.Unlock()
 		}
 		ts_entry.ts = ts
+
 		// If the set op is successsful (which it is here), then ensure that the corresponding sourcemanifestID
 		// is also restored. This ensures that when dcp sends things down, DCP can lookup the right manifest
 		// as the older source manifests are not to be sent
 		atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno], ts.ManifestIDs.SourceManifestId)
 
-		if dcp.setTSNeedToCheckManifest(ts.ManifestIDs.SourceManifestId) {
-			dcp.childrenWaitGrp.Add(1)
-			go dcp.checkManifestExistence(ts.ManifestIDs.SourceManifestId)
-		}
 		return nil
 	} else {
 		err := fmt.Errorf("setTS failed: vbno=%v is not tracked in cur_ts map", vbno)
 		dcp.handleGeneralError(err)
 		return err
-	}
-}
-
-func (dcp *DcpNozzle) setTSNeedToCheckManifest(manifestId uint64) bool {
-	var needToCheckManifest bool
-	if manifestId > 0 {
-		dcp.setTsCheckedMtx.Lock()
-		_, exists := dcp.setTsCheckedManifests[manifestId]
-		if !exists {
-			needToCheckManifest = true
-			dcp.setTsCheckedManifests[manifestId] = true
-		}
-		dcp.setTsCheckedMtx.Unlock()
-	}
-	return needToCheckManifest
-}
-
-// Can be run lazily in the background
-// When manifestId is not 0, it means that DCP is resuming from a checkpoint
-// Collections Manifest Service should have kept the actual manifest associated with checkpoints
-// If it is not there, it's a problem
-func (dcp *DcpNozzle) checkManifestExistence(manifestId uint64) {
-	defer dcp.childrenWaitGrp.Done()
-
-	_, err := dcp.specificManifestGetter(manifestId)
-	if err != nil {
-		// TODO MB-38445
-		err = fmt.Errorf("DCP cannot find source manifest version %v given a setTS operation - %v", manifestId, err)
-		dcp.handleGeneralError(err)
 	}
 }
 
@@ -1769,7 +1729,6 @@ func (dcp *DcpNozzle) isFeedClosed() bool {
  */
 func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 	streams_inactive := dcp.initedButInactiveDcpStreams()
-	streams_active := dcp.activeStreams()
 	if len(streams_inactive) > 0 {
 		updated_streams_inactive_count := atomic.AddUint32(&dcp.counter_streams_inactive, 1)
 		dcp.Logger().Infof("%v incrementing counter for inactive streams to %v\n", dcp.Id(), updated_streams_inactive_count)
@@ -1782,12 +1741,6 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 			}
 			atomic.StoreUint32(&dcp.counter_streams_inactive, 0)
 		}
-	} else if len(streams_active) == len(dcp.GetVBList()) {
-		dcp.setTsCleanOnce.Do(func() {
-			dcp.setTsCheckedMtx.Lock()
-			dcp.setTsCheckedManifests = nil
-			dcp.setTsCheckedMtx.Unlock()
-		})
 	}
 	return nil
 }

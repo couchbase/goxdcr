@@ -779,7 +779,6 @@ func (service *ReplicationSpecService) loadLatestMetakvRevisionIntoSpec(spec *me
 }
 
 func (service *ReplicationSpecService) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
-	// TODO - MB-40434
 	return service.setReplicationSpecInternal(spec, true /*lock*/)
 }
 

@@ -1075,13 +1075,40 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 
 		ckptRecord.lock.RLock()
 		ckpt_record := ckptRecord.ckpt
-		if ckpt_record != nil && ckpt_record.Seqno <= max_seqno {
+
+		if ckpt_record == nil {
+			ckptRecord.lock.RUnlock()
+			continue
+		}
+
+		if ckpt_record.Seqno <= max_seqno {
 			remote_vb_status = &service_def.RemoteVBReplicationStatus{VBOpaque: ckpt_record.Target_vb_opaque,
 				VBSeqno: ckpt_record.Target_Seqno,
 				VBNo:    vbno}
-			ckmgr.logger.Debugf("%v %v Remote bucket %v vbno %v checking to see if it could agreed on the checkpoint %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), ckmgr.remote_bucket, vbno, ckpt_record)
+			if ckmgr.logger.GetLogLevel() >= log.LogLevelDebug {
+				ckmgr.logger.Debugf("%v %v Remote bucket %v vbno %v checking to see if it could agreed on the checkpoint %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), ckmgr.remote_bucket, vbno, ckpt_record)
+			}
 		}
+		sourceDCPManifestId := ckpt_record.SourceManifestForDCP
+		sourceBackfillManifestId := ckpt_record.SourceManifestForBackfillMgr
 		ckptRecord.lock.RUnlock()
+
+		// Check to ensure that the manifests can be used
+		spec := ckmgr.pipeline.Specification().GetReplicationSpec()
+		if sourceDCPManifestId > 0 {
+			_, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, sourceDCPManifestId)
+			if err != nil {
+				ckmgr.logger.Errorf("%v unable to find DCP source manifest ID %v, skipping a record...", ckmgr.Id(), sourceDCPManifestId)
+				continue
+			}
+		}
+		if sourceBackfillManifestId > 0 {
+			_, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, sourceBackfillManifestId)
+			if err != nil {
+				ckmgr.logger.Errorf("%v unable to find BackfillMgr source manifest ID %v, skipping a record...", ckmgr.Id(), sourceBackfillManifestId)
+				continue
+			}
+		}
 
 		if remote_vb_status != nil {
 			bMatch := false
@@ -1100,11 +1127,15 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 			}
 
 			ckmgr.updateCurrentVBOpaque(vbno, current_remoteVBOpaque)
-			ckmgr.logger.Debugf("%v %v Remote vbucket %v has a new opaque %v, update\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), current_remoteVBOpaque, vbno)
-			ckmgr.logger.Debugf("%v %v Done with _pre_prelicate call for %v for vbno=%v, bMatch=%v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), remote_vb_status, vbno, bMatch)
+			if ckmgr.logger.GetLogLevel() >= log.LogLevelDebug {
+				ckmgr.logger.Debugf("%v %v Remote vbucket %v has a new opaque %v, update\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), current_remoteVBOpaque, vbno)
+				ckmgr.logger.Debugf("%v %v Done with _pre_prelicate call for %v for vbno=%v, bMatch=%v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), remote_vb_status, vbno, bMatch)
+			}
 
 			if bMatch {
-				ckmgr.logger.Debugf("%v %v Remote bucket %v vbno %v agreed on the checkpoint above\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), ckmgr.remote_bucket, vbno)
+				if ckmgr.logger.GetLogLevel() >= log.LogLevelDebug {
+					ckmgr.logger.Debugf("%v %v Remote bucket %v vbno %v agreed on the checkpoint above\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), ckmgr.remote_bucket, vbno)
+				}
 				if ckptDoc != nil {
 					agreedIndex = index
 				}
