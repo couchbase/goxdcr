@@ -353,7 +353,7 @@ func (c *ConflictManager) formatTargetDoc(input *base.ConflictParams) *mc.MCRequ
 }
 
 func (c *ConflictManager) formatMergedDoc(input *base.ConflictParams, mergedDoc []byte) *mc.MCRequest {
-	mv, pcas, err := c.mergeXattr(input)
+	mv, pcas, oldmvlen, oldpcaslen, err := c.mergeXattr(input)
 	if err != nil {
 		return nil
 	}
@@ -373,10 +373,18 @@ func (c *ConflictManager) formatMergedDoc(input *base.ConflictParams, mergedDoc 
 		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MV_PATH), mv}
 		bodylen = bodylen + spec.size()
 		specs = append(specs, spec)
+	} else if oldmvlen > 0 {
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MV_PATH), nil}
+		bodylen = bodylen + spec.size()
+		specs = append(specs, spec)
 	}
 	// PCAS path
 	if len(pcas) > 0 {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_MKDIR_P), []byte(base.XATTR_PCAS_PATH), pcas}
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_PCAS_PATH), pcas}
+		bodylen = bodylen + spec.size()
+		specs = append(specs, spec)
+	} else if oldpcaslen > 0 {
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_PCAS_PATH), nil}
 		bodylen = bodylen + spec.size()
 		specs = append(specs, spec)
 	}
@@ -456,8 +464,8 @@ func (c *ConflictManager) sendDocument(id int, input *base.ConflictParams, req *
 					c.RaiseEvent(common.NewEvent(common.MergeCasChanged, nil, c, nil, additionalInfo))
 					return
 				} else {
-					c.Logger().Errorf("%v sendDocument(id %v): received error response from subdoc_multi_mutation client for custom CR. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n",
-						c.pipeline.FullTopic(), id, response.Status, response.Opcode, input.Source.Seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
+					c.Logger().Errorf("%v sendDocument(id %v): received error response from subdoc_multi_mutation client for custom CR. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n",
+						c.pipeline.FullTopic(), id, response.Status, response.Opcode, input.Source.Seqno, base.UdTagBegin, bytes.Trim(req.Key, "\x00"), base.UdTagEnd, req.Cas, req.Extras)
 					err = fmt.Errorf("error response with startus %v from memcached", response.Status)
 					c.repairConn(client, err.Error())
 				}
@@ -490,20 +498,22 @@ func (c *ConflictManager) sendDocument(id int, input *base.ConflictParams, req *
 	c.handleGeneralError(err)
 }
 
-func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byte, err error) {
+func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byte, oldmvlen, oldpcaslen int, err error) {
 	source := input.Source.Req
 	sourceMeta, err := base.FindSourceCustomCRXattr(source, input.SourceId)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for source document body %v%v%v.",
 			c.pipeline.FullTopic(), err, base.UdTagBegin, source.Body, base.UdTagEnd)
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	targetMeta, err := input.Target.FindTargetCustomCRXattr(input.TargetId)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for target document body %v%v%v.",
 			c.pipeline.FullTopic(), err, base.UdTagBegin, input.Target.Resp.Body, base.UdTagEnd)
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
+	oldmvlen = len(sourceMeta.GetMv())
+	oldpcaslen = len(sourceMeta.GetPcas())
 	// "mv":{"<sourceId>":"<B64>","targetId>":"<B64>",...}
 	mvlen := base.MergedMvLength(sourceMeta, targetMeta)
 	pcaslen := base.MergedPcasLength(sourceMeta, targetMeta)

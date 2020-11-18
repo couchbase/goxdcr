@@ -119,6 +119,7 @@ var CollectionNamespaceRegex, _ = regexp.Compile(CollectionNamespaceRegexExpr)
 var CollectionNameValidationRegex, _ = regexp.Compile(fmt.Sprintf("^%v%v*$", CollectionValidPrefixNameClass, CollectionValidNameCharClass))
 
 const BasicFQDNCharClass = "[0-9A-Za-z-_]"
+
 var BasicFQDNRegex, _ = regexp.Compile(fmt.Sprintf("^(%v+\\.)+(%v+)$", BasicFQDNCharClass, BasicFQDNCharClass))
 
 var DefaultCollectionId uint32 = 0
@@ -452,6 +453,7 @@ const (
 	SET_TIME_SYNC         = mc.CommandCode(0xc1)
 	SUBDOC_GET            = mc.CommandCode(0xc5)
 	SUBDOC_DICT_UPSERT    = mc.CommandCode(0xc8)
+	SUBDOC_DELETE         = mc.CommandCode(0xc9)
 	SUBDOC_MULTI_LOOKUP   = mc.CommandCode(0xd0)
 	SUBDOC_MULTI_MUTATION = mc.CommandCode(0xd1)
 )
