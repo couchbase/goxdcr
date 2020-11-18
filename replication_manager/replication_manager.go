@@ -799,6 +799,11 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	}
 	spec.Settings = replSettings
 
+	if warnings == nil {
+		warnings = []string{}
+	}
+	checkAndRaiseNumNozzlesWarnings(replSettings, &warnings)
+
 	if justValidate {
 		return spec, nil, nil, warnings
 	}
@@ -811,6 +816,17 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	} else {
 		logger_rm.Errorf("Error adding replication specification %s. err=%v\n", spec.Id, err)
 		return nil, nil, err, nil
+	}
+}
+
+func checkAndRaiseNumNozzlesWarnings(settings *metadata.ReplicationSettings, warnings *[]string) {
+	numSrcNozzlesPerNode := settings.Values[metadata.SourceNozzlePerNodeKey].(int)
+	numTgtNozzlesPerNode := settings.Values[metadata.TargetNozzlePerNodeKey].(int)
+	currentGoMaxProcs := runtime.GOMAXPROCS(0)
+
+	if numSrcNozzlesPerNode+numTgtNozzlesPerNode > currentGoMaxProcs {
+		warnString := fmt.Sprintf("Settings requested %v source nozzles per node and %v target nozzles per node, which is greater than GOMAXPROCS (%v). System performance may be degraded", numSrcNozzlesPerNode, numTgtNozzlesPerNode, currentGoMaxProcs)
+		*warnings = append(*warnings, warnString)
 	}
 }
 
