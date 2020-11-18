@@ -960,8 +960,16 @@ func getLocalAndRemoteIps(request *http.Request) *service_def.LocalRemoteIPs {
 	remotePortNo, _ := base.GetPortNumber(request.RemoteAddr)
 
 	// local - refers to the machine (ip and port) that generated the audit event (the one XDCR is sitting on)
-	hostNameWithoutPort := base.GetHostName(request.Host)
-	port, portErr := base.GetPortNumber(request.Host)
+	var hostNameWithoutPort string
+	var port uint16
+	var portErr = base.ErrorNoPortNumber
+	ctx := request.Context()
+	addr, ok := ctx.Value(http.LocalAddrContextKey).(net.Addr)
+	if ok && addr != nil && addr.String() != "" {
+		hostNameWithoutPort = base.GetHostName(addr.String())
+		port, portErr = base.GetPortNumber(addr.String())
+	}
+
 	if portErr != nil {
 		// request.Host should contain portNo. If err, then use default admin port
 		port = base.DefaultAdminPort
@@ -969,44 +977,46 @@ func getLocalAndRemoteIps(request *http.Request) *service_def.LocalRemoteIPs {
 
 	var localIP string
 	var localPort uint16
-	ipCheck := net.ParseIP(hostNameWithoutPort)
-	if ipCheck != nil {
-		// The hostname being used is already an IP
-		localIP = hostNameWithoutPort
-		localPort = port
-	} else {
-		ipLookup, err := net.LookupIP(hostNameWithoutPort)
-		if err != nil || len(ipLookup) == 0 {
-			// Error case - just manually find the local IP and admin port
-			ifaces, err := net.Interfaces()
-			if err == nil {
-			FINDIPLOOP:
-				for _, i := range ifaces {
-					addrs, err := i.Addrs()
-					if err == nil {
-						for _, addr := range addrs {
-							var ip net.IP
-							switch v := addr.(type) {
-							case *net.IPNet:
-								ip = v.IP
-							case *net.IPAddr:
-								ip = v.IP
+	if len(hostNameWithoutPort) > 0 {
+		ipCheck := net.ParseIP(hostNameWithoutPort)
+		if ipCheck != nil {
+			// The hostname being used is already an IP
+			localIP = hostNameWithoutPort
+			localPort = port
+		} else {
+			ipLookup, err := net.LookupIP(hostNameWithoutPort)
+			if err != nil || len(ipLookup) == 0 {
+				// Error case - just manually find the local IP and admin port
+				ifaces, err := net.Interfaces()
+				if err == nil {
+				FINDIPLOOP:
+					for _, i := range ifaces {
+						addrs, err := i.Addrs()
+						if err == nil {
+							for _, addr := range addrs {
+								var ip net.IP
+								switch v := addr.(type) {
+								case *net.IPNet:
+									ip = v.IP
+								case *net.IPAddr:
+									ip = v.IP
+								}
+								localIP = ip.String()
+								localPort = port
+								break FINDIPLOOP
 							}
-							localIP = ip.String()
-							localPort = port
-							break FINDIPLOOP
 						}
 					}
 				}
+				if localIP == "" {
+					// worst case scenario - empty fields
+					localIP = ""
+					localPort = 1
+				}
+			} else {
+				localIP = ipLookup[0].String()
+				localPort = port
 			}
-			if localIP == "" {
-				// worst case scenario - empty fields
-				localIP = ""
-				localPort = 1
-			}
-		} else {
-			localIP = ipLookup[0].String()
-			localPort = port
 		}
 	}
 
