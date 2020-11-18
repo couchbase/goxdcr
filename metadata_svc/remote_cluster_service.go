@@ -51,9 +51,11 @@ var DeleteAlreadyIssued = errors.New("Underlying remote cluster reference has be
 var WriteToMetakvErrString = "Error writing to metakv"
 var NoSuchHostRecommendationString = " Check to see if firewall config is incorrect, or if Couchbase Cloud, check to see if source IP is allowed"
 var ErrorRemoteClusterNoCollectionsCapability = errors.New("remote cluster has no collections capability")
+var ErrorAdminTimeout = errors.New("The requested operation is being executed but is taking longer than expected. Please wait for the operation to complete, and the result will be posted in the UI Log section")
 
 var DiagNetworkThreshold = 5 * time.Second
 var DiagInternalThreshold = 2 * time.Second
+var AdminTimeout = 15 * time.Second // ns_server has a timeout of 30 seconds... should not keep user waiting past 15
 
 func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
@@ -2246,72 +2248,114 @@ func (service *RemoteClusterService) RemoteClusterByUuid(uuid string, refresh bo
 	return agent.GetReferenceClone(), err
 }
 
+func (service *RemoteClusterService) performAdminTask(task func(*error, chan bool, *uint32)) error {
+	var err error
+	adminTimer := time.NewTimer(AdminTimeout)
+	doneCh := make(chan bool)
+	var timedOut uint32
+
+	go task(&err, doneCh, &timedOut)
+
+	select {
+	case <-doneCh:
+		adminTimer.Stop()
+		return err
+	case <-adminTimer.C:
+		atomic.StoreUint32(&timedOut, 1)
+		return ErrorAdminTimeout
+	}
+}
+
 func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error {
 	service.logger.Infof("Adding remote cluster with referenceId %v\n", ref.Id())
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("AddRemoteCluster(%v, %v)", ref.Name(), skipConnectivityValidation), DiagNetworkThreshold)
-	defer stopFunc()
+	adminFunc := func(errPtr *error, doneCh chan bool, timedOut *uint32) {
+		defer close(doneCh)
 
-	err := service.validateAddRemoteCluster(ref, skipConnectivityValidation)
-	if err != nil {
-		return err
-	}
+		stopFunc := service.startDiagStopwatch(fmt.Sprintf("AddRemoteCluster(%v, %v)", ref.Name(), skipConnectivityValidation), DiagNetworkThreshold)
+		defer stopFunc()
 
-	err = service.addRemoteCluster(ref)
-	if err != nil {
-		return err
-	}
-
-	if service.uilog_svc != nil {
-		uiLogMsg := fmt.Sprintf("Created remote cluster reference \"%s\" via %s.", ref.Name(), ref.HostName())
-		service.uilog_svc.Write(uiLogMsg)
-	}
-	return nil
-}
-
-func (service *RemoteClusterService) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
-	return service.setRemoteCluster(refName, ref)
-}
-
-// Set ops are synchronous
-func (service *RemoteClusterService) setRemoteCluster(refName string, newRef *metadata.RemoteClusterReference) error {
-	service.logger.Infof("Setting remote cluster with refName %v. ref=%v\n", refName, newRef)
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("setRemoteCluster(%v, [%v])", refName, newRef.CloneAndRedact()), DiagNetworkThreshold)
-	defer stopFunc()
-
-	agent, err := service.validateSetRemoteClusterWithAgent(refName, newRef)
-	if err != nil {
-		return err
-	}
-
-	if agent == nil {
-		return errors.New(fmt.Sprintf("Error: refName %v not found in the cluster service\n", refName))
-	} else {
-		// In case things change and need to update maps
-		oldRef := agent.reference.Clone()
-
-		service.registerSet(newRef.Name())
-		err := agent.UpdateReferenceFrom(newRef, true)
-
-		if err == nil {
-			service.checkAndUpdateAgentMaps(oldRef, newRef, agent)
-
-			if service.uilog_svc != nil {
-				var hostnameChangeMsg string
-				newRefHostName := newRef.HostName()
-				if oldRef.HostName() != newRefHostName {
-					hostnameChangeMsg = fmt.Sprintf(" New contact point is %s.", newRefHostName)
-				}
-				uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", oldRef.Name(), hostnameChangeMsg)
-				service.uilog_svc.Write(uiLogMsg)
+		*errPtr = service.validateAddRemoteCluster(ref, skipConnectivityValidation)
+		if *errPtr != nil {
+			if atomic.LoadUint32(timedOut) == 1 && service.uilog_svc != nil {
+				service.uilog_svc.Write(fmt.Sprintf("Unable to AddRemoteCluster given %v and %v, due to %v", ref.Name(), ref.HostName(), *errPtr))
 			}
-		} else {
-			service.deregisterSet(newRef.Name())
+			return
 		}
-		return err
+
+		*errPtr = service.addRemoteCluster(ref)
+		if *errPtr != nil {
+			if atomic.LoadUint32(timedOut) == 1 && service.uilog_svc != nil {
+				service.uilog_svc.Write(fmt.Sprintf("Unable to AddRemoteCluster given %v and %v, due to %v", ref.Name(), ref.HostName(), *errPtr))
+			}
+			return
+		}
+
+		if service.uilog_svc != nil {
+			uiLogMsg := fmt.Sprintf("Created remote cluster reference \"%s\" via %s.", ref.Name(), ref.HostName())
+			service.uilog_svc.Write(uiLogMsg)
+		}
 	}
+	return service.performAdminTask(adminFunc)
+}
+
+func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *metadata.RemoteClusterReference) error {
+	service.logger.Infof("Setting remote cluster with refName %v. ref=%v\n", refName, newRef)
+
+	adminFunc := func(errPtr *error, doneCh chan bool, timedOut *uint32) {
+		defer close(doneCh)
+
+		stopFunc := service.startDiagStopwatch(fmt.Sprintf("setRemoteCluster(%v, [%v])", refName, newRef.CloneAndRedact()), DiagNetworkThreshold)
+		defer stopFunc()
+
+		var agent *RemoteClusterAgent
+		agent, *errPtr = service.validateSetRemoteClusterWithAgent(refName, newRef)
+		if *errPtr != nil {
+			if atomic.LoadUint32(timedOut) == 1 && service.uilog_svc != nil {
+				service.uilog_svc.Write(fmt.Sprintf("Unable to SetRemoteCluster given %v to %v, due to %v", refName, newRef.CloneAndRedact(), *errPtr))
+			}
+			return
+		}
+
+		if agent == nil {
+			*errPtr = errors.New(fmt.Sprintf("refName %v not found in the cluster service\n", refName))
+			if atomic.LoadUint32(timedOut) == 1 && service.uilog_svc != nil {
+				service.uilog_svc.Write(fmt.Sprintf("Unable to SetRemoteCluster given %v to %v, due to %v", refName, newRef.CloneAndRedact(), *errPtr))
+			}
+			return
+		} else {
+			// In case things change and need to update maps
+			oldRef := agent.reference.Clone()
+
+			service.registerSet(newRef.Name())
+			*errPtr = agent.UpdateReferenceFrom(newRef, true)
+
+			if *errPtr == nil {
+				service.checkAndUpdateAgentMaps(oldRef, newRef, agent)
+
+				if service.uilog_svc != nil {
+					var hostnameChangeMsg string
+					newRefHostName := newRef.HostName()
+					if oldRef.HostName() != newRefHostName {
+						hostnameChangeMsg = fmt.Sprintf(" New contact point is %s.", newRefHostName)
+					}
+					uiLogMsg := fmt.Sprintf("Remote cluster reference \"%s\" updated.%s", oldRef.Name(), hostnameChangeMsg)
+					if service.uilog_svc != nil {
+						service.uilog_svc.Write(uiLogMsg)
+					}
+				}
+			} else {
+				if atomic.LoadUint32(timedOut) == 1 && service.uilog_svc != nil {
+					service.uilog_svc.Write(fmt.Sprintf("Unable to SetRemoteCluster given %v to %v, due to %v", refName, newRef.CloneAndRedact(), *errPtr))
+				}
+				service.deregisterSet(newRef.Name())
+			}
+		}
+	}
+	return service.performAdminTask(adminFunc)
 }
 
 // The entry point for REST iface for when an user wants to delete a remote cluster reference
+// Delete remote cluster does not depend upon reaching out over the network so no need for performAdminTask
 func (service *RemoteClusterService) DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error) {
 	if len(refName) == 0 {
 		return nil, errors.New("No refName is given")
@@ -3170,6 +3214,8 @@ func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error)
 			return true, utilities.NonExistentBucketError
 		} else if err == coolDownError {
 			return true, coolDownError
+		} else if err == ErrorAdminTimeout {
+			return true, ErrorAdminTimeout
 		} else {
 			return false, err
 		}
