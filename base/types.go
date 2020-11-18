@@ -1140,39 +1140,39 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 		// Shouldn't have duplicated keys, but check anyway
 		_, exists := e.oneToOneRules[k]
 		if exists {
-			return fmt.Errorf("Key already exists: %v", k)
+			return fmt.Errorf("Collection To Collection rule with source namespace %v already exists", k)
 		}
 		e.oneToOneRules[k] = v
 
 		// Check for duplicity
 		submatches := CollectionNamespaceRegex.FindStringSubmatch(k)
-		sourceScopeName := submatches[1]
-		sourceCollectionName := submatches[2]
-		//sourceNamespace, _ := NewCollectionNamespaceFromString(k)
-		targetScope, exists := e.scopeToScopeRules[sourceScopeName]
+		oneToOneRuleSourceScope := submatches[1]
+		oneToOneRuleSourceCollection := submatches[2]
+		scopeRuleTargetScopeName, scopeRuleExists := e.scopeToScopeRules[oneToOneRuleSourceScope]
 		if v == nil {
-			if exists && targetScope == nil {
+			if scopeRuleExists && scopeRuleTargetScopeName == nil {
 				// S -> null already exists. S.C -> null is redundant
-				return fmt.Errorf("The rule %v%v%v is redundant", k, ScopeCollectionDelimiter, v)
+				return fmt.Errorf("The rule %v%v%v is redundant", k, JsonDelimiter, v)
 			}
-		} else {
+		} else if scopeRuleExists {
+			// A non-deny list rule, i.e. S.C -> ST.CT
 			submatches2 := CollectionNamespaceRegex.FindStringSubmatch(v.(string))
-			targetCollectionName := submatches2[2]
-			if exists && targetScope != nil {
-				if sourceCollectionName == targetCollectionName {
-					// S -> S2 already exists, S.C -> S2.C is redundant
-					return fmt.Errorf("The rule %v%v%v is redundant", k, ScopeCollectionDelimiter, v)
-				} else {
-					// S -> S2 exists, but S.C -> S2.C2 will have higher priority
-					// (S.C -> S2.C will not take place as the more specific rule takes higher precedence)
-				}
+			oneToOneRuleTargetScope := submatches2[1]
+			oneToOneRuleTargetCollection := submatches2[2]
+
+			if scopeRuleTargetScopeName == oneToOneRuleTargetScope &&
+				oneToOneRuleSourceCollection == oneToOneRuleTargetCollection {
+				// This means S -> ST exists (since scopeRuleExists) and collection name mapping
+				// is following the rule S.C -> ST.C
+				// S -> S2 already exists, S.C -> S2.C is redundant
+				return fmt.Errorf("The rule %v%v%v is redundant", k, JsonDelimiter, v)
 			}
 		}
 	case explicitRuleScopeToScope:
 		// Shouldn't have duplicated keys, but check anyway
 		_, exists := e.scopeToScopeRules[k]
 		if exists {
-			return fmt.Errorf("Key already exists: %v", k)
+			return fmt.Errorf("Scope To Scope rule with source scope %v already exists", k)
 		}
 		e.scopeToScopeRules[k] = v
 
@@ -1181,16 +1181,16 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 			submatches := CollectionNamespaceRegex.FindStringSubmatch(checkK)
 			sourceScopeName := submatches[1]
 			sourceCollectionName := submatches[2]
-			if sourceScopeName == checkK {
+			if sourceScopeName == k {
 				if v == nil && checkV == nil {
 					// S1.C1 -> nil already exists
-					return fmt.Errorf("The rule %v%v%v is redundant", checkK, ScopeCollectionDelimiter, checkV)
+					return fmt.Errorf("The rule %v%v%v is redundant", checkK, JsonDelimiter, checkV)
 				} else if v != nil && checkV != nil {
 					submatches2 := CollectionNamespaceRegex.FindStringSubmatch(checkV.(string))
 					targetColName := submatches2[2]
 					if sourceCollectionName == targetColName {
 						// S1.C1 -> S2.C1 exists, and trying to enter rule S1 -> S2
-						return fmt.Errorf("The rule %v%v%v is redundant", checkK, ScopeCollectionDelimiter, checkV)
+						return fmt.Errorf("The rule %v%v%v is redundant", checkK, JsonDelimiter, checkV)
 					} else {
 						// S1.C1 -> S2.C3 exists, and can coexist with S1 -> S2
 					}

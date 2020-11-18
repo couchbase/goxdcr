@@ -513,3 +513,52 @@ func TestValidRemoteClusterName(t *testing.T) {
 	ValidateRemoteClusterName("endwithaPeriod.com.", errMap)
 	assert.NotEqual(0, len(errMap))
 }
+
+func TestValidRules(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestValidRules =================")
+	defer fmt.Println("============== Test case end: TestValidRules =================")
+
+	validator := NewExplicitMappingValidator()
+	assert.Nil(validator.ValidateKV("scope1", DefaultScopeCollectionName))
+	assert.Nil(validator.ValidateKV("scope1.collection1", "scope1.collection1"))
+	assert.Nil(validator.ValidateKV("scope1.collection2", "scope1.collection2"))
+
+	validator = NewExplicitMappingValidator()
+	assert.Nil(validator.ValidateKV("scope1.collection1", "scope1.collection1"))
+	assert.Nil(validator.ValidateKV("scope1.collection2", "scope1.collection2"))
+	assert.Nil(validator.ValidateKV("scope1", nil))
+
+	validator = NewExplicitMappingValidator()
+	assert.Nil(validator.ValidateKV("scope1", nil))
+	assert.Nil(validator.ValidateKV("scope1.collection1", "scope1.collection1"))
+	assert.Nil(validator.ValidateKV("scope1.collection2", "scope1.collection2"))
+}
+
+func TestRulesRedundancyCheck(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRulesRedundancyCheck =================")
+	defer fmt.Println("============== Test case end: TestRulesRedundancyCheck =================")
+
+	validator := NewExplicitMappingValidator()
+	assert.Nil(validator.ValidateKV("testScope.testCol", "testScope2.testCol"))
+	assert.NotNil(validator.ValidateKV("testScope", "testScope2"))
+
+	validator = NewExplicitMappingValidator()
+	assert.Nil(validator.ValidateKV("testScope", "testScope2"))
+	assert.NotNil(validator.ValidateKV("testScope.testCol", "testScope2.testCol"))
+}
+
+func TestRuleRedundancyNilCheck(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRulesRedundancyCheck =================")
+	defer fmt.Println("============== Test case end: TestRulesRedundancyCheck =================")
+
+	validator := NewExplicitMappingValidator()
+	assert.Nil(validator.ValidateKV("testScope", nil))
+	assert.NotNil(validator.ValidateKV("testScope.testCol", nil))
+
+	validator = NewExplicitMappingValidator()
+	assert.Nil(validator.ValidateKV("testScope.testCol", nil))
+	assert.NotNil(validator.ValidateKV("testScope", nil))
+}
