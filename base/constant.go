@@ -35,6 +35,7 @@ var DefaultAdminPortSSL uint16 = 18091
 const RESTInvalidPath = "Invalid path"
 const RESTHttpReq = "in http request"
 const RESTNoSuchHost = "no such host"
+const RESTHttpChunkedEncoding = "chunked"
 
 // Exponential backoff factor
 var MetaKvBackoffFactor = 2
@@ -302,6 +303,7 @@ var ErrorCAPIDeprecated = errors.New("CAPI replication mode is now deprecated")
 var ReplicationSpecNotFoundErrorMessage = "requested resource not found"
 var ReplNotFoundErr = errors.New(ReplicationSpecNotFoundErrorMessage)
 var ErrorExplicitMappingEnterpriseOnly = errors.New("Explicit Mapping is supported in Enterprise Edition only")
+var ErrorChunkedEncodingNotSupported = errors.New("Chunked encoding is not supported")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

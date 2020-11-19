@@ -154,6 +154,10 @@ func (adminport *Adminport) handleRequest(
 	request *http.Request) (response *ap.Response, err error) {
 
 	logger_ap.Debugf("handleRequest called\n")
+	response, err = adminport.checkAndRejectChunkedEncoding(request)
+	if err != nil || response != nil {
+		return
+	}
 
 	key, err := adminport.GetMessageKeyFromRequest(request)
 	if err != nil {
@@ -1202,4 +1206,17 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 	return EncodeByteArrayIntoPrometheusResponseWithStatusCode(outputBytes, http.StatusOK)
+}
+
+func (adminport *Adminport) checkAndRejectChunkedEncoding(request *http.Request) (*ap.Response, error) {
+	for _, encodingString := range request.TransferEncoding {
+		if encodingString == base.RESTHttpChunkedEncoding {
+			// With chunked encoding, reading or closing the body will hang. So force clean the request
+			request.ContentLength = 0
+			request.TransferEncoding = []string{}
+			request.Body = nil
+			return EncodeErrorMessageIntoResponse(base.ErrorChunkedEncodingNotSupported, http.StatusBadRequest)
+		}
+	}
+	return nil, nil
 }

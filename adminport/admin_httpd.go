@@ -88,6 +88,7 @@ func (s *httpServer) Start() chan error {
 
 		logger_server.Infof("%s starting ...\n", s.logPrefix)
 		// ListenAndServe blocks and returns a non-nil error if something wrong happens
+		// ListenAndServe will cause golang library to call ServeHttp()
 		err := s.srv.ListenAndServe()
 		logger_server.Errorf("%s exited with error %v\n", s.logPrefix, err)
 		errCh <- err
@@ -179,6 +180,7 @@ type Handler struct {
 	server *httpServer
 }
 
+// Called by golang library
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if logger_server.GetLogLevel() >= log.LogLevelDebug {
 		rr := base.CloneAndTagHttpRequest(r) // rr == redactedRequest
