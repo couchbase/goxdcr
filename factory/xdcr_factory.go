@@ -221,7 +221,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		if err != nil {
 			return nil, nil, err
 		}
-		specForConstruction = backfillSpec
+		specForConstruction = backfillSpec.Clone()
 		partTopic = fmt.Sprintf("%v_%v", "backfill", topic)
 	default:
 		panic("Not implemented")
@@ -1017,7 +1017,7 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 	var osoCheckMap metadata.VBTasksMapType
 	vbTasksMap, vbTasksMapExists := settings[parts.DCP_VBTasksMap]
 	if vbTasksMapExists {
-		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap
+		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(metadata.VBTasksMapType).Clone()
 		checkIfNeedOso = true
 		osoCheckMap = vbTasksMap.(metadata.VBTasksMapType)
 	}
@@ -1026,7 +1026,7 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 	if modes.IsMigrationOn() && !vbTasksMapExists {
 		// Main pipeline that requires DCP to run a gomemcached filter of just the default collection
 		vbTasksMap = createMigrationVBTasksMap()
-		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap
+		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(metadata.VBTasksMapType).Clone()
 		checkIfNeedOso = true
 		osoCheckMap = vbTasksMap.(metadata.VBTasksMapType)
 	}
@@ -1281,7 +1281,7 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 	s[service_def.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
 	vbTasksMap, ok := settings[parts.DCP_VBTasksMap]
 	if ok {
-		s[parts.DCP_VBTasksMap] = vbTasksMap
+		s[parts.DCP_VBTasksMap] = vbTasksMap.(metadata.VBTasksMapType).Clone()
 	}
 	return s, nil
 }
