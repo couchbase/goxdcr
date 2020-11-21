@@ -24,13 +24,7 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-# Replicate US filter to target B2.S3.col1
-# Replicate NonUS to target B2.S3.col2
-US_filter='(country == \"United States\" OR country = \"Canada\") AND type=\"brewery\"'
-NonUS_filter='country != \"United States\" AND country != \"Canada\" AND type=\"brewery\"'
-Brewery_filter='type=\"brewery\"'
-
-mappingRule="{\"$US_filter\":\"S3.col1\",\"$NonUS_filter\":\"S3.col2\",\"$Brewery_filter\":\"S3.col3\"}"
+mappingRule="{\"_default._default\":\"S3.col1\"}"
 
 declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
 	["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
@@ -53,11 +47,9 @@ function runDataLoad {
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
-MULTITARGET_MSG="a single source mutation is replicated to multiple target collections"
-
 function runTestCase {
 	echo "============================================================================"
-	echo "Running collections migration multi-targets test case"
+	echo "Running explicit mapped collections migration test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -73,12 +65,6 @@ function runTestCase {
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 
-	# Get current instance
-	local -i currMultiTargetMsgCnt
-	local currentClusterLog
-	currentClusterLog=$(getClusterLogs "C1")
-	currMultiTargetMsgCnt=$(echo "$currentClusterLog" | grep -c "$MULTITARGET_MSG")
-
 	echo "Loading beer sample on source cluster..."
 	runDataLoad
 
@@ -91,8 +77,7 @@ function runTestCase {
 
 	echo "Waiting 15 seconds before checking item count first pass"
 	sleep 15
-	checkItemCnt "C2" "B2" 2824
-	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1))
+	checkItemCnt "C2" "B2" 7303
 
 	echo "============================================================================"
 	echo "PASSED"

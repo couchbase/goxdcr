@@ -478,7 +478,7 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 	// Explicit mapping mode on means that there should be rules accompanying it
 	collectionsMode := spec.Settings.GetCollectionModes()
 	collectionsMappingRules := spec.Settings.GetCollectionsRoutingRules()
-	if collectionsMode.IsExplicitMapping() && len(collectionsMappingRules) == 0 {
+	if !collectionsMode.IsImplicitMapping() && len(collectionsMappingRules) == 0 {
 		errString := fmt.Sprintf("spec %v - %v", spec.Id, ErrorExplicitMappingWoRules.Error())
 		pipelineMgr.logger.Error(errString)
 		return fmt.Errorf(errString)

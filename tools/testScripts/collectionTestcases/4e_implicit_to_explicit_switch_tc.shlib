@@ -96,6 +96,7 @@ function runTestCase {
 
 	# No backfill should be raised for first pass
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $currentBackfillInstanceCnt
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt))
 
 	# After replicating 10k items from a source collection to target collection
 	# change the replication mapping to point to a new target collection

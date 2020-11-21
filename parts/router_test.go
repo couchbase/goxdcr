@@ -507,7 +507,8 @@ func TestRouterExplicitMode(t *testing.T) {
 
 	mappingMode := spec.Settings.GetCollectionModes()
 	mappingMode.SetExplicitMapping(true)
-	rules := spec.Settings.GetCollectionsRoutingRules()
+
+	rules := make(metadata.CollectionsMappingRulesType)
 	rules["S1"] = "S2"
 	updatedMap := make(map[string]interface{})
 	updatedMap[metadata.CollectionsMgtMultiKey] = mappingMode
@@ -526,6 +527,7 @@ func TestRouterExplicitMode(t *testing.T) {
 	collectionsRouter := router.collectionsRouting[dummyDownStream]
 	assert.NotNil(collectionsRouter)
 	assert.Nil(collectionsRouter.Start())
+	assert.True(collectionsRouter.collectionMode.IsExplicitMapping())
 
 	// routing updater receiver
 	newRoutingUpdater := func(info CollectionsRoutingInfo) error {
@@ -578,6 +580,43 @@ func TestRouterExplicitMode(t *testing.T) {
 	//// Even if persist has problem, routeCollection should return a non-nil error to prevent forwarding to xmem
 	//assert.Equal(base.ErrorIgnoreRequest, router.RouteCollection(dummyData, dummyDownStream))
 	//// The ignore count should be 0 to indicate that throughSeqno will not move foward
+}
+
+func TestRouterSpecialMigrationMode(t *testing.T) {
+	fmt.Println("============== Test case start: TestRouterSpecialMigrationMode =================")
+	defer fmt.Println("============== Test case end: TestRouterSpecialMigrationMode =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
+
+	mappingMode := spec.Settings.GetCollectionModes()
+	mappingMode.SetMigration(true)
+
+	rules := make(metadata.CollectionsMappingRulesType)
+	rules["_default._default"] = "S2.col1"
+	updatedMap := make(map[string]interface{})
+	updatedMap[metadata.CollectionsMgtMultiKey] = mappingMode
+	updatedMap[metadata.CollectionsMappingRulesKey] = rules
+	_, errMap := spec.Settings.UpdateSettingsFromMap(updatedMap)
+	assert.Equal(0, len(errMap))
+
+	setupCollectionManifestsSvcRouterWithDefaultTarget(collectionsManifestSvc)
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, nil)
+
+	assert.Nil(err)
+	modes := router.collectionModes.Get()
+	assert.True(modes.IsMigrationOn())
+
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+
+	// Special migration mode will translate into a single regular explicit mapping
+	assert.Nil(collectionsRouter.Start())
+	collectionsRouter.mappingMtx.RLock()
+	assert.False(collectionsRouter.collectionMode.IsMigrationOn())
+	assert.True(collectionsRouter.collectionMode.IsExplicitMapping())
+	collectionsRouter.mappingMtx.RUnlock()
 }
 
 func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
@@ -666,7 +705,6 @@ func TestRouterExplicitMigrationSiblingReq(t *testing.T) {
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
 
 	mappingMode := spec.Settings.GetCollectionModes()
-	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 	rules := spec.Settings.GetCollectionsRoutingRules()
 	rules["REGEXP_CONTAINS(META().id, \"d1\")"] = "S2.col1"
@@ -684,7 +722,6 @@ func TestRouterExplicitMigrationSiblingReq(t *testing.T) {
 
 	assert.Nil(err)
 	modes := router.collectionModes.Get()
-	assert.True(modes.IsExplicitMapping())
 	assert.True(modes.IsMigrationOn())
 
 	collectionsRouter := router.collectionsRouting[dummyDownStream]
@@ -880,7 +917,7 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	lastCalledBackfillMap = nil
 	collectionsRouter.recordUnroutableRequest(wrappedMCR)
 	assert.Equal(2, ignoreCnt)
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	assert.NotNil(collectionsRouter.brokenMapDblChkTicker)
 	assert.Nil(lastCalledBackfillMap)
 	assert.NotEqual(0, len(collectionsRouter.brokenMapping))

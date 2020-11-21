@@ -771,6 +771,10 @@ func (c CollectionsMgtType) String() string {
 	return strings.Join(output, " ")
 }
 
+func (c *CollectionsMgtType) IsImplicitMapping() bool {
+	return !c.IsExplicitMapping() && !c.IsMigrationOn()
+}
+
 func (c *CollectionsMgtType) IsExplicitMapping() bool {
 	return *c&CollectionsExplicitBit > 0
 }

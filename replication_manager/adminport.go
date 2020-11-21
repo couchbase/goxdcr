@@ -679,20 +679,22 @@ func ForceManualBackfillRequest(replId string, incomingReq string) error {
 	// Validate the incoming request
 	var sourceNamespace *metadata.SourceNamespace
 	collectionMode := replSpec.Settings.GetCollectionModes()
-	if collectionMode.IsMigrationOn() {
+	checkDefaultNs, defaultNsErr := base.NewCollectionNamespaceFromString(incomingReq)
+	if !collectionMode.IsMigrationOn() || (defaultNsErr == nil && checkDefaultNs.IsDefault()) {
+		// NonMigration means incoming request should be a specific namespace
+		// OR Migration mode is on but specified default source collection, meaning IsExplicitMigrationRule() is true
+		collectionNamespace, err := base.NewCollectionNamespaceFromString(incomingReq)
+		if err != nil {
+			return fmt.Errorf("Unable to validate collection namespace: %v", err)
+		}
+		sourceNamespace = metadata.NewSourceCollectionNamespace(&collectionNamespace)
+	} else {
 		// incomingReq should be a rule
 		var fakeDP base.FakeDataPool
 		sourceNamespace, err = metadata.NewSourceMigrationNamespace(incomingReq, &fakeDP)
 		if err != nil {
 			return fmt.Errorf("Unable to validate migration rule: %v", err)
 		}
-	} else {
-		// NonMigration means incoming request should be a specific namespace
-		collectionNamespace, err := base.NewCollectionNamespaceFromString(incomingReq)
-		if err != nil {
-			return fmt.Errorf("Unable to validate collection namespace: %v", err)
-		}
-		sourceNamespace = metadata.NewSourceCollectionNamespace(&collectionNamespace)
 	}
 
 	// Translate into a mapping where the manual backfill logic only cares about source namespace

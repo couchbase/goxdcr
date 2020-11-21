@@ -599,11 +599,11 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 		newCollectionMode := newSettings.GetCollectionModes()
 		newRoutingRules := newSettings.GetCollectionsRoutingRules()
 
-		if oldCollectionMode.IsExplicitMapping() != newCollectionMode.IsExplicitMapping() {
+		if oldSettings.NeedToRestreamPipelineEvenIfStoppedDueToCollectionModeChanges(newSettings) {
 			// Any changes between implicit or explicit mapping means all checkpoints are deleted and everything starts over
 			// This is handled by replication spec service
 			return nil
-		} else if !newCollectionMode.IsExplicitMapping() {
+		} else if newCollectionMode.IsImplicitMapping() {
 			// No need to worry about raising backfill for implicit mapping
 			// This is handled by replication spec service
 			return nil
@@ -854,7 +854,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		return
 	}
 	modes := spec.Settings.GetCollectionModes()
-	if !modes.IsExplicitMapping() {
+	if modes.IsImplicitMapping() {
 		b.markNewSourceManifest(replId, newSourceManifest.Uid())
 		return
 	}
@@ -951,7 +951,7 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 	}
 	modes := spec.Settings.GetCollectionModes()
 
-	if newSourceManifest.Uid() == 0 && !modes.IsMigrationOn() && !modes.IsExplicitMapping() {
+	if newSourceManifest.Uid() == 0 && modes.IsImplicitMapping() {
 		// Source manifest 0 means only default collection is being replicated
 		b.logger.Infof("Repl %v shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created", replId)
 		return
@@ -959,7 +959,7 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 
 	var backfillReq interface{}
 	var skipRaiseBackfillReq bool
-	if modes.IsExplicitMapping() {
+	if !modes.IsImplicitMapping() {
 		if newTargetManifest == nil {
 			b.logger.Errorf("%v Unable to do explicit mapping if target manifest is nil", spec.Id)
 			return
@@ -984,7 +984,7 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 		b.markNewSourceManifest(replId, newSourceManifest.Uid())
 	}
 
-	if !modes.IsExplicitMapping() {
+	if modes.IsImplicitMapping() {
 		// For implicit mapping, see if there are things that need to be cleaned up
 		b.cleanupInvalidImplicitBackfillMappings(replId, oldSourceManifest, newSourceManifest)
 	}
@@ -1303,7 +1303,7 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 
 	modes := spec.Settings.GetCollectionModes()
 
-	if clonedSourceManifest.Uid() == 0 && !modes.IsMigrationOn() && !modes.IsExplicitMapping() {
+	if clonedSourceManifest.Uid() == 0 && modes.IsImplicitMapping() {
 		// Source manifest 0 means only default collection is being replicated
 		b.logger.Infof("Repl %v shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created", specId)
 		return nil, nil
@@ -1317,12 +1317,12 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 	var backfillReq interface{}
 	// Backfill everything means comparing to an empty/default manifest
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
-	if modes.IsExplicitMapping() {
-		b.logger.Infof("Forced backfill for explicit mapping, given source manifest version %v target manifest version %v and rules: %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), spec.Settings.GetCollectionsRoutingRules(), requestingStr)
-		backfillReq, _ = b.populateBackfillReqForExplicitMapping(specId, &defaultManifest /*oldSrc*/, &clonedSourceManifest, &defaultManifest /*oldTgt*/, &clonedTargetManifest, spec, modes, backfillReq)
-	} else {
+	if modes.IsImplicitMapping() {
 		b.logger.Infof("Forced backfill for implicit mapping, given source manifest version %v target manifest version %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), requestingStr)
 		backfillReq, _ = b.populateBackfillReqForImplicitMapping(&clonedTargetManifest, &defaultManifest /*oldTarget*/, &clonedSourceManifest, spec)
+	} else {
+		b.logger.Infof("Forced backfill for explicit mapping, given source manifest version %v target manifest version %v and rules: %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), spec.Settings.GetCollectionsRoutingRules(), requestingStr)
+		backfillReq, _ = b.populateBackfillReqForExplicitMapping(specId, &defaultManifest /*oldSrc*/, &clonedSourceManifest, &defaultManifest /*oldTgt*/, &clonedTargetManifest, spec, modes, backfillReq)
 	}
 	return backfillReq, err
 }

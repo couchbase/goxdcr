@@ -1208,37 +1208,39 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 	if manifestsPair.Source == nil || manifestsPair.Target == nil {
 		return CollectionNamespaceMapping{}, fmt.Errorf("creating collection namespace mapping pair contains at least one nil element")
 	}
-	switch mappingMode.IsExplicitMapping() {
-	case false:
-		// Implicit mapping
+
+	if mappingMode.IsImplicitMapping() {
 		successfulMapping, _, _ := manifestsPair.Source.ImplicitMap(manifestsPair.Target)
 		return successfulMapping, nil
-	case true:
-		// Explicit mapping
-		switch mappingMode.IsMigrationOn() {
-		case false:
-			return rules.GetOutputMapping(manifestsPair, mappingMode, ensureSourceExists)
-		case true:
-			outputMapping := CollectionNamespaceMapping{}
-			// Use a single shared datapool
-			sharedDp := base.NewDataPool()
-			for filterExpr, targetNamespaceRaw := range rules {
-				// ValidateMigrateRules() should have been called
-				targetNamespaceStr := targetNamespaceRaw.(string)
-				targetNamespace, _ := base.NewCollectionNamespaceFromString(targetNamespaceStr)
-				sourceNs, err := NewSourceMigrationNamespace(filterExpr, sharedDp)
-				if err != nil {
-					// should have already validated and thus shouldn't be possible here
-					continue
-				}
-				// Look to see if the targetNamespace exists on the target manifest
-				_, err = manifestsPair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
-				if err == nil {
-					outputMapping.AddSingleSourceNsMapping(sourceNs, &targetNamespace)
-				}
-			}
-			return outputMapping, nil
+	} else if mappingMode.IsExplicitMapping() {
+		return rules.GetOutputMapping(manifestsPair, mappingMode, ensureSourceExists)
+	} else if mappingMode.IsMigrationOn() {
+		if rules.IsExplicitMigrationRule() {
+			// Special migration mode means a single explicit mapping
+			specialMappingMode := mappingMode
+			specialMappingMode.SetMigration(false)
+			specialMappingMode.SetExplicitMapping(true)
+			return rules.GetOutputMapping(manifestsPair, specialMappingMode, ensureSourceExists)
 		}
+		outputMapping := CollectionNamespaceMapping{}
+		// Use a single shared datapool
+		sharedDp := base.NewDataPool()
+		for filterExpr, targetNamespaceRaw := range rules {
+			// ValidateMigrateRules() should have been called
+			targetNamespaceStr := targetNamespaceRaw.(string)
+			targetNamespace, _ := base.NewCollectionNamespaceFromString(targetNamespaceStr)
+			sourceNs, err := NewSourceMigrationNamespace(filterExpr, sharedDp)
+			if err != nil {
+				// should have already validated and thus shouldn't be possible here
+				continue
+			}
+			// Look to see if the targetNamespace exists on the target manifest
+			_, err = manifestsPair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
+			if err == nil {
+				outputMapping.AddSingleSourceNsMapping(sourceNs, &targetNamespace)
+			}
+		}
+		return outputMapping, nil
 	}
 	return CollectionNamespaceMapping{}, base.ErrorInvalidInput
 }
@@ -1907,6 +1909,10 @@ func (c CollectionsMappingRulesType) Clone() CollectionsMappingRulesType {
 
 func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 	errorMap := make(base.ErrorMap)
+	if c.IsExplicitMigrationRule() {
+		return nil
+	}
+
 	for filterExpr, targetNamespaceRaw := range c {
 		// filterExpr must be a valid gojsonsm expression
 		_, err := base.ValidateAndGetAdvFilter(filterExpr)
@@ -1932,6 +1938,37 @@ func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 	} else {
 		return nil
 	}
+}
+
+// Explicit migration rule is a single explicit mapping from a source collection to a specific target collection
+func (c CollectionsMappingRulesType) IsExplicitMigrationRule() bool {
+	if len(c) != 1 {
+		return false
+	}
+
+	for k, v := range c {
+		checkSourceNs, err := base.NewCollectionNamespaceFromString(k)
+		if err != nil {
+			return false
+		}
+
+		if !checkSourceNs.IsDefault() {
+			return false
+		}
+
+		targetNsString, ok := v.(string)
+		if !ok {
+			return false
+		}
+		targetNs, err := base.NewCollectionNamespaceFromString(targetNsString)
+		if err != nil {
+			return false
+		}
+		if targetNs.IsDefault() || targetNs.IsEmpty() {
+			return false
+		}
+	}
+	return true
 }
 
 func (c CollectionsMappingRulesType) ValidateExplicitMapping() error {

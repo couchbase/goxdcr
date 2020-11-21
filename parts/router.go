@@ -324,29 +324,43 @@ func (c *CollectionsRouter) Start() error {
 	rules := c.spec.Settings.GetCollectionsRoutingRules().Clone()
 	c.mappingMtx.RUnlock()
 
-	if !modes.IsExplicitMapping() {
-		//c.logger.Infof("CollectionsRouter %v started in implicit mapping mode with rules %v", c.spec.Id, rules)
+	if modes.IsExplicitMapping() {
 		c.logger.Infof("CollectionsRouter %v started in explicit mapping mode with rules %v", c.spec.Id, rules)
-		return nil
 	} else if modes.IsMigrationOn() {
 		c.logger.Infof("CollectionsRouter %v started in migration mode with rules %v", c.spec.Id, rules)
+	} else {
+		c.logger.Infof("CollectionsRouter %v started in implicit mapping mode", c.spec.Id)
+		c.initializeInternalsForImplicitMapping(modes)
+		return nil
 	}
 
 	pair := metadata.CollectionsManifestPair{
 		Source: curSrcMan,
 		Target: curTgtMan,
 	}
-	err = c.initializeInternals(pair, modes, rules)
+	err = c.initializeInternalsForExplicitOrMigration(pair, modes, rules)
 	return err
 }
 
-func (c *CollectionsRouter) initializeInternals(pair metadata.CollectionsManifestPair, modes base.CollectionsMgtType, rules metadata.CollectionsMappingRulesType) error {
+func (c *CollectionsRouter) initializeInternalsForImplicitMapping(modes base.CollectionsMgtType) {
+	c.mappingMtx.Lock()
+	defer c.mappingMtx.Unlock()
+	c.collectionMode = modes
+}
+
+func (c *CollectionsRouter) initializeInternalsForExplicitOrMigration(pair metadata.CollectionsManifestPair, modes base.CollectionsMgtType, rules metadata.CollectionsMappingRulesType) error {
 	var err error
 	c.mappingMtx.Lock()
 	c.lastKnownSrcManifest = pair.Source
+
+	checkAndHandleSpecialMigration(&rules, &modes)
+
 	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules, false)
+	if err != nil {
+		return err
+	}
 	c.explicitMappingIdx = c.explicitMappings.CreateLookupIndex()
-	c.collectionMode = c.spec.Settings.GetCollectionModes()
+	c.collectionMode = modes
 	c.cachedRules = rules
 	c.mappingMtx.Unlock()
 	return err
@@ -441,7 +455,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 	c.checkAndDisableFirstMutationKicker()
 
 	c.mappingMtx.RLock()
-	isExplicitMapping := c.explicitMappings != nil
+	isImplicitMapping := c.collectionMode.IsImplicitMapping()
 	isMigrationMode := c.collectionMode.IsMigrationOn()
 	c.mappingMtx.RUnlock()
 
@@ -450,7 +464,9 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 	var latestSourceManifest *metadata.CollectionsManifest
 	var latestTargetManifest *metadata.CollectionsManifest
 
-	if isExplicitMapping {
+	if isImplicitMapping {
+		latestTargetManifest, err = c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, math.MaxUint64)
+	} else {
 		if !isMigrationMode {
 			// Check to see if this source namespace has already been marked denied, which means
 			// it wasn't even in the rules to be matched
@@ -465,13 +481,11 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 			// Migration mode means all data is coming from default source collection, thus no denyMapping
 		}
 		latestSourceManifest, latestTargetManifest, err = c.collectionsManifestSvc.GetLatestManifests(c.spec, false)
-	} else {
-		latestTargetManifest, err = c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, math.MaxUint64)
 	}
 	if err != nil {
 		return
 	}
-	if isExplicitMapping && latestSourceManifest == nil {
+	if !isImplicitMapping && latestSourceManifest == nil {
 		err = fmt.Errorf("received nil latest source manifest")
 		return
 	}
@@ -480,7 +494,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 		return
 	}
 
-	if isExplicitMapping {
+	if !isImplicitMapping {
 		err = c.handleExplicitMappingUpdate(latestSourceManifest, latestTargetManifest)
 		if err != nil {
 			return
@@ -494,12 +508,12 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 		return
 	}
 
-	if isExplicitMapping {
-		manifestId, colIds, unmappedNamespaces, migrationColIdNsMap, err = c.explicitMap(wrappedMCReq, latestTargetManifest, eventForMigration)
-	} else {
+	if isImplicitMapping {
 		var colId uint32
 		manifestId, colId, err = c.implicitMap(namespace, latestTargetManifest)
 		colIds = append(colIds, colId)
+	} else {
+		manifestId, colIds, unmappedNamespaces, migrationColIdNsMap, err = c.explicitMap(wrappedMCReq, latestTargetManifest, eventForMigration)
 	}
 	return
 }
@@ -1021,12 +1035,10 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	cachedRules := c.cachedRules.Clone()
 	modes := c.collectionMode
 	c.mappingMtx.RUnlock()
-	isExplicitMapping := modes.IsExplicitMapping()
-	isMigration := modes.IsMigrationOn()
 	var err error
-	if isExplicitMapping {
+	if !modes.IsImplicitMapping() {
 		targetNamespaces = targetNamespaces[:0]
-		if isMigration {
+		if modes.IsMigrationOn() {
 			targetNamespaces = append(targetNamespaces, wrappedMcr.ColInfo.TargetNamespace)
 		} else {
 			targetNamespaces, err = cachedRules.GetPotentialTargetNamespaces(sourceNamespace)
@@ -1149,6 +1161,14 @@ func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *
 func (c *CollectionsRouter) checkAndDisableFirstMutationKicker() {
 	if atomic.LoadUint32(&c.waitingForFirstMutation) == 1 && atomic.CompareAndSwapUint32(&c.waitingForFirstMutation, 1, 0) {
 		c.startIdleKicker.Stop()
+	}
+}
+
+func checkAndHandleSpecialMigration(incomingRules *metadata.CollectionsMappingRulesType, modes *base.CollectionsMgtType) {
+	if modes.IsMigrationOn() && incomingRules.IsExplicitMigrationRule() {
+		// Internally convert migration mode to explicit mapping mode so that the explicit replication will take place
+		modes.SetMigration(false)
+		modes.SetExplicitMapping(true)
 	}
 }
 
@@ -1542,7 +1562,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 	var migrationColIdNamespaceMap map[uint32]*base.CollectionNamespace
 
 	collectionMode := router.collectionModes.Get()
-	if !collectionMode.IsExplicitMapping() &&
+	if collectionMode.IsImplicitMapping() &&
 		(mcRequest.SrcColNamespace == nil || mcRequest.SrcColNamespace.IsDefault()) {
 		colIds = append(colIds, 0)
 	} else {

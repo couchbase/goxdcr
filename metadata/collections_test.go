@@ -864,7 +864,6 @@ func TestMigrationMapping(t *testing.T) {
 	}
 
 	var mappingMode base.CollectionsMgtType
-	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 
 	rules := make(CollectionsMappingRulesType)
@@ -898,7 +897,6 @@ func TestMigrationDiff(t *testing.T) {
 	}
 
 	var mappingMode base.CollectionsMgtType
-	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 
 	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
@@ -1028,6 +1026,7 @@ func TestCollectionMigrateRuleValidation(t *testing.T) {
 	assert.Nil(err)
 	err = rules.ValidateMigrateRules()
 	assert.Nil(err)
+	assert.False(rules.IsExplicitMigrationRule())
 
 	invalidRules := make(map[string]interface{})
 	// Incorrect target namespace
@@ -1178,4 +1177,58 @@ func TestGetDeduplicatedSourceNamespaces(t *testing.T) {
 	assert.NotNil(testMap)
 	deduplicatedSources := testMap.GetDeduplicatedSourceNamespaces()
 	assert.Equal(9, len(deduplicatedSources))
+}
+
+func TestIsMigrationExplicitRule(t *testing.T) {
+	fmt.Println("============== Test case start: TestIsMigrationExplicitRule =================")
+	defer fmt.Println("============== Test case end: TestIsMigrationExplicitRule =================")
+	assert := assert.New(t)
+
+	rule := make(CollectionsMappingRulesType)
+	rule[fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)] = fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "col1")
+	assert.True(rule.IsExplicitMigrationRule())
+	assert.Nil(rule.ValidateMigrateRules())
+
+	rule["EXISTS(key)"] = "S2.col2"
+	assert.False(rule.IsExplicitMigrationRule())
+	assert.NotNil(rule.ValidateMigrateRules())
+}
+
+func TestSpecialMigrationNamespaceFromRules(t *testing.T) {
+	fmt.Println("============== Test case start: TestSpecialMigrationNamespaceFromRules =================")
+	defer fmt.Println("============== Test case end: TestSpecialMigrationNamespaceFromRules =================")
+	assert := assert.New(t)
+
+	oldRules := make(CollectionsMappingRulesType)
+	oldRules[fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)] = fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "col1")
+	assert.True(oldRules.IsExplicitMigrationRule())
+
+	defaultManifest := NewDefaultCollectionsManifest()
+	data, err := ioutil.ReadFile(provisionedFile)
+	assert.Nil(err)
+	var provisionedManifest CollectionsManifest
+	err = provisionedManifest.LoadBytes(data)
+	assert.Nil(err)
+	manifestPair := CollectionsManifestPair{
+		Source: &defaultManifest,
+		Target: &provisionedManifest,
+	}
+
+	mode := base.CollectionsMgtType(0)
+	mode.SetMigration(true)
+
+	oldMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, oldRules, false)
+	assert.Nil(err)
+	assert.Len(oldMapping, 1)
+
+	newRules := make(CollectionsMappingRulesType)
+	newRules[fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)] = fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "col2")
+
+	newMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, newRules, false)
+	assert.Nil(err)
+	assert.Len(newMapping, 1)
+
+	added, removed := oldMapping.Diff(newMapping)
+	assert.Len(added, 1)
+	assert.Len(removed, 1)
 }

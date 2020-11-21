@@ -298,7 +298,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	targetNozzlePerNodeChanged := !(oldSettings.TargetNozzlePerNode == newSettings.TargetNozzlePerNode)
 	compressionTypeChanged := base.GetCompressionType(oldSettings.CompressionType) != base.GetCompressionType(newSettings.CompressionType)
 	filterChanged := !(oldSettings.FilterExpression == newSettings.FilterExpression)
-	modesChanged := oldSettings.GetCollectionModes() != newSettings.GetCollectionModes()
+	modesChanged := oldSettings.NeedToRestartPipelineDueToCollectionModeChanges(newSettings)
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
 
 	// the following may qualify for live update in the future.
@@ -330,15 +330,7 @@ func needToRestreamPipelineEvenIfStopped(oldSettings, newSettings *metadata.Repl
 	if oldSettings == nil || newSettings == nil {
 		return false
 	}
-	oldMode := oldSettings.GetCollectionModes()
-	newMode := newSettings.GetCollectionModes()
-	// Any of these toggle changes mean start over
-	if oldMode.IsExplicitMapping() != newMode.IsExplicitMapping() {
-		return true
-	} else if oldMode.IsMigrationOn() != newMode.IsMigrationOn() {
-		return true
-	}
-	return false
+	return oldSettings.NeedToRestreamPipelineEvenIfStoppedDueToCollectionModeChanges(newSettings)
 }
 
 func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings, newSpecInternalId string) error {

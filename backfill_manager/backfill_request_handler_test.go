@@ -474,7 +474,6 @@ func TestHandleMigrationDiff(t *testing.T) {
 	}
 
 	var mappingMode base.CollectionsMgtType
-	mappingMode.SetExplicitMapping(true)
 	mappingMode.SetMigration(true)
 
 	rules := make(metadata.CollectionsMappingRulesType)

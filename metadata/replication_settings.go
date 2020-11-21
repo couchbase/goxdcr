@@ -629,11 +629,11 @@ func PreUpdateValidate(settingsMap map[string]interface{}) error {
 		if val.IsMirroringOn() && val.IsExplicitMapping() {
 			return fmt.Errorf("Mirroring and Explicit mapping cannot be both active")
 		}
-		if val.IsMigrationOn() && !val.IsExplicitMapping() {
-			return fmt.Errorf("Migration must be used with explicit mapping")
+		if val.IsMigrationOn() && val.IsExplicitMapping() {
+			return fmt.Errorf("Migration and Explicit mapping cannot both be active")
 		}
 		if val.IsMirroringOn() && val.IsMigrationOn() {
-			return fmt.Errorf("Migration and mirroring cannot both be on")
+			return fmt.Errorf("Migration and mirroring cannot both be active")
 		}
 
 		// Mirroring mode is not supported in 7.0. For now, reject mirroring mode
@@ -813,6 +813,22 @@ func (s *ReplicationSettings) GetExpDelMode() base.FilterExpDelType {
 func (s *ReplicationSettings) GetCollectionModes() base.CollectionsMgtType {
 	val, _ := s.GetSettingValueOrDefaultValue(CollectionsMgtMultiKey)
 	return val.(base.CollectionsMgtType)
+}
+
+func (s *ReplicationSettings) NeedToRestartPipelineDueToCollectionModeChanges(other *ReplicationSettings) bool {
+	return s.GetCollectionModes() != other.GetCollectionModes()
+}
+
+func (s *ReplicationSettings) NeedToRestreamPipelineEvenIfStoppedDueToCollectionModeChanges(other *ReplicationSettings) bool {
+	// Any of these toggle changes mean start over
+	otherCollectionModes := other.GetCollectionModes()
+	thisCollectionModes := s.GetCollectionModes()
+	if thisCollectionModes.IsExplicitMapping() != otherCollectionModes.IsExplicitMapping() {
+		return true
+	} else if thisCollectionModes.IsMigrationOn() != otherCollectionModes.IsMigrationOn() {
+		return true
+	}
+	return false
 }
 
 func (s *ReplicationSettings) GetCollectionsRoutingRules() CollectionsMappingRulesType {
