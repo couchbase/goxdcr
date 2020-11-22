@@ -89,6 +89,7 @@ const (
 	ManualBackfillRequested        = base.ManualBackfillKey
 	CollectionsDelAllBackfillKey   = base.CollectionsDelAllBackfillKey
 	CollectionsDelVbBackfillKey    = base.CollectionsDelSingleVBBackfillKey
+	RetryOnRemoteAuthErrKey        = base.RetryOnRemoteAuthErrKey
 )
 
 // constants for parsing create replication response
@@ -179,6 +180,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	ManualBackfillRequested:        metadata.CollectionsManualBackfillKey,
 	CollectionsDelAllBackfillKey:   metadata.CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey:    metadata.CollectionsDelVbBackfillKey,
+	RetryOnRemoteAuthErrKey:        metadata.RetryOnRemoteAuthErrKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -215,6 +217,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CollectionsManualBackfillKey:      ManualBackfillRequested,
 	metadata.CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillKey,
 	metadata.CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillKey,
+	metadata.RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

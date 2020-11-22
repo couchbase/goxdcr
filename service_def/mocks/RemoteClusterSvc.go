@@ -158,6 +158,29 @@ func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, fo
 	return r0, r1
 }
 
+// GetRefListForFirstTimeBadAuths provides a mock function with given fields:
+func (_m *RemoteClusterSvc) GetRefListForFirstTimeBadAuths() ([]*metadata.RemoteClusterReference, error) {
+	ret := _m.Called()
+
+	var r0 []*metadata.RemoteClusterReference
+	if rf, ok := ret.Get(0).(func() []*metadata.RemoteClusterReference); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*metadata.RemoteClusterReference)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetRefListForRestartAndClearState provides a mock function with given fields:
 func (_m *RemoteClusterSvc) GetRefListForRestartAndClearState() ([]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()

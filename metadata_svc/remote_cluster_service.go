@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2018 Couchbase, Inc.
+// Copyright (c) 2013-2020 Couchbase, Inc.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
 // except in compliance with the License. You may obtain a copy of the License at
 //   http://www.apache.org/licenses/LICENSE-2.0
@@ -90,6 +90,13 @@ func (a *AddressType) Set(external bool) {
 		*a = Internal
 	}
 }
+
+type ReportAuthErrType int
+
+const (
+	ReportAuthNoErr    ReportAuthErrType = iota
+	ReportAuthReported ReportAuthErrType = iota
+)
 
 func NewConnectivityHelper(refreshInterval time.Duration) *ConnectivityHelper {
 	return &ConnectivityHelper{
@@ -294,7 +301,9 @@ type RemoteClusterAgent struct {
 	/* refreshContext persisted information - only used by instances of refreshContext */
 	pendingAddressPreference AddressType
 	pendingAddressPrefCnt    int
-	configurationChanged     bool
+	// Various config flags used during replication to ensure a healthy remote cluster ref
+	configurationChanged bool
+	needToReportAuthErr  ReportAuthErrType
 
 	// As the remote cluster is upgraded, certain features will automatically become enabled
 	currentCapability metadata.Capability
@@ -356,7 +365,7 @@ type RemoteClusterAgent struct {
 	unitTestBypassMetaKV bool
 
 	// To be able to return remote cluster status
-	connectivityHelper *ConnectivityHelper
+	connectivityHelper service_def.ConnectivityHelperSvc
 
 	// To prevent malicious actors, for REST querying of target bucket manifest
 	// this is set to non-0 if in cool down period
@@ -394,6 +403,33 @@ func (agent *RemoteClusterAgent) ConfigurationHasChanged() bool {
 	defer agent.refMtx.RUnlock()
 
 	return agent.configurationChanged
+}
+
+// Returns true if there is unreported auth error
+func (agent *RemoteClusterAgent) GetUnreportedAuthError() bool {
+	currentStatus := agent.connectivityHelper.GetOverallStatus()
+	agent.refMtx.RLock()
+	agentStatus := agent.needToReportAuthErr
+	agent.refMtx.RUnlock()
+
+	if currentStatus == metadata.ConnValid {
+		// connection is valid, reset the status regardless of situation
+		if agentStatus == ReportAuthReported {
+			agent.refMtx.Lock()
+			agent.needToReportAuthErr = ReportAuthNoErr
+			agent.refMtx.Unlock()
+		}
+		return false
+	} else if currentStatus == metadata.ConnAuthErr && agentStatus == ReportAuthNoErr {
+		// This agent hasn't reported auth error before, this will be the first time
+		agent.refMtx.Lock()
+		agent.needToReportAuthErr = ReportAuthReported
+		agent.refMtx.Unlock()
+		return true
+	}
+
+	// Everything else do not report
+	return false
 }
 
 func (agent *RemoteClusterAgent) GetConnectionStringForCAPIRemoteCluster() (string, error) {
@@ -2498,7 +2534,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
-			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("Authentication failed. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", statusCode, hostAddr, base.PoolsPath))
+			return wrapAsInvalidRemoteClusterError(fmt.Sprintf("%v. Verify username and password. Got HTTP status %v from REST call get to %v%v. Body was: []", base.RemoteClusterAuthErrString, statusCode, hostAddr, base.PoolsPath))
 		} else {
 			if err == nil {
 				err = fmt.Errorf("Received non-OK HTTP status %v from %v%v", statusCode, hostAddr, base.PoolsPath)
@@ -3358,6 +3394,18 @@ func (service *RemoteClusterService) GetRefListForRestartAndClearState() (list [
 		if agent.ConfigurationHasChanged() {
 			list = append(list, agent.GetReferenceClone())
 			agent.clearAddressModeAccounting()
+		}
+	}
+	return
+}
+
+func (service *RemoteClusterService) GetRefListForFirstTimeBadAuths() (list []*metadata.RemoteClusterReference, err error) {
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+
+	for _, agent := range service.agentMap {
+		if agent.GetUnreportedAuthError() {
+			list = append(list, agent.GetReferenceClone())
 		}
 	}
 	return

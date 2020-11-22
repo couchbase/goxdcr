@@ -2463,3 +2463,65 @@ func TestDNSSRVReturnAlternate(t *testing.T) {
 	assert.Nil(err)
 	assert.True(isExteranal)
 }
+
+func newConnectivityHelperConnStatus(status metadata.ConnectivityStatus) *service_def.ConnectivityHelperSvc {
+	connectivityHelperMock := &service_def.ConnectivityHelperSvc{}
+	connectivityHelperMock.On("GetOverallStatus").Return(status)
+	connectivityHelperMock.On("SyncWithValidList", mock.Anything).Return()
+	return connectivityHelperMock
+}
+
+func TestAgentGetConnectivityStatusForPipelinePause(t *testing.T) {
+	fmt.Println("============== Test case start: TestAgentGetConnectivityStatusForPipelinePause =================")
+	defer fmt.Println("============== Test case end: TestAgentGetConnectivityStatusForPipelinePause =================")
+	assert := assert.New(t)
+
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	utilsMockFunc := func() {
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false, true, clusterMadHatter, dummyHostNameList)
+	}
+
+	idAndName := "test"
+
+	ref := createRemoteClusterReferenceIntOnly(idAndName)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	// This is to grab the external node list info populated from actual mock data
+	assert.NotEqual(0, len(nodeListWithMinInfo))
+	assert.NotEqual(0, len(externalNodeListWithMinInfo))
+	ref.HostName_ = externalNodeListWithMinInfo[0]
+
+	// resetup utilitiesMock knowing this info
+	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true,
+		clusterMadHatter, dummyHostNameList)
+	remoteClusterSvc.updateUtilities(utilitiesMock)
+
+	// First bootstrap agent with a reference that refers to the external hostname
+	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	assert.Nil(err)
+	assert.False(alreadyExists)
+	agent.unitTestBypassMetaKV = true
+
+	// Helper first returns everything healthy
+	agent.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnValid)
+
+	// Should not report unhealthy
+	assert.False(agent.GetUnreportedAuthError())
+
+	// Now cluster auth is bad
+	agent.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnAuthErr)
+
+	// Should report unhealthy for one time only
+	assert.True(agent.GetUnreportedAuthError())
+	assert.False(agent.GetUnreportedAuthError())
+
+	// Now cluster auth is good again
+	agent.connectivityHelper = newConnectivityHelperConnStatus(metadata.ConnValid)
+
+	// should not report
+	assert.False(agent.GetUnreportedAuthError())
+}

@@ -317,6 +317,7 @@ func IsPipelineRunning(topic string) bool {
 func (pipelineMgr *PipelineManager) CheckPipelines() {
 	pipelineMgr.validateAndGCSpecs()
 	pipelineMgr.checkRemoteClusterSvcForChangedConfigs()
+	pipelineMgr.checkAndHandleRemoteClusterAuthErrs()
 	LogStatusSummary()
 }
 
@@ -336,6 +337,7 @@ func (pipelineMgr *PipelineManager) checkRemoteClusterSvcForChangedConfigs() {
 	refList, err := pipelineMgr.remote_cluster_svc.GetRefListForRestartAndClearState()
 	if err != nil {
 		pipelineMgr.logger.Warnf("Checkpipeline got %v when asking remote cluster reference for config changes that require pipeline restarts", err)
+		return
 	}
 	for _, ref := range refList {
 		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
@@ -345,6 +347,30 @@ func (pipelineMgr *PipelineManager) checkRemoteClusterSvcForChangedConfigs() {
 		}
 		for _, spec := range replSpecsList {
 			pipelineMgr.UpdatePipeline(spec.Id, base.ErrorPipelineRestartDueToClusterConfigChange)
+		}
+	}
+}
+
+func getCredentialErrPauseMsg(rcName, pipelineName string) string {
+	return fmt.Sprintf("Remote Cluster %v has changed its credentials and the entered credentials on this cluster is no longer valid. Pipeline %v will now be paused. Please re-enter the correct remote cluster reference credentials and resume the replication", rcName, pipelineName)
+}
+
+func (pipelineMgr *PipelineManager) checkAndHandleRemoteClusterAuthErrs() {
+	refList, err := pipelineMgr.remote_cluster_svc.GetRefListForFirstTimeBadAuths()
+	if err != nil {
+		pipelineMgr.logger.Warnf("Checkpipeline got %v when asking for any remote cluster reference that experienced auth error", err)
+	}
+	for _, ref := range refList {
+		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
+		if err != nil {
+			pipelineMgr.logger.Warnf("Unable to retrieve specs for remote cluster %v ... user should manually pause pipelines replicating to this remote cluster because remote side authentication has changed", ref.Id())
+			continue
+		}
+		for _, spec := range replSpecsList {
+			pipelineMgr.AutoPauseReplication(spec.Id)
+			msg := getCredentialErrPauseMsg(ref.Name(), spec.Id)
+			pipelineMgr.uilog_svc.Write(msg)
+			pipelineMgr.logger.Errorf(msg)
 		}
 	}
 }
@@ -1543,6 +1569,14 @@ RE:
 		r.pipelineMgr.GetLogSvc().Write(dneErr)
 		r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
 		return nil
+	} else if base.CheckErrorMapForError(errMap, errors.New(base.RemoteClusterAuthErrString), false) {
+		shouldRetry, remoteClusterName := r.shouldRetryOnRemoteAuthErrAndRemoteClusterName()
+		if !shouldRetry {
+			stopErr := getCredentialErrPauseMsg(remoteClusterName, r.pipeline_name)
+			r.logger.Errorf(stopErr)
+			r.pipelineMgr.GetLogSvc().Write(stopErr)
+			r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
+		}
 	} else {
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
 	}
@@ -1975,4 +2009,20 @@ func (r *PipelineUpdater) humanRecoverableTransitionalErrors(errMap base.ErrorMa
 		return true
 	}
 	return false
+}
+
+func (r *PipelineUpdater) shouldRetryOnRemoteAuthErrAndRemoteClusterName() (bool, string) {
+	replSpecSvc := r.pipelineMgr.GetReplSpecSvc()
+	remoteClusterSvc := r.pipelineMgr.GetRemoteClusterSvc()
+	spec, err := replSpecSvc.ReplicationSpec(r.pipeline_name)
+	if err != nil {
+		r.logger.Errorf("Unable to get spec for %v\n", r.pipeline_name)
+		return false, ""
+	}
+	var remoteClusterName string
+	ref, err := remoteClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err == nil {
+		remoteClusterName = ref.Name()
+	}
+	return spec.Settings.GetRetryOnRemoteAuthErr(), remoteClusterName
 }

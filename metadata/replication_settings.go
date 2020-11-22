@@ -66,6 +66,8 @@ const (
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey
+
+	RetryOnRemoteAuthErrKey = base.RetryOnRemoteAuthErrKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -142,6 +144,8 @@ var CollectionsManualBackfillConfig = &SettingsConfig{"", nil}
 var CollectionsDelAllBackfillConfig = &SettingsConfig{false, nil}
 var CollectionsDelVbBackfillConfig = &SettingsConfig{-1, &Range{0, base.NumberOfVbs - 1}}
 
+var RetryOnRemoteAuthErrConfig = &SettingsConfig{false, nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
@@ -169,6 +173,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CollectionsManualBackfillKey:      CollectionsManualBackfillConfig,
 	CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillConfig,
 	CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillConfig,
+	RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -779,6 +784,11 @@ func (s *ReplicationSettings) IsCapi() bool {
 func (s *ReplicationSettings) GetPriority() base.PriorityType {
 	priority, _ := s.GetSettingValueOrDefaultValue(PriorityKey)
 	return priority.(base.PriorityType)
+}
+
+func (s *ReplicationSettings) GetRetryOnRemoteAuthErr() bool {
+	value, _ := s.GetSettingValueOrDefaultValue(RetryOnRemoteAuthErrKey)
+	return value.(bool)
 }
 
 func (s *ReplicationSettings) GetDesiredLatencyMs() int {

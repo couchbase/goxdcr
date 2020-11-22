@@ -364,6 +364,8 @@ const (
 	ToBucket   = "toBucket"
 )
 
+const RemoteClusterAuthErrString = "Authentication failed"
+
 // constant used by more than one rest apis
 const (
 	JustValidate        = "just_validate"
@@ -1225,3 +1227,5 @@ const (
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)
+
+const RetryOnRemoteAuthErrKey = "retryOnRemoteAuthErr"
