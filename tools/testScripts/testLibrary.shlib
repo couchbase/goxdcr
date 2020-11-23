@@ -465,3 +465,16 @@ function validateDifferResults {
 
 	return $retVal
 }
+
+function checkInternalSetting {
+	local clusterName=$1
+	local settingKey=$2
+	local expectedVal=$3
+	local checkInt
+
+	checkInt=$(getInternalSetting "$clusterName" "$settingKey")
+	if (($checkInt != $expectedVal)); then
+		echo "$settingKey is not set to $expectedVal. It is $checkInt"
+		exit 1
+	fi
+}

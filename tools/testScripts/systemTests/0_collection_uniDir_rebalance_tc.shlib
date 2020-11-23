@@ -1,0 +1,163 @@
+# Copyright (c) 2019-2020 Couchbase, Inc.
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the
+# License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific language governing permissions
+# and limitations under the License.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" >/dev/null 2>&1
+	echo "RUNNING dataload DONE"
+}
+
+function runOneReplicationCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=5
+	local checkInterval=2
+	local maxChangeCnt=2
+	local maxStableCnt=2
+	local checkInt
+	if (($cycleCnt == 0)); then
+		setupTopologies
+		# Shorten the amount of time pipeline restarts
+		setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt"
+		sleep 5
+		checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+		checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+		checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	else
+		setupBuckets
+	fi
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+
+	echo "Waiting 20 seconds before checking item count"
+	sleep 20
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	checkUnidirectionalChangesLeft
+
+	validateXDCRCheckpoints "C1"
+	grepForPanics
+
+	pauseReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
+	grepForPanics
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 seconds for resume to finish"
+	sleep 10
+	grepForPanics
+
+	checkUnidirectionalChangesLeft
+	grepForPanics
+
+	echo "============================================================================"
+	echo "Cycle $(($cycleCnt + 1)) PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	echo "Waiting for $timeIntervalSecs seconds before starting another replication"
+	sleep $timeIntervalSecs
+}
+
+function runMultipleReplicationCycles {
+	local totalCount=$1
+
+	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
+		runOneReplicationCycle $i $totalCount
+	done
+}
+
+function runOneRebalanceCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=15
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	startRebalancingIn "C1"
+	echo "Rebalancing in completed. Letting replication continue with multiple nodes for $timeIntervalSecs seconds before rebalancing out"
+	sleep $timeIntervalSecs
+	startEjectNode "C1P" "C1"
+	echo "Rebalancing out completed. Letting replication continue with one nodes for $timeIntervalSecs seconds before rebalancing back in"
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+	sleep $timeIntervalSecs
+}
+
+function runMultipleRebalanceCycles {
+	local totalCount=$1
+
+	# Wait for 20 seconds for the cluster to be set up
+	sleep 20
+
+	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
+		runOneRebalanceCycle $i $totalCount
+	done
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running unidirectional with collections and rebalancing system test case"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	runMultipleReplicationCycles 100 &
+	runMultipleRebalanceCycles 3 &
+
+	# 2 jobs - whichever finishes first is done
+	stopWhenAnyBgJobStops 2
+}
