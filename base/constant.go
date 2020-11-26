@@ -50,9 +50,9 @@ var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
 var BPath = "/pools/default/b/"
 var DocsPath = "/docs/"
-var CollectionsManifestPath = "/collections"
+var CollectionsManifestPath = "/scopes"
 var ScopesPath = "/scopes/"
-var CollectionsPath = CollectionsManifestPath + "/"
+var CollectionsPath = "/collections/"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"

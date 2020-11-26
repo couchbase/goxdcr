@@ -448,7 +448,7 @@ function createScope {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName CREATING scope $scopeName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections -d name=$scopeName >/dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes -d name=$scopeName >/dev/null 2>&1
 }
 
 function deleteScope {
@@ -458,7 +458,7 @@ function deleteScope {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName DELETING scope $scopeName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/ >/dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes/$scopeName/ >/dev/null 2>&1
 }
 
 # inputs
@@ -499,7 +499,7 @@ function createCollection {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName scope $scopeName CREATING collection $collectionName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName -d name=$collectionName >/dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes/$scopeName/collections -d name=$collectionName >/dev/null 2>&1
 }
 
 function deleteCollection {
@@ -510,7 +510,7 @@ function deleteCollection {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	echo "For cluster $clusterName bucket $bucketName scope $scopeName DELETING collection $collectionName"
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections/$scopeName/$collectionName >/dev/null 2>&1
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes/$scopeName/collections/$collectionName >/dev/null 2>&1
 }
 
 # inputs
