@@ -16,6 +16,7 @@ import (
 	"math"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -453,6 +454,24 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 	}
 
 	uprFeedName := DCP_Connection_Prefix + dcp.Id() + ":" + randName
+	if len(uprFeedName) > base.MaxDcpConnectionNameLength {
+		// dcp.Id() looks like dcp_65713400edc789b05d26283428a2af88/B1/B2_127.0.0.1:12000_0
+		// and it contains two bucket names up to 100 bytes each. That's the part we will trim so the uprFeedName will be under limit
+		// The uprFeedName will still be unique because of the randName part
+		trimLen := len(uprFeedName) - base.MaxDcpConnectionNameLength
+		id := dcp.Id()
+		index := strings.LastIndexByte(id, '/')
+		var idPart string
+		if index > trimLen {
+			// We will trim the end of source bucket name
+			idPart = string(id[:index-trimLen]) + string(id[index:])
+		} else {
+			// This should never happen. But just in case, we will trim the end of the id
+			idLen := len(id) - trimLen
+			idPart = string(id[:idLen])
+		}
+		uprFeedName = DCP_Connection_Prefix + idPart + ":" + randName
+	}
 
 	if dcp.is_capi {
 		// no need to enable features for capi replication
