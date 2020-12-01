@@ -635,6 +635,9 @@ var NetTCP = "tcp"
 
 var CurrentTime = "CurrentTime"
 
+// Limit imposed by memcached
+const MaxDcpConnectionNameLength = 200
+
 /**
  * Log Redaction section
  * Spectrum 1 - User Data redaction (ud) tags
