@@ -815,7 +815,16 @@ func (b *BackfillRequestHandler) handleSpecialDelBackfill(reqAndResp ReqAndResp)
 		panic(fmt.Sprintf("Wrong type: %v\n", reflect.TypeOf(req)))
 	}
 
-	if req.specificVBRequested {
+	var lastVbToBeDeleted bool
+	if req.specificVBRequested && b.cachedBackfillSpec != nil && len(b.cachedBackfillSpec.VBTasksMap) == 1 {
+		_, matches := b.cachedBackfillSpec.VBTasksMap[req.vbno]
+		if matches {
+			lastVbToBeDeleted = true
+			b.logger.Infof("VB %v asked to be deleted is the last one", req.vbno)
+		}
+	}
+
+	if req.specificVBRequested && !lastVbToBeDeleted {
 		// This should have been called during pipeline stopped
 		if b.cachedBackfillSpec == nil {
 			return fmt.Errorf("No backfill spec")

@@ -34,6 +34,7 @@ var UpdaterStoppedError error = errors.New("Updater already stopped")
 var MainPipelineNotRunning error = errors.New("Main pipeline is not running")
 var ErrorExplicitMappingWoRules = errors.New("specified explicit mapping but no rule is found")
 var ErrorCAPIReplicationDeprecated = errors.New("CAPI replication is now deprecated. The pipeline will be paused. Please edit the replication via REST and change the replication type to XMEM")
+var ErrorBackfillSpecHasNoVBTasks = errors.New("backfill spec VBTasksMap is empty")
 
 var default_failure_restart_interval = 10
 
@@ -912,8 +913,19 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 
 	mainPipeline := rep_status.Pipeline()
 	if mainPipeline == nil || (mainPipeline.State() != common.Pipeline_Running && mainPipeline.State() != common.Pipeline_Starting) {
-		pipelineMgr.logger.Warnf("Replication %v's main pipeline is not running. Backfill pipeline will not start")
+		pipelineMgr.logger.Warnf("Replication %v's main pipeline is not running. Backfill pipeline will not start", topic)
 		errMap[repStatusKey] = MainPipelineNotRunning
+		return errMap
+	}
+
+	// Before construction, check to ensure there are actually tasks to run
+	backfillSpec, err := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
+	if backfillSpec == nil || err != nil {
+		errMap["pipelineMgr.StartBackfillPipeline"] = err
+		return errMap
+	}
+	if len(backfillSpec.VBTasksMap) == 0 {
+		errMap["pipelineMgr.StartBackfillPipeline"] = ErrorBackfillSpecHasNoVBTasks
 		return errMap
 	}
 
@@ -928,13 +940,6 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 
 	rep_status.RecordBackfillProgress("Backfill Pipeline is constructed")
 	rep_status.SetPipeline(bp)
-
-	// Set End timestamp
-	backfillSpec, err := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
-	if backfillSpec == nil || err != nil {
-		errMap["pipelineMgr.StartBackfillPipeline"] = fmt.Errorf("Unable to get backfillSpec: %v", err)
-		return errMap
-	}
 
 	// Requesting a backfill pipeline means that a pipeline will start and for the top task in each VB
 	// of the VBTasksMap will be sent to DCP to be run and backfilled
@@ -1337,18 +1342,7 @@ func (r *PipelineUpdater) run() {
 			r.logger.Infof("Replication %v's backfill Pipeline is starting\n", r.pipeline_name)
 			r.cancelFutureBackfillStart()
 			retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
-			var successful = true
-			if len(retErrMap) > 0 {
-				if retErrMap.HasError(MainPipelineNotRunning) {
-					r.logger.Infof("Replication %v backfill pipeline is not starting because the main pipeline is currently paused", r.pipeline_name)
-				} else if retErrMap.HasError(base.ReplNotFoundErr) {
-					r.logger.Infof("Replication %v backfill pipeline is not starting because there is currently no backfill spec", r.pipeline_name)
-				} else {
-					successful = false
-				}
-			}
-
-			if !successful {
+			if !backfillStartSuccessful(retErrMap, r.logger, r.pipeline_name) {
 				r.logger.Infof("Replication %v backfill start experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 				r.setLastUpdateFailure(retErrMap)
 				r.sendBackfillStartErrMap(retErrMap)
@@ -1372,11 +1366,11 @@ func (r *PipelineUpdater) run() {
 				r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v), re-starting now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 				retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
 				r.cancelFutureRefresh()
-				if len(retErrMap) > 0 && !retErrMap.HasError(MainPipelineNotRunning) {
+				if backfillStartSuccessful(retErrMap, r.logger, r.pipeline_name) {
+					r.setLastUpdateSuccess()
+				} else {
 					updateAgain = true
 					r.setLastUpdateFailure(retErrMap)
-				} else {
-					r.setLastUpdateSuccess()
 				}
 			} else {
 				r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v). However, last update resulted in failure, so will reschedule a future update\n", r.pipeline_name, retErr)
@@ -1388,6 +1382,22 @@ func (r *PipelineUpdater) run() {
 			}
 		}
 	}
+}
+
+func backfillStartSuccessful(retErrMap base.ErrorMap, logger *log.CommonLogger, pipelineName string) bool {
+	var successful = true
+	if len(retErrMap) > 0 {
+		if retErrMap.HasError(MainPipelineNotRunning) {
+			logger.Infof("Replication %v backfill pipeline is not starting because the main pipeline is currently paused", pipelineName)
+		} else if retErrMap.HasError(base.ReplNotFoundErr) {
+			logger.Infof("Replication %v backfill pipeline is not starting because there is currently no backfill spec", pipelineName)
+		} else if retErrMap.HasError(ErrorBackfillSpecHasNoVBTasks) {
+			logger.Infof("Replication %v's backfill spec does has no tasks to run", pipelineName)
+		} else {
+			successful = false
+		}
+	}
+	return successful
 }
 
 func (r *PipelineUpdater) checkIfNeedToReUpdate(retErrMap base.ErrorMap, retErr error) bool {

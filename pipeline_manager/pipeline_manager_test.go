@@ -141,28 +141,31 @@ func setupLaunchUpdater(testRepairer *PipelineUpdater, waitForStablization bool)
 	go testRepairer.run()
 }
 
-func setupDetailedMocking(testLogger *log.CommonLogger,
-	pipelineMock *common.PipelineFactory,
-	replSpecSvcMock *service_def.ReplicationSpecSvc,
-	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
-	isKVNode bool,
-	remoteClusterMock *service_def.RemoteClusterSvc,
-	pipelineMgr *PipelineManager,
-	testRepairer *PipelineUpdater,
-	testReplicationStatus *replicationStatus.ReplicationStatus,
-	testTopic string,
-	testReplicationSettings *metadata.ReplicationSettings,
-	testReplicationSpec *metadata.ReplicationSpecification,
-	testRemoteClusterRef *metadata.RemoteClusterReference,
-	testPipeline *common.Pipeline,
-	uiLogSvc *service_def.UILogSvc,
-	replStatusMock *replicationStatusMock.ReplicationStatusIface,
-	ckptMock *service_def.CheckpointsService,
-	clusterInfoSvc *service_def.ClusterInfoSvc,
-	collectionsManifestSvc *service_def.CollectionsManifestSvc,
-	backfillReplSvc *service_def.BackfillReplSvc) {
+type mainPipelineMockStatus int
 
+const (
+	mainPipelineNil     mainPipelineMockStatus = iota
+	mainPipelineStopped mainPipelineMockStatus = iota
+	mainPipelineRunning mainPipelineMockStatus = iota
+)
+
+func setupDetailedMocking(testLogger *log.CommonLogger, pipelineMock *common.PipelineFactory, replSpecSvcMock *service_def.ReplicationSpecSvc, xdcrTopologyMock *service_def.XDCRCompTopologySvc, isKVNode bool, remoteClusterMock *service_def.RemoteClusterSvc, pipelineMgr *PipelineManager, testRepairer *PipelineUpdater, testReplicationStatus *replicationStatus.ReplicationStatus, testTopic string, testReplicationSettings *metadata.ReplicationSettings, testReplicationSpec *metadata.ReplicationSpecification, testRemoteClusterRef *metadata.RemoteClusterReference, testPipeline *common.Pipeline, uiLogSvc *service_def.UILogSvc, replStatusMock *replicationStatusMock.ReplicationStatusIface, ckptMock *service_def.CheckpointsService, clusterInfoSvc *service_def.ClusterInfoSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, mainPipelineStatus mainPipelineMockStatus, backfillSpecToReturn *metadata.BackfillReplicationSpec) {
+
+	if mainPipelineStatus != mainPipelineNil {
+		mainPipelineMock := &common.Pipeline{}
+		mainPipelineMock.On("Type").Return(commonReal.MainPipeline)
+		mainPipelineMock.On("Sources").Return(nil)
+		mainPipelineMock.On("Specification").Return(testReplicationSpec)
+		switch mainPipelineStatus {
+		case mainPipelineRunning:
+			mainPipelineMock.On("State").Return(commonReal.Pipeline_Running)
+		case mainPipelineStopped:
+			mainPipelineMock.On("State").Return(commonReal.Pipeline_Stopped)
+		}
+		testReplicationStatus.SetPipeline(mainPipelineMock)
+	}
 	testReplicationStatus.SetUpdater(testRepairer)
+
 	replSpecSvcMock.On("GetDerivedObj", testTopic).Return(testReplicationStatus, nil)
 	replSpecSvcMock.On("ReplicationSpec", testTopic).Return(testReplicationSpec, nil)
 	replSpecSvcMock.On("SetDerivedObj", testTopic, mock.Anything).Return(nil)
@@ -201,7 +204,11 @@ func setupDetailedMocking(testLogger *log.CommonLogger,
 	collectionsManifestSvc.On("ForceTargetManifestRefresh", mock.Anything).Run(func(args mock.Arguments) { atomic.AddUint64(&collectionsSvcRefreshTgtCnt, 1) }).Return(nil)
 
 	// Let's skip backfill pipeline test for now
-	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
+	if backfillSpecToReturn == nil {
+		backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ReplNotFoundErr)
+	} else {
+		backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(backfillSpecToReturn, nil)
+	}
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Return(nil, nil)
 }
 
@@ -229,10 +236,7 @@ func setupGenericMocking(testLogger *log.CommonLogger,
 	collectionsManifestSvc *service_def.CollectionsManifestSvc,
 	backfillReplSvc *service_def.BackfillReplSvc) {
 
-	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock,
-		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
-		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
-		ckptSvc, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptSvc, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, 0, nil)
 
 	return
 }
@@ -952,4 +956,57 @@ func TestPipelineMgrCallbacks(t *testing.T) {
 	assert.Equal(3, callbackCount)
 	assert.Equal(1, errCount)
 	assert.Equal(uint64(4), atomic.LoadUint64(&testRepairer.runCounter))
+}
+
+func TestPipelineMgrStartNoBackfillSpec(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineMgrStartNoBackfillSpec =================")
+	defer fmt.Println("============== Test case start: TestPipelineMgrStartNoBackfillSpec =================")
+	assert := assert.New(t)
+
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
+
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, nil)
+
+	assert.NotNil(pipelineMgr)
+	errMap := pipelineMgr.StartBackfillPipeline(testTopic)
+	assert.True(backfillStartSuccessful(errMap, testLogger, testTopic))
+}
+
+func TestPipelineMgrStartMainNotStarting(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineMgrStartMainNotStarting =================")
+	defer fmt.Println("============== Test case start: TestPipelineMgrStartMainNotStarting =================")
+	assert := assert.New(t)
+
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
+
+	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineStopped, backfillSpec)
+
+	assert.NotNil(pipelineMgr)
+	errMap := pipelineMgr.StartBackfillPipeline(testTopic)
+	assert.True(backfillStartSuccessful(errMap, testLogger, testTopic))
+}
+
+func TestPipelineMgrStartNoVBTasks(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineMgrStartNoVBTasks =================")
+	defer fmt.Println("============== Test case start: TestPipelineMgrStartNoVBTasks =================")
+	assert := assert.New(t)
+
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
+
+	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, backfillSpec)
+
+	assert.NotNil(pipelineMgr)
+	errMap := pipelineMgr.StartBackfillPipeline(testTopic)
+	assert.True(backfillStartSuccessful(errMap, testLogger, testTopic))
 }
