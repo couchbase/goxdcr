@@ -55,7 +55,7 @@ var ErrorAdminTimeout = errors.New("The requested operation is being executed bu
 
 var DiagNetworkThreshold = 5 * time.Second
 var DiagInternalThreshold = 2 * time.Second
-var AdminTimeout = 15 * time.Second // ns_server has a timeout of 30 seconds... should not keep user waiting past 15
+var AdminTimeout = 25 * time.Second // ns_server has a timeout of 30 seconds... should not keep user waiting past 25
 
 func IsRefreshError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), RefreshNotEnabledYet.Error())
@@ -199,7 +199,9 @@ func (c *ConnectivityHelper) GetOverallStatus() metadata.ConnectivityStatus {
 		}
 	}
 
-	if connErrCount == totalCount {
+	if totalCount == 0 {
+		return metadata.ConnIniting
+	} else if connErrCount == totalCount {
 		return metadata.ConnError
 	} else if connErrCount > 0 {
 		return metadata.ConnDegraded
@@ -393,7 +395,17 @@ func (agent *RemoteClusterAgent) GetReferenceClone() *metadata.RemoteClusterRefe
 }
 
 func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteClusterReference {
-	ref := agent.GetReferenceClone()
+	var ref *metadata.RemoteClusterReference
+	agent.refMtx.RLock()
+	if agent.InitDone() {
+		ref = agent.reference.Clone()
+	} else {
+		// Before initializing is done, agent.reference is empty and all the staging info is in pendingRef
+		// Autonomous Operator gets confused if XDCR returns an empty ref, so return what is currently being staged
+		// even though it may not be final
+		ref = agent.pendingRef.Clone()
+	}
+	agent.refMtx.RUnlock()
 	ref.SetConnectivityStatus(agent.connectivityHelper.GetOverallStatus().String())
 	return ref
 }

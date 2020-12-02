@@ -5,6 +5,7 @@ package metadata
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	base2 "github.com/couchbase/goxdcr/base/helpers"
 	baseH "github.com/couchbase/goxdcr/base/helpers/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,7 @@ var dnsSrvHostname string = "xdcr.couchbase.target.local"
 var invalidHostName = fmt.Sprintf("%v:%v", dnsSrvHostname, 12345)
 
 const localhostIP = "192.168.0.1"
+const localhostIP2 = "192.168.0.2"
 
 func setupDNSMocks() *baseH.DnsSrvHelperIface {
 	helper := &baseH.DnsSrvHelperIface{}
@@ -28,8 +30,8 @@ func setupDNSMocks() *baseH.DnsSrvHelperIface {
 	var entryList []*net.SRV
 	var emptyList []*net.SRV
 	entryList = append(entryList, oneEntry)
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, false, nil)
-	helper.On("DnsSrvLookup", invalidHostName).Return(emptyList, false, fmt.Errorf("Invalid"))
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, base2.SrvRecordsNonSecure, nil)
+	helper.On("DnsSrvLookup", invalidHostName).Return(emptyList, base2.SrvRecordsInvalid, fmt.Errorf("Invalid"))
 	return helper
 }
 
@@ -48,21 +50,21 @@ func setupDNS2Nodes() *baseH.DnsSrvHelperIface {
 	var entryList []*net.SRV
 	entryList = append(entryList, oneEntry)
 	entryList = append(entryList, secondEntry)
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, false, nil)
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, base2.SrvRecordsNonSecure, nil)
 	return helper
 }
 
 func setupEmptyDNS() *baseH.DnsSrvHelperIface {
 	helper := &baseH.DnsSrvHelperIface{}
 	var emptyList []*net.SRV
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, false, nil)
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, base2.SrvRecordsNonSecure, nil)
 	return helper
 }
 
 func setupErrDNS() *baseH.DnsSrvHelperIface {
 	helper := &baseH.DnsSrvHelperIface{}
 	var emptyList []*net.SRV
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, false, fmt.Errorf("Dummy"))
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(emptyList, base2.SrvRecordsInvalid, fmt.Errorf("Dummy"))
 	return helper
 }
 
@@ -77,8 +79,8 @@ func setupDNSSecureMocks() *baseH.DnsSrvHelperIface {
 	var entryList []*net.SRV
 	var emptyList []*net.SRV
 	entryList = append(entryList, oneEntry)
-	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, true, nil)
-	helper.On("DnsSrvLookup", invalidHostName).Return(emptyList, false, fmt.Errorf("Invalid"))
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, base2.SrvRecordsSecure, nil)
+	helper.On("DnsSrvLookup", invalidHostName).Return(emptyList, base2.SrvRecordsInvalid, fmt.Errorf("Invalid"))
 	return helper
 }
 
@@ -120,14 +122,14 @@ func TestNewRefWithDNSSrv(t *testing.T) {
 	// test GetTargetConnectionString() to return the correct one
 	for _, entry := range ref.srvEntries {
 		assert.NotEqual(uint16(8091), entry.srv.Port)
-		targetConnStr, err := entry.GetTargetConnectionString(HostNameSRV)
+		targetConnStr, err := entry.GetTargetConnectionString(HostNameSRV, false)
 		assert.Nil(err)
 		portNo, err := base.GetPortNumber(targetConnStr)
 		assert.Nil(err)
 		assert.Equal(base.DefaultAdminPort, portNo)
 		targetHostname := base.GetHostName(targetConnStr)
 		assert.Equal(localhostIP, targetHostname)
-		targetConnStr, err = entry.GetTargetConnectionString(HostNameSecureSRV)
+		targetConnStr, err = entry.GetTargetConnectionString(HostNameSecureSRV, false)
 		assert.Nil(err)
 		portNo, err = base.GetPortNumber(targetConnStr)
 		assert.Nil(err)
@@ -220,4 +222,67 @@ func TestNewRefWithDNSSrvSecure(t *testing.T) {
 	assert.Equal(fmt.Sprintf("%v:%v", localhostIP, base.DefaultAdminPortSSL), hostnameList[0])
 	assert.Equal(HostNameSecureSRV, ref.hostnameSRVType)
 
+}
+
+func setupDNSBothMocks() *baseH.DnsSrvHelperIface {
+	helper := &baseH.DnsSrvHelperIface{}
+	oneEntry := &net.SRV{
+		// NOTE - SRV entries for "name" will end with a .
+		// See actual output in DnsSrvHelper in base package
+		Target: localhostIP,
+		Port:   19001,
+	}
+	var entryList []*net.SRV
+	entryList = append(entryList, oneEntry)
+
+	oneEntry.Target = localhostIP2
+	entryList = append(entryList, oneEntry)
+
+	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, base2.SrvRecordsBoth, nil)
+	return helper
+}
+
+// When DNS SRV records contain both secure and non secure, then the behavior should depend upon the reference's
+// half or full encryption mode
+func TestDNSSRVBoth(t *testing.T) {
+	fmt.Println("============== Test case start: TestNewRefWithDNSSrvSecure =================")
+	defer fmt.Println("============== Test case done: TestNewRefWithDNSSrvSecure =================")
+
+	assert := assert.New(t)
+
+	helper := setupDNSBothMocks()
+
+	// Non-Full encryption reference
+	nonSecureRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
+		"", false, "", nil, nil, nil, helper)
+	nonSecureRef.PopulateDnsSrvIfNeeded(true)
+
+	assert.Equal(HostNameBothSRV, nonSecureRef.hostnameSRVType)
+	assert.False(nonSecureRef.IsFullEncryption())
+
+	// Non secure reference should give back a non-secure port
+	for _, entry := range nonSecureRef.srvEntries {
+		connStr, err := entry.GetTargetConnectionString(nonSecureRef.hostnameSRVType, nonSecureRef.IsFullEncryption())
+		assert.Nil(err)
+		portNo, err := base.GetPortNumber(connStr)
+		assert.Nil(err)
+		assert.Equal(base.DefaultAdminPort, portNo)
+	}
+
+	// Full encryption reference
+	fullEncryptionRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
+		"", true, EncryptionType_Full, nil, nil, nil, helper)
+	fullEncryptionRef.PopulateDnsSrvIfNeeded(true)
+
+	assert.Equal(HostNameBothSRV, fullEncryptionRef.hostnameSRVType)
+	assert.True(fullEncryptionRef.IsFullEncryption())
+
+	// Secure reference should give back a secure port
+	for _, entry := range fullEncryptionRef.srvEntries {
+		connStr, err := entry.GetTargetConnectionString(fullEncryptionRef.hostnameSRVType, fullEncryptionRef.IsFullEncryption())
+		assert.Nil(err)
+		portNo, err := base.GetPortNumber(connStr)
+		assert.Nil(err)
+		assert.Equal(base.DefaultAdminPortSSL, portNo)
+	}
 }

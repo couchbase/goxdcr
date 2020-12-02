@@ -104,13 +104,33 @@ const (
 	HostNameNonSRV    HostNameSrvType = iota
 	HostNameSRV       HostNameSrvType = iota
 	HostNameSecureSRV HostNameSrvType = iota
+	HostNameBothSRV   HostNameSrvType = iota
 )
 
-func (h *HostNameSrvType) SetSRV(secure bool) {
-	if secure {
-		*h = HostNameSecureSRV
-	} else {
+func NewHostNameSrvType(srvRecordsType baseH.SrvRecordsType) HostNameSrvType {
+	switch srvRecordsType {
+	case baseH.SrvRecordsInvalid:
+		return HostNameNonSRV
+	case baseH.SrvRecordsNonSecure:
+		return HostNameSRV
+	case baseH.SrvRecordsSecure:
+		return HostNameSecureSRV
+	case baseH.SrvRecordsBoth:
+		return HostNameBothSRV
+	}
+	return HostNameNonSRV
+}
+
+func (h *HostNameSrvType) SetSRV(secure baseH.SrvRecordsType) {
+	switch secure {
+	case baseH.SrvRecordsInvalid:
+		*h = HostNameNonSRV
+	case baseH.SrvRecordsNonSecure:
 		*h = HostNameSRV
+	case baseH.SrvRecordsSecure:
+		*h = HostNameSecureSRV
+	case baseH.SrvRecordsBoth:
+		*h = HostNameBothSRV
 	}
 }
 
@@ -127,7 +147,7 @@ type SrvEntryType struct {
 // Note - this method will return the port
 // For couchbase/couchbases service, the port is KV port
 // For now, return standard ports until MB-41083 is implemented
-func (s SrvEntryType) GetTargetConnectionString(srvType HostNameSrvType) (string, error) {
+func (s SrvEntryType) GetTargetConnectionString(srvType HostNameSrvType, fullEncryption bool) (string, error) {
 	if s.srv == nil {
 		return "", base.ErrorInvalidSRVFormat
 	}
@@ -140,6 +160,12 @@ func (s SrvEntryType) GetTargetConnectionString(srvType HostNameSrvType) (string
 		return fmt.Sprintf("%v:%v", hostname, base.DefaultAdminPort), nil
 	case HostNameSecureSRV:
 		return fmt.Sprintf("%v:%v", hostname, base.DefaultAdminPortSSL), nil
+	case HostNameBothSRV:
+		if fullEncryption {
+			return fmt.Sprintf("%v:%v", hostname, base.DefaultAdminPortSSL), nil
+		} else {
+			return fmt.Sprintf("%v:%v", hostname, base.DefaultAdminPort), nil
+		}
 	default:
 		return "", base.ErrorInvalidSRVFormat
 	}
@@ -546,6 +572,10 @@ func (ref *RemoteClusterReference) IsEmpty() bool {
 func (ref *RemoteClusterReference) IsFullEncryption() bool {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
+	return ref.isFullEncryptionNoLock()
+}
+
+func (ref *RemoteClusterReference) isFullEncryptionNoLock() bool {
 	// ref.EncryptionType may be empty for unupgraded remote cluster refs. treat it as "full" in this case
 	return ref.DemandEncryption_ && (len(ref.EncryptionType_) == 0 || ref.EncryptionType_ == EncryptionType_Full)
 }
@@ -794,7 +824,7 @@ func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
 	}
 
 	for _, oneEntry := range ref.srvEntries {
-		connStr, err := oneEntry.GetTargetConnectionString(ref.hostnameSRVType)
+		connStr, err := oneEntry.GetTargetConnectionString(ref.hostnameSRVType, ref.isFullEncryptionNoLock())
 		if err != nil {
 			continue
 		}
@@ -827,7 +857,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(retryOnErr bool) {
 	var entries []*net.SRV
 	var err error
 	var lookupName string
-	var isSecure bool
+	var srvRecordsType baseH.SrvRecordsType
 	for i := 0; i < 5; i++ {
 		// Dns srv lookup shouldn't fail - try 5 times
 		lookupName, err = ref.getSRVLookupHostnameNoLock()
@@ -835,7 +865,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(retryOnErr bool) {
 			ref.hostnameSRVType.ClearSRV()
 			return
 		}
-		entries, isSecure, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
+		entries, srvRecordsType, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
 		if err == nil || !retryOnErr {
 			break
 		}
@@ -845,7 +875,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(retryOnErr bool) {
 		ref.hostnameSRVType.ClearSRV()
 		return
 	}
-	ref.hostnameSRVType.SetSRV(isSecure)
+	ref.hostnameSRVType.SetSRV(srvRecordsType)
 	ref.srvEntries = ref.srvEntries[:0]
 	for _, entry := range entries {
 		ref.srvEntries = append(ref.srvEntries, SrvEntryType{entry})
@@ -883,12 +913,12 @@ func (ref *RemoteClusterReference) RefreshSRVEntries() (added, removed []*net.SR
 	}
 
 	var pulledEntries []*net.SRV
-	var latestIsSecure bool
+	var latestLookup baseH.SrvRecordsType
 
 	ref.mutex.RLock()
 	lookupName, err := ref.getSRVLookupHostnameNoLock()
 	if err == nil {
-		pulledEntries, latestIsSecure, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
+		pulledEntries, latestLookup, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
 	}
 	ref.mutex.RUnlock()
 	if err != nil && err != base.ErrorInvalidSRVFormat {
@@ -911,9 +941,9 @@ func (ref *RemoteClusterReference) RefreshSRVEntries() (added, removed []*net.SR
 	}
 
 	// Check if secure type changed - if changed, refresh all the entries
-	if (ref.hostnameSRVType == HostNameSecureSRV && !latestIsSecure) ||
-		(ref.hostnameSRVType == HostNameSRV && latestIsSecure) {
-		ref.hostnameSRVType.SetSRV(latestIsSecure)
+	checkType := NewHostNameSrvType(latestLookup)
+	if checkType != ref.hostnameSRVType {
+		ref.hostnameSRVType.SetSRV(latestLookup)
 		// Replace all the entries
 		for _, existingEntry := range ref.srvEntries {
 			removed = append(removed, existingEntry.srv)
@@ -990,6 +1020,8 @@ var ErrorNoBootableSRVEntryFound = fmt.Errorf("None of the SRV entries are boots
 // If the user set up SRV such that it forwards to the same FQDN as what the ns_server list returns,
 // i.e. user sets up a.abc.com to point to a node: 10.10.1.1 and that node exists in the pulled list
 // from ns_server, then it is good enough to validate that the SRV entry is still bootable
+// Under Autonomous Operator though, it most likely is not how it will be set up. Regardless,
+// this mechanism is a "shortcut" for bootable check without the need to reach out to target cluster again
 func (ref *RemoteClusterReference) CheckSRVValidityUsingNodeAddressesList(nodeAddressesList base.StringPairList) error {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
@@ -1000,8 +1032,8 @@ OUTERFOR:
 		for _, pair := range nodeAddressesList {
 			regHostName := base.GetHostName(pair.GetFirstString())
 			sslHostName := base.GetHostName(pair.GetSecondString())
-			srvRegEntry, err := entry.GetTargetConnectionString(HostNameSRV)
-			srvSecureEntry, err2 := entry.GetTargetConnectionString(HostNameSecureSRV)
+			srvRegEntry, err := entry.GetTargetConnectionString(HostNameSRV, false)
+			srvSecureEntry, err2 := entry.GetTargetConnectionString(HostNameSecureSRV, false)
 			if err != nil || err2 != nil {
 				continue
 			}
@@ -1027,10 +1059,7 @@ type GetUUIDFunc func(hostAddr, username, password string, authMech base.HttpAut
 // matches the UUID of the reference
 // If none match, it means the srv record is no longer valid for bootstrap
 func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, logger *log.CommonLogger) error {
-	ref.mutex.RLock()
-	defer ref.mutex.RUnlock()
-
-	if ref.Uuid_ == "" {
+	if ref.Uuid() == "" {
 		// Uninitialized UUID - weird but means assume SRV entry is valid
 		return nil
 	}
@@ -1042,11 +1071,11 @@ func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, lo
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(clonedEntries), func(i, j int) { clonedEntries[i], clonedEntries[j] = clonedEntries[j], clonedEntries[i] })
 	for _, entry := range clonedEntries {
-		hostAddr, err := entry.GetTargetConnectionString(ref.hostnameSRVType)
+		hostAddr, err := entry.GetTargetConnectionString(ref.HostNameSrvType(), ref.IsFullEncryption())
 		if err != nil {
 			continue
 		}
-		checkUuid, err := getter(hostAddr, ref.UserName_, ref.Password_, ref.HttpAuthMech_, ref.Certificate_, ref.SANInCertificate_, ref.ClientCertificate_, ref.ClientKey_, logger)
+		checkUuid, err := getter(hostAddr, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificate(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), logger)
 		if err != nil {
 			// Skip and check a next one
 			continue
@@ -1065,6 +1094,12 @@ func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, lo
 		return fmt.Errorf(base.FlattenErrorMap(atLeastOneErr))
 	}
 	return nil
+}
+
+func (ref *RemoteClusterReference) HostNameSrvType() HostNameSrvType {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return ref.hostnameSRVType
 }
 
 func (ref *RemoteClusterReference) SetConnectivityStatus(status string) {
@@ -1094,6 +1129,8 @@ func (ref *RemoteClusterReference) getHostNameForOutputNoLock() interface{} {
 type ConnectivityStatus int
 
 const (
+	// If the node has not been contacted yet
+	ConnIniting ConnectivityStatus = iota
 	// Nothing wrong yet
 	ConnValid ConnectivityStatus = iota
 	// If any remote cluster node returned authentication error
@@ -1106,6 +1143,8 @@ const (
 
 func (c ConnectivityStatus) String() string {
 	switch c {
+	case ConnIniting:
+		return "RC_INIT"
 	case ConnValid:
 		return "RC_OK"
 	case ConnAuthErr:

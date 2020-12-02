@@ -2524,4 +2524,54 @@ func TestAgentGetConnectivityStatusForPipelinePause(t *testing.T) {
 
 	// should not report
 	assert.False(agent.GetUnreportedAuthError())
+
+}
+
+// When a non-user initiated node receives a remote cluster add from a user-initiated node, it executes refresh
+// in the bg. In the meantime, any querying on this non-user initiated node should return valid info
+func TestPassiveAddAndImmediateGet(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPassiveAddAndImmediateGet =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 200*time.Millisecond /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	agent, existed, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	assert.False(existed)
+	assert.Nil(err)
+	assert.NotNil(agent)
+
+	rcMap, err := remoteClusterSvc.RemoteClusters()
+	assert.Nil(err)
+	assert.False(agent.InitDone())
+	for _, v := range rcMap {
+		outputMap := v.ToMap()
+		connectivityCheck := outputMap[base.ConnectivityStatus].(string)
+		assert.NotEqual(metadata.ConnError.String(), connectivityCheck)
+		assert.Equal(metadata.ConnIniting.String(), connectivityCheck)
+		rcNameCheck := outputMap[base.RemoteClusterName].(string)
+		assert.Equal(idAndName, rcNameCheck)
+	}
+
+	// After init done, status should be valid
+	time.Sleep(1 * time.Second)
+
+	assert.True(agent.InitDone())
+	rcMap, err = remoteClusterSvc.RemoteClusters()
+	assert.Nil(err)
+	for _, v := range rcMap {
+		outputMap := v.ToMap()
+		connectivityCheck := outputMap[base.ConnectivityStatus].(string)
+		assert.Equal(metadata.ConnValid.String(), connectivityCheck)
+		rcNameCheck := outputMap[base.RemoteClusterName].(string)
+		assert.Equal(idAndName, rcNameCheck)
+	}
+	fmt.Println("============== Test case end: TestPassiveAddAndImmediateGet =================")
 }

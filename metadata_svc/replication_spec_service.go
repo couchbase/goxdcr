@@ -228,8 +228,11 @@ func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap
 	var err error
 	var remote_connStr string
 	start_time := time.Now()
-	// refresh remote cluster reference to ensure that it is up to date
-	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, true)
+	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
+	if err == RefreshNotEnabledYet {
+		// If refresh is not enabled yet, this means that there is a refresh ongoing. Set refresh to true to piggy-back off of the current refresh
+		targetClusterRef, err = service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, true)
+	}
 	if err != nil {
 		errorMap[base.ToCluster] = service.utils.NewEnhancedError("cannot find remote cluster", err)
 	} else {

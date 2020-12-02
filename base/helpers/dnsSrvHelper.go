@@ -13,7 +13,7 @@ package base
 import "net"
 
 type DnsSrvHelperIface interface {
-	DnsSrvLookup(hostname string) (srvEntries []*net.SRV, isSecure bool, err error)
+	DnsSrvLookup(hostname string) (srvEntries []*net.SRV, secureType SrvRecordsType, err error)
 }
 
 type DnsSrvHelper struct{}
@@ -22,19 +22,37 @@ const CouchbaseService = "couchbase"
 const CouchbaseSecureService = "couchbases"
 const TCPProto = "tcp"
 
+type SrvRecordsType int
+
+const (
+	SrvRecordsInvalid   SrvRecordsType = iota
+	SrvRecordsNonSecure SrvRecordsType = iota
+	SrvRecordsSecure    SrvRecordsType = iota
+	SrvRecordsBoth      SrvRecordsType = iota
+)
+
 // NOTE - SRV entries for "name" will end with a .
 // i.e. 192.168.0.1.
-func (dsh *DnsSrvHelper) DnsSrvLookup(hostname string) (srvEntries []*net.SRV, isSecure bool, err error) {
+func (dsh *DnsSrvHelper) DnsSrvLookup(hostname string) (srvEntries []*net.SRV, secureType SrvRecordsType, err error) {
 	// First look up regular
 	_, addrs, err := net.LookupSRV(CouchbaseService, TCPProto, hostname)
 	if err == nil {
-		srvEntries = addrs
-		return
+		srvEntries = append(srvEntries, addrs...)
+		secureType = SrvRecordsNonSecure
 	}
 
 	// Then secure
-	isSecure = true
 	_, addrs, err = net.LookupSRV(CouchbaseSecureService, TCPProto, hostname)
-	srvEntries = addrs
+	if err == nil {
+		srvEntries = append(srvEntries, addrs...)
+		if secureType == SrvRecordsNonSecure {
+			secureType = SrvRecordsBoth
+		} else {
+			secureType = SrvRecordsSecure
+		}
+	} else if secureType == SrvRecordsNonSecure {
+		// Regular already found - err should be nil
+		err = nil
+	}
 	return
 }

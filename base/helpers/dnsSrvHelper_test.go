@@ -46,9 +46,9 @@ func TestDNSHelper(t *testing.T) {
 	assert.Equal(uint16(9001), addrs[0].Port)
 
 	helper := &DnsSrvHelper{}
-	entries, isSecure, err := helper.DnsSrvLookup(dnsSrvHostname)
+	entries, secureMode, err := helper.DnsSrvLookup(dnsSrvHostname)
 	assert.Nil(err)
-	assert.False(isSecure)
+	assert.Equal(SrvRecordsNonSecure, secureMode)
 	assert.Equal(1, len(entries))
 	assert.Equal("192.168.0.1.", entries[0].Target)
 	assert.Equal(uint16(9001), addrs[0].Port)
