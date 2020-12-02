@@ -2239,7 +2239,11 @@ func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logge
 		if out != nil {
 			err = json.Unmarshal(bod, out)
 			if err != nil {
-				l.Errorf("Failed to unmarshal the response as json, err=%v, bod=%v\n res=%v\n", err, string(bod), res)
+				if strings.Contains(string(bod), base.RESTNsServerNotFound) {
+					l.Errorf("Original REST request (%v) received %v response. The URL may be incorrect", res.Request.URL, string(bod))
+				} else {
+					l.Errorf("Failed to unmarshal the response as json, err=%v, bod=%v\n res=%v\n", err, string(bod), res)
+				}
 				out = bod
 				return
 			}

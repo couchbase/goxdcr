@@ -36,6 +36,7 @@ const RESTInvalidPath = "Invalid path"
 const RESTHttpReq = "in http request"
 const RESTNoSuchHost = "no such host"
 const RESTHttpChunkedEncoding = "chunked"
+const RESTNsServerNotFound = "Not found"
 
 // Exponential backoff factor
 var MetaKvBackoffFactor = 2
