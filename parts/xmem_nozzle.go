@@ -905,7 +905,7 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 
 func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 	if string(request.Req.Key) == "" {
-		xmem.Logger().Errorf("%v accumuBatch received request with Empty key, req.UniqueKey=%v%v%v\n", xmem.Id(), base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
+		xmem.Logger().Errorf("%v accumuBatch received request with Empty key, req.UniqueKey=%v%s%v\n", xmem.Id(), base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
 		err := fmt.Errorf("%v accumuBatch received request with Empty key\n", xmem.Id())
 		return err
 	}
@@ -916,7 +916,7 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 	fromTarget, err := xmem.isChangesFromTarget(request)
 	if err != nil {
 		// We shouldn't hit error here. If we do, log an error. We will just treat the document as not from target
-		xmem.Logger().Warnf("%v accumuBatch received error %v parsing the XATTR to determine if the change is from target for custom CR, req.UniqueKey=%v%v%v",
+		xmem.Logger().Warnf("%v accumuBatch received error %v parsing the XATTR to determine if the change is from target for custom CR, req.UniqueKey=%v%s%v",
 			xmem.Id(), err, base.UdTagBegin, request.UniqueKey, base.UdTagEnd)
 	} else if fromTarget {
 		// Change is from target. Don't replicate back
@@ -1472,7 +1472,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 							seqno, ok2 := keySeqno[1].(uint64)
 							vbno, ok3 := keySeqno[2].(uint16)
 							if ok1 && ok2 && ok3 {
-								xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v%v%v, seqno=%v, vb=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno, vbno,
+								xmem.Logger().Warnf("%v received fatal error from getMeta client. key=%v%s%v, seqno=%v, vb=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno, vbno,
 									base.UdTagBegin, response, base.UdTagEnd)
 							}
 						}
@@ -1525,7 +1525,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 								return
 							} else {
 								// log the corresponding request to facilitate debugging
-								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%v%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
+								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
 									base.UdTagBegin, response, base.UdTagEnd)
 								err = fmt.Errorf("error response with status %v from memcached", response.Status)
 								xmem.repairConn(xmem.client_for_getMeta, err.Error(), rev)
@@ -1586,7 +1586,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 	for _, originalReq := range bigDoc_map {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
-			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, bigDoc_map=%v%v%v", xmem.Id(),
+			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%s%v, req=%v%v%v, bigDoc_map=%v%v%v", xmem.Id(),
 				base.UdTagBegin, docKey, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, bigDoc_map, base.UdTagEnd)
 			return nil, fmt.Errorf("%v received empty docKey.", xmem.Id())
 		}
@@ -1638,7 +1638,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 		if ok && resp.Status == mc.SUCCESS {
 			doc_meta_target, err := xmem.decodeGetMetaResp([]byte(key), resp)
 			if err != nil {
-				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v%v%v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, err)
+				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v%s%v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, err)
 				continue
 			}
 			doc_meta_source := decodeSetMetaReq(wrappedReq)
@@ -1646,13 +1646,13 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 					docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
 					docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
-					xmem.Logger().Debugf("%v doc %v%v%v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
+					xmem.Logger().Debugf("%v doc %v%s%v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 				}
 				bigDoc_noRep_map[wrappedReq.UniqueKey] = Not_Send_Failed_CR
 			} else if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 				docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
 				docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
-				xmem.Logger().Debugf("%v doc %v%v%v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
+				xmem.Logger().Debugf("%v doc %v%s%v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 			}
 		} else if ok && base.IsTopologyChangeMCError(resp.Status) {
 			bigDoc_noRep_map[wrappedReq.UniqueKey] = Not_Send_Other
@@ -1757,7 +1757,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 	for _, originalReq := range get_map {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
-			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%v%v, req=%v%v%v, getMeta_map=%v%v%v", xmem.Id(),
+			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%s%v, req=%v%v%v, getMeta_map=%v%v%v", xmem.Id(),
 				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, get_map, base.UdTagEnd)
 			return respMap, specs, errors.New(xmem.Id() + " received empty docKey.")
 		}
