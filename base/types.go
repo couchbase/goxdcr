@@ -750,11 +750,12 @@ const (
 	colMgtOsoN       = 3 // Non-set if traditional, set bit to opt into OSO mode
 )
 
-var CollectionsMgtDefault CollectionsMgtType = 0 // Implicit, no mirror, no migration, no OSO
 var CollectionsExplicitBit CollectionsMgtType = 1 << colMgtMappingN
 var CollectionsMirroringBit CollectionsMgtType = 1 << colMgtMirroringN
 var CollectionsMigrationBit CollectionsMgtType = 1 << colMgtMigrateN
 var CollectionsOSOBit CollectionsMgtType = 1 << colMgtOsoN
+
+var CollectionsMgtDefault = CollectionsOSOBit // Implicit, no mirror, no migration, OSO
 
 var CollectionsMgtMax = CollectionsExplicitBit | CollectionsMirroringBit | CollectionsMigrationBit | CollectionsOSOBit
 
