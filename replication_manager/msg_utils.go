@@ -106,6 +106,7 @@ const (
 	Bucket     = "bucket"
 	Scope      = "scope"
 	Collection = "collection"
+	SkipDoc    = "skipDoc"
 	// Output
 	MatchResult = "result"
 	MatchError  = "error"
@@ -919,7 +920,7 @@ func DecodeSettingsFromXDCRInternalSettingsRequest(request *http.Request) (metad
 	return settings, nil
 }
 
-func DecodeRegexpValidationRequest(request *http.Request) (expression, docId, bucket string, collectionNamespace *base.CollectionNamespace, err error) {
+func DecodeRegexpValidationRequest(request *http.Request) (expression, docId, bucket string, collectionNamespace *base.CollectionNamespace, skipDocSpecified bool, err error) {
 	if err = request.ParseForm(); err != nil {
 		return
 	}
@@ -942,14 +943,20 @@ func DecodeRegexpValidationRequest(request *http.Request) (expression, docId, bu
 		case Collection:
 			collectionSpecified = true
 			collectionNamespace.CollectionName = getStringFromValArr(valArr)
+		case SkipDoc:
+			skipDocSpecified, err = getBoolFromValArr(valArr, false)
 		default:
 			// ignore other parameters
 		}
 	}
 
+	if err != nil {
+		return
+	}
+
 	if len(expression) == 0 {
 		err = base.MissingParameterError(Expression)
-	} else if len(docId) == 0 {
+	} else if len(docId) == 0 && !skipDocSpecified {
 		err = base.MissingParameterError(DocID)
 	} else if len(bucket) == 0 {
 		err = base.MissingParameterError(Bucket)
