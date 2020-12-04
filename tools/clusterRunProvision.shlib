@@ -1195,7 +1195,7 @@ function getManifest {
 		return 1
 	fi
 
-	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/collections
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes
 }
 
 # Called hexString because input is in a form of double quoted string
