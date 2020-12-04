@@ -13,6 +13,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
+	"runtime/debug"
+	"sync"
+	"time"
+
+	"github.com/couchbase/goxdcr/pipeline_svc"
+
 	"github.com/couchbase/cbauth/metakv"
 	mc "github.com/couchbase/gomemcached"
 	"github.com/couchbase/goxdcr/base"
@@ -24,10 +31,6 @@ import (
 	"github.com/couchbase/goxdcr/resource_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"runtime"
-	"runtime/debug"
-	"sync"
-	"time"
 )
 
 var SetTimeSyncRetryInterval = 10 * time.Second
@@ -649,7 +652,19 @@ func (iscl *InternalSettingsChangeListener) internalSettingsChangeHandlerCallbac
 
 	// Restart XDCR if internal settings have been changed
 	if !newSettings.Equals(oldSettings) {
-		iscl.logger.Infof("Restarting XDCR process since internal settings have been changed\n")
+		iscl.logger.Infof("Checkpointing the pipelines and restarting XDCR process since internal settings have been changed\n")
+		var waitGrp sync.WaitGroup
+		for _, rep_status := range replication_mgr.pipelineMgr.ReplicationStatusMap() {
+			pipeline := rep_status.Pipeline()
+			ckpt_mgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
+			if ckpt_mgr == nil {
+				iscl.logger.Infof("CheckpointingManager has not been attached to pipeline %v", pipeline.Topic())
+				continue
+			}
+			waitGrp.Add(1)
+			go ckpt_mgr.(*pipeline_svc.CheckpointManager).CheckpointBeforeStopWithWait(&waitGrp)
+		}
+		waitGrp.Wait()
 		exitProcess(false)
 	}
 	return nil

@@ -13,6 +13,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
+	"math/rand"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
@@ -23,12 +30,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"math"
-	"math/rand"
-	"reflect"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const (
@@ -591,7 +592,10 @@ func (ckmgr *CheckpointManager) Stop() error {
 	ckmgr.wait_grp.Wait()
 	return nil
 }
-
+func (ckmgr *CheckpointManager) CheckpointBeforeStopWithWait(waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+	ckmgr.CheckpointBeforeStop()
+}
 func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 	var specExists bool
 	switch ckmgr.pipeline.Type() {
