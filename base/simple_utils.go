@@ -1047,6 +1047,16 @@ func ValidateAndGetAdvFilter(filter string) (gojsonsm.Matcher, error) {
 		}
 	}
 	if !operatorFound {
+		for _, operator := range gojsonsm.GojsonsmOperators {
+			lowerOperator := strings.ToLower(operator)
+			tokenizedFilter := strings.Split(filter, " ")
+			for _, oneFilterWord := range tokenizedFilter {
+				if strings.Contains(oneFilterWord, lowerOperator) {
+					// operator entered with lower case
+					return nil, fmt.Errorf("The keyword entered \"%v\" is case sensitive and should be: \"%v\"", lowerOperator, operator)
+				}
+			}
+		}
 		if !strings.Contains(filter, " ") {
 			// Having no white-space most likely means user entered a single word, and most likely meant as a key-only regex
 			return nil, ErrorFilterInvalidFormat

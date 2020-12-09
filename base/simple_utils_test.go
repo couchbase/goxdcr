@@ -300,7 +300,7 @@ func TestLegacyKeyMsg(t *testing.T) {
 	fmt.Println("============== Test case start: TestLegacyKeyMsg =================")
 	assert := assert.New(t)
 
-	err := ValidateAdvFilter("oneWordRegex$")
+	err := ValidateAdvFilter("aSingleRegex$")
 	assert.Equal(ErrorFilterInvalidFormat, err)
 
 	err = ValidateAdvFilter("int LIKE 0")
@@ -359,4 +359,13 @@ func TestSkipXattrAndStringsConversion(t *testing.T) {
 	assert.True(strings.Contains(filterExpressionExternal, "META()"))
 
 	fmt.Println("============== Test case end: TestSkipXattrAndStringsConversion =================")
+}
+
+func TestLowerCaseOperator(t *testing.T) {
+	assert := assert.New(t)
+
+	filter := "regexp_contains(key, \"something\")"
+	err := ValidateAdvFilter(filter)
+	assert.NotNil(err)
+	assert.True(strings.Contains(err.Error(), "case sensitive"))
 }
