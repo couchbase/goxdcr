@@ -1100,6 +1100,13 @@ func (rctx *refreshContext) updateHeartbeatMap(nodeList []interface{}) {
  */
 func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, userInitiated bool) error {
 	var err error
+	diagThreshold := DiagInternalThreshold
+	if userInitiated {
+		// Will require RPC
+		diagThreshold = DiagNetworkThreshold
+	}
+	stopFunc := agent.diagStopwatchFunc(fmt.Sprintf("agent.Start(%v, %v)", newRef.Id(), userInitiated), diagThreshold)
+	defer stopFunc()
 
 	if userInitiated {
 		// If user initiated, it means that no other reference should have existed
@@ -3047,6 +3054,9 @@ func (service *RemoteClusterService) delRemoteClusterAgentById(id string, delFro
 		return nil, errors.New("No id given")
 	}
 
+	stopFunc := service.startDiagStopwatch(fmt.Sprintf("delRemoteClusterAgentById(%v, %v)", id, delFromMetaKv), DiagInternalThreshold)
+	defer stopFunc()
+
 	service.agentMutex.RLock()
 	agent := service.agentMap[id]
 	service.agentMutex.RUnlock()
@@ -3155,6 +3165,8 @@ func (service *RemoteClusterService) deregisterAdd(name string) {
 }
 
 func (service *RemoteClusterService) checkIfAddingIsActive(name string) bool {
+	stop := service.startDiagStopwatch(fmt.Sprintf("checkIfAddingIsActive(%v)", name), DiagInternalThreshold)
+	defer stop()
 	service.metakvCbAddMtx.RLock()
 	defer service.metakvCbAddMtx.RUnlock()
 	_, exists := service.metakvCbAddMap[name]
@@ -3180,6 +3192,8 @@ func (service *RemoteClusterService) deregisterSet(name string) {
 }
 
 func (service *RemoteClusterService) checkIfSettingIsActive(name string) bool {
+	stop := service.startDiagStopwatch(fmt.Sprintf("checkIfSettingIsActive(%v)", name), DiagInternalThreshold)
+	defer stop()
 	service.metakvCbSetMtx.RLock()
 	defer service.metakvCbSetMtx.RUnlock()
 	_, exists := service.metakvCbSetMap[name]
@@ -3187,6 +3201,9 @@ func (service *RemoteClusterService) checkIfSettingIsActive(name string) bool {
 }
 
 func (service *RemoteClusterService) registerDel(refId string) {
+	stopFunc := service.startDiagStopwatch(fmt.Sprintf("deregisterDel(%v)", refId), DiagInternalThreshold)
+	defer stopFunc()
+
 	service.metakvCbDelMtx.Lock()
 	defer service.metakvCbDelMtx.Unlock()
 
@@ -3194,6 +3211,9 @@ func (service *RemoteClusterService) registerDel(refId string) {
 }
 
 func (service *RemoteClusterService) deregisterDel(refId string) {
+	stopFunc := service.startDiagStopwatch(fmt.Sprintf("deregisterDel(%v)", refId), DiagInternalThreshold)
+	defer stopFunc()
+
 	service.metakvCbDelMtx.Lock()
 	defer service.metakvCbDelMtx.Unlock()
 
@@ -3201,6 +3221,9 @@ func (service *RemoteClusterService) deregisterDel(refId string) {
 }
 
 func (service *RemoteClusterService) checkIfDeletingIsActive(refId string) bool {
+	stopFunc := service.startDiagStopwatch(fmt.Sprintf("checkIfDeletingIsActive(%v)", refId), DiagInternalThreshold)
+	defer stopFunc()
+
 	service.metakvCbDelMtx.RLock()
 	defer service.metakvCbDelMtx.RUnlock()
 	_, exists := service.metakvCbDelMap[refId]
@@ -3275,6 +3298,10 @@ func (service *RemoteClusterService) CheckAndUnwrapRemoteClusterError(err error)
 // Implement callback function for metakv
 func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, value []byte, rev interface{}) error {
 	service.logger.Infof("metakvCallback called on path = %v\n", path)
+	defer service.logger.Infof("done metakvCallback called on path = %v\n", path)
+
+	stopFunc := service.startDiagStopwatch(fmt.Sprintf("RemoteClusterServiceCallback(%v, ---, %v)", path, rev), DiagInternalThreshold)
+	defer stopFunc()
 
 	var newRef *metadata.RemoteClusterReference
 	var err error
@@ -3318,6 +3345,9 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 			service.deregisterSet(newRef.Name())
 		} else {
 			_, _, err = service.getOrStartNewAgent(newRef, false /*userInitiated*/, true /*updateFromRef*/)
+			if err != nil {
+				service.logger.Warnf("metakvCallback starting agent for %v returned err %v\n", newRef.Id(), err)
+			}
 		}
 	}
 
@@ -3506,7 +3536,7 @@ func (service *RemoteClusterService) GetManifestByUuid(uuid, bucketName string, 
 
 func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
 	if spec == nil {
-		return base.ErrorInvalidInput
+		return fmt.Errorf("RequestRemoteMonitoring() passed in nil spec")
 	}
 
 	agent, err := service.getAgentByReplSpec(spec)
@@ -3518,7 +3548,7 @@ func (service *RemoteClusterService) RequestRemoteMonitoring(spec *metadata.Repl
 
 func (service *RemoteClusterService) UnRequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
 	if spec == nil {
-		return base.ErrorInvalidInput
+		return fmt.Errorf("UnRequestRemoteMonitoring() passed in nil spec")
 	}
 
 	agent, err := service.getAgentByReplSpec(spec)

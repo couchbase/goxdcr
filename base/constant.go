@@ -586,6 +586,11 @@ var PipelineSerializerMaxRetry = 3
 var PipelineSerializerRetryWaitTime = 100 * time.Millisecond
 var PipelineSerializerRetryFactor = 2
 
+// For Requesting Remote Bucket monitoring - max of 8 seconds
+var RemoteBucketMonitorMaxRetry = 4
+var RemoteBucketMonitorWaitTime = 200 * time.Millisecond
+var RemoteBucketMonitorRetryFactor = 3
+
 // minimum versions where various features are supported
 var VersionForSANInCertificateSupport = []int{4, 0}
 var VersionForRBACAndXattrSupport = []int{5, 0}

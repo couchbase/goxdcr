@@ -110,6 +110,11 @@ type ReplicationSpecService struct {
 	gcMtx    sync.Mutex
 	srcGcMap specGCMap
 	tgtGcMap specGCMap
+
+	// Request Remote Buckets background retry tasks
+	rcBgReqMtx      sync.Mutex
+	rcBgReqFinchMap map[string]chan bool
+	rcBgReqSyncMap  map[string]bool
 }
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
@@ -130,6 +135,8 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		utils:                  utilities_in,
 		srcGcMap:               make(specGCMap),
 		tgtGcMap:               make(specGCMap),
+		rcBgReqFinchMap:        make(map[string]chan bool),
+		rcBgReqSyncMap:         make(map[string]bool),
 	}
 
 	return svc, svc.initCacheFromMetaKV()
@@ -1120,10 +1127,6 @@ func (service *ReplicationSpecService) updateCache(specId string, newSpec *metad
 	return service.updateCacheInternal(specId, newSpec, true /*lock*/)
 }
 
-func (service *ReplicationSpecService) updateCacheNoLock(specId string, newSpec *metadata.ReplicationSpecification) error {
-	return service.updateCacheInternal(specId, newSpec, false /*lock*/)
-}
-
 func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpec *metadata.ReplicationSpecification, lock bool) error {
 	if lock {
 		service.cache_lock.Lock()
@@ -1131,6 +1134,9 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 	}
 
 	oldSpec, updated, err := service.updateCacheInternalNoLock(specId, newSpec)
+	if err != nil {
+		service.logger.Warnf("updateCacheInternalNoLock(%v) returned err %v", specId, err)
+	}
 
 	if updated && oldSpec != nil && newSpec == nil {
 		service.gcMtx.Lock()
@@ -1141,35 +1147,15 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 		// IIRC, the other node's metakv listener is not guaranteed to send the add + delete in order
 		// If that is the case, this request/unrequest could leak
 		// The fix of it is to kill goxdcr process, or remote the cluster ref and re-add it
-		service.remote_cluster_svc.UnRequestRemoteMonitoring(oldSpec)
+		service.unRequestRemoteMonitoring(oldSpec)
 	}
 
 	if updated && oldSpec == nil && newSpec != nil {
 		if service.remote_cluster_svc.RequestRemoteMonitoring(newSpec) != nil {
-			// Do the following in a separate go-routine since this call path is synchronized by a single
-			// go-routine handling all the metakv listeners
-			go func() {
-				// In automated test environment where remote cluster reference and spec is created
-				// almost simultaneously, there's no guarantee that the remote cluster ref created
-				// on an active node has propagated to a non-active node before the new spec is propagated to the said
-				// non-acive node.
-				// Because of this operation requires that the ref be present first, and it must not fail as
-				// other components like collections manifest service depends on this, retry up to 3 seconds
-				retryOp := func() error {
-					return service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
-				}
-				err = service.utils.ExponentialBackoffExecutor("RequestRemoteMonitoring", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
-				if err != nil {
-					// Worst case scenario even after 3 seconds, panic and XDCR process will reload everything in order from metakv
-					// as in, load the remote cluster reference first, then load the specs
-					panic("Cannot continue without requesting remote monitoring")
-				}
-				service.callMetadataChangeCb(specId, newSpec, oldSpec)
-			}()
+			service.retryRequestRemoteMonitoring(specId, newSpec, oldSpec)
 			// Skip the metadatachangeCb for now as gofunc above will call it later
 			return nil
 		}
-
 	}
 
 	var sumErr error
@@ -1178,6 +1164,80 @@ func (service *ReplicationSpecService) updateCacheInternal(specId string, newSpe
 	}
 
 	return sumErr
+}
+
+func (service *ReplicationSpecService) unRequestRemoteMonitoring(oldSpec *metadata.ReplicationSpecification) error {
+	// First, check for any concurrent bg running request remote monitoring processes
+	service.rcBgReqMtx.Lock()
+	finCh, exists := service.rcBgReqFinchMap[oldSpec.Id]
+	if exists {
+		close(finCh)
+		service.rcBgReqSyncMap[oldSpec.Id] = true
+		service.rcBgReqMtx.Unlock()
+		return nil
+	}
+	service.rcBgReqMtx.Unlock()
+
+	return service.remote_cluster_svc.UnRequestRemoteMonitoring(oldSpec)
+}
+
+func (service *ReplicationSpecService) retryRequestRemoteMonitoring(specId string, newSpec *metadata.ReplicationSpecification, oldSpec *metadata.ReplicationSpecification) {
+	service.rcBgReqMtx.Lock()
+	stopCh := make(chan bool)
+	service.rcBgReqFinchMap[specId] = stopCh
+	service.rcBgReqMtx.Unlock()
+
+	// Do the following in a separate go-routine since this call path is synchronized by a single
+	// go-routine handling all the metakv listeners
+	go func() {
+		// In automated test environment where remote cluster reference and spec is created
+		// almost simultaneously, there's no guarantee that the remote cluster ref created
+		// on an active node has propagated to a non-active node before the new spec is propagated to the said
+		// non-acive node.
+		// Because of this operation requires that the ref be present first, and it must not fail as
+		// other components like collections manifest service depends on this, retry up to 8 seconds
+		retryOp := func(interface{}) (interface{}, error) {
+			err := service.remote_cluster_svc.RequestRemoteMonitoring(newSpec)
+			if err != nil {
+				service.logger.Warnf("RequestRemoteMonitoring for %v returned err %v", newSpec.Id, err)
+			}
+			return nil, err
+		}
+		_, err := service.utils.ExponentialBackoffExecutorWithFinishSignal("RequestRemoteMonitoring", base.RemoteBucketMonitorWaitTime, base.RemoteBucketMonitorMaxRetry, base.RemoteBucketMonitorRetryFactor, retryOp, nil, stopCh)
+		finChCalled := err != nil && strings.Contains(err.Error(), base.FinClosureStr)
+		if err != nil && !finChCalled {
+			// Worst case scenario even after 8 seconds, panic and XDCR process will reload everything in order from metakv
+			// as in, load the remote cluster reference first, then load the specs
+			rcs, _ := service.remote_cluster_svc.RemoteClusters()
+			redactedRcs := make(map[string]interface{})
+			for k, v := range rcs {
+				redactedRcs[k] = v.ToMap()
+			}
+			panicString := fmt.Sprintf("Cannot continue without requesting remote monitoring: spec %v requires remote cluster cluster UUID %v. Currently, only present remote clusters: %v",
+				newSpec.Id, newSpec.TargetClusterUUID, redactedRcs)
+			panic(panicString)
+		}
+
+		// Once here, it is either because the call succeeded OR the finCh was called
+		// Before calling metadatachange cb, ensure the right cases
+		service.rcBgReqMtx.Lock()
+		unRequestCalled := service.rcBgReqSyncMap[specId]
+		delete(service.rcBgReqFinchMap, specId)
+		delete(service.rcBgReqSyncMap, specId)
+		service.rcBgReqMtx.Unlock()
+
+		if finChCalled {
+			service.logger.Warnf("While RequestRemoteMonitoring was retrying for %v, finCh was called", specId)
+			// Unregister was called while the retry above was happening
+			// finChCalled returned means that the Request never went through. This is essentially an no-op
+		} else if unRequestCalled {
+			// the retry register call succeeded, but while that was happening, the unRegister called came in for this specId
+			// XDCR should faithfully unregister it on its behalf
+			service.remote_cluster_svc.UnRequestRemoteMonitoring(newSpec)
+		} else {
+			service.callMetadataChangeCb(specId, newSpec, oldSpec)
+		}
+	}()
 }
 
 func (service *ReplicationSpecService) callMetadataChangeCb(specId string, newSpec *metadata.ReplicationSpecification, oldSpec *metadata.ReplicationSpecification) error {
