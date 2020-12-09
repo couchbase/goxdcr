@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"time"
@@ -1215,6 +1217,10 @@ func (service *ReplicationSpecService) retryRequestRemoteMonitoring(specId strin
 			}
 			panicString := fmt.Sprintf("Cannot continue without requesting remote monitoring: spec %v requires remote cluster cluster UUID %v. Currently, only present remote clusters: %v",
 				newSpec.Id, newSpec.TargetClusterUUID, redactedRcs)
+			// MB-43186 - Dump all goroutines for checking if there is any deadlocks - remove before CC is shipped
+			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+			// MB-43186 - Dump all metakv values - remove before CC is shipped
+			service.remote_cluster_svc.DumpMetakvEntriesForDebugging()
 			panic(panicString)
 		}
 
