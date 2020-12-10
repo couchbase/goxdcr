@@ -19,6 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"strings"
 	"sync"
 	"time"
 )
@@ -96,6 +97,7 @@ type ReplicationStatusIface interface {
 	SettingsMap() map[string]interface{}
 	Errors() PipelineErrorArray
 	ClearErrors()
+	ClearErrorsWithString(subStr string)
 	RecordProgress(progress string)
 	GetProgress() string
 	String() string
@@ -498,6 +500,24 @@ func (rs *ReplicationStatus) ClearErrors() {
 	defer rs.lock.Unlock()
 	rs.err_list = PipelineErrorArray{}
 	rs.Publish(false)
+}
+
+func (rs *ReplicationStatus) ClearErrorsWithString(subStr string) {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	if len(rs.err_list) == 0 {
+		return
+	}
+
+	replacementArr := PipelineErrorArray{}
+	for _, pipelineErr := range rs.err_list {
+		if !strings.Contains(pipelineErr.ErrMsg, subStr) {
+			replacementArr = append(replacementArr, pipelineErr)
+		}
+	}
+
+	rs.err_list = replacementArr
 }
 
 func (rs *ReplicationStatus) RecordProgress(progress string) {

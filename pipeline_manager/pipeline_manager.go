@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -368,10 +369,13 @@ func (pipelineMgr *PipelineManager) checkAndHandleRemoteClusterAuthErrs() {
 			continue
 		}
 		for _, spec := range replSpecsList {
-			pipelineMgr.AutoPauseReplication(spec.Id)
-			msg := getCredentialErrPauseMsg(ref.Name(), spec.Id)
-			pipelineMgr.uilog_svc.Write(msg)
-			pipelineMgr.logger.Errorf(msg)
+			shouldRetry := spec.Settings.GetRetryOnRemoteAuthErr()
+			if !shouldRetry {
+				pipelineMgr.AutoPauseReplication(spec.Id)
+				msg := getCredentialErrPauseMsg(ref.Name(), spec.Id)
+				pipelineMgr.uilog_svc.Write(msg)
+				pipelineMgr.logger.Errorf(msg)
+			}
 		}
 	}
 }
@@ -1189,9 +1193,13 @@ type PipelineUpdater struct {
 
 	stopped     bool
 	stoppedLock sync.Mutex
+	runOnce     sync.Once
 
 	humanRecoveryThresholdMtx   sync.Mutex
 	humanRecoveryThresholdTimer *time.Timer
+
+	updateRCStatusInterval time.Duration
+	updateRCStatusTicker   *time.Ticker
 }
 
 type pmErrMapType struct {
@@ -1291,6 +1299,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error,
 		currentErrors:          &pmErrMapType{errMap: make(base.ErrorMap), logger: logger},
 		overflowErrors:         &pmErrMapType{errMap: make(base.ErrorMap), logger: logger},
 		replSpecSettingsHelper: &replSettingsRevContext{rep_status: rep_status_in},
+		updateRCStatusInterval: base.RefreshRemoteClusterRefInterval,
 	}
 
 	if cur_err != nil {
@@ -1307,81 +1316,100 @@ func (r *PipelineUpdater) getLastResult() bool {
 
 //start the repairer
 func (r *PipelineUpdater) run() {
-	defer close(r.done_ch)
+	r.runOnce.Do(func() {
+		defer close(r.done_ch)
 
-	var retErr error
-	var retErrMap base.ErrorMap
+		var retErr error
+		var retErrMap base.ErrorMap
 
-	for {
-		select {
-		case <-r.fin_ch:
-			r.logger.Infof("Quit updating pipeline %v after updating a total of %v times\n", r.pipeline_name, atomic.LoadUint64(&r.runCounter))
-			r.logger.Infof("Replication %v's status is to be closed, shutting down\n", r.pipeline_name)
-			r.pipelineMgr.StopPipeline(r.rep_status)
-			// Reset runCounter to 0 for unit test
-			atomic.StoreUint64(&r.runCounter, 0)
-			return
-		case <-r.update_now_ch:
-			r.logger.Infof("Replication %v's status is changed, update now\n", r.pipeline_name)
-			retErrMap = r.update()
-			r.cancelFutureRefresh()
-			if len(retErrMap) > 0 {
-				r.logger.Infof("Replication %v update experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
-				r.sendUpdateErrMap(retErrMap)
-			} else if r.callbacksStillRemain() {
-				r.logger.Infof("There are still callback requests that need to run. Will need to update pipeline %v again", r.pipeline_name)
-				r.sendUpdateNow()
-			}
-		case retErrMap = <-r.update_err_map_ch:
-			r.currentErrors.ConcatenateErrors(retErrMap)
-			updateAgain := r.checkIfNeedToReUpdate(retErrMap, retErr)
-			if updateAgain {
-				r.scheduleFutureRefresh()
-			}
-		case <-r.backfillStartCh:
-			r.logger.Infof("Replication %v's backfill Pipeline is starting\n", r.pipeline_name)
-			r.cancelFutureBackfillStart()
-			retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
-			if !backfillStartSuccessful(retErrMap, r.logger, r.pipeline_name) {
-				r.logger.Infof("Replication %v backfill start experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
-				r.setLastUpdateFailure(retErrMap)
-				r.sendBackfillStartErrMap(retErrMap)
-			} else {
-				r.setLastUpdateSuccess()
-			}
-		case <-r.backfillStopCh:
-			if r.rep_status == nil || r.rep_status.Pipeline() == nil {
-				r.logger.Warnf("Backfill pipeline for %v is already stopped", r.pipeline_name)
-			} else {
-				r.logger.Infof("Replication %v's backfill Pipeline is stopping\n", r.pipeline_name)
-				retErrMap = r.pipelineMgr.StopBackfillPipeline(r.pipeline_name)
-				if len(retErrMap) > 0 {
-					r.logger.Infof("Replication %v backfill stop experienced error(s): %v. Will let it die\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
-				}
-			}
-		case retErrMap = <-r.backfillErrMapCh:
-			var updateAgain bool
-			if r.getLastResult() {
-				// Last time update succeeded, so this error then triggers an immediate update
-				r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v), re-starting now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
-				retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
+		r.stoppedLock.Lock()
+		r.updateRCStatusTicker = time.NewTicker(r.updateRCStatusInterval)
+		r.stoppedLock.Unlock()
+
+		for {
+			select {
+			case <-r.fin_ch:
+				r.logger.Infof("Quit updating pipeline %v after updating a total of %v times\n", r.pipeline_name, atomic.LoadUint64(&r.runCounter))
+				r.logger.Infof("Replication %v's status is to be closed, shutting down\n", r.pipeline_name)
+				r.pipelineMgr.StopPipeline(r.rep_status)
+				// Reset runCounter to 0 for unit test
+				atomic.StoreUint64(&r.runCounter, 0)
+				return
+			case <-r.update_now_ch:
+				r.logger.Infof("Replication %v's status is changed, update now\n", r.pipeline_name)
+				retErrMap = r.update()
 				r.cancelFutureRefresh()
-				if backfillStartSuccessful(retErrMap, r.logger, r.pipeline_name) {
-					r.setLastUpdateSuccess()
-				} else {
-					updateAgain = true
-					r.setLastUpdateFailure(retErrMap)
+				if len(retErrMap) > 0 {
+					r.logger.Infof("Replication %v update experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+					r.sendUpdateErrMap(retErrMap)
+				} else if r.callbacksStillRemain() {
+					r.logger.Infof("There are still callback requests that need to run. Will need to update pipeline %v again", r.pipeline_name)
+					r.sendUpdateNow()
 				}
-			} else {
-				r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v). However, last update resulted in failure, so will reschedule a future update\n", r.pipeline_name, retErr)
-				// Last time update failed, so we should wait for stablization
-				updateAgain = true
-			}
-			if updateAgain {
-				r.scheduleFutureBackfillStart()
+			case retErrMap = <-r.update_err_map_ch:
+				r.currentErrors.ConcatenateErrors(retErrMap)
+				updateAgain := r.checkIfNeedToReUpdate(retErrMap, retErr)
+				if updateAgain {
+					r.scheduleFutureRefresh()
+				}
+			case <-r.backfillStartCh:
+				r.logger.Infof("Replication %v's backfill Pipeline is starting\n", r.pipeline_name)
+				r.cancelFutureBackfillStart()
+				retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
+				if !backfillStartSuccessful(retErrMap, r.logger, r.pipeline_name) {
+					r.logger.Infof("Replication %v backfill start experienced error(s): %v. Scheduling a redo.\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+					r.setLastUpdateFailure(retErrMap)
+					r.sendBackfillStartErrMap(retErrMap)
+				} else {
+					r.setLastUpdateSuccess()
+				}
+			case <-r.backfillStopCh:
+				if r.rep_status == nil || r.rep_status.Pipeline() == nil {
+					r.logger.Warnf("Backfill pipeline for %v is already stopped", r.pipeline_name)
+				} else {
+					r.logger.Infof("Replication %v's backfill Pipeline is stopping\n", r.pipeline_name)
+					retErrMap = r.pipelineMgr.StopBackfillPipeline(r.pipeline_name)
+					if len(retErrMap) > 0 {
+						r.logger.Infof("Replication %v backfill stop experienced error(s): %v. Will let it die\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+					}
+				}
+			case retErrMap = <-r.backfillErrMapCh:
+				var updateAgain bool
+				if r.getLastResult() {
+					// Last time update succeeded, so this error then triggers an immediate update
+					r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v), re-starting now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
+					retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
+					r.cancelFutureRefresh()
+					if backfillStartSuccessful(retErrMap, r.logger, r.pipeline_name) {
+						r.setLastUpdateSuccess()
+					} else {
+						updateAgain = true
+						r.setLastUpdateFailure(retErrMap)
+					}
+				} else {
+					r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v). However, last update resulted in failure, so will reschedule a future update\n", r.pipeline_name, retErr)
+					// Last time update failed, so we should wait for stablization
+					updateAgain = true
+				}
+				if updateAgain {
+					r.scheduleFutureBackfillStart()
+				}
+			case <-r.updateRCStatusTicker.C:
+				// Check if connectivity has issues - and if so, raise an error if it's not there already
+				ref, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(r.rep_status.Spec().TargetClusterUUID, false)
+				if err != nil {
+					r.logger.Errorf("Pipeline updater received err %v when retrieving its remote cluster")
+				} else {
+					connectivityStatus, err := r.pipelineMgr.GetRemoteClusterSvc().GetConnectivityStatus(ref)
+					if err != nil {
+						r.logger.Errorf("Pipeline updater received err %v when retrieving its remote cluster's connectivity status")
+					} else {
+						r.checkAndPublishRCError(connectivityStatus, ref)
+					}
+				}
 			}
 		}
-	}
+	})
 }
 
 func backfillStartSuccessful(retErrMap base.ErrorMap, logger *log.CommonLogger, pipelineName string) bool {
@@ -1755,6 +1783,9 @@ func (r *PipelineUpdater) setStopped() error {
 		return UpdaterStoppedError
 	}
 	r.stopped = true
+	if r.updateRCStatusTicker != nil {
+		r.updateRCStatusTicker.Stop()
+	}
 	return nil
 }
 
@@ -2035,4 +2066,49 @@ func (r *PipelineUpdater) shouldRetryOnRemoteAuthErrAndRemoteClusterName() (bool
 		remoteClusterName = ref.Name()
 	}
 	return spec.Settings.GetRetryOnRemoteAuthErr(), remoteClusterName
+}
+
+const (
+	ConnAuthErrorString   = "experienced authentication issues"
+	ConnDegradedString    = "experienced connectivity issues to one or more target cluster node(s)"
+	ConnErrorString       = "experienced connectivity issues to ALL target cluster nodes"
+	ConnErrorCommonSuffix = ". User intervention may be required"
+)
+
+func (r *PipelineUpdater) checkAndPublishRCError(status metadata.ConnectivityStatus, ref *metadata.RemoteClusterReference) {
+	var needToAddErr bool
+
+	if status == metadata.ConnIniting || status == metadata.ConnValid {
+		// Clear any previous errors and that's it
+		r.rep_status.ClearErrorsWithString(ConnErrorCommonSuffix)
+		return
+	}
+
+	// Else, only add an error if it hasn't been shown before to prevent error overrun
+	allErrors := r.rep_status.Errors()
+	if len(allErrors) == 0 {
+		needToAddErr = true
+	} else {
+		allErrorsString := allErrors.String()
+		switch status {
+		case metadata.ConnAuthErr:
+			needToAddErr = !strings.Contains(allErrorsString, ConnAuthErrorString)
+		case metadata.ConnDegraded:
+			needToAddErr = !strings.Contains(allErrorsString, ConnDegradedString)
+		case metadata.ConnError:
+			needToAddErr = !strings.Contains(allErrorsString, ConnErrorString)
+		}
+	}
+
+	if needToAddErr {
+		errPrefix := fmt.Sprintf("Replication %v to remote cluster %v ", r.pipeline_name, ref.Name())
+		switch status {
+		case metadata.ConnAuthErr:
+			r.rep_status.AddError(fmt.Errorf("%v%v%v", errPrefix, ConnAuthErrorString, ConnErrorCommonSuffix))
+		case metadata.ConnDegraded:
+			r.rep_status.AddError(fmt.Errorf("%v%v%v", errPrefix, ConnDegradedString, ConnErrorCommonSuffix))
+		case metadata.ConnError:
+			r.rep_status.AddError(fmt.Errorf("%v%v%v", errPrefix, ConnErrorString, ConnErrorCommonSuffix))
+		}
+	}
 }
