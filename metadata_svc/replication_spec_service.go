@@ -833,7 +833,7 @@ func (service *ReplicationSpecService) DelReplicationSpecWithReason(replicationI
 
 	key := getKeyFromReplicationId(replicationId)
 	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, key, spec.Revision)
-	if err != nil {
+	if err != nil && err != service_def.ErrorRevisionMismatch {
 		service.logger.Errorf("Failed to delete replication spec, key=%v, err=%v\n", key, err)
 		return nil, err
 	}
@@ -847,7 +847,6 @@ func (service *ReplicationSpecService) DelReplicationSpecWithReason(replicationI
 		service.logger.Errorf("Failed to delete replication spec, key=%v, err=%v\n", key, err)
 		return nil, err
 	}
-
 }
 
 // NOTE - this is an expensive operation that will force a clean resync of the cache from metaKV
