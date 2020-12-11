@@ -223,6 +223,8 @@ const (
 	// Conflict Resolver related setting
 	JSEngineWorkersPerNodeKey   = "JSEngineWorkersPerNode"
 	JSEngineThreadsPerWorkerKey = "JSEngineThreadsPerWorker"
+
+	MaxCountDCPStreamsInactiveKey = "MaxCountDCPStreamsInactive"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -318,6 +320,7 @@ var ManifestRefreshTgtIntervalConfig = &SettingsConfig{base.ManifestRefreshTgtIn
 var BackfillPersistIntervalConfig = &SettingsConfig{int64(base.BackfillPersistInterval / time.Millisecond), &Range{1, 10000}}
 var JSEngineWorkersPerNodeConfig = &SettingsConfig{base.JSEngineWorkersPerNode, &Range{1, 10}}
 var JSEngineThreadsPerWorkerConfig = &SettingsConfig{base.JSEngineThreadsPerWorker, &Range{1, 10}}
+var MaxCountDCPStreamsInactiveConfig = &SettingsConfig{base.MaxCountStreamsInactive, &Range{1, 40}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -413,6 +416,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	BackfillPersistIntervalKey:                    BackfillPersistIntervalConfig,
 	JSEngineWorkersPerNodeKey:                     JSEngineWorkersPerNodeConfig,
 	JSEngineThreadsPerWorkerKey:                   JSEngineThreadsPerWorkerConfig,
+	MaxCountDCPStreamsInactiveKey:                 MaxCountDCPStreamsInactiveConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

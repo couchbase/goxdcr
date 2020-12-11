@@ -59,8 +59,6 @@ var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTim
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
-var MaxCountStreamsInactive uint32 = 40
-
 type vbtsWithLock struct {
 	ts   *base.VBTimestamp
 	lock *sync.RWMutex
@@ -1761,7 +1759,7 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 	if len(streams_inactive) > 0 {
 		updated_streams_inactive_count := atomic.AddUint32(&dcp.counter_streams_inactive, 1)
 		dcp.Logger().Infof("%v incrementing counter for inactive streams to %v\n", dcp.Id(), updated_streams_inactive_count)
-		if updated_streams_inactive_count > MaxCountStreamsInactive {
+		if updated_streams_inactive_count > uint32(base.MaxCountStreamsInactive) {
 			// After a certain amount of time, simply re-send a STREAMREQ to re-initiate.
 			dcp.Logger().Infof("%v re-sending STREAMREQ for inactive streams %v\n", dcp.Id(), streams_inactive)
 			err := dcp.startUprStreams_internal(streams_inactive)

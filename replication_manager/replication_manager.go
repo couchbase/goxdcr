@@ -313,6 +313,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.TimeoutHttpsPortLookupKey].(int))*time.Second,
 		internal_settings.Values[metadata.JSEngineWorkersPerNodeKey].(int),
 		internal_settings.Values[metadata.JSEngineThreadsPerWorkerKey].(int),
+		internal_settings.Values[metadata.MaxCountDCPStreamsInactiveKey].(int),
 	)
 }
 

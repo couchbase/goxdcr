@@ -1063,7 +1063,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
 	backfillPersistInterval time.Duration,
 	httpsPortLookupTimeout time.Duration,
-	jsEngineWorkersPerNode int, jsEngineThreadsPerWorker int) {
+	jsEngineWorkersPerNode int, jsEngineThreadsPerWorker int,
+	maxCountDcpStreamsInactive int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1176,6 +1177,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	HttpsPortLookupTimeout = httpsPortLookupTimeout
 	JSEngineWorkersPerNode = jsEngineWorkersPerNode
 	JSEngineThreadsPerWorker = jsEngineThreadsPerWorker
+	MaxCountStreamsInactive = maxCountDcpStreamsInactive
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -1238,3 +1240,7 @@ const (
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)
 
 const RetryOnRemoteAuthErrKey = "retryOnRemoteAuthErr"
+
+// DCP inactive stream monitor will sleep every "dcp_inactive_stream_check_interval" (30sec)
+// Once this max is hit, it'll retry streamReq with DCP
+var MaxCountStreamsInactive = 10
