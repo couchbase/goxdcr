@@ -833,9 +833,13 @@ func (service *ReplicationSpecService) DelReplicationSpecWithReason(replicationI
 
 	key := getKeyFromReplicationId(replicationId)
 	err = service.metadata_svc.DelWithCatalog(ReplicationSpecsCatalogKey, key, spec.Revision)
-	if err != nil && err != service_def.ErrorRevisionMismatch {
-		service.logger.Errorf("Failed to delete replication spec, key=%v, err=%v\n", key, err)
-		return nil, err
+	if err != nil {
+		// Check to see if the data still exists. Only if it doesn't exist is the del op considered passed
+		_, _, checkErr := service.metadata_svc.Get(key)
+		if checkErr != service_def.MetadataNotFoundErr {
+			service.logger.Errorf("Failed to delete replication spec, key=%v, err=%v\n", key, err)
+			return nil, err
+		}
 	}
 
 	err = service.updateCache(replicationId, nil)

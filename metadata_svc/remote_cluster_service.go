@@ -1902,6 +1902,11 @@ func (agent *RemoteClusterAgent) deleteFromMetaKVNoLock(id, name string, revisio
 	err := agent.metakvSvc.DelWithCatalog(RemoteClustersCatalogKey, id, revision)
 	if err != nil {
 		agent.logger.Errorf(fmt.Sprintf("Error occured when deleting reference %v from metakv: %v\n", name, err.Error()))
+		_, _, checkErr := agent.metakvSvc.Get(id)
+		if checkErr == service_def.MetadataNotFoundErr {
+			agent.logger.Warnf("Agent double check found no traces of remote cluster reference Id %v. Deletion considered passed", id)
+			err = nil
+		}
 	} else {
 		agent.logger.Infof("Remote cluster %v deleted from metadata store\n", name)
 	}
