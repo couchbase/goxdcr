@@ -207,6 +207,13 @@ func (c *Client) SetDeadline(t time.Time) {
 	c.deadline = t
 }
 
+func (c *Client) getOpaque() uint32 {
+	if c.opaque >= math.MaxInt32 {
+		c.opaque = uint32(1)
+	}
+	return c.opaque + 1
+}
+
 // Wrap an existing transport.
 func Wrap(conn memcachedConnection) (rv *Client, err error) {
 	client := &Client{
@@ -427,6 +434,7 @@ func (c *Client) Get(vb uint16, key string, context ...*ClientContext) (*gomemca
 		Opcode:  gomemcached.GET,
 		VBucket: vb,
 		Key:     []byte(key),
+		Opaque:  c.getOpaque(),
 	}
 	err := c.setCollection(req, context...)
 	if err != nil {
@@ -444,6 +452,7 @@ func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string, context ...
 		Key:     []byte(key),
 		Extras:  extraBuf,
 		Body:    valueBuf,
+		Opaque:  c.getOpaque(),
 	}
 	err := c.setCollection(req, context...)
 	if err != nil {
@@ -512,6 +521,7 @@ func (c *Client) GetMeta(vb uint16, key string, context ...*ClientContext) (*gom
 		Opcode:  gomemcached.GET_META,
 		VBucket: vb,
 		Key:     []byte(key),
+		Opaque:  c.getOpaque(),
 	}
 	err := c.setCollection(req, context...)
 	if err != nil {
