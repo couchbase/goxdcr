@@ -56,6 +56,7 @@ type ClientIface interface {
 	SelectBucket(bucket string) (*gomemcached.MCResponse, error)
 	SetCas(vb uint16, key string, flags int, exp int, cas uint64, body []byte, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	Stats(key string) ([]StatValue, error)
+	StatsFunc(key string, fn func(key, val []byte)) error
 	StatsMap(key string) (map[string]string, error)
 	StatsMapForSpecifiedStats(key string, statsMap map[string]string) error
 	Transmit(req *gomemcached.MCRequest) error
@@ -1214,6 +1215,34 @@ func (c *Client) Stats(key string) ([]StatValue, error) {
 		})
 	}
 	return rv, nil
+}
+
+// Stats requests server-side stats.
+//
+// Use "" as the stat key for toplevel stats.
+func (c *Client) StatsFunc(key string, fn func(key, val []byte)) error {
+	req := &gomemcached.MCRequest{
+		Opcode: gomemcached.STAT,
+		Key:    []byte(key),
+		Opaque: 918494,
+	}
+
+	err := c.Transmit(req)
+	if err != nil {
+		return err
+	}
+
+	for {
+		res, _, err := getResponse(c.conn, c.hdrBuf)
+		if err != nil {
+			return err
+		}
+		if len(res.Key) == 0 {
+			break
+		}
+		fn(res.Key, res.Body)
+	}
+	return nil
 }
 
 // StatsMap requests server-side stats similarly to Stats, but returns
