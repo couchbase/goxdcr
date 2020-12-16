@@ -472,6 +472,7 @@ func (c *Client) GetCollectionsManifest() (*gomemcached.MCResponse, error) {
 
 	res, err := c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.GET_COLLECTIONS_MANIFEST,
+		Opaque: c.getOpaque(),
 	})
 
 	if err != nil && IfResStatusError(res) {
@@ -486,6 +487,7 @@ func (c *Client) CollectionsGetCID(scope string, collection string) (*gomemcache
 	res, err := c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.COLLECTIONS_GET_CID,
 		Key:    []byte(scope + "." + collection),
+		Opaque: c.getOpaque(),
 	})
 
 	if err != nil && IfResStatusError(res) {
@@ -507,6 +509,7 @@ func (c *Client) GetAndTouch(vb uint16, key string, exp int, context ...*ClientC
 		VBucket: vb,
 		Key:     []byte(key),
 		Extras:  extraBuf,
+		Opaque:  c.getOpaque(),
 	}
 	err := c.setCollection(req, context...)
 	if err != nil {
@@ -549,6 +552,7 @@ func (c *Client) Del(vb uint16, key string, context ...*ClientContext) (*gomemca
 func (c *Client) GetRandomDoc(context ...*ClientContext) (*gomemcached.MCResponse, error) {
 	req := &gomemcached.MCRequest{
 		Opcode: 0xB6,
+		Opaque: c.getOpaque(),
 	}
 	err := c.setExtrasCollection(req, context...)
 	if err != nil {
@@ -662,7 +666,7 @@ func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
 		VBucket: vb,
 		Key:     []byte(key),
 		Cas:     0,
-		Opaque:  0,
+		Opaque:  c.getOpaque(),
 		Extras:  []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		Body:    body}
 
@@ -681,7 +685,7 @@ func (c *Client) storeCas(opcode gomemcached.CommandCode, vb uint16,
 		VBucket: vb,
 		Key:     []byte(key),
 		Cas:     cas,
-		Opaque:  0,
+		Opaque:  c.getOpaque(),
 		Extras:  []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		Body:    body}
 
@@ -771,7 +775,7 @@ func (c *Client) Append(vb uint16, key string, data []byte, context ...*ClientCo
 		VBucket: vb,
 		Key:     []byte(key),
 		Cas:     0,
-		Opaque:  0,
+		Opaque:  c.getOpaque(),
 		Body:    data}
 
 	err := c.setCollection(req, context...)
