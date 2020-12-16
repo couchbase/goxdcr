@@ -536,6 +536,7 @@ func (c *Client) Del(vb uint16, key string, context ...*ClientContext) (*gomemca
 		Opcode:  gomemcached.DELETE,
 		VBucket: vb,
 		Key:     []byte(key),
+		Opaque:  c.getOpaque(),
 	}
 	err := c.setCollection(req, context...)
 	if err != nil {
