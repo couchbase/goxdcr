@@ -235,7 +235,7 @@ func (reqHelper *dcpStreamReqHelper) processSuccessResponse(version uint16) {
 		return
 	}
 
-	if reqHelper.isStreamActive() {
+	if reqHelper.isStreamActiveNoLock() {
 		// reset stats
 		reqHelper.initialize()
 	}
