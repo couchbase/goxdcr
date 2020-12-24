@@ -529,9 +529,13 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 	if c.lastKnownSrcManifest != nil {
 		lastKnownUid = c.lastKnownSrcManifest.Uid()
 	}
+	var lastKnownTgtUid uint64
+	if c.lastKnownTgtManifest != nil {
+		lastKnownTgtUid = c.lastKnownTgtManifest.Uid()
+	}
 	c.mappingMtx.RUnlock()
 
-	if !isExplicitMapping || latestSourceManifest.Uid() <= lastKnownUid {
+	if !isExplicitMapping || latestSourceManifest.Uid() <= lastKnownUid && latestTargetManifest.Uid() <= lastKnownTgtUid {
 		return nil
 	}
 
