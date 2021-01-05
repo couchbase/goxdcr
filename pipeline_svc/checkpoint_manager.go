@@ -1967,12 +1967,12 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 	}
 
 	if len(added) > 0 {
-		buffer.WriteString("The followings are collection mappings that are newly broken:\n")
+		buffer.WriteString("Found following destination collection(s) missing (and will not get replicated to):\n")
 		buffer.WriteString(added.String())
 	}
 
 	if len(removed) > 0 {
-		buffer.WriteString("The followings are collection mappings that are now repaired:\n")
+		buffer.WriteString("Following collection mappings are now repaired and replicating:\n")
 		buffer.WriteString(removed.String())
 	}
 

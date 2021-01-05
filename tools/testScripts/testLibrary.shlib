@@ -8,8 +8,8 @@
 # and limitations under the License.
 
 # CONSTANTS
-BROKEN_MSG="The followings are collection mappings that are newly broken"
-REPAIR_MSG="The followings are collection mappings that are now repaired"
+BROKEN_MSG="Found following destination collection(s) missing (and will not get replicated to)"
+REPAIR_MSG="Following collection mappings are now repaired and replicating"
 BACKFILL_MSG="These collections need to backfill"
 BACKFILL_APPEND_MSG="These collections need to append backfill"
 VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
