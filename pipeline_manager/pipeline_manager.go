@@ -36,6 +36,7 @@ var MainPipelineNotRunning error = errors.New("Main pipeline is not running")
 var ErrorExplicitMappingWoRules = errors.New("specified explicit mapping but no rule is found")
 var ErrorCAPIReplicationDeprecated = errors.New("CAPI replication is now deprecated. The pipeline will be paused. Please edit the replication via REST and change the replication type to XMEM")
 var ErrorBackfillSpecHasNoVBTasks = errors.New("backfill spec VBTasksMap is empty")
+var ErrorNoKVService = errors.New("this node does not have KV service")
 
 var default_failure_restart_interval = 10
 
@@ -478,6 +479,12 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 	// Deprecate CAPI replication
 	if spec.Settings.RepType == metadata.ReplicationTypeCapi {
 		return ErrorCAPIReplicationDeprecated
+	}
+
+	// Check if this node is KV node or not
+	isMyNodeKVNode, err := pipelineMgr.xdcr_topology_svc.IsKVNode()
+	if err == nil && !isMyNodeKVNode {
+		return ErrorNoKVService
 	}
 
 	// Explicit mapping mode on means that there should be rules accompanying it
@@ -1470,7 +1477,8 @@ func allErrorsAreAllowed(errMap base.ErrorMap) bool {
 func allowableErrorCodes(err error) bool {
 	if err == nil ||
 		err == ReplicationSpecNotActive ||
-		err == service_def.MetadataNotFoundErr {
+		err == service_def.MetadataNotFoundErr ||
+		err == ErrorNoKVService {
 		return true
 	}
 	return false
@@ -1605,6 +1613,23 @@ RE:
 		r.logger.Infof("Replication %v has been paused. no need to update\n", r.pipeline_name)
 	} else if base.CheckErrorMapForError(errMap, service_def.MetadataNotFoundErr, true /*exactMatch */) {
 		r.logger.Infof("Replication %v has been deleted. no need to update\n", r.pipeline_name)
+	} else if base.CheckErrorMapForError(errMap, ErrorNoKVService, true) {
+		// MB-15357 documents the inability to dynamically add KV service to a node without a KV service
+		// If it gets fixed in the future and KV service can be added, any vb rebalancing should trigger pipeline restart
+		// and there should not be any need to fix anything
+		hostAddr, hostAddrErr := r.pipelineMgr.GetXDCRTopologySvc().MyHostAddr()
+		var msg string
+		if hostAddrErr == nil {
+			msg = fmt.Sprintf("Replication %v is unable to start on %v because this node does not have Data service", r.pipeline_name, hostAddr)
+		} else {
+			msg = fmt.Sprintf("Replication %v is unable to start on a subset of nodes because at least one does not have Data service", r.pipeline_name)
+		}
+		r.logger.Warnf(msg)
+		r.pipelineMgr.GetLogSvc().Write(msg)
+		if r.rep_status != nil {
+			// Set this to nil will enforce a clean overview "running" stats
+			r.rep_status.SetOverviewStats(nil, common.MainPipeline)
+		}
 	} else if base.CheckErrorMapForError(errMap, service_def.ErrorSourceDefaultCollectionDNE, false /*exactMatch*/) {
 		dneErr := fmt.Sprintf("Replication %v cannot continue because target does not support collections and the source bucket's default collection is removed. Replication will automatically be paused.\n", r.pipeline_name)
 		r.logger.Errorf(dneErr)

@@ -11,10 +11,9 @@ package service_def
 
 import (
 	"fmt"
-	"strings"
-
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
+	"strings"
 )
 
 // Stats per vbucket

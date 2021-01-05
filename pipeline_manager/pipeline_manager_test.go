@@ -149,13 +149,17 @@ const (
 	mainPipelineRunning mainPipelineMockStatus = iota
 )
 
-func setupDetailedMocking(testLogger *log.CommonLogger, pipelineMock *common.PipelineFactory, replSpecSvcMock *service_def.ReplicationSpecSvc, xdcrTopologyMock *service_def.XDCRCompTopologySvc, isKVNode bool, remoteClusterMock *service_def.RemoteClusterSvc, pipelineMgr *PipelineManager, testRepairer *PipelineUpdater, testReplicationStatus *replicationStatus.ReplicationStatus, testTopic string, testReplicationSettings *metadata.ReplicationSettings, testReplicationSpec *metadata.ReplicationSpecification, testRemoteClusterRef *metadata.RemoteClusterReference, testPipeline *common.Pipeline, uiLogSvc *service_def.UILogSvc, replStatusMock *replicationStatusMock.ReplicationStatusIface, ckptMock *service_def.CheckpointsService, clusterInfoSvc *service_def.ClusterInfoSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, mainPipelineStatus mainPipelineMockStatus, backfillSpecToReturn *metadata.BackfillReplicationSpec) {
+func setupDetailedMocking(testLogger *log.CommonLogger, pipelineMock *common.PipelineFactory, replSpecSvcMock *service_def.ReplicationSpecSvc, xdcrTopologyMock *service_def.XDCRCompTopologySvc, isKVNode bool, remoteClusterMock *service_def.RemoteClusterSvc, pipelineMgr *PipelineManager, testRepairer *PipelineUpdater, testReplicationStatus *replicationStatus.ReplicationStatus, testTopic string, testReplicationSettings *metadata.ReplicationSettings, testReplicationSpec *metadata.ReplicationSpecification, testRemoteClusterRef *metadata.RemoteClusterReference, testPipeline *common.Pipeline, uiLogSvc *service_def.UILogSvc, replStatusMock *replicationStatusMock.ReplicationStatusIface, ckptMock *service_def.CheckpointsService, clusterInfoSvc *service_def.ClusterInfoSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, mainPipelineStatus mainPipelineMockStatus, backfillSpecToReturn *metadata.BackfillReplicationSpec, startPipelineErr base.ErrorMap) {
 
 	if mainPipelineStatus != mainPipelineNil {
 		mainPipelineMock := &common.Pipeline{}
 		mainPipelineMock.On("Type").Return(commonReal.MainPipeline)
 		mainPipelineMock.On("Sources").Return(nil)
 		mainPipelineMock.On("Specification").Return(testReplicationSpec)
+		mainPipelineMock.On("Stop").Return(nil)
+		mainPipelineMock.On("Start").Return(startPipelineErr)
+		mainPipelineMock.On("Specification").Return(testReplicationSpec)
+		mainPipelineMock.On("Topic").Return(testTopic)
 		switch mainPipelineStatus {
 		case mainPipelineRunning:
 			mainPipelineMock.On("State").Return(commonReal.Pipeline_Running)
@@ -237,7 +241,7 @@ func setupGenericMocking(testLogger *log.CommonLogger,
 	collectionsManifestSvc *service_def.CollectionsManifestSvc,
 	backfillReplSvc *service_def.BackfillReplSvc) {
 
-	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptSvc, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, 0, nil)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptSvc, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, 0, nil, nil)
 
 	return
 }
@@ -969,7 +973,7 @@ func TestPipelineMgrStartNoBackfillSpec(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
-	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, nil)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, nil, nil)
 
 	assert.NotNil(pipelineMgr)
 	errMap := pipelineMgr.StartBackfillPipeline(testTopic)
@@ -987,7 +991,7 @@ func TestPipelineMgrStartMainNotStarting(t *testing.T) {
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec)
-	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineStopped, backfillSpec)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineStopped, backfillSpec, nil)
 
 	assert.NotNil(pipelineMgr)
 	errMap := pipelineMgr.StartBackfillPipeline(testTopic)
@@ -1005,9 +1009,28 @@ func TestPipelineMgrStartNoVBTasks(t *testing.T) {
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
 	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec)
-	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, backfillSpec)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, backfillSpec, nil)
 
 	assert.NotNil(pipelineMgr)
 	errMap := pipelineMgr.StartBackfillPipeline(testTopic)
 	assert.True(backfillStartSuccessful(errMap, testLogger, testTopic))
+}
+
+func TestNonKVNodeStartPipeline(t *testing.T) {
+	fmt.Println("============== Test case start: TestNonKVNodeStartPipeline =================")
+	defer fmt.Println("============== Test case start: TestNonKVNodeStartPipeline =================")
+	assert := assert.New(t)
+
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
+
+	startErrMap := make(base.ErrorMap)
+	startErrMap["_"] = ErrorNoKVService
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, false, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning,
+		nil, startErrMap)
+	assert.NotNil(testRepairer)
+	errMap := testRepairer.update()
+	assert.Len(errMap, 0)
 }

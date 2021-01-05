@@ -234,6 +234,8 @@ type ResourceManager struct {
 	backfillReplSvc service_def.BackfillReplSvc
 
 	managedResourceOnceSpecMap map[string]*metadata.GenericSpecification
+
+	isKVNode bool
 }
 
 type ResourceMgrIface interface {
@@ -282,6 +284,15 @@ func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec
 func (rm *ResourceManager) Start() error {
 	rm.logger.Infof("%v starting ....\n", ResourceManagerName)
 	defer rm.logger.Infof("%v started\n", ResourceManagerName)
+
+	isKVNode, kvErr := rm.xdcr_topology_svc.IsKVNode()
+	if kvErr != nil {
+		rm.logger.Warnf("Received %v when checking isKVNode", kvErr)
+		// Assume is KV node
+		isKVNode = true
+	}
+	// TODO: If MB-15357 is fixed, this will no longer be correct because it is not being monitored
+	rm.isKVNode = isKVNode
 
 	// ignore error
 	rm.getSystemStats()
@@ -1099,10 +1110,15 @@ func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecific
 	if err != nil {
 		return nil, err
 	}
+
 	statsMap := rs.GetOverviewStats(pipelineType)
-	if statsMap == nil {
+	if statsMap == nil && rm.isKVNode {
 		// this is possible when replication is starting up
 		return nil, fmt.Errorf("Cannot find overview stats for %v", spec.GetFullId())
+	}
+
+	if !rm.isKVNode {
+		return &ReplStats{0, 0, 0, time.Now().UnixNano(), 0}, nil
 	}
 
 	changesLeft, err := base.ParseStats(statsMap, base.ChangesLeftStats)

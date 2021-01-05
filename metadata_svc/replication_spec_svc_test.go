@@ -71,6 +71,9 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	targetBucket := "testTargetBucket"
 	targetCluster := "localHost"
 	settings := make(map[string]interface{})
+
+	xdcrTopologyMock.On("IsKVNode").Return(true, nil)
+
 	return xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
 		clusterInfoSvcMock, utilitiesMock, replSpecSvc, sourceBucket, targetBucket, targetCluster, settings,
 		clientMock, backfillReplSvc

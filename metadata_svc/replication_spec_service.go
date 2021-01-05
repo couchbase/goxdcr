@@ -477,7 +477,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 	}
 	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
 
-	repl_type, ok := settings[metadata.ReplicationTypeKey]
+	repl_type, replTypeOk := settings[metadata.ReplicationTypeKey]
 	compressionType, compressionOk := settings[metadata.CompressionTypeKey]
 	if !compressionOk {
 		if isEnterprise {
@@ -514,7 +514,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 		}
 	}
 
-	if !ok || repl_type == metadata.ReplicationTypeXmem {
+	if !replTypeOk || repl_type == metadata.ReplicationTypeXmem {
 		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo, allKvConnStrs[0], username, password)
 		if len(errorMap) > 0 {
 			return nil, warnings
@@ -571,9 +571,15 @@ func (service *ReplicationSpecService) validateCompression(errorMap base.ErrorMa
 		return err
 	}
 
-	err = service.validateCompressionLocal(errorMap, sourceBucket, targetBucket, errKey, requestedFeaturesSet)
-	if len(errorMap) > 0 || err != nil {
-		return err
+	thisNodeContainsKV, kvCheckErr := service.xdcr_comp_topology_svc.IsKVNode()
+	if kvCheckErr != nil {
+		service.logger.Warnf("Checking for KV capability got err: %v", kvCheckErr)
+	}
+	if kvCheckErr == nil && thisNodeContainsKV {
+		err = service.validateCompressionLocal(errorMap, sourceBucket, targetBucket, errKey, requestedFeaturesSet)
+		if len(errorMap) > 0 || err != nil {
+			return err
+		}
 	}
 
 	// Need to validate each node of the target to make sure all of them can support compression
