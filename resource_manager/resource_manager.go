@@ -229,6 +229,8 @@ type ResourceManager struct {
 	overallThroughputSamples metrics.Sample
 	// historical samples of high priority replication throughputs
 	highThroughputSamples metrics.Sample
+
+	isKVNode bool
 }
 
 type ResourceMgrIface interface {
@@ -275,6 +277,24 @@ func NewResourceManager(pipelineMgr pipeline_manager.Pipeline_mgr_iface, repl_sp
 func (rm *ResourceManager) Start() error {
 	rm.logger.Infof("%v starting ....\n", ResourceManagerName)
 	defer rm.logger.Infof("%v started\n", ResourceManagerName)
+
+	kvCheckFunc := func() error {
+		isKVNode, err := rm.xdcr_topology_svc.IsKVNode()
+		if err != nil {
+			rm.logger.Warnf("Received %v when checking isKVNode", err)
+			// Assume true if never succeeded
+			rm.isKVNode = true
+			return err
+		}
+		rm.isKVNode = isKVNode
+		return nil
+	}
+
+	kvErr := rm.utils.ExponentialBackoffExecutor("ResourceManagerKVNodeCheck", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, kvCheckFunc)
+	if kvErr != nil {
+		rm.logger.Warnf("KVNode check failed, assuming is KV node")
+	}
 
 	// igore error
 	rm.getSystemStats()
@@ -1049,10 +1069,15 @@ func (rm *ResourceManager) setDcpPriority(replId string, priority mcc.PriorityTy
 }
 
 func (rm *ResourceManager) getStatsFromReplication(spec *metadata.ReplicationSpecification) (*ReplStats, error) {
+	if !rm.isKVNode {
+		return &ReplStats{0, 0, 0, time.Now().UnixNano(), 0}, nil
+	}
+
 	rs, err := rm.pipelineMgr.ReplicationStatus(spec.Id)
 	if err != nil {
 		return nil, err
 	}
+
 	statsMap := rs.GetOverviewStats()
 	if statsMap == nil {
 		// this is possible when replication is starting up

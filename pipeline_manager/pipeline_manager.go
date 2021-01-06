@@ -29,6 +29,8 @@ import (
 var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
 var ReplicationStatusNotFound error = errors.New("Replication Status not found")
 var UpdaterStoppedError error = errors.New("Updater already stopped")
+var ErrorNoKVService = errors.New("this node does not have KV service")
+
 
 var default_failure_restart_interval = 10
 
@@ -392,6 +394,12 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 	if err != nil {
 		pipelineMgr.logger.Errorf("Failed to get replication specification for pipeline %v, err=%v\n", topic, err)
 		return err
+	}
+
+	// Check if this node is KV node or not
+	isMyNodeKVNode, err := pipelineMgr.xdcr_topology_svc.IsKVNode()
+	if err == nil && !isMyNodeKVNode {
+		return ErrorNoKVService
 	}
 
 	// refresh remote cluster reference when retrieving it, hence making sure that all fields,
@@ -955,7 +963,8 @@ func allErrorsAreAllowed(errMap base.ErrorMap) bool {
 func allowableErrorCodes(err error) bool {
 	if err == nil ||
 		err == ReplicationSpecNotActive ||
-		err == service_def.MetadataNotFoundErr {
+		err == service_def.MetadataNotFoundErr ||
+		err == ErrorNoKVService {
 		return true
 	}
 	return false
@@ -1066,6 +1075,23 @@ RE:
 		r.logger.Infof("Replication %v has been paused. no need to update\n", r.pipeline_name)
 	} else if base.CheckErrorMapForError(errMap, service_def.MetadataNotFoundErr, true /*exactMatch */) {
 		r.logger.Infof("Replication %v has been deleted. no need to update\n", r.pipeline_name)
+	} else if base.CheckErrorMapForError(errMap, ErrorNoKVService, true) {
+		// MB-15357 documents the inability to dynamically add KV service to a node without a KV service
+		// If it gets fixed in the future and KV service can be added, any vb rebalancing should trigger pipeline restart
+		// and there should not be any need to fix anything
+		hostAddr, hostAddrErr := r.pipelineMgr.GetXDCRTopologySvc().MyHostAddr()
+		var msg string
+		if hostAddrErr == nil {
+			msg = fmt.Sprintf("Replication %v is unable to start on %v because this node does not have Data service", r.pipeline_name, hostAddr)
+		} else {
+			msg = fmt.Sprintf("Replication %v is unable to start on a subset of nodes because at least one does not have Data service", r.pipeline_name)
+		}
+		r.logger.Warnf(msg)
+		r.pipelineMgr.GetLogSvc().Write(msg)
+		if r.rep_status != nil {
+			// Set this to nil will enforce a clean overview "running" stats
+			r.rep_status.SetOverviewStats(nil)
+		}
 	} else {
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
 	}

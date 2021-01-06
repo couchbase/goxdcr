@@ -277,7 +277,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 func GetStatisticsForPipeline(topic string) (*expvar.Map, error) {
 	repl_status, _ := pipeline_manager.ReplicationStatus(topic)
 	if repl_status == nil {
-		return nil, nil
+		return GetReadOnlyOverviewStats(), nil
 	}
 
 	return repl_status.GetOverviewStats(), nil
@@ -1731,4 +1731,37 @@ func (statsMgr *StatisticsManager) HandleLatestThroughSeqnos(SeqnoMap map[uint16
 	for _, collector := range statsMgr.collectors {
 		collector.HandleLatestThroughSeqnos(SeqnoMap)
 	}
+}
+
+var readOnlyInitOverview metrics.Registry
+var readOnlyInitOnce sync.Once
+
+func GetReadOnlyOverviewStats() *expvar.Map {
+	readOnlyInitOnce.Do(func() {
+		readOnlyInitOverview = metrics.NewRegistry()
+		for _, overviewKey := range OverviewMetricKeys {
+			if overviewKey == DOCS_CHECKED_METRIC {
+				docsCheckedCounter := metrics.NewCounter()
+				docsCheckedCounter.Clear()
+				docsCheckedCounter.Inc(int64(-1))
+				readOnlyInitOverview.Register(overviewKey, docsCheckedCounter)
+			} else {
+				readOnlyInitOverview.Register(overviewKey, metrics.NewCounter())
+			}
+		}
+	})
+
+	initOverviewMap := new(expvar.Map).Init()
+	readOnlyInitOverview.Each(func(name string, i interface{}) {
+		if _, okForCounter := i.(metrics.Counter); okForCounter {
+			expvarVal := new(expvar.Int)
+			initOverviewMap.Set(name, expvarVal)
+		}
+	})
+
+	currentTimeVar := new(expvar.Int)
+	currentTimeVar.Set(time.Now().UnixNano())
+	initOverviewMap.Set(base.CurrentTime, currentTimeVar)
+
+	return initOverviewMap
 }
