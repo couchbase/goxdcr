@@ -329,8 +329,8 @@ func (o *OsoSessionsTracker) GetStartingSeqno() (seqno uint64, osoActive bool) {
 // Only the last session will be "open"
 // When a session is ended, the session is now considered "closed" but potentially not yet done
 func (o *OsoSessionsTracker) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrackerSvc) (bool, *OsoSession) {
-	o.lock.Lock()
-	defer o.lock.Unlock()
+	o.lock.RLock()
+	defer o.lock.RUnlock()
 	// Only the last session should be active
 	idx := len(o.sessions) - 1
 	if idx < 0 {
