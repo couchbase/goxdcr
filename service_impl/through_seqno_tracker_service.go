@@ -521,7 +521,6 @@ func (s *OsoSession) GetStartingSeqno() uint64 {
 // essentially creating a gap, pretending that deduping occurred
 func (s *OsoSession) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrackerSvc) (isDone bool) {
 	s.lock.Lock()
-	defer s.lock.Unlock()
 
 	s.dcpSentOsoEnd = true
 
@@ -533,12 +532,14 @@ func (s *OsoSession) RegisterSessionEnd(vbno uint16, tsTracker *ThroughSeqnoTrac
 	}
 
 	s.processUnsureBuffer(vbno, tsTracker)
+	maxSeqnoFromDCP := s.maxSeqnoFromDCP
+	s.lock.Unlock()
 
 	// When a session is done, we will treat the whole OSO session as a single gap
 	// from lastSeqnoSeen+1 to maxProcessed, it will be as if there's a big gap
-	tsTracker.processGapSeqnos(vbno, s.maxSeqnoFromDCP)
+	tsTracker.processGapSeqnos(vbno, maxSeqnoFromDCP)
 
-	return s.isDoneNoLock()
+	return s.IsDone()
 }
 
 // Essentially, the session kept track of the seqno at the session's registration/inception
