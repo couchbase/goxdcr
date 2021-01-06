@@ -285,14 +285,24 @@ func (rm *ResourceManager) Start() error {
 	rm.logger.Infof("%v starting ....\n", ResourceManagerName)
 	defer rm.logger.Infof("%v started\n", ResourceManagerName)
 
-	isKVNode, kvErr := rm.xdcr_topology_svc.IsKVNode()
-	if kvErr != nil {
-		rm.logger.Warnf("Received %v when checking isKVNode", kvErr)
-		// Assume is KV node
-		isKVNode = true
+	kvCheckFunc := func() error {
+		isKVNode, err := rm.xdcr_topology_svc.IsKVNode()
+		if err != nil {
+			rm.logger.Warnf("Received %v when checking isKVNode", err)
+			// TODO: If MB-15357 is fixed, this will no longer be correct because it is not being monitored
+			// Assume true if never succeeded
+			rm.isKVNode = true
+			return err
+		}
+		rm.isKVNode = isKVNode
+		return nil
 	}
-	// TODO: If MB-15357 is fixed, this will no longer be correct because it is not being monitored
-	rm.isKVNode = isKVNode
+
+	kvErr := rm.utils.ExponentialBackoffExecutor("ResourceManagerKVNodeCheck", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
+		base.MetaKvBackoffFactor, kvCheckFunc)
+	if kvErr != nil {
+		rm.logger.Warnf("KVNode check failed, assuming is KV node")
+	}
 
 	// ignore error
 	rm.getSystemStats()
@@ -1097,6 +1107,10 @@ func (rm *ResourceManager) setDcpPriority(spec metadata.GenericSpecification, pr
 }
 
 func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecification) (*ReplStats, error) {
+	if !rm.isKVNode {
+		return &ReplStats{0, 0, 0, time.Now().UnixNano(), 0}, nil
+	}
+
 	var pipelineType common.PipelineType
 	switch spec.Type() {
 	case metadata.MainReplication:
@@ -1112,13 +1126,9 @@ func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecific
 	}
 
 	statsMap := rs.GetOverviewStats(pipelineType)
-	if statsMap == nil && rm.isKVNode {
+	if statsMap == nil {
 		// this is possible when replication is starting up
 		return nil, fmt.Errorf("Cannot find overview stats for %v", spec.GetFullId())
-	}
-
-	if !rm.isKVNode {
-		return &ReplStats{0, 0, 0, time.Now().UnixNano(), 0}, nil
 	}
 
 	changesLeft, err := base.ParseStats(statsMap, base.ChangesLeftStats)
