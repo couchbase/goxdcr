@@ -64,7 +64,7 @@ declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
 
 function runDataLoad {
-  # Run CBWorkloadgen in parallel
+	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
 	runCbWorkloadGenCollection "C1" "B1" "S2" "col1" &
 	waitForBgJobs
@@ -121,4 +121,3 @@ echo "==================="
 printSingleClusterBucketScopeAndCollection "C2" "B2"
 
 demoEcho "Demo finished"
-

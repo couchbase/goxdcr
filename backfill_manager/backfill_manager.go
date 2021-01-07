@@ -619,11 +619,11 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 				Source: srcMan,
 				Target: tgtMan,
 			}
-			newMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, newCollectionMode, newRoutingRules, false)
+			newMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, newCollectionMode, newRoutingRules, false, false)
 			if err != nil {
 				return err
 			}
-			oldMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, oldCollectionMode, oldRoutingRules, false)
+			oldMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, oldCollectionMode, oldRoutingRules, false, false)
 			if err != nil {
 				return err
 			}
@@ -1071,7 +1071,7 @@ func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSo
 			Source: sourceManifest,
 			Target: newTargetManifest,
 		}
-		explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules(), false)
+		explicitMapping, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, modes, spec.Settings.GetCollectionsRoutingRules(), false, false)
 		if err != nil {
 			panic("FIME")
 		}
@@ -1106,7 +1106,7 @@ func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpeci
 		Source: oldSourceManifest,
 		Target: oldTargetManifest,
 	}
-	oldExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules(), false)
+	oldExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules(), false, true)
 	if err != nil {
 		b.logger.Errorf("%v Error compiling old explicit map: %v", spec.Id, err)
 		panic("FIXME")
@@ -1114,7 +1114,7 @@ func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpeci
 	}
 	pair.Source = newSourceManifest
 	pair.Target = newTargetManifest
-	newExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules(), false)
+	newExplicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(pair, modes, spec.Settings.GetCollectionsRoutingRules(), false, true)
 	if err != nil {
 		b.logger.Errorf("%v Error compiling new explicit map: %v", spec.Id, err)
 		panic("FIXME")

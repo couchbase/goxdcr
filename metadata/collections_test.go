@@ -684,7 +684,7 @@ func TestExplicitMapping(t *testing.T) {
 
 	rules := make(CollectionsMappingRulesType)
 	rules["S2"] = "S1"
-	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	explicitMapIdx := explicitMap.CreateLookupIndex()
@@ -733,7 +733,7 @@ func TestExplicitMapping(t *testing.T) {
 	rules = make(CollectionsMappingRulesType)
 	rules["S1"] = "S2"
 	rules["S1.col2"] = nil
-	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
+	explicitMap, err = NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	explicitMapIdx = explicitMap.CreateLookupIndex()
@@ -799,7 +799,7 @@ func TestExplicitMapping(t *testing.T) {
 		Source: &customSrcManifest,
 		Target: &customTgtManifest,
 	}
-	explicitMap, err = NewCollectionNamespaceMappingFromRules(customManifestPair, mappingMode, rules, false)
+	explicitMap, err = NewCollectionNamespaceMappingFromRules(customManifestPair, mappingMode, rules, false, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	explicitMapIdx = explicitMap.CreateLookupIndex()
@@ -871,7 +871,7 @@ func TestMigrationMapping(t *testing.T) {
 	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1.col1"
 	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2.col1"
 
-	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false, false)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	assert.Equal(2, len(explicitMap))
@@ -899,7 +899,7 @@ func TestMigrationDiff(t *testing.T) {
 	var mappingMode base.CollectionsMgtType
 	mappingMode.SetMigration(true)
 
-	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
+	explicitMap, err := NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false, true)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	assert.Equal(0, len(explicitMap))
@@ -913,7 +913,7 @@ func TestMigrationDiff(t *testing.T) {
 		Source: &defaultManifest,
 		Target: &target,
 	}
-	newExplicitMap, err := NewCollectionNamespaceMappingFromRules(newPair, mappingMode, rules, false)
+	newExplicitMap, err := NewCollectionNamespaceMappingFromRules(newPair, mappingMode, rules, false, true)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	assert.Equal(2, len(newExplicitMap))
@@ -1109,9 +1109,9 @@ func TestPerfWeirdMappingChange(t *testing.T) {
 	mode := base.CollectionsMgtType(0)
 	mode.SetExplicitMapping(true)
 
-	oldMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, oldRules, false)
+	oldMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, oldRules, false, false)
 	assert.Nil(err)
-	newMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, newRules, false)
+	newMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, newRules, false, false)
 	assert.Nil(err)
 
 	added, removed := oldMapping.Diff(newMapping)
@@ -1217,14 +1217,14 @@ func TestSpecialMigrationNamespaceFromRules(t *testing.T) {
 	mode := base.CollectionsMgtType(0)
 	mode.SetMigration(true)
 
-	oldMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, oldRules, false)
+	oldMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, oldRules, false, false)
 	assert.Nil(err)
 	assert.Len(oldMapping, 1)
 
 	newRules := make(CollectionsMappingRulesType)
 	newRules[fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)] = fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "col2")
 
-	newMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, newRules, false)
+	newMapping, err := NewCollectionNamespaceMappingFromRules(manifestPair, mode, newRules, false, false)
 	assert.Nil(err)
 	assert.Len(newMapping, 1)
 

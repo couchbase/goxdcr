@@ -355,7 +355,7 @@ func (c *CollectionsRouter) initializeInternalsForExplicitOrMigration(pair metad
 
 	checkAndHandleSpecialMigration(&rules, &modes)
 
-	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules, false)
+	c.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, modes, rules, false, false)
 	if err != nil {
 		return err
 	}
@@ -549,7 +549,7 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 		Target: latestTargetManifest,
 	}
 
-	explicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, mappingMode, rules, false)
+	explicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, mappingMode, rules, false, false)
 	if err != nil {
 		c.logger.Errorf("Unable to create explicit mapping from rules given manifests %v and %v", manifestsPair.Source.Uid(), manifestsPair.Target.Uid())
 		return err
@@ -704,6 +704,16 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 		errMsg := fmt.Sprintf("target manifest version %v does not include %v - mutations with this mapping may need to be backfilled", manifestId, unmappedNamespaces.String())
 		// All are unmapped - need to raise error
 		err = fmt.Errorf(errMsg)
+		if c.collectionMode.IsMigrationOn() {
+			// migration routing means that the target mapping is empty. Pick one unmapped and get it rdy for brokenMap
+			for _, tgtNamespaces := range unmappedNamespaces {
+				if len(tgtNamespaces) == 0 {
+					continue
+				}
+				wrappedMCReq.ColInfo.TargetNamespace = tgtNamespaces[0]
+				break
+			}
+		}
 		return
 	}
 
@@ -1157,6 +1167,7 @@ func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *
 		errMap["migrationExplicitMap"] = base.ErrorInvalidInput
 		return nil, errMap, nil
 	}
+	// It is possible that this needs to record unroutable request using mcReq only
 	c.mappingMtx.RLock()
 	defer c.mappingMtx.RUnlock()
 	return c.explicitMappings.GetTargetUsingMigrationFilter(uprEvent, mcReq, c.logger)

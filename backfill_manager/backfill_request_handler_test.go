@@ -481,7 +481,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 	rules["REGEXP_CONTAINS(META().id, \"^S1_\")"] = "S1.col1"
 	rules["REGEXP_CONTAINS(META().id, \"^S2_\")"] = "S2.col1"
 
-	explicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false)
+	explicitMap, err := metadata.NewCollectionNamespaceMappingFromRules(manifestPair, mappingMode, rules, false, true)
 	assert.Nil(err)
 	assert.NotNil(explicitMap)
 	assert.Equal(2, len(explicitMap))

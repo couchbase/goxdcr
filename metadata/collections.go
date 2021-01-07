@@ -1143,6 +1143,16 @@ func NewSourceCollectionNamespace(colNs *base.CollectionNamespace) *SourceNamesp
 // Since the filterUtils do not need mocking, use this global
 var utils = &filter.FilterUtilsImpl{}
 
+// Used only for outputting purposes
+func NewSourceMigrationNamespaceFromColNs(namespace *base.CollectionNamespace) *SourceNamespace {
+	return &SourceNamespace{
+		CollectionNamespace: namespace,
+		nsType:              SourceDefaultCollectionFilter,
+		filterString:        namespace.CollectionName,
+		filter:              nil,
+	}
+}
+
 func NewSourceMigrationNamespace(expr string, dp base.DataPool) (*SourceNamespace, error) {
 	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp)
 	if err != nil {
@@ -1204,7 +1214,7 @@ func NewDefaultCollectionMigrationMapping() CollectionNamespaceMapping {
 	return defaultMapping
 }
 
-func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules CollectionsMappingRulesType, ensureSourceExists bool) (CollectionNamespaceMapping, error) {
+func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPair, mappingMode base.CollectionsMgtType, rules CollectionsMappingRulesType, ensureSourceExists bool, migrationBackfillDiff bool) (CollectionNamespaceMapping, error) {
 	if manifestsPair.Source == nil || manifestsPair.Target == nil {
 		return CollectionNamespaceMapping{}, fmt.Errorf("creating collection namespace mapping pair contains at least one nil element")
 	}
@@ -1234,9 +1244,13 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 				// should have already validated and thus shouldn't be possible here
 				continue
 			}
-			// Look to see if the targetNamespace exists on the target manifest
-			_, err = manifestsPair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
-			if err == nil {
+			var migrationDiffErr error
+			if migrationBackfillDiff {
+				// This mode means that output is going to be used for diff purposes
+				// Thus, only include the namespace if it exists on the target manifest
+				_, migrationDiffErr = manifestsPair.Target.GetCollectionId(targetNamespace.ScopeName, targetNamespace.CollectionName)
+			}
+			if migrationDiffErr == nil {
 				outputMapping.AddSingleSourceNsMapping(sourceNs, &targetNamespace)
 			}
 		}
@@ -1331,6 +1345,14 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 	}
 }
 
+func (c *CollectionNamespaceMapping) MigrateString() string {
+	var buffer bytes.Buffer
+	for src, tgtList := range *c {
+		buffer.WriteString(fmt.Sprintf("SOURCE ||%v|| -> TARGET(s) %v\n", src.CollectionName, CollectionNamespaceList(tgtList).String()))
+	}
+	return buffer.String()
+}
+
 func (c *CollectionNamespaceMapping) String() string {
 	var buffer bytes.Buffer
 	for src, tgtList := range *c {
@@ -1408,6 +1430,7 @@ func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(uprEvent *mcc
 		}
 
 		if match {
+			mcReq.SrcColNamespace = k.GetCollectionNamespace()
 			matchedNamespaces[k] = v
 		}
 	}

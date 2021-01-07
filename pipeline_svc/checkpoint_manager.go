@@ -1935,8 +1935,11 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 		return
 	}
 
+	var migrationMode bool
 	if len(added) > 0 || len(removed) > 0 {
 		spec := ckmgr.pipeline.Specification().GetReplicationSpec()
+		modes := spec.Settings.GetCollectionModes()
+		migrationMode = modes.IsMigrationOn()
 		ref, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
 		if err != nil || ref == nil {
 			ckmgr.logger.Warnf("Unable to write to UI log service the update.\nNewly broken: %v Repaired: %v\n",
@@ -1968,12 +1971,20 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 
 	if len(added) > 0 {
 		buffer.WriteString("Found following destination collection(s) missing (and will not get replicated to):\n")
-		buffer.WriteString(added.String())
+		if migrationMode {
+			buffer.WriteString(added.MigrateString())
+		} else {
+			buffer.WriteString(added.String())
+		}
 	}
 
 	if len(removed) > 0 {
 		buffer.WriteString("Following collection mappings are now repaired and replicating:\n")
-		buffer.WriteString(removed.String())
+		if migrationMode {
+			buffer.WriteString(removed.MigrateString())
+		} else {
+			buffer.WriteString(removed.String())
+		}
 	}
 
 	if needToRaiseUI {

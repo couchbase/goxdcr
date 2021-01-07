@@ -711,7 +711,7 @@ func validateSrcNamespacesExist(targetClusterName string, srcBucket string, targ
 		Source: srcManifest,
 		Target: tgtManifest,
 	}
-	_, err = metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, rulesToCheck, mappingRules, true)
+	_, err = metadata.NewCollectionNamespaceMappingFromRules(manifestsPair, rulesToCheck, mappingRules, true, false)
 	if err != nil {
 		return err
 	}

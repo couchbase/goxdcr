@@ -569,7 +569,7 @@ func TestRouterExplicitMode(t *testing.T) {
 	collectionsRouter.collectionsManifestSvc = collectionsManifestSvc
 
 	// TODO - change this to use actual update call
-	collectionsRouter.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, mappingMode, rules, false)
+	collectionsRouter.explicitMappings, err = metadata.NewCollectionNamespaceMappingFromRules(pair, mappingMode, rules, false, false)
 	assert.Nil(err)
 	collectionsRouter.explicitMappingIdx = collectionsRouter.explicitMappings.CreateLookupIndex()
 
