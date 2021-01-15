@@ -1617,15 +1617,8 @@ RE:
 		// MB-15357 documents the inability to dynamically add KV service to a node without a KV service
 		// If it gets fixed in the future and KV service can be added, any vb rebalancing should trigger pipeline restart
 		// and there should not be any need to fix anything
-		hostAddr, hostAddrErr := r.pipelineMgr.GetXDCRTopologySvc().MyHostAddr()
-		var msg string
-		if hostAddrErr == nil {
-			msg = fmt.Sprintf("Replication %v is unable to start on %v because this node does not have Data service", r.pipeline_name, hostAddr)
-		} else {
-			msg = fmt.Sprintf("Replication %v is unable to start on a subset of nodes because at least one does not have Data service", r.pipeline_name)
-		}
+		msg := fmt.Sprintf("Replication %v is unable to start on this node because it does not have data service", r.pipeline_name)
 		r.logger.Warnf(msg)
-		r.pipelineMgr.GetLogSvc().Write(msg)
 		if r.rep_status != nil {
 			// Set this to nil will enforce a clean overview "running" stats
 			r.rep_status.SetOverviewStats(nil, common.MainPipeline)
