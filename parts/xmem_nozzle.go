@@ -2300,15 +2300,15 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	if err != nil {
 		return
 	}
+	// Set client immediately so that if the pipeline start times out during the next getClientWithRetry call, this client connection can be cleaned up
+	xmem.setClient(base.NewXmemClient(SetMetaClientName, xmem.config.readTimeout,
+		xmem.config.writeTimeout, memClient_setMeta,
+		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger()), true /*isSetMeta*/)
 
 	memClient_getMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, true /*initializing*/, xmem.Logger())
 	if err != nil {
 		return
 	}
-
-	xmem.setClient(base.NewXmemClient(SetMetaClientName, xmem.config.readTimeout,
-		xmem.config.writeTimeout, memClient_setMeta,
-		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger()), true /*isSetMeta*/)
 	xmem.setClient(base.NewXmemClient(GetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_getMeta,
 		xmem.config.maxRetry, xmem.config.max_read_downtime, xmem.Logger()), false /*isSetMeta*/)
