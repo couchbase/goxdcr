@@ -1269,14 +1269,30 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReference(rctx *refreshC
 func (agent *RemoteClusterAgent) getCredentialsAndMisc() (username, password string, httpAuthMech base.HttpAuthMech,
 	certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte,
 	connStr string, curRefNodesList base.StringPairList, encryptionEnabled bool, err error) {
+	stopFunc := agent.diagStopwatchFunc(fmt.Sprintf("getCredentialsAndMisc(%v)", connStr), DiagNetworkThreshold)
+	defer stopFunc()
+
 	agent.refMtx.RLock()
-	defer agent.refMtx.RUnlock()
-	if agent.pendingRef.IsEmpty() {
-		err = fmt.Errorf("Agent pendingRef is empty when doing sync to %v", agent.reference.Id())
+	isEmpty := agent.pendingRef.IsEmpty()
+	id := agent.reference.Id()
+	agent.refMtx.RUnlock()
+	if isEmpty {
+		err = fmt.Errorf("Agent pendingRef is empty when doing sync to %v", id)
 		return
 	}
 
-	agent.pendingRef.PopulateDnsSrvIfNeeded(true)
+	var populateSRVWaitGrp sync.WaitGroup
+	populateSRVWaitGrp.Add(1)
+	agent.refMtx.RLock()
+	go func() {
+		defer populateSRVWaitGrp.Done()
+		agent.pendingRef.PopulateDnsSrvIfNeeded()
+	}()
+	agent.refMtx.RUnlock()
+	populateSRVWaitGrp.Wait()
+
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
 
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err = agent.pendingRef.MyCredentials()
 	if err != nil {
@@ -1661,7 +1677,7 @@ func (agent *RemoteClusterAgent) updateRevisionFromMetaKV() error {
 	}
 
 	if err == nil {
-		refInMetaKv, err := constructRemoteClusterReference(value, rev)
+		refInMetaKv, err := constructRemoteClusterReference(value, rev, true)
 		if err != nil {
 			return err
 		}
@@ -2149,7 +2165,7 @@ func (service *RemoteClusterService) loadFromMetaKV() error {
 
 	var ref *metadata.RemoteClusterReference
 	for _, KVentry := range KVsFromMetaKV {
-		ref, err = constructRemoteClusterReference(KVentry.Value, KVentry.Rev)
+		ref, err = constructRemoteClusterReference(KVentry.Value, KVentry.Rev, false)
 
 		if ref.Uuid() == "" || ref.Name() == "" || ref.Id() == "" {
 			service.logger.Warnf("Loading from metakv showed potentially problematic reference %v", ref.String())
@@ -2533,7 +2549,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	srvStop := service.startDiagStopwatch(fmt.Sprintf("ref(%v).PopulateDnsSrv", ref.Name()), DiagNetworkThreshold)
-	ref.PopulateDnsSrvIfNeeded(false)
+	ref.PopulateDnsSrvIfNeeded()
 	srvStop()
 
 	refHostName, _ := ref.MyConnectionStr()
@@ -3236,14 +3252,16 @@ func (service *RemoteClusterService) checkIfDeletingIsActive(refId string) bool 
 	return exists
 }
 
-func constructRemoteClusterReference(value []byte, rev interface{}) (*metadata.RemoteClusterReference, error) {
+func constructRemoteClusterReference(value []byte, rev interface{}, skipPopulateDnsSrv bool) (*metadata.RemoteClusterReference, error) {
 	ref := &metadata.RemoteClusterReference{}
 	err := ref.Unmarshal(value)
 	if err != nil {
 		return nil, err
 	}
 	ref.SetRevision(rev)
-	ref.PopulateDnsSrvIfNeeded(true /*retryOnErr*/)
+	if !skipPopulateDnsSrv {
+		ref.PopulateDnsSrvIfNeeded()
+	}
 
 	return ref, err
 }
@@ -3312,7 +3330,7 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	var newRef *metadata.RemoteClusterReference
 	var err error
 	if len(value) != 0 {
-		newRef, err = constructRemoteClusterReference(value, rev)
+		newRef, err = constructRemoteClusterReference(value, rev, false)
 		if err != nil {
 			service.logger.Errorf("Error marshaling remote cluster. value=%v, err=%v\n", base.TagUDBytes(value), err)
 			return err
@@ -3693,7 +3711,7 @@ func (service *RemoteClusterService) DumpMetakvEntriesForDebugging() {
 		service.logger.Errorf("DumpMetakvEntriesForDebuggingErr: %v", KVsFromMetaKVErr)
 	}
 	for _, KVentry := range KVsFromMetaKV {
-		ref, err := constructRemoteClusterReference(KVentry.Value, KVentry.Rev)
+		ref, err := constructRemoteClusterReference(KVentry.Value, KVentry.Rev, false)
 		if err != nil {
 			service.logger.Errorf("DumpMetakvEntries: Unable to construct reference due to err %v value Hexdump:\n%v\n", err, hex.Dump(KVentry.Value))
 		} else {

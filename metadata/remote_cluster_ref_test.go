@@ -94,7 +94,7 @@ func TestNewRefWithDNSSrv(t *testing.T) {
 	ref, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
 
-	ref.PopulateDnsSrvIfNeeded(true)
+	ref.PopulateDnsSrvIfNeeded()
 
 	// Test SameAs
 	ref0 := ref.Clone()
@@ -194,7 +194,7 @@ func TestNewRefWithDNSSrvInvalidPort(t *testing.T) {
 	ref, _ := NewRemoteClusterReference("testsUuid", "testName", invalidHostName, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
 
-	ref.PopulateDnsSrvIfNeeded(true)
+	ref.PopulateDnsSrvIfNeeded()
 
 	assert.False(ref.IsDnsSRV())
 	assert.Equal(0, len(ref.srvEntries))
@@ -212,7 +212,7 @@ func TestNewRefWithDNSSrvSecure(t *testing.T) {
 	ref, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
 
-	ref.PopulateDnsSrvIfNeeded(true)
+	ref.PopulateDnsSrvIfNeeded()
 
 	// Test SameAs
 	assert.True(ref.IsDnsSRV())
@@ -255,7 +255,7 @@ func TestDNSSRVBoth(t *testing.T) {
 	// Non-Full encryption reference
 	nonSecureRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
-	nonSecureRef.PopulateDnsSrvIfNeeded(true)
+	nonSecureRef.PopulateDnsSrvIfNeeded()
 
 	assert.Equal(HostNameBothSRV, nonSecureRef.hostnameSRVType)
 	assert.False(nonSecureRef.IsFullEncryption())
@@ -272,7 +272,7 @@ func TestDNSSRVBoth(t *testing.T) {
 	// Full encryption reference
 	fullEncryptionRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", true, EncryptionType_Full, nil, nil, nil, helper)
-	fullEncryptionRef.PopulateDnsSrvIfNeeded(true)
+	fullEncryptionRef.PopulateDnsSrvIfNeeded()
 
 	assert.Equal(HostNameBothSRV, fullEncryptionRef.hostnameSRVType)
 	assert.True(fullEncryptionRef.IsFullEncryption())

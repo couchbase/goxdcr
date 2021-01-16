@@ -10,7 +10,10 @@
 // simple utility functions with minimum dependencies on other goxdcr packages
 package base
 
-import "net"
+import (
+	"net"
+	"sync"
+)
 
 type DnsSrvHelperIface interface {
 	DnsSrvLookup(hostname string) (srvEntries []*net.SRV, secureType SrvRecordsType, err error)
@@ -34,25 +37,42 @@ const (
 // NOTE - SRV entries for "name" will end with a .
 // i.e. 192.168.0.1.
 func (dsh *DnsSrvHelper) DnsSrvLookup(hostname string) (srvEntries []*net.SRV, secureType SrvRecordsType, err error) {
-	// First look up regular
-	_, addrs, err := net.LookupSRV(CouchbaseService, TCPProto, hostname)
-	if err == nil {
-		srvEntries = append(srvEntries, addrs...)
+	// Perform both lookups in parallel
+	var waitGroup sync.WaitGroup
+	var nonSecureAddrs []*net.SRV
+	var nonSecureErr error
+	var secureAddrs []*net.SRV
+	var secureErr error
+
+	waitGroup.Add(2)
+	go func() {
+		defer waitGroup.Done()
+		_, nonSecureAddrs, nonSecureErr = net.LookupSRV(CouchbaseService, TCPProto, hostname)
+	}()
+
+	go func() {
+		defer waitGroup.Done()
+		_, secureAddrs, secureErr = net.LookupSRV(CouchbaseSecureService, TCPProto, hostname)
+	}()
+	waitGroup.Wait()
+
+	if nonSecureErr == nil {
+		srvEntries = append(srvEntries, nonSecureAddrs...)
 		secureType = SrvRecordsNonSecure
 	}
 
-	// Then secure
-	_, addrs, err = net.LookupSRV(CouchbaseSecureService, TCPProto, hostname)
-	if err == nil {
-		srvEntries = append(srvEntries, addrs...)
+	if secureErr == nil {
+		srvEntries = append(srvEntries, secureAddrs...)
 		if secureType == SrvRecordsNonSecure {
 			secureType = SrvRecordsBoth
 		} else {
 			secureType = SrvRecordsSecure
 		}
-	} else if secureType == SrvRecordsNonSecure {
-		// Regular already found - err should be nil
-		err = nil
+	}
+
+	// As long as one worked, returned error should be nil
+	if secureErr != nil && nonSecureErr != nil {
+		err = nonSecureErr
 	}
 	return
 }

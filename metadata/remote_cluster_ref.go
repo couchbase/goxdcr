@@ -838,39 +838,41 @@ func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
 // because the user can fix any DNS SRV look up error if it isn't right
 // If it is a cold start-up or metakv callback, retry on error before giving up
 // because there is no way to manually intervene before the system corrects itself
-func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(retryOnErr bool) {
-	ref.mutex.RLock()
-	if net.ParseIP(ref.HostName_) != nil {
+func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded() {
+	if net.ParseIP(ref.HostName()) != nil {
 		// If it is IPv4 or IPv6, it is not going to be a DNS SRV
-		ref.mutex.RUnlock()
 		return
 	}
+
+	ref.mutex.RLock()
+	dnsSrvHelper := ref.dnsSrvHelper
 	ref.mutex.RUnlock()
 
-	ref.mutex.Lock()
-	defer ref.mutex.Unlock()
-
-	if ref.dnsSrvHelper == nil {
-		ref.dnsSrvHelper = &baseH.DnsSrvHelper{}
+	if dnsSrvHelper == nil {
+		ref.mutex.Lock()
+		if ref.dnsSrvHelper == nil {
+			ref.dnsSrvHelper = &baseH.DnsSrvHelper{}
+		}
+		dnsSrvHelper = ref.dnsSrvHelper
+		ref.mutex.Unlock()
 	}
 
 	var entries []*net.SRV
-	var err error
-	var lookupName string
 	var srvRecordsType baseH.SrvRecordsType
-	for i := 0; i < 5; i++ {
-		// Dns srv lookup shouldn't fail - try 5 times
-		lookupName, err = ref.getSRVLookupHostnameNoLock()
-		if err != nil {
-			ref.hostnameSRVType.ClearSRV()
-			return
-		}
-		entries, srvRecordsType, err = ref.dnsSrvHelper.DnsSrvLookup(lookupName)
-		if err == nil || !retryOnErr {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
+	ref.mutex.RLock()
+	lookupName, err := ref.getSRVLookupHostnameNoLock()
+	ref.mutex.RUnlock()
+	if err != nil {
+		ref.mutex.Lock()
+		ref.hostnameSRVType.ClearSRV()
+		ref.mutex.Unlock()
+		return
 	}
+
+	entries, srvRecordsType, err = dnsSrvHelper.DnsSrvLookup(lookupName)
+
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
 	if err != nil {
 		ref.hostnameSRVType.ClearSRV()
 		return
