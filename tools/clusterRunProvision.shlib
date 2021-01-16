@@ -979,22 +979,28 @@ function findCbWorkloadGen {
 		return 0
 	fi
 
-	which locate >/dev/null 2>&1
-	if (($? != 0)); then
-		return $?
-	fi
-	# Just pick one
-	workloadGen=$(locate cbworkloadgen | grep build\/couchbase-cli | head -n 1)
-	if (($? != 0)); then
-		echo ""
-		return 1
-	fi
-	if [[ -z "$CBWORKLOADGEN" ]]; then
-		# set it in case needed it in future
-		CBWORKLOADGEN=$workloadGen
-	fi
-	echo "$workloadGen"
-	return 0
+	local -i count
+	local path=$(pwd)
+	local cbworkloadgenBin="cbworkloadgen"
+	local findResult
+	local workloadGen
+
+	while [[ "$path" != "/" ]]; do
+		findResult=$(find $path -name "${cbworkloadgenBin}")
+		count=$(echo "$findResult" | grep -c .)
+		if (($count > 0)); then
+			workloadGen=$(echo "$findResult" | grep "${cbworkloadgenBin}$" | grep -e "build" -e "install" -e "bin" | head -n 1)
+			if [[ -z "$CBWORKLOADGEN" ]]; then
+				# set it in case needed it in future
+				CBWORKLOADGEN=$workloadGen
+			fi
+			echo "$workloadGen"
+			return 0
+		fi
+		path=$(dirname "$path")
+	done
+	echo ""
+	return 1
 }
 
 # Input
