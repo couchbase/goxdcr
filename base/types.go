@@ -1062,6 +1062,8 @@ const (
 	explicitRuleInvalidScopeName explicitValidatingType = iota
 	explicitRuleOneToOne         explicitValidatingType = iota
 	explicitRuleScopeToScope     explicitValidatingType = iota
+	explicitRuleInvalidType      explicitValidatingType = iota
+	explicitRuleEmptyString      explicitValidatingType = iota
 )
 
 func NewExplicitMappingValidator() *ExplicitMappingValidator {
@@ -1084,7 +1086,7 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 			return explicitRuleOneToOne
 		}
 		if !vIsString {
-			return explicitRuleInvalid
+			return explicitRuleInvalidType
 		}
 		_, err = NewCollectionNamespaceFromString(vStr)
 		if err != nil {
@@ -1101,6 +1103,8 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 	if !matched {
 		if strings.Contains(k, ScopeCollectionDelimiter) {
 			return explicitRuleInvalid
+		} else if k == "" {
+			return explicitRuleEmptyString
 		} else {
 			return explicitRuleInvalidScopeName
 		}
@@ -1113,13 +1117,15 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 		if !matched {
 			if strings.Contains(k, ScopeCollectionDelimiter) {
 				return explicitRuleInvalid
+			} else if vStr == "" {
+				return explicitRuleEmptyString
 			} else {
 				return explicitRuleInvalidScopeName
 			}
 		}
 	} else if v != nil {
 		// Can only be string type or nil type
-		return explicitRuleInvalid
+		return explicitRuleInvalidType
 	}
 	return explicitRuleScopeToScope
 }
@@ -1141,6 +1147,17 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 		return fmt.Errorf("invalid rule: %v:%v", k, v)
 	case explicitRuleInvalidScopeName:
 		return fmt.Errorf("Invalid scope or collection name for one or both of %v:%v", k, v)
+	case explicitRuleInvalidType:
+		return fmt.Errorf("Rule must be either string or null types. Received: %v", reflect.TypeOf(v))
+	case explicitRuleEmptyString:
+		errStr := "Rule must not contain empty string(s):"
+		if k == "" {
+			errStr += "key is empty "
+		}
+		if vStr, ok := v.(string); ok && vStr == "" {
+			errStr += " value is empty "
+		}
+		return fmt.Errorf(errStr)
 	case explicitRuleOneToOne:
 		// Shouldn't have duplicated keys, but check anyway
 		_, exists := e.oneToOneRules[k]

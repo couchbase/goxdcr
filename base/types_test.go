@@ -533,6 +533,7 @@ func TestValidRules(t *testing.T) {
 	assert.Nil(validator.ValidateKV("scope1", nil))
 	assert.Nil(validator.ValidateKV("scope1.collection1", "scope1.collection1"))
 	assert.Nil(validator.ValidateKV("scope1.collection2", "scope1.collection2"))
+
 }
 
 func TestRulesRedundancyCheck(t *testing.T) {
@@ -547,6 +548,10 @@ func TestRulesRedundancyCheck(t *testing.T) {
 	validator = NewExplicitMappingValidator()
 	assert.Nil(validator.ValidateKV("testScope", "testScope2"))
 	assert.NotNil(validator.ValidateKV("testScope.testCol", "testScope2.testCol"))
+
+	validator = NewExplicitMappingValidator()
+	assert.NotNil(validator.ValidateKV("scope1", ""))
+	assert.NotNil(validator.ValidateKV("", "scope1"))
 }
 
 func TestRuleRedundancyNilCheck(t *testing.T) {
