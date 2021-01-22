@@ -72,11 +72,6 @@ func (_m *RemoteClusterSvc) DelRemoteCluster(refName string) (*metadata.RemoteCl
 	return r0, r1
 }
 
-// DumpMetakvEntriesForDebugging provides a mock function with given fields:
-func (_m *RemoteClusterSvc) DumpMetakvEntriesForDebugging() {
-	_m.Called()
-}
-
 // GetCapability provides a mock function with given fields: ref
 func (_m *RemoteClusterSvc) GetCapability(ref *metadata.RemoteClusterReference) (metadata.Capability, error) {
 	ret := _m.Called(ref)

@@ -77,10 +77,7 @@ type RemoteClusterSvc interface {
 
 	// Get the last-known connectivity status
 	GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error)
-
+	
 	// Gets a list of references that have experienced auth errors and have not been queried before
 	GetRefListForFirstTimeBadAuths() ([]*metadata.RemoteClusterReference, error)
-
-	// MB-43186 - remove before CC is shipped
-	DumpMetakvEntriesForDebugging()
 }

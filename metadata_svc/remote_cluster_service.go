@@ -13,7 +13,6 @@ package metadata_svc
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -3702,20 +3701,4 @@ func (service *RemoteClusterService) GetConnectivityStatus(ref *metadata.RemoteC
 	service.agentMutex.RUnlock()
 
 	return agent.connectivityHelper.GetOverallStatus(), nil
-}
-
-// MB-43186 - remove before CC is shipped
-func (service *RemoteClusterService) DumpMetakvEntriesForDebugging() {
-	KVsFromMetaKV, KVsFromMetaKVErr := service.metakv_svc.GetAllMetadataFromCatalog(RemoteClustersCatalogKey)
-	if KVsFromMetaKVErr != nil {
-		service.logger.Errorf("DumpMetakvEntriesForDebuggingErr: %v", KVsFromMetaKVErr)
-	}
-	for _, KVentry := range KVsFromMetaKV {
-		ref, err := constructRemoteClusterReference(KVentry.Value, KVentry.Rev, false)
-		if err != nil {
-			service.logger.Errorf("DumpMetakvEntries: Unable to construct reference due to err %v value Hexdump:\n%v\n", err, hex.Dump(KVentry.Value))
-		} else {
-			service.logger.Infof("DumpMetakvEntries: Debug dump one entry: %v\nCorresponding Hexdump:\n%v\n", ref.String(), hex.Dump(KVentry.Value))
-		}
-	}
 }
