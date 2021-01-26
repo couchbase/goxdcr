@@ -44,6 +44,7 @@ type ClientIface interface {
 	GetSubdoc(vb uint16, key string, subPaths []string, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	Hijack() io.ReadWriteCloser
 	Incr(vb uint16, key string, amt, def uint64, exp int, context ...*ClientContext) (uint64, error)
+	LastBucket() string
 	Observe(vb uint16, key string) (result ObserveResult, err error)
 	ObserveSeq(vb uint16, vbuuid uint64) (result *ObserveSeqResult, err error)
 	Receive() (*gomemcached.MCResponse, error)
@@ -148,6 +149,7 @@ type Client struct {
 
 	collectionsEnabled uint32
 	deadline           time.Time
+	bucket             string
 }
 
 var (
@@ -654,9 +656,17 @@ func (c *Client) AuthPlain(user, pass string) (*gomemcached.MCResponse, error) {
 
 // select bucket
 func (c *Client) SelectBucket(bucket string) (*gomemcached.MCResponse, error) {
-	return c.Send(&gomemcached.MCRequest{
+	res, err := c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.SELECT_BUCKET,
 		Key:    []byte(bucket)})
+	if res != nil {
+		c.bucket = bucket
+	}
+	return res, err
+}
+
+func (c *Client) LastBucket() string {
+	return c.bucket
 }
 
 func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
