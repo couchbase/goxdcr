@@ -270,6 +270,7 @@ var ErrorNilPtr = errors.New("Nil pointer given")
 var ErrorNoHostName = errors.New("hostname is missing")
 var ErrorInvalidSettingsKey = errors.New("Invalid settings key")
 var ErrorSizeExceeded = errors.New("Size is larger than maximum allowed")
+var ErrorLengthExceeded = errors.New("Length is longer than maximum allowed")
 var ErrorNoMatcher = errors.New("Internal error - unable to establish GoJsonsm Matcher")
 var ErrorNoDataPool = errors.New("Internal error - unable to establish GoXDCR datapool")
 var ErrorFilterEnterpriseOnly = errors.New("Filter expression can be specified in Enterprise edition only")
@@ -701,6 +702,8 @@ var DefaultGoMaxProcs int = 4
 var BacklogThresholdDefault = 50
 
 var MaxDocSizeByte uint32 = 20 << 20
+
+var MaxCollectionNameBytes int = 251
 
 // --------------- Constants that are configurable -----------------
 

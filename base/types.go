@@ -175,6 +175,9 @@ var DefaultCollectionNamespace = CollectionNamespace{
 // The specificStr should follow the format of: "<scope>.<collection>"
 func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, error) {
 	if !CollectionNamespaceRegex.MatchString(specificStr) {
+		if len(specificStr) > MaxCollectionNameBytes {
+			return CollectionNamespace{}, ErrorLengthExceeded
+		}
 		return CollectionNamespace{}, ErrorInvalidColNamespaceFormat
 	} else {
 		names := CollectionNamespaceRegex.FindStringSubmatch(specificStr)
@@ -189,6 +192,9 @@ func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, 
 			}
 			if !valid {
 				return CollectionNamespace{}, ErrorInvalidColNamespaceFormat
+			}
+			if len(names[i]) > MaxCollectionNameBytes {
+				return CollectionNamespace{}, ErrorLengthExceeded
 			}
 		}
 
@@ -1064,6 +1070,7 @@ const (
 	explicitRuleScopeToScope     explicitValidatingType = iota
 	explicitRuleInvalidType      explicitValidatingType = iota
 	explicitRuleEmptyString      explicitValidatingType = iota
+	explicitRuleStringTooLong    explicitValidatingType = iota
 )
 
 func NewExplicitMappingValidator() *ExplicitMappingValidator {
@@ -1090,9 +1097,15 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 		}
 		_, err = NewCollectionNamespaceFromString(vStr)
 		if err != nil {
+			if err == ErrorLengthExceeded {
+				return explicitRuleStringTooLong
+			}
 			return explicitRuleInvalid
 		}
 		return explicitRuleOneToOne
+	}
+	if err != nil && err == ErrorLengthExceeded {
+		return explicitRuleStringTooLong
 	}
 
 	// At this point, name has to be a scope name
@@ -1218,6 +1231,12 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 					}
 				}
 			}
+		}
+	case explicitRuleStringTooLong:
+		if vStr, ok := v.(string); ok && vStr == "" {
+			return fmt.Errorf("Either %v or %v contains a name that is too long to be valid", k, vStr)
+		} else {
+			return fmt.Errorf("%v contains a name that is too long to be valid", v)
 		}
 	default:
 		panic(fmt.Sprintf("Unhandled rule type: %v", ruleType))

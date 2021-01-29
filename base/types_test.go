@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +71,21 @@ func TestExplicitMappingValidatorParseRule(t *testing.T) {
 	key = "#%(@&#FJ"
 	value = "scope"
 	assert.Equal(explicitRuleInvalidScopeName, validator.parseRule(key, value))
+
+	// Too Long
+	var longStrArr []string
+	for i := 0; i < 256; i++ {
+		longStrArr = append(longStrArr, "a")
+	}
+	longStr := strings.Join(longStrArr, "")
+	key = longStr
+	assert.Equal(explicitRuleStringTooLong, validator.parseRule(longStr, nil))
+
+	value = longStr
+	assert.Equal(explicitRuleStringTooLong, validator.parseRule(longStr, nil))
+
+	key = "abc"
+	assert.Equal(explicitRuleStringTooLong, validator.parseRule(longStr, nil))
 }
 
 func TestExplicitMappingValidatorRules(t *testing.T) {
