@@ -746,7 +746,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext, osoSnapshotRaiser 
 
 func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 	tsTracker.rep_id = pipeline.Topic()
-	tsTracker.id = pipeline.Topic() + "_" + base.ThroughSeqnoTracker
+	tsTracker.id = pipeline.FullTopic() + "_" + base.ThroughSeqnoTracker
 	for _, vbno := range pipeline_utils.GetSourceVBListPerPipeline(pipeline) {
 		tsTracker.vb_map[vbno] = true
 

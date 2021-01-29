@@ -163,6 +163,8 @@ type StatisticsManager struct {
 	endSeqnos map[uint16]uint64
 	// For now, backfill pipeline do not dynamically change VB tasks
 	totalBackfillChanges uint64
+
+	printThroughSeqnoSummaryWhenStopping bool
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
@@ -797,6 +799,22 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 		}
 	}
 
+	if stats_mgr.pipeline.Type() == common.BackfillPipeline {
+		spec := stats_mgr.pipeline.Specification()
+		if spec != nil {
+			replSpec := spec.GetReplicationSpec()
+			if replSpec != nil && replSpec.Settings != nil {
+				collectionModes := replSpec.Settings.GetCollectionModes()
+				if collectionModes.IsOsoOn() {
+					// When OSO pipeline runs, it may finish before it statsMgr ever had a chance to print out its
+					// summary stats. So force a print at the end to ensure that oso_received count is at least
+					// in the log
+					stats_mgr.printThroughSeqnoSummaryWhenStopping = true
+				}
+			}
+		}
+	}
+
 	//register the aggregation metrics for the pipeline
 	stats_mgr.initOverviewRegistry()
 	stats_mgr.logger.Infof("StatisticsManager is started for %v %v", stats_mgr.pipeline.Type(), stats_mgr.pipeline.FullTopic())
@@ -908,6 +926,11 @@ func (stats_mgr *StatisticsManager) Stop() error {
 
 	//close the connections
 	stats_mgr.closeConnections()
+
+	if stats_mgr.printThroughSeqnoSummaryWhenStopping {
+		// Backfill pipelines can exit before ever printing the number of oso received
+		stats_mgr.through_seqno_tracker_svc.PrintStatusSummary()
+	}
 
 	stats_mgr.wait_grp.Wait()
 	stats_mgr.logger.Infof("%v StatisticsManager Stopped", stats_mgr.pipeline.InstanceId())

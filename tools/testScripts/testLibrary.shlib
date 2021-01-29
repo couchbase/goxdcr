@@ -16,6 +16,7 @@ VBTASKS_DONE_MSG="has finished processing one task for all requested VBs"
 TIMEDOUT_TYPE1_MSG="Executing Action timed out"
 TIMEDOUT_TYPE2_MSG="Executing Action2 timed out"
 OSO_MODE_MSG="with OSO mode requested"
+OSO_BACKFILL_COUNT="oso_received=10000"
 
 # These should be imported after clusterRunProvision script
 

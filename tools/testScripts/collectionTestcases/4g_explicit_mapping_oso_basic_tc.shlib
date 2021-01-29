@@ -76,6 +76,7 @@ function runTestCase {
 	local -i currentVBTasksDoneInstanceCnt
 	local -i currentBackfillAppendInstanceCnt
 	local -i currentOsoModeCnt
+	local -i currentBackfillOsoDocCnt
 	local currentXdcrLog
 
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
@@ -83,6 +84,7 @@ function runTestCase {
 	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
 	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 	currentOsoModeCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_MODE_MSG")
+	currentBackfillOsoDocCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_BACKFILL_COUNT")
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -122,6 +124,7 @@ function runTestCase {
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
 	# 2 oso mode because one for each DCP nozzle
 	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(($currentOsoModeCnt + 2))
+	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
