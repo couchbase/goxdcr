@@ -57,6 +57,7 @@ func setupMocks(pipeline *commonMock.Pipeline,
 	runtimeCtxMock.On("Service", "ConflictManager").Return(nil)
 
 	pipeline.On("Topic").Return("UnitTest")
+	pipeline.On("FullTopic").Return("UnitTest")
 	pipeline.On("Sources").Return(sourceMap)
 	pipeline.On("InstanceId").Return("UnitTestInst")
 	pipeline.On("GetAsyncListenerMap").Return(nil)
