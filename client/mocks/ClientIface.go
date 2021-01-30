@@ -630,6 +630,20 @@ func (_m *ClientIface) Incr(vb uint16, key string, amt uint64, def uint64, exp i
 	return r0, r1
 }
 
+// LastBucket provides a mock function with given fields:
+func (_m *ClientIface) LastBucket() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
 // NewUprFeed provides a mock function with given fields:
 func (_m *ClientIface) NewUprFeed() (*memcached.UprFeed, error) {
 	ret := _m.Called()
