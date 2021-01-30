@@ -205,7 +205,8 @@ const (
 	MaxCountCpuNotMaxedKey = "MaxCountCpuNotMaxed"
 	// max count of consecutive terms where throughput dropped from previous high
 	MaxCountThroughputDropKey = "MaxCountThroughputDrop"
-
+	// When resource mgr starts up until a cluster is formed, how often it should try to check for KV service
+	ResourceMgrKVDetectionRetryIntervalKey = "ResourceMgrKVDetectionRetryInterval"
 	/* --End Resource menagement related settings ---*/
 
 	// Internal keys to wrap around incoming document's key or xattributes for advanced filtering
@@ -278,7 +279,7 @@ var XmemMaxRetryIntervalConfig = &SettingsConfig{300, &Range{1, 3600}}
 var XmemMaxRetryMutationLockedConfig = &SettingsConfig{20, &Range{0, 1000}}
 var XmemMaxRetryIntervalMutationLockedConfig = &SettingsConfig{30, &Range{1, 3600}}
 var HELOTimeoutConfig = &SettingsConfig{120, &Range{1, 3600}}
-var WaitTimeBetweenMetadataChangeListenersConfig = &SettingsConfig{1000, &Range{10, 60000}}
+var WaitTimeBetweenMetadataChangeListenersConfig = &SettingsConfig{int(base.WaitTimeBetweenMetadataChangeListeners / time.Millisecond), &Range{10, 60000}}
 var KeepAlivePeriodConfig = &SettingsConfig{30, &Range{1, 3600}}
 var ThresholdPercentageForEventChanSizeLoggingConfig = &SettingsConfig{90, &Range{1, 100}}
 var ThresholdForThroughSeqnoComputationConfig = &SettingsConfig{100, &Range{1, 60000}}
@@ -321,6 +322,7 @@ var BackfillPersistIntervalConfig = &SettingsConfig{int64(base.BackfillPersistIn
 var JSEngineWorkersPerNodeConfig = &SettingsConfig{base.JSEngineWorkersPerNode, &Range{1, 10}}
 var JSEngineThreadsPerWorkerConfig = &SettingsConfig{base.JSEngineThreadsPerWorker, &Range{1, 10}}
 var MaxCountDCPStreamsInactiveConfig = &SettingsConfig{base.MaxCountStreamsInactive, &Range{1, 40}}
+var ResourceMgrKVDetectionRetryIntervalConfig = &SettingsConfig{int(base.ResourceMgrKVDetectionRetryInterval / time.Second), &Range{1, 3600}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -417,6 +419,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	JSEngineWorkersPerNodeKey:                     JSEngineWorkersPerNodeConfig,
 	JSEngineThreadsPerWorkerKey:                   JSEngineThreadsPerWorkerConfig,
 	MaxCountDCPStreamsInactiveKey:                 MaxCountDCPStreamsInactiveConfig,
+	ResourceMgrKVDetectionRetryIntervalKey:        ResourceMgrKVDetectionRetryIntervalConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

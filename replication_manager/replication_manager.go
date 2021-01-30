@@ -314,6 +314,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.JSEngineWorkersPerNodeKey].(int),
 		internal_settings.Values[metadata.JSEngineThreadsPerWorkerKey].(int),
 		internal_settings.Values[metadata.MaxCountDCPStreamsInactiveKey].(int),
+		time.Duration(internal_settings.Values[metadata.ResourceMgrKVDetectionRetryIntervalKey].(int))*time.Second,
 	)
 }
 
@@ -322,7 +323,6 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 
 	// The listeners here in order are subjected to how metakv's callback triggers the callbacks
 	// There is no guarantee that metakv callback will call these callbacks in the order created
-
 	globalSettingChangeListener := NewGlobalSettingChangeListener(
 		rm.global_setting_svc,
 		rm.metadata_change_callback_cancel_ch,

@@ -886,7 +886,7 @@ var XmemMaxRetryMutationLocked = 20
 // the upper limit on lock period is as of now 30 seconds
 var XmemMaxRetryIntervalMutationLocked = 30 * time.Second
 
-var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
+var WaitTimeBetweenMetadataChangeListeners = 1000 * time.Millisecond
 
 // Keep alive period for tcp connections
 var KeepAlivePeriod = 30 * time.Second
@@ -1019,6 +1019,8 @@ var ManifestRefreshTgtInterval = 60
 // Be careful when changing the unit - need corresponding base.InitConstants to change
 var BackfillPersistInterval = 1000 * time.Millisecond
 
+var ResourceMgrKVDetectionRetryInterval = 60 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -1067,7 +1069,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	backfillPersistInterval time.Duration,
 	httpsPortLookupTimeout time.Duration,
 	jsEngineWorkersPerNode int, jsEngineThreadsPerWorker int,
-	maxCountDcpStreamsInactive int) {
+	maxCountDcpStreamsInactive int, resourceMgrKVDetectionRetryInterval time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1181,6 +1183,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	JSEngineWorkersPerNode = jsEngineWorkersPerNode
 	JSEngineThreadsPerWorker = jsEngineThreadsPerWorker
 	MaxCountStreamsInactive = maxCountDcpStreamsInactive
+	ResourceMgrKVDetectionRetryInterval = resourceMgrKVDetectionRetryInterval
 }
 
 // Need to escape the () to result in "META().xattrs" literal
