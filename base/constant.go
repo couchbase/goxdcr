@@ -746,7 +746,7 @@ var XmemMaxRetryMutationLocked = 20
 // the upper limit on lock period is as of now 30 seconds
 var XmemMaxRetryIntervalMutationLocked = 30 * time.Second
 
-var WaitTimeBetweenMetadataChangeListeners = 1 * time.Second
+var WaitTimeBetweenMetadataChangeListeners = 1000 * time.Millisecond
 
 // Keep alive period for tcp connections
 var KeepAlivePeriod = 30 * time.Second
@@ -871,6 +871,8 @@ var ReservedWordsReplaceMapOnce sync.Once
 // external interface, and vice versa
 var RemoteClusterAlternateAddrChangeCnt = 5
 
+var ResourceMgrKVDetectionRetryInterval = 60 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -914,7 +916,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	thresholdRatioForProcessCpu int, thresholdRatioForTotalCpu int,
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
 	filteringInternalKey string, filteringInternalXattr string,
-	remoteClusterAlternateAddrChangeCnt int) {
+	remoteClusterAlternateAddrChangeCnt int, resourceMgrKVDetectionRetryInterval time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1021,6 +1023,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 		InternalKeyXattr: ExternalKeyXattrContains,
 	}
 	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
+	ResourceMgrKVDetectionRetryInterval = resourceMgrKVDetectionRetryInterval
 }
 
 // Need to escape the () to result in "META().xattrs" literal

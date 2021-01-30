@@ -230,7 +230,7 @@ type ResourceManager struct {
 	// historical samples of high priority replication throughputs
 	highThroughputSamples metrics.Sample
 
-	isKVNode bool
+	isKVNode uint32
 }
 
 type ResourceMgrIface interface {
@@ -278,25 +278,10 @@ func (rm *ResourceManager) Start() error {
 	rm.logger.Infof("%v starting ....\n", ResourceManagerName)
 	defer rm.logger.Infof("%v started\n", ResourceManagerName)
 
-	kvCheckFunc := func() error {
-		isKVNode, err := rm.xdcr_topology_svc.IsKVNode()
-		if err != nil {
-			rm.logger.Warnf("Received %v when checking isKVNode", err)
-			// Assume true if never succeeded
-			rm.isKVNode = true
-			return err
-		}
-		rm.isKVNode = isKVNode
-		return nil
-	}
+	// this could take a while when ns_server starts up, run in bg
+	go rm.checkForKVService()
 
-	kvErr := rm.utils.ExponentialBackoffExecutor("ResourceManagerKVNodeCheck", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries,
-		base.MetaKvBackoffFactor, kvCheckFunc)
-	if kvErr != nil {
-		rm.logger.Warnf("KVNode check failed, assuming is KV node")
-	}
-
-	// igore error
+	// ignore error
 	rm.getSystemStats()
 
 	// this does not return error as of now
@@ -312,6 +297,23 @@ func (rm *ResourceManager) Start() error {
 	go rm.logStats()
 
 	return nil
+}
+
+func (rm *ResourceManager) checkForKVService() {
+	// When a node first starts up and before it is a "cluster" IsKVNode() will return 404
+	// XDCR must retry until it gets a successful lookup of services
+	for {
+		isKVNode, err := rm.xdcr_topology_svc.IsKVNode()
+		if err != nil {
+			time.Sleep(base.ResourceMgrKVDetectionRetryInterval)
+		} else {
+			if isKVNode {
+				atomic.StoreUint32(&rm.isKVNode, 1)
+			}
+			rm.logger.Infof("Finished retrieving node's information - isKVNode: %v", isKVNode)
+			return
+		}
+	}
 }
 
 func (rm *ResourceManager) Stop() error {
@@ -1069,7 +1071,7 @@ func (rm *ResourceManager) setDcpPriority(replId string, priority mcc.PriorityTy
 }
 
 func (rm *ResourceManager) getStatsFromReplication(spec *metadata.ReplicationSpecification) (*ReplStats, error) {
-	if !rm.isKVNode {
+	if atomic.LoadUint32(&rm.isKVNode) == 0 {
 		return &ReplStats{0, 0, 0, time.Now().UnixNano(), 0}, nil
 	}
 
