@@ -887,7 +887,7 @@ var XmemMaxRetryMutationLocked = 20
 // the upper limit on lock period is as of now 30 seconds
 var XmemMaxRetryIntervalMutationLocked = 30 * time.Second
 
-var WaitTimeBetweenMetadataChangeListeners = 1000 * time.Millisecond
+var WaitTimeBetweenMetadataChangeListeners = 500 * time.Millisecond
 
 // Keep alive period for tcp connections
 var KeepAlivePeriod = 30 * time.Second
