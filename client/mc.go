@@ -76,6 +76,9 @@ type ClientContext struct {
 	// Collection-based context
 	CollId uint32
 
+	// Impersonate context
+	User string
+
 	// VB-state related context
 	// nil means not used in this context
 	VbState *VbStateType
@@ -366,12 +369,21 @@ func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, err
 	return rv, err
 }
 
-// Sets collection info for a request
-func (c *Client) setCollection(req *gomemcached.MCRequest, context ...*ClientContext) error {
+// Sets collection and user info for a request
+func (c *Client) setContext(req *gomemcached.MCRequest, context ...*ClientContext) error {
 	req.CollIdLen = 0
+	req.UserLen = 0
 	collectionId := uint32(0)
 	if len(context) > 0 {
 		collectionId = context[0].CollId
+		uLen := len(context[0].User)
+		if uLen > 0 {
+			if uLen > gomemcached.MAX_USER_LEN {
+				uLen = gomemcached.MAX_USER_LEN
+			}
+			req.UserLen = uLen
+			copy(req.Username[:uLen], context[0].User)
+		}
 	}
 
 	// if the optional collection is specified, it must be default for clients that haven't turned on collections
@@ -386,10 +398,16 @@ func (c *Client) setCollection(req *gomemcached.MCRequest, context ...*ClientCon
 }
 
 // Sets collection info in extras
-func (c *Client) setExtrasCollection(req *gomemcached.MCRequest, context ...*ClientContext) error {
+func (c *Client) setExtrasContext(req *gomemcached.MCRequest, context ...*ClientContext) error {
 	collectionId := uint32(0)
+	req.UserLen = 0
 	if len(context) > 0 {
 		collectionId = context[0].CollId
+		uLen := len(context[0].User)
+		if uLen > 0 {
+			req.UserLen = uLen
+			copy(req.Username[:], context[0].User)
+		}
 	}
 
 	// if the optional collection is specified, it must be default for clients that haven't turned on collections
@@ -438,7 +456,7 @@ func (c *Client) Get(vb uint16, key string, context ...*ClientContext) (*gomemca
 		Key:     []byte(key),
 		Opaque:  c.getOpaque(),
 	}
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +474,7 @@ func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string, context ...
 		Body:    valueBuf,
 		Opaque:  c.getOpaque(),
 	}
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +531,7 @@ func (c *Client) GetAndTouch(vb uint16, key string, exp int, context ...*ClientC
 		Extras:  extraBuf,
 		Opaque:  c.getOpaque(),
 	}
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +546,7 @@ func (c *Client) GetMeta(vb uint16, key string, context ...*ClientContext) (*gom
 		Key:     []byte(key),
 		Opaque:  c.getOpaque(),
 	}
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -543,7 +561,7 @@ func (c *Client) Del(vb uint16, key string, context ...*ClientContext) (*gomemca
 		Key:     []byte(key),
 		Opaque:  c.getOpaque(),
 	}
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +574,7 @@ func (c *Client) GetRandomDoc(context ...*ClientContext) (*gomemcached.MCRespons
 		Opcode: 0xB6,
 		Opaque: c.getOpaque(),
 	}
-	err := c.setExtrasCollection(req, context...)
+	err := c.setExtrasContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -680,7 +698,7 @@ func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
 		Extras:  []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		Body:    body}
 
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -699,7 +717,7 @@ func (c *Client) storeCas(opcode gomemcached.CommandCode, vb uint16,
 		Extras:  []byte{0, 0, 0, 0, 0, 0, 0, 0},
 		Body:    body}
 
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -717,7 +735,7 @@ func (c *Client) Incr(vb uint16, key string,
 		Key:     []byte(key),
 		Extras:  make([]byte, 8+8+4),
 	}
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return 0, err
 	}
@@ -743,7 +761,7 @@ func (c *Client) Decr(vb uint16, key string,
 		Key:     []byte(key),
 		Extras:  make([]byte, 8+8+4),
 	}
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return 0, err
 	}
@@ -788,7 +806,7 @@ func (c *Client) Append(vb uint16, key string, data []byte, context ...*ClientCo
 		Opaque:  c.getOpaque(),
 		Body:    data}
 
-	err := c.setCollection(req, context...)
+	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
@@ -865,7 +883,7 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 		Opcode:  gomemcached.GET,
 		VBucket: vb,
 	}
-	err := c.setCollection(memcachedReqPkt, context...)
+	err := c.setContext(memcachedReqPkt, context...)
 	if err != nil {
 		return err
 	}
