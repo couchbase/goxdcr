@@ -446,7 +446,7 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetAllReplicationInfosRequest\n")
 
-	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -768,7 +768,7 @@ func DelAllBackfillsRequest(replId string) error {
 func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetStatisticsRequest\n")
 
-	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -793,7 +793,7 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.R
 func (adminport *Adminport) doMemStatsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doMemStatsRequest\n")
 
-	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -1070,7 +1070,7 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 }
 
 func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Response, error) {
-	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalWrite)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -1099,7 +1099,7 @@ func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Resp
 }
 
 func (adminport *Adminport) doStopBlockProfile(request *http.Request) (*ap.Response, error) {
-	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalWrite)
 	if response != nil || err != nil {
 		return response, err
 	}
