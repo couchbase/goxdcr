@@ -18,31 +18,23 @@ set -u
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
 if (($? != 0)); then
-	echo "Provision failed"
-	exit 1
+  echo "Provision failed"
+  exit 1
 fi
 
 . ./testLibrary.shlib
 if (($? != 0)); then
-	echo "testLibrary.shlib failed"
-	exit 1
+  echo "testLibrary.shlib failed"
+  exit 1
 fi
 
 . customConflict/ccr_tests.shlib
 if (($? != 0)); then
-	echo "ccr_tests.shlib failed"
-	exit 1
+  echo "ccr_tests.shlib failed"
+  exit 1
 fi
 
 testCase="${1:-}"
-
-declare -a TESTLIST=(eventingFunctionUIHandlerTest configureResolver remoteClusterUserPermission dataLoad dataLoadLoop)
-
-if [[ "$testCase" != "" ]] && [[ ! " ${TESTLIST[*]} " =~ " ${testCase} " ]]; then
-	echo "${testCase} is not in the list of supported tests:"
-	echo ${TESTLIST[*]}
-	exit 1
-fi
 
 DEFAULT_ADMIN="Administrator"
 DEFAULT_PW="wewewe"
@@ -54,68 +46,50 @@ CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1" ["C2"]="CCR2" ["C3"]="CCR3" ["C4"]="CCR4"
 # See MB-39731 for conflictResolutionType=custom
 declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active" ["conflictResolutionType"]="custom")
 for bucket in "${CLUSTER_NAME_BUCKET_MAP[@]}"; do
-	insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
+  insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
 done
 
 testForClusterRun
 if (($? != 0)); then
-	exit 1
+  exit 1
 fi
-
-setupTopologies -d
-if (($? != 0)); then
-	echo "setupTopologies failed"
-	exit 1
-fi
-
-sleep 5
-mergeFunc="simpleMerge"
-declare -A CCRReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["compressionType"]="Auto" ["mergeFunctionMapping"]='{"default":"simpleMerge"}')
-
-for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
-	bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
-	for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
-		bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
-		if [[ "$cluster1" != "$cluster2" ]]; then
-			createRemoteClusterReference $cluster1 $cluster2
-		fi
-	done
-done
-
-for port in "${CLUSTER_NAME_XDCR_PORT_MAP[@]}"; do
-	echo "createMergeFunction $mergeFunc $port"
-	createMergeFunction $mergeFunc $port
-	if (($? != 0)); then
-		echo "createMergeFunction $mergeFunc $port failed"
-		exit 1
-	fi
-done
-
-for cluster1 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
-	bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
-	for cluster2 in "${!CLUSTER_NAME_PORT_MAP[@]}"; do
-		bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
-		if [[ "$cluster1" != "$cluster2" ]]; then
-			createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties
-			if (($? != 0)); then
-				echo "Failed: createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties"
-				exit 1
-			fi
-		fi
-	done
-done
 
 if [[ "$testCase" == "" ]]; then
-	eventingFunctionUIHandlerTest
-	configureResolver
-	remoteClusterUserPermission
-	dataLoad
+  setUpCcrReplication
+  for testFile in $(ls customConflict/testCases); do
+    . customConflict/testCases/$testFile
+    runTestCase
+  done
+  cleanupCcrReplication
 else
-	$testCase
+  if [[ "${testCase}" == "Loop" ]]; then
+    setUpCcrReplication
+    . ./customConflict/testCases/1_data_load.shlib
+    i=1
+    while :; do
+      echo
+      echo "=========== Start dataLoad run $i ==========="
+      runTestCase
+      if (($? != 0)); then
+        exit 1
+      fi
+      echo "=========== end dataLoad run $i ==========="
+      echo
+      i=$(($i + 1))
+    done
+    cleanupCcrReplication
+  else
+    testFile=$(find customConflict/testCases/${testCase}*)
+    if [[ -z "$testFile" ]]; then
+      echo "Cannot find test case ${testCase}"
+      exit 1
+    fi
+    setUpCcrReplication
+    . $testFile
+    runTestCase
+    cleanupCcrReplication
+  fi
+
 fi
 
 grepForPanics
-
-cleanupBucketReplications
-cleanupBuckets
-cleanupRemoteClusterRefs

@@ -1,0 +1,53 @@
+# Copyright (c) 2019-2021 Couchbase, Inc.
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+# except in compliance with the License. You may obtain a copy of the License at
+#   http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the
+# License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied. See the License for the specific language governing permissions
+# and limitations under the License.
+
+function dataLoad {
+	echo "========================================"
+	echo "=============== dataLoad ==============="
+	echo "========================================"
+	for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}; do
+		bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+		echo runCbWorkloadGenBucket $cluster1 $bucket1
+		runCbWorkloadGenBucket $cluster1 $bucket1 &
+	done
+	for cluster1 in ${!CLUSTER_NAME_PORT_MAP[@]}; do
+		bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+		# These are the data that will generate conflicts for each run
+		echo runCbWorkloadGenBucket $cluster1 $bucket1 1000 "common"
+		runCbWorkloadGenBucket $cluster1 $bucket1 1000 "common" &
+	done
+	# wait for cbworkloadgen to finish
+	wait
+	# With 4 clusters, changes_left takes longer to go down to 0
+	sleepTime=30
+	echo "Sleep $sleepTime seconds to wait for replication to finish"
+	sleep $sleepTime
+	for cluster1 in ${!CLUSTER_NAME_BUCKET_MAP[@]}; do
+		bucket1=${CLUSTER_NAME_BUCKET_MAP[$cluster1]}
+		for cluster2 in ${!CLUSTER_NAME_BUCKET_MAP[@]}; do
+			if [[ $cluster1 != $cluster2 ]]; then
+				bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
+				echo "checkChangesLeftInternal $cluster1 $bucket1 $cluster2 $bucket2"
+				checkChangesLeftInternal "$cluster1" "$bucket1" "$cluster2" "$bucket2"
+			fi
+		done
+	done
+	grepForPanics
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	echo "========================================="
+	echo "============ dataLoad PASSED ============"
+	echo "========================================="
+}
+
+function runTestCase {
+    dataLoad
+}
