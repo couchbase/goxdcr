@@ -378,9 +378,7 @@ func (c *Client) setContext(req *gomemcached.MCRequest, context ...*ClientContex
 		collectionId = context[0].CollId
 		uLen := len(context[0].User)
 
-		// There's little point in shortening the name as memcached will reject the user as invalid
-		// TODO change to MAX_USER_LEN
-		if uLen > 0 && uLen <= gomemcached.FAST_USER_LEN {
+		if uLen > 0 && uLen <= gomemcached.MAX_USER_LEN {
 			req.UserLen = uLen
 			copy(req.Username[:uLen], context[0].User)
 		}
@@ -404,7 +402,7 @@ func (c *Client) setExtrasContext(req *gomemcached.MCRequest, context ...*Client
 	if len(context) > 0 {
 		collectionId = context[0].CollId
 		uLen := len(context[0].User)
-		if uLen > 0 && uLen <= gomemcached.FAST_USER_LEN {
+		if uLen > 0 && uLen <= gomemcached.MAX_USER_LEN {
 			req.UserLen = uLen
 			copy(req.Username[:], context[0].User)
 		}

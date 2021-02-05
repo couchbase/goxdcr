@@ -47,20 +47,10 @@ type MCRequest struct {
 func (req *MCRequest) HdrSize() int {
 	rv := HDR_LEN + len(req.Extras) + req.CollIdLen + req.FramingElen + len(req.Key)
 	if req.UserLen != 0 {
-		rv += req.UserLen + 1
-
-		// half byte shifting required
-		if req.UserLen > FAST_USER_LEN {
-			rv++
-		}
+		rv += frameLen(req.UserLen)
 	}
 	for _, e := range req.FramingExtras {
-		rv += e.ObjLen + 1
-
-		// half byte shifting required
-		if e.ObjLen > FAST_USER_LEN {
-			rv++
-		}
+		rv += frameLen(e.ObjLen)
 	}
 	return rv
 }
@@ -169,7 +159,7 @@ func (req *MCRequest) fillFastFlexHeaderBytes(data []byte) int {
 	pos++
 	data[pos] = byte(req.Opcode)
 	pos++
-	data[pos] = byte(req.UserLen + 1)
+	data[pos] = byte(frameLen(req.UserLen))
 	pos++
 	data[pos] = byte(len(req.Key) + req.CollIdLen)
 	pos++
@@ -187,7 +177,7 @@ func (req *MCRequest) fillFastFlexHeaderBytes(data []byte) int {
 
 	// 8
 	binary.BigEndian.PutUint32(data[pos:pos+4],
-		uint32(len(req.Body)+req.CollIdLen+len(req.Key)+(req.UserLen+1)+len(req.Extras)+len(req.ExtMeta)))
+		uint32(len(req.Body)+req.CollIdLen+len(req.Key)+frameLen(req.UserLen)+len(req.Extras)+len(req.ExtMeta)))
 	pos += 4
 
 	// 12
@@ -202,8 +192,15 @@ func (req *MCRequest) fillFastFlexHeaderBytes(data []byte) int {
 
 	// 24 Flexible extras
 	if req.UserLen > 0 {
-		data[pos] = byte((uint8(FrameImpersonate) << 4) | uint8(req.UserLen))
-		pos++
+		if req.UserLen < FAST_FRAME_LEN {
+			data[pos] = byte((uint8(FrameImpersonate) << 4) | uint8(req.UserLen))
+			pos++
+		} else {
+			data[pos] = byte((uint8(FrameImpersonate) << 4) | uint8(FAST_FRAME_LEN))
+			pos++
+			data[pos] = byte(req.UserLen - FAST_FRAME_LEN)
+			pos++
+		}
 		copy(data[pos:pos+req.UserLen], req.Username[:req.UserLen])
 		pos += req.UserLen
 	}
@@ -381,7 +378,7 @@ func (req *MCRequest) fillFlexHeaderBytes(data []byte) (int, bool) {
 }
 
 func (req *MCRequest) FillHeaderBytes(data []byte) (int, bool) {
-	if len(req.FramingExtras) > 0 || req.UserLen > FAST_USER_LEN {
+	if len(req.FramingExtras) > 0 {
 		return req.fillFlexHeaderBytes(data)
 	} else if req.UserLen > 0 {
 		return req.fillFastFlexHeaderBytes(data), false

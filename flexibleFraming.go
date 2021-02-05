@@ -15,10 +15,8 @@ const (
 	FrameImpersonate FrameObjType = iota
 )
 
-// TODO half byte shifting to be implemented
-// it's not very efficient so we currently ignore user names longer than 15
 const MAX_USER_LEN = 128
-const FAST_USER_LEN = 15
+const FAST_FRAME_LEN = 15
 
 type FrameInfo struct {
 	ObjId   FrameObjType
@@ -119,11 +117,16 @@ func (f *FrameInfo) Bytes() ([]byte, bool) {
 	return obj2Bytes(f.ObjId, f.ObjLen, f.ObjData)
 }
 
-// TODO implement half byte shifting for impersonate user names
-// halfByteRemaining will always be false, because ObjID and Len haven't gotten that large yet
-// and user names are truncated
+func frameLen(len int) int {
+	if len < FAST_FRAME_LEN {
+		return len + 1
+	}
+	return len + 2
+}
+
+// halfByteRemaining will always be false, handled internally
 func obj2Bytes(id FrameObjType, len int, data []byte) (output []byte, halfByteRemaining bool) {
-	if len < 16 {
+	if len < FAST_FRAME_LEN {
 
 		// ObjIdentifier - 4 bits + ObjLength - 4 bits
 		var idAndLen uint8
@@ -131,11 +134,18 @@ func obj2Bytes(id FrameObjType, len int, data []byte) (output []byte, halfByteRe
 		idAndLen |= uint8(len)
 		output = append(output, byte(idAndLen))
 
-		// Rest is Data
-		output = append(output, data[:len]...)
-
 	} else {
+
+		// ObjIdentifier - 4 bits + ObjLength - 4 bits
+		var idAndLen uint8
+		idAndLen |= uint8(id) << 4
+		idAndLen |= uint8(FAST_FRAME_LEN)
+		output = append(output, byte(idAndLen))
+		output = append(output, byte(len-FAST_FRAME_LEN))
 	}
+
+	// Rest is Data
+	output = append(output, data[:len]...)
 	return
 }
 
