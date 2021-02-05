@@ -15,8 +15,9 @@ const (
 	FrameImpersonate FrameObjType = iota
 )
 
-const MAX_USER_LEN = 15 // TODO half byte shifting to be implemented
-// it's not very efficient so we currently truncate user names
+// TODO half byte shifting to be implemented
+// it's not very efficient so we currently ignore user names longer than 15
+const MAX_USER_LEN = 128
 const FAST_USER_LEN = 15
 
 type FrameInfo struct {
