@@ -75,7 +75,7 @@ type UtilsIface interface {
 	EncodeHttpRequestHeader(reqBytes []byte, key, value string) []byte
 	EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error)
 	GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger, useExternal bool) (string, error)
-	GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error)
+	GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, keepClientAlive bool) (*http.Client, error)
 	GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	RemovePrefix(prefix string, str string) string
 	UrlForLog(urlStr string) string

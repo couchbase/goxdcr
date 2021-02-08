@@ -159,7 +159,7 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 		}
 
 		remoteBucket.MemcachedAddrRestAddrMap[serverAddr] = hostAddr
-		http_client, err := remoteBucket.utils.GetHttpClient(username, remoteBucket.RemoteClusterRef.HttpAuthMech(), certificate, sanInCertificate, clientCertificate, clientKey, hostAddr, remoteBucket.logger)
+		http_client, err := remoteBucket.utils.GetHttpClient(username, remoteBucket.RemoteClusterRef.HttpAuthMech(), certificate, sanInCertificate, clientCertificate, clientKey, hostAddr, remoteBucket.logger, false)
 		if err != nil {
 			return err
 		}

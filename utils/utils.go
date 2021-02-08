@@ -52,6 +52,7 @@ func (f *HELOFeatures) NumberOfActivatedFeatures() int {
 
 type Utilities struct {
 	logger_utils *log.CommonLogger
+	reusableNoKeepAliveTransport *http.Transport
 }
 
 /**
@@ -64,6 +65,21 @@ type Utilities struct {
 func NewUtilities() *Utilities {
 	retVar := &Utilities{
 		logger_utils: log.NewLogger("Utils", log.DefaultLoggerContext),
+		// The following is copied from "DefaultTransport" from go 1.11.5 except disableKeepAlive is set
+		// This is because DefaultTransport's clone() method was not implemented until go 1.13
+		reusableNoKeepAliveTransport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+				DualStack: true,
+			}).DialContext,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableKeepAlives: true,
+		},
 	}
 	return retVar
 }
@@ -2054,13 +2070,13 @@ func (u *Utilities) QueryRestApiWithAuth(
 	var http_client *http.Client
 	if authMech != base.HttpAuthMechScramSha {
 		var req *http.Request
-		http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger)
+		http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, keep_client_alive)
 		if err != nil {
 			return
 		}
 		err, statusCode = u.doRestCall(req, timeout, out, http_client, logger)
 	} else {
-		err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger)
+		err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger, keep_client_alive)
 
 	}
 	u.cleanupAfterRestCall(keep_client_alive, err, statusCode, http_client, logger)
@@ -2079,7 +2095,8 @@ func (u *Utilities) queryRestApiWithScramShaAuth(
 	timeout time.Duration,
 	out interface{},
 	client *http.Client,
-	logger *log.CommonLogger) (error, int, *http.Client) {
+	logger *log.CommonLogger,
+	keepClientAlive bool) (error, int, *http.Client) {
 
 	logger.Debugf("SCRAM-SHA authentication for user %v%v%v, baseURL=%v, path=%v\n", base.UdTagBegin, username, base.UdTagEnd, baseURL, path)
 
@@ -2100,7 +2117,11 @@ func (u *Utilities) queryRestApiWithScramShaAuth(
 		timeout = base.DefaultHttpTimeout
 	}
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		if keepClientAlive {
+			client = &http.Client{Timeout: timeout}
+		} else {
+			client = &http.Client{Transport: u.reusableNoKeepAliveTransport, Timeout: timeout}
+		}
 	} else {
 		client.Timeout = timeout
 	}
@@ -2119,21 +2140,7 @@ func (u *Utilities) queryRestApiWithScramShaAuth(
 
 }
 
-func (u *Utilities) prepareForRestCall(baseURL string,
-	path string,
-	preservePathEncoding bool,
-	username string,
-	password string,
-	authMech base.HttpAuthMech,
-	certificate []byte,
-	san_in_certificate bool,
-	clientCertificate []byte,
-	clientKey []byte,
-	httpCommand string,
-	contentType string,
-	body []byte,
-	client *http.Client,
-	logger *log.CommonLogger) (*http.Client, *http.Request, error) {
+func (u *Utilities) prepareForRestCall(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, client *http.Client, logger *log.CommonLogger, keep_client_alive bool) (*http.Client, *http.Request, error) {
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	var ret_client *http.Client = client
 
@@ -2160,7 +2167,7 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	}
 
 	if ret_client == nil {
-		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l)
+		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l, keep_client_alive)
 		if err != nil {
 			l.Errorf("Failed to get client for request, err=%v, req=%v\n", err, req)
 			return nil, nil, err
@@ -2273,7 +2280,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 
 	for i := 0; i < num_retry; i++ {
 		if authMech != base.HttpAuthMechScramSha {
-			http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger)
+			http_client, req, err = u.prepareForRestCall(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, client, logger, keep_client_alive)
 			if err == nil {
 				err, statusCode = u.doRestCall(req, timeout, out, http_client, logger)
 			}
@@ -2282,7 +2289,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 				break
 			}
 		} else {
-			err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger)
+			err, statusCode, http_client = u.queryRestApiWithScramShaAuth(baseURL, path, preservePathEncoding, username, password, httpCommand, contentType, body, timeout, out, client, logger, keep_client_alive)
 			if err == nil {
 				break
 			}
@@ -2302,7 +2309,7 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 
 }
 
-func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
+func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger, keepClientAlive bool) (*http.Client, error) {
 	var client *http.Client
 	if authMech == base.HttpAuthMechHttps {
 		caPool := x509.NewCertPool()
@@ -2319,12 +2326,18 @@ func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, c
 		}
 		conn.Close()
 
-		tr := &http.Transport{TLSClientConfig: tlsConfig, Dial: base.DialTCPWithTimeout}
+		tr := &http.Transport{TLSClientConfig: tlsConfig,
+			Dial: base.DialTCPWithTimeout,
+			DisableKeepAlives: !keepClientAlive}
 		client = &http.Client{Transport: tr,
 			Timeout: base.DefaultHttpTimeout}
 
 	} else {
-		client = &http.Client{Timeout: base.DefaultHttpTimeout}
+		if !keepClientAlive{
+			client = &http.Client{Transport: u.reusableNoKeepAliveTransport, Timeout: base.DefaultHttpTimeout}
+		} else {
+			client = &http.Client{Timeout: base.DefaultHttpTimeout}
+		}
 	}
 	return client, nil
 }
