@@ -133,7 +133,6 @@ func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.C
 	defer waitGrp.Done()
 	atomic.StoreUint32(&b.stopRequested, 1)
 	close(b.finCh)
-	close(b.incomingReqCh)
 
 	b.childrenWaitgrp.Done()
 
@@ -288,18 +287,27 @@ func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, 
 	reqAndResp.HandleResponse = make(chan error, 1)
 	reqAndResp.Force = forceFlag
 
-	// Serialize the requests - goes to run()
-	b.incomingReqCh <- reqAndResp
+	select {
+	case <-b.finCh:
+		return errorStopped
+	default:
+		// Serialize the requests - goes to run()
+		b.incomingReqCh <- reqAndResp
 
-	err := <-reqAndResp.HandleResponse
-	if err != nil {
-		if err == errorSyncDel {
-			err = nil
+		select {
+		// In case we didn't catch it in time
+		case <-b.finCh:
+			return errorStopped
+		case err := <-reqAndResp.HandleResponse:
+			if err != nil {
+				if err == errorSyncDel {
+					err = nil
+				}
+				return err
+			}
+			return <-reqAndResp.PersistResponse
 		}
-		return err
 	}
-
-	return <-reqAndResp.PersistResponse
 }
 
 func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
@@ -686,7 +694,7 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		} else {
 			err = base.ErrorInvalidInput
 		}
-		if err != nil {
+		if err != nil && err != errorStopped {
 			b.logger.Errorf("Handler Process event received err %v for backfillmap %v", err, routingInfo.BackfillMap)
 			b.logger.Fatalf(base.GetBackfillFatalDataLossError(b.id).Error())
 			b.restreamPipelineFatalFunc()

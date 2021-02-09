@@ -910,7 +910,8 @@ func (b *BackfillMgr) internalGetHandler(replId string) *BackfillRequestHandler 
 
 func (b *BackfillMgr) markNewSourceManifest(replId string, newSourceManifestId uint64) {
 	b.cacheMtx.Lock()
-	if newSourceManifestId > b.cacheSpecLastSuccessfulManifestId[replId] {
+	manifestId, replExists := b.cacheSpecLastSuccessfulManifestId[replId]
+	if replExists && newSourceManifestId > manifestId {
 		b.cacheSpecLastSuccessfulManifestId[replId] = newSourceManifestId
 	}
 	b.cacheMtx.Unlock()
@@ -1456,8 +1457,10 @@ func (b *BackfillMgr) startRetryMonitor() {
 					handler := job.handler
 					err := handler.handleBackfillRequestWithArgs(job.req, job.force)
 					if err != nil {
-						b.logger.Errorf("Retrying job %v failed due to %v - will try again next cycle", job.req, err)
-						unableToBeProcessedQueue = append(unableToBeProcessedQueue, job)
+						if err != errorStopped {
+							b.logger.Errorf("Retrying job %v failed due to %v - will try again next cycle", job.req, err)
+							unableToBeProcessedQueue = append(unableToBeProcessedQueue, job)
+						}
 					} else {
 						b.markNewSourceManifest(job.replId, job.correspondingSrcManifestId)
 					}
