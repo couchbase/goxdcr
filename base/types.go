@@ -1307,7 +1307,7 @@ func (meta *CustomCRMeta) GetCvId() []byte {
 }
 
 // Returns the id of the cluster that last updated this document
-func (meta *CustomCRMeta) Updater() []byte {
+func (meta *CustomCRMeta) DocumentSourceId() []byte {
 	if meta.cas > meta.cv {
 		// New change in sending cluster so that's the id
 		return meta.senderId
@@ -1468,78 +1468,139 @@ func (meta *CustomCRMeta) previousVersions() (map[string]uint64, error) {
 	return previousVersions, nil
 }
 
-// This routine construct XATTR _xdcr{...} if there is new change (meta.cas > meta.cv)
-func (meta *CustomCRMeta) ConstructCustomCRXattr(body []byte, startPos int) (pos int, err error) {
-	if meta.cas <= meta.cv {
-		return startPos, fmt.Errorf("ConstructCustomCRXattr cannot be called when there has been no change. cas=%v, cv=%v", meta.cas, meta.cv)
-	}
-	pos = startPos + 4
-	copy(body[pos:], []byte(XATTR_XDCR))
-	pos = pos + len(XATTR_XDCR)
-	body[pos] = '\x00'
-	pos++
-	if len(meta.senderId) == 0 {
-		return startPos, errors.New("Cannot format XATTR for custom CR because the sender ID is empty")
-	}
+// {"id":...;"cv":...
+func (meta *CustomCRMeta) formatIdCv(body []byte, pos int) int {
 	body, pos = WriteJsonRawMsg(body, []byte(XATTR_ID), pos, WriteJsonKey, len(XATTR_ID), true /*firstKey*/)
-	body, pos = WriteJsonRawMsg(body, meta.senderId, pos, WriteJsonValue, len(meta.senderId), false /*firstKey*/)
+	if meta.cas <= meta.cv {
+		// Since there is no new update, id/cv stays the same
+		body, pos = WriteJsonRawMsg(body, meta.cvId, pos, WriteJsonValue, len(meta.cvId), false /*firstKey*/)
+		cvHex := Uint64ToHexLittleEndian(meta.cv)
+		body, pos = WriteJsonRawMsg(body, []byte(XATTR_CV), pos, WriteJsonKey, len(XATTR_CV), false /*firstKey*/)
+		body, pos = WriteJsonRawMsg(body, cvHex, pos, WriteJsonValue, len(cvHex), false /*firstKey*/)
+	} else {
+		// Set id to sender
+		body, pos = WriteJsonRawMsg(body, meta.senderId, pos, WriteJsonValue, len(meta.senderId), false /*firstKey*/)
+		// Set cv to the new CAS
+		cvHex := Uint64ToHexLittleEndian(meta.cas)
+		body, pos = WriteJsonRawMsg(body, []byte(XATTR_CV), pos, WriteJsonKey, len(XATTR_CV), false /*firstKey*/)
+		body, pos = WriteJsonRawMsg(body, cvHex, pos, WriteJsonValue, len(cvHex), false /*firstKey*/)
+	}
+	return pos
+}
 
-	cvHex := Uint64ToHexLittleEndian(meta.cas)
-	body, pos = WriteJsonRawMsg(body, []byte(XATTR_CV), pos, WriteJsonKey, len(XATTR_CV), false /*firstKey*/)
-	body, pos = WriteJsonRawMsg(body, cvHex, pos, WriteJsonValue, len(cvHex), false /*firstKey*/)
+// If key:value exceeds pruning window, it will not be added
+// No pruning if pruningWindow == 0
+// If an entry is pruned, its CAS will be returned.
+func (meta *CustomCRMeta) addEntryToBody(key, value, body []byte, pos int, empty bool, pruningWindow time.Duration) (uint64 /*cas*/, int /*pos*/, bool /*empty*/, error) {
+	if pruningWindow > 0 {
+		// Convert value to CAS to check for pruning
+		cas, err := Base64ToUint64(value)
+		if err != nil {
+			return 0, pos, empty, err
+		}
+		if CasDuration(cas, meta.cas) >= pruningWindow {
+			return cas, pos, empty, nil
+		}
+	}
+	body, pos = WriteJsonRawMsg(body, key, pos, WriteJsonKey, len(key), empty /*firstKey*/)
+	body, pos = WriteJsonRawMsg(body, value, pos, WriteJsonValue, len(value), false /*firstKey*/)
+	return 0, pos, false, nil
+}
 
-	pcas := make(map[string][]byte)
-	if meta.cvId != nil {
-		pcas[string(meta.cvId)] = Uint64ToBase64(meta.cv)
+func (meta *CustomCRMeta) formatPv(body []byte, pos int, pruningWindow time.Duration) (int, error) {
+	empty := true
+	startPos := pos
+	body, pos = WriteJsonRawMsg(body, []byte(XATTR_PCAS), pos, WriteJsonKey, len(XATTR_PCAS), false /*firstKey*/)
+	if meta.cas > meta.cv {
+		// New change, move mv into pv
+		if meta.mv != nil {
+			it, err := NewCCRXattrFieldIterator(meta.mv)
+			if err != nil {
+				return startPos, err
+			}
+			for it.HasNext() {
+				key, value, err := it.Next()
+				if err != nil {
+					return startPos, err
+				}
+				// Use 0 for pruning window since items from MV will not be pruned
+				_, pos, empty, err = meta.addEntryToBody(key, value, body, pos, empty, 0)
+			}
+		} else if len(meta.cvId) > 0 {
+			// New change but no MV, put id/cv into PV
+			var err error
+			cvBase64 := Uint64ToBase64(meta.cv)
+			_, pos, empty, err = meta.addEntryToBody(meta.cvId, cvBase64, body, pos, empty, 0)
+			if err != nil {
+				return startPos, err
+			}
+		}
 	}
 	if meta.pcas != nil {
+		var savedKey, savedVal []byte
+		var maxCas uint64 = 0
 		it, err := NewCCRXattrFieldIterator(meta.pcas)
 		if err != nil {
-			// This should never happen unless there is software bug where we formatted the _xdcr.pcas badly.
-			return startPos, fmt.Errorf("Error '%v' calling NewCCRXattrFieldIterator() for pcas '%s'. Will truncate it from new pcas.", err, meta.pcas)
-		} else {
-			for it.HasNext() {
-				key, value, err := it.Next()
-				if err != nil {
-					return startPos, fmt.Errorf("Error '%v' iterating through '%s'. Will truncate it from new pcas.", err, meta.pcas)
-				}
-				pcas[string(key)] = value
+			return startPos, err
+		}
+		for it.HasNext() {
+			key, value, err := it.Next()
+			if err != nil {
+				return startPos, err
 			}
+			// The document source will be set as id/cv, so it doesn't need to be in PV
+			if bytes.Equal(meta.DocumentSourceId(), key) {
+				continue
+			}
+			var cas uint64
+			cas, pos, empty, err = meta.addEntryToBody(key, value, body, pos, empty, pruningWindow)
+			if err != nil {
+				return startPos, err
+			}
+			// No value has been written to body and pruning is currently taking place
+			if empty && cas > maxCas {
+				maxCas = cas
+				savedKey = key
+				savedVal = value
+			}
+		}
+		if empty && !meta.IsMergedDoc() && meta.pcas != nil && savedKey != nil && savedVal != nil {
+			// We have to have one PV entry for future CR
+			_, pos, empty, err = meta.addEntryToBody(savedKey, savedVal, body, pos, empty, 0)
 		}
 	}
-	if meta.mv != nil {
-		it, err := NewCCRXattrFieldIterator(meta.mv)
-		if err != nil {
-			return startPos, fmt.Errorf("Error '%v' calling NewCCRXattrFieldIterator() for mv '%s'. Will truncate it from new pcas.", err, meta.mv)
-		} else {
-			for it.HasNext() {
-				key, value, err := it.Next()
-				if err != nil {
-					return startPos, fmt.Errorf("Error '%v' iterating through '%s'. Will truncate it from new pcas.", err, meta.mv)
-				}
-				// pcas should not have any entry that's in mv
-				pcas[string(key)] = value
-			}
-		}
-	}
-
-	if len(pcas) > 0 {
-		body, pos = WriteJsonRawMsg(body, []byte(XATTR_PCAS), pos, WriteJsonKey, len(XATTR_PCAS), false /*firstKey*/)
-
-		first := true
-		for k, v := range pcas {
-			if Equals(meta.senderId, k) == false { // sender is already in _xdcr.id
-				body, pos = WriteJsonRawMsg(body, []byte(k), pos, WriteJsonKey, len(k), first /*firstKey*/)
-				body, pos = WriteJsonRawMsg(body, v, pos, WriteJsonValue, len(v), false /*firstKey*/)
-				first = false
-			}
-		}
-		body[pos] = '}'
-		pos++
+	if empty {
+		return startPos, nil
 	}
 	body[pos] = '}'
 	pos++
-	body[pos] = '\x00'
+	return pos, nil
+}
+
+// This routine construct XATTR _xdcr{...} based on meta. The constructed XATTRs includes updates for
+// new change (meta.cas > meta.cv) and pruning in PV
+func (meta *CustomCRMeta) ConstructCustomCRXattrForSetMeta(body []byte, startPos int, pruningWindow time.Duration) (pos int, err error) {
+	// Reserve the first 4 bytes for total length.
+	pos = startPos + 4
+	copy(body[pos:], []byte(XATTR_XDCR))
+	pos = pos + len(XATTR_XDCR)
+	body[pos] = '\x00' // This separates the XATTR name and body
+	pos++
+	pos = meta.formatIdCv(body, pos)
+	if meta.cas <= meta.cv && meta.mv != nil {
+		// Since there is no new change, mv stays the same
+		body, pos = WriteJsonRawMsg(body, []byte(XATTR_MV), pos, WriteJsonKey, len(XATTR_MV), false /*firstKey*/)
+		// copy the mv since it is already in json format
+		copy(body[pos:], meta.mv)
+		pos = pos + len(meta.mv)
+	}
+	pos, err = meta.formatPv(body, pos, pruningWindow)
+	if err != nil {
+		return startPos, err
+	}
+	body[pos] = '}'
+	pos++
+	body[pos] = '\x00' // This marks the end of this XATTR
 	pos++
 	binary.BigEndian.PutUint32(body[startPos:startPos+4], uint32(pos-(startPos+4)))
 	return pos, nil
@@ -1594,7 +1655,7 @@ func (meta *CustomCRMeta) UpdateMetaForSetBack() (pcas, mv []byte, err error) {
 //   It finds the current versions (MV) of the two documents, combine them into new MV.
 //   It finds the previous versions (PCAS) of the two documents, combine them into new PCAS
 //   It then remove any duplicates and format them in the provided slices
-func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mergedPcasSlice []byte) (mvlen int, pcaslen int, err error) {
+func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mergedPcasSlice []byte, pruningWindow time.Duration) (mvlen int, pcaslen int, err error) {
 	currentVersions, err := meta.currentVersions()
 	if err != nil {
 		return 0, 0, err
@@ -1629,10 +1690,14 @@ func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mer
 			}
 		}
 	}
-	// Remove any redundant entries in previousVersions that already in currentVersions
-	for key, _ := range currentVersions {
-		if _, ok := previousVersions[key]; ok {
+	// Remove any entries in previousVersions that are already in currentVersions or exceed pruningWindow
+	for key, value := range previousVersions {
+		if _, ok := currentVersions[key]; ok {
 			delete(previousVersions, key)
+		} else {
+			if pruningWindow > 0 && CasDuration(value, meta.cas) >= pruningWindow {
+				delete(previousVersions, key)
+			}
 		}
 	}
 	// Construct MV
@@ -1663,6 +1728,40 @@ func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mer
 	}
 	return mvlen, pcaslen, nil
 }
+
+func (meta *CustomCRMeta) NeedUpdate(pruningWindow time.Duration) (bool, error) {
+	// We need to update if CAS has changed from cv.CAS
+	if meta.GetCas() > meta.GetCv() {
+		return true, nil
+	}
+
+	// The CAS has not changed. But do we need to prune PV?
+
+	// No pruning if its setting is 0 or there is no pv to prune
+	if pruningWindow == 0 || meta.pcas == nil {
+		return false, nil
+	}
+	it, err := NewCCRXattrFieldIterator(meta.pcas)
+	if err != nil {
+		return false, err
+	}
+	for it.HasNext() {
+		_, v, err := it.Next()
+		if err != nil {
+			return false, err
+		}
+		cas, err := Base64ToUint64(v)
+		if err != nil {
+			return false, err
+		}
+		// Check for pruning window
+		if CasDuration(cas, meta.cas) >= pruningWindow {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (meta *CustomCRMeta) String() string {
 	return fmt.Sprintf("senderId: %s, cas: %v, cvId: %s, cv: %v, pcas: %s, mv: %s",
 		meta.senderId, meta.cas, meta.cvId, meta.cv, meta.pcas, meta.mv)
@@ -1680,8 +1779,8 @@ var MaxBase64CASLength = len(Uint64ToBase64(math.MaxUint64))
 
 func MergedMvLength(sourceMeta, targetMeta *CustomCRMeta) int {
 	return len(sourceMeta.GetMv()) + len(targetMeta.GetMv()) + 2 + // maximumn combined MV + 2 seperators ','
-		len(sourceMeta.Updater()) + 3 + // quotes and separators "...":
-		len(targetMeta.Updater()) + 3 + // quotes and separators "...":
+		len(sourceMeta.DocumentSourceId()) + 3 + // quotes and separators "...":
+		len(targetMeta.DocumentSourceId()) + 3 + // quotes and separators "...":
 		2*(MaxBase64CASLength+3) + 2 // quotes and separators "...", plus '{' and '}'
 }
 

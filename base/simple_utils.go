@@ -1749,3 +1749,13 @@ func ValidateRemoteClusterName(name string, errorsMap map[string]error) {
 	errorsMap[RemoteClusterName] = fmt.Errorf("Remote cluster name should only be IPv4, IPv6, or alpha-numeric characters")
 	return
 }
+
+func CasToTime(cas uint64) time.Time {
+	var mask uint64 = (1 << 16) - 1
+	t := time.Unix(0, int64(uint64(cas) & ^mask))
+	return t
+}
+
+func CasDuration(from, to uint64) time.Duration {
+	return time.Duration(to - from)
+}

@@ -1206,6 +1206,8 @@ const FilterDelKey = "filterDeletion"
 const BypassExpiryKey = "filterBypassExpiry"
 
 const MergeFunctionMappingKey = "mergeFunctionMapping"
+const HlvPruningWindowKey = "hlvPruningWindowSec"
+const HlvPruningDefault = 259200 // seconds, 3 days
 
 // UI+ns_server returned document content, keyed by special keys
 const (

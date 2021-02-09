@@ -23,8 +23,10 @@ import (
 )
 
 const targetClusterName = "C2"
+const sourceClusterName = "C1"
 const xmemBucket = "B2"
 const xmemPort = "12002"
+const sourcePort = "9000"
 const targetPort = "9001"
 const username = "Administrator"
 const password = "wewewe"

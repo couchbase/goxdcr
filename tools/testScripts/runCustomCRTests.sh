@@ -70,6 +70,7 @@ else
       echo
       echo "=========== Start dataLoad run $i ==========="
       runTestCase
+      grepForPanics
       if (($? != 0)); then
         exit 1
       fi

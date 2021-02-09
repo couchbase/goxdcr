@@ -83,6 +83,7 @@ type ConflictManager struct {
 	sourceBucketName  string
 	mergeFunction     string
 	userAgent         string
+	pruningWindow     time.Duration
 
 	counter_conflict_ch_waittime uint64 // time waiting to put conflict into conflict_ch
 	counter_resolver_waittime    uint64 // time waiting to put conflict to resolver's input_ch
@@ -144,6 +145,9 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	if c.mergeFunction == "" {
 		return fmt.Errorf("%v: Default merge function is not set for the pipeline.", c.pipeline.FullTopic())
 	}
+	if value, ok := settingsMap[base.HlvPruningWindowKey]; ok {
+		c.pruningWindow = time.Duration(value.(int)) * time.Second
+	}
 	c.result_ch = make(chan *base.MergeInputAndResult, resultChannelsize)
 	c.conflict_ch = make(chan *base.ConflictParams, conflictChannelSize)
 	for i := 0; i < numConflictManagerWorkers; i++ {
@@ -196,6 +200,9 @@ func (c *ConflictManager) IsSharable() bool {
 	return false
 }
 func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	if value, exists := settings[base.HlvPruningWindowKey]; exists {
+		c.pruningWindow = time.Duration(value.(int)) * time.Second
+	}
 	return nil
 }
 func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte, recycler func(*base.WrappedMCRequest)) error {
@@ -520,7 +527,7 @@ func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byt
 	// TODO (MB-41808): data pool
 	mergedMvSlice := make([]byte, mvlen)
 	mergedPcasSlice := make([]byte, pcaslen)
-	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice, c.pruningWindow)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom CR: failed to merge metadata for document key %s, error: %v source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
 			c.pipeline.FullTopic(), bytes.Trim(input.Source.Req.Key, "\x00"), err,

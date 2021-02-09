@@ -66,6 +66,7 @@ const (
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey
+	HlvPruningWindowKey     = base.HlvPruningWindowKey
 
 	RetryOnRemoteAuthErrKey = base.RetryOnRemoteAuthErrKey
 )
@@ -136,13 +137,16 @@ var FilterSkipRestreamConfig = &SettingsConfig{false, nil}
 
 var CollectionsMappingRulesConfig = &SettingsConfig{CollectionsMappingRulesType{}, nil}
 
-var MergeFunctionMappingConfig = &SettingsConfig{base.MergeFunctionMappingType{}, nil}
-
 var CollectionsSkipSrcCheckConfig = &SettingsConfig{false, nil}
 
 var CollectionsManualBackfillConfig = &SettingsConfig{"", nil}
 var CollectionsDelAllBackfillConfig = &SettingsConfig{false, nil}
 var CollectionsDelVbBackfillConfig = &SettingsConfig{-1, &Range{0, base.NumberOfVbs - 1}}
+
+var MergeFunctionMappingConfig = &SettingsConfig{base.MergeFunctionMappingType{}, nil}
+
+// Default pruning window is 3 days (259200 seconds), 0 means no pruning, maximum is 365 days (31536000 seconds)
+var PruningWindowConfig = &SettingsConfig{base.HlvPruningDefault, &Range{0, 31536000}}
 
 var RetryOnRemoteAuthErrConfig = &SettingsConfig{false, nil}
 
@@ -168,12 +172,13 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	FilterExpDelKey:                   FilterExpDelConfig,
 	CollectionsMgtMultiKey:            CollectionsMgtConfig,
 	CollectionsMappingRulesKey:        CollectionsMappingRulesConfig,
-	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
 	CollectionsSkipSourceCheckKey:     CollectionsSkipSrcCheckConfig,
 	CollectionsManualBackfillKey:      CollectionsManualBackfillConfig,
 	CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillConfig,
 	CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillConfig,
 	RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrConfig,
+	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
+	HlvPruningWindowKey:               PruningWindowConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead

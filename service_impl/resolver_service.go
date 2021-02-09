@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/eventing-ee/js-evaluator/defs"
@@ -159,9 +158,8 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	source := input.Source
 	target := input.Target
 	var params []interface{}
-	var mask uint64 = (1 << 16) - 1
-	sourceTime := time.Unix(0, int64(source.Req.Cas & ^mask)).String()
-	targetTime := time.Unix(0, int64(target.Resp.Cas & ^mask)).String()
+	sourceTime := base.CasToTime(source.Req.Cas).String()
+	targetTime := base.CasToTime(target.Resp.Cas).String()
 	sourceBody := base.FindSourceBodyWithoutXattr(source.Req)
 	targetBody, err := target.FindTargetBodyWithoutXattr()
 	if err != nil {

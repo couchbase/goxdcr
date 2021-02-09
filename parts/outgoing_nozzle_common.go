@@ -49,6 +49,8 @@ const (
 	EVENT_ADDI_REQ_VBUCKET    = "req_vbucket"
 	EVENT_ADDI_REQ_EXPIRY_SET = "req_expiry_set"
 	EVENT_ADDI_REQ_SIZE       = "req_size"
+
+	HLV_PRUNING_WINDOW = base.HlvPruningWindowKey
 )
 
 type NeedSendStatus int
@@ -89,6 +91,7 @@ type baseConfig struct {
 	connectStr         string
 	username           string
 	password           string
+	hlvPruningWindow   time.Duration
 	logger             *log.CommonLogger
 }
 
@@ -202,7 +205,9 @@ func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettings
 	if val, ok := settings[SETTING_OPTI_REP_THRESHOLD]; ok {
 		config.optiRepThreshold = uint32(val.(int))
 	}
-
+	if val, ok := settings[HLV_PRUNING_WINDOW]; ok {
+		config.hlvPruningWindow = time.Duration(val.(int)) * time.Second
+	}
 }
 
 /**

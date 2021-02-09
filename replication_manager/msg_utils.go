@@ -85,11 +85,12 @@ const (
 	CollectionsMigrateKey          = base.CollectionsMigrateKey
 	CollectionsOsoKey              = base.CollectionsOsoKey
 	CollectionsMappingRulesKey     = base.CollectionsMappingRulesKey
-	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
 	ManualBackfillRequested        = base.ManualBackfillKey
 	CollectionsDelAllBackfillKey   = base.CollectionsDelAllBackfillKey
 	CollectionsDelVbBackfillKey    = base.CollectionsDelSingleVBBackfillKey
 	RetryOnRemoteAuthErrKey        = base.RetryOnRemoteAuthErrKey
+	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
+	HlvPruningWindowLKey           = base.HlvPruningWindowKey
 )
 
 // constants for parsing create replication response
@@ -177,11 +178,12 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CollectionsMirrorKey:           metadata.CollectionsMgtMirrorKey,
 	CollectionsOsoKey:              metadata.CollectionsMgtOsoKey,
 	CollectionsMappingRulesKey:     metadata.CollectionsMappingRulesKey,
-	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
 	ManualBackfillRequested:        metadata.CollectionsManualBackfillKey,
 	CollectionsDelAllBackfillKey:   metadata.CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey:    metadata.CollectionsDelVbBackfillKey,
 	RetryOnRemoteAuthErrKey:        metadata.RetryOnRemoteAuthErrKey,
+	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
+	HlvPruningWindowLKey:           metadata.HlvPruningWindowKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -214,11 +216,12 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CollectionsMgtMirrorKey:           CollectionsMirrorKey,
 	metadata.CollectionsMgtOsoKey:              CollectionsOsoKey,
 	metadata.CollectionsMappingRulesKey:        CollectionsMappingRulesKey,
-	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
 	metadata.CollectionsManualBackfillKey:      ManualBackfillRequested,
 	metadata.CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillKey,
 	metadata.CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillKey,
 	metadata.RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrKey,
+	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
+	metadata.HlvPruningWindowKey:               HlvPruningWindowLKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

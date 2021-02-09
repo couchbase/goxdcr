@@ -25,7 +25,7 @@ import (
 const sourceConnStr = "http://127.0.0.1:9000"
 const targetConnStr = "http://127.0.0.1:9001"
 const targetCluster = "C2"
-const urlCreateReplication = "http://127.0.0.1:9000/controller/createReplication"
+const urlCreateReplicationFmt = "http://127.0.0.1:%s/controller/createReplication"
 const urlFunctionsFmt = "http://127.0.0.1:13000/functions/v1/libraries/xdcr/functions/%v"
 const bucketPath = "/pools/default/buckets"
 
@@ -90,16 +90,26 @@ func waitForBucketReady(t *testing.T, bucket *gocb.Bucket) {
 	}
 	fmt.Println("Buckets are ready")
 }
-func createReplication(t *testing.T, bucketName string, mergeFunction string) {
+func createReplication(t *testing.T, bucketName string, mergeFunction string, sourceToTarget bool) {
 	assert := assert.New(t)
 	client := &http.Client{}
 	data := url.Values{}
 	data.Set("fromBucket", bucketName)
-	data.Add("toCluster", targetCluster)
+	var toCluster string
+	var urlCreateReplication string
+	if sourceToTarget {
+		toCluster = targetClusterName
+		urlCreateReplication = fmt.Sprintf(urlCreateReplicationFmt, sourcePort)
+	} else { // reverse direction
+		toCluster = sourceClusterName
+		urlCreateReplication = fmt.Sprintf(urlCreateReplicationFmt, targetPort)
+	}
+	data.Add("toCluster", toCluster)
 	data.Add("toBucket", bucketName)
 	data.Add("replicationType", "continuous")
 	data.Add("mergeFunctionMapping", "{\""+base.BucketMergeFunctionKey+"\":\""+mergeFunction+"\"}")
 	data.Add("logLevel", "Debug")
+	data.Add(base.HlvPruningWindowKey, "360") // 1 hour
 	req, err := http.NewRequest(base.MethodPost, urlCreateReplication, bytes.NewBufferString(data.Encode()))
 	assert.Nil(err)
 	req.Header.Set(base.ContentType, base.DefaultContentType)
@@ -251,7 +261,8 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc)
+	createReplication(t, bucketName, base.DefaultMergeFunc, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, false) // reverse direction to test pruning
 
 	/*
 	 * Test 1: New doc at source. Expect to format _xdcr at target with cv and id.
@@ -345,13 +356,33 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	pc, err := getPathValue(key, "_xdcr.pc", targetBucket)
 	assert.Nil(err)
-	assert.Equal(2, len(pc.(map[string]interface{})))
+	// There are 3 items in MV and they all move to PV
+	assert.Equal(3, len(pc.(map[string]interface{})), fmt.Sprintf("Document %s, Unexpected pc: %v\n", key, pc))
 	mv, err = getPathValue(key, "_xdcr.mv", targetBucket)
 	assert.NotNil(err)
 	assert.Nil(mv)
 
 	/*
-	 * Test 5: Do an upsert without subdoc flags and check that xattrs are preserved
+	 * Test 5: Update at target, PV should be pruned.
+	 */
+	_, err = targetBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target item"}}, expire)
+	assert.Nil(err)
+	err = waitForReplication(key, targetBucket, sourceBucket) // replicate from C2 to C1
+	assert.Nil(err)
+	err = verifyCv(key, sourceBucket)
+	assert.Nil(err)
+	_, err = getPathValue(key, base.XATTR_ID_PATH, sourceBucket)
+	assert.Nil(err)
+	pv, err := getPathValue(key, base.XATTR_PCAS_PATH, sourceBucket)
+	assert.Nil(err)
+	// PV had 3 items, now 1
+	assert.Equal(1, len(pv.(map[string]interface{})), fmt.Sprintf("Unexpected pv=%v\n", pv))
+
+	/*
+	 * Test 6: Do an upsert without subdoc flags and check that xattrs are preserved
 	 */
 	_, err = sourceBucket.Upsert(key,
 		User{Id: "kingarthur",
@@ -364,12 +395,12 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	_, err = getPathValue(key, "_xdcr.id", targetBucket)
 	assert.Nil(err)
-	mv, err = getPathValue(key, "_xdcr.mv", sourceBucket)
+	pv, err = getPathValue(key, base.XATTR_PCAS_PATH, sourceBucket)
 	assert.Nil(err)
-	assert.Equal(3, len(mv.(map[string]interface{})))
+	assert.Equal(1, len(pv.(map[string]interface{})))
 
 	/*
-	 * Test 6. Delete the document and _xdcr is intact
+	 * Test 7. Delete the document and _xdcr is intact
 	 */
 	_, err = sourceBucket.Remove(key, 0)
 	assert.Nil(err)
@@ -380,7 +411,7 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.Equal(3, len(xdcr.(map[string]interface{})))
 
 	/*
-	 * Test 7. Recreate the document and old _xdcr is lost, unfortunately
+	* Test 7. Recreate the document and old _xdcr is lost, unfortunately
 	 */
 	_, err = sourceBucket.Upsert(key,
 		User{Id: "kingarthur",
@@ -411,7 +442,7 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc)
+	createReplication(t, bucketName, base.DefaultMergeFunc, true)
 
 	key := time.Now().Format(time.RFC3339)
 	var expire uint32 = 24 * 60 * 60
@@ -464,7 +495,7 @@ func TestCustomCRBinaryDocs(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc)
+	createReplication(t, bucketName, base.DefaultMergeFunc, true)
 
 	fmt.Println("Test 1. Create target binary doc, create source binary doc. Source wins.")
 	key := "sourceAndTargetBinary"
@@ -520,19 +551,28 @@ func TestCcrXattrAfterMerge(t *testing.T) {
 	waitForBucketReady(t, targetBucket)
 	mergeFunc := "simpleMerge"
 	createMergeFunction(t, mergeFunc)
-	createReplication(t, bucketName, mergeFunc)
+	createReplication(t, bucketName, mergeFunc, true)
 
 	// Create documents at target and then at source to get conflicts
 	key := time.Now().Format(time.RFC3339)
 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
 	numDoc := 100
+	var cas1 uint64
+	var cas100 uint64
 	for i := 0; i < numDoc; i++ {
-		_, err = targetBucket.Upsert(fmt.Sprintf("%v_%v", key, i),
+		cas, err := targetBucket.Upsert(fmt.Sprintf("%v_%v", key, i),
 			User{Id: "kingarthur",
 				Email:     "kingarthur@couchbase.com",
 				Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
 		assert.Nil(err)
+		if i == 0 {
+			cas1 = uint64(cas)
+		} else if i == 99 {
+			cas100 = uint64(cas)
+		}
 	}
+
+	fmt.Printf("cas1=%v,cas100=%v,diff=%v, diff2=%v\n", base.CasToTime(cas1), base.CasToTime(cas100), base.CasDuration(cas1, cas100), base.CasDuration(cas100, cas1))
 	fmt.Printf("Created %v target documents\n", numDoc)
 	cas := make([]gocb.Cas, numDoc)
 	for i := 0; i < numDoc; i++ {
@@ -579,7 +619,7 @@ func TestCcrXattrSetBack(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc)
+	createReplication(t, bucketName, base.DefaultMergeFunc, true)
 
 	key := time.Now().Format(time.RFC3339) + "_setback"
 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
