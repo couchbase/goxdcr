@@ -839,7 +839,9 @@ func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
 // If it is a cold start-up or metakv callback, retry on error before giving up
 // because there is no way to manually intervene before the system corrects itself
 func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded() {
-	if net.ParseIP(ref.HostName()) != nil {
+	// hostname may have port
+	hostNameWithoutPort := base.GetHostName(ref.HostName())
+	if net.ParseIP(hostNameWithoutPort) != nil {
 		// If it is IPv4 or IPv6, it is not going to be a DNS SRV
 		return
 	}
