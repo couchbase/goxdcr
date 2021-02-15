@@ -663,7 +663,9 @@ func (c *Client) AuthScramSha(user, pass string) (*gomemcached.MCResponse, error
 }
 
 func (c *Client) AuthPlain(user, pass string) (*gomemcached.MCResponse, error) {
-	logging.Infof("Using plain authentication for user %v%v%v", gomemcached.UdTagBegin, user, gomemcached.UdTagEnd)
+	if len(user) > 0 && user[0] != '@' {
+		logging.Infof("Using plain authentication for user %v%v%v", gomemcached.UdTagBegin, user, gomemcached.UdTagEnd)
+	}
 	return c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.SASL_AUTH,
 		Key:    []byte("PLAIN"),
