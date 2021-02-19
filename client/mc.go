@@ -364,6 +364,22 @@ func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, err
 	})
 
 	if err == nil && collectionsEnabled != 0 {
+		collectionsEnabled = 0
+		body := rv.Body
+		if rv.Status != gomemcached.SUCCESS {
+			logging.Errorf("Client.EnableFeatures: Features can't be enabled: HELO status = %v", rv.Status)
+			return nil, errors.New("Unsuccessful HELO exchange")
+		} else if rv.Opcode != gomemcached.HELLO {
+			logging.Errorf("Client.EnableFeatures: Invalid memcached HELO response: opcode %v, expecting %v", rv.Opcode, gomemcached.HELLO)
+			return nil, errors.New("Invalid HELO response")
+		} else {
+			for i:=0; len(body) > i; i+=2 {
+				if Feature(binary.BigEndian.Uint16(body[i:])) == FeatureCollections {
+					collectionsEnabled = 1
+					break
+				}
+			}
+		}
 		atomic.StoreUint32(&c.collectionsEnabled, uint32(collectionsEnabled))
 	}
 	return rv, err
