@@ -1053,7 +1053,15 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	if !modes.IsImplicitMapping() {
 		targetNamespaces = targetNamespaces[:0]
 		if modes.IsMigrationOn() {
-			targetNamespaces = append(targetNamespaces, wrappedMcr.ColInfo.TargetNamespace)
+			if wrappedMcr.ColInfo == nil || wrappedMcr.ColInfo.TargetNamespace == nil {
+				// This happens if explicitMap() was not called due unable to find a collection manifest agent
+				// to do the mapping, which can only happen during a replication removal situation
+				return
+			}
+			// Make a copy to prevent namespace from being recycled
+			targetNsCopy := &base.CollectionNamespace{}
+			*targetNsCopy = *(wrappedMcr.ColInfo.TargetNamespace)
+			targetNamespaces = append(targetNamespaces, targetNsCopy)
 		} else {
 			targetNamespaces, err = cachedRules.GetPotentialTargetNamespaces(sourceNamespace)
 			if err == nil && len(targetNamespaces) == 0 {
@@ -1603,6 +1611,8 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 				// But we need the upper layer to do some special handling
 				router.collectionsRouting[partId].updateBrokenMappingAndRaiseNecessaryEvents(mcRequest, unmappedNamespaces, false)
 				err = nil
+			} else if err == PartStoppedError {
+				// don't recordUnroutable
 			} else {
 				// Record unroutable request will try to re-raise the synchronous routing update
 				// Only if it succeeds, will the ignoreDataFunc be called
