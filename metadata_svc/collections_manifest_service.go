@@ -146,9 +146,8 @@ func (c *CollectionsManifestService) handleDelReplSpec(oldSpec *metadata.Replica
 	c.agentsMtx.Unlock()
 
 	if ok {
-		// metakv call can happen in the bg
-		go agent.DeleteManifests()
 		agent.Stop()
+		agent.DeleteManifests() // can be called after stop
 	}
 
 	c.srcBucketGetterMtx.Lock()

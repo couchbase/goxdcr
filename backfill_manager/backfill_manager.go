@@ -96,7 +96,7 @@ func (r *replSpecHandler) HandleNewSpec() {
 		panic(fmt.Sprintf("Unable to establish starting manifests for %v", r.spec.Id))
 	}
 	r.createBackfillReqHandlerFunc(r.spec)
-	r.cleanupFunc(r.spec.Id)
+	go r.cleanupFunc(r.spec.Id)
 }
 
 func NewReplSpecHandler(b *BackfillMgr, newSpec *metadata.ReplicationSpecification) *replSpecHandler {
@@ -557,7 +557,7 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 			return fmt.Errorf(errMsg)
 		}
 		b.replSpecHandlerMap[newSpec.Id] = NewReplSpecHandler(b, newSpec)
-		go b.replSpecHandlerMap[newSpec.Id].HandleNewSpec()
+		b.replSpecHandlerMap[newSpec.Id].HandleNewSpec()
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
 		oldSpec := oldSpecObj.(*metadata.ReplicationSpecification)
