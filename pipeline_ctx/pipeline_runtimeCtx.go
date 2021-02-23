@@ -12,11 +12,12 @@ package pipeline_ctx
 import (
 	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"sync"
 )
 
 type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
@@ -159,7 +160,7 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 
 		//stop all registered services
 		for name, service := range ctx.runtime_svcs {
-			if service.IsSharable() {
+			if service.IsSharable() && ctx.Pipeline().Type() != common.MainPipeline {
 				// If it is sharable, only the main pipeline can stop the service
 				ctx.logger.Infof("%v service %v is sharable. This context is not based on Main Pipeline. Skip stopping",
 					topic, name)
