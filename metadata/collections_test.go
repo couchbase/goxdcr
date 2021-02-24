@@ -12,12 +12,12 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"reflect"
-	"sync"
 	"testing"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/stretchr/testify/assert"
 )
 
 var testDir string = "testData/"

@@ -439,6 +439,20 @@ func (_m *UtilsIface) ExponentialBackoffExecutorWithFinishSignal(name string, in
 	return r0, r1
 }
 
+// ExponentialBackoffExecutorWithOriginalError provides a mock function with given fields: name, initialWait, maxRetries, factor, op
+func (_m *UtilsIface) ExponentialBackoffExecutorWithOriginalError(name string, initialWait time.Duration, maxRetries int, factor int, op utils.ExponentialOpFunc) error {
+	ret := _m.Called(name, initialWait, maxRetries, factor, op)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, time.Duration, int, int, utils.ExponentialOpFunc) error); ok {
+		r0 = rf(name, initialWait, maxRetries, factor, op)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // FilterExpressionMatchesDoc provides a mock function with given fields: expression, docId, bucketName, collectionNs, addr, port
 func (_m *UtilsIface) FilterExpressionMatchesDoc(expression string, docId string, bucketName string, collectionNs *base.CollectionNamespace, addr string, port uint16) (bool, error) {
 	ret := _m.Called(expression, docId, bucketName, collectionNs, addr, port)

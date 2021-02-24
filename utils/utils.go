@@ -8,17 +8,6 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/cbauth"
-	"github.com/couchbase/go-couchbase"
-	mc "github.com/couchbase/gomemcached"
-	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goutils/scramsha"
-	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/base/filter"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbaselabs/gojsonsm"
-	gocb "gopkg.in/couchbase/gocb.v1"
 	"io"
 	"io/ioutil"
 	"net"
@@ -33,6 +22,18 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/couchbase/cbauth"
+	"github.com/couchbase/go-couchbase"
+	mc "github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goutils/scramsha"
+	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base/filter"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbaselabs/gojsonsm"
+	gocb "gopkg.in/couchbase/gocb.v1"
 )
 
 var NonExistentBucketError error = errors.New("Bucket doesn't exist")
@@ -1374,7 +1375,7 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 		return nil
 	}
 
-	err = u.ExponentialBackoffExecutor("BucketValidationInfo", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, bucketValidationInfoOp)
+	err = u.ExponentialBackoffExecutorWithOriginalError("BucketValidationInfo", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, bucketValidationInfoOp)
 	return
 }
 
@@ -2570,21 +2571,29 @@ func (u *Utilities) NewTCPConn(hostName string) (*net.TCPConn, error) {
  * Factor == exponential backoff factor based off of initialWait
  */
 func (u *Utilities) ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) error {
+	opErr := u.ExponentialBackoffExecutorWithOriginalError(name, initialWait, maxRetries, factor, op)
+	if opErr == nil {
+		return nil
+	} else {
+		opErr = fmt.Errorf("%v %v Last error: %v", name, base.ErrorFailedAfterRetry.Error(), opErr.Error())
+		return opErr
+	}
+}
+
+func (u *Utilities) ExponentialBackoffExecutorWithOriginalError(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) (err error) {
 	waitTime := initialWait
-	var opErr error
 	for i := 0; i <= maxRetries; i++ {
-		opErr = op()
-		if opErr == nil {
+		err = op()
+		if err == nil {
 			return nil
 		} else if i != maxRetries {
 			u.logger_utils.Warnf("ExponentialBackoffExecutor for %v encountered error (%v). Sleeping %v\n",
-				name, opErr.Error(), waitTime)
+				name, err.Error(), waitTime)
 			time.Sleep(waitTime)
 			waitTime *= time.Duration(factor)
 		}
 	}
-	opErr = fmt.Errorf("%v %v Last error: %v", name, base.ErrorFailedAfterRetry.Error(), opErr.Error())
-	return opErr
+	return err
 }
 
 /*
