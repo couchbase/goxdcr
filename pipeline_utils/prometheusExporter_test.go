@@ -15,7 +15,7 @@ func TestPrometheusExpVarParseMap(t *testing.T) {
 	fmt.Println("============== Test case start: TestPrometheusExpVarParseMap	=================")
 	defer fmt.Println("============== Test case start: TestPrometheusExpVarParseMap =================")
 
-	expVarMap := expvar.Map{}
+	expVarMap := &expvar.Map{}
 	expVarMap.Add("testInt", 12)
 	expVarMap.AddFloat("testFloat", 13.3)
 
@@ -44,7 +44,7 @@ func TestPrometheusExpVarParseMap(t *testing.T) {
 	assert.True(parseMap.CheckNoKeyChanges(expVarMap))
 
 	exporter := NewPrometheusExporter(nil)
-	exporter.LoadExpVarMap(&expVarMap)
+	exporter.LoadExpVarMap(expVarMap)
 	assert.Equal(int64(12), exporter.expVarParseMap["testInt"].(int64))
 	assert.Equal(float64(13.3), exporter.expVarParseMap["testFloat"].(float64))
 	assert.Equal("String", exporter.expVarParseMap["subMap"].(ExpVarParseMapType)["subString"].(string))

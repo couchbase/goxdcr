@@ -112,7 +112,7 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 type ExpVarParseMapType map[string]interface{}
 
 // Returns true if all the keys match, and the types all match
-func (e ExpVarParseMapType) CheckNoKeyChanges(varMap expvar.Map) bool {
+func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map) bool {
 	var missingKey bool
 	var inconsistentType bool
 	var subLevelCheckPasses = true
@@ -133,7 +133,7 @@ func (e ExpVarParseMapType) CheckNoKeyChanges(varMap expvar.Map) bool {
 				inconsistentType = true
 				return
 			}
-			subLevelCheckPasses = eSubMap.CheckNoKeyChanges(*subMap)
+			subLevelCheckPasses = eSubMap.CheckNoKeyChanges(subMap)
 			if !subLevelCheckPasses {
 				return
 			}
@@ -316,7 +316,7 @@ func parseExpMap(varMap *expvar.Map, targetMap ExpVarParseMapType) {
 
 func (p *PrometheusExporter) LoadExpVarMap(m *expvar.Map) (noKeysChanged bool) {
 	p.mapsMtx.Lock()
-	noKeysChanged = p.expVarParseMap.CheckNoKeyChanges(*m)
+	noKeysChanged = p.expVarParseMap.CheckNoKeyChanges(m)
 	keysChanged := !noKeysChanged
 	if keysChanged {
 		p.expVarParseMap = make(ExpVarParseMapType)
