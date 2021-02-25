@@ -53,8 +53,6 @@ var NoSuchHostRecommendationString = " Check to see if firewall config is incorr
 var ErrorRemoteClusterNoCollectionsCapability = errors.New("remote cluster has no collections capability")
 var ErrorAdminTimeout = errors.New("The requested operation is being executed but is taking longer than expected. Please wait for the operation to complete, and the result will be posted in the UI Log section")
 
-var DiagNetworkThreshold = 5 * time.Second
-var DiagInternalThreshold = 2 * time.Second
 var AdminTimeout = 25 * time.Second // ns_server has a timeout of 30 seconds... should not keep user waiting past 25
 
 func IsRefreshError(err error) bool {
@@ -372,8 +370,6 @@ type RemoteClusterAgent struct {
 	// To prevent malicious actors, for REST querying of target bucket manifest
 	// this is set to non-0 if in cool down period
 	restQueryCoolDown uint32
-
-	diagStopwatchFunc func(string, time.Duration) func()
 }
 
 const (
@@ -1100,12 +1096,12 @@ func (rctx *refreshContext) updateHeartbeatMap(nodeList []interface{}) {
  */
 func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, userInitiated bool) error {
 	var err error
-	diagThreshold := DiagInternalThreshold
+	diagThreshold := base.DiagInternalThreshold
 	if userInitiated {
 		// Will require RPC
-		diagThreshold = DiagNetworkThreshold
+		diagThreshold = base.DiagNetworkThreshold
 	}
-	stopFunc := agent.diagStopwatchFunc(fmt.Sprintf("agent.Start(%v, %v)", newRef.Id(), userInitiated), diagThreshold)
+	stopFunc := agent.utils.StartDiagStopwatch(fmt.Sprintf("agent.Start(%v, %v)", newRef.Id(), userInitiated), diagThreshold)
 	defer stopFunc()
 
 	if userInitiated {
@@ -1268,7 +1264,7 @@ func (agent *RemoteClusterAgent) syncInternalsFromStagedReference(rctx *refreshC
 func (agent *RemoteClusterAgent) getCredentialsAndMisc() (username, password string, httpAuthMech base.HttpAuthMech,
 	certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte,
 	connStr string, curRefNodesList base.StringPairList, encryptionEnabled bool, err error) {
-	stopFunc := agent.diagStopwatchFunc(fmt.Sprintf("getCredentialsAndMisc(%v)", connStr), DiagNetworkThreshold)
+	stopFunc := agent.utils.StartDiagStopwatch(fmt.Sprintf("getCredentialsAndMisc(%v)", connStr), base.DiagNetworkThreshold)
 	defer stopFunc()
 
 	agent.refMtx.RLock()
@@ -1730,11 +1726,11 @@ func (agent *RemoteClusterAgent) updateReferenceFromInternal(newRef *metadata.Re
 		return base.ErrorResourceDoesNotExist
 	}
 
-	threshold := DiagInternalThreshold
+	threshold := base.DiagInternalThreshold
 	if synchronous {
-		threshold = DiagNetworkThreshold
+		threshold = base.DiagNetworkThreshold
 	}
-	stopFunc := agent.diagStopwatchFunc(fmt.Sprintf("%v - updateReferenceFromInternal([%v], %v)", newRef.Clone(), updateMetaKv, shouldCallCb), threshold)
+	stopFunc := agent.utils.StartDiagStopwatch(fmt.Sprintf("%v - updateReferenceFromInternal([%v], %v)", newRef.Clone(), updateMetaKv, shouldCallCb), threshold)
 	defer stopFunc()
 
 	capabilityChanged := rctx != nil && rctx.capabilityChanged()
@@ -2237,30 +2233,19 @@ func (service *RemoteClusterService) RemoteClusterByRefId(refId string, refresh 
 	return agent.GetReferenceClone(), err
 }
 
-// Used throughout code to log any long running operations for awareness
-func (service *RemoteClusterService) startDiagStopwatch(id string, threshold time.Duration) func() {
-	startTime := time.Now()
-	return func() {
-		duration := time.Since(startTime)
-		if duration > threshold {
-			service.logger.Warnf("%v took %v", id, duration)
-		}
-	}
-}
-
 func (service *RemoteClusterService) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("RemoteClusterByRefName(%v, %v)", refName, refresh), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("RemoteClusterByRefName(%v, %v)", refName, refresh), base.DiagInternalThreshold)
 	defer stopFunc()
 	ref, _, err := service.remoteClusterByRefNameWithAgent(refName, refresh)
 	return ref, err
 }
 
 func (service *RemoteClusterService) remoteClusterByRefNameWithAgent(refName string, refresh bool) (*metadata.RemoteClusterReference, *RemoteClusterAgent, error) {
-	diagThreshold := DiagInternalThreshold
+	diagThreshold := base.DiagInternalThreshold
 	if refresh {
-		diagThreshold = DiagNetworkThreshold
+		diagThreshold = base.DiagNetworkThreshold
 	}
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("remoteClusterByRefNameWithAgent(%v, %v)", refName, refresh), diagThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("remoteClusterByRefNameWithAgent(%v, %v)", refName, refresh), diagThreshold)
 	defer stopFunc()
 
 	service.agentMutex.RLock()
@@ -2347,7 +2332,7 @@ func (service *RemoteClusterService) AddRemoteCluster(ref *metadata.RemoteCluste
 	adminFunc := func(errPtr *error, doneCh chan bool, timedOut *uint32) {
 		defer close(doneCh)
 
-		stopFunc := service.startDiagStopwatch(fmt.Sprintf("AddRemoteCluster(%v, %v)", ref.Name(), skipConnectivityValidation), DiagNetworkThreshold)
+		stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("AddRemoteCluster(%v, %v)", ref.Name(), skipConnectivityValidation), base.DiagNetworkThreshold)
 		defer stopFunc()
 
 		*errPtr = service.validateAddRemoteCluster(ref, skipConnectivityValidation)
@@ -2380,7 +2365,7 @@ func (service *RemoteClusterService) SetRemoteCluster(refName string, newRef *me
 	adminFunc := func(errPtr *error, doneCh chan bool, timedOut *uint32) {
 		defer close(doneCh)
 
-		stopFunc := service.startDiagStopwatch(fmt.Sprintf("setRemoteCluster(%v, [%v])", refName, newRef.CloneAndRedact()), DiagNetworkThreshold)
+		stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("setRemoteCluster(%v, [%v])", refName, newRef.CloneAndRedact()), base.DiagNetworkThreshold)
 		defer stopFunc()
 
 		var agent *RemoteClusterAgent
@@ -2547,7 +2532,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		}
 	}
 
-	srvStop := service.startDiagStopwatch(fmt.Sprintf("ref(%v).PopulateDnsSrv", ref.Name()), DiagNetworkThreshold)
+	srvStop := service.utils.StartDiagStopwatch(fmt.Sprintf("ref(%v).PopulateDnsSrv", ref.Name()), base.DiagNetworkThreshold)
 	ref.PopulateDnsSrvIfNeeded()
 	srvStop()
 
@@ -2683,7 +2668,7 @@ func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.Rem
 }
 
 func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metadata.RemoteClusterReference) error {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("setHostNamesAndSecuritySettings(%v)", ref.Name()), DiagNetworkThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("setHostNamesAndSecuritySettings(%v)", ref.Name()), base.DiagNetworkThreshold)
 	defer stopFunc()
 	if !ref.IsEncryptionEnabled() {
 		if ref.IsDnsSRV() {
@@ -2801,7 +2786,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 // The second part of "figuring out https" if the first fails, can be done in parallel to save time
 // This method lets both go at the same time, and whoever comes back first with a valid result wins
 func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata.RemoteClusterReference, refHostName string, refHttpsHostNameIn string) (bool, base.HttpAuthMech, map[string]interface{}, error, string) {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("getDefaultPoolInfoAndAuthMech(%v, %v, %v", ref.Name(), refHostName, refHttpsHostNameIn), DiagNetworkThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("getDefaultPoolInfoAndAuthMech(%v, %v, %v", ref.Name(), refHostName, refHttpsHostNameIn), base.DiagNetworkThreshold)
 	defer stopFunc()
 	// Synchronization primitives for racing
 	firstWinnerCh := make(chan bool)
@@ -2926,7 +2911,7 @@ func getCombinedError(ref *metadata.RemoteClusterReference, err error, bgErr err
 }
 
 func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (string, string, error) {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("getHttpsRemoteHostAddr(%v)", hostName), DiagNetworkThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("getHttpsRemoteHostAddr(%v)", hostName), base.DiagNetworkThreshold)
 	defer stopFunc()
 	internalHttpsHostname, externalHttpsHostname, err := service.utils.HttpsRemoteHostAddr(hostName, service.logger)
 	if err != nil {
@@ -2942,7 +2927,7 @@ func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (st
 
 // validate certificates in remote cluster ref
 func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteClusterReference) error {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("validateCertificates(%v)", ref.Name()), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCertificates(%v)", ref.Name()), base.DiagInternalThreshold)
 	defer stopFunc()
 	refCertificate := ref.Certificate()
 	if len(refCertificate) == 0 {
@@ -3027,7 +3012,6 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		bucketManifestGetters:  make(map[string]*BucketManifestGetter),
 		agentFinCh:             make(chan bool, 1),
 		connectivityHelper:     NewConnectivityHelper(base.RefreshRemoteClusterRefInterval),
-		diagStopwatchFunc:      service.startDiagStopwatch,
 	}
 	newAgent.refreshCv = &sync.Cond{L: &newAgent.refreshMtx}
 	return newAgent
@@ -3039,7 +3023,7 @@ func (service *RemoteClusterService) delRemoteAgent(agent *RemoteClusterAgent, d
 		return nil, errors.New("Nil agent provided")
 	}
 
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("delRemoteAgent([%v], %v)", agent, delFromMetaKv), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("delRemoteAgent([%v], %v)", agent, delFromMetaKv), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	clonedCopy, err := agent.DeleteReference(delFromMetaKv)
@@ -3075,7 +3059,7 @@ func (service *RemoteClusterService) delRemoteClusterAgentById(id string, delFro
 		return nil, errors.New("No id given")
 	}
 
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("delRemoteClusterAgentById(%v, %v)", id, delFromMetaKv), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("delRemoteClusterAgentById(%v, %v)", id, delFromMetaKv), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	service.agentMutex.RLock()
@@ -3098,7 +3082,7 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 		return nil, false, base.ErrorResourceDoesNotExist
 	}
 
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("getOrStartNewAgent(%v, %v, %v)", ref.Name(), userInitiated, updateFromRef), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("getOrStartNewAgent(%v, %v, %v)", ref.Name(), userInitiated, updateFromRef), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	service.agentMutex.RLock()
@@ -3168,7 +3152,7 @@ func (service *RemoteClusterService) addRemoteCluster(ref *metadata.RemoteCluste
 
 // These registerAdd/dregisterAdd are needed to prevent innocuous errors from being shown in the logs
 func (service *RemoteClusterService) registerAdd(name string) {
-	stop := service.startDiagStopwatch(fmt.Sprintf("registerAdd(%v)", name), DiagInternalThreshold)
+	stop := service.utils.StartDiagStopwatch(fmt.Sprintf("registerAdd(%v)", name), base.DiagInternalThreshold)
 	defer stop()
 	service.metakvCbAddMtx.Lock()
 	defer service.metakvCbAddMtx.Unlock()
@@ -3177,7 +3161,7 @@ func (service *RemoteClusterService) registerAdd(name string) {
 }
 
 func (service *RemoteClusterService) deregisterAdd(name string) {
-	stop := service.startDiagStopwatch(fmt.Sprintf("deregisterAdd(%v)", name), DiagInternalThreshold)
+	stop := service.utils.StartDiagStopwatch(fmt.Sprintf("deregisterAdd(%v)", name), base.DiagInternalThreshold)
 	defer stop()
 	service.metakvCbAddMtx.Lock()
 	defer service.metakvCbAddMtx.Unlock()
@@ -3186,7 +3170,7 @@ func (service *RemoteClusterService) deregisterAdd(name string) {
 }
 
 func (service *RemoteClusterService) checkIfAddingIsActive(name string) bool {
-	stop := service.startDiagStopwatch(fmt.Sprintf("checkIfAddingIsActive(%v)", name), DiagInternalThreshold)
+	stop := service.utils.StartDiagStopwatch(fmt.Sprintf("checkIfAddingIsActive(%v)", name), base.DiagInternalThreshold)
 	defer stop()
 	service.metakvCbAddMtx.RLock()
 	defer service.metakvCbAddMtx.RUnlock()
@@ -3195,7 +3179,7 @@ func (service *RemoteClusterService) checkIfAddingIsActive(name string) bool {
 }
 
 func (service *RemoteClusterService) registerSet(name string) {
-	stop := service.startDiagStopwatch(fmt.Sprintf("registerSet(%v)", name), DiagInternalThreshold)
+	stop := service.utils.StartDiagStopwatch(fmt.Sprintf("registerSet(%v)", name), base.DiagInternalThreshold)
 	defer stop()
 	service.metakvCbSetMtx.Lock()
 	defer service.metakvCbSetMtx.Unlock()
@@ -3204,7 +3188,7 @@ func (service *RemoteClusterService) registerSet(name string) {
 }
 
 func (service *RemoteClusterService) deregisterSet(name string) {
-	stop := service.startDiagStopwatch(fmt.Sprintf("deregisterSet(%v)", name), DiagInternalThreshold)
+	stop := service.utils.StartDiagStopwatch(fmt.Sprintf("deregisterSet(%v)", name), base.DiagInternalThreshold)
 	defer stop()
 	service.metakvCbSetMtx.Lock()
 	defer service.metakvCbSetMtx.Unlock()
@@ -3213,7 +3197,7 @@ func (service *RemoteClusterService) deregisterSet(name string) {
 }
 
 func (service *RemoteClusterService) checkIfSettingIsActive(name string) bool {
-	stop := service.startDiagStopwatch(fmt.Sprintf("checkIfSettingIsActive(%v)", name), DiagInternalThreshold)
+	stop := service.utils.StartDiagStopwatch(fmt.Sprintf("checkIfSettingIsActive(%v)", name), base.DiagInternalThreshold)
 	defer stop()
 	service.metakvCbSetMtx.RLock()
 	defer service.metakvCbSetMtx.RUnlock()
@@ -3222,7 +3206,7 @@ func (service *RemoteClusterService) checkIfSettingIsActive(name string) bool {
 }
 
 func (service *RemoteClusterService) registerDel(refId string) {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("deregisterDel(%v)", refId), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("deregisterDel(%v)", refId), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	service.metakvCbDelMtx.Lock()
@@ -3232,7 +3216,7 @@ func (service *RemoteClusterService) registerDel(refId string) {
 }
 
 func (service *RemoteClusterService) deregisterDel(refId string) {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("deregisterDel(%v)", refId), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("deregisterDel(%v)", refId), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	service.metakvCbDelMtx.Lock()
@@ -3242,7 +3226,7 @@ func (service *RemoteClusterService) deregisterDel(refId string) {
 }
 
 func (service *RemoteClusterService) checkIfDeletingIsActive(refId string) bool {
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("checkIfDeletingIsActive(%v)", refId), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("checkIfDeletingIsActive(%v)", refId), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	service.metakvCbDelMtx.RLock()
@@ -3323,7 +3307,7 @@ func (service *RemoteClusterService) RemoteClusterServiceCallback(path string, v
 	service.logger.Infof("metakvCallback called on path = %v\n", path)
 	defer service.logger.Infof("done metakvCallback called on path = %v\n", path)
 
-	stopFunc := service.startDiagStopwatch(fmt.Sprintf("RemoteClusterServiceCallback(%v, ---, %v)", path, rev), DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("RemoteClusterServiceCallback(%v, ---, %v)", path, rev), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	var newRef *metadata.RemoteClusterReference
@@ -3440,6 +3424,9 @@ func (service *RemoteClusterService) ShouldUseAlternateAddress(ref *metadata.Rem
 	if ref == nil {
 		return false, base.ErrorInvalidInput
 	}
+
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("ShouldUseAlternateAddress(%v)", ref.Name()), base.DiagInternalThreshold)
+	defer stopFunc()
 
 	service.agentMutex.RLock()
 	defer service.agentMutex.RUnlock()

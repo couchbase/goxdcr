@@ -707,6 +707,8 @@ func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId strin
 
 func (b *BackfillMgr) postDeleteBackfillRepl(specId, internalId string) error {
 	backfillSpecId := common.ComposeFullTopic(specId, common.BackfillPipeline)
+	stopFunc := b.utils.StartDiagStopwatch(fmt.Sprintf("postDeleteBackfillRepl(%v)", specId), base.DiagInternalThreshold)
+	defer stopFunc()
 	err := b.checkpointsSvc.DelCheckpointsDocs(backfillSpecId)
 	if err != nil {
 		b.logger.Errorf("Cleaning up backfill checkpoints for %v got err %v", backfillSpecId, err)

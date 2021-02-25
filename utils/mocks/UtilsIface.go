@@ -2071,6 +2071,22 @@ func (_m *UtilsIface) SendHELOWithFeatures(client memcached.ClientIface, userAge
 	return r0, r1
 }
 
+// StartDiagStopwatch provides a mock function with given fields: id, threshold
+func (_m *UtilsIface) StartDiagStopwatch(id string, threshold time.Duration) func() {
+	ret := _m.Called(id, threshold)
+
+	var r0 func()
+	if rf, ok := ret.Get(0).(func(string, time.Duration) func()); ok {
+		r0 = rf(id, threshold)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(func())
+		}
+	}
+
+	return r0
+}
+
 // TranslateKvVbMap provides a mock function with given fields: kvVBMap, targetBucketInfo
 func (_m *UtilsIface) TranslateKvVbMap(kvVBMap base.BucketKVVbMap, targetBucketInfo map[string]interface{}) {
 	_m.Called(kvVBMap, targetBucketInfo)

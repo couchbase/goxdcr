@@ -113,6 +113,7 @@ type UtilsIface interface {
 	ExponentialBackoffExecutorWithFinishSignal(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc2, param interface{}, finCh chan bool) (interface{}, error)
 	GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{}
 	AddKeyToBeFiltered(currentValue, key []byte, dpGetter base.DpGetterFunc, toBeReleased *[][]byte, currentValueEndBody int) ([]byte, error, int64, int)
+	StartDiagStopwatch(id string, threshold time.Duration) func()
 
 	/**
 	 * ------------------------

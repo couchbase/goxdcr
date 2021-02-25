@@ -564,6 +564,9 @@ func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (
 	_, err := b.backfillSpec(replicationId)
 	backfillSpecCacheExists := err == nil
 
+	stopFunc := b.utils.StartDiagStopwatch(fmt.Sprintf("DelBackfillReplSpec(%v)", replicationId), base.DiagInternalThreshold)
+	defer stopFunc()
+
 	key := getBackfillReplicationDocKeyFunc(replicationId)
 	err = b.metadataSvc.Del(key, nil /*rev*/)
 	if err != nil && err != service_def.MetadataNotFoundErr {

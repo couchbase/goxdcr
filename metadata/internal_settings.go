@@ -226,6 +226,9 @@ const (
 	JSEngineThreadsPerWorkerKey = "JSEngineThreadsPerWorker"
 
 	MaxCountDCPStreamsInactiveKey = "MaxCountDCPStreamsInactive"
+
+	UtilsStopwatchDiagInternalThresholdKey = "StopwatchDiagInternalThresholdMs"
+	UtilsStopwatchDiagExternalThresholdKey = "StopwatchDiagExternalThresholdMs"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -323,6 +326,8 @@ var JSEngineWorkersPerNodeConfig = &SettingsConfig{base.JSEngineWorkersPerNode, 
 var JSEngineThreadsPerWorkerConfig = &SettingsConfig{base.JSEngineThreadsPerWorker, &Range{1, 10}}
 var MaxCountDCPStreamsInactiveConfig = &SettingsConfig{base.MaxCountStreamsInactive, &Range{1, 40}}
 var ResourceMgrKVDetectionRetryIntervalConfig = &SettingsConfig{int(base.ResourceMgrKVDetectionRetryInterval / time.Second), &Range{1, 3600}}
+var UtilsStopwatchDiagInternalThresholdConfig = &SettingsConfig{int(base.DiagInternalThreshold / time.Millisecond), &Range{10, 3600000}}
+var UtilsStopwatchDiagExternalThresholdConfig = &SettingsConfig{int(base.DiagNetworkThreshold / time.Millisecond), &Range{10, 3600000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -420,6 +425,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	JSEngineThreadsPerWorkerKey:                   JSEngineThreadsPerWorkerConfig,
 	MaxCountDCPStreamsInactiveKey:                 MaxCountDCPStreamsInactiveConfig,
 	ResourceMgrKVDetectionRetryIntervalKey:        ResourceMgrKVDetectionRetryIntervalConfig,
+	UtilsStopwatchDiagInternalThresholdKey:        UtilsStopwatchDiagInternalThresholdConfig,
+	UtilsStopwatchDiagExternalThresholdKey:        UtilsStopwatchDiagExternalThresholdConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

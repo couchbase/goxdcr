@@ -528,10 +528,13 @@ func (u *Utilities) GetMemcachedConnectionWFeatures(serverAddr, bucketName, user
 		logger.Warnf(err.Error())
 		return nil, respondedFeatures, err
 	}
+
+	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("cbauth.GetMemcachedServiceAuth(%v)", serverAddr), base.DiagInternalThreshold)
 	username, password, err := cbauth.GetMemcachedServiceAuth(serverAddr)
 	if u.logger_utils.GetLogLevel() >= log.LogLevelDebug {
 		logger.Debugf("memcached auth: username=%v%v%v, password=%v%v%v, err=%v\n", base.UdTagBegin, username, base.UdTagEnd, base.UdTagBegin, password, base.UdTagEnd, err)
 	}
+	stopFunc()
 	if err != nil {
 		return nil, respondedFeatures, err
 	}
@@ -548,6 +551,9 @@ func (u *Utilities) GetMemcachedConnection(serverAddr, bucketName, userAgent str
 
 func (u *Utilities) GetMemcachedRawConn(serverAddr, username, password, bucketName string, plainAuth bool,
 	keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error) {
+	// getting a conn should not take too long
+	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetMemcachedRawConn(%v, %v, %v, %v)", serverAddr, bucketName, plainAuth, keepAlivePeriod), base.DiagInternalThreshold)
+	defer stopFunc()
 	conn, err := base.NewConn(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
 	if err != nil {
 		return nil, err
@@ -618,10 +624,11 @@ func (u *Utilities) SendHELO(client mcc.ClientIface, userAgent string, readTimeo
 }
 
 // send helo to memcached with data type (including xattr) feature enabled
-// used exclusively by xmem nozzle
 // we need to know whether data type is indeed enabled from helo response
 // unsuccessful response is treated as errors
 func (u *Utilities) SendHELOWithFeatures(client mcc.ClientIface, userAgent string, readTimeout, writeTimeout time.Duration, requestedFeatures HELOFeatures, logger *log.CommonLogger) (respondedFeatures HELOFeatures, err error) {
+	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("SendHELOWithFeatures(%v)", requestedFeatures), base.DiagNetworkThreshold)
+	defer stopFunc()
 	// Initially set initial respondedFeatures to None since no compression negotiated should not be invalid
 	respondedFeatures.CompressionType = base.CompressionTypeNone
 
@@ -1211,6 +1218,10 @@ func (u *Utilities) GetBucketInfo(hostAddr, bucketName, username, password strin
 		return nil, fmt.Errorf("Bucket name cannot be empty")
 	}
 	bucketInfo := make(map[string]interface{})
+
+	// This is used for local as well - but log only if atrociously bad
+	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("GetBucketInfo(%v, %v)", hostAddr, bucketName), base.DiagNetworkThreshold)
+	defer stopFunc()
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &bucketInfo, nil, false, logger)
 	if err == nil && statusCode == http.StatusOK {
 		return bucketInfo, nil
@@ -2240,7 +2251,8 @@ func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logge
 			err = json.Unmarshal(bod, out)
 			if err != nil {
 				if strings.Contains(string(bod), base.RESTNsServerNotFound) ||
-					strings.Contains(string(bod), strings.ToLower(base.RESTNsServerNotFound)) {
+					strings.Contains(string(bod), strings.ToLower(base.RESTNsServerNotFound)) ||
+					res.StatusCode == http.StatusNotFound {
 					l.Errorf("Original REST request (%v) received %v response. The URL may be incorrect or requested resource no longer exists", res.Request.URL, string(bod))
 				} else {
 					l.Errorf("Failed to unmarshal the response as json, err=%v, bod=%v\n res=%v\n", err, string(bod), res)
@@ -2867,4 +2879,14 @@ func (u *Utilities) composeNsServerDocGetPath(bucketName string, ns *base.Collec
 		path += base.ScopesPath + ns.ScopeName + base.CollectionsPath + ns.CollectionName + docPath
 	}
 	return path
+}
+
+func (u *Utilities) StartDiagStopwatch(id string, threshold time.Duration) func() {
+	startTime := time.Now()
+	return func() {
+		duration := time.Since(startTime)
+		if duration > threshold {
+			u.logger_utils.Warnf("%v took %v", id, duration)
+		}
+	}
 }

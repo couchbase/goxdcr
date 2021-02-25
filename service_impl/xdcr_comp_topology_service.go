@@ -125,6 +125,8 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 
 // get information about current node from nodeService at /pools/nodes
 func (top_svc *XDCRTopologySvc) getHostInfo() (map[string]interface{}, error) {
+	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.getHostInfo()", base.DiagInternalThreshold)
+	defer stopFunc()
 	nodeList, err := top_svc.getNodeList()
 	if err != nil {
 		return nil, err
@@ -228,6 +230,8 @@ func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, base.HttpAuthMe
 
 func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {
 	var poolsInfo map[string]interface{}
+	stopFunc := top_svc.utils.StartDiagStopwatch("MyClusterUuid()", base.DiagInternalThreshold)
+	defer stopFunc()
 	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
 		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))

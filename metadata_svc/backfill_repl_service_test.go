@@ -56,6 +56,7 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc,
 	// This is cool - it is actually returning the data we are feeding it back
 	utilsIn.On("ExponentialBackoffExecutor", "GetAllMetadataFromCatalogBackfillReplicationSpec", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Run(func(args mock.Arguments) { (args.Get(4)).(utilsReal.ExponentialOpFunc)() }).Return(nil)
+	utilsIn.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 
 	for specName, actualSpec := range replSpecMap {
 		replSpecSvc.On("ReplicationSpec", specName).Return(actualSpec, nil)

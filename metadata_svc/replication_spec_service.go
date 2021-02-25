@@ -260,6 +260,8 @@ func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap
 }
 
 func (service *ReplicationSpecService) validateReplicationSpecDoesNotAlreadyExist(errorMap base.ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string) {
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateReplicationSpecDoesNotAlreadyExist(%v, _, %v)", sourceBucket, targetBucket), base.DiagInternalThreshold)
+	defer stopFunc()
 	repId := metadata.ReplicationId(sourceBucket, targetClusterRef.Uuid(), targetBucket)
 	_, err := service.replicationSpec(repId)
 	if err == nil {
@@ -272,6 +274,9 @@ func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef 
 		err = errors.New("kv vb map is empty")
 		return
 	}
+
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("populateConnectionCreds(%v)", targetClusterRef.Name()), base.DiagInternalThreshold)
+	stopFunc()
 
 	// Pull all the kv connection strings to a slice
 	i := 0
@@ -310,6 +315,8 @@ func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef 
 
 func (service *ReplicationSpecService) validateXmemSettings(errorMap base.ErrorMap, targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, sourceBucket, targetBucket string, targetBucketInfo map[string]interface{}, kvConnStr, username, password string) {
 	if targetClusterRef.IsHalfEncryption() {
+		stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateXmemSettings(%v, %v, %v)", targetClusterRef.Name(), sourceBucket, targetBucket), base.DiagNetworkThreshold)
+		defer stopFunc()
 		// for half-ssl ref, validate that target memcached supports SCRAM-SHA authentication
 		client, err := service.utils.GetRemoteMemcachedConnection(kvConnStr, username, password, targetBucket,
 			base.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket),
@@ -367,6 +374,9 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	errorMap := make(base.ErrorMap)
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v\n", sourceBucket, targetCluster, targetBucket)
 	defer service.logger.Infof("Finished ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, errorMap=%v\n", sourceBucket, targetCluster, targetBucket, errorMap)
+
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("ValidateNewReplicationSpec(%v, %v, %v)", sourceBucket, targetCluster, targetBucket), base.DiagNetworkThreshold)
+	defer stopFunc()
 
 	sourceBucketUUID, sourceBucketNumberOfVbs, sourceConflictResolutionType, err := service.validateSourceBucket(errorMap, sourceBucket, targetCluster, targetBucket)
 	if len(errorMap) > 0 || err != nil {
@@ -559,11 +569,12 @@ func (service *ReplicationSpecService) validateCompression(errorMap base.ErrorMa
 	requestedFeaturesSet.CompressionType = base.GetCompressionType(compressionType)
 	errKey := base.CompressionTypeREST
 
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCompression(%v, %v, %v)", sourceBucket, targetClusterRef.Name(), targetBucket), base.DiagNetworkThreshold)
+	defer stopFunc()
 	if compressionType == base.CompressionTypeNone {
 		// Don't check anything
 		return err
 	}
-
 	err = service.validateCompressionPreReq(errorMap, targetBucket, targetBucketInfo, compressionType, errKey)
 	if len(errorMap) > 0 || err != nil {
 		return err
@@ -573,23 +584,49 @@ func (service *ReplicationSpecService) validateCompression(errorMap base.ErrorMa
 	if kvCheckErr != nil {
 		service.logger.Warnf("Checking for KV capability got err: %v", kvCheckErr)
 	}
+
 	if kvCheckErr == nil && thisNodeContainsKV {
-		err = service.validateCompressionLocal(errorMap, sourceBucket, targetBucket, errKey, requestedFeaturesSet)
-		if len(errorMap) > 0 || err != nil {
-			return err
+		// 0th element is for local
+		// Thereafter is each remote target KV
+		var parallelErrMaps []base.ErrorMap
+		var parallelErrs []error
+		parallelErrMaps = append(parallelErrMaps, errorMap)
+		parallelErrs = append(parallelErrs, errors.New(""))
+		for i := 0; i < len(allKvConnStrs); i++ {
+			parallelErrMaps = append(parallelErrMaps, make(base.ErrorMap))
+			parallelErrs = append(parallelErrs, errors.New(""))
+		}
+		var waitGrp sync.WaitGroup
+
+		waitGrp.Add(1)
+		go func() {
+			defer waitGrp.Done()
+			parallelErrs[0] = service.validateCompressionLocal(parallelErrMaps[0], sourceBucket, targetBucket, errKey, requestedFeaturesSet)
+		}()
+
+		// Need to validate each node of the target to make sure all of them can support compression
+		for i := 0; i < len(allKvConnStrs); i++ {
+			iClone := i
+			waitGrp.Add(1)
+			go func() {
+				defer waitGrp.Done()
+				parallelErrs[iClone+1] = service.validateCompressionTarget(parallelErrMaps[iClone+1], sourceBucket, targetClusterRef, targetBucket, allKvConnStrs[iClone], username, password,
+					httpAuthMech, certificate, SANInCertificate, clientCertificate, clientKey, errKey, requestedFeaturesSet)
+			}()
+		}
+
+		waitGrp.Wait()
+
+		for i := 0; i < len(parallelErrMaps); i++ {
+			errorMap = parallelErrMaps[i]
+			err = parallelErrs[i]
+			if len(errorMap) > 0 || (err != nil && err.Error() != "") {
+				return err
+			}
 		}
 	}
 
-	// Need to validate each node of the target to make sure all of them can support compression
-	for i := 0; i < len(allKvConnStrs); i++ {
-		err = service.validateCompressionTarget(errorMap, sourceBucket, targetClusterRef, targetBucket, allKvConnStrs[i], username, password,
-			httpAuthMech, certificate, SANInCertificate, clientCertificate, clientKey, errKey, requestedFeaturesSet)
-		if len(errorMap) > 0 || err != nil {
-			return err
-		}
-	}
-
-	return err
+	return nil
 }
 
 func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.ErrorMap, targetBucket string, targetBucketInfo map[string]interface{}, compressionType int,
@@ -623,6 +660,8 @@ func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.E
 
 func (service *ReplicationSpecService) validateCompressionLocal(errorMap base.ErrorMap, sourceBucket string, targetBucket string, errKey string,
 	requestedFeaturesSet utilities.HELOFeatures) error {
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCompressionLocal(%v, %v)", sourceBucket, targetBucket), base.DiagInternalThreshold)
+	defer stopFunc()
 	localAddr, err := service.xdcr_comp_topology_svc.MyMemcachedAddr()
 	if err != nil {
 		return err
@@ -648,6 +687,9 @@ func (service *ReplicationSpecService) validateCompressionTarget(errorMap base.E
 	var conn mcc.ClientIface
 	sslPortMap := make(base.SSLPortMap)
 	var err error
+
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCompressionTarget(%v, %v, %v, %v)", sourceBucket, targetClusterRef.Name(), targetBucket, kvConnStr), base.DiagNetworkThreshold)
+	defer stopFunc()
 
 	if targetClusterRef.IsFullEncryption() {
 		// Full encryption needs TLS connection with special inputs
@@ -716,6 +758,9 @@ func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorM
 
 func (service *ReplicationSpecService) validateBucket(sourceBucket, targetCluster, targetBucket, bucketType string, evictionPolicy string, err error, errorMap map[string]error, isSourceBucket bool) {
 	var qualifier, errKey, bucketName string
+
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateBucket(%v,%v,%v,%v)", sourceBucket, targetCluster, targetBucket, bucketType), base.DiagInternalThreshold)
+	defer stopFunc()
 
 	// should always return nil for second argument (error)
 	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()

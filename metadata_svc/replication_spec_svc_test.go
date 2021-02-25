@@ -149,6 +149,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	myConnectionStr := base.GetHostAddr("localhost", port)
 	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil, nil)
 	utilitiesMock.On("GetBucketPasswordFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return("", nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 
 	var bucketInfo map[string]interface{}
 	bucketType := base.CouchbaseBucketType

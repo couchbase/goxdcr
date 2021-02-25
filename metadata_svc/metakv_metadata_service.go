@@ -43,8 +43,9 @@ func (meta_svc *MetaKVMetadataSvc) Get(key string) ([]byte, interface{}, error) 
 	var value []byte
 	var rev interface{}
 	var err error
-	start_time := time.Now()
-	defer meta_svc.logger.Debugf("Took %vs to get %v to metakv\n", time.Since(start_time).Seconds(), key)
+
+	stopFunc := meta_svc.utils.StartDiagStopwatch(fmt.Sprintf("Get(%v)", key), base.DiagInternalThreshold)
+	defer stopFunc()
 
 	metakvOpGetFunc := func() error {
 		value, rev, err = metakv.Get(getPathFromKey(key))
@@ -94,6 +95,10 @@ func (meta_svc *MetaKVMetadataSvc) add(key string, value []byte, sensitive bool)
 	var redactedValue []byte
 	valueToPrint := &value
 	start_time := time.Now()
+
+	stopFunc := meta_svc.utils.StartDiagStopwatch(fmt.Sprintf("Get(%v)", key), base.DiagInternalThreshold)
+	defer stopFunc()
+
 	defer meta_svc.logger.Debugf("Took %vs to add %v to metakv\n", time.Since(start_time).Seconds(), key)
 
 	var redactOnceSync sync.Once
@@ -175,8 +180,9 @@ func (meta_svc *MetaKVMetadataSvc) set(key string, value []byte, rev interface{}
 	var err error
 	var redactedValue []byte
 	valueToPrint := &value
-	start_time := time.Now()
-	defer meta_svc.logger.Debugf("Took %vs to set %v to metakv\n", time.Since(start_time).Seconds(), key)
+
+	stopFunc := meta_svc.utils.StartDiagStopwatch(fmt.Sprintf("Set(%v)", key), base.DiagInternalThreshold)
+	defer stopFunc()
 
 	var redactOnceSync sync.Once
 	redactOnce := func() {
@@ -226,8 +232,9 @@ func (meta_svc *MetaKVMetadataSvc) Del(key string, rev interface{}) error {
 		return nil
 	}
 	var err error
-	start_time := time.Now()
-	defer meta_svc.logger.Debugf("Took %vs to delete %v from metakv\n", time.Since(start_time).Seconds(), key)
+
+	stopFunc := meta_svc.utils.StartDiagStopwatch(fmt.Sprintf("Del(%v)", key), base.DiagInternalThreshold)
+	defer stopFunc()
 
 	metakvOpDelFunc := func() error {
 		err = metakv.Delete(getPathFromKey(key), rev)
@@ -267,8 +274,8 @@ func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog(catalogKey string) error {
 	if meta_svc.readOnly {
 		return nil
 	}
-	start_time := time.Now()
-	defer meta_svc.logger.Debugf("Took %vs to RecursiveDelete for catalogKey=%v to metakv\n", time.Since(start_time).Seconds(), catalogKey)
+	stopFunc := meta_svc.utils.StartDiagStopwatch(fmt.Sprintf("DelAllFromCatalog(%v)", catalogKey), base.DiagInternalThreshold)
+	defer stopFunc()
 
 	metakvOpDelRFunc := func() error {
 		err := metakv.RecursiveDelete(GetCatalogPathFromCatalogKey(catalogKey))
@@ -294,8 +301,9 @@ func (meta_svc *MetaKVMetadataSvc) DelAllFromCatalog(catalogKey string) error {
 //if metakv operation failed after max number of retries, return ErrorFailedAfterRetry
 func (meta_svc *MetaKVMetadataSvc) GetAllMetadataFromCatalog(catalogKey string) ([]*service_def.MetadataEntry, error) {
 	var entries = make([]*service_def.MetadataEntry, 0)
-	start_time := time.Now()
-	defer meta_svc.logger.Debugf("Took %vs to ListAllChildren for catalogKey=%v to metakv\n", time.Since(start_time).Seconds(), catalogKey)
+
+	stopFunc := meta_svc.utils.StartDiagStopwatch(fmt.Sprintf("GetAllMetadataFromCatalog(%v)", catalogKey), base.DiagInternalThreshold)
+	defer stopFunc()
 
 	metakvOpGetAllMetadataFunc := func() error {
 		kvEntries, err := metakv.ListAllChildren(GetCatalogPathFromCatalogKey(catalogKey))

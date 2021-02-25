@@ -233,6 +233,7 @@ func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetwor
 	utilitiesMock.On("GetClusterInfo", mock.Anything, base.PoolsPath, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(oneDelay) }).Return(poolsInfo, getNodeListWithMinInfoErr)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 func setupUtilsSSL(utilitiesMock *utilsMock.UtilsIface) {
@@ -248,6 +249,7 @@ func setupUtilsSSL(utilitiesMock *utilsMock.UtilsIface) {
 	sslPairList = append(sslPairList, onePair)
 	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything, mock.Anything).Return(sslPairList, nil)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 func setupUtilsSSL2(utilitiesMock *utilsMock.UtilsIface) {
@@ -280,6 +282,7 @@ func setupUtilsSSL2(utilitiesMock *utilsMock.UtilsIface) {
 	extHostSSL, extPortSSL, extErrSSL := testUtils.GetExternalMgtHostAndPort(nodeInfoMap, true /*isHttps*/)
 	utilitiesMock.On("GetExternalMgtHostAndPort", nodeInfoMap, true /*isHttps*/).Return(extHostSSL, extPortSSL, extErrSSL)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
@@ -300,6 +303,7 @@ func setupUtilsMockPre1Good3Bad(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 func setupUtilsOneNode(utilitiesMock *utilsMock.UtilsIface) {
@@ -318,6 +322,7 @@ func setupUtilsOneNode(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetClusterInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 // emulates where node1 and 2 and 3 becomes cluster splitNames2 and rebalanced
@@ -350,6 +355,7 @@ func setupUtilsMock1Good3Bad(utilitiesMock *utilsMock.UtilsIface) base.StringPai
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", nonEmptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField, emptyList, nil)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 
 	// diff from generic above
 	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything, mock.Anything).Return(splitNames2, nil)
@@ -394,6 +400,7 @@ func setupUtilsMockListNode2Bad(utilitiesMock *utilsMock.UtilsIface) base.String
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetExternalMgtHostAndPort", mock.Anything, mock.Anything).Return("", -1, base.ErrorResourceDoesNotExist)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 
 	// diff from generic above
 	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything, mock.Anything).Return(splitNames2, nil)
@@ -430,6 +437,7 @@ func setupUtilsMockFirstNodeBad(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", nonEmptyMap, mock.Anything).Return(uuidField2, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", emptyMap, mock.Anything).Return("", emptyList, dummyErr)
 	utilitiesMock.On("GetClusterHeartbeatStatusFromNodeList", mock.Anything).Return(nil, nil)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 
 	// diff from generic above
 	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", mock.Anything, hostname, mock.Anything, mock.Anything, mock.Anything).Return(splitNames2, nil)
@@ -475,7 +483,7 @@ func createSSLRemoteClusterRef(id string, helper base2.DnsSrvHelperIface) *metad
 
 func TestAddDelRemoteClusterRef(t *testing.T) {
 	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestAddRDelRemoteClusterRef =================")
+	fmt.Println("============== Test case start: TestAddDelRemoteClusterRef =================")
 	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
@@ -2342,6 +2350,7 @@ func setupUtilsAdminBlockedAndSSLIsOK(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", nodeList, hostname, true, mock.Anything, false).Return(nodeAddressesList, nil)
 	clusterInfo, _ := getPools70()
 	utilitiesMock.On("GetClusterInfoWStatusCode", hostnameSSL, base.PoolsPath, mock.Anything, mock.Anything, base.HttpAuthMechHttps, dummySelfSignedCert, false, mock.Anything, mock.Anything, mock.Anything).Return(clusterInfo, nil, http.StatusOK)
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 func TestParallelSecureGet(t *testing.T) {
@@ -2378,6 +2387,7 @@ func setupUtilsBothAdminPortsBlocked(utilitiesMock *utilsMock.UtilsIface) {
 	// Block both
 	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
 	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Run(func(arguments mock.Arguments) { time.Sleep(blockedTime) }).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
+	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 func TestParallelSecureGetFail(t *testing.T) {
