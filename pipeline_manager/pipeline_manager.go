@@ -1371,8 +1371,18 @@ func (r *PipelineUpdater) run() {
 					r.setLastUpdateSuccess()
 				}
 			case <-r.backfillStopCh:
-				if r.rep_status == nil || r.rep_status.Pipeline() == nil {
+				if r.rep_status == nil || r.rep_status.BackfillPipeline() == nil {
 					r.logger.Warnf("Backfill pipeline for %v is already stopped", r.pipeline_name)
+					if r.checkReplicationActiveness() == ReplicationSpecNotActive {
+						// Do not let any potential restart timers fire after a permanent stop has been issued
+						stoppedInTime := r.cancelFutureBackfillStart()
+						if !stoppedInTime {
+							// This run() is currently executing this StopCh. Soak up the backfillStartCh
+							// to ensure that this pipeline doesn't go rogue and start since the replication
+							// has indicated that it shouldn't run
+							r.soakUpBackfillStartCh()
+						}
+					}
 				} else {
 					r.logger.Infof("Replication %v's backfill Pipeline is stopping\n", r.pipeline_name)
 					retErrMap = r.pipelineMgr.StopBackfillPipeline(r.pipeline_name)
@@ -1386,7 +1396,7 @@ func (r *PipelineUpdater) run() {
 					// Last time update succeeded, so this error then triggers an immediate update
 					r.logger.Infof("Backfill Replication %v's status experienced changes or errors (%v), re-starting now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 					retErrMap = r.pipelineMgr.StartBackfillPipeline(r.pipeline_name)
-					r.cancelFutureRefresh()
+					r.cancelFutureBackfillStart()
 					if backfillStartSuccessful(retErrMap, r.logger, r.pipeline_name) {
 						r.setLastUpdateSuccess()
 					} else {
@@ -1421,6 +1431,15 @@ func (r *PipelineUpdater) run() {
 			}
 		}
 	})
+}
+
+func (r *PipelineUpdater) soakUpBackfillStartCh() {
+	select {
+	case <-r.backfillStartCh:
+	// do nothing
+	default:
+		break
+	}
 }
 
 func backfillStartSuccessful(retErrMap base.ErrorMap, logger *log.CommonLogger, pipelineName string) bool {
@@ -1844,7 +1863,7 @@ func (r *PipelineUpdater) sendStartBackfillPipeline() {
 	default:
 		r.logger.Infof("BackfillStart-now message is already delivered for %v\n", r.pipeline_name)
 	}
-	r.logger.Infof("Replication status is updated now, current status=%v\n", r.rep_status)
+	r.logger.Infof("Replication status received startBackfill, current status=%v\n", r.rep_status)
 }
 
 func (r *PipelineUpdater) sendStopBackfillPipeline() {
@@ -1853,7 +1872,7 @@ func (r *PipelineUpdater) sendStopBackfillPipeline() {
 	default:
 		r.logger.Infof("BackfillStop-now message is already delivered for %v\n", r.pipeline_name)
 	}
-	r.logger.Infof("Replication status is updated now, current status=%v\n", r.rep_status)
+	r.logger.Infof("Replication status received stopBackfill, current status=%v\n", r.rep_status)
 }
 
 func (r *PipelineUpdater) sendUpdateErr(err error) {
@@ -1919,7 +1938,7 @@ func (r *PipelineUpdater) scheduleFutureBackfillStart() {
 
 	if r.backfillScheduledTimer == nil {
 		r.logger.Infof("Pipeline updater scheduled to start backfill pipeline in %v\n", scheduledTimeMs)
-		r.scheduledTimer = time.AfterFunc(scheduledTimeMs, func() {
+		r.backfillScheduledTimer = time.AfterFunc(scheduledTimeMs, func() {
 			r.logger.Infof("Backfill Pipeline updater scheduled time is up. Executing pipeline updater\n")
 			r.sendStartBackfillPipeline()
 		})

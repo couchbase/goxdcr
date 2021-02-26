@@ -1034,3 +1034,28 @@ func TestNonKVNodeStartPipeline(t *testing.T) {
 	errMap := testRepairer.update()
 	assert.Len(errMap, 0)
 }
+
+func TestUpdaterSoakUpBackfillStartCh(t *testing.T) {
+	fmt.Println("============== Test case start: TestUpdaterSoakUpBackfillStartCh =================")
+	defer fmt.Println("============== Test case end: TestUpdaterSoakUpBackfillStartCh =================")
+	assert := assert.New(t)
+
+	testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
+
+	setupGenericMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock,
+		pipelineMgr, testRepairer, testReplicationStatus, testTopic,
+		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
+		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
+
+	assert.NotNil(testRepairer)
+	testRepairer.soakUpBackfillStartCh()
+
+	testRepairer.backfillStartCh <- true
+	assert.Len(testRepairer.backfillStartCh, 1)
+
+	testRepairer.soakUpBackfillStartCh()
+	assert.Len(testRepairer.backfillStartCh, 0)
+}
