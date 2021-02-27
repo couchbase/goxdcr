@@ -24,9 +24,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
+	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -2889,4 +2892,35 @@ func (u *Utilities) StartDiagStopwatch(id string, threshold time.Duration) func(
 			u.logger_utils.Warnf("%v took %v", id, duration)
 		}
 	}
+}
+
+// Given an time threshold, execute a func if timer expires
+// Returns a stopFunc to stop the timer from firing
+func (u *Utilities) StartDebugExec(id string, threshold time.Duration, debugFunc func()) func() {
+	finCh := make(chan bool)
+	timer := time.NewTimer(threshold)
+	var closeFinOnce sync.Once
+
+	stopFunc := func() {
+		closeFinOnce.Do(func() { close(finCh) })
+	}
+
+	go func() {
+		select {
+		case <-finCh:
+			timer.Stop()
+		case <-timer.C:
+			stopFunc()
+			debugFunc()
+		}
+	}()
+
+	return stopFunc
+}
+
+func (u *Utilities) DumpStackTraceAfterThreshold(id string, threshold time.Duration, goroutines base.PprofLookupTypes) func() {
+	dumpStackTrace := func() {
+		pprof.Lookup(goroutines.String()).WriteTo(os.Stdout, 1)
+	}
+	return u.StartDebugExec(id, threshold, dumpStackTrace)
 }

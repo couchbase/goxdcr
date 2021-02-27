@@ -114,6 +114,8 @@ type UtilsIface interface {
 	GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{}
 	AddKeyToBeFiltered(currentValue, key []byte, dpGetter base.DpGetterFunc, toBeReleased *[][]byte, currentValueEndBody int) ([]byte, error, int64, int)
 	StartDiagStopwatch(id string, threshold time.Duration) func()
+	StartDebugExec(id string, threshold time.Duration, debugFunc func()) func()
+	DumpStackTraceAfterThreshold(id string, threshold time.Duration, goroutines base.PprofLookupTypes) func()
 
 	/**
 	 * ------------------------

@@ -12,8 +12,10 @@ package pipeline_utils
 import (
 	"expvar"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
 	"sync"
 )
@@ -60,6 +62,8 @@ type PrometheusExporter struct {
 	// Only to be modified by Export
 	outputBuffer    []byte
 	outputBufferMtx sync.Mutex
+
+	utils utilities.UtilsIface
 }
 
 func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap) *PrometheusExporter {
@@ -71,6 +75,7 @@ func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap) *Pr
 		metricsMap:          make(MetricsMapType),
 		expVarParseMap:      make(ExpVarParseMapType),
 		outputBuffer:        make([]byte, 0),
+		utils:               utilities.NewUtilities(),
 	}
 
 	for k, statsProperty := range prom.globalLookupMap {
@@ -112,12 +117,20 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 type ExpVarParseMapType map[string]interface{}
 
 // Returns true if all the keys match, and the types all match
-func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map) bool {
+func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map, utils utilities.UtilsIface) bool {
 	var missingKey bool
 	var inconsistentType bool
 	var subLevelCheckPasses = true
 	var keyCount int
 	keyLen := len(e)
+
+	// TODO - MB-44586 - remove this before CC ships
+	if utils != nil {
+		stopFunc := utils.DumpStackTraceAfterThreshold("CheckNoKeyChanges", base.DiagInternalThreshold, base.PprofAllGoroutines)
+		defer stopFunc()
+		stopFunc2 := utils.DumpStackTraceAfterThreshold("CheckNoKeyChanges", base.DiagInternalThreshold, base.PprofBlocking)
+		defer stopFunc2()
+	}
 
 	varMap.Do(func(kv expvar.KeyValue) {
 		keyCount++
@@ -133,7 +146,7 @@ func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map) bool {
 				inconsistentType = true
 				return
 			}
-			subLevelCheckPasses = eSubMap.CheckNoKeyChanges(subMap)
+			subLevelCheckPasses = eSubMap.CheckNoKeyChanges(subMap, nil)
 			if !subLevelCheckPasses {
 				return
 			}
@@ -316,7 +329,7 @@ func parseExpMap(varMap *expvar.Map, targetMap ExpVarParseMapType) {
 
 func (p *PrometheusExporter) LoadExpVarMap(m *expvar.Map) (noKeysChanged bool) {
 	p.mapsMtx.Lock()
-	noKeysChanged = p.expVarParseMap.CheckNoKeyChanges(m)
+	noKeysChanged = p.expVarParseMap.CheckNoKeyChanges(m, p.utils)
 	keysChanged := !noKeysChanged
 	if keysChanged {
 		p.expVarParseMap = make(ExpVarParseMapType)

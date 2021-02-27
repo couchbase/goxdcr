@@ -310,6 +310,22 @@ func (_m *UtilsIface) ConstructHttpRequest(baseURL string, path string, preserve
 	return r0, r1, r2
 }
 
+// DumpStackTraceAfterThreshold provides a mock function with given fields: id, threshold, goroutines
+func (_m *UtilsIface) DumpStackTraceAfterThreshold(id string, threshold time.Duration, goroutines base.PprofLookupTypes) func() {
+	ret := _m.Called(id, threshold, goroutines)
+
+	var r0 func()
+	if rf, ok := ret.Get(0).(func(string, time.Duration, base.PprofLookupTypes) func()); ok {
+		r0 = rf(id, threshold, goroutines)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(func())
+		}
+	}
+
+	return r0
+}
+
 // EncodeHttpRequest provides a mock function with given fields: req
 func (_m *UtilsIface) EncodeHttpRequest(req *http.Request) ([]byte, error) {
 	ret := _m.Called(req)
@@ -2069,6 +2085,22 @@ func (_m *UtilsIface) SendHELOWithFeatures(client memcached.ClientIface, userAge
 	}
 
 	return r0, r1
+}
+
+// StartDebugExec provides a mock function with given fields: id, threshold, debugFunc
+func (_m *UtilsIface) StartDebugExec(id string, threshold time.Duration, debugFunc func()) func() {
+	ret := _m.Called(id, threshold, debugFunc)
+
+	var r0 func()
+	if rf, ok := ret.Get(0).(func(string, time.Duration, func()) func()); ok {
+		r0 = rf(id, threshold, debugFunc)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(func())
+		}
+	}
+
+	return r0
 }
 
 // StartDiagStopwatch provides a mock function with given fields: id, threshold

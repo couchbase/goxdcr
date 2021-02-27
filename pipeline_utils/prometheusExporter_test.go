@@ -5,6 +5,7 @@ import (
 	"expvar"
 	"fmt"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"testing"
@@ -19,29 +20,31 @@ func TestPrometheusExpVarParseMap(t *testing.T) {
 	expVarMap.Add("testInt", 12)
 	expVarMap.AddFloat("testFloat", 13.3)
 
+	utils := utilities.NewUtilities()
+
 	parseMap := make(ExpVarParseMapType)
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
 
 	parseMap["testInt"] = 12
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
 
 	parseMap["testFloat"] = 13.3
-	assert.True(parseMap.CheckNoKeyChanges(expVarMap))
+	assert.True(parseMap.CheckNoKeyChanges(expVarMap, utils))
 
 	subExpVarMap := &expvar.Map{}
 	varString := expvar.String{}
 	varString.Set("String")
 	subExpVarMap.Set("subString", &varString)
 	expVarMap.Set("subMap", subExpVarMap)
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
 
 	subMap := make(ExpVarParseMapType)
 	parseMap["subMap"] = subMap
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
 
 	subMap["subString"] = "String"
 	parseMap["subMap"] = subMap
-	assert.True(parseMap.CheckNoKeyChanges(expVarMap))
+	assert.True(parseMap.CheckNoKeyChanges(expVarMap, utils))
 
 	exporter := NewPrometheusExporter(nil)
 	exporter.LoadExpVarMap(expVarMap)

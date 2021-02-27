@@ -1258,3 +1258,17 @@ var MaxCountStreamsInactive = 10
 // Stopwatch timers
 var DiagNetworkThreshold = 5000 * time.Millisecond
 var DiagInternalThreshold = 2000 * time.Millisecond
+
+// Pprof goroutines dump types
+type PprofLookupTypes string
+
+const (
+	PprofAllGoroutines PprofLookupTypes = "goroutine"
+	PprofHeapProfile   PprofLookupTypes = "heap"
+	PprofthreadCreate  PprofLookupTypes = "threadcreate"
+	PprofBlocking      PprofLookupTypes = "block"
+)
+
+func (p PprofLookupTypes) String() string {
+	return string(p)
+}
