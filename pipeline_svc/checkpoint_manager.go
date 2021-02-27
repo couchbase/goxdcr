@@ -43,6 +43,7 @@ var CHECKPOINT_INTERVAL = "checkpoint_interval"
 
 var ckptRecordMismatch error = errors.New("Checkpoint Records internal version mismatch")
 var targetVbuuidChangedError error = errors.New("target vbuuid has changed")
+var ckptMgrStopped = errors.New("Ckptmgr has stopped")
 
 type CheckpointMgrSvc interface {
 	common.PipelineService
@@ -580,6 +581,15 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 	}
 }
 
+func (ckmgr *CheckpointManager) IsStopped() bool {
+	select {
+	case <-ckmgr.finish_ch:
+		return true
+	default:
+		return false
+	}
+}
+
 func (ckmgr *CheckpointManager) Stop() error {
 	//send signal to checkpoiting routine to exit
 	close(ckmgr.finish_ch)
@@ -783,23 +793,23 @@ func (ckmgr *CheckpointManager) DelSingleVBCheckpoint(topic string, vbno uint16)
  * The timestamps are to be consumed by dcp nozzle to determine the start point of dcp stream/replication via settings map (UpdateSettings).
  */
 func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
-	defer ckmgr.logger.Infof("%v %v Done with SetVBTimestamps", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+	defer ckmgr.logger.Infof("%v Done with SetVBTimestamps", ckmgr.pipeline.FullTopic())
 	defer func() {
 		atomic.StoreUint32(&ckmgr.checkpointOpAllowed, 1)
 	}()
-	ckmgr.logger.Infof("Set start seqnos for %v %v...", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+	ckmgr.logger.Infof("Set start seqnos for %v...", ckmgr.pipeline.FullTopic())
 
 	listOfVbs := ckmgr.getMyVBs()
 
 	// Get persisted checkpoints from metakv - each valid vbucket has a *metadata.CheckpointsDoc
-	ckmgr.logger.Infof("Getting checkpoint for %v\n", topic)
+	ckmgr.logger.Infof("Getting checkpoint for %v %v\n", ckmgr.pipeline.Type().String(), topic)
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic, true /*needBrokenMapping*/)
 	if err != nil {
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
 	ckmgr.loadCollectionMappingsFromCkptDocs(ckptDocs)
-	ckmgr.logger.Infof("Found %v checkpoint documents for replication %v\n", len(ckptDocs), topic)
+	ckmgr.logger.Infof("Found %v checkpoint documents for %v replication %v\n", len(ckptDocs), ckmgr.pipeline.Type().String(), topic)
 
 	ckmgr.initBpMapIfNeeded(ckptDocs)
 
@@ -810,6 +820,9 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	var brokenMappingModified bool
 	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
 	for vbno, ckptDoc := range ckptDocs {
+		if ckmgr.IsStopped() {
+			return ckptMgrStopped
+		}
 		if !base.IsVbInList(vbno, listOfVbs) {
 			// if the vbno is no longer managed by the current checkpoint manager/pipeline,
 			// the checkpoint doc is no longer valid and needs to be deleted
@@ -851,7 +864,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 	}
 
-	if brokenMappingModified {
+	if brokenMappingModified && !ckmgr.IsStopped() {
 		// For potential deleted checkpoints, ensure the brokenMapping is synced with metakv
 		ckmgr.CommitBrokenMappingUpdates()
 	}
@@ -941,8 +954,9 @@ func (ckmgr *CheckpointManager) markBpCkptStored(vbno uint16) {
 	return
 }
 
+// Should only be called during pipeline startup times
 func (ckmgr *CheckpointManager) postDelCheckpointsDocWrapper(topic string, ckptDoc *metadata.CheckpointsDoc, brokenMappingModified *bool) {
-	if ckptDoc == nil {
+	if ckptDoc == nil || ckmgr.IsStopped() {
 		return
 	}
 

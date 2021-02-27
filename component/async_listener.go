@@ -87,7 +87,7 @@ func (l *AsyncComponentEventListenerImpl) Stop() error {
 	if err == nil {
 		l.logger.Infof("%v stopped processing events\n", l.id)
 	} else {
-		l.logger.Infof("%v failed to stop processing events. Leaving it alone to die. err=%v\n", l.id, err)
+		l.logger.Warnf("%v failed to stop processing events. Leaving it alone to die. err=%v\n", l.id, err)
 	}
 	return err
 }

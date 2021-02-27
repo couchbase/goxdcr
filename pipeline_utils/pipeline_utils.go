@@ -72,11 +72,11 @@ func HasSANInCertificateSupport(cluster_info_svc service_def.ClusterInfoSvc, tar
 }
 
 func GetElementIdFromName(pipeline common.Pipeline, name string) string {
-	return pipeline.Topic() + "_" + name
+	return pipeline.FullTopic() + "_" + name
 }
 
 func GetElementIdFromNameAndIndex(pipeline common.Pipeline, name string, index int) string {
-	return pipeline.Topic() + "_" + name + "_" + strconv.Itoa(index)
+	return pipeline.FullTopic() + "_" + name + "_" + strconv.Itoa(index)
 }
 
 // as the name indicates, this method works only on element ids with index at the end
