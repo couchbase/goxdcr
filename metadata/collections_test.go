@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"reflect"
+	"sync"
 	"testing"
 )
 

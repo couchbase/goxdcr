@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"sync"
 	"unsafe"
 )
 
@@ -57,14 +58,18 @@ type CheckpointRecord struct {
 	// BrokenMapping SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMapping above
 	BrokenMappingSha256 string `json:"brokenCollectionsMapSha256"`
 	// Broken mapping (if any) associated with the checkpoint - this is populated automatically by checkpointsService
-	brokenMappings CollectionNamespaceMapping
+	brokenMappings    CollectionNamespaceMapping
+	brokenMappingsMtx sync.RWMutex
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
 	if c == nil {
 		return nil
 	}
-	return &(c.brokenMappings)
+	c.brokenMappingsMtx.RLock()
+	defer c.brokenMappingsMtx.RUnlock()
+	cloned := c.brokenMappings.Clone()
+	return &(cloned)
 }
 
 func (c *CheckpointRecord) Size() int {
@@ -101,13 +106,16 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 }
 
 func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
+	ckptRecord.brokenMappingsMtx.RLock()
 	if len(ckptRecord.brokenMappings) > 0 {
 		sha, err := ckptRecord.brokenMappings.Sha256()
+		ckptRecord.brokenMappingsMtx.RUnlock()
 		if err != nil {
 			return err
 		}
 		ckptRecord.BrokenMappingSha256 = fmt.Sprintf("%x", sha[:])
 	} else {
+		ckptRecord.brokenMappingsMtx.RUnlock()
 		ckptRecord.BrokenMappingSha256 = ""
 	}
 	return nil
@@ -153,16 +161,17 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.SourceManifestForDCP = other.SourceManifestForDCP
 	ckptRecord.SourceManifestForBackfillMgr = other.SourceManifestForBackfillMgr
 	ckptRecord.TargetManifest = other.TargetManifest
-	ckptRecord.LoadBrokenMapping(other.brokenMappings)
+	ckptRecord.LoadBrokenMapping(*other.BrokenMappings())
 }
 
-func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) {
+func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
 	if ckptRecord == nil {
-		return
+		return fmt.Errorf("nil ckptRecord")
 	}
+	ckptRecord.brokenMappingsMtx.Lock()
 	ckptRecord.brokenMappings = other
-	ckptRecord.PopulateBrokenMappingSha()
-	return
+	ckptRecord.brokenMappingsMtx.Unlock()
+	return ckptRecord.PopulateBrokenMappingSha()
 }
 
 func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
@@ -405,6 +414,8 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 }
 
 func (ckpt_record *CheckpointRecord) String() string {
+	ckpt_record.brokenMappingsMtx.RLock()
+	defer ckpt_record.brokenMappingsMtx.RUnlock()
 	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMapping=%v}",
 		ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
 		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
@@ -452,11 +463,6 @@ func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
 	ckpt_record_map[TargetVbOpaque] = ckpt.Target_vb_opaque
 	ckpt_record_map[TargetSeqno] = ckpt.Target_Seqno
 	return ckpt_record_map
-}
-
-func (ckpt *CheckpointRecord) SetBrokenMappings(mappings CollectionNamespaceMapping) error {
-	ckpt.brokenMappings = mappings
-	return ckpt.PopulateBrokenMappingSha()
 }
 
 func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {

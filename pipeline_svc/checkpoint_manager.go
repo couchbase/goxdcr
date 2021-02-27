@@ -968,19 +968,23 @@ func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata
 			continue
 		}
 		for _, record := range ckptDoc.Checkpoint_records {
-			if record == nil || record.BrokenMappings() == nil {
+			if record == nil {
+				continue
+			}
+			brokenMappings := record.BrokenMappings()
+			if brokenMappings == nil {
 				continue
 			}
 			if record.TargetManifest > highestManifestId {
 				// Simply set the new map
-				ckmgr.cachedBrokenMap.brokenMap = *record.BrokenMappings()
+				ckmgr.cachedBrokenMap.brokenMap = *brokenMappings
 				if ckmgr.cachedBrokenMap.brokenMap == nil {
 					ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
 				}
 				highestManifestId = record.TargetManifest
 			} else if record.TargetManifest == highestManifestId {
 				// Same version - consolidate it into a bigger fishing net
-				ckmgr.cachedBrokenMap.brokenMap.Consolidate(*record.BrokenMappings())
+				ckmgr.cachedBrokenMap.brokenMap.Consolidate(*brokenMappings)
 			}
 		}
 	}

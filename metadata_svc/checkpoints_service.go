@@ -299,8 +299,9 @@ func (ckpt_svc *CheckpointsService) RecordMappings(replicationId string, ckptRec
 		return err
 	}
 
-	if ckptRecord.BrokenMappings() != nil && len(*(ckptRecord.BrokenMappings())) > 0 {
-		incrementerFunc(ckptRecord.BrokenMappingSha256, ckptRecord.BrokenMappings())
+	clonedBrokenMap := ckptRecord.BrokenMappings()
+	if clonedBrokenMap != nil && len(*(clonedBrokenMap)) > 0 {
+		incrementerFunc(ckptRecord.BrokenMappingSha256, clonedBrokenMap)
 		for _, removedRecord := range removedRecords {
 			if removedRecord != nil && len(removedRecord.BrokenMappingSha256) > 0 {
 				decrementerFunc(removedRecord.BrokenMappingSha256)
@@ -569,7 +570,7 @@ func (ckpt_svc *CheckpointsService) removeNamespacesFromCkpt(incomingMapping *me
 		newBrokenMapping := incomingMapping.Delete(toBeDelNamespace)
 		newShaSlice, _ := newBrokenMapping.Sha256()
 		newSha := fmt.Sprintf("%x", newShaSlice[:])
-		err = record.SetBrokenMappings(newBrokenMapping)
+		err = record.LoadBrokenMapping(newBrokenMapping)
 		if err != nil {
 			ckpt_svc.logger.Warnf("when setting brokenMapping SHA: %v", err)
 		} else {
