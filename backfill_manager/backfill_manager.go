@@ -78,6 +78,9 @@ type BackfillMgr struct {
 	errorRetryQMtx  sync.RWMutex
 	errorRetryQueue []BackfillRetryRequest
 	finCh           chan bool
+
+	retrySpecRemovalCh chan string
+	retryTimerPeriod   time.Duration
 }
 
 type replSpecHandler struct {
@@ -250,6 +253,8 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		utils:                             utils.NewUtilities(),
 		replSpecHandlerMap:                make(map[string]*replSpecHandler),
 		finCh:                             make(chan bool),
+		retrySpecRemovalCh:                make(chan string, 5),
+		retryTimerPeriod:                  10 * time.Second,
 	}
 
 	return backfillMgr
@@ -278,7 +283,7 @@ func (b *BackfillMgr) Start() error {
 
 	b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
 
-	go b.startRetryMonitor()
+	go b.runRetryMonitor()
 
 	b.logger.Infof("BackfillMgr Started")
 	return nil
@@ -399,6 +404,10 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		b.pipelineMgr.ReInitStreams(spec.Id)
 	}
 
+	specCheckFunc := func() bool {
+		return b.validateReplIdExists(replId)
+	}
+
 	var err error
 	b.specReqHandlersMtx.Lock()
 	if _, exists := b.specToReqHandlerMap[replId]; exists {
@@ -406,7 +415,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		b.specReqHandlersMtx.Unlock()
 		return err
 	}
-	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier, mainPipelineCkptSeqnosGetter, restreamPipelineFatalFunc)
+	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier, mainPipelineCkptSeqnosGetter, restreamPipelineFatalFunc, specCheckFunc)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
@@ -561,6 +570,9 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 	} else if newSpecObj.(*metadata.ReplicationSpecification) == nil &&
 		oldSpecObj.(*metadata.ReplicationSpecification) != nil {
 		oldSpec := oldSpecObj.(*metadata.ReplicationSpecification)
+		// Tell retry mechanism to stop retrying for this spec if any exists
+		b.retrySpecRemovalCh <- oldSpec.Id
+
 		// Delete internal caches
 		b.replSpecHandlerMtx.Lock()
 		handler, exists := b.replSpecHandlerMap[oldSpec.Id]
@@ -630,6 +642,19 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 			added, removed := oldMapping.Diff(newMapping)
 			err = b.handleExplicitMapChangeBackfillReq(specId, added, removed)
 			if err != nil {
+				if !b.validateReplIdExists(specId) {
+					return nil
+				}
+				if errMeansReqNeedsToBeRetried(err) {
+					req := BackfillRetryRequest{
+						replId:                     specId,
+						req:                        specForId,
+						force:                      false,
+						correspondingSrcManifestId: srcMan.Uid(),
+						handler:                    b.internalGetHandler(specId),
+					}
+					b.retryBackfillRequest(req)
+				}
 				return err
 			}
 
@@ -653,16 +678,28 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 	}
 
 	errCallback := func(err error) {
-		b.explicitMappingCbGenericErrHandler(err, specId)
+		// Do nothing, because callback above will retry if needed
 	}
 
 	return callback, errCallback
 }
 
-func (b *BackfillMgr) explicitMappingCbGenericErrHandler(err error, specId string) {
+func (b *BackfillMgr) explicitMappingCbGenericErrHandler(err error, specId string, diff metadata.CollectionNamespaceMappingsDiffPair) {
 	if err != nil {
-		b.logger.Fatalf("Unable to Handle backfilling data for explicit mapping change due to err %v. To prevent data loss, the whole replication %v must be restarted from seqno 0", err, specId)
-		b.pipelineMgr.ReInitStreams(specId)
+		if !b.validateReplIdExists(specId) {
+			return
+		}
+
+		if errMeansReqNeedsToBeRetried(err) {
+			req := BackfillRetryRequest{
+				replId:                     specId,
+				req:                        diff,
+				force:                      false,
+				correspondingSrcManifestId: diff.RouterLatestSrcManifestId,
+				handler:                    b.internalGetHandler(specId),
+			}
+			b.retryBackfillRequest(req)
+		}
 	}
 }
 
@@ -700,7 +737,7 @@ func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId strin
 	}
 
 	errCb := func(err error) {
-		b.explicitMappingCbGenericErrHandler(err, specId)
+		b.explicitMappingCbGenericErrHandler(err, specId, diff)
 	}
 	return callback, errCb
 }
@@ -828,6 +865,10 @@ func (b *BackfillMgr) handleManifestsChanges(replId string, oldManifests, newMan
 		return
 	}
 
+	if !b.validateReplIdExists(replId) {
+		return
+	}
+
 	if newManifests.Source == nil && newManifests.Target == nil {
 		// Nothing changed
 		return
@@ -892,8 +933,10 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 			handler:                    b.internalGetHandler(replId),
 		}
 		b.retryBackfillRequest(req)
-	} else {
+	} else if err == nil {
 		b.markNewSourceManifest(replId, newSourceManifest.Uid())
+	} else {
+		// Either queued for retry or spec deleted (errorStopped)
 	}
 }
 
@@ -902,10 +945,10 @@ func (b *BackfillMgr) internalGetHandler(replId string) *BackfillRequestHandler 
 	handler := b.specToReqHandlerMap[replId]
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
+		// This can happen in two cases:
+		// 1. Replication spec is deleted
+		// 2. Pipeline is currently stopped
 		b.logger.Errorf("Unable to find handler for spec %v", replId)
-		retErr := base.GetBackfillFatalDataLossError(replId).Error()
-		b.logger.Fatalf(retErr)
-		b.pipelineMgr.ReInitStreams(replId)
 	}
 	return handler
 }
@@ -974,6 +1017,7 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 	if !skipRaiseBackfillReq {
 		err = b.raiseBackfillReq(replId, backfillReq, false, newSourceManifest.Uid())
 	}
+
 	if errMeansReqNeedsToBeRetried(err) {
 		req := BackfillRetryRequest{
 			replId:                     replId,
@@ -983,8 +1027,11 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 			handler:                    b.internalGetHandler(replId),
 		}
 		b.retryBackfillRequest(req)
-	} else {
+	} else if err == nil {
+		// Only mark if successfull
 		b.markNewSourceManifest(replId, newSourceManifest.Uid())
+	} else {
+		// Either it is in the retry queue, or the spec is deleted (errorStopped)
 	}
 
 	if modes.IsImplicitMapping() {
@@ -1136,7 +1183,7 @@ var QueuedForRetry = fmt.Errorf("queued a job for retry")
 func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, overridePreviousBackfills bool, newSourceManifestId uint64) error {
 	handler := b.internalGetHandler(replId)
 	b.errorRetryQMtx.RLock()
-	if len(b.errorRetryQueue) > 0 {
+	if handler == nil || len(b.errorRetryQueue) > 0 {
 		// Don't jump ahead of queue
 		b.errorRetryQMtx.RUnlock()
 		b.errorRetryQMtx.Lock()
@@ -1426,13 +1473,15 @@ func (b *BackfillMgr) SetLastSuccessfulSourceManifestId(specId string, manifestI
 	return err
 }
 
-func (b *BackfillMgr) startRetryMonitor() {
-	periodicRetryTimer := time.NewTicker(10 * time.Second)
+func (b *BackfillMgr) runRetryMonitor() {
+	periodicRetryTimer := time.NewTicker(b.retryTimerPeriod)
 	for {
 		select {
 		case <-b.finCh:
 			periodicRetryTimer.Stop()
 			return
+		case removedSpecId := <-b.retrySpecRemovalCh:
+			b.cleanupBackfillRetryQueue(removedSpecId)
 		case <-periodicRetryTimer.C:
 			b.errorRetryQMtx.RLock()
 			if len(b.errorRetryQueue) == 0 {
@@ -1441,39 +1490,78 @@ func (b *BackfillMgr) startRetryMonitor() {
 			} else {
 				b.errorRetryQMtx.RUnlock()
 				b.errorRetryQMtx.Lock()
-				// First, find the smalles manifestId to process
+				// find the smallest manifestId to process
 				var unableToBeProcessedQueue []BackfillRetryRequest
+				var smallestJob uint64
+				var lastRetryWasSuccessful = true
+
 				for len(b.errorRetryQueue) > 0 {
 					// Find the earliest job first to process, according to the srcManifestsID it is supposed to set
-					var minSourceManifestId uint64 = math.MaxUint64
-					var minIdx int
-					for i := 0; i < len(b.errorRetryQueue); i++ {
-						if b.errorRetryQueue[i].correspondingSrcManifestId < minSourceManifestId {
-							minIdx = i
-							minSourceManifestId = b.errorRetryQueue[i].correspondingSrcManifestId
+					minIdx, job := b.retryQueueFindSmallestManifestRequest()
+					if lastRetryWasSuccessful {
+						smallestJob = job.correspondingSrcManifestId
+					} else {
+						// Do not retry a job that has a higher source manifest ID than the last failed job
+						if job.correspondingSrcManifestId > smallestJob {
+							break
 						}
 					}
-					job := b.errorRetryQueue[minIdx]
 					// Unlock before doing metakv ops - in the meantime, queue may be appended but minIdx location should not be affected
 					b.errorRetryQMtx.Unlock()
-					handler := job.handler
-					err := handler.handleBackfillRequestWithArgs(job.req, job.force)
-					if err != nil {
-						if err != errorStopped {
-							b.logger.Errorf("Retrying job %v failed due to %v - will try again next cycle", job.req, err)
-							unableToBeProcessedQueue = append(unableToBeProcessedQueue, job)
-						}
-					} else {
-						b.markNewSourceManifest(job.replId, job.correspondingSrcManifestId)
-					}
+					lastRetryWasSuccessful = b.retryJob(job, &unableToBeProcessedQueue)
 					b.errorRetryQMtx.Lock()
+					// Regardless of success or failure, remove the job from errorRetryQueue
 					b.errorRetryQueue = append(b.errorRetryQueue[:minIdx], b.errorRetryQueue[minIdx+1:]...)
 				}
-				b.errorRetryQueue = unableToBeProcessedQueue
+				// After cycling through the errorRetryQueue, re-add those jobs that weren't able to successfully run
+				for _, unableToBeProcessedJob := range unableToBeProcessedQueue {
+					b.errorRetryQueue = append(b.errorRetryQueue, unableToBeProcessedJob)
+				}
 				b.errorRetryQMtx.Unlock()
 			}
 		}
 	}
+}
+
+// Used internally - retry a BackfillRetryRequest. In the case of error, put it in the unableToBeProcessedQueue
+// Returns boolean to indicate whether or not the retry was successful
+func (b *BackfillMgr) retryJob(job BackfillRetryRequest, unableToBeProcessedQueue *[]BackfillRetryRequest) bool {
+	handler := job.handler
+	var err error
+	if handler == nil {
+		handler = b.internalGetHandler(job.replId)
+		if handler == nil {
+			err = fmt.Errorf("unable to find backfill handler for %v", job.replId)
+		}
+	}
+	if handler != nil {
+		err = handler.handleBackfillRequestWithArgs(job.req, job.force)
+	}
+	if err != nil {
+		// errorStopped by handler means that a repl spec has been deleted. If a spec hasn't been
+		// deleted, even if it is just stopped, it is prob safer to put it in errorRetryQueue
+		b.logger.Errorf("Retrying job %v failed due to %v - will try again next cycle", job.req, err)
+		*unableToBeProcessedQueue = append(*unableToBeProcessedQueue, job)
+		return false
+	} else {
+		// Successfully handled
+		b.markNewSourceManifest(job.replId, job.correspondingSrcManifestId)
+		return true
+	}
+}
+
+// Used internally - lock must be held
+func (b *BackfillMgr) retryQueueFindSmallestManifestRequest() (int, BackfillRetryRequest) {
+	var minSourceManifestId uint64 = math.MaxUint64
+	var minIdx int
+	for i := 0; i < len(b.errorRetryQueue); i++ {
+		if b.errorRetryQueue[i].correspondingSrcManifestId < minSourceManifestId {
+			minIdx = i
+			minSourceManifestId = b.errorRetryQueue[i].correspondingSrcManifestId
+		}
+	}
+	job := b.errorRetryQueue[minIdx]
+	return minIdx, job
 }
 
 func (b *BackfillMgr) retryBackfillRequest(req BackfillRetryRequest) {
@@ -1524,4 +1612,36 @@ func (b *BackfillMgr) DelBackfillForVB(topic string, vbno uint16) error {
 		return err
 	}
 	return nil
+}
+
+func (b *BackfillMgr) cleanupBackfillRetryQueue(removedSpecId string) {
+	b.errorRetryQMtx.Lock()
+	defer b.errorRetryQMtx.Unlock()
+
+	var replacementQueue []BackfillRetryRequest
+
+	for i := 0; i < len(b.errorRetryQueue); i++ {
+		job := b.errorRetryQueue[i]
+		if job.replId == removedSpecId {
+			continue
+		}
+		replacementQueue = append(replacementQueue, job)
+	}
+
+	b.errorRetryQueue = replacementQueue
+}
+
+// Returns true if replId still exists
+func (b *BackfillMgr) validateReplIdExists(replId string) bool {
+	allSpecs, err := b.replSpecSvc.AllReplicationSpecIds()
+	if err != nil {
+		// Pretend it exists and let retry mechanism clean up
+		return true
+	}
+	for _, specId := range allSpecs {
+		if specId == replId {
+			return true
+		}
+	}
+	return false
 }

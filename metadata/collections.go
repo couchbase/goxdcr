@@ -1670,6 +1670,9 @@ func NewCollectionNamespaceMappingFromSnappyData(data []byte) (*CollectionNamesp
 type CollectionNamespaceMappingsDiffPair struct {
 	Added   CollectionNamespaceMapping
 	Removed CollectionNamespaceMapping
+
+	// When called from Router, router should attach its latest source manifest ID
+	RouterLatestSrcManifestId uint64
 }
 
 type CollectionNsMappingsDoc struct {

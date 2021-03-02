@@ -408,6 +408,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 	if needToUpdate {
 		manifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, targetManifestId)
 		if err != nil {
+			// TODO - MB-44683
 			err = fmt.Errorf("Collections Router %v error - unable to find last known target manifest version %v from collectionsManifestSvc - err: %v",
 				c.spec.Id, targetManifestId, err)
 			// TODO MB-38445
@@ -552,6 +553,7 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 	mappingMode := c.collectionMode
 	rules := c.cachedRules.Clone()
 	cachedExplicitMap := c.explicitMappings.Clone()
+	lastKnownSrcManifestId := c.lastKnownSrcManifest.Uid()
 	c.mappingMtx.RUnlock()
 	manifestsPair := metadata.CollectionsManifestPair{
 		Source: latestSourceManifest,
@@ -579,8 +581,9 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 	// 4. Start pipelines
 	added, removed := c.explicitMappings.Diff(explicitMap)
 	pair := metadata.CollectionNamespaceMappingsDiffPair{
-		Added:   added,
-		Removed: removed,
+		Added:                     added,
+		Removed:                   removed,
+		RouterLatestSrcManifestId: lastKnownSrcManifestId,
 	}
 	c.explicitMapChangeHandler(pair)
 
@@ -802,7 +805,10 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 	if manifestIsNotChanging {
 		added = make(metadata.ScopesMap)
 		// The only case we hit here if manifest is not changing is if we need to double check broken map
-		c.doubleCheckBrokenMapAndClearDblChkTicker(latestManifest, added)
+		dblCheckErr := c.doubleCheckBrokenMapAndClearDblChkTicker(latestManifest, added)
+		if dblCheckErr != nil {
+			c.logger.Warnf("doubleCheckBrokenMapAndClearDblChkTicker returned err %v", dblCheckErr)
+		}
 	} else {
 		added, _, removed, err = latestManifest.Diff(&lastKnownManifestClone)
 		if err != nil {
@@ -813,7 +819,10 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 			if added == nil {
 				added = make(metadata.ScopesMap)
 			}
-			c.doubleCheckBrokenMapAndClearDblChkTicker(latestManifest, added)
+			dblCheckErr := c.doubleCheckBrokenMapAndClearDblChkTicker(latestManifest, added)
+			if dblCheckErr != nil {
+				c.logger.Warnf("doubleCheckBrokenMapAndClearDblChkTicker2 returned err %v", dblCheckErr)
+			}
 		}
 	}
 
@@ -822,6 +831,10 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 }
 
 func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestManifest *metadata.CollectionsManifest, lastKnownManifestId uint64, removed metadata.ScopesMap, added metadata.ScopesMap) error {
+	if !c.IsRunning() {
+		return PartStoppedError
+	}
+
 	var routingInfo CollectionsRoutingInfo
 	var rollbackFunc func()
 	var abort bool
@@ -863,7 +876,7 @@ func (c *CollectionsRouter) fixBrokenMapAndRaiseBackfill(latestManifest *metadat
 	}
 
 	err := c.routingUpdater(routingInfo)
-	if err != nil {
+	if err != nil && c.IsRunning() {
 		// If routing updater had error, it means that the potentially either or both ckpt mgr and backfill mgr
 		// do not have the most up-to-date brokenmap/repairedmap (routingInfo).
 		// Most likely though, it means that backfill was not able to be persisted correctly.
@@ -979,7 +992,7 @@ func (c *CollectionsRouter) updateBrokenMapAndRoutingInfo(latestManifest *metada
 			}
 		}
 		c.brokenDenyMtx.Unlock()
-		c.logger.Warnf("Due to error, %v has rolled back to prev brokenMap %v and prev target manifest %v", rbPrevBrokenMapping.String(), rbPrevKnownTgtManifest.Uid())
+		c.logger.Warnf("Due to error, %v has rolled back to prev brokenMap %v and prev target manifest %v", c.spec.Id, rbPrevBrokenMapping.String(), rbPrevKnownTgtManifest.Uid())
 	}
 
 	if !dblCheckBrokenMap {
@@ -1048,6 +1061,9 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	if !ok {
 		panic("coding bug")
 	}
+	if !c.IsRunning() {
+		return
+	}
 
 	c.mappingMtx.RLock()
 	// When raising an ignore event, prevent the namespace from being recycled
@@ -1107,6 +1123,10 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 }
 
 func (c *CollectionsRouter) brokenMapIdleDoubleCheck() {
+	if !c.IsRunning() {
+		return
+	}
+
 	c.brokenDenyMtx.RLock()
 	latestManifestClone := c.lastKnownTgtManifest.Clone()
 	c.brokenDenyMtx.RUnlock()
@@ -1124,6 +1144,9 @@ func (c *CollectionsRouter) brokenMapIdleDoubleCheck() {
 
 func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMcr *base.WrappedMCRequest, unmappedNamespaces metadata.CollectionNamespaceMapping, shouldIgnore bool) {
 	var routingInfo CollectionsRoutingInfo
+	if !c.IsRunning() {
+		return
+	}
 
 	c.brokenDenyMtx.Lock()
 	_, _, findErr := c.lastKnownTgtManifest.GetScopeAndCollectionName(wrappedMcr.ColInfo.ColId)

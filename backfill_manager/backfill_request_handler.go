@@ -73,7 +73,8 @@ type BackfillRequestHandler struct {
 	vbsGetter       MyVBsGetter
 	vbsDoneNotifier MyVBsTasksDoneNotifier
 
-	spec *metadata.ReplicationSpecification
+	spec            *metadata.ReplicationSpecification
+	specStillExists func() bool
 
 	// TODO MB-38931 - once consistent metakv is in, this needs to be updated
 	cachedBackfillSpec           *metadata.BackfillReplicationSpec
@@ -95,7 +96,7 @@ type ReqAndResp struct {
 	Force           bool
 }
 
-func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, vbsGetter MyVBsGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func()) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, vbsGetter MyVBsGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func(), specCheckFunc func() bool) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
 		logger:                       logger,
@@ -112,6 +113,7 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		vbsDoneNotifier:              vbsTasksDoneNotifier,
 		mainpipelineCkptSeqnosGetter: mainPipelineCkptSeqnosGetter,
 		restreamPipelineFatalFunc:    restreamPipelineFatalFunc,
+		specStillExists:              specCheckFunc,
 	}
 }
 
@@ -704,18 +706,10 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		} else {
 			err = base.ErrorInvalidInput
 		}
-		var routerStopped bool
-		select {
-		case <-routerFinCh:
-			routerStopped = true
-			b.logger.Warnf("%v detected that router has been stopped", b.id)
-		default:
-			break
-		}
-		if err != nil && err != errorStopped && !routerStopped {
+		if err != nil && err != errorStopped && !b.routerHasStopped(routerFinCh) && b.specStillExists() {
 			b.logger.Errorf("Handler Process event received err %v for backfillmap %v", err, routingInfo.BackfillMap)
-			b.logger.Fatalf(base.GetBackfillFatalDataLossError(b.id).Error())
-			b.restreamPipelineFatalFunc()
+			// Return the error back to the router, and the router will rollback its view of the broken mapping
+			// and retry to re-raise the event
 		}
 		syncCh <- err
 		close(syncCh)
@@ -743,6 +737,18 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		b.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, b.id)
 	}
 	return nil
+}
+
+func (b *BackfillRequestHandler) routerHasStopped(routerFinCh chan bool) bool {
+	var routerStopped bool
+	select {
+	case <-routerFinCh:
+		routerStopped = true
+		b.logger.Warnf("%v detected that router has been stopped", b.id)
+	default:
+		break
+	}
+	return routerStopped
 }
 
 // end Implement AsyncComponentEventHandler

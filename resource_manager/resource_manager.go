@@ -643,7 +643,9 @@ func (rm *ResourceManager) collectReplStats() map[*metadata.GenericSpecification
 		spec := *specPtr
 		replStats, err := rm.getStatsFromReplication(spec)
 		if err != nil {
-			rm.logger.Warnf("Could not retrieve runtime stats for %v. err=%v\n", spec.GetFullId(), err)
+			if spec.Type() == metadata.MainReplication {
+				rm.logger.Warnf("Could not retrieve runtime stats for %v. err=%v\n", spec.GetFullId(), err)
+			}
 		} else {
 			specReplStatsMap[specPtr] = replStats
 		}

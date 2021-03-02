@@ -149,7 +149,7 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc := setupBRHBoilerPlate()
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), time.Second, createVBDoneFunc(), nil, nil)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), createVBsGetter(), time.Second, createVBDoneFunc(), nil, nil, nil)
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
@@ -193,7 +193,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), nil, nil)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), nil, nil, nil)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -282,7 +282,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), nil, nil)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), nil, nil, nil)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -394,7 +394,7 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -461,7 +461,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, vbsGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
