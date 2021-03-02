@@ -824,7 +824,9 @@ func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_cli
 func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
 	vbucketServerMapObj, ok := bucketInfo[base.VBucketServerMapKey]
 	if !ok {
-		return nil, fmt.Errorf("Error getting vbucket server map from bucket info. connStr=%v, bucketName=%v, bucketInfo=%v\n", connStr, bucketName, bucketInfo)
+		// The returned error will be displayed on UI. We don't want to include the bucketInfo map since it is too much info for UI.
+		u.logger_utils.Errorf("Error getting vbucket server map from bucket info. connStr=%v, bucketName=%v, bucketInfo=%v\n", connStr, bucketName, bucketInfo)
+		return nil, fmt.Errorf("Error getting %v from bucket info. connStr=%v, bucketName=%v\n", base.VBucketServerMapKey, connStr, bucketName)
 	}
 	vbucketServerMap, ok := vbucketServerMapObj.(map[string]interface{})
 	if !ok {
@@ -1342,7 +1344,6 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 		if err != nil {
 			return err
 		}
-
 		bucketType, err = u.GetBucketTypeFromBucketInfo(bucketName, bucketInfo)
 		if err != nil {
 			err = fmt.Errorf("Error retrieving BucketType setting on bucket %v. err=%v", bucketName, err)
@@ -1365,7 +1366,6 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 		}
 		bucketKVVBMap, err = u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
 		if err != nil {
-			err = fmt.Errorf("Error retrieving server vb map on bucket %v. err=%v", bucketName, err)
 			return err
 		}
 
