@@ -1052,7 +1052,8 @@ func (pipelineMgr *PipelineManager) GetXDCRTopologySvc() service_def.XDCRCompTop
 func (pipelineMgr *PipelineManager) GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error) {
 	pipeline := pipelineMgr.getPipelineFromMap(topic)
 	if pipeline == nil {
-		return nil, fmt.Errorf("Unable to find pipeline %v", topic)
+		// If cannot find pipeline, this function is called when pipeline is stopping or starting up
+		return nil, fmt.Errorf("%v - Unable to find pipeline %v", parts.PartStoppedError, topic)
 	}
 	runtimeCtx := pipeline.RuntimeContext()
 	if runtimeCtx == nil {

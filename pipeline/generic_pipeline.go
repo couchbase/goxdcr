@@ -340,6 +340,41 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	return errMap
 }
 
+func (genericPipeline *GenericPipeline) stopConnectorsWithTimeout() base.ErrorMap {
+	errMap := make(base.ErrorMap)
+	connectorsMap := GetAllConnectors(genericPipeline)
+
+	err_ch := make(chan base.ComponentError, len(connectorsMap))
+
+	stopConnectorsFunc := func() error {
+		wait_grp := &sync.WaitGroup{}
+		for _, connector := range connectorsMap {
+			wait_grp.Add(1)
+			go genericPipeline.stopConnector(connector, wait_grp, err_ch)
+		}
+
+		wait_grp.Wait()
+		if len(err_ch) != 0 {
+			errMap = base.FormatErrMsgWithUpperLimit(err_ch, MaxNumberOfErrorsToTrack)
+		}
+		return nil
+	}
+
+	// put a timeout around part stopping to avoid being stuck
+	err := base.ExecWithTimeout(stopConnectorsFunc, base.TimeoutConnectorsStop, genericPipeline.logger)
+	if err != nil {
+		// if err is not nill, it is possible that stopPartsFunc is still running and may still access errMap
+		// return errMap1 instead of errMap to avoid race conditions
+		genericPipeline.logger.Warnf("%v error stopping pipeline connector.", genericPipeline.InstanceId(), err)
+		errMap1 := make(base.ErrorMap)
+		errMap1["genericPipeline.StopConnectors"] = err
+		return errMap1
+	}
+
+	genericPipeline.logger.Infof("%v pipeline connectors have stopped successfully", genericPipeline.InstanceId())
+	return errMap
+}
+
 func (genericPipeline *GenericPipeline) stopPartsWithTimeout() base.ErrorMap {
 	errMap := make(base.ErrorMap)
 
@@ -383,6 +418,16 @@ func (genericPipeline *GenericPipeline) stopPart(part common.Part, wait_grp *syn
 	if err != nil {
 		genericPipeline.logger.Warnf("%v failed to stop part %v, err=%v, let it alone to die\n", genericPipeline.InstanceId(), part.Id(), err)
 		err_ch <- base.ComponentError{part.Id(), err}
+	}
+}
+
+func (genericPipeline *GenericPipeline) stopConnector(connector common.Connector, wait_grp *sync.WaitGroup, err_ch chan base.ComponentError) {
+	defer wait_grp.Done()
+	genericPipeline.logger.Infof("%v trying to stop connector %v\n", genericPipeline.InstanceId(), connector.Id())
+	err := connector.Stop()
+	if err != nil {
+		genericPipeline.logger.Warnf("%v failed to stop connector %v, err=%v, let it alone to die\n", genericPipeline.InstanceId(), connector.Id(), err)
+		err_ch <- base.ComponentError{connector.Id(), err}
 	}
 }
 
@@ -463,6 +508,10 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 
 	partsErrMap := genericPipeline.stopPartsWithTimeout()
 	base.ConcatenateErrors(errMap, partsErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
+
+	connectorsErrMap := genericPipeline.stopConnectorsWithTimeout()
+	base.ConcatenateErrors(errMap, connectorsErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
+
 	genericPipeline.ReportProgress("Pipeline has been stopped")
 
 	err = genericPipeline.SetState(common.Pipeline_Stopped)

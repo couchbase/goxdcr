@@ -120,6 +120,8 @@ type Router struct {
 	utils           utilities.UtilsIface
 	expDelMode      FilterExpDelAtomicType
 	collectionModes CollectionsMgtAtomicType
+	started         uint32
+	finCh           chan bool
 
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
 	// whether the current replication is a high priority replication
@@ -185,8 +187,10 @@ type Router struct {
  * The static path will be taken care of by Collections Manifest Service
  */
 type CollectionsRouter struct {
+	parentRouterId         string
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	started                uint32
+	finCh                  chan bool
 	logger                 *log.CommonLogger
 	spec                   *metadata.ReplicationSpecification // Read-Only at startup
 	targetManifestRefresh  time.Duration
@@ -295,8 +299,9 @@ type CollectionsRouter struct {
 //	   a. Any future checkpoints will no longer contain broken maps.
 //	5. Now, mutation y+2 will be routed successfully.
 
-func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) *CollectionsRouter {
+func NewCollectionsRouter(id string, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) *CollectionsRouter {
 	return &CollectionsRouter{
+		parentRouterId:           id,
 		collectionsManifestSvc:   colManifestSvc,
 		spec:                     spec,
 		logger:                   logger,
@@ -309,6 +314,7 @@ func NewCollectionsRouter(colManifestSvc service_def.CollectionsManifestSvc, spe
 		migrationUIRaiser:        migrationUIRaiser,
 		targetManifestRefresh:    time.Duration(base.ManifestRefreshTgtInterval) * time.Second,
 		connectivityStatusGetter: connectivityStatusGetter,
+		finCh:                    make(chan bool),
 	}
 }
 
@@ -325,11 +331,11 @@ func (c *CollectionsRouter) Start() error {
 	c.mappingMtx.RUnlock()
 
 	if modes.IsExplicitMapping() {
-		c.logger.Infof("CollectionsRouter %v started in explicit mapping mode with rules %v", c.spec.Id, rules)
+		c.logger.Infof("CollectionsRouter %v started in explicit mapping mode with rules %v", c.parentRouterId, rules)
 	} else if modes.IsMigrationOn() {
-		c.logger.Infof("CollectionsRouter %v started in migration mode with rules %v", c.spec.Id, rules)
+		c.logger.Infof("CollectionsRouter %v started in migration mode with rules %v", c.parentRouterId, rules)
 	} else {
-		c.logger.Infof("CollectionsRouter %v started in implicit mapping mode", c.spec.Id)
+		c.logger.Infof("CollectionsRouter %v started in implicit mapping mode", c.parentRouterId)
 		c.initializeInternalsForImplicitMapping(modes)
 		return nil
 	}
@@ -367,7 +373,10 @@ func (c *CollectionsRouter) initializeInternalsForExplicitOrMigration(pair metad
 }
 
 func (c *CollectionsRouter) Stop() error {
-	atomic.CompareAndSwapUint32(&c.started, 1, 0)
+	if atomic.CompareAndSwapUint32(&c.started, 1, 0) {
+		c.logger.Infof("CollectionsRouter %v is now stopping", c.parentRouterId)
+		close(c.finCh)
+	}
 	return nil
 }
 
@@ -1198,11 +1207,11 @@ func checkAndHandleSpecialMigration(incomingRules *metadata.CollectionsMappingRu
 // Key - xmem nozzle ID
 type CollectionsRoutingMap map[string]*CollectionsRouter
 
-func (c CollectionsRoutingMap) Init(downStreamParts map[string]common.Part, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) error {
+func (c CollectionsRoutingMap) Init(id string, downStreamParts map[string]common.Part, colManifestSvc service_def.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, logger *log.CommonLogger, routingUpdater CollectionsRoutingUpdater, ignoreDataFunc IgnoreDataEventer, fatalErrorFunc func(error, interface{}), explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) error {
 	for partId, outNozzlePart := range downStreamParts {
 		collectionRouter, exists := c[partId]
 		if !exists {
-			collectionRouter = NewCollectionsRouter(colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc, explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter)
+			collectionRouter = NewCollectionsRouter(id, colManifestSvc, spec, logger, routingUpdater, ignoreDataFunc, fatalErrorFunc, explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter)
 			c[partId] = collectionRouter
 		}
 		outNozzle, ok := outNozzlePart.(common.OutNozzle)
@@ -1303,6 +1312,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		remoteClusterCapability:  remoteClusterCapability,
 		migrationUIRaiser:        migrationUIRaiser,
 		connectivityStatusGetter: connectivityStatusGetter,
+		finCh:                    make(chan bool),
 	}
 
 	router.expDelMode.Set(filterExpDelType)
@@ -1329,7 +1339,10 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		if len(info.BackfillMap) > 0 ||
 			len(info.ExplicitBackfillMap.Added) > 0 || len(info.ExplicitBackfillMap.Removed) > 0 {
 			syncCh := make(chan error)
-			backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, nil, syncCh)
+			var channels []interface{}
+			channels = append(channels, syncCh)
+			channels = append(channels, router.finCh)
+			backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, channels, nil)
 			go router.RaiseEvent(backfillEvent)
 			err := <-syncCh
 			if err != nil {
@@ -1359,7 +1372,7 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	}
 
 	if router.remoteClusterCapability.HasCollectionSupport() {
-		router.collectionsRouting.Init(downStreamParts, collectionsManifestSvc, spec, router.Logger(), routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter)
+		router.collectionsRouting.Init(router.id, downStreamParts, collectionsManifestSvc, spec, router.Logger(), routingUpdater, ignoreRequestFunc, fatalErrorFunc, router.explicitMapChangeHandler, migrationUIRaiser, connectivityStatusGetter)
 
 		modes := spec.Settings.GetCollectionModes()
 		router.collectionModes = CollectionsMgtAtomicType(modes)
@@ -1449,23 +1462,31 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 // So they should not block and the operations underneath should be innocuous if not
 // stopped in time
 func (router *Router) Start() error {
-	if len(router.collectionsRouting) > 0 {
-		defer router.Logger().Infof("Router %v started", router.Id())
-		router.Logger().Infof("Router %v starting...", router.Id())
-		return router.collectionsRouting.StartAll()
+	if atomic.CompareAndSwapUint32(&router.started, 0, 1) {
+		if len(router.collectionsRouting) > 0 {
+			defer router.Logger().Infof("Router %v started", router.Id())
+			router.Logger().Infof("Router %v starting...", router.Id())
+			return router.collectionsRouting.StartAll()
+		} else {
+			return nil
+		}
 	} else {
-		return nil
+		return PartAlreadyStartedError
 	}
 }
 
 func (router *Router) Stop() error {
-	if len(router.collectionsRouting) > 0 {
-		defer router.Logger().Infof("Router %v stopped", router.Id())
-		router.Logger().Infof("Router %v stopping...", router.Id())
-		return router.collectionsRouting.StopAll()
-	} else {
-		return nil
+	if atomic.CompareAndSwapUint32(&router.started, 1, 0) {
+		close(router.finCh)
+		if len(router.collectionsRouting) > 0 {
+			defer router.Logger().Infof("Router %v stopped", router.Id())
+			router.Logger().Infof("Router %v stopping...", router.Id())
+			return router.collectionsRouting.StopAll()
+		} else {
+			return nil
+		}
 	}
+	return PartAlreadyStoppedError
 }
 
 func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent) interface{} {

@@ -26,6 +26,7 @@ import (
 var PartStoppedError = errors.New("Part is stopping or already stopped, exit")
 
 var PartAlreadyStartedError = errors.New("Part has already been started before")
+var PartAlreadyStoppedError = errors.New("Part has already been stopped before")
 
 type AbstractPart struct {
 	*component.AbstractComponent

@@ -337,12 +337,12 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
 	seqnosMap, err := b.getThroughSeqno()
 	if err != nil {
-		b.logger.Errorf("%v unable to get seqno as part of handling backfill pipeline request", b.Id())
+		b.logger.Errorf("%v unable to get seqno as part of handling backfill pipeline request - %v", b.Id(), err)
 		return err
 	}
 	myVBs, err := b.vbsGetter()
 	if err != nil {
-		b.logger.Errorf("%v unable to get VBs", b.Id())
+		b.logger.Errorf("%v unable to get VBs - %v", b.Id(), err)
 		return err
 	}
 
@@ -679,9 +679,19 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			// ProcessEvent doesn't care about return code
 			return nil
 		}
-		syncCh, ok := event.OtherInfos.(chan error)
+		if len(event.DerivedData) != 2 {
+			b.logger.Errorf("Invalid routing info number of channels %v type", len(event.DerivedData))
+			return nil
+		}
+		syncCh, ok := event.DerivedData[0].(chan error)
 		if !ok {
-			b.logger.Errorf("Invalid routing info response channel %v type", reflect.TypeOf(event.OtherInfos))
+			b.logger.Errorf("Invalid routing info response channel %v type", reflect.TypeOf(event.DerivedData[0]))
+			// ProcessEvent doesn't care about return code
+			return nil
+		}
+		routerFinCh, ok := event.DerivedData[1].(chan bool)
+		if !ok {
+			b.logger.Errorf("Invalid routing info fin channel %v type", reflect.TypeOf(event.DerivedData[1]))
 			// ProcessEvent doesn't care about return code
 			return nil
 		}
@@ -694,7 +704,15 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		} else {
 			err = base.ErrorInvalidInput
 		}
-		if err != nil && err != errorStopped {
+		var routerStopped bool
+		select {
+		case <-routerFinCh:
+			routerStopped = true
+			b.logger.Warnf("%v detected that router has been stopped", b.id)
+		default:
+			break
+		}
+		if err != nil && err != errorStopped && !routerStopped {
 			b.logger.Errorf("Handler Process event received err %v for backfillmap %v", err, routingInfo.BackfillMap)
 			b.logger.Fatalf(base.GetBackfillFatalDataLossError(b.id).Error())
 			b.restreamPipelineFatalFunc()

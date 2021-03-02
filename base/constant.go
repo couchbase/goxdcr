@@ -635,6 +635,7 @@ var TimeoutRuntimeContextStart = 30 * time.Second
 var TimeoutRuntimeContextStop = 5 * time.Second
 var TimeoutPartsStart = 30 * time.Second
 var TimeoutPartsStop = 10 * time.Second
+var TimeoutConnectorsStop = 5 * time.Second
 var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
 
