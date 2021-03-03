@@ -124,12 +124,16 @@ func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map, utils utilitie
 	var keyCount int
 	keyLen := len(e)
 
-	// TODO - MB-44586 - remove this before CC ships
+	// TODO - MB-44716 - remove this before CC ships
 	if utils != nil {
 		stopFunc := utils.DumpStackTraceAfterThreshold("CheckNoKeyChanges", base.DiagInternalThreshold, base.PprofAllGoroutines)
 		defer stopFunc()
 		stopFunc2 := utils.DumpStackTraceAfterThreshold("CheckNoKeyChanges", base.DiagInternalThreshold, base.PprofBlocking)
 		defer stopFunc2()
+		stopFunc3 := utils.StartDebugExec("DumpExpVarMap", base.DiagInternalThreshold, func() {
+			fmt.Printf("Slow running expVarMap: %v\n", varMap.String())
+		})
+		defer stopFunc3()
 	}
 
 	varMap.Do(func(kv expvar.KeyValue) {
