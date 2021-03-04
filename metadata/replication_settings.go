@@ -46,10 +46,10 @@ const (
 	// FilterExpDelKey is a combination flag of the 3 below it
 	FilterExpDelKey = base.FilterExpDelKey
 	// These 3 are used for REST input/output into an internal flag of FilterExpDelKey
-	FilterExpKey       = base.FilterExpKey
-	FilterDelKey       = base.FilterDelKey
-	BypassExpiryKey    = base.BypassExpiryKey
-	BrokenMappingsPair = "BrokenMappingsPair"
+	FilterExpKey            = base.FilterExpKey
+	FilterDelKey            = base.FilterDelKey
+	BypassExpiryKey         = base.BypassExpiryKey
+	BrokenMappingsUpdateKey = "BrokenMappingsUpdate"
 
 	// Have a single key for replication settings struct, multiple keys for REST endpoints
 	CollectionsMgtMultiKey   = "CollectionsMgtMulti"

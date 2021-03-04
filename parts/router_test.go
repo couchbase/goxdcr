@@ -363,14 +363,14 @@ func TestRouterManifestChange(t *testing.T) {
 	data, _ = ioutil.ReadFile(targetv9)
 	targetv9Manifest, _ := metadata.NewCollectionsManifestFromBytes(data)
 
-	assert.Nil(collectionsRouter.handleNewManifestChanges(&targetv8Manifest))
+	assert.Nil(collectionsRouter.handleNewTgtManifestChanges(&targetv8Manifest))
 	// Force a manual brokenmap. V9 will have the following fixed
 	implicitNamespace := &base.CollectionNamespace{"S2", "col3"}
 	collectionsRouter.brokenDenyMtx.Lock()
 	collectionsRouter.brokenMapping.AddSingleMapping(implicitNamespace, implicitNamespace)
 	collectionsRouter.brokenDenyMtx.Unlock()
 
-	assert.Nil(collectionsRouter.handleNewManifestChanges(&targetv9Manifest))
+	assert.Nil(collectionsRouter.handleNewTgtManifestChanges(&targetv9Manifest))
 
 	collectionsRouter.brokenDenyMtx.Lock()
 	assert.Equal(0, len(collectionsRouter.brokenMapping))

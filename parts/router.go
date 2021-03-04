@@ -385,7 +385,7 @@ func (c *CollectionsRouter) IsRunning() bool {
 }
 
 // When router is started, this method loads the broken map pair
-func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.CollectionNamespaceMapping, targetManifestId uint64) {
+func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.CollectionNamespaceMapping, targetManifestId uint64, isRollBack bool) {
 	if !c.IsRunning() || brokenMappings == nil || len(*brokenMappings) == 0 {
 		return
 	}
@@ -402,13 +402,21 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 
 	// The key is to always pick the newer manifest, and if they are the same,
 	// consolidate the brokenmaps
-	needToUpdate := currentManifestId < targetManifestId
+	// If a manifest rolls backwards, it means that a rollback happened and ckptMgr is telling this router about
+	// the rollback checkpoint's stored target manifestID and also the older broken map
+	// For rollback case, since router's brokenmap spans multiple VBs, cast the same broken map capture net
+	// Also, it is almost guaranteed that targetManifestId <= currentManifestId for rollback, but to prevent any
+	// odd situations, use isRollBack boolean to enforce this explicitly
+	needToUpdate := currentManifestId < targetManifestId && !isRollBack
 	needToUpdate2 := currentManifestId > 0 && currentManifestId == targetManifestId && (len(currentBrokenMap) < len(*brokenMappings) || !currentBrokenMap.IsSame(*brokenMappings))
 
 	if needToUpdate {
+		// This section will set the router's internal broken map and last known target manifest to the values
+		// being sent over
 		manifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, targetManifestId)
 		if err != nil {
-			// TODO - MB-44683
+			// Since the targetManifestId is given by Checkpoint manager, this means collection manifest service
+			// should have kept a copy of the manifest around
 			err = fmt.Errorf("Collections Router %v error - unable to find last known target manifest version %v from collectionsManifestSvc - err: %v",
 				c.spec.Id, targetManifestId, err)
 			// TODO MB-38445
@@ -441,6 +449,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 			checkManifestId = c.lastKnownTgtManifest.Uid()
 		}
 		if checkManifestId == targetManifestId {
+			// Only consolidate if the router's view of the target is agreed
 			c.brokenMapping.Consolidate(*brokenMappings)
 		}
 		c.brokenDenyMtx.Unlock()
@@ -450,7 +459,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 	c.startIdleKicker = time.AfterFunc(10*time.Second, func() {
 		latestTargetManifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, math.MaxUint64)
 		if err == nil {
-			c.handleNewManifestChanges(latestTargetManifest)
+			c.handleNewTgtManifestChanges(latestTargetManifest)
 		}
 	})
 }
@@ -511,7 +520,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 		}
 	}
 
-	err = c.handleNewManifestChanges(latestTargetManifest)
+	err = c.handleNewTgtManifestChanges(latestTargetManifest)
 	backfillPersistHadErr = err != nil && strings.Contains(err.Error(), BackfillPersistErrKey)
 
 	if err != nil && !backfillPersistHadErr {
@@ -756,7 +765,7 @@ func (c *CollectionsRouter) regularExplicitMap(namespace *base.CollectionNamespa
 	return tgtCollections, nil
 }
 
-func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.CollectionsManifest) (err error) {
+func (c *CollectionsRouter) handleNewTgtManifestChanges(latestManifest *metadata.CollectionsManifest) (err error) {
 	if latestManifest == nil {
 		err = base.ErrorInvalidInput
 		return
@@ -796,7 +805,6 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 
 	// Diff should catch this error, but check here just in case
 	if lastKnownManifestId > latestManifest.Uid() {
-		// TODO - MB-44734
 		err = fmt.Errorf("Odd error: New manifest coming in is older than currently known manifest")
 		return
 	}
@@ -1282,9 +1290,9 @@ func (c CollectionsRoutingMap) startOrStopAll(start bool) error {
 	}
 }
 
-func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.CollectionNamespaceMapping, targetManifestId uint64) {
+func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.CollectionNamespaceMapping, targetManifestId uint64, isRollBack bool) {
 	for _, collectionsRouter := range c {
-		collectionsRouter.UpdateBrokenMappingsPair(brokenMaps, targetManifestId)
+		collectionsRouter.UpdateBrokenMappingsPair(brokenMaps, targetManifestId, isRollBack)
 	}
 }
 
@@ -1853,12 +1861,13 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		}
 	}
 
-	pair, ok := settings[metadata.BrokenMappingsPair].([]interface{})
-	if ok && len(pair) == 2 {
+	pair, ok := settings[metadata.BrokenMappingsUpdateKey].([]interface{})
+	if ok && len(pair) == 3 {
 		brokenMappings, ok2 := pair[0].(*metadata.CollectionNamespaceMapping)
 		targetManifestId, ok := pair[1].(uint64)
-		if ok && ok2 && router.Router.IsStartable() {
-			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappings, targetManifestId)
+		isRollBack, ok3 := pair[2].(bool)
+		if ok && ok2 && ok3 && router.Router.IsStartable() {
+			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappings, targetManifestId, isRollBack)
 		}
 	}
 

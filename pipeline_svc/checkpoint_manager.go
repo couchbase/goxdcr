@@ -1028,15 +1028,16 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 	return nil
 }
 
-func (ckmgr *CheckpointManager) restoreBrokenMappingManifestsToRouter(brokenMapping *metadata.CollectionNamespaceMapping, manifestId uint64) {
+func (ckmgr *CheckpointManager) restoreBrokenMappingManifestsToRouter(brokenMapping *metadata.CollectionNamespaceMapping, manifestId uint64, isRollBack bool) {
 	if brokenMapping == nil || len(*brokenMapping) == 0 || manifestId == 0 {
 		return
 	}
 	settings := make(map[string]interface{})
-	var pairList []interface{}
-	pairList = append(pairList, brokenMapping)
-	pairList = append(pairList, manifestId)
-	settings[metadata.BrokenMappingsPair] = pairList
+	var argsList []interface{}
+	argsList = append(argsList, brokenMapping)
+	argsList = append(argsList, manifestId)
+	argsList = append(argsList, isRollBack)
+	settings[metadata.BrokenMappingsUpdateKey] = argsList
 	ckmgr.pipeline.UpdateSettings(settings)
 }
 
@@ -1059,7 +1060,7 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 			err_ch <- err_info
 			return
 		}
-		ckmgr.restoreBrokenMappingManifestsToRouter(brokenMapping, targetManifestId)
+		ckmgr.restoreBrokenMappingManifestsToRouter(brokenMapping, targetManifestId, false /*isRollBack*/)
 		err = ckmgr.setTimestampForVB(vbno, vbts)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
@@ -2119,7 +2120,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 
 	pipeline_startSeqnos_map[vbno] = vbts
 
-	ckmgr.restoreBrokenMappingManifestsToRouter(brokenMappings, targetManifestId)
+	ckmgr.restoreBrokenMappingManifestsToRouter(brokenMappings, targetManifestId, true /*isRollBack*/)
 
 	//set the start seqno on through_seqno_tracker_svc
 	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno, vbts.ManifestIDs)
