@@ -1203,6 +1203,22 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addSystemSeqno(vbno uint16, systemEvent
 	tsTracker.vbSystemEventsSeqnoListMap[vbno].appendSeqnos(systemEventSeqno, manifestId)
 }
 
+func (tsTracker *ThroughSeqnoTrackerSvc) setSourceSeqnoManifestIdPair(vbno uint16, seqno, manifestId uint64) {
+	tsTracker.validateVbno(vbno, "setSourceSeqnoManifestIdPair")
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].lock.Lock()
+	defer tsTracker.vbSystemEventsSeqnoListMap[vbno].lock.Unlock()
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].seqno_list_1 = []uint64{seqno}
+	tsTracker.vbSystemEventsSeqnoListMap[vbno].seqno_list_2 = []uint64{manifestId}
+}
+
+func (tsTracker *ThroughSeqnoTrackerSvc) setTargetSeqnoManifestIdPair(vbno uint16, seqno, manifestId uint64) {
+	tsTracker.validateVbno(vbno, "setTargetSeqnoManifestIdPair")
+	tsTracker.vbTgtSeqnoManifestMap[vbno].lock.Lock()
+	defer tsTracker.vbTgtSeqnoManifestMap[vbno].lock.Unlock()
+	tsTracker.vbTgtSeqnoManifestMap[vbno].seqno_list_1 = []uint64{seqno}
+	tsTracker.vbTgtSeqnoManifestMap[vbno].seqno_list_2 = []uint64{manifestId}
+}
+
 func (tsTracker *ThroughSeqnoTrackerSvc) addManifestId(vbno uint16, seqno, manifestId uint64) {
 	tsTracker.validateVbno(vbno, "addManifestId")
 	tsTracker.vbTgtSeqnoManifestMap.UpdateOrAppendSeqnoManifest(vbno, seqno, manifestId)
@@ -1485,11 +1501,18 @@ func (tsTracker *ThroughSeqnoTrackerSvc) getThroughSeqnos(executor_id int, listO
 	}
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno, manifestId uint64) {
+func (tsTracker *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdPair) {
 	tsTracker.validateVbno(vbno, "setStartSeqno")
 	obj, _ := tsTracker.through_seqno_map[vbno]
 	obj.SetSeqno(seqno)
-	tsTracker.addSystemSeqno(vbno, seqno, manifestId)
+	// When Pipeline starts from a checkpoint (SetVBTimeStamp) or rollback occurs (UpdateVBTimeStamp)
+	// the throughSeqno is set to "seqno"
+	// The manifestIDs also need to be set accordingly
+	// Since it is resuming from a ckpt OR a rollback, any previously known information is no longer needed
+	// because the source + target manifest pairs are only used as part of GetThroughSeqnos
+	// and after the above Set call, the "seqno" will be the new starting point
+	tsTracker.setSourceSeqnoManifestIdPair(vbno, seqno, manifestIds.SourceManifestId)
+	tsTracker.setTargetSeqnoManifestIdPair(vbno, seqno, manifestIds.TargetManifestId)
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) validateVbno(vbno uint16, caller string) {

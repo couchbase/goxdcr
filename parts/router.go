@@ -796,6 +796,7 @@ func (c *CollectionsRouter) handleNewManifestChanges(latestManifest *metadata.Co
 
 	// Diff should catch this error, but check here just in case
 	if lastKnownManifestId > latestManifest.Uid() {
+		// TODO - MB-44734
 		err = fmt.Errorf("Odd error: New manifest coming in is older than currently known manifest")
 		return
 	}

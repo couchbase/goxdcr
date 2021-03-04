@@ -3,7 +3,9 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -95,7 +97,7 @@ func (_m *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 	_m.Called()
 }
 
-// SetStartSeqno provides a mock function with given fields: vbno, seqno, manifestId
-func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestId uint64) {
-	_m.Called(vbno, seqno, manifestId)
+// SetStartSeqno provides a mock function with given fields: vbno, seqno, manifestIds
+func (_m *ThroughSeqnoTrackerSvc) SetStartSeqno(vbno uint16, seqno uint64, manifestIds base.CollectionsManifestIdPair) {
+	_m.Called(vbno, seqno, manifestIds)
 }

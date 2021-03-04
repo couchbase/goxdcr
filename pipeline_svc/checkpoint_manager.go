@@ -607,6 +607,11 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStopWithWait(waitGrp *sync.WaitG
 	ckmgr.CheckpointBeforeStop()
 }
 func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
+	if !ckmgr.isCheckpointAllowed() {
+		ckmgr.logger.Errorf("%v %v has not been started - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+		return
+	}
+
 	var specExists bool
 	switch ckmgr.pipeline.Type() {
 	case common.MainPipeline:
@@ -1011,7 +1016,7 @@ func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimest
 		ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, ts.Seqno, ts.ManifestIDs.SourceManifestId, ts.ManifestIDs.TargetManifestId)
 
 	//set the start seqno on through_seqno_tracker_svc
-	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno, ts.ManifestIDs.SourceManifestId)
+	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, ts.Seqno, ts.ManifestIDs)
 
 	settings := make(map[string]interface{})
 	ts_map := make(map[uint16]*base.VBTimestamp)
@@ -1442,6 +1447,11 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 
 // local API. supports periodical checkpoint operations
 func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.WaitGroup) {
+	if !ckmgr.isCheckpointAllowed() {
+		ckmgr.logger.Errorf("%v %v has not been started - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+		return
+	}
+
 	ckmgr.logger.Infof("Start checkpointing for replication %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 	defer ckmgr.logger.Infof("Done checkpointing for replication %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 	// vbucketID -> ThroughSeqNumber
@@ -2112,7 +2122,7 @@ func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno ui
 	ckmgr.restoreBrokenMappingManifestsToRouter(brokenMappings, targetManifestId)
 
 	//set the start seqno on through_seqno_tracker_svc
-	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno, vbts.ManifestIDs.SourceManifestId)
+	ckmgr.through_seqno_tracker_svc.SetStartSeqno(vbno, vbts.Seqno, vbts.ManifestIDs)
 	err = ckmgr.statsMgr.SetVBCountMetrics(vbno, vbStats)
 	if err != nil {
 		ckmgr.logger.Warnf("%v setting vbStat for vb %v returned error %v Stats: %v\n", ckmgr.pipeline.FullTopic(), vbno, err, vbStats)
