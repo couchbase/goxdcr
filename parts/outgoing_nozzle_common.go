@@ -317,9 +317,8 @@ func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLo
 	}
 }
 
-func decodeSetMetaReq(wrapped_req *base.WrappedMCRequest) documentMetadata {
+func decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
 	ret := documentMetadata{}
-	req := wrapped_req.Req
 	ret.key = req.Key
 	ret.flags = binary.BigEndian.Uint32(req.Extras[0:4])
 	ret.expiry = binary.BigEndian.Uint32(req.Extras[4:8])

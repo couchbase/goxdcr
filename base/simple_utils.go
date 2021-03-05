@@ -1609,7 +1609,7 @@ func (lookupResp *SubdocLookupResponse) FindTargetBodyWithoutXattr() ([]byte, er
 }
 
 func (lookupResp *SubdocLookupResponse) IsTargetJson() (bool, error) {
-	value, err := lookupResp.ResponseForAPath(XATTR_DATATYPE)
+	value, err := lookupResp.ResponseForAPath(VXATTR_DATATYPE)
 	if err != nil {
 		return false, err
 	}
@@ -1617,7 +1617,7 @@ func (lookupResp *SubdocLookupResponse) IsTargetJson() (bool, error) {
 		// Response for datatype virtual XATTR should not be nil. This should never happen
 		return false, errors.New("Lookup for datatype virtual xattrs received nil response")
 	}
-	res, err := regexp.Match("json", value)
+	res, err := regexp.Match(JsonDataTypeStr, value)
 	if err == nil && res == true {
 		return true, nil
 	} else {

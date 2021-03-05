@@ -205,6 +205,10 @@ const (
 	JSONDataType   = 1
 	SnappyDataType = 2
 	XattrDataType  = 4
+	// In subdoc lookup for vxattr $document, KV returns an array of the following strings instead
+	JsonDataTypeStr   string = "json"
+	SnappyDataTypeStr string = "snappy"
+	XattrDataTypeStr  string = "xattr"
 )
 
 const (
@@ -458,29 +462,19 @@ const (
 	ADD_WITH_META         = mc.CommandCode(0xa4)
 	DELETE_WITH_META      = mc.CommandCode(0xa8)
 	SET_TIME_SYNC         = mc.CommandCode(0xc1)
-	SUBDOC_GET            = mc.CommandCode(0xc5)
 	SUBDOC_DICT_UPSERT    = mc.CommandCode(0xc8)
 	SUBDOC_DELETE         = mc.CommandCode(0xc9)
-	SUBDOC_MULTI_LOOKUP   = mc.CommandCode(0xd0)
 	SUBDOC_MULTI_MUTATION = mc.CommandCode(0xd1)
 )
 
 // Flags for SUBDOC commands
 const (
-	// Document level flag
-	SUBDOC_DOC_FLAG_ACCESS_DELETED = 0x04
 	// Path level flag
 	SUBDOC_FLAG_MKDIR_P       = 0x01
 	SUBDOC_FLAG_XATTR         = 0x04
 	SUBDOC_FLAG_EXPAND_MACROS = 0x10
 )
 
-// Return status for operations that has not been added to gomemcached
-const (
-	XATTR_EINVAL           = 0x87 // There is something wrong with the XATTR
-	SUBDOC_INVALID_COMBO   = 0xcb
-	SUBDOC_SUCCESS_DELETED = 0xcd
-)
 const (
 	PipelineSetting_RequestPool = "RequestPool"
 	DefaultRequestPoolSize      = 10000
@@ -1233,7 +1227,10 @@ const BackfillPipelineTopicPrefix = "backfill_"
 // Custom CR related constants
 const (
 	CAS_MACRO_EXPANSION = "\"${Mutation.CAS}\"" // The value for the cv field when setting back to source
-	XATTR_DATATYPE      = "$document.datatype"
+	VXATTR_REVID        = "$document.revid"
+	VXATTR_FLAGS        = "$document.flags"
+	VXATTR_EXPIRY       = "$document.exptime"
+	VXATTR_DATATYPE     = "$document.datatype"
 	XATTR_ID            = "id"    // The cluster ID field in _xdcr
 	XATTR_CV            = "cv"    // The Cas field in _xdcr
 	XATTR_MV            = "mv"    // the MV field in _xdcr

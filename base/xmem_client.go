@@ -249,21 +249,51 @@ func IsIgnorableMCResponse(resp *gomemcached.MCResponse, caslock bool) bool {
 			return true
 		}
 	case gomemcached.SUBDOC_BAD_MULTI: // This means at least one path failed for subdoc_multi_ commands. Only ignorable for multi_lookup.
-		if resp.Opcode == SUBDOC_MULTI_LOOKUP {
+		if resp.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP {
 			return true
 		} else { // SUBDOC_MULTI_MUTATION
 			return false
 		}
-	case SUBDOC_SUCCESS_DELETED:
+	case gomemcached.SUBDOC_SUCCESS_DELETED:
 		return true
 	case gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED: // Same as SUBDOC_BAD_MULTI but on a deleted document
-		if resp.Opcode == SUBDOC_MULTI_LOOKUP {
+		if resp.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP {
 			return true
 		} else { // SUBDOC_MULTI_MUTATION
 			return false
 		}
 	}
 
+	return false
+}
+
+func IsSuccessSubdocLookupResponse(resp *gomemcached.MCResponse) bool {
+	if resp == nil {
+		return false
+	}
+	switch resp.Status {
+	case gomemcached.SUCCESS:
+		return true
+	case gomemcached.SUBDOC_SUCCESS_DELETED: // successfully looked up a deleted document
+		return true
+	case gomemcached.SUBDOC_BAD_MULTI: // the lookup is successful, some path doesn't exist
+		return true
+	case gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED: // successfully looked up a deleted document, some path doesn't exist
+		return true
+	}
+	return false
+}
+
+func IsDeletedSubdocLookupResponse(resp *gomemcached.MCResponse) bool {
+	if resp == nil {
+		return false
+	}
+	switch resp.Status {
+	case gomemcached.SUBDOC_SUCCESS_DELETED: // successfully looked up a deleted document
+		return true
+	case gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED: // successfully looked up a deleted document, some path doesn't exist
+		return true
+	}
 	return false
 }
 

@@ -19,6 +19,8 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1641,7 +1643,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 				xmem.Logger().Warnf("%v batchGetMeta: Error decoding getMeta response for doc %v%s%v. err=%v. Skip conflict resolution and send the doc", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, err)
 				continue
 			}
-			doc_meta_source := decodeSetMetaReq(wrappedReq)
+			doc_meta_source := decodeSetMetaReq(wrappedReq.Req)
 			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.xattrEnabled, xmem.Logger()) {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 					docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
@@ -1700,7 +1702,72 @@ func (xmem *XmemNozzle) decodeGetMetaResp(key []byte, resp *mc.MCResponse) (docu
 		ret.dataType = resp.DataType
 	}
 	return ret, nil
+}
 
+func (xmem *XmemNozzle) decodeSubDocResp(key []byte, lookupResp *base.SubdocLookupResponse) documentMetadata {
+	specs := lookupResp.Specs
+	resp := lookupResp.Resp
+	body := resp.Body
+	if base.IsSuccessSubdocLookupResponse(resp) == false {
+		return documentMetadata{}
+	}
+	pos := 0
+	docMeta := documentMetadata{
+		key:      key,
+		revSeq:   0,
+		cas:      resp.Cas,
+		flags:    0,
+		expiry:   0,
+		deletion: base.IsDeletedSubdocLookupResponse(resp),
+		dataType: 0,
+	}
+	for i := 0; i < len(specs); i++ {
+		spec := specs[i]
+		status := mc.Status(binary.BigEndian.Uint16(body[pos : pos+2]))
+		pos = pos + 2
+		xattrlen := int(binary.BigEndian.Uint32(body[pos : pos+4]))
+		if pos+xattrlen > len(body) {
+			// This should never happen
+			xmem.Logger().Errorf("Returned value length %v for subdoc_get path %v exceeds body length", xattrlen, spec.Path)
+			return documentMetadata{}
+		}
+		pos = pos + 4
+		value := string(body[pos : pos+xattrlen])
+		if status == mc.SUCCESS {
+			switch string(spec.Path) {
+			case base.VXATTR_REVID:
+				if xattrlen < 3 {
+					// This should never happen
+					xmem.Logger().Errorf("Unexpected return value length %v for subdoc_get path %v", xattrlen, base.VXATTR_REVID)
+					return documentMetadata{}
+				}
+				// KV returns $document.revid as a string. So skip the quotes in the return value
+				if revid, err := strconv.ParseUint(value[1:xattrlen-1], 10, 64); err == nil {
+					docMeta.revSeq = uint64(revid)
+				}
+			case base.VXATTR_DATATYPE:
+				if isJson, err := regexp.Match(base.JsonDataTypeStr, body[pos:pos+xattrlen]); err == nil && isJson {
+					docMeta.dataType = docMeta.dataType | base.JSONDataType
+				}
+				if isSnappy, err := regexp.Match(base.SnappyDataTypeStr, body[pos:pos+xattrlen]); err == nil && isSnappy {
+					docMeta.dataType = docMeta.dataType | base.SnappyDataType
+				}
+				if isXattr, err := regexp.Match(base.XattrDataTypeStr, body[pos:pos+xattrlen]); err == nil && isXattr {
+					docMeta.dataType = docMeta.dataType | base.XattrDataType
+				}
+			case base.VXATTR_EXPIRY:
+				if expiry, err := strconv.ParseUint(value, 10, 32); err == nil {
+					docMeta.expiry = uint32(expiry)
+				}
+			case base.VXATTR_FLAGS:
+				if flag, err := strconv.ParseUint(value, 10, 32); err == nil {
+					docMeta.flags = uint32(flag)
+				}
+			}
+		}
+		pos = pos + xattrlen
+	}
+	return docMeta
 }
 
 func (xmem *XmemNozzle) composeRequestForGetMeta(key string, vb uint16, opaque uint32) *mc.MCRequest {
@@ -1744,15 +1811,8 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 	sent_key_map := make(map[string]bool, len(get_map))
 
 	// This is the spec for the lookup paths
-	specs = make([]base.SubdocLookupPathSpec, 0, 3)
-	spec := base.SubdocLookupPathSpec{base.SUBDOC_GET, base.SUBDOC_FLAG_XATTR, []byte(base.XATTR_XDCR)}
-	specs = append(specs, spec)
-	spec = base.SubdocLookupPathSpec{base.SUBDOC_GET, base.SUBDOC_FLAG_XATTR, []byte(base.XATTR_DATATYPE)}
-	specs = append(specs, spec)
-	if include_doc {
-		spec = base.SubdocLookupPathSpec{base.GET, 0, nil}
-		specs = append(specs, spec)
-	}
+	specs = xmem.composeSpecForSubdocGet(include_doc)
+
 	// Add each req in reqs_bytes_list and set sent_key_map for each doc key
 	for _, originalReq := range get_map {
 		docKey := string(originalReq.Req.Key)
@@ -1831,12 +1891,7 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 		for uniqueKey, wrappedReq := range getMeta_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
-			// Here we are sending SUBDOC_MULTI_LOOKUP command.
-			// SUBDOC_BAD_MULTI is returned when XATTR _xdcr does not exist. This is expected for new documents that XDCR
-			// with custom CR never set. We will continue with detectConflictWithXattr() since it handles _xdcr nil value
-			// SUBDOC_MULTI_PATH_FAILURE_DELETED is the same but on a deleted document
-			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI ||
-				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED) {
+			if ok && (resp.Status == mc.KEY_ENOENT || base.IsSuccessSubdocLookupResponse(resp)) {
 				var res ConflictResult
 				res, err = xmem.detectConflictWithXattr(wrappedReq.Req, &base.SubdocLookupResponse{specs, resp})
 				if err != nil {
@@ -1888,6 +1943,34 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 	return
 }
 
+func (xmem *XmemNozzle) composeSpecForSubdocGet(include_doc bool) (specs []base.SubdocLookupPathSpec) {
+	specLen := 5
+	if include_doc {
+		specLen++
+	}
+	specs = make([]base.SubdocLookupPathSpec, 0, specLen)
+	// _xdcr XATTR for CCR
+	spec := base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(base.XATTR_XDCR)}
+	specs = append(specs, spec)
+	// $document.revid
+	spec = base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(base.VXATTR_REVID)}
+	specs = append(specs, spec)
+	// $document.flags
+	spec = base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(base.VXATTR_FLAGS)}
+	specs = append(specs, spec)
+	spec = base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(base.VXATTR_EXPIRY)}
+	specs = append(specs, spec)
+	// $document.datatype.
+	spec = base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(base.VXATTR_DATATYPE)}
+	specs = append(specs, spec)
+
+	if include_doc {
+		spec = base.SubdocLookupPathSpec{base.GET, 0, nil}
+		specs = append(specs, spec)
+	}
+	return specs
+}
+
 // Request to get _xdcr XATTR. If document body is included, it must be the last path
 func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPathSpec, key string, vb uint16, opaque uint32) *mc.MCRequest {
 	bodylen := 0
@@ -1914,9 +1997,9 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPath
 		VBucket: vb,
 		Key:     []byte(key),
 		Opaque:  opaque,
-		Extras:  []byte{base.SUBDOC_DOC_FLAG_ACCESS_DELETED},
+		Extras:  []byte{mc.SUBDOC_FLAG_ACCESS_DELETED},
 		Body:    body,
-		Opcode:  base.SUBDOC_MULTI_LOOKUP,
+		Opcode:  mc.SUBDOC_MULTI_LOOKUP,
 	}
 }
 
@@ -1943,8 +2026,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 		for uniqueKey, wrappedReq := range getDoc_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
-			if ok && (resp.Status == mc.SUCCESS || resp.Status == mc.KEY_ENOENT || resp.Status == mc.SUBDOC_BAD_MULTI ||
-				resp.Status == base.SUBDOC_SUCCESS_DELETED || resp.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED) {
+			if ok && (base.IsSuccessSubdocLookupResponse(resp) || resp.Status == mc.KEY_ENOENT) {
 				var res ConflictResult
 				lookupResp := &base.SubdocLookupResponse{specs, resp}
 				res, err = xmem.detectConflictWithXattr(wrappedReq.Req, lookupResp)
@@ -2033,18 +2115,13 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, lookupResp
 	 * USE LWW for non-json or deleted docs.
 	 */
 	if source.DataType&mcc.JSONDataType == 0 || isTargetJson == false ||
-		target.Status == base.SUBDOC_SUCCESS_DELETED || target.Status == mc.SUBDOC_MULTI_PATH_FAILURE_DELETED || encodeOpCode(source, true) == base.DELETE_WITH_META {
-		// Since target is a subdoc_multi_lookup response which doesn't provide any metadata except for CAS,
-		// we have to use CAS alone for LWW. In case of equal CAS, it will be considered equal.
-		// TODO (MB-42424): Look into doing the proper LWW
-		if sourceMeta.GetCas() == targetMeta.GetCas() {
-			// For equal CAS, if target is delete and source is not, let source win
-			if target.Status == base.SUBDOC_SUCCESS_DELETED && encodeOpCode(source, true) != base.DELETE_WITH_META {
-				return SourceDominate, nil
-			}
-			return SourceEqualsTarget, nil
-		} else {
+		base.IsDeletedSubdocLookupResponse(target) || encodeOpCode(source, true) == base.DELETE_WITH_META {
+		doc_meta_source := decodeSetMetaReq(source)
+		doc_meta_target := xmem.decodeSubDocResp(source.Key, lookupResp)
+		if xmem.conflict_resolver(doc_meta_source, doc_meta_target, base.CRMode_LWW, xmem.xattrEnabled, xmem.Logger()) {
 			return SourceDominate, nil
+		} else {
+			return TargetDominate, nil
 		}
 	}
 
@@ -2608,7 +2685,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								atomic.AddUint64(&xmem.counter_ignored, 1)
 							} else {
 								// for other non-temporary errors, repair connections
-								if response.Status == base.XATTR_EINVAL {
+								if response.Status == mc.XATTR_EINVAL {
 									// There is something wrong with XATTR. Let's print it
 									xattrlen := binary.BigEndian.Uint32(req.Body[0:4])
 									ccrxattrlen := binary.BigEndian.Uint32(req.Body[4:8])
