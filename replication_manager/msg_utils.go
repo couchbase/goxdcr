@@ -89,6 +89,7 @@ const (
 	CollectionsDelAllBackfillKey   = base.CollectionsDelAllBackfillKey
 	CollectionsDelVbBackfillKey    = base.CollectionsDelSingleVBBackfillKey
 	RetryOnRemoteAuthErrKey        = base.RetryOnRemoteAuthErrKey
+	RetryOnRemoteAuthErrMaxWaitKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
 	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
 	HlvPruningWindowLKey           = base.HlvPruningWindowKey
 )
@@ -182,6 +183,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CollectionsDelAllBackfillKey:   metadata.CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey:    metadata.CollectionsDelVbBackfillKey,
 	RetryOnRemoteAuthErrKey:        metadata.RetryOnRemoteAuthErrKey,
+	RetryOnRemoteAuthErrMaxWaitKey: metadata.RetryOnRemoteAuthErrMaxWaitSecKey,
 	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
 	HlvPruningWindowLKey:           metadata.HlvPruningWindowKey,
 }
@@ -220,6 +222,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillKey,
 	metadata.CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillKey,
 	metadata.RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrKey,
+	metadata.RetryOnRemoteAuthErrMaxWaitSecKey: RetryOnRemoteAuthErrMaxWaitKey,
 	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
 	metadata.HlvPruningWindowKey:               HlvPruningWindowLKey,
 }

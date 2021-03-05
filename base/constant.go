@@ -1210,6 +1210,8 @@ const MergeFunctionMappingKey = "mergeFunctionMapping"
 const HlvPruningWindowKey = "hlvPruningWindowSec"
 const HlvPruningDefault = 259200 // seconds, 3 days
 
+const RetryOnRemoteAuthErrMaxWaitDefault = 3600 // seconds, 1 hour
+
 // UI+ns_server returned document content, keyed by special keys
 const (
 	BucketDocBodyKey  = "json"
@@ -1253,6 +1255,7 @@ const (
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)
 
 const RetryOnRemoteAuthErrKey = "retryOnRemoteAuthErr"
+const RetryOnRemoteAuthErrMaxWaitSecKey = "retryOnRemoteAuthErrMaxWaitSec"
 
 // DCP inactive stream monitor will sleep every "dcp_inactive_stream_check_interval" (30sec)
 // Once this max is hit, it'll retry streamReq with DCP

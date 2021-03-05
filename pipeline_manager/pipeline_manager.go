@@ -354,8 +354,12 @@ func (pipelineMgr *PipelineManager) checkRemoteClusterSvcForChangedConfigs() {
 	}
 }
 
+func getCredentialErrMsg(rcName, pipelineName string) string {
+	return fmt.Sprintf("Remote Cluster %v has changed its credentials and the entered credentials on this cluster is no longer valid for pipeline %v", rcName, pipelineName)
+}
+
 func getCredentialErrPauseMsg(rcName, pipelineName string) string {
-	return fmt.Sprintf("Remote Cluster %v has changed its credentials and the entered credentials on this cluster is no longer valid. Pipeline %v will now be paused. Please re-enter the correct remote cluster reference credentials and resume the replication", rcName, pipelineName)
+	return fmt.Sprintf("%v. It will now be paused. Please re-enter the correct remote cluster reference credentials and resume the replication", getCredentialErrMsg(rcName, pipelineName))
 }
 
 func (pipelineMgr *PipelineManager) checkAndHandleRemoteClusterAuthErrs() {
@@ -371,7 +375,9 @@ func (pipelineMgr *PipelineManager) checkAndHandleRemoteClusterAuthErrs() {
 		}
 		for _, spec := range replSpecsList {
 			shouldRetry := spec.Settings.GetRetryOnRemoteAuthErr()
-			if !shouldRetry {
+			if shouldRetry {
+				pipelineMgr.Update(spec.Id, fmt.Errorf(getCredentialErrMsg(ref.Name(), spec.Id)))
+			} else {
 				pipelineMgr.AutoPauseReplication(spec.Id)
 				msg := getCredentialErrPauseMsg(ref.Name(), spec.Id)
 				pipelineMgr.uilog_svc.Write(msg)
@@ -1208,6 +1214,9 @@ type PipelineUpdater struct {
 
 	updateRCStatusInterval time.Duration
 	updateRCStatusTicker   *time.Ticker
+
+	// The number of times that pipeline fails to start due to remote cluster auth error
+	rcAuthErrCnt int
 }
 
 type pmErrMapType struct {
@@ -1308,6 +1317,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error,
 		overflowErrors:         &pmErrMapType{errMap: make(base.ErrorMap), logger: logger},
 		replSpecSettingsHelper: &replSettingsRevContext{rep_status: rep_status_in},
 		updateRCStatusInterval: base.RefreshRemoteClusterRefInterval,
+		rcAuthErrCnt:           -1, // start with -1 as the first authErr does not require exp backoff
 	}
 
 	if cur_err != nil {
@@ -1656,6 +1666,9 @@ RE:
 			r.logger.Errorf(stopErr)
 			r.pipelineMgr.GetLogSvc().Write(stopErr)
 			r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
+		} else {
+			replaceErrWithHumanReadableString(errMap, r.pipeline_name, remoteClusterName)
+			r.rcAuthErrCnt++
 		}
 	} else {
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
@@ -1681,6 +1694,14 @@ RE:
 	r.reportStatus()
 
 	return errMap
+}
+
+func replaceErrWithHumanReadableString(errMap base.ErrorMap, pipelineName string, rcName string) {
+	for k, v := range errMap {
+		if strings.Contains(v.Error(), base.RemoteClusterAuthErrString) {
+			errMap[k] = errors.New(getCredentialErrMsg(rcName, pipelineName))
+		}
+	}
 }
 
 // pick up overflow errors that were not captured by the channel
@@ -1908,8 +1929,30 @@ func (r *PipelineUpdater) isScheduledTimerNil() bool {
 	return r.scheduledTimer == nil
 }
 
+func (r *PipelineUpdater) getFutureRefreshDuration() time.Duration {
+	if r.rcAuthErrCnt <= 0 {
+		return r.retry_interval
+	}
+
+	// Do exponential backoff of 2 until a largest retry constant
+	spec := r.rep_status.Spec()
+	if spec == nil {
+		// Doesn't really matter as spec is deleted
+		return r.retry_interval
+	}
+
+	maxWait := spec.Settings.GetRetryOnRemoteAuthErrMaxWait()
+	backoffRetryInterval := r.retry_interval
+	for i := 0; i < r.rcAuthErrCnt; i++ {
+		if backoffRetryInterval*2 < maxWait {
+			backoffRetryInterval = backoffRetryInterval * 2
+		}
+	}
+	return backoffRetryInterval
+}
+
 func (r *PipelineUpdater) scheduleFutureRefresh() {
-	var scheduledTimeMs time.Duration = r.retry_interval
+	scheduledTimeMs := r.getFutureRefreshDuration()
 	r.scheduledTimerLock.Lock()
 	defer r.scheduledTimerLock.Unlock()
 
@@ -1950,6 +1993,7 @@ func (r *PipelineUpdater) setLastUpdateSuccess() {
 	r.pipelineUpdaterLock.Lock()
 	defer r.pipelineUpdaterLock.Unlock()
 	r.lastSuccessful = true
+	r.rcAuthErrCnt = -1
 	r.clearHumanRecoveryTimer()
 }
 

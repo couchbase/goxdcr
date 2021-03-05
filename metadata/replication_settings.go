@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -68,7 +69,8 @@ const (
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey
 	HlvPruningWindowKey     = base.HlvPruningWindowKey
 
-	RetryOnRemoteAuthErrKey = base.RetryOnRemoteAuthErrKey
+	RetryOnRemoteAuthErrKey           = base.RetryOnRemoteAuthErrKey
+	RetryOnRemoteAuthErrMaxWaitSecKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -148,7 +150,9 @@ var MergeFunctionMappingConfig = &SettingsConfig{base.MergeFunctionMappingType{}
 // Default pruning window is 3 days (259200 seconds), 0 means no pruning, maximum is 365 days (31536000 seconds)
 var PruningWindowConfig = &SettingsConfig{base.HlvPruningDefault, &Range{0, 31536000}}
 
-var RetryOnRemoteAuthErrConfig = &SettingsConfig{false, nil}
+var RetryOnRemoteAuthErrConfig = &SettingsConfig{true, nil}
+
+var RetryOnRemoteAuthErrMaxWaitConfig = &SettingsConfig{base.RetryOnRemoteAuthErrMaxWaitDefault, &Range{1, 86400 /* secs -> 1 day */}}
 
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
@@ -177,6 +181,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillConfig,
 	CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillConfig,
 	RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrConfig,
+	RetryOnRemoteAuthErrMaxWaitSecKey: RetryOnRemoteAuthErrMaxWaitConfig,
 	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
 	HlvPruningWindowKey:               PruningWindowConfig,
 }
@@ -794,6 +799,12 @@ func (s *ReplicationSettings) GetPriority() base.PriorityType {
 func (s *ReplicationSettings) GetRetryOnRemoteAuthErr() bool {
 	value, _ := s.GetSettingValueOrDefaultValue(RetryOnRemoteAuthErrKey)
 	return value.(bool)
+}
+
+func (s *ReplicationSettings) GetRetryOnRemoteAuthErrMaxWait() time.Duration {
+	value, _ := s.GetSettingValueOrDefaultValue(RetryOnRemoteAuthErrMaxWaitSecKey)
+	intVal := value.(int)
+	return time.Duration(intVal) * time.Second
 }
 
 func (s *ReplicationSettings) GetDesiredLatencyMs() int {
