@@ -97,10 +97,18 @@ const (
 	OBSERVE       = CommandCode(0x92)
 
 	GET_META                 = CommandCode(0xA0) // Get meta. returns with expiry, flags, cas etc
+	SET_WITH_META            = CommandCode(0xa2)
+	ADD_WITH_META            = CommandCode(0xa4)
+	DELETE_WITH_META         = CommandCode(0xa8)
 	GET_COLLECTIONS_MANIFEST = CommandCode(0xba) // Get entire collections manifest.
 	COLLECTIONS_GET_CID      = CommandCode(0xbb) // Get collection id.
-	SUBDOC_GET               = CommandCode(0xc5) // Get subdoc. Returns with xattrs
-	SUBDOC_MULTI_LOOKUP      = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
+	SET_TIME_SYNC            = CommandCode(0xc1)
+
+	SUBDOC_GET            = CommandCode(0xc5) // Get subdoc. Returns with xattrs
+	SUBDOC_DICT_UPSERT    = CommandCode(0xc8)
+	SUBDOC_DELETE         = CommandCode(0xc9) // Delete a path
+	SUBDOC_MULTI_LOOKUP   = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
+	SUBDOC_MULTI_MUTATION = CommandCode(0xd1) // Multi mutation. Doc and xattr
 
 	DCP_SYSTEM_EVENT = CommandCode(0x5f) // A system event has occurred
 	DCP_SEQNO_ADV    = CommandCode(0x64) // Sent when the vb seqno has advanced due to an unsubscribed event
@@ -149,6 +157,7 @@ const (
 	EINTERNAL          = Status(0x84)
 	EBUSY              = Status(0x85)
 	TMPFAIL            = Status(0x86)
+	XATTR_EINVAL       = Status(0x87)
 	UNKNOWN_COLLECTION = Status(0x88)
 
 	SYNC_WRITE_IN_PROGRESS = Status(0xa2)
@@ -157,10 +166,27 @@ const (
 	// SUBDOC
 	SUBDOC_PATH_NOT_FOUND             = Status(0xc0)
 	SUBDOC_BAD_MULTI                  = Status(0xcc)
+	SUBDOC_SUCCESS_DELETED            = Status(0xcd)
 	SUBDOC_MULTI_PATH_FAILURE_DELETED = Status(0xd3)
 
 	// Not a Memcached status
 	UNKNOWN_STATUS = Status(0xffff)
+)
+
+const (
+	// doc level flags for subdoc commands
+	SUBDOC_FLAG_NONE              uint8 = 0x00
+	SUBDOC_FLAG_MKDOC             uint8 = 0x01 // Create if it does not exist
+	SUBDOC_FLAG_ADD               uint8 = 0x02 // Add doc only if it does not exist.
+	SUBDOC_FLAG_ACCESS_DELETED    uint8 = 0x04 // allow access to XATTRs for deleted document
+	SUBDOC_FLAG_CREATE_AS_DELETED uint8 = 0x08 // Used with mkdoc/add
+	SUBDOC_FLAG_REVIVED_DOC       uint8 = 0x10
+
+	// path level flags for subdoc commands
+	SUBDOC_FLAG_NONE_PATH          uint8 = 0x00
+	SUBDOC_FLAG_MKDIR_PATH         uint8 = 0x01 // create path
+	SUBDOC_FLAG_XATTR_PATH         uint8 = 0x04 // if set, the path refers to an XATTR
+	SUBDOC_FLAG_EXPAND_MACRRO_PATH uint8 = 0x10 // Expand macro value inside XATTR
 )
 
 // for log redaction
