@@ -311,13 +311,16 @@ func (o *OsoSessionsTracker) GetStartingSeqno() (seqno uint64, osoActive bool) {
 	// Find a session that is active
 	for idx := 0; idx < len(o.sessions); idx++ {
 		session := o.sessions[idx]
-		if session.IsDone() {
+		session.lock.RLock()
+		if session.isDoneNoLock() {
+			session.lock.RUnlock()
 			continue
 		}
 
 		// Found a session that is active
 		osoActive = true
-		seqno = session.GetStartingSeqno()
+		seqno = session.GetStartingSeqnoNoLock()
+		session.lock.RUnlock()
 		return
 	}
 
@@ -503,14 +506,7 @@ func (s *OsoSession) markSeqnoProcessedInternal(manifestId uint64) {
 	}
 }
 
-func (s *OsoSession) GetStartingSeqno() uint64 {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
-	if s.isDoneNoLock() {
-		panic(fmt.Sprintf("session is done yet asking for startingSeqno: %v", s))
-	}
-
+func (s *OsoSession) GetStartingSeqnoNoLock() uint64 {
 	return s.dcpSeqnoWhenSessionStarts
 }
 
