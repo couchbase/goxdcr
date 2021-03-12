@@ -1859,7 +1859,7 @@ func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, s
 	if backfillSpec != nil {
 		// Need to also construct stats with backfill info
 		backfillTotalChanges, backfillCkptsExist, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc,
-			logger, cur_vb_list)
+			cur_vb_list, true)
 		if err == nil {
 			logBackfillStat = true
 			total_changes += backfillTotalChanges
@@ -1942,11 +1942,20 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 
 // For a paused pipeline, we need to update what is the total number of changes for the paused backfill pipeline
 // The total number of changes will be: SUM_ALL_VBS(endSeqnoRequested - startSeqnoRequested)
-func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicationSpec, checkpointsSvc service_def.CheckpointsService,
-	logger *log.CommonLogger, cur_vb_list []uint16) (int64, bool, error) {
+func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicationSpec, checkpointsSvc service_def.CheckpointsService, cur_vb_list []uint16, findCkpts bool) (int64, bool, error) {
 	var backfillTotalChanges int64 = 0
 	// TODO MB-44909 - missing seeing if checkpoint exists
 	var checkpointExists bool
+
+	if findCkpts {
+		for _, vb := range cur_vb_list {
+			_, err := checkpointsSvc.CheckpointsDoc(common.ComposeFullTopic(backfillSpec.Id, common.BackfillPipeline), vb)
+			if err == nil {
+				checkpointExists = true
+				break
+			}
+		}
+	}
 
 	for _, vb := range cur_vb_list {
 		tasksPtr, exists, backfillVBUnlock := backfillSpec.VBTasksMap.Get(vb, false)
@@ -2029,8 +2038,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 
 	var backfillTotalChanges int64
 	if backfillSpec != nil {
-		backfillTotalChanges, _, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc,
-			logger, cur_vb_list)
+		backfillTotalChanges, _, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc, cur_vb_list, false)
 		if err != nil {
 			return err
 		}
