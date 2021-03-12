@@ -42,7 +42,8 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
 	waitForBgJobs
 }
 
@@ -104,13 +105,16 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count first pass"
 	sleep 5
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" 0
 
-	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
+	# One broken msg for B1.S1.c1 -> B2.S1.c1 and one for B1.S1.c2 -> B2.S1.c2
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 2))
 
 	# Validate brokenmap exists
 	validateBrokenMapExists "C1"
+	validateBrokenMapEntry "C1" "S1" "col1" "S1" "col1"
+	validateBrokenMapEntry "C1" "S1" "col2" "S1" "col2"
 
 	# Then re-setup the implicit matching that matches
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
@@ -120,8 +124,8 @@ function runTestCase {
 	printGlobalScopeAndCollectionInfo
 
 	# After sleeping, the backfill manager should have triggered the backfill
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
 
 	# Before running I/O, router will not raise a repaired message
@@ -135,7 +139,8 @@ function runTestCase {
 	# Under normal I/O load, these should happen closely together
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 2))
-	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1))
+	# No OSO because backfill 2 collections
+	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"
