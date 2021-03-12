@@ -11,9 +11,11 @@ package metadata
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	"sync"
 )
 
 type BackfillReplicationSpec struct {
@@ -29,19 +31,29 @@ type BackfillReplicationSpec struct {
 
 	// Backfill Replication spec is composed of jobs per VB that needs to be handled
 	// For vb's that have backfill needs, each vb contains a list of ordered jobs to backfill
-	VBTasksMap VBTasksMapType
+	VBTasksMap *VBTasksMapType
 
 	// revision number to be used by metadata service. not included in json
 	revision interface{}
 }
 
-func NewBackfillReplicationSpec(id, internalId string, vbTasksMap VBTasksMapType, parentSpec *ReplicationSpecification) *BackfillReplicationSpec {
-	return &BackfillReplicationSpec{
+func NewBackfillReplicationSpec(id, internalId string, vbTasksMap *VBTasksMapType, parentSpec *ReplicationSpecification) *BackfillReplicationSpec {
+	spec := &BackfillReplicationSpec{
 		Id:               id,
 		InternalId:       internalId,
 		VBTasksMap:       vbTasksMap,
 		replicationSpec_: parentSpec,
 	}
+	spec.PostUnmarshalInit()
+	return spec
+}
+
+func (b *BackfillReplicationSpec) PostUnmarshalInit() {
+	if b.VBTasksMap.IsNil() {
+		taskMap := NewVBTasksMap()
+		b.VBTasksMap = taskMap
+	}
+	b.VBTasksMap.PostUnmarshalInit()
 }
 
 func (b *BackfillReplicationSpec) SameAs(other *BackfillReplicationSpec) bool {
@@ -115,75 +127,64 @@ func (b *BackfillReplicationSpec) Redact() *BackfillReplicationSpec {
 // It's possible that the first task is actively being fulfilled
 // Keeps the current tasks in order, and whatever ask cannot be incorporated then append a new task
 // to cover it
-func (b *BackfillReplicationSpec) MergeNewTasks(vbTasksMap VBTasksMapType, skipFirst bool) {
-	for vb, newTasks := range vbTasksMap {
-		_, exists := b.VBTasksMap[vb]
-		if !exists {
-			b.VBTasksMap[vb] = newTasks
-			continue
-		}
+func (b *BackfillReplicationSpec) MergeNewTasks(vbTasksMap *VBTasksMapType, skipFirst bool) {
+	vbTasksMap.mutex.Lock()
+	defer vbTasksMap.mutex.Unlock()
 
+	for vb, newTasks := range vbTasksMap.VBTasksMap {
 		if newTasks == nil {
 			continue
 		}
 
-		// Need to merge
-		for _, newTask := range *newTasks {
-			mergeCopy := *(b.VBTasksMap[vb])
-			firstTask := mergeCopy[0]
-			var unmergableTasks BackfillTasks
-			if skipFirst {
-				mergeCopy = mergeCopy[1:]
-			}
-			mergeCopy.MergeIncomingTaskIntoTasks(newTask, &unmergableTasks)
-
-			for _, unmergableTask := range unmergableTasks {
-				mergeCopy = append(mergeCopy, unmergableTask)
-			}
-
-			if skipFirst {
-				// Need to prepend first task back
-				mergeCopy = append(mergeCopy, nil)
-				copy(mergeCopy[1:], mergeCopy[0:])
-				mergeCopy[0] = firstTask
-			}
-
-			// Just replace
-			b.VBTasksMap[vb] = &mergeCopy
+		backfillTasksForVB, exists, unlockFunc := b.VBTasksMap.Get(vb, true)
+		if !exists {
+			b.VBTasksMap.VBTasksMap[vb] = newTasks
+			unlockFunc()
+			continue
 		}
+
+		newTasks.mutex.Lock()
+		// Need to merge
+		for _, newTask := range newTasks.List {
+			var unmergableTasks BackfillTasks
+			var index int
+			if skipFirst {
+				index++
+			}
+
+			backfillTasksForVB.mutex.Lock()
+			backfillTasksForVB.MergeIncomingTaskIntoTasksNoLock(newTask, &unmergableTasks, index)
+
+			for _, unmergableTask := range unmergableTasks.List {
+				backfillTasksForVB.List = append(backfillTasksForVB.List, unmergableTask)
+			}
+
+			backfillTasksForVB.mutex.Unlock()
+		}
+		newTasks.mutex.Unlock()
+		unlockFunc()
 	}
 }
 
 // When traffic is bursty, it's possible that multiple routers will be raising the same task
 // Returns true if incoming taskmap duplicates a portion of current spec
-func (b *BackfillReplicationSpec) Contains(vbTasksMap VBTasksMapType) bool {
-	for vb, newTasks := range vbTasksMap {
-		currentTasks, exists := b.VBTasksMap[vb]
+func (b *BackfillReplicationSpec) Contains(vbTasksMap *VBTasksMapType) bool {
+	b.VBTasksMap.mutex.RLock()
+	defer b.VBTasksMap.mutex.RUnlock()
+	for vb, newTasks := range vbTasksMap.VBTasksMap {
+		currentTasks, exists, unlockFunc := b.VBTasksMap.Get(vb, false)
 		if !exists {
+			unlockFunc()
 			return false
 		}
 
-		if !currentTasks.Contains(*newTasks) {
+		if !currentTasks.Contains(newTasks) {
+			unlockFunc()
 			return false
 		}
+		unlockFunc()
 	}
 	return true
-}
-
-// Given a list of tasks for VBs, add (append) them to the list of currently existing tasks
-func (b *BackfillReplicationSpec) AppendTasks(vbTasksMap VBTasksMapType) {
-	if b == nil {
-		return
-	}
-
-	for vb, tasks := range vbTasksMap {
-		_, exists := b.VBTasksMap[vb]
-		if !exists {
-			b.VBTasksMap[vb] = tasks
-		} else {
-			*(b.VBTasksMap[vb]) = append(*(b.VBTasksMap[vb]), (*tasks)...)
-		}
-	}
 }
 
 func (b *BackfillReplicationSpec) SameSpecGeneric(other GenericSpecification) bool {
@@ -198,17 +199,35 @@ func (b *BackfillReplicationSpec) RedactGeneric() GenericSpecification {
 	return b.Redact()
 }
 
-type VBTasksMapType map[uint16]*BackfillTasks
+type VBTasksMapType struct {
+	VBTasksMap map[uint16]*BackfillTasks
+	mutex      *sync.RWMutex
+}
+
+func NewVBTasksMap() *VBTasksMapType {
+	taskMap := make(map[uint16]*BackfillTasks)
+	obj := VBTasksMapType{
+		VBTasksMap: taskMap,
+		mutex:      &sync.RWMutex{},
+	}
+	return &obj
+}
+
+func NewVBTasksMapWithMTasks(taskMap map[uint16]*BackfillTasks) *VBTasksMapType {
+	return &VBTasksMapType{
+		VBTasksMap: taskMap,
+		mutex:      &sync.RWMutex{},
+	}
+}
 
 // Given a list of VBs and a namespace mapping, create a VBTasksMap that includes this this mapping
-func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16, endSeqnos map[uint16]uint64) (VBTasksMapType, error) {
-	var vbTasksMap VBTasksMapType
+func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16, endSeqnos map[uint16]uint64) (*VBTasksMapType, error) {
+	vbTasksMap := NewVBTasksMap()
 
 	if len(vbs) == 0 {
 		return vbTasksMap, base.ErrorNoSourceKV
 	}
 
-	vbTasksMap = make(VBTasksMapType)
 	errorMap := make(base.ErrorMap)
 	for _, vb := range vbs {
 		endSeqno, exists := endSeqnos[vb]
@@ -221,46 +240,141 @@ func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16
 		endTs := &base.VBTimestamp{Vbno: vb, Seqno: endSeqno}
 		timestamps := &BackfillVBTimestamps{startTs, endTs}
 
-		var tasks BackfillTasks
+		tasks := NewBackfillTasks()
 		task := NewBackfillTask(timestamps, []CollectionNamespaceMapping{namespaceMap})
-		tasks = append(tasks, task)
-		vbTasksMap[vb] = &tasks
+		tasks.mutex.Lock()
+		tasks.List = append(tasks.List, task)
+		tasks.mutex.Unlock()
+		vbTasksMap.mutex.Lock()
+		vbTasksMap.VBTasksMap[vb] = &tasks
+		vbTasksMap.mutex.Unlock()
 	}
 	return vbTasksMap, nil
 }
 
-func (v VBTasksMapType) ContainsAtLeastOneTask() bool {
-	for _, tasks := range v {
-		if tasks != nil && len(*tasks) > 0 {
+func (v *VBTasksMapType) IsNil() bool {
+	return v == nil || v.VBTasksMap == nil
+}
+
+func (v *VBTasksMapType) String() string {
+	if v == nil {
+		return ""
+	}
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	return fmt.Sprintf("%v", v.VBTasksMap)
+}
+
+func (v *VBTasksMapType) MarshalJSON() ([]byte, error) {
+	if v == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	return json.Marshal(v.VBTasksMap)
+}
+
+func (v *VBTasksMapType) UnmarshalJSON(b []byte) error {
+	if v == nil {
+		return base.ErrorNilPtr
+	}
+
+	if v.mutex == nil {
+		v.mutex = &sync.RWMutex{}
+	}
+
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	return json.Unmarshal(b, &v.VBTasksMap)
+}
+
+func (v *VBTasksMapType) Len() int {
+	if v == nil {
+		return 0
+	}
+
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	return len(v.VBTasksMap)
+}
+
+func (v *VBTasksMapType) GetLock() *sync.RWMutex {
+	if v == nil {
+		// instead of returning a nil lock, return an empty lock
+		return &sync.RWMutex{}
+	}
+
+	if v.mutex != nil {
+		return v.mutex
+	} else {
+		return &sync.RWMutex{}
+	}
+}
+
+func (v *VBTasksMapType) ContainsAtLeastOneTask() bool {
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for _, tasks := range v.VBTasksMap {
+		if tasks != nil && tasks.Len() > 0 {
 			return true
 		}
 	}
 	return false
 }
 
-func (this VBTasksMapType) SameAs(other VBTasksMapType) bool {
-	if len(this) != len(other) {
+// Remember to call unlockFunc even if exists is false
+func (v *VBTasksMapType) Get(vbno uint16, writeRequested bool) (tasks *BackfillTasks, exists bool, unlockFunc func()) {
+	if writeRequested {
+		unlockFunc = func() {
+			v.mutex.Unlock()
+		}
+	} else {
+		unlockFunc = func() {
+			v.mutex.RUnlock()
+		}
+	}
+
+	if writeRequested {
+		v.mutex.Lock()
+	} else {
+		v.mutex.RLock()
+	}
+
+	tasks, exists = v.VBTasksMap[vbno]
+	return
+}
+
+func (this *VBTasksMapType) SameAs(other *VBTasksMapType) bool {
+	if this.Len() != other.Len() {
 		return false
 	}
 
-	for k, v := range this {
-		otherv, exists := other[k]
+	this.mutex.RLock()
+	defer this.mutex.RUnlock()
+	for k, v := range this.VBTasksMap {
+		otherv, exists, unlockFunc := other.Get(k, false)
 		if !exists {
+			unlockFunc()
 			return false
 		}
-		if !v.SameAs(*otherv) {
+		if !v.SameAs(otherv) {
+			unlockFunc()
 			return false
 		}
+		unlockFunc()
 	}
 
 	return true
 }
 
-func (this VBTasksMapType) Clone() VBTasksMapType {
-	clonedMap := make(VBTasksMapType)
-	for k, v := range this {
+func (this *VBTasksMapType) Clone() *VBTasksMapType {
+	clonedMap := NewVBTasksMap()
+	this.mutex.RLock()
+	defer this.mutex.RUnlock()
+	for k, v := range this.VBTasksMap {
 		clonedTasks := v.Clone()
-		clonedMap[k] = &clonedTasks
+		clonedMap.VBTasksMap[k] = clonedTasks
 	}
 	return clonedMap
 }
@@ -271,9 +385,14 @@ func (v *VBTasksMapType) LoadFromMappingsShaMap(shaToCollectionNsMap ShaToCollec
 		return base.ErrorInvalidInput
 	}
 
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+
 	errMap := make(base.ErrorMap)
-	for _, tasks := range *v {
-		for _, task := range *tasks {
+	for _, tasks := range v.VBTasksMap {
+		tasks.mutex.Lock()
+		for _, task := range tasks.List {
+			task.mutex.Lock()
 			task.requestedCollections_ = task.requestedCollections_[:0]
 			for _, oneRequestedCollectionSha := range task.RequestedCollectionsShas {
 				collectionNsMapping, exists := shaToCollectionNsMap[oneRequestedCollectionSha]
@@ -283,7 +402,9 @@ func (v *VBTasksMapType) LoadFromMappingsShaMap(shaToCollectionNsMap ShaToCollec
 				}
 				task.requestedCollections_ = append(task.requestedCollections_, *collectionNsMapping)
 			}
+			task.mutex.Unlock()
 		}
+		tasks.mutex.Unlock()
 	}
 	if len(errMap) > 0 {
 		return fmt.Errorf("Unable to find the following sha-collection namespace maps: %v", base.FlattenErrorMap(errMap))
@@ -296,8 +417,11 @@ func (v *VBTasksMapType) GetAllCollectionNamespaceMappings() ShaToCollectionName
 		return ShaToCollectionNamespaceMap{}
 	}
 
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+
 	returnMap := make(ShaToCollectionNamespaceMap)
-	for _, tasks := range *v {
+	for _, tasks := range v.VBTasksMap {
 		if tasks == nil {
 			continue
 		}
@@ -318,18 +442,27 @@ func (v *VBTasksMapType) MarkOneVBTaskDone(vbno uint16) {
 		return
 	}
 
-	tasksPtr, exists := (*v)[vbno]
-	if !exists || tasksPtr == nil || len(*tasksPtr) == 0 {
+	// Start without writeRequest
+	tasksPtr, exists, unlockFunc := v.Get(vbno, false)
+	if !exists || tasksPtr == nil || tasksPtr.Len() == 0 {
+		unlockFunc()
 		return
 	}
 
-	if len(*tasksPtr) == 1 {
-		delete(*v, vbno)
+	if tasksPtr.Len() == 1 {
+		// need to upgrade lock
+		unlockFunc()
+		// upgrade lock
+		v.mutex.Lock()
+		delete(v.VBTasksMap, vbno)
+		unlockFunc = func() {
+			v.mutex.Unlock()
+		}
 	} else {
 		// Chop off the 0'th element
-		slicedTasks := (*tasksPtr)[1:]
-		(*v)[vbno] = &slicedTasks
+		tasksPtr.RemoveFirstElem()
 	}
+	unlockFunc()
 }
 
 func (v *VBTasksMapType) RemoveNamespaceMappings(removed CollectionNamespaceMapping) (modified bool) {
@@ -337,90 +470,120 @@ func (v *VBTasksMapType) RemoveNamespaceMappings(removed CollectionNamespaceMapp
 		return
 	}
 
+	var hasKeysToDel bool
+
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+
 	var keysToDel []uint16
-	for vbno, backfillTasks := range *v {
+	for vbno, backfillTasks := range v.VBTasksMap {
 		oneModified := backfillTasks.RemoveNamespaceMappings(removed)
 		if oneModified {
 			modified = true
-			if len(*backfillTasks) == 0 {
+			if backfillTasks.Len() == 0 {
+				hasKeysToDel = true
 				keysToDel = append(keysToDel, vbno)
 			}
 		}
 	}
 
-	if modified {
+	if hasKeysToDel {
 		for _, vbno := range keysToDel {
-			delete((*v), vbno)
+			delete(v.VBTasksMap, vbno)
 		}
 	}
 	return
 }
 
-func (v *VBTasksMapType) GetTopTasksOnly() VBTasksMapType {
-	retMap := make(VBTasksMapType)
-	if v == nil || len(*v) == 0 {
+func (v *VBTasksMapType) GetTopTasksOnlyClone() *VBTasksMapType {
+	retMap := NewVBTasksMap()
+	if v == nil || v.Len() == 0 {
 		return retMap
 	}
 
-	for vb, tasks := range *v {
-		var subTasksList BackfillTasks
-		if tasks != nil && len(*tasks) > 0 {
-			subTask := (*tasks)[0].Clone()
-			subTasksList = append(subTasksList, &subTask)
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for vb, tasks := range v.VBTasksMap {
+		var subTasksList *BackfillTasks
+		if tasks != nil && tasks.Len() > 0 {
+			subTasksList = tasks.CloneTopTask()
 		}
-		retMap[vb] = &subTasksList
+		if subTasksList != nil {
+			retMap.VBTasksMap[vb] = subTasksList
+		}
 	}
 	return retMap
 }
 
-func (v VBTasksMapType) DebugString() string {
+func (v *VBTasksMapType) DebugString() string {
 	var buffer bytes.Buffer
 	for i := uint16(0); i < base.NumberOfVbs; i++ {
-		if tasks, exists := v[i]; exists {
+		tasks, exists, unlockFunc := v.Get(i, false)
+		if exists {
 			buffer.WriteString(fmt.Sprintf("VB %v : %v", i, tasks.PrettyPrint()))
 		}
+		unlockFunc()
 	}
 	return buffer.String()
 }
 
-func (v VBTasksMapType) AllStartsWithSeqno0() bool {
-	for _, tasks := range v {
+func (v *VBTasksMapType) AllStartsWithSeqno0() bool {
+	if v == nil {
+		return true
+	}
+
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for _, tasks := range v.VBTasksMap {
 		if tasks == nil {
 			continue
 		}
 
-		for _, task := range *tasks {
+		tasks.mutex.RLock()
+		for _, task := range tasks.List {
+			task.mutex.RLock()
 			if task.Timestamps == nil || task.Timestamps.StartingTimestamp == nil {
 				// Very odd
 				continue
 			}
 			if task.Timestamps.StartingTimestamp.Seqno > 0 {
+				task.mutex.RUnlock()
+				tasks.mutex.RUnlock()
 				return false
 			}
+			task.mutex.RUnlock()
 		}
+		tasks.mutex.RUnlock()
 	}
 	return true
 }
 
-func (v VBTasksMapType) GetDeduplicatedSourceNamespaces() []*SourceNamespace {
+func (v *VBTasksMapType) GetDeduplicatedSourceNamespaces() []*SourceNamespace {
 	var retList []*SourceNamespace
 	var dedupMap = make(CollectionNamespaceMapping)
 
-	for _, backfillTasks := range v {
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+
+	for _, backfillTasks := range v.VBTasksMap {
 		if backfillTasks == nil {
 			continue
 		}
-		for _, backfillTask := range *backfillTasks {
+		backfillTasks.mutex.RLock()
+		for _, backfillTask := range backfillTasks.List {
 			if backfillTask == nil {
 				continue
 			}
 
-			for _, requestedCollection := range backfillTask.RequestedCollections() {
+			requestedCollections, unlockFunc := backfillTask.RequestedCollections(false)
+			for _, requestedCollection := range requestedCollections {
 				for srcNamespace, _ := range requestedCollection {
 					dedupMap.AddSingleSourceNsMapping(srcNamespace, &base.CollectionNamespace{})
 				}
 			}
+			unlockFunc()
 		}
+		backfillTasks.mutex.RUnlock()
 	}
 
 	for srcNs, _ := range dedupMap {
@@ -429,42 +592,149 @@ func (v VBTasksMapType) GetDeduplicatedSourceNamespaces() []*SourceNamespace {
 	return retList
 }
 
-// Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
-type BackfillTasks []*BackfillTask
+func (v *VBTasksMapType) PostUnmarshalInit() {
+	if v.mutex == nil {
+		v.mutex = &sync.RWMutex{}
+	}
 
-func (b BackfillTasks) Clone() BackfillTasks {
-	var clonedTasks BackfillTasks
-	for _, task := range b {
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for _, tasks := range v.VBTasksMap {
+		tasks.PostUnmarshalInit()
+	}
+}
+
+// Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
+type BackfillTasks struct {
+	List  []*BackfillTask
+	mutex *sync.RWMutex
+}
+
+func NewBackfillTasks() BackfillTasks {
+	return BackfillTasks{
+		List:  []*BackfillTask{},
+		mutex: &sync.RWMutex{},
+	}
+}
+
+func NewBackfillTasksWithTask(incomingTask *BackfillTask) BackfillTasks {
+	return BackfillTasks{
+		List:  []*BackfillTask{incomingTask},
+		mutex: &sync.RWMutex{},
+	}
+}
+
+func (b *BackfillTasks) GetLock() *sync.RWMutex {
+	return b.mutex
+}
+
+func (b *BackfillTasks) Append(incoming *BackfillTasks) {
+	if b == nil {
+		return
+	}
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	incoming.mutex.RLock()
+	defer incoming.mutex.RUnlock()
+
+	b.List = append(b.List, incoming.List...)
+	return
+}
+
+func (b *BackfillTasks) RemoveFirstElem() {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	if len(b.List) > 0 {
+		b.List = b.List[1:]
+	}
+}
+
+func (b *BackfillTasks) Clone() *BackfillTasks {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	clonedTasks := NewBackfillTasks()
+	for _, task := range b.List {
 		if task == nil {
 			continue
 		}
 		oneClonedTask := task.Clone()
-		clonedTasks = append(clonedTasks, &oneClonedTask)
+		clonedTasks.List = append(clonedTasks.List, &oneClonedTask)
 	}
-	return clonedTasks
+	return &clonedTasks
 }
 
-func (b BackfillTasks) SameAs(other BackfillTasks) bool {
-	if len(b) != len(other) {
+func (b *BackfillTasks) Len() int {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	return len(b.List)
+}
+
+func (b *BackfillTasks) CloneTopTask() *BackfillTasks {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+
+	if len(b.List) == 0 {
+		return nil
+	}
+
+	topTaskClone := b.List[0].Clone()
+	cloneTask := NewBackfillTasksWithTask(&topTaskClone)
+	return &cloneTask
+}
+
+func (b *BackfillTasks) GetRO(idx int) (*BackfillTask, bool, func()) {
+	b.mutex.RLock()
+
+	unlockFunc := func() {
+		b.mutex.RUnlock()
+	}
+
+	if len(b.List) <= idx {
+		return nil, false, unlockFunc
+	}
+	return b.List[idx], true, unlockFunc
+}
+
+func (b *BackfillTasks) SameAs(other *BackfillTasks) bool {
+	if b.Len() != other.Len() {
 		return false
 	}
 
-	for i := 0; i < len(b); i++ {
-		if !b[i].SameAs(other[i]) {
+	bLen := b.Len()
+
+	for i := 0; i < bLen; i++ {
+		bElement, exists, unlockB := b.GetRO(i)
+		otherElem, otherExists, unlockOther := other.GetRO(i)
+		if exists && otherExists {
+			if !bElement.SameAs(otherElem) {
+				unlockOther()
+				unlockB()
+				return false
+			}
+		} else {
+			unlockOther()
+			unlockB()
 			return false
 		}
 	}
 	return true
 }
 
-func (b BackfillTasks) Contains(subsetOfTasks BackfillTasks) bool {
-	for _, task := range subsetOfTasks {
+func (b *BackfillTasks) Contains(subsetOfTasks *BackfillTasks) bool {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	subsetOfTasks.mutex.RLock()
+	defer subsetOfTasks.mutex.RUnlock()
+
+	for _, task := range subsetOfTasks.List {
 		if task == nil {
 			continue
 		}
 
 		var found bool
-		for _, curTask := range b {
+		for _, curTask := range b.List {
 			if task.Contains(curTask) {
 				found = true
 				break
@@ -477,14 +747,17 @@ func (b BackfillTasks) Contains(subsetOfTasks BackfillTasks) bool {
 	return true
 }
 
-func (b BackfillTasks) PrettyPrint() string {
-	if len(b) == 0 {
+func (b *BackfillTasks) PrettyPrint() string {
+	if b.Len() == 0 {
 		return ""
 	}
 
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+
 	var buffer bytes.Buffer
-	buffer.WriteString(fmt.Sprintf("%v Backfill tasks: ", len(b)))
-	for _, task := range b {
+	buffer.WriteString(fmt.Sprintf("%v Backfill tasks: ", len(b.List)))
+	for _, task := range b.List {
 		buffer.WriteString(task.String())
 		buffer.WriteString("|")
 	}
@@ -493,15 +766,17 @@ func (b BackfillTasks) PrettyPrint() string {
 }
 
 // Returns a map of sha -> mapping
-func (b BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNamespaceMap {
+func (b *BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNamespaceMap {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
 	returnMap := make(ShaToCollectionNamespaceMap)
-	for _, task := range b {
+	for _, task := range b.List {
 		if task == nil {
 			continue
 		}
 		for i, requestedSha := range task.RequestedCollectionsShas {
 			if _, exists := returnMap[requestedSha]; !exists {
-				requestedCols := task.RequestedCollections()[i]
+				requestedCols := task.requestedCollections_[i]
 				returnMap[requestedSha] = &requestedCols
 			}
 		}
@@ -529,30 +804,34 @@ func (b BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNamesp
  * 1. First 5-5000 will soak up the middle, leaving 0-5 (subtask1) and 5000-20000 (subtask2)
  * 2. Run subtask1 through 0-20000, and subtask2 through 0-20000
  * Each subtask recursively will figure out what couldn't be "soaked" up and add the unmergable part to the list on the stack
+ *
+ * No locking is to be done as this will be called recursively. top level call should lock it accordingly
  */
-func (b *BackfillTasks) MergeIncomingTaskIntoTasks(task *BackfillTask, unmergableTasks *BackfillTasks) {
-	if b == nil || len(*b) == 0 {
-		(*unmergableTasks) = append(*unmergableTasks, task)
+func (b *BackfillTasks) MergeIncomingTaskIntoTasksNoLock(task *BackfillTask, unmergableTasks *BackfillTasks, index int) {
+	if b == nil || len(b.List) == 0 || index >= len(b.List) {
+		unmergableTasks.List = append(unmergableTasks.List, task)
 		return
 	}
 
-	fullyMerged, unableToMerge, subTask1, subTask2 := ((*b)[0]).MergeIncomingTask(task)
+	fullyMerged, unableToMerge, subTask1, subTask2 := (b.List[index]).MergeIncomingTask(task)
 	if fullyMerged {
 		return
 	}
 	if unableToMerge {
-		(*unmergableTasks) = append((*unmergableTasks), task)
+		unmergableTasks.List = append(unmergableTasks.List, task)
 		return
 	}
 
-	nextBackfillTasks := (*b)[1:]
-	nextBackfillTasks.MergeIncomingTaskIntoTasks(subTask1, unmergableTasks)
-	nextBackfillTasks.MergeIncomingTaskIntoTasks(subTask2, unmergableTasks)
+	index++
+	b.MergeIncomingTaskIntoTasksNoLock(subTask1, unmergableTasks, index)
+	b.MergeIncomingTaskIntoTasksNoLock(subTask2, unmergableTasks, index)
 	return
 }
 
-func (b BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool {
-	for _, task := range b {
+func (b *BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	for _, task := range b.List {
 		if task.Timestamps.StartingTimestamp.Seqno == startSeqno && task.Timestamps.EndingTimestamp.Seqno == endSeqno {
 			return true
 		}
@@ -562,16 +841,18 @@ func (b BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool {
 
 func (b *BackfillTasks) RemoveNamespaceMappings(removed CollectionNamespaceMapping) (modified bool) {
 	var needCleanup bool
-	for _, task := range *b {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	for _, task := range b.List {
 		oneModified := task.RemoveCollectionNamespaceMapping(removed)
 		if oneModified && !modified {
 			modified = true
-			if len(task.RequestedCollections()) == 0 {
+			if task.RequestedCollectionsLen() == 0 {
 				needCleanup = true
 			}
 		}
 	}
-
 	if !needCleanup {
 		return
 	}
@@ -581,17 +862,30 @@ func (b *BackfillTasks) RemoveNamespaceMappings(removed CollectionNamespaceMappi
 		doneCleanedUp = true
 		var i int
 		var task *BackfillTask
-		for i, task = range *b {
-			if len(task.RequestedCollections()) == 0 {
+		for i, task = range b.List {
+			if task.RequestedCollectionsLen() == 0 {
 				doneCleanedUp = false
 				break
 			}
 		}
 		if !doneCleanedUp {
-			*b = append((*b)[:i], (*b)[i+1:]...)
+			b.List = append((b.List)[:i], (b.List)[i+1:]...)
 		}
 	}
 	return
+}
+
+func (b *BackfillTasks) PostUnmarshalInit() {
+	if b.mutex == nil {
+		b.mutex = &sync.RWMutex{}
+	}
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	for _, task := range b.List {
+		task.PostUnmarshalInit()
+	}
+
 }
 
 // Each backfill task should be RO once created
@@ -605,23 +899,20 @@ type BackfillTask struct {
 	// The shas and the actual mappings are linked by the same index
 	requestedCollections_    []CollectionNamespaceMapping
 	RequestedCollectionsShas []string
-}
-
-func (b BackfillTask) String() string {
-	var buffer bytes.Buffer
-	buffer.WriteString(fmt.Sprintf("Backfill task (VB %v) [%v,%v) with the following mappings:\n",
-		b.Timestamps.StartingTimestamp.Vbno, b.Timestamps.StartingTimestamp.Seqno, b.Timestamps.EndingTimestamp.Seqno))
-	for i, col := range b.RequestedCollections() {
-		buffer.WriteString(fmt.Sprintf("Sha: %v ", b.RequestedCollectionsShas[i]))
-		buffer.WriteString(col.String())
-		buffer.WriteString("\n")
-	}
-	return buffer.String()
+	mutex                    *sync.RWMutex
 }
 
 func NewBackfillTask(ts *BackfillVBTimestamps, requestedCollectionMappings []CollectionNamespaceMapping) *BackfillTask {
 	shas := generateShas(requestedCollectionMappings)
-	return &BackfillTask{Timestamps: ts, requestedCollections_: requestedCollectionMappings, RequestedCollectionsShas: shas}
+	var clonedMapping []CollectionNamespaceMapping
+	for _, orig := range requestedCollectionMappings {
+		clonedMapping = append(clonedMapping, orig.Clone())
+	}
+	return &BackfillTask{Timestamps: ts,
+		requestedCollections_:    clonedMapping,
+		RequestedCollectionsShas: shas,
+		mutex:                    &sync.RWMutex{},
+	}
 }
 
 func generateShas(requestedCollectionMappings []CollectionNamespaceMapping) []string {
@@ -631,6 +922,55 @@ func generateShas(requestedCollectionMappings []CollectionNamespaceMapping) []st
 		shas = append(shas, fmt.Sprintf("%x", shaSlice[:]))
 	}
 	return shas
+}
+
+func (b *BackfillTask) GetLock() *sync.RWMutex {
+	return b.mutex
+}
+
+func (b *BackfillTask) GetEndingTimestampSeqno() uint64 {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+
+	if b.Timestamps != nil && b.Timestamps.EndingTimestamp != nil {
+		return b.Timestamps.EndingTimestamp.Seqno
+	}
+	return 0
+}
+
+func (b *BackfillTask) GetStartingTimestampSeqno() uint64 {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+
+	if b.Timestamps != nil && b.Timestamps.StartingTimestamp != nil {
+		return b.Timestamps.StartingTimestamp.Seqno
+	}
+	return 0
+}
+
+func (b *BackfillTask) String() string {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	var buffer bytes.Buffer
+	buffer.WriteString(fmt.Sprintf("Backfill task (VB %v) [%v,%v) with the following mappings:\n",
+		b.Timestamps.StartingTimestamp.Vbno, b.Timestamps.StartingTimestamp.Seqno, b.Timestamps.EndingTimestamp.Seqno))
+	for i, col := range b.requestedCollections_ {
+		buffer.WriteString(fmt.Sprintf("Sha: %v ", b.RequestedCollectionsShas[i]))
+		buffer.WriteString(col.String())
+		buffer.WriteString("\n")
+	}
+	return buffer.String()
+}
+
+func (b *BackfillTask) GetTimestampsClone() *BackfillVBTimestamps {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	if b.Timestamps != nil {
+		clone := b.Timestamps.Clone()
+		return &clone
+	} else {
+		return nil
+	}
 }
 
 // When given a new task, try to merge the new tasks's request into this current task
@@ -643,6 +983,11 @@ func (b *BackfillTask) MergeIncomingTask(task *BackfillTask) (canFullyMerge, una
 		return
 	}
 
+	b.mutex.Lock()
+	task.mutex.RLock()
+	defer b.mutex.Unlock()
+	defer task.mutex.RUnlock()
+
 	tsAccomodated, tsUnableToMerge, tsSmallerBound, tsLargerBound := b.Timestamps.Accomodate(task.Timestamps)
 	if tsUnableToMerge {
 		unableToMerge = true
@@ -650,8 +995,8 @@ func (b *BackfillTask) MergeIncomingTask(task *BackfillTask) (canFullyMerge, una
 	}
 
 	// Some sort of merge happened
-	for _, oneMapping := range task.RequestedCollections() {
-		b.AddCollectionNamespaceMapping(oneMapping)
+	for _, oneMapping := range task.requestedCollections_ {
+		b.AddCollectionNamespaceMappingNoLock(oneMapping)
 	}
 
 	if tsAccomodated {
@@ -661,21 +1006,39 @@ func (b *BackfillTask) MergeIncomingTask(task *BackfillTask) (canFullyMerge, una
 
 	// Otherwise, need to pop back out subset of tasks, one before and one after, that wasn't able to be merged
 	if !tsSmallerBound.IsEmpty() {
-		subtask1 = NewBackfillTask(&tsSmallerBound, task.RequestedCollections())
+		subtask1 = NewBackfillTask(&tsSmallerBound, task.requestedCollections_)
 	}
 
 	if !tsLargerBound.IsEmpty() {
-		subtask2 = NewBackfillTask(&tsLargerBound, task.RequestedCollections())
+		subtask2 = NewBackfillTask(&tsLargerBound, task.requestedCollections_)
 	}
 
 	return
 }
 
-func (b *BackfillTask) RequestedCollections() []CollectionNamespaceMapping {
-	return b.requestedCollections_
+func (b *BackfillTask) RequestedCollectionsLen() int {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	return len(b.requestedCollections_)
 }
 
-func (b *BackfillTask) AddCollectionNamespaceMapping(nsMapping CollectionNamespaceMapping) {
+func (b *BackfillTask) RequestedCollections(writeRequested bool) ([]CollectionNamespaceMapping, func()) {
+	unlockFunc := func() {
+		if writeRequested {
+			b.mutex.Unlock()
+		} else {
+			b.mutex.RUnlock()
+		}
+	}
+	if writeRequested {
+		b.mutex.Lock()
+	} else {
+		b.mutex.RLock()
+	}
+	return b.requestedCollections_, unlockFunc
+}
+
+func (b *BackfillTask) AddCollectionNamespaceMappingNoLock(nsMapping CollectionNamespaceMapping) {
 	incomingSha, _ := nsMapping.Sha256()
 	incomingShaStr := fmt.Sprintf("%x", incomingSha)
 	for _, checkSha := range b.RequestedCollectionsShas {
@@ -692,6 +1055,9 @@ func (b *BackfillTask) AddCollectionNamespaceMapping(nsMapping CollectionNamespa
 func (b *BackfillTask) RemoveCollectionNamespaceMapping(nsMapping CollectionNamespaceMapping) (modified bool) {
 	var i int
 	var oneMapping CollectionNamespaceMapping
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 
 	// There are 3 cases of removal
 	// 1. nsMapping contains the same exact mapping as the one in backfillTask
@@ -792,6 +1158,10 @@ func (b *BackfillTask) SameAs(other *BackfillTask) bool {
 		return true
 	}
 
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	other.mutex.RLock()
+	defer other.mutex.RUnlock()
 	sortedShas := base.SortStringList(b.RequestedCollectionsShas)
 	otherShas := base.SortStringList(other.RequestedCollectionsShas)
 	if len(sortedShas) != len(otherShas) {
@@ -808,7 +1178,7 @@ func (b *BackfillTask) SameAs(other *BackfillTask) bool {
 	return b.Timestamps.SameAs(other.Timestamps)
 }
 
-func (b BackfillTask) Clone() BackfillTask {
+func (b *BackfillTask) Clone() BackfillTask {
 	clonedTs := b.Timestamps.Clone()
 	var clonedList []CollectionNamespaceMapping
 	for _, nsMapping := range b.requestedCollections_ {
@@ -819,19 +1189,22 @@ func (b BackfillTask) Clone() BackfillTask {
 	return *task
 }
 
-func (b BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (seqnoEnd uint64, filter *mcc.CollectionsFilter, err error) {
+func (b *BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (seqnoEnd uint64, filter *mcc.CollectionsFilter, err error) {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+
 	if b.Timestamps == nil || b.Timestamps.EndingTimestamp == nil || b.Timestamps.StartingTimestamp == nil || latestSrcManifest == nil {
 		err = base.ErrorInvalidInput
 		return
 	}
-	if len(b.RequestedCollections()) == 0 {
+	if len(b.requestedCollections_) == 0 {
 		err = fmt.Errorf("No collections requested")
 		return
 	}
 	errMap := make(base.ErrorMap)
 	seqnoEnd = b.Timestamps.EndingTimestamp.Seqno
 	var filterCollectionList []uint32
-	for _, requestedCollection := range b.RequestedCollections() {
+	for _, requestedCollection := range b.requestedCollections_ {
 		for sourceNamespace, _ := range requestedCollection {
 			var scopeName string = sourceNamespace.ScopeName
 			var collectionName string = sourceNamespace.CollectionName
@@ -856,6 +1229,12 @@ func (b BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (s
 		CollectionsList: filterCollectionList,
 	}
 	return
+}
+
+func (b *BackfillTask) PostUnmarshalInit() {
+	if b.mutex == nil {
+		b.mutex = &sync.RWMutex{}
+	}
 }
 
 // This is specifically used to indicate the start and end of a backfill

@@ -901,15 +901,19 @@ func (stats_mgr *StatisticsManager) initializeConfig(settings metadata.Replicati
 
 	vbTasksRaw, exists := settings[parts.DCP_VBTasksMap]
 	if exists {
-		backfillVBTasks := vbTasksRaw.(metadata.VBTasksMapType)
+		backfillVBTasks := vbTasksRaw.(*metadata.VBTasksMapType)
 		stats_mgr.endSeqnos = make(map[uint16]uint64)
-		for vb, vbTasks := range backfillVBTasks {
-			if vbTasks != nil && len(*vbTasks) > 0 {
-				endSeqno := (*vbTasks)[0].Timestamps.EndingTimestamp.Seqno
+		backfillVBTasks.GetLock().RLock()
+		for vb, vbTasks := range backfillVBTasks.VBTasksMap {
+			if vbTasks != nil && vbTasks.Len() > 0 {
+				topTask, _, unlockFunc := vbTasks.GetRO(0)
+				endSeqno := topTask.GetEndingTimestampSeqno()
+				unlockFunc()
 				stats_mgr.endSeqnos[vb] = endSeqno
 				stats_mgr.totalBackfillChanges += endSeqno
 			}
 		}
+		backfillVBTasks.GetLock().RUnlock()
 	}
 
 	if stats_mgr.logger.GetLogLevel() >= log.LogLevelDebug {
@@ -1941,18 +1945,21 @@ func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[str
 func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicationSpec, checkpointsSvc service_def.CheckpointsService,
 	logger *log.CommonLogger, cur_vb_list []uint16) (int64, bool, error) {
 	var backfillTotalChanges int64 = 0
+	// TODO MB-44909 - missing seeing if checkpoint exists
 	var checkpointExists bool
 
 	for _, vb := range cur_vb_list {
-		tasksPtr, exists := backfillSpec.VBTasksMap[vb]
-		if !exists || tasksPtr == nil || len(*tasksPtr) == 0 {
+		tasksPtr, exists, backfillVBUnlock := backfillSpec.VBTasksMap.Get(vb, false)
+		if !exists || tasksPtr == nil || tasksPtr.Len() == 0 {
+			backfillVBUnlock()
 			continue
 		}
-		tasks := *tasksPtr
-		oneTask := *(tasks[0])
-		begin := oneTask.Timestamps.StartingTimestamp.Seqno
-		end := oneTask.Timestamps.EndingTimestamp.Seqno
+		oneTask, _, tasksPtrUnlock := tasksPtr.GetRO(0)
+		begin := oneTask.GetStartingTimestampSeqno()
+		end := oneTask.GetEndingTimestampSeqno()
 		backfillTotalChanges += int64(end - begin)
+		tasksPtrUnlock()
+		backfillVBUnlock()
 	}
 	return backfillTotalChanges, checkpointExists, nil
 }

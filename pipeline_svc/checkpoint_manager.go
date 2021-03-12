@@ -293,13 +293,20 @@ func (ckmgr *CheckpointManager) populateBackfillStartingTs(spec *metadata.Backfi
 	defer ckmgr.backfillStartingTsMtx.Unlock()
 
 	vbTasks := spec.VBTasksMap
-	for vb, tasks := range vbTasks {
-		if tasks == nil || len(*tasks) == 0 {
+	vbTasks.GetLock().RLock()
+	for vb, tasks := range vbTasks.VBTasksMap {
+		if tasks == nil || tasks.Len() == 0 {
 			continue
 		}
-		ckmgr.backfillStartingTs[vb] = (*tasks)[0].Timestamps.StartingTimestamp
-		atLeastOneValid = true
+		topTask, _, unlockFunc := tasks.GetRO(0)
+		timestampsClone := topTask.GetTimestampsClone()
+		unlockFunc()
+		if timestampsClone != nil && timestampsClone.StartingTimestamp != nil {
+			ckmgr.backfillStartingTs[vb] = timestampsClone.StartingTimestamp
+			atLeastOneValid = true
+		}
 	}
+	vbTasks.GetLock().RUnlock()
 	if !atLeastOneValid {
 		return fmt.Errorf("Unable to find at least one valid task for backfill spec %v", spec.Id)
 	}

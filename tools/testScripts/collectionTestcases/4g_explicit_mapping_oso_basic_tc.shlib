@@ -124,7 +124,7 @@ function runTestCase {
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
 	# 2 oso mode because one for each DCP nozzle
 	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(($currentOsoModeCnt + 2))
-	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1))
+	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1)) $(($currentBackfillOsoDocCnt + 3))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

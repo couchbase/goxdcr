@@ -97,7 +97,7 @@ func setupReplStartupSpecs(replSpecSvc *service_def.ReplicationSpecSvc,
 func setupBackfillSpecs(backfillReplSvc *service_def.BackfillReplSvc, parentSpecs map[string]*metadata.ReplicationSpecification) {
 	backfillSpecs := make(map[string]*metadata.BackfillReplicationSpec)
 	for specId, spec := range parentSpecs {
-		vbTaskMap := make(metadata.VBTasksMapType)
+		vbTaskMap := metadata.NewVBTasksMap()
 		bSpec := metadata.NewBackfillReplicationSpec(specId, "dummy", vbTaskMap, spec)
 		backfillSpecs[specId] = bSpec
 	}
@@ -316,7 +316,7 @@ func TestBackfillMgrSourceCollectionCleanedUp(t *testing.T) {
 		ScopeName:      "S2",
 		CollectionName: "col2",
 	}
-	for _, tasks := range v9BackfillTaskMap {
+	for _, tasks := range v9BackfillTaskMap.VBTasksMap {
 		mappings := tasks.GetAllCollectionNamespaceMappings()
 		for _, mapping := range mappings {
 			_, _, _, exists := mapping.Get(checkSourceNs, nil)

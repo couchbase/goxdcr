@@ -369,7 +369,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 	return nil
 }
 
-func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap metadata.VBTasksMapType, req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64, force bool) error {
+func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap *metadata.VBTasksMapType, req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64, force bool) error {
 	clonedSpec := b.spec.Clone()
 
 	exists := b.cachedBackfillSpec != nil
@@ -816,7 +816,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 			// This could happen to a cleanly started pipeline and explicit mapping was removed
 			// Use the same return path as delOp - to bypass any actual metakv op
 			return errorSyncDel
-		} else if len(b.cachedBackfillSpec.VBTasksMap) == 0 {
+		} else if b.cachedBackfillSpec.VBTasksMap.Len() == 0 {
 			// The whole spec is now deleted because of the pair.Removed
 			delErr := b.requestPersistence(DelOp, resp.PersistResponse)
 			if delErr == nil {
@@ -848,8 +848,9 @@ func (b *BackfillRequestHandler) handleSpecialDelBackfill(reqAndResp ReqAndResp)
 	}
 
 	var lastVbToBeDeleted bool
-	if req.specificVBRequested && b.cachedBackfillSpec != nil && len(b.cachedBackfillSpec.VBTasksMap) == 1 {
-		_, matches := b.cachedBackfillSpec.VBTasksMap[req.vbno]
+	if req.specificVBRequested && b.cachedBackfillSpec != nil && !b.cachedBackfillSpec.VBTasksMap.IsNil() && b.cachedBackfillSpec.VBTasksMap.Len() == 1 {
+		_, matches, unlockFunc := b.cachedBackfillSpec.VBTasksMap.Get(req.vbno, false)
+		unlockFunc()
 		if matches {
 			lastVbToBeDeleted = true
 			b.logger.Infof("VB %v asked to be deleted is the last one", req.vbno)
@@ -861,11 +862,14 @@ func (b *BackfillRequestHandler) handleSpecialDelBackfill(reqAndResp ReqAndResp)
 		if b.cachedBackfillSpec == nil {
 			return fmt.Errorf("No backfill spec")
 		}
-		_, vbExists := b.cachedBackfillSpec.VBTasksMap[req.vbno]
+		b.cachedBackfillSpec.VBTasksMap.GetLock().Lock()
+		_, vbExists := b.cachedBackfillSpec.VBTasksMap.VBTasksMap[req.vbno]
 		if !vbExists {
+			b.cachedBackfillSpec.VBTasksMap.GetLock().Unlock()
 			return fmt.Errorf("VB does not exist")
 		}
-		delete(b.cachedBackfillSpec.VBTasksMap, req.vbno)
+		delete(b.cachedBackfillSpec.VBTasksMap.VBTasksMap, req.vbno)
+		b.cachedBackfillSpec.VBTasksMap.GetLock().Unlock()
 
 		return b.requestPersistence(SetOp, reqAndResp.PersistResponse)
 	} else {

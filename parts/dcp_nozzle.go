@@ -352,7 +352,7 @@ type DcpNozzle struct {
 
 	collectionEnabled uint32
 	// If backfill pipeline, then could be passed in a vb task map
-	specificVBTasks metadata.VBTasksMapType
+	specificVBTasks *metadata.VBTasksMapType
 
 	// Datapools for reusing memory
 	wrappedUprPool          utilities.WrappedUprPoolIface
@@ -635,11 +635,12 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 	vbTasksRaw, exists := settings[DCP_VBTasksMap]
 	if exists {
-		dcp.specificVBTasks = vbTasksRaw.(metadata.VBTasksMapType)
+		dcp.specificVBTasks = vbTasksRaw.(*metadata.VBTasksMapType)
 		// Take out any vb's that are not part of the tasks
 		var newVbList []uint16
 		for _, vbno := range dcp.vbnos {
-			_, exists := dcp.specificVBTasks[vbno]
+			_, exists, unlockFunc := dcp.specificVBTasks.Get(vbno, false)
+			unlockFunc()
 			if exists {
 				newVbList = append(newVbList, vbno)
 			}
@@ -650,12 +651,22 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		var allMigrationTasks bool
 
 		outputEndSeqnoMap := make(map[uint16]uint64)
-		for vb, vbTasks := range dcp.specificVBTasks {
-			if vbTasks != nil && len(*vbTasks) > 0 {
-				endSeqno := (*vbTasks)[0].Timestamps.EndingTimestamp.Seqno
+		dcp.specificVBTasks.GetLock().RLock()
+		for vb, vbTasks := range dcp.specificVBTasks.VBTasksMap {
+			if vbTasks != nil && vbTasks.Len() > 0 {
+				topTask, exists, unlockFunc := vbTasks.GetRO(0)
+				if !exists {
+					// odd race
+					unlockFunc()
+					continue
+				}
+				endSeqno := topTask.GetEndingTimestampSeqno()
+				unlockFunc()
 				outputEndSeqnoMap[vb] = endSeqno
-				for _, task := range *vbTasks {
-					for _, colNsMapping := range task.RequestedCollections() {
+				vbTasks.GetLock().RLock()
+				for _, task := range vbTasks.List {
+					requestedCollections, unlockFunc := task.RequestedCollections(false)
+					for _, colNsMapping := range requestedCollections {
 						for srcMapping, _ := range colNsMapping {
 							if !atLeastOneMigrationTask && srcMapping.GetType() == metadata.SourceDefaultCollectionFilter {
 								atLeastOneMigrationTask = true
@@ -665,9 +676,12 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 							}
 						}
 					}
+					unlockFunc()
 				}
+				vbTasks.GetLock().RUnlock()
 			}
 		}
+		dcp.specificVBTasks.GetLock().RUnlock()
 
 		if !atLeastOneMigrationTask {
 			dcp.Logger().Infof("%v Received backfill tasks for vb to endSeqno: %v", dcp.Id(), outputEndSeqnoMap)
@@ -1133,12 +1147,17 @@ func (dcp *DcpNozzle) vbStreamEndIsOk(vbno uint16) bool {
 		return false
 	}
 
-	tasks, exists := dcp.specificVBTasks[vbno]
+	if dcp.specificVBTasks.IsNil() {
+		return false
+	}
+
+	tasks, exists, unlockFunc := dcp.specificVBTasks.Get(vbno, false)
+	defer unlockFunc()
 	if !exists {
 		return false
 	}
 
-	if tasks == nil || len(*tasks) == 0 {
+	if tasks == nil || tasks.Len() == 0 {
 		return false
 	}
 
@@ -1370,14 +1389,15 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 	seqEnd := base.DcpSeqnoEnd
 	var filter *mcc.CollectionsFilter
 	// filter for main pipeline if resuming from a checkpoint
-	if len(dcp.specificVBTasks) == 0 && vbts.Seqno > 0 {
+	if (dcp.specificVBTasks.IsNil() || dcp.specificVBTasks.Len() == 0) && vbts.Seqno > 0 {
 		filter = &mcc.CollectionsFilter{UseManifestUid: true, ManifestUid: vbts.ManifestIDs.SourceManifestId}
 	}
 
-	if len(dcp.specificVBTasks) > 0 {
-		vbTasks := dcp.specificVBTasks[vbno]
-		if vbTasks == nil || len(*vbTasks) == 0 {
+	if !dcp.specificVBTasks.IsNil() && dcp.specificVBTasks.Len() > 0 {
+		vbTasks, exists, unlockSpecificVBTasksMap := dcp.specificVBTasks.Get(vbno, false)
+		if !exists || vbTasks == nil || vbTasks.Len() == 0 {
 			dcp.Logger().Infof("vbno %v has no task. Exiting")
+			unlockSpecificVBTasksMap()
 			return nil
 		}
 		// Execute the first task
@@ -1388,7 +1408,11 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 			dcp.handleGeneralError(err)
 		}
 
-		seqEnd, filter, err = (*vbTasks)[0].ToDcpNozzleTask(manifest)
+		topTask, _, unlockVbTasks := vbTasks.GetRO(0)
+		seqEnd, filter, err = topTask.ToDcpNozzleTask(manifest)
+		unlockVbTasks()
+		unlockSpecificVBTasksMap()
+
 		if err != nil {
 			err = fmt.Errorf("Error converting VBTask to DCP Nozzle Task %v", err)
 			return err
@@ -1950,7 +1974,7 @@ func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
 }
 
 func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
-	if len(dcp.specificVBTasks) == 0 {
+	if dcp.specificVBTasks.IsNil() || dcp.specificVBTasks.Len() == 0 {
 		// Main pipeline, no need to get high Seqno
 		return nil
 	}
@@ -1961,9 +1985,10 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 		return nil
 	}
 
-	topTasks := dcp.specificVBTasks.GetTopTasksOnly()
+	topTasks := dcp.specificVBTasks.GetTopTasksOnlyClone()
 	for _, vbno := range vbnos {
-		_, exists := topTasks[vbno]
+		_, exists, unlockFunc := topTasks.Get(vbno, false)
+		unlockFunc()
 		if !exists {
 			return fmt.Errorf("Requesting vb %v but specific VBTasks does not contain such VB", vbno)
 		}

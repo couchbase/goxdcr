@@ -108,14 +108,14 @@ const (
 	Subset  TasksMapType = iota
 )
 
-func constructDummyTasksMap() metadata.VBTasksMapType {
+func constructDummyTasksMap() *metadata.VBTasksMapType {
 	return constructDummyTasksMapCustom(FullSet)
 }
 
 const CustomScopeName = "CustomScope"
 const CustomCollectionName = "CustomCollection"
 
-func constructDummyTasksMapCustom(set TasksMapType) metadata.VBTasksMapType {
+func constructDummyTasksMapCustom(set TasksMapType) *metadata.VBTasksMapType {
 	namespaceMapping := make(metadata.CollectionNamespaceMapping)
 	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
 	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
@@ -141,10 +141,10 @@ func constructDummyTasksMapCustom(set TasksMapType) metadata.VBTasksMapType {
 		vb0Task1 = metadata.NewBackfillTask(ts1, []metadata.CollectionNamespaceMapping{nonDefaultNamespaceMapping})
 	}
 
-	var vb0Tasks metadata.BackfillTasks
-	vb0Tasks = append(vb0Tasks, vb0Task0)
+	vb0Tasks := metadata.NewBackfillTasks()
+	vb0Tasks.List = append(vb0Tasks.List, vb0Task0)
 	if set == FullSet {
-		vb0Tasks = append(vb0Tasks, vb0Task1)
+		vb0Tasks.List = append(vb0Tasks.List, vb0Task1)
 	}
 
 	ts2 := &metadata.BackfillVBTimestamps{
@@ -153,21 +153,21 @@ func constructDummyTasksMapCustom(set TasksMapType) metadata.VBTasksMapType {
 	}
 	vb1Task0 := metadata.NewBackfillTask(ts2, []metadata.CollectionNamespaceMapping{namespaceMapping})
 
-	var vb1Tasks metadata.BackfillTasks
-	vb1Tasks = append(vb1Tasks, vb1Task0)
+	vb1Tasks := metadata.NewBackfillTasks()
+	vb1Tasks.List = append(vb1Tasks.List, vb1Task0)
 
 	vbTasksMap := make(map[uint16]*metadata.BackfillTasks)
 	vbTasksMap[0] = &vb0Tasks
 	vbTasksMap[1] = &vb1Tasks
 
-	return vbTasksMap
+	return metadata.NewVBTasksMapWithMTasks(vbTasksMap)
 }
 
 func createValidateCollectionNsMappingsDocBytes(internalId string, setType TasksMapType) []byte {
 	// As part of adding, upsert should be done for all the VBtaskmaps
 	dummyVBTaskMap := constructDummyTasksMapCustom(setType)
 	shaToColMap := make(metadata.ShaToCollectionNamespaceMap)
-	for _, tasks := range dummyVBTaskMap {
+	for _, tasks := range dummyVBTaskMap.VBTasksMap {
 		oneMap := tasks.GetAllCollectionNamespaceMappings()
 		for sha, mapping := range oneMap {
 			shaToColMap[sha] = mapping
@@ -229,15 +229,17 @@ func TestBackfillReplSvc(t *testing.T) {
 	assert.True(checkSpec.SameAs(backfillSpec))
 
 	// Ensure that the backfillSpec loaded from service is not empty, thus validating the checkSpec.SameAs above
-	assert.NotEqual(0, len(checkSpec.VBTasksMap))
-	for _, backfillTasks := range checkSpec.VBTasksMap {
-		for _, backfillTask := range *backfillTasks {
+	assert.NotEqual(0, checkSpec.VBTasksMap.Len())
+	for _, backfillTasks := range checkSpec.VBTasksMap.VBTasksMap {
+		for _, backfillTask := range backfillTasks.List {
 			assert.NotNil(backfillTask.Timestamps)
 			assert.False(backfillTask.Timestamps.StartingTimestamp.SameAs(backfillTask.Timestamps.EndingTimestamp))
-			assert.NotEqual(0, len(backfillTask.RequestedCollections()))
-			for _, collectionNamespaceList := range backfillTask.RequestedCollections() {
+			assert.NotEqual(0, backfillTask.RequestedCollectionsLen())
+			requestedCollections, unlockFunc := backfillTask.RequestedCollections(false)
+			for _, collectionNamespaceList := range requestedCollections {
 				assert.NotEqual(0, collectionNamespaceList)
 			}
+			unlockFunc()
 		}
 	}
 
@@ -382,7 +384,7 @@ func setupMetakvUnrecoverableErr(metadataSvc *service_def.MetadataSvc, specId, i
 
 	// Set should be an empty doc - since the recovery effort is trying to have a clean slate
 	backfillReplKey := getBackfillReplicationDocKeyFunc(specId)
-	emptyBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, make(metadata.VBTasksMapType), nil)
+	emptyBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, metadata.NewVBTasksMap(), nil)
 	marshalledData, err := json.Marshal(emptyBackfillSpec)
 	if err != nil {
 		panic(err)

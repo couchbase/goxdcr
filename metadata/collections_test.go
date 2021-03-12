@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/couchbase/goxdcr/base"
@@ -1120,7 +1121,7 @@ func TestPerfWeirdMappingChange(t *testing.T) {
 	assert.Equal(2, len(removed))
 
 	var testBackfillSpec BackfillReplicationSpec
-	testBackfillSpec.VBTasksMap = make(VBTasksMapType)
+	testBackfillSpec.VBTasksMap = NewVBTasksMap()
 
 	testBackfillSpec.VBTasksMap.RemoveNamespaceMappings(removed)
 	assert.False(testBackfillSpec.VBTasksMap.ContainsAtLeastOneTask())
@@ -1137,7 +1138,10 @@ func TestPerfWeirdMappingChange(t *testing.T) {
 	checkMapping := testBackfillSpec.VBTasksMap.GetAllCollectionNamespaceMappings()
 	assert.Equal(1, len(checkMapping))
 
-	_, filter, err := ((*testBackfillSpec.VBTasksMap[0])[0]).ToDcpNozzleTask(&provisionedManifest)
+	actualTask, exists, unlockFunc := testBackfillSpec.VBTasksMap.VBTasksMap[0].GetRO(0)
+	assert.True(exists)
+	_, filter, err := actualTask.ToDcpNozzleTask(&provisionedManifest)
+	unlockFunc()
 	assert.Nil(err)
 	assert.False(filter.UseManifestUid)
 	assert.Equal(1, len(filter.CollectionsList))
@@ -1148,9 +1152,9 @@ func TestGetDeduplicatedSourceNamespaces(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestGetDeduplicatedSourceNamespaces =================")
 	assert := assert.New(t)
 
-	testMap := make(VBTasksMapType)
+	testMap := NewVBTasksMap()
 	for i := uint16(1); i < uint16(10); i++ {
-		backfillTasks := &BackfillTasks{}
+		backfillTasks := NewBackfillTasks()
 		for j := uint16(0); j < i; j++ {
 			var namespaceMapping []CollectionNamespaceMapping
 			oneNamespace := make(CollectionNamespaceMapping)
@@ -1169,10 +1173,11 @@ func TestGetDeduplicatedSourceNamespaces(t *testing.T) {
 				Timestamps:               &timestamps,
 				requestedCollections_:    namespaceMapping,
 				RequestedCollectionsShas: []string{"test"},
+				mutex:                    &sync.RWMutex{},
 			}
-			*backfillTasks = append(*backfillTasks, backfillTask)
+			backfillTasks.List = append(backfillTasks.List, backfillTask)
 		}
-		testMap[i] = backfillTasks
+		testMap.VBTasksMap[i] = &backfillTasks
 	}
 
 	assert.NotNil(testMap)

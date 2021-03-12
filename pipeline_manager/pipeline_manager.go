@@ -941,7 +941,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 		errMap["pipelineMgr.StartBackfillPipeline"] = err
 		return errMap
 	}
-	if len(backfillSpec.VBTasksMap) == 0 {
+	if backfillSpec.VBTasksMap.Len() == 0 {
 		errMap["pipelineMgr.StartBackfillPipeline"] = ErrorBackfillSpecHasNoVBTasks
 		return errMap
 	}
@@ -964,7 +964,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	// (DCP will let Backfill Request Handler will know when each VB is done so the top task for the vb is removed)
 	// And if there are more VBTasks, then another new pipeline will be launched start to handle the next sets of tasks
 	bpCustomSettingMap := make(map[string]interface{})
-	bpCustomSettingMap[parts.DCP_VBTasksMap] = backfillSpec.VBTasksMap.Clone()
+	bpCustomSettingMap[parts.DCP_VBTasksMap] = backfillSpec.VBTasksMap
 	rep_status.SetCustomSettings(bpCustomSettingMap)
 
 	pipelineMgr.logger.Infof("Backfill Pipeline %v is constructed. Starting it.", bp.InstanceId())

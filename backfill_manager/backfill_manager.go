@@ -506,8 +506,8 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			// 1. Explicit mapping changed and some backfill tasks mappings are no longer required
 			// 2. Both Implicit and Explicit mapping: if source collections that were part of the backfill tasks have
 			//    been deleted, then the top tasks' mappings will be modified
-			oldTopTasks := oldSpec.VBTasksMap.GetTopTasksOnly()
-			newTopTasks := newSpec.VBTasksMap.GetTopTasksOnly()
+			oldTopTasks := oldSpec.VBTasksMap.GetTopTasksOnlyClone()
+			newTopTasks := newSpec.VBTasksMap.GetTopTasksOnlyClone()
 			oldNamespaceMappings := oldTopTasks.GetAllCollectionNamespaceMappings()
 			newNamespaceMappings := newTopTasks.GetAllCollectionNamespaceMappings()
 			if !oldNamespaceMappings.SameAs(newNamespaceMappings) && newSpec.ReplicationSpec().Settings.Active {

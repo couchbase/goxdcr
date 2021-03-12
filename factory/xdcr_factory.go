@@ -1015,21 +1015,21 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 	}
 
 	var checkIfNeedOso bool
-	var osoCheckMap metadata.VBTasksMapType
+	var osoCheckMap *metadata.VBTasksMapType
 	vbTasksMap, vbTasksMapExists := settings[parts.DCP_VBTasksMap]
 	if vbTasksMapExists {
-		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(metadata.VBTasksMapType).Clone()
+		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(*metadata.VBTasksMapType)
 		checkIfNeedOso = true
-		osoCheckMap = vbTasksMap.(metadata.VBTasksMapType)
+		osoCheckMap = vbTasksMap.(*metadata.VBTasksMapType)
 	}
 
 	modes := repSettings.GetCollectionModes()
 	if modes.IsMigrationOn() && !vbTasksMapExists {
 		// Main pipeline that requires DCP to run a gomemcached filter of just the default collection
 		vbTasksMap = createMigrationVBTasksMap()
-		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(metadata.VBTasksMapType).Clone()
+		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(*metadata.VBTasksMapType)
 		checkIfNeedOso = true
-		osoCheckMap = vbTasksMap.(metadata.VBTasksMapType)
+		osoCheckMap = vbTasksMap.(*metadata.VBTasksMapType)
 	}
 
 	if !modes.IsOsoOn() {
@@ -1040,7 +1040,7 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 		// Oso would only work if DCP is serving a single collection, and has to start from seqno 0
 		// Thus, check the backfill tasks and ensure that it only contains one source collections
 		shaToCollectionsMap := osoCheckMap.GetAllCollectionNamespaceMappings()
-		vbTasksMap := osoCheckMap.GetTopTasksOnly()
+		vbTasksMap := osoCheckMap.GetTopTasksOnlyClone()
 		if len(shaToCollectionsMap) == 1 && vbTasksMap.AllStartsWithSeqno0() {
 			dcpNozzleSettings[parts.DCP_EnableOSO] = true
 		}
@@ -1048,8 +1048,7 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 }
 
 func createMigrationVBTasksMap() interface{} {
-	//type VBTasksMapType map[uint16]*BackfillTasks
-	migrationTasksMap := make(metadata.VBTasksMapType)
+	migrationTasksMap := metadata.NewVBTasksMap()
 	// DCP will do its own filtering based on the VBs it owns
 	for vbno := uint16(0); vbno < base.NumberOfVbs; vbno++ {
 		startTs := &base.VBTimestamp{
@@ -1068,7 +1067,8 @@ func createMigrationVBTasksMap() interface{} {
 			EndingTimestamp:   endTs,
 		}, []metadata.CollectionNamespaceMapping{defaultMigrationMapping})
 
-		migrationTasksMap[vbno] = &metadata.BackfillTasks{task}
+		newTasks := metadata.NewBackfillTasksWithTask(task)
+		migrationTasksMap.VBTasksMap[vbno] = &newTasks
 	}
 
 	return migrationTasksMap
@@ -1282,7 +1282,7 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 	s[service_def.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
 	vbTasksMap, ok := settings[parts.DCP_VBTasksMap]
 	if ok {
-		s[parts.DCP_VBTasksMap] = vbTasksMap.(metadata.VBTasksMapType).Clone()
+		s[parts.DCP_VBTasksMap] = vbTasksMap.(*metadata.VBTasksMapType)
 	}
 	return s, nil
 }

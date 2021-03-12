@@ -216,6 +216,7 @@ func (b *BackfillReplicationService) constructBackfillSpec(value []byte, rev int
 		return nil, err
 	}
 
+	spec.PostUnmarshalInit()
 	return spec, nil
 }
 
@@ -425,7 +426,8 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 	mySortedVBs := base.SortUint16List(myVBs)
 
 	consolidatedMap := make(metadata.ShaToCollectionNamespaceMap)
-	for vb, tasks := range spec.VBTasksMap {
+	spec.VBTasksMap.GetLock().RLock()
+	for vb, tasks := range spec.VBTasksMap.VBTasksMap {
 		_, isMyVB := base.SearchVBInSortedList(vb, mySortedVBs)
 		if !isMyVB {
 			continue
@@ -437,6 +439,7 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 			}
 		}
 	}
+	spec.VBTasksMap.GetLock().RUnlock()
 
 	incrementer, err := b.GetIncrementerFunc(spec.Id)
 	if err != nil {
@@ -508,21 +511,25 @@ func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec 
 	}
 	sortedVbs := base.SortUint16List(vbsList)
 
-	subsetBackfillTasks := make(metadata.VBTasksMapType)
-	for vb, tasks := range spec.VBTasksMap {
+	subsetBackfillTasks := metadata.NewVBTasksMap()
+	spec.VBTasksMap.GetLock().RLock()
+	for vb, tasks := range spec.VBTasksMap.VBTasksMap {
 		_, isInList := base.SearchVBInSortedList(vb, sortedVbs)
 		if isInList {
-			subsetBackfillTasks[vb] = tasks
+			subsetBackfillTasks.VBTasksMap[vb] = tasks.Clone()
 		}
 	}
+	spec.VBTasksMap.GetLock().RUnlock()
 
-	olderSubsetBackfillTasks := make(metadata.VBTasksMapType)
-	for vb, tasks := range oldSpec.VBTasksMap {
+	olderSubsetBackfillTasks := metadata.NewVBTasksMap()
+	oldSpec.VBTasksMap.GetLock().RLock()
+	for vb, tasks := range oldSpec.VBTasksMap.VBTasksMap {
 		_, isInList := base.SearchVBInSortedList(vb, sortedVbs)
 		if isInList {
-			olderSubsetBackfillTasks[vb] = tasks
+			olderSubsetBackfillTasks.VBTasksMap[vb] = tasks.Clone()
 		}
 	}
+	oldSpec.VBTasksMap.GetLock().RUnlock()
 
 	newShaToColMapping := subsetBackfillTasks.GetAllCollectionNamespaceMappings()
 	oldShaToColMapping := olderSubsetBackfillTasks.GetAllCollectionNamespaceMappings()
@@ -744,7 +751,7 @@ func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 			}
 
 			// Ensure that backfillspecs are empty so raising the complete backfill will become the first task
-			emptyBackfillSpec := metadata.NewBackfillReplicationSpec(backfillSpecId, internalId, make(metadata.VBTasksMapType), nil)
+			emptyBackfillSpec := metadata.NewBackfillReplicationSpec(backfillSpecId, internalId, metadata.NewVBTasksMap(), nil)
 			marshalledData, err := json.Marshal(emptyBackfillSpec)
 			if err != nil {
 				b.logger.Warnf("handleUnrecoverableBackfills received err %v when marshalling empty backfill spec. Backfill may not raise correctly", backfillSpecId)

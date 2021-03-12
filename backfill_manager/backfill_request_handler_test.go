@@ -246,12 +246,12 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	// Pretend backfill pipeline started
 	assert.Nil(rh.Attach(backfillPipeline))
 
-	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
-	assert.Equal(2, len(*(rh.cachedBackfillSpec.VBTasksMap[0])))
+	assert.Equal(1024, rh.cachedBackfillSpec.VBTasksMap.Len())
+	assert.Equal(2, rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len())
 	assert.Nil(rh.HandleVBTaskDone(0))
 	time.Sleep(100 * time.Millisecond)
-	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
-	assert.Equal(1, len(*(rh.cachedBackfillSpec.VBTasksMap[0])))
+	assert.Equal(1024, rh.cachedBackfillSpec.VBTasksMap.Len())
+	assert.Equal(1, rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len())
 
 	endTime := time.Now()
 
@@ -309,7 +309,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	assert.Nil(err1)
 	err2 := <-reqAndResp.PersistResponse
 	assert.Nil(err2)
-	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+	assert.Equal(1024, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	// Test has 1024 VB's
 	var handleResponses [1024]chan error
@@ -361,7 +361,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	assert.Nil(err1)
 	err2 = <-reqAndResp.PersistResponse
 	assert.Nil(err2)
-	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+	assert.Equal(1024, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	assert.Equal(0, setCount)
 	assert.Equal(2, addCount)
@@ -414,14 +414,14 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	pair.Removed = metadata.CollectionNamespaceMapping{}
 	err = rh.HandleBackfillRequest(pair)
 	assert.Nil(err)
-	assert.Equal(1024, len(rh.cachedBackfillSpec.VBTasksMap))
+	assert.Equal(1024, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	// Removed should cause the whole thing to be removed
 	pair.Added = metadata.CollectionNamespaceMapping{}
 	pair.Removed = requestMapping
 	err = rh.HandleBackfillRequest(pair)
 	assert.Nil(err)
-	assert.Equal(0, len(rh.cachedBackfillSpec.VBTasksMap))
+	assert.Equal(0, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	var info parts.CollectionsRoutingInfo
 	info.ExplicitBackfillMap = pair
