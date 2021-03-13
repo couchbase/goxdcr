@@ -1233,11 +1233,7 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 			}
 		}
 	case explicitRuleStringTooLong:
-		if vStr, ok := v.(string); ok && vStr == "" {
-			return fmt.Errorf("Either %v or %v contains a name that is too long to be valid", k, vStr)
-		} else {
-			return fmt.Errorf("%v contains a name that is too long to be valid", v)
-		}
+		return ErrorLengthExceeded
 	default:
 		panic(fmt.Sprintf("Unhandled rule type: %v", ruleType))
 	}
