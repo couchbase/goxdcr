@@ -109,6 +109,9 @@ function runTestCase {
 
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 
+	# Validate brokenmap exists
+	validateBrokenMapExists "C1"
+
 	# Then re-setup the implicit matching that matches
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 	setupTopologies
@@ -127,6 +130,7 @@ function runTestCase {
 	# After running I/O, router should raise a repaired message
 	sleep 10
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
+	validateBrokenMapDoesNotExist "C1"
 
 	# Under normal I/O load, these should happen closely together
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2))

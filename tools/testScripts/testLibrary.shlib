@@ -478,3 +478,56 @@ function checkInternalSetting {
 		exit 1
 	fi
 }
+
+function getErrorListForMainPipeline {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	local output
+	local mainPipelineErrList
+
+	output=$(getReplicationInfos $port)
+	if ((!$? == 0)); then
+		echo ""
+		return 1
+	fi
+
+	if (($(echo "$output" | jq 'length') > 2)); then
+		echo "Not valid replicationInfos - seeing more than 2 output"
+		return 1
+	fi
+
+	mainPipelineErrList=$(echo "$output" | jq '.[0]' | jq '.ErrorList')
+	echo "$mainPipelineErrList"
+}
+
+function validateBrokenMapExists {
+	local errList
+	local cluster=$1
+
+	errList=$(getErrorListForMainPipeline $cluster)
+	if ((!$? == 0)); then
+		echo "Issue getting error list"
+		exit 1
+	fi
+
+	if (($(echo "$errList" | jq 'length') == 0)); then
+		echo "See no error list"
+		exit 1
+	fi
+}
+
+function validateBrokenMapDoesNotExist {
+	local errList
+	local cluster=$1
+
+	errList=$(getErrorListForMainPipeline $cluster)
+	if ((!$? == 0)); then
+		echo "Issue getting error list"
+		exit 1
+	fi
+
+	if (($(echo "$errList" | jq 'length') > 0)); then
+		echo "Error list exists when it should not"
+		exit 1
+	fi
+}

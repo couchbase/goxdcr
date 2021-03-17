@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
@@ -2265,4 +2267,279 @@ func (c CollectionsMappingRulesType) GetOutputMapping(pair CollectionsManifestPa
 	}
 
 	return outNamespace, nil
+}
+
+type PipelineEventBrokenMap struct {
+	// Each pipeline can have one single broken map
+	cachedBrokenMapMtx     sync.RWMutex
+	cachedBrokenMap        CollectionNamespaceMapping
+	cachedBrokenMapUpdated bool
+	// Indexes
+	cachedBrokenMapSrcEventIdIdx   map[string]int64
+	cachedBrokenMapSrcNamespaceIdx CollectionNamespaceMappingIdx
+	cachedBrokenMapSrcScopeIdx     map[string]int64
+}
+
+func NewPipelineEventBrokenMap() PipelineEventBrokenMap {
+	ret := PipelineEventBrokenMap{
+		cachedBrokenMapMtx:             sync.RWMutex{},
+		cachedBrokenMap:                make(CollectionNamespaceMapping),
+		cachedBrokenMapUpdated:         false,
+		cachedBrokenMapSrcEventIdIdx:   make(map[string]int64),
+		cachedBrokenMapSrcNamespaceIdx: make(CollectionNamespaceMappingIdx),
+		cachedBrokenMapSrcScopeIdx:     make(map[string]int64),
+	}
+	return ret
+}
+
+func (p *PipelineEventBrokenMap) LoadLatestBrokenMap(roBrokenMap CollectionNamespaceMapping) {
+	var needToLoad bool
+	p.cachedBrokenMapMtx.RLock()
+	if !p.cachedBrokenMap.IsSame(roBrokenMap) {
+		needToLoad = true
+	}
+	p.cachedBrokenMapMtx.RUnlock()
+
+	if needToLoad {
+		p.cachedBrokenMapMtx.Lock()
+		p.cachedBrokenMap = roBrokenMap.Clone()
+		p.cachedBrokenMapSrcNamespaceIdx = p.cachedBrokenMap.CreateLookupIndex()
+		p.cachedBrokenMapUpdated = true
+		p.cachedBrokenMapMtx.Unlock()
+	}
+}
+
+func (p *PipelineEventBrokenMap) NeedsToUpdate() bool {
+	p.cachedBrokenMapMtx.RLock()
+	needToUpdate := p.cachedBrokenMapUpdated
+	p.cachedBrokenMapMtx.RUnlock()
+	return needToUpdate
+}
+
+func (p *PipelineEventBrokenMap) GetBrokenMapRO() (CollectionNamespaceMapping, func()) {
+	p.cachedBrokenMapMtx.RLock()
+	doneFunc := func() {
+		p.cachedBrokenMapMtx.RUnlock()
+	}
+
+	return p.cachedBrokenMap, doneFunc
+}
+
+func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *int64) bool {
+	// WLock because we need to do updates
+	// Note locking order -> cachedBrokenMap first then event
+	p.cachedBrokenMapMtx.Lock()
+	defer p.cachedBrokenMapMtx.Unlock()
+
+	if !event.EventExtras.IsNil() && event.EventExtras.IsEmpty() {
+		srcIndex, scopeIndex := p.loadEmptyEvent(event, idWell)
+		eventIsEmpty := len(event.EventExtras.EventsMap) == 0
+		if !eventIsEmpty {
+			p.cachedBrokenMapSrcEventIdIdx = srcIndex
+			p.cachedBrokenMapSrcScopeIdx = scopeIndex
+		} else {
+			p.recreateNewSrcIndexes()
+		}
+		return eventIsEmpty
+	}
+
+	eventLock := event.EventExtras.GetRWLock()
+	eventLock.Lock()
+	defer eventLock.Unlock()
+
+	// First delete any mappings that no longer exist
+	eventCompiledBrokenMap := p.cleanUpObsoleteSourcesFromEventNoLock(event)
+
+	// Then add things that are missing into event
+	p.addMissingBrokenMappingIntoEventNoLock(event, idWell, eventCompiledBrokenMap)
+
+	eventIsEmpty := len(event.EventExtras.EventsMap) == 0
+
+	if eventIsEmpty {
+		p.recreateNewSrcIndexes()
+	} else {
+		p.updateEventIdIndexesNoLock(event)
+	}
+
+	return eventIsEmpty
+}
+
+func (p *PipelineEventBrokenMap) recreateNewSrcIndexes() {
+	p.cachedBrokenMapSrcScopeIdx = make(map[string]int64)
+	p.cachedBrokenMapSrcEventIdIdx = make(map[string]int64)
+}
+
+func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *base.EventInfo, idWell *int64, eventCompiledBrokenMap CollectionNamespaceMapping) {
+	added, _ := eventCompiledBrokenMap.Diff(p.cachedBrokenMap)
+	for srcNs, tgtList := range added {
+		scopeEventId, scopeEventExists := p.cachedBrokenMapSrcScopeIdx[srcNs.ScopeName]
+		var scopeEvent base.EventInfo
+		if !scopeEventExists {
+			scopeEvent = base.NewEventInfo()
+			scopeEvent.EventType = base.BrokenMappingInfoType
+			scopeEvent.EventId = atomic.AddInt64(idWell, 1)
+			scopeEvent.EventDesc = srcNs.ScopeName
+			event.EventExtras.EventsMap[scopeEvent.EventId] = scopeEvent
+			p.cachedBrokenMapSrcScopeIdx[srcNs.ScopeName] = scopeEvent.EventId
+		} else {
+			scopeEvent = event.EventExtras.EventsMap[scopeEventId].(base.EventInfo)
+		}
+		scopeEvent.EventExtras.GetRWLock().Lock()
+
+		srcEventId, srcExists := p.cachedBrokenMapSrcEventIdIdx[srcNs.ToIndexString()]
+		var srcEvent base.EventInfo
+		if !srcExists {
+			srcEvent = base.NewEventInfo()
+			srcEvent.EventType = base.BrokenMappingInfoType
+			srcEvent.EventId = atomic.AddInt64(idWell, 1)
+			srcEvent.EventDesc = srcNs.ToIndexString()
+			srcEvent.SetHint(srcNs)
+			scopeEvent.EventExtras.EventsMap[srcEvent.EventId] = srcEvent
+			p.cachedBrokenMapSrcEventIdIdx[srcNs.ToIndexString()] = srcEvent.EventId
+		} else {
+			srcEvent = scopeEvent.EventExtras.EventsMap[srcEventId].(base.EventInfo)
+		}
+		srcEvent.EventExtras.GetRWLock().Lock()
+		// At this point all the tgts here are missing
+		for _, tgtNs := range tgtList {
+			tgtEvent := base.NewEventInfo()
+			tgtEvent.EventId = atomic.AddInt64(idWell, 1)
+			tgtEvent.EventType = base.BrokenMappingInfoType
+			tgtEvent.EventDesc = tgtNs.ToIndexString()
+			tgtEvent.SetHint(tgtNs)
+			srcEvent.EventExtras.EventsMap[tgtEvent.EventId] = tgtEvent
+		}
+		srcEvent.EventExtras.GetRWLock().Unlock()
+
+		scopeEvent.EventExtras.GetRWLock().Unlock()
+	}
+}
+
+// Given the current broken map, and given an event, remove obsolete entries from event that are no longer present in
+// the current broken map. At the same time, return:
+// A compiled broken map that represents an intersection between the current brokenmap and the event broken map
+func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *base.EventInfo) CollectionNamespaceMapping {
+	eventCompiledBrokenMap := make(CollectionNamespaceMapping)
+	var scopeDelEventIds []int64
+
+	for wholeScopeEventId, wholeSrcScopeEventRaw := range event.EventExtras.EventsMap {
+		wholeSrcScopeEvent := wholeSrcScopeEventRaw.(base.EventInfo)
+		var wholeScopeStillExists bool
+		wholeSrcScopeEvent.EventExtras.GetRWLock().RLock()
+		for srcEventId, srcNsEventRaw := range wholeSrcScopeEvent.EventExtras.EventsMap {
+			srcNsEvent := srcNsEventRaw.(base.EventInfo)
+			srcNamespace := srcNsEvent.GetHint().(*SourceNamespace)
+			_, _, tgtList, srcExists := p.cachedBrokenMap.Get(srcNamespace.CollectionNamespace, p.cachedBrokenMapSrcNamespaceIdx)
+			if !srcExists {
+				// The whole source scope:collection no longer exists
+				delete(event.EventExtras.EventsMap, srcEventId)
+				delete(p.cachedBrokenMapSrcEventIdIdx, srcNamespace.ToIndexString())
+			} else {
+				// At least one collection still exists under this scope
+				wholeScopeStillExists = true
+				// check for non-existing targets
+				tgtLock := srcNsEvent.EventExtras.GetRWLock()
+				// TODO expensive - optimize this later
+				tgtLock.RLock()
+				for subEventId, tgtNsEventRaw := range srcNsEvent.EventExtras.EventsMap {
+					var found bool
+					tgtEvent := tgtNsEventRaw.(base.EventInfo)
+					var tgtNamespace *base.CollectionNamespace
+					for _, tgtNs := range tgtList {
+						tgtNamespace = tgtEvent.GetHint().(*base.CollectionNamespace)
+						if tgtNs.IsSameAs(*tgtNamespace) {
+							found = true
+							break
+						}
+					}
+
+					if !found {
+						tgtLock.RUnlock()
+						tgtLock.Lock()
+						delete(srcNsEvent.EventExtras.EventsMap, subEventId)
+						tgtLock.Unlock()
+						tgtLock.RLock()
+					} else {
+						eventCompiledBrokenMap.AddSingleSourceNsMapping(srcNamespace, tgtNamespace)
+					}
+				}
+				tgtLock.RUnlock()
+			}
+		}
+		if !wholeScopeStillExists {
+			scopeDelEventIds = append(scopeDelEventIds, wholeScopeEventId)
+			delete(p.cachedBrokenMapSrcScopeIdx, wholeSrcScopeEvent.EventDesc)
+		}
+		wholeSrcScopeEvent.EventExtras.GetRWLock().RUnlock()
+	}
+
+	for _, id := range scopeDelEventIds {
+		delete(event.EventExtras.EventsMap, id)
+	}
+
+	return eventCompiledBrokenMap
+}
+
+// Loads brokenmap into an empty event
+// Returns the indexes needed
+func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *int64) (map[string]int64, map[string]int64) {
+	srcEventIdx := make(map[string]int64)
+	scopeEventIdx := make(map[string]int64)
+
+	eventLock := event.EventExtras.GetRWLock()
+	eventLock.Lock()
+	var wholeScopeEventId int64
+	var exists bool
+	for srcNs, tgtList := range p.cachedBrokenMap {
+		wholeScopeEventId, exists = scopeEventIdx[srcNs.ScopeName]
+		if !exists {
+			// First create a eventID that tags the whole scope
+			wholeScopeEventId = atomic.AddInt64(idWell, 1)
+			newWholeScopeEvent := base.EventInfo{
+				EventId:     wholeScopeEventId,
+				EventType:   base.BrokenMappingInfoType,
+				EventDesc:   srcNs.ScopeName,
+				EventExtras: base.NewEventsMap(),
+			}
+			event.EventExtras.EventsMap[wholeScopeEventId] = newWholeScopeEvent
+			scopeEventIdx[srcNs.ScopeName] = wholeScopeEventId
+		}
+		wholeScopeEvent := event.EventExtras.EventsMap[wholeScopeEventId].(base.EventInfo)
+		wholeScopeEvent.EventExtras.GetRWLock().Lock()
+
+		// Then for each individual scope:col -> scopeT:colT, create individual events underneath
+		newSrcEventId := atomic.AddInt64(idWell, 1)
+		newSrcEventInfo := base.EventInfo{
+			EventId:     newSrcEventId,
+			EventType:   base.BrokenMappingInfoType,
+			EventDesc:   srcNs.ToIndexString(),
+			EventExtras: base.NewEventsMap(),
+		}
+		newSrcEventInfo.SetHint(srcNs)
+		newSrcEventInfo.EventExtras.GetRWLock().Lock()
+
+		// create the index
+		srcEventIdx[srcNs.ToIndexString()] = newSrcEventId
+
+		for _, tgtNs := range tgtList {
+			newTgtEventId := atomic.AddInt64(idWell, 1)
+			newTgtEvent := base.EventInfo{
+				EventId:     newTgtEventId,
+				EventType:   base.BrokenMappingInfoType,
+				EventDesc:   tgtNs.ToIndexString(),
+				EventExtras: base.EventsMap{},
+			}
+			newTgtEvent.SetHint(tgtNs)
+			newSrcEventInfo.EventExtras.EventsMap[newTgtEventId] = newTgtEvent
+		}
+		newSrcEventInfo.EventExtras.GetRWLock().Unlock()
+		wholeScopeEvent.EventExtras.EventsMap[newSrcEventId] = newSrcEventInfo
+		wholeScopeEvent.EventExtras.GetRWLock().Unlock()
+	}
+	eventLock.Unlock()
+	return srcEventIdx, scopeEventIdx
+}
+
+func (p *PipelineEventBrokenMap) updateEventIdIndexesNoLock(event *base.EventInfo) {
+
 }

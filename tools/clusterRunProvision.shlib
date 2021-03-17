@@ -1636,3 +1636,9 @@ function getReplicationSettingsInternal {
 	fi
 
 }
+
+function getReplicationInfos {
+	local port=$1
+
+	$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/pools/default/replicationInfos
+}

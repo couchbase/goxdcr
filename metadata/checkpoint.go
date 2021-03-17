@@ -54,7 +54,7 @@ type CheckpointRecord struct {
 	SourceManifestForDCP         uint64 `json:"source_manifest_dcp"`
 	SourceManifestForBackfillMgr uint64 `json:"source_manifest_backfill_mgr"`
 	TargetManifest               uint64 `json:"target_manifest"`
-	// BrokenMapping SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMapping above
+	// BrokenMappingInfoType SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMappingInfoType above
 	BrokenMappingSha256 string `json:"brokenCollectionsMapSha256"`
 	// Broken mapping (if any) associated with the checkpoint - this is populated automatically by checkpointsService
 	brokenMappings    CollectionNamespaceMapping
@@ -415,7 +415,7 @@ func TargetVBOpaqueUnmarshalError(data interface{}) error {
 func (ckpt_record *CheckpointRecord) String() string {
 	ckpt_record.brokenMappingsMtx.RLock()
 	defer ckpt_record.brokenMappingsMtx.RUnlock()
-	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMapping=%v}",
+	return fmt.Sprintf("{Failover_uuid=%v; Seqno=%v; Dcp_snapshot_seqno=%v; Dcp_snapshot_end_seqno=%v; Target_vb_opaque=%v; Commitopaque=%v; SourceManifestForDCP=%v; SourceManifestForBackfillMgr=%v; TargetManifest=%v; BrokenMappingSha=%v; BrokenMappingInfoType=%v}",
 		ckpt_record.Failover_uuid, ckpt_record.Seqno, ckpt_record.Dcp_snapshot_seqno, ckpt_record.Dcp_snapshot_end_seqno, ckpt_record.Target_vb_opaque,
 		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
 }

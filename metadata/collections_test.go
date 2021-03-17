@@ -1277,3 +1277,129 @@ func TestTwoToOneExplicitMapping(t *testing.T) {
 	assert.False(rule.IsExplicitMigrationRule())
 	assert.NotNil(rule.ValidateExplicitMapping())
 }
+
+func TestPipelineBrokenMapExport(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineBrokenMapExport =================")
+	defer fmt.Println("============== Test case end: TestPipelineBrokenMapExport =================")
+	assert := assert.New(t)
+
+	pipelineBm := NewPipelineEventBrokenMap()
+
+	ns1, _ := base.NewCollectionNamespaceFromString("s1.c1")
+	ns2, _ := base.NewCollectionNamespaceFromString("s1.c2")
+	ns3, _ := base.NewCollectionNamespaceFromString("s1.c3")
+	ns4, _ := base.NewCollectionNamespaceFromString("s2.c3")
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns1, &ns2)
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns1, &ns3)
+	pipelineBm.cachedBrokenMapSrcNamespaceIdx = pipelineBm.cachedBrokenMap.CreateLookupIndex()
+
+	var idWell int64
+	testEvent := base.NewEventInfo()
+	pipelineBm.ExportToEvent(&testEvent, &idWell)
+
+	assert.Len(pipelineBm.cachedBrokenMapSrcScopeIdx, 1)
+	assert.Len(pipelineBm.cachedBrokenMapSrcEventIdIdx, 1)
+
+	// Validate scope name exists
+	assert.Len(testEvent.EventExtras.EventsMap, 1)
+	for k, _ := range testEvent.EventExtras.EventsMap {
+		// Validate the map has 1 source namespace and 2 target namespaces
+		actualEvents := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		assert.Len(actualEvents.EventExtras.EventsMap, 1)
+		for k, _ := range actualEvents.EventExtras.EventsMap {
+			collectionEvent := actualEvents.EventExtras.EventsMap[k].(base.EventInfo)
+			assert.Len(collectionEvent.EventExtras.EventsMap, 2)
+		}
+	}
+
+	// Now pretend brokenmap s1.c1 -> s1.c3 got repaired
+	repairedBm := NewPipelineEventBrokenMap()
+	repairedBm.cachedBrokenMap.AddSingleMapping(&ns1, &ns2)
+	repairedBm.cachedBrokenMapSrcNamespaceIdx = repairedBm.cachedBrokenMap.CreateLookupIndex()
+	// Since the source namespaces remain the same (s1 and s1.c1), just copy them
+	// as this new creation of repairedBm shouldn't really happen in real life
+	repairedBm.cachedBrokenMapSrcScopeIdx = pipelineBm.cachedBrokenMapSrcScopeIdx
+	repairedBm.cachedBrokenMapSrcEventIdIdx = pipelineBm.cachedBrokenMapSrcEventIdIdx
+	repairedBm.ExportToEvent(&testEvent, &idWell)
+
+	// None of the sources cache should have changed
+	assert.Len(repairedBm.cachedBrokenMapSrcScopeIdx, 1)
+	assert.Len(repairedBm.cachedBrokenMapSrcEventIdIdx, 1)
+
+	// Validate the map has 1 source namespace and 1 target namespaces
+	assert.Len(testEvent.EventExtras.EventsMap, 1)
+	for k, _ := range testEvent.EventExtras.EventsMap {
+		subEvent := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		assert.Len(subEvent.EventExtras.EventsMap, 1)
+	}
+
+	// Now add new ones
+	assert.False(repairedBm.cachedBrokenMapUpdated)
+	newBm := repairedBm.cachedBrokenMap.Clone()
+	newBm.AddSingleMapping(&ns1, &ns4)
+	newBm.AddSingleMapping(&ns4, &ns1)
+	repairedBm.LoadLatestBrokenMap(newBm)
+	assert.True(repairedBm.cachedBrokenMapUpdated)
+
+	repairedBm.ExportToEvent(&testEvent, &idWell)
+
+	// Two scopes and two distinct source namespaces
+	assert.Len(pipelineBm.cachedBrokenMapSrcScopeIdx, 2)
+	assert.Len(pipelineBm.cachedBrokenMapSrcEventIdIdx, 2)
+
+	// testEvent top level has two scope keys, one for s1 and one for s2
+	assert.Len(testEvent.EventExtras.EventsMap, 2)
+
+	for k, _ := range testEvent.EventExtras.EventsMap {
+		testEventInner := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		// One is s1.c1 and one is s2.c3. Either one lives independently
+		assert.Len(testEventInner.EventExtras.EventsMap, 1)
+		for k, srcEventRaw := range testEventInner.EventExtras.EventsMap {
+			srcEvent := srcEventRaw.(base.EventInfo)
+			subEvent := testEventInner.EventExtras.EventsMap[k].(base.EventInfo)
+			if srcEvent.EventDesc == "s1.c1" {
+				assert.Len(subEvent.EventExtras.EventsMap, 2)
+			} else {
+				assert.Len(subEvent.EventExtras.EventsMap, 1)
+			}
+		}
+	}
+
+	// Test deleting s2.c3
+	delMap := make(CollectionNamespaceMapping)
+	delMap.AddSingleMapping(&ns4, &ns1)
+	delMap.AddSingleMapping(&ns1, &ns2)
+	repairedBm.cachedBrokenMap = repairedBm.cachedBrokenMap.Delete(delMap)
+
+	repairedBm.ExportToEvent(&testEvent, &idWell)
+
+	// indexes should be updated
+	assert.Len(pipelineBm.cachedBrokenMapSrcScopeIdx, 1)
+	assert.Len(pipelineBm.cachedBrokenMapSrcEventIdIdx, 1)
+
+	// testEvent top level has one scope keys, one for s1
+	assert.Len(testEvent.EventExtras.EventsMap, 1)
+
+	// Should have one left
+	for k, _ := range testEvent.EventExtras.EventsMap {
+		testEventInner := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		// should have only one left of s1.c1 -> s2.c3
+		assert.Len(testEventInner.EventExtras.EventsMap, 1)
+		for k, srcEventRaw := range testEventInner.EventExtras.EventsMap {
+			srcEvent := srcEventRaw.(base.EventInfo)
+			subEvent := testEventInner.EventExtras.EventsMap[k].(base.EventInfo)
+			assert.Equal("s1.c1", srcEvent.EventDesc)
+			assert.Len(subEvent.EventExtras.EventsMap, 1)
+		}
+	}
+
+	// Try deleting everything now
+	delMap = make(CollectionNamespaceMapping)
+	delMap.AddSingleMapping(&ns1, &ns4)
+	repairedBm.cachedBrokenMap = repairedBm.cachedBrokenMap.Delete(delMap)
+	repairedBm.ExportToEvent(&testEvent, &idWell)
+
+	assert.Len(pipelineBm.cachedBrokenMapSrcScopeIdx, 0)
+	assert.Len(pipelineBm.cachedBrokenMapSrcEventIdIdx, 0)
+	assert.Len(testEvent.EventExtras.EventsMap, 0)
+}

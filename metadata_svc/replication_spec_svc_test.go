@@ -109,9 +109,7 @@ func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService,
 
 	pipelineMock.On("SetPipelineStopCallback", mock.Anything).Return(nil)
 
-	pipelineMgr := pipeline_manager.NewPipelineManager(pipelineMock, replSpecSvc, xdcrTopologyMock,
-		remoteClusterMock, clusterInfoSvc, checkPointsSvc,
-		uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc)
+	pipelineMgr := pipeline_manager.NewPipelineManager(pipelineMock, replSpecSvc, xdcrTopologyMock, remoteClusterMock, clusterInfoSvc, checkPointsSvc, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil)
 
 	testPipeline := &common.Pipeline{}
 	return pipelineMgr, pipelineMock, checkPointsSvc, testPipeline

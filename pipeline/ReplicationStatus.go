@@ -105,12 +105,14 @@ type ReplicationStatusIface interface {
 	SetCustomSettings(customSettings map[string]interface{})
 	ClearCustomSetting(settingsKey string)
 	ClearTemporaryCustomSettings()
+	GetEventsManager() PipelineEventsManager
+	PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string)
 }
 
 type ReplicationStatus struct {
 	pipeline_           common.Pipeline
 	backfillPipeline_   common.Pipeline
-	err_list            PipelineErrorArray
+	err_list            PipelineErrorArray // a.k.a. high priority events
 	progress            string
 	oldProgress         string
 	backfillProgress    string
@@ -126,9 +128,17 @@ type ReplicationStatus struct {
 	// useful when replication is paused, when it can be compared with the current vb_list to determine
 	// whether topology change has occured on source
 	vb_list []uint16
+
+	eventIdWell   *int64
+	eventsManager PipelineEventsManager
 }
 
-func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger) *ReplicationStatus {
+func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger, eventIdWell *int64) *ReplicationStatus {
+	if eventIdWell == nil {
+		idWell := int64(-1)
+		eventIdWell = &idWell
+	}
+
 	rep_status := &ReplicationStatus{specId: specId,
 		pipeline_:      nil,
 		logger:         logger,
@@ -136,7 +146,10 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 		spec_getter:    spec_getter,
 		lock:           &sync.RWMutex{},
 		customSettings: make(map[string]interface{}),
-		progress:       ""}
+		progress:       "",
+		eventIdWell:    eventIdWell,
+		eventsManager:  NewPipelineEventsMgr(eventIdWell, specId, spec_getter),
+	}
 
 	rep_status.Publish(false)
 	return rep_status
@@ -488,6 +501,7 @@ func (rs *ReplicationStatus) getSpecSettingsMap() map[string]interface{} {
 	}
 }
 
+// Errors are essentially high priority events
 func (rs *ReplicationStatus) Errors() PipelineErrorArray {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
@@ -572,4 +586,37 @@ func (rs *ReplicationStatus) GetSpecInternalId() string {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	return rs.specInternalId
+}
+
+func (rs *ReplicationStatus) GetEventsManager() PipelineEventsManager {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+
+	return rs.eventsManager
+}
+
+// Note - no concurrency allowed for replInfo
+func (rs *ReplicationStatus) PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string) {
+	// First populate the legacy errors
+	errs := rs.Errors()
+	if len(errs) > 0 {
+		for _, pipeline_error := range errs {
+			if bypassUIErrorCodes(pipeline_error.ErrMsg) {
+				continue
+			}
+			err_msg := processErrorMsgForUI(pipeline_error.ErrMsg)
+			errInfo := base.NewErrorInfo(pipeline_error.Timestamp.UnixNano(), err_msg, rs.eventIdWell)
+			(*replInfo).ErrorList = append((*replInfo).ErrorList, errInfo)
+		}
+	}
+
+	// Then populate the non-error based events
+	eventsList := rs.GetEventsManager().GetCurrentEvents()
+	eventsList.Mutex.RLock()
+	defer eventsList.Mutex.RUnlock()
+
+	for i, event := range eventsList.EventInfos {
+		errInfoFromReplInfo := base.NewErrorInfoFromEventInfo(event, eventsList.TimeInfos[i])
+		replInfo.ErrorList = append(replInfo.ErrorList, errInfoFromReplInfo)
+	}
 }

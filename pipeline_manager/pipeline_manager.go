@@ -60,6 +60,8 @@ type PipelineManager struct {
 	logger     *log.CommonLogger
 	serializer PipelineOpSerializerIface
 	utils      utilities.UtilsIface
+
+	eventIdWell *int64
 }
 
 // External APIs
@@ -126,10 +128,12 @@ type PipelineMgrBackfillIface interface {
 // Global ptr, should slowly get rid of refences to this global
 var pipeline_mgr *PipelineManager
 
-func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
-	uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc) *PipelineManager {
+func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, eventIdWell *int64) *PipelineManager {
+	if eventIdWell == nil {
+		// Possible for unit test
+		eventId := int64(-1)
+		eventIdWell = &eventId
+	}
 
 	pipelineMgrRetVar := &PipelineManager{
 		pipeline_factory:       factory,
@@ -143,6 +147,7 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		utils:                  utilsIn,
 		collectionsManifestSvc: collectionsManifestSvc,
 		backfillReplSvc:        backfillReplSvc,
+		eventIdWell:            eventIdWell,
 	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constructed")
 
@@ -771,7 +776,7 @@ func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, c
 		return repStatus, nil
 	} else {
 		var retErr error
-		repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger)
+		repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger, pipelineMgr.eventIdWell)
 		pipelineMgr.repl_spec_svc.SetDerivedObj(topic, repStatus)
 		pipelineMgr.logger.Infof("ReplicationStatus is created and set with %v\n", topic)
 		if repStatus.Updater() != nil {

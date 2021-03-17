@@ -93,10 +93,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 
 	pipelineMock.On("SetPipelineStopCallback", mock.Anything).Return(nil)
 
-	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock,
-		remoteClusterMock, clusterInfoSvc, nil, /*checkpoint_svc*/
-		uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc,
-		backfillReplSvc)
+	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock, clusterInfoSvc, nil, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil)
 
 	// Some things needed for pipelinemgr
 	testTopic := "testTopic"
@@ -121,7 +118,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	testReplicationSpec := &metadata.ReplicationSpecification{Id: testTopic, Settings: testReplicationSettings, Revision: 1}
 
 	specGetterFxLiteral := func(specId string) (*metadata.ReplicationSpecification, error) { return testReplicationSpec, nil }
-	testReplicationStatus := replicationStatus.NewReplicationStatus(testTopic, specGetterFxLiteral, testLogger)
+	testReplicationStatus := replicationStatus.NewReplicationStatus(testTopic, specGetterFxLiteral, testLogger, nil)
 
 	testRepairer = newPipelineUpdater(testTopic, 0 /*retry_interval*/, nil, /*cur_err*/
 		testReplicationStatus, testLogger, pipelineMgr)

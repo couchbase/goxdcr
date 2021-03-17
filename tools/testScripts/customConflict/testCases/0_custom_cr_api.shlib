@@ -7,27 +7,27 @@
 # licenses/APL2.txt.
 
 function ccrReplicationSettings {
-    local pruningWindow
-    local setting="hlvPruningWindowSec"
-    local value=10
-    echo "Get replication setting for $setting"
-    setReplicationSettings "C1" "CCR1" "C2" "CCR2" "$setting=$value"
-    pruningWindow=`getReplicationSettings "C1" "CCR1" "C2" "CCR2" | jq .$setting`
-    if [[ $pruningWindow != $value ]]; then
-        echo "Setting $setting is $pruningWindow. Expected value is $value."
-        exit 1
-    else
-        echo "Pruning window is $pruningWindow"
-    fi
-    # 100000000 exceeds max value allowed so it will fail
-    setReplicationSettings "C1" "CCR1" "C2" "CCR2" "$setting=100000000"
-    pruningWindow=`getReplicationSettings "C1" "CCR1" "C2" "CCR2" | jq .$setting`
-    if [[ $pruningWindow != $value ]]; then
-        echo "Setting $setting is $pruningWindow. Expected value is $value."
-        exit 1
-    else
-        echo "Pruning window is still $pruningWindow as expected"
-    fi
+	local pruningWindow
+	local setting="hlvPruningWindowSec"
+	local value=10
+	echo "Get replication setting for $setting"
+	setReplicationSettings "C1" "CCR1" "C2" "CCR2" "$setting=$value"
+	pruningWindow=$(getReplicationSettings "C1" "CCR1" "C2" "CCR2" | jq .$setting)
+	if [[ $pruningWindow != $value ]]; then
+		echo "Setting $setting is $pruningWindow. Expected value is $value."
+		exit 1
+	else
+		echo "Pruning window is $pruningWindow"
+	fi
+	# 100000000 exceeds max value allowed so it will fail
+	setReplicationSettings "C1" "CCR1" "C2" "CCR2" "$setting=100000000"
+	pruningWindow=$(getReplicationSettings "C1" "CCR1" "C2" "CCR2" | jq .$setting)
+	if [[ $pruningWindow != $value ]]; then
+		echo "Setting $setting is $pruningWindow. Expected value is $value."
+		exit 1
+	else
+		echo "Pruning window is still $pruningWindow as expected"
+	fi
 }
 
 function eventingFunctionUIHandlerTest {
@@ -136,16 +136,16 @@ function remoteClusterUserPermission {
 }
 
 function runTestCase {
-    echo "=================================="
-    echo "Running REST API tests"
-    echo "=================================="
+	echo "=================================="
+	echo "Running REST API tests"
+	echo "=================================="
 
-    ccrReplicationSettings
-    eventingFunctionUIHandlerTest
-    configureResolver
-    remoteClusterUserPermission
+	ccrReplicationSettings
+	eventingFunctionUIHandlerTest
+	configureResolver
+	remoteClusterUserPermission
 
-    echo "=================================="
-    echo "Finished REST API tests"
-    echo "=================================="
+	echo "=================================="
+	echo "Finished REST API tests"
+	echo "=================================="
 }

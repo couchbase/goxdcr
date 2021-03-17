@@ -147,16 +147,154 @@ type ClusterConnectionInfoProvider interface {
 }
 
 type ReplicationInfo struct {
-	Id                      string
-	StatsMap                map[string]interface{}
-	BrokenCollectionMapping map[string][]string
-	ErrorList               []ErrorInfo
+	Id        string
+	StatsMap  map[string]interface{}
+	ErrorList []ErrorInfo
+}
+
+type ErrorInfoType int
+
+const (
+	HighPriorityMsg       ErrorInfoType = iota
+	LowPriorityMsg        ErrorInfoType = iota
+	PersistentMsg         ErrorInfoType = iota
+	BrokenMappingInfoType ErrorInfoType = iota
+)
+
+func (e ErrorInfoType) String() string {
+	switch e {
+	case HighPriorityMsg:
+		return "HighPriorityMsg"
+	case LowPriorityMsg:
+		return "LowPriorityMsg"
+	case BrokenMappingInfoType:
+		return "BrokenMappingInfo"
+	case PersistentMsg:
+		return "PersistentMsg"
+	default:
+		return "?? (ErrorInfoType)"
+	}
+}
+
+type EventsMap struct {
+	EventsMap   map[int64]interface{}
+	eventMapMtx *sync.RWMutex // Not exporting because of JSON marshaller
+}
+
+func NewEventsMap() EventsMap {
+	return EventsMap{
+		EventsMap:   make(map[int64]interface{}),
+		eventMapMtx: &sync.RWMutex{},
+	}
+}
+
+func (c *EventsMap) IsNil() bool {
+	return c.eventMapMtx == nil && c.EventsMap == nil
+}
+
+func (c *EventsMap) IsEmpty() bool {
+	if !c.IsNil() {
+		c.eventMapMtx.RLock()
+		defer c.eventMapMtx.RUnlock()
+		return len(c.EventsMap) == 0
+	}
+	return true
+}
+
+// Not concurrency safe
+func (c *EventsMap) Init() {
+	c.eventMapMtx = &sync.RWMutex{}
+	c.EventsMap = make(map[int64]interface{})
+}
+
+func (c *EventsMap) GetRWLock() *sync.RWMutex {
+	return c.eventMapMtx
+}
+
+func (c *EventsMap) MarshalJSON() ([]byte, error) {
+	if c == nil {
+		return nil, ErrorNilPtr
+	}
+
+	c.eventMapMtx.RLock()
+	defer c.eventMapMtx.RUnlock()
+
+	return json.Marshal(c.EventsMap)
+}
+
+func (c *EventsMap) UnmarshalJSON(b []byte) error {
+	if c == nil {
+		return ErrorNilPtr
+	}
+
+	c.eventMapMtx.Lock()
+	defer c.eventMapMtx.Unlock()
+
+	return json.Unmarshal(b, &c.EventsMap)
+}
+
+func (c *EventsMap) String() string {
+	c.eventMapMtx.RLock()
+	defer c.eventMapMtx.RUnlock()
+
+	return fmt.Sprintf("%v", c.EventsMap)
+}
+
+type EventInfo struct {
+	EventId   int64
+	EventType ErrorInfoType
+	EventDesc string
+
+	// Keyed by subEventId
+	// Value depends on EventType
+	EventExtras EventsMap
+
+	hint interface{}
+}
+
+func NewEventInfo() EventInfo {
+	return EventInfo{
+		EventExtras: NewEventsMap(),
+	}
+}
+
+func (e *EventInfo) SetHint(ns interface{}) {
+	e.hint = ns
+}
+
+func (e *EventInfo) GetHint() interface{} {
+	return e.hint
+}
+
+func (e *EventInfo) String() string {
+	return fmt.Sprintf("EventId: %v type: %v desc: %v extras: %v hint: %v", e.EventId, e.EventType.String(), e.EventDesc, e.EventExtras.String(), e.hint)
 }
 
 type ErrorInfo struct {
+	EventInfo
 	// Time is the number of nano seconds elapsed since 1/1/1970 UTC
 	Time     int64
 	ErrorMsg string
+}
+
+func NewErrorInfo(time int64, errorMsg string, eventIdWell *int64) ErrorInfo {
+	errInfo := ErrorInfo{
+		EventInfo: EventInfo{
+			EventType:   HighPriorityMsg,
+			EventId:     atomic.AddInt64(eventIdWell, 1),
+			EventExtras: NewEventsMap(),
+		},
+		Time:     time,
+		ErrorMsg: errorMsg,
+	}
+	return errInfo
+}
+
+func NewErrorInfoFromEventInfo(event EventInfo, t int64) ErrorInfo {
+	return ErrorInfo{
+		EventInfo: event,
+		Time:      t,
+	}
 }
 
 // These should be RO once they are created
@@ -209,6 +347,7 @@ func NewDefaultCollectionNamespace() *CollectionNamespace {
 	return &ns
 }
 
+// To index string showcases a simple to understand of "scope.collection"
 func (c CollectionNamespace) ToIndexString() string {
 	return fmt.Sprintf("%v%v%v", c.ScopeName, ScopeCollectionDelimiter, c.CollectionName)
 }

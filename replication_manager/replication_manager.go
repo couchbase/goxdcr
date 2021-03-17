@@ -122,6 +122,8 @@ type replicationManager struct {
 	status_logger_finch chan bool
 
 	mem_stats_logger_finch chan bool
+
+	eventIdAtomicWell int64
 }
 
 //singleton
@@ -148,6 +150,8 @@ func StartReplicationManager(sourceKVHost string,
 	backfillReplSvc service_def.BackfillReplSvc) {
 
 	replication_mgr.once.Do(func() {
+		replication_mgr.eventIdAtomicWell = -1
+
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
@@ -199,7 +203,6 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.GenericSupervisor.AddChild(adminport)
 
 		logger_rm.Info("ReplicationManager is running")
-
 	})
 }
 
@@ -462,7 +465,7 @@ func (rm *replicationManager) init(
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
 		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc)
 
-	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc)
+	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell)
 	rm.pipelineMgr = pipelineMgrObj
 
 	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.DefaultLoggerContext, rm.utils, rm.backfillReplSvc)
@@ -898,28 +901,21 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 			continue
 		}
 		fullReplId := common.ComposeFullTopic(replId, common.PipelineType(i))
-		var brokenMap metadata.CollectionNamespaceMapping
-		var brokenMapDoneFunc func()
-		var brokenExternalMap map[string][]string
-		pipeline := rep_status.Pipeline()
-		if pipeline != nil {
-			brokenMap, brokenMapDoneFunc = pipeline.GetBrokenMapRO()
-			brokenExternalMap = brokenMap.ToExternalMap()
-		}
+
 		replInfo := base.ReplicationInfo{
-			Id:                      fullReplId,
-			StatsMap:                replication_mgr.utils.GetMapFromExpvarMap(expvarMap),
-			BrokenCollectionMapping: brokenExternalMap,
-			ErrorList:               make([]base.ErrorInfo, 0),
+			Id:        fullReplId,
+			StatsMap:  replication_mgr.utils.GetMapFromExpvarMap(expvarMap),
+			ErrorList: make([]base.ErrorInfo, 0),
 		}
-		if brokenMapDoneFunc != nil {
-			brokenMapDoneFunc()
-		}
+
 		validateStatsMap(replInfo.StatsMap)
 
 		if common.PipelineType(i) == common.MainPipeline {
-			// set error list
-			fillReplInfoWithErr(rep_status, &replInfo)
+			loadLatestBrokenMap(rep_status)
+
+			// set error list, and broken mapping if any
+			rep_status.PopulateReplInfo(&replInfo, bypassUIErrorCodes, processErrorMsgForUI)
+
 		}
 
 		replInfos = append(replInfos, replInfo)
@@ -927,19 +923,19 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 	return replInfos
 }
 
-func fillReplInfoWithErr(rep_status *pipeline.ReplicationStatus, replInfo *base.ReplicationInfo) {
-	errs := rep_status.Errors()
-	if len(errs) == 0 {
-		return
+func loadLatestBrokenMap(rep_status *pipeline.ReplicationStatus) {
+	var brokenMapRO metadata.CollectionNamespaceMapping
+	var brokenMapDoneFunc func()
+	repStatusPipeline := rep_status.Pipeline()
+	if repStatusPipeline != nil {
+		brokenMapRO, brokenMapDoneFunc = repStatusPipeline.GetBrokenMapRO()
 	}
-	for _, pipeline_error := range errs {
-		if bypassUIErrorCodes(pipeline_error.ErrMsg) {
-			continue
-		}
-		err_msg := processErrorMsgForUI(pipeline_error.ErrMsg)
-		errInfo := base.ErrorInfo{pipeline_error.Timestamp.UnixNano(), err_msg}
-		(*replInfo).ErrorList = append((*replInfo).ErrorList, errInfo)
+	// Let EventsManager examine the latest ReadOnly brokenmap
+	rep_status.GetEventsManager().LoadLatestBrokenMap(brokenMapRO)
+	if brokenMapDoneFunc != nil {
+		brokenMapDoneFunc()
 	}
+
 }
 
 func validateStatsMap(statsMap map[string]interface{}) {

@@ -17,20 +17,20 @@ set -u
 # main logic all exist elsewhere
 . ./clusterRunProvision.shlib
 if (($? != 0)); then
-  echo "Provision failed"
-  exit 1
+	echo "Provision failed"
+	exit 1
 fi
 
 . ./testLibrary.shlib
 if (($? != 0)); then
-  echo "testLibrary.shlib failed"
-  exit 1
+	echo "testLibrary.shlib failed"
+	exit 1
 fi
 
 . customConflict/ccr_tests.shlib
 if (($? != 0)); then
-  echo "ccr_tests.shlib failed"
-  exit 1
+	echo "ccr_tests.shlib failed"
+	exit 1
 fi
 
 testCase="${1:-}"
@@ -45,50 +45,50 @@ CLUSTER_NAME_BUCKET_MAP=(["C1"]="CCR1" ["C2"]="CCR2" ["C3"]="CCR3" ["C4"]="CCR4"
 # See MB-39731 for conflictResolutionType=custom
 declare -A BucketProperties=(["ramQuotaMB"]=100 ["CompressionMode"]="active" ["conflictResolutionType"]="custom")
 for bucket in "${CLUSTER_NAME_BUCKET_MAP[@]}"; do
-  insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
+	insertPropertyIntoBucketNamePropertyMap $bucket BucketProperties
 done
 
 testForClusterRun
 if (($? != 0)); then
-  exit 1
+	exit 1
 fi
 
 if [[ "$testCase" == "" ]]; then
-  setUpCcrReplication
-  for testFile in $(ls customConflict/testCases); do
-    . customConflict/testCases/$testFile
-    runTestCase
-  done
-  cleanupCcrReplication
+	setUpCcrReplication
+	for testFile in $(ls customConflict/testCases); do
+		. customConflict/testCases/$testFile
+		runTestCase
+	done
+	cleanupCcrReplication
 else
-  if [[ "${testCase}" == "Loop" ]]; then
-    setUpCcrReplication
-    . ./customConflict/testCases/1_data_load.shlib
-    i=1
-    while :; do
-      echo
-      echo "=========== Start dataLoad run $i ==========="
-      runTestCase
-      grepForPanics
-      if (($? != 0)); then
-        exit 1
-      fi
-      echo "=========== end dataLoad run $i ==========="
-      echo
-      i=$(($i + 1))
-    done
-    cleanupCcrReplication
-  else
-    testFile=$(find customConflict/testCases/${testCase}*)
-    if [[ -z "$testFile" ]]; then
-      echo "Cannot find test case ${testCase}"
-      exit 1
-    fi
-    setUpCcrReplication
-    . $testFile
-    runTestCase
-    cleanupCcrReplication
-  fi
+	if [[ "${testCase}" == "Loop" ]]; then
+		setUpCcrReplication
+		. ./customConflict/testCases/1_data_load.shlib
+		i=1
+		while :; do
+			echo
+			echo "=========== Start dataLoad run $i ==========="
+			runTestCase
+			grepForPanics
+			if (($? != 0)); then
+				exit 1
+			fi
+			echo "=========== end dataLoad run $i ==========="
+			echo
+			i=$(($i + 1))
+		done
+		cleanupCcrReplication
+	else
+		testFile=$(find customConflict/testCases/${testCase}*)
+		if [[ -z "$testFile" ]]; then
+			echo "Cannot find test case ${testCase}"
+			exit 1
+		fi
+		setUpCcrReplication
+		. $testFile
+		runTestCase
+		cleanupCcrReplication
+	fi
 
 fi
 

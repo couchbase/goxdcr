@@ -19,6 +19,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
+	"sync/atomic"
 	"testing"
 )
 
@@ -34,7 +35,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	specGetter := func(string) (*metadata.ReplicationSpecification, error) {
 		return testSpec, nil
 	}
-	repStatus := NewReplicationStatus(specId, specGetter, testLogger)
+	repStatus := NewReplicationStatus(specId, specGetter, testLogger, nil)
 
 	return testLogger, specId, testSpec, specGetter, repStatus
 }
@@ -83,4 +84,41 @@ func TestReplicationStatusErrorMapFull(t *testing.T) {
 	assert.Equal(repStatus.err_list[0].ErrMsg, newErrString)
 
 	fmt.Println("============== Test case end: TestReplicationStatusErrorMapFull =================")
+}
+
+func setupEventMgrMock(m PipelineEventsManager, numOfLowMsg int) {
+	for i := 0; i < numOfLowMsg; i++ {
+		m.AddEvent(base.LowPriorityMsg, fmt.Sprintf("testEvent message %v", numOfLowMsg), base.EventsMap{})
+	}
+}
+
+func TestReplicationStatusFillReplInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestReplicationStatusFillReplInfo =================")
+	defer fmt.Println("============== Test case end: TestReplicationStatusFillReplInfo =================")
+
+	assert := assert.New(t)
+	_, _, _, _, repStatus := setupBoilerPlate()
+	setupEventMgrMock(repStatus.eventsManager, 2)
+
+	assert.Equal(int64(1), atomic.LoadInt64(repStatus.eventIdWell))
+
+	eventsList := repStatus.GetEventsManager().GetCurrentEvents()
+	assert.Equal(2, eventsList.Len())
+
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	ns1, _ := base.NewCollectionNamespaceFromString("s1.col1")
+	ns2, _ := base.NewCollectionNamespaceFromString("s1.col2")
+	brokenMap.AddSingleMapping(&ns1, &ns1)
+	brokenMap.AddSingleMapping(&ns1, &ns2)
+
+	eventsMgr := repStatus.eventsManager.(*PipelineEventsMgr)
+
+	brokenMapRO, doneFunc := eventsMgr.cachedBrokenMap.GetBrokenMapRO()
+	assert.Len(brokenMapRO, 0)
+	doneFunc()
+	repStatus.GetEventsManager().LoadLatestBrokenMap(brokenMap)
+	brokenMapRO, doneFunc = eventsMgr.cachedBrokenMap.GetBrokenMapRO()
+	assert.Len(brokenMapRO, 1)
+	doneFunc()
+	assert.True(eventsMgr.cachedBrokenMap.NeedsToUpdate())
 }

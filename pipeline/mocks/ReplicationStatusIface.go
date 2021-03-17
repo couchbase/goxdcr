@@ -103,6 +103,22 @@ func (_m *ReplicationStatusIface) Errors() pipeline.PipelineErrorArray {
 	return r0
 }
 
+// GetEventsManager provides a mock function with given fields:
+func (_m *ReplicationStatusIface) GetEventsManager() pipeline.PipelineEventsManager {
+	ret := _m.Called()
+
+	var r0 pipeline.PipelineEventsManager
+	if rf, ok := ret.Get(0).(func() pipeline.PipelineEventsManager); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(pipeline.PipelineEventsManager)
+		}
+	}
+
+	return r0
+}
+
 // GetOverviewStats provides a mock function with given fields: pipelineType
 func (_m *ReplicationStatusIface) GetOverviewStats(pipelineType common.PipelineType) *expvar.Map {
 	ret := _m.Called(pipelineType)
@@ -177,6 +193,11 @@ func (_m *ReplicationStatusIface) Pipeline() common.Pipeline {
 	}
 
 	return r0
+}
+
+// PopulateReplInfo provides a mock function with given fields: replInfo, bypassUIErrorCodes, processErrorMsgForUI
+func (_m *ReplicationStatusIface) PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string) {
+	_m.Called(replInfo, bypassUIErrorCodes, processErrorMsgForUI)
 }
 
 // Publish provides a mock function with given fields: lock
