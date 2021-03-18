@@ -373,7 +373,7 @@ func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, err
 			logging.Errorf("Client.EnableFeatures: Invalid memcached HELO response: opcode %v, expecting %v", rv.Opcode, gomemcached.HELLO)
 			return nil, errors.New("Invalid HELO response")
 		} else {
-			for i:=0; len(body) > i; i+=2 {
+			for i := 0; len(body) > i; i += 2 {
 				if Feature(binary.BigEndian.Uint16(body[i:])) == FeatureCollections {
 					collectionsEnabled = 1
 					break
@@ -520,7 +520,7 @@ func (c *Client) CollectionsGetCID(scope string, collection string) (*gomemcache
 
 	res, err := c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.COLLECTIONS_GET_CID,
-		Key:    []byte(scope + "." + collection),
+		Body:   []byte(scope + "." + collection),
 		Opaque: c.getOpaque(),
 	})
 
