@@ -13,18 +13,16 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"reflect"
-	"sort"
-	"strconv"
-	"strings"
-	"sync"
-	"sync/atomic"
-
 	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/golang/snappy"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
 )
 
 type ManifestsDoc struct {
@@ -1260,6 +1258,49 @@ func NewCollectionNamespaceMappingFromRules(manifestsPair CollectionsManifestPai
 	return CollectionNamespaceMapping{}, base.ErrorInvalidInput
 }
 
+func NewCollectionNamespaceMappingFromEvent(event *base.EventInfo) CollectionNamespaceMapping {
+	retNamespace := make(CollectionNamespaceMapping)
+
+	// We should only parse a top level event
+	if event.EventType != base.BrokenMappingInfoType && event.EventDesc != "" {
+		return retNamespace
+	}
+
+	event.EventExtras.GetRWLock().RLock()
+	defer event.EventExtras.GetRWLock().RUnlock()
+	for _, scopeLevelEventRaw := range event.EventExtras.EventsMap {
+		scopeEvent, ok := scopeLevelEventRaw.(base.EventInfo)
+		if !ok {
+			continue
+		}
+		scopeEvent.EventExtras.GetRWLock().RLock()
+		for _, srcCollectionEventRaw := range scopeEvent.EventExtras.EventsMap {
+			srcEvent, ok := srcCollectionEventRaw.(base.EventInfo)
+			if !ok {
+				continue
+			}
+			// Found one source namespace
+			srcColNs, _ := base.NewCollectionNamespaceFromString(srcEvent.EventDesc)
+
+			// Go through each target namespace of this source namespace
+			srcEvent.EventExtras.GetRWLock().RLock()
+			for _, tgtEventRaw := range srcEvent.EventExtras.EventsMap {
+				tgtEvent, ok := tgtEventRaw.(base.EventInfo)
+				if !ok {
+					continue
+				}
+				tgtNs, _ := base.NewCollectionNamespaceFromString(tgtEvent.EventDesc)
+				// Found a single source -> tgt
+				retNamespace.AddSingleMapping(&srcColNs, &tgtNs)
+			}
+			srcEvent.EventExtras.GetRWLock().RUnlock()
+		}
+		scopeEvent.EventExtras.GetRWLock().RUnlock()
+	}
+
+	return retNamespace
+}
+
 func (c *CollectionNamespaceMapping) AppendToTarget(srcPtr, target *base.CollectionNamespace) {
 	for k, _ := range *c {
 		if k.CollectionNamespace.IsSameAs(*srcPtr) {
@@ -2278,6 +2319,11 @@ type PipelineEventBrokenMap struct {
 	cachedBrokenMapSrcEventIdIdx   map[string]int64
 	cachedBrokenMapSrcNamespaceIdx CollectionNamespaceMappingIdx
 	cachedBrokenMapSrcScopeIdx     map[string]int64
+
+	// remember user can dismiss specific brokenmap
+	userDismissedBrokenMap CollectionNamespaceMapping
+	userDismissedBrokenIdx CollectionNamespaceMappingIdx
+	userDismissUpdated     bool
 }
 
 func NewPipelineEventBrokenMap() PipelineEventBrokenMap {
@@ -2288,6 +2334,8 @@ func NewPipelineEventBrokenMap() PipelineEventBrokenMap {
 		cachedBrokenMapSrcEventIdIdx:   make(map[string]int64),
 		cachedBrokenMapSrcNamespaceIdx: make(CollectionNamespaceMappingIdx),
 		cachedBrokenMapSrcScopeIdx:     make(map[string]int64),
+		userDismissedBrokenMap:         make(CollectionNamespaceMapping),
+		userDismissedBrokenIdx:         make(CollectionNamespaceMappingIdx),
 	}
 	return ret
 }
@@ -2302,16 +2350,18 @@ func (p *PipelineEventBrokenMap) LoadLatestBrokenMap(roBrokenMap CollectionNames
 
 	if needToLoad {
 		p.cachedBrokenMapMtx.Lock()
-		p.cachedBrokenMap = roBrokenMap.Clone()
-		p.cachedBrokenMapSrcNamespaceIdx = p.cachedBrokenMap.CreateLookupIndex()
-		p.cachedBrokenMapUpdated = true
+		if needToLoad {
+			p.cachedBrokenMap = roBrokenMap.Clone()
+			p.cachedBrokenMapSrcNamespaceIdx = p.cachedBrokenMap.CreateLookupIndex()
+			p.cachedBrokenMapUpdated = true
+		}
 		p.cachedBrokenMapMtx.Unlock()
 	}
 }
 
 func (p *PipelineEventBrokenMap) NeedsToUpdate() bool {
 	p.cachedBrokenMapMtx.RLock()
-	needToUpdate := p.cachedBrokenMapUpdated
+	needToUpdate := p.cachedBrokenMapUpdated || p.userDismissUpdated
 	p.cachedBrokenMapMtx.RUnlock()
 	return needToUpdate
 }
@@ -2325,13 +2375,14 @@ func (p *PipelineEventBrokenMap) GetBrokenMapRO() (CollectionNamespaceMapping, f
 	return p.cachedBrokenMap, doneFunc
 }
 
+// Returns true if event is empty
 func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *int64) bool {
 	// WLock because we need to do updates
 	// Note locking order -> cachedBrokenMap first then event
 	p.cachedBrokenMapMtx.Lock()
 	defer p.cachedBrokenMapMtx.Unlock()
 
-	if !event.EventExtras.IsNil() && event.EventExtras.IsEmpty() {
+	if !event.EventExtras.IsNil() && event.EventExtras.IsEmpty() && len(p.userDismissedBrokenMap) == 0 {
 		srcIndex, scopeIndex := p.loadEmptyEvent(event, idWell)
 		eventIsEmpty := len(event.EventExtras.EventsMap) == 0
 		if !eventIsEmpty {
@@ -2357,10 +2408,7 @@ func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *in
 
 	if eventIsEmpty {
 		p.recreateNewSrcIndexes()
-	} else {
-		p.updateEventIdIndexesNoLock(event)
 	}
-
 	return eventIsEmpty
 }
 
@@ -2369,15 +2417,22 @@ func (p *PipelineEventBrokenMap) recreateNewSrcIndexes() {
 	p.cachedBrokenMapSrcEventIdIdx = make(map[string]int64)
 }
 
+// Takes the current broken map, filter out user's intent on dismissal, and write them to event
 func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *base.EventInfo, idWell *int64, eventCompiledBrokenMap CollectionNamespaceMapping) {
+	// Given current event version's of the brokenmap, diff against the actual broken map. Whatever is not here needs to be added only if user didn't filter it out
 	added, _ := eventCompiledBrokenMap.Diff(p.cachedBrokenMap)
 	for srcNs, tgtList := range added {
+		if p.checkUserDismissedMapForMatch(srcNs, tgtList) {
+			// user has intended to dismiss this set of namespaces
+			continue
+		}
+
 		scopeEventId, scopeEventExists := p.cachedBrokenMapSrcScopeIdx[srcNs.ScopeName]
 		var scopeEvent base.EventInfo
 		if !scopeEventExists {
 			scopeEvent = base.NewEventInfo()
 			scopeEvent.EventType = base.BrokenMappingInfoType
-			scopeEvent.EventId = atomic.AddInt64(idWell, 1)
+			scopeEvent.EventId = base.GetEventIdFromWell(idWell)
 			scopeEvent.EventDesc = srcNs.ScopeName
 			event.EventExtras.EventsMap[scopeEvent.EventId] = scopeEvent
 			p.cachedBrokenMapSrcScopeIdx[srcNs.ScopeName] = scopeEvent.EventId
@@ -2391,7 +2446,7 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 		if !srcExists {
 			srcEvent = base.NewEventInfo()
 			srcEvent.EventType = base.BrokenMappingInfoType
-			srcEvent.EventId = atomic.AddInt64(idWell, 1)
+			srcEvent.EventId = base.GetEventIdFromWell(idWell)
 			srcEvent.EventDesc = srcNs.ToIndexString()
 			srcEvent.SetHint(srcNs)
 			scopeEvent.EventExtras.EventsMap[srcEvent.EventId] = srcEvent
@@ -2403,7 +2458,7 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 		// At this point all the tgts here are missing
 		for _, tgtNs := range tgtList {
 			tgtEvent := base.NewEventInfo()
-			tgtEvent.EventId = atomic.AddInt64(idWell, 1)
+			tgtEvent.EventId = base.GetEventIdFromWell(idWell)
 			tgtEvent.EventType = base.BrokenMappingInfoType
 			tgtEvent.EventDesc = tgtNs.ToIndexString()
 			tgtEvent.SetHint(tgtNs)
@@ -2453,13 +2508,19 @@ func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *ba
 						}
 					}
 
-					if !found {
+					// If the event's target namespace is not found in the latest broken map, which means that the event
+					// is outdated since the brokenmap is always source of truth...
+					// OR if it is found but the specific mapping has been dismissed
+					// don't export it to the event, and ensure that it is removed from existing event
+					if !found || p.checkUserDismissedMapForMatch(srcNamespace, CollectionNamespaceList{tgtNamespace}) {
 						tgtLock.RUnlock()
 						tgtLock.Lock()
 						delete(srcNsEvent.EventExtras.EventsMap, subEventId)
 						tgtLock.Unlock()
 						tgtLock.RLock()
 					} else {
+						// At this stage, cachedBrokenMap states that srcNs->tgtNs is valid
+						// And user hasn't dismissed it
 						eventCompiledBrokenMap.AddSingleSourceNsMapping(srcNamespace, tgtNamespace)
 					}
 				}
@@ -2494,13 +2555,11 @@ func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *i
 		wholeScopeEventId, exists = scopeEventIdx[srcNs.ScopeName]
 		if !exists {
 			// First create a eventID that tags the whole scope
-			wholeScopeEventId = atomic.AddInt64(idWell, 1)
-			newWholeScopeEvent := base.EventInfo{
-				EventId:     wholeScopeEventId,
-				EventType:   base.BrokenMappingInfoType,
-				EventDesc:   srcNs.ScopeName,
-				EventExtras: base.NewEventsMap(),
-			}
+			wholeScopeEventId = base.GetEventIdFromWell(idWell)
+			newWholeScopeEvent := base.NewEventInfo()
+			newWholeScopeEvent.EventId = wholeScopeEventId
+			newWholeScopeEvent.EventType = base.BrokenMappingInfoType
+			newWholeScopeEvent.EventDesc = srcNs.ScopeName
 			event.EventExtras.EventsMap[wholeScopeEventId] = newWholeScopeEvent
 			scopeEventIdx[srcNs.ScopeName] = wholeScopeEventId
 		}
@@ -2508,13 +2567,11 @@ func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *i
 		wholeScopeEvent.EventExtras.GetRWLock().Lock()
 
 		// Then for each individual scope:col -> scopeT:colT, create individual events underneath
-		newSrcEventId := atomic.AddInt64(idWell, 1)
-		newSrcEventInfo := base.EventInfo{
-			EventId:     newSrcEventId,
-			EventType:   base.BrokenMappingInfoType,
-			EventDesc:   srcNs.ToIndexString(),
-			EventExtras: base.NewEventsMap(),
-		}
+		newSrcEventId := base.GetEventIdFromWell(idWell)
+		newSrcEventInfo := base.NewEventInfo()
+		newSrcEventInfo.EventId = newSrcEventId
+		newSrcEventInfo.EventType = base.BrokenMappingInfoType
+		newSrcEventInfo.EventDesc = srcNs.ToIndexString()
 		newSrcEventInfo.SetHint(srcNs)
 		newSrcEventInfo.EventExtras.GetRWLock().Lock()
 
@@ -2522,13 +2579,11 @@ func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *i
 		srcEventIdx[srcNs.ToIndexString()] = newSrcEventId
 
 		for _, tgtNs := range tgtList {
-			newTgtEventId := atomic.AddInt64(idWell, 1)
-			newTgtEvent := base.EventInfo{
-				EventId:     newTgtEventId,
-				EventType:   base.BrokenMappingInfoType,
-				EventDesc:   tgtNs.ToIndexString(),
-				EventExtras: base.EventsMap{},
-			}
+			newTgtEventId := base.GetEventIdFromWell(idWell)
+			newTgtEvent := base.NewEventInfo()
+			newTgtEvent.EventId = newTgtEventId
+			newTgtEvent.EventType = base.BrokenMappingInfoType
+			newTgtEvent.EventDesc = tgtNs.ToIndexString()
 			newTgtEvent.SetHint(tgtNs)
 			newSrcEventInfo.EventExtras.EventsMap[newTgtEventId] = newTgtEvent
 		}
@@ -2540,6 +2595,121 @@ func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *i
 	return srcEventIdx, scopeEventIdx
 }
 
-func (p *PipelineEventBrokenMap) updateEventIdIndexesNoLock(event *base.EventInfo) {
+func (p *PipelineEventBrokenMap) RegisterDismissAction(level int, srcDesc string, tgtDesc string) error {
+	var userRequestedMapping CollectionNamespaceMapping
+	var err error
+	// First, translate input into an actual namespace mapping
+	switch level {
+	case 0:
+		// dismiss the whole current backfill mapping
+		p.cachedBrokenMapMtx.RLock()
+		userRequestedMapping = p.cachedBrokenMap.Clone()
+		p.cachedBrokenMapMtx.RUnlock()
+	case 1:
+		userRequestedMapping, err = p.translateLevel1(srcDesc)
+	case 2:
+		userRequestedMapping, err = p.translateLevel2(srcDesc)
+	case 3:
+		userRequestedMapping, err = p.translateLevel3(srcDesc, tgtDesc)
+	default:
+		panic("Invalid case")
+	}
 
+	if err != nil {
+		return err
+	}
+
+	p.cachedBrokenMapMtx.Lock()
+	defer p.cachedBrokenMapMtx.Unlock()
+	p.userDismissedBrokenMap.Consolidate(userRequestedMapping)
+	p.userDismissedBrokenIdx = p.userDismissedBrokenMap.CreateLookupIndex()
+	p.userDismissUpdated = true
+	return nil
+}
+
+func (p *PipelineEventBrokenMap) translateLevel1(desc string) (CollectionNamespaceMapping, error) {
+	retMap := make(CollectionNamespaceMapping)
+	p.cachedBrokenMapMtx.RLock()
+	defer p.cachedBrokenMapMtx.RUnlock()
+	// Level 1 means a whole scope
+	for srcNs, v := range p.cachedBrokenMap {
+		// If each s.c matches the description as the source scope name
+		// there may be multiple ones... i.e. s.c1 + s.c2, both are considered hit
+		if srcNs.ScopeName == desc {
+			newSrc := srcNs.Clone()
+			retMap[NewSourceCollectionNamespace(&newSrc)] = v.Clone()
+		}
+	}
+	if len(retMap) == 0 {
+		return nil, base.ErrorNotFound
+	}
+	return retMap, nil
+}
+
+func (p *PipelineEventBrokenMap) translateLevel2(desc string) (CollectionNamespaceMapping, error) {
+	retMap := make(CollectionNamespaceMapping)
+	p.cachedBrokenMapMtx.RLock()
+	defer p.cachedBrokenMapMtx.RUnlock()
+	// Level 2 means a singular s.c source namespace
+	for srcNs, v := range p.cachedBrokenMap {
+		if srcNs.ToIndexString() != desc {
+			continue
+		}
+		// found
+		newSrc := srcNs.Clone()
+		retMap[NewSourceCollectionNamespace(&newSrc)] = v.Clone()
+		return retMap, nil
+	}
+	return nil, base.ErrorNotFound
+}
+
+func (p *PipelineEventBrokenMap) translateLevel3(srcDesc string, tgtDesc string) (CollectionNamespaceMapping, error) {
+	retMap := make(CollectionNamespaceMapping)
+	p.cachedBrokenMapMtx.RLock()
+	defer p.cachedBrokenMapMtx.RUnlock()
+	// Level 3 means an exact match
+	for srcNs, v := range p.cachedBrokenMap {
+		if srcNs.ToIndexString() != srcDesc {
+			continue
+		}
+		// found source
+		for _, tgtNs := range v {
+			if tgtNs.ToIndexString() != tgtDesc {
+				continue
+			}
+			// found tgt and thus exact match
+			retMap.AddSingleMapping(srcNs.CollectionNamespace, tgtNs)
+			return retMap, nil
+		}
+	}
+	return nil, base.ErrorNotFound
+}
+
+func (p *PipelineEventBrokenMap) MarkUpdated() {
+	p.cachedBrokenMapMtx.Lock()
+	defer p.cachedBrokenMapMtx.Unlock()
+
+	p.cachedBrokenMapUpdated = false
+	p.userDismissUpdated = false
+
+}
+
+// Check the user dismissed broken map to see if the input <srcNs + tgtNs's> is contained in the user's intent
+// Returns true if it is a complete match - in other words, user has dismissed this
+func (p *PipelineEventBrokenMap) checkUserDismissedMapForMatch(ns *SourceNamespace, list CollectionNamespaceList) bool {
+	if len(p.userDismissedBrokenMap) == 0 {
+		return false
+	}
+
+	_, _, tgtList, exists := p.userDismissedBrokenMap.Get(ns.CollectionNamespace, p.userDismissedBrokenIdx)
+	if !exists {
+		return false
+	}
+	for _, oneNs := range list {
+		if !tgtList.Contains(oneNs) {
+			return false
+		}
+	}
+	// ns exists in dismissedBrokenMap AND all elements in list exists in the tgtList
+	return true
 }

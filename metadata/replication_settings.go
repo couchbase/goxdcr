@@ -10,6 +10,7 @@ package metadata
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"time"
@@ -70,6 +71,8 @@ const (
 
 	RetryOnRemoteAuthErrKey           = base.RetryOnRemoteAuthErrKey
 	RetryOnRemoteAuthErrMaxWaitSecKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
+
+	DismissEventKey = "dismissEvent"
 )
 
 // keys to facilitate redaction of replication settings map
@@ -82,16 +85,20 @@ const (
 // settings whose default values cannot be viewed or changed through rest apis
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
 	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,
-	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsMgtOsoKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey, CollectionsDelVbBackfillKey}
+	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsMgtOsoKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
+	CollectionsDelVbBackfillKey, DismissEventKey}
 
 // settings whose values cannot be changed after replication is created
 var ImmutableSettings = []string{}
 
 // settings that are internal and should be hidden from outside
-var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey, CollectionsDelVbBackfillKey}
+var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
+	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
+	CollectionsDelVbBackfillKey, DismissEventKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
-var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey, CollectionsDelVbBackfillKey}
+var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
+	CollectionsDelAllBackfillKey, CollectionsDelVbBackfillKey, DismissEventKey}
 
 // settings that are externally multiple values, but internally single value
 var MultiValueMap map[string]string = map[string]string{
@@ -153,6 +160,8 @@ var RetryOnRemoteAuthErrConfig = &SettingsConfig{true, nil}
 
 var RetryOnRemoteAuthErrMaxWaitConfig = &SettingsConfig{base.RetryOnRemoteAuthErrMaxWaitDefault, &Range{1, 86400 /* secs -> 1 day */}}
 
+var DismissEventConfig = &SettingsConfig{-1, &Range{0, math.MaxInt32}}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
@@ -183,6 +192,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	RetryOnRemoteAuthErrMaxWaitSecKey: RetryOnRemoteAuthErrMaxWaitConfig,
 	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
 	HlvPruningWindowKey:               PruningWindowConfig,
+	DismissEventKey:                   DismissEventConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1044,7 +1054,11 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 		if err != nil {
 			return
 		}
-
+	case DismissEventKey:
+		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
+		if err != nil {
+			return
+		}
 	default:
 		// generic cases that can be handled by ValidateAndConvertSettingsValue
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)

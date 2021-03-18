@@ -25,6 +25,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"net"
 	"net/http"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -737,6 +738,13 @@ func (adminport *Adminport) performOnetimeUserActions(settingsMap metadata.Repli
 		if err != nil {
 			return err
 		}
+	}
+
+	eventId, dismissEventRequested := settingsMap[metadata.DismissEventKey]
+	if dismissEventRequested {
+		logger_ap.Infof("Dismiss event has been requested for %v, type: %v", eventId, reflect.TypeOf(eventId))
+		replication_mgr.pipelineMgr.DismissEvent(eventId.(int))
+		return nil
 	}
 	return nil
 }

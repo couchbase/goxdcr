@@ -148,7 +148,7 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 		customSettings: make(map[string]interface{}),
 		progress:       "",
 		eventIdWell:    eventIdWell,
-		eventsManager:  NewPipelineEventsMgr(eventIdWell, specId, spec_getter),
+		eventsManager:  NewPipelineEventsMgr(eventIdWell, specId, spec_getter, logger),
 	}
 
 	rep_status.Publish(false)

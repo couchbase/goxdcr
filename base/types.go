@@ -161,6 +161,21 @@ const (
 	BrokenMappingInfoType ErrorInfoType = iota
 )
 
+func (e ErrorInfoType) CanDismiss() bool {
+	switch e {
+	case HighPriorityMsg:
+		return false
+	case LowPriorityMsg:
+		return true
+	case BrokenMappingInfoType:
+		return true
+	case PersistentMsg:
+		return false
+	default:
+		panic("Implement me")
+	}
+}
+
 func (e ErrorInfoType) String() string {
 	switch e {
 	case HighPriorityMsg:
@@ -174,6 +189,10 @@ func (e ErrorInfoType) String() string {
 	default:
 		return "?? (ErrorInfoType)"
 	}
+}
+
+type EventInfoComparator interface {
+	SameAs(other interface{}) bool
 }
 
 type EventsMap struct {
@@ -234,11 +253,88 @@ func (c *EventsMap) UnmarshalJSON(b []byte) error {
 }
 
 func (c *EventsMap) String() string {
+	if c == nil {
+		return ""
+	}
+
 	c.eventMapMtx.RLock()
 	defer c.eventMapMtx.RUnlock()
 
 	return fmt.Sprintf("%v", c.EventsMap)
 }
+
+func (c *EventsMap) ContainsEvent(eventId int) bool {
+	if c == nil {
+		return false
+	}
+
+	c.eventMapMtx.RLock()
+	defer c.eventMapMtx.RUnlock()
+
+	for k, v := range c.EventsMap {
+		if int(k) == eventId {
+			return true
+		}
+		if event, ok := v.(EventInfo); ok {
+			if event.ContainsEvent(eventId) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *EventsMap) SameAs(other EventsMap) bool {
+	if c == nil {
+		return false
+	}
+
+	c.eventMapMtx.RLock()
+	defer c.eventMapMtx.RUnlock()
+
+	other.eventMapMtx.RLock()
+	defer other.eventMapMtx.RUnlock()
+
+	if len(c.EventsMap) != len(other.EventsMap) {
+		return false
+	}
+
+	for k, v := range c.EventsMap {
+		compareV, ok := other.EventsMap[k]
+		if !ok {
+			return false
+		}
+		vComparator := v.(EventInfoComparator)
+		if !vComparator.SameAs(compareV) {
+			return false
+		}
+	}
+
+	return true
+}
+
+/*
+ * Usage for EventInfo data structure:
+ *
+ * For high and low priority messages:
+ *      - ErrDesc == message to be communicated
+ *		- EventExtras not used
+ *
+ * For broken map events:
+ * Level 0: Complete brokenmap event
+ *      - ErrDesc == ""
+ *		- Use EventExtras with KV pairs. Each KV pair contains a Level 1 event
+ * Level 1: Source Scope level event
+ *      - ErrDesc == a single source scope name
+ *		- Use EventExtras with KV pairs. Each KV pair contains a Level 2 event
+ * Level 2: Source namespace event
+ *      - ErrDesc == "scopeName.collectionName"
+ *		- Use EventExtras with KV pairs. Each KV pair contains a Level 3 event
+ * Level 3: Target namespace event
+ *      - ErrDesc == "targetScopeName.targetCollectionName"
+ *		- EventExtras not used
+ *
+ */
 
 type EventInfo struct {
 	EventId   int64
@@ -249,25 +345,82 @@ type EventInfo struct {
 	// Value depends on EventType
 	EventExtras EventsMap
 
-	hint interface{}
+	hintMtx *sync.RWMutex
+	hint    interface{}
 }
 
 func NewEventInfo() EventInfo {
 	return EventInfo{
 		EventExtras: NewEventsMap(),
+		hintMtx:     &sync.RWMutex{},
 	}
 }
 
 func (e *EventInfo) SetHint(ns interface{}) {
+	e.hintMtx.Lock()
+	defer e.hintMtx.Unlock()
 	e.hint = ns
 }
 
 func (e *EventInfo) GetHint() interface{} {
+	e.hintMtx.RLock()
+	defer e.hintMtx.RUnlock()
 	return e.hint
+}
+
+func (e *EventInfo) SameAs(otherRaw interface{}) bool {
+	otherE, ok := otherRaw.(EventInfo)
+	if ok {
+		return e.EventId == otherE.EventId &&
+			e.EventType == otherE.EventType &&
+			e.EventDesc == otherE.EventDesc &&
+			e.EventExtras.SameAs(otherE.EventExtras)
+	}
+
+	otherEPtr, ok := otherRaw.(*EventInfo)
+	if ok {
+		return e.EventId == otherEPtr.EventId &&
+			e.EventType == otherEPtr.EventType &&
+			e.EventDesc == otherEPtr.EventDesc &&
+			e.EventExtras.SameAs(otherEPtr.EventExtras)
+	}
+
+	return false
 }
 
 func (e *EventInfo) String() string {
 	return fmt.Sprintf("EventId: %v type: %v desc: %v extras: %v hint: %v", e.EventId, e.EventType.String(), e.EventDesc, e.EventExtras.String(), e.hint)
+}
+
+func (e *EventInfo) ContainsEvent(eventId int) bool {
+	if int(e.EventId) == eventId {
+		return true
+	}
+
+	return e.EventExtras.ContainsEvent(eventId)
+}
+
+func (e *EventInfo) GetSubEvent(eventId int) (*EventInfo, error) {
+	e.EventExtras.eventMapMtx.RLock()
+	defer e.EventExtras.eventMapMtx.RUnlock()
+
+	for eId, eventRaw := range e.EventExtras.EventsMap {
+		eventInfo, ok := eventRaw.(EventInfo)
+		if int(eId) == eventId {
+			if ok {
+				return &eventInfo, nil
+			} else {
+				return nil, fmt.Errorf("Wrong type: %v", reflect.TypeOf(eventRaw))
+			}
+		}
+		if ok {
+			recurseSearch, reErr := eventInfo.GetSubEvent(eventId)
+			if reErr == nil && recurseSearch != nil {
+				return recurseSearch, reErr
+			}
+		}
+	}
+	return nil, ErrorNotFound
 }
 
 type ErrorInfo struct {
@@ -277,11 +430,29 @@ type ErrorInfo struct {
 	ErrorMsg string
 }
 
+// Internally, XDCR eventIDs are kept as int64
+// Externally, since JSON doesn't play nice with int64, we will use reg int32
+// The Getter function here should ensure that if it exceeds MaxInt32, it starts over from
+// the beginning
+func GetEventIdFromWell(eventIdWell *int64) int64 {
+	for {
+		retVal := atomic.AddInt64(eventIdWell, 1)
+		if retVal > math.MaxInt32 {
+			swapped := atomic.CompareAndSwapInt64(eventIdWell, atomic.LoadInt64(eventIdWell), 0)
+			if swapped {
+				return atomic.AddInt64(eventIdWell, 1)
+			}
+		} else {
+			return retVal
+		}
+	}
+}
+
 func NewErrorInfo(time int64, errorMsg string, eventIdWell *int64) ErrorInfo {
 	errInfo := ErrorInfo{
 		EventInfo: EventInfo{
 			EventType:   HighPriorityMsg,
-			EventId:     atomic.AddInt64(eventIdWell, 1),
+			EventId:     GetEventIdFromWell(eventIdWell),
 			EventExtras: NewEventsMap(),
 		},
 		Time:     time,

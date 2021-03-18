@@ -91,6 +91,7 @@ const (
 	RetryOnRemoteAuthErrMaxWaitKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
 	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
 	HlvPruningWindowLKey           = base.HlvPruningWindowKey
+	DismissEventKey                = metadata.DismissEventKey
 )
 
 // constants for parsing create replication response
@@ -185,6 +186,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	RetryOnRemoteAuthErrMaxWaitKey: metadata.RetryOnRemoteAuthErrMaxWaitSecKey,
 	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
 	HlvPruningWindowLKey:           metadata.HlvPruningWindowKey,
+	DismissEventKey:                metadata.DismissEventKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -224,6 +226,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.RetryOnRemoteAuthErrMaxWaitSecKey: RetryOnRemoteAuthErrMaxWaitKey,
 	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
 	metadata.HlvPruningWindowKey:               HlvPruningWindowLKey,
+	metadata.DismissEventKey:                   DismissEventKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

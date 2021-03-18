@@ -79,6 +79,7 @@ type PipelineMgrIface interface {
 	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
 	OnExit() error
 	UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
+	DismissEvent(eventId int) error
 }
 
 type PipelineMgrInternalIface interface {
@@ -1079,6 +1080,17 @@ func (pipelineMgr *PipelineManager) GetMainPipelineThroughSeqnos(topic string) (
 
 func (pipelineMgr *PipelineManager) UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
 	return pipelineMgr.serializer.UpdateWithStoppedCb(topic, callback, errCb)
+}
+
+func (pipelineMgr *PipelineManager) DismissEvent(eventId int) error {
+	repStatusMap := pipelineMgr.ReplicationStatusMap()
+	for replId, replStatus := range repStatusMap {
+		if replStatus.GetEventsManager().ContainsEvent(eventId) {
+			fmt.Printf("Found replication %v with event %v\n", replId, eventId)
+			// TODO - part4: hook up and test
+		}
+	}
+	return nil
 }
 
 var updaterStateErrorStr = "Can't move update state from %v to %v"
