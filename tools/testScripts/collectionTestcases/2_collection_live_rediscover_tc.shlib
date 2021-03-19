@@ -49,6 +49,49 @@ function runDataLoad {
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
+function dismissLevel0 {
+	getBrokenMapEntryId "C1"
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+}
+
+function dismissLevel1 {
+	getBrokenMapEntryId "C1" "S1"
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+}
+
+function dismissLevel2 {
+	getBrokenMapEntryId "C1" "S1" "col1"
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	getBrokenMapEntryId "C1" "S1" "col2"
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+}
+
+function dismissLevel3 {
+	getBrokenMapEntryId "C1" "S1" "col1" "S1" "col1"
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	getBrokenMapEntryId "C1" "S1" "col2" "S1" "col2"
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+}
+
+function pickARandomLevelToDismissBrokenMap {
+	randomCase=$(echo $(($RANDOM % 4)))
+	echo "Randomly picking to dismiss broken map with level $randomCase..."
+	case $randomCase in
+	0)
+		dismissLevel0
+		;;
+	1)
+		dismissLevel1
+		;;
+	2)
+		dismissLevel2
+		;;
+	3)
+		dismissLevel3
+		;;
+	esac
+}
+
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
 }
@@ -71,7 +114,7 @@ function runTestCase {
 	setCustomManifestRefreshInterval "C1"
 
 	# At this point, settings need to be restored IF the script was forced exited
-	trap cleanupTestCaseInternalSettings EXIT
+	# trap cleanupTestCaseInternalSettings EXIT
 
 	# Get current instance
 	local -i currentBrokenInstanceCnt
@@ -115,6 +158,11 @@ function runTestCase {
 	validateBrokenMapExists "C1"
 	validateBrokenMapEntry "C1" "S1" "col1" "S1" "col1"
 	validateBrokenMapEntry "C1" "S1" "col2" "S1" "col2"
+
+	# We can only pick one so randomly pick one
+	pickARandomLevelToDismissBrokenMap
+
+	validateBrokenMapDoesNotExist "C1"
 
 	# Then re-setup the implicit matching that matches
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")

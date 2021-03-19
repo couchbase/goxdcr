@@ -481,28 +481,6 @@ function checkInternalSetting {
 }
 
 # TODO - right now assumes only one outgoing pipeline per cluster
-function getErrorListForMainPipeline {
-	local clusterName=$1
-	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
-	local output
-	local mainPipelineErrList
-
-	output=$(getReplicationInfos $port)
-	if ((!$? == 0)); then
-		echo ""
-		return 1
-	fi
-
-	if (($(echo "$output" | jq 'length') > 2)); then
-		echo "Not valid replicationInfos - seeing more than 2 output"
-		return 1
-	fi
-
-	mainPipelineErrList=$(echo "$output" | jq '.[0]' | jq '.ErrorList')
-	echo "$mainPipelineErrList"
-}
-
-# TODO - right now assumes only one outgoing pipeline per cluster
 function validateBrokenMapExists {
 	local errList
 	local cluster=$1
@@ -519,7 +497,6 @@ function validateBrokenMapExists {
 	fi
 }
 
-# TODO - right now assumes only one outgoing pipeline per cluster
 function validateBrokenMapDoesNotExist {
 	local errList
 	local cluster=$1
@@ -543,77 +520,7 @@ function validateBrokenMapEntry {
 	local sourceCollectionName=$3
 	local targetScopeName=$4
 	local targetCollectionName=$5
-	local requestedSrcNamespace
-	local requestedTgtNamespace
-	requestedSrcNamespace=$(echo -n "\"${sourceScopeName}.${sourceCollectionName}\"")
-	requestedTgtNamespace=$(echo -n "\"${targetScopeName}.${targetCollectionName}\"")
 
-	errList=$(getErrorListForMainPipeline $cluster)
-	if ((!$? == 0)); then
-		echo "Issue getting error list"
-		exit 1
-	fi
-
-	# ErrorsList contain multiple error events. There should only be one error type event
-	local totalErrorsLen=$(echo "$errList" | jq 'length')
-	local i
-	for ((i = 0; i < $totalErrorsLen; i = $(($i + 1)))); do
-		local oneEvent
-		local eventType
-		oneEvent=$(echo "$errList" | jq '.[0]')
-		eventType=$(echo "$oneEvent" | jq '.EventType')
-		if ((!eventType == $BROKENEVENT_TYPE)); then
-			continue
-		fi
-		local scopesEvents
-		scopesEvents=$(echo "$oneEvent" | jq '.EventExtras')
-		# Found the overall broken map event
-		# First see if the sourceScopeName is found
-		local scopesEventsKeys
-		scopesEventsKeys=$(echo "$scopesEvents" | jq 'keys[]')
-		local scopeEventKey
-		for scopeEventKey in $(echo "$scopesEventsKeys"); do
-			local scopeEvent
-			scopeEvent=$(echo "$scopesEvents" | jq ".[$scopeEventKey]")
-			local scopeEventScopeNameWithoutQuotes
-			scopeEventScopeNameWithoutQuotes=$(echo "$scopeEvent" | jq '.EventDesc' | sed 's/"//g')
-			if [[ ! "$scopeEventScopeNameWithoutQuotes" == "$sourceScopeName" ]]; then
-				continue
-			fi
-			# Found the source scope
-			# Now, cycle through each source namespace to find the matching source namespace
-			local sourceNamespaces
-			local sourceNamespacesKeys
-			sourceNamespaces=$(echo "$scopeEvent" | jq '.EventExtras' | jq '.EventsMap')
-			sourceNamespacesKeys=$(echo "$sourceNamespaces" | jq 'keys[]')
-			local oneKey
-			for oneKey in $(echo "$sourceNamespacesKeys"); do
-				local oneSourceNamespace
-				oneSourceNamespace=$(echo "$sourceNamespaces" | jq ".[$oneKey]")
-				local brokenMapSourceNamespace
-				brokenMapSourceNamespace=$(echo "$oneSourceNamespace" | jq '.EventDesc')
-				if [[ "$requestedSrcNamespace" == "$brokenMapSourceNamespace" ]]; then
-					# Found the source namespace. Now check the target namespace
-					local targetNamespaces
-					targetNamespaces=$(echo "$oneSourceNamespace" | jq '.EventExtras' | jq '.EventsMap')
-					local targetNamespacesKeys
-					targetNamespacesKeys=$(echo "$targetNamespaces" | jq 'keys[]')
-					local oneTKey
-					for oneTKey in $(echo "$targetNamespacesKeys"); do
-						local targetNamespace
-						targetNamespace=$(echo "$targetNamespaces" | jq ".[$oneTKey]")
-						local brokenMapTargetNamespace
-						brokenMapTargetNamespace=$(echo "$targetNamespace" | jq '.EventDesc')
-						if [[ "$brokenMapTargetNamespace" == "$requestedTgtNamespace" ]]; then
-							echo "Found requested brokenmap of $requestedSrcNamespace -> $requestedTgtNamespace"
-							return 0
-						fi
-					done
-				fi
-			done
-		done
-	done
-
-	echo "Unable to find the matching error event"
-	exit 1
+	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
+	echo "Got entry ID: $?"
 }

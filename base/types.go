@@ -313,6 +313,16 @@ func (c *EventsMap) SameAs(other EventsMap) bool {
 	return true
 }
 
+func (c *EventsMap) Len() int {
+	if c == nil {
+		return 0
+	}
+
+	c.eventMapMtx.RLock()
+	defer c.eventMapMtx.RUnlock()
+	return len(c.EventsMap)
+}
+
 /*
  * Usage for EventInfo data structure:
  *

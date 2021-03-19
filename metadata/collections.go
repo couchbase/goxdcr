@@ -2394,11 +2394,16 @@ func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *in
 		return eventIsEmpty
 	}
 
+	if len(p.userDismissedBrokenMap) > 0 && p.userDismissedBrokenMap.IsSame(p.cachedBrokenMap) {
+		// Force the event to be empty
+		return true
+	}
+
 	eventLock := event.EventExtras.GetRWLock()
 	eventLock.Lock()
 	defer eventLock.Unlock()
 
-	// First delete any mappings that no longer exist
+	// First delete any mappings that no longer exist or user has dismissed
 	eventCompiledBrokenMap := p.cleanUpObsoleteSourcesFromEventNoLock(event)
 
 	// Then add things that are missing into event
@@ -2422,8 +2427,7 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 	// Given current event version's of the brokenmap, diff against the actual broken map. Whatever is not here needs to be added only if user didn't filter it out
 	added, _ := eventCompiledBrokenMap.Diff(p.cachedBrokenMap)
 	for srcNs, tgtList := range added {
-		if p.checkUserDismissedMapForMatch(srcNs, tgtList) {
-			// user has intended to dismiss this set of namespaces
+		if p.userHasDismissedThisNamespace(srcNs, tgtList) {
 			continue
 		}
 
@@ -2471,53 +2475,54 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 }
 
 // Given the current broken map, and given an event, remove obsolete entries from event that are no longer present in
-// the current broken map. At the same time, return:
-// A compiled broken map that represents an intersection between the current brokenmap and the event broken map
+// the current broken map. At the same time, return A compiled broken map that represents an intersection between the
+// current brokenmap and the event broken map
 func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *base.EventInfo) CollectionNamespaceMapping {
 	eventCompiledBrokenMap := make(CollectionNamespaceMapping)
 	var scopeDelEventIds []int64
 
+	// BrokenMapping Event map is in the format of:
+	// Level0 : Whole Broken Map Event
+	// ------------------------------------ <- The event incoming argument is at this level
+	// Level1: Source Scope Event (SrcScope)
+	//   Level2: SrcScope.SrcCollection Event (Could have >1 tgt collections)
+	//     Level3: SrcScope.SrcCollection -> TgtScope.TgtCollection Event
+
+	// Level 1 - whole source scope event
 	for wholeScopeEventId, wholeSrcScopeEventRaw := range event.EventExtras.EventsMap {
 		wholeSrcScopeEvent := wholeSrcScopeEventRaw.(base.EventInfo)
-		var wholeScopeStillExists bool
 		wholeSrcScopeEvent.EventExtras.GetRWLock().RLock()
+		//  Variables used to keep track of whether or not this whole scope should be deleted
+		var wholeScopeStillExists bool
+		numSrcCollectionsUnderScope := len(wholeSrcScopeEvent.EventExtras.EventsMap)
+		var numLevel2Deleted int
+		// Level 2 - srcScope.srcCollection event
 		for srcEventId, srcNsEventRaw := range wholeSrcScopeEvent.EventExtras.EventsMap {
 			srcNsEvent := srcNsEventRaw.(base.EventInfo)
 			srcNamespace := srcNsEvent.GetHint().(*SourceNamespace)
 			_, _, tgtList, srcExists := p.cachedBrokenMap.Get(srcNamespace.CollectionNamespace, p.cachedBrokenMapSrcNamespaceIdx)
-			if !srcExists {
+			numTgtForThisSrcEvt := srcNsEvent.EventExtras.Len()
+			if !srcExists || numTgtForThisSrcEvt == 0 {
 				// The whole source scope:collection no longer exists
-				delete(event.EventExtras.EventsMap, srcEventId)
-				delete(p.cachedBrokenMapSrcEventIdIdx, srcNamespace.ToIndexString())
+				p.tempUpgradeLockAndDelL2EventFromL1(&wholeSrcScopeEvent, srcEventId, srcNamespace, &numSrcCollectionsUnderScope)
 			} else {
 				// At least one collection still exists under this scope
 				wholeScopeStillExists = true
-				// check for non-existing targets
+				// Level 3 - srcScope.srcCollection -> tgtScope.TgtCollection event check
 				tgtLock := srcNsEvent.EventExtras.GetRWLock()
-				// TODO expensive - optimize this later
 				tgtLock.RLock()
+				// Variables to see if the whole srcScope.srcCollection event (lvl2) should be deleted
+				numTgts := len(srcNsEvent.EventExtras.EventsMap)
+				var numLevel3Deleted int
 				for subEventId, tgtNsEventRaw := range srcNsEvent.EventExtras.EventsMap {
-					var found bool
-					tgtEvent := tgtNsEventRaw.(base.EventInfo)
-					var tgtNamespace *base.CollectionNamespace
-					for _, tgtNs := range tgtList {
-						tgtNamespace = tgtEvent.GetHint().(*base.CollectionNamespace)
-						if tgtNs.IsSameAs(*tgtNamespace) {
-							found = true
-							break
-						}
-					}
+					found, tgtNamespace := p.findTargetNamespaceGivenEvent(tgtNsEventRaw, tgtList)
 
 					// If the event's target namespace is not found in the latest broken map, which means that the event
 					// is outdated since the brokenmap is always source of truth...
 					// OR if it is found but the specific mapping has been dismissed
 					// don't export it to the event, and ensure that it is removed from existing event
-					if !found || p.checkUserDismissedMapForMatch(srcNamespace, CollectionNamespaceList{tgtNamespace}) {
-						tgtLock.RUnlock()
-						tgtLock.Lock()
-						delete(srcNsEvent.EventExtras.EventsMap, subEventId)
-						tgtLock.Unlock()
-						tgtLock.RLock()
+					if !found || p.userHasDismissedThisNamespace(srcNamespace, CollectionNamespaceList{tgtNamespace}) {
+						p.tempUpgradeLockAndDelL3EventFromL2(srcNsEvent, subEventId, &numLevel3Deleted)
 					} else {
 						// At this stage, cachedBrokenMap states that srcNs->tgtNs is valid
 						// And user hasn't dismissed it
@@ -2525,20 +2530,61 @@ func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *ba
 					}
 				}
 				tgtLock.RUnlock()
+				if numTgts == numLevel3Deleted {
+					//All the individual target ns for this source ns is deleted - the source should be deleted too
+					p.tempUpgradeLockAndDelL2EventFromL1(&wholeSrcScopeEvent, srcEventId, srcNamespace, &numLevel2Deleted)
+				}
 			}
 		}
-		if !wholeScopeStillExists {
-			scopeDelEventIds = append(scopeDelEventIds, wholeScopeEventId)
-			delete(p.cachedBrokenMapSrcScopeIdx, wholeSrcScopeEvent.EventDesc)
-		}
 		wholeSrcScopeEvent.EventExtras.GetRWLock().RUnlock()
-	}
-
-	for _, id := range scopeDelEventIds {
-		delete(event.EventExtras.EventsMap, id)
+		if !wholeScopeStillExists || numSrcCollectionsUnderScope == numLevel2Deleted {
+			p.deleteL1EventFromL0Event(event, wholeSrcScopeEvent, scopeDelEventIds, wholeScopeEventId)
+		}
 	}
 
 	return eventCompiledBrokenMap
+}
+
+func (p *PipelineEventBrokenMap) findTargetNamespaceGivenEvent(tgtNsEventRaw interface{}, tgtList CollectionNamespaceList) (bool, *base.CollectionNamespace) {
+	var found bool
+	var tgtNamespace *base.CollectionNamespace
+	tgtEvent := tgtNsEventRaw.(base.EventInfo)
+	for _, tgtNs := range tgtList {
+		tgtNamespace = tgtEvent.GetHint().(*base.CollectionNamespace)
+		if tgtNs.IsSameAs(*tgtNamespace) {
+			found = true
+			break
+		}
+	}
+	return found, tgtNamespace
+}
+
+// Delete a S.C:St.Ct event from the parent of a S.C event
+func (p *PipelineEventBrokenMap) tempUpgradeLockAndDelL3EventFromL2(srcNsEvent base.EventInfo, subEventId int64, numDeleted *int) {
+	srcNsEvent.EventExtras.GetRWLock().RUnlock()
+	srcNsEvent.EventExtras.GetRWLock().Lock()
+	delete(srcNsEvent.EventExtras.EventsMap, subEventId)
+	*numDeleted++
+	srcNsEvent.EventExtras.GetRWLock().Unlock()
+	srcNsEvent.EventExtras.GetRWLock().RLock()
+}
+
+// Delete a S.C from the parent of a S event
+func (p *PipelineEventBrokenMap) tempUpgradeLockAndDelL2EventFromL1(wholeSrcScopeEvent *base.EventInfo, srcEventId int64, srcNamespace *SourceNamespace, numSrcCollectionsDeleted *int) {
+	wholeSrcScopeEvent.EventExtras.GetRWLock().RUnlock()
+	wholeSrcScopeEvent.EventExtras.GetRWLock().Lock()
+	delete(wholeSrcScopeEvent.EventExtras.EventsMap, srcEventId)
+	delete(p.cachedBrokenMapSrcEventIdIdx, srcNamespace.ToIndexString())
+	*numSrcCollectionsDeleted++
+	wholeSrcScopeEvent.EventExtras.GetRWLock().Unlock()
+	wholeSrcScopeEvent.EventExtras.GetRWLock().RLock()
+}
+
+// No lock is needed because the top level of brokenMap was locked already
+func (p *PipelineEventBrokenMap) deleteL1EventFromL0Event(event *base.EventInfo, wholeSrcScopeEvent base.EventInfo, scopeDelEventIds []int64, wholeScopeEventId int64) {
+	scopeDelEventIds = append(scopeDelEventIds, wholeScopeEventId)
+	delete(p.cachedBrokenMapSrcScopeIdx, wholeSrcScopeEvent.EventDesc)
+	delete(event.EventExtras.EventsMap, wholeScopeEventId)
 }
 
 // Loads brokenmap into an empty event
@@ -2601,7 +2647,7 @@ func (p *PipelineEventBrokenMap) RegisterDismissAction(level int, srcDesc string
 	// First, translate input into an actual namespace mapping
 	switch level {
 	case 0:
-		// dismiss the whole current backfill mapping
+		// dismiss the whole current broken mapping mapping
 		p.cachedBrokenMapMtx.RLock()
 		userRequestedMapping = p.cachedBrokenMap.Clone()
 		p.cachedBrokenMapMtx.RUnlock()
@@ -2696,7 +2742,7 @@ func (p *PipelineEventBrokenMap) MarkUpdated() {
 
 // Check the user dismissed broken map to see if the input <srcNs + tgtNs's> is contained in the user's intent
 // Returns true if it is a complete match - in other words, user has dismissed this
-func (p *PipelineEventBrokenMap) checkUserDismissedMapForMatch(ns *SourceNamespace, list CollectionNamespaceList) bool {
+func (p *PipelineEventBrokenMap) userHasDismissedThisNamespace(ns *SourceNamespace, list CollectionNamespaceList) bool {
 	if len(p.userDismissedBrokenMap) == 0 {
 		return false
 	}

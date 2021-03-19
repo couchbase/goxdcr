@@ -822,7 +822,6 @@ func TestValidRules(t *testing.T) {
 	assert.Nil(validator.ValidateKV("scope1", nil))
 	assert.Nil(validator.ValidateKV("scope1.collection1", "scope1.collection1"))
 	assert.Nil(validator.ValidateKV("scope1.collection2", "scope1.collection2"))
-
 }
 
 func TestRulesRedundancyCheck(t *testing.T) {

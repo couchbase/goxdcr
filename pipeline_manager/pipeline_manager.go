@@ -1084,13 +1084,12 @@ func (pipelineMgr *PipelineManager) UpdatePipelineWithStoppedCb(topic string, ca
 
 func (pipelineMgr *PipelineManager) DismissEvent(eventId int) error {
 	repStatusMap := pipelineMgr.ReplicationStatusMap()
-	for replId, replStatus := range repStatusMap {
+	for _, replStatus := range repStatusMap {
 		if replStatus.GetEventsManager().ContainsEvent(eventId) {
-			fmt.Printf("Found replication %v with event %v\n", replId, eventId)
-			// TODO - part4: hook up and test
+			return replStatus.GetEventsManager().DismissEvent(eventId)
 		}
 	}
-	return nil
+	return base.ErrorNotFound
 }
 
 var updaterStateErrorStr = "Can't move update state from %v to %v"

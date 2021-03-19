@@ -1642,3 +1642,175 @@ function getReplicationInfos {
 
 	$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/pools/default/replicationInfos
 }
+
+# Users can specify:
+# 0. (requestedLevel 0) Cluster only - this will return the eventID for the whole broken map
+# 1. (requestedLevel 1) Cluster and sourceScopeName - this will return the eventID for the whole source scope in the broken map
+# 2. (requestedLevel 2) 1 + sourceCollectionName - return eventID for the sourceScope.sourceCol
+# 3.           2 + targetScope - invalid
+# 4. (requestedLevel 3) 2 + targetScope + targetCollectionName - return eventID for a single mapping
+#
+# Warning: Error condition - if specified entity is not found, calls exit on the script
+function getBrokenMapEntryId {
+	local cluster=$1
+	local sourceScopeName=${2:-}
+	local sourceCollectionName=${3:-}
+	local targetScopeName=${4:-}
+	local targetCollectionName=${5:-}
+	local requestedSrcNamespace
+	local requestedTgtNamespace
+	local returnEventId
+	local requestedLevel=0
+
+	# check as target pairs need to be present
+	if [[ ! -z "$targetScopeName" ]] || [[ ! -z "$targetCollectionName" ]]; then
+		if [[ -z "$targetScopeName" ]] || [[ -z "$targetCollectionName" ]]; then
+			echo "Both targets need to be specified if one is specified"
+			exit 1
+		fi
+	fi
+
+	# figure out which level we are diving to
+	if [[ ! -z "$sourceScopeName" ]]; then
+		requestedLevel=1
+		if [[ ! -z "$sourceCollectionName" ]]; then
+			requestedLevel=2
+			if [[ ! -z "$targetScopeName" ]]; then
+				requestedLevel=3
+			fi
+		fi
+	fi
+
+	if (($requestedLevel >= 2)); then
+		requestedSrcNamespace=$(echo -n "\"${sourceScopeName}.${sourceCollectionName}\"")
+		if (($requestedLevel == 3)); then
+			requestedTgtNamespace=$(echo -n "\"${targetScopeName}.${targetCollectionName}\"")
+		fi
+	fi
+
+	errList=$(getErrorListForMainPipeline $cluster)
+	if ((!$? == 0)); then
+		echo "Issue getting error list"
+		exit 1
+	fi
+
+	# ErrorsList contain multiple error events. There should only be one error type event
+	local totalErrorsLen=$(echo "$errList" | jq 'length')
+	local i
+	for ((i = 0; i < $totalErrorsLen; i = $(($i + 1)))); do
+		local oneEvent
+		local eventType
+		local returnEventId
+		oneEvent=$(echo "$errList" | jq '.[0]')
+		eventType=$(echo "$oneEvent" | jq '.EventType')
+		if ((!eventType == $BROKENEVENT_TYPE)); then
+			continue
+		fi
+		# Found the overall broken map event
+		if (($requestedLevel == 0)); then
+			returnEventId=$(echo "$oneEvent" | jq '.EventId')
+			return $returnEventId
+		fi
+		local scopesEvents
+		scopesEvents=$(echo "$oneEvent" | jq '.EventExtras')
+		# First see if the sourceScopeName is found
+		local scopesEventsKeys
+		scopesEventsKeys=$(echo "$scopesEvents" | jq 'keys[]')
+		local scopeEventKey
+		for scopeEventKey in $(echo "$scopesEventsKeys"); do
+			local scopeEvent
+			scopeEvent=$(echo "$scopesEvents" | jq ".[$scopeEventKey]")
+			local scopeEventScopeNameWithoutQuotes
+			scopeEventScopeNameWithoutQuotes=$(echo "$scopeEvent" | jq '.EventDesc' | sed 's/"//g')
+			if [[ ! "$scopeEventScopeNameWithoutQuotes" == "$sourceScopeName" ]]; then
+				continue
+			fi
+			# Found the source scope
+			if (($requestedLevel == 1)); then
+				returnEventId=$(echo "$scopeEvent" | jq '.EventId')
+				return $returnEventId
+			fi
+			# Now, cycle through each source namespace to find the matching source namespace
+			local sourceNamespaces
+			local sourceNamespacesKeys
+			sourceNamespaces=$(echo "$scopeEvent" | jq '.EventExtras' | jq '.EventsMap')
+			sourceNamespacesKeys=$(echo "$sourceNamespaces" | jq 'keys[]')
+			local oneKey
+			for oneKey in $(echo "$sourceNamespacesKeys"); do
+				local oneSourceNamespace
+				oneSourceNamespace=$(echo "$sourceNamespaces" | jq ".[$oneKey]")
+				local brokenMapSourceNamespace
+				brokenMapSourceNamespace=$(echo "$oneSourceNamespace" | jq '.EventDesc')
+				if [[ "$requestedSrcNamespace" == "$brokenMapSourceNamespace" ]]; then
+					# Found the source namespace.
+					if (($requestedLevel == 2)); then
+						returnEventId=$(echo "$oneSourceNamespace" | jq '.EventId')
+						return $returnEventId
+					fi
+					# Now check the target namespace
+					local targetNamespaces
+					targetNamespaces=$(echo "$oneSourceNamespace" | jq '.EventExtras' | jq '.EventsMap')
+					local targetNamespacesKeys
+					targetNamespacesKeys=$(echo "$targetNamespaces" | jq 'keys[]')
+					local oneTKey
+					for oneTKey in $(echo "$targetNamespacesKeys"); do
+						local targetNamespace
+						targetNamespace=$(echo "$targetNamespaces" | jq ".[$oneTKey]")
+						local brokenMapTargetNamespace
+						brokenMapTargetNamespace=$(echo "$targetNamespace" | jq '.EventDesc')
+						if [[ "$brokenMapTargetNamespace" == "$requestedTgtNamespace" ]]; then
+							echo "Found requested brokenmap of $requestedSrcNamespace -> $requestedTgtNamespace"
+							# shellcheck disable=SC2001
+							returnEventId=$(echo "$oneTKey" | sed 's/"//g')
+							return $returnEventId
+						fi
+					done
+				fi
+			done
+		done
+	done
+
+	echo "Unable to find the matching error event"
+	exit 1
+}
+
+function dismissEvent {
+	local sourceCluster=$1
+	local sourceBucket=$2
+	local targetCluster=$3
+	local targetBucket=$4
+
+	local sourceScopeName=${5:-}
+	local sourceCollectionName=${6:-}
+	local targetScopeName=${7:-}
+	local targetCollectionName=${8:-}
+	local eventID
+
+	getBrokenMapEntryId "$sourceCluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
+	eventID=$?
+	echo "Dismissing event ID: $eventID"
+
+	setReplicationSettings "$sourceCluster" "$sourceBucket" "$targetCluster" "$targetBucket" "dismissEvent=$eventID"
+}
+
+# TODO - right now assumes only one outgoing pipeline per cluster
+function getErrorListForMainPipeline {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	local output
+	local mainPipelineErrList
+
+	output=$(getReplicationInfos $port)
+	if ((!$? == 0)); then
+		echo ""
+		return 1
+	fi
+
+	if (($(echo "$output" | jq 'length') > 2)); then
+		echo "Not valid replicationInfos - seeing more than 2 output"
+		return 1
+	fi
+
+	mainPipelineErrList=$(echo "$output" | jq '.[0]' | jq '.ErrorList')
+	echo "$mainPipelineErrList"
+}

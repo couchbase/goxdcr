@@ -159,7 +159,6 @@ func (p *PipelineEventsMgr) updateBrokenMapEventIfNeeded() {
 	brokenMapEvent, doneFunc, delFunc := p.events.LockAndGetBrokenMapEventForEditing(p.eventIdWell)
 	defer doneFunc()
 
-	// TODO Part 2 - filter out events based on user's dismissal feedback history
 	eventIsEmpty := p.cachedBrokenMap.ExportToEvent(brokenMapEvent, p.eventIdWell)
 	if eventIsEmpty {
 		delFunc()

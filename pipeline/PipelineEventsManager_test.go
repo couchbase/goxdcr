@@ -16,7 +16,7 @@ func setupPemBoilerPlate() (*int64, string, func(string) (*metadata.ReplicationS
 	specGetter := func(string) (*metadata.ReplicationSpecification, error) {
 		return testSpec, nil
 	}
-	logger := &log.CommonLogger{}
+	logger := log.NewLogger("testPipelineEventsMgr", log.DefaultLoggerContext)
 	return &idWell, specName, specGetter, logger
 }
 
@@ -143,4 +143,76 @@ func TestPipelineEventsMgr_DismissEvent_LowPriority(t *testing.T) {
 
 	eventsMgr.DismissEvent(int(dismissID))
 	assert.Len(eventsMgr.events.EventInfos, 0)
+}
+
+func TestPipelineEventsMgr_DismissEvent_WholeBrokenMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_DismissEvent_WholeBrokenMap =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_WholeBrokenMap =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+
+	assert.NotNil(eventsMgr)
+
+	brokenMap := setupBrokenMap()
+	eventsMgr.LoadLatestBrokenMap(brokenMap)
+	eventsList := eventsMgr.GetCurrentEvents()
+	assert.NotEqual(0, len(eventsList.EventInfos))
+
+	eventsMgr.DismissEvent(0)
+
+	eventsList = eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 0)
+}
+
+func TestPipelineEventsMgr_DismissEvent_WholeScope(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_DismissEvent_WholeScope =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_WholeScope =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+
+	assert.NotNil(eventsMgr)
+
+	brokenMap := setupBrokenMap()
+	eventsMgr.LoadLatestBrokenMap(brokenMap)
+	eventsList := eventsMgr.GetCurrentEvents()
+	assert.NotEqual(0, len(eventsList.EventInfos))
+
+	eventsMgr.DismissEvent(1)
+
+	eventsList = eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 0)
+}
+
+func TestPipelineEventsMgr_DismissEvent_SingleScope(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_DismissEvent_SingleScope =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_SingleScope =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+
+	assert.NotNil(eventsMgr)
+
+	brokenMap := setupBrokenMap()
+	eventsMgr.LoadLatestBrokenMap(brokenMap)
+	eventsList := eventsMgr.GetCurrentEvents()
+	assert.NotEqual(0, len(eventsList.EventInfos))
+
+	eventsMgr.DismissEvent(2)
+
+	eventsList = eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 1)
+
+	// map[1:{1 BrokenMappingInfo s1 {map[4:{4 BrokenMappingInfo s1.c2 {map[5:{5 BrokenMappingInfo s1t.c2t {map[] 0xc000292f80} 0xc000292fa0 0xc000289380}] 0xc000292f40} 0xc000292f60 0xc0003025d0}] 0xc000292e80} 0xc000292ea0 <nil>}]
+	s1Map := eventsList.EventInfos[0].EventExtras.EventsMap[1].(base.EventInfo)
+	assert.Len(s1Map.EventExtras.EventsMap, 1)
+
+	// Now dismissing the last complete src->target event should render the whole broken mapping event gone
+	eventsMgr.DismissEvent(5)
+	eventsList = eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 0)
 }
