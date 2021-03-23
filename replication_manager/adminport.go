@@ -743,7 +743,7 @@ func (adminport *Adminport) performOnetimeUserActions(settingsMap metadata.Repli
 	eventId, dismissEventRequested := settingsMap[metadata.DismissEventKey]
 	if dismissEventRequested {
 		logger_ap.Infof("Dismiss event has been requested for %v, type: %v", eventId, reflect.TypeOf(eventId))
-		replication_mgr.pipelineMgr.DismissEvent(eventId.(int))
+		replication_mgr.pipelineMgr.DismissEventForPipeline(replicationId, eventId.(int))
 		return nil
 	}
 	return nil

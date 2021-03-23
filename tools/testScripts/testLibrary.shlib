@@ -522,5 +522,22 @@ function validateBrokenMapEntry {
 	local targetCollectionName=$5
 
 	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
+	if (( $? == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  exit 1
+  fi
 	echo "Got entry ID: $?"
+}
+
+function validateBrokenMapEntryDNE {
+	local cluster=$1
+	local sourceScopeName=$2
+	local sourceCollectionName=$3
+	local targetScopeName=$4
+	local targetCollectionName=$5
+
+	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
+	if (( ! $? == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  echo "Found entry when not supposed to"
+	  exit 1
+	fi
 }

@@ -50,27 +50,55 @@ function runDataLoad {
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
 function dismissLevel0 {
+  local eventId
 	getBrokenMapEntryId "C1"
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	eventId=$?
+	if (( $eventId == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
 }
 
 function dismissLevel1 {
+  local eventId
 	getBrokenMapEntryId "C1" "S1"
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	eventId=$?
+	if (( $eventId == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
 }
 
 function dismissLevel2 {
+  local eventId
 	getBrokenMapEntryId "C1" "S1" "col1"
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	eventId=$?
+	if (( $eventId == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
 	getBrokenMapEntryId "C1" "S1" "col2"
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	eventId=$?
+	if (( $eventId == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
 }
 
 function dismissLevel3 {
+  local eventId
 	getBrokenMapEntryId "C1" "S1" "col1" "S1" "col1"
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	eventId=$?
+	if (( $eventId == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
 	getBrokenMapEntryId "C1" "S1" "col2" "S1" "col2"
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$?"
+	eventId=$?
+	if (( $eventId == $GET_BROKEN_MAP_NOT_FOUND ));then
+	  exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
 }
 
 function pickARandomLevelToDismissBrokenMap {
@@ -161,8 +189,27 @@ function runTestCase {
 
 	# We can only pick one so randomly pick one
 	pickARandomLevelToDismissBrokenMap
-
+	sleep 5
 	validateBrokenMapDoesNotExist "C1"
+
+	# Pause and resume pipeline should free up dismissal and brokenMap should show up again
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 5
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 5
+	validateBrokenMapExists "C1"
+
+	# run data load again to ensure brokenMapping is updated and displayed correctly
+	runDataLoad
+
+	# Try removing "S1.col2" and see if brokenMap entry gets removed
+	deleteCollection "C1" "B1" "S1" "col2"
+	validateBrokenMapExists "C1"
+	validateBrokenMapEntryDNE "C1" "S2" "col2" "S1" "col2"
+
+	# Repair it to set up correctly for original backfill test
+	createCollection "C1" "B1" "S1" "col2"
+	runDataLoad
 
 	# Then re-setup the implicit matching that matches
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline"
 	"sync"
 )
@@ -37,6 +38,8 @@ const (
 	BackfillPipelineStop           PipelineMgtOpType = iota
 	BackfillPipelineStopWStoppedCb PipelineMgtOpType = iota
 	BackfillPipelineClean          PipelineMgtOpType = iota
+	DismissEvent                   PipelineMgtOpType = iota
+	BackfillMappingStatusUpdate    PipelineMgtOpType = iota
 )
 
 func (p PipelineMgtOpType) String() string {
@@ -61,6 +64,10 @@ func (p PipelineMgtOpType) String() string {
 		return "BackfillPipelineStop"
 	case BackfillPipelineClean:
 		return "BackfillPipelineClean"
+	case DismissEvent:
+		return "DismissEvent"
+	case BackfillMappingStatusUpdate:
+		return "BackfillMappingStatusUpdate"
 	default:
 		return "?? PipelineMgtOpType"
 	}
@@ -86,6 +93,10 @@ type PipelineOpSerializerIface interface {
 
 	// APIs for Pipeline Manager to drive
 	Stop()
+
+	// Event Framework
+	DismissEvent(topic string, eventId int) error
+	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
 }
 
 type SerializerRepStatusPair struct {
@@ -105,6 +116,10 @@ type Job struct {
 	// Input for UpdateWithStoppedCallback
 	callbackForWhenPipelineIsStopped base.StoppedPipelineCallback
 	errorCbForFailedStoppedOp        base.StoppedPipelineErrCallback
+
+	// Event and backfill related
+	eventId  int
+	diffPair *metadata.CollectionNamespaceMappingsDiffPair
 
 	// Optional outputs from jobs
 	repStatusCh chan SerializerRepStatusPair
@@ -419,6 +434,16 @@ forloop:
 				if err != nil {
 					serializer.logger.Warnf("Error cleaning backfill pipeline ckpts %v. err=%v", job.pipelineTopic, err)
 				}
+			case DismissEvent:
+				err := serializer.pipelineMgr.DismissEvent(job.eventId)
+				if err != nil {
+					serializer.logger.Warnf("Error dismissing event %v for pipeline %v. err=%v", job.eventId, job.pipelineTopic, err)
+				}
+			case BackfillMappingStatusUpdate:
+				err := serializer.pipelineMgr.BackfillMappingUpdate(job.pipelineTopic, job.diffPair)
+				if err != nil {
+					serializer.logger.Warnf("Error updating backfill mapping for pipeline %v. err=%v", job.pipelineTopic, err)
+				}
 			default:
 				serializer.logger.Errorf(fmt.Sprintf("Unknown job type: %v -> %v", job.jobType, job.String()))
 			}
@@ -483,4 +508,30 @@ func (serializer *PipelineOpSerializer) UpdateWithStoppedCb(topic string, callba
 	updateJob.errorCbForFailedStoppedOp = errCb
 
 	return serializer.distributeJob(updateJob)
+}
+
+func (serializer *PipelineOpSerializer) DismissEvent(topic string, eventId int) error {
+	if serializer.isStopped() {
+		return SerializerStoppedErr
+	}
+
+	var dismissJob Job
+	dismissJob.jobType = DismissEvent
+	dismissJob.pipelineTopic = topic
+	dismissJob.eventId = eventId
+
+	return serializer.distributeJob(dismissJob)
+}
+
+func (serializer *PipelineOpSerializer) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+	if serializer.isStopped() {
+		return SerializerStoppedErr
+	}
+
+	var statusUpdateJob Job
+	statusUpdateJob.jobType = BackfillMappingStatusUpdate
+	statusUpdateJob.pipelineTopic = topic
+	statusUpdateJob.diffPair = diffPair
+
+	return serializer.distributeJob(statusUpdateJob)
 }

@@ -152,14 +152,17 @@ func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) 
 	return collection.Uid, nil
 }
 
-func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, source *CollectionsManifest) (backfillsNeeded CollectionNamespaceMapping, err error) {
+func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, source *CollectionsManifest) (backfillsNeeded CollectionNamespaceMapping, addedRemovedPair CollectionNamespaceMappingsDiffPair, err error) {
 	backfillsNeeded = make(CollectionNamespaceMapping)
 
 	// First, find any previously unmapped target collections that are now mapped
 	oldSrcToTargetMapping, _, _ := source.ImplicitMap(prevTarget)
 	srcToTargetMapping, _, _ := source.ImplicitMap(target)
 
-	added, _ := oldSrcToTargetMapping.Diff(srcToTargetMapping)
+	added, removed := oldSrcToTargetMapping.Diff(srcToTargetMapping)
+	addedRemovedPair.Added = added
+	addedRemovedPair.Removed = removed
+
 	backfillsNeeded.Consolidate(added)
 
 	// Then, find out if any target Collection UID changed from underneath the manifests
@@ -167,7 +170,7 @@ func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, so
 	// because they were never "missing", but their collection UID changed
 	_, changedTargets, _, err := target.Diff(prevTarget)
 	if err != nil {
-		return nil, err
+		return nil, addedRemovedPair, err
 	}
 	backfillsNeededDueToTargetRecreation := srcToTargetMapping.GetSubsetBasedOnSpecifiedTargets(changedTargets)
 
@@ -1269,13 +1272,13 @@ func NewCollectionNamespaceMappingFromEvent(event *base.EventInfo) CollectionNam
 	event.EventExtras.GetRWLock().RLock()
 	defer event.EventExtras.GetRWLock().RUnlock()
 	for _, scopeLevelEventRaw := range event.EventExtras.EventsMap {
-		scopeEvent, ok := scopeLevelEventRaw.(base.EventInfo)
+		scopeEvent, ok := scopeLevelEventRaw.(*base.EventInfo)
 		if !ok {
 			continue
 		}
 		scopeEvent.EventExtras.GetRWLock().RLock()
 		for _, srcCollectionEventRaw := range scopeEvent.EventExtras.EventsMap {
-			srcEvent, ok := srcCollectionEventRaw.(base.EventInfo)
+			srcEvent, ok := srcCollectionEventRaw.(*base.EventInfo)
 			if !ok {
 				continue
 			}
@@ -1285,7 +1288,7 @@ func NewCollectionNamespaceMappingFromEvent(event *base.EventInfo) CollectionNam
 			// Go through each target namespace of this source namespace
 			srcEvent.EventExtras.GetRWLock().RLock()
 			for _, tgtEventRaw := range srcEvent.EventExtras.EventsMap {
-				tgtEvent, ok := tgtEventRaw.(base.EventInfo)
+				tgtEvent, ok := tgtEventRaw.(*base.EventInfo)
 				if !ok {
 					continue
 				}
@@ -2375,6 +2378,10 @@ func (p *PipelineEventBrokenMap) GetBrokenMapRO() (CollectionNamespaceMapping, f
 	return p.cachedBrokenMap, doneFunc
 }
 
+func (p *PipelineEventBrokenMap) GetDismissedMapWMtx() (CollectionNamespaceMapping, CollectionNamespaceMappingIdx, *sync.RWMutex) {
+	return p.userDismissedBrokenMap, p.userDismissedBrokenIdx, &p.cachedBrokenMapMtx
+}
+
 // Returns true if event is empty
 func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *int64) bool {
 	// WLock because we need to do updates
@@ -2432,7 +2439,7 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 		}
 
 		scopeEventId, scopeEventExists := p.cachedBrokenMapSrcScopeIdx[srcNs.ScopeName]
-		var scopeEvent base.EventInfo
+		var scopeEvent *base.EventInfo
 		if !scopeEventExists {
 			scopeEvent = base.NewEventInfo()
 			scopeEvent.EventType = base.BrokenMappingInfoType
@@ -2441,12 +2448,12 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 			event.EventExtras.EventsMap[scopeEvent.EventId] = scopeEvent
 			p.cachedBrokenMapSrcScopeIdx[srcNs.ScopeName] = scopeEvent.EventId
 		} else {
-			scopeEvent = event.EventExtras.EventsMap[scopeEventId].(base.EventInfo)
+			scopeEvent = event.EventExtras.EventsMap[scopeEventId].(*base.EventInfo)
 		}
 		scopeEvent.EventExtras.GetRWLock().Lock()
 
 		srcEventId, srcExists := p.cachedBrokenMapSrcEventIdIdx[srcNs.ToIndexString()]
-		var srcEvent base.EventInfo
+		var srcEvent *base.EventInfo
 		if !srcExists {
 			srcEvent = base.NewEventInfo()
 			srcEvent.EventType = base.BrokenMappingInfoType
@@ -2456,7 +2463,7 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 			scopeEvent.EventExtras.EventsMap[srcEvent.EventId] = srcEvent
 			p.cachedBrokenMapSrcEventIdIdx[srcNs.ToIndexString()] = srcEvent.EventId
 		} else {
-			srcEvent = scopeEvent.EventExtras.EventsMap[srcEventId].(base.EventInfo)
+			srcEvent = scopeEvent.EventExtras.EventsMap[srcEventId].(*base.EventInfo)
 		}
 		srcEvent.EventExtras.GetRWLock().Lock()
 		// At this point all the tgts here are missing
@@ -2480,17 +2487,16 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *base.EventInfo) CollectionNamespaceMapping {
 	eventCompiledBrokenMap := make(CollectionNamespaceMapping)
 	var scopeDelEventIds []int64
-
 	// BrokenMapping Event map is in the format of:
-	// Level0 : Whole Broken Map Event
-	// ------------------------------------ <- The event incoming argument is at this level
+	// Level0 : Whole Broken Map Event       <- The event incoming argument is at this level
+	// ------------------------------------
 	// Level1: Source Scope Event (SrcScope)
 	//   Level2: SrcScope.SrcCollection Event (Could have >1 tgt collections)
 	//     Level3: SrcScope.SrcCollection -> TgtScope.TgtCollection Event
 
 	// Level 1 - whole source scope event
 	for wholeScopeEventId, wholeSrcScopeEventRaw := range event.EventExtras.EventsMap {
-		wholeSrcScopeEvent := wholeSrcScopeEventRaw.(base.EventInfo)
+		wholeSrcScopeEvent := wholeSrcScopeEventRaw.(*base.EventInfo)
 		wholeSrcScopeEvent.EventExtras.GetRWLock().RLock()
 		//  Variables used to keep track of whether or not this whole scope should be deleted
 		var wholeScopeStillExists bool
@@ -2498,13 +2504,13 @@ func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *ba
 		var numLevel2Deleted int
 		// Level 2 - srcScope.srcCollection event
 		for srcEventId, srcNsEventRaw := range wholeSrcScopeEvent.EventExtras.EventsMap {
-			srcNsEvent := srcNsEventRaw.(base.EventInfo)
+			srcNsEvent := srcNsEventRaw.(*base.EventInfo)
 			srcNamespace := srcNsEvent.GetHint().(*SourceNamespace)
 			_, _, tgtList, srcExists := p.cachedBrokenMap.Get(srcNamespace.CollectionNamespace, p.cachedBrokenMapSrcNamespaceIdx)
 			numTgtForThisSrcEvt := srcNsEvent.EventExtras.Len()
 			if !srcExists || numTgtForThisSrcEvt == 0 {
 				// The whole source scope:collection no longer exists
-				p.tempUpgradeLockAndDelL2EventFromL1(&wholeSrcScopeEvent, srcEventId, srcNamespace, &numSrcCollectionsUnderScope)
+				p.tempUpgradeLockAndDelL2EventFromL1(wholeSrcScopeEvent, srcEventId, srcNamespace, &numSrcCollectionsUnderScope)
 			} else {
 				// At least one collection still exists under this scope
 				wholeScopeStillExists = true
@@ -2532,7 +2538,7 @@ func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *ba
 				tgtLock.RUnlock()
 				if numTgts == numLevel3Deleted {
 					//All the individual target ns for this source ns is deleted - the source should be deleted too
-					p.tempUpgradeLockAndDelL2EventFromL1(&wholeSrcScopeEvent, srcEventId, srcNamespace, &numLevel2Deleted)
+					p.tempUpgradeLockAndDelL2EventFromL1(wholeSrcScopeEvent, srcEventId, srcNamespace, &numLevel2Deleted)
 				}
 			}
 		}
@@ -2548,7 +2554,7 @@ func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *ba
 func (p *PipelineEventBrokenMap) findTargetNamespaceGivenEvent(tgtNsEventRaw interface{}, tgtList CollectionNamespaceList) (bool, *base.CollectionNamespace) {
 	var found bool
 	var tgtNamespace *base.CollectionNamespace
-	tgtEvent := tgtNsEventRaw.(base.EventInfo)
+	tgtEvent := tgtNsEventRaw.(*base.EventInfo)
 	for _, tgtNs := range tgtList {
 		tgtNamespace = tgtEvent.GetHint().(*base.CollectionNamespace)
 		if tgtNs.IsSameAs(*tgtNamespace) {
@@ -2560,7 +2566,7 @@ func (p *PipelineEventBrokenMap) findTargetNamespaceGivenEvent(tgtNsEventRaw int
 }
 
 // Delete a S.C:St.Ct event from the parent of a S.C event
-func (p *PipelineEventBrokenMap) tempUpgradeLockAndDelL3EventFromL2(srcNsEvent base.EventInfo, subEventId int64, numDeleted *int) {
+func (p *PipelineEventBrokenMap) tempUpgradeLockAndDelL3EventFromL2(srcNsEvent *base.EventInfo, subEventId int64, numDeleted *int) {
 	srcNsEvent.EventExtras.GetRWLock().RUnlock()
 	srcNsEvent.EventExtras.GetRWLock().Lock()
 	delete(srcNsEvent.EventExtras.EventsMap, subEventId)
@@ -2581,7 +2587,7 @@ func (p *PipelineEventBrokenMap) tempUpgradeLockAndDelL2EventFromL1(wholeSrcScop
 }
 
 // No lock is needed because the top level of brokenMap was locked already
-func (p *PipelineEventBrokenMap) deleteL1EventFromL0Event(event *base.EventInfo, wholeSrcScopeEvent base.EventInfo, scopeDelEventIds []int64, wholeScopeEventId int64) {
+func (p *PipelineEventBrokenMap) deleteL1EventFromL0Event(event *base.EventInfo, wholeSrcScopeEvent *base.EventInfo, scopeDelEventIds []int64, wholeScopeEventId int64) {
 	scopeDelEventIds = append(scopeDelEventIds, wholeScopeEventId)
 	delete(p.cachedBrokenMapSrcScopeIdx, wholeSrcScopeEvent.EventDesc)
 	delete(event.EventExtras.EventsMap, wholeScopeEventId)
@@ -2593,8 +2599,8 @@ func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *i
 	srcEventIdx := make(map[string]int64)
 	scopeEventIdx := make(map[string]int64)
 
-	eventLock := event.EventExtras.GetRWLock()
-	eventLock.Lock()
+	event.EventExtras.GetRWLock().Lock()
+	defer event.EventExtras.GetRWLock().Unlock()
 	var wholeScopeEventId int64
 	var exists bool
 	for srcNs, tgtList := range p.cachedBrokenMap {
@@ -2609,7 +2615,7 @@ func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *i
 			event.EventExtras.EventsMap[wholeScopeEventId] = newWholeScopeEvent
 			scopeEventIdx[srcNs.ScopeName] = wholeScopeEventId
 		}
-		wholeScopeEvent := event.EventExtras.EventsMap[wholeScopeEventId].(base.EventInfo)
+		wholeScopeEvent := event.EventExtras.EventsMap[wholeScopeEventId].(*base.EventInfo)
 		wholeScopeEvent.EventExtras.GetRWLock().Lock()
 
 		// Then for each individual scope:col -> scopeT:colT, create individual events underneath
@@ -2637,7 +2643,6 @@ func (p *PipelineEventBrokenMap) loadEmptyEvent(event *base.EventInfo, idWell *i
 		wholeScopeEvent.EventExtras.EventsMap[newSrcEventId] = newSrcEventInfo
 		wholeScopeEvent.EventExtras.GetRWLock().Unlock()
 	}
-	eventLock.Unlock()
 	return srcEventIdx, scopeEventIdx
 }
 
@@ -2758,4 +2763,146 @@ func (p *PipelineEventBrokenMap) userHasDismissedThisNamespace(ns *SourceNamespa
 	}
 	// ns exists in dismissedBrokenMap AND all elements in list exists in the tgtList
 	return true
+}
+
+func (p *PipelineEventBrokenMap) ResetAllDismissedHistory() {
+	p.cachedBrokenMapMtx.Lock()
+	defer p.cachedBrokenMapMtx.Unlock()
+
+	p.userDismissedBrokenMap = make(CollectionNamespaceMapping)
+	p.userDismissedBrokenIdx = make(CollectionNamespaceMappingIdx)
+	p.userDismissUpdated = true
+}
+
+func (p *PipelineEventBrokenMap) UpdateWithNewDiffPair(diffPair *CollectionNamespaceMappingsDiffPair) error {
+	p.cachedBrokenMapMtx.RLock()
+	defer p.cachedBrokenMapMtx.RUnlock()
+
+	if len(p.userDismissedBrokenMap) == 0 && len(p.cachedBrokenMap) == 0 {
+		return nil
+	}
+
+	var userDismissedUpdated bool
+	var brokenMapUpdated bool
+	if len(diffPair.Added) > 0 {
+		// added means that these namespace mappings are being backfilled
+		// If anyone of them was dismissed before, remove them so that if it is broken again
+		// the brokenEvent will be reported
+		for srcNs, tgtList := range diffPair.Added {
+			p.upgradeLockAndUpdateDismissedMapWithUpdatedPair(srcNs, tgtList, &userDismissedUpdated)
+			p.upgradeLockAndUpdateCachedBrokenmapWithUpdatedPair(srcNs, tgtList, &brokenMapUpdated)
+		}
+	}
+
+	if len(diffPair.Removed) > 0 {
+		for srcNs, _ := range diffPair.Removed {
+			p.upgradeLockAndCleanupDismissedMapWithUpdatedPair(srcNs, &userDismissedUpdated)
+			p.upgradeLockAndCleanupCachedBrokenMapWithUpdatedPair(srcNs, &brokenMapUpdated)
+		}
+	}
+
+	if userDismissedUpdated || brokenMapUpdated {
+		p.cachedBrokenMapMtx.RUnlock()
+		p.cachedBrokenMapMtx.Lock()
+		if userDismissedUpdated {
+			p.userDismissedBrokenIdx = p.userDismissedBrokenMap.CreateLookupIndex()
+			p.userDismissUpdated = true
+		}
+		if brokenMapUpdated {
+			p.cachedBrokenMapSrcNamespaceIdx = p.cachedBrokenMap.CreateLookupIndex()
+			p.cachedBrokenMapUpdated = true
+		}
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	}
+	return nil
+}
+
+func (p *PipelineEventBrokenMap) upgradeLockAndUpdateDismissedMapWithUpdatedPair(srcNs *SourceNamespace, tgtList CollectionNamespaceList, updated *bool) {
+	dismissedSrcPtr, _, dismissedTgtList, exists := p.userDismissedBrokenMap.Get(srcNs.GetCollectionNamespace(), p.userDismissedBrokenIdx)
+	if !exists {
+		return
+	}
+
+	// Check to see if the tgt match
+	var replacementList CollectionNamespaceList
+	for _, oneTgt := range dismissedTgtList {
+		if !tgtList.Contains(oneTgt) {
+			replacementList = append(replacementList, oneTgt)
+		}
+	}
+	if len(replacementList) > 0 && !replacementList.IsSame(dismissedTgtList) {
+		p.cachedBrokenMapMtx.RUnlock()
+		p.cachedBrokenMapMtx.Lock()
+		p.userDismissedBrokenMap[dismissedSrcPtr] = replacementList
+		*updated = true
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	} else if len(replacementList) == 0 {
+		p.cachedBrokenMapMtx.RUnlock()
+		p.cachedBrokenMapMtx.Lock()
+		delete(p.userDismissedBrokenMap, dismissedSrcPtr)
+		*updated = true
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	}
+}
+
+func (p *PipelineEventBrokenMap) upgradeLockAndUpdateCachedBrokenmapWithUpdatedPair(srcNs *SourceNamespace, tgtList CollectionNamespaceList, updated *bool) {
+	brokenMapSrcPtr, _, brokenMapTgtList, exists := p.cachedBrokenMap.Get(srcNs.GetCollectionNamespace(), p.cachedBrokenMapSrcNamespaceIdx)
+	if !exists {
+		return
+	}
+
+	// Check to see if the tgt match
+	var replacementList CollectionNamespaceList
+	for _, oneTgt := range brokenMapTgtList {
+		if !tgtList.Contains(oneTgt) {
+			replacementList = append(replacementList, oneTgt)
+		}
+	}
+	if len(replacementList) > 0 && !replacementList.IsSame(brokenMapTgtList) {
+		p.cachedBrokenMapMtx.RUnlock()
+		p.cachedBrokenMapMtx.Lock()
+		p.cachedBrokenMap[brokenMapSrcPtr] = replacementList
+		*updated = true
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	} else if len(replacementList) == 0 {
+		p.cachedBrokenMapMtx.RUnlock()
+		p.cachedBrokenMapMtx.Lock()
+		delete(p.cachedBrokenMap, brokenMapSrcPtr)
+		*updated = true
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	}
+}
+
+func (p *PipelineEventBrokenMap) upgradeLockAndCleanupDismissedMapWithUpdatedPair(srcNs *SourceNamespace, updated *bool) {
+	srcPtr, _, _, exists := p.userDismissedBrokenMap.Get(srcNs.GetCollectionNamespace(), p.userDismissedBrokenIdx)
+	if !exists {
+		return
+	}
+
+	p.cachedBrokenMapMtx.RUnlock()
+	p.cachedBrokenMapMtx.Lock()
+	delete(p.userDismissedBrokenMap, srcPtr)
+	*updated = true
+	p.cachedBrokenMapMtx.Unlock()
+	p.cachedBrokenMapMtx.RLock()
+}
+
+func (p *PipelineEventBrokenMap) upgradeLockAndCleanupCachedBrokenMapWithUpdatedPair(srcNs *SourceNamespace, updated *bool) {
+	srcPtr, _, _, exists := p.cachedBrokenMap.Get(srcNs.GetCollectionNamespace(), p.cachedBrokenMapSrcNamespaceIdx)
+	if !exists {
+		return
+	}
+
+	p.cachedBrokenMapMtx.RUnlock()
+	p.cachedBrokenMapMtx.Lock()
+	delete(p.cachedBrokenMap, srcPtr)
+	delete(p.cachedBrokenMapSrcEventIdIdx, srcPtr.ToIndexString())
+	*updated = true
+	p.cachedBrokenMapMtx.Unlock()
+	p.cachedBrokenMapMtx.RLock()
 }

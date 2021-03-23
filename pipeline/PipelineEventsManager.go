@@ -13,7 +13,7 @@ import (
 var ErrorCannotDismiss = errors.New("Specified event cannot be dismissed")
 
 type PipelineEventList struct {
-	EventInfos []base.EventInfo
+	EventInfos []*base.EventInfo
 	TimeInfos  []int64
 	Mutex      *sync.RWMutex
 }
@@ -46,13 +46,13 @@ func (p *PipelineEventList) LockAndGetBrokenMapEventForEditing(idWell *int64) (e
 		if p.EventInfos[idx].EventType == base.BrokenMappingInfoType {
 			// Update this slot's time
 			p.TimeInfos[idx] = time.Now().UnixNano()
-			event = &p.EventInfos[idx]
+			event = p.EventInfos[idx]
 			return
 		}
 	}
 
 	// Not found
-	newEvent := base.EventInfo{
+	newEvent := &base.EventInfo{
 		EventId:     base.GetEventIdFromWell(idWell),
 		EventType:   base.BrokenMappingInfoType,
 		EventDesc:   "",
@@ -60,7 +60,7 @@ func (p *PipelineEventList) LockAndGetBrokenMapEventForEditing(idWell *int64) (e
 	}
 	p.EventInfos = append(p.EventInfos, newEvent)
 	idx = len(p.EventInfos) - 1
-	event = &p.EventInfos[idx]
+	event = p.EventInfos[idx]
 	p.TimeInfos = append(p.TimeInfos, time.Now().UnixNano())
 
 	return
@@ -72,6 +72,8 @@ type PipelineEventsManager interface {
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
 	ContainsEvent(eventId int) bool
 	DismissEvent(eventId int) error
+	ResetDismissedHistory()
+	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
 }
 
 // The pipeline events mgr's job is to handle the exporting of events and also remember the user's preference
@@ -117,7 +119,7 @@ func (p *PipelineEventsMgr) getEvent(eventId int) (*base.EventInfo, error) {
 
 	for _, event := range p.events.EventInfos {
 		if int(event.EventId) == eventId {
-			return &event, nil
+			return event, nil
 		}
 		subEvent, err := event.GetSubEvent(eventId)
 		if subEvent != nil && err == nil {
@@ -132,7 +134,7 @@ func (p *PipelineEventsMgr) AddEvent(eventType base.ErrorInfoType, eventDesc str
 		eventExtras.Init()
 	}
 
-	newEvent := base.EventInfo{
+	newEvent := &base.EventInfo{
 		EventId:     base.GetEventIdFromWell(p.eventIdWell),
 		EventType:   eventType,
 		EventDesc:   eventDesc,
@@ -244,7 +246,7 @@ func (p *PipelineEventsMgr) getIncomingEventBrokenmapLevelAndDesc(incomingEvent 
 		defer brokenMappingEvent.EventExtras.GetRWLock().RUnlock()
 		for _, scopeEventRaw := range brokenMappingEvent.EventExtras.EventsMap {
 			level = 1
-			scopeEvent := scopeEventRaw.(base.EventInfo)
+			scopeEvent := scopeEventRaw.(*base.EventInfo)
 			if scopeEvent.EventId == incomingEvent.EventId {
 				return level, scopeEvent.EventDesc, "", nil
 			}
@@ -252,7 +254,7 @@ func (p *PipelineEventsMgr) getIncomingEventBrokenmapLevelAndDesc(incomingEvent 
 			scopeEvent.EventExtras.GetRWLock().RLock()
 			for _, srcNsEventRaw := range scopeEvent.EventExtras.EventsMap {
 				level = 2
-				srcNsEvent := srcNsEventRaw.(base.EventInfo)
+				srcNsEvent := srcNsEventRaw.(*base.EventInfo)
 				if srcNsEvent.EventId == incomingEvent.EventId {
 					scopeEvent.EventExtras.GetRWLock().RUnlock()
 					return level, srcNsEvent.EventDesc, "", nil
@@ -261,9 +263,10 @@ func (p *PipelineEventsMgr) getIncomingEventBrokenmapLevelAndDesc(incomingEvent 
 				srcNsEvent.EventExtras.GetRWLock().RLock()
 				for _, tgtNsEventRaw := range srcNsEvent.EventExtras.EventsMap {
 					level = 3
-					tgtNsEvent := tgtNsEventRaw.(base.EventInfo)
+					tgtNsEvent := tgtNsEventRaw.(*base.EventInfo)
 					if tgtNsEvent.EventId == incomingEvent.EventId {
 						srcNsEvent.EventExtras.GetRWLock().RUnlock()
+						scopeEvent.EventExtras.GetRWLock().RUnlock()
 						// For level 3, require some special descriptor
 						// Since a single targetScope.targetCol is not enough
 						// we need to pass back an entirety of s.c:st.ct
@@ -291,4 +294,12 @@ func (p *PipelineEventsMgr) handleDismissLowPriorityMsg(event *base.EventInfo) e
 		}
 	}
 	return base.ErrorNotFound
+}
+
+func (p *PipelineEventsMgr) ResetDismissedHistory() {
+	p.cachedBrokenMap.ResetAllDismissedHistory()
+}
+
+func (p *PipelineEventsMgr) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+	return p.cachedBrokenMap.UpdateWithNewDiffPair(diffPair)
 }

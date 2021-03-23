@@ -601,7 +601,7 @@ func TestManifestFindBackfill(t *testing.T) {
 	target2.scopes["S1"].Collections["col1"] = newCol
 	target2.generateReverseLookupMap()
 
-	output, err := target2.ImplicitGetBackfillCollections(&target, &source)
+	output, _, err := target2.ImplicitGetBackfillCollections(&target, &source)
 	assert.Nil(err)
 	assert.Equal(1, len(output))
 
@@ -614,7 +614,7 @@ func TestManifestFindBackfill(t *testing.T) {
 	target3.generateReverseLookupMap()
 
 	// However, there should not be a backfill YET because source doesn't have a matching "Extraneous" collection
-	output, err = target3.ImplicitGetBackfillCollections(&target, &source)
+	output, _, err = target3.ImplicitGetBackfillCollections(&target, &source)
 	assert.Nil(err)
 	assert.Equal(1, len(output))
 
@@ -624,7 +624,7 @@ func TestManifestFindBackfill(t *testing.T) {
 	source2.scopes["S1"].Collections[oneMoreCollectionName] = testSrcCol
 	source2.generateReverseLookupMap()
 
-	output, err = target3.ImplicitGetBackfillCollections(&target, &source2)
+	output, _, err = target3.ImplicitGetBackfillCollections(&target, &source2)
 	assert.Nil(err)
 	assert.Equal(2, len(output))
 
@@ -1295,7 +1295,7 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 
 	var idWell int64
 	testEvent := base.NewEventInfo()
-	pipelineBm.ExportToEvent(&testEvent, &idWell)
+	pipelineBm.ExportToEvent(testEvent, &idWell)
 
 	assert.Len(pipelineBm.cachedBrokenMapSrcScopeIdx, 1)
 	assert.Len(pipelineBm.cachedBrokenMapSrcEventIdIdx, 1)
@@ -1304,15 +1304,15 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 	assert.Len(testEvent.EventExtras.EventsMap, 1)
 	for k, _ := range testEvent.EventExtras.EventsMap {
 		// Validate the map has 1 source namespace and 2 target namespaces
-		actualEvents := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		actualEvents := testEvent.EventExtras.EventsMap[k].(*base.EventInfo)
 		assert.Len(actualEvents.EventExtras.EventsMap, 1)
 		for k, _ := range actualEvents.EventExtras.EventsMap {
-			collectionEvent := actualEvents.EventExtras.EventsMap[k].(base.EventInfo)
+			collectionEvent := actualEvents.EventExtras.EventsMap[k].(*base.EventInfo)
 			assert.Len(collectionEvent.EventExtras.EventsMap, 2)
 		}
 	}
 
-	testBrokenMapFromEvent := NewCollectionNamespaceMappingFromEvent(&testEvent)
+	testBrokenMapFromEvent := NewCollectionNamespaceMappingFromEvent(testEvent)
 	assert.True(testBrokenMapFromEvent.IsSame(pipelineBm.cachedBrokenMap))
 
 	// Now pretend brokenmap s1.c1 -> s1.c3 got repaired
@@ -1323,7 +1323,7 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 	// as this new creation of repairedBm shouldn't really happen in real life
 	repairedBm.cachedBrokenMapSrcScopeIdx = pipelineBm.cachedBrokenMapSrcScopeIdx
 	repairedBm.cachedBrokenMapSrcEventIdIdx = pipelineBm.cachedBrokenMapSrcEventIdIdx
-	repairedBm.ExportToEvent(&testEvent, &idWell)
+	repairedBm.ExportToEvent(testEvent, &idWell)
 
 	// None of the sources cache should have changed
 	assert.Len(repairedBm.cachedBrokenMapSrcScopeIdx, 1)
@@ -1332,7 +1332,7 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 	// Validate the map has 1 source namespace and 1 target namespaces
 	assert.Len(testEvent.EventExtras.EventsMap, 1)
 	for k, _ := range testEvent.EventExtras.EventsMap {
-		subEvent := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		subEvent := testEvent.EventExtras.EventsMap[k].(*base.EventInfo)
 		assert.Len(subEvent.EventExtras.EventsMap, 1)
 	}
 
@@ -1343,7 +1343,7 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 	newBm.AddSingleMapping(&ns4, &ns1)
 	repairedBm.LoadLatestBrokenMap(newBm)
 	assert.True(repairedBm.cachedBrokenMapUpdated)
-	repairedBm.ExportToEvent(&testEvent, &idWell)
+	repairedBm.ExportToEvent(testEvent, &idWell)
 
 	//   [s1.c1:|Scope: s1 Collection: c2| |Scope: s2 Collection: c3|
 	//    s2.c3:|Scope: s1 Collection: c1| ]
@@ -1381,12 +1381,12 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 	assert.Len(testEvent.EventExtras.EventsMap, 2)
 
 	for k, _ := range testEvent.EventExtras.EventsMap {
-		testEventInner := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		testEventInner := testEvent.EventExtras.EventsMap[k].(*base.EventInfo)
 		// One is s1.c1 and one is s2.c3. Either one lives independently
 		assert.Len(testEventInner.EventExtras.EventsMap, 1)
 		for k, srcEventRaw := range testEventInner.EventExtras.EventsMap {
-			srcEvent := srcEventRaw.(base.EventInfo)
-			subEvent := testEventInner.EventExtras.EventsMap[k].(base.EventInfo)
+			srcEvent := srcEventRaw.(*base.EventInfo)
+			subEvent := testEventInner.EventExtras.EventsMap[k].(*base.EventInfo)
 			if srcEvent.EventDesc == "s1.c1" {
 				assert.Len(subEvent.EventExtras.EventsMap, 2)
 			} else {
@@ -1401,7 +1401,7 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 	delMap.AddSingleMapping(&ns1, &ns2)
 	repairedBm.cachedBrokenMap = repairedBm.cachedBrokenMap.Delete(delMap)
 
-	repairedBm.ExportToEvent(&testEvent, &idWell)
+	repairedBm.ExportToEvent(testEvent, &idWell)
 
 	// indexes should be updated
 	assert.Len(pipelineBm.cachedBrokenMapSrcScopeIdx, 1)
@@ -1412,12 +1412,12 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 
 	// Should have one left
 	for k, _ := range testEvent.EventExtras.EventsMap {
-		testEventInner := testEvent.EventExtras.EventsMap[k].(base.EventInfo)
+		testEventInner := testEvent.EventExtras.EventsMap[k].(*base.EventInfo)
 		// should have only one left of s1.c1 -> s2.c3
 		assert.Len(testEventInner.EventExtras.EventsMap, 1)
 		for k, srcEventRaw := range testEventInner.EventExtras.EventsMap {
-			srcEvent := srcEventRaw.(base.EventInfo)
-			subEvent := testEventInner.EventExtras.EventsMap[k].(base.EventInfo)
+			srcEvent := srcEventRaw.(*base.EventInfo)
+			subEvent := testEventInner.EventExtras.EventsMap[k].(*base.EventInfo)
 			assert.Equal("s1.c1", srcEvent.EventDesc)
 			assert.Len(subEvent.EventExtras.EventsMap, 1)
 		}
@@ -1427,7 +1427,7 @@ func TestPipelineBrokenMapExport(t *testing.T) {
 	delMap = make(CollectionNamespaceMapping)
 	delMap.AddSingleMapping(&ns1, &ns4)
 	repairedBm.cachedBrokenMap = repairedBm.cachedBrokenMap.Delete(delMap)
-	repairedBm.ExportToEvent(&testEvent, &idWell)
+	repairedBm.ExportToEvent(testEvent, &idWell)
 
 	assert.Len(pipelineBm.cachedBrokenMapSrcScopeIdx, 0)
 	assert.Len(pipelineBm.cachedBrokenMapSrcEventIdIdx, 0)
@@ -1464,7 +1464,7 @@ func TestPipelineBrokenMapExportWithFilter(t *testing.T) {
 	// Test case - whole thing is filtered out - returns true when empty
 	pipelineBm.userDismissedBrokenMap = pipelineBm.cachedBrokenMap.Clone()
 	pipelineBm.userDismissedBrokenIdx = pipelineBm.userDismissedBrokenMap.CreateLookupIndex()
-	assert.True(pipelineBm.ExportToEvent(&event, &idWell))
+	assert.True(pipelineBm.ExportToEvent(event, &idWell))
 
 	// Kill off any s1 sources
 	pipelineBm.userDismissedBrokenMap = make(CollectionNamespaceMapping)
@@ -1472,16 +1472,17 @@ func TestPipelineBrokenMapExportWithFilter(t *testing.T) {
 	pipelineBm.userDismissedBrokenMap.AddSingleMapping(&ns1, &ns3)
 	pipelineBm.userDismissedBrokenMap.AddSingleMapping(&ns2, &ns4)
 	pipelineBm.userDismissedBrokenIdx = pipelineBm.userDismissedBrokenMap.CreateLookupIndex()
-	assert.False(pipelineBm.ExportToEvent(&event, &idWell))
-	validateNsMapping := NewCollectionNamespaceMappingFromEvent(&event)
+	pipelineBm.userDismissUpdated = true
+	assert.False(pipelineBm.ExportToEvent(event, &idWell))
+	validateNsMapping := NewCollectionNamespaceMappingFromEvent(event)
 	assert.Len(validateNsMapping, 1)
 
 	// Kill off just one target
 	pipelineBm.userDismissedBrokenMap = make(CollectionNamespaceMapping)
 	pipelineBm.userDismissedBrokenMap.AddSingleMapping(&ns4, &ns1)
 	pipelineBm.userDismissedBrokenIdx = pipelineBm.userDismissedBrokenMap.CreateLookupIndex()
-	assert.False(pipelineBm.ExportToEvent(&event, &idWell))
-	validateNsMapping = NewCollectionNamespaceMappingFromEvent(&event)
+	assert.False(pipelineBm.ExportToEvent(event, &idWell))
+	validateNsMapping = NewCollectionNamespaceMappingFromEvent(event)
 	assert.Len(validateNsMapping, 2)
 	// Validate: SOURCE ||s1.c1|| -> TARGET(s) |Scope: s1 Collection: c3| |Scope: s1 Collection: c2|
 	//			 SOURCE ||s1.c2|| -> TARGET(s) |Scope: s2 Collection: c3|
@@ -1489,8 +1490,169 @@ func TestPipelineBrokenMapExportWithFilter(t *testing.T) {
 	// Now, kill off the s1.c2
 	pipelineBm.userDismissedBrokenMap.AddSingleMapping(&ns2, &ns4)
 	pipelineBm.userDismissedBrokenIdx = pipelineBm.userDismissedBrokenMap.CreateLookupIndex()
-	assert.False(pipelineBm.ExportToEvent(&event, &idWell))
-	validateNsMapping = NewCollectionNamespaceMappingFromEvent(&event)
+	assert.False(pipelineBm.ExportToEvent(event, &idWell))
+	validateNsMapping = NewCollectionNamespaceMappingFromEvent(event)
 	assert.Len(validateNsMapping, 1)
 	// Validate: SOURCE ||s1.c1|| -> TARGET(s) |Scope: s1 Collection: c2| |Scope: s1 Collection: c3|
+}
+
+func TestPipelineEventBrokenMap_UpdateWithNewDiffPair(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPipelineEventBrokenMap_UpdateWithNewDiffPair =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventBrokenMap_UpdateWithNewDiffPair =================")
+
+	pipelineBm := NewPipelineEventBrokenMap()
+	ns1, _ := base.NewCollectionNamespaceFromString("s1.c1")
+	ns2, _ := base.NewCollectionNamespaceFromString("s1.c2")
+	ns3, _ := base.NewCollectionNamespaceFromString("s1.c3")
+	ns4, _ := base.NewCollectionNamespaceFromString("s2.c3")
+
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns1, &ns2)
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns1, &ns3)
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns2, &ns4)
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns4, &ns1)
+	pipelineBm.cachedBrokenMapSrcNamespaceIdx = pipelineBm.cachedBrokenMap.CreateLookupIndex()
+
+	// Pretending we have one that is ignored
+	pipelineBm.RegisterDismissAction(3, "s2.c3", "s1.c1")
+
+	dummyEvent := base.NewEventInfo()
+	dummyEvent.EventType = base.BrokenMappingInfoType
+	var idWell int64
+	pipelineBm.ExportToEvent(dummyEvent, &idWell)
+	assert.NotNil(dummyEvent)
+
+	// EventMap should only contain s1.cx ->
+	assert.Len(dummyEvent.EventExtras.EventsMap, 1)
+
+	// UserDismissedBrokenMap should have the single entry
+	assert.Len(pipelineBm.userDismissedBrokenMap, 1)
+
+	// BrokenMap should have 3 entries
+	// one for s1.c1 ->
+	// one for s1.c3 ->
+	// One for s2.c3 ->
+	assert.Len(pipelineBm.cachedBrokenMap, 3)
+
+	// Now brokenmap has been repaired
+	var repairedPair CollectionNamespaceMappingsDiffPair
+	repairedPair.Added = make(CollectionNamespaceMapping)
+	ns4Clone := ns4.Clone()
+	ns1Clone := ns1.Clone()
+	repairedPair.Added.AddSingleMapping(&ns4Clone, &ns1Clone)
+
+	assert.Nil(pipelineBm.UpdateWithNewDiffPair(&repairedPair))
+
+	// After repair, s2c3 should be gone so the userDismissed map should be empty
+	assert.True(pipelineBm.NeedsToUpdate())
+	assert.Len(pipelineBm.userDismissedBrokenMap, 0)
+	assert.Len(pipelineBm.userDismissedBrokenIdx, 0)
+
+	//The brokenMap should also be fixed
+	// BrokenMap should have 2 entries
+	// one for s1.c1 ->
+	// one for s1.c3 ->
+	assert.Len(pipelineBm.cachedBrokenMap, 2)
+}
+
+func TestPipelineEventBrokenMap_UpdateWithCleanupPair(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPipelineEventBrokenMap_UpdateWithCleanupPair =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventBrokenMap_UpdateWithCleanupPair =================")
+
+	pipelineBm := NewPipelineEventBrokenMap()
+	ns1, _ := base.NewCollectionNamespaceFromString("s1.c1")
+	ns2, _ := base.NewCollectionNamespaceFromString("s1.c2")
+	ns3, _ := base.NewCollectionNamespaceFromString("s1.c3")
+	ns4, _ := base.NewCollectionNamespaceFromString("s2.c3")
+
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns1, &ns2)
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns1, &ns3)
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns2, &ns4)
+	pipelineBm.cachedBrokenMap.AddSingleMapping(&ns4, &ns1)
+	pipelineBm.cachedBrokenMapSrcNamespaceIdx = pipelineBm.cachedBrokenMap.CreateLookupIndex()
+
+	// Pretending we have one that is ignored
+	pipelineBm.RegisterDismissAction(3, "s2.c3", "s1.c1")
+
+	dummyEvent := base.NewEventInfo()
+	dummyEvent.EventType = base.BrokenMappingInfoType
+	var idWell int64
+	pipelineBm.ExportToEvent(dummyEvent, &idWell)
+	assert.NotNil(dummyEvent)
+
+	// EventMap should only contain s1.cx ->
+	assert.Len(dummyEvent.EventExtras.EventsMap, 1)
+
+	// UserDismissedBrokenMap should have the single entry
+	assert.Len(pipelineBm.userDismissedBrokenMap, 1)
+
+	// BrokenMap should have 3 entries
+	// one for s1.c1 ->
+	// one for s1.c3 ->
+	// One for s2.c3 ->
+	assert.Len(pipelineBm.cachedBrokenMap, 3)
+
+	// Let's say now scope s1 is removed from the source manifest
+	var updatePair CollectionNamespaceMappingsDiffPair
+	updatePair.Removed = make(CollectionNamespaceMapping)
+	ns1Clone := ns1.Clone()
+	ns2Clone := ns2.Clone()
+	ns3Clone := ns3.Clone()
+	ns4Clone := ns4.Clone()
+
+	updatePair.Removed.AddSingleMapping(&ns1Clone, &ns2Clone)
+	updatePair.Removed.AddSingleMapping(&ns1Clone, &ns3Clone)
+	updatePair.Removed.AddSingleMapping(&ns2Clone, &ns4Clone)
+	assert.Nil(pipelineBm.UpdateWithNewDiffPair(&updatePair))
+
+	// BrokenMap should have 1 entry
+	// --- one for s1.c1 ->  gone now
+	// --- one for s1.c3 ->  gone now
+	// One for s2.c3 ->
+	assert.Len(pipelineBm.cachedBrokenMap, 1)
+
+	// UserDismissedBrokenMap should still have the single entry
+	assert.Len(pipelineBm.userDismissedBrokenMap, 1)
+
+	// Now let's pretend that user deleted source scope too
+	updatePair.Removed = make(CollectionNamespaceMapping)
+	updatePair.Removed.AddSingleMapping(&ns4Clone, &ns1Clone)
+	assert.Nil(pipelineBm.UpdateWithNewDiffPair(&updatePair))
+
+	// All should be cleaned up
+	assert.Len(pipelineBm.cachedBrokenMap, 0)
+	assert.Len(pipelineBm.userDismissedBrokenMap, 0)
+}
+
+func TestPipelineEventBrokenMap_Frozen(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPipelineEventBrokenMap_Frozen =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventBrokenMap_Frozen =================")
+
+	pipelineBm := NewPipelineEventBrokenMap()
+	ns1, _ := base.NewCollectionNamespaceFromString("s1.col1")
+	ns2, _ := base.NewCollectionNamespaceFromString("s1.col2")
+
+	var idWell int64
+	initialEvent := base.NewEventInfo()
+
+	pipelineBm.ExportToEvent(initialEvent, &idWell)
+
+	brokenMap := make(CollectionNamespaceMapping)
+	brokenMap.AddSingleMapping(&ns1, &ns1)
+	brokenMap.AddSingleMapping(&ns2, &ns2)
+	brokenMap.AddSingleMapping(&ns2, &ns1)
+
+	pipelineBm.LoadLatestBrokenMap(brokenMap)
+	assert.True(pipelineBm.cachedBrokenMapUpdated)
+
+	pipelineBm.ExportToEvent(initialEvent, &idWell)
+
+	assert.Nil(pipelineBm.RegisterDismissAction(3, "s1.col1", "s1.col1"))
+	assert.Nil(pipelineBm.RegisterDismissAction(3, "s1.col2", "s1.col2"))
+	assert.True(pipelineBm.userDismissUpdated)
+
+	pipelineBm.ExportToEvent(initialEvent, &idWell)
+
 }

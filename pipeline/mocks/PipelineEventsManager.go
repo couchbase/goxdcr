@@ -21,6 +21,20 @@ func (_m *PipelineEventsManager) AddEvent(eventType base.ErrorInfoType, eventDes
 	_m.Called(eventType, eventDesc, eventExtras)
 }
 
+// BackfillUpdateCb provides a mock function with given fields: diffPair
+func (_m *PipelineEventsManager) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+	ret := _m.Called(diffPair)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.CollectionNamespaceMappingsDiffPair) error); ok {
+		r0 = rf(diffPair)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // ContainsEvent provides a mock function with given fields: eventId
 func (_m *PipelineEventsManager) ContainsEvent(eventId int) bool {
 	ret := _m.Called(eventId)
@@ -68,4 +82,9 @@ func (_m *PipelineEventsManager) GetCurrentEvents() *pipeline.PipelineEventList 
 // LoadLatestBrokenMap provides a mock function with given fields: mapping
 func (_m *PipelineEventsManager) LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping) {
 	_m.Called(mapping)
+}
+
+// ResetDismissedHistory provides a mock function with given fields:
+func (_m *PipelineEventsManager) ResetDismissedHistory() {
+	_m.Called()
 }

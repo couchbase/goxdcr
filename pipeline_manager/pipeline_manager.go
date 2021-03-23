@@ -79,7 +79,7 @@ type PipelineMgrIface interface {
 	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
 	OnExit() error
 	UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
-	DismissEvent(eventId int) error
+	DismissEventForPipeline(pipelineName string, eventId int) error
 }
 
 type PipelineMgrInternalIface interface {
@@ -103,6 +103,7 @@ type PipelineMgrForUpdater interface {
 	PipelineMgrInternalIface
 	StartBackfillPipeline(topic string) base.ErrorMap
 	StopBackfillPipeline(topic string) base.ErrorMap
+	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
 }
 
 type PipelineMgrForSerializer interface {
@@ -114,6 +115,8 @@ type PipelineMgrForSerializer interface {
 	StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	CleanupBackfillPipeline(topic string) error
 	UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
+	DismissEvent(eventId int) error
+	BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
 }
 
 // Specifically APIs used by backfill manager
@@ -124,6 +127,7 @@ type PipelineMgrBackfillIface interface {
 	HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	CleanupBackfillCkpts(topic string) error
 	ReInitStreams(pipelineName string) error
+	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -600,6 +604,9 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 	} else {
 		pipelineMgr.logger.Infof("Pipeline %v is not running\n", replId)
 	}
+
+	// Remove all dismissed events
+	rep_status.GetEventsManager().ResetDismissedHistory()
 
 	// if replication spec has been deleted
 	// or deleted and recreated, which is signaled by change in spec internal id
@@ -1082,6 +1089,12 @@ func (pipelineMgr *PipelineManager) UpdatePipelineWithStoppedCb(topic string, ca
 	return pipelineMgr.serializer.UpdateWithStoppedCb(topic, callback, errCb)
 }
 
+// External
+func (pipelineMgr *PipelineManager) DismissEventForPipeline(pipelineName string, eventId int) error {
+	return pipelineMgr.serializer.DismissEvent(pipelineName, eventId)
+}
+
+// Internal
 func (pipelineMgr *PipelineManager) DismissEvent(eventId int) error {
 	repStatusMap := pipelineMgr.ReplicationStatusMap()
 	for _, replStatus := range repStatusMap {
@@ -1090,6 +1103,21 @@ func (pipelineMgr *PipelineManager) DismissEvent(eventId int) error {
 		}
 	}
 	return base.ErrorNotFound
+}
+
+// External
+func (pipelineMgr *PipelineManager) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+	return pipelineMgr.serializer.BackfillMappingStatusUpdate(topic, diffPair)
+}
+
+// Internal
+func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+	repStatusMap := pipelineMgr.ReplicationStatusMap()
+	replStatus, ok := repStatusMap[topic]
+	if !ok {
+		return base.ErrorNotFound
+	}
+	return replStatus.GetEventsManager().BackfillUpdateCb(diffPair)
 }
 
 var updaterStateErrorStr = "Can't move update state from %v to %v"

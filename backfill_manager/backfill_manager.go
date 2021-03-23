@@ -922,6 +922,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		b.logger.Errorf("%v Error compiling explicit backfillReq: %v", spec.Id, err)
 		return
 	}
+	b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair)
 	err = b.raiseBackfillReq(replId, diffPair, false, newSourceManifest.Uid())
 	if errMeansReqNeedsToBeRetried(err) {
 		req := BackfillRetryRequest{
@@ -1004,14 +1005,17 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 
 	var backfillReq interface{}
 	var skipRaiseBackfillReq bool
+	var diffPair metadata.CollectionNamespaceMappingsDiffPair
 	if !modes.IsImplicitMapping() {
 		if newTargetManifest == nil {
 			b.logger.Errorf("%v Unable to do explicit mapping if target manifest is nil", spec.Id)
 			return
 		}
 		backfillReq, skipRaiseBackfillReq = b.populateBackfillReqForExplicitMapping(replId, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest, spec, modes, backfillReq)
+		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, backfillReq.(metadata.CollectionNamespaceMappingsDiffPair))
 	} else {
-		backfillReq, skipRaiseBackfillReq = b.populateBackfillReqForImplicitMapping(newTargetManifest, oldTargetManifest, newSourceManifest, spec)
+		backfillReq, diffPair, skipRaiseBackfillReq = b.populateBackfillReqForImplicitMapping(newTargetManifest, oldTargetManifest, newSourceManifest, spec)
+		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair)
 	}
 	if !skipRaiseBackfillReq {
 		err = b.raiseBackfillReq(replId, backfillReq, false, newSourceManifest.Uid())
@@ -1037,6 +1041,15 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 		// For implicit mapping, see if there are things that need to be cleaned up
 		b.cleanupInvalidImplicitBackfillMappings(replId, oldSourceManifest, newSourceManifest)
 	}
+}
+
+func (b *BackfillMgr) notifyBackfillMappingStatusUpdateToEventMgr(replId string, sentPair metadata.CollectionNamespaceMappingsDiffPair) error {
+	err := b.pipelineMgr.BackfillMappingStatusUpdate(replId, &sentPair)
+	if err != nil {
+		// error could occur only if serializer is stopped which shouldn't happen in normal circumstances
+		b.logger.Warnf("Unable to raise BackfillMappingStatusUpdate %v", err)
+	}
+	return err
 }
 
 func errMeansReqNeedsToBeRetried(err error) bool {
@@ -1078,17 +1091,17 @@ func (b *BackfillMgr) cleanupInvalidImplicitBackfillMappings(replId string, oldS
 	return false
 }
 
-func (b *BackfillMgr) populateBackfillReqForImplicitMapping(newTargetManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, spec *metadata.ReplicationSpecification) (metadata.CollectionNamespaceMapping, bool) {
-	backfillMapping, err := newTargetManifest.ImplicitGetBackfillCollections(oldTargetManifest, newSourceManifest)
+func (b *BackfillMgr) populateBackfillReqForImplicitMapping(newTargetManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, spec *metadata.ReplicationSpecification) (metadata.CollectionNamespaceMapping, metadata.CollectionNamespaceMappingsDiffPair, bool) {
+	backfillMapping, addedRemovedPair, err := newTargetManifest.ImplicitGetBackfillCollections(oldTargetManifest, newSourceManifest)
 	if err != nil {
 		b.logger.Errorf("%v handleSrcAndTgtChanges error: %v", spec.Id, err)
-		return nil, true
+		return nil, addedRemovedPair, true
 	}
 	if len(backfillMapping) == 0 {
 		// If no backfill is needed such as when collections get del' on the target, don't raise backfill request
-		return nil, true
+		return nil, addedRemovedPair, true
 	}
-	return backfillMapping, false
+	return backfillMapping, addedRemovedPair, false
 }
 
 func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newTargetManifest *metadata.CollectionsManifest, spec *metadata.ReplicationSpecification, modes base.CollectionsMgtType, backfillReq interface{}) (interface{}, bool) {
@@ -1368,7 +1381,7 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
 	if modes.IsImplicitMapping() {
 		b.logger.Infof("Forced backfill for implicit mapping, given source manifest version %v target manifest version %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), requestingStr)
-		backfillReq, _ = b.populateBackfillReqForImplicitMapping(&clonedTargetManifest, &defaultManifest /*oldTarget*/, &clonedSourceManifest, spec)
+		backfillReq, _, _ = b.populateBackfillReqForImplicitMapping(&clonedTargetManifest, &defaultManifest /*oldTarget*/, &clonedSourceManifest, spec)
 	} else {
 		b.logger.Infof("Forced backfill for explicit mapping, given source manifest version %v target manifest version %v and rules: %v, requesting: %v", clonedSourceManifest.Uid(), clonedTargetManifest.Uid(), spec.Settings.GetCollectionsRoutingRules(), requestingStr)
 		backfillReq, _ = b.populateBackfillReqForExplicitMapping(specId, &defaultManifest /*oldSrc*/, &clonedSourceManifest, &defaultManifest /*oldTgt*/, &clonedTargetManifest, spec, modes, backfillReq)

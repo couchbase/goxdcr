@@ -76,8 +76,7 @@ func TestPipelineEventsMgr_ContainsEvent(t *testing.T) {
 	}
 
 	// Validate level and namespace
-	getterEventObj := base.NewEventInfo()
-	getterEvent := &getterEventObj
+	getterEvent := base.NewEventInfo()
 	getterEvent.EventId = 0
 	level, srcDesc, tgtDesc, err := eventsMgr.getIncomingEventBrokenmapLevelAndDesc(getterEvent)
 	assert.Nil(err)
@@ -208,11 +207,67 @@ func TestPipelineEventsMgr_DismissEvent_SingleScope(t *testing.T) {
 	assert.Len(eventsList.EventInfos, 1)
 
 	// map[1:{1 BrokenMappingInfo s1 {map[4:{4 BrokenMappingInfo s1.c2 {map[5:{5 BrokenMappingInfo s1t.c2t {map[] 0xc000292f80} 0xc000292fa0 0xc000289380}] 0xc000292f40} 0xc000292f60 0xc0003025d0}] 0xc000292e80} 0xc000292ea0 <nil>}]
-	s1Map := eventsList.EventInfos[0].EventExtras.EventsMap[1].(base.EventInfo)
+	s1Map := eventsList.EventInfos[0].EventExtras.EventsMap[1].(*base.EventInfo)
 	assert.Len(s1Map.EventExtras.EventsMap, 1)
 
 	// Now dismissing the last complete src->target event should render the whole broken mapping event gone
 	eventsMgr.DismissEvent(5)
 	eventsList = eventsMgr.GetCurrentEvents()
 	assert.Len(eventsList.EventInfos, 0)
+}
+
+func TestPipelineEventsMgr_ResetDismissedHistory(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_ResetDismissedHistory =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_ResetDismissedHistory =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+
+	assert.NotNil(eventsMgr)
+
+	brokenMap := setupBrokenMap()
+	eventsMgr.LoadLatestBrokenMap(brokenMap)
+	eventsList := eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 1)
+
+	// First dismiss the whole brokenMap
+	eventsMgr.DismissEvent(0)
+	eventsList = eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 0)
+
+	// Reset dismissal should bring it back
+	eventsMgr.ResetDismissedHistory()
+	eventsList = eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 1)
+}
+
+func TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+
+	assert.NotNil(eventsMgr)
+
+	brokenMap := setupBrokenMap()
+	eventsMgr.LoadLatestBrokenMap(brokenMap)
+	eventsList := eventsMgr.GetCurrentEvents()
+	assert.NotEqual(0, len(eventsList.EventInfos))
+
+	eventsMgr.DismissEvent(2)
+
+	eventsList = eventsMgr.GetCurrentEvents()
+	assert.Len(eventsList.EventInfos, 1)
+
+	var repairedPair metadata.CollectionNamespaceMappingsDiffPair
+	repairedPair.Added = make(metadata.CollectionNamespaceMapping)
+	source, _ := base.NewCollectionNamespaceFromString("s1.c1")
+	target, _ := base.NewCollectionNamespaceFromString("s1t.c1t")
+	repairedPair.Added.AddSingleMapping(&source, &target)
+	eventsMgr.BackfillUpdateCb(&repairedPair)
+
+	eventsList = eventsMgr.GetCurrentEvents()
 }

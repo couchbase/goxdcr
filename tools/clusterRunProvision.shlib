@@ -66,6 +66,7 @@ declare -A BUCKET_NAME_SCOPE_DONE_MAP
 declare -A SCOPE_NAME_COLLECTION_DONE_MAP
 
 REST_MAX_RETRY=5
+GET_BROKEN_MAP_NOT_FOUND=255
 
 # Input
 # 0: ClusterName
@@ -1733,7 +1734,7 @@ function getBrokenMapEntryId {
 			# Now, cycle through each source namespace to find the matching source namespace
 			local sourceNamespaces
 			local sourceNamespacesKeys
-			sourceNamespaces=$(echo "$scopeEvent" | jq '.EventExtras' | jq '.EventsMap')
+			sourceNamespaces=$(echo "$scopeEvent" | jq '.EventExtras')
 			sourceNamespacesKeys=$(echo "$sourceNamespaces" | jq 'keys[]')
 			local oneKey
 			for oneKey in $(echo "$sourceNamespacesKeys"); do
@@ -1749,7 +1750,7 @@ function getBrokenMapEntryId {
 					fi
 					# Now check the target namespace
 					local targetNamespaces
-					targetNamespaces=$(echo "$oneSourceNamespace" | jq '.EventExtras' | jq '.EventsMap')
+					targetNamespaces=$(echo "$oneSourceNamespace" | jq '.EventExtras')
 					local targetNamespacesKeys
 					targetNamespacesKeys=$(echo "$targetNamespaces" | jq 'keys[]')
 					local oneTKey
@@ -1771,7 +1772,7 @@ function getBrokenMapEntryId {
 	done
 
 	echo "Unable to find the matching error event"
-	exit 1
+	return $GET_BROKEN_MAP_NOT_FOUND
 }
 
 function dismissEvent {

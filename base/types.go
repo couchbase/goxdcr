@@ -275,7 +275,7 @@ func (c *EventsMap) ContainsEvent(eventId int) bool {
 		if int(k) == eventId {
 			return true
 		}
-		if event, ok := v.(EventInfo); ok {
+		if event, ok := v.(*EventInfo); ok {
 			if event.ContainsEvent(eventId) {
 				return true
 			}
@@ -359,8 +359,8 @@ type EventInfo struct {
 	hint    interface{}
 }
 
-func NewEventInfo() EventInfo {
-	return EventInfo{
+func NewEventInfo() *EventInfo {
+	return &EventInfo{
 		EventExtras: NewEventsMap(),
 		hintMtx:     &sync.RWMutex{},
 	}
@@ -415,10 +415,10 @@ func (e *EventInfo) GetSubEvent(eventId int) (*EventInfo, error) {
 	defer e.EventExtras.eventMapMtx.RUnlock()
 
 	for eId, eventRaw := range e.EventExtras.EventsMap {
-		eventInfo, ok := eventRaw.(EventInfo)
+		eventInfo, ok := eventRaw.(*EventInfo)
 		if int(eId) == eventId {
 			if ok {
-				return &eventInfo, nil
+				return eventInfo, nil
 			} else {
 				return nil, fmt.Errorf("Wrong type: %v", reflect.TypeOf(eventRaw))
 			}
@@ -434,7 +434,7 @@ func (e *EventInfo) GetSubEvent(eventId int) (*EventInfo, error) {
 }
 
 type ErrorInfo struct {
-	EventInfo
+	*EventInfo
 	// Time is the number of nano seconds elapsed since 1/1/1970 UTC
 	Time     int64
 	ErrorMsg string
@@ -460,7 +460,7 @@ func GetEventIdFromWell(eventIdWell *int64) int64 {
 
 func NewErrorInfo(time int64, errorMsg string, eventIdWell *int64) ErrorInfo {
 	errInfo := ErrorInfo{
-		EventInfo: EventInfo{
+		EventInfo: &EventInfo{
 			EventType:   HighPriorityMsg,
 			EventId:     GetEventIdFromWell(eventIdWell),
 			EventExtras: NewEventsMap(),
@@ -471,7 +471,7 @@ func NewErrorInfo(time int64, errorMsg string, eventIdWell *int64) ErrorInfo {
 	return errInfo
 }
 
-func NewErrorInfoFromEventInfo(event EventInfo, t int64) ErrorInfo {
+func NewErrorInfoFromEventInfo(event *EventInfo, t int64) ErrorInfo {
 	return ErrorInfo{
 		EventInfo: event,
 		Time:      t,
