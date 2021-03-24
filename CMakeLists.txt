@@ -59,12 +59,14 @@ ENDIF ()
 IF (BUILD_ENTERPRISE)
    MESSAGE(STATUS "Building EE edition of XDCR")
    SET (xdcrGoTags "pcre enterprise")
+   SET (NEWEVAL_DIR ../eventing-ee/evaluator)
+   SET(_eval_no_default_path NO_DEFAULT_PATH)
 ELSE (BUILD_ENTERPRISE)
    MESSAGE(STATUS "Building CE edition of XDCR")
 ENDIF (BUILD_ENTERPRISE)
 
-SET(CGO_INCLUDE_DIRS "${FORESTDB_INCLUDE_DIR};${PCRE_INCLUDE_DIR};${sigar_SOURCE_DIR}/include")
-SET(CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR};${PCRE_LIBRARY_DIR};${sigar_BINARY_DIR}/src")
+SET(CGO_INCLUDE_DIRS "${FORESTDB_INCLUDE_DIR};${PCRE_INCLUDE_DIR};${sigar_SOURCE_DIR}/include;${NEWEVAL_INCLUDE_DIR}")
+SET(CGO_LIBRARY_DIRS "${FORESTDB_LIBRARY_DIR};${PCRE_LIBRARY_DIR};${sigar_BINARY_DIR}/src;${evaluator_BINARY_DIR}")
 
 GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   GOPATH "${PROJECT_SOURCE_DIR}/../../../.." "${GODEPSDIR}"
@@ -78,5 +80,5 @@ GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
 
 ADD_DEPENDENCIES(goxdcr sigar n1ql-yacc)
 IF (BUILD_ENTERPRISE)
-  ADD_DEPENDENCIES (goxdcr js-evaluator)
+  ADD_DEPENDENCIES (goxdcr jseval)
 ENDIF ()

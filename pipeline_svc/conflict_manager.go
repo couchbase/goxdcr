@@ -45,7 +45,7 @@ import (
 
 var (
 	// The number of goroutines that takes the merge result and connect to source and send the merged docu
-	numConflictManagerWorkers = base.JSEngineWorkersPerNode * base.JSEngineThreadsPerWorker
+	numConflictManagerWorkers = base.JSEngineThreads
 
 	// This channel is a buffer before sending to resolverSvc. When the pipeline stop, data here will be discarded
 	// and not stuck in the resolverSvc input channel.

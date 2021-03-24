@@ -1,4 +1,4 @@
-{ "name": "simpleMerge", "code": "function simpleMerge(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId)
+function simpleMerge(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId)
 { doc1Js = JSON.parse(sourceDoc);
   doc2Js = JSON.parse(targetDoc);
   docJs = {};
@@ -6,4 +6,4 @@
   else docJs = {...doc1Js, ...doc2Js};
   let doc = JSON.stringify(docJs);
   return doc;
-}"}
+}

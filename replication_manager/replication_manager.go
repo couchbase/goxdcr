@@ -160,7 +160,7 @@ func StartReplicationManager(sourceKVHost string,
 
 		// Start resolver_svc before the adminport and before starting any pipeline,
 		// since it will initialize the javascript function handler and start the resolverSvc that the pipeline needs
-		// resolver_svc.Start(sourceKVHost, xdcrRestPort)
+		resolver_svc.Start(sourceKVHost, xdcrRestPort)
 
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
@@ -310,8 +310,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.ManifestRefreshTgtIntervalKey].(int),
 		time.Duration(internal_settings.Values[metadata.BackfillPersistIntervalKey].(int64))*time.Millisecond,
 		time.Duration(internal_settings.Values[metadata.TimeoutHttpsPortLookupKey].(int))*time.Second,
-		internal_settings.Values[metadata.JSEngineWorkersPerNodeKey].(int),
-		internal_settings.Values[metadata.JSEngineThreadsPerWorkerKey].(int),
+		internal_settings.Values[metadata.JSEngineThreadsKey].(int),
 		internal_settings.Values[metadata.MaxCountDCPStreamsInactiveKey].(int),
 		time.Duration(internal_settings.Values[metadata.ResourceMgrKVDetectionRetryIntervalKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.UtilsStopwatchDiagInternalThresholdKey].(int))*time.Millisecond,

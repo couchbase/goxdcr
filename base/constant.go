@@ -132,8 +132,7 @@ const UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
 // Custom conflict resolution related constants
-var JSEngineWorkersPerNode = 2
-var JSEngineThreadsPerWorker = 3
+var JSEngineThreads = 3
 
 // constants for ipv6 addresses
 const Ipv6AddressSeparator = ":"
@@ -1023,6 +1022,7 @@ var ReplStatusExportBrokenMapTimeout = 5 * time.Second
 
 var TopologySvcCoolDownPeriod = 60 * time.Second
 var TopologySvcErrCoolDownPeriod = 120 * time.Second
+var TopologySvcStatusNotFoundCoolDownPeriod = 10 * time.Second
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
@@ -1071,7 +1071,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
 	backfillPersistInterval time.Duration,
 	httpsPortLookupTimeout time.Duration,
-	jsEngineWorkersPerNode int, jsEngineThreadsPerWorker int,
+	jsEngineThreads int,
 	maxCountDcpStreamsInactive int, resourceMgrKVDetectionRetryInterval time.Duration,
 	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
 	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
@@ -1186,8 +1186,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
 	BackfillPersistInterval = backfillPersistInterval
 	HttpsPortLookupTimeout = httpsPortLookupTimeout
-	JSEngineWorkersPerNode = jsEngineWorkersPerNode
-	JSEngineThreadsPerWorker = jsEngineThreadsPerWorker
+	JSEngineThreads = jsEngineThreads
 	MaxCountStreamsInactive = maxCountDcpStreamsInactive
 	ResourceMgrKVDetectionRetryInterval = resourceMgrKVDetectionRetryInterval
 	DiagInternalThreshold = utilsStopwatchDiagInternal
@@ -1255,11 +1254,13 @@ const (
 	XATTR_MV_PATH   = "_xdcr.mv"
 	XATTR_PCAS_PATH = "_xdcr.pc"
 
-	FunctionUrlFmt         = "http://%v:%v/functions/v1/libraries/xdcr/functions"
+	FunctionUrlFmt         = "http://%v:%v/evaluator/v1/libraries"
 	DefaultMergeFunc       = "defaultLWW"
 	DefaultMergeFuncBodyCC = "function " + DefaultMergeFunc + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) {" +
 		"if (sourceCas >= targetCas) {return sourceDoc; } else {return targetDoc; } } "
 	BucketMergeFunctionKey = "default"
+
+	CCRKVRestCallRetryInterval = 2 * time.Second
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)
