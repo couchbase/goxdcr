@@ -13,7 +13,7 @@ function createMergeFunction {
 	local funcName=$1
 	local port=$2
 	curl -i -POST \
-		http://localhost:$port/functions/v1/libraries/xdcr/functions/$funcName \
+		http://localhost:$port/evaluator/v1/libraries/$funcName \
 		-u $DEFAULT_ADMIN:$DEFAULT_PW \
 		-H 'content-type: application/json' \
 		-d @customConflict/$funcName.js

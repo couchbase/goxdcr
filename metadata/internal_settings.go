@@ -238,8 +238,7 @@ const (
 	BackfillPersistIntervalKey = "BackfillPersistInterval"
 
 	// Conflict Resolver related setting
-	JSEngineWorkersPerNodeKey   = "JSEngineWorkersPerNode"
-	JSEngineThreadsPerWorkerKey = "JSEngineThreadsPerWorker"
+	JSEngineThreadsKey = "JSEngineThreads"
 
 	MaxCountDCPStreamsInactiveKey = "MaxCountDCPStreamsInactive"
 
@@ -341,8 +340,7 @@ var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterA
 var ManifestRefreshSrcIntervalConfig = &SettingsConfig{base.ManifestRefreshSrcInterval, &Range{1, 10000}}
 var ManifestRefreshTgtIntervalConfig = &SettingsConfig{base.ManifestRefreshTgtInterval, &Range{1, 10000}}
 var BackfillPersistIntervalConfig = &SettingsConfig{int64(base.BackfillPersistInterval / time.Millisecond), &Range{1, 10000}}
-var JSEngineWorkersPerNodeConfig = &SettingsConfig{base.JSEngineWorkersPerNode, &Range{1, 10}}
-var JSEngineThreadsPerWorkerConfig = &SettingsConfig{base.JSEngineThreadsPerWorker, &Range{1, 10}}
+var JSEngineThreadsConfig = &SettingsConfig{base.JSEngineThreads, &Range{1, 10}}
 var MaxCountDCPStreamsInactiveConfig = &SettingsConfig{base.MaxCountStreamsInactive, &Range{1, 40}}
 var ResourceMgrKVDetectionRetryIntervalConfig = &SettingsConfig{int(base.ResourceMgrKVDetectionRetryInterval / time.Second), &Range{1, 3600}}
 var UtilsStopwatchDiagInternalThresholdConfig = &SettingsConfig{int(base.DiagInternalThreshold / time.Millisecond), &Range{10, 3600000}}
@@ -446,8 +444,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ManifestRefreshSrcIntervalKey:                 ManifestRefreshSrcIntervalConfig,
 	ManifestRefreshTgtIntervalKey:                 ManifestRefreshTgtIntervalConfig,
 	BackfillPersistIntervalKey:                    BackfillPersistIntervalConfig,
-	JSEngineWorkersPerNodeKey:                     JSEngineWorkersPerNodeConfig,
-	JSEngineThreadsPerWorkerKey:                   JSEngineThreadsPerWorkerConfig,
+	JSEngineThreadsKey:                            JSEngineThreadsConfig,
 	MaxCountDCPStreamsInactiveKey:                 MaxCountDCPStreamsInactiveConfig,
 	ResourceMgrKVDetectionRetryIntervalKey:        ResourceMgrKVDetectionRetryIntervalConfig,
 	UtilsStopwatchDiagInternalThresholdKey:        UtilsStopwatchDiagInternalThresholdConfig,

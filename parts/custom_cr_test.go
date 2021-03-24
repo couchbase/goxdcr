@@ -36,7 +36,7 @@ const sourceConnStr = "http://127.0.0.1:9000"
 const targetConnStr = "http://127.0.0.1:9001"
 const targetCluster = "C2"
 const urlCreateReplicationFmt = "http://127.0.0.1:%s/controller/createReplication"
-const urlFunctionsFmt = "http://127.0.0.1:13000/functions/v1/libraries/xdcr/functions/%v"
+const urlFunctionsFmt = "http://127.0.0.1:13000/evaluator/v1/libraries/%v"
 const bucketPath = "/pools/default/buckets"
 
 func createBucket(connStr, bucketName string) (bucket *gocb.Bucket, err error) {

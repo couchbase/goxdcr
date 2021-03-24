@@ -11,14 +11,16 @@ package service_impl
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/service_def"
-	utilities "github.com/couchbase/goxdcr/utils"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 var ErrorParsingHostInfo = errors.New("Could not parse current host info from the result.server returned")
@@ -356,13 +358,17 @@ func (top_svc *XDCRTopologySvc) getNodeList() ([]interface{}, error) {
 	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.getNodeList()", base.DiagInternalThreshold)
 	defer stopFunc()
 	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
-
 	// Regardless of the RPC call, enforce a cooldown
 	var cooldownPeriod = base.TopologySvcCoolDownPeriod
 	if getNodeListHasError(err, statusCode) {
 		// If ns_server experiences error with base.NodesPath, potentially means that it is overloaded
 		// By default, TopologySvcErrCoolDownPeriod is longer than regular to give ns_server time to breathe
-		cooldownPeriod = base.TopologySvcErrCoolDownPeriod
+		if statusCode == http.StatusNotFound {
+			// When a node first starts up and before it is a "cluster", it will return 404. Have a shorter cool down in this case
+			cooldownPeriod = base.TopologySvcStatusNotFoundCoolDownPeriod
+		} else {
+			cooldownPeriod = base.TopologySvcErrCoolDownPeriod
+		}
 	}
 
 	top_svc.cachedNodesListTimer = time.AfterFunc(cooldownPeriod, func() {

@@ -34,27 +34,36 @@ function eventingFunctionUIHandlerTest {
 	echo "====== Test eventing function UIHandler ======"
 
 	funcName="simpleMerge"
+	echo
 	echo "=== Create library xdcr function $funcName at XDCR admin port ==="
-	curl -i -POST \
-		http://localhost:13000/functions/v1/libraries/xdcr/functions/$funcName \
+	curl -s -request POST \
+		http://localhost:13000/evaluator/v1/libraries/$funcName \
 		-u $DEFAULT_ADMIN:$DEFAULT_PW \
 		-H 'content-type: application/json' \
-		-d @customConflict/$funcName.js
+		-d @customConflict/simpleMerge.js
 	if (($? != 0)); then
 		echo "Failed to create function $funcName"
 		exit 1
 	fi
-
+    echo
 	echo "=== Get library xdcr function $funcName at XDCR admin port ==="
-	curl -s -X GET http://localhost:13000/functions/v1/libraries/math/functions/$funcName \
+	curl -s -request GET http://127.0.0.1:13000/evaluator/v1/libraries/$funcName \
 		-u $DEFAULT_ADMIN:$DEFAULT_PW
 	if (($? != 0)); then
 		echo "Failed to GET function"
 		exit 1
 	fi
-
-	echo "=== Delete library math function $funcName at XDCR admin port ==="
-	curl -s -X DELETE http://localhost:13000/functions/v1/libraries/math/functions/$funcName \
+    echo
+    echo "=== Get all libraries xdcr function $funcName at XDCR admin port ==="
+    curl -s -request GET http://127.0.0.1:13000/evaluator/v1/libraries/ \
+        -u $DEFAULT_ADMIN:$DEFAULT_PW
+    if (($? != 0)); then
+        echo "Failed to GET function"
+        exit 1
+    fi
+    echo
+	echo "=== Delete library $funcName at XDCR admin port ==="
+	curl -s -request DELETE http://localhost:13000/evaluator/v1/libraries/$funcName \
 		-u $DEFAULT_ADMIN:$DEFAULT_PW
 	if (($? != 0)); then
 		echo "Failed to DELETE function $funcName"
@@ -64,22 +73,15 @@ function eventingFunctionUIHandlerTest {
 
 function configureResolver {
 	echo "====== Configure Resolver ======"
-	WorkersPerNode=2
-	ThreadsPerWorker=4
-	setInternalSettings "C1" "JSEngineWorkersPerNode"=$WorkersPerNode "JSEngineThreadsPerWorker"=$ThreadsPerWorker
-	echo "Setting JSEngineWorkersPerNode and JSEngineThreadsPerWorker. Sleep 10 seconds for XDCR to reboot"
+	EvaluatorThreads=4
+	setInternalSettings "C1" "JSEngineThreads"=$EvaluatorThreads
+	echo "Setting JSEngineThreads. Sleep 10 seconds for XDCR to reboot"
 	sleep 10
-	setting=$(getSpecificInternalSettings "C1" "JSEngineWorkersPerNode")
-	if (($setting != $WorkersPerNode)); then
-		echo "JSEngineWorkersPerNode is $setting, expected $WorkersPerNode"
+	setting=$(getSpecificInternalSettings "C1" "JSEngineThreads")
+	if (($setting != $EvaluatorThreads)); then
+		echo "JSEngineThreads is $setting, expected $EvaluatorThreads"
 	else
-		echo "JSEngineWorkersPerNode is set to $setting"
-	fi
-	setting=$(getSpecificInternalSettings "C1" "JSEngineThreadsPerWorker")
-	if (($setting != $ThreadsPerWorker)); then
-		echo "JSEngineThreadsPerWorker is $setting, expected $ThreadsPerWorker"
-	else
-		echo "JSEngineThreadsPerWorker is set to $setting"
+		echo "JSEngineThreads is set to $setting"
 	fi
 	echo "====== Configure Resolver Finished ======"
 }

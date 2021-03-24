@@ -15,20 +15,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/couchbase/cbauth"
-	"github.com/couchbase/eventing-ee/js-evaluator/defs"
-	"github.com/couchbase/eventing-ee/js-evaluator/impl"
+	"github.com/couchbase/eventing-ee/evaluator/defs"
+	impl "github.com/couchbase/eventing-ee/evaluator/n1ql_impl"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 )
 
-const EVENTING_FUNCTION_LIB = "xdcr"
-
 var (
 	// The number of goroutines that can call js-evaluator to get merge result
-	numResolverWorkers = base.JSEngineThreadsPerWorker * base.JSEngineWorkersPerNode
+	numResolverWorkers = base.JSEngineThreads
 	// The channel size for sending input to resolverWorkers. Keep this channel small so it won't have backup data from pipelines that went away
 	inputChanelSize = numResolverWorkers
 )
@@ -57,14 +56,10 @@ func (rs *ResolverSvc) ResolveAsync(aConflict *base.ConflictParams, finish_ch ch
 // This default function is only for internal testing. The create should not fail. If it fails, we log an error.
 // When we create replication using this merge function, we will check if it exists.
 func (rs *ResolverSvc) InitDefaultFunc() {
-	reqBody := map[string]string{
-		"name": base.DefaultMergeFunc,
-		"code": base.DefaultMergeFuncBodyCC,
-	}
 	buffer := &bytes.Buffer{}
 	encoder := json.NewEncoder(buffer)
 	encoder.SetEscapeHTML(false)
-	err := encoder.Encode(reqBody)
+	err := encoder.Encode(base.DefaultMergeFuncBodyCC)
 	if err != nil {
 		rs.logger.Errorf("Encode failed for %v function. err: %v", base.DefaultMergeFunc, err)
 		return
@@ -99,7 +94,7 @@ func (rs *ResolverSvc) InitDefaultFunc() {
 		rs.logger.Infof("Created %v function", base.DefaultMergeFunc)
 		return
 	} else {
-		rs.logger.Errorf("Create %v received http.Status %v for merge function %s, encoded: %s", base.DefaultMergeFunc, response.Status, reqBody, b)
+		rs.logger.Errorf("Create %v received http.Status %v for merge function %s, encoded: %s", base.DefaultMergeFunc, response.Status, base.DefaultMergeFuncBodyCC, b)
 		return
 	}
 }
@@ -107,10 +102,20 @@ func (rs *ResolverSvc) InitDefaultFunc() {
 func (rs *ResolverSvc) CheckMergeFunction(fname string) error {
 	functionUrl := fmt.Sprintf("%v/%v", rs.functionUrl, fname)
 	req, err := http.NewRequest(base.MethodGet, functionUrl, nil)
-	req.Header.Set(base.ContentType, base.JsonContentType)
-	conn_str, err := rs.top_svc.MyMemcachedAddr()
 	if err != nil {
 		return err
+	}
+	req.Header.Set(base.ContentType, base.JsonContentType)
+	// When a node first starts up and before it is a "cluster", REST call to KV such as MyMemchachedAddr()
+	// will return 404. Retry until it is successful
+	var conn_str string
+	for {
+		conn_str, err = rs.top_svc.MyMemcachedAddr()
+		if err != nil {
+			time.Sleep(base.CCRKVRestCallRetryInterval)
+		} else {
+			break
+		}
 	}
 	username, password, err := cbauth.GetMemcachedServiceAuth(conn_str)
 	if err != nil {
@@ -121,11 +126,10 @@ func (rs *ResolverSvc) CheckMergeFunction(fname string) error {
 	if err != nil {
 		return err
 	}
-	if response.StatusCode == http.StatusOK {
-		return nil
-	} else {
+	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("CheckMergeFunction received http.Status %v for merge function %v", response.Status, fname)
 	}
+	return nil
 }
 
 func (rs *ResolverSvc) Start(sourceKVHost string, xdcrRestPort uint16) {
@@ -172,7 +176,7 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	params = append(params, string(targetBody))
 	params = append(params, targetTime)
 	params = append(params, string(input.TargetId))
-	res, err := rs.execute(EVENTING_FUNCTION_LIB, input.MergeFunction, params)
+	res, err := rs.execute(input.MergeFunction, input.MergeFunction, params)
 	input.ResultNotifier.NotifyMergeResult(input, res, err)
 }
 
@@ -180,9 +184,7 @@ func (rs *ResolverSvc) initEvaluator(sourceKVHost string, xdcrRestPort uint16) e
 	engine := impl.NewEngine()
 
 	config := make(map[defs.Config]interface{})
-	config[defs.WorkersPerNode] = base.JSEngineWorkersPerNode
-	config[defs.ThreadsPerWorker] = base.JSEngineThreadsPerWorker
-	config[defs.NsServerURL] = base.GetHostAddr(sourceKVHost, xdcrRestPort)
+	config[defs.Threads] = base.JSEngineThreads
 
 	err := engine.Configure(config)
 	if err.Err != nil {
@@ -201,7 +203,7 @@ func (rs *ResolverSvc) initEvaluator(sourceKVHost string, xdcrRestPort uint16) e
 	if rs.evaluator == nil {
 		return fmt.Errorf("Unable to fetch javascript evaluator.")
 	} else {
-		rs.logger.Infof("Javascript evaluator started with %v worker and %v threads each.", config[defs.WorkersPerNode], config[defs.ThreadsPerWorker])
+		rs.logger.Infof("Javascript evaluator started with %v threads.", config[defs.Threads])
 	}
 	return nil
 }
