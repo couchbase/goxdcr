@@ -826,3 +826,16 @@ func TestRuleRedundancyNilCheck(t *testing.T) {
 	assert.Nil(validator.ValidateKV("testScope.testCol", nil))
 	assert.NotNil(validator.ValidateKV("testScope", nil))
 }
+
+func TestRuleNameTooLong(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRuleNameTooLong =================")
+	defer fmt.Println("============== Test case end: TestRuleNameTooLong =================")
+
+	longStr := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	validator := NewExplicitMappingValidator()
+	assert.NotNil(validator.ValidateKV(longStr, longStr))
+	ns2 := fmt.Sprintf("%v%v%v", longStr, ScopeCollectionDelimiter, longStr)
+	assert.NotNil(validator.ValidateKV(ns2, ns2))
+}

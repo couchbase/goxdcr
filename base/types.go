@@ -1109,6 +1109,10 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 	}
 
 	// At this point, name has to be a scope name
+	if len(k) > MaxCollectionNameBytes {
+		return explicitRuleStringTooLong
+	}
+
 	matched := k == DefaultScopeCollectionName
 	if !matched {
 		matched = CollectionNameValidationRegex.MatchString(k)
@@ -1122,7 +1126,11 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 			return explicitRuleInvalidScopeName
 		}
 	}
+
 	if vIsString {
+		if len(vStr) > MaxCollectionNameBytes {
+			return explicitRuleStringTooLong
+		}
 		matched = vStr == DefaultScopeCollectionName
 		if !matched {
 			matched = CollectionNameValidationRegex.MatchString(vStr)
@@ -1233,7 +1241,7 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 			}
 		}
 	case explicitRuleStringTooLong:
-		return ErrorLengthExceeded
+		return fmt.Errorf("%v - maximum length for scope or collection names is %v", ErrorLengthExceeded, MaxCollectionNameBytes)
 	default:
 		panic(fmt.Sprintf("Unhandled rule type: %v", ruleType))
 	}
