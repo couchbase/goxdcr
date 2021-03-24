@@ -179,6 +179,11 @@ func (_m *ReplicationStatusIface) GetStats(registryName string, pipelineType com
 	return r0
 }
 
+// LoadLatestBrokenMap provides a mock function with given fields:
+func (_m *ReplicationStatusIface) LoadLatestBrokenMap() {
+	_m.Called()
+}
+
 // Pipeline provides a mock function with given fields:
 func (_m *ReplicationStatusIface) Pipeline() common.Pipeline {
 	ret := _m.Called()

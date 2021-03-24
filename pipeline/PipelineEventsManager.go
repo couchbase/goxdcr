@@ -6,6 +6,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
 )
@@ -31,15 +32,32 @@ func (p *PipelineEventList) Len() int {
 // DelFunc is used if brokenmap is not meant to exist in the ErrorList to be returned and must be called before doneFunc
 func (p *PipelineEventList) LockAndGetBrokenMapEventForEditing(idWell *int64) (event *base.EventInfo, doneFunc func(), delFunc func()) {
 	var idx int
-	idxPtr := &idx
 
-	p.Mutex.Lock()
+	p.Mutex.RLock()
 	doneFunc = func() {
-		p.Mutex.Unlock()
+		p.Mutex.RUnlock()
 	}
 
 	delFunc = func() {
-		p.EventInfos = append(p.EventInfos[:*idxPtr], p.EventInfos[*idxPtr+1:]...)
+		// Upgrade lock
+		p.Mutex.RUnlock()
+		p.Mutex.Lock()
+
+		// Check again to make sure that idx didn't move
+		var delIdx int
+		var delFound bool
+		for delIdx = 0; delIdx < len(p.EventInfos); delIdx++ {
+			if p.EventInfos[delIdx].EventType == base.BrokenMappingInfoType {
+				delFound = true
+				break
+			}
+		}
+
+		if delFound {
+			p.EventInfos = append(p.EventInfos[:delIdx], p.EventInfos[delIdx+1:]...)
+		}
+		p.Mutex.Unlock()
+		p.Mutex.RLock()
 	}
 
 	for idx = 0; idx < len(p.EventInfos); idx++ {
@@ -52,6 +70,15 @@ func (p *PipelineEventList) LockAndGetBrokenMapEventForEditing(idWell *int64) (e
 	}
 
 	// Not found
+	event = p.tempUpgradeLockAndCreateNewBrokenMapEvent(idWell)
+
+	return
+}
+
+func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *int64) *base.EventInfo {
+	p.Mutex.RUnlock()
+	p.Mutex.Lock()
+
 	newEvent := &base.EventInfo{
 		EventId:     base.GetEventIdFromWell(idWell),
 		EventType:   base.BrokenMappingInfoType,
@@ -59,11 +86,13 @@ func (p *PipelineEventList) LockAndGetBrokenMapEventForEditing(idWell *int64) (e
 		EventExtras: base.NewEventsMap(),
 	}
 	p.EventInfos = append(p.EventInfos, newEvent)
-	idx = len(p.EventInfos) - 1
-	event = p.EventInfos[idx]
+	idx := len(p.EventInfos) - 1
+	event := p.EventInfos[idx]
 	p.TimeInfos = append(p.TimeInfos, time.Now().UnixNano())
 
-	return
+	p.Mutex.Unlock()
+	p.Mutex.RLock()
+	return event
 }
 
 type PipelineEventsManager interface {
@@ -84,11 +113,13 @@ type PipelineEventsMgr struct {
 	specGetter  ReplicationSpecGetter
 	eventIdWell *int64
 	logger      *log.CommonLogger
+	utils       utilities.UtilsIface
 
-	cachedBrokenMap metadata.PipelineEventBrokenMap
+	cachedBrokenMap        metadata.PipelineEventBrokenMap
+	updateBrokenMapEventCh chan bool
 }
 
-func NewPipelineEventsMgr(eventIdWell *int64, specId string, specGetter ReplicationSpecGetter, logger *log.CommonLogger) *PipelineEventsMgr {
+func NewPipelineEventsMgr(eventIdWell *int64, specId string, specGetter ReplicationSpecGetter, logger *log.CommonLogger, utils utilities.UtilsIface) *PipelineEventsMgr {
 	if eventIdWell == nil {
 		idWell := int64(-1)
 		eventIdWell = &idWell
@@ -97,12 +128,15 @@ func NewPipelineEventsMgr(eventIdWell *int64, specId string, specGetter Replicat
 		events: PipelineEventList{
 			Mutex: &sync.RWMutex{},
 		},
-		specId:          specId,
-		specGetter:      specGetter,
-		eventIdWell:     eventIdWell,
-		cachedBrokenMap: metadata.NewPipelineEventBrokenMap(),
-		logger:          logger,
+		specId:                 specId,
+		specGetter:             specGetter,
+		eventIdWell:            eventIdWell,
+		cachedBrokenMap:        metadata.NewPipelineEventBrokenMap(),
+		logger:                 logger,
+		updateBrokenMapEventCh: make(chan bool, 1),
+		utils:                  utils,
 	}
+	mgr.updateBrokenMapEventCh <- true
 	return mgr
 }
 
@@ -155,6 +189,22 @@ func (p *PipelineEventsMgr) updateBrokenMapEventIfNeeded() {
 	if !p.cachedBrokenMap.NeedsToUpdate() {
 		return
 	}
+
+	select {
+	case <-p.updateBrokenMapEventCh:
+		updateTimeout := base.ExecWithTimeout(p.updateBrokenMapEvent, base.ReplStatusExportBrokenMapTimeout, p.logger)
+		if updateTimeout != nil {
+			p.logger.Warnf("Updating brokenMap event is taking longer. It will finish up eventually")
+		}
+	default:
+		return
+	}
+}
+
+func (p *PipelineEventsMgr) updateBrokenMapEvent() error {
+	stopFunc := p.utils.StartDiagStopwatch(fmt.Sprintf("updateBrokenMapEvent - %v", p.specId), base.ReplStatusExportBrokenMapTimeout)
+	defer stopFunc()
+
 	// As part of the update below, clear the booleans
 	p.cachedBrokenMap.MarkUpdated()
 
@@ -165,7 +215,8 @@ func (p *PipelineEventsMgr) updateBrokenMapEventIfNeeded() {
 	if eventIsEmpty {
 		delFunc()
 	}
-
+	p.updateBrokenMapEventCh <- true
+	return nil
 }
 
 func (p *PipelineEventsMgr) ContainsEvent(eventId int) bool {

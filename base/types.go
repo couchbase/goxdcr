@@ -220,6 +220,16 @@ func (c *EventsMap) IsEmpty() bool {
 	return true
 }
 
+// Assumes RLock his held - only safe for 1-writer multi-readers
+func (c *EventsMap) UpgradeLock() func() {
+	c.eventMapMtx.RUnlock()
+	c.eventMapMtx.Lock()
+	return func() {
+		c.eventMapMtx.Unlock()
+		c.eventMapMtx.RLock()
+	}
+}
+
 // Not concurrency safe
 func (c *EventsMap) Init() {
 	c.eventMapMtx = &sync.RWMutex{}

@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"github.com/couchbase/goxdcr/utils"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +108,7 @@ type ReplicationStatusIface interface {
 	ClearTemporaryCustomSettings()
 	GetEventsManager() PipelineEventsManager
 	PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string)
+	LoadLatestBrokenMap()
 }
 
 type ReplicationStatus struct {
@@ -131,25 +133,33 @@ type ReplicationStatus struct {
 
 	eventIdWell   *int64
 	eventsManager PipelineEventsManager
+
+	utils           utils.UtilsIface
+	loadBrokenMapCh chan bool
 }
 
-func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger, eventIdWell *int64) *ReplicationStatus {
+func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logger *log.CommonLogger, eventIdWell *int64, utils utils.UtilsIface) *ReplicationStatus {
 	if eventIdWell == nil {
 		idWell := int64(-1)
 		eventIdWell = &idWell
 	}
 
 	rep_status := &ReplicationStatus{specId: specId,
-		pipeline_:      nil,
-		logger:         logger,
-		err_list:       make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
-		spec_getter:    spec_getter,
-		lock:           &sync.RWMutex{},
-		customSettings: make(map[string]interface{}),
-		progress:       "",
-		eventIdWell:    eventIdWell,
-		eventsManager:  NewPipelineEventsMgr(eventIdWell, specId, spec_getter, logger),
+		pipeline_:       nil,
+		logger:          logger,
+		err_list:        make(PipelineErrorArray, 0, PipelineErrorMaxEntries),
+		spec_getter:     spec_getter,
+		lock:            &sync.RWMutex{},
+		customSettings:  make(map[string]interface{}),
+		progress:        "",
+		eventIdWell:     eventIdWell,
+		eventsManager:   NewPipelineEventsMgr(eventIdWell, specId, spec_getter, logger, utils),
+		loadBrokenMapCh: make(chan bool, 1),
+		utils:           utils,
 	}
+
+	// Allow first caller to load brokenMap
+	rep_status.loadBrokenMapCh <- true
 
 	rep_status.Publish(false)
 	return rep_status
@@ -597,6 +607,8 @@ func (rs *ReplicationStatus) GetEventsManager() PipelineEventsManager {
 
 // Note - no concurrency allowed for replInfo
 func (rs *ReplicationStatus) PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string) {
+	rs.LoadLatestBrokenMap()
+
 	// First populate the legacy errors
 	errs := rs.Errors()
 	if len(errs) > 0 {
@@ -619,4 +631,43 @@ func (rs *ReplicationStatus) PopulateReplInfo(replInfo *base.ReplicationInfo, by
 		errInfoFromReplInfo := base.NewErrorInfoFromEventInfo(event, eventsList.TimeInfos[i])
 		replInfo.ErrorList = append(replInfo.ErrorList, errInfoFromReplInfo)
 	}
+}
+
+func (rs *ReplicationStatus) LoadLatestBrokenMap() {
+	// Load brokenMap could get slow or expensive if it gets too big
+	// To prevent hanging up the caller, provide an eventual consistent API here
+	select {
+	case <-rs.loadBrokenMapCh:
+		timeoutErr := base.ExecWithTimeout(rs.loadLatestBrokenMapInternal, base.ReplStatusLoadBrokenMapTimeout, rs.logger)
+		if timeoutErr != nil {
+			rs.logger.Warnf("Loading brokenMap is taking longer than usual. It will finish up eventually")
+		}
+	default:
+		// A loading is taking place above - let it finish
+		return
+	}
+}
+
+// Should return only nil, but need error return to fit ExecWithTimeout argument signature
+func (rs *ReplicationStatus) loadLatestBrokenMapInternal() error {
+	var brokenMapRO metadata.CollectionNamespaceMapping
+	var brokenMapDoneFunc func()
+
+	doneFunc := rs.utils.StartDiagStopwatch(fmt.Sprintf("loadLatestBrokenMapInternal %v", rs.RepId()), base.ReplStatusLoadBrokenMapTimeout)
+	defer doneFunc()
+
+	repStatusPipeline := rs.Pipeline()
+	if repStatusPipeline != nil {
+		brokenMapRO, brokenMapDoneFunc = repStatusPipeline.GetBrokenMapRO()
+	}
+	if brokenMapDoneFunc != nil {
+		defer brokenMapDoneFunc()
+	}
+	if brokenMapRO != nil {
+		rs.GetEventsManager().LoadLatestBrokenMap(brokenMapRO)
+	}
+
+	// Once it is done, put back the token
+	rs.loadBrokenMapCh <- true
+	return nil
 }

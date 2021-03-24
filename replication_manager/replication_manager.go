@@ -319,6 +319,8 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.ResourceMgrKVDetectionRetryIntervalKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.UtilsStopwatchDiagInternalThresholdKey].(int))*time.Millisecond,
 		time.Duration(internal_settings.Values[metadata.UtilsStopwatchDiagExternalThresholdKey].(int))*time.Millisecond,
+		time.Duration(internal_settings.Values[metadata.ReplStatusLoadBrokenMapTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.ReplStatusExportBrokenMapTimeoutKey].(int))*time.Second,
 	)
 }
 
@@ -911,8 +913,6 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 		validateStatsMap(replInfo.StatsMap)
 
 		if common.PipelineType(i) == common.MainPipeline {
-			loadLatestBrokenMap(rep_status)
-
 			// set error list, and broken mapping if any
 			rep_status.PopulateReplInfo(&replInfo, bypassUIErrorCodes, processErrorMsgForUI)
 
@@ -921,21 +921,6 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 		replInfos = append(replInfos, replInfo)
 	}
 	return replInfos
-}
-
-func loadLatestBrokenMap(rep_status *pipeline.ReplicationStatus) {
-	var brokenMapRO metadata.CollectionNamespaceMapping
-	var brokenMapDoneFunc func()
-	repStatusPipeline := rep_status.Pipeline()
-	if repStatusPipeline != nil {
-		brokenMapRO, brokenMapDoneFunc = repStatusPipeline.GetBrokenMapRO()
-	}
-	// Let EventsManager examine the latest ReadOnly brokenmap
-	rep_status.GetEventsManager().LoadLatestBrokenMap(brokenMapRO)
-	if brokenMapDoneFunc != nil {
-		brokenMapDoneFunc()
-	}
-
 }
 
 func validateStatsMap(statsMap map[string]interface{}) {

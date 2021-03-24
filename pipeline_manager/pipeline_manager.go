@@ -784,7 +784,7 @@ func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, c
 		return repStatus, nil
 	} else {
 		var retErr error
-		repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger, pipelineMgr.eventIdWell)
+		repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger, pipelineMgr.eventIdWell, pipelineMgr.utils)
 		pipelineMgr.repl_spec_svc.SetDerivedObj(topic, repStatus)
 		pipelineMgr.logger.Infof("ReplicationStatus is created and set with %v\n", topic)
 		if repStatus.Updater() != nil {

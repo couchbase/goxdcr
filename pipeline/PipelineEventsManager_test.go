@@ -5,11 +5,14 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"testing"
+	"time"
 )
 
-func setupPemBoilerPlate() (*int64, string, func(string) (*metadata.ReplicationSpecification, error), *log.CommonLogger) {
+func setupPemBoilerPlate() (*int64, string, func(string) (*metadata.ReplicationSpecification, error), *log.CommonLogger, *utilsMock.UtilsIface) {
 	var idWell int64 = -1
 	specName := "testSpec"
 	testSpec, _ := metadata.NewReplicationSpecification("srcBucket", "srcUUID", "tgtCluster", "tgtBucket", "tgtBucketUUID")
@@ -17,7 +20,9 @@ func setupPemBoilerPlate() (*int64, string, func(string) (*metadata.ReplicationS
 		return testSpec, nil
 	}
 	logger := log.NewLogger("testPipelineEventsMgr", log.DefaultLoggerContext)
-	return &idWell, specName, specGetter, logger
+	utils := &utilsMock.UtilsIface{}
+	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
+	return &idWell, specName, specGetter, logger, utils
 }
 
 func setupBrokenMap() metadata.CollectionNamespaceMapping {
@@ -31,13 +36,27 @@ func setupBrokenMap() metadata.CollectionNamespaceMapping {
 	return brokenMap
 }
 
+func setupSuperLargeBrokenMap() metadata.CollectionNamespaceMapping {
+	largeBM := make(metadata.CollectionNamespaceMapping)
+	var namespaces []*base.CollectionNamespace
+	var maxCnt = 10000
+	for i := 0; i < maxCnt; i++ {
+		ns, _ := base.NewCollectionNamespaceFromString(fmt.Sprintf("s1.c%v", i))
+		namespaces = append(namespaces, &ns)
+	}
+	for i := 0; i < maxCnt; i++ {
+		largeBM.AddSingleMapping(namespaces[i], namespaces[i])
+	}
+	return largeBM
+}
+
 func TestPipelineEventsMgr_AddEvent(t *testing.T) {
 	fmt.Println("============== Test case start: TestPipelineEventsMgr_AddEvent =================")
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_AddEvent =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -50,8 +69,8 @@ func TestPipelineEventsMgr_ContainsEvent(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_ContainsEvent =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -126,8 +145,8 @@ func TestPipelineEventsMgr_DismissEvent_LowPriority(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_LowPriority =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -149,8 +168,8 @@ func TestPipelineEventsMgr_DismissEvent_WholeBrokenMap(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_WholeBrokenMap =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -170,8 +189,8 @@ func TestPipelineEventsMgr_DismissEvent_WholeScope(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_WholeScope =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -191,8 +210,8 @@ func TestPipelineEventsMgr_DismissEvent_SingleScope(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_SingleScope =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -221,8 +240,8 @@ func TestPipelineEventsMgr_ResetDismissedHistory(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_ResetDismissedHistory =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -247,8 +266,8 @@ func TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore =================")
 	assert := assert.New(t)
 
-	idWell, specName, specGetter, logger := setupPemBoilerPlate()
-	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger)
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
 
 	assert.NotNil(eventsMgr)
 
@@ -270,4 +289,64 @@ func TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore(t *testing.T) {
 	eventsMgr.BackfillUpdateCb(&repairedPair)
 
 	eventsList = eventsMgr.GetCurrentEvents()
+}
+
+func TestPipelineEventsMgr_LargeBrokenMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
+
+	assert.NotNil(eventsMgr)
+
+	smallBM := setupBrokenMap()
+	eventsMgr.LoadLatestBrokenMap(smallBM)
+	eventsList := eventsMgr.GetCurrentEvents()
+	assert.NotEqual(0, len(eventsList.EventInfos))
+
+	largeBM := setupSuperLargeBrokenMap()
+	assert.NotEqual(0, len(largeBM))
+
+	// This test will launch a separate go-routine to keep hammering and getting data while a single setter takes place
+	var collectedTimes []time.Duration
+	finCh := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-finCh:
+				return
+			default:
+				startTime := time.Now()
+				eventsMgr.GetCurrentEvents()
+				timeTaken := time.Since(startTime)
+				collectedTimes = append(collectedTimes, timeTaken)
+			}
+		}
+	}()
+
+	// This is the single update operation
+	// Takes about 26 milli-seconds on 2019 MBP
+	startTime := time.Now()
+	eventsMgr.LoadLatestBrokenMap(largeBM)
+	eventsList = eventsMgr.GetCurrentEvents()
+	settingTimeTaken := time.Since(startTime)
+	assert.NotEqual(0, len(eventsList.EventInfos))
+
+	// stop collecting data
+	close(finCh)
+
+	var maxCheckTime time.Duration
+	for _, checkTime := range collectedTimes {
+		if checkTime > maxCheckTime {
+			maxCheckTime = checkTime
+		}
+	}
+
+	comparison := settingTimeTaken.Nanoseconds() / maxCheckTime.Nanoseconds()
+
+	// Fail the test if querying is getting close to half as long as setting a time
+	// Then this means lock contention is an issue
+	assert.True(comparison >= 3)
 }

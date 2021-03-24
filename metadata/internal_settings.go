@@ -239,6 +239,9 @@ const (
 
 	UtilsStopwatchDiagInternalThresholdKey = "StopwatchDiagInternalThresholdMs"
 	UtilsStopwatchDiagExternalThresholdKey = "StopwatchDiagExternalThresholdMs"
+
+	ReplStatusExportBrokenMapTimeoutKey = "ReplStatusExportBrokenMapTimeoutSec"
+	ReplStatusLoadBrokenMapTimeoutKey   = "ReplStatusLoadBrokenMapTimeoutSec"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -338,6 +341,8 @@ var MaxCountDCPStreamsInactiveConfig = &SettingsConfig{base.MaxCountStreamsInact
 var ResourceMgrKVDetectionRetryIntervalConfig = &SettingsConfig{int(base.ResourceMgrKVDetectionRetryInterval / time.Second), &Range{1, 3600}}
 var UtilsStopwatchDiagInternalThresholdConfig = &SettingsConfig{int(base.DiagInternalThreshold / time.Millisecond), &Range{10, 3600000}}
 var UtilsStopwatchDiagExternalThresholdConfig = &SettingsConfig{int(base.DiagNetworkThreshold / time.Millisecond), &Range{10, 3600000}}
+var ReplStatusLoadBrokenMapTimeoutConfig = &SettingsConfig{int(base.ReplStatusLoadBrokenMapTimeout / time.Second), &Range{1, int(base.AdminportReadTimeout / time.Second)}}
+var ReplStatusExportBrokenMapTimeoutConfig = &SettingsConfig{int(base.ReplStatusExportBrokenMapTimeout / time.Second), &Range{1, int(base.AdminportReadTimeout / time.Second)}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -437,6 +442,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ResourceMgrKVDetectionRetryIntervalKey:        ResourceMgrKVDetectionRetryIntervalConfig,
 	UtilsStopwatchDiagInternalThresholdKey:        UtilsStopwatchDiagInternalThresholdConfig,
 	UtilsStopwatchDiagExternalThresholdKey:        UtilsStopwatchDiagExternalThresholdConfig,
+	ReplStatusExportBrokenMapTimeoutKey:           ReplStatusExportBrokenMapTimeoutConfig,
+	ReplStatusLoadBrokenMapTimeoutKey:             ReplStatusLoadBrokenMapTimeoutConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"sync/atomic"
 	"testing"
@@ -35,7 +36,8 @@ func setupBoilerPlate() (*log.CommonLogger,
 	specGetter := func(string) (*metadata.ReplicationSpecification, error) {
 		return testSpec, nil
 	}
-	repStatus := NewReplicationStatus(specId, specGetter, testLogger, nil)
+	utils := &utilsMock.UtilsIface{}
+	repStatus := NewReplicationStatus(specId, specGetter, testLogger, nil, utils)
 
 	return testLogger, specId, testSpec, specGetter, repStatus
 }

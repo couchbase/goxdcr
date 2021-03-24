@@ -118,7 +118,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 	testReplicationSpec := &metadata.ReplicationSpecification{Id: testTopic, Settings: testReplicationSettings, Revision: 1}
 
 	specGetterFxLiteral := func(specId string) (*metadata.ReplicationSpecification, error) { return testReplicationSpec, nil }
-	testReplicationStatus := replicationStatus.NewReplicationStatus(testTopic, specGetterFxLiteral, testLogger, nil)
+	testReplicationStatus := replicationStatus.NewReplicationStatus(testTopic, specGetterFxLiteral, testLogger, nil, utilsNew)
 
 	testRepairer = newPipelineUpdater(testTopic, 0 /*retry_interval*/, nil, /*cur_err*/
 		testReplicationStatus, testLogger, pipelineMgr)

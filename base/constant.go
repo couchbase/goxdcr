@@ -1016,6 +1016,9 @@ var BackfillPersistInterval = 1000 * time.Millisecond
 
 var ResourceMgrKVDetectionRetryInterval = 60 * time.Second
 
+var ReplStatusLoadBrokenMapTimeout = 5 * time.Second
+var ReplStatusExportBrokenMapTimeout = 5 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -1065,7 +1068,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	httpsPortLookupTimeout time.Duration,
 	jsEngineWorkersPerNode int, jsEngineThreadsPerWorker int,
 	maxCountDcpStreamsInactive int, resourceMgrKVDetectionRetryInterval time.Duration,
-	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration) {
+	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
+	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1182,6 +1186,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ResourceMgrKVDetectionRetryInterval = resourceMgrKVDetectionRetryInterval
 	DiagInternalThreshold = utilsStopwatchDiagInternal
 	DiagNetworkThreshold = utilsStopwatchDiagExternal
+	ReplStatusLoadBrokenMapTimeout = replStatusLoadBrokenMapTimeout
+	ReplStatusExportBrokenMapTimeout = replStatusExportBrokenMapTimeout
 }
 
 // Need to escape the () to result in "META().xattrs" literal

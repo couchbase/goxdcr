@@ -2384,20 +2384,14 @@ func (p *PipelineEventBrokenMap) GetDismissedMapWMtx() (CollectionNamespaceMappi
 
 // Returns true if event is empty
 func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *int64) bool {
-	// WLock because we need to do updates
 	// Note locking order -> cachedBrokenMap first then event
-	p.cachedBrokenMapMtx.Lock()
-	defer p.cachedBrokenMapMtx.Unlock()
+	p.cachedBrokenMapMtx.RLock()
+	defer p.cachedBrokenMapMtx.RUnlock()
 
 	if !event.EventExtras.IsNil() && event.EventExtras.IsEmpty() && len(p.userDismissedBrokenMap) == 0 {
 		srcIndex, scopeIndex := p.loadEmptyEvent(event, idWell)
 		eventIsEmpty := len(event.EventExtras.EventsMap) == 0
-		if !eventIsEmpty {
-			p.cachedBrokenMapSrcEventIdIdx = srcIndex
-			p.cachedBrokenMapSrcScopeIdx = scopeIndex
-		} else {
-			p.recreateNewSrcIndexes()
-		}
+		p.upgradeLockAndUpdateCachedBrokenMapIndexes(eventIsEmpty, srcIndex, scopeIndex)
 		return eventIsEmpty
 	}
 
@@ -2406,31 +2400,50 @@ func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *in
 		return true
 	}
 
-	eventLock := event.EventExtras.GetRWLock()
-	eventLock.Lock()
-	defer eventLock.Unlock()
-
 	// First delete any mappings that no longer exist or user has dismissed
-	eventCompiledBrokenMap := p.cleanUpObsoleteSourcesFromEventNoLock(event)
+	eventCompiledBrokenMap := p.cleanUpObsoleteSourcesFromEvent(event)
 
 	// Then add things that are missing into event
-	p.addMissingBrokenMappingIntoEventNoLock(event, idWell, eventCompiledBrokenMap)
+	p.addMissingBrokenMappingIntoEvent(event, idWell, eventCompiledBrokenMap)
 
-	eventIsEmpty := len(event.EventExtras.EventsMap) == 0
-
+	eventIsEmpty := event.EventExtras.Len() == 0
 	if eventIsEmpty {
-		p.recreateNewSrcIndexes()
+		p.recreateNewSrcIndexes(true)
 	}
 	return eventIsEmpty
 }
 
-func (p *PipelineEventBrokenMap) recreateNewSrcIndexes() {
+func (p *PipelineEventBrokenMap) upgradeLockAndUpdateCachedBrokenMapIndexes(eventIsEmpty bool, srcIndex map[string]int64, scopeIndex map[string]int64) {
+	p.cachedBrokenMapMtx.RUnlock()
+	p.cachedBrokenMapMtx.Lock()
+	if !eventIsEmpty {
+		p.cachedBrokenMapSrcEventIdIdx = srcIndex
+		p.cachedBrokenMapSrcScopeIdx = scopeIndex
+	} else {
+		p.recreateNewSrcIndexes(false)
+	}
+	p.cachedBrokenMapMtx.Unlock()
+	p.cachedBrokenMapMtx.RLock()
+}
+
+func (p *PipelineEventBrokenMap) recreateNewSrcIndexes(upgradeLockNeeded bool) {
+	if upgradeLockNeeded {
+		p.cachedBrokenMapMtx.RUnlock()
+		p.cachedBrokenMapMtx.Lock()
+	}
 	p.cachedBrokenMapSrcScopeIdx = make(map[string]int64)
 	p.cachedBrokenMapSrcEventIdIdx = make(map[string]int64)
+	if upgradeLockNeeded {
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	}
 }
 
 // Takes the current broken map, filter out user's intent on dismissal, and write them to event
-func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *base.EventInfo, idWell *int64, eventCompiledBrokenMap CollectionNamespaceMapping) {
+func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEvent(event *base.EventInfo, idWell *int64, eventCompiledBrokenMap CollectionNamespaceMapping) {
+	event.EventExtras.GetRWLock().RLock()
+	defer event.EventExtras.GetRWLock().RUnlock()
+
 	// Given current event version's of the brokenmap, diff against the actual broken map. Whatever is not here needs to be added only if user didn't filter it out
 	added, _ := eventCompiledBrokenMap.Diff(p.cachedBrokenMap)
 	for srcNs, tgtList := range added {
@@ -2445,7 +2458,9 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 			scopeEvent.EventType = base.BrokenMappingInfoType
 			scopeEvent.EventId = base.GetEventIdFromWell(idWell)
 			scopeEvent.EventDesc = srcNs.ScopeName
+			eventMapLockDone := event.EventExtras.UpgradeLock()
 			event.EventExtras.EventsMap[scopeEvent.EventId] = scopeEvent
+			eventMapLockDone()
 			p.cachedBrokenMapSrcScopeIdx[srcNs.ScopeName] = scopeEvent.EventId
 		} else {
 			scopeEvent = event.EventExtras.EventsMap[scopeEventId].(*base.EventInfo)
@@ -2484,9 +2499,11 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEventNoLock(event *b
 // Given the current broken map, and given an event, remove obsolete entries from event that are no longer present in
 // the current broken map. At the same time, return A compiled broken map that represents an intersection between the
 // current brokenmap and the event broken map
-func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *base.EventInfo) CollectionNamespaceMapping {
+func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEvent(event *base.EventInfo) CollectionNamespaceMapping {
+	event.EventExtras.GetRWLock().RLock()
+	defer event.EventExtras.GetRWLock().RUnlock()
+
 	eventCompiledBrokenMap := make(CollectionNamespaceMapping)
-	var scopeDelEventIds []int64
 	// BrokenMapping Event map is in the format of:
 	// Level0 : Whole Broken Map Event       <- The event incoming argument is at this level
 	// ------------------------------------
@@ -2544,7 +2561,7 @@ func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEventNoLock(event *ba
 		}
 		wholeSrcScopeEvent.EventExtras.GetRWLock().RUnlock()
 		if !wholeScopeStillExists || numSrcCollectionsUnderScope == numLevel2Deleted {
-			p.deleteL1EventFromL0Event(event, wholeSrcScopeEvent, scopeDelEventIds, wholeScopeEventId)
+			p.tempUpgradeLockAndDeleteL1EventFromL0Event(event, wholeSrcScopeEvent, wholeScopeEventId)
 		}
 	}
 
@@ -2567,28 +2584,25 @@ func (p *PipelineEventBrokenMap) findTargetNamespaceGivenEvent(tgtNsEventRaw int
 
 // Delete a S.C:St.Ct event from the parent of a S.C event
 func (p *PipelineEventBrokenMap) tempUpgradeLockAndDelL3EventFromL2(srcNsEvent *base.EventInfo, subEventId int64, numDeleted *int) {
-	srcNsEvent.EventExtras.GetRWLock().RUnlock()
-	srcNsEvent.EventExtras.GetRWLock().Lock()
+	doneFunc := srcNsEvent.EventExtras.UpgradeLock()
+	defer doneFunc()
 	delete(srcNsEvent.EventExtras.EventsMap, subEventId)
 	*numDeleted++
-	srcNsEvent.EventExtras.GetRWLock().Unlock()
-	srcNsEvent.EventExtras.GetRWLock().RLock()
 }
 
 // Delete a S.C from the parent of a S event
 func (p *PipelineEventBrokenMap) tempUpgradeLockAndDelL2EventFromL1(wholeSrcScopeEvent *base.EventInfo, srcEventId int64, srcNamespace *SourceNamespace, numSrcCollectionsDeleted *int) {
-	wholeSrcScopeEvent.EventExtras.GetRWLock().RUnlock()
-	wholeSrcScopeEvent.EventExtras.GetRWLock().Lock()
+	doneFunc := wholeSrcScopeEvent.EventExtras.UpgradeLock()
+	defer doneFunc()
 	delete(wholeSrcScopeEvent.EventExtras.EventsMap, srcEventId)
 	delete(p.cachedBrokenMapSrcEventIdIdx, srcNamespace.ToIndexString())
 	*numSrcCollectionsDeleted++
-	wholeSrcScopeEvent.EventExtras.GetRWLock().Unlock()
-	wholeSrcScopeEvent.EventExtras.GetRWLock().RLock()
 }
 
 // No lock is needed because the top level of brokenMap was locked already
-func (p *PipelineEventBrokenMap) deleteL1EventFromL0Event(event *base.EventInfo, wholeSrcScopeEvent *base.EventInfo, scopeDelEventIds []int64, wholeScopeEventId int64) {
-	scopeDelEventIds = append(scopeDelEventIds, wholeScopeEventId)
+func (p *PipelineEventBrokenMap) tempUpgradeLockAndDeleteL1EventFromL0Event(event *base.EventInfo, wholeSrcScopeEvent *base.EventInfo, wholeScopeEventId int64) {
+	doneFunc := event.EventExtras.UpgradeLock()
+	defer doneFunc()
 	delete(p.cachedBrokenMapSrcScopeIdx, wholeSrcScopeEvent.EventDesc)
 	delete(event.EventExtras.EventsMap, wholeScopeEventId)
 }
