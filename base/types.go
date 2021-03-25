@@ -1059,6 +1059,8 @@ type ExplicitMappingValidator struct {
 	oneToOneRules map[string]interface{}
 	// S -> S || S -> nil
 	scopeToScopeRules map[string]interface{}
+	// Ensure tgt namespaces are not being reused
+	valueDuplicatorCheckMap map[string]interface{}
 }
 
 type explicitValidatingType int
@@ -1071,12 +1073,14 @@ const (
 	explicitRuleInvalidType      explicitValidatingType = iota
 	explicitRuleEmptyString      explicitValidatingType = iota
 	explicitRuleStringTooLong    explicitValidatingType = iota
+	explicitRuleTargetDuplicate  explicitValidatingType = iota
 )
 
 func NewExplicitMappingValidator() *ExplicitMappingValidator {
 	return &ExplicitMappingValidator{
-		oneToOneRules:     make(map[string]interface{}),
-		scopeToScopeRules: make(map[string]interface{}),
+		oneToOneRules:           make(map[string]interface{}),
+		scopeToScopeRules:       make(map[string]interface{}),
+		valueDuplicatorCheckMap: make(map[string]interface{}),
 	}
 }
 
@@ -1102,6 +1106,15 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 			}
 			return explicitRuleInvalid
 		}
+
+		if vIsString {
+			_, exists := e.valueDuplicatorCheckMap[vStr]
+			if exists {
+				return explicitRuleTargetDuplicate
+			}
+			e.valueDuplicatorCheckMap[vStr] = true
+		}
+
 		return explicitRuleOneToOne
 	}
 	if err != nil && err == ErrorLengthExceeded {
@@ -1144,6 +1157,11 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 				return explicitRuleInvalidScopeName
 			}
 		}
+		_, exists := e.valueDuplicatorCheckMap[vStr]
+		if exists {
+			return explicitRuleTargetDuplicate
+		}
+		e.valueDuplicatorCheckMap[vStr] = true
 	} else if v != nil {
 		// Can only be string type or nil type
 		return explicitRuleInvalidType
@@ -1242,6 +1260,8 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 		}
 	case explicitRuleStringTooLong:
 		return fmt.Errorf("%v - maximum length for scope or collection names is %v", ErrorLengthExceeded, MaxCollectionNameBytes)
+	case explicitRuleTargetDuplicate:
+		return fmt.Errorf("%v is reused as a target namespace", v.(string))
 	default:
 		panic(fmt.Sprintf("Unhandled rule type: %v", ruleType))
 	}

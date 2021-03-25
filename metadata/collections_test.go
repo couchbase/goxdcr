@@ -1238,3 +1238,23 @@ func TestSpecialMigrationNamespaceFromRules(t *testing.T) {
 	assert.Len(added, 1)
 	assert.Len(removed, 1)
 }
+
+func TestTwoToOneExplicitMapping(t *testing.T) {
+	fmt.Println("============== Test case start: TestTwoToOneExplicitMapping =================")
+	defer fmt.Println("============== Test case end: TestTwoToOneExplicitMapping =================")
+	assert := assert.New(t)
+
+	// Test 2 collections to 1 collection
+	rule := make(CollectionsMappingRulesType)
+	rule[fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "c1")] = fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "col1")
+	rule[fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "c2")] = fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "col1")
+	assert.False(rule.IsExplicitMigrationRule())
+	assert.NotNil(rule.ValidateExplicitMapping())
+
+	// Test 2 scopes to 1 scope
+	rule = make(CollectionsMappingRulesType)
+	rule[fmt.Sprintf("%v", "S1")] = fmt.Sprintf("%v", "S1")
+	rule[fmt.Sprintf("%v", "S2")] = fmt.Sprintf("%v", "S1")
+	assert.False(rule.IsExplicitMigrationRule())
+	assert.NotNil(rule.ValidateExplicitMapping())
+}

@@ -744,11 +744,11 @@ func TestDefaultNs(t *testing.T) {
 	assert.Equal(explicitRuleScopeToScope, validator.parseRule("_default", nil))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default._default", nil))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default._default", "_default._default"))
+	validator = NewExplicitMappingValidator()
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default.testCol", nil))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default.testCol", "_default._default"))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope.testCol", nil))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope.testCol", "_default.nonDefCol"))
-
 	assert.Equal(explicitRuleInvalid, validator.parseRule("testScope.testCol", "_nonDefault.nonDefCol"))
 
 }
