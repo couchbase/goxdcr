@@ -393,60 +393,6 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 	fmt.Println("============== Test case end: TestCompressionNegNotEnterprise =================")
 }
 
-func TestCompressionNegCAPI(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestCompressionNegCAPI =================")
-	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
-		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
-
-	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, false, false, false, backfillReplSvc, false)
-
-	// Turning on should be disallowed
-	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
-	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeCapi
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
-	assert.NotEqual(len(errMap), 0)
-
-	fmt.Println("============== Test case end: TestCompressionNegCAPI =================")
-}
-
-func TestCompressionNegNoSnappy(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestCompressionNegNoSnappy =================")
-	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
-		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
-
-	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, false, false, backfillReplSvc, false)
-
-	// Turning off should be allowed
-	settings[metadata.CompressionTypeKey] = base.CompressionTypeNone
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
-	assert.Equal(len(errMap), 0)
-
-	// Turning on Snappy should result in error since it is not a valid input anymore
-	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
-	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
-	assert.NotEqual(len(errMap), 0)
-
-	// Setting to Auto should result in warning only, and no error
-	settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
-	_, _, _, errMap, _, warnings := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
-	assert.Equal(len(errMap), 0)
-	assert.NotEqual(len(warnings), 0)
-
-	// Setting path should be allowed as well
-	settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
-	errMap, err := replSpecSvc.ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket, settings)
-	errExists := len(errMap) > 0 || err != nil
-	assert.False(errExists)
-
-	fmt.Println("============== Test case end: TestCompressionNegNoSnappy =================")
-}
-
 func TestElasticSearch(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestElasticSearch =================")

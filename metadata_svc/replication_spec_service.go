@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -579,56 +578,10 @@ func (service *ReplicationSpecService) validateCompression(errorMap base.ErrorMa
 	if len(errorMap) > 0 || err != nil {
 		return err
 	}
-
-	thisNodeContainsKV, kvCheckErr := service.xdcr_comp_topology_svc.IsKVNode()
-	if kvCheckErr != nil {
-		service.logger.Warnf("Checking for KV capability got err: %v", kvCheckErr)
-	}
-
-	if kvCheckErr == nil && thisNodeContainsKV {
-		// 0th element is for local
-		// Thereafter is each remote target KV
-		var parallelErrMaps []base.ErrorMap
-		var parallelErrs []error
-		parallelErrMaps = append(parallelErrMaps, errorMap)
-		parallelErrs = append(parallelErrs, errors.New(""))
-		for i := 0; i < len(allKvConnStrs); i++ {
-			parallelErrMaps = append(parallelErrMaps, make(base.ErrorMap))
-			parallelErrs = append(parallelErrs, errors.New(""))
-		}
-		var waitGrp sync.WaitGroup
-
-		waitGrp.Add(1)
-		go func() {
-			defer waitGrp.Done()
-			parallelErrs[0] = service.validateCompressionLocal(parallelErrMaps[0], sourceBucket, targetBucket, errKey, requestedFeaturesSet)
-		}()
-
-		// Need to validate each node of the target to make sure all of them can support compression
-		for i := 0; i < len(allKvConnStrs); i++ {
-			iClone := i
-			waitGrp.Add(1)
-			go func() {
-				defer waitGrp.Done()
-				parallelErrs[iClone+1] = service.validateCompressionTarget(parallelErrMaps[iClone+1], sourceBucket, targetClusterRef, targetBucket, allKvConnStrs[iClone], username, password,
-					httpAuthMech, certificate, SANInCertificate, clientCertificate, clientKey, errKey, requestedFeaturesSet)
-			}()
-		}
-
-		waitGrp.Wait()
-
-		for i := 0; i < len(parallelErrMaps); i++ {
-			errorMap = parallelErrMaps[i]
-			err = parallelErrs[i]
-			if len(errorMap) > 0 || (err != nil && err.Error() != "") {
-				return err
-			}
-		}
-	}
-
 	return nil
 }
 
+// Prereq compression check is cheap
 func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.ErrorMap, targetBucket string, targetBucketInfo map[string]interface{}, compressionType int,
 	errKey string) error {
 	var err error
@@ -653,91 +606,6 @@ func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.E
 	if !hasCompressionSupport {
 		errorMap[base.ToCluster] = fmt.Errorf("The version of Couchbase software installed on the remote cluster does not support compression. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
 			base.VersionForCompressionSupport[0], base.VersionForCompressionSupport[1])
-		return err
-	}
-	return err
-}
-
-func (service *ReplicationSpecService) validateCompressionLocal(errorMap base.ErrorMap, sourceBucket string, targetBucket string, errKey string,
-	requestedFeaturesSet utilities.HELOFeatures) error {
-	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCompressionLocal(%v, %v)", sourceBucket, targetBucket), base.DiagInternalThreshold)
-	defer stopFunc()
-	localAddr, err := service.xdcr_comp_topology_svc.MyMemcachedAddr()
-	if err != nil {
-		return err
-	}
-	localClient, respondedFeatures, err := service.utils.GetMemcachedConnectionWFeatures(localAddr, sourceBucket,
-		base.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket), base.KeepAlivePeriod, requestedFeaturesSet, service.logger)
-	if localClient != nil {
-		localClient.Close()
-	}
-	if err != nil {
-		return err
-	}
-	if respondedFeatures.CompressionType != requestedFeaturesSet.CompressionType {
-		errorMap[errKey] = fmt.Errorf("Source cluster %v does not support %v compression. Please verify the configuration on the source cluster for %v compression support, or disable compression for this replication.",
-			localAddr, base.CompressionTypeStrings[requestedFeaturesSet.CompressionType], base.CompressionTypeStrings[requestedFeaturesSet.CompressionType])
-		return err
-	}
-	return err
-}
-
-func (service *ReplicationSpecService) validateCompressionTarget(errorMap base.ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string, kvConnStr, username, password string,
-	httpAuthMech base.HttpAuthMech, certificate []byte, SANInCertificate bool, clientCertificate, clientKey []byte, errKey string, requestedFeaturesSet utilities.HELOFeatures) error {
-	var conn mcc.ClientIface
-	sslPortMap := make(base.SSLPortMap)
-	var err error
-
-	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCompressionTarget(%v, %v, %v, %v)", sourceBucket, targetClusterRef.Name(), targetBucket, kvConnStr), base.DiagNetworkThreshold)
-	defer stopFunc()
-
-	if targetClusterRef.IsFullEncryption() {
-		// Full encryption needs TLS connection with special inputs
-		var connStr string
-		var useExternal bool
-		connStr, err = targetClusterRef.MyConnectionStr()
-		if err != nil {
-			return err
-		}
-		useExternal, err = service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
-		if err != nil {
-			return err
-		}
-		sslPortMap, err = service.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, SANInCertificate, clientCertificate, clientKey, targetBucket, service.logger, useExternal)
-		if err != nil {
-			return err
-		}
-		sslPort, ok := sslPortMap[kvConnStr]
-		if !ok {
-			err = errors.New(fmt.Sprintf("Unable to populate sslPort using kvConnStr: %v sslPortMap: %v", kvConnStr, sslPortMap))
-			return err
-		}
-		hostName := base.GetHostName(kvConnStr)
-		sslConStr := base.GetHostAddr(hostName, sslPort)
-		conn, err = base.NewTLSConn(sslConStr, username, password, certificate, SANInCertificate, clientCertificate, clientKey, targetBucket, service.logger)
-	} else {
-		// Half-Encryption should have already been verified via SCRAM-SHA check in validateXmem...
-		// Unencrypted is also fine here with RawConn
-		conn, err = service.utils.GetMemcachedRawConn(kvConnStr, username, password, targetBucket, !targetClusterRef.IsEncryptionEnabled() /*plainAuth*/, 0 /*keepAliveeriod*/, service.logger)
-	}
-	connCloseFunc := func() {
-		if conn != nil {
-			conn.Close()
-		}
-	}
-	defer connCloseFunc()
-	if err != nil {
-		return err
-	}
-
-	respondedFeatures, err := service.utils.SendHELOWithFeatures(conn, base.ComposeUserAgentWithBucketNames("Goxdcr ReplSpecSvc", sourceBucket, targetBucket), base.HELOTimeout, base.HELOTimeout, requestedFeaturesSet, service.logger)
-	if err != nil {
-		return err
-	}
-
-	if respondedFeatures.CompressionType != requestedFeaturesSet.CompressionType {
-		errorMap[base.ToCluster] = fmt.Errorf("Target cluster (node %v) does not support %v compression. Please verify the configuration on the target cluster for %v compression support, or disable compression for this replication.",
-			kvConnStr, base.CompressionTypeStrings[requestedFeaturesSet.CompressionType], base.CompressionTypeStrings[requestedFeaturesSet.CompressionType])
 		return err
 	}
 	return err
