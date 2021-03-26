@@ -12,7 +12,6 @@ package pipeline_utils
 import (
 	"expvar"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -117,24 +116,12 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 type ExpVarParseMapType map[string]interface{}
 
 // Returns true if all the keys match, and the types all match
-func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map, utils utilities.UtilsIface) bool {
+func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map) bool {
 	var missingKey bool
 	var inconsistentType bool
 	var subLevelCheckPasses = true
 	var keyCount int
 	keyLen := len(e)
-
-	// TODO - MB-44716 - remove this before CC ships
-	if utils != nil {
-		stopFunc := utils.DumpStackTraceAfterThreshold("CheckNoKeyChanges", base.DiagInternalThreshold, base.PprofAllGoroutines)
-		defer stopFunc()
-		stopFunc2 := utils.DumpStackTraceAfterThreshold("CheckNoKeyChanges", base.DiagInternalThreshold, base.PprofBlocking)
-		defer stopFunc2()
-		stopFunc3 := utils.StartDebugExec("DumpExpVarMap", base.DiagInternalThreshold, func() {
-			fmt.Printf("Slow running expVarMap: %v\n", varMap.String())
-		})
-		defer stopFunc3()
-	}
 
 	varMap.Do(func(kv expvar.KeyValue) {
 		keyCount++
@@ -150,7 +137,7 @@ func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map, utils utilitie
 				inconsistentType = true
 				return
 			}
-			subLevelCheckPasses = eSubMap.CheckNoKeyChanges(subMap, nil)
+			subLevelCheckPasses = eSubMap.CheckNoKeyChanges(subMap)
 			if !subLevelCheckPasses {
 				return
 			}
@@ -333,7 +320,7 @@ func parseExpMap(varMap *expvar.Map, targetMap ExpVarParseMapType) {
 
 func (p *PrometheusExporter) LoadExpVarMap(m *expvar.Map) (noKeysChanged bool) {
 	p.mapsMtx.Lock()
-	noKeysChanged = p.expVarParseMap.CheckNoKeyChanges(m, p.utils)
+	noKeysChanged = p.expVarParseMap.CheckNoKeyChanges(m)
 	keysChanged := !noKeysChanged
 	if keysChanged {
 		p.expVarParseMap = make(ExpVarParseMapType)

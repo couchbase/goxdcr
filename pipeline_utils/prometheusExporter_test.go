@@ -23,28 +23,28 @@ func TestPrometheusExpVarParseMap(t *testing.T) {
 	utils := utilities.NewUtilities()
 
 	parseMap := make(ExpVarParseMapType)
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
 
 	parseMap["testInt"] = 12
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
 
 	parseMap["testFloat"] = 13.3
-	assert.True(parseMap.CheckNoKeyChanges(expVarMap, utils))
+	assert.True(parseMap.CheckNoKeyChanges(expVarMap))
 
 	subExpVarMap := &expvar.Map{}
 	varString := expvar.String{}
 	varString.Set("String")
 	subExpVarMap.Set("subString", &varString)
 	expVarMap.Set("subMap", subExpVarMap)
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
 
 	subMap := make(ExpVarParseMapType)
 	parseMap["subMap"] = subMap
-	assert.False(parseMap.CheckNoKeyChanges(expVarMap, utils))
+	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
 
 	subMap["subString"] = "String"
 	parseMap["subMap"] = subMap
-	assert.True(parseMap.CheckNoKeyChanges(expVarMap, utils))
+	assert.True(parseMap.CheckNoKeyChanges(expVarMap))
 
 	exporter := NewPrometheusExporter(nil)
 	exporter.LoadExpVarMap(expVarMap)
