@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1195,9 +1196,28 @@ func TestIsMigrationExplicitRule(t *testing.T) {
 	assert.True(rule.IsExplicitMigrationRule())
 	assert.Nil(rule.ValidateMigrateRules())
 
-	rule["EXISTS(key)"] = "S2.col2"
-	assert.False(rule.IsExplicitMigrationRule())
-	assert.NotNil(rule.ValidateMigrateRules())
+	ruleNeg1 := rule.Clone()
+	ruleNeg2 := rule.Clone()
+
+	ruleNeg1["EXISTS(key)"] = "S2.col2"
+	assert.False(ruleNeg1.IsExplicitMigrationRule())
+	assert.Equal(ErrorMigrationExplicitOnlyOneAllowed, ruleNeg1.ValidateMigrateRules())
+
+	ruleNeg2[fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)] = nil
+	assert.False(ruleNeg2.IsExplicitMigrationRule())
+	assert.Equal(ErrorDenyRuleMigrationModeNotAllowed, ruleNeg2.ValidateMigrateRules())
+
+	ruleNeg3 := make(CollectionsMappingRulesType)
+	ruleNeg3["EXISTS(key)"] = "S2.col2"
+	ruleNeg3["scopeName"] = "targetScopeName"
+	validateErr := ruleNeg3.ValidateMigrateRules()
+	assert.NotNil(validateErr)
+	assert.True(strings.Contains(validateErr.Error(), ErrorMigrationExplicitScopeToScopeNotAllowedStr))
+
+	ruleNeg4 := make(CollectionsMappingRulesType)
+	ruleNeg4["scopeName"] = nil
+	validateErr = ruleNeg4.ValidateMigrateRules()
+	assert.Equal(ErrorDenyRuleMigrationModeNotAllowed, ruleNeg4.ValidateMigrateRules())
 }
 
 func TestSpecialMigrationNamespaceFromRules(t *testing.T) {

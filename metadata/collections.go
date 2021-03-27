@@ -1938,6 +1938,10 @@ func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 	if c.IsExplicitMigrationRule() {
 		return nil
 	}
+	migrationExplicitRuleErr := c.CheckForExplicitMigrationRuleViolation()
+	if migrationExplicitRuleErr != nil {
+		return migrationExplicitRuleErr
+	}
 
 	for filterExpr, targetNamespaceRaw := range c {
 		// filterExpr must be a valid gojsonsm expression
@@ -1995,6 +1999,47 @@ func (c CollectionsMappingRulesType) IsExplicitMigrationRule() bool {
 		}
 	}
 	return true
+}
+
+var ErrorDenyRuleMigrationModeNotAllowed = fmt.Errorf("Deny rules are not allowed for migration mode")
+var ErrorMigrationExplicitOnlyOneAllowed = fmt.Errorf("One single rule migrating from default collection to a target collection cannot be accompanied by any other rules")
+var ErrorMigrationExplicitScopeToScopeNotAllowedStr = "seems like a scope to scope rule, which is not allowed under migration mode"
+
+// If migration mode is turned on and is not explicit migration rule, check to make sure
+// user didn't make an error of trying to:
+// 1. Create a explicit migration rule
+// 2. Add a non-explicit migration rule that contains filter expressions
+func (c CollectionsMappingRulesType) CheckForExplicitMigrationRuleViolation() error {
+	// Look for a default namespace key
+	for k, v := range c {
+		checkSourceNs, err := base.NewCollectionNamespaceFromString(k)
+		if err != nil {
+			// Check to see if user entered a scope -> scope rule
+			vStr, ok := v.(string)
+			if !ok {
+				return ErrorDenyRuleMigrationModeNotAllowed
+			}
+			if base.CollectionNameValidationRegex.MatchString(k) && base.CollectionNameValidationRegex.MatchString(vStr) && base.ValidateAdvFilter(k) != nil {
+				return fmt.Errorf("%v -> %v %v", k, vStr, ErrorMigrationExplicitScopeToScopeNotAllowedStr)
+			}
+		}
+		if checkSourceNs.IsDefault() {
+			targetNsString, ok := v.(string)
+			if !ok {
+				return ErrorDenyRuleMigrationModeNotAllowed
+			}
+			targetNs, err := base.NewCollectionNamespaceFromString(targetNsString)
+			if err != nil {
+				continue
+			}
+			if !targetNs.IsDefault() && !targetNs.IsEmpty() {
+				// We have found the one and only default.default -> targetscope.targetCol rule
+				// in admist of other types of rules. Print out a nice message
+				return ErrorMigrationExplicitOnlyOneAllowed
+			}
+		}
+	}
+	return nil
 }
 
 func (c CollectionsMappingRulesType) ValidateExplicitMapping() error {
