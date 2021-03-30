@@ -112,6 +112,16 @@ func TestExplicitMappingValidatorRules(t *testing.T) {
 	value = "TargetScope2"
 	assert.Nil(validator.ValidateKV(key, value))
 
+	// 1-N is disallowed
+	key = "Scope"
+	value = "TargetScope2"
+	assert.NotNil(validator.ValidateKV(key, value))
+
+	// N-1 is not allowed
+	key = "Scope2Test"
+	value = "TargetScope2"
+	assert.NotNil(validator.ValidateKV(key, value))
+
 	key = "AnotherScope.AnotherCollection"
 	value = "AnotherTargetScope.AnotherTargetCollection"
 	assert.Nil(validator.ValidateKV(key, value))
@@ -119,6 +129,16 @@ func TestExplicitMappingValidatorRules(t *testing.T) {
 	key = "AnotherScope2.AnotherCollection2"
 	value = "AnotherTargetScope2.AnotherTargetCollection2"
 	assert.Nil(validator.ValidateKV(key, value))
+
+	// 1-N is not allowed
+	key = "AnotherScope.AnotherCollection"
+	value = "AnotherTargetScope.AnotherTargetCollection2"
+	assert.NotNil(validator.ValidateKV(key, value))
+
+	// N-1 is not allowed
+	key = "AnotherScope2.AnotherCollection3"
+	value = "AnotherTargetScope2.AnotherTargetCollection2"
+	assert.NotNil(validator.ValidateKV(key, value))
 
 	// Adding non-duplicating blacklist rules
 	key = "Scope3"
