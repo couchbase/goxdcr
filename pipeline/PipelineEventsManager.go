@@ -97,7 +97,7 @@ func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *in
 
 type PipelineEventsManager interface {
 	GetCurrentEvents() *PipelineEventList
-	AddEvent(eventType base.ErrorInfoType, eventDesc string, eventExtras base.EventsMap)
+	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap)
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
 	ContainsEvent(eventId int) bool
 	DismissEvent(eventId int) error
@@ -163,7 +163,7 @@ func (p *PipelineEventsMgr) getEvent(eventId int) (*base.EventInfo, error) {
 	return nil, base.ErrorNotFound
 }
 
-func (p *PipelineEventsMgr) AddEvent(eventType base.ErrorInfoType, eventDesc string, eventExtras base.EventsMap) {
+func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) {
 	if eventExtras.IsNil() {
 		eventExtras.Init()
 	}

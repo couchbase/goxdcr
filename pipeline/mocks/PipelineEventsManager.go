@@ -17,7 +17,7 @@ type PipelineEventsManager struct {
 }
 
 // AddEvent provides a mock function with given fields: eventType, eventDesc, eventExtras
-func (_m *PipelineEventsManager) AddEvent(eventType base.ErrorInfoType, eventDesc string, eventExtras base.EventsMap) {
+func (_m *PipelineEventsManager) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) {
 	_m.Called(eventType, eventDesc, eventExtras)
 }
 

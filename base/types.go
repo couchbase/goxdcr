@@ -152,16 +152,16 @@ type ReplicationInfo struct {
 	ErrorList []ErrorInfo
 }
 
-type ErrorInfoType int
+type EventInfoType int
 
 const (
-	HighPriorityMsg       ErrorInfoType = iota
-	LowPriorityMsg        ErrorInfoType = iota
-	PersistentMsg         ErrorInfoType = iota
-	BrokenMappingInfoType ErrorInfoType = iota
+	HighPriorityMsg       EventInfoType = iota
+	LowPriorityMsg        EventInfoType = iota
+	PersistentMsg         EventInfoType = iota
+	BrokenMappingInfoType EventInfoType = iota
 )
 
-func (e ErrorInfoType) CanDismiss() bool {
+func (e EventInfoType) CanDismiss() bool {
 	switch e {
 	case HighPriorityMsg:
 		return false
@@ -176,7 +176,7 @@ func (e ErrorInfoType) CanDismiss() bool {
 	}
 }
 
-func (e ErrorInfoType) String() string {
+func (e EventInfoType) String() string {
 	switch e {
 	case HighPriorityMsg:
 		return "HighPriorityMsg"
@@ -187,7 +187,7 @@ func (e ErrorInfoType) String() string {
 	case PersistentMsg:
 		return "PersistentMsg"
 	default:
-		return "?? (ErrorInfoType)"
+		return "?? (EventInfoType)"
 	}
 }
 
@@ -358,7 +358,7 @@ func (c *EventsMap) Len() int {
 
 type EventInfo struct {
 	EventId   int64
-	EventType ErrorInfoType
+	EventType EventInfoType
 	EventDesc string
 
 	// Keyed by subEventId
