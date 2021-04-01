@@ -97,27 +97,6 @@ func (_m *UtilsIface) BucketNotFoundError(bucketName string) error {
 	return r0
 }
 
-// BucketPassword provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
-func (_m *UtilsIface) BucketPassword(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (string, error) {
-	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) string); ok {
-		r0 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
-		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // BucketUUID provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) BucketUUID(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
@@ -248,20 +227,6 @@ func (_m *UtilsIface) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.Up
 	}
 
 	return r0, r1, r2, r3, r4, r5
-}
-
-// CheckWhetherClusterIsESBasedOnBucketInfo provides a mock function with given fields: bucketInfo
-func (_m *UtilsIface) CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool {
-	ret := _m.Called(bucketInfo)
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(map[string]interface{}) bool); ok {
-		r0 = rf(bucketInfo)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
 }
 
 // ComposeHELORequest provides a mock function with given fields: userAgent, features
@@ -490,27 +455,6 @@ func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
 		r1 = rf(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetBucketPasswordFromBucketInfo provides a mock function with given fields: bucketName, bucketInfo, logger
-func (_m *UtilsIface) GetBucketPasswordFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
-	ret := _m.Called(bucketName, bucketInfo, logger)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, *log.CommonLogger) string); ok {
-		r0 = rf(bucketName, bucketInfo, logger)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, map[string]interface{}, *log.CommonLogger) error); ok {
-		r1 = rf(bucketName, bucketInfo, logger)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1738,27 +1682,6 @@ func (_m *UtilsIface) LocalBucket(localConnectStr string, bucketName string) (*c
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
 		r1 = rf(localConnectStr, bucketName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// LocalBucketPassword provides a mock function with given fields: local_connStr, bucketName, logger
-func (_m *UtilsIface) LocalBucketPassword(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error) {
-	ret := _m.Called(local_connStr, bucketName, logger)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(string, string, *log.CommonLogger) string); ok {
-		r0 = rf(local_connStr, bucketName, logger)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, *log.CommonLogger) error); ok {
-		r1 = rf(local_connStr, bucketName, logger)
 	} else {
 		r1 = ret.Error(1)
 	}

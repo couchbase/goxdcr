@@ -518,10 +518,6 @@ func (u *Utilities) LocalBucketUUID(local_connStr string, bucketName string, log
 	return u.BucketUUID(local_connStr, bucketName, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, logger)
 }
 
-func (u *Utilities) LocalBucketPassword(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error) {
-	return u.BucketPassword(local_connStr, bucketName, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, logger)
-}
-
 func (u *Utilities) ReplicationStatusNotFoundError(topic string) error {
 	return fmt.Errorf("Cannot find replication status for topic %v", topic)
 }
@@ -932,13 +928,6 @@ func (u *Utilities) GetBucketTypeFromBucketInfo(bucketName string, bucketInfo ma
 	return bucketType, nil
 }
 
-// check if a bucket belongs to an elastic search (es) cluster by looking for "authType" field in bucket info.
-// if not found, cluster is es
-func (u *Utilities) CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool {
-	_, ok := bucketInfo[base.AuthTypeKey]
-	return !ok
-}
-
 // get conflict resolution type setting from bucket info
 func (u *Utilities) GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	conflictResolutionType := base.ConflictResolutionType_Seqno
@@ -1260,16 +1249,6 @@ func (u *Utilities) BucketUUID(hostAddr, bucketName, username, password string, 
 	return u.GetBucketUuidFromBucketInfo(bucketName, bucketInfo, logger)
 }
 
-// get bucket password
-func (u *Utilities) BucketPassword(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error) {
-	bucketInfo, err := u.GetBucketInfo(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
-	if err != nil {
-		return "", err
-	}
-
-	return u.GetBucketPasswordFromBucketInfo(bucketName, bucketInfo, logger)
-}
-
 func (u *Utilities) GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error) {
 	return u.GetBuckets(hostAddr, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, logger)
 }
@@ -1455,20 +1434,6 @@ func (u *Utilities) GetClusterCompatibilityFromBucketInfo(bucketInfo map[string]
 	}
 
 	return clusterCompatibility, nil
-}
-
-func (u *Utilities) GetBucketPasswordFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
-	bucketPassword := ""
-	bucketPasswordObj, ok := bucketInfo[base.SASLPasswordKey]
-	if !ok {
-		return "", fmt.Errorf("Error looking up password of bucket %v", bucketName)
-	} else {
-		bucketPassword, ok = bucketPasswordObj.(string)
-		if !ok {
-			return "", fmt.Errorf("Password of bucket %v is of wrong type", bucketName)
-		}
-	}
-	return bucketPassword, nil
 }
 
 func (u *Utilities) GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {

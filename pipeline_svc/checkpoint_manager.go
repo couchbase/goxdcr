@@ -112,9 +112,6 @@ type CheckpointManager struct {
 	ssl_con_str_map  map[string]string
 	target_kv_vb_map map[string][]uint16
 
-	// whether target cluster is elasticsearch
-	isTargetES bool
-
 	user_agent string
 
 	// these fields are used for xmem replication only
@@ -193,7 +190,7 @@ type brokenMappingWithLock struct {
 	lock                        sync.RWMutex
 }
 
-func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username, target_password, target_bucket_name string, target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference, target_cluster_version int, isTargetES bool, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface, uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, getBackfillMgr func() service_def.BackfillMgrIface) (*CheckpointManager, error) {
+func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username, target_password, target_bucket_name string, target_kv_vb_map map[string][]uint16, target_cluster_ref *metadata.RemoteClusterReference, target_cluster_version int, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface, uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, getBackfillMgr func() service_def.BackfillMgrIface) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -224,7 +221,6 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		kv_mem_clients:            make(map[string]mcc.ClientIface),
 		target_cluster_ref:        target_cluster_ref,
 		target_cluster_version:    target_cluster_version,
-		isTargetES:                isTargetES,
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
 		uiLogSvc:                  uiLogSvc,
@@ -361,11 +357,9 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 	ckmgr.startRandomizedCheckpointingTicker()
 
 	//initialize connections
-	if !ckmgr.isTargetES {
-		err = ckmgr.initConnections()
-		if err != nil {
-			return err
-		}
+	err = ckmgr.initConnections()
+	if err != nil {
+		return err
 	}
 
 	//start checkpointing loop
@@ -601,9 +595,7 @@ func (ckmgr *CheckpointManager) Stop() error {
 	close(ckmgr.finish_ch)
 
 	//close the connections
-	if !ckmgr.isTargetES {
-		ckmgr.closeConnections()
-	}
+	ckmgr.closeConnections()
 
 	ckmgr.wait_grp.Wait()
 	return nil
@@ -1406,16 +1398,15 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	var xattr_seqno_map map[uint16]uint64
 	var srcManifestIds map[uint16]uint64
 	var tgtManifestIds map[uint16]uint64
-	if !ckmgr.isTargetES {
-		// get through seqnos for all vbuckets in the pipeline
-		through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
-		// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
-		ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
-		// get high seqno and vbuuid for all vbuckets in the pipeline
-		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
-		// get first seen xattr seqnos for all vbuckets in the pipeline
-		xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
-	}
+
+	// get through seqnos for all vbuckets in the pipeline
+	through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
+	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
+	ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
+	// get high seqno and vbuuid for all vbuckets in the pipeline
+	high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
+	// get first seen xattr seqnos for all vbuckets in the pipeline
+	xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
 
 	//divide the workload to several getter and run the getter parallelly
 	vb_list := ckmgr.getMyVBs()
@@ -1469,20 +1460,20 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	var xattr_seqno_map map[uint16]uint64
 	var srcManifestIds map[uint16]uint64
 	var tgtManifestIds map[uint16]uint64
-	if !ckmgr.isTargetES {
-		// get through seqnos for all vbuckets in the pipeline
-		if ckmgr.collectionEnabled() {
-			through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
-		} else {
-			through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
-		}
-		// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
-		ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
-		// get high seqno and vbuuid for all vbuckets in the pipeline
-		high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
-		// get first seen xattr seqnos for all vbuckets in the pipeline
-		xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
+
+	// get through seqnos for all vbuckets in the pipeline
+	if ckmgr.collectionEnabled() {
+		through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
+	} else {
+		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
 	}
+	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
+	ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
+	// get high seqno and vbuuid for all vbuckets in the pipeline
+	high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
+	// get first seen xattr seqnos for all vbuckets in the pipeline
+	xattr_seqno_map = pipeline_utils.GetXattrSeqnos(ckmgr.pipeline)
+
 	var total_committing_time int64
 
 	if ckmgr.collectionEnabled() {
@@ -1768,57 +1759,32 @@ func (ckmgr *CheckpointManager) getCollectionItemsIfEnabled(vbno uint16, ok bool
 
 func (ckmgr *CheckpointManager) getThroughSeqno(vbno uint16, through_seqno_map map[uint16]uint64) (uint64, error) {
 	var through_seqno uint64
-	if !ckmgr.isTargetES {
-		// non-capi mode, get from through_seqno_map
-		var ok bool
-		through_seqno, ok = through_seqno_map[vbno]
-		if !ok {
-			return 0, fmt.Errorf("%v %v cannot find through seqno for vb %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
-		}
-	} else {
-		// capi mode
-		through_seqno = ckmgr.through_seqno_tracker_svc.GetThroughSeqno(vbno)
+	var ok bool
+	through_seqno, ok = through_seqno_map[vbno]
+	if !ok {
+		return 0, fmt.Errorf("%v %v cannot find through seqno for vb %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 	}
 	return through_seqno, nil
 }
 
 func (ckmgr *CheckpointManager) getRemoteSeqno(vbno uint16, high_seqno_and_vbuuid_map map[uint16][]uint64, curCkptTargetVBOpaque metadata.TargetVBOpaque) (uint64, error) {
-	if !ckmgr.isTargetES {
-		// non-capi mode, high_seqno and vbuuid on target have been retrieved through vbucket-seqno stats
-		high_seqno_and_vbuuid, ok := high_seqno_and_vbuuid_map[vbno]
-		if !ok {
-			return 0, fmt.Errorf("%v %v cannot find high seqno and vbuuid for vb %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
-		}
-
-		remote_seqno := high_seqno_and_vbuuid[0]
-		vbuuid := high_seqno_and_vbuuid[1]
-		targetVBOpaque := &metadata.TargetVBUuid{vbuuid}
-		if !curCkptTargetVBOpaque.IsSame(targetVBOpaque) {
-			ckmgr.logger.Errorf("%v %v target vbuuid has changed for vb=%v. old=%v, new=%v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, curCkptTargetVBOpaque, targetVBOpaque)
-			return 0, targetVbuuidChangedError
-		}
-		return remote_seqno, nil
-	} else {
-		// capi mode, get high_seqno and vbuuid on target by calling commitForCheckpoint
-		remote_seqno, targetVBOpaque, commitForCheckpointErr := ckmgr.capi_svc.CommitForCheckpoint(ckmgr.remote_bucket, curCkptTargetVBOpaque, vbno)
-		if commitForCheckpointErr != nil {
-			if commitForCheckpointErr == service_def.VB_OPAQUE_MISMATCH_ERR {
-				ckmgr.logger.Errorf("%v %v target vbuuid has changed for vb=%v. old=%v, new=%v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, curCkptTargetVBOpaque, targetVBOpaque)
-				return 0, targetVbuuidChangedError
-			} else {
-				return 0, fmt.Errorf("%v %v error contacting capi service when calling CommitForCheckpoint for vb %v. err=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, commitForCheckpointErr)
-			}
-		}
-		return remote_seqno, nil
+	// non-capi mode, high_seqno and vbuuid on target have been retrieved through vbucket-seqno stats
+	high_seqno_and_vbuuid, ok := high_seqno_and_vbuuid_map[vbno]
+	if !ok {
+		return 0, fmt.Errorf("%v %v cannot find high seqno and vbuuid for vb %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 	}
+
+	remote_seqno := high_seqno_and_vbuuid[0]
+	vbuuid := high_seqno_and_vbuuid[1]
+	targetVBOpaque := &metadata.TargetVBUuid{vbuuid}
+	if !curCkptTargetVBOpaque.IsSame(targetVBOpaque) {
+		ckmgr.logger.Errorf("%v %v target vbuuid has changed for vb=%v. old=%v, new=%v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, curCkptTargetVBOpaque, targetVBOpaque)
+		return 0, targetVbuuidChangedError
+	}
+	return remote_seqno, nil
 }
 
 func (ckmgr *CheckpointManager) getXattrSeqno(vbno uint16, xattr_seqno_map map[uint16]uint64, through_seqno uint64) (uint64, error) {
-	if ckmgr.isTargetES {
-		// xattr not supported by capi
-		return 0, nil
-	}
-
 	xattr_seqno, ok := xattr_seqno_map[vbno]
 	if !ok {
 		return 0, fmt.Errorf("%v %v cannot find xattr seqno for vb %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)

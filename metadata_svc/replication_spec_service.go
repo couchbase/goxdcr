@@ -284,29 +284,20 @@ func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef 
 		i++
 	}
 
-	hasRBACSupport := false
-	isTargetES := service.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
-	if !isTargetES {
-		var targetClusterCompatibility int
-		targetClusterCompatibility, err = service.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, service.logger)
-		if err != nil {
-			err = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-			return
-		}
-
-		hasRBACSupport = base.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
+	var targetClusterCompatibility int
+	targetClusterCompatibility, err = service.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, service.logger)
+	if err != nil {
+		err = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
+		return
 	}
+	hasRBACSupport := base.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
 
 	if hasRBACSupport {
 		username = targetClusterRef.UserName()
 		password = targetClusterRef.Password()
 	} else {
-		username = targetBucket
-		password, err = service.utils.GetBucketPasswordFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
-		if err != nil {
-			err = fmt.Errorf("Error retrieving password on bucket %v. err=%v", targetBucket, err)
-			return
-		}
+		err = base.ErrorRBACNotSupportAtTarget
+		return
 	}
 	return
 }
@@ -330,14 +321,7 @@ func (service *ReplicationSpecService) validateXmemSettings(errorMap base.ErrorM
 
 func (service *ReplicationSpecService) validateES(errorMap base.ErrorMap, targetClusterRef *metadata.RemoteClusterReference, targetBucketInfo map[string]interface{}, repl_type interface{}, sourceConflictResolutionType, targetConflictResolutionType string) []string {
 	warnings := make([]string, 0)
-	isTargetES := service.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
 	if repl_type != metadata.ReplicationTypeCapi {
-		// for xmem replication, validate that target is not an elasticsearch cluster
-		if isTargetES {
-			errorMap[base.Type] = errors.New("Replication to an Elasticsearch target cluster using XDCR Version 2 (XMEM protocol) is not supported. Use XDCR Version 1 (CAPI protocol) instead.")
-			return warnings
-		}
-
 		// for xmem replication, validate that source and target bucket have the same conflict resolution type metadata
 		if sourceConflictResolutionType != targetConflictResolutionType {
 			errorMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
@@ -351,10 +335,6 @@ func (service *ReplicationSpecService) validateES(errorMap base.ErrorMap, target
 			return warnings
 		}
 
-		// if target is not elastic search cluster, compose a warning to be displayed in the replication creation ui log
-		if !isTargetES {
-			warnings = append(warnings, fmt.Sprintf("XDCR Version 1 (CAPI protocol) replication has been deprecated and should be used only for an Elasticsearch target cluster. Since the current target cluster is a Couchbase Server cluster, use XDCR Version 2 (XMEM protocol) instead."))
-		}
 		// if source bucket has timestamp conflict resolution enabled,
 		// compose a warning to be displayed in the replication creation ui log
 		if sourceConflictResolutionType == base.ConflictResolutionType_Lww {

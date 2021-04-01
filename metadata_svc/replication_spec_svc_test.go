@@ -401,25 +401,6 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 	fmt.Println("============== Test case end: TestCompressionNegNotEnterprise =================")
 }
 
-func TestElasticSearch(t *testing.T) {
-	assert := assert.New(t)
-	fmt.Println("============== Test case start: TestElasticSearch =================")
-	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
-		clusterInfoSvcMock, utilitiesMock, replSpecSvc,
-		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
-
-	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, clusterInfoSvcMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false)
-
-	// Xmem using elas
-	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
-
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
-	assert.NotEqual(len(errMap), 0)
-
-	fmt.Println("============== Test case start: TestElasticSearch =================")
-}
-
 func TestOriginalRegexInvalidateFilter(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestOriginalRegexInvalidateFilter =================")

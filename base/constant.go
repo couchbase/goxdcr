@@ -81,7 +81,6 @@ var ServerListKey = "serverList"
 var VBucketServerMapKey = "vBucketServerMap"
 var VBucketMapKey = "vBucketMap"
 var URIKey = "uri"
-var SASLPasswordKey = "saslPassword"
 var UUIDKey = "uuid"
 var BucketCapabilitiesKey = "bucketCapabilities"
 var BucketTypeKey = "bucketType"
@@ -89,7 +88,6 @@ var BucketsKey = "buckets"
 var EvictionPolicyKey = "evictionPolicy"
 var BucketNameKey = "name"
 var ClusterMembershipKey = "clusterMembership"
-var AuthTypeKey = "authType"
 var AlternateKey = "alternateAddresses"
 var ExternalKey = "external"
 var CapiPortKey = "capi"
@@ -309,6 +307,8 @@ var ReplicationSpecNotFoundErrorMessage = "requested resource not found"
 var ReplNotFoundErr = errors.New(ReplicationSpecNotFoundErrorMessage)
 var ErrorExplicitMappingEnterpriseOnly = errors.New("Explicit Mapping is supported in Enterprise Edition only")
 var ErrorChunkedEncodingNotSupported = errors.New("Chunked encoding is not supported")
+var ErrorRBACNotSupportAtTarget = fmt.Errorf("The version of Couchbase software installed on the remote cluster does not support RBAC. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
+	VersionForRBACAndXattrSupport[0], VersionForRBACAndXattrSupport[1])
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

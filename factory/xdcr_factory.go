@@ -205,8 +205,6 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		return nil, nil, err
 	}
 
-	isTargetES := xdcrf.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
-
 	conflictResolutionType, err := xdcrf.utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
 		return nil, nil, err
@@ -237,7 +235,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		panic("Not implemented")
 	}
 
-	xdcrf.logger.Infof("%v %v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v isTargetES=%v\n", pipelineType.String(), topic, sourceCRMode, httpAuthMech, isCapiReplication, isTargetES)
+	xdcrf.logger.Infof("%v %v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v\n", pipelineType.String(), topic, sourceCRMode, httpAuthMech, isCapiReplication)
 
 	/**
 	 * Construct the Source nozzles
@@ -263,7 +261,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
-		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, isTargetES, logger_ctx)
+		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx)
 
 	if err != nil {
 		return nil, nil, err
@@ -325,7 +323,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	pipeline.SetRuntimeContext(pipelineContext)
 
 	registerCb := func(mainPipeline *common.Pipeline) error {
-		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, isTargetES, mainPipeline, sourceCRMode)
+		return xdcrf.registerServices(pipeline, logger_ctx, kv_vb_map, targetUserName, targetPassword, spec.TargetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, isCapiReplication, mainPipeline, sourceCRMode)
 	}
 	return pipeline, registerCb, nil
 }
@@ -538,7 +536,7 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
  */
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, isTargetES bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
+	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
@@ -560,38 +558,18 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 		return
 	}
 
-	if isTargetES {
+	targetClusterVersion, err = xdcrf.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, xdcrf.logger)
+	if err != nil {
+		return
+	}
+	targetHasRBACSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
+	if targetHasRBACSupport {
+		// if target is spock and up, simply use the username and password in remote cluster ref
 		targetUserName = targetClusterRef.UserName()
 		targetPassword = targetClusterRef.Password()
-		// set target cluster version to 0 so that topology change detector will not listen to target version change
-		targetClusterVersion = 0
 	} else {
-		targetClusterVersion, err = xdcrf.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, xdcrf.logger)
-		if err != nil {
-			return
-		}
-		targetHasRBACSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
-		if targetHasRBACSupport {
-			// if target is spock and up, simply use the username and password in remote cluster ref
-			targetUserName = targetClusterRef.UserName()
-			targetPassword = targetClusterRef.Password()
-		} else {
-			// if target is pre-spock, use bucket name and bucket password
-			targetUserName = spec.TargetBucketName
-
-			// get target bucket password
-			bucketPwdObj, ok := targetBucketInfo[base.SASLPasswordKey]
-			if !ok {
-				err = fmt.Errorf("%v cannot get sasl password from target bucket, %v.", spec.Id, targetBucketInfo)
-				return
-			}
-			bucketPwd, ok := bucketPwdObj.(string)
-			if !ok {
-				err = fmt.Errorf("%v sasl password on target bucket is of wrong type.", spec.Id, bucketPwdObj)
-				return
-			}
-			targetPassword = bucketPwd
-		}
+		err = base.ErrorRBACNotSupportAtTarget
+		return
 	}
 	xdcrf.logger.Infof("%v username for target bucket access=%v%v%v\n", spec.Id, base.UdTagBegin, targetUserName, base.UdTagEnd)
 
@@ -1126,7 +1104,7 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx *log.LoggerContext,
 	kv_vb_map map[string][]uint16, targetUserName, targetPassword string, targetBucketName string,
 	target_kv_vb_map map[string][]uint16, targetClusterRef *metadata.RemoteClusterReference,
-	targetClusterVersion int, isCapi bool, isTargetES bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode) error {
+	targetClusterVersion int, isCapi bool, mainPipeline *common.Pipeline, crMode base.ConflictResolutionMode) error {
 
 	ctx := pipeline.RuntimeContext()
 	var parentCtx common.PipelineRuntimeContext
@@ -1180,7 +1158,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
 		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
 		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, isTargetES, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc,
+		targetClusterVersion, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc,
 		xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,

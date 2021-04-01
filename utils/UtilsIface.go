@@ -71,8 +71,6 @@ type UtilsIface interface {
 	BucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
 		logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
-	CheckWhetherClusterIsESBasedOnBucketInfo(bucketInfo map[string]interface{}) bool
-	GetBucketPasswordFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	GetBucketTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
 	GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
@@ -80,7 +78,6 @@ type UtilsIface interface {
 	GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error)
 	LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error)
 	LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error)
-	LocalBucketPassword(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error)
 	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error
 	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)
 
@@ -136,7 +133,6 @@ type UtilsIface interface {
 	 */
 	// Buckets related utilities
 	BucketUUID(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
-	BucketPassword(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, error)
 	GetBuckets(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]string, error)
 	GetBucketInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error)
 	GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error)

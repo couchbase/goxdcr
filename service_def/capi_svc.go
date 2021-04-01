@@ -11,13 +11,14 @@ package service_def
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/capi_utils"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"net/http"
-	"net/url"
 )
 
 var NoSupportForXDCRCheckpointingError = errors.New("No xdcrcheckpointing support on older node")
@@ -124,18 +125,12 @@ func (remoteBucket *RemoteBucketInfo) refresh_internal(full bool) error {
 	remoteBucket.MemcachedAddrRestAddrMap = make(map[string]string)
 	remoteBucket.RestAddrHttpClientMap = make(map[string]*http.Client)
 
-	isTargetES := remoteBucket.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
-	// use CouchApiBase when target is elasticsearch or pre-Vulcan couchbase server
-	if isTargetES {
-		remoteBucket.UseCouchApiBase = true
-	} else {
-		clusterCompatibility, err := remoteBucket.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, remoteBucket.logger)
-		if err != nil {
-			return err
-		}
-		nsServerScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
-		remoteBucket.UseCouchApiBase = !nsServerScramShaSupport
+	clusterCompatibility, err := remoteBucket.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, remoteBucket.logger)
+	if err != nil {
+		return err
 	}
+	nsServerScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
+	remoteBucket.UseCouchApiBase = !nsServerScramShaSupport
 
 	urlmap, err := capi_utils.ConstructCapiServiceEndPointMap(remoteBucket.BucketName, targetBucketInfo, remoteBucket.RemoteClusterRef, remoteBucket.utils, remoteBucket.UseCouchApiBase, useExternal)
 	if err != nil {
