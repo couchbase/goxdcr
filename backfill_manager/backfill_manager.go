@@ -540,7 +540,11 @@ func (b *BackfillMgr) populateRemovedScopesMap(newNamespaceMappings metadata.Sha
 	return removedScopesMap
 }
 
-func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
+func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpecObj, newSpecObj interface{}, wg *sync.WaitGroup) error {
+	if wg != nil {
+		defer wg.Done()
+	}
+
 	oldSpec, ok := oldSpecObj.(*metadata.ReplicationSpecification)
 	newSpec, ok2 := newSpecObj.(*metadata.ReplicationSpecification)
 

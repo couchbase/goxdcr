@@ -12,12 +12,13 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
+	"sync"
 )
 
 type BackfillMgrIface interface {
 	Start() error
 	Stop()
-	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error
+	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 
 	// Backfill manager can act as a pipeline service and handle specific pipeline needs
 	GetPipelineSvc() common.PipelineService

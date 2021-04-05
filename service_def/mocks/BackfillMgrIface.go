@@ -5,6 +5,7 @@ package mocks
 import (
 	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
+	"sync"
 
 	metadata "github.com/couchbase/goxdcr/metadata"
 
@@ -104,7 +105,7 @@ func (_m *BackfillMgrIface) GetRouterMappingChangeHandler(specId string, interna
 }
 
 // ReplicationSpecChangeCallback provides a mock function with given fields: id, oldVal, newVal
-func (_m *BackfillMgrIface) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}) error {
+func (_m *BackfillMgrIface) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal)
 
 	var r0 error

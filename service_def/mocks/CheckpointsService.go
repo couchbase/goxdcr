@@ -5,6 +5,7 @@ package mocks
 import (
 	base "github.com/couchbase/goxdcr/base"
 	metadata "github.com/couchbase/goxdcr/metadata"
+	"sync"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -200,7 +201,7 @@ func (_m *CheckpointsService) PreUpsertBrokenMapping(replicationId string, specI
 }
 
 // ReplicationSpecChangeCallback provides a mock function with given fields: metadataId, oldMetadata, newMetadata
-func (_m *CheckpointsService) ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}) error {
+func (_m *CheckpointsService) ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(metadataId, oldMetadata, newMetadata)
 
 	var r0 error

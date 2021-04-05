@@ -369,12 +369,14 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 		rm.utils,
 		rm.resourceMgr)
 	mcm.RegisterListener(replicationSpecChangeListener)
-	// ReplSpecSvc allows multiple callbacks - add the collections one first to be called first
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.collectionsManifestSvc.ReplicationSpecChangeCallback)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillReplSvc.ReplicationSpecChangeCallback)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillMgr.ReplicationSpecChangeCallback)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.checkpoint_svc.ReplicationSpecChangeCallback)
+	// ReplSpecSvc allows multiple callbacks in parallel
+	// Execute high priority in parallel first, then med in parallel, then low in parallel
+	// priorities are specified in the order of addOp, delOp, and modOp
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.collectionsManifestSvc.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback, base.MetadataChangeLowPrioriy, base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillReplSvc.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillMgr.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.checkpoint_svc.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
 
 	mcm.Start()
 }

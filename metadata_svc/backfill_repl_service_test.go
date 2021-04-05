@@ -364,12 +364,12 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	// Then do a delete
 	oldSpec := dummySpec
 	var newNilSpec *metadata.ReplicationSpecification
-	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(specName, oldSpec, newNilSpec))
+	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(specName, oldSpec, newNilSpec, nil))
 	_, err = backfillReplSvc.backfillSpec(specName)
 	assert.Equal(base.ReplNotFoundErr, err)
 
 	// Random delete of another entity that does not have backfill replication associated should be nil error
-	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(randomSpecName, oldSpec, newNilSpec))
+	assert.Nil(backfillReplSvc.ReplicationSpecChangeCallback(randomSpecName, oldSpec, newNilSpec, nil))
 
 	fmt.Println("============== Test case end: TestBackfillReplSvcAddSetDel =================")
 }

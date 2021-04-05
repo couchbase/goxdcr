@@ -11,6 +11,7 @@ package service_def
 import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
+	"sync"
 )
 
 /*
@@ -69,7 +70,7 @@ type CollectionsManifestSvc interface {
 
 	// This service should allow multiple calls and each call should be append
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
-	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error
+	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 }
 
 type CollectionsManifestOps interface {

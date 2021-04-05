@@ -301,7 +301,7 @@ func (_m *ReplicationSpecSvc) SetDerivedObj(specId string, derivedObj interface{
 }
 
 // SetMetadataChangeHandlerCallback provides a mock function with given fields: callBack
-func (_m *ReplicationSpecSvc) SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback) {
+func (_m *ReplicationSpecSvc) SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority) {
 	_m.Called(callBack)
 }
 

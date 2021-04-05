@@ -74,7 +74,7 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 
 	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice)
 
-	ckptSvc := NewCheckpointsService(metadataSvc, loggerCtx)
+	ckptSvc := NewCheckpointsService(metadataSvc, loggerCtx, nil)
 	assert.NotNil(ckptSvc)
 
 	docs, err := ckptSvc.CheckpointsDocs(replId, true)

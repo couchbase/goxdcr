@@ -51,5 +51,5 @@ type ReplicationSpecSvc interface {
 	// set the metadata change call back methods
 	// when the replication spec service makes changes, it needs to call the call back
 	// explicitly, so that the actions can be taken immediately
-	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
+	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority)
 }

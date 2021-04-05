@@ -582,7 +582,7 @@ func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (
 
 	// Once backfill spec has been deleted, safe to delete the backfill mappings
 	// TODO - revisit once consistent metakv is in
-	err = b.CleanupMapping(replicationId)
+	err = b.CleanupMapping(replicationId, b.utils)
 	if err != nil {
 		b.logger.Errorf("Failed to cleanup backfill spec mapping err=%v\n", err)
 		return nil, err
@@ -626,7 +626,10 @@ func (b *BackfillReplicationService) updateCacheInternal(specId string, newSpec 
 	return err
 }
 
-func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error {
+func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error {
+	if wg != nil {
+		defer wg.Done()
+	}
 	oldSpec, ok := oldVal.(*metadata.ReplicationSpecification)
 	if !ok {
 		return base.ErrorInvalidInput
@@ -744,7 +747,7 @@ func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 		for _, backfillPair := range b.unrecoverableBackfillIds {
 			backfillSpecId := backfillPair[0]
 			internalId := backfillPair[1]
-			err := b.CleanupMapping(backfillSpecId)
+			err := b.CleanupMapping(backfillSpecId, b.utils)
 			if err != nil {
 				b.logger.Warnf("handleUnrecoverableBackfills received err %v when cleaning up mappings. Backfill may not raise correctly", backfillSpecId)
 			}

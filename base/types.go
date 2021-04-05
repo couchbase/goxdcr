@@ -730,6 +730,19 @@ type MetadataServiceCallback func(path string, value []byte, rev interface{}) er
 // Callback function for the handling of metadata changed event
 type MetadataChangeHandlerCallback func(metadataId string, oldMetadata interface{}, newMetadata interface{}) error
 
+// Certain callbacks are done in parallel and so may need a waitGroup to ensure synchronization is done
+type MetadataChangeHandlerCallbackWithWg func(metadataId string, oldMetadata interface{}, newMetadata interface{}, wg *sync.WaitGroup) error
+
+type MetadataChangeHandlerPriority int
+
+// When callbacks are to be called concurrently, certain callbacks may have higher priority to be called than another
+// when certain metadata is being created or deleted
+const (
+	MetadataChangeHighPrioriy MetadataChangeHandlerPriority = iota
+	MetadataChangeMedPrioriy  MetadataChangeHandlerPriority = iota
+	MetadataChangeLowPrioriy  MetadataChangeHandlerPriority = iota
+)
+
 type DataObjRecycler func(topic string, dataObj *WrappedMCRequest)
 
 type VBErrorType int

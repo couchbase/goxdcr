@@ -156,7 +156,10 @@ func NewReplicationSpecChangeListener(repl_spec_svc service_def.ReplicationSpecS
 }
 
 // Handler callback for replication spec changed event
-func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}) error {
+func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(changedSpecId string, oldSpecObj interface{}, newSpecObj interface{}, wg *sync.WaitGroup) error {
+	if wg != nil {
+		defer wg.Done()
+	}
 	topic := changedSpecId
 
 	oldSpec, err := rscl.validateReplicationSpec(oldSpecObj)

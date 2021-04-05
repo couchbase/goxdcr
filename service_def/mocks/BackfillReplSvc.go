@@ -5,6 +5,7 @@ package mocks
 import (
 	base "github.com/couchbase/goxdcr/base"
 	metadata "github.com/couchbase/goxdcr/metadata"
+	"sync"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -98,7 +99,7 @@ func (_m *BackfillReplSvc) DelBackfillReplSpec(replicationId string) (*metadata.
 }
 
 // ReplicationSpecChangeCallback provides a mock function with given fields: id, oldVal, newVal
-func (_m *BackfillReplSvc) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}) error {
+func (_m *BackfillReplSvc) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal)
 
 	var r0 error

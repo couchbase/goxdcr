@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"sync"
 )
 
 /**
@@ -131,18 +132,33 @@ func (m *ManifestsService) GetTargetManifests(replSpec *metadata.ReplicationSpec
 
 func (m *ManifestsService) DelManifests(replSpec *metadata.ReplicationSpecification) error {
 	errorMap := make(base.ErrorMap)
+	var errMtx sync.Mutex
 
-	key := getManifestDocKey(replSpec.Id, true /*source*/)
-	err := m.metadata_svc.Del(key, nil /*revision*/)
-	if err != nil {
-		errorMap["sourceManifestDelOp"] = err
-	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		key := getManifestDocKey(replSpec.Id, true /*source*/)
+		err := m.metadata_svc.Del(key, nil /*revision*/)
+		if err != nil {
+			errMtx.Lock()
+			errorMap["sourceManifestDelOp"] = err
+			errMtx.Unlock()
+		}
+	}()
 
-	key = getManifestDocKey(replSpec.Id, false /*source*/)
-	err = m.metadata_svc.Del(key, nil /*revision*/)
-	if err != nil {
-		errorMap["targetManifestDelOp"] = err
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		key := getManifestDocKey(replSpec.Id, false /*source*/)
+		err := m.metadata_svc.Del(key, nil /*revision*/)
+		if err != nil {
+			errMtx.Lock()
+			errorMap["targetManifestDelOp"] = err
+			errMtx.Unlock()
+		}
+	}()
+	wg.Wait()
 
 	if len(errorMap) > 0 {
 		return fmt.Errorf(base.FlattenErrorMap(errorMap))

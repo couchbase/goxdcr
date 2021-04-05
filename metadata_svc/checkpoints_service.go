@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"strconv"
 	"strings"
@@ -64,6 +65,7 @@ type CheckpointsService struct {
 	*ShaRefCounterService
 	metadata_svc service_def.MetadataSvc
 	logger       *log.CommonLogger
+	utils        utilities.UtilsIface
 
 	specsMtx    sync.RWMutex
 	cachedSpecs map[string]*metadata.ReplicationSpecification
@@ -72,13 +74,14 @@ type CheckpointsService struct {
 	cachedBackfillSpecs map[string]*metadata.BackfillReplicationSpec
 }
 
-func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext) *CheckpointsService {
+func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, utils utilities.UtilsIface) *CheckpointsService {
 	logger := log.NewLogger("CheckpointSvc", logger_ctx)
 	return &CheckpointsService{metadata_svc: metadata_svc,
 		logger:               logger,
 		ShaRefCounterService: NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger),
 		cachedSpecs:          make(map[string]*metadata.ReplicationSpecification),
 		cachedBackfillSpecs:  make(map[string]*metadata.BackfillReplicationSpec),
+		utils:                utils,
 	}
 }
 
@@ -131,17 +134,43 @@ func (ckpt_svc *CheckpointsService) isBrokenMappingDoc(ckptDocKey string) bool {
 func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) error {
 	ckpt_svc.logger.Infof("DelCheckpointsDocs for replication %v...", replicationId)
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
-	err_ret := ckpt_svc.metadata_svc.DelAllFromCatalog(catalogKey)
-	if err_ret != nil {
-		ckpt_svc.logger.Errorf("Failed to delete checkpoints docs for %v\n", replicationId)
-	} else {
-		cleanMapErr := ckpt_svc.CleanupMapping(replicationId)
-		if cleanMapErr != nil {
-			ckpt_svc.logger.Warnf("DelCheckpointsDoc for brokenmapping had error: %v", cleanMapErr)
+
+	errMap := make(base.ErrorMap)
+	var errMtx sync.Mutex
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err_ret := ckpt_svc.metadata_svc.DelAllFromCatalog(catalogKey)
+		if err_ret != nil {
+			errMsg := fmt.Sprintf("Failed to delete checkpoints docs for %v - manual clean up may be required\n", replicationId)
+			ckpt_svc.logger.Errorf(errMsg)
+			errMtx.Lock()
+			errMap["1"] = fmt.Errorf(errMsg)
+			errMtx.Unlock()
 		}
-		ckpt_svc.logger.Infof("DelCheckpointsDocs is done for %v\n", replicationId)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cleanMapErr := ckpt_svc.CleanupMapping(replicationId, ckpt_svc.utils)
+		if cleanMapErr != nil {
+			errMsg := fmt.Sprintf("DelCheckpointsDoc for brokenmapping had error: %v - manual clean up may be required", cleanMapErr)
+			ckpt_svc.logger.Errorf(errMsg)
+			errMtx.Lock()
+			errMap["2"] = fmt.Errorf(errMsg)
+			errMtx.Unlock()
+		}
+	}()
+
+	wg.Wait()
+	ckpt_svc.logger.Infof("DelCheckpointsDocs is done for %v\n", replicationId)
+	if len(errMap) == 0 {
+		return nil
 	}
-	return err_ret
+	return fmt.Errorf(base.FlattenErrorMap(errMap))
 }
 
 // Need to have correct accounting after deleting checkpoingsDocs
@@ -477,7 +506,11 @@ func (ckpt_svc *CheckpointsService) CollectionsManifestChangeCb(replId string, o
 	return nil
 }
 
-func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}) error {
+func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
+	if wg != nil {
+		defer wg.Done()
+	}
+
 	oldSpec, ok := oldVal.(*metadata.ReplicationSpecification)
 	if !ok {
 		return base.ErrorInvalidInput

@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 )
 
@@ -210,10 +211,13 @@ func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error
 	return counter.upsertMapping(topic, specInternalId, true /*cleanup*/)
 }
 
-func (s *ShaRefCounterService) CleanupMapping(topic string) error {
+func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.UtilsIface) error {
 	s.topicMapMtx.Lock()
 	counter, ok := s.topicMaps[topic]
 	s.topicMapMtx.Unlock()
+
+	doneFunc := utils.StartDiagStopwatch(fmt.Sprintf("CleanupMapping(%v) found? %v", topic, ok), base.DiagInternalThreshold)
+	defer doneFunc()
 
 	if !ok {
 		// Still need to clean up the mapping

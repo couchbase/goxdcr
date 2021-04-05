@@ -135,7 +135,7 @@ func main() {
 		migration_svc := service_impl.NewMigrationSvc(top_svc, remote_cluster_svc,
 			replication_spec_svc,
 			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
-			metadata_svc.NewCheckpointsService(metakv_svc, nil),
+			metadata_svc.NewCheckpointsService(metakv_svc, nil, utils),
 			nil, utils)
 		err = migration_svc.Migrate()
 		if err == nil {
@@ -160,7 +160,7 @@ func main() {
 
 		internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
 
-		checkpointsService := metadata_svc.NewCheckpointsService(metakv_svc, nil)
+		checkpointsService := metadata_svc.NewCheckpointsService(metakv_svc, nil, utils)
 		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)
 		collectionsManifestService, err := metadata_svc.NewCollectionsManifestService(remote_cluster_svc,
 			replication_spec_svc, uilog_svc, log.DefaultLoggerContext, utils, checkpointsService,

@@ -179,7 +179,11 @@ func (c *CollectionsManifestService) CollectionManifestGetter(bucketName string)
 	return c.utilities.GetCollectionsManifest(localConnStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, c.logger)
 }
 
-func (c *CollectionsManifestService) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}) error {
+func (c *CollectionsManifestService) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error {
+	if wg != nil {
+		defer wg.Done()
+	}
+
 	oldSpec, ok := oldVal.(*metadata.ReplicationSpecification)
 	if !ok {
 		return base.ErrorInvalidInput
