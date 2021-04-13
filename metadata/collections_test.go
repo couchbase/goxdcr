@@ -1224,6 +1224,11 @@ func TestSpecialMigrationNamespaceFromRules(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestSpecialMigrationNamespaceFromRules =================")
 	assert := assert.New(t)
 
+	defaultToDefaultRules := make(CollectionsMappingRulesType)
+	defaultToDefaultRules[fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)] = fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)
+	assert.True(defaultToDefaultRules.IsExplicitMigrationRule())
+	assert.Nil(defaultToDefaultRules.ValidateMigrateRules())
+
 	oldRules := make(CollectionsMappingRulesType)
 	oldRules[fmt.Sprintf("%v%v%v", base.DefaultScopeCollectionName, base.ScopeCollectionDelimiter, base.DefaultScopeCollectionName)] = fmt.Sprintf("%v%v%v", "S1", base.ScopeCollectionDelimiter, "col1")
 	assert.True(oldRules.IsExplicitMigrationRule())

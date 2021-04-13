@@ -2039,7 +2039,7 @@ func (c CollectionsMappingRulesType) IsExplicitMigrationRule() bool {
 		if err != nil {
 			return false
 		}
-		if targetNs.IsDefault() || targetNs.IsEmpty() {
+		if targetNs.IsEmpty() {
 			return false
 		}
 	}
