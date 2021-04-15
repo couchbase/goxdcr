@@ -71,9 +71,7 @@ func TestBackfillReplMarshal(t *testing.T) {
 	marshalledSpec, err := json.Marshal(testSpec)
 	assert.Nil(err)
 
-	checkSpec := &BackfillReplicationSpec{
-		VBTasksMap: NewVBTasksMap(),
-	}
+	checkSpec := &BackfillReplicationSpec{}
 	err = json.Unmarshal(marshalledSpec, &checkSpec)
 	checkSpec.PostUnmarshalInit()
 	assert.Nil(err)
@@ -86,6 +84,9 @@ func TestBackfillReplMarshal(t *testing.T) {
 	assert.Nil(testSpec.VBTasksMap.VBTasksMap[2])
 	assert.True(testSpec.VBTasksMap.VBTasksMap[0].Contains(checkSpec.VBTasksMap.VBTasksMap[0]))
 	assert.True(testSpec.VBTasksMap.VBTasksMap[0].SameAs(checkSpec.VBTasksMap.VBTasksMap[0]))
+
+	assert.NotNil(checkSpec.VBTasksMap.VBTasksMap[0].mutex)
+	assert.NotNil(checkSpec.VBTasksMap.VBTasksMap[0].List[0].mutex)
 
 	fmt.Println("============== Test case end: TestBackfillReplMarshal =================")
 }

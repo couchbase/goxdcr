@@ -324,6 +324,9 @@ func (v *VBTasksMapType) ContainsAtLeastOneTask() bool {
 
 // Remember to call unlockFunc even if exists is false
 func (v *VBTasksMapType) Get(vbno uint16, writeRequested bool) (tasks *BackfillTasks, exists bool, unlockFunc func()) {
+	if v == nil {
+		return nil, false, func() {}
+	}
 	if writeRequested {
 		unlockFunc = func() {
 			v.mutex.Unlock()
@@ -345,6 +348,18 @@ func (v *VBTasksMapType) Get(vbno uint16, writeRequested bool) (tasks *BackfillT
 }
 
 func (this *VBTasksMapType) SameAs(other *VBTasksMapType) bool {
+	if this == nil {
+		if other == nil {
+			return true
+		} else {
+			return false
+		}
+	}
+
+	if other == nil {
+		return false
+	}
+
 	if this.Len() != other.Len() {
 		return false
 	}
@@ -369,6 +384,9 @@ func (this *VBTasksMapType) SameAs(other *VBTasksMapType) bool {
 
 func (this *VBTasksMapType) Clone() *VBTasksMapType {
 	clonedMap := NewVBTasksMap()
+	if this == nil {
+		return clonedMap
+	}
 	this.mutex.RLock()
 	defer this.mutex.RUnlock()
 	for k, v := range this.VBTasksMap {
@@ -389,8 +407,14 @@ func (v *VBTasksMapType) LoadFromMappingsShaMap(shaToCollectionNsMap ShaToCollec
 
 	errMap := make(base.ErrorMap)
 	for _, tasks := range v.VBTasksMap {
+		if tasks == nil {
+			continue
+		}
 		tasks.mutex.Lock()
 		for _, task := range tasks.List {
+			if task == nil {
+				continue
+			}
 			task.mutex.Lock()
 			task.requestedCollections_ = task.requestedCollections_[:0]
 			for _, oneRequestedCollectionSha := range task.RequestedCollectionsShas {
@@ -515,6 +539,9 @@ func (v *VBTasksMapType) GetTopTasksOnlyClone() *VBTasksMapType {
 }
 
 func (v *VBTasksMapType) DebugString() string {
+	if v == nil {
+		return "nil VBTasksMapType"
+	}
 	var buffer bytes.Buffer
 	for i := uint16(0); i < base.NumberOfVbs; i++ {
 		tasks, exists, unlockFunc := v.Get(i, false)
@@ -561,6 +588,10 @@ func (v *VBTasksMapType) GetDeduplicatedSourceNamespaces() []*SourceNamespace {
 	var retList []*SourceNamespace
 	var dedupMap = make(CollectionNamespaceMapping)
 
+	if v == nil {
+		return retList
+	}
+
 	v.mutex.RLock()
 	defer v.mutex.RUnlock()
 
@@ -596,10 +627,14 @@ func (v *VBTasksMapType) PostUnmarshalInit() {
 		v.mutex = &sync.RWMutex{}
 	}
 
-	v.mutex.RLock()
-	defer v.mutex.RUnlock()
-	for _, tasks := range v.VBTasksMap {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	for vb, tasks := range v.VBTasksMap {
+		// Take this opportunity to clean up nil tasks
 		tasks.PostUnmarshalInit()
+		if tasks.Len() == 0 {
+			delete(v.VBTasksMap, vb)
+		}
 	}
 }
 
@@ -624,6 +659,9 @@ func NewBackfillTasksWithTask(incomingTask *BackfillTask) BackfillTasks {
 }
 
 func (b *BackfillTasks) GetLock() *sync.RWMutex {
+	if b == nil {
+		return &sync.RWMutex{}
+	}
 	return b.mutex
 }
 
@@ -642,6 +680,9 @@ func (b *BackfillTasks) Append(incoming *BackfillTasks) {
 }
 
 func (b *BackfillTasks) RemoveFirstElem() {
+	if b == nil {
+		return
+	}
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -651,6 +692,9 @@ func (b *BackfillTasks) RemoveFirstElem() {
 }
 
 func (b *BackfillTasks) Clone() *BackfillTasks {
+	if b == nil {
+		return nil
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	clonedTasks := NewBackfillTasks()
@@ -665,12 +709,18 @@ func (b *BackfillTasks) Clone() *BackfillTasks {
 }
 
 func (b *BackfillTasks) Len() int {
+	if b == nil {
+		return 0
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	return len(b.List)
 }
 
 func (b *BackfillTasks) CloneTopTask() *BackfillTasks {
+	if b == nil {
+		return nil
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 
@@ -684,6 +734,9 @@ func (b *BackfillTasks) CloneTopTask() *BackfillTasks {
 }
 
 func (b *BackfillTasks) GetRO(idx int) (*BackfillTask, bool, func()) {
+	if b == nil {
+		return nil, false, func() {}
+	}
 	b.mutex.RLock()
 
 	unlockFunc := func() {
@@ -697,6 +750,18 @@ func (b *BackfillTasks) GetRO(idx int) (*BackfillTask, bool, func()) {
 }
 
 func (b *BackfillTasks) SameAs(other *BackfillTasks) bool {
+	if b == nil {
+		if other == nil {
+			return true
+		} else {
+			return false
+		}
+	}
+
+	if other == nil {
+		return false
+	}
+
 	if b.Len() != other.Len() {
 		return false
 	}
@@ -722,6 +787,18 @@ func (b *BackfillTasks) SameAs(other *BackfillTasks) bool {
 }
 
 func (b *BackfillTasks) Contains(subsetOfTasks *BackfillTasks) bool {
+	if b == nil {
+		if subsetOfTasks == nil {
+			return true
+		} else {
+			return false
+		}
+	}
+
+	if subsetOfTasks == nil {
+		return true
+	}
+
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	subsetOfTasks.mutex.RLock()
@@ -766,9 +843,13 @@ func (b *BackfillTasks) PrettyPrint() string {
 
 // Returns a map of sha -> mapping
 func (b *BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNamespaceMap {
+	returnMap := make(ShaToCollectionNamespaceMap)
+	if b == nil {
+		return returnMap
+	}
+
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
-	returnMap := make(ShaToCollectionNamespaceMap)
 	for _, task := range b.List {
 		if task == nil {
 			continue
@@ -828,6 +909,10 @@ func (b *BackfillTasks) MergeIncomingTaskIntoTasksNoLock(task *BackfillTask, unm
 }
 
 func (b *BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool {
+	if b == nil {
+		return false
+	}
+
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	for _, task := range b.List {
@@ -839,6 +924,10 @@ func (b *BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool 
 }
 
 func (b *BackfillTasks) RemoveNamespaceMappings(removed CollectionNamespaceMapping) (modified bool) {
+	if b == nil {
+		return
+	}
+
 	var needCleanup bool
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -875,16 +964,24 @@ func (b *BackfillTasks) RemoveNamespaceMappings(removed CollectionNamespaceMappi
 }
 
 func (b *BackfillTasks) PostUnmarshalInit() {
+	if b == nil {
+		return
+	}
+
 	if b.mutex == nil {
 		b.mutex = &sync.RWMutex{}
 	}
 
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
+	var cleanedupList []*BackfillTask
 	for _, task := range b.List {
-		task.PostUnmarshalInit()
+		if task != nil {
+			cleanedupList = append(cleanedupList, task)
+			task.PostUnmarshalInit()
+		}
 	}
-
+	b.List = cleanedupList
 }
 
 // Each backfill task should be RO once created
@@ -923,11 +1020,10 @@ func generateShas(requestedCollectionMappings []CollectionNamespaceMapping) []st
 	return shas
 }
 
-func (b *BackfillTask) GetLock() *sync.RWMutex {
-	return b.mutex
-}
-
 func (b *BackfillTask) GetEndingTimestampSeqno() uint64 {
+	if b == nil {
+		return 0
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 
@@ -938,6 +1034,9 @@ func (b *BackfillTask) GetEndingTimestampSeqno() uint64 {
 }
 
 func (b *BackfillTask) GetStartingTimestampSeqno() uint64 {
+	if b == nil {
+		return 0
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 
@@ -948,6 +1047,9 @@ func (b *BackfillTask) GetStartingTimestampSeqno() uint64 {
 }
 
 func (b *BackfillTask) String() string {
+	if b == nil {
+		return "nil BackfillTask"
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	var buffer bytes.Buffer
@@ -962,6 +1064,9 @@ func (b *BackfillTask) String() string {
 }
 
 func (b *BackfillTask) GetTimestampsClone() *BackfillVBTimestamps {
+	if b == nil {
+		return nil
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	if b.Timestamps != nil {
@@ -1016,12 +1121,18 @@ func (b *BackfillTask) MergeIncomingTask(task *BackfillTask) (canFullyMerge, una
 }
 
 func (b *BackfillTask) RequestedCollectionsLen() int {
+	if b == nil {
+		return 0
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	return len(b.requestedCollections_)
 }
 
 func (b *BackfillTask) RequestedCollections(writeRequested bool) ([]CollectionNamespaceMapping, func()) {
+	if b == nil {
+		return []CollectionNamespaceMapping{}, func() {}
+	}
 	unlockFunc := func() {
 		if writeRequested {
 			b.mutex.Unlock()
@@ -1038,6 +1149,9 @@ func (b *BackfillTask) RequestedCollections(writeRequested bool) ([]CollectionNa
 }
 
 func (b *BackfillTask) AddCollectionNamespaceMappingNoLock(nsMapping CollectionNamespaceMapping) {
+	if b == nil {
+		return
+	}
 	incomingSha, _ := nsMapping.Sha256()
 	incomingShaStr := fmt.Sprintf("%x", incomingSha)
 	for _, checkSha := range b.RequestedCollectionsShas {
@@ -1052,6 +1166,9 @@ func (b *BackfillTask) AddCollectionNamespaceMappingNoLock(nsMapping CollectionN
 }
 
 func (b *BackfillTask) RemoveCollectionNamespaceMapping(nsMapping CollectionNamespaceMapping) (modified bool) {
+	if b == nil {
+		return
+	}
 	var i int
 	var oneMapping CollectionNamespaceMapping
 
@@ -1178,17 +1295,29 @@ func (b *BackfillTask) SameAs(other *BackfillTask) bool {
 }
 
 func (b *BackfillTask) Clone() BackfillTask {
+	if b == nil {
+		return BackfillTask{}
+	}
+	b.mutex.RLock()
 	clonedTs := b.Timestamps.Clone()
 	var clonedList []CollectionNamespaceMapping
 	for _, nsMapping := range b.requestedCollections_ {
 		clonedList = append(clonedList, nsMapping.Clone())
 	}
+	b.mutex.RUnlock()
 	// Sha is automatically calculated
 	task := NewBackfillTask(&clonedTs, clonedList)
 	return *task
 }
 
+// Takes the latestSrcManifest, create a filter for gomemcached
+// Returns err if specified task can't be found in the latest source manifest
+// Which may be an ok error if latestManifest is actually correct
 func (b *BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (seqnoEnd uint64, filter *mcc.CollectionsFilter, err error) {
+	if b == nil {
+		err = base.ErrorNilPtr
+		return
+	}
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 
@@ -1213,6 +1342,8 @@ func (b *BackfillTask) ToDcpNozzleTask(latestSrcManifest *CollectionsManifest) (
 			}
 			cid, err := latestSrcManifest.GetCollectionId(scopeName, collectionName)
 			if err != nil {
+				// By now, we have validated that "latest" source manifest is newer than checkpointed info
+				// So if something does not exist, it is because source namespace has been removed
 				errMap[fmt.Sprintf("Manifest %v looking up %v:%v", latestSrcManifest.Uid(), sourceNamespace.ScopeName, sourceNamespace.CollectionName)] = err
 				continue
 			}
@@ -1253,6 +1384,16 @@ func (b BackfillVBTimestamps) Clone() BackfillVBTimestamps {
 }
 
 func (b *BackfillVBTimestamps) SameAs(other *BackfillVBTimestamps) bool {
+	if b == nil {
+		if other == nil {
+			return true
+		} else {
+			return false
+		}
+	}
+	if other == nil {
+		return false
+	}
 	return b.StartingTimestamp.SameAs(other.StartingTimestamp) &&
 		b.EndingTimestamp.SameAs(other.EndingTimestamp)
 }

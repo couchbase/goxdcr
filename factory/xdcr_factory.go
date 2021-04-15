@@ -150,7 +150,9 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 // Given a primary pipeline, create a secondary/child pipeline that supplements the primary
 func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline common.Pipeline, progress_recorder common.PipelineProgressRecorder, pipelineType common.PipelineType) (common.Pipeline, error) {
-	spec := primaryPipeline.Specification().GetReplicationSpec()
+	spec := primaryPipeline.Specification().GetReplicationSpec().Clone()
+	// spec.Settings is a map that is Read-Only since inception. Need to create a clone
+	// and force a low priority - otherwise there is a very small chance of concurrent r/w panic
 	spec.Settings.Values[metadata.PriorityKey] = base.PriorityTypeLow
 
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)

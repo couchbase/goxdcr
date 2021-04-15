@@ -1401,19 +1401,35 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 		}
 		// Execute the first task
 		// Use the latest source manifest to look up collection ID for backfill
-		manifest, err := dcp.specificManifestGetter(math.MaxUint64)
-		if err != nil {
-			err = fmt.Errorf("When resuming backfill, unable to retrieve latest manifest. Err - %v", err)
+		manifest, manifestErr := dcp.specificManifestGetter(math.MaxUint64)
+		if manifestErr != nil {
+			err = fmt.Errorf("When resuming backfill, unable to retrieve latest manifest. Err - %v", manifestErr)
 			dcp.handleGeneralError(err)
+			return
+		}
+
+		if manifest.Uid() < vbts.ManifestIDs.SourceManifestId {
+			err = fmt.Errorf("%v experienced manifest rollback - Checkpointed with source manifest ID %v but currently is %v",
+				dcp.Id(), vbts.ManifestIDs.SourceManifestId, manifest.Uid())
+			// TODO - MB-45435 - quorum failover where source manifest rolls back
+			dcp.handleGeneralError(err)
+			return err
 		}
 
 		topTask, _, unlockVbTasks := vbTasks.GetRO(0)
-		seqEnd, filter, err = topTask.ToDcpNozzleTask(manifest)
+		var toTaskErrs error
+		seqEnd, filter, toTaskErrs = topTask.ToDcpNozzleTask(manifest)
 		unlockVbTasks()
 		unlockSpecificVBTasksMap()
 
-		if err != nil {
-			err = fmt.Errorf("Error converting VBTask to DCP Nozzle Task %v", err)
+		if toTaskErrs != nil {
+			// If ToDcpNozzleTask returned error given "latest" manifest, it means that something changed on the source
+			// and that the backfill task passed in to DCP and the "latest" manifest isn't up to date
+			// Backfill Manager should be monitoring source side manifest changes, and making sure that the backfill
+			// replication's VBTasks are cleaned up correctly if a source collection no longer exists
+			// So if this has errors, DCP should just bail and eventually the backfill spec's tasks should only contain
+			// source collections that actually exist in the steady-state manifest
+			err = fmt.Errorf("Error converting VBTask to DCP Nozzle Task %v", toTaskErrs)
 			return err
 		}
 
