@@ -45,7 +45,7 @@ type MCRequest struct {
 
 // Size gives the number of bytes this request requires.
 func (req *MCRequest) HdrSize() int {
-	rv := HDR_LEN + len(req.Extras) + req.CollIdLen + req.FramingElen + len(req.Key)
+	rv := HDR_LEN + len(req.Extras) + req.CollIdLen + len(req.Key)
 	if req.UserLen != 0 {
 		rv += frameLen(req.UserLen)
 	}
@@ -159,7 +159,8 @@ func (req *MCRequest) fillFastFlexHeaderBytes(data []byte) int {
 	pos++
 	data[pos] = byte(req.Opcode)
 	pos++
-	data[pos] = byte(frameLen(req.UserLen))
+	req.FramingElen = frameLen(req.UserLen)
+	data[pos] = byte(req.FramingElen)
 	pos++
 	data[pos] = byte(len(req.Key) + req.CollIdLen)
 	pos++

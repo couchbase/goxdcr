@@ -49,7 +49,7 @@ func (f *FrameInfo) Validate() error {
 		}
 	case FrameOpenTracing:
 		if f.ObjLen != 1 {
-			return fmt.Errorf("Invalid FrameImpersonate - length is %v\n", f.ObjLen)
+			return fmt.Errorf("Invalid FrameOpenTracing - length is %v\n", f.ObjLen)
 		} else if f.ObjLen != len(f.ObjData) {
 			return ErrorObjLenNotMatch
 		}

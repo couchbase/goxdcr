@@ -192,7 +192,9 @@ func TestIsFatal(t *testing.T) {
 		is bool
 	}{
 		{nil, false},
-		{errors.New("something"), false},
+
+		// Non Memcached errors are considered fatal, as they leave unread data on the wire
+		{errors.New("something"), true},
 		{&MCResponse{}, false},
 		{&MCResponse{Status: KEY_ENOENT}, false},
 		{&MCResponse{Status: EINVAL}, false},
