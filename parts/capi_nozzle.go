@@ -1339,8 +1339,9 @@ func (capi *CapiNozzle) getLastSentBatches() string {
 	return buffer.String()
 }
 
-func (capi *CapiNozzle) ResponsibleVBs() []uint16 {
-	return capi.vbList
+// Not used, for interface capatibility
+func (capi *CapiNozzle) ResponsibleVBs() ([]uint16, func()) {
+	return capi.vbList, func() {}
 }
 
 func (capi *CapiNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {

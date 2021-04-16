@@ -91,7 +91,7 @@ var UninitializedReseverationNumber = -1
 
 func GetErrorXmemTargetUnknownCollection(mcr *base.WrappedMCRequest) error {
 	return fmt.Errorf("%v scope %v collection %v given known manifest ID %v", base.StringTargetCollectionMappingErr,
-		mcr.SrcColNamespace.ScopeName, mcr.SrcColNamespace.CollectionName, mcr.ColInfo.ManifestId)
+		mcr.GetSourceCollectionNamespace().ScopeName, mcr.GetSourceCollectionNamespace().CollectionName, mcr.GetManifestId())
 }
 
 var ErrorXmemIsStuck = errors.New("Xmem is stuck")
@@ -666,7 +666,8 @@ type XmemNozzle struct {
 	// and after the data members have been initialized and set
 	stateLock sync.RWMutex
 
-	vbList []uint16
+	vbList    []uint16
+	vbListMtx sync.RWMutex
 
 	collectionEnabled uint32
 
@@ -894,12 +895,14 @@ func (xmem *XmemNozzle) Receive(data interface{}) error {
 		xmem.handleGeneralError(err)
 	}
 
+	request.SiblingReqsMtx.RLock()
 	for _, siblingReq := range request.SiblingReqs {
 		err = xmem.accumuBatch(siblingReq)
 		if err != nil {
 			xmem.handleGeneralError(err)
 		}
 	}
+	request.SiblingReqsMtx.RUnlock()
 
 	return err
 }
@@ -1304,15 +1307,23 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 		if mc_req.DataType&mcc.SnappyDataType == 0 {
 			maxEncodedLen := snappy.MaxEncodedLen(len(mc_req.Body))
 			if maxEncodedLen > 0 && maxEncodedLen < len(mc_req.Body) {
+				req.SlicesToBeReleasedMtx.RLock()
 				if req.SlicesToBeReleased != nil {
+					req.SlicesToBeReleasedMtx.RUnlock()
+					req.SlicesToBeReleasedMtx.Lock()
 					req.SlicesToBeReleased = make([][]byte, 0, 1)
+					req.SlicesToBeReleasedMtx.Unlock()
+					req.SlicesToBeReleasedMtx.RLock()
 				}
+				req.SlicesToBeReleasedMtx.RUnlock()
 				body, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
 				if err != nil {
 					body = make([]byte, maxEncodedLen)
 					xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 				} else {
+					req.SlicesToBeReleasedMtx.Lock()
 					req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
+					req.SlicesToBeReleasedMtx.Unlock()
 				}
 				body = snappy.Encode(body, mc_req.Body)
 				mc_req.Body = body
@@ -2201,15 +2212,23 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 	body := req.Body
 	var maxBodyIncrease = 8 + 24 + len(xmem.sourceClusterId) + 18
 	newbodyLen := len(body) + maxBodyIncrease
+	wrappedReq.SlicesToBeReleasedMtx.RLock()
 	if wrappedReq.SlicesToBeReleased == nil {
+		wrappedReq.SlicesToBeReleasedMtx.RUnlock()
+		wrappedReq.SlicesToBeReleasedMtx.Lock()
 		wrappedReq.SlicesToBeReleased = make([][]byte, 0, 2)
+		wrappedReq.SlicesToBeReleasedMtx.Unlock()
+		wrappedReq.SlicesToBeReleasedMtx.RLock()
 	}
+	wrappedReq.SlicesToBeReleasedMtx.RUnlock()
 	newbody, err := xmem.dataPool.GetByteSlice(uint64(newbodyLen))
 	if err != nil {
 		newbody = make([]byte, newbodyLen)
 		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 	} else {
+		wrappedReq.SlicesToBeReleasedMtx.Lock()
 		wrappedReq.SlicesToBeReleased = append(wrappedReq.SlicesToBeReleased, newbody)
+		wrappedReq.SlicesToBeReleasedMtx.Unlock()
 	}
 	pos, err := meta.ConstructCustomCRXattrForSetMeta(newbody, 4, xmem.config.hlvPruningWindow)
 	if err != nil {
@@ -2259,11 +2278,17 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 		return false, nil
 	}
 	if req.Req.DataType&mcc.SnappyDataType > 0 {
+		req.SlicesToBeReleasedMtx.RLock()
 		if req.SlicesToBeReleased == nil {
+			req.SlicesToBeReleasedMtx.RUnlock()
+			req.SlicesToBeReleasedMtx.Lock()
 			// For target we need up to 3 byte slices, 1 to decompress, 1 for body with new XATTR, 1 to compress
 			// For merge back to source, we need up to 4 byte slices, 1 to decompress, 2 to format pcas and mv, 1 for new body and XATTR
 			req.SlicesToBeReleased = make([][]byte, 0, 4)
+			req.SlicesToBeReleasedMtx.Unlock()
+			req.SlicesToBeReleasedMtx.RLock()
 		}
+		req.SlicesToBeReleasedMtx.RUnlock()
 		decodedLen, err := snappy.DecodedLen(req.Req.Body)
 		if err != nil {
 			return false, err
@@ -2273,7 +2298,9 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 			body = make([]byte, decodedLen)
 			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 		} else {
+			req.SlicesToBeReleasedMtx.Lock()
 			req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
+			req.SlicesToBeReleasedMtx.Unlock()
 		}
 		body, err = snappy.Decode(body, req.Req.Body)
 		if err != nil {
@@ -3616,12 +3643,14 @@ func (xmem *XmemNozzle) RecycleDataObj(incomingReq interface{}) {
 }
 
 func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
+	req.SlicesToBeReleasedMtx.Lock()
 	if req.SlicesToBeReleased != nil {
 		for _, aSlice := range req.SlicesToBeReleased {
 			xmem.dataPool.PutByteSlice(aSlice)
 		}
 		req.SlicesToBeReleased = nil
 	}
+	req.SlicesToBeReleasedMtx.Unlock()
 	if xmem.upstreamObjRecycler != nil {
 		xmem.upstreamObjRecycler(req)
 	}
@@ -3702,8 +3731,12 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 	return client, nil
 }
 
-func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
-	return xmem.vbList
+func (xmem *XmemNozzle) ResponsibleVBs() ([]uint16, func()) {
+	xmem.vbListMtx.RUnlock()
+	unlockFunc := func() {
+		xmem.vbListMtx.RUnlock()
+	}
+	return xmem.vbList, unlockFunc
 }
 
 // Should only be done during pipeline construction

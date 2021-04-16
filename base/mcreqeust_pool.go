@@ -60,7 +60,9 @@ func (pool *MCRequestPool) Put(req *WrappedMCRequest) {
 func (pool *MCRequestPool) cleanReq(req *WrappedMCRequest) *WrappedMCRequest {
 	req.Req = pool.cleanMCReq(req.Req)
 	req.Seqno = 0
+	req.SiblingReqsMtx.Lock()
 	req.SiblingReqs = req.SiblingReqs[:0]
+	req.SiblingReqsMtx.Unlock()
 	req.RetryCRCount = 0
 	return req
 }

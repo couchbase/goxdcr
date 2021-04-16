@@ -275,20 +275,23 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	// construct routers to be able to connect the nozzles
 	for _, sourceNozzle := range sourceNozzles {
-		vblist := sourceNozzle.(*parts.DcpNozzle).GetVBList()
+		vblist, doneFunc := sourceNozzle.(*parts.DcpNozzle).ResponsibleVBs()
 		downStreamParts := make(map[string]common.Part)
 		for _, vb := range vblist {
 			targetNozzleId, ok := vbNozzleMap[vb]
 			if !ok {
+				doneFunc()
 				return nil, nil, fmt.Errorf("Error constructing pipeline %v since there is no target nozzle for vb=%v", topic, vb)
 			}
 
 			outNozzle, ok := outNozzles[targetNozzleId]
 			if !ok {
+				doneFunc()
 				return nil, nil, fmt.Errorf("%v There is no corresponding target nozzle for vb=%v, targetNozzleId=%v", topic, vb, targetNozzleId)
 			}
 			downStreamParts[targetNozzleId] = outNozzle
 		}
+		doneFunc()
 
 		// Construct a router - each Source nozzle has a router.
 		router, err := xdcrf.constructRouter(sourceNozzle.Id(), spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, sourceNozzle.RecycleDataObj, colMigrationMultiTargetUIRaiser)

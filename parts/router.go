@@ -384,8 +384,9 @@ func (c *CollectionsRouter) IsRunning() bool {
 }
 
 // When router is started, this method loads the broken map pair
-func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.CollectionNamespaceMapping, targetManifestId uint64, isRollBack bool) {
-	if !c.IsRunning() || brokenMappings == nil || len(*brokenMappings) == 0 {
+// The brokenMappingsRO passed in is shared between multiple collectionsRouter and should be handled carefully as such
+func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappingsRO *metadata.CollectionNamespaceMapping, targetManifestId uint64, isRollBack bool) {
+	if !c.IsRunning() || brokenMappingsRO == nil || len(*brokenMappingsRO) == 0 {
 		return
 	}
 
@@ -407,7 +408,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 	// Also, it is almost guaranteed that targetManifestId <= currentManifestId for rollback, but to prevent any
 	// odd situations, use isRollBack boolean to enforce this explicitly
 	needToUpdate := currentManifestId < targetManifestId && !isRollBack
-	needToUpdate2 := currentManifestId > 0 && currentManifestId == targetManifestId && (len(currentBrokenMap) < len(*brokenMappings) || !currentBrokenMap.IsSame(*brokenMappings))
+	needToUpdate2 := currentManifestId > 0 && currentManifestId == targetManifestId && (len(currentBrokenMap) < len(*brokenMappingsRO) || !currentBrokenMap.IsSame(*brokenMappingsRO))
 
 	if needToUpdate {
 		// This section will set the router's internal broken map and last known target manifest to the values
@@ -432,7 +433,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 			c.brokenMapping.IsSame(currentBrokenMap) {
 			// things were same as before
 			c.lastKnownTgtManifest = manifest
-			c.brokenMapping = *brokenMappings
+			c.brokenMapping = brokenMappingsRO.Clone()
 			c.brokenMappingIdx = c.brokenMapping.CreateLookupIndex()
 		} else if checkManifestId == targetManifestId {
 			// Target manifest got bumped up between the rlock and lock
@@ -449,7 +450,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappings *metadata.Co
 		}
 		if checkManifestId == targetManifestId {
 			// Only consolidate if the router's view of the target is agreed
-			c.brokenMapping.Consolidate(*brokenMappings)
+			c.brokenMapping.Consolidate(*brokenMappingsRO)
 		}
 		c.brokenDenyMtx.Unlock()
 	}
@@ -477,7 +478,7 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 	isMigrationMode := c.collectionMode.IsMigrationOn()
 	c.mappingMtx.RUnlock()
 
-	namespace := wrappedMCReq.SrcColNamespace
+	namespace := wrappedMCReq.GetSourceCollectionNamespace()
 
 	var latestSourceManifest *metadata.CollectionsManifest
 	var latestTargetManifest *metadata.CollectionsManifest
@@ -624,7 +625,7 @@ func (c *CollectionsRouter) implicitMap(namespace *base.CollectionNamespace, lat
 }
 
 func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, latestTargetManifest *metadata.CollectionsManifest, eventForMigration *mcc.UprEvent) (manifestId uint64, colIds []uint32, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, err error) {
-	srcNamespace := wrappedMCReq.SrcColNamespace
+	srcNamespace := wrappedMCReq.GetSourceCollectionNamespace()
 	manifestId = latestTargetManifest.Uid()
 	var matchedNamespaces metadata.CollectionNamespaceMapping
 
@@ -661,7 +662,9 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 				unableToFilterCnt++
 				c.ignoreDataFunc(errMCReqMap[key])
 			}
+			wrappedMCReq.SiblingReqsMtx.RLock()
 			totalInstances := len(wrappedMCReq.SiblingReqs) + 1
+			wrappedMCReq.SiblingReqsMtx.RUnlock()
 			if totalInstances == unableToFilterCnt {
 				// The original req + the siblings were all not able be replicated
 				err = base.ErrorIgnoreRequest
@@ -730,7 +733,9 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 				if len(tgtNamespaces) == 0 {
 					continue
 				}
+				wrappedMCReq.ColInfoMtx.Lock()
 				wrappedMCReq.ColInfo.TargetNamespace = tgtNamespaces[0]
+				wrappedMCReq.ColInfoMtx.Unlock()
 				break
 			}
 		}
@@ -1076,7 +1081,7 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	c.mappingMtx.RLock()
 	// When raising an ignore event, prevent the namespace from being recycled
 	sourceNamespace := &base.CollectionNamespace{}
-	*sourceNamespace = *(wrappedMcr.SrcColNamespace)
+	*sourceNamespace = *(wrappedMcr.GetSourceCollectionNamespace())
 	var targetNamespaces []*base.CollectionNamespace
 	targetNamespaces = append(targetNamespaces, sourceNamespace) // for implicit mapping
 	cachedRules := c.cachedRules.Clone()
@@ -1086,14 +1091,17 @@ func (c *CollectionsRouter) recordUnroutableRequest(req interface{}) {
 	if !modes.IsImplicitMapping() {
 		targetNamespaces = targetNamespaces[:0]
 		if modes.IsMigrationOn() {
+			wrappedMcr.ColInfoMtx.RLock()
 			if wrappedMcr.ColInfo == nil || wrappedMcr.ColInfo.TargetNamespace == nil {
 				// This happens if explicitMap() was not called due unable to find a collection manifest agent
 				// to do the mapping, which can only happen during a replication removal situation
+				wrappedMcr.ColInfoMtx.RUnlock()
 				return
 			}
 			// Make a copy to prevent namespace from being recycled
 			targetNsCopy := &base.CollectionNamespace{}
 			*targetNsCopy = *(wrappedMcr.ColInfo.TargetNamespace)
+			wrappedMcr.ColInfoMtx.RUnlock()
 			targetNamespaces = append(targetNamespaces, targetNsCopy)
 		} else {
 			targetNamespaces, err = cachedRules.GetPotentialTargetNamespaces(sourceNamespace)
@@ -1156,8 +1164,13 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 		return
 	}
 
+	wrappedMcr.ColInfoMtx.RLock()
+	colId := wrappedMcr.ColInfo.ColId
+	manifestId := wrappedMcr.ColInfo.ManifestId
+	wrappedMcr.ColInfoMtx.RUnlock()
+
 	c.brokenDenyMtx.Lock()
-	_, _, findErr := c.lastKnownTgtManifest.GetScopeAndCollectionName(wrappedMcr.ColInfo.ColId)
+	_, _, findErr := c.lastKnownTgtManifest.GetScopeAndCollectionName(colId)
 	if findErr == nil {
 		// If this function hits here given the wrappedMCR and it is actually found using lastKnownTgtManifest
 		// then it means that this is being called by downstream XMEM reporting back saying that the target KV does
@@ -1183,7 +1196,7 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 			}
 		}
 		if !allAlreadyExist && c.logger.GetLogLevel() > log.LogLevelDebug {
-			c.logger.Debugf("Based on target manifest %v brokenmap: %v", wrappedMcr.ColInfo.ManifestId, c.brokenMapping.String())
+			c.logger.Debugf("Based on target manifest %v brokenmap: %v", manifestId, c.brokenMapping.String())
 		}
 	}
 	if !allAlreadyExist {
@@ -1191,7 +1204,7 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 		raiseBrokenEvent = true
 	}
 	routingInfo.BrokenMap = c.brokenMapping.Clone()
-	routingInfo.TargetManifestId = wrappedMcr.ColInfo.ManifestId
+	routingInfo.TargetManifestId = manifestId
 	c.brokenDenyMtx.Unlock()
 
 	if raiseBrokenEvent {
@@ -1289,9 +1302,9 @@ func (c CollectionsRoutingMap) startOrStopAll(start bool) error {
 	}
 }
 
-func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMaps *metadata.CollectionNamespaceMapping, targetManifestId uint64, isRollBack bool) {
+func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMapsRO *metadata.CollectionNamespaceMapping, targetManifestId uint64, isRollBack bool) {
 	for _, collectionsRouter := range c {
-		collectionsRouter.UpdateBrokenMappingsPair(brokenMaps, targetManifestId, isRollBack)
+		collectionsRouter.UpdateBrokenMappingsPair(brokenMapsRO, targetManifestId, isRollBack)
 	}
 }
 
@@ -1482,9 +1495,13 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 	wrapped_req.Start_time = time.Now()
 
 	// this means implicit routing only for now
+	wrapped_req.SrcColNamespaceMtx.Lock()
 	wrapped_req.SrcColNamespace = wrappedEvent.ColNamespace
+	wrapped_req.SrcColNamespaceMtx.Unlock()
 
+	wrapped_req.ColInfoMtx.Lock()
 	wrapped_req.ColInfo = router.targetColInfoPool.Get()
+	wrapped_req.ColInfoMtx.Unlock()
 
 	return wrapped_req, nil
 }
@@ -1638,7 +1655,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 
 	collectionMode := router.collectionModes.Get()
 	if collectionMode.IsImplicitMapping() &&
-		(mcRequest.SrcColNamespace == nil || mcRequest.SrcColNamespace.IsDefault()) {
+		(mcRequest.GetSourceCollectionNamespace() == nil || mcRequest.GetSourceCollectionNamespace().IsDefault()) {
 		colIds = append(colIds, 0)
 	} else {
 		var backfillPersistHadErr bool
@@ -1650,7 +1667,9 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 		// If backfillPersistHadErr is set, then it is:
 		// 1. Safe to re-raise routingUpdate, as each routingUpdate will try to persist again
 		// 2. NOT safe to ignore data - as ignoring data means throughSeqno will move forward
+		mcRequest.ColInfoMtx.Lock()
 		mcRequest.ColInfo.ManifestId = manifestId
+		mcRequest.ColInfoMtx.Unlock()
 		if err != nil {
 			if err == base.ErrorIgnoreRequest && !backfillPersistHadErr {
 				if router.Logger().GetLogLevel() >= log.LogLevelDebug {
@@ -1700,15 +1719,19 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 			if err != nil {
 				return err
 			}
+			firstReq.SiblingReqsMtx.Lock()
 			firstReq.SiblingReqs = append(firstReq.SiblingReqs, reqToProcess)
+			firstReq.SiblingReqsMtx.Unlock()
 		}
 
+		reqToProcess.ColInfoMtx.Lock()
 		reqToProcess.ColInfo.ColId = colId
 		// no need to truncate if we use the leb128CidLen
 		leb128Cid, leb128CidLen, err := base.NewUleb128(colId, router.dataPool.GetByteSlice, true /*truncate*/)
 		if err != nil {
 			err = fmt.Errorf("LEB encoding for collection ID %v error: %v", colId, err)
 			router.dataPool.PutByteSlice(leb128Cid)
+			reqToProcess.ColInfoMtx.Unlock()
 			return err
 		}
 		totalLen := len(reqToProcess.Req.Key) + leb128CidLen
@@ -1730,6 +1753,7 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 		if migrationNamespaceMap != nil {
 			reqToProcess.ColInfo.TargetNamespace = migrationNamespaceMap[colId]
 		}
+		reqToProcess.ColInfoMtx.Unlock()
 	}
 	if len(colIds) > 1 {
 		vbno := firstReq.Req.VBucket
@@ -1862,11 +1886,11 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 
 	pair, ok := settings[metadata.BrokenMappingsUpdateKey].([]interface{})
 	if ok && len(pair) == 3 {
-		brokenMappings, ok2 := pair[0].(*metadata.CollectionNamespaceMapping)
+		brokenMappingsRO, ok2 := pair[0].(*metadata.CollectionNamespaceMapping)
 		targetManifestId, ok := pair[1].(uint64)
 		isRollBack, ok3 := pair[2].(bool)
 		if ok && ok2 && ok3 && router.Router.IsStartable() {
-			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappings, targetManifestId, isRollBack)
+			router.collectionsRouting.UpdateBrokenMappingsPair(brokenMappingsRO, targetManifestId, isRollBack)
 		}
 	}
 
@@ -1885,7 +1909,9 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 	newReq := router.mcRequestPool.Get()
 	newReq.Req = &mc.MCRequest{}
+	newReq.ColInfoMtx.Lock()
 	newReq.ColInfo = nil
+	newReq.ColInfoMtx.Unlock()
 	return newReq, nil
 }
 
@@ -1929,12 +1955,15 @@ func (router *Router) recycleDataObj(obj interface{}) {
 	case *base.WrappedMCRequest:
 		if router.mcRequestPool != nil {
 			req := obj.(*base.WrappedMCRequest)
+			req.SrcColNamespaceMtx.Lock()
 			if req.SrcColNamespace != nil {
 				req.SrcColNamespace.ScopeName = ""
 				req.SrcColNamespace.CollectionName = ""
 				router.dcpObjRecycler(req.SrcColNamespace)
 			}
+			req.SrcColNamespaceMtx.Unlock()
 
+			req.ColInfoMtx.Lock()
 			if req.ColInfo != nil && router.targetColInfoPool != nil {
 				if req.ColInfo.ColIDPrefixedKeyLen > 0 && router.dataPool != nil {
 					req.ColInfo.ColIDPrefixedKeyLen = 0
@@ -1944,6 +1973,7 @@ func (router *Router) recycleDataObj(obj interface{}) {
 				req.ColInfo.ManifestId = 0
 				router.targetColInfoPool.Put(req.ColInfo)
 			}
+			req.ColInfoMtx.Unlock()
 			router.mcRequestPool.Put(obj.(*base.WrappedMCRequest))
 		}
 	default:

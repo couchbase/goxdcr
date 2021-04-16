@@ -26,6 +26,9 @@ var ErrorSourceDefaultCollectionDNE = errors.New("Source bucket's default collec
 
 func DelOpConsideredPass(err error) bool {
 	if err == ErrorRevisionMismatch || (err != nil && strings.Contains(err.Error(), MetaKVFailedAfterMaxTriesBaseString)) {
+		if err != nil {
+			fmt.Printf("ND: err is not considered pass: %v\n", err)
+		}
 		return false
 	}
 	return true

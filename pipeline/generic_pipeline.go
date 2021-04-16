@@ -744,7 +744,9 @@ func (genericPipeline *GenericPipeline) Layout() string {
 	footer := "-----------------------------"
 	content := ""
 	for _, sourceNozzle := range genericPipeline.Sources() {
-		dcpSection := fmt.Sprintf("\t%s:{vbList=%v}\n", sourceNozzle.Id(), sourceNozzle.(*parts.DcpNozzle).GetVBList())
+		vbsList, doneFunc := sourceNozzle.ResponsibleVBs()
+		dcpSection := fmt.Sprintf("\t%s:{vbList=%v}\n", sourceNozzle.Id(), vbsList)
+		doneFunc()
 		router := sourceNozzle.Connector().(*parts.Router)
 		routerSection := fmt.Sprintf("\t\t%s :{\nroutingMap=%v}\n", router.Id(), router.RoutingMapByDownstreams())
 		downstreamParts := router.DownStreams()

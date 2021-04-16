@@ -8,8 +8,6 @@
 
 package common
 
-import ()
-
 //Nozzle models the openning that data streaming out of the source system
 //and the outlet where the data flowing into the target system.
 //
@@ -32,8 +30,8 @@ type Nozzle interface {
 	//IsOpen returns true if the nozzle is open; returns false if the nozzle is closed
 	IsOpen() bool
 
-	// Returns a list of its responsible VBs (Read-only)
-	ResponsibleVBs() []uint16
+	// Returns a list of its responsible VBs (Read-only) and unlocker when done
+	ResponsibleVBs() ([]uint16, func())
 
 	// To avoid garbage
 	RecycleDataObj(obj interface{})

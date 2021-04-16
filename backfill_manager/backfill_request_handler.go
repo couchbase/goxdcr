@@ -590,10 +590,11 @@ func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 		b.backfillPipelineTotalVBsDone = 0
 		dcp_parts := pipeline.Sources()
 		for _, dcp := range dcp_parts {
-			vbs := dcp.ResponsibleVBs()
+			vbs, doneFunc := dcp.ResponsibleVBs()
 			for _, vb := range vbs {
 				b.backfillPipelineVBsDone[vb] = false
 			}
+			doneFunc()
 		}
 		atomic.StoreUint32(&b.backfillPipelineAttached, 1)
 	} else if pipeline.Type() == common.MainPipeline {

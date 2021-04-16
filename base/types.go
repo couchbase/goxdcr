@@ -621,17 +621,21 @@ type TargetCollectionInfo struct {
 }
 
 type WrappedMCRequest struct {
-	Seqno              uint64
-	Req                *gomemcached.MCRequest
-	Start_time         time.Time
-	UniqueKey          string
-	SrcColNamespace    *CollectionNamespace
-	ColInfo            *TargetCollectionInfo
-	SlicesToBeReleased [][]byte
+	Seqno                 uint64
+	Req                   *gomemcached.MCRequest
+	Start_time            time.Time
+	UniqueKey             string
+	SrcColNamespace       *CollectionNamespace
+	SrcColNamespaceMtx    sync.RWMutex
+	ColInfo               *TargetCollectionInfo
+	ColInfoMtx            sync.RWMutex
+	SlicesToBeReleased    [][]byte
+	SlicesToBeReleasedMtx sync.RWMutex
 
 	// If a single source mutation is translated to multiple target requests, the additional ones are listed here
-	SiblingReqs  []*WrappedMCRequest
-	RetryCRCount int
+	SiblingReqs    []*WrappedMCRequest
+	SiblingReqsMtx sync.RWMutex
+	RetryCRCount   int
 }
 
 func (req *WrappedMCRequest) ConstructUniqueKey() {
@@ -640,6 +644,7 @@ func (req *WrappedMCRequest) ConstructUniqueKey() {
 	buffer.Write(req.Req.Extras[8:16])
 	req.UniqueKey = buffer.String()
 
+	req.SiblingReqsMtx.RLock()
 	if len(req.SiblingReqs) > 0 {
 		for _, sibling := range req.SiblingReqs {
 			if sibling != nil {
@@ -647,15 +652,24 @@ func (req *WrappedMCRequest) ConstructUniqueKey() {
 			}
 		}
 	}
+	req.SiblingReqsMtx.RUnlock()
 }
 
 // Returns 0 if no collection is used
 func (req *WrappedMCRequest) GetManifestId() uint64 {
+	req.ColInfoMtx.RLock()
+	defer req.ColInfoMtx.RUnlock()
 	if req != nil && req.ColInfo != nil {
 		return req.ColInfo.ManifestId
 	} else {
 		return 0
 	}
+}
+
+func (req *WrappedMCRequest) GetSourceCollectionNamespace() *CollectionNamespace {
+	req.SrcColNamespaceMtx.RLock()
+	defer req.SrcColNamespaceMtx.RUnlock()
+	return req.SrcColNamespace
 }
 
 type McRequestMap map[string]*WrappedMCRequest

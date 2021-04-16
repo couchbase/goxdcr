@@ -1536,7 +1536,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.DOCS_CLONED_METRIC] = docs_cloned
 
 		// VB specific stats
-		listOfVbs := dcp_part.ResponsibleVBs()
+		listOfVbs, doneFunc := dcp_part.ResponsibleVBs()
 		for _, i := range listOfVbs {
 			r_collector.routerVbsIdMap[i] = conn.Id()
 			metricsMap := make(map[string]interface{})
@@ -1547,6 +1547,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 			}
 			r_collector.vbBasedMetric[i] = metricsMap
 		}
+		doneFunc()
 
 		r_collector.component_map[conn.Id()] = metric_map
 	}

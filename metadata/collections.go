@@ -961,6 +961,7 @@ func (c CollectionNamespaceList) Less(i, j int) bool {
 	return (*(c[i])).LessThan(*(c[j]))
 }
 
+// NOTE: sort.Sort performs pivots on list
 func SortCollectionsNamespaceList(list CollectionNamespaceList) CollectionNamespaceList {
 	sort.Sort(list)
 	return list
@@ -978,13 +979,14 @@ func (c CollectionNamespaceList) String() string {
 	return buffer.String()
 }
 
-func (c CollectionNamespaceList) IsSame(other CollectionNamespaceList) bool {
-	if len(c) != len(other) {
+func (c CollectionNamespaceList) IsSame(otherRO CollectionNamespaceList) bool {
+	if len(c) != len(otherRO) {
 		return false
 	}
 
-	aList := SortCollectionsNamespaceList(c)
-	bList := SortCollectionsNamespaceList(other)
+	// IsSame() is used often as readers ... pass in clones to prevent sort.Sort as it pivots
+	aList := SortCollectionsNamespaceList(c.Clone())
+	bList := SortCollectionsNamespaceList(otherRO.Clone())
 
 	for i, col := range aList {
 		if *col != *bList[i] {
@@ -1001,7 +1003,7 @@ func (c CollectionNamespaceList) IsSubset(other CollectionNamespaceList) bool {
 		return false
 	}
 
-	cList := SortCollectionsNamespaceList(c)
+	cList := SortCollectionsNamespaceList(c.Clone())
 	otherList := SortCollectionsNamespaceList(other)
 
 	i := 0 // for other
@@ -1047,14 +1049,15 @@ func (c CollectionNamespaceList) Contains(namespace *base.CollectionNamespace) b
 }
 
 // Caller should have called IsSame() before doing consolidate
-func (c *CollectionNamespaceList) Consolidate(other CollectionNamespaceList) {
+func (c *CollectionNamespaceList) Consolidate(otherRO CollectionNamespaceList) {
 	aMissingAction := func(item *base.CollectionNamespace) {
 		*c = append(*c, item)
 	}
 
-	c.diffOrConsolidate(other, aMissingAction, nil /*bMissingAction*/)
+	c.diffOrConsolidate(otherRO.Clone(), aMissingAction, nil /*bMissingAction*/)
 }
 
+// Diff will make sure that both "c" and "other" are not modified
 func (c CollectionNamespaceList) Diff(other CollectionNamespaceList) (added, removed CollectionNamespaceList) {
 	aMissingAction := func(item *base.CollectionNamespace) {
 		added = append(added, item)
@@ -1064,11 +1067,13 @@ func (c CollectionNamespaceList) Diff(other CollectionNamespaceList) (added, rem
 		removed = append(removed, item)
 	}
 
-	c.diffOrConsolidate(other, aMissingAction, bMissingAction)
+	clone := c.Clone()
+	clone.diffOrConsolidate(other.Clone(), aMissingAction, bMissingAction)
 	return
 }
 
 func (c *CollectionNamespaceList) diffOrConsolidate(other CollectionNamespaceList, aMissingAction, bMissingAction func(item *base.CollectionNamespace)) {
+	// Note SortCollectionsNamespaceList() modifies the elements - so Diff() or Consolidate() should take preventative measures
 	aList := SortCollectionsNamespaceList(*c)
 	bList := SortCollectionsNamespaceList(other)
 
@@ -1475,7 +1480,9 @@ func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(uprEvent *mcc
 		}
 
 		if match {
+			mcReq.SrcColNamespaceMtx.Lock()
 			mcReq.SrcColNamespace = k.GetCollectionNamespace()
+			mcReq.SrcColNamespaceMtx.Unlock()
 			matchedNamespaces[k] = v
 		}
 	}
@@ -1543,14 +1550,14 @@ func (c *CollectionNamespaceMapping) GetSubsetBasedOnSpecifiedTargets(targetScop
 	return
 }
 
-func (c CollectionNamespaceMapping) IsSame(other CollectionNamespaceMapping) bool {
-	return c.IsSubset(other) && other.IsSubset(c)
+func (c CollectionNamespaceMapping) IsSame(otherRO CollectionNamespaceMapping) bool {
+	return c.IsSubset(otherRO) && otherRO.IsSubset(c)
 }
 
 // This means if other contains everything in c
-func (c CollectionNamespaceMapping) IsSubset(other CollectionNamespaceMapping) bool {
+func (c CollectionNamespaceMapping) IsSubset(otherRO CollectionNamespaceMapping) bool {
 	for src, tgtList := range c {
-		_, _, otherTgtList, exists := other.Get(src.CollectionNamespace, nil)
+		_, _, otherTgtList, exists := otherRO.Get(src.CollectionNamespace, nil)
 		if !exists {
 			return false
 		}
@@ -1591,13 +1598,13 @@ func (c *CollectionNamespaceMapping) Delete(subset CollectionNamespaceMapping) (
 	return
 }
 
-func (c *CollectionNamespaceMapping) Consolidate(other CollectionNamespaceMapping) {
-	for otherSrc, otherTgtList := range other {
-		srcPtr, _, tgtList, exists := c.Get(otherSrc.CollectionNamespace, nil)
+func (c *CollectionNamespaceMapping) Consolidate(otherRO CollectionNamespaceMapping) {
+	for otherSrcRO, otherTgtListRO := range otherRO {
+		srcPtr, _, tgtList, exists := c.Get(otherSrcRO.CollectionNamespace, nil)
 		if !exists {
-			(*c)[otherSrc] = otherTgtList.Clone()
-		} else if !tgtList.IsSame(otherTgtList) {
-			tgtList.Consolidate(otherTgtList)
+			(*c)[otherSrcRO] = otherTgtListRO.Clone()
+		} else if !tgtList.IsSame(otherTgtListRO) {
+			tgtList.Consolidate(otherTgtListRO)
 			(*c)[srcPtr] = tgtList
 		}
 	}

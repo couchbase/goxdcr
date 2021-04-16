@@ -97,7 +97,7 @@ func brhMockSourceNozzles() map[string]commonReal.Nozzle {
 	for i := uint16(0); i < base.NumberOfVbs; i++ {
 		vbsList = append(vbsList, i)
 	}
-	dcpNozzle.On("ResponsibleVBs").Return(vbsList)
+	dcpNozzle.On("ResponsibleVBs").Return(vbsList, func() {})
 
 	retMap := make(map[string]commonReal.Nozzle)
 	retMap[nozzleId] = dcpNozzle
