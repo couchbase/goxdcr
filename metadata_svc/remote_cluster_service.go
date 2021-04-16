@@ -383,6 +383,12 @@ const (
 	refreshAbortAcknowledged = 2
 )
 
+func (agent *RemoteClusterAgent) Id() string {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+	return agent.reference.Id()
+}
+
 func (agent *RemoteClusterAgent) GetReferenceClone() *metadata.RemoteClusterReference {
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
@@ -3022,7 +3028,7 @@ func (service *RemoteClusterService) delRemoteAgent(agent *RemoteClusterAgent, d
 		return nil, errors.New("Nil agent provided")
 	}
 
-	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("delRemoteAgent([%v], %v)", agent, delFromMetaKv), base.DiagInternalThreshold)
+	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("delRemoteAgent([%v], %v)", agent.Id(), delFromMetaKv), base.DiagInternalThreshold)
 	defer stopFunc()
 
 	clonedCopy, err := agent.DeleteReference(delFromMetaKv)
