@@ -155,9 +155,6 @@ func StartReplicationManager(sourceKVHost string,
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
 		go pollStdin()
 
-		// initialize constants
-		initConstants(xdcr_topology_svc, internal_settings_svc)
-
 		// Take in utilities
 		replication_mgr.utils = utilitiesIn
 
@@ -206,7 +203,7 @@ func StartReplicationManager(sourceKVHost string,
 	})
 }
 
-func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_settings_svc service_def.InternalSettingsSvc) {
+func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_settings_svc service_def.InternalSettingsSvc) {
 	// get cluster version
 	version, err := xdcr_topology_svc.MyClusterVersion()
 	if err != nil {

@@ -110,6 +110,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
+
+	rm.InitConstants(top_svc, internalSettings_svc)
+
 	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
@@ -157,8 +161,6 @@ func main() {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
 		}
-
-		internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
 
 		checkpointsService := metadata_svc.NewCheckpointsService(metakv_svc, nil, utils)
 		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)

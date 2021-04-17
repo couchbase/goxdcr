@@ -227,7 +227,8 @@ function runTestCase {
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt))
 	runDataLoad
 	# After running I/O, router should raise a repaired message
-	sleep 10
+	# RACE detector let it wait longer
+	sleep 20
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
 	validateBrokenMapDoesNotExist "C1"
 
