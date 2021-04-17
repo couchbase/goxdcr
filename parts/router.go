@@ -226,6 +226,7 @@ type CollectionsRouter struct {
 
 	waitingForFirstMutation uint32
 	startIdleKicker         *time.Timer
+	startIdleKickerMtx      sync.RWMutex
 }
 
 // A collection router is critically important to not only route to the target collection, but
@@ -456,12 +457,14 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappingsRO *metadata.
 	}
 
 	atomic.StoreUint32(&c.waitingForFirstMutation, 1)
+	c.startIdleKickerMtx.Lock()
 	c.startIdleKicker = time.AfterFunc(10*time.Second, func() {
 		latestTargetManifest, err := c.collectionsManifestSvc.GetSpecificTargetManifest(c.spec, math.MaxUint64)
 		if err == nil {
 			c.handleNewTgtManifestChanges(latestTargetManifest)
 		}
 	})
+	c.startIdleKickerMtx.Unlock()
 }
 
 // No-Concurrent call
@@ -1236,7 +1239,9 @@ func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *
 
 func (c *CollectionsRouter) checkAndDisableFirstMutationKicker() {
 	if atomic.LoadUint32(&c.waitingForFirstMutation) == 1 && atomic.CompareAndSwapUint32(&c.waitingForFirstMutation, 1, 0) {
+		c.startIdleKickerMtx.RLock()
 		c.startIdleKicker.Stop()
+		c.startIdleKickerMtx.RUnlock()
 	}
 }
 
