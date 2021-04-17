@@ -1017,12 +1017,31 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 	}
 
 	modes := repSettings.GetCollectionModes()
-	if modes.IsMigrationOn() && !vbTasksMapExists {
-		// Main pipeline that requires DCP to run a gomemcached filter of just the default collection
-		vbTasksMap = createMigrationVBTasksMap()
-		dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(*metadata.VBTasksMapType)
+	if modes.IsMigrationOn() {
 		checkIfNeedOso = true
-		osoCheckMap = vbTasksMap.(*metadata.VBTasksMapType)
+		if !vbTasksMapExists {
+			// Main pipeline that requires DCP to run a gomemcached filter of just the default collection
+			vbTasksMap = createMigrationVBTasksMap()
+			dcpNozzleSettings[parts.DCP_VBTasksMap] = vbTasksMap.(*metadata.VBTasksMapType)
+			osoCheckMap = vbTasksMap.(*metadata.VBTasksMapType)
+		} else {
+			// Backfill tasks are composed when XDCR detects a change in target manifest, diffs and find the new
+			// target collections that need to be backfilled. This can occur either on the router or the backfillMgr
+			// Normally, if vbTasksMap is composed by backfillMgr discovering new target manifests and diffing,
+			// and then creating the backfill spec, then things will work fine
+			// However, under extremely slow running or busy system (such as when golang race detector is running),
+			// it is possible that the main pipeline's router can race against the backfillMgr. Both of them will
+			// try to raise the backfill task. However, router's limitation is that it raises the tasks with
+			// source namespace type of SourceCollectionNamespace instead of SourceDefaultCollectionFilter
+			// because migration mode was not built into the router in the first place
+			// This will lead to DCP trying to convert a "_default.<filterExpr>" into a namespace and try to find it
+			// in the manifest via ToDcpNozzleTask, and cause DCP to have issues starting stream requests
+			// Since that migration mode is steady-state and non-changing, this ExportAsMigration() call will ensure
+			// that even in the case the router race wins, the vbTasks will be able to converted to a valid streamreq
+			dcpOnlyMigrationTaskMap := vbTasksMap.(*metadata.VBTasksMapType).ExportAsMigration()
+			dcpNozzleSettings[parts.DCP_VBTasksMap] = dcpOnlyMigrationTaskMap
+			osoCheckMap = dcpOnlyMigrationTaskMap
+		}
 	}
 
 	if !modes.IsOsoOn() {

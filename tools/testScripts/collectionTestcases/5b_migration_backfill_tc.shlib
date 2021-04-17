@@ -121,6 +121,8 @@ function runTestCase {
 	# 1412 items total for the above filters
 	checkItemCnt "C2" "B2" 1412
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
+	# No error converting DCP task
+	validateInternalLogWithInstance "C1" "$DCP_CONVERT_ERR_MSG" 0
 
 	grepForPanics
 	validateXDCRCheckpoints "C1"

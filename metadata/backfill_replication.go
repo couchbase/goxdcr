@@ -538,6 +538,36 @@ func (v *VBTasksMapType) GetTopTasksOnlyClone() *VBTasksMapType {
 	return retMap
 }
 
+// ExportAsMigration For Backfill Pipelines, the VBTasksMap will be in the form of "filter" for
+// the source collection namespace
+// Migration will require the source namespace to be from default colletion
+// so this method will create a copy of the task and change the soure
+// namespace to from the default collection
+func (v *VBTasksMapType) ExportAsMigration() *VBTasksMapType {
+	convertedMap := NewVBTasksMap()
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for vb, tasks := range v.VBTasksMap {
+		if tasks == nil {
+			continue
+		}
+		tasks.mutex.RLock()
+		tasksList := NewBackfillTasks()
+		for _, oneTask := range tasks.List {
+			if oneTask == nil {
+				continue
+			}
+			convertedTask := oneTask.CloneForMigration()
+			tasksList.List = append(tasksList.List, convertedTask)
+		}
+		tasks.mutex.RUnlock()
+		if tasksList.Len() > 0 {
+			convertedMap.VBTasksMap[vb] = &tasksList
+		}
+	}
+	return convertedMap
+}
+
 func (v *VBTasksMapType) DebugString() string {
 	if v == nil {
 		return "nil VBTasksMapType"
@@ -1308,6 +1338,19 @@ func (b *BackfillTask) Clone() BackfillTask {
 	// Sha is automatically calculated
 	task := NewBackfillTask(&clonedTs, clonedList)
 	return *task
+}
+
+func (b *BackfillTask) CloneForMigration() *BackfillTask {
+	if b == nil {
+		return nil
+	}
+	b.mutex.RLock()
+	clonedTs := b.Timestamps.Clone()
+	defaultMigrationMapping := NewDefaultCollectionMigrationMapping()
+	b.mutex.RUnlock()
+
+	clonedMigrationTask := NewBackfillTask(&clonedTs, []CollectionNamespaceMapping{defaultMigrationMapping})
+	return clonedMigrationTask
 }
 
 // Takes the latestSrcManifest, create a filter for gomemcached
