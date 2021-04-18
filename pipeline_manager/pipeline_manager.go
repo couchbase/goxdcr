@@ -571,11 +571,15 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 			bp := rep_status.BackfillPipeline()
 			var bgWaitGrp *sync.WaitGroup
 			var bgErrMap base.ErrorMap
+			var bgErrMapMtx sync.RWMutex
 			if bp != nil {
-				bgWaitGrp := &sync.WaitGroup{}
+				bgWaitGrp = &sync.WaitGroup{}
 				stopBackfillPipelineInBg := func() {
 					defer bgWaitGrp.Done()
-					bgErrMap = pipelineMgr.StopBackfillPipeline(replId)
+					tempMap := pipelineMgr.StopBackfillPipeline(replId)
+					bgErrMapMtx.Lock()
+					bgErrMap = tempMap
+					bgErrMapMtx.Unlock()
 				}
 				bgWaitGrp.Add(1)
 				go stopBackfillPipelineInBg()
@@ -584,11 +588,13 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 			if bgWaitGrp != nil {
 				bgWaitGrp.Wait()
 			}
+			bgErrMapMtx.RLock()
 			if bgErrMap != nil {
 				for k, v := range bgErrMap {
 					errMap[k] = v
 				}
 			}
+			bgErrMapMtx.RUnlock()
 			if len(errMap) > 0 {
 				pipelineMgr.logger.Errorf("Received error(s) when stopping pipeline %v - %v\n", replId, base.FlattenErrorMap(errMap))
 				//pipeline failed to stopped gracefully in time. ignore the error.
