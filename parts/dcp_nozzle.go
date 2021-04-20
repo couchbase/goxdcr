@@ -1941,6 +1941,7 @@ func (dcp *DcpNozzle) getDcpDataChanLen() {
 
 }
 
+// The vbnos can be called at multiple places, such as GetSourceVBListPerPipeline, so ensure there's a lock
 func (dcp *DcpNozzle) ResponsibleVBs() ([]uint16, func()) {
 	dcp.vbnosMtx.RLock()
 	unlockFunc := func() {

@@ -961,7 +961,8 @@ func (c CollectionNamespaceList) Less(i, j int) bool {
 	return (*(c[i])).LessThan(*(c[j]))
 }
 
-// NOTE: sort.Sort performs pivots on list
+// NOTE: sort.Sort seems to pivot on the element passed in and since slice references share the same backend,
+// callers should be fixed to pass in clones to prevent concurrency issues
 func SortCollectionsNamespaceList(list CollectionNamespaceList) CollectionNamespaceList {
 	sort.Sort(list)
 	return list
@@ -1004,7 +1005,7 @@ func (c CollectionNamespaceList) IsSubset(other CollectionNamespaceList) bool {
 	}
 
 	cList := SortCollectionsNamespaceList(c.Clone())
-	otherList := SortCollectionsNamespaceList(other)
+	otherList := SortCollectionsNamespaceList(other.Clone())
 
 	i := 0 // for other
 	j := 0 // for c
