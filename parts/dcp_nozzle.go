@@ -1388,6 +1388,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 		if manifestErr != nil {
 			err = fmt.Errorf("When resuming backfill, unable to retrieve latest manifest. Err - %v", manifestErr)
 			dcp.handleGeneralError(err)
+			unlockSpecificVBTasksMap()
 			return
 		}
 
@@ -1396,6 +1397,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 				dcp.Id(), vbts.ManifestIDs.SourceManifestId, manifest.Uid())
 			// TODO - MB-45435 - quorum failover where source manifest rolls back
 			dcp.handleGeneralError(err)
+			unlockSpecificVBTasksMap()
 			return err
 		}
 
