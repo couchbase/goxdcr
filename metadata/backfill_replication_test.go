@@ -351,3 +351,26 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 
 	fmt.Println("============== Test case end: TestMergeTasksIntoSpec =================")
 }
+
+func TestSameAsWriteLock(t *testing.T) {
+	fmt.Println("============== Test case start: TestSameAsWriteLock =================")
+	fmt.Println("============== Test case end: TestSameAsWriteLock =================")
+	assert := assert.New(t)
+
+	startTs := base.VBTimestamp{}
+	endTs := base.VBTimestamp{Seqno: 100}
+	backfillTs := BackfillVBTimestamps{StartingTimestamp: &startTs, EndingTimestamp: &endTs}
+	oneTask := NewBackfillTask(&backfillTs, []CollectionNamespaceMapping{})
+
+	backfillTasks1 := NewBackfillTasks()
+	backfillTasks1.List = append(backfillTasks1.List, oneTask)
+	backfillTasks2 := NewBackfillTasks()
+	backfillTasks2.List = append(backfillTasks2.List, oneTask)
+
+	assert.True(backfillTasks1.SameAs(&backfillTasks2))
+	assert.True(backfillTasks1.SameAs(&backfillTasks2))
+
+	// locks should be unlocked so that lock here should succeed
+	backfillTasks1.mutex.Lock()
+	backfillTasks2.mutex.Lock()
+}

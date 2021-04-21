@@ -801,15 +801,13 @@ func (b *BackfillTasks) SameAs(other *BackfillTasks) bool {
 	for i := 0; i < bLen; i++ {
 		bElement, exists, unlockB := b.GetRO(i)
 		otherElem, otherExists, unlockOther := other.GetRO(i)
+		var same bool
 		if exists && otherExists {
-			if !bElement.SameAs(otherElem) {
-				unlockOther()
-				unlockB()
-				return false
-			}
-		} else {
-			unlockOther()
-			unlockB()
+			same = bElement.SameAs(otherElem)
+		}
+		unlockOther()
+		unlockB()
+		if !same {
 			return false
 		}
 	}
