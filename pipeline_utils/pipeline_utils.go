@@ -26,9 +26,8 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	ret := []uint16{}
 	sourceNozzles := pipeline.Sources()
 	for _, sourceNozzle := range sourceNozzles {
-		responsibleVBs, doneFunc := sourceNozzle.ResponsibleVBs()
+		responsibleVBs := sourceNozzle.ResponsibleVBs()
 		ret = append(ret, responsibleVBs...)
-		doneFunc()
 	}
 	return ret
 }

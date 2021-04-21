@@ -31,7 +31,7 @@ type Nozzle interface {
 	IsOpen() bool
 
 	// Returns a list of its responsible VBs (Read-only) and unlocker when done
-	ResponsibleVBs() ([]uint16, func())
+	ResponsibleVBs() []uint16
 
 	// To avoid garbage
 	RecycleDataObj(obj interface{})

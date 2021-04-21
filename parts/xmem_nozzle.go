@@ -666,8 +666,7 @@ type XmemNozzle struct {
 	// and after the data members have been initialized and set
 	stateLock sync.RWMutex
 
-	vbList    []uint16
-	vbListMtx sync.RWMutex
+	vbList []uint16
 
 	collectionEnabled uint32
 
@@ -3731,12 +3730,8 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 	return client, nil
 }
 
-func (xmem *XmemNozzle) ResponsibleVBs() ([]uint16, func()) {
-	xmem.vbListMtx.RUnlock()
-	unlockFunc := func() {
-		xmem.vbListMtx.RUnlock()
-	}
-	return xmem.vbList, unlockFunc
+func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
+	return xmem.vbList
 }
 
 // Should only be done during pipeline construction

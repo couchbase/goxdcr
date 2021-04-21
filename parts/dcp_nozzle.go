@@ -275,8 +275,7 @@ type DcpNozzle struct {
 
 	// the list of vbuckets that the dcp nozzle is responsible for
 	// this allows multiple  dcp nozzles to be created for a kv node
-	vbnos    []uint16
-	vbnosMtx sync.RWMutex
+	vbnos []uint16
 
 	// key - vb#
 	// value - first seqno seen with xattr
@@ -630,21 +629,6 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	vbTasksRaw, exists := settings[DCP_VBTasksMap]
 	if exists {
 		dcp.specificVBTasks = vbTasksRaw.(*metadata.VBTasksMapType)
-		// Take out any vb's that are not part of the tasks
-		var newVbList []uint16
-		dcp.vbnosMtx.RLock()
-		for _, vbno := range dcp.vbnos {
-			_, exists, unlockFunc := dcp.specificVBTasks.Get(vbno, false)
-			unlockFunc()
-			if exists {
-				newVbList = append(newVbList, vbno)
-			}
-		}
-		dcp.vbnosMtx.RUnlock()
-		dcp.vbnosMtx.Lock()
-		dcp.vbnos = newVbList
-		dcp.vbnosMtx.Unlock()
-
 		var atLeastOneMigrationTask bool
 		var allMigrationTasks bool
 
@@ -708,13 +692,10 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 }
 
 func (dcp *DcpNozzle) initializeUprHandshakeHelpers() {
-	vbList, doneFunc := dcp.ResponsibleVBs()
-
-	for _, vb := range vbList {
+	for _, vb := range dcp.ResponsibleVBs() {
 		dcp.vbHandshakeMap[vb] = &dcpStreamReqHelper{vbno: vb, dcp: dcp}
 		dcp.vbHandshakeMap[vb].initialize()
 	}
-	doneFunc()
 }
 
 func (dcp *DcpNozzle) Open() error {
@@ -862,7 +843,7 @@ func (dcp *DcpNozzle) closeUprStreamsWithTimeout() {
 func (dcp *DcpNozzle) closeUprStreams() error {
 	defer dcp.childrenWaitGrp.Done()
 
-	vbsList, doneFunc := dcp.ResponsibleVBs()
+	vbsList := dcp.ResponsibleVBs()
 	dcp.Logger().Infof("%v Closing dcp streams for vb=%v\n", dcp.Id(), vbsList)
 	errMap := make(map[uint16]error)
 	var uprFeed mcc.UprFeedIface
@@ -891,7 +872,6 @@ func (dcp *DcpNozzle) closeUprStreams() error {
 			dcp.Logger().Infof("%v skip closing of stream for vb %v since there is no active stream\n", dcp.Id(), vbno)
 		}
 	}
-	doneFunc()
 
 	if len(errMap) > 0 {
 		msg := fmt.Sprintf("Failed to close upr streams, err=%v\n", errMap)
@@ -1310,9 +1290,8 @@ func (dcp *DcpNozzle) startUprStreams() error {
 	defer dcp.childrenWaitGrp.Done()
 
 	var err error = nil
-	vbsList, vbsListDone := dcp.ResponsibleVBs()
+	vbsList := dcp.ResponsibleVBs()
 	dcp.Logger().Infof("%v: startUprStreams for %v...\n", dcp.Id(), vbsList)
-	vbsListDone()
 
 	init_ch := make(chan bool, 1)
 	init_ch <- true
@@ -1328,9 +1307,8 @@ func (dcp *DcpNozzle) startUprStreams() error {
 		case <-init_ch:
 			// dcp.GetVBList() returns the original vb list in dcp.
 			// hence a copy is needed when the list needs to be modified
-			vbsList, vbsListDone = dcp.ResponsibleVBs()
+			vbsList = dcp.ResponsibleVBs()
 			err = dcp.startUprStreams_internal(base.DeepCopyUint16Array(vbsList))
-			vbsListDone()
 			if err != nil {
 				return err
 			}
@@ -1524,14 +1502,13 @@ type stateCheckFunc func(state DcpStreamState) bool
 
 func (dcp *DcpNozzle) getDcpStreams(stateCheck stateCheckFunc) []uint16 {
 	ret := []uint16{}
-	vbsList, doneFunc := dcp.ResponsibleVBs()
+	vbsList := dcp.ResponsibleVBs()
 	for _, vb := range vbsList {
 		state, err := dcp.GetStreamState(vb)
 		if err == nil && stateCheck(state) {
 			ret = append(ret, vb)
 		}
 	}
-	doneFunc()
 	return ret
 }
 
@@ -1569,14 +1546,13 @@ func activeStateCheck(state DcpStreamState) bool {
 
 func (dcp *DcpNozzle) inactiveDcpStreamsWithState() map[uint16]DcpStreamState {
 	ret := make(map[uint16]DcpStreamState)
-	vbsList, doneFunc := dcp.ResponsibleVBs()
+	vbsList := dcp.ResponsibleVBs()
 	for _, vb := range vbsList {
 		state, err := dcp.GetStreamState(vb)
 		if err == nil && state != Dcp_Stream_Active && state != Dcp_Stream_Closed {
 			ret[vb] = state
 		}
 	}
-	doneFunc()
 	return ret
 }
 
@@ -1941,13 +1917,9 @@ func (dcp *DcpNozzle) getDcpDataChanLen() {
 
 }
 
-// The vbnos can be called at multiple places, such as GetSourceVBListPerPipeline, so ensure there's a lock
-func (dcp *DcpNozzle) ResponsibleVBs() ([]uint16, func()) {
-	dcp.vbnosMtx.RLock()
-	unlockFunc := func() {
-		dcp.vbnosMtx.RUnlock()
-	}
-	return dcp.vbnos, unlockFunc
+// This should be used for externally
+func (dcp *DcpNozzle) ResponsibleVBs() []uint16 {
+	return dcp.vbnos
 }
 
 func (dcp *DcpNozzle) checkDefaultCollectionExistence() error {
@@ -2061,11 +2033,9 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 		mccContext := &mcc.ClientContext{}
 		var vbSeqnoMap map[uint16]uint64
 
-		dcp.vbnosMtx.RLock()
 		for _, vb := range dcp.vbnos {
 			dcp.vbHighSeqnoMap[vb].SetSeqno(0)
 		}
-		dcp.vbnosMtx.RUnlock()
 
 		for _, collectionId := range collectionIds {
 			mccContext.CollId = collectionId
@@ -2074,7 +2044,6 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 				return fmt.Errorf("Unable to GetAllVbSeqnos %v\n", err)
 			}
 
-			dcp.vbnosMtx.RLock()
 			for _, vb := range dcp.vbnos {
 				highSeqno, exists := vbSeqnoMap[vb]
 				if !exists {
@@ -2085,7 +2054,6 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 					}
 				}
 			}
-			dcp.vbnosMtx.RUnlock()
 		}
 	}
 	return nil

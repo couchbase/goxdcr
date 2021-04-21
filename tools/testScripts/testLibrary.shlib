@@ -18,6 +18,7 @@ OSO_MODE_MSG="with OSO mode requested"
 OSO_BACKFILL_COUNT="oso_received=10000"
 DCP_CONVERT_ERR_MSG="Error converting VBTask to DCP Nozzle Task"
 BROKENEVENT_TYPE=3
+BACKFILL_PIPELINE_TORNDOWN_MSG="Background check task finished"
 
 # These should be imported after clusterRunProvision script
 
@@ -523,9 +524,9 @@ function validateBrokenMapEntry {
 	local targetCollectionName=$5
 
 	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
-	if (( $? == $GET_BROKEN_MAP_NOT_FOUND ));then
-	  exit 1
-  fi
+	if (($? == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
 	echo "Got entry ID: $?"
 }
 
@@ -537,8 +538,8 @@ function validateBrokenMapEntryDNE {
 	local targetCollectionName=$5
 
 	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
-	if (( ! $? == $GET_BROKEN_MAP_NOT_FOUND ));then
-	  echo "Found entry when not supposed to"
-	  exit 1
+	if ((!$? == $GET_BROKEN_MAP_NOT_FOUND)); then
+		echo "Found entry when not supposed to"
+		exit 1
 	fi
 }

@@ -1187,7 +1187,10 @@ func (tsTracker *ThroughSeqnoTrackerSvc) processGapSeqnos(vbno uint16, current_s
 	}
 	last_seen_seqno_obj.SetSeqnoWithoutLock(current_seqno)
 
-	if last_seen_seqno < current_seqno-1 {
+	// Only append gap seqno if current_seqno is greater than 0
+	// Otherwise, this will introduce a humongous gap (0 to MaxUint64) that can lead to
+	// eating up CPU cycles, and also lead to never-ending backfill pipelines
+	if current_seqno > 0 && last_seen_seqno < current_seqno-1 {
 		// If the current sequence number is not consecutive, then this means we have hit a gap. Store it in gap list.
 		tsTracker.vb_gap_seqno_list_map[vbno].appendSeqnos(last_seen_seqno+1, current_seqno-1)
 	}

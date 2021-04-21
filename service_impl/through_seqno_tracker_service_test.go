@@ -55,7 +55,7 @@ func setupMocks(pipeline *commonMock.Pipeline,
 
 	var vbList []uint16
 	vbList = append(vbList, 1)
-	sourceNozzle.On("ResponsibleVBs").Return(vbList, func() {})
+	sourceNozzle.On("ResponsibleVBs").Return(vbList)
 	sourceNozzle.On("Id").Return("TestNozzleId")
 	sourceNozzle.On("AsyncComponentEventListeners").Return(nil)
 	sourceNozzle.On("Connector").Return(nil)
