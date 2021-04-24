@@ -990,9 +990,13 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 
 	// Backfill pipeline should always run in low priority
 	settings := rep_status.SettingsMap()
+	// The settings here is a clone of the original setting + the custom settings called above
 	settings[metadata.PriorityKey] = base.PriorityTypeLow
 
 	errMap = bp.Start(settings)
+
+	// Clear the settings once passed to backfill pipeline to prevent from going to main pipeline
+	rep_status.ClearCustomSetting(parts.DCP_VBTasksMap)
 	if len(errMap) > 0 {
 		pipelineMgr.logger.Errorf("Failed to start the backfill pipeline %v", bp.InstanceId())
 	}
