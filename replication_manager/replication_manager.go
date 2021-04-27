@@ -160,7 +160,7 @@ func StartReplicationManager(sourceKVHost string,
 
 		// Start resolver_svc before the adminport and before starting any pipeline,
 		// since it will initialize the javascript function handler and start the resolverSvc that the pipeline needs
-		resolver_svc.Start(sourceKVHost, xdcrRestPort)
+		// resolver_svc.Start(sourceKVHost, xdcrRestPort)
 
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
