@@ -15,7 +15,7 @@ type PipelineMgrBackfillIface struct {
 }
 
 // BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair
-func (_m *PipelineMgrBackfillIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+func (_m *PipelineMgrBackfillIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error {
 	ret := _m.Called(topic, diffPair)
 
 	var r0 error

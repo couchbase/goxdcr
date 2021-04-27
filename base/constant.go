@@ -309,6 +309,7 @@ var ErrorExplicitMappingEnterpriseOnly = errors.New("Explicit Mapping is support
 var ErrorChunkedEncodingNotSupported = errors.New("Chunked encoding is not supported")
 var ErrorRBACNotSupportAtTarget = fmt.Errorf("The version of Couchbase software installed on the remote cluster does not support RBAC. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
 	VersionForRBACAndXattrSupport[0], VersionForRBACAndXattrSupport[1])
+var BrokenMappingUIString = "Found following destination collection(s) missing (and will not get replicated to):\n"
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

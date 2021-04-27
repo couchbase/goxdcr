@@ -899,17 +899,20 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		b.logger.Errorf("Unable to find spec %v - %v", spec.Id, err)
 		return
 	}
+
 	modes := spec.Settings.GetCollectionModes()
-	if modes.IsImplicitMapping() {
-		b.markNewSourceManifest(replId, newSourceManifest.Uid())
-		return
-	}
 
 	b.cacheMtx.RLock()
 	latestTgtManifestOrig := b.cacheSpecTargetMap[replId]
 	if latestTgtManifestOrig == nil {
-		b.logger.Warnf("%v Target has no manifest", replId)
+		if !modes.IsImplicitMapping() {
+			// If there is no target manifest, it means that the target cluster is a <7.0 cluster that does not
+			// have collections support. That also means that implicit mode is the only mode this replication can be in
+			// If it is explicit mode, then the above assumption is broken and we should show a warning
+			b.logger.Warnf("%v Target has no manifest", replId)
+		}
 		b.cacheMtx.RUnlock()
+		b.markNewSourceManifest(replId, newSourceManifest.Uid())
 		return
 	}
 	latestTgtManifestObj := latestTgtManifestOrig.Clone()
@@ -917,7 +920,28 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 	b.cacheMtx.RUnlock()
 
 	if latestTgtManifest == nil {
-		b.logger.Errorf("Unable to do explicit mapping diff for %v if target manifest is nil", spec.Id)
+		if !modes.IsImplicitMapping() {
+			// If there is no target manifest, it means that the target cluster is a <7.0 cluster that does not
+			// have collections support. That also means that implicit mode is the only mode this replication can be in
+			// If it is explicit mode, then the above assumption is broken and we should show a warning
+			b.logger.Errorf("Unable to do mapping diff for %v if target manifest is nil", spec.Id)
+		}
+		b.markNewSourceManifest(replId, newSourceManifest.Uid())
+		return
+	}
+
+	if modes.IsImplicitMapping() {
+		diffPair := metadata.CollectionNamespaceMappingsDiffPair{}
+
+		oldSrcToTargetMapping, _, _ := oldSourceManifest.ImplicitMap(latestTgtManifest)
+		srcToTargetMapping, _, _ := newSourceManifest.ImplicitMap(latestTgtManifest)
+
+		added, removed := oldSrcToTargetMapping.Diff(srcToTargetMapping)
+		diffPair.Added = added
+		diffPair.Removed = removed
+
+		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
+		b.markNewSourceManifest(replId, newSourceManifest.Uid())
 		return
 	}
 
@@ -926,7 +950,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		b.logger.Errorf("%v Error compiling explicit backfillReq: %v", spec.Id, err)
 		return
 	}
-	b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair)
+	b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
 	err = b.raiseBackfillReq(replId, diffPair, false, newSourceManifest.Uid())
 	if errMeansReqNeedsToBeRetried(err) {
 		req := BackfillRetryRequest{
@@ -982,6 +1006,12 @@ func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, n
 		}
 	}
 
+	if oldSourceManifest == nil {
+		b.cacheMtx.RLock()
+		oldSourceManifest = b.cacheSpecSourceMap[replId]
+		b.cacheMtx.RUnlock()
+	}
+
 	// Update cache
 	b.cacheMtx.Lock()
 	if sourceChanged {
@@ -1016,10 +1046,11 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 			return
 		}
 		backfillReq, skipRaiseBackfillReq = b.populateBackfillReqForExplicitMapping(replId, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest, spec, modes, backfillReq)
-		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, backfillReq.(metadata.CollectionNamespaceMappingsDiffPair))
+		backfillReqDiffPair := backfillReq.(metadata.CollectionNamespaceMappingsDiffPair)
+		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, backfillReqDiffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
 	} else {
 		backfillReq, diffPair, skipRaiseBackfillReq = b.populateBackfillReqForImplicitMapping(newTargetManifest, oldTargetManifest, newSourceManifest, spec)
-		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair)
+		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
 	}
 	if !skipRaiseBackfillReq {
 		err = b.raiseBackfillReq(replId, backfillReq, false, newSourceManifest.Uid())
@@ -1047,8 +1078,9 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 	}
 }
 
-func (b *BackfillMgr) notifyBackfillMappingStatusUpdateToEventMgr(replId string, sentPair metadata.CollectionNamespaceMappingsDiffPair) error {
-	err := b.pipelineMgr.BackfillMappingStatusUpdate(replId, &sentPair)
+// The srcManifestsDiff is needed to detect any removed source namespaces that are not part of the implicit mapping
+func (b *BackfillMgr) notifyBackfillMappingStatusUpdateToEventMgr(replId string, sentPair metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDiff []*metadata.CollectionsManifest) error {
+	err := b.pipelineMgr.BackfillMappingStatusUpdate(replId, &sentPair, srcManifestsDiff)
 	if err != nil {
 		// error could occur only if serializer is stopped which shouldn't happen in normal circumstances
 		b.logger.Warnf("Unable to raise BackfillMappingStatusUpdate %v", err)
@@ -1109,6 +1141,7 @@ func (b *BackfillMgr) populateBackfillReqForImplicitMapping(newTargetManifest *m
 }
 
 func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSourceManifest *metadata.CollectionsManifest, newSourceManifest *metadata.CollectionsManifest, oldTargetManifest *metadata.CollectionsManifest, newTargetManifest *metadata.CollectionsManifest, spec *metadata.ReplicationSpecification, modes base.CollectionsMgtType, backfillReq interface{}) (interface{}, bool) {
+	// TODO - revisit this logic - some of these may not be needed
 	if oldSourceManifest != nil && oldTargetManifest != nil && newSourceManifest != nil && newTargetManifest != nil {
 		// Both changed
 		diffPair, err := b.compileExplicitBackfillReq(spec, modes, oldSourceManifest, oldTargetManifest, newSourceManifest, newTargetManifest)

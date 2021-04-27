@@ -124,6 +124,7 @@ function runTestCase {
 	runDataLoad
 	sleep 5
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	sleep 10
 	# broken msg shouldn't have increased
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 	# mappingChanged msg should not have occurred

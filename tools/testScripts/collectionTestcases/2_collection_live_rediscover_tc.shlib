@@ -221,19 +221,22 @@ function runTestCase {
 	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
+	# Before running I/O, ckptMgr will raise a repaired message
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
 
-	# Before running I/O, router will not raise a repaired message
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt))
+	# Sometimes racey detection will detect collection manifest changes mid flight and raise more than one backfill
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
+
 	runDataLoad
 	# After running I/O, router should raise a repaired message
 	# RACE detector let it wait longer
 	sleep 20
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
+	#
+	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
 	validateBrokenMapDoesNotExist "C1"
 
 	# Under normal I/O load, these should happen closely together
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2)) $(($currentBackfillInstanceCnt + 3))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 2))
 	# No OSO because backfill 2 collections
 	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt))

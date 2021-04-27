@@ -22,7 +22,7 @@ func (_m *PipelineEventsManager) AddEvent(eventType base.EventInfoType, eventDes
 }
 
 // BackfillUpdateCb provides a mock function with given fields: diffPair
-func (_m *PipelineEventsManager) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+func (_m *PipelineEventsManager) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
 	ret := _m.Called(diffPair)
 
 	var r0 error

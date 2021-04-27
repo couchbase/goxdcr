@@ -1760,9 +1760,9 @@ function getBrokenMapEntryId {
 						local brokenMapTargetNamespace
 						brokenMapTargetNamespace=$(echo "$targetNamespace" | jq '.EventDesc')
 						if [[ "$brokenMapTargetNamespace" == "$requestedTgtNamespace" ]]; then
-							echo "Found requested brokenmap of $requestedSrcNamespace -> $requestedTgtNamespace"
 							# shellcheck disable=SC2001
 							returnEventId=$(echo "$oneTKey" | sed 's/"//g')
+							echo "Found requested brokenmap of $requestedSrcNamespace -> $requestedTgtNamespace with ID $returnEventId"
 							return $returnEventId
 						fi
 					done

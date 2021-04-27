@@ -286,7 +286,7 @@ func TestPipelineEventsMgr_DismissEvent_SingleScope_ThenRestore(t *testing.T) {
 	source, _ := base.NewCollectionNamespaceFromString("s1.c1")
 	target, _ := base.NewCollectionNamespaceFromString("s1t.c1t")
 	repairedPair.Added.AddSingleMapping(&source, &target)
-	eventsMgr.BackfillUpdateCb(&repairedPair)
+	eventsMgr.BackfillUpdateCb(&repairedPair, nil)
 
 	eventsList = eventsMgr.GetCurrentEvents()
 }

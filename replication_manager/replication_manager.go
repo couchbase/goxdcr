@@ -914,7 +914,6 @@ func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (r
 		if common.PipelineType(i) == common.MainPipeline {
 			// set error list, and broken mapping if any
 			rep_status.PopulateReplInfo(&replInfo, bypassUIErrorCodes, processErrorMsgForUI)
-
 		}
 
 		replInfos = append(replInfos, replInfo)

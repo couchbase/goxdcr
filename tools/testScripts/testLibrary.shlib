@@ -524,10 +524,11 @@ function validateBrokenMapEntry {
 	local targetCollectionName=$5
 
 	getBrokenMapEntryId "$cluster" "$sourceScopeName" "$sourceCollectionName" "$targetScopeName" "$targetCollectionName"
-	if (($? == $GET_BROKEN_MAP_NOT_FOUND)); then
+	local entryId=$?
+	if (($entryId == $GET_BROKEN_MAP_NOT_FOUND)); then
 		exit 1
 	fi
-	echo "Got entry ID: $?"
+	echo "Got entry ID: $entryId"
 }
 
 function validateBrokenMapEntryDNE {

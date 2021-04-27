@@ -79,12 +79,9 @@ func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *in
 	p.Mutex.RUnlock()
 	p.Mutex.Lock()
 
-	newEvent := &base.EventInfo{
-		EventId:     base.GetEventIdFromWell(idWell),
-		EventType:   base.BrokenMappingInfoType,
-		EventDesc:   "",
-		EventExtras: base.NewEventsMap(),
-	}
+	newEvent := base.NewEventInfo()
+	newEvent.EventId = base.GetEventIdFromWell(idWell)
+	newEvent.EventType = base.BrokenMappingInfoType
 	p.EventInfos = append(p.EventInfos, newEvent)
 	idx := len(p.EventInfos) - 1
 	event := p.EventInfos[idx]
@@ -102,7 +99,7 @@ type PipelineEventsManager interface {
 	ContainsEvent(eventId int) bool
 	DismissEvent(eventId int) error
 	ResetDismissedHistory()
-	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
+	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
 }
 
 // The pipeline events mgr's job is to handle the exporting of events and also remember the user's preference
@@ -117,6 +114,8 @@ type PipelineEventsMgr struct {
 
 	cachedBrokenMap        metadata.PipelineEventBrokenMap
 	updateBrokenMapEventCh chan bool
+
+	isMigrationMode bool
 }
 
 func NewPipelineEventsMgr(eventIdWell *int64, specId string, specGetter ReplicationSpecGetter, logger *log.CommonLogger, utils utilities.UtilsIface) *PipelineEventsMgr {
@@ -168,12 +167,11 @@ func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc str
 		eventExtras.Init()
 	}
 
-	newEvent := &base.EventInfo{
-		EventId:     base.GetEventIdFromWell(p.eventIdWell),
-		EventType:   eventType,
-		EventDesc:   eventDesc,
-		EventExtras: eventExtras,
-	}
+	newEvent := base.NewEventInfo()
+	newEvent.EventId = base.GetEventIdFromWell(p.eventIdWell)
+	newEvent.EventType = eventType
+	newEvent.EventDesc = eventDesc
+	newEvent.EventExtras = eventExtras
 
 	p.events.Mutex.Lock()
 	defer p.events.Mutex.Unlock()
@@ -205,13 +203,15 @@ func (p *PipelineEventsMgr) updateBrokenMapEvent() error {
 	stopFunc := p.utils.StartDiagStopwatch(fmt.Sprintf("updateBrokenMapEvent - %v", p.specId), base.ReplStatusExportBrokenMapTimeout)
 	defer stopFunc()
 
+	p.updateMigrationMode()
+
 	// As part of the update below, clear the booleans
 	p.cachedBrokenMap.MarkUpdated()
 
 	brokenMapEvent, doneFunc, delFunc := p.events.LockAndGetBrokenMapEventForEditing(p.eventIdWell)
 	defer doneFunc()
 
-	eventIsEmpty := p.cachedBrokenMap.ExportToEvent(brokenMapEvent, p.eventIdWell)
+	eventIsEmpty := p.cachedBrokenMap.ExportToEvent(brokenMapEvent, p.eventIdWell, p.isMigrationMode)
 	if eventIsEmpty {
 		delFunc()
 	}
@@ -351,6 +351,19 @@ func (p *PipelineEventsMgr) ResetDismissedHistory() {
 	p.cachedBrokenMap.ResetAllDismissedHistory()
 }
 
-func (p *PipelineEventsMgr) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
-	return p.cachedBrokenMap.UpdateWithNewDiffPair(diffPair)
+func (p *PipelineEventsMgr) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
+	return p.cachedBrokenMap.UpdateWithNewDiffPair(diffPair, srcManifestsDelta)
+}
+
+func (p *PipelineEventsMgr) updateMigrationMode() {
+	stopFunc := p.utils.StartDiagStopwatch(fmt.Sprintf("updateMigrationMode - %v", p.specId), base.DiagInternalThreshold)
+	defer stopFunc()
+
+	spec, err := p.specGetter(p.specId)
+	if err != nil {
+		p.logger.Warnf("Received err %v when getting spec: %v", err, spec)
+		return
+	}
+	collectionMode := spec.Settings.GetCollectionModes()
+	p.isMigrationMode = collectionMode.IsMigrationOn()
 }

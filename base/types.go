@@ -443,6 +443,30 @@ func (e *EventInfo) GetSubEvent(eventId int) (*EventInfo, error) {
 	return nil, ErrorNotFound
 }
 
+func (e *EventInfo) GetLegacyErrMsg() string {
+	if e == nil {
+		return ""
+	}
+	switch e.EventType {
+	case HighPriorityMsg:
+		return e.EventDesc
+	case LowPriorityMsg:
+		return e.EventDesc
+	case PersistentMsg:
+		return e.EventDesc
+	case BrokenMappingInfoType:
+		hint, isString := e.GetHint().(string)
+		if isString {
+			// Only the top level brokenMapping event should have a string hint
+			return hint
+		} else {
+			return ""
+		}
+	default:
+		return "?? (EventInfo)"
+	}
+}
+
 type ErrorInfo struct {
 	*EventInfo
 	// Time is the number of nano seconds elapsed since 1/1/1970 UTC
@@ -469,14 +493,14 @@ func GetEventIdFromWell(eventIdWell *int64) int64 {
 }
 
 func NewErrorInfo(time int64, errorMsg string, eventIdWell *int64) ErrorInfo {
+	eventInfo := NewEventInfo()
+	eventInfo.EventType = HighPriorityMsg
+	eventInfo.EventId = GetEventIdFromWell(eventIdWell)
+
 	errInfo := ErrorInfo{
-		EventInfo: &EventInfo{
-			EventType:   HighPriorityMsg,
-			EventId:     GetEventIdFromWell(eventIdWell),
-			EventExtras: NewEventsMap(),
-		},
-		Time:     time,
-		ErrorMsg: errorMsg,
+		EventInfo: eventInfo,
+		Time:      time,
+		ErrorMsg:  errorMsg,
 	}
 	return errInfo
 }
@@ -484,6 +508,7 @@ func NewErrorInfo(time int64, errorMsg string, eventIdWell *int64) ErrorInfo {
 func NewErrorInfoFromEventInfo(event *EventInfo, t int64) ErrorInfo {
 	return ErrorInfo{
 		EventInfo: event,
+		ErrorMsg:  event.GetLegacyErrMsg(),
 		Time:      t,
 	}
 }

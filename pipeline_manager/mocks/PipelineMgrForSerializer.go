@@ -33,7 +33,7 @@ func (_m *PipelineMgrForSerializer) AutoPauseReplication(topic string) error {
 }
 
 // BackfillMappingUpdate provides a mock function with given fields: topic, diffPair
-func (_m *PipelineMgrForSerializer) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+func (_m *PipelineMgrForSerializer) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
 	ret := _m.Called(topic, diffPair)
 
 	var r0 error

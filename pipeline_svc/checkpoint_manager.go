@@ -1211,6 +1211,14 @@ func (ckmgr *CheckpointManager) ckptRecordsWLock(ckptDoc *metadata.CheckpointsDo
 
 func (ckmgr *CheckpointManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ckmgr.logger.Debugf("Updating settings on checkpoint manager for %v %v. settings=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), settings)
+	// Before interval, check for idle brokenMap update
+	diffPair, bmUpdateOk := settings[metadata.CkptMgrBrokenmapIdleUpdateDiffPair].(*metadata.CollectionNamespaceMappingsDiffPair)
+	srcManifestsDelta, bmUpdateOk2 := settings[metadata.CkptMgrBrokenmapIdleUpdateSrcManDelta].([]*metadata.CollectionsManifest)
+	if bmUpdateOk && bmUpdateOk2 {
+		ckmgr.CleanupInMemoryBrokenMap(diffPair, srcManifestsDelta)
+		return nil
+	}
+
 	checkpoint_interval, err := ckmgr.utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
 	if err != nil {
 		return err
@@ -1972,7 +1980,7 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 	}
 
 	if len(added) > 0 {
-		buffer.WriteString("Found following destination collection(s) missing (and will not get replicated to):\n")
+		buffer.WriteString(base.BrokenMappingUIString)
 		if migrationMode {
 			buffer.WriteString(added.MigrateString())
 		} else {
@@ -2163,4 +2171,51 @@ func (ckmgr *CheckpointManager) NotifyBackfillMgrRollbackTo0(vbno uint16) {
 	settingsMap[base.NameKey] = topic
 	settingsMap[metadata.CollectionsDelVbBackfillKey] = int(vbno)
 	backfillMgrPipelineSvc.UpdateSettings(settingsMap)
+}
+
+// This path is called once manifests changes occur, and backfill map may need to be cleaned up
+// This potentially is needed if no I/O is ongoing, which means that router won't be cleaning it up
+// Without this function, brokenMap is only updated if a doc flow through the collection router of the VB
+// and the router raises brokenMap event. This function supplements that and can happen concurrently
+func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManDelta []*metadata.CollectionsManifest) {
+	sourceChanged := len(srcManDelta) == 2 && srcManDelta[0] != nil && srcManDelta[1] != nil
+	// This must be deferred first as defer calls are FILO and this needs a lock
+	defer ckmgr.updateReplStatusBrokenMap()
+	// This path only gets called when manifest changes... so it shouldn't be too often/expensive to clone
+	ckmgr.cachedBrokenMap.lock.Lock()
+	defer ckmgr.cachedBrokenMap.lock.Unlock()
+
+	oldMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
+	// pair.Added means backfillMgr detected these and need to be backfilled, which means they're no longer broken
+	ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Added)
+	// pair.Removed means these mappings no longer exist and are obsolete, and should be cleaned up too
+	ckmgr.cachedBrokenMap.brokenMap = ckmgr.cachedBrokenMap.brokenMap.Delete(diffPair.Removed)
+	newerMap := ckmgr.cachedBrokenMap.brokenMap.Clone()
+
+	if sourceChanged {
+		_, _, removed, err := srcManDelta[1].Diff(srcManDelta[0])
+		if err != nil {
+			return
+		}
+		cachedIndex := ckmgr.cachedBrokenMap.brokenMap.CreateLookupIndex()
+		var reusedNamespace base.CollectionNamespace
+		for scopeName, scope := range removed {
+			for collectionName, _ := range scope.Collections {
+				reusedNamespace.ScopeName = scopeName
+				reusedNamespace.CollectionName = collectionName
+
+				srcPtr, _, _, exists := ckmgr.cachedBrokenMap.brokenMap.Get(&reusedNamespace, cachedIndex)
+				if exists {
+					delete(ckmgr.cachedBrokenMap.brokenMap, srcPtr)
+				}
+			}
+		}
+	}
+	newerMap = ckmgr.cachedBrokenMap.brokenMap.Clone()
+	if len(diffPair.Added) > 0 {
+		// Only repaired should be logged
+		// Things that are removed due to things being removed should not be logged
+		ckmgr.wait_grp.Add(1)
+		go ckmgr.logBrokenMapUpdatesToUI(oldMap, newerMap)
+	}
 }

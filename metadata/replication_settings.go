@@ -73,6 +73,9 @@ const (
 	RetryOnRemoteAuthErrMaxWaitSecKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
 
 	DismissEventKey = "dismissEvent"
+
+	CkptMgrBrokenmapIdleUpdateDiffPair    = "ckmgrBrokenMapIdleUpdateDiffPair"
+	CkptMgrBrokenmapIdleUpdateSrcManDelta = "ckmgrBrokenMapIdleUpdateSrcManDelta"
 )
 
 // keys to facilitate redaction of replication settings map

@@ -103,7 +103,6 @@ type PipelineMgrForUpdater interface {
 	PipelineMgrInternalIface
 	StartBackfillPipeline(topic string) base.ErrorMap
 	StopBackfillPipeline(topic string) base.ErrorMap
-	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
 }
 
 type PipelineMgrForSerializer interface {
@@ -116,7 +115,7 @@ type PipelineMgrForSerializer interface {
 	CleanupBackfillPipeline(topic string) error
 	UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	DismissEvent(eventId int) error
-	BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
+	BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
 }
 
 // Specifically APIs used by backfill manager
@@ -127,7 +126,7 @@ type PipelineMgrBackfillIface interface {
 	HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	CleanupBackfillCkpts(topic string) error
 	ReInitStreams(pipelineName string) error
-	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error
+	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error
 }
 
 // Global ptr, should slowly get rid of refences to this global
@@ -1116,18 +1115,29 @@ func (pipelineMgr *PipelineManager) DismissEvent(eventId int) error {
 }
 
 // External
-func (pipelineMgr *PipelineManager) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
-	return pipelineMgr.serializer.BackfillMappingStatusUpdate(topic, diffPair)
+func (pipelineMgr *PipelineManager) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error {
+	return pipelineMgr.serializer.BackfillMappingStatusUpdate(topic, diffPair, srcManifestDelta)
 }
 
 // Internal
-func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
+func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
 	repStatusMap := pipelineMgr.ReplicationStatusMap()
 	replStatus, ok := repStatusMap[topic]
 	if !ok {
+		pipelineMgr.logger.Errorf("%v unable to find replication status %v to send backfill mapping update", topic)
 		return base.ErrorNotFound
 	}
-	return replStatus.GetEventsManager().BackfillUpdateCb(diffPair)
+	pipeline := replStatus.Pipeline()
+	if pipeline != nil && pipeline.Type() == common.MainPipeline && pipeline.RuntimeContext() != nil {
+		ckptMgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
+		if ckptMgr != nil {
+			settingsMap := make(metadata.ReplicationSettingsMap)
+			settingsMap[metadata.CkptMgrBrokenmapIdleUpdateDiffPair] = diffPair
+			settingsMap[metadata.CkptMgrBrokenmapIdleUpdateSrcManDelta] = srcManifestsDelta
+			ckptMgr.UpdateSettings(settingsMap)
+		}
+	}
+	return replStatus.GetEventsManager().BackfillUpdateCb(diffPair, srcManifestsDelta)
 }
 
 var updaterStateErrorStr = "Can't move update state from %v to %v"

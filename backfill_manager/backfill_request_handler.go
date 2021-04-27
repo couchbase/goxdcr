@@ -347,20 +347,20 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 		return err
 	}
 
-	req, ok := reqAndResp.Request.(metadata.CollectionNamespaceMapping)
+	reqRO, ok := reqAndResp.Request.(metadata.CollectionNamespaceMapping)
 	if !ok {
 		err = fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(reqAndResp.Request))
 		b.logger.Errorf(err.Error())
 		return err
 	}
 
-	vbTasksMap, err := metadata.NewBackfillVBTasksMap(req, myVBs, seqnosMap)
+	vbTasksMap, err := metadata.NewBackfillVBTasksMap(reqRO, myVBs, seqnosMap)
 	if err != nil {
 		b.logger.Errorf(err.Error())
 		return err
 	}
 
-	err = b.updateBackfillSpec(reqAndResp.PersistResponse, vbTasksMap, req, seqnosMap, reqAndResp.Force)
+	err = b.updateBackfillSpec(reqAndResp.PersistResponse, vbTasksMap, reqRO, seqnosMap, reqAndResp.Force)
 	if err != nil {
 		b.logger.Errorf(err.Error())
 		return err
@@ -368,7 +368,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 	return nil
 }
 
-func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap *metadata.VBTasksMapType, req metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64, force bool) error {
+func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap *metadata.VBTasksMapType, reqRO metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64, force bool) error {
 	clonedSpec := b.spec.Clone()
 
 	exists := b.cachedBackfillSpec != nil
@@ -384,7 +384,7 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 	if !exists {
 		backfillSpec := metadata.NewBackfillReplicationSpec(clonedSpec.Id, clonedSpec.InternalId, vbTasksMap, clonedSpec)
 		b.cachedBackfillSpec = backfillSpec
-		b.logNewBackfillMsg(req, seqnosMap)
+		b.logNewBackfillMsg(reqRO, seqnosMap)
 		b.requestPersistence(AddOp, persistResponse)
 	} else {
 		if force {
@@ -422,9 +422,9 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 				skipFirstString = " (complete merge) "
 			}
 			// Note, this message is used for integration testing script
-			b.logger.Infof("Replication %v%v- These collections need to append backfill %v for vb->seqnos %v", b.id, skipFirstString, req, seqnosMap)
+			b.logger.Infof("Replication %v%v- These collections need to append backfill %v for vb->seqnos %v", b.id, skipFirstString, reqRO, seqnosMap)
 		} else {
-			b.logNewBackfillMsg(req, seqnosMap)
+			b.logNewBackfillMsg(reqRO, seqnosMap)
 		}
 
 		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, shouldSkipFirst)
@@ -756,13 +756,13 @@ func (b *BackfillRequestHandler) routerHasStopped(routerFinCh chan bool) bool {
 // This means the backfill spec needs to be updated with newly added backfills from 0 to the "latest"
 // and any removed mappings need to be removed from the explicit backfills
 func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) error {
-	pair := resp.Request.(metadata.CollectionNamespaceMappingsDiffPair)
+	pairRO := resp.Request.(metadata.CollectionNamespaceMappingsDiffPair)
 
-	if len(pair.Removed) > 0 && b.cachedBackfillSpec != nil {
-		b.cachedBackfillSpec.VBTasksMap.RemoveNamespaceMappings(pair.Removed)
+	if len(pairRO.Removed) > 0 && b.cachedBackfillSpec != nil {
+		b.cachedBackfillSpec.VBTasksMap.RemoveNamespaceMappings(pairRO.Removed)
 	}
 
-	if len(pair.Added) > 0 {
+	if len(pairRO.Added) > 0 {
 		myVBs, err := b.vbsGetter()
 		if err != nil {
 			return fmt.Errorf("unable to get VBs: %v", err.Error())
@@ -803,11 +803,11 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 			}
 		}
 
-		vbTasksMap, err := metadata.NewBackfillVBTasksMap(pair.Added, newVBsList, maxSeqnos)
+		vbTasksMap, err := metadata.NewBackfillVBTasksMap(pairRO.Added.Clone(), newVBsList, maxSeqnos)
 		if err != nil {
 			return err
 		}
-		err = b.updateBackfillSpec(resp.PersistResponse, vbTasksMap, pair.Added, maxSeqnos, resp.Force)
+		err = b.updateBackfillSpec(resp.PersistResponse, vbTasksMap, pairRO.Added, maxSeqnos, resp.Force)
 		return err
 	} else {
 		if b.cachedBackfillSpec == nil {
@@ -816,7 +816,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 			// Use the same return path as delOp - to bypass any actual metakv op
 			return errorSyncDel
 		} else if b.cachedBackfillSpec.VBTasksMap.Len() == 0 {
-			// The whole spec is now deleted because of the pair.Removed
+			// The whole spec is now deleted because of the pairRO.Removed
 			delErr := b.requestPersistence(DelOp, resp.PersistResponse)
 			if delErr == nil {
 				return errorSyncDel

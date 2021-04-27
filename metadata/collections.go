@@ -152,8 +152,9 @@ func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) 
 	return collection.Uid, nil
 }
 
-func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, source *CollectionsManifest) (backfillsNeeded CollectionNamespaceMapping, addedRemovedPair CollectionNamespaceMappingsDiffPair, err error) {
-	backfillsNeeded = make(CollectionNamespaceMapping)
+func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, source *CollectionsManifest) (CollectionNamespaceMapping, CollectionNamespaceMappingsDiffPair, error) {
+	var addedRemovedPair CollectionNamespaceMappingsDiffPair
+	backfillsNeeded := make(CollectionNamespaceMapping)
 
 	// First, find any previously unmapped target collections that are now mapped
 	oldSrcToTargetMapping, _, _ := source.ImplicitMap(prevTarget)
@@ -175,7 +176,7 @@ func (target *CollectionsManifest) ImplicitGetBackfillCollections(prevTarget, so
 	backfillsNeededDueToTargetRecreation := srcToTargetMapping.GetSubsetBasedOnSpecifiedTargets(changedTargets)
 
 	backfillsNeeded.Consolidate(backfillsNeededDueToTargetRecreation)
-	return
+	return backfillsNeeded, addedRemovedPair, nil
 }
 
 func (c CollectionsManifest) GetAllCollectionsGivenScopeRO(scopeName string) (CollectionsMap, error) {
@@ -2391,7 +2392,7 @@ func (p *PipelineEventBrokenMap) GetDismissedMapWMtx() (CollectionNamespaceMappi
 }
 
 // Returns true if event is empty
-func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *int64) bool {
+func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *int64, isMigrationMode bool) bool {
 	// Note locking order -> cachedBrokenMap first then event
 	p.cachedBrokenMapMtx.RLock()
 	defer p.cachedBrokenMapMtx.RUnlock()
@@ -2400,11 +2401,13 @@ func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *in
 		srcIndex, scopeIndex := p.loadEmptyEvent(event, idWell)
 		eventIsEmpty := len(event.EventExtras.EventsMap) == 0
 		p.upgradeLockAndUpdateCachedBrokenMapIndexes(eventIsEmpty, srcIndex, scopeIndex)
+		p.writeLegacyErrMsg(event, isMigrationMode, p.cachedBrokenMap)
 		return eventIsEmpty
 	}
 
 	if len(p.userDismissedBrokenMap) > 0 && p.userDismissedBrokenMap.IsSame(p.cachedBrokenMap) {
 		// Force the event to be empty
+		event.SetHint(nil)
 		return true
 	}
 
@@ -2415,10 +2418,27 @@ func (p *PipelineEventBrokenMap) ExportToEvent(event *base.EventInfo, idWell *in
 	p.addMissingBrokenMappingIntoEvent(event, idWell, eventCompiledBrokenMap)
 
 	eventIsEmpty := event.EventExtras.Len() == 0
+
 	if eventIsEmpty {
+		event.SetHint(nil)
 		p.recreateNewSrcIndexes(true)
+	} else {
+		// Write the summary message to event
+		p.writeLegacyErrMsg(event, isMigrationMode, *eventCompiledBrokenMap)
 	}
+
 	return eventIsEmpty
+}
+
+func (p *PipelineEventBrokenMap) writeLegacyErrMsg(event *base.EventInfo, isMigrationMode bool, legacyErrorMsgOutputMap CollectionNamespaceMapping) {
+	var buffer bytes.Buffer
+	buffer.WriteString(base.BrokenMappingUIString)
+	if isMigrationMode {
+		buffer.WriteString(legacyErrorMsgOutputMap.MigrateString())
+	} else {
+		buffer.WriteString(legacyErrorMsgOutputMap.String())
+	}
+	event.SetHint(buffer.String())
 }
 
 func (p *PipelineEventBrokenMap) upgradeLockAndUpdateCachedBrokenMapIndexes(eventIsEmpty bool, srcIndex map[string]int64, scopeIndex map[string]int64) {
@@ -2448,7 +2468,7 @@ func (p *PipelineEventBrokenMap) recreateNewSrcIndexes(upgradeLockNeeded bool) {
 }
 
 // Takes the current broken map, filter out user's intent on dismissal, and write them to event
-func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEvent(event *base.EventInfo, idWell *int64, eventCompiledBrokenMap CollectionNamespaceMapping) {
+func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEvent(event *base.EventInfo, idWell *int64, eventCompiledBrokenMap *CollectionNamespaceMapping) {
 	event.EventExtras.GetRWLock().RLock()
 	defer event.EventExtras.GetRWLock().RUnlock()
 
@@ -2456,6 +2476,12 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEvent(event *base.Ev
 	added, _ := eventCompiledBrokenMap.Diff(p.cachedBrokenMap)
 	for srcNs, tgtList := range added {
 		if p.userHasDismissedThisNamespace(srcNs, tgtList) {
+			// We need to actually reflect what user has dismissed from the eventCompiledBrokenMap
+			// This map will be accurate and thus can be printed as the actual brokenMap event summary string
+			// for legacy UI
+			cleanupMap := make(CollectionNamespaceMapping)
+			cleanupMap[srcNs] = tgtList
+			*eventCompiledBrokenMap = eventCompiledBrokenMap.Delete(cleanupMap)
 			continue
 		}
 
@@ -2502,12 +2528,13 @@ func (p *PipelineEventBrokenMap) addMissingBrokenMappingIntoEvent(event *base.Ev
 
 		scopeEvent.EventExtras.GetRWLock().Unlock()
 	}
+
 }
 
 // Given the current broken map, and given an event, remove obsolete entries from event that are no longer present in
 // the current broken map. At the same time, return A compiled broken map that represents an intersection between the
 // current brokenmap and the event broken map
-func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEvent(event *base.EventInfo) CollectionNamespaceMapping {
+func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEvent(event *base.EventInfo) *CollectionNamespaceMapping {
 	event.EventExtras.GetRWLock().RLock()
 	defer event.EventExtras.GetRWLock().RUnlock()
 
@@ -2573,7 +2600,7 @@ func (p *PipelineEventBrokenMap) cleanUpObsoleteSourcesFromEvent(event *base.Eve
 		}
 	}
 
-	return eventCompiledBrokenMap
+	return &eventCompiledBrokenMap
 }
 
 func (p *PipelineEventBrokenMap) findTargetNamespaceGivenEvent(tgtNsEventRaw interface{}, tgtList CollectionNamespaceList) (bool, *base.CollectionNamespace) {
@@ -2796,7 +2823,9 @@ func (p *PipelineEventBrokenMap) ResetAllDismissedHistory() {
 	p.userDismissUpdated = true
 }
 
-func (p *PipelineEventBrokenMap) UpdateWithNewDiffPair(diffPair *CollectionNamespaceMappingsDiffPair) error {
+// In implicit mapping, we need to diff srcManifests deltas to see which source namespaces have been removed
+// and thus can be cleaned up
+func (p *PipelineEventBrokenMap) UpdateWithNewDiffPair(diffPair *CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*CollectionsManifest) error {
 	p.cachedBrokenMapMtx.RLock()
 	defer p.cachedBrokenMapMtx.RUnlock()
 
@@ -2820,6 +2849,14 @@ func (p *PipelineEventBrokenMap) UpdateWithNewDiffPair(diffPair *CollectionNames
 		for srcNs, _ := range diffPair.Removed {
 			p.upgradeLockAndCleanupDismissedMapWithUpdatedPair(srcNs, &userDismissedUpdated)
 			p.upgradeLockAndCleanupCachedBrokenMapWithUpdatedPair(srcNs, &brokenMapUpdated)
+		}
+	}
+
+	if len(srcManifestsDelta) == 2 && srcManifestsDelta[0] != nil && srcManifestsDelta[1] != nil {
+		_, _, removed, err := srcManifestsDelta[1].Diff(srcManifestsDelta[0])
+		if err == nil && len(removed) > 0 {
+			p.upgradeLockAndRemoveOutdatedSourceNamespacesFromDismissedMap(removed, &userDismissedUpdated)
+			p.upgradeLockAndRemoveOutdatedSourceNamespacesFromBrokenMap(removed, &brokenMapUpdated)
 		}
 	}
 
@@ -2927,4 +2964,64 @@ func (p *PipelineEventBrokenMap) upgradeLockAndCleanupCachedBrokenMapWithUpdated
 	*updated = true
 	p.cachedBrokenMapMtx.Unlock()
 	p.cachedBrokenMapMtx.RLock()
+}
+
+// When source namespaces are removed, make sure the internals are cleaned up too
+func (p *PipelineEventBrokenMap) upgradeLockAndRemoveOutdatedSourceNamespacesFromDismissedMap(removed ScopesMap, updated *bool) {
+	var lockUpgraded bool
+
+	var reusedNamespace base.CollectionNamespace
+	// Check to make sure at least one needs to be removed
+	for scopeName, scope := range removed {
+		for collectionName, _ := range scope.Collections {
+			reusedNamespace.ScopeName = scopeName
+			reusedNamespace.CollectionName = collectionName
+
+			srcPtr, _, _, exists := p.userDismissedBrokenMap.Get(&reusedNamespace, p.userDismissedBrokenIdx)
+			if exists {
+				// This removed source namespace needs to be cleared
+				if !lockUpgraded {
+					lockUpgraded = true
+					p.cachedBrokenMapMtx.RUnlock()
+					p.cachedBrokenMapMtx.Lock()
+				}
+				*updated = true
+				delete(p.userDismissedBrokenMap, srcPtr)
+			}
+		}
+	}
+
+	if lockUpgraded {
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	}
+}
+
+func (p *PipelineEventBrokenMap) upgradeLockAndRemoveOutdatedSourceNamespacesFromBrokenMap(removed ScopesMap, updated *bool) {
+	var lockUpgraded bool
+	var reusedNamespace base.CollectionNamespace
+	// Check to make sure at least one needs to be removed
+	for scopeName, scope := range removed {
+		for collectionName, _ := range scope.Collections {
+			reusedNamespace.ScopeName = scopeName
+			reusedNamespace.CollectionName = collectionName
+
+			srcPtr, _, _, exists := p.cachedBrokenMap.Get(&reusedNamespace, p.cachedBrokenMapSrcNamespaceIdx)
+			if exists {
+				// This removed source namespace needs to be cleared
+				if !lockUpgraded {
+					lockUpgraded = true
+					p.cachedBrokenMapMtx.RUnlock()
+					p.cachedBrokenMapMtx.Lock()
+				}
+				*updated = true
+				delete(p.cachedBrokenMap, srcPtr)
+			}
+		}
+	}
+
+	if lockUpgraded {
+		p.cachedBrokenMapMtx.Unlock()
+		p.cachedBrokenMapMtx.RLock()
+	}
 }

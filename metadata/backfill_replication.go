@@ -220,7 +220,7 @@ func NewVBTasksMapWithMTasks(taskMap map[uint16]*BackfillTasks) *VBTasksMapType 
 }
 
 // Given a list of VBs and a namespace mapping, create a VBTasksMap that includes this this mapping
-func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16, endSeqnos map[uint16]uint64) (*VBTasksMapType, error) {
+func NewBackfillVBTasksMap(namespaceMapRO CollectionNamespaceMapping, vbs []uint16, endSeqnos map[uint16]uint64) (*VBTasksMapType, error) {
 	vbTasksMap := NewVBTasksMap()
 
 	if len(vbs) == 0 {
@@ -240,7 +240,8 @@ func NewBackfillVBTasksMap(namespaceMap CollectionNamespaceMapping, vbs []uint16
 		timestamps := &BackfillVBTimestamps{startTs, endTs}
 
 		tasks := NewBackfillTasks()
-		task := NewBackfillTask(timestamps, []CollectionNamespaceMapping{namespaceMap})
+		// Make a copy to ensure map doesn't get changed from underneath when doing merging
+		task := NewBackfillTask(timestamps, []CollectionNamespaceMapping{namespaceMapRO.Clone()})
 		tasks.mutex.Lock()
 		tasks.List = append(tasks.List, task)
 		tasks.mutex.Unlock()
