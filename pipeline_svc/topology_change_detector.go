@@ -194,7 +194,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 func (top_detect_svc *TopologyChangeDetectorSvc) Stop() error {
 	close(top_detect_svc.finish_ch)
 	top_detect_svc.wait_grp.Wait()
-	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v has stopped", top_detect_svc.pipelines[0].Topic())
+	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v has stopped", top_detect_svc.mainPipelineTopic)
 	return nil
 
 }

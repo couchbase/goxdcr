@@ -120,6 +120,7 @@ type Router struct {
 	expDelMode      FilterExpDelAtomicType
 	collectionModes CollectionsMgtAtomicType
 	started         uint32
+	stopped         uint32
 	finCh           chan bool
 
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
@@ -1530,6 +1531,7 @@ func (router *Router) Start() error {
 
 func (router *Router) Stop() error {
 	if atomic.CompareAndSwapUint32(&router.started, 1, 0) {
+		atomic.StoreUint32(&router.stopped, 1)
 		close(router.finCh)
 		if len(router.collectionsRouting) > 0 {
 			defer router.Logger().Infof("Router %v stopped", router.Id())
@@ -1539,7 +1541,12 @@ func (router *Router) Stop() error {
 			return nil
 		}
 	}
-	return PartAlreadyStoppedError
+	if atomic.LoadUint32(&router.stopped) == 1 {
+		return PartAlreadyStoppedError
+	} else {
+		// Possible to have Stop() called before Start() is called
+		return nil
+	}
 }
 
 func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent) interface{} {

@@ -134,18 +134,15 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 		return nil
 	}
 
-	// Only detach non-main pipelines
-	if ctx.Pipeline().Type() != common.MainPipeline {
-		// put a timeout around service stopping to avoid being stuck
-		err := base.ExecWithTimeout(detachFunc, base.TimeoutRuntimeContextStop, ctx.logger)
-		if err != nil {
-			// if err is not nill, it is possible that stopServicesFunc is still running and may still access errMap
-			// return errMap1 instead of errMap to avoid race conditions
-			ctx.logger.Warnf("%v Error detaching pipeline context. err=%v", topic, err)
-			errMap1 := make(base.ErrorMap)
-			errMap1[RuntimeContext] = err
-			return errMap1
-		}
+	// put a timeout around service stopping to avoid being stuck
+	err := base.ExecWithTimeout(detachFunc, base.TimeoutRuntimeContextStop, ctx.logger)
+	if err != nil {
+		// if err is not nill, it is possible that stopServicesFunc is still running and may still access errMap
+		// return errMap1 instead of errMap to avoid race conditions
+		ctx.logger.Warnf("%v Error detaching pipeline context. err=%v", topic, err)
+		errMap1 := make(base.ErrorMap)
+		errMap1[RuntimeContext] = err
+		return errMap1
 	}
 
 	ctx.logger.Infof("%v Pipeline context is stopping...", topic)
@@ -179,7 +176,7 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 	}
 
 	// put a timeout around service stopping to avoid being stuck
-	err := base.ExecWithTimeout(stopServicesFunc, base.TimeoutRuntimeContextStop, ctx.logger)
+	err = base.ExecWithTimeout(stopServicesFunc, base.TimeoutRuntimeContextStop, ctx.logger)
 	if err != nil {
 		// if err is not nill, it is possible that stopServicesFunc is still running and may still access errMap
 		// return errMap1 instead of errMap to avoid race conditions
@@ -223,7 +220,7 @@ func (ctx *PipelineRuntimeCtx) detachService(name string, service common.Pipelin
 	}
 
 	err := service.Detach(ctx.pipeline)
-	if err != nil {
+	if err != nil && err != base.ErrorNotSupported {
 		ctx.logger.Warnf("%v failed to detach service %s. err=%v", topic, name, err)
 		errCh <- base.ComponentError{name, err}
 	} else {

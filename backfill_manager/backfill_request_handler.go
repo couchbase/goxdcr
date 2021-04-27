@@ -580,7 +580,6 @@ func (b *BackfillRequestHandler) GetSourceNucketName() string {
 // Each replication will have one single active pipeline at one time
 // Req Handlers are tied to the repl spec so
 // When replications are deleted, the backfill request handler will also be removed
-// and thus there is no need for "Detach"
 func (b *BackfillRequestHandler) Attach(pipeline common.Pipeline) error {
 	b.pipelinesMtx.Lock()
 	defer b.pipelinesMtx.Unlock()

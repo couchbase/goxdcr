@@ -193,6 +193,8 @@ func (rs *ReplicationStatus) RemovePipeline(pipeline common.Pipeline) {
 		rs.pipeline_ = nil
 	case common.BackfillPipeline:
 		rs.backfillPipeline_ = nil
+	default:
+		rs.logger.Warnf("Unknown pipeline type: %v\n", pipeline.Type())
 	}
 }
 

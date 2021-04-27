@@ -13,12 +13,14 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"sync"
 )
 
 type AbstractComponent struct {
 	id              string
 	pipeline        common.Pipeline
 	event_listeners map[common.ComponentEventType][]common.ComponentEventListener
+	evtListenersMtx sync.RWMutex
 	logger          *log.CommonLogger
 }
 
@@ -39,7 +41,8 @@ func (c *AbstractComponent) Id() string {
 }
 
 func (c *AbstractComponent) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
-
+	c.evtListenersMtx.Lock()
+	defer c.evtListenersMtx.Unlock()
 	listenerList := c.event_listeners[eventType]
 	if listenerList == nil {
 		listenerList = make([]common.ComponentEventListener, 0, 2)
@@ -52,8 +55,13 @@ func (c *AbstractComponent) RegisterComponentEventListener(eventType common.Comp
 	return nil
 }
 
+// Warning - if too many RaiseEvent() is happening and is blocked because listener's channel is full
+// then this UnRegisterComponentEventListener will be blocked as well, and pipeline stop will show timeout
+// Only a few components use this call for now. If the components in the future use a lot of RaiseEvent and require
+// this Unregister call, then those components need to be careful to prevent deadlock
 func (c *AbstractComponent) UnRegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
-
+	c.evtListenersMtx.Lock()
+	defer c.evtListenersMtx.Unlock()
 	listenerList := c.event_listeners[eventType]
 	var index int = -1
 
@@ -75,6 +83,8 @@ func (c *AbstractComponent) UnRegisterComponentEventListener(eventType common.Co
 }
 
 func (c *AbstractComponent) RaiseEvent(event *common.Event) {
+	c.evtListenersMtx.RLock()
+	defer c.evtListenersMtx.RUnlock()
 	listenerList := c.event_listeners[event.EventType]
 
 	for _, listener := range listenerList {
@@ -90,6 +100,8 @@ func (c *AbstractComponent) Logger() *log.CommonLogger {
 
 func (c *AbstractComponent) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	listenerMap := make(map[string]common.AsyncComponentEventListener)
+	c.evtListenersMtx.RLock()
+	defer c.evtListenersMtx.RUnlock()
 	for _, listeners := range c.event_listeners {
 		for _, listener := range listeners {
 			if asyncListener, ok := listener.(common.AsyncComponentEventListener); ok {
