@@ -10,10 +10,8 @@ package pipeline_utils
 
 import (
 	"errors"
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/service_def"
 	"strconv"
@@ -64,11 +62,6 @@ func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_s
 		}
 	}
 	return
-}
-
-// checks if target cluster supports SANs in certificates
-func HasSANInCertificateSupport(cluster_info_svc service_def.ClusterInfoSvc, targetClusterRef *metadata.RemoteClusterReference) (bool, error) {
-	return cluster_info_svc.IsClusterCompatible(targetClusterRef, base.VersionForSANInCertificateSupport)
 }
 
 func GetElementIdFromName(pipeline common.Pipeline, name string) string {

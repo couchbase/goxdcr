@@ -703,7 +703,7 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 		defer signalFunc()
 		if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
 			// if updateSecuritySettings is true, get up to date security settings from target
-			sanInCertificate, httpAuthMech, defaultPoolInfo, statusCode, bgErr = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
+			httpAuthMech, defaultPoolInfo, statusCode, bgErr = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
 			rctx.markNodeWithStatus(statusCode)
 			if bgErr != nil {
 				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id(), connStr, bgErr)
@@ -2594,17 +2594,6 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		if !isEnterprise_remote {
 			return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
 		}
-
-		// if ref is half secured, validate that target clusters is spock and up
-		if ref.IsHalfEncryption() {
-			rbacCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, base.VersionForRBACAndXattrSupport)
-			if err != nil {
-				return wrapAsInvalidRemoteClusterError("Failed to get target cluster version information")
-			}
-			if !rbacCompatible {
-				return wrapAsInvalidRemoteClusterError("Remote cluster has a version lower than 5.0 and does not support half-SSL type remote cluster references.")
-			}
-		}
 	}
 
 	// get remote cluster uuid from the map
@@ -2825,7 +2814,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 	go func() {
 		defer close(firstWinnerCh)
 		// Attempt to retrieve defaultPoolInfo with what the user initially entered
-		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+		refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 	}()
 
 	// If half-mode, no need to do the following to look up ports, etc
@@ -2853,7 +2842,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 			}
 
 			// now we potentially have valid https address, re-do security settings retrieval
-			bgSANInCertificate, bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 			if bgErr != nil {
 				if len(bgExternalRefHttpsHostName) > 0 {
 					if shouldBail() {
@@ -2862,7 +2851,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 					// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
 					// as a last resort, try that for a third time
 					bgRefHttpsHostName = bgExternalRefHttpsHostName
-					bgSANInCertificate, bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 				}
 			}
 			return

@@ -560,19 +560,8 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 		return
 	}
 
-	targetClusterVersion, err = xdcrf.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, xdcrf.logger)
-	if err != nil {
-		return
-	}
-	targetHasRBACSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
-	if targetHasRBACSupport {
-		// if target is spock and up, simply use the username and password in remote cluster ref
-		targetUserName = targetClusterRef.UserName()
-		targetPassword = targetClusterRef.Password()
-	} else {
-		err = base.ErrorRBACNotSupportAtTarget
-		return
-	}
+	targetUserName = targetClusterRef.UserName()
+	targetPassword = targetClusterRef.Password()
 	xdcrf.logger.Infof("%v username for target bucket access=%v%v%v\n", spec.Id, base.UdTagBegin, targetUserName, base.UdTagEnd)
 
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
@@ -1207,8 +1196,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 			return fmt.Errorf("Unable to retrieve main pipeline service %v", base.TOPOLOGY_CHANGE_DETECT_SVC)
 		}
 	} else {
-		targetHasRBACAndXattrSupport := base.IsClusterCompatible(targetClusterVersion, base.VersionForRBACAndXattrSupport)
-		top_detect_svc = pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, targetHasRBACAndXattrSupport, logger_ctx, xdcrf.utils)
+		top_detect_svc = pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, logger_ctx, xdcrf.utils)
 	}
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {

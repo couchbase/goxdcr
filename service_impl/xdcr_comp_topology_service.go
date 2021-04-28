@@ -17,6 +17,8 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
 	"strings"
+	"sync"
+	"time"
 )
 
 var ErrorParsingHostInfo = errors.New("Could not parse current host info from the result.server returned")
@@ -30,6 +32,11 @@ type XDCRTopologySvc struct {
 	cluster_info_svc service_def.ClusterInfoSvc
 	logger           *log.CommonLogger
 	utils            utilities.UtilsIface
+
+	cachedNodesList      []interface{}
+	cachedNodesListErr   error
+	cachedNodesListTimer *time.Timer
+	cachedNodesListMtx   sync.RWMutex
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
@@ -124,8 +131,6 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 
 // get information about current node from nodeService at /pools/nodes
 func (top_svc *XDCRTopologySvc) getHostInfo() (map[string]interface{}, error) {
-	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.getHostInfo()", base.DiagInternalThreshold)
-	defer stopFunc()
 	nodeList, err := top_svc.getNodeList()
 	if err != nil {
 		return nil, err
@@ -324,22 +329,79 @@ func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {
 
 func (top_svc *XDCRTopologySvc) getNodeList() ([]interface{}, error) {
 	var nodesInfo map[string]interface{}
+
+	top_svc.cachedNodesListMtx.RLock()
+	defer top_svc.cachedNodesListMtx.RUnlock()
+
+	// Timer's existence determines whether or not we're in cool down period
+	if top_svc.cachedNodesListTimer != nil {
+		// Still within cooldown period - return cached information
+		return top_svc.cachedNodesList, top_svc.cachedNodesListErr
+	}
+
+	// Upgrade lock
+	top_svc.cachedNodesListMtx.RUnlock()
+	top_svc.cachedNodesListMtx.Lock()
+	defer func() {
+		top_svc.cachedNodesListMtx.Unlock()
+		top_svc.cachedNodesListMtx.RLock()
+	}()
+
+	if top_svc.cachedNodesListTimer != nil {
+		// Someone sneaked one in
+		return top_svc.cachedNodesList, top_svc.cachedNodesListErr
+	}
+
+	// Need to populate cache and hold it for a period of time
+	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.getNodeList()", base.DiagInternalThreshold)
+	defer stopFunc()
 	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.NodesPath, false, base.MethodGet, "", nil, 0, &nodesInfo, top_svc.logger)
-	if err != nil || statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
+
+	// Regardless of the RPC call, enforce a cooldown
+	var cooldownPeriod = base.TopologySvcCoolDownPeriod
+	if getNodeListHasError(err, statusCode) {
+		// If ns_server experiences error with base.NodesPath, potentially means that it is overloaded
+		// By default, TopologySvcErrCoolDownPeriod is longer than regular to give ns_server time to breathe
+		cooldownPeriod = base.TopologySvcErrCoolDownPeriod
+	}
+
+	top_svc.cachedNodesListTimer = time.AfterFunc(cooldownPeriod, func() {
+		top_svc.cachedNodesListMtx.Lock()
+		defer top_svc.cachedNodesListMtx.Unlock()
+		// Once cool down has occurred, remove the timer to let the next caller re-pull the latest info
+		top_svc.cachedNodesListTimer = nil
+		top_svc.cachedNodesList = nil
+		top_svc.cachedNodesListErr = nil
+	})
+
+	if getNodeListHasError(err, statusCode) {
+		top_svc.cachedNodesList = nil
+		top_svc.cachedNodesListErr = errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.NodesPath, err, statusCode))
+		return top_svc.cachedNodesList, top_svc.cachedNodesListErr
 	}
 	// get node list from the map
 	nodes, ok := nodesInfo[base.NodesKey]
 	if !ok {
 		// should never get here
 		top_svc.logger.Errorf("no nodes")
-		return nil, ErrorParsingHostInfo
+		top_svc.cachedNodesList = nil
+		top_svc.cachedNodesListErr = ErrorParsingHostInfo
+		return top_svc.cachedNodesList, top_svc.cachedNodesListErr
 	}
 
 	nodeList, ok := nodes.([]interface{})
 	if !ok {
 		// should never get here
-		return nil, ErrorParsingHostInfo
+		top_svc.cachedNodesList = nil
+		top_svc.cachedNodesListErr = ErrorParsingHostInfo
+		return top_svc.cachedNodesList, top_svc.cachedNodesListErr
 	}
+
+	top_svc.cachedNodesList = nodeList
+	top_svc.cachedNodesListErr = nil
 	return nodeList, nil
+}
+
+func getNodeListHasError(err error, statusCode int) bool {
+	return err != nil || statusCode != 200
 }

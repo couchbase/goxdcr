@@ -9,7 +9,6 @@
 package service_impl
 
 import (
-	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -49,32 +48,4 @@ func (ci_svc *ClusterInfoSvc) GetLocalServerVBucketsMap(clusterConnInfoProvider 
 
 	return ci_svc.utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
 
-}
-
-func (ci_svc *ClusterInfoSvc) IsClusterCompatible(clusterConnInfoProvider base.ClusterConnectionInfoProvider, version []int) (bool, error) {
-
-	connStr, err := clusterConnInfoProvider.MyConnectionStr()
-	if err != nil {
-		return false, err
-	}
-
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := clusterConnInfoProvider.MyCredentials()
-	if err != nil {
-		return false, err
-	}
-
-	// so far IsClusterCompatible is called only when the remote cluster reference is ssl enabled
-	// which indicates that the target cluster is not an elastic search cluster
-	// it should be safe to call GetNodeListWithFullInfo() to retrive full node info
-	nodeList, err := ci_svc.utils.GetNodeListWithFullInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, ci_svc.logger)
-	if err == nil && len(nodeList) > 0 {
-		clusterCompatibility, err := ci_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
-		if err != nil {
-			return false, err
-		}
-		return base.IsClusterCompatible(clusterCompatibility, version), nil
-	} else {
-		//should not ever get here
-		return false, fmt.Errorf("Can't get nodes information for cluster %v, err=%v", connStr, err)
-	}
 }

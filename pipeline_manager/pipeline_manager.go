@@ -23,7 +23,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 )
@@ -1785,7 +1784,6 @@ func (r *PipelineUpdater) reportStatus() {
 }
 
 func (r *PipelineUpdater) raiseWarningsIfNeeded() {
-	r.raiseXattrWarningIfNeeded()
 	r.raiseCompressionWarningIfNeeded()
 	r.raiseRemoteClusterRestartReasonsIfNeeded()
 }
@@ -1808,55 +1806,6 @@ func (r *PipelineUpdater) raiseRemoteClusterRestartReasonsIfNeeded() {
 	errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been restarted due to remote-cluster configuration changes\n", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name())
 	r.logger.Warnf(errMsg)
 	r.pipelineMgr.GetLogSvc().Write(errMsg)
-}
-
-// raise warning on UI console when
-// 1. replication is not of capi type
-// 2. replication is not recovering from error
-// 3. target cluster does not support xattr
-// 4. current node is the master for vbucket 0 - this is needed to ensure that warning is shown on UI only once, instead of once per source node
-func (r *PipelineUpdater) raiseXattrWarningIfNeeded() {
-	p := r.rep_status.Pipeline()
-	if p == nil {
-		r.logger.Warnf("Skipping xattr warning check since pipeline %v has not been started\n", r.pipeline_name)
-		return
-	}
-	spec := r.rep_status.Spec()
-	if spec == nil {
-		r.logger.Warnf("Skipping xattr warning check since cannot find replication spec for pipeline %v\n", r.pipeline_name)
-		return
-	}
-	if spec.Settings.IsCapi() {
-		return
-	}
-	targetClusterRef, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
-	if err != nil {
-		r.logger.Warnf("Skipping xattr warning check since received error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
-		return
-	}
-	hasXattrSupport, err := r.pipelineMgr.GetClusterInfoSvc().IsClusterCompatible(targetClusterRef, base.VersionForRBACAndXattrSupport)
-	if err != nil {
-		r.logger.Warnf("Skipping xattr warning check since received error checking target cluster version. target cluster=%v, pipeline=%v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
-		return
-	}
-	if !hasXattrSupport {
-		errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been started. Note - Target cluster is older than 5.0.0, hence some of the new feature enhancements such as \"Extended Attributes (XATTR)\" are not supported, which might result in loss of XATTR data. If this is not acceptable, please pause the replication, upgrade cluster '%v' to 5.0.0, and restart replication.", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name(), targetClusterRef.Name())
-		r.logger.Warn(errMsg)
-
-		sourceVbList := pipeline_utils.GetSourceVBListPerPipeline(p)
-		containsVb0 := false
-		for _, vbno := range sourceVbList {
-			if vbno == 0 {
-				containsVb0 = true
-				break
-			}
-		}
-
-		if containsVb0 {
-			// write warning to UI
-			r.pipelineMgr.GetLogSvc().Write(errMsg)
-		}
-	}
 }
 
 func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {

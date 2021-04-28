@@ -307,8 +307,6 @@ var ReplicationSpecNotFoundErrorMessage = "requested resource not found"
 var ReplNotFoundErr = errors.New(ReplicationSpecNotFoundErrorMessage)
 var ErrorExplicitMappingEnterpriseOnly = errors.New("Explicit Mapping is supported in Enterprise Edition only")
 var ErrorChunkedEncodingNotSupported = errors.New("Chunked encoding is not supported")
-var ErrorRBACNotSupportAtTarget = fmt.Errorf("The version of Couchbase software installed on the remote cluster does not support RBAC. Please upgrade the destination cluster to version %v.%v or above to enable this feature",
-	VersionForRBACAndXattrSupport[0], VersionForRBACAndXattrSupport[1])
 var BrokenMappingUIString = "Found following destination collection(s) missing (and will not get replicated to):\n"
 
 func GetBackfillFatalDataLossError(specId string) error {
@@ -588,8 +586,6 @@ var RemoteBucketMonitorWaitTime = 200 * time.Millisecond
 var RemoteBucketMonitorRetryFactor = 3
 
 // minimum versions where various features are supported
-var VersionForSANInCertificateSupport = []int{4, 0}
-var VersionForRBACAndXattrSupport = []int{5, 0}
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
@@ -1020,6 +1016,9 @@ var ResourceMgrKVDetectionRetryInterval = 60 * time.Second
 var ReplStatusLoadBrokenMapTimeout = 5 * time.Second
 var ReplStatusExportBrokenMapTimeout = 5 * time.Second
 
+var TopologySvcCoolDownPeriod = 60 * time.Second
+var TopologySvcErrCoolDownPeriod = 120 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -1070,7 +1069,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	jsEngineWorkersPerNode int, jsEngineThreadsPerWorker int,
 	maxCountDcpStreamsInactive int, resourceMgrKVDetectionRetryInterval time.Duration,
 	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
-	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration) {
+	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
+	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1189,6 +1189,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	DiagNetworkThreshold = utilsStopwatchDiagExternal
 	ReplStatusLoadBrokenMapTimeout = replStatusLoadBrokenMapTimeout
 	ReplStatusExportBrokenMapTimeout = replStatusExportBrokenMapTimeout
+	TopologySvcCoolDownPeriod = topologyCooldownPeriod
+	TopologySvcErrCoolDownPeriod = topologyErrCooldownPeriod
 }
 
 // Need to escape the () to result in "META().xattrs" literal

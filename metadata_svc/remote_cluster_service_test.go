@@ -240,8 +240,8 @@ func setupUtilsSSL(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetDefaultPoolInfoUsingHttps", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, http.StatusUnauthorized, fmt.Errorf("HttpsUsingdefault will fail"))
 	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, externalHostnameSSL, nil)
 	// When using hostname instead of hostnameSSL (i.e. 8091), fail
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("WrongPort") /*err*/)
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusOK, nil /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("WrongPort") /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusOK, nil /*err*/)
 	utilitiesMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(nil, nil)
 	var sslPairList base.StringPairList
 	onePair := base.StringPair{hostname, hostnameSSL}
@@ -259,11 +259,11 @@ func setupUtilsSSL2(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("GetDefaultPoolInfoUsingHttps", hostname, "", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("HttpsUsingdefault will fail"))
 	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, externalHostnameSSL, nil)
 	// When using hostname instead of hostnameSSL (i.e. 8091), fail
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("WrongPort") /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("WrongPort") /*err*/)
 	// Pretend that the target internal host and port is closed
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("dummy") /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(base.HttpAuthMechHttps, nil /*defaultPoolInfo*/, http.StatusUnauthorized, fmt.Errorf("dummy") /*err*/)
 	// Only if external port is used then it's ok
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, externalHostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false /*refSanincertificate*/, base.HttpAuthMechHttps, defaultPool /*defaultPoolInfo*/, http.StatusOK, nil /*err*/)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, externalHostnameSSL, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(base.HttpAuthMechHttps, defaultPool /*defaultPoolInfo*/, http.StatusOK, nil /*err*/)
 
 	nodeList, _ := testUtils.GetNodeListFromInfoMap(defaultPool, nil)
 	// The 0th element of the node List is the dummy one we want
@@ -2338,9 +2338,9 @@ func setupUtilsAdminBlockedAndSSLIsOK(utilitiesMock *utilsMock.UtilsIface) {
 
 	defaultPoolInfo, _ := getClusterInfoMockInt()
 	// SSL port is ok to get it
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Return(false, base.HttpAuthMechHttps, defaultPoolInfo, http.StatusOK, nil)
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Return(base.HttpAuthMechHttps, defaultPoolInfo, http.StatusOK, nil)
 	// Non-SSL port on security default pool, block it
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Run(func(arguments mock.Arguments) { time.Sleep(blockedTime) }).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Run(func(arguments mock.Arguments) { time.Sleep(blockedTime) }).Return(base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
 
 	// These are proxy calls to actual real utils
 	nodeList, _ := testUtils.GetNodeListFromInfoMap(defaultPoolInfo, nil)
@@ -2384,8 +2384,8 @@ func setupUtilsBothAdminPortsBlocked(utilitiesMock *utilsMock.UtilsIface) {
 	utilitiesMock.On("HttpsRemoteHostAddr", hostname, mock.Anything).Return(hostnameSSL, "", nil)
 
 	// Block both
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
-	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Run(func(arguments mock.Arguments) { time.Sleep(blockedTime) }).Return(false, base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostnameSSL, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Return(base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
+	utilitiesMock.On("GetSecuritySettingsAndDefaultPoolInfo", hostname, hostname, mock.Anything, mock.Anything, dummySelfSignedCert, mock.Anything, mock.Anything, false, mock.Anything).Run(func(arguments mock.Arguments) { time.Sleep(blockedTime) }).Return(base.HttpAuthMechHttps, nil, http.StatusOK, fmt.Errorf("Blocked"))
 	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 

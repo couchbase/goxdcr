@@ -163,6 +163,9 @@ const (
 	BypassSanInCertificateCheckKey = "BypassSanInCertificateCheck"
 	// Number of times to verify bucket is missing before removing an invalid replicationSpec
 	ReplicationSpecGCCntKey = "ReplicationSpecGCCnt"
+	// Cooldown period for topology service before hitting ns_server REST endpoint again
+	TopologySvcCooldownPeriodKey    = "TopologySvcCooldownPeriodSec"
+	TopologySvcErrCooldownPeriodKey = "TopologySvcErrCooldownPeriodSec"
 
 	TimeoutRuntimeContextStartKey = "TimeoutRuntimeContextStart"
 	TimeoutRuntimeContextStopKey  = "TimeoutRuntimeContextStop"
@@ -343,6 +346,8 @@ var UtilsStopwatchDiagInternalThresholdConfig = &SettingsConfig{int(base.DiagInt
 var UtilsStopwatchDiagExternalThresholdConfig = &SettingsConfig{int(base.DiagNetworkThreshold / time.Millisecond), &Range{10, 3600000}}
 var ReplStatusLoadBrokenMapTimeoutConfig = &SettingsConfig{int(base.ReplStatusLoadBrokenMapTimeout / time.Second), &Range{1, int(base.AdminportReadTimeout / time.Second)}}
 var ReplStatusExportBrokenMapTimeoutConfig = &SettingsConfig{int(base.ReplStatusExportBrokenMapTimeout / time.Second), &Range{1, int(base.AdminportReadTimeout / time.Second)}}
+var TopologySvcCooldownConfig = &SettingsConfig{int(base.TopologySvcCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
+var TopologySvcErrCooldownConfig = &SettingsConfig{int(base.TopologySvcErrCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -444,6 +449,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	UtilsStopwatchDiagExternalThresholdKey:        UtilsStopwatchDiagExternalThresholdConfig,
 	ReplStatusExportBrokenMapTimeoutKey:           ReplStatusExportBrokenMapTimeoutConfig,
 	ReplStatusLoadBrokenMapTimeoutKey:             ReplStatusLoadBrokenMapTimeoutConfig,
+	TopologySvcCooldownPeriodKey:                  TopologySvcCooldownConfig,
+	TopologySvcErrCooldownPeriodKey:               TopologySvcErrCooldownConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

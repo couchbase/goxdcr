@@ -318,6 +318,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.UtilsStopwatchDiagExternalThresholdKey].(int))*time.Millisecond,
 		time.Duration(internal_settings.Values[metadata.ReplStatusLoadBrokenMapTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.ReplStatusExportBrokenMapTimeoutKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.TopologySvcCooldownPeriodKey].(int))*time.Second,
+		time.Duration(internal_settings.Values[metadata.TopologySvcCooldownPeriodKey].(int))*time.Second,
 	)
 }
 
