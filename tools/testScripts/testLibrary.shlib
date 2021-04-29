@@ -146,7 +146,7 @@ function checkChangesLeftInternal {
 
 	for ((i = 0; $i < 3; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
-		if [[ -z "${changesLeft:-}" ]]; then
+		if [[ -z "${changesLeft:-}" ]] || [[ "$changesLeft" == "null" ]]; then
 			changesLeft=999999
 		fi
 		if (($changesLeft == 0)); then
