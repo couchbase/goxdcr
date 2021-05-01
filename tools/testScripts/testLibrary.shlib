@@ -29,7 +29,9 @@ function checkItemCnt {
 	local i
 
 	local previousItemCnt=0
-	for ((i = 0; $i < 5; i = $(($i + 1)))); do
+	local maxCnt=8
+	for ((i = 0; $i < $maxCnt; i = $(($i + 1)))); do
+		echo "Checking item count $(($i + 1)) / $maxCnt"
 		itemCount=$(getBucketItemCount "$cluster" "$bucket")
 		if (($itemCount == $expectedCnt)); then
 			echo "Item count for cluster $cluster bucket $bucket: $itemCount"

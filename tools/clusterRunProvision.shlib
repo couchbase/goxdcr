@@ -155,6 +155,43 @@ function recordNamespaceCreated {
 	fi
 }
 
+function deleteBucketRecordNamespace {
+	local clusterName=$1
+	local bucketName=$2
+
+	# First remove the bucket entity
+	local key="${clusterName}"
+	local -a bucketArr
+	if [[ ! -z ${CLUSTER_NAME_BUCKET_DONE_MAP[$key]:-} ]]; then
+		# remove the bucket map from the array of bucketDone by creating a new array
+		bucketArr=(${CLUSTER_NAME_BUCKET_DONE_MAP[$key]})
+		newArray=()
+		local value
+		for value in "${bucketArr[@]}"; do
+			[[ "$value" != "$bucketName" ]] && newArray+=($value)
+		done
+		CLUSTER_NAME_BUCKET_DONE_MAP[$key]=${newArray[@]}
+	fi
+
+	# Before unsetting scopeArr, unset all the collection under each scope
+	key="${clusterName},${bucketName}"
+	if [[ -z ${BUCKET_NAME_SCOPE_DONE_MAP[$key]:-} ]]; then
+		# no scopes or collections underneath, we're done
+		return
+	fi
+
+	local -a scopeArr
+	scopeArr=(${BUCKET_NAME_SCOPE_DONE_MAP[$key]})
+	unset BUCKET_NAME_SCOPE_DONE_MAP[$key]
+
+	local oneScope
+	for oneScope in "${scopeArr[@]}"; do
+		key="${clusterName},${bucketName},${oneScope}"
+		unset SCOPE_NAME_COLLECTION_DONE_MAP[$key]
+	done
+
+}
+
 # Input:
 # 1. Bucket name
 # 2. An associative array of Key - Parameter Value - value to send
@@ -567,52 +604,69 @@ function enableDeveloperPreview {
 	done
 }
 
+function createBucket {
+	local clusterName=$1
+	local bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	getPropertiesFromBucketNamePropertyMap "$bucketName"
+	echo "For cluster $clusterName CREATING bucket $bucketName with properties $(printBucketPropertiesResults)"
+	local ramQuotaCheck=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
+	if [[ -z "$ramQuotaCheck" ]]; then
+		echo "Missing ramQuota for $bucketName"
+		return 1
+	fi
+	getBucketPropertiesRESTString
+
+	# Only run the bucket create command if it hasn't been executed before
+	checkNamespaceCreated "$clusterName" "$bucketName"
+	if ((!$? == 0)); then
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]} >/dev/null 2>&1
+		if (($? != 0)); then
+			return $?
+		fi
+		recordNamespaceCreated "$clusterName" "$bucketName"
+	fi
+
+	# If bucket has scopes
+	if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]]; then
+		setupScopes $clusterName $bucketName
+	fi
+}
+
 function setupBuckets {
 	for clusterName in $(echo ${!CLUSTER_NAME_BUCKET_MAP[@]}); do
 		local bucketNames=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
-		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		for bucketName in $(echo ${bucketNames[@]}); do
-			getPropertiesFromBucketNamePropertyMap "$bucketName"
-			echo "For cluster $clusterName CREATING bucket $bucketName with properties $(printBucketPropertiesResults)"
-			local ramQuotaCheck=${BUCKET_PROPERTIES_OUTPUT_MAP["ramQuotaMB"]:-}
-			if [[ -z "$ramQuotaCheck" ]]; then
-				echo "Missing ramQuota for $bucketName"
-				return 1
-			fi
-			getBucketPropertiesRESTString
-
-			# Only run the bucket create command if it hasn't been executed before
-			checkNamespaceCreated "$clusterName" "$bucketName"
-			if ((!$? == 0)); then
-				$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH -d name=$bucketName ${getBucketOutArr[@]} >/dev/null 2>&1
-				if (($? != 0)); then
-					return $?
-				fi
-				recordNamespaceCreated "$clusterName" "$bucketName"
-			fi
-
-			# If bucket has scopes
-			if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]]; then
-				setupScopes $clusterName $bucketName
-			fi
+			createBucket "$clusterName" "$bucketName"
 		done
 	done
 }
 
 function deleteBucket {
-	local port=$1
+	local clusterName=$1
 	local bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName >/dev/null 2>&1
+	deleteBucketRecordNamespace "$clusterName" "$bucketName"
+}
+
+function flushBucket {
+	local clusterName=$1
+	local bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	# Don't redirect to dev null in case the bucket has flush disabled - which the error message will help
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/controller/doFlush
 }
 
 function cleanupBuckets {
 	for clusterName in $(echo ${!CLUSTER_NAME_BUCKET_MAP[@]}); do
 		local bucketNames=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
-		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		for bucketName in $(echo ${bucketNames[@]}); do
 			echo "For cluster $clusterName DELETING bucket $bucketName"
-			deleteBucket "$port" "$bucketName"
+			deleteBucket "$clusterName" "$bucketName"
 		done
 	done
 	CLUSTER_NAME_BUCKET_DONE_MAP=()
