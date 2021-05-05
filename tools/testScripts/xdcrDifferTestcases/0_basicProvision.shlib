@@ -80,6 +80,12 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" 0
 
+	echo "Writing some mismatching data"
+	writeJSONDocument "C1" "B1" "d1" '{"foo":"bar"}'
+	writeJSONDocument "C2" "B2" "d1" '{"foo2":"bar2"}'
+	writeJSONDocument "C2" "B2" "d2" '{"foo2":"bar2"}'
+	sleep 5
+
 	runXdcrDiffer "C1" "B1" "C2" "B2"
 	retVal=$?
 	if (($retVal != 0)); then
@@ -87,7 +93,7 @@ function runTestCase {
 		return $retVal
 	fi
 
-	validateDifferResults 0 0 $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	validateDifferResults 1 1 $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed"

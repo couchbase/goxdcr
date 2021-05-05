@@ -32,7 +32,7 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 
 # Scopes -> Collections
 # ----------------------

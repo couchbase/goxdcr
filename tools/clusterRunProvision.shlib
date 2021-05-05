@@ -634,6 +634,20 @@ function createBucket {
 	fi
 }
 
+function writeJSONDocument {
+	local clusterName=$1
+	local bucketName=$2
+	local docName=$3
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	# jsonData needs to be enclosed in single quotes
+	#local jsonData='{"foo":"bar"}'
+	local jsonData=$4
+
+	$CURL --location --request POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/docs/$docName \
+		--header 'Accept: application/json, text/plain, */*' --header 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' \
+		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData
+}
+
 function setupBuckets {
 	for clusterName in $(echo ${!CLUSTER_NAME_BUCKET_MAP[@]}); do
 		local bucketNames=(${CLUSTER_NAME_BUCKET_MAP[$clusterName]:-})
