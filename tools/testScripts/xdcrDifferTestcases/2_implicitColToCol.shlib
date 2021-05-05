@@ -36,7 +36,7 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 
 # Scopes -> Collections
 # ----------------------
-declare -a collection1Arr=("col1")
+declare -a collection1Arr=("col1" "col2")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
 
 function runDataLoad {
@@ -83,31 +83,37 @@ function runTestCase {
 	echo "PASSED"
 	echo "============================================================================"
 
-	# TODO - cannot do this yet
-	#echo "Pausing replication and flushing target bucket to create $CBWORKLOAD_COLLECTION_NUM_ITEMS mismatches"
-	#pauseReplication "C1" "B1" "C2" "B2"
-	#flushBucket "C2" "B2"
-	#sleep 5
-	#checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	#checkItemCnt "C2" "B2" 0
+	echo "Pausing replication and flushing target bucket to create $CBWORKLOAD_COLLECTION_NUM_ITEMS mismatches"
+	pauseReplication "C1" "B1" "C2" "B2"
+	flushBucket "C2" "B2"
+	sleep 5
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" 0
 
-	#runXdcrDiffer "C1" "B1" "C2" "B2"
-	#retVal=$?
-	#if (($retVal != 0)); then
-	#	echo "Differ returned non-0 exit code"
-	#	return $retVal
-	#fi
+	echo "Writing some mismatching data"
+	writeCollectionJSONDoc "C1" "B1" "S1" "col1" "d1" '{"foo":"bar"}'
+	writeCollectionJSONDoc "C2" "B2" "S1" "col1" "d1" '{"foo2":"bar2"}'
+	# One missing from source doc
+	writeCollectionJSONDoc "C2" "B2" "S1" "col2" "d2" '{"foo2":"bar2"}'
+	sleep 5
 
-	#validateDifferResults 0 0 $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	#retVal=$?
-	#if (($retVal != 0)); then
-	#	echo "Failed"
-	#	return $retVal
-	#fi
+	runXdcrDiffer "C1" "B1" "C2" "B2"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
 
-	#echo "============================================================================"
-	#echo "PASSED"
-	#echo "============================================================================"
+	validateDifferResults 1 1 $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs

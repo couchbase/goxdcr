@@ -645,7 +645,21 @@ function writeJSONDocument {
 
 	$CURL --location --request POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/docs/$docName \
 		--header 'Accept: application/json, text/plain, */*' --header 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' \
-		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData
+		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData >/dev/null
+}
+
+function writeCollectionJSONDoc {
+	local clusterName=$1
+	local bucketName=$2
+	local scopeName=$3
+	local collectionName=$4
+	local docName=$5
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local jsonData=$6
+
+	$CURL --location --request POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/scopes/$scopeName/collections/$collectionName/docs/$docName \
+		--header 'Accept: application/json, text/plain, */*' --header 'Content-Type: application/x-www-form-urlencoded; charset=UTF-8' \
+		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData >/dev/null
 }
 
 function setupBuckets {
