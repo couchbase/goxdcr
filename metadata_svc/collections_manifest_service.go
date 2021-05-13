@@ -268,7 +268,7 @@ func (c *CollectionsManifestService) PersistNeededManifests(spec *metadata.Repli
 
 	srcErr, tgtErr, _, _ := agent.PersistNeededManifests()
 	if srcErr != nil || tgtErr != nil {
-		return fmt.Errorf("SourceManifestForDCP persist err: %v TargetManifest persist err: %v", srcErr.Error(), tgtErr.Error())
+		return fmt.Errorf("SourceManifestForDCP persist err: %v TargetManifest persist err: %v", srcErr, tgtErr)
 	}
 	return nil
 }

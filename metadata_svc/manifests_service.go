@@ -95,7 +95,7 @@ func (m *ManifestsService) upsertInternal(key string, data *metadata.ManifestsDo
 
 	getRevisionDoc, err := m.getInternal(key)
 	if err != nil {
-		m.logger.Warnf("Getting revision after set or add resulted in err %v", err)
+		m.logger.Warnf("Getting revision after set or add for %v resulted in err %v", key, err)
 	} else {
 		data.SetRevision(getRevisionDoc.Revision())
 	}
