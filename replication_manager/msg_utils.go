@@ -148,6 +148,7 @@ const (
 var ErrorParsingForm = errors.New("Error parsing http request")
 var MissingSettingsInRequest = errors.New("Invalid http request. No replication setting parameters have been supplied.")
 var MissingOldSettingsInRequest = errors.New("Invalid http request. No old replication settings have been supplied.")
+var ErrorColMigrationNeedsDelFiltering = errors.New("collections migrations mode with filtering expression requires both \"Do not replicate DELETE and EXPIRATION\" under \"Filter Replication\" to be turned on")
 
 // replication settings key in rest api -> internal replication settings key
 var RestKeyToSettingsKeyMap = map[string]string{
@@ -677,6 +678,19 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 		}
 		if !isEnterprise {
 			return base.ErrorColMigrationEnterpriseOnly
+		}
+		if !mappingRules.IsExplicitMigrationRule() {
+			if multiHelper, ok := settings[base.FilterExpDelKey].(metadata.ReplicationMultiValueHelper); ok {
+				baselineSetting := metadata.EmptyReplicationSettings()
+				baselineSetting.Values[base.FilterExpKey] = base.FilterExpDelNone
+				peekMap := multiHelper.PeekValues(baselineSetting)
+				expDelVar, ok := peekMap[base.FilterExpDelKey].(base.FilterExpDelType)
+				if !ok || !expDelVar.IsSkipExpirationSet() || !expDelVar.IsSkipDeletesSet() {
+					return ErrorColMigrationNeedsDelFiltering
+				}
+			} else {
+				return ErrorColMigrationNeedsDelFiltering
+			}
 		}
 		return mappingRules.ValidateMigrateRules()
 	} else {
