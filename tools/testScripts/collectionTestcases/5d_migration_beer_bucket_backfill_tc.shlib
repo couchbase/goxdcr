@@ -31,7 +31,7 @@ NonUS_filter='country != \"United States\" AND country != \"Canada\" AND type=\"
 mappingRule="{\"$US_filter\":\"S3.col1\",\"$NonUS_filter\":\"S3.col2\"}"
 
 declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
-	["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule" ["filterExpiration"]="true" ["filterDeletion"]="true")
+	["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
 
 # Bucket -> Scopes
 # -----------------

@@ -32,7 +32,7 @@ Brewery_filter='type=\"brewery\"'
 mappingRule="{\"$US_filter\":\"S3.col1\",\"$NonUS_filter\":\"S3.col2\",\"$Brewery_filter\":\"S3.col3\"}"
 
 declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
-	["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule" ["filterExpiration"]="true" ["filterDeletion"]="true")
+	["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule")
 
 # Bucket -> Scopes
 # -----------------
