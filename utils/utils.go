@@ -43,7 +43,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbaselabs/gojsonsm"
-	gocb "gopkg.in/couchbase/gocb.v1"
 )
 
 var NonExistentBucketError error = errors.New("Bucket doesn't exist")
@@ -313,72 +312,6 @@ func (u *Utilities) UrlForLog(urlStr string) string {
 	} else {
 		return urlStr
 	}
-}
-
-func filterExpressionGetXattrHelper(bucket *gocb.Bucket, docId string, docCas gocb.Cas) ([]byte, error) {
-	var xattrMap map[string]interface{}
-	var xtoc interface{}
-	var xattrSlice []byte
-
-	xattrMap = make(map[string]interface{})
-	frag, err := bucket.LookupIn(docId).GetEx(base.XattributeToc, gocb.SubdocFlagXattr).Execute()
-	if err != nil {
-		return nil, err
-	}
-
-	if frag.Cas() != docCas {
-		return nil, base.ErrorInvalidCAS
-	}
-
-	err = frag.Content(base.XattributeToc, &xtoc)
-	if err != nil {
-		return nil, err
-	}
-
-	tocList := xtoc.([]interface{})
-	for _, tocEntry := range tocList {
-		if entry, ok := tocEntry.(string); ok {
-			frag, err := bucket.LookupIn(docId).GetEx(entry, gocb.SubdocFlagXattr).Execute()
-			if err != nil {
-				return nil, err
-			}
-
-			if frag.Cas() != docCas {
-				return nil, base.ErrorInvalidCAS
-			}
-
-			var value interface{}
-			frag.Content(entry, &value)
-			xattrMap[entry] = value
-		}
-	}
-	xattrSlice, err = json.Marshal(xattrMap)
-	if err != nil {
-		return nil, err
-	}
-
-	return xattrSlice, nil
-}
-
-func filterExpressionGetDocVal(bucket *gocb.Bucket, docId string) ([]byte, gocb.Cas, error) {
-	var retrievedDocVal interface{}
-	docCas, err := bucket.Get(docId, &retrievedDocVal)
-	if err != nil {
-		return nil, docCas, err
-	}
-
-	valMap, ok := retrievedDocVal.(map[string]interface{})
-	if !ok {
-		err = fmt.Errorf("Retrieved document (%v) value is not a valid key-value map", docId)
-		return nil, docCas, err
-	}
-
-	bodySlice, err := json.Marshal(valMap)
-	if err != nil {
-		return nil, docCas, err
-	}
-
-	return bodySlice, docCas, err
 }
 
 // Called by UI to run a test on a specific document. This cannot be unit-tested as the authentication will fail
