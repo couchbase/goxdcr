@@ -258,13 +258,11 @@ type DcpNozzleIface interface {
 	CollectionEnabled() bool
 	GetStreamState(vbno uint16) (DcpStreamState, error)
 	GetXattrSeqnos() map[uint16]uint64
-	Receive(data interface{}) error
 	SetMaxMissCount(max_dcp_miss_count int)
 	PrintStatusSummary()
 
 	// Embedded from AbstractPart
 	Logger() *log.CommonLogger
-	RaiseEvent(event *common.Event)
 }
 
 /************************************

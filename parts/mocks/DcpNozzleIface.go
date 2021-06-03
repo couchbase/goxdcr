@@ -231,7 +231,7 @@ func (_m *DcpNozzleIface) RegisterComponentEventListener(eventType common.Compon
 }
 
 // ResponsibleVBs provides a mock function with given fields:
-func (_m *DcpNozzleIface) ResponsibleVBs() ([]uint16, func()) {
+func (_m *DcpNozzleIface) ResponsibleVBs() []uint16 {
 	ret := _m.Called()
 
 	var r0 []uint16
@@ -243,16 +243,7 @@ func (_m *DcpNozzleIface) ResponsibleVBs() ([]uint16, func()) {
 		}
 	}
 
-	var r1 func()
-	if rf, ok := ret.Get(1).(func() func()); ok {
-		r1 = rf()
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(func())
-		}
-	}
-
-	return r0, r1
+	return r0
 }
 
 // SetConnector provides a mock function with given fields: connector
