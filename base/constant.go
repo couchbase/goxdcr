@@ -585,6 +585,11 @@ var RemoteBucketMonitorMaxRetry = 4
 var RemoteBucketMonitorWaitTime = 200 * time.Millisecond
 var RemoteBucketMonitorRetryFactor = 3
 
+// DefaultHttpTimeout is 180 seconds
+var DefaultHttpTimeoutWaitTime = 200 * time.Millisecond
+var DefaultHttpTimeoutMaxRetry = 10
+var DefaultHttpTimeoutRetryFactor = 2
+
 // minimum versions where various features are supported
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
