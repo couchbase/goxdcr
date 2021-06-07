@@ -799,7 +799,7 @@ func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpe
 		}
 		return nil, err
 	}
-	_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("BackfillInit", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp, nil, finCh)
+	_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("BackfillInit", base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp, nil, finCh)
 	if err != nil {
 		return err
 	}

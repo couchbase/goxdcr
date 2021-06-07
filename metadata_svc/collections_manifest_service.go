@@ -713,15 +713,15 @@ func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() error {
 		return getErr
 	}
 	err := a.utilities.ExponentialBackoffExecutor("CollectionsManifestSvcHandleNewReplSpec",
-		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
+		base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
 	if err != nil {
 		if a.tempAgent {
 			// tempagent do not panic just return error
 			return err
 		}
-		// Worst case scenario even after 3 seconds, panic and XDCR process will reload everything in order from metakv
+		// Worst case scenario even after 180 seconds, panic and XDCR process will reload everything in order from metakv
 		// as in, load the remote cluster reference first, then load the specs
-		panic("Cannot continue without retrieving remote cluster reference")
+		panic(fmt.Sprintf("RemoteCluster service bootstrapping did not finish within %v and XDCR must restart to try again", base.DefaultHttpTimeout))
 	}
 	atomic.StoreUint32(&a.remoteClusterRefPopulated, 1)
 	return nil
