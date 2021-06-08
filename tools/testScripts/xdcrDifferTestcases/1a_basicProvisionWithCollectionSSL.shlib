@@ -46,7 +46,7 @@ function runDataLoad {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running XdcrDiffer simple collection singleLoad test case"
+	echo "Running XdcrDiffer simple collection secure singleLoad test case"
 	echo "============================================================================"
 	setupTopologies
 	if (($? != 0)); then
@@ -54,7 +54,7 @@ function runTestCase {
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 

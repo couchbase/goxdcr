@@ -1,0 +1,142 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+# Replicate US filter to target B2.S3.col1
+# Replicate NonUS to target B2.S3.col2
+US_filter='(country == \"United States\" OR country = \"Canada\") AND type=\"brewery\"'
+NonUS_filter='country != \"United States\" AND country != \"Canada\" AND type=\"brewery\"'
+Brewery_filter='type=\"brewery\"'
+
+mappingRule="{\"$US_filter\":\"S3.col1\",\"$NonUS_filter\":\"S3.col2\",\"$Brewery_filter\":\"S3.col3\"}"
+
+declare -A MigrationReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+	["collectionsMigrationMode"]=true ["colMappingRules"]="$mappingRule" ["filterExpiration"]="true" ["filterDeletion"]="true")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B2"]="S3")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
+	runDocLoader "C1" "B1" "$beerSample"
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+MULTITARGET_MSG="a single source mutation is replicated to multiple target collections"
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running collections migration multi-targets secure test case"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+
+	# Get current instance
+	local -i currMultiTargetMsgCnt
+	local currentClusterLog
+	currentClusterLog=$(getClusterLogs "C1")
+	currMultiTargetMsgCnt=$(echo "$currentClusterLog" | grep -c "$MULTITARGET_MSG")
+
+	echo "Loading beer sample on source cluster..."
+	runDataLoad
+
+	createSecureRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C2" "C1"
+	sleep 1
+
+	createBucketReplication "C1" "B1" "C2" "B2" MigrationReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	echo "Waiting 15 seconds before checking item count first pass"
+	sleep 15
+	checkItemCnt "C2" "B2" 2824
+	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1))
+
+	local retVal
+	runXdcrDiffer "C1" "B1" "C2" "B2"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	echo "Pausing replication and deleting one target collection to create some mismatches"
+	pauseReplication "C1" "B1" "C2" "B2"
+	deleteCollection "C2" "B2" "S3" "col1"
+	createCollection "C2" "B2" "S3" "col1"
+
+	echo "Writing one extra doc on target collection to make sure it isn't picked up"
+	writeCollectionJSONDoc "C2" "B2" "S3" "col1" "d2" '{"foo2":"bar2"}'
+	echo "Waiting 15 seconds before checking item count secon pass"
+	sleep 15
+	checkItemCnt "C2" "B2" 1905
+
+	runXdcrDiffer "C1" "B1" "C2" "B2"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 0 0 920
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

@@ -28,25 +28,29 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S2.col3", "S1.col2":"S2.col4"}')
 
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S2")
 
 # Scopes -> Collections
 # ----------------------
-declare -a collection1Arr=("col1")
-SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col3" "col4" "col5")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]})
 
 function runDataLoad {
 	echo "RUNNING dataload..."
-	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	waitForBgJobs
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running XdcrDiffer simple collection singleLoad test case"
+	echo "Running XdcrDiffer explicit collection secure singleLoad test case"
 	echo "============================================================================"
 	setupTopologies
 	if (($? != 0)); then
@@ -54,15 +58,15 @@ function runTestCase {
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C1" "C2"
 	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
 
 	runDataLoad
 
 	checkUnidirectionalChangesLeft
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 
 	local retVal
 	runXdcrDiffer "C1" "B1" "C2" "B2"
@@ -83,12 +87,21 @@ function runTestCase {
 	echo "PASSED"
 	echo "============================================================================"
 
-	echo "Pausing replication and flushing target bucket to create $CBWORKLOAD_COLLECTION_NUM_ITEMS mismatches"
+	echo "Pausing replication and flushing target bucket to create $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) mismatches"
 	pauseReplication "C1" "B1" "C2" "B2"
 	flushBucket "C2" "B2"
 	sleep 5
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" 0
+
+	echo "Writing some mismatching data"
+	writeCollectionJSONDoc "C1" "B1" "S1" "col1" "d1" '{"foo":"bar"}'
+	writeCollectionJSONDoc "C2" "B2" "S2" "col3" "d1" '{"foo2":"bar2"}'
+	# One missing from source doc
+	writeCollectionJSONDoc "C2" "B2" "S2" "col4" "d2" '{"foo2":"bar2"}'
+	# One that is not mapped and should not show up
+	writeCollectionJSONDoc "C2" "B2" "S2" "col5" "d3" '{"foo":"bar"}'
+	sleep 5
 
 	runXdcrDiffer "C1" "B1" "C2" "B2"
 	retVal=$?
@@ -97,7 +110,7 @@ function runTestCase {
 		return $retVal
 	fi
 
-	validateDifferResults 0 0 $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	validateDifferResults 1 1 $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed"
@@ -106,7 +119,7 @@ function runTestCase {
 
 	echo "============================================================================"
 	echo "PASSED"
-	echo "============================================================================"
+	echo "==========================================================================="
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs

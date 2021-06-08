@@ -32,21 +32,21 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 
 # Scopes -> Collections
 # ----------------------
-declare -a collection1Arr=("col1")
+declare -a collection1Arr=("col1" "col2")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
 
 function runDataLoad {
 	echo "RUNNING dataload..."
-	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running XdcrDiffer simple collection singleLoad test case"
+	echo "Running XdcrDiffer implicit collection secure singleLoad test case"
 	echo "============================================================================"
 	setupTopologies
 	if (($? != 0)); then
@@ -54,7 +54,7 @@ function runTestCase {
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 
@@ -90,6 +90,13 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" 0
 
+	echo "Writing some mismatching data"
+	writeCollectionJSONDoc "C1" "B1" "S1" "col1" "d1" '{"foo":"bar"}'
+	writeCollectionJSONDoc "C2" "B2" "S1" "col1" "d1" '{"foo2":"bar2"}'
+	# One missing from source doc
+	writeCollectionJSONDoc "C2" "B2" "S1" "col2" "d2" '{"foo2":"bar2"}'
+	sleep 5
+
 	runXdcrDiffer "C1" "B1" "C2" "B2"
 	retVal=$?
 	if (($retVal != 0)); then
@@ -97,7 +104,7 @@ function runTestCase {
 		return $retVal
 	fi
 
-	validateDifferResults 0 0 $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	validateDifferResults 1 1 $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed"
