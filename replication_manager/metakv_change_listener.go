@@ -79,7 +79,7 @@ func (mcl *MetakvChangeListener) Start() error {
 
 func (mcl *MetakvChangeListener) observeChildren() {
 	defer mcl.children_waitgrp.Done()
-	err := metakv.RunObserveChildren(mcl.dirpath, mcl.metakvCallback, mcl.cancel_chan)
+	err := metakv.RunObserveChildrenV2(mcl.dirpath, mcl.metakvCallback, mcl.cancel_chan)
 	// call failure call back only when there are real errors
 	// err may be nil when observeChildren is canceled, in which case there is no need to call failure call back
 	mcl.failureCallback(err)
@@ -87,10 +87,10 @@ func (mcl *MetakvChangeListener) observeChildren() {
 
 // Implement callback function for metakv
 // Never returns err since we do not want RunObserveChildren to abort
-func (mcl *MetakvChangeListener) metakvCallback(path string, value []byte, rev interface{}) error {
-	mcl.logger.Infof("metakvCallback called on listener %v with path = %v\n", mcl.Id(), path)
+func (mcl *MetakvChangeListener) metakvCallback(kve metakv.KVEntry) error {
+	mcl.logger.Infof("metakvCallback called on listener %v with path = %v\n", mcl.Id(), kve.Path)
 
-	go mcl.metakvCallback_async(path, value, rev)
+	go mcl.metakvCallback_async(kve.Path, kve.Value, kve.Rev)
 
 	return nil
 }
