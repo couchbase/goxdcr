@@ -70,6 +70,7 @@ type XDCRFactory struct {
 	collectionsManifestSvc   service_def.CollectionsManifestSvc
 	backfillReplSvc          service_def.BackfillReplSvc
 	resolverSvc              service_def.ResolverSvcIface
+	bucketTopologySvc        service_def.BucketTopologySvc
 
 	getBackfillMgr BackfillMgrGetter
 
@@ -100,7 +101,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 	resolver_svc service_def.ResolverSvcIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
 	getBackfillMgr BackfillMgrGetter,
-	backfillReplSvc service_def.BackfillReplSvc) *XDCRFactory {
+	backfillReplSvc service_def.BackfillReplSvc,
+	bucketTopologySvc service_def.BucketTopologySvc) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		cluster_info_svc:         cluster_info_svc,
@@ -118,6 +120,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		collectionsManifestSvc:   collectionsManifestSvc,
 		getBackfillMgr:           getBackfillMgr,
 		backfillReplSvc:          backfillReplSvc,
+		bucketTopologySvc:        bucketTopologySvc,
 	}
 }
 

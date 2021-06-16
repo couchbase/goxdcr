@@ -226,7 +226,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	}
 
 	//	    BodyBase = [{<<"bucket">>, Bucket},
-	//                {<<"bucketUUID">>, BucketUUID}],
+	//                {<<"bucketUUID">>, bucketUUID}],
 	api_base := &apiRequest{}
 	api_base.url = rest_addr
 	api_base.username = username

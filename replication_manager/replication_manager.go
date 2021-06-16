@@ -106,6 +106,8 @@ type replicationManager struct {
 	backfillReplSvc service_def.BackfillReplSvc
 	// Backfill Manager service
 	backfillMgr service_def.BackfillMgrIface
+	// Bucket Topology Service
+	bucketTopologySvc service_def.BucketTopologySvc
 
 	once sync.Once
 
@@ -147,7 +149,8 @@ func StartReplicationManager(sourceKVHost string,
 	resolver_svc service_def.ResolverSvcIface,
 	utilitiesIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc) {
+	backfillReplSvc service_def.BackfillReplSvc,
+	bucketTopologySvc service_def.BucketTopologySvc) {
 
 	replication_mgr.once.Do(func() {
 		replication_mgr.eventIdAtomicWell = -1
@@ -166,7 +169,7 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
 			audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
-			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc)
+			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc, bucketTopologySvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -445,7 +448,8 @@ func (rm *replicationManager) init(
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	resolverSvc service_def.ResolverSvcIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc) {
+	backfillReplSvc service_def.BackfillReplSvc,
+	bucketTopologySvc service_def.BucketTopologySvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
@@ -463,11 +467,13 @@ func (rm *replicationManager) init(
 	rm.internal_settings_svc = internal_settings_svc
 	rm.collectionsManifestSvc = collectionsManifestSvc
 	rm.backfillReplSvc = backfillReplSvc
+	rm.bucketTopologySvc = bucketTopologySvc
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
-		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc)
+		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc,
+		rm.bucketTopologySvc)
 
 	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell)
 	rm.pipelineMgr = pipelineMgrObj

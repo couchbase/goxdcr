@@ -1027,6 +1027,8 @@ var TopologySvcStatusNotFoundCoolDownPeriod = 10 * time.Second
 var HealthCheckInterval = 120 * time.Second
 var HealthCheckTimeout = 10 * time.Second
 
+var BucketTopologyWatcherChanLen = 1000
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,

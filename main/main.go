@@ -179,6 +179,8 @@ func main() {
 			os.Exit(1)
 		}
 
+		bucketTopologyService := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils, base.TopologyChangeCheckInterval, log.DefaultLoggerContext)
+
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,
 			uint16(options.xdcrRestPort),
@@ -199,7 +201,8 @@ func main() {
 			resolver_svc,
 			utils,
 			collectionsManifestService,
-			backfillReplService)
+			backfillReplService,
+			bucketTopologyService)
 
 		// keep main alive in normal mode
 		<-done
