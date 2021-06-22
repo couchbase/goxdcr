@@ -419,6 +419,42 @@ func GetDiffVBList(vbList []uint16, vbServerMap1, vbServerMap2 map[uint16]string
 	return diffVBList
 }
 
+func DiffVBsList(vbList1, vbList2 []uint16) (added, removed []uint16) {
+	oldSortedVBs := SortUint16List(vbList1)
+	newSortedVBs := SortUint16List(vbList2)
+
+	var i = 0
+	var j = 0
+
+	for i < len(oldSortedVBs) && j < len(newSortedVBs) {
+		if oldSortedVBs[i] == newSortedVBs[j] {
+			i++
+			j++
+		} else if oldSortedVBs[i] < newSortedVBs[j] {
+			removed = append(removed, oldSortedVBs[i])
+			i++
+		} else {
+			// oldSortedVBs[i] > newSortedVBs[j]
+			added = append(added, newSortedVBs[j])
+			j++
+		}
+	}
+
+	if i == len(oldSortedVBs) {
+		// Rest is added
+		for ; j < len(newSortedVBs); j++ {
+			added = append(added, newSortedVBs[j])
+		}
+	} else if j == len(newSortedVBs) {
+		// rest is removed
+		for ; i < len(oldSortedVBs); i++ {
+			removed = append(removed, oldSortedVBs[i])
+		}
+	}
+
+	return
+}
+
 // check if two vb server maps are the same
 func AreVBServerMapsTheSame(vbServerMap1, vbServerMap2 map[uint16]string) bool {
 	if len(vbServerMap1) != len(vbServerMap2) {

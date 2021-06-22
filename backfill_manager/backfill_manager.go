@@ -15,7 +15,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_manager"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"math"
@@ -48,6 +47,7 @@ type BackfillMgr struct {
 	clusterInfoSvc         service_def.ClusterInfoSvc
 	xdcrTopologySvc        service_def.XDCRCompTopologySvc
 	checkpointsSvc         service_def.CheckpointsService
+	bucketTopologySvc      service_def.BucketTopologySvc
 
 	pipelineMgr pipeline_manager.PipelineMgrBackfillIface
 
@@ -227,13 +227,7 @@ type BackfillRetryRequest struct {
 	handler                    *BackfillRequestHandler
 }
 
-func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc,
-	replSpecSvc service_def.ReplicationSpecSvc,
-	backfillReplSvc service_def.BackfillReplSvc,
-	pipelineMgr pipeline_manager.PipelineMgrBackfillIface,
-	clusterInfoSvc service_def.ClusterInfoSvc,
-	xdcrTopologySvc service_def.XDCRCompTopologySvc,
-	checkpointsSvc service_def.CheckpointsService) *BackfillMgr {
+func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc, replSpecSvc service_def.ReplicationSpecSvc, backfillReplSvc service_def.BackfillReplSvc, pipelineMgr pipeline_manager.PipelineMgrBackfillIface, clusterInfoSvc service_def.ClusterInfoSvc, xdcrTopologySvc service_def.XDCRCompTopologySvc, checkpointsSvc service_def.CheckpointsService, bucketTopologySvc service_def.BucketTopologySvc) *BackfillMgr {
 
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc:            collectionsManifestSvc,
@@ -254,6 +248,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		finCh:                             make(chan bool),
 		retrySpecRemovalCh:                make(chan string, 5),
 		retryTimerPeriod:                  10 * time.Second,
+		bucketTopologySvc:                 bucketTopologySvc,
 	}
 
 	return backfillMgr
@@ -370,9 +365,6 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	seqnoGetter := func() (map[uint16]uint64, error) {
 		return b.getThroughSeqno(replId)
 	}
-	vbsGetter := func() ([]uint16, error) {
-		return b.GetMyVBs(spec.SourceBucketName)
-	}
 	vbsTasksDoneNotifier := func(startNewTask bool) {
 		// When the first tasks for all VBs in VBTasksMap are done, this is the callback
 		// (i.e. VBTasksMap 0th index of the VBTasksList for all VBs)
@@ -407,6 +399,10 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		return b.validateReplIdExists(replId)
 	}
 
+	getCompleteReq := func() (interface{}, error) {
+		return b.onDemandBackfillGetCompleteRequest(replId, nil)
+	}
+
 	var err error
 	b.specReqHandlersMtx.Lock()
 	if _, exists := b.specToReqHandlerMap[replId]; exists {
@@ -414,7 +410,9 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		b.specReqHandlersMtx.Unlock()
 		return err
 	}
-	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetter, vbsGetter, base.BackfillPersistInterval, vbsTasksDoneNotifier, mainPipelineCkptSeqnosGetter, restreamPipelineFatalFunc, specCheckFunc)
+	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetter,
+		base.BackfillPersistInterval, vbsTasksDoneNotifier, mainPipelineCkptSeqnosGetter, restreamPipelineFatalFunc,
+		specCheckFunc, b.bucketTopologySvc, getCompleteReq, b.replSpecSvc)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
@@ -1254,21 +1252,6 @@ func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, o
 
 func (b *BackfillMgr) getThroughSeqno(replId string) (map[uint16]uint64, error) {
 	return b.pipelineMgr.GetMainPipelineThroughSeqnos(replId)
-}
-
-func (b *BackfillMgr) GetMyVBs(sourceBucketName string) ([]uint16, error) {
-	var vbList []uint16
-
-	kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(b.clusterInfoSvc, b.xdcrTopologySvc, sourceBucketName, b.logger)
-	if err != nil {
-		return vbList, err
-	}
-
-	for _, vbno := range kv_vb_map {
-		vbList = append(vbList, vbno...)
-	}
-
-	return vbList, nil
 }
 
 func (b *BackfillMgr) GetPipelineSvc() common.PipelineService {

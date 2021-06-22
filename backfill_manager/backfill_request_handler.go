@@ -68,9 +68,9 @@ type BackfillRequestHandler struct {
 
 	queuedResps []chan error
 
-	getThroughSeqno SeqnosGetter
-	vbsGetter       MyVBsGetter
-	vbsDoneNotifier MyVBsTasksDoneNotifier
+	getThroughSeqno        SeqnosGetter
+	vbsDoneNotifier        MyVBsTasksDoneNotifier
+	getCompleteBackfillReq func() interface{}
 
 	spec            *metadata.ReplicationSpecification
 	specStillExists func() bool
@@ -80,6 +80,17 @@ type BackfillRequestHandler struct {
 	delOpBackfillId              string
 	mainpipelineCkptSeqnosGetter SeqnosGetter
 	restreamPipelineFatalFunc    func()
+
+	bucketTopologySvc      service_def.BucketTopologySvc
+	sourceBucketTopologyCh chan service_def.Notification
+	replicationSpecSvc     service_def.ReplicationSpecSvc
+
+	latestCachedSourceNotification    service_def.Notification
+	latestCachedSourceNotificationMtx sync.RWMutex
+	getCompleteReq                    func() (interface{}, error)
+
+	sourceUnsubscribeFuncMtx sync.Mutex
+	sourceUnsubscribeFunc    func()
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -95,7 +106,7 @@ type ReqAndResp struct {
 	Force           bool
 }
 
-func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, vbsGetter MyVBsGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func(), specCheckFunc func() bool) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
 		logger:                       logger,
@@ -106,36 +117,64 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		persistenceNeededCh:          make(chan PersistType, 1),
 		spec:                         spec,
 		getThroughSeqno:              seqnoGetter,
-		vbsGetter:                    vbsGetter,
 		backfillReplSvc:              backfillReplSvc,
 		persistInterval:              persistInterval,
 		vbsDoneNotifier:              vbsTasksDoneNotifier,
 		mainpipelineCkptSeqnosGetter: mainPipelineCkptSeqnosGetter,
 		restreamPipelineFatalFunc:    restreamPipelineFatalFunc,
 		specStillExists:              specCheckFunc,
+		bucketTopologySvc:            bucketTopologySvc,
+		getCompleteReq:               getCompleteReq,
+		sourceBucketTopologyCh:       make(chan service_def.Notification, base.BucketTopologyWatcherChanLen),
+		replicationSpecSvc:           replicationSpecSvc,
 	}
 }
 
 func (b *BackfillRequestHandler) Start() error {
+	var err error
 	b.startOnce.Do(func() {
 		atomic.StoreUint32(&b.stopRequested, 0)
 
-		spec, err := b.backfillReplSvc.BackfillReplSpec(b.id)
-		if err == nil && spec != nil {
-			b.cachedBackfillSpec = spec.Clone()
+		var backfillSpec *metadata.BackfillReplicationSpec
+		backfillSpec, err = b.backfillReplSvc.BackfillReplSpec(b.id)
+		if err == nil && backfillSpec != nil {
+			b.cachedBackfillSpec = backfillSpec.Clone()
 		}
+
+		var replSpec *metadata.ReplicationSpecification
+		replSpec, err = b.replicationSpecSvc.ReplicationSpec(b.id)
+		if err != nil {
+			return
+		}
+		b.sourceBucketTopologyCh, err = b.bucketTopologySvc.SubscribeToLocalBucketFeed(replSpec, b.id)
+		if err != nil {
+			return
+		}
+		b.sourceUnsubscribeFuncMtx.Lock()
+		if atomic.LoadUint32(&b.stopRequested) == 0 {
+			b.sourceUnsubscribeFunc = func() {
+				b.bucketTopologySvc.UnSubscribeLocalBucketFeed(replSpec, b.id)
+			}
+		}
+		b.sourceUnsubscribeFuncMtx.Unlock()
+
 		b.childrenWaitgrp.Add(1)
 		go b.run()
 	})
-	return nil
+	return err
 }
 
 func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.ComponentError) {
 	defer waitGrp.Done()
 	atomic.StoreUint32(&b.stopRequested, 1)
 	close(b.finCh)
-
 	b.childrenWaitgrp.Done()
+
+	b.sourceUnsubscribeFuncMtx.Lock()
+	if b.sourceUnsubscribeFunc != nil {
+		b.sourceUnsubscribeFunc()
+	}
+	b.sourceUnsubscribeFuncMtx.Unlock()
 
 	var componentErr base.ComponentError
 	componentErr.ComponentId = b.id
@@ -195,6 +234,14 @@ func (b *BackfillRequestHandler) run() {
 		}
 	}
 
+	// Before being able to receive backfill requests, we must have a list of VBs ready
+	select {
+	case notification := <-b.sourceBucketTopologyCh:
+		b.latestCachedSourceNotificationMtx.Lock()
+		b.latestCachedSourceNotification = notification
+		b.latestCachedSourceNotificationMtx.Unlock()
+	}
+
 	var needCoolDown uint32
 	for {
 		select {
@@ -211,6 +258,29 @@ func (b *BackfillRequestHandler) run() {
 			case reflect.TypeOf(internalDelBackfillReq{}):
 				err := b.handleSpecialDelBackfill(reqAndResp)
 				b.handlePersist(reqAndResp, err, requestPersistFunc)
+			case reflect.TypeOf(internalVBDiffBackfillReq{}):
+				internalReq := reqAndResp.Request.(internalVBDiffBackfillReq)
+				var addErr error
+				if len(internalReq.addedVBsList) > 0 {
+					switch reflect.TypeOf(internalReq.req) {
+					case reflect.TypeOf(metadata.CollectionNamespaceMapping{}):
+						addErr = b.handleBackfillRequestInternal(reqAndResp)
+					case reflect.TypeOf(metadata.CollectionNamespaceMappingsDiffPair{}):
+						addErr = b.handleBackfillRequestDiffPair(reqAndResp)
+					default:
+						panic(fmt.Sprintf("Unknown type %v", reflect.TypeOf(internalReq.req)))
+					}
+				}
+				b.handlePersist(reqAndResp, addErr, requestPersistFunc)
+				if len(internalReq.removedVBsList) > 0 {
+					for _, vb := range internalReq.removedVBsList {
+						delReq := internalDelBackfillReq{
+							specificVBRequested: true,
+							vbno:                vb,
+						}
+						go b.HandleBackfillRequest(delReq)
+					}
+				}
 			case nil:
 				// This is when stop() is called and the channel is closed
 			default:
@@ -256,6 +326,22 @@ func (b *BackfillRequestHandler) run() {
 				}
 				b.queuedResps = b.queuedResps[:0]
 			}
+		case notification := <-b.sourceBucketTopologyCh:
+			// TODO - Think about diffing and catching missed vb's
+			oldVBsList, err := b.getVBs()
+			if err != nil {
+				b.logger.Errorf("Unable to get oldVBList")
+			}
+
+			b.latestCachedSourceNotificationMtx.Lock()
+			b.latestCachedSourceNotification = notification
+			newKvVBMap, _ := notification.GetSourceVBMapRO()
+			b.latestCachedSourceNotificationMtx.Unlock()
+
+			newVBList, _ := b.getVBsInternal(newKvVBMap)
+
+			// TODO - handle err
+			b.handleVBsDiff(base.DiffVBsList(oldVBsList, newVBList))
 		}
 	}
 }
@@ -334,6 +420,27 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 	return <-reqAndResp.PersistResponse
 }
 
+func (b *BackfillRequestHandler) getVBs() ([]uint16, error) {
+	var vbList []uint16
+
+	b.latestCachedSourceNotificationMtx.RLock()
+	kv_vb_map, err := b.latestCachedSourceNotification.GetSourceVBMapRO()
+	b.latestCachedSourceNotificationMtx.RUnlock()
+	if err != nil {
+		return vbList, err
+	}
+
+	return b.getVBsInternal(kv_vb_map)
+}
+
+func (b *BackfillRequestHandler) getVBsInternal(kv_vb_map map[string][]uint16) ([]uint16, error) {
+	var vbList []uint16
+	for _, vbno := range kv_vb_map {
+		vbList = append(vbList, vbno...)
+	}
+	return vbList, nil
+}
+
 // TODO - MB-38931 - once consistent metakv is in place, need to have a listener, handle concurrent updates, etc
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
 	seqnosMap, err := b.getThroughSeqno()
@@ -341,7 +448,8 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 		b.logger.Errorf("%v unable to get seqno as part of handling backfill pipeline request - %v", b.Id(), err)
 		return err
 	}
-	myVBs, err := b.vbsGetter()
+
+	myVBs, err := b.getVBs()
 	if err != nil {
 		b.logger.Errorf("%v unable to get VBs - %v", b.Id(), err)
 		return err
@@ -349,9 +457,16 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 
 	reqRO, ok := reqAndResp.Request.(metadata.CollectionNamespaceMapping)
 	if !ok {
-		err = fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(reqAndResp.Request))
-		b.logger.Errorf(err.Error())
-		return err
+		var ok2 bool
+		var internalReq internalVBDiffBackfillReq
+		if internalReq, ok2 = reqAndResp.Request.(internalVBDiffBackfillReq); ok2 {
+			reqRO, ok2 = internalReq.req.(metadata.CollectionNamespaceMapping)
+		}
+		if !ok && !ok2 {
+			err = fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(reqAndResp.Request))
+			b.logger.Errorf(err.Error())
+			return err
+		}
 	}
 
 	vbTasksMap, err := metadata.NewBackfillVBTasksMap(reqRO, myVBs, seqnosMap)
@@ -755,14 +870,27 @@ func (b *BackfillRequestHandler) routerHasStopped(routerFinCh chan bool) bool {
 // This means the backfill spec needs to be updated with newly added backfills from 0 to the "latest"
 // and any removed mappings need to be removed from the explicit backfills
 func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) error {
-	pairRO := resp.Request.(metadata.CollectionNamespaceMappingsDiffPair)
+	pairRO, ok := resp.Request.(metadata.CollectionNamespaceMappingsDiffPair)
+	if !ok {
+		var ok2 bool
+		var internalReq internalVBDiffBackfillReq
+		if internalReq, ok2 = resp.Request.(internalVBDiffBackfillReq); ok2 {
+			pairRO, ok2 = internalReq.req.(metadata.CollectionNamespaceMappingsDiffPair)
+		}
+
+		if !ok && !ok2 {
+			err := fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(resp.Request))
+			b.logger.Errorf(err.Error())
+			return err
+		}
+	}
 
 	if len(pairRO.Removed) > 0 && b.cachedBackfillSpec != nil {
 		b.cachedBackfillSpec.VBTasksMap.RemoveNamespaceMappings(pairRO.Removed)
 	}
 
 	if len(pairRO.Added) > 0 {
-		myVBs, err := b.vbsGetter()
+		myVBs, err := b.getVBs()
 		if err != nil {
 			return fmt.Errorf("unable to get VBs: %v", err.Error())
 		}
@@ -834,6 +962,12 @@ type internalDelBackfillReq struct {
 	vbno                uint16
 }
 
+type internalVBDiffBackfillReq struct {
+	addedVBsList   []uint16
+	removedVBsList []uint16
+	req            interface{}
+}
+
 func (b *BackfillRequestHandler) DelAllBackfills() error {
 	var delBackfillReq internalDelBackfillReq
 	return b.HandleBackfillRequest(delBackfillReq)
@@ -896,4 +1030,24 @@ func (b *BackfillRequestHandler) GetDelVBSpecificBackfillCb(vbno uint16) (cb bas
 		b.logger.Errorf("Unable to delete vbSpecificRequest due to %v. Extraneous backfill may occur", err)
 	}
 	return cb, errCb
+}
+
+func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16) error {
+	if len(added) == 0 && len(removed) == 0 {
+		return nil
+	}
+
+	backfillReqRaw, err := b.getCompleteReq()
+	if err != nil {
+		return err
+	}
+
+	internalDiffReq := internalVBDiffBackfillReq{
+		addedVBsList:   added,
+		removedVBsList: removed,
+		req:            backfillReqRaw,
+	}
+
+	go b.handleBackfillRequestWithArgs(internalDiffReq, false)
+	return nil
 }
