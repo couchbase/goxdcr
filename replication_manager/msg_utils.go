@@ -91,6 +91,7 @@ const (
 	RetryOnRemoteAuthErrMaxWaitKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
 	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
 	HlvPruningWindowLKey           = base.HlvPruningWindowKey
+	JSFunctionTimeoutKey           = base.JSFunctionTimeoutKey
 	DismissEventKey                = metadata.DismissEventKey
 )
 
@@ -186,6 +187,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	RetryOnRemoteAuthErrMaxWaitKey: metadata.RetryOnRemoteAuthErrMaxWaitSecKey,
 	MergeFunctionMappingKey:        metadata.MergeFunctionMappingKey,
 	HlvPruningWindowLKey:           metadata.HlvPruningWindowKey,
+	JSFunctionTimeoutKey:           metadata.JSFunctionTimeoutKey,
 	DismissEventKey:                metadata.DismissEventKey,
 }
 
@@ -226,6 +228,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.RetryOnRemoteAuthErrMaxWaitSecKey: RetryOnRemoteAuthErrMaxWaitKey,
 	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
 	metadata.HlvPruningWindowKey:               HlvPruningWindowLKey,
+	metadata.JSFunctionTimeoutKey:              JSFunctionTimeoutKey,
 	metadata.DismissEventKey:                   DismissEventKey,
 }
 

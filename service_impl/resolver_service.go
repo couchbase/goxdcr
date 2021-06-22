@@ -14,12 +14,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	evaluatorApi "github.com/couchbase/eventing-ee/evaluator/api"
+	evaluatorClient "github.com/couchbase/eventing-ee/evaluator/client"
 	"net/http"
 	"time"
 
 	"github.com/couchbase/cbauth"
-	"github.com/couchbase/eventing-ee/evaluator/defs"
-	impl "github.com/couchbase/eventing-ee/evaluator/n1ql_impl"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
@@ -27,19 +27,20 @@ import (
 
 var (
 	// The number of goroutines that can call js-evaluator to get merge result
-	numResolverWorkers = base.JSEngineThreads
+	numResolverWorkers = base.JSEngineWorkers
 	// The channel size for sending input to resolverWorkers. Keep this channel small so it won't have backup data from pipelines that went away
 	inputChanelSize = numResolverWorkers
 )
 
 type ResolverSvc struct {
-	logger      *log.CommonLogger
-	InputCh     chan *base.ConflictParams // This accepts conflicting documents from XMEM
-	handler     defs.Handler              // js-evaluator handler for REST request
-	evaluator   defs.Evaluator
-	functionUrl string
-	top_svc     service_def.XDCRCompTopologySvc
-	started     bool
+	logger       *log.CommonLogger
+	InputCh      chan *base.ConflictParams // This accepts conflicting documents from XMEM
+	engine       evaluatorApi.Engine
+	adminService evaluatorApi.AdminService // js-evaluator handler for REST request
+	workerPool   chan evaluatorApi.Worker
+	functionUrl  string
+	top_svc      service_def.XDCRCompTopologySvc
+	started      bool
 }
 
 func NewResolverSvc(top_svc service_def.XDCRCompTopologySvc) *ResolverSvc {
@@ -48,6 +49,7 @@ func NewResolverSvc(top_svc service_def.XDCRCompTopologySvc) *ResolverSvc {
 
 func (rs *ResolverSvc) ResolveAsync(aConflict *base.ConflictParams, finish_ch chan bool) {
 	select {
+	// TODO: MB-47102: Handle when InputCh is not created
 	case rs.InputCh <- aConflict:
 	case <-finish_ch:
 	}
@@ -160,6 +162,7 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	input := <-rs.InputCh
 	source := input.Source
 	target := input.Target
+	timeout := input.Timeout
 	var params []interface{}
 	sourceTime := base.CasToTime(source.Req.Cas).String()
 	targetTime := base.CasToTime(target.Resp.Cas).String()
@@ -176,51 +179,64 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	params = append(params, string(targetBody))
 	params = append(params, targetTime)
 	params = append(params, string(input.TargetId))
-	res, err := rs.execute(input.MergeFunction, input.MergeFunction, params)
+	res, err := rs.execute(input.MergeFunction, input.MergeFunction, params, timeout)
 	input.ResultNotifier.NotifyMergeResult(input, res, err)
 }
 
 func (rs *ResolverSvc) initEvaluator(sourceKVHost string, xdcrRestPort uint16) error {
-	engine := impl.NewEngine()
+	rs.engine = evaluatorClient.Singleton
 
-	config := make(map[defs.Config]interface{})
-	config[defs.Threads] = base.JSEngineThreads
+	config := make(map[evaluatorApi.Config]interface{})
 
-	err := engine.Configure(config)
-	if err.Err != nil {
-		return fmt.Errorf("Unable to configure engine. err: %v", err.Err)
+	if fault := rs.engine.Initialize(config); fault != nil {
+		return fmt.Errorf("Unable to configure engine. err: %v", fault.Error())
+	}
+	rs.adminService = rs.engine.AdminService()
+	http.HandleFunc(rs.adminService.Path(), rs.functionsPathHandler)
+	rs.workerPool = make(chan evaluatorApi.Worker, base.JSEngineWorkers)
+	for i := 0; i < base.JSEngineWorkers; i++ {
+		workerInst, fault := rs.engine.Create(uint64(base.JSWorkerQuota))
+		if fault != nil {
+			return fmt.Errorf("Started %v of %v workers. Failed to start next worker", i, base.JSEngineWorkers)
+		}
+		rs.workerPool <- workerInst
 	}
 
-	rs.handler = engine.UIHandler()
-	http.HandleFunc(rs.handler.Path(), rs.functionsPathHandler)
-
-	err = engine.Start()
-	if err.Err != nil {
-		return fmt.Errorf("Unable to start engine. err: %v", err.Err)
-	}
-
-	rs.evaluator = engine.Fetch()
-	if rs.evaluator == nil {
-		return fmt.Errorf("Unable to fetch javascript evaluator.")
-	} else {
-		rs.logger.Infof("Javascript evaluator started with %v threads.", config[defs.Threads])
-	}
+	rs.logger.Infof("Javascript evaluator started with %v workers at quota %v.", base.JSEngineWorkers, base.JSWorkerQuota)
 	return nil
 }
 
 func (rs *ResolverSvc) functionsPathHandler(w http.ResponseWriter, r *http.Request) {
 	// We can do any verification here before sending to js-evaluator's handler.
-	rs.handler.Handler()(w, r)
+	rs.adminService.Handler()(w, r)
 }
 
-func (rs *ResolverSvc) execute(libraryName string, functionName string, params []interface{}) (interface{}, error) {
+func (rs *ResolverSvc) execute(libraryName string, functionName string, params []interface{}, timeout int) (interface{}, error) {
 	if rs.started == false {
 		return nil, fmt.Errorf("ResolverSvc is not started.")
 	}
-	options := map[defs.Option]interface{}{defs.Timeout: 1000000 /* time in nanosecond for function to run */}
-	res, err := rs.evaluator.Evaluate(libraryName, functionName, options, params)
-	if err.Err != nil {
-		return nil, fmt.Errorf("Javascript Evaluate() returned error: %v, error details: %v", err.Err, err.Details)
+	options := map[evaluatorApi.Option]interface{}{evaluatorApi.Timeout: timeout}
+	worker := <-rs.workerPool
+	defer func() {
+		rs.workerPool <- worker
+	}()
+	if stale := rs.engine.CheckStaleWorker(worker); stale == true {
+		tmpworker, fault := rs.engine.Create(uint64(base.JSWorkerQuota))
+		if fault == nil {
+			go func(oldworker evaluatorApi.Worker) {
+				if disposeFault := rs.engine.Dispose(oldworker); disposeFault != nil {
+					rs.logger.Warnf("Failed to dispose an older workerr. Error: %v", disposeFault.Error())
+				}
+			}(worker)
+			worker = tmpworker
+			tmpworker = nil
+		} else {
+			rs.logger.Warnf("Failed to create a new worker to replace a stale worker. Error: %v", fault.Error())
+		}
+	}
+	res, fault := worker.Run(libraryName, functionName, options, params...)
+	if fault != nil && fault.Error() != nil {
+		return nil, fmt.Errorf("Javascript Evaluate() returned error: %v", fault.Error())
 	} else {
 		return res, nil
 	}

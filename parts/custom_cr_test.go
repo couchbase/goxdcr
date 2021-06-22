@@ -100,7 +100,7 @@ func waitForBucketReady(t *testing.T, bucket *gocb.Bucket) {
 	}
 	fmt.Println("Buckets are ready")
 }
-func createReplication(t *testing.T, bucketName string, mergeFunction string, sourceToTarget bool) {
+func createReplication(t *testing.T, bucketName string, mergeFunction string, timeout int, sourceToTarget bool) {
 	assert := assert.New(t)
 	client := &http.Client{}
 	data := url.Values{}
@@ -120,6 +120,7 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, so
 	data.Add("mergeFunctionMapping", "{\""+base.BucketMergeFunctionKey+"\":\""+mergeFunction+"\"}")
 	data.Add("logLevel", "Debug")
 	data.Add(base.HlvPruningWindowKey, "360") // 1 hour
+	data.Add(base.JSFunctionTimeoutKey, fmt.Sprintf("%v", timeout))
 	req, err := http.NewRequest(base.MethodPost, urlCreateReplication, bytes.NewBufferString(data.Encode()))
 	assert.Nil(err)
 	req.Header.Set(base.ContentType, base.DefaultContentType)
@@ -271,8 +272,8 @@ func TestCcrXattrAfterRep(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc, true)
-	createReplication(t, bucketName, base.DefaultMergeFunc, false) // reverse direction to test pruning
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, false) // reverse direction to test pruning
 
 	/*
 	 * Test 1: New doc at source. Expect to format _xdcr at target with cv and id.
@@ -452,7 +453,7 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
 
 	key := time.Now().Format(time.RFC3339)
 	var expire uint32 = 24 * 60 * 60
@@ -505,7 +506,7 @@ func TestCustomCRBinaryDocs(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
 
 	fmt.Println("Test 1. Create target binary doc, create source binary doc. Source wins.")
 	key := "sourceAndTargetBinary"
@@ -561,7 +562,7 @@ func TestCcrXattrAfterMerge(t *testing.T) {
 	waitForBucketReady(t, targetBucket)
 	mergeFunc := "simpleMerge"
 	createMergeFunction(t, mergeFunc)
-	createReplication(t, bucketName, mergeFunc, true)
+	createReplication(t, bucketName, mergeFunc, base.JSFunctionTimeoutDefault, true)
 
 	// Create documents at target and then at source to get conflicts
 	key := time.Now().Format(time.RFC3339)
@@ -629,7 +630,7 @@ func TestCcrXattrSetBack(t *testing.T) {
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
 	waitForBucketReady(t, targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
 
 	key := time.Now().Format(time.RFC3339) + "_setback"
 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
@@ -683,4 +684,47 @@ func TestCcrXattrSetBack(t *testing.T) {
 
 }
 
-// TODO: Error test, create a function with typo, like "function bucketName (a, b) return b}" and make sure we have a way to recover
+func TestCustomCRFunctionTimeout(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCRFunctionTimeout =================")
+	defer fmt.Println("============== Test case end: TestCustomCRFunctionTimeout =================")
+	bucketName := "TestCustomCRTimeout"
+	assert := assert.New(t)
+	sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRFunctionTimeout skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRFunctionTimeout skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	waitForBucketReady(t, targetBucket)
+	funcName := "loopForever"
+	createMergeFunction(t, funcName)
+	timeout := 4000
+	createReplication(t, bucketName, funcName, timeout, true)
+
+	// Create a document at target and then at source to get conflicts
+	key := time.Now().Format(time.RFC3339) + "timeout"
+	var expire uint32 = 60 * 60 * 24 // expires in 1 day
+	_, err = targetBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
+	assert.Nil(err)
+	_, err = sourceBucket.Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
+	assert.Nil(err)
+	time.Sleep(10 * time.Second)
+	// Expect timeout message
+	filename := "../../../../../../ns_server/logs/n_0/goxdcr.log"
+	b, err := ioutil.ReadFile(filename)
+	s := string(b)
+	expected := fmt.Sprintf("loopForever stopped after running beyond %v ms", timeout)
+	assert.Contains(s, expected, fmt.Sprintf("%v does not contain expected message '%v'", filename, expected))
+}

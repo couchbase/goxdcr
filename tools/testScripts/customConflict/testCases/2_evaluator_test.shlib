@@ -25,7 +25,7 @@ function runTestCase {
     if (($? != 0)); then
     	exit 1
     fi
-    go test -run TestEvaluatorWorkloadMultiFunctionsLargeDocs -test.timeout 20m
+    go test -run TestEvaluatorWorkloadMultiFunctionsLargeDocs -test.timeout 30m
     if (($? != 0)); then
     	exit 1
     fi
@@ -33,9 +33,13 @@ function runTestCase {
     if (($? != 0)); then
      	exit 1
     fi
-    go test -run TestEvaluatorWorkloadSingleFunction
+    go test -run TestEvaluatorWorkloadSingleFunctionLargeDocs -test.timeout 30m
     if (($? != 0)); then
     	exit 1
+    fi
+    go test -run TestEvaluatorWorkloadSingleFunctionSmallDocs
+    if (($? != 0)); then
+        exit 1
     fi
     go test -run TestEvaluatorWorkloadSlowFunction
     if (($? != 0)); then
