@@ -18,7 +18,7 @@ go test -run TestEvaluatorError
 
 export EVALUATOR_WORKERS=10
 export EVALUATOR_QUOTA=1536 #1.5KB
-go test -run TestEvaluatorWorkloadMultiFunctionsLargeDocs -test.timeout 20m
+go test -run TestEvaluatorWorkloadMultiFunctionsLargeDocs -test.timeout 30m
 
 export EVALUATOR_WORKERS=10
 export EVALUATOR_QUOTA=1536 #1.5KB
@@ -26,7 +26,11 @@ go test -run TestEvaluatorWorkloadMultiFunctionsSmallDoc
 
 export EVALUATOR_WORKERS=10
 export EVALUATOR_QUOTA=1536 #1.5KB
-go test -run TestEvaluatorWorkloadSingleFunction
+go test -run TestEvaluatorWorkloadSingleFunctionLargeDocs -test.timeout 30m
+
+export EVALUATOR_WORKERS=10
+export EVALUATOR_QUOTA=1536 #1.5KB
+go test -run TestEvaluatorWorkloadSingleFunctionSmallDocs
 
 export EVALUATOR_WORKERS=10
 export EVALUATOR_QUOTA=1536 #1.5KB

@@ -25,10 +25,8 @@ import (
 	"testing"
 	"time"
 
-	impl "github.com/couchbase/eventing-ee/evaluator/n1ql_impl"
-
-	"github.com/couchbase/eventing-ee/evaluator/defs"
-
+	"github.com/couchbase/eventing-ee/evaluator/api"
+	"github.com/couchbase/eventing-ee/evaluator/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
 )
@@ -37,16 +35,17 @@ var cas1 = 123456789
 var cas2 = 234567890
 var id1 = "Cluster1"
 var id2 = "Cluster2"
-var threads int = defs.DefaultThreadCount
-var evaluatorQuota uint64 = defs.DefaultEvaluatorQuota
+var engineWorkerCount int = base.JSEngineWorkers
+var evaluatorQuota int = base.JSWorkerQuota
 
 var functionUrl = fmt.Sprintf(base.FunctionUrlFmt, "127.0.0.1", "8080")
 var username = "Administrator"
 var password = "wewewe"
 
-var evaluator defs.Evaluator
 var once sync.Once
 var sleepTime = 30 * time.Second
+var engine = client.Singleton
+var workerpool chan api.Worker
 
 // All function files are under ../tools/testScripts/customConflict/
 func createFunction(funcName string) (int, []byte, error) {
@@ -156,7 +155,7 @@ func mergeFunctionBodyFmt() string {
 	body = body + "doc2Js = JSON.parse(targetDoc);\n"
 	body = body + "docJs = {};\n"
 	// Add some lines to make this function body size to be around 2K
-	for ; len(body) < 2000; {
+	for len(body) < 2000 {
 		body = body + "targetCas = targetCas + 1;\n"
 	}
 	body = body + "if (sourceCas > targetCas) docJs = {...doc2Js, ...doc1Js};\n"
@@ -215,7 +214,6 @@ func handleHTTP(mux *http.ServeMux) {
 func initEvaluator() {
 	once.Do(func() {
 		runtime.GOMAXPROCS(4)
-
 		if err := InitSigar(); err != nil {
 			fmt.Printf("InitSigar returned error %v\n", err)
 			os.Exit(1)
@@ -223,53 +221,82 @@ func initEvaluator() {
 		collectStats("Before Evaluator starts", 0)
 		workerStr := os.Getenv("EVALUATOR_WORKERS")
 		if workerStr != "" {
-			worker, err := strconv.Atoi(workerStr)
+			workers, err := strconv.Atoi(workerStr)
 			if err != nil {
 				fmt.Printf("Invalid value $EVALUATOR_WORKERS=%v, use default\n", workerStr)
 			} else {
-				threads = worker
+				engineWorkerCount = workers
 			}
 		}
+		workerpool = make(chan api.Worker, engineWorkerCount)
 		quotaStr := os.Getenv("EVALUATOR_QUOTA")
 		if quotaStr != "" {
-			quota, err := strconv.ParseUint(quotaStr, 10, 64)
+			quota, err := strconv.Atoi(quotaStr)
 			if err != nil {
 				fmt.Printf("Invalid value EVALUATOR_QUOTA=%v, use default\n", quotaStr)
 			} else {
 				evaluatorQuota = quota
 			}
 		}
-		engine := impl.NewEngine()
-		config := make(map[defs.Config]interface{})
-		config[defs.Threads] = threads
-		config[defs.EvaluatorQuota] = evaluatorQuota
-		err := engine.Configure(config)
-		if err.Err != nil {
-			fmt.Printf("Unable to configure engine. err: %v", err.Err)
+		config := make(map[api.Config]interface{})
+		//syslog := "sys.out"
+		//applog := "app.out"
+		//appFD, err := os.OpenFile(applog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 664)
+		//if err != nil {
+		//	fmt.Printf("Could not open applog file, err: %v\n", err)
+		//	os.Exit(1)
+		//}
+		//sysFD, err := os.OpenFile(syslog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 664)
+		//if err != nil {
+		//	fmt.Printf("Could not open syslog file: err: %v\n", err)
+		//	os.Exit(1)
+		//}
+		//config[api.SystemLog] = sysFD
+		//config[api.ApplicationLog] = appFD
+		// One time op. Init V8 and time to configure syslog and application log
+		if fault := engine.Initialize(config); fault != nil {
+			fmt.Printf("Unable to configure engine. err: %v\n", fault.Error())
 			os.Exit(1)
 		}
-		collectStats("Evaluator configured", 0)
+		collectStats("Evaluator initialized", 0)
 		mux := http.NewServeMux()
-		handle := engine.UIHandler()
-		mux.HandleFunc(handle.Path(), handle.Handler())
+		adminService := engine.AdminService()
+		mux.HandleFunc(adminService.Path(), adminService.Handler())
 		go handleHTTP(mux)
-		err = engine.Start()
-		if err.Err != nil {
-			fmt.Printf("Unable to start engine. err: %v", err.Details)
-			os.Exit(1)
+
+		for i := 0; i < engineWorkerCount; i++ {
+			workerInst, fault := engine.Create(uint64(evaluatorQuota))
+			if fault != nil {
+				fmt.Printf("Create worker %v failed with %v\n", i, fault.Error())
+				os.Exit(1)
+			}
+			workerpool <- workerInst
 		}
-		evaluator = engine.Fetch()
-		if evaluator == nil {
-			fmt.Printf("Unable to fetch javascript evaluator.")
-			os.Exit(1)
-		}
+
 		collectStats("After Evaluator starts", 0)
 	})
 }
 
-func execute(id int, evaluator defs.Evaluator, funcName string, opt map[defs.Option]interface{}, params []interface{},  asrt *assert.Assertions) {
-	_, fault := evaluator.Evaluate(funcName, funcName, opt, params)
-	asrt.Nil(fault.Err, fmt.Sprintf("Evaluate returned fault: %v for calling thread %v", fault.Details, id))
+func execute(funcName string, opt map[api.Option]interface{}, params []interface{}) (interface{}, api.Fault) {
+	worker := <-workerpool
+	defer func() {
+		workerpool <- worker
+	}()
+	if engine.CheckStaleWorker(worker) == true {
+		tmpworker, fault := engine.Create(uint64(evaluatorQuota))
+		if fault == nil {
+			go func(oldworker api.Worker) {
+				if disposeFault := engine.Dispose(oldworker); disposeFault != nil {
+					fmt.Printf("Error while desposing worker: %v\n", disposeFault)
+				}
+			}(worker)
+			worker = tmpworker
+			tmpworker = nil
+		}
+	}
+	result, fault := worker.Run(funcName, funcName, opt, params...)
+
+	return result, fault
 }
 
 type testStats_t struct {
@@ -286,6 +313,7 @@ type testStats_t struct {
 	cpuPercent   float64
 	numThreads   int
 	elapseTime   time.Duration
+	workerHeaps  []uint64
 }
 
 var testStats []testStats_t
@@ -293,7 +321,6 @@ var testStats []testStats_t
 func collectStats(msg string, elapseTime time.Duration) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-
 	stats := testStats_t{
 		description:  msg,
 		alloc:        m.Alloc,
@@ -304,7 +331,6 @@ func collectStats(msg string, elapseTime time.Duration) {
 		heapReleased: m.HeapReleased,
 		elapseTime:   elapseTime,
 	}
-
 	if procStats, err := GetProcessRSS(); err == nil {
 		stats.procMemRSS = procStats.ProcMemRSS
 		stats.procMemSize = procStats.ProcMemSize
@@ -316,6 +342,14 @@ func collectStats(msg string, elapseTime time.Duration) {
 		stats.cpuPercent = cpuPercent
 	}
 	stats.maxProc = runtime.GOMAXPROCS(0)
+	if len(workerpool) > 0 {
+		for i := 0; i < engineWorkerCount; i++ {
+			w := <-workerpool
+			heapSize := w.GetHeapSize()
+			stats.workerHeaps = append(stats.workerHeaps, heapSize)
+			workerpool <- w
+		}
+	}
 	testStats = append(testStats, stats)
 }
 func printStats() {
@@ -331,7 +365,7 @@ func printStats() {
 		quota = quota / 1024
 		unit = "KB"
 	}
-	fmt.Printf("Test stats (worker threads = %v, quota = %.1f %v):\n", threads, quota, unit)
+	fmt.Printf("Test stats (workers = %v, quota = %.1f %v):\n", engineWorkerCount, quota, unit)
 	fmt.Println("golangMem = heapInuse + heapIdle - heapReleased")
 	fmt.Println("-------------------------------------------------")
 	fmt.Printf("%-*s", 35, "Description")
@@ -347,7 +381,8 @@ func printStats() {
 	fmt.Printf("%*s", 12, "CpuPercent")
 	fmt.Printf("%*s", 12, "NumThreads")
 	fmt.Printf("%*s", 16, "ElapseTime")
-	fmt.Printf("%*s\n", 10, "MaxProc")
+	fmt.Printf("%*s", 10, "MaxProc")
+	fmt.Printf("%*s\n", 18, "WorkerHeapSizes")
 
 	for _, s := range testStats {
 		fmt.Printf("%-*v", 35, s.description)
@@ -363,39 +398,55 @@ func printStats() {
 		fmt.Printf("%*.2f", 12, s.cpuPercent)
 		fmt.Printf("%*v", 12, s.numThreads)
 		fmt.Printf("%*v", 16, s.elapseTime)
-		fmt.Printf("%*v\n", 10, s.maxProc)
+		fmt.Printf("%*v", 10, s.maxProc)
+		for i, heap := range s.workerHeaps {
+			if i == 0 {
+				fmt.Printf("   ")
+			} else {
+				fmt.Printf(",")
+			}
+			fmt.Printf("%v", heap)
+		}
+		fmt.Printf("\n")
 	}
 }
 
-func doEvaluatorWorkload(t *testing.T, repeat int, funcName string, opt map[defs.Option]interface{}, params []interface{}) {
+func doEvaluatorWorkload(t *testing.T, repeat int, funcName string, opt map[api.Option]interface{}, params []interface{}) {
 	assert := assert.New(t)
 	waitGrp := sync.WaitGroup{}
 	t1 := time.Now()
-	for thrd := 0; thrd < threads; thrd++ {
+	for thrd := 0; thrd < engineWorkerCount; thrd++ {
 		waitGrp.Add(1)
-		go func() {
+		go func(tid int) {
 			defer waitGrp.Done()
 			for i := 0; i < repeat; i++ {
-				execute(i, evaluator, funcName, opt, params, assert)
+				_, fault := execute(funcName, opt, params)
+				if fault != nil {
+					fmt.Printf("%v\n", params)
+					fmt.Printf("Thread %v returned fault: %v\n", tid, fault.Error())
+					os.Exit(1)
+				}
+				assert.Nil(fault, fmt.Sprintf("Evaluate returned fault: %v for calling thread %v", fault, tid))
 			}
-		}()
+		}(thrd)
 	}
 	waitGrp.Wait()
 	evalTime := time.Since(t1)
 	collectStats(fmt.Sprintf("%v %v evals per thread", repeat, funcName), evalTime)
 }
 
-func doEvaluatorMultiFunctionsWorkload(t *testing.T, prefix string, funcCount int, opt map[defs.Option]interface{}, params []interface{}) {
+func doEvaluatorMultiFunctionsWorkload(t *testing.T, prefix string, funcCount int, opt map[api.Option]interface{}, params []interface{}) {
 	assert := assert.New(t)
 	waitGrp := sync.WaitGroup{}
 	t1 := time.Now()
-	for thrd := 0; thrd < threads; thrd++ {
+	for thrd := 0; thrd < engineWorkerCount; thrd++ {
 		waitGrp.Add(1)
 		go func(tid int) {
 			defer waitGrp.Done()
 			for suffix := 0; suffix < funcCount; suffix++ {
 				funcName := fmt.Sprintf("%v%v", prefix, suffix)
-				execute(tid, evaluator, funcName, opt, params, assert)
+				_, fault := execute(funcName, opt, params)
+				assert.Nil(fault, fmt.Sprintf("Evaluate returned fault: %v for calling thread %v", fault, tid))
 			}
 		}(thrd)
 	}
@@ -414,7 +465,7 @@ func TestEvaluatorError(t *testing.T) {
 	doc2 := generateDoc(2*1024, 50, 3)
 	assert.Equal(2*1024, len(doc1))
 	assert.Equal(2*1024, len(doc2))
-	opt := make(map[defs.Option]interface{})
+	opt := make(map[api.Option]interface{})
 	var params []interface{}
 	params = append(params, "key")
 	params = append(params, doc1)
@@ -423,7 +474,6 @@ func TestEvaluatorError(t *testing.T) {
 	params = append(params, doc2)
 	params = append(params, cas2)
 	params = append(params, id2)
-
 	//1. Function with syntax errors. The function should not be created
 	funcName := "TruncatedBody"
 	body := "function " + funcName + "(key, sourceDoc, sourceCas, sourceId, targetDoc, targetCas, targetId) \n"
@@ -433,7 +483,7 @@ func TestEvaluatorError(t *testing.T) {
 	body = body + "if (sourceCas > targetCas) docJs = {...doc2Js, ...doc1Js};\n"
 	body = body + "else docJs = {...doc1Js, ...doc2Js};\n"
 	body = body + "let doc = JSON.stringify(docJs);\n"
-	res, bodyBytes, err := createFunctionInner(funcName, []byte( body))
+	res, bodyBytes, err := createFunctionInner(funcName, []byte(body))
 	assert.Nil(err)
 	assert.Equal(http.StatusBadRequest, res)
 	fmt.Printf("----- Creating functions with syntax errors returned: -----\n%s\n", bodyBytes)
@@ -447,15 +497,15 @@ func TestEvaluatorError(t *testing.T) {
 	res, _, err = createFunction(funcName)
 	assert.Nil(err)
 	assert.Equal(http.StatusOK, res)
-	//   Function is created
+	// Function is created
 	res, err = checkFunction(funcName)
 	assert.Nil(err)
 	assert.Equal(http.StatusOK, res)
-	result, fault := evaluator.Evaluate(funcName, funcName, opt, params)
-	fmt.Printf("funcName: %v \nresult: %v\nerror: %v\n", funcName, result, fault.Details)
-	assert.NotNil(fault.Err)
+	result, fault := execute(funcName, opt, params)
+	fmt.Printf("funcName: %v \nresult: %v\nFault: %v\n", funcName, result, fault.Error())
+	assert.NotNil(fault)
 
-	//3. Functions that causes exceptions
+	// 3. Functions that causes exceptions
 	fmt.Printf("----- Function with unexpected input causing exception: -----\n")
 	funcName = "simpleMerge"
 	res, _, err = createFunction(funcName)
@@ -465,14 +515,27 @@ func TestEvaluatorError(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(http.StatusOK, res)
 	params[1] = "A string"
-	result, fault = evaluator.Evaluate(funcName, funcName, opt, params)
-	fmt.Printf("\nfuncName: %v \nresult: %v, \nerror: %v\n", funcName, result, fault.Details)
-	assert.NotNil(fault.Err)
+	result, fault = execute(funcName, opt, params)
+	fmt.Printf("\nfuncName: %v \nresult: %v, \nerror: %v\n", funcName, result, fault.Error())
+	assert.NotNil(fault)
 }
 
-func TestEvaluatorWorkloadSingleFunction(t *testing.T) {
-	fmt.Println("\n============= Test case start: TestEvaluatorWorkloadSingleFunction =============")
-	defer fmt.Println("============= Test case end: TestEvaluatorWorkloadSingleFunction =============")
+func TestEvaluatorWorkloadSingleFunctionLargeDocs(t *testing.T) {
+	fmt.Println("\n============= Test case start: TestEvaluatorWorkloadSingleFunctionLargeDocs =============")
+	defer fmt.Println("============= Test case end: TestEvaluatorWorkloadSingleFunctionLargeDocs =============")
+	assert := assert.New(t)
+	initEvaluator()
+
+	doc1 := generateDoc(1*1024*1024, 10000, 2)
+	doc2 := generateDoc(1*1024*1024, 10000, 3)
+	assert.Equal(1*1024*1024, len(doc1))
+	assert.Equal(1*1024*1024, len(doc2))
+	evaluatorWorkloadSingleFunc(doc1, doc2, t)
+}
+
+func TestEvaluatorWorkloadSingleFunctionSmallDocs(t *testing.T) {
+	fmt.Println("\n============= Test case start: TestEvaluatorWorkloadSingleFunctionSmallDocs =============")
+	defer fmt.Println("============= Test case end: TestEvaluatorWorkloadSingleFunctionSmallDocs =============")
 	assert := assert.New(t)
 	initEvaluator()
 
@@ -480,7 +543,12 @@ func TestEvaluatorWorkloadSingleFunction(t *testing.T) {
 	doc2 := generateDoc(2*1024, 50, 3)
 	assert.Equal(2*1024, len(doc1))
 	assert.Equal(2*1024, len(doc2))
-	opt := make(map[defs.Option]interface{})
+	evaluatorWorkloadSingleFunc(doc1, doc2, t)
+}
+
+func evaluatorWorkloadSingleFunc(doc1, doc2 string, t *testing.T) {
+	assert := assert.New(t)
+	opt := make(map[api.Option]interface{})
 	var params []interface{}
 	params = append(params, "key")
 	params = append(params, doc1)
@@ -508,7 +576,6 @@ func TestEvaluatorWorkloadSingleFunction(t *testing.T) {
 	doEvaluatorWorkload(t, 10, funcName, opt, params)
 	doEvaluatorWorkload(t, 100, funcName, opt, params)
 	doEvaluatorWorkload(t, 1000, funcName, opt, params)
-	doEvaluatorWorkload(t, 10000, funcName, opt, params)
 
 	res, err = deleteFunction(funcName)
 	assert.Nil(err)
@@ -519,21 +586,12 @@ func TestEvaluatorWorkloadSingleFunction(t *testing.T) {
 	runtime.GC()
 	debug.FreeOSMemory()
 	collectStats("After dropping func", 0)
-	//fileName := "SingleFuncPprof.out"
-	//f, err := os.Create(fileName)
-	//if err != nil {
-	//	fmt.Printf("Failed to open %v\n", fileName)
-	//} else {
-	//	pprof.WriteHeapProfile(f)
-	//	f.Close()
-	//}
 	if sleepTime > 0 {
 		time.Sleep(sleepTime)
 		collectStats(fmt.Sprintf("After sleep %v", sleepTime), sleepTime)
 	}
 	printStats()
 }
-
 func TestEvaluatorWorkloadMultiFunctionsSmallDoc(t *testing.T) {
 	fmt.Println("\n============= Test case start: TestEvaluatorWorkloadMultiFunctionsSmallDoc =============")
 	defer fmt.Println("============= Test case end: TestEvaluatorWorkloadMultiFunctionsSmallDoc =============")
@@ -543,127 +601,9 @@ func TestEvaluatorWorkloadMultiFunctionsSmallDoc(t *testing.T) {
 	doc2 := generateDoc(2*1024, 50, 3)
 	assert.Equal(2*1024, len(doc1))
 	assert.Equal(2*1024, len(doc2))
-	var params []interface{}
-	params = append(params, "key")
-	params = append(params, doc1)
-	params = append(params, cas1)
-	params = append(params, id1)
-	params = append(params, doc2)
-	params = append(params, cas2)
-	params = append(params, id2)
-	opt := make(map[defs.Option]interface{})
 
-	// start with clean slate
-	runtime.GC()
-	debug.FreeOSMemory()
-	collectStats("Start of MultiFunc test", 0)
-
-	prefix := "func"
-	count := 1
-	res, err := createMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 10
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 100
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 1000
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 100
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 10
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	//fileName := "SmallDocPprof.out"
-	//f, err := os.Create(fileName)
-	//if err != nil {
-	//	fmt.Printf("Failed to open %v\n", fileName)
-	//} else {
-	//	pprof.WriteHeapProfile(f)
-	//	f.Close()
-	//}
-	count = 1
-	res, err = createMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	if sleepTime > 0 {
-		time.Sleep(sleepTime)
-		collectStats(fmt.Sprintf("After sleep %v", sleepTime), sleepTime)
-	}
-	printStats()
+	opt := make(map[api.Option]interface{})
+	evaluatorWorkloadMultiFuncs(doc1, doc2, opt, t)
 }
 
 func TestEvaluatorWorkloadMultiFunctionsLargeDocs(t *testing.T) {
@@ -676,135 +616,51 @@ func TestEvaluatorWorkloadMultiFunctionsLargeDocs(t *testing.T) {
 	largeDoc2 := generateDoc(1*1024*1024, 10000, 3)
 	assert.Equal(1*1024*1024, len(largeDoc1))
 	assert.Equal(1*1024*1024, len(largeDoc2))
-	opt := make(map[defs.Option]interface{})
+	opt := make(map[api.Option]interface{})
 	// In a busy system, OS context switch may cause longer execution time.
 	// Timeout > 10s has been observed with 10 workers and 1000 functions
-	opt[defs.Timeout] = 60000 // 60s
+	opt[api.Timeout] = 60000 // 60s
+	evaluatorWorkloadMultiFuncs(largeDoc1, largeDoc2, opt, t)
+}
+
+func evaluatorWorkloadMultiFuncs(doc1, doc2 string, opt map[api.Option]interface{}, t *testing.T) {
+	assert := assert.New(t)
 	var params []interface{}
 	params = append(params, "key")
-	params = append(params, largeDoc1)
+	params = append(params, doc1)
 	params = append(params, cas1)
 	params = append(params, id1)
-	params = append(params, largeDoc2)
+	params = append(params, doc2)
 	params = append(params, cas2)
 	params = append(params, id2)
 
 	// start with clean slate
 	runtime.GC()
 	debug.FreeOSMemory()
-	collectStats("Start of MultiFunc LargDoc test", 0)
+	collectStats("Test", 0)
+
+	counts := [7]int{1, 10, 100, 1000, 100, 10, 1}
+
 	prefix := "func"
-
-	count := 1
-	res, err := createMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 10
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
+	for _, count := range counts {
+		res, err := createMultiFunctions(prefix, count)
+		assert.Nil(err)
+		assert.Equal(http.StatusOK, res)
+		res, err = checkMultiFunctions(prefix, count, http.StatusOK)
+		assert.Nil(err)
+		assert.Equal(http.StatusOK, res)
+		doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
+		res, err = deleteMultiFunctions(prefix, count)
+		assert.Nil(err)
+		assert.Equal(http.StatusOK, res)
 	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
 
-	count = 100
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 1000
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 100
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 10
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-
-	count = 1
-	res, err = createMultiFunctions(prefix, count)
-	if err != nil {
-		fmt.Printf("createMultiFunction with prefix %v and repeat %v returned err: %v\n", prefix, count, err)
-	}
-	assert.Equal(http.StatusOK, res)
-	res, err = checkMultiFunctions(prefix, count, http.StatusOK)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	doEvaluatorMultiFunctionsWorkload(t, prefix, count, opt, params)
-	res, err = deleteMultiFunctions(prefix, count)
-	assert.Nil(err)
-	assert.Equal(http.StatusOK, res)
-	//fileName := "LargeDocPprof.out"
-	//f, err := os.Create(fileName)
-	//if err != nil {
-	//	fmt.Printf("Failed to open %v\n", fileName)
-	//} else {
-	//	pprof.WriteHeapProfile(f)
-	//	f.Close()
-	//}
 	if sleepTime > 0 {
 		time.Sleep(sleepTime)
 		collectStats(fmt.Sprintf("After sleep %v", sleepTime), sleepTime)
 	}
 	printStats()
 }
-
 func TestEvaluatorWorkloadSlowFunction(t *testing.T) {
 	fmt.Println("\n============= Test case start: TestEvaluatorWorkloadSlowFunction =============")
 	defer fmt.Println("============= Test case end: TestEvaluatorWorkloadSlowFunction =============")
@@ -814,7 +670,7 @@ func TestEvaluatorWorkloadSlowFunction(t *testing.T) {
 	doc2 := generateDoc(2*1024, 50, 3)
 	assert.Equal(2*1024, len(doc1))
 	assert.Equal(2*1024, len(doc2))
-	opt := make(map[defs.Option]interface{})
+	opt := make(map[api.Option]interface{})
 	var params []interface{}
 	params = append(params, "key")
 	params = append(params, doc1)

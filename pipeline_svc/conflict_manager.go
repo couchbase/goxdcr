@@ -45,7 +45,7 @@ import (
 
 var (
 	// The number of goroutines that takes the merge result and connect to source and send the merged docu
-	numConflictManagerWorkers = base.JSEngineThreads
+	numConflictManagerWorkers = base.JSEngineWorkers
 
 	// This channel is a buffer before sending to resolverSvc. When the pipeline stop, data here will be discarded
 	// and not stuck in the resolverSvc input channel.
@@ -94,6 +94,7 @@ type ConflictManager struct {
 	mergeFunction     string
 	userAgent         string
 	pruningWindow     time.Duration
+	functionTimeout   int
 
 	counter_conflict_ch_waittime uint64 // time waiting to put conflict into conflict_ch
 	counter_resolver_waittime    uint64 // time waiting to put conflict to resolver's input_ch
@@ -158,6 +159,9 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	if value, ok := settingsMap[base.HlvPruningWindowKey]; ok {
 		c.pruningWindow = time.Duration(value.(int)) * time.Second
 	}
+	if value, ok := settingsMap[base.JSFunctionTimeoutKey]; ok {
+		c.functionTimeout = value.(int)
+	}
 	c.result_ch = make(chan *base.MergeInputAndResult, resultChannelsize)
 	c.conflict_ch = make(chan *base.ConflictParams, conflictChannelSize)
 	for i := 0; i < numConflictManagerWorkers; i++ {
@@ -167,7 +171,7 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	// Start the goroutine that will move data from conflict_ch to Resolver
 	c.wait_grp.Add(1)
 	go c.sendToResolverSvc()
-	c.Logger().Infof("%v: ConflictManager started with merge function %v.", c.pipeline.FullTopic(), c.mergeFunction)
+	c.Logger().Infof("%v: ConflictManager started with merge function %v and function timeout %v.", c.pipeline.FullTopic(), c.mergeFunction, c.functionTimeout)
 	return nil
 }
 func (c *ConflictManager) Stop() error {
@@ -212,6 +216,11 @@ func (c *ConflictManager) IsSharable() bool {
 func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	if value, exists := settings[base.HlvPruningWindowKey]; exists {
 		c.pruningWindow = time.Duration(value.(int)) * time.Second
+		c.Logger().Infof("%v is changedd to %v", base.HlvPruningWindowKey, c.pruningWindow)
+	}
+	if value, exists := settings[base.JSFunctionTimeoutKey]; exists {
+		c.functionTimeout = value.(int)
+		c.Logger().Infof("%v is changedd to %v", base.JSFunctionTimeoutKey, c.functionTimeout)
 	}
 	return nil
 }
@@ -225,6 +234,7 @@ func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target 
 		targetId,
 		c.mergeFunction,
 		c,
+		c.functionTimeout,
 		recycler,
 	}
 	// Send to the larger conflict channel instead of ResolverSvc input channel so XMEM will not block
@@ -283,7 +293,6 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 				// set to source
 				if c.Logger().GetLogLevel() >= log.LogLevelDebug {
 					c.Logger().Debugf("%v: conflictManagerWorker %v received key %v for format and set", c.pipeline.FullTopic(), id, v.Input.Source.Req.Key)
-					continue
 				}
 				req := c.formatMergedDoc(v.Input, []byte(mergedDoc))
 				// TODO (MB-40143): Remove before CC shipping. The req should never be nil unless there are bugs in xattrs format.

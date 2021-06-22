@@ -132,7 +132,8 @@ const UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
 // Custom conflict resolution related constants
-var JSEngineThreads = 3
+var JSEngineWorkers = DefaultGoMaxProcs
+var JSWorkerQuota = 1572864 // 1.5MB
 
 // constants for ipv6 addresses
 const Ipv6AddressSeparator = ":"
@@ -1078,7 +1079,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	manifestRefreshSrcInterval int, manifestRefreshTgtInterval int,
 	backfillPersistInterval time.Duration,
 	httpsPortLookupTimeout time.Duration,
-	jsEngineThreads int,
+	jsEngineWorkers int,
+	jsWorkerQuota int,
 	maxCountDcpStreamsInactive int, resourceMgrKVDetectionRetryInterval time.Duration,
 	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
 	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
@@ -1194,7 +1196,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ManifestRefreshTgtInterval = manifestRefreshTgtInterval
 	BackfillPersistInterval = backfillPersistInterval
 	HttpsPortLookupTimeout = httpsPortLookupTimeout
-	JSEngineThreads = jsEngineThreads
+	JSEngineWorkers = jsEngineWorkers
+	JSWorkerQuota = jsWorkerQuota
 	MaxCountStreamsInactive = maxCountDcpStreamsInactive
 	ResourceMgrKVDetectionRetryInterval = resourceMgrKVDetectionRetryInterval
 	DiagInternalThreshold = utilsStopwatchDiagInternal
@@ -1225,6 +1228,9 @@ const BypassExpiryKey = "filterBypassExpiry"
 const MergeFunctionMappingKey = "mergeFunctionMapping"
 const HlvPruningWindowKey = "hlvPruningWindowSec"
 const HlvPruningDefault = 259200 // seconds, 3 days
+
+const JSFunctionTimeoutKey = "jsFunctionTimeoutMs"
+const JSFunctionTimeoutDefault = 20000 // 20s. 10s is not enough in evaluator unit tests
 
 const RetryOnRemoteAuthErrMaxWaitDefault = 3600 // seconds, 1 hour
 

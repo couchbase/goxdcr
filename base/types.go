@@ -2196,6 +2196,7 @@ type ConflictParams struct {
 	TargetId       []byte
 	MergeFunction  string
 	ResultNotifier MergeResultNotifier
+	Timeout        int                             //in milliseconds
 	ObjectRecycler func(request *WrappedMCRequest) // for source WrappedMCRequest cleanup
 }
 
