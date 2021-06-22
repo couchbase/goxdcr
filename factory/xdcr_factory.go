@@ -182,6 +182,23 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 
+	id := "XDCRFactory"
+
+	sourcebucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, id)
+	if err != nil {
+		xdcrf.logger.Errorf("Error subscribing to local feed for spec %v", spec.Id)
+		return nil, nil, err
+	}
+	var latestSourceBucketTopology service_def.Notification
+	defer xdcrf.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, id)
+	select {
+	case latestSourceBucketTopology = <-sourcebucketFeed:
+	default:
+		return nil, nil, base.ErrorSourceBucketTopologyNotReady
+	}
+
+	// TODO - target
+
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
 		xdcrf.logger.Errorf("Error getting remote cluster with uuid=%v for pipeline %v, err=%v\n", spec.TargetClusterUUID, spec.Id, err)
@@ -247,7 +264,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * sourceNozzles - a map of DCPNozzleID -> *DCPNozzle
 	 * kv_vb_map - Map of SourceKVNode -> list of vbucket#'s that it's responsible for
 	 */
-	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, partTopic, isCapiReplication, logger_ctx)
+	sourceNozzles, kv_vb_map, err := xdcrf.constructSourceNozzles(spec, partTopic, isCapiReplication, logger_ctx, latestSourceBucketTopology)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -449,16 +466,13 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
  * 2. Map of SourceKVNode -> list of vbucket#'s that it's responsible for
  * Currently since XDCR is run on a per node, it should only have 1 source KV node in the map
  */
-func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification,
-	topic string,
-	isCapiReplication bool,
-	logger_ctx *log.LoggerContext) (map[string]common.Nozzle, map[string][]uint16, error) {
+func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, isCapiReplication bool, logger_ctx *log.LoggerContext, srcBucketTopology service_def.Notification) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
 	// Get a map of kvNode -> vBuckets responsibile for
-	kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, spec.SourceBucketName, xdcrf.logger)
+	kv_vb_map, err := srcBucketTopology.GetKvVbMapRO()
 	if err != nil {
 		return nil, nil, err
 	}
