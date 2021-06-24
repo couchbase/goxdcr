@@ -232,22 +232,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) pipelineHasStopped() bool {
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validate() {
-	//vblist_supposed, number_of_source_nodes, err := top_detect_svc.validateSourceTopology()
-	//if err != nil {
-	//	if err == errPipelinesDetached {
-	//		return
-	//	}
-	//	top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating source topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
-	//}
-
-	//err = top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, err)
-	//if err != nil {
-	//	if err == errPipelinesDetached {
-	//		return
-	//	}
-	//	top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when handling source topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
-	//}
-
 	diff_vb_list, target_vb_server_map, err := top_detect_svc.validateTargetTopology()
 	if err != nil {
 		top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
@@ -419,35 +403,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateVbErrors(diff_vb_list [
 	}
 
 	return nil
-}
-
-func (top_detect_svc *TopologyChangeDetectorSvc) validateSourceTopology() ([]uint16, int, error) {
-	defer top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v validateSourceTopology completed", top_detect_svc.mainPipelineTopic)
-
-	mainPipelineSpec, pipelineStillExists := top_detect_svc.pipelineStillExists()
-	if !pipelineStillExists {
-		return []uint16{}, 0, errPipelinesDetached
-	}
-
-	vblist_supposed := []uint16{}
-	kv_vb_map, number_of_nodes, err := pipeline_utils.GetSourceVBMap(top_detect_svc.cluster_info_svc, top_detect_svc.xdcr_topology_svc, mainPipelineSpec.SourceBucketName, top_detect_svc.logger)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	for _, vblist := range kv_vb_map {
-		vblist_supposed = append(vblist_supposed, vblist...)
-	}
-
-	base.SortUint16List(vblist_supposed)
-
-	if !base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_original, vblist_supposed) {
-		top_detect_svc.logger.Infof("Source topology has changed for pipeline %v\n", top_detect_svc.mainPipelineTopic)
-		top_detect_svc.logger.Debugf("Pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.mainPipelineTopic, vblist_supposed, top_detect_svc.vblist_original)
-		return vblist_supposed, number_of_nodes, source_topology_changedErr
-	}
-
-	return vblist_supposed, number_of_nodes, nil
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) pipelineStillExists() (*metadata.ReplicationSpecification, bool) {

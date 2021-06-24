@@ -327,7 +327,6 @@ func (b *BackfillRequestHandler) run() {
 				b.queuedResps = b.queuedResps[:0]
 			}
 		case notification := <-b.sourceBucketTopologyCh:
-			// TODO - Think about diffing and catching missed vb's
 			oldVBsList, err := b.getVBs()
 			if err != nil {
 				b.logger.Errorf("Unable to get oldVBList")
@@ -340,8 +339,10 @@ func (b *BackfillRequestHandler) run() {
 
 			newVBList, _ := b.getVBsInternal(newKvVBMap)
 
-			// TODO - handle err
-			b.handleVBsDiff(base.DiffVBsList(oldVBsList, newVBList))
+			err = b.handleVBsDiff(base.DiffVBsList(oldVBsList, newVBList))
+			if err != nil {
+				b.logger.Errorf("Unable to handle VBs diff due to err %v - oldVBs: %v newVBs: %v", err, oldVBsList, newVBList)
+			}
 		}
 	}
 }

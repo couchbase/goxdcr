@@ -88,27 +88,27 @@ function runOneReplicationCycle {
 	validateXDCRCheckpoints "C1"
 	grepForPanics
 
-	#pauseReplication "C1" "B1" "C2" "B2"
-	#echo "Waiting 10 seconds for pipeline to really pause"
-	#sleep 10
-	#grepForPanics
+	pauseReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
+	grepForPanics
 
-	#resumeReplication "C1" "B1" "C2" "B2"
-	#echo "Waiting 10 seconds for resume to finish"
+	resumeReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 seconds for resume to finish"
 	sleep 10
 	grepForPanics
 
 	checkUnidirectionalChangesLeft
 	grepForPanics
 
-	#echo "============================================================================"
-	#echo "Cycle $(($cycleCnt + 1)) PASSED"
-	#echo "============================================================================"
-	#cleanupBucketReplications
-	#cleanupBuckets
-	#cleanupRemoteClusterRefs
-	#echo "Waiting for $timeIntervalSecs seconds before starting another replication"
-	#sleep $timeIntervalSecs
+	echo "============================================================================"
+	echo "Cycle $(($cycleCnt + 1)) PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	echo "Waiting for $timeIntervalSecs seconds before starting another replication"
+	sleep $timeIntervalSecs
 }
 
 function runMultipleReplicationCycles {
@@ -180,9 +180,8 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-	#runMultipleReplicationCycles 100 &
-	runMultipleReplicationCycles 1
-	runMultipleRebalanceCycles 1
+	runMultipleReplicationCycles 100 &
+	runMultipleRebalanceCycles 3 &
 
 	# 2 jobs - whichever finishes first is done
 	stopWhenAnyBgJobStops 2

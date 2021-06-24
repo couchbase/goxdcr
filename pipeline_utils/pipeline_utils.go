@@ -11,9 +11,7 @@ package pipeline_utils
 import (
 	"errors"
 	"github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
-	"github.com/couchbase/goxdcr/service_def"
 	"strconv"
 	"strings"
 )
@@ -28,40 +26,6 @@ func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 		ret = append(ret, responsibleVBs...)
 	}
 	return ret
-}
-
-/**
- * Returns a map of: kvServerNode -> vBuckets that it is responsible for
- */
-func GetSourceVBMap(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	sourceBucketName string, logger *log.CommonLogger) (kv_vb_map map[string][]uint16, number_of_source_nodes int, err error) {
-	kv_vb_map = make(map[string][]uint16)
-
-	server_vbmap, err := cluster_info_svc.GetLocalServerVBucketsMap(xdcr_topology_svc, sourceBucketName)
-	if err != nil {
-		return
-	}
-
-	number_of_source_nodes = len(server_vbmap)
-
-	logger.Debugf("server_vbmap=%v\n", server_vbmap)
-	nodes, err := xdcr_topology_svc.MyKVNodes()
-	if err != nil {
-		logger.Errorf("Failed to get my KV nodes, err=%v\n", err)
-		return
-	}
-
-	if len(nodes) == 0 {
-		err = ErrorNoSourceKV
-		return
-	}
-
-	for _, node := range nodes {
-		if vbnos, ok := server_vbmap[node]; ok {
-			kv_vb_map[node] = vbnos
-		}
-	}
-	return
 }
 
 func GetElementIdFromName(pipeline common.Pipeline, name string) string {
