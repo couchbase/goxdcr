@@ -1723,10 +1723,9 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.Replic
 	return pipeline_manager.ReplicationStatus(topic)
 }
 
-func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	checkpoints_svc service_def.CheckpointsService, bucket_kv_mem_clients map[string]map[string]mcc.ClientIface,
-	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc,
-	backfillReplSvc service_def.BackfillReplSvc) {
+const updateStatsId = "ReplicationMgrUpdateStats"
+
+func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, checkpoints_svc service_def.CheckpointsService, bucket_kv_mem_clients map[string]map[string]mcc.ClientIface, logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, backfillReplSvc service_def.BackfillReplSvc, bucketTopologySvc service_def.BucketTopologySvc) {
 	logger.Debug("updateStats for paused replications")
 
 	for repl_id, repl_status := range pipeline_manager.ReplicationStatusMap() {
@@ -1741,11 +1740,19 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			continue
 		}
 
-		cur_kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(cluster_info_svc, xdcr_topology_svc, spec.SourceBucketName, logger)
+		localBucketNotificationCh, err := bucketTopologySvc.SubscribeToLocalBucketFeed(spec, updateStatsId)
 		if err != nil {
+			logger.Errorf("Error subscribing to local bucket feed for paused replication %v. err=%v", repl_id, err)
+			continue
+		}
+		notification := <-localBucketNotificationCh
+		cur_kv_vb_map, err := notification.GetKvVbMapRO()
+		if err != nil {
+			bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, updateStatsId)
 			logger.Errorf("Error retrieving kv_vb_map for paused replication %v. err=%v", repl_id, err)
 			continue
 		}
+		bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, updateStatsId)
 
 		// Check to ensure remote cluster collection capability is aligned with the current memcached connections
 		remoteClusterCapability, err := remoteClusterSvc.GetCapability(ref)

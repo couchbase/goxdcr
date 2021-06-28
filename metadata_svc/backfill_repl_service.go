@@ -14,7 +14,6 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
@@ -44,6 +43,8 @@ func getBackfillReplicationDocKeyFunc(replicationId string) string {
 	return fmt.Sprintf("%v", BackfillParentCatalogKey+base.KeyPartsDelimiter+replicationId+base.KeyPartsDelimiter+SpecKey)
 }
 
+const BackfillReplSvcId = "BackfillReplicationService"
+
 type BackfillReplicationService struct {
 	*ShaRefCounterService
 	metadataSvc     service_def.MetadataSvc
@@ -64,15 +65,11 @@ type BackfillReplicationService struct {
 	completeBackfillCbMtx    sync.RWMutex
 	completeBackfillCb       func(string) error
 	recoveringBackfill       uint32
+
+	bucketTopologySvc service_def.BucketTopologySvc
 }
 
-func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc,
-	metadataSvc service_def.MetadataSvc,
-	loggerCtx *log.LoggerContext,
-	utilsIn utilities.UtilsIface,
-	replSpecSvc service_def.ReplicationSpecSvc,
-	clusterInfoSvc service_def.ClusterInfoSvc,
-	xdcrTopologySvc service_def.XDCRCompTopologySvc) (*BackfillReplicationService, error) {
+func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc service_def.MetadataSvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface, replSpecSvc service_def.ReplicationSpecSvc, clusterInfoSvc service_def.ClusterInfoSvc, xdcrTopologySvc service_def.XDCRCompTopologySvc, bucketTopologySvc service_def.BucketTopologySvc) (*BackfillReplicationService, error) {
 	logger := log.NewLogger("BackfillReplSvc", loggerCtx)
 	svc := &BackfillReplicationService{
 		ShaRefCounterService: NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger),
@@ -83,6 +80,7 @@ func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc,
 		utils:                utilsIn,
 		clusterInfoSvc:       clusterInfoSvc,
 		xdcrTopologySvc:      xdcrTopologySvc,
+		bucketTopologySvc:    bucketTopologySvc,
 	}
 
 	return svc, svc.initCacheFromMetaKV()
@@ -340,18 +338,23 @@ func (b *BackfillReplicationService) BackfillReplSpec(replicationId string) (*me
 	return spec, nil
 }
 
-func (b *BackfillReplicationService) GetMyVBs(sourceBucketName string) ([]uint16, error) {
-	var vbList []uint16
-
-	kv_vb_map, _, err := pipeline_utils.GetSourceVBMap(b.clusterInfoSvc, b.xdcrTopologySvc, sourceBucketName, b.logger)
+func (b *BackfillReplicationService) GetMyVBs(replSpec *metadata.ReplicationSpecification) ([]uint16, error) {
+	notificationCh, err := b.bucketTopologySvc.SubscribeToLocalBucketFeed(replSpec, BackfillReplSvcId)
 	if err != nil {
-		return vbList, err
+		return nil, err
+	}
+	defer b.bucketTopologySvc.UnSubscribeLocalBucketFeed(replSpec, BackfillReplSvcId)
+
+	latestNotification := <-notificationCh
+	kv_vb_map, err := latestNotification.GetSourceVBMapRO()
+	if err != nil {
+		return nil, err
 	}
 
+	var vbList []uint16
 	for _, vbno := range kv_vb_map {
 		vbList = append(vbList, vbno...)
 	}
-
 	return vbList, nil
 }
 
@@ -418,7 +421,7 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 		return err
 	}
 
-	myVBs, err := b.GetMyVBs(spec.ReplicationSpec().SourceBucketName)
+	myVBs, err := b.GetMyVBs(spec.ReplicationSpec())
 	if err != nil {
 		return err
 	}
@@ -504,7 +507,7 @@ func (b *BackfillReplicationService) setBackfillSpecUsingMarshalledData(spec *me
 }
 
 func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec *metadata.BackfillReplicationSpec) error {
-	vbsList, err := b.GetMyVBs(spec.ReplicationSpec().SourceBucketName)
+	vbsList, err := b.GetMyVBs(spec.ReplicationSpec())
 	if err != nil {
 		return err
 	}
