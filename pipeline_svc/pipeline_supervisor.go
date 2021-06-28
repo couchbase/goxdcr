@@ -37,7 +37,6 @@ const (
 )
 
 const (
-	health_check_interval          = 120 * time.Second
 	default_max_dcp_miss_count     = 10
 	filterErrCheckAndPrintInterval = 5 * time.Second
 	maxFilterErrorsPerInterval     = 20
@@ -141,7 +140,7 @@ func (pipelineSupervisor *PipelineSupervisor) setMaxDcpMissCount(settings metada
 	// before we declare the pipeline to be broken
 	var max_dcp_miss_count int
 	stats_update_interval := StatsUpdateInterval(settings)
-	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/health_check_interval.Nanoseconds()) + 1
+	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/base.HealthCheckInterval.Nanoseconds()) + 1
 	if number_of_waits_to_ensure_stats_update < default_max_dcp_miss_count {
 		max_dcp_miss_count = default_max_dcp_miss_count
 	} else {
@@ -181,11 +180,11 @@ func (pipelineSupervisor *PipelineSupervisor) closeConnections() {
 }
 
 func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
-	pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started", pipelineSupervisor.Id())
+	pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started with interval: %v timeout: %v", pipelineSupervisor.Id(), base.HealthCheckInterval, base.HealthCheckTimeout)
 
 	defer pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Done()
 
-	health_check_ticker := time.NewTicker(health_check_interval)
+	health_check_ticker := time.NewTicker(base.HealthCheckInterval)
 	defer health_check_ticker.Stop()
 
 	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
@@ -196,7 +195,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 			pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
 			return nil
 		case <-health_check_ticker.C:
-			err := base.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, 1000*time.Millisecond, pipelineSupervisor.Logger())
+			err := base.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, base.HealthCheckTimeout, pipelineSupervisor.Logger())
 			if err != nil {
 				if err == base.ErrorExecutionTimedOut {
 					// ignore timeout error and continue
@@ -207,7 +206,6 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 			}
 		}
 	}
-	return nil
 }
 
 func (pipelineSupervisor *PipelineSupervisor) logFilterError(err error, desc string) {

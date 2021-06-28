@@ -152,6 +152,9 @@ const (
 	BypassSanInCertificateCheckKey = "BypassSanInCertificateCheck"
 	// Number of times to verify bucket is missing before removing an invalid replicationSpec
 	ReplicationSpecGCCntKey = "ReplicationSpecGCCnt"
+	// Pipeline Supervisor health check interval
+	HealthCheckIntervalKey = "HealthCheckIntervalSec"
+	HealthCheckTimeoutKey  = "HealthCheckTimeoutSec"
 
 	TimeoutRuntimeContextStartKey = "TimeoutRuntimeContextStart"
 	TimeoutRuntimeContextStopKey  = "TimeoutRuntimeContextStop"
@@ -302,6 +305,8 @@ var FilteringInternalKeyConfig = &SettingsConfig{base.InternalKeyKey, nil}
 var FilteringInternalXattrConfig = &SettingsConfig{base.InternalKeyXattr, nil}
 var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterAlternateAddrChangeCnt, &Range{1, 1000}}
 var ResourceMgrKVDetectionRetryIntervalConfig = &SettingsConfig{int(base.ResourceMgrKVDetectionRetryInterval / time.Second), &Range{1, 3600}}
+var HealthCheckIntervalConfig = &SettingsConfig{int(base.HealthCheckInterval / time.Second), &Range{5, 3600 /*1 hour*/}}
+var HealthCheckTimeoutConfig = &SettingsConfig{int(base.HealthCheckTimeout / time.Second), &Range{5, 3600 /*1 hour*/}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -392,6 +397,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	FilteringInternalXattr:                        FilteringInternalXattrConfig,
 	RemoteClusterAlternateAddrChangeKey:           RemoteClusterAlternateAddrChangeConfig,
 	ResourceMgrKVDetectionRetryIntervalKey:        ResourceMgrKVDetectionRetryIntervalConfig,
+	HealthCheckIntervalKey:                        HealthCheckIntervalConfig,
+	HealthCheckTimeoutKey:                         HealthCheckTimeoutConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

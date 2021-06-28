@@ -873,6 +873,9 @@ var RemoteClusterAlternateAddrChangeCnt = 5
 
 var ResourceMgrKVDetectionRetryInterval = 60 * time.Second
 
+var HealthCheckInterval = 120 * time.Second
+var HealthCheckTimeout = 10 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -916,7 +919,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	thresholdRatioForProcessCpu int, thresholdRatioForTotalCpu int,
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
 	filteringInternalKey string, filteringInternalXattr string,
-	remoteClusterAlternateAddrChangeCnt int, resourceMgrKVDetectionRetryInterval time.Duration) {
+	remoteClusterAlternateAddrChangeCnt int, resourceMgrKVDetectionRetryInterval time.Duration,
+	healthCheckInterval time.Duration, healthCheckTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1024,6 +1028,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	}
 	RemoteClusterAlternateAddrChangeCnt = remoteClusterAlternateAddrChangeCnt
 	ResourceMgrKVDetectionRetryInterval = resourceMgrKVDetectionRetryInterval
+	HealthCheckInterval = healthCheckInterval
+	HealthCheckTimeout = healthCheckTimeout
 }
 
 // Need to escape the () to result in "META().xattrs" literal
