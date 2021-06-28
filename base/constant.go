@@ -1024,6 +1024,9 @@ var ReplStatusExportBrokenMapTimeout = 5 * time.Second
 var TopologySvcCoolDownPeriod = 60 * time.Second
 var TopologySvcErrCoolDownPeriod = 120 * time.Second
 
+var HealthCheckInterval = 120 * time.Second
+var HealthCheckTimeout = 10 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -1075,7 +1078,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxCountDcpStreamsInactive int, resourceMgrKVDetectionRetryInterval time.Duration,
 	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
 	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
-	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration) {
+	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration,
+	healthCheckInterval time.Duration, healthCheckTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1196,6 +1200,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ReplStatusExportBrokenMapTimeout = replStatusExportBrokenMapTimeout
 	TopologySvcCoolDownPeriod = topologyCooldownPeriod
 	TopologySvcErrCoolDownPeriod = topologyErrCooldownPeriod
+	HealthCheckInterval = healthCheckInterval
+	HealthCheckTimeout = healthCheckTimeout
 }
 
 // Need to escape the () to result in "META().xattrs" literal
