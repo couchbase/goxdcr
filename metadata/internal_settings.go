@@ -215,6 +215,8 @@ const (
 	FilteringInternalXattr = "FilteringInternalXattrKey"
 
 	RemoteClusterAlternateAddrChangeKey = "RemoteClusterAlternateAddrChangeKey"
+
+	MaxCountDCPStreamsInactiveKey = "MaxCountDCPStreamsInactive"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -307,6 +309,7 @@ var RemoteClusterAlternateAddrChangeConfig = &SettingsConfig{base.RemoteClusterA
 var ResourceMgrKVDetectionRetryIntervalConfig = &SettingsConfig{int(base.ResourceMgrKVDetectionRetryInterval / time.Second), &Range{1, 3600}}
 var HealthCheckIntervalConfig = &SettingsConfig{int(base.HealthCheckInterval / time.Second), &Range{5, 3600 /*1 hour*/}}
 var HealthCheckTimeoutConfig = &SettingsConfig{int(base.HealthCheckTimeout / time.Second), &Range{5, 3600 /*1 hour*/}}
+var MaxCountDCPStreamsInactiveConfig = &SettingsConfig{base.MaxCountStreamsInactive, &Range{1, 40}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -399,6 +402,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ResourceMgrKVDetectionRetryIntervalKey:        ResourceMgrKVDetectionRetryIntervalConfig,
 	HealthCheckIntervalKey:                        HealthCheckIntervalConfig,
 	HealthCheckTimeoutKey:                         HealthCheckTimeoutConfig,
+	MaxCountDCPStreamsInactiveKey:                 MaxCountDCPStreamsInactiveConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

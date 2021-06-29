@@ -292,6 +292,7 @@ func initConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.ResourceMgrKVDetectionRetryIntervalKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.HealthCheckIntervalKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.HealthCheckTimeoutKey].(int))*time.Second,
+		internal_settings.Values[metadata.MaxCountDCPStreamsInactiveKey].(int),
 	)
 }
 

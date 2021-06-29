@@ -923,7 +923,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxCountCpuNotMaxed int, maxCountThroughputDrop int,
 	filteringInternalKey string, filteringInternalXattr string,
 	remoteClusterAlternateAddrChangeCnt int, resourceMgrKVDetectionRetryInterval time.Duration,
-	healthCheckInterval time.Duration, healthCheckTimeout time.Duration) {
+	healthCheckInterval time.Duration, healthCheckTimeout time.Duration,
+	maxCountDcpStreamsInactive int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1033,6 +1034,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ResourceMgrKVDetectionRetryInterval = resourceMgrKVDetectionRetryInterval
 	HealthCheckInterval = healthCheckInterval
 	HealthCheckTimeout = healthCheckTimeout
+	MaxCountStreamsInactive = maxCountDcpStreamsInactive
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -1065,3 +1067,7 @@ const ActiveTransactionRecordSuffix = "-#[0-9a-f]+$"
 var ActiveTxnRecordRegexp *regexp.Regexp = regexp.MustCompile(fmt.Sprintf("%v%v%v", ActiveTransactionRecordPrefix, ValidVbucketRangeRegexpGroup, ActiveTransactionRecordSuffix))
 
 const TransactionXattrKey = "txn"
+
+// DCP inactive stream monitor will sleep every "dcp_inactive_stream_check_interval" (30sec)
+// Once this max is hit, it'll retry streamReq with DCP
+var MaxCountStreamsInactive = 10
