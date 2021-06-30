@@ -86,7 +86,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	clusterInfoSvcMock.On("GetLocalServerVBucketsMap", mock.Anything, mock.Anything).Return(localVBMapGetter(nil), nil)
 	xdcrTopologyMock.On("MyKVNodes").Return([]string{"localhost:9000"}, nil)
 
-	sourceCh := make(chan service_def_real.Notification, base.BucketTopologyWatcherChanLen)
+	sourceCh := make(chan service_def_real.SourceNotification, base.BucketTopologyWatcherChanLen)
 	srcNotification := getDefaultSourceNotification(nil)
 	go func() {
 		for i := 0; i < 50; i++ {
@@ -99,7 +99,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	setupBackfillReplSvcMock(backfillReplSvc)
 }
 
-func getDefaultSourceNotification(customVBsList []uint16) service_def_real.Notification {
+func getDefaultSourceNotification(customVBsList []uint16) service_def_real.SourceNotification {
 	notification := &service_impl.Notification{
 		Source:              true,
 		NumberOfSourceNodes: 1,

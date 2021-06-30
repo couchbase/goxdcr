@@ -189,15 +189,13 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		xdcrf.logger.Errorf("Error subscribing to local feed for spec %v", spec.Id)
 		return nil, nil, err
 	}
-	var latestSourceBucketTopology service_def.Notification
+	var latestSourceBucketTopology service_def.SourceNotification
 	defer xdcrf.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, id)
 	select {
 	case latestSourceBucketTopology = <-sourcebucketFeed:
 	default:
 		return nil, nil, base.ErrorSourceBucketTopologyNotReady
 	}
-
-	// TODO - target
 
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
@@ -212,20 +210,19 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	}
 	isCapiReplication := (nozzleType == base.Capi)
 
-	connStr, err := xdcrf.remote_cluster_svc.GetConnectionStringForRemoteCluster(targetClusterRef, isCapiReplication)
+	targetBucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, id)
 	if err != nil {
+		xdcrf.logger.Errorf("Error subscribing to remote feed for spec %v", spec.Id)
 		return nil, nil, err
 	}
-
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := targetClusterRef.MyCredentials()
-	if err != nil {
-		return nil, nil, err
+	var latestTargetBucketTopology service_def.TargetNotification
+	defer xdcrf.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, id)
+	select {
+	case latestTargetBucketTopology = <-targetBucketFeed:
+	default:
+		return nil, nil, base.ErrorSourceBucketTopologyNotReady
 	}
-
-	targetBucketInfo, err := xdcrf.utils.GetBucketInfo(connStr, spec.TargetBucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, xdcrf.logger)
-	if err != nil {
-		return nil, nil, err
-	}
+	targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
 
 	conflictResolutionType, err := xdcrf.utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
@@ -257,7 +254,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		panic("Not implemented")
 	}
 
-	xdcrf.logger.Infof("%v %v sourceCRMode=%v httpAuthMech=%v isCapiReplication=%v\n", pipelineType.String(), topic, sourceCRMode, httpAuthMech, isCapiReplication)
+	xdcrf.logger.Infof("%v %v sourceCRMode=%v\n", pipelineType.String(), topic, sourceCRMode)
 
 	/**
 	 * Construct the Source nozzles
@@ -466,16 +463,13 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
  * 2. Map of SourceKVNode -> list of vbucket#'s that it's responsible for
  * Currently since XDCR is run on a per node, it should only have 1 source KV node in the map
  */
-func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, isCapiReplication bool, logger_ctx *log.LoggerContext, srcBucketTopology service_def.Notification) (map[string]common.Nozzle, map[string][]uint16, error) {
+func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpecification, topic string, isCapiReplication bool, logger_ctx *log.LoggerContext, srcBucketTopology service_def.SourceNotification) (map[string]common.Nozzle, map[string][]uint16, error) {
 	sourceNozzles := make(map[string]common.Nozzle)
 
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
 	// Get a map of kvNode -> vBuckets responsibile for
-	kv_vb_map, err := srcBucketTopology.GetKvVbMapRO()
-	if err != nil {
-		return nil, nil, err
-	}
+	kv_vb_map := srcBucketTopology.GetSourceVBMapRO()
 
 	for kvaddr, vbnos := range kv_vb_map {
 

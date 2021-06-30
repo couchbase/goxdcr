@@ -199,7 +199,7 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 }
 
 func setupBucketTopology(bucketTopologySvc *service_def.BucketTopologySvc, customVBs []uint16) {
-	sourceCh := make(chan service_def_real.Notification, base.BucketTopologyWatcherChanLen)
+	sourceCh := make(chan service_def_real.SourceNotification, base.BucketTopologyWatcherChanLen)
 	srcNotification := getDefaultSourceNotification(customVBs)
 	for i := 0; i < 50; i++ {
 		sourceCh <- srcNotification

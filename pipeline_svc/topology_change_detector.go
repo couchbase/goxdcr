@@ -22,7 +22,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
-	"time"
 )
 
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
@@ -145,22 +144,17 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 					return
 				}
 
-				//initialize target vb server map to set up a baseline for target topology change detection
-				target_server_vb_map, err := top_detect_svc.getTargetBucketInfo()
+				err = top_detect_svc.monitorTarget()
 				if err != nil {
 					startErr = err
 					return
 				}
-				top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
 
 				top_detect_svc.number_of_source_nodes, err = top_detect_svc.xdcr_topology_svc.NumberOfKVNodes()
 				if err != nil {
 					startErr = err
 					return
 				}
-
-				top_detect_svc.wait_grp.Add(1)
-				go top_detect_svc.watch()
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v has started", pipeline.Topic())
 			})
 			if startErr != nil {
@@ -192,28 +186,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Stop() error {
 
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) watch() {
-	defer top_detect_svc.wait_grp.Done()
-
-	//run it once right at the beginning
-	top_detect_svc.validate()
-	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
-
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-top_detect_svc.finish_ch:
-			return
-		case <-ticker.C:
-			if top_detect_svc.pipelineHasStopped() {
-				return
-			}
-			top_detect_svc.validate()
-		}
-	}
-}
-
 func (top_detect_svc *TopologyChangeDetectorSvc) pipelineHasStopped() bool {
 	top_detect_svc.pipelinesMtx.RLock()
 	var mainPipelineState common.PipelineState
@@ -232,17 +204,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) pipelineHasStopped() bool {
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validate() {
-	diff_vb_list, target_vb_server_map, err := top_detect_svc.validateTargetTopology()
-	if err != nil {
-		top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
-	}
-	err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, err)
-	if err != nil {
-		if err == errPipelinesDetached {
-			return
-		}
-		top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when handling target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
-	}
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vblist_supposed []uint16, number_of_source_nodes int, err_in error) error {
@@ -416,114 +377,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) pipelineStillExists() (*metadat
 	return mainPipelineSpec, pipelineStillExists
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetTopology() ([]uint16, map[uint16]string, error) {
-	defer top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v validateTargetTopology completed", top_detect_svc.mainPipelineTopic)
-
-	targetServerVBMap, err := top_detect_svc.getTargetBucketInfo()
-
-	if err != nil {
-		top_detect_svc.logger.Warnf("Skipping target check since received error retrieving target bucket info for %v. err=%v", top_detect_svc.mainPipelineTopic, err)
-		return nil, nil, err
-	}
-
-	// check for target topology changes
-	target_vb_server_map := base.ConstructVbServerMap(top_detect_svc.vblist_original, targetServerVBMap)
-
-	diff_vb_list := base.GetDiffVBList(top_detect_svc.vblist_original, top_detect_svc.target_vb_server_map_original, target_vb_server_map)
-
-	if len(diff_vb_list) > 0 {
-		return diff_vb_list, target_vb_server_map, target_topology_changedErr
-	} else {
-		return diff_vb_list, target_vb_server_map, nil
-	}
-}
-
-func (top_detect_svc *TopologyChangeDetectorSvc) getTargetBucketInfo() (map[string][]uint16, error) {
-	spec, _ := top_detect_svc.repl_spec_svc.ReplicationSpec(top_detect_svc.mainPipelineTopic)
-	if spec == nil {
-		return nil, fmt.Errorf("Cannot find replication spec for %v", top_detect_svc.mainPipelineTopic)
-	}
-
-	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
-	if err != nil {
-		return nil, err
-	}
-
-	connStr, err := top_detect_svc.remote_cluster_svc.GetConnectionStringForRemoteCluster(targetClusterRef, top_detect_svc.capi)
-	if err != nil {
-		return nil, err
-	}
-
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := targetClusterRef.MyCredentials()
-	if err != nil {
-		return nil, err
-	}
-
-	useExternal, err := top_detect_svc.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
-	if err != nil {
-		return nil, err
-	}
-
-	bucketName := spec.TargetBucketName
-	var targetBucketUUID string
-	var targetServerVBMap map[string][]uint16
-	allFieldsFound := false
-
-	targetBucketInfo, err := top_detect_svc.utils.GetBucketInfo(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_detect_svc.logger)
-
-	if err == nil {
-		targetBucketUUID, err = top_detect_svc.utils.GetBucketUuidFromBucketInfo(bucketName, targetBucketInfo, top_detect_svc.logger)
-		if err == nil {
-			targetServerVBMap, err = top_detect_svc.utils.GetRemoteServerVBucketsMap(connStr, bucketName, targetBucketInfo, useExternal)
-			if err == nil {
-				allFieldsFound = true
-			}
-		}
-	}
-
-	if err != nil {
-		errMsg := fmt.Sprintf("Skipping target bucket check for spec %v since failed to get bucket info for %v. err=%v", top_detect_svc.mainPipelineTopic, bucketName, err)
-		top_detect_svc.logger.Warn(errMsg)
-		return nil, errors.New(errMsg)
-	}
-
-	// validate target bucket uuid
-	if spec.TargetBucketUUID != "" && targetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID {
-		/*When target bucket uuid does not match, there are two possibilities:
-		4. target node has been moved to a different cluster, which happens to have bucket with the same name
-		5. target bucket has been deleted and re-created. in this case we need to delete repl spec
-		We need to make an additional call to retrieve target cluster uuid to differentiate between these two cases
-		D. if the call returns a different cluster uuid as that in repl spec, it is case #4
-		E. if the call returns the same cluster uuid as that in repl spec, it is case #5
-		F. if the call returns error, we have to play safe and skip the current target bucket check */
-
-		curTargetClusterUUID, err := top_detect_svc.utils.GetClusterUUID(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_detect_svc.logger)
-		if err != nil {
-			// target node not accessible, skip target check
-			logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err)
-			top_detect_svc.logger.Warn(logMessage)
-			return nil, errors.New(logMessage)
-		}
-		if curTargetClusterUUID != spec.TargetClusterUUID {
-			// case 4, target node has been moved to a different cluster. skip target check
-			logMessage := fmt.Sprintf("%v skipping target bucket check since %v has been moved to a different cluster %v.\n", spec.Id, connStr, curTargetClusterUUID)
-			top_detect_svc.logger.Warn(logMessage)
-			return nil, errors.New(logMessage)
-		}
-
-		// if we get here, it is case 5, delete repl spec
-		reason := fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
-		err = top_detect_svc.DelReplicationSpec(spec, reason)
-		return nil, err
-	}
-
-	if allFieldsFound {
-		return targetServerVBMap, nil
-	} else {
-		return nil, fmt.Errorf("%v Error retrieving target server map from the target bucket %v", spec.Id, spec.TargetBucketName)
-	}
-}
-
 func (top_detect_svc *TopologyChangeDetectorSvc) DelReplicationSpec(spec *metadata.ReplicationSpecification, reason string) error {
 	logMessage := fmt.Sprintf("Deleting replication spec %v since %v.\n", spec.Id, reason)
 	top_detect_svc.logger.Info(logMessage)
@@ -607,16 +460,13 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 				if top_detect_svc.pipelineHasStopped() {
 					return
 				}
-				if !notification.IsSourceNotification() {
-					continue
-				}
-				kv_vb_map, updateOnceErr := notification.GetSourceVBMapRO()
+				kv_vb_map := notification.GetSourceVBMapRO()
 				if updateOnceErr != nil {
 					top_detect_svc.logger.Errorf("Unable to get KV VB Map - %v", updateOnceErr)
 					continue
 				}
 
-				number_of_source_nodes, updateOnceErr := notification.GetNumberOfSourceNodes()
+				number_of_source_nodes := notification.GetNumberOfSourceNodes()
 				if updateOnceErr != nil {
 					top_detect_svc.logger.Errorf("Unable to get number of source nodes - %v", updateOnceErr)
 					continue
@@ -629,7 +479,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 
 				if !base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_original, vblist_supposed) {
 					top_detect_svc.logger.Infof("Source topology has changed for pipeline %v\n", top_detect_svc.mainPipelineTopic)
-					top_detect_svc.logger.Debugf("Pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.mainPipelineTopic, vblist_supposed, top_detect_svc.vblist_original)
+					top_detect_svc.logger.Infof("Pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.mainPipelineTopic, vblist_supposed, top_detect_svc.vblist_original)
 					updateOnceErr = source_topology_changedErr
 				}
 
@@ -638,4 +488,113 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 		}
 	}()
 	return nil
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget() error {
+	var err error
+	var spec *metadata.ReplicationSpecification
+	mainPipeline := top_detect_svc.pipelines[0]
+	genSpec := mainPipeline.Specification()
+	if genSpec == nil {
+		err = base.ErrorNilPtr
+	} else {
+		spec = genSpec.GetReplicationSpec()
+	}
+	targetVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, top_detect_svc.Id())
+	if err != nil {
+		return err
+	}
+
+	// Init with initial info
+	firstNotification := <-targetVbUpdateCh
+	target_server_vb_map := firstNotification.GetTargetServerVBMap()
+	// monitorSource must have had occurred first already
+	top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
+
+	go func() {
+		for {
+			select {
+			case <-top_detect_svc.finish_ch:
+				top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.Id())
+				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v validateTargetTopology completed", top_detect_svc.mainPipelineTopic)
+				return
+			case notification := <-targetVbUpdateCh:
+				if top_detect_svc.pipelineHasStopped() {
+					return
+				}
+				targetBucketUUID := notification.GetTargetBucketUUID()
+
+				// validate target bucket uuid
+				if spec.TargetBucketUUID != "" && targetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID {
+					shouldTryAgain := top_detect_svc.validateTargetBucketUUIDDifferences(spec)
+					if shouldTryAgain {
+						continue
+					}
+				}
+
+				targetServerVBMap := notification.GetTargetServerVBMap()
+				// check for target topology changes
+				target_vb_server_map := base.ConstructVbServerMap(top_detect_svc.vblist_original, targetServerVBMap)
+
+				diff_vb_list := base.GetDiffVBList(top_detect_svc.vblist_original, top_detect_svc.target_vb_server_map_original, target_vb_server_map)
+				var errToHandleTargetChange error
+				if len(diff_vb_list) > 0 {
+					errToHandleTargetChange = target_topology_changedErr
+					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
+				}
+				err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
+				if err != nil {
+					if err == errPipelinesDetached {
+						return
+					}
+					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when handling target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetBucketUUIDDifferences(spec *metadata.ReplicationSpecification) (shouldTryAgain bool) {
+	/*When target bucket uuid does not match, there are two possibilities:
+	4. target node has been moved to a different cluster, which happens to have bucket with the same name
+	5. target bucket has been deleted and re-created. in this case we need to delete repl spec
+	We need to make an additional call to retrieve target cluster uuid to differentiate between these two cases
+	D. if the call returns a different cluster uuid as that in repl spec, it is case #4
+	E. if the call returns the same cluster uuid as that in repl spec, it is case #5
+	F. if the call returns error, we have to play safe and skip the current target bucket check */
+	targetClusterRef, err := top_detect_svc.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil {
+		shouldTryAgain = true
+		return
+	}
+	connStr, err := top_detect_svc.remote_cluster_svc.GetConnectionStringForRemoteCluster(targetClusterRef, top_detect_svc.capi)
+	if err != nil {
+		shouldTryAgain = true
+		return
+	}
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := targetClusterRef.MyCredentials()
+	if err != nil {
+		shouldTryAgain = true
+		return
+	}
+	curTargetClusterUUID, err := top_detect_svc.utils.GetClusterUUID(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_detect_svc.logger)
+	if err != nil {
+		// target node not accessible, skip target check
+		logMessage := fmt.Sprintf("%v skipping target bucket check since %v is not accessible. err=%v\n", spec.Id, connStr, err)
+		top_detect_svc.logger.Warn(logMessage)
+		shouldTryAgain = true
+		return
+	}
+	if curTargetClusterUUID != spec.TargetClusterUUID {
+		// case 4, target node has been moved to a different cluster. skip target check
+		logMessage := fmt.Sprintf("%v skipping target bucket check since %v has been moved to a different cluster %v.\n", spec.Id, connStr, curTargetClusterUUID)
+		top_detect_svc.logger.Warn(logMessage)
+		shouldTryAgain = true
+		return
+	}
+	// if we get here, it is case 5, delete repl spec
+	reason := fmt.Sprintf("the target bucket \"%v\" has been deleted and recreated", spec.TargetBucketName)
+	err = top_detect_svc.DelReplicationSpec(spec, reason)
+	return
 }

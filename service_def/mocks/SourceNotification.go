@@ -9,8 +9,24 @@ type SourceNotification struct {
 	mock.Mock
 }
 
+// CloneRO provides a mock function with given fields:
+func (_m *SourceNotification) CloneRO() interface{} {
+	ret := _m.Called()
+
+	var r0 interface{}
+	if rf, ok := ret.Get(0).(func() interface{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(interface{})
+		}
+	}
+
+	return r0
+}
+
 // GetKvVbMapRO provides a mock function with given fields:
-func (_m *SourceNotification) GetKvVbMapRO() (map[string][]uint16, error) {
+func (_m *SourceNotification) GetKvVbMapRO() map[string][]uint16 {
 	ret := _m.Called()
 
 	var r0 map[string][]uint16
@@ -22,18 +38,11 @@ func (_m *SourceNotification) GetKvVbMapRO() (map[string][]uint16, error) {
 		}
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // GetNumberOfSourceNodes provides a mock function with given fields:
-func (_m *SourceNotification) GetNumberOfSourceNodes() (int, error) {
+func (_m *SourceNotification) GetNumberOfSourceNodes() int {
 	ret := _m.Called()
 
 	var r0 int
@@ -43,18 +52,11 @@ func (_m *SourceNotification) GetNumberOfSourceNodes() (int, error) {
 		r0 = ret.Get(0).(int)
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // GetSourceVBMapRO provides a mock function with given fields:
-func (_m *SourceNotification) GetSourceVBMapRO() (map[string][]uint16, error) {
+func (_m *SourceNotification) GetSourceVBMapRO() map[string][]uint16 {
 	ret := _m.Called()
 
 	var r0 map[string][]uint16
@@ -66,12 +68,19 @@ func (_m *SourceNotification) GetSourceVBMapRO() (map[string][]uint16, error) {
 		}
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
+	return r0
+}
+
+// IsSourceNotification provides a mock function with given fields:
+func (_m *SourceNotification) IsSourceNotification() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
 	} else {
-		r1 = ret.Error(1)
+		r0 = ret.Get(0).(bool)
 	}
 
-	return r0, r1
+	return r0
 }

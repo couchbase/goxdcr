@@ -82,10 +82,10 @@ type BackfillRequestHandler struct {
 	restreamPipelineFatalFunc    func()
 
 	bucketTopologySvc      service_def.BucketTopologySvc
-	sourceBucketTopologyCh chan service_def.Notification
+	sourceBucketTopologyCh chan service_def.SourceNotification
 	replicationSpecSvc     service_def.ReplicationSpecSvc
 
-	latestCachedSourceNotification    service_def.Notification
+	latestCachedSourceNotification    service_def.SourceNotification
 	latestCachedSourceNotificationMtx sync.RWMutex
 	getCompleteReq                    func() (interface{}, error)
 
@@ -125,7 +125,7 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		specStillExists:              specCheckFunc,
 		bucketTopologySvc:            bucketTopologySvc,
 		getCompleteReq:               getCompleteReq,
-		sourceBucketTopologyCh:       make(chan service_def.Notification, base.BucketTopologyWatcherChanLen),
+		sourceBucketTopologyCh:       make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen),
 		replicationSpecSvc:           replicationSpecSvc,
 	}
 }
@@ -334,7 +334,7 @@ func (b *BackfillRequestHandler) run() {
 
 			b.latestCachedSourceNotificationMtx.Lock()
 			b.latestCachedSourceNotification = notification
-			newKvVBMap, _ := notification.GetSourceVBMapRO()
+			newKvVBMap := notification.GetSourceVBMapRO()
 			b.latestCachedSourceNotificationMtx.Unlock()
 
 			newVBList, _ := b.getVBsInternal(newKvVBMap)
@@ -422,15 +422,9 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 }
 
 func (b *BackfillRequestHandler) getVBs() ([]uint16, error) {
-	var vbList []uint16
-
 	b.latestCachedSourceNotificationMtx.RLock()
-	kv_vb_map, err := b.latestCachedSourceNotification.GetSourceVBMapRO()
+	kv_vb_map := b.latestCachedSourceNotification.GetSourceVBMapRO()
 	b.latestCachedSourceNotificationMtx.RUnlock()
-	if err != nil {
-		return vbList, err
-	}
-
 	return b.getVBsInternal(kv_vb_map)
 }
 

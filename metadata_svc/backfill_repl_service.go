@@ -346,10 +346,7 @@ func (b *BackfillReplicationService) GetMyVBs(replSpec *metadata.ReplicationSpec
 	defer b.bucketTopologySvc.UnSubscribeLocalBucketFeed(replSpec, BackfillReplSvcId)
 
 	latestNotification := <-notificationCh
-	kv_vb_map, err := latestNotification.GetSourceVBMapRO()
-	if err != nil {
-		return nil, err
-	}
+	kv_vb_map := latestNotification.GetSourceVBMapRO()
 
 	var vbList []uint16
 	for _, vbno := range kv_vb_map {

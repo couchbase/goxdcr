@@ -17,8 +17,8 @@ import (
 // topologies from either local or remote nodes in a responsible manner
 // and feeding the information back to those who need it
 type BucketTopologySvc interface {
-	SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan Notification, error)
-	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan Notification, error)
+	SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
+	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, error)
 
 	UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
@@ -27,13 +27,20 @@ type BucketTopologySvc interface {
 }
 
 type Notification interface {
-	SourceNotification
 	IsSourceNotification() bool
-	CloneRO() Notification
+	CloneRO() interface{}
 }
 
 type SourceNotification interface {
-	GetNumberOfSourceNodes() (int, error)
-	GetKvVbMapRO() (map[string][]uint16, error)
-	GetSourceVBMapRO() (map[string][]uint16, error)
+	Notification
+	GetNumberOfSourceNodes() int
+	GetSourceVBMapRO() map[string][]uint16
+	GetKvVbMapRO() map[string][]uint16
+}
+
+type TargetNotification interface {
+	Notification
+	GetTargetServerVBMap() map[string][]uint16
+	GetTargetBucketUUID() string
+	GetTargetBucketInfo() map[string]interface{}
 }

@@ -31,15 +31,15 @@ func (_m *BucketTopologySvc) ReplicationSpecChangeCallback(id string, oldVal int
 }
 
 // SubscribeToLocalBucketFeed provides a mock function with given fields: spec, subscriberId
-func (_m *BucketTopologySvc) SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.Notification, error) {
+func (_m *BucketTopologySvc) SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
 	ret := _m.Called(spec, subscriberId)
 
-	var r0 chan service_def.Notification
-	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) chan service_def.Notification); ok {
+	var r0 chan service_def.SourceNotification
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) chan service_def.SourceNotification); ok {
 		r0 = rf(spec, subscriberId)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(chan service_def.Notification)
+			r0 = ret.Get(0).(chan service_def.SourceNotification)
 		}
 	}
 
@@ -54,15 +54,15 @@ func (_m *BucketTopologySvc) SubscribeToLocalBucketFeed(spec *metadata.Replicati
 }
 
 // SubscribeToRemoteBucketFeed provides a mock function with given fields: spec, subscriberId
-func (_m *BucketTopologySvc) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.Notification, error) {
+func (_m *BucketTopologySvc) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, error) {
 	ret := _m.Called(spec, subscriberId)
 
-	var r0 chan service_def.Notification
-	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) chan service_def.Notification); ok {
+	var r0 chan service_def.TargetNotification
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) chan service_def.TargetNotification); ok {
 		r0 = rf(spec, subscriberId)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(chan service_def.Notification)
+			r0 = ret.Get(0).(chan service_def.TargetNotification)
 		}
 	}
 

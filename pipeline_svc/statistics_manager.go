@@ -1746,12 +1746,7 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			continue
 		}
 		notification := <-localBucketNotificationCh
-		cur_kv_vb_map, err := notification.GetKvVbMapRO()
-		if err != nil {
-			bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, updateStatsId)
-			logger.Errorf("Error retrieving kv_vb_map for paused replication %v. err=%v", repl_id, err)
-			continue
-		}
+		cur_kv_vb_map := notification.GetKvVbMapRO()
 		bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, updateStatsId)
 
 		// Check to ensure remote cluster collection capability is aligned with the current memcached connections

@@ -13,6 +13,13 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 )
 
+// Returns:
+// 1. bucketInfo
+// 2. shouldUseAlternateAddressing
+// 3. connectionString
+// 4. err
+type BucketInfoGetter func() (map[string]interface{}, bool, string, error)
+
 type RemoteClusterSvc interface {
 	RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error)
 	RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error)
@@ -76,7 +83,10 @@ type RemoteClusterSvc interface {
 
 	// Get the last-known connectivity status
 	GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error)
-	
+
 	// Gets a list of references that have experienced auth errors and have not been queried before
 	GetRefListForFirstTimeBadAuths() ([]*metadata.RemoteClusterReference, error)
+
+	// Gives an API that returns the ability to retrieve target bucket info - note that this call may be heavy on ns_server
+	GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (BucketInfoGetter, error)
 }

@@ -63,7 +63,7 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.Meta
 	kvNodes = append(kvNodes, "localhost")
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
 
-	notificationCh := make(chan serviceDefReal.Notification, 1000)
+	notificationCh := make(chan serviceDefReal.SourceNotification, 1000)
 	notification := &service_impl.Notification{
 		Source:              true,
 		NumberOfSourceNodes: 1,

@@ -6,10 +6,10 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	mocks2 "github.com/couchbase/goxdcr/service_def/mocks"
+	"github.com/couchbase/goxdcr/service_def"
+	mocks "github.com/couchbase/goxdcr/service_def/mocks"
 	utilities "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
-	"github.com/nelio2k/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"io/ioutil"
@@ -17,10 +17,10 @@ import (
 	"time"
 )
 
-func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks2.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc) {
+func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc) {
 	remClusterSvc := &mocks.RemoteClusterSvc{}
 	utils := &utilsMock.UtilsIface{}
-	xdcrCompTopologySvc := &mocks2.XDCRCompTopologySvc{}
+	xdcrCompTopologySvc := &mocks.XDCRCompTopologySvc{}
 	utilsReal := utilities.NewUtilities()
 	replSpecSvc := &mocks.ReplicationSpecSvc{}
 
@@ -42,20 +42,47 @@ func setupBTSSpecs() *metadata.ReplicationSpecification {
 	return spec
 }
 
-func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks2.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification) {
-	xdcrTopologySvc.On("MyConnectionStr").Return("dummyConnStr", nil)
+func getTestRemRef() *metadata.RemoteClusterReference {
+	ref, _ := metadata.NewRemoteClusterReference("uuid", "name", "hostname", "username", "password", "", false, "", nil, nil, nil, nil)
+	return ref
+}
+
+func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification, ref *metadata.RemoteClusterReference) {
+	var connStr = "dummyConnStr"
+	xdcrTopologySvc.On("MyConnectionStr").Return(connStr, nil)
 	xdcrTopologySvc.On("MyCredentials").Return("", "", base.HttpAuthMechPlain, nil, false, nil, nil, nil)
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
 	utils.On("GetBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo, nil)
+	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		utilsFunc := args.Get(4).(utilities.ExponentialOpFunc)
+		utilsFunc()
+	}).Return(nil)
 
-	vbMapToRet, vbMapErr := utilsReal.GetServerVBucketsMap("", "", bucketInfo)
-	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything).Return(vbMapToRet, vbMapErr)
+	bucketUuidGetterFunc := func() string {
+		bucketUuid, _ := utilsReal.GetBucketUuidFromBucketInfo("", bucketInfo, nil)
+		return bucketUuid
+	}
+	utils.On("GetBucketUuidFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return(bucketUuidGetterFunc(), nil)
+
+	vbMapGetter := func() map[string][]uint16 {
+		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo)
+		return result
+	}
+	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
+	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {
 		replMap[spec.Id] = spec
 	}
 	replSpecSvc.On("AllReplicationSpecs").Return(replMap, nil)
+
+	remClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(ref, nil)
+	bucketInfoGetter := func() (map[string]interface{}, bool, string, error) {
+		return bucketInfo, false, connStr, nil
+	}
+	remClusterSvc.On("GetBucketInfoGetter", mock.Anything, mock.Anything).Return(service_def.BucketInfoGetter(bucketInfoGetter), nil)
+	//type BucketInfoGetter func() (map[string]interface{}, bool, string, error)
 }
 
 func getBucketMap() (map[string]interface{}, []string) {
@@ -83,7 +110,7 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 
 	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc := setupBTSBoilerPlate()
 	bucketMap, kvNames := getBucketMap()
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil)
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef())
 
 	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc)
 	assert.NotNil(bts)
@@ -120,10 +147,10 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	notification2 := <-spec2NotifyCh
 	assert.NotNil(notification1)
 	assert.NotNil(notification2)
-	srcVBMap1, _ := notification1.GetSourceVBMapRO()
-	srcVBMap2, _ := notification2.GetSourceVBMapRO()
-	numSrcNodes1, _ := notification1.GetNumberOfSourceNodes()
-	numSrcNodes2, _ := notification2.GetNumberOfSourceNodes()
+	srcVBMap1 := notification1.GetSourceVBMapRO()
+	srcVBMap2 := notification2.GetSourceVBMapRO()
+	numSrcNodes1 := notification1.GetNumberOfSourceNodes()
+	numSrcNodes2 := notification2.GetNumberOfSourceNodes()
 	assert.Equal(srcVBMap1, srcVBMap2)
 	assert.Equal(numSrcNodes1, numSrcNodes2)
 
@@ -151,7 +178,7 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	spec, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName, tgtBucketUuid)
 	spec2, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName2, tgtBucketUuid2)
 	specList := []*metadata.ReplicationSpecification{spec, spec2}
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList)
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList, nil)
 
 	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc)
 	assert.NotNil(bts)
@@ -171,13 +198,12 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	watcher.latestCacheMtx.RLock()
 	assert.NotEqual(0, watcher.latestCached.NumberOfSourceNodes)
-	latestCacheCopy := watcher.latestCached.CloneRO()
+	//latestCacheCopy := watcher.latestCached.CloneRO().(serviceDefReal.SourceNotification)
 	watcher.latestCacheMtx.RUnlock()
 
-	immediateCh := watcher.registerAndGetCh(spec, "")
+	immediateCh := watcher.registerAndGetCh(spec, "").(chan service_def.SourceNotification)
 	select {
-	case testReceive := <-immediateCh:
-		assert.Equal(latestCacheCopy.IsSourceNotification(), testReceive.IsSourceNotification())
+	case <-immediateCh:
 	default:
 		// test failed
 		assert.False(true)
