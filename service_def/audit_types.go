@@ -23,6 +23,9 @@ const (
 	UpdateDefaultReplicationSettingsEventId uint32 = 16391
 	UpdateReplicationSettingsEventId        uint32 = 16392
 	UpdateBucketSettingsEventId             uint32 = 16393
+	CreateRemoteAccessDeniedEventId         uint32 = 16394
+	UpdateRemoteAccessDeniedEventId         uint32 = 16395
+	LocalAccessDeniedEventId                uint32 = 16396
 )
 
 var ErrorWritingAudit = "Could not write audit logs."
@@ -63,6 +66,22 @@ type UpdateBucketSettingsEvent struct {
 type GenericReplicationEvent struct {
 	GenericReplicationFields
 	ReplicationSpecificFields
+}
+
+type LocalClusterAccessDeniedEvent struct {
+	GenericFields
+	Request      string `json:"request"`
+	Method       string `json:"method"`
+	ErrorMessage string `json:"error_message"`
+}
+
+type RemoteClusterAccessDeniedEvent struct {
+	GenericFields
+	RemoteClusterName     string `json:"cluster_name"`
+	RemoteClusterHostname string `json:"cluster_hostname"`
+	RemoteUserName        string `json:"remote_username"`
+	EncryptionType        string `json:"encryption_type"`
+	ErrorMessage          string `json:"error_message"`
 }
 
 // fields applicable to all events
@@ -156,6 +175,26 @@ func (event *GenericReplicationEvent) Redact() AuditEventIface {
 }
 
 func (event *GenericReplicationEvent) Clone() AuditEventIface {
+	clonedEvent := *event
+	return &clonedEvent
+}
+
+func (event *RemoteClusterAccessDeniedEvent) Redact() AuditEventIface {
+	event.GenericFields.Redact()
+	return event
+}
+
+func (event *RemoteClusterAccessDeniedEvent) Clone() AuditEventIface {
+	clonedEvent := *event
+	return &clonedEvent
+}
+
+func (event *LocalClusterAccessDeniedEvent) Redact() AuditEventIface {
+	event.GenericFields.Redact()
+	return event
+}
+
+func (event *LocalClusterAccessDeniedEvent) Clone() AuditEventIface {
 	clonedEvent := *event
 	return &clonedEvent
 }

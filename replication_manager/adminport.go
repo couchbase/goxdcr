@@ -223,6 +223,9 @@ func (adminport *Adminport) handleRequest(
 		errOutput := base.InvalidPathInHttpRequestError(key)
 		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
 	}
+	if response != nil && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+		go writeLocalAccessDeniedEvent(service_def.LocalAccessDeniedEventId, request, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), fmt.Sprintf("Request received http statusCode %v", response.StatusCode))
+	}
 	return response, err
 }
 
@@ -293,6 +296,15 @@ func parseGetRemoteClusterRequestQuery(request *http.Request) getRemoteClusterOp
 	return opt
 }
 
+func isAccessDeniedErr(err error) bool {
+	if strings.Contains(err.Error(), "status 401") || strings.Contains(err.Error(), fmt.Sprintf(base.AuditStatusFmt, http.StatusUnauthorized)) ||
+		strings.Contains(err.Error(), "status 403") || strings.Contains(err.Error(), fmt.Sprintf(base.AuditStatusFmt, http.StatusForbidden)) ||
+		strings.Contains(err.Error(), base.AuditWrongCertificateErr) {
+		return true
+	} else {
+		return false
+	}
+}
 func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) (*ap.Response, error) {
 	redactedRequest := base.CloneAndTagHttpRequest(request) // This is not an operation that occurs regularly
 	logger_ap.Infof("doCreateRemoteClusterRequest req=%v\n", redactedRequest)
@@ -322,6 +334,9 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 	} else {
 		err = remoteClusterService.AddRemoteCluster(remoteClusterRef, false /*skipConnectivityValidation*/)
 		if err != nil {
+			if isAccessDeniedErr(err) {
+				go writeRemoteAccessDeniedEvent(service_def.CreateRemoteAccessDeniedEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), err.Error())
+			}
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
 			go writeRemoteClusterAuditEvent(service_def.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
@@ -366,6 +381,9 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 	} else {
 		err = remoteClusterService.SetRemoteCluster(remoteClusterName, remoteClusterRef)
 		if err != nil {
+			if isAccessDeniedErr(err) {
+				go writeRemoteAccessDeniedEvent(service_def.UpdateRemoteAccessDeniedEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), err.Error())
+			}
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
 			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
@@ -947,6 +965,30 @@ func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.Rem
 		IsEncrypted:           remoteClusterRef.DemandEncryption(),
 		EncryptionType:        remoteClusterRef.EncryptionType()}
 
+	err := AuditService().Write(eventId, event)
+	logAuditErrors(err)
+}
+
+func writeRemoteAccessDeniedEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs, errorStr string) {
+	event := &service_def.RemoteClusterAccessDeniedEvent{
+		GenericFields:         service_def.GenericFields{Timestamp: log.FormatTimeWithMilliSecondPrecision(time.Now()), RealUserid: *realUserId, LocalRemoteIPs: *ips},
+		RemoteClusterName:     remoteClusterRef.Name(),
+		RemoteClusterHostname: remoteClusterRef.HostName(),
+		RemoteUserName:        remoteClusterRef.UserName(),
+		EncryptionType:        remoteClusterRef.EncryptionType(),
+		ErrorMessage:          errorStr,
+	}
+	err := AuditService().Write(eventId, event)
+	logAuditErrors(err)
+}
+
+func writeLocalAccessDeniedEvent(eventId uint32, request *http.Request, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs, errorStr string) {
+	event := &service_def.LocalClusterAccessDeniedEvent{
+		GenericFields: service_def.GenericFields{Timestamp: log.FormatTimeWithMilliSecondPrecision(time.Now()), RealUserid: *realUserId, LocalRemoteIPs: *ips},
+		Request:       request.RequestURI,
+		Method:        request.Method,
+		ErrorMessage:  errorStr,
+	}
 	err := AuditService().Write(eventId, event)
 	logAuditErrors(err)
 }
