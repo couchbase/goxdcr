@@ -25,6 +25,9 @@ var DefaultCAPIConnectionSize = 5
 var DefaultPoolName = "default"
 var AuditServicePoolName = "auditService"
 
+const AuditWrongCertificateErr = "certificate signed by unknown authority, statusCode=0"
+const AuditStatusFmt = "statusCode=%v"
+
 var LocalHostName = "127.0.0.1"
 var LocalHostNameIpv6 = "[::1]"
 

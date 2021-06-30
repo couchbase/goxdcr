@@ -2613,7 +2613,11 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 		} else {
 			if len(certificate) == 0 {
 				// certificate not provided, cannot fall back to https. return error right away
-				return base.HttpAuthMechPlain, nil, statusCode, fmt.Errorf("Cannot connect to target %v using \"half\" secure mode. Received unauthorized error when using Scram-Sha authentication. Cannot use https because server certificate has not been provided.", hostAddr)
+				// Include statusCode in error message to get audit logged for http request
+				auditStatusStr := fmt.Sprintf(base.AuditStatusFmt, statusCode)
+				return base.HttpAuthMechPlain, nil, statusCode,
+					fmt.Errorf("Cannot connect to target %v using \"half\" secure mode. Received unauthorized error (%v) when using Scram-Sha authentication. Cannot use https because server certificate has not been provided.",
+						hostAddr, auditStatusStr)
 			} else {
 				// proceed to fall back to https
 			}

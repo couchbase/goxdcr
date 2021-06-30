@@ -1,0 +1,117 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+ns_serverDir=$(getNsServerDir)
+logDir="${ns_serverDir}/logs/n_0"
+
+function grepAuditFile {
+	local key=$1
+	local expectedCount=$2
+	local auditLog="${logDir}/audit.log"
+	echo
+	# sleep 1s to wait for audit write
+	sleep 1
+	grep $key $auditLog
+	count=$(grep -c $key $auditLog)
+	if (($count != $expectedCount)); then
+		echo "Expect to find $expectedCount but found $count for $key in $auditLog"
+		exit $?
+	fi
+
+	echo "Found $count logged events for id $key."
+}
+function runTestCase {
+	echo "============================================================================"
+	echo "Running auditing test case"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Turn on auditing
+	curl -s -request POST -u Administrator:wewewe http://127.0.0.1:9000/settings/audit \
+		-d auditdEnabled=true -d rotateSize=5242880 -d rotateInterval=7200 -d logPath=$logDir
+	if (($? != 0)); then
+		echo "Failed to turn on auditing"
+		exit 1
+	fi
+	echo "Auditing enabled"
+	sleep 1 # give a little time for audit to turn on
+
+	echo "== Test audit log for authentication error creating remote cluster ref with no encryption =="
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters -d name=C2 -d hostname=127.0.0.1:9001 -d username=$DEFAULT_ADMIN -d password=wrongpwd
+	grepAuditFile 16394 1
+
+	echo "== Test audit log for authentication error creating remote cluster ref with half encryption =="
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters -d name=C2 -d hostname=127.0.0.1:9001 -d username=$DEFAULT_ADMIN -d password=wrongpwd -d secureType=half
+	grepAuditFile 16394 2
+
+	echo "== Test audit log for authentication error creating remote cluster ref with full encryption =="
+	echo "Use source cluster's root certificate which should be invalid for target"
+	sourceClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/pools/default/certificate)
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/pools/default/remoteClusters -d name=C2 -d hostname=127.0.0.1:9001 -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		-d secureType=full --data-urlencode "certificate=${sourceClusterCert}"
+	grepAuditFile 16394 3
+
+	echo "== Test audit log for authentication error updating remote cluster ref =="
+	echo "Create remote cluster C2"
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters -d name=C2 -d hostname=127.0.0.1:9001 -d username=Administrator -d password=wewewe
+	grepAuditFile 16384 1
+	echo "Change remote cluster C2 with a non-existing user"
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters/C2 -d name=C2 -d hostname=127.0.0.1:9001 -d username=tmpuser -d password=wrongpwd
+	grepAuditFile 16395 1
+
+	echo "== Test audit log for http request with an invalid user =="
+	echo "Create replication HTTP request with an invalid user"
+	# Have to send it to 13000 to get an audit log. If the bad user request is sent to 9000, ns_server will reject the request
+	curl -X POST -u $DEFAULT_ADMIN:wrongpwd http://127.0.0.1:13000/controller/createReplication -d fromBucket=B1 -d toCluster=C2 -d toBucket=B2 -d replicationType=continuous
+	grepAuditFile 16396 1
+
+	echo "Create tmpuser with no role"
+	curl -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/settings/rbac/users/local/tmpuser -d password=wewewe
+	echo
+	echo "Create replication using tmpuser"
+	curl -X POST -u tmpuser:wewewe http://127.0.0.1:9000/controller/createReplication -d fromBucket=B1 -d toCluster=C2 -d toBucket=B2 -d replicationType=continuous
+	grepAuditFile 16396 2
+	echo "Delete remote cluster with tmpuser"
+	curl -X DELETE -u tmpuser:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters/C2 -d name=C2 -d hostname=127.0.0.1:9001
+	grepAuditFile 16396 3
+	# Drop tmpuser
+	curl -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/settings/rbac/users/local/tmpuser
+	echo
+	echo "Delete remote cluster C2"
+	curl -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters/C2 -d name=C2 -d hostname=127.0.0.1:9001 -d username=Administrator -d password=wewewe
+	grepAuditFile 16386 1
+
+	# turn off auditing
+	curl -s -request POST -u Administrator:wewewe http://127.0.0.1:9000/settings/audit -d auditdEnabled=false
+	if (($? != 0)); then
+		echo "Failed to turn off auditing"
+		exit 1
+	fi
+	echo "Auditing disabled"
+	echo "============================================================================"
+	echo "Auditing test case passed"
+	echo "============================================================================"
+}

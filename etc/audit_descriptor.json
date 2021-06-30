@@ -150,6 +150,52 @@
                                          "updated_settings" : {}
                                         },
                    "optional_fields" : {}
+                },
+        {  "id" : 16394,
+                   "name" : "authorization failure while adding remote cluster ref",
+                   "description" : "failed to add remote cluster ref because of authorization failure",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"domain" : "", "user" : ""},
+                                         "cluster_name" : "",
+                                         "cluster_hostname" : "",
+                                         "remote_username": "",
+                                         "encryption_type" : "",
+                                         "error_message": ""
+                   },
+                   "optional_fields" : {}
+                },
+        {  "id" : 16395,
+                   "name" : "authorization failure while updating remote cluster ref",
+                   "description" : "failed to update remote cluster ref because of authorization failure",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"domain" : "", "user" : ""},
+                                         "cluster_name" : "",
+                                         "cluster_hostname" : "",
+                                         "remote_username": "",
+                                         "encryption_type" : "",
+                                         "error_message": ""
+                   },
+                   "optional_fields" : {}
+                },
+        {  "id" : 16396,
+                   "name" : "access denied",
+                   "description" : "access denied",
+                   "sync" : false,
+                   "enabled" : true,
+                   "mandatory_fields" : {
+                                         "timestamp" : "",
+                                         "real_userid" : {"domain" : "", "user" : ""},
+                                         "request" : "",
+                                         "method": "",
+                                         "error_message": ""
+                   },
+                   "optional_fields" : {}
                 }
 		]
 }
