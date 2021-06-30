@@ -122,7 +122,7 @@ function runTestCase {
 
 	checkUnidirectionalChangesLeft
 
-	pauseAndResumeMultiples 3
+	pauseAndResumeMultiples 2
 
 	echo "============================================================================"
 	echo "PASSED"

@@ -249,6 +249,7 @@ const (
 	ReplStatusLoadBrokenMapTimeoutKey   = "ReplStatusLoadBrokenMapTimeoutSec"
 )
 
+//var TopologyChangeCheckIntervalConfig = &SettingsConfig{int(base.TopologySvcCoolDownPeriod / time.Second), &Range{10, 3600}}
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
 var MaxTopologyChangeCountBeforeRestartConfig = &SettingsConfig{30, &Range{1, 300}}
 var MaxTopologyStableCountBeforeRestartConfig = &SettingsConfig{30, &Range{1, 300}}

@@ -8,31 +8,32 @@
 
 package service_def
 
-import "github.com/couchbase/goxdcr/metadata"
+import (
+	"github.com/couchbase/goxdcr/metadata"
+	"sync"
+)
 
 // Bucket Topology Service is responsible for coordinating retrieval of bucket
 // topologies from either local or remote nodes in a responsible manner
 // and feeding the information back to those who need it
 type BucketTopologySvc interface {
-	RegisterLocalBucket(spec *metadata.ReplicationSpecification) (BucketTopologySvcWatcher, chan Notification, error)
-	RegisterRemoteBucket(spec *metadata.ReplicationSpecification) (BucketTopologySvcWatcher, chan Notification, error)
+	SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan Notification, error)
+	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan Notification, error)
 
-	UnRegisterLocalBucket(spec *metadata.ReplicationSpecification) error
-	UnRegisterRemoteBucket(spec *metadata.ReplicationSpecification) error
+	UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+	UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+
+	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 }
 
 type Notification interface {
 	SourceNotification
-	Clone() Notification
 	IsSourceNotification() bool
+	CloneRO() Notification
 }
 
 type SourceNotification interface {
 	GetNumberOfSourceNodes() (int, error)
 	GetKvVbMapRO() (map[string][]uint16, error)
-}
-
-type BucketTopologySvcWatcher interface {
-	Start() error
-	Stop() error
+	GetSourceVBMapRO() (map[string][]uint16, error)
 }

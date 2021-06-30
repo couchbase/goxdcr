@@ -1199,7 +1199,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 			return fmt.Errorf("Unable to retrieve main pipeline service %v", base.TOPOLOGY_CHANGE_DETECT_SVC)
 		}
 	} else {
-		top_detect_svc = pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, logger_ctx, xdcrf.utils)
+		top_detect_svc = pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, logger_ctx, xdcrf.utils, xdcrf.bucketTopologySvc)
 	}
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {

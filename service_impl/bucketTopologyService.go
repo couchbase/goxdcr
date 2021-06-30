@@ -33,8 +33,8 @@ type BucketTopologyService struct {
 	srcBucketWatchersMtx sync.RWMutex
 }
 
-func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext) *BucketTopologyService {
-	return &BucketTopologyService{
+func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc) (*BucketTopologyService, error) {
+	b := &BucketTopologyService{
 		remClusterSvc:        remClusterSvc,
 		xdcrCompTopologySvc:  xdcrCompTopologySvc,
 		logger:               log.NewLogger("BucketTopologySvc", loggerContext),
@@ -43,35 +43,59 @@ func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySv
 		srcBucketWatchersCnt: map[string]int{},
 		refreshInterval:      refreshInterval,
 	}
+	return b, b.loadFromReplSpecSvc(replicationSpecService)
 }
 
-func (b *BucketTopologyService) RegisterLocalBucket(spec *metadata.ReplicationSpecification) (service_def.BucketTopologySvcWatcher, chan *Notification, error) {
+func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.ReplicationSpecSvc) error {
+	specs, err := replSpecSvc.AllReplicationSpecs()
+	if err != nil {
+		return err
+	}
+
+	for _, spec := range specs {
+		watcher := b.getOrCreateLocalWatcher(spec)
+		watcher.Start()
+	}
+	return nil
+}
+
+func (b *BucketTopologyService) SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.Notification, error) {
 	if spec == nil {
-		return nil, nil, base.ErrorNilPtr
+		return nil, base.ErrorNilPtr
+	}
+
+	if spec.SourceBucketName == "" {
+		return nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
 	}
 
 	b.srcBucketWatchersMtx.Lock()
-
+	defer b.srcBucketWatchersMtx.Unlock()
 	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
 	if exists {
-		b.srcBucketWatchersCnt[spec.SourceBucketName]++
-		b.srcBucketWatchersMtx.Unlock()
-		return watcher, watcher.registerAndGetCh(spec), nil
+		return watcher.registerAndGetCh(spec, subscriberId), nil
 	}
 
-	watcher = NewBucketTopologySvcWatcher(spec.SourceBucketName, spec.SourceBucketUUID, b.refreshInterval, b.logger, true, b.xdcrCompTopologySvc, b.utils)
-	b.srcBucketWatchers[spec.SourceBucketName] = watcher
+	return nil, fmt.Errorf("SubscribeToLocalBucketFeed could not find watcher for %v", spec.SourceBucketName)
+}
+
+func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.ReplicationSpecification) *BucketTopologySvcWatcher {
+	b.srcBucketWatchersMtx.Lock()
+	defer b.srcBucketWatchersMtx.Unlock()
+	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
+	if !exists {
+		watcher = NewBucketTopologySvcWatcher(spec.SourceBucketName, spec.SourceBucketUUID, b.refreshInterval, b.logger, true, b.xdcrCompTopologySvc, b.utils)
+		b.srcBucketWatchers[spec.SourceBucketName] = watcher
+	}
 	b.srcBucketWatchersCnt[spec.SourceBucketName]++
-	b.srcBucketWatchersMtx.Unlock()
-	return watcher, watcher.registerAndGetCh(spec), watcher.Start()
+	return watcher
 }
 
-func (b *BucketTopologyService) RegisterRemoteBucket(spec *metadata.ReplicationSpecification) (service_def.BucketTopologySvcWatcher, *service_def.Notification, error) {
-	watcher := NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.refreshInterval, b.logger, false, nil, nil)
-	return watcher, nil, nil
+func (b *BucketTopologyService) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.Notification, error) {
+	//watcher := NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.refreshInterval, b.logger, false, nil, nil)
+	return nil, nil
 }
 
-func (b *BucketTopologyService) UnRegisterLocalBucket(spec *metadata.ReplicationSpecification) error {
+func (b *BucketTopologyService) UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	if spec == nil {
 		return base.ErrorNilPtr
 	}
@@ -85,7 +109,14 @@ func (b *BucketTopologyService) UnRegisterLocalBucket(spec *metadata.Replication
 	}
 	b.srcBucketWatchersMtx.RUnlock()
 
-	b.srcBucketWatchers[spec.SourceBucketName].unregisterCh(spec)
+	b.srcBucketWatchers[spec.SourceBucketName].unregisterCh(spec, subscriberId)
+	return nil
+}
+
+func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpecification) error {
+	if spec == nil {
+		return base.ErrorNilPtr
+	}
 
 	b.srcBucketWatchersMtx.Lock()
 	defer b.srcBucketWatchersMtx.Unlock()
@@ -101,7 +132,42 @@ func (b *BucketTopologyService) UnRegisterLocalBucket(spec *metadata.Replication
 	return err
 }
 
-func (b *BucketTopologyService) UnRegisterRemoteBucket(spec *metadata.ReplicationSpecification) error {
+func (b *BucketTopologyService) UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+
+	return nil
+}
+
+func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error {
+	if wg != nil {
+		defer wg.Done()
+	}
+
+	oldSpec, ok := oldVal.(*metadata.ReplicationSpecification)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+	newSpec, ok := newVal.(*metadata.ReplicationSpecification)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	if oldSpec == nil && newSpec != nil {
+		watcher := b.getOrCreateLocalWatcher(newSpec)
+		localStartErr := watcher.Start()
+		if localStartErr != nil {
+			b.logger.Errorf("Error starting local watcher for %v - %v", newSpec, localStartErr)
+		}
+
+		b.logger.Infof("Registered bucket monitor for %v", newSpec.Id)
+		// TODO - register remote bucket
+	} else if oldSpec != nil && newSpec == nil {
+		err := b.handleSpecDeletion(oldSpec)
+		if err != nil {
+			b.logger.Errorf("Unable to unregister local bucket for %v", oldSpec)
+			return err
+		}
+		b.logger.Infof("Unregistered bucket monitor for %v", oldSpec.Id)
+	}
 
 	return nil
 }
@@ -115,12 +181,14 @@ type BucketTopologySvcWatcher struct {
 	startOnce sync.Once
 
 	notifyChsMtx sync.RWMutex
-	notifyChs    map[string]chan *Notification
+	// Key is a "spec + subscriber ID"
+	notifyChs map[string]chan service_def.Notification
 
 	refreshInterval time.Duration
 
 	latestCacheMtx sync.RWMutex
 	latestCached   *Notification
+	cachePopulated bool
 
 	logger    *log.CommonLogger
 	isStarted uint32
@@ -143,25 +211,29 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, refreshInterval 
 		source:              source,
 		xdcrCompTopologySvc: xdcrCompTopologySvc,
 		latestCached:        NewNotification(source),
-		notifyChs:           map[string]chan *Notification{},
+		notifyChs:           map[string]chan service_def.Notification{},
 	}
 
 	if source {
 		watcher.localKVVbMapUpdater = func() (map[string][]uint16, error) {
 			connStr, err := xdcrCompTopologySvc.MyConnectionStr()
 			if err != nil {
+				watcher.logger.Errorf("%v bucket connStr error %v", bucketName, err)
 				return nil, err
 			}
 			userName, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := xdcrCompTopologySvc.MyCredentials()
 			if err != nil {
+				watcher.logger.Errorf("%v bucket credentials error %v", bucketName, err)
 				return nil, err
 			}
 			bucketInfo, err := utils.GetBucketInfo(connStr, bucketName, userName, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 			if err != nil {
+				watcher.logger.Errorf("%v bucket bucketInfo error %v", bucketName, err)
 				return nil, err
 			}
 			serverVBMap, err := utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
 			if err != nil {
+				watcher.logger.Errorf("%v bucket server VBMap error %v", bucketName, err)
 				return nil, err
 			}
 
@@ -179,6 +251,7 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, refreshInterval 
 				}
 			}
 			watcher.latestCacheMtx.Lock()
+			watcher.cachePopulated = true
 			watcher.latestCached.KvVbMap = serverVBMap
 			watcher.latestCached.NumberOfSourceNodes = len(serverVBMap)
 			watcher.latestCached.SourceVBMap = sourceKvVbMap
@@ -219,8 +292,11 @@ func (bw *BucketTopologySvcWatcher) run() {
 
 func (bw *BucketTopologySvcWatcher) updateOnce() {
 	if bw.source {
-		bw.localKVVbMapUpdater()
-
+		_, err := bw.localKVVbMapUpdater()
+		if err != nil {
+			bw.logger.Errorf("BucketTopologySvcWatcher for local bucket %v updating resulted in err %v - bypassing notification", bw.bucketName, err)
+			return
+		}
 	}
 
 	bw.latestCacheMtx.RLock()
@@ -234,7 +310,14 @@ func (bw *BucketTopologySvcWatcher) updateOnce() {
 
 	bw.notifyChsMtx.RLock()
 	for _, ch := range bw.notifyChs {
-		ch <- &notification
+		timeout := time.NewTicker(1 * time.Second)
+		select {
+		case ch <- &notification:
+		// sent
+		case <-timeout.C:
+			// provide a bail out path
+			continue
+		}
 	}
 	bw.notifyChsMtx.RUnlock()
 }
@@ -246,28 +329,45 @@ func (bw *BucketTopologySvcWatcher) Stop() error {
 	return nil
 }
 
-func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationSpecification) chan *Notification {
-	bw.notifyChsMtx.Lock()
-	defer bw.notifyChsMtx.Unlock()
-
+func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationSpecification, subscriberId string) chan service_def.Notification {
+	bw.notifyChsMtx.RLock()
 	ch, exists := bw.notifyChs[spec.Id]
 	if exists {
+		bw.notifyChsMtx.RUnlock()
 		return ch
 	}
+	bw.notifyChsMtx.RUnlock()
 
-	newCh := make(chan *Notification, base.BucketTopologyWatcherChanLen)
-	bw.notifyChs[spec.Id] = newCh
+	newCh := make(chan service_def.Notification, base.BucketTopologyWatcherChanLen)
+
+	fullSubscriberId := compileFullSubscriberId(spec, subscriberId)
+	bw.notifyChsMtx.Lock()
+	bw.notifyChs[fullSubscriberId] = newCh
+	bw.notifyChsMtx.Unlock()
+
+	// When someone first registers and subscribes, it prob expects some data - feed it the latest if it's not nil
+	bw.latestCacheMtx.RLock()
+	if bw.cachePopulated {
+		notification := bw.latestCached.CloneRO()
+		newCh <- notification
+	}
+	bw.latestCacheMtx.RUnlock()
 	return newCh
 }
 
-func (bw *BucketTopologySvcWatcher) unregisterCh(spec *metadata.ReplicationSpecification) {
-	bw.notifyChsMtx.RLock()
+func compileFullSubscriberId(spec *metadata.ReplicationSpecification, id string) string {
+	return fmt.Sprintf("%v_%v", spec.Id, id)
+}
 
+func (bw *BucketTopologySvcWatcher) unregisterCh(spec *metadata.ReplicationSpecification, subscriberId string) {
+	fullSubscriberId := compileFullSubscriberId(spec, subscriberId)
+
+	bw.notifyChsMtx.RLock()
 	// When unregistering, need to flush all channels before closing
 forloop:
 	for {
 		select {
-		case <-bw.notifyChs[spec.Id]:
+		case <-bw.notifyChs[fullSubscriberId]:
 		default:
 			break forloop
 		}
@@ -277,8 +377,7 @@ forloop:
 	bw.notifyChsMtx.Lock()
 	defer bw.notifyChsMtx.Unlock()
 
-	close(bw.notifyChs[spec.Id])
-	delete(bw.notifyChs, spec.Id)
+	delete(bw.notifyChs, fullSubscriberId)
 }
 
 type Notification struct {
@@ -305,7 +404,7 @@ func (n *Notification) IsSourceNotification() bool {
 	return n.Source
 }
 
-func (n *Notification) Clone() *Notification {
+func (n *Notification) CloneRO() service_def.Notification {
 	if n == nil {
 		return nil
 	}
@@ -313,6 +412,7 @@ func (n *Notification) Clone() *Notification {
 		NumberOfSourceNodes: n.NumberOfSourceNodes,
 		Source:              n.Source,
 		KvVbMap:             n.KvVbMap,
+		SourceVBMap:         n.SourceVBMap,
 	}
 }
 
@@ -322,4 +422,8 @@ func (n *Notification) GetNumberOfSourceNodes() (int, error) {
 
 func (n *Notification) GetKvVbMapRO() (map[string][]uint16, error) {
 	return n.KvVbMap, nil
+}
+
+func (n *Notification) GetSourceVBMapRO() (map[string][]uint16, error) {
+	return n.SourceVBMap, nil
 }
