@@ -13,6 +13,7 @@ package pipeline_svc
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"testing"
 
@@ -386,11 +387,11 @@ func TestFilterVBSeqnoMap(t *testing.T) {
 	latestVbSeqnoMap[1] = 2
 	latestVbSeqnoMap[2] = 3
 
-	populateMaxVbSeqnoMap(latestVbSeqnoMap, maxVbSeqnoMap)
+	utils.PopulateMaxVbSeqnoMap(latestVbSeqnoMap, maxVbSeqnoMap)
 	assert.Equal(3, len(maxVbSeqnoMap))
 
 	var filterVbs []uint16 = []uint16{0, 1}
-	maxVbSeqnoMap, err := filterVbSeqnoMap(filterVbs, maxVbSeqnoMap)
+	maxVbSeqnoMap, err := utils.FilterVbSeqnoMap(filterVbs, maxVbSeqnoMap)
 	assert.Equal(2, len(maxVbSeqnoMap))
 	assert.Nil(err)
 

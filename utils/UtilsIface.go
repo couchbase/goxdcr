@@ -75,6 +75,7 @@ type UtilsIface interface {
 	GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
 	GetEvictionPolicyFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
+	GetHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.ClientIface, stats_map map[string]string, collectionIds []uint32, logger *log.CommonLogger) (map[uint16]uint64, error)
 	GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error)
 	LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error)
 	LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error)

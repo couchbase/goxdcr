@@ -977,6 +977,29 @@ func (_m *UtilsIface) GetExternalMgtHostAndPort(nodeInfo map[string]interface{},
 	return r0, r1, r2
 }
 
+// GetHighSeqNos provides a mock function with given fields: serverAddr, vbnos, conn, stats_map, collectionIds, logger
+func (_m *UtilsIface) GetHighSeqNos(serverAddr string, vbnos []uint16, conn memcached.ClientIface, stats_map map[string]string, collectionIds []uint32, logger *log.CommonLogger) (map[uint16]uint64, error) {
+	ret := _m.Called(serverAddr, vbnos, conn, stats_map, collectionIds, logger)
+
+	var r0 map[uint16]uint64
+	if rf, ok := ret.Get(0).(func(string, []uint16, memcached.ClientIface, map[string]string, []uint32, *log.CommonLogger) map[uint16]uint64); ok {
+		r0 = rf(serverAddr, vbnos, conn, stats_map, collectionIds, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]uint64)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, []uint16, memcached.ClientIface, map[string]string, []uint32, *log.CommonLogger) error); ok {
+		r1 = rf(serverAddr, vbnos, conn, stats_map, collectionIds, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetHostAddrFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, isHttps, logger, useExternal
 func (_m *UtilsIface) GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger, useExternal bool) (string, error) {
 	ret := _m.Called(adminHostAddr, nodeInfo, isHttps, logger, useExternal)

@@ -26,6 +26,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/pprof"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2827,4 +2828,85 @@ func (u *Utilities) DumpStackTraceAfterThreshold(id string, threshold time.Durat
 		pprof.Lookup(goroutines.String()).WriteTo(os.Stdout, 1)
 	}
 	return u.StartDebugExec(id, threshold, dumpStackTrace)
+}
+
+func (u *Utilities) GetHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.ClientIface, stats_map map[string]string, collectionIds []uint32, logger *log.CommonLogger) (map[uint16]uint64, error) {
+	highseqno_map := make(map[uint16]uint64)
+
+	var err error
+	if len(collectionIds) == 0 {
+		// Get all the seqno across everything in the bucket using traditional stats map
+		if stats_map != nil {
+			// stats_map is not nill when GetHighSeqNos is called from per-replication stats manager, reuse stats_map to avoid memory over-allocation and re-allocation
+			err = conn.StatsMapForSpecifiedStats(base.VBUCKET_SEQNO_STAT_NAME, stats_map)
+		} else {
+			// stats_map is nill when GetHighSeqNos is called on paused replications. do not reuse stats_map
+			stats_map, err = conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = u.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
+	} else {
+		// Need to get high sequence numbers across one or a set of collections only
+		mccContext := &mcc.ClientContext{}
+		var vbSeqnoMap map[uint16]uint64
+		for _, collectionId := range collectionIds {
+			mccContext.CollId = collectionId
+			vbSeqnoMap, err = conn.GetAllVbSeqnos(vbSeqnoMap, mccContext)
+			if err != nil {
+				return nil, err
+			}
+			PopulateMaxVbSeqnoMap(vbSeqnoMap, highseqno_map)
+		}
+		highseqno_map, err = FilterVbSeqnoMap(vbnos, highseqno_map)
+	}
+
+	if err != nil {
+		return nil, err
+	} else {
+		return highseqno_map, nil
+	}
+}
+
+func PopulateMaxVbSeqnoMap(latestVbSeqnoMap, maxVbSeqnoMap map[uint16]uint64) {
+	for vb, latestSeqno := range latestVbSeqnoMap {
+		maxSeqno, exists := maxVbSeqnoMap[vb]
+		if !exists || latestSeqno > maxSeqno {
+			maxVbSeqnoMap[vb] = latestSeqno
+		}
+	}
+}
+
+// Make sure vbSeqnoMap only contains entries in vbnos
+func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap map[uint16]uint64) (map[uint16]uint64, error) {
+	if len(vbnos) == 0 {
+		if len(vbSeqnoMap) > 0 {
+			vbSeqnoMap = make(map[uint16]uint64)
+		}
+		return vbSeqnoMap, nil
+	}
+
+	// Shouldn't be the case
+	if len(vbnos) > len(vbSeqnoMap) {
+		return vbSeqnoMap, fmt.Errorf("Asking for vb's %v when seqnoMap only contains %v", vbnos, vbSeqnoMap)
+	}
+
+	sortedVbnos := base.SortUint16List(vbnos)
+	sortedVbnosLen := len(sortedVbnos)
+	var vbsToDelete []uint16
+	for vbno, _ := range vbSeqnoMap {
+		i := sort.Search(sortedVbnosLen, func(i int) bool { return sortedVbnos[i] >= vbno })
+		if i < sortedVbnosLen && sortedVbnos[i] == vbno {
+			// Vbno entry of vbSeqnoMap exists in the vbnos list
+		} else {
+			// vbnos list did not indicate to include this vb in the vbSeqnoMap
+			vbsToDelete = append(vbsToDelete, vbno)
+		}
+	}
+
+	for _, vbno := range vbsToDelete {
+		delete(vbSeqnoMap, vbno)
+	}
+	return vbSeqnoMap, nil
 }

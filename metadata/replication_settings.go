@@ -122,6 +122,8 @@ const (
 	ReplicationTypeCapi = "capi"
 )
 
+var DefaultPipelineStatsIntervalMs = 1000
+
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
@@ -133,7 +135,7 @@ var OptimisticReplicationThresholdConfig = &SettingsConfig{256, &Range{0, 20 * 1
 var SourceNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
 var TargetNozzlePerNodeConfig = &SettingsConfig{2, &Range{1, 100}}
 var PipelineLogLevelConfig = &SettingsConfig{log.LogLevelInfo, nil}
-var PipelineStatsIntervalConfig = &SettingsConfig{1000, &Range{200, 600000}}
+var PipelineStatsIntervalConfig = &SettingsConfig{DefaultPipelineStatsIntervalMs, &Range{200, 600000}}
 var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
 
 // user can only configure compression to 1 (None) or 3(Auto). 2 (Snappy) is for internal use
@@ -1132,4 +1134,14 @@ func IsSettingValueTemporary(key string) bool {
 		}
 	}
 	return false
+}
+
+func GetSettingFromSettingsMap(settings ReplicationSettingsMap, setting_name string, default_value interface{}) interface{} {
+	if settings != nil {
+		if setting, ok := settings[setting_name]; ok {
+			return setting
+		}
+	}
+
+	return default_value
 }

@@ -78,6 +78,12 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
+	highSeqnosMap := make(map[uint16]uint64)
+	for i := uint16(0); i < 1024; i++ {
+		highSeqnosMap[i] = uint64(100 + int(i))
+	}
+	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(highSeqnosMap, nil)
+
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {
 		replMap[spec.Id] = spec
@@ -105,11 +111,21 @@ func getBucketMap() (map[string]interface{}, []string) {
 	if err != nil {
 		panic(err)
 	}
-	var kvNames []string
-	for k, _ := range retMap {
-		kvNames = append(kvNames, k)
+	var bucketInfo map[string]interface{} = retMap
+	vbucketServerMapObj, ok := bucketInfo[base.VBucketServerMapKey]
+	if !ok {
+		panic("not ok")
 	}
-	return retMap, kvNames
+	vbucketServerMap, _ := vbucketServerMapObj.(map[string]interface{})
+	serverListObj, _ := vbucketServerMap[base.ServerListKey]
+	serverList, _ := serverListObj.([]interface{})
+	servers := make([]string, len(serverList))
+	for index, serverName := range serverList {
+		serverNameStr, _ := serverName.(string)
+		servers[index] = serverNameStr
+	}
+
+	return retMap, servers
 }
 
 func TestBucketTopologyServiceRegister(t *testing.T) {
@@ -216,5 +232,91 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	default:
 		// test failed
 		assert.False(true)
+	}
+}
+
+func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
+	fmt.Println("============== Test case start: TestBucketTopologyServiceHighSeqnos =================")
+	defer fmt.Println("============== Test case end: TestBucketTopologyServiceHighSeqnos =================")
+	assert := assert.New(t)
+
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
+	bucketMap, kvNames := getBucketMap()
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient)
+
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond)
+	assert.NotNil(bts)
+	assert.Nil(err)
+
+	spec, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName, tgtBucketUuid)
+	spec2, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName2, tgtBucketUuid2)
+
+	watcher1 := bts.getOrCreateLocalWatcher(spec)
+	assert.Nil(watcher1.Start())
+	watcher2 := bts.getOrCreateLocalWatcher(spec2)
+	assert.NotNil(watcher2.Start())
+	assert.Equal(watcher1, watcher2)
+
+	feed1, _, err := bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub1", 110*time.Millisecond)
+	assert.Nil(err)
+
+	feed2, updater2, err := bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub2", 500*time.Millisecond)
+	assert.Nil(err)
+
+	watcher1.highSeqnosTrackersMtx.RLock()
+	assert.Len(watcher1.highSeqnosIntervals, 2)
+	watcher1.highSeqnosTrackersMtx.RUnlock()
+
+	// When subscribing, it'll pass one first, so soak that one up
+	select {
+	case <-feed1:
+	}
+
+	select {
+	case <-feed2:
+	}
+
+	// Then the next one should have some delay
+	time.Sleep(150 * time.Millisecond)
+
+	// Feed 1 should get something and feed 2 should not
+	select {
+	case notification := <-feed1:
+		notification.GetDcpStatsMap()
+	default:
+		assert.True(false)
+	}
+	select {
+	case <-feed2:
+		assert.True(false)
+	default:
+		break
+	}
+
+	// The once threshold passed, it'll get it
+	time.Sleep(550 * time.Millisecond)
+	select {
+	case <-feed2:
+		break
+	default:
+		assert.True(false)
+	}
+
+	// Set update interval to 90 sec
+	updater2(90 * time.Millisecond)
+
+	// After ~ 120 ms, both should receive updates
+	time.Sleep(120 * time.Millisecond)
+	select {
+	case notification := <-feed1:
+		notification.GetDcpStatsMap()
+	default:
+		assert.True(false)
+	}
+	select {
+	case notification := <-feed2:
+		notification.GetDcpStatsMap()
+	default:
+		assert.True(false)
 	}
 }

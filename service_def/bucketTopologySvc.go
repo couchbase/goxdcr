@@ -11,6 +11,7 @@ package service_def
 import (
 	"github.com/couchbase/goxdcr/metadata"
 	"sync"
+	"time"
 )
 
 // Bucket Topology Service is responsible for coordinating retrieval of bucket
@@ -20,12 +21,16 @@ type BucketTopologySvc interface {
 	SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
 	SubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
 	SubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
+	SubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
+	SubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
 	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, error)
 
 	UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+	UnSubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+	UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 }

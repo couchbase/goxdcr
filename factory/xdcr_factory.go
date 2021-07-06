@@ -880,13 +880,13 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	repSettings := spec.Settings
 	xmemConnStr := part.(*parts.XmemNozzle).ConnStr()
 
-	xmemSettings[parts.SETTING_BATCHCOUNT] = getSettingFromSettingsMap(settings, metadata.BatchCountKey, repSettings.BatchCount)
-	xmemSettings[parts.SETTING_BATCHSIZE] = getSettingFromSettingsMap(settings, metadata.BatchSizeKey, repSettings.BatchSize)
+	xmemSettings[parts.SETTING_BATCHCOUNT] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchCountKey, repSettings.BatchCount)
+	xmemSettings[parts.SETTING_BATCHSIZE] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchSizeKey, repSettings.BatchSize)
 	xmemSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
 	xmemSettings[parts.SETTING_BATCH_EXPIRATION_TIME] = time.Duration(float64(repSettings.MaxExpectedReplicationLag)*0.7) * time.Millisecond
-	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThresholdKey, repSettings.OptimisticReplicationThreshold)
-	xmemSettings[parts.SETTING_STATS_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
-	xmemSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
+	xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = metadata.GetSettingFromSettingsMap(settings, metadata.OptimisticReplicationThresholdKey, repSettings.OptimisticReplicationThreshold)
+	xmemSettings[parts.SETTING_STATS_INTERVAL] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
+	xmemSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(metadata.GetSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
 	xdcrf.disableCollectionIfNeeded(settings, xmemSettings, pipeline.Specification().GetReplicationSpec())
 
 	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption()
@@ -894,7 +894,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.XMEM_SETTING_CLIENT_CERTIFICATE] = targetClusterRef.ClientCertificate()
 	xmemSettings[parts.XMEM_SETTING_CLIENT_KEY] = targetClusterRef.ClientKey()
 	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType()
-	xmemSettings[parts.HLV_PRUNING_WINDOW] = getSettingFromSettingsMap(settings, metadata.HlvPruningWindowKey, base.HlvPruningDefault)
+	xmemSettings[parts.HLV_PRUNING_WINDOW] = metadata.GetSettingFromSettingsMap(settings, metadata.HlvPruningWindowKey, base.HlvPruningDefault)
 	if targetClusterRef.IsFullEncryption() {
 		mem_ssl_port, ok := ssl_port_map[xmemConnStr]
 		if !ok {
@@ -916,11 +916,11 @@ func (xdcrf *XDCRFactory) constructSettingsForCapiNozzle(pipeline common.Pipelin
 	capiSettings := make(metadata.ReplicationSettingsMap)
 	repSettings := pipeline.Specification().GetReplicationSpec().Settings
 
-	capiSettings[parts.SETTING_BATCHCOUNT] = getSettingFromSettingsMap(settings, metadata.BatchCountKey, repSettings.BatchCount)
-	capiSettings[parts.SETTING_BATCHSIZE] = getSettingFromSettingsMap(settings, metadata.BatchSizeKey, repSettings.BatchSize)
+	capiSettings[parts.SETTING_BATCHCOUNT] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchCountKey, repSettings.BatchCount)
+	capiSettings[parts.SETTING_BATCHSIZE] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchSizeKey, repSettings.BatchSize)
 	capiSettings[parts.SETTING_RESP_TIMEOUT] = xdcrf.getTargetTimeoutEstimate(pipeline.Topic())
-	capiSettings[parts.SETTING_OPTI_REP_THRESHOLD] = getSettingFromSettingsMap(settings, metadata.OptimisticReplicationThresholdKey, repSettings.OptimisticReplicationThreshold)
-	capiSettings[parts.SETTING_STATS_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
+	capiSettings[parts.SETTING_OPTI_REP_THRESHOLD] = metadata.GetSettingFromSettingsMap(settings, metadata.OptimisticReplicationThresholdKey, repSettings.OptimisticReplicationThreshold)
+	capiSettings[parts.SETTING_STATS_INTERVAL] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
 
 	return capiSettings, nil
 
@@ -977,7 +977,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	}
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
-	dcpNozzleSettings[parts.DCP_Stats_Interval] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
+	dcpNozzleSettings[parts.DCP_Stats_Interval] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
 
 	if repSettings.IsCapi() {
 		// For CAPI nozzle, do not allow DCP to have compression
@@ -985,7 +985,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		// CAPI nozzle also does not have collections support
 		dcpNozzleSettings[parts.ForceCollectionDisableKey] = true
 	} else {
-		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(getSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
+		dcpNozzleSettings[parts.SETTING_COMPRESSION_TYPE] = base.GetCompressionType(metadata.GetSettingFromSettingsMap(settings, metadata.CompressionTypeKey, repSettings.CompressionType).(int))
 
 		err := xdcrf.disableCollectionIfNeeded(settings, dcpNozzleSettings, pipeline.Specification().GetReplicationSpec())
 		if err != nil {
@@ -1276,8 +1276,8 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipe
 
 func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	s[service_def.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
-	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevelKey, pipeline.Specification().GetReplicationSpec().Settings.LogLevel.String())
+	s[service_def.PUBLISH_INTERVAL] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
+	log_level_str := metadata.GetSettingFromSettingsMap(settings, metadata.PipelineLogLevelKey, pipeline.Specification().GetReplicationSpec().Settings.LogLevel.String())
 	log_level, err := log.LogLevelFromStr(log_level_str.(string))
 	if err != nil {
 		return nil, err
@@ -1288,7 +1288,7 @@ func (xdcrf *XDCRFactory) constructSettingsForSupervisor(pipeline common.Pipelin
 
 func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	s[service_def.PUBLISH_INTERVAL] = getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
+	s[service_def.PUBLISH_INTERVAL] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.StatsInterval)
 	vbTasksMap, ok := settings[parts.DCP_VBTasksMap]
 	if ok {
 		s[parts.DCP_VBTasksMap] = vbTasksMap.(*metadata.VBTasksMapType)
@@ -1298,14 +1298,14 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 
 func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	s[pipeline_svc.CHECKPOINT_INTERVAL] = getSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.CheckpointInterval)
+	s[pipeline_svc.CHECKPOINT_INTERVAL] = metadata.GetSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.CheckpointInterval)
 	xdcrf.disableCollectionIfNeeded(settings, s, pipeline.Specification().GetReplicationSpec())
 	return s, nil
 }
 
 func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	log_level_str := getSettingFromSettingsMap(settings, metadata.PipelineLogLevelKey, nil)
+	log_level_str := metadata.GetSettingFromSettingsMap(settings, metadata.PipelineLogLevelKey, nil)
 	if log_level_str != nil {
 		log_level, err := log.LogLevelFromStr(log_level_str.(string))
 		if err != nil {
@@ -1314,7 +1314,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.P
 		s[pipeline_svc.PIPELINE_LOG_LEVEL] = log_level
 	}
 
-	publish_interval := getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, nil)
+	publish_interval := metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, nil)
 	if publish_interval != nil {
 		s[service_def.PUBLISH_INTERVAL] = publish_interval
 	}
@@ -1323,7 +1323,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForSupervisor(pipeline common.P
 
 func (xdcrf *XDCRFactory) constructUpdateSettingsForStatsManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
-	publish_interval := getSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, nil)
+	publish_interval := metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, nil)
 	if publish_interval != nil {
 		s[service_def.PUBLISH_INTERVAL] = publish_interval
 	}
@@ -1335,7 +1335,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline c
 		xdcrf.logger.Debugf("constructUpdateSettingsForCheckpointManager called with settings=%v\n", settings.CloneAndRedact())
 	}
 	s := make(metadata.ReplicationSettingsMap)
-	checkpoint_interval := getSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, nil)
+	checkpoint_interval := metadata.GetSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, nil)
 	if checkpoint_interval != nil {
 		s[pipeline_svc.CHECKPOINT_INTERVAL] = checkpoint_interval
 	}
@@ -1356,16 +1356,6 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForBandwidthThrottler(pipeline 
 		s[pipeline_svc.NUMBER_OF_SOURCE_NODES] = number_of_source_nodes
 	}
 	return s, nil
-}
-
-func getSettingFromSettingsMap(settings metadata.ReplicationSettingsMap, setting_name string, default_value interface{}) interface{} {
-	if settings != nil {
-		if setting, ok := settings[setting_name]; ok {
-			return setting
-		}
-	}
-
-	return default_value
 }
 
 func (xdcrf *XDCRFactory) ConstructSSLPortMap(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, error) {

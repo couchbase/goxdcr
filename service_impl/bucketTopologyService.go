@@ -156,6 +156,15 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		intervalFuncMap[DCPSTATSCHECKLEGACY] = make(IntervalInnerFuncMap)
 		intervalFuncMap[DCPSTATSCHECKLEGACY][b.healthCheckInterval] = dcpStatsLegacyFunc
 
+		defaultPipelineStatsInterval := time.Duration(metadata.DefaultPipelineStatsIntervalMs) * time.Millisecond
+		highSeqnoFunc := b.getHighSeqnosUpdater(spec, watcher, false)
+		intervalFuncMap[HIGHSEQNOS] = make(IntervalInnerFuncMap)
+		intervalFuncMap[HIGHSEQNOS][defaultPipelineStatsInterval] = highSeqnoFunc
+
+		highSeqnoFuncLegacy := b.getHighSeqnosUpdater(spec, watcher, true)
+		intervalFuncMap[HIGHSEQNOSLEGACY] = make(IntervalInnerFuncMap)
+		intervalFuncMap[HIGHSEQNOSLEGACY][defaultPipelineStatsInterval] = highSeqnoFuncLegacy
+
 		watcher.intervalFuncMap = intervalFuncMap
 	}
 	b.srcBucketWatchersCnt[spec.SourceBucketName]++
@@ -557,6 +566,14 @@ func (b *BucketTopologyService) UnSubscribeToLocalBucketDcpStatsLegacyFeed(spec 
 	return b.unSubscribeLocalInternal(spec, subscriberId, DCPSTATSCHECKLEGACY)
 }
 
+func (b *BucketTopologyService) UnSubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+	return b.unSubscribeLocalInternal(spec, subscriberId, HIGHSEQNOS)
+}
+
+func (b *BucketTopologyService) UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+	return b.unSubscribeLocalInternal(spec, subscriberId, HIGHSEQNOSLEGACY)
+}
+
 func (b *BucketTopologyService) unSubscribeLocalInternal(spec *metadata.ReplicationSpecification, subscriberId string, feedType string) error {
 	if spec == nil {
 		return base.ErrorNilPtr
@@ -574,6 +591,138 @@ func (b *BucketTopologyService) unSubscribeLocalInternal(spec *metadata.Replicat
 	return nil
 }
 
+func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher, legacyMode bool) func() error {
+	updaterFunc := func() error {
+		settings := spec.Settings.ToMap(false)
+		metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, spec.GetReplicationSpec().Settings.StatsInterval)
+		var collectionIds []uint32
+		var features utils.HELOFeatures
+		watcher.latestCacheMtx.RLock()
+		if !watcher.cachePopulated {
+			watcher.latestCacheMtx.RUnlock()
+			return fmt.Errorf("Cache is not populated yet to get highseqnos")
+		}
+		kv_vb_map := watcher.latestCached.GetSourceVBMapRO()
+		watcher.latestCacheMtx.RUnlock()
+
+		if legacyMode {
+			// This is reverse logic because to only get stat for the default collection, we need to enable collection
+			// so we can ask specifically for a subset, aka the default collection
+			features.Collections = true
+			collectionIds = append(collectionIds, base.DefaultCollectionId)
+		}
+
+		var highseqno_map map[uint16]uint64
+		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", spec.SourceBucketName)
+		watcher.kvMemClientsMtx.Lock()
+		for serverAddr, vbnos := range kv_vb_map {
+			// TODO - optimizing locking
+			client, err := b.utils.GetMemcachedClient(serverAddr, spec.SourceBucketName, watcher.kvMemClients, userAgent, base.KeepAlivePeriod, watcher.logger, features)
+			if err != nil {
+				watcher.kvMemClientsMtx.Unlock()
+				return err
+			}
+			watcher.statsMapMtx.Lock()
+			highseqno_map, err = b.utils.GetHighSeqNos(serverAddr, vbnos, client, watcher.statsMap, collectionIds, watcher.logger)
+			watcher.statsMapMtx.Unlock()
+
+			if err != nil {
+				watcher.logger.Warnf("%v Error getting high seqno for kv %v. err=%v", userAgent, serverAddr, err)
+				err1 := client.Close()
+				if err1 != nil {
+					watcher.logger.Warnf("%v error from closing connection for %v is %v\n", userAgent, serverAddr, err1)
+				}
+				delete(watcher.kvMemClients, serverAddr)
+				watcher.kvMemClientsMtx.Unlock()
+				return err
+			}
+		}
+		watcher.kvMemClientsMtx.Unlock()
+
+		watcher.latestCacheMtx.Lock()
+		if legacyMode {
+			watcher.latestCached.HighSeqnoMapLegacy = highseqno_map
+		} else {
+			watcher.latestCached.HighSeqnoMap = highseqno_map
+		}
+		watcher.latestCacheMtx.Unlock()
+		return nil
+	}
+	return updaterFunc
+}
+
+// Returns a duration updater
+func (b *BucketTopologyService) SubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan service_def.SourceNotification, func(time.Duration), error) {
+	if spec == nil {
+		return nil, nil, base.ErrorNilPtr
+	}
+
+	if spec.SourceBucketName == "" {
+		return nil, nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
+	}
+
+	b.srcBucketWatchersMtx.Lock()
+	defer b.srcBucketWatchersMtx.Unlock()
+	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
+	if exists {
+		intOpts := HighSeqnosOpts{
+			Spec:              spec,
+			RequestedInterval: requestedInterval,
+			SubscriberId:      subscriberId,
+		}
+		retCh := watcher.registerAndGetCh(spec, subscriberId, HIGHSEQNOS, intOpts).(chan service_def.SourceNotification)
+		intervalUpdateFunc := func(newInterval time.Duration) {
+			updateOpts := HighSeqnosOpts{
+				Spec:              spec,
+				RequestedInterval: newInterval,
+				SubscriberId:      subscriberId,
+			}
+			err := watcher.updateSettings(HIGHSEQNOS, updateOpts)
+			if err != nil {
+				b.logger.Errorf("Unable to update watcher setting for %v given opts %v", HIGHSEQNOS, updateOpts)
+			}
+		}
+		return retCh, intervalUpdateFunc, nil
+	}
+	return nil, nil, fmt.Errorf("SubscribeToLocalBucketHighSeqnosFeed could not find watcher for %v", spec.SourceBucketName)
+}
+
+// Returns a duration updater
+func (b *BucketTopologyService) SubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan service_def.SourceNotification, func(time.Duration), error) {
+	if spec == nil {
+		return nil, nil, base.ErrorNilPtr
+	}
+
+	if spec.SourceBucketName == "" {
+		return nil, nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
+	}
+
+	b.srcBucketWatchersMtx.Lock()
+	defer b.srcBucketWatchersMtx.Unlock()
+	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
+	if exists {
+		intOpts := HighSeqnosOpts{
+			Spec:              spec,
+			RequestedInterval: requestedInterval,
+			SubscriberId:      subscriberId,
+		}
+		retCh := watcher.registerAndGetCh(spec, subscriberId, HIGHSEQNOSLEGACY, intOpts).(chan service_def.SourceNotification)
+		intervalUpdateFunc := func(newInterval time.Duration) {
+			updateOpts := HighSeqnosOpts{
+				Spec:              spec,
+				RequestedInterval: newInterval,
+				SubscriberId:      subscriberId,
+			}
+			err := watcher.updateSettings(HIGHSEQNOSLEGACY, updateOpts)
+			if err != nil {
+				b.logger.Errorf("Unable to update watcher setting for %v given opts %v", HIGHSEQNOSLEGACY, updateOpts)
+			}
+		}
+		return retCh, intervalUpdateFunc, nil
+	}
+	return nil, nil, fmt.Errorf("SubscribeToLocalBucketHighSeqnosLegacyFeed could not find watcher for %v", spec.SourceBucketName)
+}
+
 type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string
@@ -584,24 +733,35 @@ type BucketTopologySvcWatcher struct {
 	startOnce sync.Once
 
 	// Key is a "spec + subscriber ID"
-	topologyNotifyMtx sync.RWMutex
-	topologyNotifyChs map[string]interface{}
-	dcpStatsMtx       sync.RWMutex
-	dcpStatsChs       map[string]interface{}
-	dcpStatsLegacyMtx sync.RWMutex
-	dcpStatsLegacyChs map[string]interface{}
+	topologyNotifyMtx      sync.RWMutex
+	topologyNotifyChs      map[string]interface{}
+	dcpStatsMtx            sync.RWMutex
+	dcpStatsChs            map[string]interface{}
+	dcpStatsLegacyMtx      sync.RWMutex
+	dcpStatsLegacyChs      map[string]interface{}
+	highSeqnosChsMtx       sync.RWMutex
+	highSeqnosChs          map[string]interface{}
+	highSeqnosLegacyChsMtx sync.RWMutex
+	highSeqnosLegacyChs    map[string]interface{}
 
 	latestCacheMtx sync.RWMutex
 	latestCached   *Notification
 	cachePopulated bool
 
-	logger    *log.CommonLogger
-	isStarted uint32
-	isStopped uint32
+	logger       *log.CommonLogger
+	firstToStart uint32
+	isStarted    uint32
+	isStopped    uint32
 
 	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
 
+	// For bootstrapping
 	intervalFuncMap IntervalFuncMap
+
+	// For runtime
+	watchersTickersMap      WatchersTickerMap
+	watchersTickersValueMap WatchersTickerValueMap
+	watchersTickersMapMtx   sync.RWMutex
 
 	// For DCP stats
 	kvMemClients    map[string]mcc.ClientIface
@@ -609,10 +769,36 @@ type BucketTopologySvcWatcher struct {
 
 	kvMemClientsLegacy    map[string]mcc.ClientIface
 	kvMemClientsLegacyMtx sync.Mutex
+
+	// Used internally to call KV
+	statsMap    map[string]string
+	statsMapMtx sync.RWMutex
+
+	// For highSeqnos and highSeqnosLegacy, intervals need to be changed dynamically
+	// The ideas here is to separate operation into the actual GET op and the passing of data to the receiver
+	// The GET op is dictated by the subscriber who wants it the most frequently, and then only pass to
+	// each individual receiver as to not overwhelm it
+	// Each key is a replication and each replication has a desired time interval to receive data
+	// The idea is watcher need to call REST API's at the smallest duration (highSeqnosIntervals)
+	// But only feed the latest data back a specific requester only if the requester expects it
+	// ... i.e the channel whenever a ticker has fired (highSeqnosReceiverFired)
+	highSeqnosIntervals     map[string]time.Duration
+	highSeqnosReceiverFired map[string]*time.Ticker // Key is replId + subscriberID
+	highSeqnosTrackersMtx   sync.RWMutex
+
+	highSeqnosIntervalsLegacy     map[string]time.Duration
+	highSeqnosReceiverFiredLegacy map[string]*time.Ticker // Key is replId + subscriberID
+	highSeqnosTrackersMtxLegacy   sync.RWMutex
 }
 
+// IntervalFuncMap is keyed by type
+// Each type will have a single len IntervalInnerFuncMap
 type IntervalFuncMap map[string]IntervalInnerFuncMap
 type IntervalInnerFuncMap map[time.Duration]func() error
+
+type WatchersCallbacksFuncMap map[string]func(opts interface{}) error
+type WatchersTickerMap map[string]*time.Ticker
+type WatchersTickerValueMap map[string]time.Duration
 
 // Legacy below is needed to replicate to target cluster that is < 7.0
 // Once <7.0 is EOL'ed, then LEGACY can be removed
@@ -620,26 +806,39 @@ const (
 	TOPOLOGY            = "topology"
 	DCPSTATSCHECK       = "dcpStats"
 	DCPSTATSCHECKLEGACY = "dcpStatsLegacy"
+	HIGHSEQNOS          = "vbHighSeqnos"
+	HIGHSEQNOSLEGACY    = "vbHighSeqnosLegacy" // Legacy means it only receives default collection high seqnos
 )
 
 type HighSeqnosOpts struct {
+	Spec              *metadata.ReplicationSpecification
 	RequestedInterval time.Duration
+	SubscriberId      string
 }
 
 func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.CommonLogger, source bool, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) *BucketTopologySvcWatcher {
 	watcher := &BucketTopologySvcWatcher{
-		bucketName:          bucketName,
-		bucketUUID:          bucketUuid,
-		finCh:               make(chan bool),
-		logger:              logger,
-		source:              source,
-		xdcrCompTopologySvc: xdcrCompTopologySvc,
-		latestCached:        NewNotification(source),
-		topologyNotifyChs:   make(map[string]interface{}),
-		kvMemClients:        map[string]mcc.ClientIface{},
-		kvMemClientsLegacy:  map[string]mcc.ClientIface{},
-		dcpStatsChs:         map[string]interface{}{},
-		dcpStatsLegacyChs:   map[string]interface{}{},
+		bucketName:                    bucketName,
+		bucketUUID:                    bucketUuid,
+		finCh:                         make(chan bool),
+		logger:                        logger,
+		source:                        source,
+		xdcrCompTopologySvc:           xdcrCompTopologySvc,
+		latestCached:                  NewNotification(source),
+		topologyNotifyChs:             make(map[string]interface{}),
+		kvMemClients:                  map[string]mcc.ClientIface{},
+		kvMemClientsLegacy:            map[string]mcc.ClientIface{},
+		dcpStatsChs:                   map[string]interface{}{},
+		dcpStatsLegacyChs:             map[string]interface{}{},
+		statsMap:                      map[string]string{},
+		watchersTickersMap:            WatchersTickerMap{},
+		watchersTickersValueMap:       WatchersTickerValueMap{},
+		highSeqnosChs:                 map[string]interface{}{},
+		highSeqnosLegacyChs:           map[string]interface{}{},
+		highSeqnosIntervals:           map[string]time.Duration{},
+		highSeqnosReceiverFired:       map[string]*time.Ticker{},
+		highSeqnosIntervalsLegacy:     map[string]time.Duration{},
+		highSeqnosReceiverFiredLegacy: map[string]*time.Ticker{},
 	}
 	return watcher
 }
@@ -647,14 +846,18 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 var ErrorWatcherAlreadyStarted = fmt.Errorf("Watcher is already started")
 
 func (bw *BucketTopologySvcWatcher) Start() error {
-	if atomic.CompareAndSwapUint32(&bw.isStarted, 0, 1) {
-		go bw.run()
+	if atomic.CompareAndSwapUint32(&bw.firstToStart, 0, 1) {
+		var initDone sync.WaitGroup
+		initDone.Add(1)
+		go bw.run(&initDone)
+		initDone.Wait()
+		atomic.StoreUint32(&bw.isStarted, 1)
 		return nil
 	}
 	return ErrorWatcherAlreadyStarted
 }
 
-func (bw *BucketTopologySvcWatcher) run() {
+func (bw *BucketTopologySvcWatcher) run(initDone *sync.WaitGroup) {
 	bw.logger.Infof("Starting watcher for local? %v bucket of %v with UUID %v", bw.source, bw.bucketName, bw.bucketUUID)
 	defer bw.logger.Infof("Stopped watcher for local? %v bucket of %v with UUID %v", bw.source, bw.bucketName, bw.bucketUUID)
 
@@ -664,16 +867,22 @@ func (bw *BucketTopologySvcWatcher) run() {
 			updateTypeCpy := updateType
 			intervalCpy := interval
 			funcCpy := updateFunc
+			initDone.Add(1)
 			go func() {
 				initCh := make(chan bool, 1)
 				initCh <- true
 				ticker := time.NewTicker(intervalCpy)
+				bw.watchersTickersMapMtx.Lock()
+				bw.watchersTickersMap[updateTypeCpy] = ticker
+				bw.watchersTickersValueMap[updateTypeCpy] = intervalCpy
+				bw.watchersTickersMapMtx.Unlock()
 				for {
 					select {
 					case <-bw.finCh:
 						return
 					case <-initCh:
 						bw.updateOnce(updateTypeCpy, funcCpy)
+						initDone.Done()
 					case <-ticker.C:
 						bw.updateOnce(updateTypeCpy, funcCpy)
 					}
@@ -681,6 +890,7 @@ func (bw *BucketTopologySvcWatcher) run() {
 			}()
 		}
 	}
+	initDone.Done()
 
 	for {
 		select {
@@ -704,6 +914,12 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 	case DCPSTATSCHECKLEGACY:
 		channelsMap = bw.dcpStatsLegacyChs
 		mutex = &bw.dcpStatsLegacyMtx
+	case HIGHSEQNOS:
+		channelsMap = bw.highSeqnosChs
+		mutex = &bw.highSeqnosChsMtx
+	case HIGHSEQNOSLEGACY:
+		channelsMap = bw.highSeqnosLegacyChs
+		mutex = &bw.highSeqnosLegacyChsMtx
 	default:
 		panic(fmt.Sprintf("Unknown type: %v", updateType))
 	}
@@ -730,7 +946,10 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 
 	mutex.RLock()
 	defer mutex.RUnlock()
-	for _, chRaw := range channelsMap {
+	for channelName, chRaw := range channelsMap {
+		if !bw.shouldSendToCh(channelName, updateType) {
+			continue
+		}
 		timeout := time.NewTicker(1 * time.Second)
 		if bw.source {
 			select {
@@ -761,6 +980,10 @@ func (bw *BucketTopologySvcWatcher) Stop() error {
 }
 
 func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationSpecification, subscriberId string, chType string, opts interface{}) interface{} {
+	for atomic.LoadUint32(&bw.isStarted) == 0 {
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	var specifiedChs map[string]interface{}
 	var mutex *sync.RWMutex
 	switch chType {
@@ -773,6 +996,14 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 	case DCPSTATSCHECKLEGACY:
 		specifiedChs = bw.dcpStatsLegacyChs
 		mutex = &bw.dcpStatsLegacyMtx
+	case HIGHSEQNOS:
+		specifiedChs = bw.highSeqnosChs
+		mutex = &bw.highSeqnosChsMtx
+		defer bw.setHighSeqnosInterval(opts.(HighSeqnosOpts), false)
+	case HIGHSEQNOSLEGACY:
+		specifiedChs = bw.highSeqnosLegacyChs
+		mutex = &bw.highSeqnosLegacyChsMtx
+		defer bw.setHighSeqnosInterval(opts.(HighSeqnosOpts), true)
 	default:
 		panic(fmt.Sprintf("Unknown type %v", chType))
 	}
@@ -828,6 +1059,14 @@ func (bw *BucketTopologySvcWatcher) unregisterCh(spec *metadata.ReplicationSpeci
 	case DCPSTATSCHECKLEGACY:
 		specifiedChs = bw.dcpStatsLegacyChs
 		mutex = &bw.dcpStatsLegacyMtx
+	case HIGHSEQNOS:
+		specifiedChs = bw.highSeqnosChs
+		mutex = &bw.highSeqnosChsMtx
+		bw.cleanupHighSeqnosInternalData(spec, subscriberId, false)
+	case HIGHSEQNOSLEGACY:
+		specifiedChs = bw.highSeqnosLegacyChs
+		mutex = &bw.highSeqnosLegacyChsMtx
+		bw.cleanupHighSeqnosInternalData(spec, subscriberId, false)
 	default:
 		panic(fmt.Sprintf("Unknown type %v", chType))
 	}
@@ -863,6 +1102,149 @@ func (bw *BucketTopologySvcWatcher) closeKvConns() {
 
 }
 
+func (bw *BucketTopologySvcWatcher) updateSettings(chType string, opts interface{}) error {
+	switch chType {
+	case HIGHSEQNOS:
+		bw.setHighSeqnosInterval(opts.(HighSeqnosOpts), false)
+		return nil
+	case HIGHSEQNOSLEGACY:
+		bw.setHighSeqnosInterval(opts.(HighSeqnosOpts), true)
+		return nil
+	default:
+		// Nothing is to be updated
+		return base.ErrorNotSupported
+	}
+}
+
+func (bw *BucketTopologySvcWatcher) setHighSeqnosInterval(opts HighSeqnosOpts, legacy bool) {
+	mtx := &bw.highSeqnosTrackersMtx
+	subscriberToIntervalMap := bw.highSeqnosIntervals
+	receiverFiredMap := bw.highSeqnosReceiverFired
+	chType := HIGHSEQNOS
+	if legacy {
+		mtx = &bw.highSeqnosTrackersMtxLegacy
+		subscriberToIntervalMap = bw.highSeqnosIntervalsLegacy
+		receiverFiredMap = bw.highSeqnosReceiverFiredLegacy
+		chType = HIGHSEQNOSLEGACY
+	}
+
+	mtx.Lock()
+	fullKey := compileFullSubscriberId(opts.Spec, opts.SubscriberId)
+
+	subscriberToIntervalMap[fullKey] = opts.RequestedInterval
+	_, exists := receiverFiredMap[fullKey]
+	if !exists {
+		receiverFiredMap[fullKey] = time.NewTicker(opts.RequestedInterval)
+	} else {
+		receiverFiredMap[fullKey].Reset(opts.RequestedInterval)
+	}
+
+	shortestInterval := opts.RequestedInterval
+	for _, currentIntervalForASubscriber := range subscriberToIntervalMap {
+		if currentIntervalForASubscriber < shortestInterval {
+			shortestInterval = currentIntervalForASubscriber
+		}
+	}
+	mtx.Unlock()
+
+	bw.watchersTickersMapMtx.RLock()
+	bw.watchersTickersMap[chType].Reset(shortestInterval)
+	bw.logger.Infof("Setting overall ticker for %v to %v", chType, shortestInterval)
+	bw.watchersTickersMapMtx.RUnlock()
+}
+
+func (bw *BucketTopologySvcWatcher) shouldSendToCh(name string, updateType string) bool {
+	switch updateType {
+	case HIGHSEQNOS:
+		return bw.checkHighSeqnosReceiverAwaitingData(name, false)
+	case HIGHSEQNOSLEGACY:
+		return bw.checkHighSeqnosReceiverAwaitingData(name, true)
+	default:
+		return true
+	}
+}
+
+func (bw *BucketTopologySvcWatcher) checkHighSeqnosReceiverAwaitingData(name string, legacy bool) bool {
+	bw.highSeqnosTrackersMtx.RLock()
+	var ticker *time.Ticker
+	var found bool
+	if !legacy {
+		ticker, found = bw.highSeqnosReceiverFired[name]
+	} else {
+		ticker, found = bw.highSeqnosReceiverFiredLegacy[name]
+	}
+	if !found {
+		// TODO remove
+		panic(fmt.Sprintf("%v - %v not found", name, legacy))
+	}
+	bw.highSeqnosTrackersMtx.RUnlock()
+	select {
+	case <-ticker.C:
+		return true
+	default:
+		return false
+	}
+}
+
+func (bw *BucketTopologySvcWatcher) cleanupHighSeqnosInternalData(spec *metadata.ReplicationSpecification, subscriberId string, legacy bool) {
+	mtx := &bw.highSeqnosTrackersMtx
+	subscriberToIntervalMap := bw.highSeqnosIntervals
+	receiverFiredMap := bw.highSeqnosReceiverFired
+	chType := HIGHSEQNOS
+	if legacy {
+		mtx = &bw.highSeqnosTrackersMtxLegacy
+		subscriberToIntervalMap = bw.highSeqnosIntervalsLegacy
+		receiverFiredMap = bw.highSeqnosReceiverFiredLegacy
+		chType = HIGHSEQNOSLEGACY
+	}
+
+	mtx.RLock()
+	var shortestIntervalBeforeRemoval time.Duration
+	var first = true
+	for _, currentIntervalForASubscriber := range subscriberToIntervalMap {
+		if first {
+			shortestIntervalBeforeRemoval = currentIntervalForASubscriber
+			first = false
+			continue
+		}
+		if currentIntervalForASubscriber < shortestIntervalBeforeRemoval {
+			shortestIntervalBeforeRemoval = currentIntervalForASubscriber
+		}
+	}
+	mtx.RUnlock()
+
+	mtx.Lock()
+	fullKey := compileFullSubscriberId(spec, subscriberId)
+
+	delete(subscriberToIntervalMap, fullKey)
+	ticker, exists := receiverFiredMap[fullKey]
+	if exists {
+		ticker.Stop()
+	}
+	delete(receiverFiredMap, fullKey)
+
+	first = true
+	var shortestIntervalAfterRemoval time.Duration
+	for _, currentIntervalForASubscriber := range subscriberToIntervalMap {
+		if first {
+			shortestIntervalAfterRemoval = currentIntervalForASubscriber
+			first = false
+			continue
+		}
+		if currentIntervalForASubscriber < shortestIntervalAfterRemoval {
+			shortestIntervalAfterRemoval = currentIntervalForASubscriber
+		}
+	}
+	mtx.Unlock()
+
+	if shortestIntervalBeforeRemoval != shortestIntervalAfterRemoval {
+		bw.watchersTickersMapMtx.RLock()
+		bw.watchersTickersMap[chType].Reset(shortestIntervalAfterRemoval)
+		bw.logger.Infof("Setting overall ticker for %v to %v", chType, shortestIntervalAfterRemoval)
+		bw.watchersTickersMapMtx.RUnlock()
+	}
+}
+
 type Notification struct {
 	Source bool
 
@@ -872,6 +1254,8 @@ type Notification struct {
 	KvVbMap             map[string][]uint16
 	DcpStatsMap         map[string]map[string]string
 	DcpStatsMapLegacy   map[string]map[string]string
+	HighSeqnoMap        map[uint16]uint64
+	HighSeqnoMapLegacy  map[uint16]uint64
 
 	// Target only
 	TargetBucketUUID  string
