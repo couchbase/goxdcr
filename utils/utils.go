@@ -226,12 +226,12 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 		highseqnostr, ok := stats_map[stats_key]
 		if !ok || highseqnostr == "" {
-			err = fmt.Errorf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			err = fmt.Errorf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed", vbno)
 			return err
 		}
 		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
-			u.logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
+			u.logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v", vbno, highseqnostr)
 			err = fmt.Errorf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
 			return err
 		}
@@ -2830,7 +2830,7 @@ func (u *Utilities) DumpStackTraceAfterThreshold(id string, threshold time.Durat
 	return u.StartDebugExec(id, threshold, dumpStackTrace)
 }
 
-func (u *Utilities) GetHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.ClientIface, stats_map map[string]string, collectionIds []uint32, logger *log.CommonLogger) (map[uint16]uint64, error) {
+func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_map map[string]string, collectionIds []uint32) (map[uint16]uint64, map[string]string, error) {
 	highseqno_map := make(map[uint16]uint64)
 
 	var err error
@@ -2844,7 +2844,7 @@ func (u *Utilities) GetHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.Cl
 			stats_map, err = conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		err = u.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
 	} else {
@@ -2855,7 +2855,7 @@ func (u *Utilities) GetHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.Cl
 			mccContext.CollId = collectionId
 			vbSeqnoMap, err = conn.GetAllVbSeqnos(vbSeqnoMap, mccContext)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			PopulateMaxVbSeqnoMap(vbSeqnoMap, highseqno_map)
 		}
@@ -2863,9 +2863,9 @@ func (u *Utilities) GetHighSeqNos(serverAddr string, vbnos []uint16, conn mcc.Cl
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	} else {
-		return highseqno_map, nil
+		return highseqno_map, stats_map, nil
 	}
 }
 

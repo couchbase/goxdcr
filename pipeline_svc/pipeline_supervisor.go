@@ -186,9 +186,9 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
 	var dcpStatsCh chan service_def.SourceNotification
 	if remoteClusterCapability.HasCollectionSupport() {
-		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.Id())
+		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
 	} else {
-		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.Id())
+		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
 	}
 	if err != nil {
 		return err
@@ -201,9 +201,9 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 			case <-fin_ch:
 				pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
 				if remoteClusterCapability.HasCollectionSupport() {
-					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.Id())
+					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
 				} else {
-					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.Id())
+					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
 				}
 				if err != nil {
 					pipelineSupervisor.Logger().Errorf("Unable to unsubscribe from DcpStatsFeed: %v", err)

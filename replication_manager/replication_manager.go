@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/backfill_manager"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
@@ -416,11 +415,6 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 	stats_update_ticker := time.NewTicker(StatsUpdateIntervalForPausedReplications)
 	defer stats_update_ticker.Stop()
 
-	// key of outer map - bucket name
-	// key of inner map - kv address
-	// value - memcached client
-	bucket_kv_mem_clients := make(map[string]map[string]mcc.ClientIface)
-
 	for {
 		select {
 		case <-fin_chan:
@@ -428,7 +422,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-status_check_ticker.C:
 			rm.pipelineMgr.CheckPipelines()
 		case <-stats_update_ticker.C:
-			pipeline_svc.UpdateStats(ClusterInfoService(), XDCRCompTopologyService(), CheckpointService(), bucket_kv_mem_clients, logger_rm, rm.utils, rm.remote_cluster_svc, rm.backfillReplSvc, rm.bucketTopologySvc)
+			pipeline_svc.UpdateStats(CheckpointService(), logger_rm, rm.remote_cluster_svc, rm.backfillReplSvc, rm.bucketTopologySvc)
 		}
 	}
 }

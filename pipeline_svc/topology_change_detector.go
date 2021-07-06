@@ -439,7 +439,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 	} else {
 		replicationSpec = genSpec.GetReplicationSpec()
 	}
-	sourceVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToLocalBucketFeed(replicationSpec, top_detect_svc.Id())
+	sourceVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToLocalBucketFeed(replicationSpec, mainPipeline.InstanceId())
 	if err != nil {
 		return err
 	}
@@ -452,7 +452,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 		for {
 			select {
 			case <-top_detect_svc.finish_ch:
-				top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, top_detect_svc.Id())
+				top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, mainPipeline.InstanceId())
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v received finish signal and is exiting", top_detect_svc.mainPipelineTopic)
 				return
 			case notification := <-sourceVbUpdateCh:
@@ -500,7 +500,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget() error {
 	} else {
 		spec = genSpec.GetReplicationSpec()
 	}
-	targetVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, top_detect_svc.Id())
+	targetVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, mainPipeline.InstanceId())
 	if err != nil {
 		return err
 	}
@@ -515,7 +515,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget() error {
 		for {
 			select {
 			case <-top_detect_svc.finish_ch:
-				top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.Id())
+				err := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, mainPipeline.InstanceId())
+				if err != nil {
+					top_detect_svc.logger.Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
+				}
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v validateTargetTopology completed", top_detect_svc.mainPipelineTopic)
 				return
 			case notification := <-targetVbUpdateCh:

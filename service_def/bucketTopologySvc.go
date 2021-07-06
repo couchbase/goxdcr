@@ -47,6 +47,8 @@ type SourceNotification interface {
 	GetKvVbMapRO() map[string][]uint16
 	GetDcpStatsMap() map[string]map[string]string
 	GetDcpStatsMapLegacy() map[string]map[string]string
+	GetHighSeqnosMap() map[string]map[uint16]uint64
+	GetHighSeqnosMapLegacy() map[string]map[uint16]uint64
 }
 
 type TargetNotification interface {

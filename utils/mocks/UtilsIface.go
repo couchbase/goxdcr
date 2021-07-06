@@ -977,27 +977,36 @@ func (_m *UtilsIface) GetExternalMgtHostAndPort(nodeInfo map[string]interface{},
 	return r0, r1, r2
 }
 
-// GetHighSeqNos provides a mock function with given fields: serverAddr, vbnos, conn, stats_map, collectionIds, logger
-func (_m *UtilsIface) GetHighSeqNos(serverAddr string, vbnos []uint16, conn memcached.ClientIface, stats_map map[string]string, collectionIds []uint32, logger *log.CommonLogger) (map[uint16]uint64, error) {
-	ret := _m.Called(serverAddr, vbnos, conn, stats_map, collectionIds, logger)
+// GetHighSeqNos provides a mock function with given fields: vbnos, conn, stats_map, collectionIds
+func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, stats_map map[string]string, collectionIds []uint32) (map[uint16]uint64, map[string]string, error) {
+	ret := _m.Called(vbnos, conn, stats_map, collectionIds)
 
 	var r0 map[uint16]uint64
-	if rf, ok := ret.Get(0).(func(string, []uint16, memcached.ClientIface, map[string]string, []uint32, *log.CommonLogger) map[uint16]uint64); ok {
-		r0 = rf(serverAddr, vbnos, conn, stats_map, collectionIds, logger)
+	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface, map[string]string, []uint32) map[uint16]uint64); ok {
+		r0 = rf(vbnos, conn, stats_map, collectionIds)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[uint16]uint64)
 		}
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, []uint16, memcached.ClientIface, map[string]string, []uint32, *log.CommonLogger) error); ok {
-		r1 = rf(serverAddr, vbnos, conn, stats_map, collectionIds, logger)
+	var r1 map[string]string
+	if rf, ok := ret.Get(1).(func([]uint16, memcached.ClientIface, map[string]string, []uint32) map[string]string); ok {
+		r1 = rf(vbnos, conn, stats_map, collectionIds)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(map[string]string)
+		}
 	}
 
-	return r0, r1
+	var r2 error
+	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface, map[string]string, []uint32) error); ok {
+		r2 = rf(vbnos, conn, stats_map, collectionIds)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // GetHostAddrFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, isHttps, logger, useExternal

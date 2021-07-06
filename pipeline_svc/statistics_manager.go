@@ -111,7 +111,6 @@ type SampleStats struct {
 //, then stores the result in expvar
 //The result in expvar can be exposed to outside via different channels - log or to ns_server.
 type StatisticsManager struct {
-
 	//a map of registry with the part id as key
 	//the aggregated metrics for the pipeline is the entry with key="Overall"
 	//this map will be exported to expval, but only
@@ -143,15 +142,12 @@ type StatisticsManager struct {
 	active_vbs  map[string][]uint16
 	bucket_name string
 
-	// Keeps track of all the serverAddr -> MCC client required
-	kv_mem_clients      map[string]mcc.ClientIface
-	kv_mem_clients_lock *sync.RWMutex
-
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
 	cluster_info_svc          service_def.ClusterInfoSvc
 	xdcr_topology_svc         service_def.XDCRCompTopologySvc
 	remoteClusterSvc          service_def.RemoteClusterSvc
 	cachedCapability          metadata.Capability
+	bucketTopologySvc         service_def.BucketTopologySvc
 
 	stats_map map[string]string
 
@@ -164,12 +160,18 @@ type StatisticsManager struct {
 	totalBackfillChanges uint64
 
 	printThroughSeqnoSummaryWhenStopping bool
+
+	highSeqnosDcpCh           chan service_def.SourceNotification
+	getHighSeqnosAndSourceVBs func() (map[string]map[uint16]uint64, map[string][]uint16)
+
+	highSeqnosIntervalUpdater    func(time.Duration)
+	highSeqnosIntervalUpdaterMtx sync.RWMutex
+
+	highSeqnosFeedUnsubscriberMtx sync.RWMutex
+	highSeqnosFeedUnsubscriber    func() error
 }
 
-func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc,
-	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
-	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc) *StatisticsManager {
+func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *StatisticsManager {
 	stats_mgr := &StatisticsManager{
 		registries:                make(map[string]metrics.Registry),
 		logger:                    log.NewLogger("StatsMgr", logger_ctx),
@@ -181,8 +183,6 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		update_interval:           default_update_interval,
 		active_vbs:                active_vbs,
 		wait_grp:                  &sync.WaitGroup{},
-		kv_mem_clients:            make(map[string]mcc.ClientIface),
-		kv_mem_clients_lock:       &sync.RWMutex{},
 		checkpointed_seqnos:       make(map[uint16]*base.SeqnoWithLock),
 		stats_map:                 make(map[string]string),
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
@@ -190,6 +190,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		xdcr_topology_svc:         xdcr_topology_svc,
 		utils:                     utilsIn,
 		remoteClusterSvc:          remoteClusterSvc,
+		bucketTopologySvc:         bucketTopologySvc,
 	}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 
@@ -250,6 +251,11 @@ func (stats_mgr *StatisticsManager) getUpdateInterval() time.Duration {
 
 func (stats_mgr *StatisticsManager) setUpdateInterval(update_interval int) {
 	atomic.StoreUint32(&stats_mgr.update_interval, uint32(update_interval))
+	stats_mgr.highSeqnosIntervalUpdaterMtx.RLock()
+	if stats_mgr.highSeqnosIntervalUpdater != nil {
+		stats_mgr.highSeqnosIntervalUpdater(time.Duration(update_interval) * time.Millisecond)
+	}
+	stats_mgr.highSeqnosIntervalUpdaterMtx.RUnlock()
 	stats_mgr.logger.Infof("%v set update interval to %v ms\n", stats_mgr.pipeline.InstanceId(), update_interval)
 }
 
@@ -632,11 +638,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (
 }
 
 func (stats_mgr *StatisticsManager) calculateChangesLeftMainPipeline(docs_processed int64) (int64, error) {
-	stats_mgr.kv_mem_clients_lock.Lock()
-	defer stats_mgr.kv_mem_clients_lock.Unlock()
-
-	total_changes, err := calculateTotalChanges(stats_mgr.active_vbs, stats_mgr.kv_mem_clients, stats_mgr.bucket_name, stats_mgr.user_agent, stats_mgr.stats_map, stats_mgr.logger,
-		stats_mgr.utils, stats_mgr.cachedCapability)
+	total_changes, err := calculateTotalChanges(stats_mgr.logger, stats_mgr.getHighSeqnosAndSourceVBs)
 	if err != nil {
 		return 0, err
 	}
@@ -777,8 +779,7 @@ func (stats_mgr *StatisticsManager) Start(settings metadata.ReplicationSettingsM
 		return err
 	}
 
-	//initialize connection
-	err = stats_mgr.initConnections()
+	err = stats_mgr.initDataFeeds()
 	if err != nil {
 		return err
 	}
@@ -845,13 +846,19 @@ func (stats_mgr *StatisticsManager) Stop() error {
 	stats_mgr.logger.Infof("%v StatisticsManager Stopping...", stats_mgr.pipeline.InstanceId())
 	close(stats_mgr.finish_ch)
 
-	//close the connections
-	stats_mgr.closeConnections()
-
 	if stats_mgr.printThroughSeqnoSummaryWhenStopping {
 		// Backfill pipelines can exit before ever printing the number of oso received
 		stats_mgr.through_seqno_tracker_svc.PrintStatusSummary()
 	}
+
+	stats_mgr.highSeqnosFeedUnsubscriberMtx.RLock()
+	if stats_mgr.highSeqnosFeedUnsubscriber != nil {
+		err := stats_mgr.highSeqnosFeedUnsubscriber()
+		if err != nil {
+			stats_mgr.logger.Warnf("%v Unsubscribing feed resulted in %v", stats_mgr.pipeline.InstanceId(), err)
+		}
+	}
+	stats_mgr.highSeqnosFeedUnsubscriberMtx.RUnlock()
 
 	stats_mgr.wait_grp.Wait()
 	stats_mgr.logger.Infof("%v StatisticsManager Stopped", stats_mgr.pipeline.InstanceId())
@@ -859,19 +866,7 @@ func (stats_mgr *StatisticsManager) Stop() error {
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) closeConnections() {
-	stats_mgr.kv_mem_clients_lock.Lock()
-	defer stats_mgr.kv_mem_clients_lock.Unlock()
-	for server_addr, client := range stats_mgr.kv_mem_clients {
-		err := client.Close()
-		if err != nil {
-			stats_mgr.logger.Infof("%v error from closing connection for %v is %v\n", stats_mgr.pipeline.InstanceId(), server_addr, err)
-		}
-	}
-	stats_mgr.kv_mem_clients = make(map[string]mcc.ClientIface)
-}
-
-func (stats_mgr *StatisticsManager) initConnections() error {
+func (stats_mgr *StatisticsManager) initDataFeeds() error {
 	spec := stats_mgr.pipeline.Specification().GetReplicationSpec()
 	ref, err := stats_mgr.remoteClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
 	if err != nil {
@@ -884,22 +879,52 @@ func (stats_mgr *StatisticsManager) initConnections() error {
 	stats_mgr.cachedCapability = rcCapability
 
 	var features utilities.HELOFeatures
+	var updater func(duration time.Duration)
 	if !rcCapability.HasCollectionSupport() {
 		// If remote cluster does not support collection, then only get stats for default collection
 		// This is reverse logic because to only get stat for the default collection, we need to enable collection
 		// so we can ask specifically for a subset, aka the default collection
 		features.Collections = true
-	}
-
-	for serverAddr, _ := range stats_mgr.active_vbs {
-		// as of now active_vbs contains only the current node and the connection is always local. use plain authentication
-		conn, _, err := stats_mgr.utils.GetMemcachedConnectionWFeatures(serverAddr, stats_mgr.bucket_name, stats_mgr.user_agent, base.KeepAlivePeriod, features, stats_mgr.logger)
+		stats_mgr.highSeqnosFeedUnsubscriberMtx.Lock()
+		stats_mgr.highSeqnosDcpCh, updater, err = stats_mgr.bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, stats_mgr.pipeline.InstanceId(), stats_mgr.getUpdateInterval())
 		if err != nil {
+			stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
 			return err
 		}
-		// no need to lock since this is done during initialization
-		stats_mgr.kv_mem_clients[serverAddr] = conn
+		stats_mgr.highSeqnosFeedUnsubscriber = func() error {
+			return stats_mgr.bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec, stats_mgr.pipeline.InstanceId())
+		}
+		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
+
+		stats_mgr.getHighSeqnosAndSourceVBs = func() (map[string]map[uint16]uint64, map[string][]uint16) {
+			select {
+			case notification := <-stats_mgr.highSeqnosDcpCh:
+				return notification.GetHighSeqnosMapLegacy(), notification.GetSourceVBMapRO()
+			}
+		}
+	} else {
+		stats_mgr.highSeqnosFeedUnsubscriberMtx.Lock()
+		stats_mgr.highSeqnosDcpCh, updater, err = stats_mgr.bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, stats_mgr.pipeline.InstanceId(), stats_mgr.getUpdateInterval())
+		if err != nil {
+			stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
+			return err
+		}
+		stats_mgr.highSeqnosFeedUnsubscriber = func() error {
+			return stats_mgr.bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, stats_mgr.pipeline.InstanceId())
+		}
+		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
+
+		stats_mgr.getHighSeqnosAndSourceVBs = func() (map[string]map[uint16]uint64, map[string][]uint16) {
+			select {
+			case notification := <-stats_mgr.highSeqnosDcpCh:
+				return notification.GetHighSeqnosMap(), notification.GetSourceVBMapRO()
+			}
+		}
 	}
+
+	stats_mgr.highSeqnosIntervalUpdaterMtx.Lock()
+	stats_mgr.highSeqnosIntervalUpdater = updater
+	stats_mgr.highSeqnosIntervalUpdaterMtx.Unlock()
 
 	return nil
 }
@@ -1643,7 +1668,7 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.Replic
 
 const updateStatsId = "ReplicationMgrUpdateStats"
 
-func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, checkpoints_svc service_def.CheckpointsService, bucket_kv_mem_clients map[string]map[string]mcc.ClientIface, logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, backfillReplSvc service_def.BackfillReplSvc, bucketTopologySvc service_def.BucketTopologySvc) {
+func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, remoteClusterSvc service_def.RemoteClusterSvc, backfillReplSvc service_def.BackfillReplSvc, bucketTopologySvc service_def.BucketTopologySvc) {
 	logger.Debug("updateStats for paused replications")
 
 	for repl_id, repl_status := range pipeline_manager.ReplicationStatusMap() {
@@ -1665,7 +1690,10 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 		}
 		notification := <-localBucketNotificationCh
 		cur_kv_vb_map := notification.GetKvVbMapRO()
-		bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, updateStatsId)
+		err = bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, updateStatsId)
+		if err != nil {
+			logger.Errorf("Error unsubscribing to local bucket feed for paused replication %v - err: %v", ref.Id(), err)
+		}
 
 		// Check to ensure remote cluster collection capability is aligned with the current memcached connections
 		remoteClusterCapability, err := remoteClusterSvc.GetCapability(ref)
@@ -1674,12 +1702,41 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			continue
 		}
 
-		// get the kv_mem_client map for the corresponding source bucket
-		kv_mem_clients := bucket_kv_mem_clients[spec.SourceBucketName]
-		if kv_mem_clients == nil {
-			kv_mem_clients = initEmptyConnections(bucket_kv_mem_clients, spec.SourceBucketName)
+		var highSeqnosMaps map[string]map[uint16]uint64
+		var sourceVBMap map[string][]uint16
+		if remoteClusterCapability.HasCollectionSupport() {
+			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, updateStatsId, base.ReplSpecCheckInterval)
+			if err != nil {
+				logger.Errorf("Error subscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
+				continue
+			}
+
+			notification := <-highSeqnoFeed
+			highSeqnosMaps = notification.GetHighSeqnosMap()
+			sourceVBMap = notification.GetSourceVBMapRO()
+
+			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, updateStatsId)
+			if err != nil {
+				logger.Errorf("Error unsubscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
+			}
 		} else {
-			kv_mem_clients = checkMccConnectionsCapability(bucket_kv_mem_clients, spec.SourceBucketName, remoteClusterCapability)
+			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, updateStatsId, base.ReplSpecCheckInterval)
+			if err != nil {
+				logger.Errorf("Error subscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
+				continue
+			}
+
+			notification := <-highSeqnoFeed
+			highSeqnosMaps = notification.GetHighSeqnosMap()
+			sourceVBMap = notification.GetSourceVBMapRO()
+
+			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, updateStatsId)
+			if err != nil {
+				logger.Errorf("Error unsubscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
+			}
+		}
+		highSeqnoAndSourceVBGetter := func() (map[string]map[uint16]uint64, map[string][]uint16) {
+			return highSeqnosMaps, sourceVBMap
 		}
 
 		// Check to see if backfill replication exists
@@ -1693,14 +1750,14 @@ func UpdateStats(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc 
 			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
 			// or it may be nil when the underying replication is not paused but has not completed startup process
 			// construct it
-			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils, remoteClusterCapability, backfillSpec)
+			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
 			if err != nil {
 				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
 				continue
 			}
 		} else {
 			if repl_status.RuntimeStatus(true) != pipeline_pkg.Replicating {
-				err := updateStatsForReplication(repl_status, overview_stats, cur_kv_vb_map, checkpoints_svc, kv_mem_clients, logger, utils, remoteClusterCapability, backfillSpec)
+				err := updateStatsForReplication(repl_status, overview_stats, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
 					continue
@@ -1754,17 +1811,14 @@ func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]m
 }
 
 // compute and set changes_left and docs_processed stats. set other stats to 0
-func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
-	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterCapability metadata.Capability,
-	backfillSpec *metadata.BackfillReplicationSpec) error {
+func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosAndSourceVBMapGetter func() (map[string]map[uint16]uint64, map[string][]uint16)) error {
 	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
 		return err
 	}
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, UserAgentPausedReplication, nil, logger, utils, remoteClusterCapability)
+	total_changes, err := calculateTotalChanges(logger, highSeqnosAndSourceVBMapGetter)
 	if err != nil {
 		return err
 	}
@@ -1821,35 +1875,16 @@ func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, s
 	return nil
 }
 
-func calculateTotalChanges(kv_vb_map map[string][]uint16, kv_mem_clients map[string]mcc.ClientIface,
-	sourceBucketName string, user_agent string, stats_map map[string]string, logger *log.CommonLogger, utils utilities.UtilsIface,
-	remoteClusterCapability metadata.Capability) (int64, error) {
+func calculateTotalChanges(logger *log.CommonLogger, getHighSeqnosAndVBMap func() (map[string]map[uint16]uint64, map[string][]uint16)) (int64, error) {
 	var total_changes uint64 = 0
 
-	var features utilities.HELOFeatures
-	var collectionIds []uint32
-	if !remoteClusterCapability.HasCollectionSupport() {
-		// This is reverse logic because to only get stat for the default collection, we need to enable collection
-		// so we can ask specifically for a subset, aka the default collection
-		features.Collections = true
-		collectionIds = append(collectionIds, base.DefaultCollectionId)
-	}
+	highSeqnoKvMap, kv_vb_map := getHighSeqnosAndVBMap()
 
 	for serverAddr, vbnos := range kv_vb_map {
-		// as of now kv_vb_map contains only the current node and the connection is always local. use plain authentication
-		client, err := utils.GetMemcachedClient(serverAddr, sourceBucketName, kv_mem_clients, user_agent, base.KeepAlivePeriod, logger, features)
-		if err != nil {
-			return 0, err
-		}
-		highseqno_map, err := utils.GetHighSeqNos(serverAddr, vbnos, client, stats_map, collectionIds, logger)
-		if err != nil {
-			logger.Warnf("error from getting high seqno for %v is %v\n", serverAddr, err)
-			err1 := client.Close()
-			if err1 != nil {
-				logger.Warnf("error from closing connection for %v is %v\n", serverAddr, err1)
-			}
-			delete(kv_mem_clients, serverAddr)
-			return 0, err
+		highseqno_map, found := highSeqnoKvMap[serverAddr]
+		if !found {
+			logger.Warnf("Server %v not found in high seqnoMap %v", serverAddr, highSeqnoKvMap)
+			continue
 		}
 		for _, vbno := range vbnos {
 			current_vb_highseqno := highseqno_map[vbno]
@@ -1892,10 +1927,7 @@ func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicat
 	return backfillTotalChanges, checkpointExists, nil
 }
 
-func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, overview_stats *expvar.Map, cur_kv_vb_map map[string][]uint16,
-	checkpoints_svc service_def.CheckpointsService, kv_mem_clients map[string]mcc.ClientIface,
-	logger *log.CommonLogger, utils utilities.UtilsIface, remoteClusterCapability metadata.Capability,
-	backfillSpec *metadata.BackfillReplicationSpec) error {
+func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, overview_stats *expvar.Map, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosAndSourceVBGetter func() (map[string]map[uint16]uint64, map[string][]uint16)) error {
 
 	// if pipeline is not running, update docs_processed and changes_left stats, which are not being
 	// updated by running pipeline and may have become inaccurate
@@ -1914,6 +1946,8 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 		logger.Infof("replication %v has been deleted, skip updating stats\n", repl_status.RepId())
 		return nil
 	}
+
+	_, cur_kv_vb_map := highSeqnosAndSourceVBGetter()
 
 	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
 	base.SortUint16List(cur_vb_list)
@@ -1950,7 +1984,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 		repl_status.SetVbList(cur_vb_list)
 	}
 
-	total_changes, err := calculateTotalChanges(cur_kv_vb_map, kv_mem_clients, spec.SourceBucketName, UserAgentPausedReplication, nil, logger, utils, remoteClusterCapability)
+	total_changes, err := calculateTotalChanges(logger, highSeqnosAndSourceVBGetter)
 	if err != nil {
 		return err
 	}

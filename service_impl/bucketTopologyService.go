@@ -597,6 +597,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 		metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, spec.GetReplicationSpec().Settings.StatsInterval)
 		var collectionIds []uint32
 		var features utils.HELOFeatures
+		features.CompressionType = base.CompressionTypeNone
 		watcher.latestCacheMtx.RLock()
 		if !watcher.cachePopulated {
 			watcher.latestCacheMtx.RUnlock()
@@ -612,7 +613,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 			collectionIds = append(collectionIds, base.DefaultCollectionId)
 		}
 
-		var highseqno_map map[uint16]uint64
+		highseqno_map := make(map[string]map[uint16]uint64)
 		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", spec.SourceBucketName)
 		watcher.kvMemClientsMtx.Lock()
 		for serverAddr, vbnos := range kv_vb_map {
@@ -623,8 +624,10 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 				return err
 			}
 			watcher.statsMapMtx.Lock()
-			highseqno_map, err = b.utils.GetHighSeqNos(serverAddr, vbnos, client, watcher.statsMap, collectionIds, watcher.logger)
+			oneSeqnoMap, updatedStatsMap, err := b.utils.GetHighSeqNos(vbnos, client, watcher.statsMap, collectionIds)
+			watcher.statsMap = updatedStatsMap
 			watcher.statsMapMtx.Unlock()
+			highseqno_map[serverAddr] = oneSeqnoMap
 
 			if err != nil {
 				watcher.logger.Warnf("%v Error getting high seqno for kv %v. err=%v", userAgent, serverAddr, err)
@@ -635,6 +638,8 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 				delete(watcher.kvMemClients, serverAddr)
 				watcher.kvMemClientsMtx.Unlock()
 				return err
+			} else {
+				watcher.kvMemClients[serverAddr] = client
 			}
 		}
 		watcher.kvMemClientsMtx.Unlock()
@@ -830,7 +835,7 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		kvMemClientsLegacy:            map[string]mcc.ClientIface{},
 		dcpStatsChs:                   map[string]interface{}{},
 		dcpStatsLegacyChs:             map[string]interface{}{},
-		statsMap:                      map[string]string{},
+		statsMap:                      nil, // Start off with nil
 		watchersTickersMap:            WatchersTickerMap{},
 		watchersTickersValueMap:       WatchersTickerValueMap{},
 		highSeqnosChs:                 map[string]interface{}{},
@@ -1254,8 +1259,8 @@ type Notification struct {
 	KvVbMap             map[string][]uint16
 	DcpStatsMap         map[string]map[string]string
 	DcpStatsMapLegacy   map[string]map[string]string
-	HighSeqnoMap        map[uint16]uint64
-	HighSeqnoMapLegacy  map[uint16]uint64
+	HighSeqnoMap        map[string]map[uint16]uint64
+	HighSeqnoMapLegacy  map[string]map[uint16]uint64
 
 	// Target only
 	TargetBucketUUID  string
@@ -1293,6 +1298,8 @@ func (n *Notification) CloneRO() interface{} {
 		TargetServerVBMap:   n.TargetServerVBMap,
 		DcpStatsMap:         n.DcpStatsMap,
 		DcpStatsMapLegacy:   n.DcpStatsMapLegacy,
+		HighSeqnoMap:        n.HighSeqnoMap,
+		HighSeqnoMapLegacy:  n.HighSeqnoMapLegacy,
 	}
 }
 
@@ -1326,4 +1333,12 @@ func (n *Notification) GetDcpStatsMap() map[string]map[string]string {
 
 func (n *Notification) GetDcpStatsMapLegacy() map[string]map[string]string {
 	return n.DcpStatsMapLegacy
+}
+
+func (n *Notification) GetHighSeqnosMap() map[string]map[uint16]uint64 {
+	return n.HighSeqnoMap
+}
+
+func (n *Notification) GetHighSeqnosMapLegacy() map[string]map[uint16]uint64 {
+	return n.HighSeqnoMapLegacy
 }
