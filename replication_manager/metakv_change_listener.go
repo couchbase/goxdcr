@@ -323,19 +323,30 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipelineWithRetry(topic str
 			pipeline := rs.Pipeline()
 			if pipeline != nil {
 				// check if the pipeline is associated with the correct repl spec to which the new settings belongs
-				curSpecInternalId := rs.Spec().InternalId
-				if curSpecInternalId == specInternalId {
-					err = pipeline.UpdateSettings(newSettingsMap)
-					if err != nil {
-						rscl.logger.Errorf("Live update on pipeline %v returned err = %v", topic, err)
+				spec := rs.Spec()
+				if spec != nil {
+					curSpecInternalId := spec.InternalId
+					if curSpecInternalId == specInternalId {
+						err = pipeline.UpdateSettings(newSettingsMap)
+						if err != nil {
+							rscl.logger.Errorf("Live update on pipeline %v returned err = %v", topic, err)
+						}
+					} else {
+						rscl.logger.Warnf("Abort live update on pipeline %v since replication spec has been recreated. oldSpecId=%v, newSpecId=%v", topic, specInternalId, curSpecInternalId)
 					}
-				} else {
-					rscl.logger.Warnf("Abort live update on pipeline %v since replication spec has been recreated. oldSpecId=%v, newSpecId=%v", topic, specInternalId, curSpecInternalId)
 				}
 				return
 			} else {
 				err = fmt.Errorf("Cannot find pipeline with topic %v", topic)
 			}
+		}
+
+		// It is possible this method invoked in a bg go-routine actually runs after a replication has been deleted
+		// Check to see if spec still exists
+		_, foundErr := replication_mgr.repl_spec_svc.ReplicationSpec(topic)
+		if foundErr != nil {
+			rscl.logger.Warnf("Abort live update on pipeline %v (internalID: %v) since replication spec has been deleted", topic, specInternalId)
+			return
 		}
 
 		rscl.logger.Warnf("Error live updating pipeline %v. err=%v", topic, err)
