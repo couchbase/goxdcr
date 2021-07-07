@@ -313,6 +313,7 @@ var ErrorChunkedEncodingNotSupported = errors.New("Chunked encoding is not suppo
 var BrokenMappingUIString = "Found following destination collection(s) missing (and will not get replicated to):\n"
 var ErrorSourceBucketTopologyNotReady = errors.New("Local bucket topology does not have any cached data yet")
 var ErrorTargetBucketTopologyNotReady = errors.New("Target bucket topology does not have any cached data yet")
+var ErrorNoBackfillNeeded = errors.New("No backfill needed")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

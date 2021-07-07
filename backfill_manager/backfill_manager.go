@@ -1302,6 +1302,9 @@ func (b *BackfillMgr) cleanupSpecHandlerCb(specId string) {
 func (b *BackfillMgr) RequestCompleteBackfill(specId string) error {
 	backfillReq, err := b.onDemandBackfillGetCompleteRequest(specId, nil)
 	if err != nil {
+		if err == base.ErrorNoBackfillNeeded {
+			err = nil
+		}
 		return err
 	}
 
@@ -1317,6 +1320,9 @@ func (b *BackfillMgr) RequestCompleteBackfill(specId string) error {
 func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings metadata.CollectionNamespaceMapping) error {
 	backfillReq, err := b.onDemandBackfillGetCompleteRequest(specId, pendingMappings)
 	if err != nil {
+		if err == base.ErrorNoBackfillNeeded {
+			err = nil
+		}
 		return err
 	}
 
@@ -1388,7 +1394,7 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 	if clonedSourceManifest.Uid() == 0 && modes.IsImplicitMapping() {
 		// Source manifest 0 means only default collection is being replicated
 		b.logger.Infof("Repl %v shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created", specId)
-		return nil, nil
+		return nil, base.ErrorNoBackfillNeeded
 	}
 
 	requestingStr := "everything"

@@ -1034,6 +1034,9 @@ func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16)
 
 	backfillReqRaw, err := b.getCompleteReq()
 	if err != nil {
+		if err == base.ErrorNoBackfillNeeded {
+			err = nil
+		}
 		return err
 	}
 
