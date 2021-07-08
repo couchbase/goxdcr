@@ -72,7 +72,8 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 			retryOp := func() error {
 				watcher, startErr := b.getOrCreateRemoteWatcher(spec)
 				if startErr != nil {
-					return err
+					b.logger.Errorf("getOrCreateRemoteWatcher has error: %v", startErr)
+					return startErr
 				}
 				watcher.Start()
 				return nil
@@ -180,7 +181,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 
 	ref, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to find reference for spec %v", spec.Id)
+		return nil, fmt.Errorf("Unable to find remote cluster reference for spec %v", spec.Id)
 	}
 
 	bucketInfoGetter, err := b.remClusterSvc.GetBucketInfoGetter(ref, spec.TargetBucketName)
