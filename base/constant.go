@@ -31,6 +31,10 @@ const AuditStatusFmt = "statusCode=%v"
 var LocalHostName = "127.0.0.1"
 var LocalHostNameIpv6 = "[::1]"
 
+var IpFamilyOnlyErrorMessage = fmt.Sprintf("The cluster is %v only. ", IpFamilyStr)
+var AddressNotAllowedErrorMessageFmt = "The address %v is not allowed."
+var IpFamilyAddressNotFoundMessageFmt = "Cannot find address in the ip family for %v."
+
 var DefaultAdminPort uint16 = 8091
 var DefaultAdminPortSSL uint16 = 18091
 
@@ -637,7 +641,13 @@ var TimeoutConnectorsStop = 5 * time.Second
 var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
 
-var NetTCP = "tcp"
+// This is for enforcing remote connection network type.
+const TCP = "tcp"   // ipv4/ipv6 are both supported
+const TCP4 = "tcp4" // ipv4 only
+const TCP6 = "tcp6" // ipv6 only
+
+var NetTCP = TCP
+var IpFamilyStr = "tcp4/tcp6"
 
 var CurrentTime = "CurrentTime"
 
@@ -1084,7 +1094,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
 	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
 	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration,
-	healthCheckInterval time.Duration, healthCheckTimeout time.Duration) {
+	healthCheckInterval time.Duration, healthCheckTimeout time.Duration,
+	blockedIpv4 bool, blockedIpv6 bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1207,6 +1218,14 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TopologySvcErrCoolDownPeriod = topologyErrCooldownPeriod
 	HealthCheckInterval = healthCheckInterval
 	HealthCheckTimeout = healthCheckTimeout
+	if blockedIpv4 == true {
+		NetTCP = TCP6
+		IpFamilyStr = "ipv6"
+	} else if blockedIpv6 == true {
+		NetTCP = TCP4
+		IpFamilyStr = "ipv4"
+	}
+	IpFamilyOnlyErrorMessage = fmt.Sprintf("The cluster is %v only. ", IpFamilyStr)
 }
 
 // Need to escape the () to result in "META().xattrs" literal
@@ -1304,3 +1323,17 @@ const (
 func (p PprofLookupTypes) String() string {
 	return string(p)
 }
+
+const (
+	IpFamilyRequiredOption = "required"
+	IpFamilyOptionalOption = "optional"
+	IpFamilyOffOption      = "off"
+)
+
+type IpFamilySupport int
+
+const (
+	IpFamilyRequired IpFamilySupport = 1
+	IpFamilyOptional IpFamilySupport = 2
+	IpFamilyOff      IpFamilySupport = 3
+)

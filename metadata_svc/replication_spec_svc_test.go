@@ -193,7 +193,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 
 	// TARGET mock - emptyString since we're feeding a dummy target
 	utilitiesMock.On("RemoteBucketValidationInfo", hostAddr,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo,
 		bucketType, bucketUUID, destResolutionType, bucketEvictionPolicy, bucketKVVBMap, err)
 
 	nonExistentBucketError := errors.New("NonExistentBucketError")
@@ -272,7 +272,6 @@ func TestValidateNewReplicationSpec(t *testing.T) {
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
-
 	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestValidateNewReplicationSpec =================")

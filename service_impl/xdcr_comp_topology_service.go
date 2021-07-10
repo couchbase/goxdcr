@@ -30,7 +30,8 @@ type XDCRTopologySvc struct {
 	adminport        uint16
 	xdcrRestPort     uint16
 	isEnterprise     bool
-	isIpv6           bool
+	ipv4             base.IpFamilySupport
+	ipv6             base.IpFamilySupport
 	cluster_info_svc service_def.ClusterInfoSvc
 	logger           *log.CommonLogger
 	utils            utilities.UtilsIface
@@ -42,16 +43,29 @@ type XDCRTopologySvc struct {
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
-	isEnterprise bool, isIpv6 bool, cluster_info_svc service_def.ClusterInfoSvc,
+	isEnterprise bool, ipv4, ipv6 string, cluster_info_svc service_def.ClusterInfoSvc,
 	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
 		adminport:        adminport,
 		xdcrRestPort:     xdcrRestPort,
 		isEnterprise:     isEnterprise,
-		isIpv6:           isIpv6,
 		cluster_info_svc: cluster_info_svc,
 		logger:           log.NewLogger("TopoSvc", logger_ctx),
 		utils:            utilsIn,
+	}
+	if ipv4 == base.IpFamilyRequiredOption {
+		top_svc.ipv4 = base.IpFamilyRequired
+	} else if ipv4 == base.IpFamilyOptionalOption {
+		top_svc.ipv4 = base.IpFamilyOptional
+	} else if ipv4 == base.IpFamilyOffOption {
+		top_svc.ipv4 = base.IpFamilyOff
+	}
+	if ipv6 == base.IpFamilyRequiredOption {
+		top_svc.ipv6 = base.IpFamilyRequired
+	} else if ipv6 == base.IpFamilyOptionalOption {
+		top_svc.ipv6 = base.IpFamilyOptional
+	} else if ipv6 == base.IpFamilyOffOption {
+		top_svc.ipv6 = base.IpFamilyOff
 	}
 	return top_svc, nil
 }
@@ -114,11 +128,19 @@ func (top_svc *XDCRTopologySvc) IsMyClusterEnterprise() (bool, error) {
 }
 
 func (top_svc *XDCRTopologySvc) IsMyClusterIpv6() bool {
-	return top_svc.isIpv6
+	return top_svc.ipv6 == base.IpFamilyRequired
+}
+
+func (top_svc *XDCRTopologySvc) IsIpv4Blocked() bool {
+	return top_svc.ipv4 == base.IpFamilyOff
+}
+
+func (top_svc *XDCRTopologySvc) IsIpv6Blocked() bool {
+	return top_svc.ipv6 == base.IpFamilyOff
 }
 
 func (top_svc *XDCRTopologySvc) GetLocalHostName() string {
-	if top_svc.isIpv6 {
+	if top_svc.ipv6 == base.IpFamilyRequired {
 		return base.LocalHostNameIpv6
 	} else {
 		return base.LocalHostName

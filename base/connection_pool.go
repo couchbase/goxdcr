@@ -602,7 +602,7 @@ func (connPoolMgr *connPoolMgr) Close() {
 func NewConn(hostName string, userName string, password string, bucketName string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (conn *mcc.Client, err error) {
 	// connect to host
 	start_time := time.Now()
-	conn, err = mcc.Connect("tcp", hostName)
+	conn, err = mcc.Connect(NetTCP, hostName)
 	if err != nil {
 		return nil, err
 	}
@@ -720,7 +720,7 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 	tlsConfig.CurvePreferences = []tls.CurveID{tls.CurveP256, tls.CurveP384, tls.CurveP521}
 
 	// get tcp connection
-	rawConn, err := dialer.Dial("tcp", ssl_con_str)
+	rawConn, err := dialer.Dial(NetTCP, ssl_con_str)
 
 	if err != nil {
 		logger.Errorf("Failed to connect to %v, err=%v\n", ssl_con_str, err)
@@ -793,5 +793,5 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 }
 
 func DialTCPWithTimeout(network, address string) (net.Conn, error) {
-	return dialer.Dial(network, address)
+	return dialer.Dial(NetTCP, address)
 }

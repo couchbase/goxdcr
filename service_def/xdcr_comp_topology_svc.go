@@ -54,6 +54,8 @@ type XDCRCompTopologySvc interface {
 
 	//is the cluster XDCR is serving ipv6 enabled
 	IsMyClusterIpv6() bool
+	IsIpv4Blocked() bool
+	IsIpv6Blocked() bool
 
 	IsMyClusterDeveloperPreview() bool
 	// get local host name

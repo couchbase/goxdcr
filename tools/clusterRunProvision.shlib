@@ -39,6 +39,7 @@ CBWORKLOAD_COLLECTION_NUM_ITEMS=10000
 # cluster -> Bucket(s)
 # Bucket -> Scopes
 # Scopes -> Collections
+declare -A CLUSTER_NAME_HOST_MAP
 declare -A CLUSTER_NAME_PORT_MAP
 declare -A CLUSTER_NAME_XDCR_PORT_MAP
 declare -A CLUSTER_NAME_BUCKET_MAP
@@ -481,9 +482,10 @@ function waitForRebalanceToFinish {
 }
 
 function addNodesIn {
-	for clusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
-		local dependentNodePort=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-		local nodeName=${CLUSTER_DEPENDENCY_MAP[$clusterName]:-}
+	local dependentClusterName
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		local dependentNodePort=${CLUSTER_NAME_PORT_MAP[$dependentClusterName]:-}
+		local nodeName=${CLUSTER_DEPENDENCY_MAP[$dependentClusterName]:-}
 		local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
 
 		local preAddNumNodes=$(getNsServerPoolsDefault "C1" | jq '.nodes' | jq length)
@@ -842,15 +844,17 @@ function setupTopologies {
 function createRemoteClusterReference {
 	local source=$1
 	local target=$2
+	local targetHost=${3:-"127.0.0.1"}
 	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
 		echo "Invalid input"
 		return 1
 	fi
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
 	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
 
 	echo "Creating remote cluster reference from $source to $target"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=127.0.0.1:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
 	echo ""
 }
 
@@ -948,10 +952,11 @@ function createBucketReplication {
 	getPropertiesFromBucketReplPropertyMap $sourceCluster $sourceBucket $targetCluster $targetBucket
 
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
 	getBucketReplPropertiesRESTString
 
 	for ((i = 0; $i < 3; i = $(($i + 1)))); do
-		repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
+		repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
 		if (((($? == 0)) && (($(echo "$repId" | grep -c error) == 0)))); then
 			if (($(checkJQ) == 0)); then
 				repIdReal=$(getKeyUsingJQ "$repId" '.id')
@@ -977,11 +982,12 @@ function createBucketReplication {
 function cleanupRemoteClusterRefs {
 	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
 		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
+		local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
 		local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
 		local targetCluster=$(echo "$replKey" | cut -d, -f3)
 
 		echo "Deleting remote cluster reference $targetCluster on cluster $sourceCluster"
-		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$targetCluster >/dev/null 2>&1
+		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters/$targetCluster >/dev/null 2>&1
 	done
 }
 
@@ -989,13 +995,14 @@ function cleanupBucketReplications {
 	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
 		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
 		local restID=$(echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g')
+		local sourceHost=${CLUSTER_NAME_HOST_MAP[$sourceCluster]:-"127.0.0.1"}
 		local sourcePort=${CLUSTER_NAME_PORT_MAP[$sourceCluster]:-}
 		local sourceBucket=$(echo "$replKey" | cut -d, -f2)
 		local targetCluster=$(echo "$replKey" | cut -d, -f3)
 		local targetBucket=$(echo "$replKey" | cut -d, -f4)
 
 		echo "DELETING replication from sourceCluster $sourceCluster sourceBucket $sourceBucket to targetCluster $targetCluster targetBucket $targetBucket..."
-		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
+		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
 	done
 }
 
@@ -1462,15 +1469,15 @@ function getStats {
 	fi
 
 	local port=${CLUSTER_NAME_PORT_MAP[$srcClusterName]}
+	local host=${CLUSTER_NAME_HOST_MAP[$srcClusterName]:-"127.0.0.1"}
 	if (($(checkJQ) != 0)); then
 		return 1
 	fi
-
 	local curlResult=1
 	local parseResult=1
 	local counter=0
 	local result
-	statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
+	statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://$host:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
 	curlResult=$?
 	if (($curlResult == 0)); then
 		result=$(parseStatsOutput "$statsOutput" "$port")
@@ -1480,7 +1487,7 @@ function getStats {
 	while (((((($curlResult != 0)) || (($parseResult != 0)))) && (($counter < $REST_MAX_RETRY)))); do
 		counter=$(($counter + 1))
 		sleep 5
-		statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
+		statsOutput=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X GET http://$host:$port/$POOLS_DEFAULT_BUCKETS_PATH/$srcBucketName/stats/replications%2F${restId}%2F${statsName})
 
 		curlResult=$?
 		if (($curlResult == 0)); then
@@ -1488,7 +1495,6 @@ function getStats {
 			parseResult=$?
 		fi
 	done
-
 	echo "$result"
 }
 

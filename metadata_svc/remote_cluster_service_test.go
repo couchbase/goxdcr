@@ -27,6 +27,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -208,6 +209,7 @@ func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetwor
 	utilitiesMock.On("GetPortNumber", mock.Anything).Return(uint16(9999), nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, hostnameList, nil)
 	utilitiesMock.On("GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo", mock.Anything, mock.Anything).Return(uuidField, nodeList, nil)
+	utilitiesMock.On("GetClusterUUID", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(uuidField, nil)
 
 	var clusterInfo map[string]interface{}
 	var poolsInfo map[string]interface{}
@@ -476,6 +478,14 @@ var dummySelfSignedCert = []byte("-----BEGIN CERTIFICATE-----\nMIIB/TCCAWagAwIBA
 
 func createSSLRemoteClusterRef(id string, helper base2.DnsSrvHelperIface) *metadata.RemoteClusterReference {
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "username", "passworD", metadata.HostnameMode_Internal, true, metadata.EncryptionType_Full, dummySelfSignedCert, nil, nil, helper)
+	aRef.SetId(id)
+	return aRef
+}
+
+func createRemoteClusterRefWithHost(id, host string, helper base2.DnsSrvHelperIface, assert *assert.Assertions) *metadata.RemoteClusterReference {
+	hostAddr, err := base.ValidateHostAddr(host)
+	assert.Nil(err)
+	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostAddr, "", "", "", false, "", nil, nil, nil, helper)
 	aRef.SetId(id)
 	return aRef
 }
@@ -2212,7 +2222,7 @@ func TestDNSSrv(t *testing.T) {
 	var srvList []*net.SRV
 	srvList = append(srvList, srvEntry)
 
-	srvHelper.On("DnsSrvLookup", dnsSrvHostname).Return(srvList, nil)
+	srvHelper.On("DnsSrvLookup", dnsSrvHostname).Return(srvList, base2.SrvRecordsNonSecure, nil)
 
 	idAndName := "test"
 	ref := createRemoteClusterReferenceDNSSRV(idAndName, srvHelper)
@@ -2228,6 +2238,8 @@ func TestDNSSrv(t *testing.T) {
 	agent.refMtx.RLock()
 	assert.True(agent.reference.IsDnsSRV())
 	srvHostNames := agent.reference.GetSRVHostNames()
+	// GetSrvHostName will always use standard port for now. See GetTargetConnectionString()
+	dnsRemotenodeHostname = "192.168.0.1:8091"
 	agent.refMtx.RUnlock()
 	var found bool
 	for _, host := range srvHostNames {
@@ -2254,7 +2266,7 @@ func TestDNSSrv(t *testing.T) {
 	// Now pretend DNS SRV is turned off/broken
 	badSRVHelper := &baseMock.DnsSrvHelperIface{}
 	var emptyList []*net.SRV
-	badSRVHelper.On("DnsSrvLookup", mock.Anything).Return(emptyList, fmt.Errorf("Dummy"))
+	badSRVHelper.On("DnsSrvLookup", mock.Anything).Return(emptyList, base2.SrvRecordsInvalid, fmt.Errorf("Dummy"))
 	agent.refMtx.Lock()
 	agent.reference.UnitTestSetSRVHelper(badSRVHelper)
 	agent.refMtx.Unlock()
@@ -2583,4 +2595,86 @@ func TestPassiveAddAndImmediateGet(t *testing.T) {
 		assert.Equal(idAndName, rcNameCheck)
 	}
 	fmt.Println("============== Test case end: TestPassiveAddAndImmediateGet =================")
+}
+
+func TestCreateRemoteWithIpFamilyV4Blocked(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCreateRemoteWithIpFamilyV4Blocked ===============")
+	defer fmt.Println("============== Test case End: TestCreateRemoteWithIpFamilyV4Blocked ===============")
+
+	base.NetTCP = base.TCP6 // This blocks IPV4
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	srvHelper := &baseMock.DnsSrvHelperIface{}
+
+	var emptyList []*net.SRV
+	srvHelper.On("DnsSrvLookup", mock.Anything).Return(emptyList, base2.SrvRecordsInvalid, nil)
+
+	// Test when ipv4 is blocked, create remote with ipv4 address 127.0.0.1:9000 is not allowed
+	idAndName := "test"
+	ref := createRemoteClusterRefWithHost(idAndName, "127.0.0.1:9000", srvHelper, assert)
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+	err := remoteClusterSvc.validateAddRemoteCluster(ref, false)
+	assert.NotNil(err)
+	if err != nil {
+		assert.Contains(err.Error(), "not allowed")
+	}
+
+	// Test when ipv4 is blocked, create remote with ipv4 address 127.0.0.1 is not allowed
+	ref = createRemoteClusterRefWithHost(idAndName, "127.0.0.1", srvHelper, assert)
+	utilsMockFunc = func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+	err = remoteClusterSvc.validateAddRemoteCluster(ref, false)
+	assert.NotNil(err)
+	if err != nil {
+		assert.Contains(err.Error(), "not allowed")
+	}
+
+	// Test when ipv4 is blocked, create remote with hostname which maps to ipv4 is not allowed
+	hostname, err := os.Hostname()
+	if err != nil {
+		fmt.Printf("os.Hostname() failed with error %v. Skiping create remote ref with hostname test\n", err)
+	} else {
+		ref = createRemoteClusterRefWithHost(idAndName, hostname, srvHelper, assert)
+		utilsMockFunc = func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+		setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+			remoteClusterSvc, ref, utilsMockFunc)
+		err = remoteClusterSvc.validateAddRemoteCluster(ref, false)
+		assert.NotNil(err)
+		if err != nil {
+			assert.Contains(err.Error(), "Cannot find address in the ip family")
+		}
+	}
+	base.NetTCP = base.TCP // This restores to support both IPV4/IPV6
+}
+
+func TestCreateRemoteWithIpFamilyV6Blocked(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCreateRemoteWithIpFamilyV6Blocked ===============")
+	defer fmt.Println("============== Test case End: TestCreateRemoteWithIpFamilyV6Blocked ===============")
+	base.NetTCP = base.TCP4 // This blocks IPV6
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	srvHelper := &baseMock.DnsSrvHelperIface{}
+
+	var emptyList []*net.SRV
+	srvHelper.On("DnsSrvLookup", mock.Anything).Return(emptyList, base2.SrvRecordsInvalid, nil)
+
+	// Test when ipv6 is blocked, create remote with ipv6 address [::FFFF:C0A8:1] is not allowed
+	idAndName := "test"
+	ref := createRemoteClusterRefWithHost(idAndName, "[::FFFF:C0A8:1]", srvHelper, assert)
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+	err := remoteClusterSvc.validateAddRemoteCluster(ref, false)
+	assert.NotNil(err)
+	if err != nil {
+		assert.Contains(err.Error(), "is not allowed")
+	}
+	base.NetTCP = base.TCP // This restores to support both IPV4/IPV6
 }
