@@ -239,31 +239,32 @@ func RemoteClusterRefId() (string, error) {
 }
 
 // implements base.ClusterConnectionInfoProvider
-func (ref *RemoteClusterReference) MyConnectionStr() (string, error) {
-
+func (ref *RemoteClusterReference) MyConnectionStr() (connStr string, err error) {
 	if ref.IsDnsSRV() && ref.ActiveHostName() == "" && ref.ActiveHttpsHostName() == "" {
 		srvHostnames := ref.GetSRVHostNames()
 		if len(srvHostnames) == 0 {
 			// Shouldn't be the case
-			return ref.HostName(), nil
+			connStr = ref.HostName()
 		}
 		randIdx := rand.Int() % len(srvHostnames)
-		return srvHostnames[randIdx], nil
+		connStr = srvHostnames[randIdx]
 	} else if ref.IsHttps() {
 		activeHttpsHostName := ref.ActiveHttpsHostName()
 		if len(activeHttpsHostName) > 0 {
-			return activeHttpsHostName, nil
+			connStr = activeHttpsHostName
 		} else {
-			return ref.HttpsHostName(), nil
+			connStr = ref.HttpsHostName()
 		}
 	} else {
 		activeHostName := ref.ActiveHostName()
 		if len(activeHostName) > 0 {
-			return activeHostName, nil
+			connStr = activeHostName
 		} else {
-			return ref.HostName(), nil
+			connStr = ref.HostName()
 		}
 	}
+	connStr, err = base.MapToSupportedIpFamily(connStr)
+	return
 }
 
 func (ref *RemoteClusterReference) redactNoLock() *RemoteClusterReference {

@@ -18,5 +18,6 @@ type ConnectivityHelperSvc interface {
 	GetOverallStatus() metadata.ConnectivityStatus
 	SyncWithValidList(nodeList base.StringPairList)
 	MarkNode(nodeName string, status metadata.ConnectivityStatus) (changedState, authErrFixed bool)
+	MarkIpFamilyError(bool)
 	String() string
 }

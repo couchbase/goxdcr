@@ -28,6 +28,11 @@ func (_m *ConnectivityHelperSvc) GetOverallStatus() metadata.ConnectivityStatus 
 	return r0
 }
 
+// MarkIpFamilyError provides a mock function with given fields: _a0
+func (_m *ConnectivityHelperSvc) MarkIpFamilyError(_a0 bool) {
+	_m.Called(_a0)
+}
+
 // MarkNode provides a mock function with given fields: nodeName, status
 func (_m *ConnectivityHelperSvc) MarkNode(nodeName string, status metadata.ConnectivityStatus) (bool, bool) {
 	ret := _m.Called(nodeName, status)

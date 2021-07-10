@@ -26,6 +26,34 @@ func (_m *XDCRCompTopologySvc) GetLocalHostName() string {
 	return r0
 }
 
+// IsIpv4Blocked provides a mock function with given fields:
+func (_m *XDCRCompTopologySvc) IsIpv4Blocked() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// IsIpv6Blocked provides a mock function with given fields:
+func (_m *XDCRCompTopologySvc) IsIpv6Blocked() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
 // IsKVNode provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) IsKVNode() (bool, error) {
 	ret := _m.Called()

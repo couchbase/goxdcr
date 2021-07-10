@@ -651,6 +651,80 @@ func StripBracketsFromHostName(hostName string) string {
 	return hostName[len(LeftBracket) : len(hostName)-len(RightBracket)]
 }
 
+func IsIpV4Blocked() bool {
+	return NetTCP == TCP6
+}
+
+func IsIpV6BLocked() bool {
+	return NetTCP == TCP4
+}
+
+// If both IP families are supported, this routine will return connStr, nil
+// If only one IP family is supported, this routine will verify the address is in the right family
+// If hostname is not already an IP address, it will lookup the address in the supported family
+// and use it in return value
+//
+// It will only return error if the address cannot be mapped to the supported IP family
+func MapToSupportedIpFamily(connStr string) (string, error) {
+	if !IsIpV4Blocked() && !IsIpV6BLocked() { // Both address family are supported
+		return connStr, nil
+	}
+
+	hostname := GetHostName(connStr)
+	// If it is in bracket, it is ipv6 address
+	if IsIpAddressEnclosedInBrackets(hostname) {
+		if IsIpV6BLocked() == true {
+			return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+		} else {
+			return connStr, nil
+		}
+	}
+
+	// Check if it is already an ip address
+	if addr := net.ParseIP(hostname); addr != nil {
+		if addr.To4() != nil {
+			if IsIpV4Blocked() == false {
+				return connStr, nil
+			} else {
+				return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+			}
+		} else { // IPV6
+			if IsIpV6BLocked() == false {
+				return connStr, nil
+			} else {
+				return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
+			}
+		}
+	}
+
+	addrs, err := net.LookupIP(hostname)
+	if err != nil {
+		return "", fmt.Errorf("Lookup failed for %v", hostname)
+	}
+	for _, addr := range addrs {
+		if addr.To4() != nil { // IPV4 address
+			if IsIpV4Blocked() == false {
+				port, portErr := GetPortNumber(connStr)
+				if portErr == nil {
+					return GetHostAddr(fmt.Sprintf("%v", addr), port), nil
+				} else {
+					return fmt.Sprintf("%v", addr), nil
+				}
+			}
+		} else { // IPV6 address
+			if IsIpV6BLocked() == false {
+				port, portErr := GetPortNumber(connStr)
+				if portErr == nil {
+					return GetHostAddr(fmt.Sprintf("%v", addr), port), nil
+				} else {
+					return fmt.Sprintf("[%v]", addr), nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(IpFamilyAddressNotFoundMessageFmt, hostname))
+}
+
 func ShuffleStringsList(list []string) {
 	r := mrand.New(mrand.NewSource(time.Now().Unix()))
 	// Start at the end of the slice, go backwards and scramble

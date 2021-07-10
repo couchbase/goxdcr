@@ -110,6 +110,7 @@ type ConnectivityHelper struct {
 	nodeHeartbeatCleanupMap map[string]*time.Timer
 	mtx                     sync.RWMutex
 	refreshInterval         time.Duration
+	ipFamilyError           bool // Error before connecting to any node.
 }
 
 func (c *ConnectivityHelper) String() string {
@@ -136,6 +137,11 @@ func (c *ConnectivityHelper) MarkNode(nodeName string, status metadata.Connectiv
 	return
 }
 
+func (c *ConnectivityHelper) MarkIpFamilyError(val bool) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.ipFamilyError = val
+}
 func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -182,6 +188,10 @@ func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
 func (c *ConnectivityHelper) GetOverallStatus() metadata.ConnectivityStatus {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
+
+	if c.ipFamilyError == true {
+		return metadata.ConnError
+	}
 
 	totalCount := len(c.nodeStatus)
 	var connErrCount int
@@ -408,6 +418,11 @@ func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteCl
 		ref = agent.pendingRef.Clone()
 	}
 	agent.refMtx.RUnlock()
+	if _, err := ref.MyConnectionStr(); err != nil && strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
+		agent.connectivityHelper.MarkIpFamilyError(true)
+	} else {
+		agent.connectivityHelper.MarkIpFamilyError(false)
+	}
 	ref.SetConnectivityStatus(agent.connectivityHelper.GetOverallStatus().String())
 	return ref
 }
@@ -599,7 +614,7 @@ func (rctx *refreshContext) initialize() {
 	}
 }
 
-func (rctx *refreshContext) setHostNamesAndConnStr(pair base.StringPair) {
+func (rctx *refreshContext) setHostNamesAndConnStr(pair base.StringPair) error {
 	rctx.hostName = pair.GetFirstString()
 	rctx.httpsHostName = pair.GetSecondString()
 
@@ -608,6 +623,12 @@ func (rctx *refreshContext) setHostNamesAndConnStr(pair base.StringPair) {
 	} else {
 		rctx.connStr = rctx.hostName
 	}
+	// Make sure the connStr is supported
+	_, err := base.MapToSupportedIpFamily(rctx.connStr)
+	if err != nil {
+		rctx.connStr = ""
+	}
+	return err
 }
 
 func (rctx *refreshContext) checkAndUpdateActiveHost() {
@@ -869,7 +890,10 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	var nodeAddressesList base.StringPairList
 	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList /*already shuffled*/); rctx.index++ {
 		hostnamePair := rctx.cachedRefNodesList[rctx.index]
-		rctx.setHostNamesAndConnStr(hostnamePair)
+		err := rctx.setHostNamesAndConnStr(hostnamePair)
+		if err != nil {
+			return err
+		}
 
 		nodeList, err := rctx.verifyNodeAndGetList(rctx.connStr, true /*updateSecuritySettings*/)
 		if err != nil {
@@ -1064,7 +1088,10 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.Stri
 	sort.Sort(sortedList)
 
 	for i := 0; i < len(sortedList); i++ {
-		rctx.setHostNamesAndConnStr(sortedList[i])
+		if err := rctx.setHostNamesAndConnStr(sortedList[i]); err != nil {
+			rctx.agent.logger.Warnf("When calling setHostNamesAndConnStr() received error %v", err)
+			continue
+		}
 
 		// updateSecuritySettings is set to false since security settings should have been updated shortly before in Refresh()
 		_, err := rctx.verifyNodeAndGetList(rctx.connStr, false /*updateSecuritySettings*/)
@@ -1571,6 +1598,11 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 			err := agent.Refresh()
 			if err != nil {
 				agent.logger.Warnf("Agent %v periodic refresher encountered error while doing a refresh: %v", cachedId, err.Error())
+				if strings.Contains(err.Error(), base.IpFamilyOnlyErrorMessage) {
+					agent.connectivityHelper.MarkIpFamilyError(true)
+				} else {
+					agent.connectivityHelper.MarkIpFamilyError(false)
+				}
 			}
 		}
 	}
@@ -2585,8 +2617,10 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	srvStop := service.utils.StartDiagStopwatch(fmt.Sprintf("ref(%v).PopulateDnsSrv", ref.Name()), base.DiagNetworkThreshold)
 	ref.PopulateDnsSrvIfNeeded()
 	srvStop()
-
-	refHostName, _ := ref.MyConnectionStr()
+	refHostName, err := ref.MyConnectionStr()
+	if err != nil {
+		return wrapAsInvalidRemoteClusterError(err.Error())
+	}
 	hostName := base.GetHostName(refHostName)
 	port, err := base.GetPortNumber(refHostName)
 	if err != nil {

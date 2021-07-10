@@ -1,0 +1,379 @@
+#!/usr/bin/env bash
+set -u
+# Copyright 2021-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_HOST_MAP=(["C1"]="127.0.0.1" ["C2"]="127.0.0.1")
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100 ["flushEnabled"]=1)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active" ["flushEnabled"]=1)
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
+
+function getRemoteCluster {
+	local source=$1
+	local target=$2
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
+	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters | jq | grep name | grep -c $target)
+	echo $result
+}
+
+function getRemoteClusters {
+	local source=$1
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
+	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters)
+	echo $result
+}
+
+function setIpFamily {
+	local cluster=$1
+	local ip=$2
+	local only=$3
+	local host=${CLUSTER_NAME_HOST_MAP[$cluster]:-}
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+	#echo "CLUSTER_NAME_PORT_MAP=${!CLUSTER_NAME_PORT_MAP[@]}"
+	#echo "CLUSTER_NAME_HOST_MAP=${CLUSTER_NAME_HOST_MAP[@]}"
+
+	# Turn off auto failover
+	# echo "Turn off autoFailover: curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d enabled=false"
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d enabled=false
+	if (($? != 0)); then
+		echo "Failed to turn off auto failover for ${clusterName}"
+		exit $?
+	fi
+	# Set ip family
+	# echo "Set IP family: curl -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/node/controller/setupNetConfig  -d afamilyOnly=$only -d afamily=${ip}"
+	curl -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/node/controller/setupNetConfig -d afamilyOnly=$only -d afamily=${ip}
+	if (($? != 0)); then
+		echo "Failed to set ip family to $ip for ${clusterName}"
+		exit $?
+	fi
+	if [[ "$ip" == "ipv6" ]]; then
+		host="[::1]"
+	fi
+	if [[ "$ip" == "ipv4" ]]; then
+		host="127.0.0.1"
+	fi
+	CLUSTER_NAME_HOST_MAP[$cluster]=$host
+
+	# echo "Turn on failover: curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d 'enabled=true&timeout=120' -d 'failoverServerGroup=true&maxCount=2'"
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d 'enabled=true&timeout=120' -d 'failoverServerGroup=true&maxCount=2'
+	if (($? != 0)); then
+		echo "Failed to turn on auto failover for ${clusterName}"
+		exit $?
+	fi
+	echo "Cluster $cluster $host:$port is set to $ip (only=$only)"
+}
+
+function replicationWithIpAddress {
+	local remoteIp=$1
+	local cleanup=${2:-"true"}
+	createRemoteClusterReference "C1" "C2" $remoteIp
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 1)); then
+		echo "Failed to create remote cluster reference C2 at C1"
+		exit 1
+	fi
+
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	if (($? != 0)); then
+		exit $?
+	fi
+	echo "Waiting for changes_left to go down to 0..."
+	sleep 10
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	if [[ "$cleanup" == "true" ]]; then
+		cleanupBucketReplications
+		cleanupRemoteClusterRefs
+	fi
+}
+
+function checkReplication {
+	local srcClusterName=$1
+	local srcBucketName=$2
+	local targetClusterName=$3
+	local targetBucketName=$4
+
+	restID=$(getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName")
+	if (($? != 0)); then
+		echo "Unable to find REST ID"
+		return 1
+	fi
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$srcClusterName]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$srcClusterName]:-}
+
+	curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://${sourceHost}:${sourcePort}/pools/default/replicationInfos
+}
+function testCreateRemote {
+	echo "=================================================="
+	echo "====== Create Remote Cluster Reference Test ======"
+	echo "=================================================="
+
+	echo
+	echo "===== Test 1: C1:ipv4 only, C2 default: 127.0.0.1 address works."
+	setIpFamily "C1" "ipv4" "true"
+	sleep 10
+	replicationWithIpAddress "127.0.0.1"
+
+	echo
+	echo "===== Test 2: C1:ipv4 only, C2 default: [::1] address fails."
+	sleep 5
+	createRemoteClusterReference "C1" "C2" "[::1]"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote > 0)); then
+		echo "Remote cluster reference C2 at C1 was created but should not"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 3: C1:ipv4 only, C2 default: localhost address works."
+	replicationWithIpAddress "localhost"
+
+	echo
+	echo "===== Test 4: C1:ipv4 only, C2 ipv6 only: both address families fail."
+	setIpFamily "C2" "ipv6" "true"
+	sleep 10
+	createRemoteClusterReference "C1" "C2" "127.0.0.1"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote > 0)); then
+		echo "Remote cluster reference C2 at C1 was created but should not"
+		exit 1
+	fi
+	createRemoteClusterReference "C1" "C2" "[::1]"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote > 0)); then
+		echo "Remote cluster reference C2 at C1 was created but should not"
+		exit 1
+	fi
+	createRemoteClusterReference "C1" "C2" "localhost"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote > 0)); then
+		echo "Remote cluster reference C2 at C1 was created but should not"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 5: C1:ipv6 only, C2:ipv6 only: localhost works."
+	setIpFamily "C1" "ipv6" "true"
+	sleep 10
+	replicationWithIpAddress "localhost"
+
+	# restore to default
+	setIpFamily "C1" "ipv4" "false"
+	setIpFamily "C2" "ipv4" "false"
+
+	echo "========================================================="
+	echo "====== Passed Create Remote Cluster Reference Test ======"
+	echo "========================================================="
+}
+
+function changeRemoteClusterReference {
+	local source=$1
+	local target=$2
+	local targetHost=${3:-"127.0.0.1"}
+	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
+		echo "Invalid input"
+		return 1
+	fi
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
+
+	echo "Change remote cluster reference $target to $targetHost" >&1
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW
+}
+
+function testChangeRemote {
+	echo "=================================================="
+	echo "====== Change Remote Cluster Reference Test ======"
+	echo "=================================================="
+
+	echo "Create ipv4 remote and replication"
+	sleep 5
+	# cleanup = false so the replication will exist for the following test case.
+	replicationWithIpAddress "127.0.0.1" "false"
+
+	echo
+	echo "===== Test 1: C1:ipv4 only, C2 default: changing remote to ipv6 address fails."
+	setIpFamily "C1" "ipv4" "true"
+	sleep 10
+	result=$(changeRemoteClusterReference "C1" "C2" "[::1]")
+	count=$(echo $result | grep -c "The cluster is ipv4 only")
+	if (($count != 1)); then
+		echo "Change remote to ipv6 should fail but returned unexpected result $result"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 2: C1:ipv6 only, C2 default: existing remote with ipv4 address will be in trouble."
+	setIpFamily "C1" "ipv6" "true"
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count == 0)); then
+		echo "Change C1 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+	result=$(checkReplication "C1" "B1" "C2" "B2")
+	count=$(echo $result | grep -c "The cluster is ipv6 only")
+	if (($count == 0)); then
+		echo "Change C1 to ipv6 only should cause existing replication to fail but replicationInfos returned $result"
+		exit 1
+	fi
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C1 to ipv6 only should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 3: C1:ipv4 (only=false), C2 default: existing remote with ipv4 address will work."
+	setIpFamily "C1" "ipv4" "false"
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_OK")
+	if (($count == 0)); then
+		echo "remoteClusters should return RC_OK but it should not: $result"
+		exit 1
+	fi
+	result=$(checkReplication "C1" "B1" "C2" "B2")
+	count=$(echo $result | grep -c "The cluster is ipv4 only")
+	if (($count != 0)); then
+		echo "Change C1 back to ipv4 only should restore existing replication but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 4: C1 ipv4 (only=false), C2:ipv6 only: existing remote with ipv4 address will not be able to connect."
+	setIpFamily "C2" "ipv6" "true"
+	sleep 30
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count == 0)); then
+		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+	result=$(checkReplication "C1" "B1" "C2" "B2")
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C2 to ipv6 only should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 5: C1 ipv4 (only=false), Change C2 to default. The previous erroring replication should work now."
+	setIpFamily "C2" "ipv4" "false"
+	sleep 20
+	result=$(checkReplication "C1" "B1" "C2" "B2")
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count != 0)); then
+		echo "Change C2 to ipv4 only should cause existing replication connection issues to go away but replicationInfos returned $result"
+		exit 1
+	fi
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_OK")
+	if (($count == 0)); then
+		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 6: C1 ipv6 only, C2 default: The previous ipv4 address will fail"
+	setIpFamily "C1" "ipv6" "true"
+	sleep 20
+	result=$(checkReplication "C1" "B1" "C2" "B2")
+	count=$(echo $result | grep -c "The cluster is ipv6 only")
+	if (($count == 0)); then
+		echo "Change C2 to ipv6 only should cause existing replication to fail with connection issues but replicationInfos returned $result"
+		exit 1
+	fi
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C1 to ipv6 only should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count == 0)); then
+		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 7: C1 ipv6 only, C2 default: Change remote to ipv6 should fix the replication"
+	result=$(changeRemoteClusterReference "C1" "C2" "[::1]")
+	count=$(echo $result | grep -c "The cluster is ipv6 only")
+	if (($count != 0)); then
+		echo "Change remote cluster ref to ipv6 should work but returned unexpected result $result"
+		exit 1
+	fi
+	sleep 20
+	result=$(checkReplication "C1" "B1" "C2" "B2")
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count != 0)); then
+		echo "Expect replication to work but replicationInfos returned $result"
+		exit 1
+	fi
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_OK")
+	if (($count == 0)); then
+		echo "Change remote ref to ipv6 address only should cause remoteClusters to return RC_OK but it returned $result"
+		exit 1
+	fi
+
+	echo
+	echo "====== restore to default and cleanup."
+	setIpFamily "C1" "ipv4" "false"
+	setIpFamily "C2" "ipv4" "false"
+	sleep 10
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	echo "========================================================="
+	echo "====== Passed Change Remote Cluster Reference Test ======"
+	echo "========================================================="
+}
+
+function runTestCase {
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	runCbWorkloadGenBucket "C1" "B1" 1000
+
+	testCreateRemote
+	testChangeRemote
+}
