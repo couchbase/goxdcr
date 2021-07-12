@@ -61,27 +61,44 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 	var waitGrp sync.WaitGroup
 	for _, spec := range specs {
 		waitGrp.Add(2)
+		specCpy := spec.Clone()
 		go func() {
 			defer waitGrp.Done()
-			watcher := b.getOrCreateLocalWatcher(spec)
-			watcher.Start()
+
+			localRetryOp := func() error {
+				watcher := b.getOrCreateLocalWatcher(specCpy)
+				if watcher == nil {
+					return base.ErrorNilPtr
+				}
+				return watcher.Start()
+			}
+
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (local)",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, localRetryOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not successfully start local and XDCR must restart to try again", specCpy.Id))
+			}
 		}()
 		go func() {
 			defer waitGrp.Done()
 
 			retryOp := func() error {
-				watcher, startErr := b.getOrCreateRemoteWatcher(spec)
+				watcher, startErr := b.getOrCreateRemoteWatcher(specCpy)
 				if startErr != nil {
 					b.logger.Errorf("getOrCreateRemoteWatcher has error: %v", startErr)
 					return startErr
 				}
-				watcher.Start()
+				startErr = watcher.Start()
+				if startErr != nil {
+					b.logger.Errorf("Error starting remote watcher for %v - %v", specCpy.Id, startErr)
+					return startErr
+				}
 				return nil
 			}
-			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec",
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (remote)",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp)
 			if retryErr != nil {
-				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", spec.Id, base.DefaultHttpTimeout))
+				panic(fmt.Sprintf("Bucket Topology service bootstrapping %v did not finish within %v and XDCR must restart to try again", specCpy.Id, base.DefaultHttpTimeout))
 			}
 		}()
 	}
@@ -320,20 +337,48 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 	}
 
 	if oldSpec == nil && newSpec != nil {
-		watcher := b.getOrCreateLocalWatcher(newSpec)
-		localStartErr := watcher.Start()
-		if localStartErr != nil {
-			b.logger.Errorf("Error starting local watcher for %v - %v", newSpec, localStartErr)
-		}
+		var waitGrp sync.WaitGroup
+		waitGrp.Add(2)
 
-		remoteWatcher, remoteErr := b.getOrCreateRemoteWatcher(newSpec)
-		if remoteErr != nil {
-			b.logger.Errorf("Error getting remote watcher for %v - %v", newSpec, remoteErr)
-		}
-		remoteStartErr := remoteWatcher.Start()
-		if remoteStartErr != nil {
-			b.logger.Errorf("Error starting remote watcher for %v - %v", newSpec, remoteStartErr)
-		}
+		go func() {
+			defer waitGrp.Done()
+
+			localRetryOp := func() error {
+				watcher := b.getOrCreateLocalWatcher(newSpec)
+				if watcher == nil {
+					return base.ErrorNilPtr
+				}
+				return watcher.Start()
+			}
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecLocal",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, localRetryOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service (local) bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
+			}
+		}()
+
+		go func() {
+			defer waitGrp.Done()
+			retryRemoteOp := func() error {
+				remoteWatcher, remoteErr := b.getOrCreateRemoteWatcher(newSpec)
+				if remoteErr != nil {
+					b.logger.Errorf("Error getting remote watcher for %v - %v", newSpec, remoteErr)
+					return remoteErr
+				}
+				remoteStartErr := remoteWatcher.Start()
+				if remoteStartErr != nil {
+					b.logger.Errorf("Error starting remote watcher for %v - %v", newSpec, remoteStartErr)
+					return remoteStartErr
+				}
+				return nil
+			}
+			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecRemote",
+				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryRemoteOp)
+			if retryErr != nil {
+				panic(fmt.Sprintf("Bucket Topology service (remote) bootstrapping %v did not finish within %v and XDCR must restart to try again", newSpec.Id, base.DefaultHttpTimeout))
+			}
+		}()
+		waitGrp.Wait()
 		b.logger.Infof("Registered bucket monitor for %v", newSpec.Id)
 	} else if oldSpec != nil && newSpec == nil {
 		err := b.handleSpecDeletion(oldSpec)
