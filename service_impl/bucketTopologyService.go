@@ -70,7 +70,12 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 				if watcher == nil {
 					return base.ErrorNilPtr
 				}
-				return watcher.Start()
+				localStartErr := watcher.Start()
+				if localStartErr != nil && localStartErr != ErrorWatcherAlreadyStarted {
+					b.logger.Errorf("Error starting local watcher for %v - %v", specCpy, localStartErr)
+					return localStartErr
+				}
+				return nil
 			}
 
 			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpec (local)",
@@ -89,7 +94,7 @@ func (b *BucketTopologyService) loadFromReplSpecSvc(replSpecSvc service_def.Repl
 					return startErr
 				}
 				startErr = watcher.Start()
-				if startErr != nil {
+				if startErr != nil && startErr != ErrorWatcherAlreadyStarted {
 					b.logger.Errorf("Error starting remote watcher for %v - %v", specCpy.Id, startErr)
 					return startErr
 				}
@@ -348,7 +353,12 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 				if watcher == nil {
 					return base.ErrorNilPtr
 				}
-				return watcher.Start()
+				localStartErr := watcher.Start()
+				if localStartErr != nil && localStartErr != ErrorWatcherAlreadyStarted {
+					b.logger.Errorf("Error starting local watcher for %v - %v", newSpec, localStartErr)
+					return localStartErr
+				}
+				return nil
 			}
 			retryErr := b.utils.ExponentialBackoffExecutor("BucketTopologyServiceLoadSpecLocal",
 				base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, localRetryOp)
@@ -366,7 +376,7 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 					return remoteErr
 				}
 				remoteStartErr := remoteWatcher.Start()
-				if remoteStartErr != nil {
+				if remoteStartErr != nil && remoteStartErr != ErrorWatcherAlreadyStarted {
 					b.logger.Errorf("Error starting remote watcher for %v - %v", newSpec, remoteStartErr)
 					return remoteStartErr
 				}
@@ -435,12 +445,14 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, refreshInterval 
 	return watcher
 }
 
+var ErrorWatcherAlreadyStarted = fmt.Errorf("Watcher is already started")
+
 func (bw *BucketTopologySvcWatcher) Start() error {
 	if atomic.CompareAndSwapUint32(&bw.isStarted, 0, 1) {
 		go bw.run()
 		return nil
 	}
-	return fmt.Errorf("Watcher for %v Already started", bw.bucketName)
+	return ErrorWatcherAlreadyStarted
 }
 
 func (bw *BucketTopologySvcWatcher) run() {
