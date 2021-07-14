@@ -1987,6 +1987,18 @@ func (c CollectionsMappingRulesType) Clone() CollectionsMappingRulesType {
 	return clonedCopy
 }
 
+// Assumes these are migration rules
+func (c CollectionsMappingRulesType) CloneAndRedact() CollectionsMappingRulesType {
+	redactedClone := make(CollectionsMappingRulesType)
+
+	for k, v := range c {
+		redactedK := fmt.Sprintf("%v%v%v", base.UdTagBegin, k, base.UdTagEnd)
+		redactedClone[redactedK] = v
+	}
+
+	return redactedClone
+}
+
 func (c CollectionsMappingRulesType) ValidateMigrateRules() error {
 	errorMap := make(base.ErrorMap)
 	if c.IsExplicitMigrationRule() {

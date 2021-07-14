@@ -25,6 +25,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"net"
 	"net/http"
+	"net/url"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -256,6 +257,13 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 		remoteClusters[rcClone.Id()] = rcClone
 	} else {
 		remoteClusters, err = RemoteClusterService().RemoteClusters()
+		if remoteClusterGetOpts.RedactRequested {
+			remoteClustersClone := make(map[string]*metadata.RemoteClusterReference)
+			for k, v := range remoteClusters {
+				remoteClustersClone[k] = v.CloneAndRedact()
+			}
+			remoteClusters = remoteClustersClone
+		}
 		if err != nil {
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		}
@@ -263,7 +271,16 @@ func (adminport *Adminport) doGetRemoteClustersRequest(request *http.Request) (*
 	return NewGetRemoteClustersResponse(remoteClusters)
 }
 
+type getOptsCommon struct {
+	RedactRequested bool
+}
+
+type getReplicationsOpt struct {
+	getOptsCommon
+}
+
 type getRemoteClusterOpts struct {
+	getOptsCommon
 	BucketManifestBucketName string
 	RemoteClusterUuid        string
 }
@@ -283,6 +300,8 @@ func parseGetRemoteClusterRequestQuery(request *http.Request) getRemoteClusterOp
 		return opt
 	}
 
+	parseGetOptsCommon(query, &opt.getOptsCommon)
+
 	for key, valArr := range query {
 		if key == base.RemoteBucketManifest && len(valArr) == 1 {
 			// Should be in the format of <remoteClusteRUUID>/<Bucketname>
@@ -293,6 +312,30 @@ func parseGetRemoteClusterRequestQuery(request *http.Request) getRemoteClusterOp
 			}
 		}
 	}
+	return opt
+}
+
+func parseGetOptsCommon(query url.Values, opt *getOptsCommon) {
+	for key, valArr := range query {
+		if key == base.RedactRequested && len(valArr) == 1 && strings.ToLower(valArr[0]) == "true" {
+			opt.RedactRequested = true
+		}
+	}
+}
+
+func parseGetReplicationsRequestQuery(request *http.Request) getReplicationsOpt {
+	var opt getReplicationsOpt
+	if request == nil {
+		return opt
+	}
+
+	query := request.URL.Query()
+	if query == nil || len(query) == 0 {
+		return opt
+	}
+
+	parseGetOptsCommon(query, &opt.getOptsCommon)
+
 	return opt
 }
 
@@ -449,12 +492,18 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 		return response, err
 	}
 
+	replicationsGetOpts := parseGetReplicationsRequestQuery(request)
+
 	replIds := replication_mgr.pipelineMgr.AllReplications()
 	replSpecs := make(map[string]*metadata.ReplicationSpecification)
 	for _, replId := range replIds {
 		rep_status, _ := replication_mgr.pipelineMgr.ReplicationStatus(replId)
 		if rep_status != nil {
-			replSpecs[replId] = rep_status.Spec()
+			if replicationsGetOpts.RedactRequested {
+				replSpecs[replId] = rep_status.Spec().CloneAndRedact()
+			} else {
+				replSpecs[replId] = rep_status.Spec()
+			}
 		}
 	}
 
