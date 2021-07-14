@@ -357,6 +357,7 @@ const (
 	RemoteClusterHostnameMode      = "network_type"
 	ConnectivityStatus             = "connectivityStatus"
 	RemoteBucketManifest           = "remoteBucketManifest"
+	RedactRequested                = "redactRequested"
 )
 
 // secure type for remote cluster reference

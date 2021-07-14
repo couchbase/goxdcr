@@ -125,7 +125,6 @@ func (spec *ReplicationSpecification) Clone() *ReplicationSpecification {
 
 func (spec *ReplicationSpecification) Redact() *ReplicationSpecification {
 	if spec != nil {
-		// Currently only the Settings has user identifiable data in filtered expression
 		spec.Settings.Redact()
 	}
 	return spec

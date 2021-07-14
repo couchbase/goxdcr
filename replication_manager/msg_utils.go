@@ -9,6 +9,7 @@
 package replication_manager
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1179,10 +1180,15 @@ func EncodeObjectIntoResponseWithStatusCode(object interface{}, statusCode int) 
 		body = []byte{}
 	} else {
 		var err error
-		body, err = json.Marshal(object)
+		buf := new(bytes.Buffer)
+		encoder := json.NewEncoder(buf)
+		// Need to set this to false to keep the redaction tag symbols "<ud>" from being transformed
+		encoder.SetEscapeHTML(false)
+		err = encoder.Encode(object)
 		if err != nil {
 			return nil, err
 		}
+		body = buf.Bytes()
 	}
 	return EncodeByteArrayIntoResponseWithStatusCode(body, statusCode)
 }

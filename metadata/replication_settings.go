@@ -530,6 +530,18 @@ func (s *ReplicationSettings) Redact() *ReplicationSettings {
 		s.FilterExpression = base.TagUD(s.FilterExpression)
 	}
 
+	collectionModes := s.GetCollectionModes()
+	if collectionModes.IsMigrationOn() {
+		// Migration rules have filter expressions and need to be redacted
+		val, _ := s.GetSettingValueOrDefaultValue(CollectionsMappingRulesKey)
+		if val != nil {
+			mappingRules := val.(CollectionsMappingRulesType)
+			if !mappingRules.IsExplicitMigrationRule() {
+				redactedRules := mappingRules.CloneAndRedact()
+				s.Values[CollectionsMappingRulesKey] = redactedRules
+			}
+		}
+	}
 	return s
 }
 
