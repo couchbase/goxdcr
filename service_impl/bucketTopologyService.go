@@ -32,6 +32,7 @@ type BucketTopologyService struct {
 	srcBucketWatchersCnt map[string]int
 	srcBucketWatchersMtx sync.RWMutex
 
+	// Key is targetClusterUUID+bucketName
 	tgtBucketWatchers    map[string]*BucketTopologySvcWatcher
 	tgtBucketWatchersCnt map[string]int
 	tgtBucketWatchersMtx sync.RWMutex
@@ -188,6 +189,10 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 	return watcher
 }
 
+func getTargetWatcherKey(spec *metadata.ReplicationSpecification) string {
+	return fmt.Sprintf("%v_%v", spec.TargetClusterUUID, spec.TargetBucketName)
+}
+
 func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.ReplicationSpecification) (*BucketTopologySvcWatcher, error) {
 	if spec == nil {
 		return nil, base.ErrorNilPtr
@@ -213,7 +218,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 
 	b.tgtBucketWatchersMtx.Lock()
 	defer b.tgtBucketWatchersMtx.Unlock()
-	watcher, exists := b.tgtBucketWatchers[spec.TargetBucketName]
+	watcher, exists := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
 	if !exists {
 		getterFunc := func() error {
 			targetBucketInfo, shouldUseExternal, connStr, err := bucketInfoGetter()
@@ -239,9 +244,9 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			return nil
 		}
 		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.refreshInterval, b.logger, false, b.xdcrCompTopologySvc, getterFunc)
-		b.tgtBucketWatchers[spec.TargetBucketName] = watcher
+		b.tgtBucketWatchers[getTargetWatcherKey(spec)] = watcher
 	}
-	b.tgtBucketWatchersCnt[spec.TargetBucketName]++
+	b.tgtBucketWatchersCnt[getTargetWatcherKey(spec)]++
 	return watcher, nil
 }
 
@@ -256,7 +261,7 @@ func (b *BucketTopologyService) SubscribeToRemoteBucketFeed(spec *metadata.Repli
 
 	b.tgtBucketWatchersMtx.Lock()
 	defer b.tgtBucketWatchersMtx.Unlock()
-	watcher, exists := b.tgtBucketWatchers[spec.TargetBucketName]
+	watcher, exists := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
 	if exists {
 		return watcher.registerAndGetCh(spec, subscriberId).(chan service_def.TargetNotification), nil
 	}
@@ -298,11 +303,11 @@ func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpe
 	b.srcBucketWatchersMtx.Unlock()
 
 	b.tgtBucketWatchersMtx.Lock()
-	b.tgtBucketWatchersCnt[spec.TargetBucketName]--
-	if b.tgtBucketWatchersCnt[spec.TargetBucketName] == 0 {
-		err = b.tgtBucketWatchers[spec.TargetBucketName].Stop()
-		delete(b.tgtBucketWatchers, spec.TargetBucketName)
-		delete(b.tgtBucketWatchersCnt, spec.TargetBucketName)
+	b.tgtBucketWatchersCnt[getTargetWatcherKey(spec)]--
+	if b.tgtBucketWatchersCnt[getTargetWatcherKey(spec)] == 0 {
+		err = b.tgtBucketWatchers[getTargetWatcherKey(spec)].Stop()
+		delete(b.tgtBucketWatchers, getTargetWatcherKey(spec))
+		delete(b.tgtBucketWatchersCnt, getTargetWatcherKey(spec))
 	}
 	b.tgtBucketWatchersMtx.Unlock()
 
@@ -315,15 +320,15 @@ func (b *BucketTopologyService) UnSubscribeRemoteBucketFeed(spec *metadata.Repli
 	}
 
 	b.tgtBucketWatchersMtx.RLock()
-	_, exists := b.tgtBucketWatchersCnt[spec.TargetBucketName]
-	_, exists2 := b.tgtBucketWatchers[spec.TargetBucketName]
+	_, exists := b.tgtBucketWatchersCnt[getTargetWatcherKey(spec)]
+	_, exists2 := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
 	if !exists || !exists2 {
 		b.tgtBucketWatchersMtx.RUnlock()
 		return base.ErrorResourceDoesNotExist
 	}
 	b.tgtBucketWatchersMtx.RUnlock()
 
-	b.tgtBucketWatchers[spec.TargetBucketName].unregisterCh(spec, subscriberId)
+	b.tgtBucketWatchers[getTargetWatcherKey(spec)].unregisterCh(spec, subscriberId)
 	return nil
 }
 
