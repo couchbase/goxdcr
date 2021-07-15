@@ -529,6 +529,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget() error {
 
 				// validate target bucket uuid
 				if spec.TargetBucketUUID != "" && targetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID {
+
 					shouldTryAgain := top_detect_svc.validateTargetBucketUUIDDifferences(spec)
 					if shouldTryAgain {
 						continue

@@ -94,6 +94,7 @@ const (
 	HlvPruningWindowLKey           = base.HlvPruningWindowKey
 	JSFunctionTimeoutKey           = base.JSFunctionTimeoutKey
 	DismissEventKey                = metadata.DismissEventKey
+	PreReplicateVBMasterCheckKey   = base.PreReplicateVBMasterCheckKey
 )
 
 // constants for parsing create replication response
@@ -190,6 +191,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	HlvPruningWindowLKey:           metadata.HlvPruningWindowKey,
 	JSFunctionTimeoutKey:           metadata.JSFunctionTimeoutKey,
 	DismissEventKey:                metadata.DismissEventKey,
+	PreReplicateVBMasterCheckKey:   metadata.PreReplicateVBMasterCheckKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -231,6 +233,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.HlvPruningWindowKey:               HlvPruningWindowLKey,
 	metadata.JSFunctionTimeoutKey:              JSFunctionTimeoutKey,
 	metadata.DismissEventKey:                   DismissEventKey,
+	metadata.PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

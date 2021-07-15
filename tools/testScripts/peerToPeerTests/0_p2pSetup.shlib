@@ -16,12 +16,13 @@ CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
 CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
-CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B0")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
 declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
@@ -32,7 +33,8 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 # ----------------------
 function runDataLoad {
 	echo "RUNNING dataload..."
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" >/dev/null 2>&1
+	runCbWorkloadGenBucket "C1" "B0" &
+	waitForBgJobs
 	echo "RUNNING dataload DONE"
 }
 
@@ -66,39 +68,39 @@ function runOneReplicationCycle {
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
 
 	echo "Waiting 20 seconds before checking item count"
 	sleep 20
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C1" "B0" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
-	checkUnidirectionalChangesLeft
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	validateXDCRCheckpoints "C1"
 	grepForPanics
 
-	pauseReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 10 seconds for pipeline to really pause"
-	sleep 10
-	grepForPanics
+	#pauseReplication "C1" "B1" "C2" "B2"
+	#echo "Waiting 10 seconds for pipeline to really pause"
+	#sleep 10
+	#grepForPanics
 
-	resumeReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 10 seconds for resume to finish"
-	sleep 10
-	grepForPanics
+	#resumeReplication "C1" "B1" "C2" "B2"
+	#echo "Waiting 10 seconds for resume to finish"
+	#sleep 10
+	#grepForPanics
 
-	checkUnidirectionalChangesLeft
+	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	grepForPanics
 
 	echo "============================================================================"
 	echo "Cycle $(($cycleCnt + 1)) PASSED"
 	echo "============================================================================"
-	cleanupBucketReplications
-	cleanupBuckets
-	cleanupRemoteClusterRefs
-	echo "Waiting for $timeIntervalSecs seconds before starting another replication"
-	sleep $timeIntervalSecs
+	#cleanupBucketReplications
+	#cleanupBuckets
+	#cleanupRemoteClusterRefs
+	#echo "Waiting for $timeIntervalSecs seconds before starting another replication"
+	#sleep $timeIntervalSecs
 }
 
 function runMultipleReplicationCycles {
@@ -142,35 +144,9 @@ function runOneRebalanceCycle {
 
   validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(( $currentPeerMsgsC1 + 1 ))
 
-	#local currentXdcrLogC1
-	#local currentXdcrLogC1P
-	#currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
-	#currentXdcrLogC1P=$(getInternalNodeXdcrLog "C1P")
-
-	#local currentTopologyRestartCnt
-	#local currentTopologyRestartCnt2
-	#currentTopologyRestartCnt=$(echo "$currentXdcrLogC1" | grep -c "$TOPOLOGY_RESTART_MSG")
-	#currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
-	#sleep $timeIntervalSecs
-
-	#validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
-	#validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2
-
-	#startEjectNode "C1P" "C1"
-	#echo "Rebalancing out completed. Letting replication continue with one nodes for $timeIntervalSecs seconds before rebalancing back in"
-
-	#currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
-	#currentXdcrLogC1P=$(getInternalNodeXdcrLog "C1P")
-	#currentTopologyRestartCnt=$(echo "$currentXdcrLogC1" | grep -c "$TOPOLOGY_RESTART_MSG")
-	#currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
-	#sleep $timeIntervalSecs
-
-	#validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
-	#validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"
-	#sleep $timeIntervalSecs
 }
 
 function runMultipleRebalanceCycles {
@@ -189,8 +165,8 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-	#runMultipleReplicationCycles 1
 	runMultipleRebalanceCycles 1
+	runMultipleReplicationCycles 1
 
 	# 2 jobs - whichever finishes first is done
 	stopWhenAnyBgJobStops 2

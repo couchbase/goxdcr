@@ -77,6 +77,8 @@ const (
 
 	CkptMgrBrokenmapIdleUpdateDiffPair    = "ckmgrBrokenMapIdleUpdateDiffPair"
 	CkptMgrBrokenmapIdleUpdateSrcManDelta = "ckmgrBrokenMapIdleUpdateSrcManDelta"
+
+	PreReplicateVBMasterCheckKey = base.PreReplicateVBMasterCheckKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -170,6 +172,8 @@ var RetryOnRemoteAuthErrMaxWaitConfig = &SettingsConfig{base.RetryOnRemoteAuthEr
 
 var DismissEventConfig = &SettingsConfig{-1, &Range{0, math.MaxInt32}}
 
+var PreReplicateVBMasterCheckConfig = &SettingsConfig{true, nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
@@ -202,6 +206,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	HlvPruningWindowKey:               PruningWindowConfig,
 	JSFunctionTimeoutKey:              JSFunctionTimeoutConfig,
 	DismissEventKey:                   DismissEventConfig,
+	PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead

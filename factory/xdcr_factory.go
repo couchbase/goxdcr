@@ -13,6 +13,7 @@ package factory
 import (
 	"errors"
 	"fmt"
+	peerToPeer "github.com/couchbase/goxdcr/peerToPeer"
 	"math"
 	"strconv"
 	"sync"
@@ -80,29 +81,22 @@ type XDCRFactory struct {
 	utils                    utilities.UtilsIface
 
 	pipelineMgrStopCallback base.PipelineMgrStopCbType
+
+	p2pMgr peerToPeer.P2PManager
 }
 
 type BackfillMgrGetter func() service_def.BackfillMgrIface
 
 // set call back functions is done only once
-func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
-	remote_cluster_svc service_def.RemoteClusterSvc,
-	cluster_info_svc service_def.ClusterInfoSvc,
-	xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	checkpoint_svc service_def.CheckpointsService,
-	capi_svc service_def.CAPIService,
-	uilog_svc service_def.UILogSvc,
-	bucket_settings_svc service_def.BucketSettingsSvc,
-	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
-	pipeline_default_logger_ctx *log.LoggerContext,
-	factory_logger_ctx *log.LoggerContext,
-	pipeline_failure_handler common.SupervisorFailureHandler,
-	utilsIn utilities.UtilsIface,
-	resolver_svc service_def.ResolverSvcIface,
-	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	getBackfillMgr BackfillMgrGetter,
-	backfillReplSvc service_def.BackfillReplSvc,
-	bucketTopologySvc service_def.BucketTopologySvc) *XDCRFactory {
+func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster_svc service_def.RemoteClusterSvc,
+	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	checkpoint_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, uilog_svc service_def.UILogSvc,
+	bucket_settings_svc service_def.BucketSettingsSvc, throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	pipeline_default_logger_ctx *log.LoggerContext, factory_logger_ctx *log.LoggerContext,
+	pipeline_failure_handler common.SupervisorFailureHandler, utilsIn utilities.UtilsIface,
+	resolver_svc service_def.ResolverSvcIface, collectionsManifestSvc service_def.CollectionsManifestSvc,
+	getBackfillMgr BackfillMgrGetter, backfillReplSvc service_def.BackfillReplSvc,
+	bucketTopologySvc service_def.BucketTopologySvc, p2pMgr peerToPeer.P2PManager) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		cluster_info_svc:         cluster_info_svc,
@@ -121,6 +115,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc,
 		getBackfillMgr:           getBackfillMgr,
 		backfillReplSvc:          backfillReplSvc,
 		bucketTopologySvc:        bucketTopologySvc,
+		p2pMgr:                   p2pMgr,
 	}
 }
 
@@ -324,7 +319,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	// construct and initializes the pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
-		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx)
+		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -870,6 +865,39 @@ func (xdcrf *XDCRFactory) CheckpointBeforeStop(pipeline common.Pipeline) error {
 	}
 	ckpt_mgr.(*pipeline_svc.CheckpointManager).CheckpointBeforeStop()
 	return nil
+}
+
+func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) (peerToPeer.VBMasterChkRespType, error) {
+	if pipeline == nil {
+		return nil, errors.New("pipeline=nil")
+	}
+
+	genSpec := pipeline.Specification()
+	if genSpec == nil {
+		return nil, fmt.Errorf("GenSpec for %v not found", pipeline.Topic())
+	}
+	spec := genSpec.GetReplicationSpec()
+	if spec == nil {
+		return nil, fmt.Errorf("Spec for %v not found", pipeline.Topic())
+	}
+	srcBucketName := spec.SourceBucketName
+
+	// Get a list of responsible VBs
+	var sourceVBs []uint16
+	for _, sourceNozzle := range pipeline.Sources() {
+		setOfVBs := sourceNozzle.ResponsibleVBs()
+		sourceVBs = append(sourceVBs, setOfVBs...)
+	}
+
+	vbsReq := make(peerToPeer.BucketVBMapType)
+	vbsReq[srcBucketName] = sourceVBs
+
+	xdcrf.logger.Infof("Running VBMasterCheck for bucket %v", srcBucketName)
+	resp, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part,

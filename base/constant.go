@@ -1349,3 +1349,5 @@ const (
 	IpFamilyOptional IpFamilySupport = 2
 	IpFamilyOff      IpFamilySupport = 3
 )
+
+const PreReplicateVBMasterCheckKey = "preReplicateVBMasterCheck"

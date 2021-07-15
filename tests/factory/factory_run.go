@@ -140,7 +140,7 @@ func invokeFactory() error {
 		remote_cluster_svc,
 		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(msvc, nil), checkpoints_svc, capi_svc, audit_svc, uilog_svc, processSetting_svc, bucketSettings_svc, internalSettings_svc)
 
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, uilog_svc, bucketSettings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil)
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc, top_svc, checkpoints_svc, capi_svc, uilog_svc, bucketSettings_svc, log.DefaultLoggerContext, log.DefaultLoggerContext, nil, nil, nil)
 
 	// create remote cluster reference needed by replication
 	err = common.CreateTestRemoteCluster(remote_cluster_svc, options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword,

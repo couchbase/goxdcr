@@ -1352,15 +1352,16 @@ func (adminport *Adminport) checkAndRejectChunkedEncoding(request *http.Request)
 }
 
 func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doPostPeerToPeerRequest\n")
 
 	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
+	logger_ap.Infof("NEIL DEBUG received peer-to-peer request req %v\n", request)
 
 	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils)
 	if err != nil {
+		adminport.Logger().Errorf("Unable to generate req or resp %v\n", err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 

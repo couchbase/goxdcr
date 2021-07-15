@@ -26,6 +26,12 @@ type P2PManager interface {
 	Start() (PeerToPeerCommAPI, error)
 	Stop() error
 	GetLifecycleId() string
+
+	VBMasterCheck
+}
+
+type VBMasterCheck interface {
+	CheckVBMaster(BucketVBMapType) (VBMasterChkRespType, error)
 }
 
 type Handler interface {
@@ -51,6 +57,8 @@ type P2PManagerImpl struct {
 	receiveHandlers     map[OpCode]Handler
 
 	latestKnownPeers *KnownPeers
+
+	vbMasterCheckHelper *VbMasterCheckHelperImpl
 }
 
 func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface) (*P2PManagerImpl, error) {
@@ -69,6 +77,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		receiveHandlerFinCh: make(chan bool),
 		receiveHandlers:     map[OpCode]Handler{},
 		latestKnownPeers:    &KnownPeers{PeersMap: PeersMapType{}},
+		vbMasterCheckHelper: NewVBMasterCheckHelper(),
 	}, nil
 }
 
@@ -108,6 +117,9 @@ func (p *P2PManagerImpl) runHandlers() error {
 		case ReqDiscovery:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
 			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, base.P2POpaqueCleanupInterval)
+		case ReqVBMasterChk:
+			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
+			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, base.P2POpaqueCleanupInterval)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -128,52 +140,116 @@ func (p *P2PManagerImpl) initCommAPI() {
 }
 
 func (p *P2PManagerImpl) sendDiscoveryRequest() error {
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		discoveryReq := NewP2PDiscoveryReq(common)
+		return discoveryReq
+	}
+
+	return p.sendToEachPeerOnce(ReqDiscovery, getReqFunc)
+}
+
+func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 	var peers []string
-	var err error
-	retryOp := func() error {
-		peers, err = p.xdcrCompSvc.PeerNodesAdminAddrs()
-		if err != nil {
-			p.logger.Errorf("PeerNodesAdminAddrs() err: %v\n", err)
+	var myHostAddr string
+	var retry1Err error
+	var myHostErr error
+	retry1 := func() error {
+		peers, retry1Err = p.xdcrCompSvc.PeerNodesAdminAddrs()
+		if retry1Err != nil {
+			p.logger.Errorf("PeerNodesAdminAddrs() err: %v\n", retry1Err)
+			return retry1Err
 		}
+
+		myHostAddr, myHostErr = p.xdcrCompSvc.MyHostAddr()
+		if myHostErr != nil {
+			p.logger.Errorf("Error getting myHostAddr %v", myHostErr)
+			return myHostErr
+		}
+		return nil
+	}
+
+	err := p.utils.ExponentialBackoffExecutor("getSendPreReq", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry,
+		base.BucketInfoOpRetryFactor, retry1)
+	if err != nil {
+		return nil, "", err
+	}
+	return peers, myHostAddr, nil
+}
+
+type GetReqFunc func(source, target string) Request
+
+func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc) error {
+	peers, myHost, err := p.getSendPreReq()
+	if err != nil {
+		return err
+	}
+
+	peersToRetry := make(map[string]bool)
+	for _, peer := range peers {
+		peersToRetry[peer] = true
+	}
+
+	retryOp := func() error {
+		peersToRetryReplacement := make(map[string]bool)
 		errMap := make(base.ErrorMap)
-		for _, peerAddr := range peers {
-			myHost, err := p.xdcrCompSvc.MyHostAddr()
+		var err error
+		for peerAddr, _ := range peersToRetry {
+			compiledReq := getReqFunc(myHost, peerAddr)
+			err = p.receiveHandlers[opCode].RegisterOpaque(compiledReq)
 			if err != nil {
-				p.logger.Errorf("Error getting myHostAddr %v", err)
+				errMap[peerAddr] = err
+				peersToRetryReplacement[peerAddr] = true
 				continue
 			}
 
-			common := NewRequestCommon(myHost, peerAddr, p.GetLifecycleId(), "", getOpaqueWrapper())
-			discoveryReq := NewP2PDiscoveryReq(common)
-			err = p.receiveHandlers[ReqDiscovery].RegisterOpaque(discoveryReq)
+			handlerResult, err := p.commAPI.P2PSend(compiledReq)
 			if err != nil {
+				p.logger.Errorf("P2PSend %v resulted in %v", compiledReq, err)
 				errMap[peerAddr] = err
+				peersToRetryReplacement[peerAddr] = true
 				continue
 			}
 
-			handlerResult, err := p.commAPI.P2PSend(discoveryReq)
-			if err != nil {
-				p.logger.Errorf("P2PSend %v resulted in %v", discoveryReq, err)
-				errMap[peerAddr] = err
-				continue
-			}
 			if handlerResult.GetError() != nil || handlerResult.GetHttpStatusCode() != http.StatusOK {
 				errMap[peerAddr] = fmt.Errorf("%v-%v", handlerResult.GetError(), handlerResult.GetHttpStatusCode())
+				peersToRetryReplacement[peerAddr] = true
 			}
 		}
-		if len(errMap) > 0 {
+		if len(peersToRetryReplacement) > 0 {
+			peersToRetry = peersToRetryReplacement
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
 		} else {
 			return nil
 		}
 	}
-	err = p.utils.ExponentialBackoffExecutor("sendDiscoveryRequest", base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry,
-		base.BucketInfoOpRetryFactor, retryOp)
+
+	err = p.utils.ExponentialBackoffExecutor(fmt.Sprintf("sendPeerToPeerReq(%v)", opCode.String()),
+		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
 	if err != nil {
-		p.logger.Errorf("Unable to send discovery request to some or all the nodes... %v", err)
+		p.logger.Errorf("Unable to send %v to some or all the nodes... %v", opCode.String(), err)
 		return err
 	}
 	return nil
+}
+
+func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType) (VBMasterChkRespType, error) {
+	// Only need to check the non-verified VBs
+	filteredSubsets := p.vbMasterCheckHelper.GetUnverifiedSubset(bucketAndVBs)
+
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		vbCheckReq := NewVBMasterCheckReq(common)
+		vbCheckReq.SetBucketVBMap(filteredSubsets)
+		return vbCheckReq
+	}
+
+	err := p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc)
+	if err != nil {
+		return nil, err
+	}
+	// TODO - wait for response
+	return "dummyResp", nil
 }
 
 func getOpaqueWrapper() uint32 {

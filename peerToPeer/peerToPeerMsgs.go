@@ -15,20 +15,24 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/golang/snappy"
 	"io/ioutil"
 	"net/http"
 	"reflect"
 )
 
 const (
-	ReqDiscovery  OpCode = iota
-	ReqMaxInvalid OpCode = iota
+	ReqDiscovery   OpCode = iota
+	ReqVBMasterChk OpCode = iota
+	ReqMaxInvalid  OpCode = iota
 )
 
 func (o OpCode) String() string {
 	switch o {
 	case ReqDiscovery:
 		return "Discovery"
+	case ReqVBMasterChk:
+		return "VBMasterCheck"
 	default:
 		return "?? (InvalidRequest)"
 	}
@@ -251,7 +255,8 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 			return nil, err
 		}
 		return respDisc, nil
-
+	//case ReqVBMasterChk:
+	//resp := &VBMasterCheckResp{}
 	default:
 		return nil, fmt.Errorf("Unknown response %v", respCommon.RespType)
 	}
@@ -280,6 +285,11 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, err er
 		err = reqDisc.DeSerialize(body)
 		reqDisc.RequestCommon = reqCommon
 		return reqDisc, err
+	case ReqVBMasterChk:
+		reqVBChk := &VBMasterCheckReq{}
+		err = reqVBChk.DeSerialize(body)
+		reqVBChk.RequestCommon = reqCommon
+		return reqVBChk, err
 	default:
 		return nil, fmt.Errorf("Unknown request %v", reqCommon.ReqType)
 	}
@@ -289,4 +299,109 @@ func NewP2PDiscoveryReq(common RequestCommon) *DiscoveryRequest {
 	p2pReq := &DiscoveryRequest{RequestCommon: common}
 	p2pReq.ReqType = ReqDiscovery
 	return p2pReq
+}
+
+type VBMasterCheckReq struct {
+	RequestCommon
+
+	// Request peer node's response given a map of bucket names and VBs for each bucket
+	bucketVBMap           BucketVBMapType // small case to not be marshalled
+	BucketVBMapCompressed []byte          // Not to be used except for marshalling
+}
+
+func (v *VBMasterCheckReq) GetBucketVBMap() BucketVBMapType {
+	return v.bucketVBMap
+}
+
+func (v *VBMasterCheckReq) SetBucketVBMap(vNew BucketVBMapType) {
+	v.bucketVBMap = vNew
+}
+
+type BucketVBMapType map[string][]uint16
+
+func (b *BucketVBMapType) SameAs(other BucketVBMapType) bool {
+	if len(*b) != len(other) {
+		return false
+	}
+
+	return BucketVBMapTypeAreSame(other, *b)
+}
+
+func BucketVBMapTypeAreSame(other BucketVBMapType, b BucketVBMapType) bool {
+	for k, aList := range b {
+		bList, ok := other[k]
+		if !ok {
+			return false
+		}
+
+		aSorted := base.SortUint16List(aList)
+		bSorted := base.SortUint16List(bList)
+		if !base.AreSortedUint16ListsTheSame(aSorted, bSorted) {
+			return false
+		}
+	}
+	return true
+}
+
+// TODO
+type VBMasterChkRespType interface{}
+
+func NewVBMasterCheckReq(common RequestCommon) *VBMasterCheckReq {
+	req := &VBMasterCheckReq{RequestCommon: common}
+	req.ReqType = ReqVBMasterChk
+	return req
+}
+
+func (v *VBMasterCheckReq) Serialize() ([]byte, error) {
+	bucketMapMarshalled, err := json.Marshal(v.bucketVBMap)
+	if err != nil {
+		return nil, err
+	}
+
+	v.BucketVBMapCompressed = snappy.Encode(nil, bucketMapMarshalled)
+
+	return json.Marshal(v)
+}
+
+func (v *VBMasterCheckReq) DeSerialize(stream []byte) error {
+	err := json.Unmarshal(stream, v)
+	if err != nil {
+		return err
+	}
+
+	if len(v.BucketVBMapCompressed) > 0 {
+		marshalledVBMasterChkReq, snappyErr := snappy.Decode(nil, v.BucketVBMapCompressed)
+		if snappyErr != nil {
+			return snappyErr
+		}
+		err = json.Unmarshal(marshalledVBMasterChkReq, &v.bucketVBMap)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *VBMasterCheckReq) SameAs(otherRaw interface{}) (bool, error) {
+	other, ok := otherRaw.(*VBMasterCheckReq)
+	if !ok {
+		return false, getWrongTypeErr("*VBMasterCheckReq", otherRaw)
+	}
+	if !v.bucketVBMap.SameAs(other.bucketVBMap) {
+		return false, fmt.Errorf("BucketVBMap are different: %v vs %v", v.bucketVBMap, other.bucketVBMap)
+	}
+	return v.RequestCommon.SameAs(&other.RequestCommon)
+}
+
+func (v *VBMasterCheckReq) GenerateResponse() interface{} {
+	common := NewResponseCommon(v.ReqType, v.RemoteLifeCycleId, v.LocalLifeCycleId, v.Opaque, v.TargetAddr)
+	common.RespType = v.ReqType
+	resp := &VBMasterCheckResp{
+		ResponseCommon: common,
+	}
+	return resp
+}
+
+type VBMasterCheckResp struct {
+	ResponseCommon
 }

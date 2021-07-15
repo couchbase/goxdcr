@@ -16,6 +16,7 @@ import (
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 	"time"
@@ -49,6 +50,8 @@ type ConnectorsUpdateSettingsConstructor func(pipeline common.Pipeline, connecto
 type StartingSeqnoConstructor func(pipeline common.Pipeline) error
 
 type CheckpointFunc func(pipeline common.Pipeline) error
+
+type VBMasterCheckFunc func(common.Pipeline) (peerToPeer.VBMasterChkRespType, error)
 
 //GenericPipeline is the generic implementation of a data processing pipeline
 //
@@ -117,6 +120,8 @@ type GenericPipeline struct {
 
 	brokenMapMtx sync.RWMutex
 	brokenMap    metadata.CollectionNamespaceMapping
+
+	vbMasterCheckFunc VBMasterCheckFunc
 }
 
 //Get the runtime context of this pipeline
@@ -249,6 +254,16 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	settings[base.ProblematicVBTarget] = &base.ObjectWithLock{make(map[uint16]error), &sync.RWMutex{}}
 
 	genericPipeline.settings = settings
+
+	// Before starting vb timestamp, need to ensure VBMaster
+	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
+	if !ok || ok && vbMasterCheckConfig.(bool) == true {
+		_, err = genericPipeline.vbMasterCheckFunc(genericPipeline)
+		if err != nil {
+			errMap["genericPipeline.vbMasterCheckFunc"] = err
+			return errMap
+		}
+	}
 
 	//get starting vb timestamp
 	go genericPipeline.startingSeqno_constructor(genericPipeline)
@@ -569,7 +584,9 @@ func NewPipelineWithSettingConstructor(t string,
 	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor,
 	startingSeqnoConstructor StartingSeqnoConstructor,
 	checkpoint_func CheckpointFunc,
-	logger_context *log.LoggerContext) *GenericPipeline {
+	logger_context *log.LoggerContext,
+	vbMasterCheckFunc VBMasterCheckFunc,
+) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
 		targets:                            targets,
@@ -587,6 +604,7 @@ func NewPipelineWithSettingConstructor(t string,
 		state:                              common.Pipeline_Initial,
 		settings_lock:                      &sync.RWMutex{},
 		pipelineType:                       pipelineType,
+		vbMasterCheckFunc:                  vbMasterCheckFunc,
 	}
 	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()

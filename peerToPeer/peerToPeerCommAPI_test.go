@@ -20,11 +20,11 @@ func TestDiscoveryReqMarsh(t *testing.T) {
 	bytes, err := discoveryReq.Serialize()
 	assert.Nil(err)
 
-	testValidate := DiscoveryRequest{}
+	testValidate := &DiscoveryRequest{}
 	err = testValidate.DeSerialize(bytes)
 	assert.Nil(err)
 
-	fmt.Printf("testValidate: %v\n", testValidate)
+	assert.True(discoveryReq.SameAs(testValidate))
 }
 
 func TestMagic(t *testing.T) {
@@ -68,4 +68,24 @@ func TestMagic(t *testing.T) {
 	respCheck := &DiscoveryResponse{}
 	err = json.Unmarshal(bytes, &respCheck)
 	assert.Nil(err)
+}
+
+func TestVBMasterCheckReq(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestVBMasterCheckReq =================")
+	defer fmt.Println("============== Test case end: TestVBMasterCheckReq =================")
+
+	common := NewRequestCommon("127.0.0.1:9000", "127.0.0.1:9001", "randId", "", getOpaqueWrapper())
+	checkReq := NewVBMasterCheckReq(common)
+	checkReq.bucketVBMap = make(BucketVBMapType)
+	checkReq.bucketVBMap["testBucket"] = []uint16{0, 1, 2, 3}
+
+	bytes, err := checkReq.Serialize()
+	assert.Nil(err)
+
+	testValidate := &VBMasterCheckReq{}
+	err = testValidate.DeSerialize(bytes)
+	assert.Nil(err)
+
+	assert.True(testValidate.SameAs(checkReq))
 }
