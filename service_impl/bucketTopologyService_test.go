@@ -82,7 +82,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	for i := uint16(0); i < 1024; i++ {
 		highSeqnosMap[i] = uint64(100 + int(i))
 	}
-	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(highSeqnosMap, nil)
+	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(highSeqnosMap, nil, nil)
 
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {
