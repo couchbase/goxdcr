@@ -1135,7 +1135,8 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//register pipeline supervisor
 	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
-		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils, xdcrf.remote_cluster_svc)
+		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils, xdcrf.remote_cluster_svc,
+		xdcrf.bucketTopologySvc)
 	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	if err != nil {
 		return err

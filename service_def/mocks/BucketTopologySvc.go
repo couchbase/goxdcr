@@ -30,6 +30,52 @@ func (_m *BucketTopologySvc) ReplicationSpecChangeCallback(id string, oldVal int
 	return r0
 }
 
+// SubscribeToLocalBucketDcpStatsFeed provides a mock function with given fields: spec, subscriberId
+func (_m *BucketTopologySvc) SubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
+	ret := _m.Called(spec, subscriberId)
+
+	var r0 chan service_def.SourceNotification
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) chan service_def.SourceNotification); ok {
+		r0 = rf(spec, subscriberId)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(chan service_def.SourceNotification)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, string) error); ok {
+		r1 = rf(spec, subscriberId)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// SubscribeToLocalBucketDcpStatsLegacyFeed provides a mock function with given fields: spec, subscriberId
+func (_m *BucketTopologySvc) SubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
+	ret := _m.Called(spec, subscriberId)
+
+	var r0 chan service_def.SourceNotification
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) chan service_def.SourceNotification); ok {
+		r0 = rf(spec, subscriberId)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(chan service_def.SourceNotification)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification, string) error); ok {
+		r1 = rf(spec, subscriberId)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // SubscribeToLocalBucketFeed provides a mock function with given fields: spec, subscriberId
 func (_m *BucketTopologySvc) SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
 	ret := _m.Called(spec, subscriberId)
@@ -92,6 +138,34 @@ func (_m *BucketTopologySvc) UnSubscribeLocalBucketFeed(spec *metadata.Replicati
 
 // UnSubscribeRemoteBucketFeed provides a mock function with given fields: spec, subscriberId
 func (_m *BucketTopologySvc) UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+	ret := _m.Called(spec, subscriberId)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
+		r0 = rf(spec, subscriberId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UnSubscribeToLocalBucketDcpStatsFeed provides a mock function with given fields: spec, subscriberId
+func (_m *BucketTopologySvc) UnSubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+	ret := _m.Called(spec, subscriberId)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
+		r0 = rf(spec, subscriberId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UnSubscribeToLocalBucketDcpStatsLegacyFeed provides a mock function with given fields: spec, subscriberId
+func (_m *BucketTopologySvc) UnSubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	ret := _m.Called(spec, subscriberId)
 
 	var r0 error

@@ -168,7 +168,6 @@ const (
 	TopologySvcErrCooldownPeriodKey = "TopologySvcErrCooldownPeriodSec"
 	// Pipeline Supervisor health check interval
 	HealthCheckIntervalKey = "HealthCheckIntervalSec"
-	HealthCheckTimeoutKey  = "HealthCheckTimeoutSec"
 
 	TimeoutRuntimeContextStartKey = "TimeoutRuntimeContextStart"
 	TimeoutRuntimeContextStopKey  = "TimeoutRuntimeContextStop"
@@ -352,7 +351,6 @@ var ReplStatusExportBrokenMapTimeoutConfig = &SettingsConfig{int(base.ReplStatus
 var TopologySvcCooldownConfig = &SettingsConfig{int(base.TopologySvcCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
 var TopologySvcErrCooldownConfig = &SettingsConfig{int(base.TopologySvcErrCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
 var HealthCheckIntervalConfig = &SettingsConfig{int(base.HealthCheckInterval / time.Second), &Range{5, 3600 /*1 hour*/}}
-var HealthCheckTimeoutConfig = &SettingsConfig{int(base.HealthCheckTimeout / time.Second), &Range{5, 3600 /*1 hour*/}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -457,7 +455,6 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologySvcCooldownPeriodKey:                  TopologySvcCooldownConfig,
 	TopologySvcErrCooldownPeriodKey:               TopologySvcErrCooldownConfig,
 	HealthCheckIntervalKey:                        HealthCheckIntervalConfig,
-	HealthCheckTimeoutKey:                         HealthCheckTimeoutConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

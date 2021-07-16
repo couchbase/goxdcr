@@ -18,9 +18,13 @@ import (
 // and feeding the information back to those who need it
 type BucketTopologySvc interface {
 	SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
+	SubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
+	SubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
 	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, error)
 
 	UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+	UnSubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+	UnSubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
@@ -36,6 +40,8 @@ type SourceNotification interface {
 	GetNumberOfSourceNodes() int
 	GetSourceVBMapRO() map[string][]uint16
 	GetKvVbMapRO() map[string][]uint16
+	GetDcpStatsMap() map[string]map[string]string
+	GetDcpStatsMapLegacy() map[string]map[string]string
 }
 
 type TargetNotification interface {

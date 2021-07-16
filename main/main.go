@@ -172,7 +172,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils, base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc)
+		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils, base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc, base.HealthCheckInterval)
 		if err != nil {
 			fmt.Printf("Error starting bucket topology service. err=%v\n", err)
 			os.Exit(1)

@@ -401,12 +401,12 @@ function testForClusterRun {
 
 function setupCluster {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
-	  if [[ ! -z "${CLUSTER_SETUP_DONE_MAP[$clusterName]:-}" ]];then
-	      echo "$clusterName has already been set up - skipping setup"
-	      continue
-	  else
-	      CLUSTER_SETUP_DONE_MAP[$clusterName]="1"
-	  fi
+		if [[ ! -z "${CLUSTER_SETUP_DONE_MAP[$clusterName]:-}" ]]; then
+			echo "$clusterName has already been set up - skipping setup"
+			continue
+		else
+			CLUSTER_SETUP_DONE_MAP[$clusterName]="1"
+		fi
 
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		# If this nodeInfo is meant to be a dependency (added to a cluster) then don't add it
@@ -1565,6 +1565,32 @@ function listInternalSettings {
 	else
 		$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH
 	fi
+}
+
+function setInternalSettingsWithoutImport {
+	local clusterName=$1
+	local -a keyVal=("${@:2}")
+
+	local jqStr
+	jqLocation=$(which jq)
+	if (($? == 0)); then
+		jqStr="$jqLocation"
+	fi
+
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	# Because to do multiple -d keyvals, it's better to pass in a single array
+	local -a curlMultiArr
+	for kv in "${keyVal[@]}"; do
+		curlMultiArr+=(" -d ")
+		curlMultiArr+=("$kv")
+	done
+
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH ${curlMultiArr[@]} >/dev/null 2>&1
 }
 
 function setInternalSettings {

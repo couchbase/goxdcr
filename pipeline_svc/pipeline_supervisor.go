@@ -59,10 +59,7 @@ type PipelineSupervisor struct {
 	cluster_info_svc  service_def.ClusterInfoSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 	remoteClusterSvc  service_def.RemoteClusterSvc
-
-	// memcached clients for dcp health check
-	kv_mem_clients      map[string]mcc.ClientIface
-	kv_mem_clients_lock *sync.Mutex
+	bucketTopologySvc service_def.BucketTopologySvc
 
 	user_agent string
 
@@ -72,20 +69,17 @@ type PipelineSupervisor struct {
 	filterErrCh chan error
 }
 
-func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler,
-	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc) *PipelineSupervisor {
+func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *PipelineSupervisor {
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, nil, utilsIn)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
-		errors_seen:         make(map[string]error),
-		errors_seen_lock:    &sync.RWMutex{},
-		cluster_info_svc:    cluster_info_svc,
-		xdcr_topology_svc:   xdcr_topology_svc,
-		kv_mem_clients:      make(map[string]mcc.ClientIface),
-		kv_mem_clients_lock: &sync.Mutex{},
-		utils:               utilsIn,
-		filterErrCh:         make(chan error, maxFilterErrorsPerInterval),
-		remoteClusterSvc:    remoteClusterSvc,
+		errors_seen:       make(map[string]error),
+		errors_seen_lock:  &sync.RWMutex{},
+		cluster_info_svc:  cluster_info_svc,
+		xdcr_topology_svc: xdcr_topology_svc,
+		utils:             utilsIn,
+		filterErrCh:       make(chan error, maxFilterErrorsPerInterval),
+		remoteClusterSvc:  remoteClusterSvc,
+		bucketTopologySvc: bucketTopologySvc,
 	}
 	return pipelineSupervisor
 }
@@ -98,8 +92,6 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 	pipelineSupervisor.Logger().Infof("Attaching pipeline %v to supervior service %v\n", p.InstanceId(), pipelineSupervisor.Id())
 
 	pipelineSupervisor.pipeline = p
-
-	pipelineSupervisor.composeUserAgent()
 
 	partsMap := pipeline.GetAllParts(p)
 
@@ -133,11 +125,13 @@ func (pipelineSupervisor *PipelineSupervisor) Start(settings metadata.Replicatio
 		return err
 	}
 
-	// start an additional go routine for pipeline health monitoring
-	pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Add(2)
-	go pipelineSupervisor.monitorPipelineHealth()
-	go pipelineSupervisor.checkAndLogFilterErrors()
+	err = pipelineSupervisor.monitorPipelineHealth()
+	if err != nil {
+		return err
+	}
 
+	pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Add(1)
+	go pipelineSupervisor.checkAndLogFilterErrors()
 	return err
 }
 
@@ -167,51 +161,64 @@ func (pipelineSupervisor *PipelineSupervisor) Stop() error {
 		pipelineSupervisor.Logger().Warnf("%v received error when stopping, %v\n", pipelineSupervisor.Id(), err)
 	}
 
-	//close the connections
-	pipelineSupervisor.closeConnections()
-
 	return nil
 }
 
-func (pipelineSupervisor *PipelineSupervisor) closeConnections() {
-	pipelineSupervisor.kv_mem_clients_lock.Lock()
-	defer pipelineSupervisor.kv_mem_clients_lock.Unlock()
-	for serverAddr, client := range pipelineSupervisor.kv_mem_clients {
-		err := client.Close()
-		if err != nil {
-			pipelineSupervisor.Logger().Warnf("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err)
-		}
-	}
-	pipelineSupervisor.kv_mem_clients = make(map[string]mcc.ClientIface)
-}
-
 func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
-	pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started with interval: %v timeout: %v", pipelineSupervisor.Id(), base.HealthCheckInterval, base.HealthCheckTimeout)
+	spec := pipelineSupervisor.Pipeline().Specification()
+	if spec == nil {
+		return fmt.Errorf("Nil spec")
+	}
+	replSpec := spec.GetReplicationSpec()
+	if replSpec == nil {
+		return fmt.Errorf("Nil spec2")
+	}
 
-	defer pipelineSupervisor.GenericSupervisor.ChidrenWaitGroup().Done()
-
-	health_check_ticker := time.NewTicker(base.HealthCheckInterval)
-	defer health_check_ticker.Stop()
+	ref, err := pipelineSupervisor.remoteClusterSvc.RemoteClusterByUuid(replSpec.TargetClusterUUID, false)
+	if err != nil {
+		return err
+	}
+	remoteClusterCapability, err := pipelineSupervisor.remoteClusterSvc.GetCapability(ref)
+	if err != nil {
+		return err
+	}
 
 	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
+	var dcpStatsCh chan service_def.SourceNotification
+	if remoteClusterCapability.HasCollectionSupport() {
+		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.Id())
+	} else {
+		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.Id())
+	}
+	if err != nil {
+		return err
+	}
 
-	for {
-		select {
-		case <-fin_ch:
-			pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
-			return nil
-		case <-health_check_ticker.C:
-			err := base.ExecWithTimeout(pipelineSupervisor.checkPipelineHealth, base.HealthCheckTimeout, pipelineSupervisor.Logger())
-			if err != nil {
-				if err == base.ErrorExecutionTimedOut {
-					// ignore timeout error and continue
-					pipelineSupervisor.Logger().Infof("Received timeout error when checking pipeline health. topic=%v\n", pipelineSupervisor.pipeline.Topic())
+	pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started with interval: %v", pipelineSupervisor.Id(), base.HealthCheckInterval)
+	go func() {
+		for {
+			select {
+			case <-fin_ch:
+				pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
+				if remoteClusterCapability.HasCollectionSupport() {
+					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.Id())
 				} else {
-					return err
+					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.Id())
+				}
+				if err != nil {
+					pipelineSupervisor.Logger().Errorf("Unable to unsubscribe from DcpStatsFeed: %v", err)
+				}
+				return
+			case notification := <-dcpStatsCh:
+				if remoteClusterCapability.HasCollectionSupport() {
+					pipelineSupervisor.checkPipelineHealth(notification.GetDcpStatsMap())
+				} else {
+					pipelineSupervisor.checkPipelineHealth(notification.GetDcpStatsMapLegacy())
 				}
 			}
 		}
-	}
+	}()
+	return nil
 }
 
 func (pipelineSupervisor *PipelineSupervisor) logFilterError(err error, desc string) {
@@ -341,7 +348,7 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 }
 
 // check if any runtime stats indicates that pipeline is broken
-func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
+func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth(dcpStats map[string]map[string]string) error {
 	if !pipeline_utils.IsPipelineRunning(pipelineSupervisor.pipeline.State()) {
 		//the pipeline is no longer running, kill myself
 		message := "Pipeline is no longer running, exit."
@@ -349,14 +356,8 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 		return errors.New(message)
 	}
 
-	dcp_stats, err := pipelineSupervisor.getDcpStats()
-	if err != nil {
-		pipelineSupervisor.Logger().Errorf("%v Failed to get dcp stats. Skipping dcp health check.", pipelineSupervisor.Id())
-		return nil
-	}
-
 	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
-		err = dcp_nozzle.(*parts.DcpNozzle).CheckStuckness(dcp_stats)
+		err := dcp_nozzle.(*parts.DcpNozzle).CheckStuckness(dcpStats)
 		if err != nil {
 			pipelineSupervisor.setError(dcp_nozzle.Id(), err)
 			return err
@@ -364,69 +365,6 @@ func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth() error {
 	}
 
 	return nil
-}
-
-// compose user agent string for HELO command
-func (pipelineSupervisor *PipelineSupervisor) composeUserAgent() {
-	spec := pipelineSupervisor.pipeline.Specification().GetReplicationSpec()
-	pipelineSupervisor.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr PipelineSupervisor", spec.SourceBucketName, spec.TargetBucketName)
-}
-
-func (pipelineSupervisor *PipelineSupervisor) getDcpStats() (map[string]map[string]string, error) {
-	// need to lock since it is possible, even though unlikely, that getDcpStats() may be called multiple times at the same time
-	pipelineSupervisor.kv_mem_clients_lock.Lock()
-	defer pipelineSupervisor.kv_mem_clients_lock.Unlock()
-
-	dcp_stats := make(map[string]map[string]string)
-
-	spec := pipelineSupervisor.pipeline.Specification().GetReplicationSpec()
-	bucketName := spec.SourceBucketName
-	nodes, err := pipelineSupervisor.xdcr_topology_svc.MyKVNodes()
-	if err != nil {
-		pipelineSupervisor.Logger().Errorf("Error retrieving kv nodes for pipeline %v. Skipping dcp stats check. err=%v", pipelineSupervisor.pipeline.Topic(), err)
-		return nil, err
-	}
-
-	ref, err := pipelineSupervisor.remoteClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false /*refresh*/)
-	if err != nil {
-		pipelineSupervisor.Logger().Errorf("Error retrieving remote cluster reference for pipeline %v. Skipping dcp stats check. err=%v", pipelineSupervisor.pipeline.Topic(), err)
-		return nil, err
-	}
-
-	rcCapability, err := pipelineSupervisor.remoteClusterSvc.GetCapability(ref)
-	if err != nil {
-		pipelineSupervisor.Logger().Errorf("Error retrieving remote cluster capability for pipeline %v. Skipping dcp stats check. err=%v", pipelineSupervisor.pipeline.Topic(), err)
-		return nil, err
-	}
-
-	for _, serverAddr := range nodes {
-		// If the remote cluster does not support collections, then only get the stat for default collection
-		var features utilities.HELOFeatures
-		if !rcCapability.HasCollectionSupport() {
-			// This is reverse logic because to only get stat for the default collection, we need to enable collection
-			// so we can ask specifically for a subset, aka the default collection
-			features.Collections = true
-		}
-		client, err := pipelineSupervisor.utils.GetMemcachedClient(serverAddr, bucketName, pipelineSupervisor.kv_mem_clients, pipelineSupervisor.user_agent, base.KeepAlivePeriod, pipelineSupervisor.Logger(), features)
-		if err != nil {
-			return nil, err
-		}
-
-		stats_map, err := client.StatsMap(base.DCP_STAT_NAME)
-		if err != nil {
-			pipelineSupervisor.Logger().Warnf("%v Error getting dcp stats for kv %v. err=%v", pipelineSupervisor.Id(), serverAddr, err)
-			err1 := client.Close()
-			if err1 != nil {
-				pipelineSupervisor.Logger().Warnf("%v error from closing connection for %v is %v\n", pipelineSupervisor.Id(), serverAddr, err1)
-			}
-			delete(pipelineSupervisor.kv_mem_clients, serverAddr)
-			return nil, err
-		} else {
-			dcp_stats[serverAddr] = stats_map
-		}
-	}
-
-	return dcp_stats, nil
 }
 
 func (pipelineSupervisor *PipelineSupervisor) setError(partId string, err error) {

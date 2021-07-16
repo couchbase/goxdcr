@@ -3,6 +3,7 @@ package service_impl
 import (
 	"encoding/json"
 	"fmt"
+	mocks2 "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -17,14 +18,15 @@ import (
 	"time"
 )
 
-func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc) {
+func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc, *mocks2.ClientIface) {
 	remClusterSvc := &mocks.RemoteClusterSvc{}
 	utils := &utilsMock.UtilsIface{}
 	xdcrCompTopologySvc := &mocks.XDCRCompTopologySvc{}
 	utilsReal := utilities.NewUtilities()
 	replSpecSvc := &mocks.ReplicationSpecSvc{}
+	mcClient := &mocks2.ClientIface{}
 
-	return remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc
+	return remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient
 }
 
 const (
@@ -47,7 +49,11 @@ func getTestRemRef() *metadata.RemoteClusterReference {
 	return ref
 }
 
-func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification, ref *metadata.RemoteClusterReference) {
+func getCapability() metadata.Capability {
+	return metadata.UnitTestGetCollectionsCapability()
+}
+
+func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification, ref *metadata.RemoteClusterReference, cap metadata.Capability, mcClient *mocks2.ClientIface) {
 	var connStr = "dummyConnStr"
 	xdcrTopologySvc.On("MyConnectionStr").Return(connStr, nil)
 	xdcrTopologySvc.On("MyCredentials").Return("", "", base.HttpAuthMechPlain, nil, false, nil, nil, nil)
@@ -70,6 +76,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	}
 	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
+	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {
@@ -82,7 +89,9 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 		return bucketInfo, false, connStr, nil
 	}
 	remClusterSvc.On("GetBucketInfoGetter", mock.Anything, mock.Anything).Return(service_def.BucketInfoGetter(bucketInfoGetter), nil)
-	//type BucketInfoGetter func() (map[string]interface{}, bool, string, error)
+	remClusterSvc.On("GetCapability", mock.Anything).Return(cap, nil)
+
+	mcClient.On("StatsMap", mock.Anything).Return(nil, nil)
 }
 
 func getBucketMap() (map[string]interface{}, []string) {
@@ -108,11 +117,11 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestBucketTopologyServiceRegister =================")
 	assert := assert.New(t)
 
-	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc := setupBTSBoilerPlate()
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
 	bucketMap, kvNames := getBucketMap()
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef())
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -172,15 +181,15 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestBucketTopologyServiceRegister =================")
 	assert := assert.New(t)
 
-	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc := setupBTSBoilerPlate()
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
 	bucketMap, kvNames := getBucketMap()
 
 	spec, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName, tgtBucketUuid)
 	spec2, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName2, tgtBucketUuid2)
 	specList := []*metadata.ReplicationSpecification{spec, spec2}
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList, nil)
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList, nil, getCapability(), mcClient)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc, 10*time.Second)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -201,7 +210,7 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	//latestCacheCopy := watcher.latestCached.CloneRO().(serviceDefReal.SourceNotification)
 	watcher.latestCacheMtx.RUnlock()
 
-	immediateCh := watcher.registerAndGetCh(spec, "").(chan service_def.SourceNotification)
+	immediateCh := watcher.registerAndGetCh(spec, "", TOPOLOGY, nil).(chan service_def.SourceNotification)
 	select {
 	case <-immediateCh:
 	default:

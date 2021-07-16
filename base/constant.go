@@ -1033,7 +1033,6 @@ var TopologySvcErrCoolDownPeriod = 120 * time.Second
 var TopologySvcStatusNotFoundCoolDownPeriod = 10 * time.Second
 
 var HealthCheckInterval = 120 * time.Second
-var HealthCheckTimeout = 10 * time.Second
 
 var BucketTopologyWatcherChanLen = 1000
 
@@ -1090,7 +1089,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
 	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
 	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration,
-	healthCheckInterval time.Duration, healthCheckTimeout time.Duration) {
+	healthCheckInterval time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1212,7 +1211,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TopologySvcCoolDownPeriod = topologyCooldownPeriod
 	TopologySvcErrCoolDownPeriod = topologyErrCooldownPeriod
 	HealthCheckInterval = healthCheckInterval
-	HealthCheckTimeout = healthCheckTimeout
 }
 
 // Need to escape the () to result in "META().xattrs" literal

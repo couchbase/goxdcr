@@ -25,6 +25,38 @@ func (_m *SourceNotification) CloneRO() interface{} {
 	return r0
 }
 
+// GetDcpStatsMap provides a mock function with given fields:
+func (_m *SourceNotification) GetDcpStatsMap() map[string]map[string]string {
+	ret := _m.Called()
+
+	var r0 map[string]map[string]string
+	if rf, ok := ret.Get(0).(func() map[string]map[string]string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]map[string]string)
+		}
+	}
+
+	return r0
+}
+
+// GetDcpStatsMapLegacy provides a mock function with given fields:
+func (_m *SourceNotification) GetDcpStatsMapLegacy() map[string]map[string]string {
+	ret := _m.Called()
+
+	var r0 map[string]map[string]string
+	if rf, ok := ret.Get(0).(func() map[string]map[string]string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]map[string]string)
+		}
+	}
+
+	return r0
+}
+
 // GetKvVbMapRO provides a mock function with given fields:
 func (_m *SourceNotification) GetKvVbMapRO() map[string][]uint16 {
 	ret := _m.Called()
