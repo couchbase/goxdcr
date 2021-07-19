@@ -21,6 +21,7 @@ DIRS_WITH_UT=(
 base
 base/filter
 backfill_manager
+factory
 peerToPeer
 pipeline
 pipeline_svc

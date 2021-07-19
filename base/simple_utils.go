@@ -180,44 +180,42 @@ func RandomizeUint16List(list []uint16) {
 
 }
 
-// "sort" needs to be true if list_1 and list_2 are not sorted 	136
-func ComputeDeltaOfUint16Lists(list_1, list_2 []uint16, sort bool) ([]uint16, []uint16) {
+// "sort" needs to be true if list_1 and list_2 are not sorted
+func ComputeDeltaOfUint16Lists(list_1, list_2 []uint16, sort bool) (vblistRemoved []uint16, vblistNew []uint16, vblistIntersect []uint16) {
 	if sort {
-		SortUint16List(list_1)
-		SortUint16List(list_2)
+		list_1 = SortUint16List(list_1)
+		list_2 = SortUint16List(list_2)
 	}
-
-	vblist_removed := make([]uint16, 0)
-	vblist_new := make([]uint16, 0)
 
 	i := 0
 	j := 0
 	for {
 		if i >= len(list_1) || j >= len(list_2) {
 			if j < len(list_2) {
-				vblist_new = append(vblist_new, list_2[j:]...)
+				vblistNew = append(vblistNew, list_2[j:]...)
 			} else if i < len(list_1) {
-				vblist_removed = append(vblist_removed, list_1[i:]...)
+				vblistRemoved = append(vblistRemoved, list_1[i:]...)
 			}
 			break
 		} else {
 			if list_1[i] == list_2[j] {
 				// vb not changed
+				vblistIntersect = append(vblistIntersect, list_1[i])
 				i++
 				j++
 			} else if list_1[i] > list_2[j] {
 				// vb in list_2 is new
-				vblist_new = append(vblist_new, list_2[j])
+				vblistNew = append(vblistNew, list_2[j])
 				j++
 			} else {
 				//  vb in list_1 has been removed
-				vblist_removed = append(vblist_removed, list_1[i])
+				vblistRemoved = append(vblistRemoved, list_1[i])
 				i++
 			}
 		}
 	}
 
-	return vblist_removed, vblist_new
+	return
 }
 
 // type to facilitate the sorting of uint64 lists

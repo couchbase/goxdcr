@@ -12,14 +12,16 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-const ModuleName = "P2PManagerImpl"
+const ModuleName = "P2PManager"
 const randIdLen = 32
 
 type P2PManager interface {
@@ -27,29 +29,34 @@ type P2PManager interface {
 	Stop() error
 	GetLifecycleId() string
 
+	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
+
 	VBMasterCheck
 }
 
 type VBMasterCheck interface {
-	CheckVBMaster(BucketVBMapType) (VBMasterChkRespType, error)
+	CheckVBMaster(BucketVBMapType) (map[string]*VBMasterCheckResp, error)
 }
 
 type Handler interface {
 	Start() error
 	Stop() error
-	RegisterOpaque(req Request) error
+	RegisterOpaque(req Request, opts *SendOpts) error
 }
 
 type P2PManagerImpl struct {
-	xdcrCompSvc service_def.XDCRCompTopologySvc
-	utils       utils.UtilsIface
+	utils             utils.UtilsIface
+	xdcrCompSvc       service_def.XDCRCompTopologySvc
+	bucketTopologySvc service_def.BucketTopologySvc
+	replSpecSvc       service_def.ReplicationSpecSvc
 
 	lifeCycleId string
 	logger      *log.CommonLogger
 
-	started uint32
-	finCh   chan bool
-	commAPI PeerToPeerCommAPI
+	started         uint32
+	finCh           chan bool
+	commAPI         PeerToPeerCommAPI
+	cleanupInterval time.Duration
 
 	receiveChsMap map[OpCode]chan interface{}
 
@@ -58,10 +65,10 @@ type P2PManagerImpl struct {
 
 	latestKnownPeers *KnownPeers
 
-	vbMasterCheckHelper *VbMasterCheckHelperImpl
+	vbMasterCheckHelper VbMasterCheckHelper
 }
 
-func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface) (*P2PManagerImpl, error) {
+func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
 	if err != nil {
 		return nil, err
@@ -78,6 +85,9 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		receiveHandlers:     map[OpCode]Handler{},
 		latestKnownPeers:    &KnownPeers{PeersMap: PeersMapType{}},
 		vbMasterCheckHelper: NewVBMasterCheckHelper(),
+		bucketTopologySvc:   bucketTopologySvc,
+		replSpecSvc:         replicationSpecSvc,
+		cleanupInterval:     cleanupInt,
 	}, nil
 }
 
@@ -98,7 +108,7 @@ func (p *P2PManagerImpl) Start() (PeerToPeerCommAPI, error) {
 		p.initCommAPI()
 		p.logger.Infof("P2PManagerImpl started with lifeCycleId %v", p.lifeCycleId)
 		go p.sendDiscoveryRequest()
-		return p.commAPI, nil
+		return p.commAPI, p.loadSpecsFromMetakv()
 	}
 	return nil, fmt.Errorf("P2PManagerImpl already started")
 }
@@ -116,10 +126,10 @@ func (p *P2PManagerImpl) runHandlers() error {
 		switch i {
 		case ReqDiscovery:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, base.P2POpaqueCleanupInterval)
+			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, p.cleanupInterval)
 		case ReqVBMasterChk:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, base.P2POpaqueCleanupInterval)
+			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.bucketTopologySvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -146,7 +156,7 @@ func (p *P2PManagerImpl) sendDiscoveryRequest() error {
 		return discoveryReq
 	}
 
-	return p.sendToEachPeerOnce(ReqDiscovery, getReqFunc)
+	return p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false))
 }
 
 func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
@@ -177,9 +187,7 @@ func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 	return peers, myHostAddr, nil
 }
 
-type GetReqFunc func(source, target string) Request
-
-func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc) error {
+func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts) error {
 	peers, myHost, err := p.getSendPreReq()
 	if err != nil {
 		return err
@@ -192,30 +200,55 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
+		var peersToRetryMtx sync.Mutex
+		var waitGrp sync.WaitGroup
+
+		var errMapMtx sync.RWMutex
 		errMap := make(base.ErrorMap)
 		var err error
-		for peerAddr, _ := range peersToRetry {
-			compiledReq := getReqFunc(myHost, peerAddr)
-			err = p.receiveHandlers[opCode].RegisterOpaque(compiledReq)
-			if err != nil {
-				errMap[peerAddr] = err
-				peersToRetryReplacement[peerAddr] = true
-				continue
-			}
+		for peerAddrTransient, _ := range peersToRetry {
+			peerAddr := peerAddrTransient
+			waitGrp.Add(1)
+			go func() {
+				defer waitGrp.Done()
+				compiledReq := getReqFunc(myHost, peerAddr)
+				err = p.receiveHandlers[opCode].RegisterOpaque(compiledReq, cbOpts)
+				if err != nil {
+					errMapMtx.Lock()
+					errMap[peerAddr] = err
+					errMapMtx.Unlock()
+					peersToRetryMtx.Lock()
+					peersToRetryReplacement[peerAddr] = true
+					peersToRetryMtx.Unlock()
+					return
+				}
 
-			handlerResult, err := p.commAPI.P2PSend(compiledReq)
-			if err != nil {
-				p.logger.Errorf("P2PSend %v resulted in %v", compiledReq, err)
-				errMap[peerAddr] = err
-				peersToRetryReplacement[peerAddr] = true
-				continue
-			}
+				handlerResult, err := p.commAPI.P2PSend(compiledReq)
+				if err != nil {
+					p.logger.Errorf("P2PSend %v resulted in %v", compiledReq, err)
+					errMapMtx.Lock()
+					errMap[peerAddr] = err
+					errMapMtx.Unlock()
+					peersToRetryMtx.Lock()
+					peersToRetryReplacement[peerAddr] = true
+					peersToRetryMtx.Unlock()
+					return
+				}
 
-			if handlerResult.GetError() != nil || handlerResult.GetHttpStatusCode() != http.StatusOK {
-				errMap[peerAddr] = fmt.Errorf("%v-%v", handlerResult.GetError(), handlerResult.GetHttpStatusCode())
-				peersToRetryReplacement[peerAddr] = true
-			}
+				if handlerResult.GetError() != nil || handlerResult.GetHttpStatusCode() != http.StatusOK {
+					errMapMtx.Lock()
+					errMap[peerAddr] = fmt.Errorf("%v-%v", handlerResult.GetError(), handlerResult.GetHttpStatusCode())
+					errMapMtx.Unlock()
+					peersToRetryMtx.Lock()
+					peersToRetryReplacement[peerAddr] = true
+					peersToRetryMtx.Unlock()
+				}
+			}()
 		}
+		waitGrp.Wait()
+
+		peersToRetryMtx.Lock()
+		defer peersToRetryMtx.Unlock()
 		if len(peersToRetryReplacement) > 0 {
 			peersToRetry = peersToRetryReplacement
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
@@ -233,9 +266,74 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 	return nil
 }
 
-func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType) (VBMasterChkRespType, error) {
+type GetReqFunc func(source, target string) Request
+
+type SendOpts struct {
+	synchronous bool // Do we need to wait until response is heard
+
+	respMapMtx sync.RWMutex
+	respMap    SendOptsMap // If synchronous, then the sent requests and responses are stored
+}
+
+type SendOptsMap map[string]chan ReqRespPair
+
+func NewSendOpts(sync bool) *SendOpts {
+	if sync {
+		return &SendOpts{
+			synchronous: true,
+			respMap:     make(SendOptsMap),
+		}
+	} else {
+		return &SendOpts{}
+	}
+}
+
+func (s *SendOpts) GetResults() map[string]*ReqRespPair {
+	retMap := make(map[string]*ReqRespPair)
+
+	var waitGrp sync.WaitGroup
+
+	s.respMapMtx.RLock()
+	for serverName, _ := range s.respMap {
+		retMap[serverName] = &ReqRespPair{}
+	}
+
+	for serverName, ch := range s.respMap {
+		serverNameCpy := serverName
+		chCpy := ch
+		waitGrp.Add(1)
+		go func() {
+			defer waitGrp.Done()
+			select {
+			case pair := <-chCpy:
+				retMap[serverNameCpy].ReqPtr = pair.ReqPtr
+				retMap[serverNameCpy].RespPtr = pair.RespPtr
+			}
+		}()
+	}
+	s.respMapMtx.RUnlock()
+	waitGrp.Wait()
+
+	return retMap
+}
+
+type ReqRespPair struct {
+	ReqPtr  interface{}
+	RespPtr interface{}
+}
+
+// VB Master check involves:
+// 1. Look at all the VBs request incoming
+// 2. For VBs that this node hasn't ensured that nobody else has the same VB, send check request to those nodes
+// 3. Peer nodes respond with:
+//    a. Happy path - NOT_MY_VBUCKET status code with optional payload (if exists checkpoint and backfill information)
+//    b. Error path - "I'm VB Owner too" - which means something is wrong and recovery action may be needed (TODO)
+func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType) (map[string]*VBMasterCheckResp, error) {
 	// Only need to check the non-verified VBs
-	filteredSubsets := p.vbMasterCheckHelper.GetUnverifiedSubset(bucketAndVBs)
+	filteredSubsets, err := p.vbMasterCheckHelper.GetUnverifiedSubset(bucketAndVBs)
+	if err != nil {
+		return nil, err
+	}
 
 	getReqFunc := func(src, tgt string) Request {
 		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
@@ -244,66 +342,60 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType) (VBMasterCh
 		return vbCheckReq
 	}
 
-	err := p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc)
+	opts := NewSendOpts(true)
+	err = p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	if err != nil {
 		return nil, err
 	}
-	// TODO - wait for response
-	return "dummyResp", nil
+
+	result := opts.GetResults()
+
+	respMap := make(map[string]*VBMasterCheckResp)
+	for k, v := range result {
+		respMap[k] = v.RespPtr.(*VBMasterCheckResp)
+	}
+
+	return respMap, nil
+}
+
+func (p *P2PManagerImpl) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error {
+	if wg != nil {
+		defer wg.Done()
+	}
+
+	oldSpec, ok := oldVal.(*metadata.ReplicationSpecification)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+	newSpec, ok := newVal.(*metadata.ReplicationSpecification)
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	if oldSpec == nil && newSpec != nil {
+		p.vbMasterCheckHelper.HandleSpecCreation(newSpec)
+	} else if oldSpec != nil && newSpec == nil {
+		p.vbMasterCheckHelper.HandleSpecDeletion(oldSpec)
+	}
+	return nil
+}
+
+func (p *P2PManagerImpl) loadSpecsFromMetakv() error {
+	specs, err := p.replSpecSvc.AllReplicationSpecs()
+	if err != nil {
+		return err
+	}
+
+	var nilSpec *metadata.ReplicationSpecification
+	for _, spec := range specs {
+		err = p.ReplicationSpecChangeCallback("", nilSpec, spec, nil)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func getOpaqueWrapper() uint32 {
 	return base.GetOpaque(0, uint16(time.Now().UnixNano()))
-}
-
-type P2pCommAPIimpl struct {
-	receiveChs     map[OpCode]chan interface{}
-	utils          utils.UtilsIface
-	xdcrCompTopSvc service_def.XDCRCompTopologySvc
-}
-
-func NewP2pCommAPIHelper(receiveChs map[OpCode]chan interface{}, utils utils.UtilsIface, xdcrCompTopSvc service_def.XDCRCompTopologySvc) *P2pCommAPIimpl {
-	return &P2pCommAPIimpl{
-		receiveChs:     receiveChs,
-		utils:          utils,
-		xdcrCompTopSvc: xdcrCompTopSvc,
-	}
-}
-
-func (p2p *P2pCommAPIimpl) P2PReceive(req ReqRespCommon) (HandlerResult, error) {
-	result := &HandlerResultImpl{}
-
-	reqType := req.GetOpcode()
-
-	receiveCh, found := p2p.receiveChs[reqType]
-	if !found {
-		result.Err = ErrorInvalidOpcode
-		return result, ErrorInvalidOpcode
-	}
-
-	select {
-	case receiveCh <- req:
-		return result, nil
-	default:
-		result.Err = ErrorReceiveChanFull
-	}
-
-	return result, ErrorReceiveChanFull
-}
-
-func getDevOnlyPath() string {
-	return fmt.Sprintf("_goxdcr/%v", base.XDCRPeerToPeerPath)
-}
-
-func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
-	payload, err := req.Serialize()
-	if err != nil {
-		return nil, err
-	}
-
-	var out interface{}
-	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), getDevOnlyPath(), false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
-		payload, 0, &out, nil, false, nil)
-	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
-	return result, err
 }

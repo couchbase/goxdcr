@@ -61,10 +61,8 @@ func (h *DiscoveryHandler) handler() {
 			discoveryReq, isReq := req.(*DiscoveryRequest)
 			discoveryResp, isResp := req.(*DiscoveryResponse)
 			if isReq {
-				h.logger.Infof("Received req %v", discoveryReq)
 				h.handleRequest(discoveryReq)
 			} else if isResp {
-				h.logger.Infof("Received resp %v", discoveryResp)
 				h.handleResponse(discoveryResp)
 			}
 
@@ -105,7 +103,8 @@ func (h *DiscoveryHandler) handleRequest(req *DiscoveryRequest) {
 }
 
 func (h *DiscoveryHandler) handleResponse(resp *DiscoveryResponse) {
-	if !h.GetAndClearOpaque(resp.GetOpaque()) {
+	_, _, found := h.GetReqAndClearOpaque(resp.GetOpaque())
+	if !found {
 		h.logger.Errorf("Unable to find opaque %v", resp.GetOpaque())
 		return
 	}

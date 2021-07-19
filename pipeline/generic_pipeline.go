@@ -51,7 +51,8 @@ type StartingSeqnoConstructor func(pipeline common.Pipeline) error
 
 type CheckpointFunc func(pipeline common.Pipeline) error
 
-type VBMasterCheckFunc func(common.Pipeline) (peerToPeer.VBMasterChkRespType, error)
+// Returns the VBMasterCheck response and results, which will contain checkpoint information
+type VBMasterCheckFunc func(common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error)
 
 //GenericPipeline is the generic implementation of a data processing pipeline
 //

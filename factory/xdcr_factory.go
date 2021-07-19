@@ -867,7 +867,7 @@ func (xdcrf *XDCRFactory) CheckpointBeforeStop(pipeline common.Pipeline) error {
 	return nil
 }
 
-func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) (peerToPeer.VBMasterChkRespType, error) {
+func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error) {
 	if pipeline == nil {
 		return nil, errors.New("pipeline=nil")
 	}
@@ -893,11 +893,47 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	vbsReq[srcBucketName] = sourceVBs
 
 	xdcrf.logger.Infof("Running VBMasterCheck for bucket %v", srcBucketName)
-	resp, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq)
+	respMap, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq)
 	if err != nil {
 		return nil, err
 	}
-	return resp, nil
+
+	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO - do checkpoint merge
+
+	return respMap, nil
+}
+
+func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, srcBucketName string, sourceVBs []uint16) error {
+	var err error
+	errMap := make(base.ErrorMap)
+	for peerAddr, resp := range respMap {
+		nodeResp := resp.GetReponse()
+		requestedBucketInfo, found := nodeResp[srcBucketName]
+		if !found {
+			errMap[peerAddr] = fmt.Errorf("node %v response does not contain info for requested src bucket %v", peerAddr, srcBucketName)
+			continue
+		}
+		// Convert NotMyVBs into list for comparison
+		var respondedVBs []uint16
+		for vb, _ := range requestedBucketInfo.NotMyVBs {
+			respondedVBs = append(respondedVBs, vb)
+		}
+
+		removed, _, intersected := base.ComputeDeltaOfUint16Lists(sourceVBs, respondedVBs, true)
+		if len(intersected) != len(sourceVBs) {
+			errMap[peerAddr] = fmt.Errorf("node %v response for bucket %v shows vbs %v as masters as well", peerAddr, srcBucketName, removed)
+			continue
+		}
+	}
+	if len(errMap) > 0 {
+		err = fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return err
 }
 
 func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipeline, part common.Part,

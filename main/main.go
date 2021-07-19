@@ -226,7 +226,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.DefaultLoggerContext, top_svc, utils)
+		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.DefaultLoggerContext, top_svc, utils, bucketTopologyService, replication_spec_svc, base.P2POpaqueCleanupInterval)
 
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,

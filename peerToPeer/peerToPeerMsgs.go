@@ -183,13 +183,13 @@ func (r *ResponseCommon) GetOpaque() uint32 {
 	return r.Opaque
 }
 
+func (r *ResponseCommon) GetOpcode() OpCode {
+	return r.RespType
+}
+
 type DiscoveryResponse struct {
 	ResponseCommon
 	DiscoveryErrString string
-}
-
-func (d *DiscoveryResponse) GetOpcode() OpCode {
-	return d.RespType
 }
 
 func (d *DiscoveryResponse) Serialize() ([]byte, error) {
@@ -255,8 +255,13 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 			return nil, err
 		}
 		return respDisc, nil
-	//case ReqVBMasterChk:
-	//resp := &VBMasterCheckResp{}
+	case ReqVBMasterChk:
+		resp := &VBMasterCheckResp{}
+		err = resp.DeSerialize(body)
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
 	default:
 		return nil, fmt.Errorf("Unknown response %v", respCommon.RespType)
 	}
@@ -343,9 +348,6 @@ func BucketVBMapTypeAreSame(other BucketVBMapType, b BucketVBMapType) bool {
 	return true
 }
 
-// TODO
-type VBMasterChkRespType interface{}
-
 func NewVBMasterCheckReq(common RequestCommon) *VBMasterCheckReq {
 	req := &VBMasterCheckReq{RequestCommon: common}
 	req.ReqType = ReqVBMasterChk
@@ -404,4 +406,100 @@ func (v *VBMasterCheckReq) GenerateResponse() interface{} {
 
 type VBMasterCheckResp struct {
 	ResponseCommon
+
+	responsePayload           BucketVBMPayloadType
+	ResponsePayloadCompressed []byte
+}
+
+// Unit test
+func NewVBMasterCheckRespGivenPayload(payload BucketVBMPayloadType) *VBMasterCheckResp {
+	return &VBMasterCheckResp{
+		ResponseCommon:            ResponseCommon{},
+		responsePayload:           payload,
+		ResponsePayloadCompressed: nil,
+	}
+}
+
+func (v *VBMasterCheckResp) GetReponse() BucketVBMPayloadType {
+	return v.responsePayload
+}
+
+func (v *VBMasterCheckResp) Serialize() ([]byte, error) {
+	responsePayloadMarshalled, err := json.Marshal(v.responsePayload)
+	if err != nil {
+		return nil, err
+	}
+
+	v.ResponsePayloadCompressed = snappy.Encode(nil, responsePayloadMarshalled)
+
+	return json.Marshal(v)
+}
+
+func (v *VBMasterCheckResp) DeSerialize(bytes []byte) error {
+	err := json.Unmarshal(bytes, v)
+	if err != nil {
+		return err
+	}
+
+	v.Init()
+	if len(v.ResponsePayloadCompressed) > 0 {
+		marshalledPayload, snappyErr := snappy.Decode(nil, v.ResponsePayloadCompressed)
+		if snappyErr != nil {
+			return snappyErr
+		}
+		err = json.Unmarshal(marshalledPayload, &v.responsePayload)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Key is bucket name
+type BucketVBMPayloadType map[string]*VBMasterPayload
+
+type VBMasterPayload struct {
+	OverallPayloadErr string // If populated, the data below are invalid
+
+	NotMyVBs       VBsPayload // These VBs are not owned by requested node
+	ConflictingVBs VBsPayload // Requested node believes these VBs to be owned as does sender
+}
+
+func (p *VBMasterPayload) RegisterVbsIntersect(vbsIntersect []uint16) {
+	for _, vb := range vbsIntersect {
+		// TODO - actually populate payload?
+		p.ConflictingVBs[vb] = NewPayload()
+	}
+}
+
+func (p *VBMasterPayload) RegisterNotMyVBs(notMyVbs []uint16) {
+	for _, vb := range notMyVbs {
+		p.NotMyVBs[vb] = NewPayload()
+	}
+}
+
+type VBsPayload map[uint16]*Payload
+
+func NewVBMasterPayload() *VBMasterPayload {
+	return &VBMasterPayload{
+		OverallPayloadErr: "",
+		NotMyVBs:          make(VBsPayload),
+		ConflictingVBs:    make(VBsPayload),
+	}
+}
+
+type Payload struct {
+	// TODO
+}
+
+func NewPayload() *Payload {
+	return &Payload{}
+}
+
+func (v *VBMasterCheckResp) Init() {
+	v.responsePayload = make(BucketVBMPayloadType)
+}
+
+func (v *VBMasterCheckResp) InitBucket(bucketName string) {
+	v.responsePayload[bucketName] = NewVBMasterPayload()
 }

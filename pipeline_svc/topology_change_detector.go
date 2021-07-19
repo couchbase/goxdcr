@@ -211,7 +211,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 
 	var err error
 	if vblist_supposed != nil {
-		vblist_removed, vblist_new := base.ComputeDeltaOfUint16Lists(top_detect_svc.vblist_original, vblist_supposed, false)
+		vblist_removed, vblist_new, _ := base.ComputeDeltaOfUint16Lists(top_detect_svc.vblist_original, vblist_supposed, false)
 		if len(vblist_removed) > 0 || len(vblist_new) > 0 {
 			top_detect_svc.logger.Infof("Source topology changed for pipeline %v: vblist_removed=%v, vblist_new=%v\n", top_detect_svc.mainPipelineTopic, vblist_removed, vblist_new)
 		}

@@ -13,7 +13,7 @@ type Handler struct {
 }
 
 // RegisterOpaque provides a mock function with given fields: req
-func (_m *Handler) RegisterOpaque(req peerToPeer.Request) error {
+func (_m *Handler) RegisterOpaque(req peerToPeer.Request, opts *interface{}) error {
 	ret := _m.Called(req)
 
 	var r0 error
