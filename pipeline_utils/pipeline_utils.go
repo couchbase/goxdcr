@@ -72,16 +72,3 @@ func IsPipelineRunning(state common.PipelineState) bool {
 func IsPipelineStopping(state common.PipelineState) bool {
 	return state == common.Pipeline_Stopping || state == common.Pipeline_Stopped
 }
-
-// get first seen xattr seqno for each vbucket in pipeline
-func GetXattrSeqnos(pipeline common.Pipeline) map[uint16]uint64 {
-	ret := make(map[uint16]uint64)
-	sourceNozzles := pipeline.Sources()
-	for _, sourceNozzle := range sourceNozzles {
-		xattr_seqnos := sourceNozzle.(*parts.DcpNozzle).GetXattrSeqnos()
-		for vbno, xattr_seqno := range xattr_seqnos {
-			ret[vbno] = xattr_seqno
-		}
-	}
-	return ret
-}

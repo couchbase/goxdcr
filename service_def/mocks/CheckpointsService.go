@@ -229,20 +229,20 @@ func (_m *CheckpointsService) UpsertBrokenMapping(replicationId string, specInte
 	return r0
 }
 
-// UpsertCheckpoints provides a mock function with given fields: replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion
-func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64, targetClusterVersion int) (int, error) {
-	ret := _m.Called(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+// UpsertCheckpoints provides a mock function with given fields: replicationId, specInternalId, vbno, ckpt_record
+func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error) {
+	ret := _m.Called(replicationId, specInternalId, vbno, ckpt_record)
 
 	var r0 int
-	if rf, ok := ret.Get(0).(func(string, string, uint16, *metadata.CheckpointRecord, uint64, int) int); ok {
-		r0 = rf(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+	if rf, ok := ret.Get(0).(func(string, string, uint16, *metadata.CheckpointRecord) int); ok {
+		r0 = rf(replicationId, specInternalId, vbno, ckpt_record)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, uint16, *metadata.CheckpointRecord, uint64, int) error); ok {
-		r1 = rf(replicationId, specInternalId, vbno, ckpt_record, xattr_seqno, targetClusterVersion)
+	if rf, ok := ret.Get(1).(func(string, string, uint16, *metadata.CheckpointRecord) error); ok {
+		r1 = rf(replicationId, specInternalId, vbno, ckpt_record)
 	} else {
 		r1 = ret.Error(1)
 	}

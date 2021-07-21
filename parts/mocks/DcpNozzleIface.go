@@ -113,22 +113,6 @@ func (_m *DcpNozzleIface) GetStreamState(vbno uint16) (parts.DcpStreamState, err
 	return r0, r1
 }
 
-// GetXattrSeqnos provides a mock function with given fields:
-func (_m *DcpNozzleIface) GetXattrSeqnos() map[uint16]uint64 {
-	ret := _m.Called()
-
-	var r0 map[uint16]uint64
-	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[uint16]uint64)
-		}
-	}
-
-	return r0
-}
-
 // Id provides a mock function with given fields:
 func (_m *DcpNozzleIface) Id() string {
 	ret := _m.Called()

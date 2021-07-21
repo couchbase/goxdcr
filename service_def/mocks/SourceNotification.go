@@ -57,6 +57,38 @@ func (_m *SourceNotification) GetDcpStatsMapLegacy() map[string]map[string]strin
 	return r0
 }
 
+// GetHighSeqnosMap provides a mock function with given fields:
+func (_m *SourceNotification) GetHighSeqnosMap() map[string]map[uint16]uint64 {
+	ret := _m.Called()
+
+	var r0 map[string]map[uint16]uint64
+	if rf, ok := ret.Get(0).(func() map[string]map[uint16]uint64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]map[uint16]uint64)
+		}
+	}
+
+	return r0
+}
+
+// GetHighSeqnosMapLegacy provides a mock function with given fields:
+func (_m *SourceNotification) GetHighSeqnosMapLegacy() map[string]map[uint16]uint64 {
+	ret := _m.Called()
+
+	var r0 map[string]map[uint16]uint64
+	if rf, ok := ret.Get(0).(func() map[string]map[uint16]uint64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]map[uint16]uint64)
+		}
+	}
+
+	return r0
+}
+
 // GetKvVbMapRO provides a mock function with given fields:
 func (_m *SourceNotification) GetKvVbMapRO() map[string][]uint16 {
 	ret := _m.Called()

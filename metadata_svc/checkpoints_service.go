@@ -219,9 +219,8 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 // and target cluster version in checkpoint doc
 // these operations are done in the same metakv operation to ensure that they succeed and fail together
 // Returns size of the checkpoint
-func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16,
-	ckpt_record *metadata.CheckpointRecord, xattr_seqno uint64, targetClusterVersion int) (int, error) {
-	ckpt_svc.logger.Debugf("Persisting checkpoint record=%v xattr_seqno=%v for vbno=%v replication=%v\n", ckpt_record, xattr_seqno, vbno, replicationId)
+func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error) {
+	ckpt_svc.logger.Debugf("Persisting checkpoint record=%v for vbno=%v replication=%v\n", ckpt_record, vbno, replicationId)
 	var size int
 
 	if ckpt_record == nil {
@@ -235,21 +234,6 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 	}
 	if err != nil {
 		return size, err
-	}
-
-	// check if xattr seqno in checkpoint doc needs to be updated
-	if xattr_seqno > 0 {
-		// the "ckpt_doc.XattrSeqno > xattr_seqno" check is needed since ckpt_doc.XattrSeqno
-		// could go backward in rollback scenario
-		if ckpt_doc.XattrSeqno == 0 || ckpt_doc.XattrSeqno > xattr_seqno {
-			ckpt_doc.XattrSeqno = xattr_seqno
-		}
-	}
-
-	// check if target cluster version in checkpoint doc needs to be updated
-	// since cluster downgrade is not allowed, target version can only go up
-	if ckpt_doc.TargetClusterVersion < targetClusterVersion {
-		ckpt_doc.TargetClusterVersion = targetClusterVersion
 	}
 
 	added, removedRecords := ckpt_doc.AddRecord(ckpt_record)

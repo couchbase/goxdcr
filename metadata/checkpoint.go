@@ -424,13 +424,6 @@ type CheckpointsDoc struct {
 	//keep "MaxCheckpointsKept" checkpoint record - ordered by new to old, with 0th element being the newest
 	Checkpoint_records []*CheckpointRecord `json:"checkpoints"`
 
-	// senqo of the first mutation with xattr in the corresponding vbucket
-	XattrSeqno uint64 `json:"xattrSeqno"`
-
-	// track the latest target cluster version
-	// it can be used to detect the event that target cluster has been upgraded to support xattr
-	TargetClusterVersion int `json:"targetClusterVersion"`
-
 	// internal id of repl spec - for detection of repl spec deletion and recreation event
 	SpecInternalId string `json:"specInternalId"`
 
@@ -447,8 +440,6 @@ func (c *CheckpointsDoc) Size() int {
 	for _, j := range c.Checkpoint_records {
 		totalSize += j.Size()
 	}
-	totalSize += int(unsafe.Sizeof(c.XattrSeqno))
-	totalSize += int(unsafe.Sizeof(c.TargetClusterVersion))
 	totalSize += len(c.SpecInternalId)
 	return totalSize
 }
