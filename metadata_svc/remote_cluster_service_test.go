@@ -27,7 +27,6 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -2635,20 +2634,21 @@ func TestCreateRemoteWithIpFamilyV4Blocked(t *testing.T) {
 	}
 
 	// Test when ipv4 is blocked, create remote with hostname which maps to ipv4 is not allowed
-	hostname, err := os.Hostname()
-	if err != nil {
-		fmt.Printf("os.Hostname() failed with error %v. Skiping create remote ref with hostname test\n", err)
-	} else {
-		ref = createRemoteClusterRefWithHost(idAndName, hostname, srvHelper, assert)
-		utilsMockFunc = func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
-		setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
-			remoteClusterSvc, ref, utilsMockFunc)
-		err = remoteClusterSvc.validateAddRemoteCluster(ref, false)
-		assert.NotNil(err)
-		if err != nil {
-			assert.Contains(err.Error(), "Cannot find address in the ip family")
-		}
-	}
+	// Comment out this part since it assume that hostname can be resolved to a ipv4 and ipv4 only
+	//hostname, err := os.Hostname()
+	//if err != nil {
+	//	fmt.Printf("os.Hostname() failed with error %v. Skiping create remote ref with hostname test\n", err)
+	//} else {
+	//	ref = createRemoteClusterRefWithHost(idAndName, hostname, srvHelper, assert)
+	//	utilsMockFunc = func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+	//	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	//		remoteClusterSvc, ref, utilsMockFunc)
+	//	err = remoteClusterSvc.validateAddRemoteCluster(ref, false)
+	//	assert.NotNil(err)
+	//	if err != nil {
+	//		assert.Contains(err.Error(), "Cannot find address in the ip family")
+	//	}
+	//}
 	base.NetTCP = base.TCP // This restores to support both IPV4/IPV6
 }
 
