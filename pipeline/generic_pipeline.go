@@ -54,6 +54,8 @@ type CheckpointFunc func(pipeline common.Pipeline) error
 // Returns the VBMasterCheck response and results, which will contain checkpoint information
 type VBMasterCheckFunc func(common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error)
 
+type MergeVBMasterRespCkptsFunc func(common.Pipeline, map[string]*peerToPeer.VBMasterCheckResp) error
+
 //GenericPipeline is the generic implementation of a data processing pipeline
 //
 //The assumption here is all the processing steps are self-connected, so
@@ -123,6 +125,7 @@ type GenericPipeline struct {
 	brokenMap    metadata.CollectionNamespaceMapping
 
 	vbMasterCheckFunc VBMasterCheckFunc
+	mergeCkptFunc     MergeVBMasterRespCkptsFunc
 }
 
 //Get the runtime context of this pipeline
@@ -259,9 +262,15 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	// Before starting vb timestamp, need to ensure VBMaster
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
 	if !ok || ok && vbMasterCheckConfig.(bool) == true {
-		_, err = genericPipeline.vbMasterCheckFunc(genericPipeline)
+		resp, err := genericPipeline.vbMasterCheckFunc(genericPipeline)
 		if err != nil {
 			errMap["genericPipeline.vbMasterCheckFunc"] = err
+			return errMap
+		}
+
+		err = genericPipeline.mergeCkptFunc(genericPipeline, resp)
+		if err != nil {
+			errMap["genericPipeline.mergeCkptFunc"] = err
 			return errMap
 		}
 	}
@@ -572,22 +581,7 @@ func NewGenericPipeline(t string,
 	return pipeline
 }
 
-func NewPipelineWithSettingConstructor(t string,
-	pipelineType common.PipelineType,
-	sources map[string]common.Nozzle,
-	targets map[string]common.Nozzle,
-	spec metadata.GenericSpecification,
-	targetClusterRef *metadata.RemoteClusterReference,
-	partsSettingsConstructor PartsSettingsConstructor,
-	connectorSettingsConstructor ConnectorSettingsConstructor,
-	sslPortMapConstructor SSLPortMapConstructor,
-	partsUpdateSettingsConstructor PartsUpdateSettingsConstructor,
-	connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor,
-	startingSeqnoConstructor StartingSeqnoConstructor,
-	checkpoint_func CheckpointFunc,
-	logger_context *log.LoggerContext,
-	vbMasterCheckFunc VBMasterCheckFunc,
-) *GenericPipeline {
+func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
 		targets:                            targets,
@@ -606,6 +600,7 @@ func NewPipelineWithSettingConstructor(t string,
 		settings_lock:                      &sync.RWMutex{},
 		pipelineType:                       pipelineType,
 		vbMasterCheckFunc:                  vbMasterCheckFunc,
+		mergeCkptFunc:                      mergeCkptFunc,
 	}
 	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()

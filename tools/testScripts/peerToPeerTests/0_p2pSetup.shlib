@@ -40,27 +40,22 @@ function runDataLoad {
 
 TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
 
-function runOneReplicationCycle {
-	local cycleCnt=$1
-	local totalCycleCnt=$2
+function runOneReplicationCycleAndPause {
 	local timeIntervalSecs=5
 	local checkInterval=10
 	local maxChangeCnt=3
 	local maxStableCnt=3
 	local coolDownPeriod=1
 	local checkInt
-	if (($cycleCnt == 0)); then
-		setupTopologies
-		# Shorten the amount of time pipeline restarts
-		setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
-		sleep 5
-		checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
-		checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
-		checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
-		checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
-	else
-		setupBuckets
-	fi
+	setupCluster
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
 	if (($? != 0)); then
 		exit $?
 	fi
@@ -80,22 +75,17 @@ function runOneReplicationCycle {
 	validateXDCRCheckpoints "C1"
 	grepForPanics
 
-	#pauseReplication "C1" "B1" "C2" "B2"
-	#echo "Waiting 10 seconds for pipeline to really pause"
-	#sleep 10
-	#grepForPanics
-
-	#resumeReplication "C1" "B1" "C2" "B2"
-	#echo "Waiting 10 seconds for resume to finish"
-	#sleep 10
-	#grepForPanics
-
-	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
 	grepForPanics
 
-	echo "============================================================================"
-	echo "Cycle $(($cycleCnt + 1)) PASSED"
-	echo "============================================================================"
+	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	#grepForPanics
+
+	#	echo "============================================================================"
+	#	echo "Cycle $(($cycleCnt + 1)) PASSED"
+	#	echo "============================================================================"
 	#cleanupBucketReplications
 	#cleanupBuckets
 	#cleanupRemoteClusterRefs
@@ -103,23 +93,16 @@ function runOneReplicationCycle {
 	#sleep $timeIntervalSecs
 }
 
-function runMultipleReplicationCycles {
-	local totalCount=$1
-
-	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
-		runOneReplicationCycle $i $totalCount
-	done
-}
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
-
+CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
+CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
 
 function runOneRebalanceCycle {
 	local cycleCnt=$1
 	local totalCycleCnt=$2
 	local timeIntervalSecs=30
 
-  setupCluster
-  echo "Sleeping 10 secs before rebalancing node in"
+	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
 
 	echo "============================================================================"
@@ -129,32 +112,44 @@ function runOneRebalanceCycle {
 	startRebalancingIn "C1"
 	echo "Rebalancing node in is completed"
 
-  echo "Sleeping before checking logs"
+	#echo "Sleeping before checking logs"
 	sleep 15
-	currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
-	local currentPeerMsgsC1
-	currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
+	#currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
+	#local currentPeerMsgsC1
+	#currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
 
-	echo "Restarting XDCR processes to trigger p2p discovery"
-	killGoXdcr "C1"
-	killGoXdcr "C1P"
+	#echo "Restarting XDCR processes to trigger p2p discovery"
+	#killGoXdcr "C1"
+	#killGoXdcr "C1P"
 
-  echo "Sleeping before checking logs"
-  sleep 15
+	#echo "Sleeping before checking logs"
+	#sleep 15
 
-  validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(( $currentPeerMsgsC1 + 1 ))
+	#validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(( $currentPeerMsgsC1 + 1 ))
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"
 }
 
-function runMultipleRebalanceCycles {
-	local totalCount=$1
+function runReplicationResume {
+	local logs
 
-	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
-		runOneRebalanceCycle $i $totalCount
-	done
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 20 seconds for resume to finish"
+	sleep 20
+
+	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
+	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" 1
+	logs=$(getInternalNodeXdcrLog "C1")
+	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
+	if (($foundDocCount == 0)); then
+		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
+		exit 1
+	fi
+
+	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" 1
+	grepForPanics
 }
 
 function runTestCase {
@@ -165,8 +160,9 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-	runMultipleRebalanceCycles 1
-	runMultipleReplicationCycles 1
+	runOneReplicationCycleAndPause
+	runOneRebalanceCycle 1 1
+	runReplicationResume
 
 	# 2 jobs - whichever finishes first is done
 	stopWhenAnyBgJobStops 2

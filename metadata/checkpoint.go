@@ -11,6 +11,7 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"sync"
 	"unsafe"
@@ -420,15 +421,163 @@ func (ckpt_record *CheckpointRecord) String() string {
 		ckpt_record.Target_Seqno, ckpt_record.SourceManifestForDCP, ckpt_record.SourceManifestForBackfillMgr, ckpt_record.TargetManifest, ckpt_record.BrokenMappingSha256, ckpt_record.brokenMappings)
 }
 
+type CheckpointSortRecordsList []*CheckpointSortRecord
+type CheckpointSortRecord struct {
+	*CheckpointRecord
+	srcFailoverLog *mcc.FailoverLog
+	tgtFailoverLog *mcc.FailoverLog
+}
+
+func (c CheckpointSortRecordsList) Len() int      { return len(c) }
+func (c CheckpointSortRecordsList) Swap(i, j int) { c[i], c[j] = c[j], c[i] }
+
+func (c CheckpointSortRecordsList) ToRegularList() CheckpointRecordsList {
+	var outList CheckpointRecordsList
+	for _, ckptSortRecord := range c {
+		outList = append(outList, ckptSortRecord.CheckpointRecord)
+	}
+	return outList
+}
+
+func findIdxGivenRecordAndFailoverlog(vbUuid uint64, failoverLog *mcc.FailoverLog) (int, bool) {
+	if failoverLog == nil {
+		return -1, false
+	}
+
+	for idx, pair := range *failoverLog {
+		// vbuuid is 0th element
+		if pair[0] == vbUuid {
+			return idx, true
+		}
+	}
+
+	return -1, false
+}
+
+// Since XDCR resumes pipelines by reading ckpts from idx 0 and onwards,
+// checkpoints is sorted in reverse chronological order. This means that a < b if a happens later than b
+func (c CheckpointSortRecordsList) Less(i, j int) bool {
+	aRecord := c[i]
+	bRecord := c[j]
+
+	// If failover records are there, use those first
+	if aRecord.srcFailoverLog != nil && bRecord.srcFailoverLog != nil {
+		// First compare failover position
+		result, done := compareFailoverLogPositionThenSeqnos(aRecord, bRecord, true /*src*/)
+		if done {
+			return result
+		}
+	}
+
+	// If one record has failoverlog and another record doesn't, pick the one that does
+	if aRecord.srcFailoverLog != nil && bRecord.srcFailoverLog == nil {
+		// Let A be prioritized (less than)
+		return true
+	} else if aRecord.srcFailoverLog == nil && bRecord.srcFailoverLog != nil {
+		return false
+	}
+
+	// Failover records comparison doesn't apply here
+	if aRecord.Seqno != bRecord.Seqno {
+		// Let seqno dictate
+		return aRecord.Seqno > bRecord.Seqno
+	}
+
+	// By this point, both records cannot match on source failover UUID
+	// And both cannot match by source seqnos
+	// Let target side dictate who wins
+	if aRecord.tgtFailoverLog != nil && bRecord.tgtFailoverLog == nil {
+		return true
+	} else if aRecord.tgtFailoverLog == nil && bRecord.tgtFailoverLog != nil {
+		return false
+	} else if aRecord.tgtFailoverLog != nil && bRecord.tgtFailoverLog != nil {
+		result, done := compareFailoverLogPositionThenSeqnos(aRecord, bRecord, false /*src*/)
+		if done {
+			return result
+		}
+	}
+
+	// Last resort
+	return aRecord.Target_Seqno > bRecord.Target_Seqno
+}
+
+func compareFailoverLogPositionThenSeqnos(aRecord *CheckpointSortRecord, bRecord *CheckpointSortRecord, source bool) (bool, bool) {
+	var aFailoverLog *mcc.FailoverLog
+	var aFailoverUuid uint64
+	var aSeqno uint64
+
+	var bFailoverLog *mcc.FailoverLog
+	var bFailoverUuid uint64
+	var bSeqno uint64
+
+	if source {
+		aFailoverLog = aRecord.srcFailoverLog
+		bFailoverLog = bRecord.srcFailoverLog
+		aFailoverUuid = aRecord.Failover_uuid
+		aSeqno = aRecord.Seqno
+	} else {
+		aFailoverLog = aRecord.tgtFailoverLog
+		bFailoverLog = bRecord.tgtFailoverLog
+		aFailoverUuid = aRecord.Target_vb_opaque.Value().(uint64)
+		aSeqno = aRecord.Target_Seqno
+	}
+
+	aFailoverPos, aFound := findIdxGivenRecordAndFailoverlog(aFailoverUuid, aFailoverLog)
+	bFailoverPos, bFound := findIdxGivenRecordAndFailoverlog(bFailoverUuid, bFailoverLog)
+	if aFound && !bFound {
+		// aRecord has vbuuid, bRecord doesn't... aRecord should be considered "more valid", aka "more recent"
+		return true, true
+	} else if !aFound && bFound {
+		// converse of above
+		return false, true
+	} else {
+		if aFound && bFound && aFailoverPos != bFailoverPos {
+			// Comparison of index is only valid if failoverPos are different
+			// Failover logs are sent back in the order of recent -> oldest
+			return aFailoverPos < bFailoverPos, true
+		} else {
+			if aRecord.Seqno != bRecord.Seqno {
+				// If aSeqno is > than bSeqno, that means aRecord should be "less than" or "newer" than bRecord
+				return aSeqno > bSeqno, true
+			}
+		}
+	}
+	return false, false
+}
+
+type CheckpointRecordsList []*CheckpointRecord
+
+func (c *CheckpointRecordsList) PrepareSortStructure(srcFailoverlog, tgtFailoverlog *mcc.FailoverLog) CheckpointSortRecordsList {
+	var sortRecordsList CheckpointSortRecordsList
+	if c == nil {
+		return sortRecordsList
+	}
+	for _, checkpointRecord := range *c {
+		sortRecordsList = append(sortRecordsList, &CheckpointSortRecord{
+			CheckpointRecord: checkpointRecord,
+			srcFailoverLog:   srcFailoverlog,
+			tgtFailoverLog:   tgtFailoverlog,
+		})
+	}
+	return sortRecordsList
+}
+
 type CheckpointsDoc struct {
 	//keep "MaxCheckpointsKept" checkpoint record - ordered by new to old, with 0th element being the newest
-	Checkpoint_records []*CheckpointRecord `json:"checkpoints"`
+	Checkpoint_records CheckpointRecordsList `json:"checkpoints"`
 
 	// internal id of repl spec - for detection of repl spec deletion and recreation event
 	SpecInternalId string `json:"specInternalId"`
 
 	//revision number
 	Revision interface{}
+}
+
+func (c *CheckpointsDoc) CloneWithoutRecords() *CheckpointsDoc {
+	return &CheckpointsDoc{
+		SpecInternalId: c.SpecInternalId,
+		Revision:       nil,
+	}
 }
 
 func (c *CheckpointsDoc) Size() int {

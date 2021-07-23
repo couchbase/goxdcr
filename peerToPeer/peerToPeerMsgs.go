@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
+	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/golang/snappy"
 	"io/ioutil"
@@ -258,8 +260,8 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 	case ReqVBMasterChk:
 		resp := &VBMasterCheckResp{}
 		err = resp.DeSerialize(body)
-		if err != nil {
-			return nil, err
+		if len(resp.ResponsePayloadCompressed) > 0 && len(*resp.responsePayload) == 0 {
+			panic("Should not be possible")
 		}
 		return resp, nil
 	default:
@@ -312,6 +314,11 @@ type VBMasterCheckReq struct {
 	// Request peer node's response given a map of bucket names and VBs for each bucket
 	bucketVBMap           BucketVBMapType // small case to not be marshalled
 	BucketVBMapCompressed []byte          // Not to be used except for marshalling
+
+	// For now, only one ckpt request for one replication
+	ReplicationId    string
+	SourceBucketName string // already in replicationId but for ease of use
+	PipelineType     common.PipelineType
 }
 
 func (v *VBMasterCheckReq) GetBucketVBMap() BucketVBMapType {
@@ -392,14 +399,23 @@ func (v *VBMasterCheckReq) SameAs(otherRaw interface{}) (bool, error) {
 	if !v.bucketVBMap.SameAs(other.bucketVBMap) {
 		return false, fmt.Errorf("BucketVBMap are different: %v vs %v", v.bucketVBMap, other.bucketVBMap)
 	}
+	if v.ReplicationId != other.ReplicationId {
+		return false, nil
+	}
+	if v.PipelineType != other.PipelineType {
+		return false, nil
+	}
 	return v.RequestCommon.SameAs(&other.RequestCommon)
 }
 
 func (v *VBMasterCheckReq) GenerateResponse() interface{} {
-	common := NewResponseCommon(v.ReqType, v.RemoteLifeCycleId, v.LocalLifeCycleId, v.Opaque, v.TargetAddr)
-	common.RespType = v.ReqType
+	responseCommon := NewResponseCommon(v.ReqType, v.RemoteLifeCycleId, v.LocalLifeCycleId, v.Opaque, v.TargetAddr)
+	responseCommon.RespType = v.ReqType
 	resp := &VBMasterCheckResp{
-		ResponseCommon: common,
+		ResponseCommon:    responseCommon,
+		ReplicationSpecId: v.ReplicationId,
+		PipelineType:      v.PipelineType,
+		SourceBucketName:  v.SourceBucketName,
 	}
 	return resp
 }
@@ -407,20 +423,25 @@ func (v *VBMasterCheckReq) GenerateResponse() interface{} {
 type VBMasterCheckResp struct {
 	ResponseCommon
 
-	responsePayload           BucketVBMPayloadType
+	responsePayload           *BucketVBMPayloadType
 	ResponsePayloadCompressed []byte
+	ErrorMsg                  string
+
+	ReplicationSpecId string
+	SourceBucketName  string
+	PipelineType      common.PipelineType
 }
 
 // Unit test
 func NewVBMasterCheckRespGivenPayload(payload BucketVBMPayloadType) *VBMasterCheckResp {
 	return &VBMasterCheckResp{
 		ResponseCommon:            ResponseCommon{},
-		responsePayload:           payload,
+		responsePayload:           &payload,
 		ResponsePayloadCompressed: nil,
 	}
 }
 
-func (v *VBMasterCheckResp) GetReponse() BucketVBMPayloadType {
+func (v *VBMasterCheckResp) GetReponse() *BucketVBMPayloadType {
 	return v.responsePayload
 }
 
@@ -431,7 +452,6 @@ func (v *VBMasterCheckResp) Serialize() ([]byte, error) {
 	}
 
 	v.ResponsePayloadCompressed = snappy.Encode(nil, responsePayloadMarshalled)
-
 	return json.Marshal(v)
 }
 
@@ -442,17 +462,42 @@ func (v *VBMasterCheckResp) DeSerialize(bytes []byte) error {
 	}
 
 	v.Init()
+	err = v.decompressPayload()
+	if err != nil {
+		return err
+	}
+
+	v.InitNilPts()
+	return nil
+}
+
+func (v *VBMasterCheckResp) decompressPayload() error {
 	if len(v.ResponsePayloadCompressed) > 0 {
 		marshalledPayload, snappyErr := snappy.Decode(nil, v.ResponsePayloadCompressed)
 		if snappyErr != nil {
 			return snappyErr
 		}
-		err = json.Unmarshal(marshalledPayload, &v.responsePayload)
+		err := json.Unmarshal(marshalledPayload, &v.responsePayload)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (v *VBMasterCheckResp) InitNilPts() {
+	for bucket, payloadPerBucket := range *v.responsePayload {
+		if payloadPerBucket == nil {
+			(*v.responsePayload)[bucket] = NewVBMasterPayload()
+		} else {
+			if payloadPerBucket.NotMyVBs == nil {
+				payloadPerBucket.NotMyVBs = NewVBsPayload(nil)
+			}
+			if payloadPerBucket.ConflictingVBs == nil {
+				payloadPerBucket.ConflictingVBs = NewVBsPayload(nil)
+			}
+		}
+	}
 }
 
 // Key is bucket name
@@ -461,35 +506,63 @@ type BucketVBMPayloadType map[string]*VBMasterPayload
 type VBMasterPayload struct {
 	OverallPayloadErr string // If populated, the data below are invalid
 
-	NotMyVBs       VBsPayload // These VBs are not owned by requested node
-	ConflictingVBs VBsPayload // Requested node believes these VBs to be owned as does sender
+	NotMyVBs       *VBsPayload // These VBs are not owned by requested node
+	ConflictingVBs *VBsPayload // Requested node believes these VBs to be owned as does sender
 }
 
 func (p *VBMasterPayload) RegisterVbsIntersect(vbsIntersect []uint16) {
 	for _, vb := range vbsIntersect {
 		// TODO - actually populate payload?
-		p.ConflictingVBs[vb] = NewPayload()
+		(*p.ConflictingVBs)[vb] = NewPayload()
 	}
 }
 
 func (p *VBMasterPayload) RegisterNotMyVBs(notMyVbs []uint16) {
 	for _, vb := range notMyVbs {
-		p.NotMyVBs[vb] = NewPayload()
+		(*p.NotMyVBs)[vb] = NewPayload()
 	}
+}
+
+func (p *VBMasterPayload) GetAllCheckpoints() map[uint16]*metadata.CheckpointsDoc {
+	retMap := make(map[uint16]*metadata.CheckpointsDoc)
+
+	for vb, payload := range *p.NotMyVBs {
+		if payload.CheckpointsDoc != nil {
+			retMap[vb] = payload.CheckpointsDoc
+		}
+	}
+
+	for vb, payload := range *p.ConflictingVBs {
+		if payload.CheckpointsDoc != nil {
+			retMap[vb] = payload.CheckpointsDoc
+		}
+	}
+
+	return retMap
 }
 
 type VBsPayload map[uint16]*Payload
 
+func NewVBsPayload(vbsList []uint16) *VBsPayload {
+	retMap := make(VBsPayload)
+	for _, vb := range vbsList {
+		retMap[vb] = NewPayload()
+	}
+	return &retMap
+}
+
 func NewVBMasterPayload() *VBMasterPayload {
+	notMyVbs := make(VBsPayload)
+	conflictingVBs := make(VBsPayload)
 	return &VBMasterPayload{
 		OverallPayloadErr: "",
-		NotMyVBs:          make(VBsPayload),
-		ConflictingVBs:    make(VBsPayload),
+		NotMyVBs:          &notMyVbs,
+		ConflictingVBs:    &conflictingVBs,
 	}
 }
 
 type Payload struct {
-	// TODO
+	CheckpointsDoc *metadata.CheckpointsDoc
 }
 
 func NewPayload() *Payload {
@@ -497,9 +570,39 @@ func NewPayload() *Payload {
 }
 
 func (v *VBMasterCheckResp) Init() {
-	v.responsePayload = make(BucketVBMPayloadType)
+	newMap := make(BucketVBMPayloadType)
+	v.responsePayload = &newMap
 }
 
 func (v *VBMasterCheckResp) InitBucket(bucketName string) {
-	v.responsePayload[bucketName] = NewVBMasterPayload()
+	(*v.responsePayload)[bucketName] = NewVBMasterPayload()
+}
+
+func (v *VBMasterCheckResp) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.CheckpointsDoc, srcBucketName string) error {
+	payload, found := (*v.responsePayload)[srcBucketName]
+	if !found {
+		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
+	}
+
+	errMap := make(base.ErrorMap)
+	for vb, ckptDoc := range ckptDocs {
+		notMyVBMap := *payload.NotMyVBs
+		vbPayload, found := notMyVBMap[vb]
+		if found {
+			vbPayload.CheckpointsDoc = ckptDoc
+			continue
+		}
+
+		// If not found above, try next data structure
+		conflictingVBMap := *payload.ConflictingVBs
+		vbPayload2, found2 := conflictingVBMap[vb]
+		if found2 {
+			vbPayload2.CheckpointsDoc = ckptDoc
+		}
+	}
+
+	if len(errMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return nil
 }

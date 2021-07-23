@@ -139,7 +139,6 @@ function runOneRebalanceCycle {
 
 	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
 
-
 	startEjectNode "C2P" "C2"
 	echo "Rebalancing out completed. Letting replication continue with one nodes for $timeIntervalSecs seconds before rebalancing back in"
 

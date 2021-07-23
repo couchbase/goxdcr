@@ -262,6 +262,11 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 	return size, err
 }
 
+func (ckpt_svc *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc) error {
+
+	return nil
+}
+
 // Ensure that one single broken mapping that will be used for most, if not all, of the checkpoints, are persisted
 func (ckpt_svc *CheckpointsService) PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error {
 	if oneBrokenMapping == nil {

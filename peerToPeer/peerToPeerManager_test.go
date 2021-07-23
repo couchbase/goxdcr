@@ -72,7 +72,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	xdcrComp, utilsMock, bucket, replSvc, utilsReal := setupBoilerPlate()
 	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode)
 
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucket, replSvc, 100*time.Millisecond)
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucket, replSvc, 100*time.Millisecond, nil)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	commAPI, err := mgr.Start()
@@ -111,14 +111,12 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 		var reqIface interface{} = req
 		vbMasterCheckReq := reqIface.(*VBMasterCheckReq)
 		resp := vbMasterCheckReq.GenerateResponse().(*VBMasterCheckResp)
-		resp.responsePayload = make(BucketVBMPayloadType)
-		resp.responsePayload[bucketName] = &VBMasterPayload{
+		newMap := make(BucketVBMPayloadType)
+		resp.responsePayload = &newMap
+		(*resp.responsePayload)[bucketName] = &VBMasterPayload{
 			OverallPayloadErr: "",
-			NotMyVBs: map[uint16]*Payload{
-				uint16(0): &Payload{},
-				uint16(1): &Payload{},
-			},
-			ConflictingVBs: nil,
+			NotMyVBs:          NewVBsPayload([]uint16{0, 1}),
+			ConflictingVBs:    nil,
 		}
 		responses = append(responses, resp)
 	}
@@ -158,11 +156,13 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	assert.NotNil(tgt2Result.ReqPtr)
 	assert.NotNil(tgt2Result.RespPtr)
 	checkResp := tgt1Result.RespPtr.(*VBMasterCheckResp)
-	assert.Len(checkResp.responsePayload, 1)
-	assert.Len(checkResp.responsePayload[bucketName].NotMyVBs, 2)
+	assert.Len((*checkResp.responsePayload), 1)
+	notMyVbs := (*checkResp.responsePayload)[bucketName].NotMyVBs
+	assert.Len(*notMyVbs, 2)
 	checkResp = tgt2Result.RespPtr.(*VBMasterCheckResp)
-	assert.Len(checkResp.responsePayload, 1)
-	assert.Len(checkResp.responsePayload[bucketName].NotMyVBs, 2)
+	assert.Len((*checkResp.responsePayload), 1)
+	notMyVbs = (*checkResp.responsePayload)[bucketName].NotMyVBs
+	assert.Len(*notMyVbs, 2)
 
 	time.Sleep(150 * time.Millisecond)
 	vbMasterCheckHandler.opaqueMapMtx.RLock()

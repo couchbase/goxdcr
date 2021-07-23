@@ -91,6 +91,20 @@ func (_m *CheckpointMgrSvc) IsSharable() bool {
 	return r0
 }
 
+// MergePeerNodesCkptInfo provides a mock function with given fields: genericResponse
+func (_m *CheckpointMgrSvc) MergePeerNodesCkptInfo(genericResponse interface{}) error {
+	ret := _m.Called(genericResponse)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
+		r0 = rf(genericResponse)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Start provides a mock function with given fields: _a0
 func (_m *CheckpointMgrSvc) Start(_a0 metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(_a0)

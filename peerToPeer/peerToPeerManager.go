@@ -11,6 +11,7 @@ package peerToPeer
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	common "github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -35,7 +36,7 @@ type P2PManager interface {
 }
 
 type VBMasterCheck interface {
-	CheckVBMaster(BucketVBMapType) (map[string]*VBMasterCheckResp, error)
+	CheckVBMaster(BucketVBMapType, common.Pipeline) (map[string]*VBMasterCheckResp, error)
 }
 
 type Handler interface {
@@ -49,6 +50,7 @@ type P2PManagerImpl struct {
 	xdcrCompSvc       service_def.XDCRCompTopologySvc
 	bucketTopologySvc service_def.BucketTopologySvc
 	replSpecSvc       service_def.ReplicationSpecSvc
+	ckptSvc           service_def.CheckpointsService
 
 	lifeCycleId string
 	logger      *log.CommonLogger
@@ -68,7 +70,7 @@ type P2PManagerImpl struct {
 	vbMasterCheckHelper VbMasterCheckHelper
 }
 
-func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration) (*P2PManagerImpl, error) {
+func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
 	if err != nil {
 		return nil, err
@@ -88,6 +90,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		bucketTopologySvc:   bucketTopologySvc,
 		replSpecSvc:         replicationSpecSvc,
 		cleanupInterval:     cleanupInt,
+		ckptSvc:             ckptSvc,
 	}, nil
 }
 
@@ -129,7 +132,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, p.cleanupInterval)
 		case ReqVBMasterChk:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.bucketTopologySvc)
+			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.bucketTopologySvc, p.ckptSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -328,23 +331,32 @@ type ReqRespPair struct {
 // 3. Peer nodes respond with:
 //    a. Happy path - NOT_MY_VBUCKET status code with optional payload (if exists checkpoint and backfill information)
 //    b. Error path - "I'm VB Owner too" - which means something is wrong and recovery action may be needed (TODO)
-func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType) (map[string]*VBMasterCheckResp, error) {
+func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline common.Pipeline) (map[string]*VBMasterCheckResp, error) {
 	// Only need to check the non-verified VBs
 	filteredSubsets, err := p.vbMasterCheckHelper.GetUnverifiedSubset(bucketAndVBs)
 	if err != nil {
+		p.logger.Errorf("error GetUnverifiedSubset %v", err)
 		return nil, err
 	}
 
 	getReqFunc := func(src, tgt string) Request {
-		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
-		vbCheckReq := NewVBMasterCheckReq(common)
+		requestCommon := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		vbCheckReq := NewVBMasterCheckReq(requestCommon)
 		vbCheckReq.SetBucketVBMap(filteredSubsets)
+		vbCheckReq.ReplicationId = pipeline.Topic()
+		vbCheckReq.PipelineType = pipeline.Type()
+		spec := pipeline.Specification().GetReplicationSpec()
+		if spec == nil {
+			return nil
+		}
+		vbCheckReq.SourceBucketName = spec.SourceBucketName
 		return vbCheckReq
 	}
 
 	opts := NewSendOpts(true)
 	err = p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	if err != nil {
+		p.logger.Errorf("sendToEachPeerOnce err %v", err)
 		return nil, err
 	}
 
@@ -354,7 +366,6 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType) (map[string
 	for k, v := range result {
 		respMap[k] = v.RespPtr.(*VBMasterCheckResp)
 	}
-
 	return respMap, nil
 }
 

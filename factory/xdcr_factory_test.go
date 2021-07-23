@@ -25,13 +25,15 @@ func TestFactoryParseVBMasterResp(t *testing.T) {
 	respMap := make(map[string]*peerToPeer.VBMasterCheckResp)
 
 	payloadType := make(peerToPeer.BucketVBMPayloadType)
+	notMyVbs := make(peerToPeer.VBsPayload)
 	payloadType[srcBucketName] = &peerToPeer.VBMasterPayload{
 		OverallPayloadErr: "",
-		NotMyVBs:          map[uint16]*peerToPeer.Payload{},
+		NotMyVBs:          &notMyVbs,
 		ConflictingVBs:    nil,
 	}
 	for _, vb := range sourceVBs {
-		payloadType[srcBucketName].NotMyVBs[vb] = &peerToPeer.Payload{}
+		srcBucketNotMyVbs := *payloadType[srcBucketName].NotMyVBs
+		srcBucketNotMyVbs[vb] = &peerToPeer.Payload{}
 	}
 
 	respMap["testHost"] = peerToPeer.NewVBMasterCheckRespGivenPayload(payloadType)
@@ -40,7 +42,7 @@ func TestFactoryParseVBMasterResp(t *testing.T) {
 	assert.Nil(err)
 
 	// Take out one VB and test
-	delete(payloadType[srcBucketName].NotMyVBs, sourceVBs[0])
+	delete(notMyVbs, sourceVBs[0])
 	respMap["testHost"] = peerToPeer.NewVBMasterCheckRespGivenPayload(payloadType)
 
 	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs)

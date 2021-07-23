@@ -319,7 +319,8 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	// construct and initializes the pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
-		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck)
+		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck,
+		xdcrf.MergePeerNodesCkptsResponse)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -893,17 +894,16 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	vbsReq[srcBucketName] = sourceVBs
 
 	xdcrf.logger.Infof("Running VBMasterCheck for bucket %v", srcBucketName)
-	respMap, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq)
+	respMap, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)
 	if err != nil {
 		return nil, err
 	}
 
 	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs)
 	if err != nil {
+		xdcrf.logger.Errorf("Error checkNoOtherVBMasters: %v\n", err)
 		return nil, err
 	}
-
-	// TODO - do checkpoint merge
 
 	return respMap, nil
 }
@@ -913,15 +913,18 @@ func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, src
 	errMap := make(base.ErrorMap)
 	for peerAddr, resp := range respMap {
 		nodeResp := resp.GetReponse()
-		requestedBucketInfo, found := nodeResp[srcBucketName]
+		requestedBucketInfo, found := (*nodeResp)[srcBucketName]
 		if !found {
 			errMap[peerAddr] = fmt.Errorf("node %v response does not contain info for requested src bucket %v", peerAddr, srcBucketName)
 			continue
 		}
 		// Convert NotMyVBs into list for comparison
 		var respondedVBs []uint16
-		for vb, _ := range requestedBucketInfo.NotMyVBs {
-			respondedVBs = append(respondedVBs, vb)
+		notMyVbs := requestedBucketInfo.NotMyVBs
+		if notMyVbs != nil {
+			for vb, _ := range *notMyVbs {
+				respondedVBs = append(respondedVBs, vb)
+			}
 		}
 
 		removed, _, intersected := base.ComputeDeltaOfUint16Lists(sourceVBs, respondedVBs, true)
@@ -1241,12 +1244,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		xdcrf.bucketTopologySvc)
 
 	//register pipeline checkpoint manager
-	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc,
-		xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc,
-		xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName,
-		targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef,
-		targetClusterVersion, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc,
-		xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr)
+	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName, targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef, targetClusterVersion, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc, xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -1488,4 +1486,16 @@ func (xdcrf *XDCRFactory) MakeOSOSnapshotRaiser(pipeline common.Pipeline) func(v
 		return dcpNozzle.GetOSOSeqnoRaiser()
 	}
 	return nil
+}
+
+// Follows pipeline.MergeVBMasterRespCkptsFunc
+func (xdcrf *XDCRFactory) MergePeerNodesCkptsResponse(pipeline common.Pipeline, resp map[string]*peerToPeer.VBMasterCheckResp) error {
+	if pipeline == nil {
+		return errors.New("pipeline=nil")
+	}
+	ckpt_mgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
+	if ckpt_mgr == nil {
+		return errors.New(fmt.Sprintf("CheckpointingManager has not been attached to pipeline %v", pipeline.Topic()))
+	}
+	return ckpt_mgr.(*pipeline_svc.CheckpointManager).MergePeerNodesCkptInfo(resp)
 }

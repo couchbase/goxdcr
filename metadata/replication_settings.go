@@ -899,6 +899,11 @@ func (s *ReplicationSettings) GetCollectionsRoutingRules() CollectionsMappingRul
 	}
 }
 
+func (s *ReplicationSettings) GetVBMasterCheckEnabled() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(PreReplicateVBMasterCheckKey)
+	return val.(bool)
+}
+
 type ReplicationSettingsMap map[string]interface{}
 
 type redactDictType int

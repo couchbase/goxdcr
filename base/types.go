@@ -2261,3 +2261,17 @@ func (h HeartbeatStatus) String() string {
 		return "?? (HeartbeatStatus)"
 	}
 }
+
+type KvVBMapType map[string][]uint16
+
+func (k *KvVBMapType) CompileLookupIndex() map[uint16]string {
+	retMap := make(map[uint16]string)
+
+	for kv, vbs := range *k {
+		for _, vb := range vbs {
+			retMap[vb] = kv
+		}
+	}
+
+	return retMap
+}

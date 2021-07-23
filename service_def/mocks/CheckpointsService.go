@@ -249,3 +249,17 @@ func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specIntern
 
 	return r0, r1
 }
+
+// UpsertCheckpointsDoc provides a mock function with given fields: replicationId, ckptDocs
+func (_m *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc) error {
+	ret := _m.Called(replicationId, ckptDocs)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, map[uint16]*metadata.CheckpointsDoc) error); ok {
+		r0 = rf(replicationId, ckptDocs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
