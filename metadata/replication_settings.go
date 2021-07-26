@@ -568,8 +568,16 @@ func (s *ReplicationSettings) ToRESTMap(isDefaultSettings bool) ReplicationSetti
 }
 
 func (s *ReplicationSettings) toMapInternal(isDefaultSettings bool, hideInternals bool) ReplicationSettingsMap {
-	s.exportFlagTypeValues()
-	settingsMap := ReplicationSettingsMap(s.Settings.ToMap())
+	var settingsMap ReplicationSettingsMap
+	if hideInternals {
+		// ExportFlagType will cause write. And only external consumers will need exporting from flag values to other
+		// outward facing Key-Values, so do a clone before export
+		clonedSetting := s.Clone()
+		clonedSetting.exportFlagTypeValues()
+		settingsMap = clonedSetting.Settings.ToMap()
+	} else {
+		settingsMap = s.Settings.ToMap()
+	}
 	if isDefaultSettings {
 		// remove keys that do not belong to default settings
 		for _, key := range ImmutableDefaultSettings {

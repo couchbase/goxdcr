@@ -153,7 +153,7 @@ func TestFlagBasedUpdates(t *testing.T) {
 	assert.True(checkMode&base.FilterExpDelSkipDeletes > 0)
 	assert.False(checkMode&base.FilterExpDelSkipExpiration > 0)
 
-	outMap := existSettings.ToMap(false /*default*/)
+	outMap := existSettings.ToRESTMap(false /*default*/)
 	stripExp, ok := outMap[BypassExpiryKey]
 	assert.True(ok)
 	assert.True(stripExp.(bool))
