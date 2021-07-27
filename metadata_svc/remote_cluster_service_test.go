@@ -95,6 +95,8 @@ func setupMocksRCS(uiLogSvcMock *service_def.UILogSvc,
 	remoteClusterRef *metadata.RemoteClusterReference,
 	utilsMockFunc func()) {
 
+	clusterInfoSvcMock.On("IsClusterEncryptionLevelStrict").Return(false)
+
 	// metakv mock
 	setupMetaSvcMockGeneric(metadataSvcMock, remoteClusterRef)
 

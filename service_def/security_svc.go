@@ -1,4 +1,4 @@
-// Copyright 2013-Present Couchbase, Inc.
+// Copyright 2021-Present Couchbase, Inc.
 //
 // Use of this software is governed by the Business Source License included in
 // the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -8,12 +8,14 @@
 
 package service_def
 
-import (
-	"github.com/couchbase/goxdcr/base"
-)
-
-type ClusterInfoSvc interface {
-	// This API should be called on source cluster only
-	GetLocalServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (map[string][]uint16, error)
-	IsClusterEncryptionLevelStrict() bool
+type EncryptionSettingIface interface {
+	IsStrictEncryption() bool
 }
+
+type SecuritySvc interface {
+	Start()
+	IsClusterEncryptionLevelStrict() bool
+	SetEncryptionLevelChangeCallback(key string, callback SecChangeCallback)
+}
+
+type SecChangeCallback func(old, new EncryptionSettingIface)

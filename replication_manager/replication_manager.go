@@ -147,7 +147,8 @@ func StartReplicationManager(sourceKVHost string,
 	resolver_svc service_def.ResolverSvcIface,
 	utilitiesIn utilities.UtilsIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc) {
+	backfillReplSvc service_def.BackfillReplSvc,
+	securitySvc service_def.SecuritySvc) {
 
 	replication_mgr.once.Do(func() {
 		replication_mgr.eventIdAtomicWell = -1
@@ -166,7 +167,7 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
 			audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
-			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc)
+			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc, securitySvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -447,8 +448,8 @@ func (rm *replicationManager) init(
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	resolverSvc service_def.ResolverSvcIface,
 	collectionsManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc) {
-
+	backfillReplSvc service_def.BackfillReplSvc,
+	securitySvc service_def.SecuritySvc) {
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
 	rm.remote_cluster_svc = remote_cluster_svc
@@ -479,6 +480,9 @@ func (rm *replicationManager) init(
 
 	rm.backfillMgr = backfill_manager.NewBackfillManager(collectionsManifestSvc, repl_spec_svc, backfillReplSvc, pipelineMgrObj, cluster_info_svc, xdcr_topology_svc, checkpoint_svc)
 	rm.backfillMgr.Start()
+
+	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
+	securitySvc.Start()
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 

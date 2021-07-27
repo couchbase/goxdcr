@@ -122,7 +122,9 @@ func main() {
 	// Initializes official utility object to be used throughout
 	utils := utilities.NewUtilities()
 
-	cluster_info_svc := service_impl.NewClusterInfoSvc(nil, utils)
+	securitySvc := service_impl.NewSecurityService(nil)
+	cluster_info_svc := service_impl.NewClusterInfoSvc(nil, utils, securitySvc)
+
 	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, cluster_info_svc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
@@ -232,7 +234,8 @@ func main() {
 			resolver_svc,
 			utils,
 			collectionsManifestService,
-			backfillReplService)
+			backfillReplService,
+			securitySvc)
 
 		// keep main alive in normal mode
 		<-done

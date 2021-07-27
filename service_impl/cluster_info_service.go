@@ -11,18 +11,21 @@ package service_impl
 import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 type ClusterInfoSvc struct {
 	logger *log.CommonLogger
 	utils  utilities.UtilsIface
+	secSvc service_def.SecuritySvc
 }
 
-func NewClusterInfoSvc(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) *ClusterInfoSvc {
+func NewClusterInfoSvc(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, sec service_def.SecuritySvc) *ClusterInfoSvc {
 	return &ClusterInfoSvc{
 		logger: log.NewLogger("ClusterInfoSvc", logger_ctx),
 		utils:  utilsIn,
+		secSvc: sec,
 	}
 }
 
@@ -48,4 +51,8 @@ func (ci_svc *ClusterInfoSvc) GetLocalServerVBucketsMap(clusterConnInfoProvider 
 
 	return ci_svc.utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
 
+}
+
+func (ci *ClusterInfoSvc) IsClusterEncryptionLevelStrict() bool {
+	return ci.secSvc.IsClusterEncryptionLevelStrict()
 }

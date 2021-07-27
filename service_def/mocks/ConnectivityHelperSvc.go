@@ -28,6 +28,11 @@ func (_m *ConnectivityHelperSvc) GetOverallStatus() metadata.ConnectivityStatus 
 	return r0
 }
 
+// MarkEncryptionError provides a mock function with given fields: val
+func (_m *ConnectivityHelperSvc) MarkEncryptionError(val bool) {
+	_m.Called(val)
+}
+
 // MarkIpFamilyError provides a mock function with given fields: _a0
 func (_m *ConnectivityHelperSvc) MarkIpFamilyError(_a0 bool) {
 	_m.Called(_a0)

@@ -35,32 +35,14 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 declare -a scope1Arr=("S1" "S2")
 BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
 
-function getRemoteCluster {
-	local source=$1
-	local target=$2
-	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
-	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
-	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters | jq | grep name | grep -c $target)
-	echo $result
-}
-
-function getRemoteClusters {
-	local source=$1
-	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
-	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
-	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters)
-	echo $result
-}
-
 function setIpFamily {
 	local cluster=$1
 	local ip=$2
 	local only=$3
 	local host=${CLUSTER_NAME_HOST_MAP[$cluster]:-}
 	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
-	#echo "CLUSTER_NAME_PORT_MAP=${!CLUSTER_NAME_PORT_MAP[@]}"
-	#echo "CLUSTER_NAME_HOST_MAP=${CLUSTER_NAME_HOST_MAP[@]}"
 
+	echo "Setting $cluster ($host:$port) to $ip (only=$only)"
 	# Turn off auto failover
 	# echo "Turn off autoFailover: curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d enabled=false"
 	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d enabled=false
@@ -68,11 +50,15 @@ function setIpFamily {
 		echo "Failed to turn off auto failover for ${clusterName}"
 		exit $?
 	fi
-	# Set ip family
-	# echo "Set IP family: curl -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/node/controller/setupNetConfig  -d afamilyOnly=$only -d afamily=${ip}"
-	curl -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/node/controller/setupNetConfig -d afamilyOnly=$only -d afamily=${ip}
+	echo "Turned off autFailover for $cluster ($host:$port)"
+	# Set ip family. Use couchbase-cli instead of REST api
+	# result=$(curl -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/node/controller/setupNetConfig -d afamilyOnly=$only -d afamily=${ip})
+	# REST API doesn't work anymore after enforce_tls test (error: Failed to update distribution configuration file ...)
+	# The couchbase-cli command often fails the first time. Call twice to ensure it works
+	../../../../../../../install/bin/couchbase-cli ip-family -c http://$host:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW --set --$ip
+	../../../../../../../install/bin/couchbase-cli ip-family -c http://$host:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW --set --$ip
 	if (($? != 0)); then
-		echo "Failed to set ip family to $ip for ${clusterName}"
+		echo "Failed to set ip family to $ip (only=$only) for ${clusterName} ($host:$port)"
 		exit $?
 	fi
 	if [[ "$ip" == "ipv6" ]]; then
@@ -81,7 +67,16 @@ function setIpFamily {
 	if [[ "$ip" == "ipv4" ]]; then
 		host="127.0.0.1"
 	fi
+	echo "Cluster $cluster ($host:$port) is set to $ip"
 	CLUSTER_NAME_HOST_MAP[$cluster]=$host
+
+	if [[ "$only" == "true" ]]; then
+		../../../../../../../install/bin/couchbase-cli ip-family -c http://$host:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW --set --${ip}only
+		if (($? != 0)); then
+			echo "Failed to set ip family to ${ip}Only for ${clusterName} ($host:$port)"
+			exit $?
+		fi
+	fi
 
 	# echo "Turn on failover: curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d 'enabled=true&timeout=120' -d 'failoverServerGroup=true&maxCount=2'"
 	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://${host}:${port}/settings/autoFailover -d 'enabled=true&timeout=120' -d 'failoverServerGroup=true&maxCount=2'
@@ -89,6 +84,7 @@ function setIpFamily {
 		echo "Failed to turn on auto failover for ${clusterName}"
 		exit $?
 	fi
+	echo "Turned on autFailover for $cluster ($host:$port)"
 	echo "Cluster $cluster $host:$port is set to $ip (only=$only)"
 }
 
@@ -116,22 +112,6 @@ function replicationWithIpAddress {
 	fi
 }
 
-function checkReplication {
-	local srcClusterName=$1
-	local srcBucketName=$2
-	local targetClusterName=$3
-	local targetBucketName=$4
-
-	restID=$(getBucketReplicationRestID "$srcClusterName" "$srcBucketName" "$targetClusterName" "$targetBucketName")
-	if (($? != 0)); then
-		echo "Unable to find REST ID"
-		return 1
-	fi
-	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$srcClusterName]:-}
-	local sourceHost=${CLUSTER_NAME_HOST_MAP[$srcClusterName]:-}
-
-	curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://${sourceHost}:${sourcePort}/pools/default/replicationInfos
-}
 function testCreateRemote {
 	echo "=================================================="
 	echo "====== Create Remote Cluster Reference Test ======"
@@ -242,7 +222,7 @@ function testChangeRemote {
 		echo "Change C1 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
 		exit 1
 	fi
-	result=$(checkReplication "C1" "B1" "C2" "B2")
+	result=$(checkReplicationInfos "C1")
 	count=$(echo $result | grep -c "The cluster is ipv6 only")
 	if (($count == 0)); then
 		echo "Change C1 to ipv6 only should cause existing replication to fail but replicationInfos returned $result"
@@ -264,7 +244,7 @@ function testChangeRemote {
 		echo "remoteClusters should return RC_OK but it should not: $result"
 		exit 1
 	fi
-	result=$(checkReplication "C1" "B1" "C2" "B2")
+	result=$(checkReplicationInfos "C1")
 	count=$(echo $result | grep -c "The cluster is ipv4 only")
 	if (($count != 0)); then
 		echo "Change C1 back to ipv4 only should restore existing replication but replicationInfos returned $result"
@@ -281,7 +261,7 @@ function testChangeRemote {
 		echo "Change C2 to ipv6 only should cause remoteClusters to return RC_ERROR but it returned $result"
 		exit 1
 	fi
-	result=$(checkReplication "C1" "B1" "C2" "B2")
+	result=$(checkReplicationInfos "C1")
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count == 0)); then
 		echo "Change C2 to ipv6 only should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
@@ -292,7 +272,7 @@ function testChangeRemote {
 	echo "===== Test 5: C1 ipv4 (only=false), Change C2 to default. The previous erroring replication should work now."
 	setIpFamily "C2" "ipv4" "false"
 	sleep 20
-	result=$(checkReplication "C1" "B1" "C2" "B2")
+	result=$(checkReplicationInfos "C1")
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count != 0)); then
 		echo "Change C2 to ipv4 only should cause existing replication connection issues to go away but replicationInfos returned $result"
@@ -309,7 +289,7 @@ function testChangeRemote {
 	echo "===== Test 6: C1 ipv6 only, C2 default: The previous ipv4 address will fail"
 	setIpFamily "C1" "ipv6" "true"
 	sleep 20
-	result=$(checkReplication "C1" "B1" "C2" "B2")
+	result=$(checkReplicationInfos "C1")
 	count=$(echo $result | grep -c "The cluster is ipv6 only")
 	if (($count == 0)); then
 		echo "Change C2 to ipv6 only should cause existing replication to fail with connection issues but replicationInfos returned $result"
@@ -336,7 +316,7 @@ function testChangeRemote {
 		exit 1
 	fi
 	sleep 20
-	result=$(checkReplication "C1" "B1" "C2" "B2")
+	result=$(checkReplicationInfos "C1")
 	count=$(echo $result | grep -c "User intervention may be required")
 	if (($count != 0)); then
 		echo "Expect replication to work but replicationInfos returned $result"
