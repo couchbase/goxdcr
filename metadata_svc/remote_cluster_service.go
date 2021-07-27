@@ -111,6 +111,7 @@ type ConnectivityHelper struct {
 	mtx                     sync.RWMutex
 	refreshInterval         time.Duration
 	ipFamilyError           bool // Error before connecting to any node.
+	encryptionError         bool
 }
 
 func (c *ConnectivityHelper) String() string {
@@ -142,6 +143,13 @@ func (c *ConnectivityHelper) MarkIpFamilyError(val bool) {
 	defer c.mtx.Unlock()
 	c.ipFamilyError = val
 }
+
+func (c *ConnectivityHelper) MarkEncryptionError(val bool) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.encryptionError = val
+}
+
 func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -189,7 +197,7 @@ func (c *ConnectivityHelper) GetOverallStatus() metadata.ConnectivityStatus {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 
-	if c.ipFamilyError == true {
+	if c.ipFamilyError == true || c.encryptionError == true {
 		return metadata.ConnError
 	}
 
@@ -355,6 +363,8 @@ type RemoteClusterAgent struct {
 	uiLogSvc service_def.UILogSvc
 	// utilites service
 	utils utilities.UtilsIface
+	// for getting cluster security setting
+	clusterInfoSvc service_def.ClusterInfoSvc
 
 	// Each bucket on one remote cluster will have one centralized getter
 	bucketManifestGetters map[string]*BucketManifestGetter
@@ -423,6 +433,14 @@ func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteCl
 	} else {
 		agent.connectivityHelper.MarkIpFamilyError(false)
 	}
+
+	if (ref.DemandEncryption() == false || ref.EncryptionType() != metadata.EncryptionType_Full) &&
+		agent.clusterInfoSvc.IsClusterEncryptionLevelStrict() == true {
+		agent.connectivityHelper.MarkEncryptionError(true)
+	} else {
+		agent.connectivityHelper.MarkEncryptionError(false)
+	}
+
 	ref.SetConnectivityStatus(agent.connectivityHelper.GetOverallStatus().String())
 	return ref
 }
@@ -2613,6 +2631,11 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
 	}
+	if service.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+		if ref.IsEncryptionEnabled() == false || ref.EncryptionType() != metadata.EncryptionType_Full {
+			return wrapAsInvalidRemoteClusterError(base.ErrorRemoteClusterFullEncryptionRequired.Error())
+		}
+	}
 
 	srvStop := service.utils.StartDiagStopwatch(fmt.Sprintf("ref(%v).PopulateDnsSrv", ref.Name()), base.DiagNetworkThreshold)
 	ref.PopulateDnsSrvIfNeeded()
@@ -3080,6 +3103,7 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		uiLogSvc:               service.uilog_svc,
 		utils:                  service.utils,
 		logger:                 service.logger,
+		clusterInfoSvc:         service.cluster_info_svc,
 		metadataChangeCallback: service.metadata_change_callback,
 		bucketRefCnt:           make(map[string]uint32),
 		bucketManifestGetters:  make(map[string]*BucketManifestGetter),

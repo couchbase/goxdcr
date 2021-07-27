@@ -578,3 +578,55 @@ function validateBrokenMapEntryDNE {
 		exit 1
 	fi
 }
+
+# returns the count of remote cluster ref from source to target
+function getRemoteCluster {
+	local source=$1
+	local target=$2
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
+	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters | jq | grep name | grep -c $target)
+	echo $result
+}
+
+# returns the output from /pools/default/remoteClusters
+function getRemoteClusters {
+	local source=$1
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
+	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters)
+	echo $result
+}
+
+function checkReplicationInfos {
+	local srcClusterName=$1
+
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$srcClusterName]:-}
+	local sourceHost=${CLUSTER_NAME_HOST_MAP[$srcClusterName]:-"127.0.0.1"}
+
+	echo "curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://${sourceHost}:${sourcePort}/pools/default/replicationInfos"
+	curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://${sourceHost}:${sourcePort}/pools/default/replicationInfos
+}
+
+function changeRemoteClusterReferenceToSecure {
+	local source=$1
+	local target=$2
+	local targetHost=${3:-"127.0.0.1"}
+	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
+		echo "Invalid input"
+		return 1
+	fi
+	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
+	local targetPort=${4:-${CLUSTER_NAME_PORT_MAP[$target]}}
+	local remoteClusterCert=${5:-}
+
+	# Get the target cluster's root certificate if not provided
+	if [[ -z "${remoteClusterCert:-}" ]]; then
+		remoteClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$targetHost:$targetPort/pools/default/certificate)
+	fi
+
+	echo "Change remote cluster reference from $source to $target ($targetHost:$targetPort) to SECURE"
+	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=${remoteClusterCert}\""
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
+}

@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+set -u
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100 ["flushEnabled"]=1)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active" ["flushEnabled"]=1)
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
+
+function setNodeToNodeEncryption {
+	local cluster=$1
+	local value=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+
+	# turn on encryption:
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=false
+	if (($? != 0)); then
+		echo "Failed to turn off autoFailover"
+		exit $?
+	fi
+	../../../../../../../install/bin/couchbase-cli node-to-node-encryption -c http://127.0.0.1:$port -u $DEFAULT_ADMIN -p $DEFAULT_PW --$value
+	if (($? != 0)); then
+		echo "Failed to set node to node encryption to $value"
+		exit $?
+	fi
+	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=true
+	if (($? != 0)); then
+		echo "Failed to turn on autoFailover"
+		exit $?
+	fi
+	echo "Node to node encryption for $cluster is set to $value" >&1
+}
+
+function setEncryptionLevel {
+	local cluster=$1
+	local value=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+	# set encryption leval
+	curl -POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/settings/security -d "clusterEncryptionLevel=$value"
+	if (($? != 0)); then
+		echo "Failed to set cluster encryption level to $value"
+		exit $?
+	fi
+	echo "Encryption level for $cluster is set to $value" >&1
+}
+
+# When source encryption level is strict: XDCR will only allow full encryption remote. Plain and half will fail.
+# When target encryption level is strict: plain and half encryption will fail in connect because target only listen on secure port
+# and will require certificate. Local loopback connects are OK.
+function testCreateRemote {
+	echo "=================================================="
+	echo "====== Create Remote Cluster Reference Test ======"
+	echo "=================================================="
+
+	echo
+	echo "===== Setup source cluster to use strict encryption"
+	setNodeToNodeEncryption "C1" "enable"
+	setEncryptionLevel "C1" "strict"
+
+	echo
+	echo "===== Test 1: Create remote with plain encryption should fail when source cluster encryption=strict"
+	createRemoteClusterReference "C1" "C2"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 0)); then
+		echo "Encryption=strict. Expect create plain remote cluster reference C2 at C1 to fail but it was created."
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 2: Create remote with half encryption should fail when source cluster encryption=strict"
+	createHalfSecureRemoteClusterReference "C1" "C2"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 0)); then
+		echo "Encryption=strict. Expect create half remote cluster reference C2 at C1 to fail but it was created."
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 3: Create remote cluster with full encryption should work"
+	createSecureRemoteClusterReference "C1" "C2"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 1)); then
+		echo "Encryption=strict. Expect create full remote cluster reference C2 at C1 to work."
+		exit 1
+	fi
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	if (($? != 0)); then
+		exit $?
+	fi
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	echo
+	echo "Setup target cluster to use strict encryption, source node to node encryption off"
+	# Set up for the next part of the test. First disable node to node encryption at source
+	setEncryptionLevel "C1" "control"
+	sleep 5
+	setNodeToNodeEncryption "C1" "disable"
+	# Get host network ip address. This is used to avoid local loopback address where node to node encryption is skipped
+	targetHost=$(ipconfig getifaddr en0)
+	if [[ -z "${targetHost:-}" ]]; then
+		echo "===== Skip target node to node encription Test since only loopback address is available ====="
+		return 0
+	fi
+
+	setNodeToNodeEncryption "C2" "enable"
+	setEncryptionLevel "C2" "strict"
+
+	echo
+	echo "===== Test 4: Create remote (host=$targetHost) with plain encryption should fail when target cluster encryption=strict"
+	# This fails because connection to non-loopback is restricted.
+	createRemoteClusterReference "C1" "C2" $targetHost
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 0)); then
+		echo "C2 encryption=strict. Expect create plain remote cluster reference C2 at C1 to fail but it was created."
+		exit 1
+	fi
+
+	echo
+	echo "===== Test 5: Create remote with half encryption should fail when target cluster encryption=strict"
+	# This fails because connection to non-loopback is restricted.
+	createHalfSecureRemoteClusterReference "C1" "C2" $targetHost
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 0)); then
+		echo "Encryption=strict. Expect create half remote cluster reference C2 at C1 to fail but it was created."
+		exit 1
+	fi
+
+	# Not testing non-loopback remote address with full encryption since the remote certificate only works for loopback address.
+
+	setEncryptionLevel "C2" "control"
+	sleep 5
+	setNodeToNodeEncryption "C2" "disable"
+
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	echo
+	echo "========================================================="
+	echo "====== Passed Create Remote Cluster Reference Test ======"
+	echo "========================================================="
+}
+
+function testChangeTLS {
+	echo "======================================================="
+	echo "====== Ongoing replication and Changing TLS Test ======"
+	echo "======================================================="
+
+	echo
+	level="strict"
+	echo "===== Test 1: With existing plain replication, source enforce TLS $level."
+	createRemoteClusterReference "C1" "C2"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 1)); then
+		echo "Failed to create remote cluster reference C2 at C1"
+		exit 1
+	fi
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setNodeToNodeEncryption "C1" "enable"
+	setEncryptionLevel "C1" $level
+
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 1)); then
+		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
+		exit 1
+	fi
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	level="all"
+	echo "====== Test 2: Change encryption level to $level and failing replication with plain remote ref should recover"
+	setEncryptionLevel "C1" $level
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 0)); then
+		echo "Change C1 to $level encryption should cause remoteClusters to not return RC_ERROR but it returned $result"
+		exit 1
+	fi
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count != 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to work but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	level="strict"
+	echo "===== Test 3: Strict encryption: Failing replication with plain remote ref should recover after changing remote ref to full encryption"
+	setEncryptionLevel "C1" $level
+
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 1)); then
+		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
+		exit 1
+	fi
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+
+	changeRemoteClusterReferenceToSecure "C1" "C2"
+	sleep 10
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 0)); then
+		echo "Change remote cluster C2 to SECURE should cause remoteClusters to not return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count != 0)); then
+		echo "Change remote cluster C2 to SECURE should cause existing replication to work but replicationInfos returned $result"
+		exit 1
+	fi
+
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	setEncryptionLevel "C1" "control"
+	sleep 5
+	setNodeToNodeEncryption "C1" "disable"
+
+	echo
+	level="strict"
+	echo "===== Test 4: With existing half secure remote/replication, source enforce TLS $level."
+	createHalfSecureRemoteClusterReference "C1" "C2"
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 1)); then
+		echo "Failed to create remote cluster reference C2 at C1"
+		exit 1
+	fi
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setNodeToNodeEncryption "C1" "enable"
+	setEncryptionLevel "C1" $level
+
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 1)); then
+		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
+		exit 1
+	fi
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	level="all"
+	echo "====== Test 5: Change encryption level to $level and failing replication with half secure remote ref should recover"
+	setEncryptionLevel "C1" $level
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 0)); then
+		echo "Change C1 to $level encryption should cause remoteClusters to not return RC_ERROR but it returned $result"
+		exit 1
+	fi
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count != 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to work but replicationInfos returned $result"
+		exit 1
+	fi
+
+	echo
+	level="strict"
+	echo "===== Test 6: Strict encryption: Failing replication with half secure remote ref should recover after changing remote ref to full encryption"
+	setEncryptionLevel "C1" $level
+
+	sleep 20
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 1)); then
+		echo "Change C1 to $level encryption should cause remoteClusters to return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail but replicationInfos returned $result"
+		exit 1
+	fi
+	count=$(echo $result | grep -c "User intervention may be required")
+	if (($count == 0)); then
+		echo "Change C1 to $level encryption should cause existing replication to fail with 'User intervention' but replicationInfos returned $result"
+		exit 1
+	fi
+
+	changeRemoteClusterReferenceToSecure "C1" "C2"
+	sleep 10
+	result=$(getRemoteClusters "C1")
+	count=$(echo $result | grep -c "RC_ERROR")
+	if (($count != 0)); then
+		echo "Change remote cluster C2 to SECURE should cause remoteClusters to not return RC_ERROR but it returned $result"
+		exit 1
+	fi
+
+	result=$(checkReplicationInfos "C1")
+	count=$(echo $result | grep -c "Remote cluster reference must use full encryption")
+	if (($count != 0)); then
+		echo "Change remote cluster C2 to SECURE should cause existing replication to work but replicationInfos returned $result"
+		exit 1
+	fi
+
+	# Load more data and make sure the full encryption replication still works
+	runCbWorkloadGenBucket "C1" "B1" 20000
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	setEncryptionLevel "C1" "control"
+	sleep 5
+	setNodeToNodeEncryption "C1" "disable"
+
+	echo
+	echo "=============================================================="
+	echo "====== Passed Ongoing replication and Changing TLS Test ======"
+	echo "=============================================================="
+}
+
+function runTestCase {
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	runCbWorkloadGenBucket "C1" "B1" 10000
+
+	testCreateRemote
+	testChangeTLS
+}

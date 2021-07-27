@@ -19,5 +19,6 @@ type ConnectivityHelperSvc interface {
 	SyncWithValidList(nodeList base.StringPairList)
 	MarkNode(nodeName string, status metadata.ConnectivityStatus) (changedState, authErrFixed bool)
 	MarkIpFamilyError(bool)
+	MarkEncryptionError(val bool)
 	String() string
 }

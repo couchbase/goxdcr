@@ -30,8 +30,8 @@ function grepAuditFile {
 	local expectedCount=$2
 	local auditLog="${logDir}/audit.log"
 	echo
-	# sleep 1s to wait for audit write
-	sleep 1
+	# sleep 5s to wait for audit write
+	sleep 5
 	grep $key $auditLog
 	count=$(grep -c $key $auditLog)
 	if (($count != $expectedCount)); then
@@ -45,6 +45,10 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Running auditing test case"
 	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
 	setupTopologies
 	if (($? != 0)); then
 		exit $?
@@ -57,7 +61,7 @@ function runTestCase {
 		exit 1
 	fi
 	echo "Auditing enabled"
-	sleep 1 # give a little time for audit to turn on
+	sleep 10
 
 	echo "== Test audit log for authentication error creating remote cluster ref with no encryption =="
 	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/pools/default/remoteClusters -d name=C2 -d hostname=127.0.0.1:9001 -d username=$DEFAULT_ADMIN -d password=wrongpwd

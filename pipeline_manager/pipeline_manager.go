@@ -79,6 +79,7 @@ type PipelineMgrIface interface {
 	OnExit() error
 	UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	DismissEventForPipeline(pipelineName string, eventId int) error
+	HandleClusterEncryptionLevelChange(old, new service_def.EncryptionSettingIface)
 }
 
 type PipelineMgrInternalIface interface {
@@ -331,6 +332,32 @@ func (pipelineMgr *PipelineManager) CheckPipelines() {
 	LogStatusSummary()
 }
 
+func (pipelineMgr *PipelineManager) HandleClusterEncryptionLevelChange(old, new service_def.EncryptionSettingIface) {
+	if new.IsStrictEncryption() == false || old.IsStrictEncryption() == new.IsStrictEncryption() {
+		return
+	}
+	// Cluster encryption level has changed to strict. All pipelines not full encryption cannot run
+	refList, err := pipelineMgr.remote_cluster_svc.RemoteClusters()
+	if err != nil {
+		pipelineMgr.logger.Errorf("Cannot get list of remote clusters. err=%v", err)
+		return
+	}
+	for _, ref := range refList {
+		if ref.DemandEncryption() == true && ref.EncryptionType() == metadata.EncryptionType_Full {
+			// Full encryption remote ref works with strict cluster encryption
+			continue
+		}
+
+		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
+		if err != nil {
+			pipelineMgr.logger.Errorf("Unable to retrieve specs for remote cluster %v ... user should manually restart pipelines replicating to this remote cluster", ref.Id())
+			continue
+		}
+		for _, spec := range replSpecsList {
+			pipelineMgr.UpdatePipeline(spec.Id, base.ErrorPipelineRestartDueToEncryptionChange)
+		}
+	}
+}
 func (pipelineMgr *PipelineManager) validateAndGCSpecs() {
 	rep_status_map := pipelineMgr.ReplicationStatusMap()
 	for _, rep_status := range rep_status_map {
