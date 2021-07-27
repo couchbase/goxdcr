@@ -1668,8 +1668,21 @@ func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.Replic
 
 const updateStatsId = "ReplicationMgrUpdateStats"
 
+var updateStatsInstanceCnt uint32
+
+const maxConcurrentUpdateStatsInstances = 500
+
+// Compile a instance ID to be used each time UpdateStats is called to prevent subscriber ID collision when called
+// concurrently. Wraps around once max has been hit
+func getUpdateStatsInstanceId() string {
+	instanceCnt := atomic.AddUint32(&updateStatsInstanceCnt, 1) % maxConcurrentUpdateStatsInstances
+	return fmt.Sprintf("%v_%v", updateStatsId, instanceCnt)
+}
+
 func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, remoteClusterSvc service_def.RemoteClusterSvc, backfillReplSvc service_def.BackfillReplSvc, bucketTopologySvc service_def.BucketTopologySvc) {
-	logger.Debug("updateStats for paused replications")
+	logger.Debugf("updateStats for paused replications")
+
+	subscriberId := getUpdateStatsInstanceId()
 
 	for repl_id, repl_status := range pipeline_manager.ReplicationStatusMap() {
 		overview_stats := repl_status.GetOverviewStats(common.MainPipeline)
@@ -1683,14 +1696,14 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			continue
 		}
 
-		localBucketNotificationCh, err := bucketTopologySvc.SubscribeToLocalBucketFeed(spec, updateStatsId)
+		localBucketNotificationCh, err := bucketTopologySvc.SubscribeToLocalBucketFeed(spec, subscriberId)
 		if err != nil {
 			logger.Errorf("Error subscribing to local bucket feed for paused replication %v. err=%v", repl_id, err)
 			continue
 		}
 		notification := <-localBucketNotificationCh
 		cur_kv_vb_map := notification.GetKvVbMapRO()
-		err = bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, updateStatsId)
+		err = bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, subscriberId)
 		if err != nil {
 			logger.Errorf("Error unsubscribing to local bucket feed for paused replication %v - err: %v", ref.Id(), err)
 		}
@@ -1705,7 +1718,7 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 		var highSeqnosMaps map[string]map[uint16]uint64
 		var sourceVBMap map[string][]uint16
 		if remoteClusterCapability.HasCollectionSupport() {
-			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, updateStatsId, base.ReplSpecCheckInterval)
+			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
 				logger.Errorf("Error subscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
 				continue
@@ -1715,12 +1728,12 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			highSeqnosMaps = notification.GetHighSeqnosMap()
 			sourceVBMap = notification.GetSourceVBMapRO()
 
-			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, updateStatsId)
+			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId)
 			if err != nil {
 				logger.Errorf("Error unsubscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
 			}
 		} else {
-			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, updateStatsId, base.ReplSpecCheckInterval)
+			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
 				logger.Errorf("Error subscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
 				continue
@@ -1730,7 +1743,7 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			highSeqnosMaps = notification.GetHighSeqnosMap()
 			sourceVBMap = notification.GetSourceVBMapRO()
 
-			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, updateStatsId)
+			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId)
 			if err != nil {
 				logger.Errorf("Error unsubscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
 			}

@@ -319,4 +319,10 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	default:
 		assert.True(false)
 	}
+
+	intervalAndFunc := watcher1.intervalFuncMap[HIGHSEQNOS]
+	for _, updateFunc := range intervalAndFunc {
+		updateFuncCpy := updateFunc
+		watcher1.updateOnce(HIGHSEQNOS, updateFuncCpy)
+	}
 }

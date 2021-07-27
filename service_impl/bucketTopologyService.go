@@ -1154,7 +1154,7 @@ func (bw *BucketTopologySvcWatcher) setHighSeqnosInterval(opts HighSeqnosOpts, l
 
 	bw.watchersTickersMapMtx.RLock()
 	bw.watchersTickersMap[chType].Reset(shortestInterval)
-	bw.logger.Infof("Setting overall ticker for %v to %v", chType, shortestInterval)
+	bw.logger.Infof("spec %v Setting overall ticker for %v to %v", opts.Spec.Id, chType, shortestInterval)
 	bw.watchersTickersMapMtx.RUnlock()
 }
 
@@ -1179,8 +1179,9 @@ func (bw *BucketTopologySvcWatcher) checkHighSeqnosReceiverAwaitingData(name str
 		ticker, found = bw.highSeqnosReceiverFiredLegacy[name]
 	}
 	if !found {
-		// TODO remove
-		panic(fmt.Sprintf("%v - %v not found", name, legacy))
+		// It is raceful and possible that the timer did not stop in time during unsubscribing
+		// and the timer has fired already
+		return false
 	}
 	bw.highSeqnosTrackersMtx.RUnlock()
 	select {
@@ -1242,10 +1243,10 @@ func (bw *BucketTopologySvcWatcher) cleanupHighSeqnosInternalData(spec *metadata
 	}
 	mtx.Unlock()
 
-	if shortestIntervalBeforeRemoval != shortestIntervalAfterRemoval {
+	if shortestIntervalAfterRemoval != 0 && shortestIntervalBeforeRemoval != shortestIntervalAfterRemoval {
 		bw.watchersTickersMapMtx.RLock()
 		bw.watchersTickersMap[chType].Reset(shortestIntervalAfterRemoval)
-		bw.logger.Infof("Setting overall ticker for %v to %v", chType, shortestIntervalAfterRemoval)
+		bw.logger.Infof("spec %v Setting overall ticker for %v to %v", spec.Id, chType, shortestIntervalAfterRemoval)
 		bw.watchersTickersMapMtx.RUnlock()
 	}
 }
