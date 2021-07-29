@@ -176,11 +176,16 @@ func main() {
 			os.Exit(1)
 		}
 
+		ckpt_svc, err := metadata_svc.NewCheckpointsService(metakv_svc, nil, utils, replication_spec_svc)
+		if err != nil {
+			fmt.Printf("Error starting checkpoints service. err=%v\n", err)
+			os.Exit(1)
+		}
+
 		migration_svc := service_impl.NewMigrationSvc(top_svc, remote_cluster_svc,
 			replication_spec_svc,
 			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
-			metadata_svc.NewCheckpointsService(metakv_svc, nil, utils),
-			nil, utils)
+			ckpt_svc, nil, utils)
 		err = migration_svc.Migrate()
 		if err == nil {
 			os.Exit(0)
@@ -202,7 +207,12 @@ func main() {
 			os.Exit(1)
 		}
 
-		checkpointsService := metadata_svc.NewCheckpointsService(metakv_svc, nil, utils)
+		checkpointsService, err := metadata_svc.NewCheckpointsService(metakv_svc, nil, utils, replication_spec_svc)
+		if err != nil {
+			fmt.Printf("Error starting checkpoints service. err=%v\n", err)
+			os.Exit(1)
+		}
+
 		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)
 		collectionsManifestService, err := metadata_svc.NewCollectionsManifestService(remote_cluster_svc,
 			replication_spec_svc, uilog_svc, log.DefaultLoggerContext, utils, checkpointsService,
@@ -226,7 +236,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.DefaultLoggerContext, top_svc, utils, bucketTopologyService, replication_spec_svc, base.P2POpaqueCleanupInterval, checkpointsService)
+		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.DefaultLoggerContext, top_svc, utils, bucketTopologyService,
+			replication_spec_svc, base.P2POpaqueCleanupInterval, checkpointsService, collectionsManifestService)
 
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,

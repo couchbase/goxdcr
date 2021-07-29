@@ -13,16 +13,19 @@ import (
 	"time"
 )
 
-func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.CheckpointsService, *log.CommonLogger) {
+func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.CheckpointsService, *log.CommonLogger, *service_def.CollectionsManifestSvc) {
 	bucketTopologySvc := &service_def.BucketTopologySvc{}
 	ckptSvc := &service_def.CheckpointsService{}
 	logger := log.NewLogger("test", nil)
+	colManifestSvc := &service_def.CollectionsManifestSvc{}
 
-	return bucketTopologySvc, ckptSvc, logger
+	return bucketTopologySvc, ckptSvc, logger, colManifestSvc
 }
 
-func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16) {
-	ckptSvc.On("CheckpointsDocs", replId, false).Return(ckptData, nil)
+func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16, colManifestSvc *service_def.CollectionsManifestSvc) {
+	ckptSvc.On("CheckpointsDocs", replId, mock.Anything).Return(ckptData, nil)
+	nsMappingDoc := &metadata.CollectionNsMappingsDoc{}
+	ckptSvc.On("LoadBrokenMappings", replId).Return(nil, nsMappingDoc, nil, false, nil)
 
 	notificationCh := make(chan service_def2.SourceNotification, 1)
 	bucketTopologySvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything).Return(notificationCh, nil)
@@ -34,6 +37,10 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 	notificationMock.On("GetSourceVBMapRO").Return(retMap, nil)
 	notificationCh <- notificationMock
 
+	manifestCache := make(map[uint64]*metadata.CollectionsManifest)
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	manifestCache[0] = &defaultManifest
+	colManifestSvc.On("GetAllCachedManifests", mock.Anything).Return(manifestCache, manifestCache, nil)
 }
 
 var srcBucketName = "bucket"
@@ -44,7 +51,7 @@ func TestVBMasterHandler(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestVBMasterHandler =================")
 	assert := assert.New(t)
 
-	bucketTopologySvc, ckptSvc, logger := setupVBCHBoilerPlate()
+	bucketTopologySvc, ckptSvc, logger, colManifestSvc := setupVBCHBoilerPlate()
 
 	vbList := []uint16{0, 1}
 	vbsListNonIntersect := []uint16{2, 3}
@@ -53,10 +60,10 @@ func TestVBMasterHandler(t *testing.T) {
 		ckptData[vb] = &metadata.CheckpointsDoc{SpecInternalId: "dummyId"}
 	}
 
-	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect)
+	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect, colManifestSvc)
 
 	reqCh := make(chan interface{}, 100)
-	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc)
+	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc)
 
 	var waitGrp sync.WaitGroup
 	assert.Nil(handler.Start())
@@ -71,7 +78,6 @@ func TestVBMasterHandler(t *testing.T) {
 		responseCb: func(resp Response) (HandlerResult, error) {
 			var respInterface interface{} = resp
 			respActual := respInterface.(*VBMasterCheckResp)
-			fmt.Printf("ND: %v\n", respActual)
 			bucketMap := respActual.GetReponse()
 			payload := (*bucketMap)[srcBucketName]
 			ckptMap := payload.GetAllCheckpoints()

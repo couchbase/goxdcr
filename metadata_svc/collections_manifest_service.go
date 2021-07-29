@@ -19,7 +19,6 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 	"math"
 	"reflect"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -326,6 +325,26 @@ func (c *CollectionsManifestService) ForceTargetManifestRefresh(spec *metadata.R
 	return agent.ForceTargetManifestRefresh()
 }
 
+func (c *CollectionsManifestService) GetAllCachedManifests(spec *metadata.ReplicationSpecification) (map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest, error) {
+	c.agentsMtx.RLock()
+	agent, ok := c.agentsMap[spec.Id]
+	c.agentsMtx.RUnlock()
+	if !ok {
+		return nil, nil, fmt.Errorf("Unable to find agent for spec %v\n", spec.Id)
+	}
+	return agent.GetAllCachedManifests()
+}
+
+func (c *CollectionsManifestService) PersistReceivedManifests(spec *metadata.ReplicationSpecification, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
+	c.agentsMtx.RLock()
+	agent, ok := c.agentsMap[spec.Id]
+	c.agentsMtx.RUnlock()
+	if !ok {
+		return fmt.Errorf("Unable to find agent for spec %v\n", spec.Id)
+	}
+	return agent.PersistReceivedManifests(srcManifests, tgtManifests)
+}
+
 type AgentSrcManifestGetter func() *metadata.CollectionsManifest
 
 type AgentPersistResult struct {
@@ -361,8 +380,8 @@ type CollectionsManifestAgent struct {
 	tgtMtx         sync.RWMutex
 	lastSourcePull uint64
 	lastTargetPull uint64
-	sourceCache    ManifestsCache
-	targetCache    ManifestsCache
+	sourceCache    metadata.ManifestsCache
+	targetCache    metadata.ManifestsCache
 	// When Backfill manager starts up, it needs to know the highest manifest saved for a replication
 	// This must be restored from checkpoint and not from ns_server to ensure no data loss
 	lastSourceStoredManifest uint64
@@ -401,8 +420,8 @@ func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.Remot
 		srcManifestGetter:      srcManifestGetter,
 		finCh:                  make(chan bool, 1),
 		ckptDocsCache:          make(map[uint16]*metadata.CheckpointsDoc),
-		sourceCache:            make(ManifestsCache),
-		targetCache:            make(ManifestsCache),
+		sourceCache:            make(metadata.ManifestsCache),
+		targetCache:            make(metadata.ManifestsCache),
 		metakvSvc:              metakvSvc,
 		metadataChangeCb:       metadataChangeCb,
 		singlePersistReq:       make(chan bool, 1),
@@ -531,8 +550,13 @@ func (a *CollectionsManifestAgent) PersistNeededManifests() (error, error, bool,
 func (a *CollectionsManifestAgent) persistNeededManifestsInternal() (srcErr, tgtErr error, srcUpdated, tgtUpdated bool) {
 	// find all the manifest UIDs that existing checkpoints refer for both source and target
 	srcList, tgtList, err := a.getAllManifestsUids()
+	if err != nil {
+		srcErr = err
+		tgtErr = err
+		return
+	}
 	// Clean up agent's current manifest storage to get rid of unreferred sourcelist
-	a.cleanupUnreferredManifests(srcList, tgtList)
+	err = a.cleanupUnreferredManifests(srcList, tgtList)
 	if err != nil {
 		srcErr = err
 		tgtErr = err
@@ -604,30 +628,6 @@ func (a *CollectionsManifestAgent) DeleteManifests() error {
 	return a.metakvSvc.DelManifests(a.replicationSpec)
 }
 
-type ManifestsCache map[uint64]*metadata.CollectionsManifest
-
-func (m ManifestsCache) String() string {
-	var output []string
-	for k, v := range m {
-		output = append(output, fmt.Sprintf("%v:%v\n", k, v))
-	}
-	return strings.Join(output, " ")
-}
-
-func (m ManifestsCache) GetMaxManifestID() uint64 {
-	var max uint64
-	for k, v := range m {
-		if v == nil {
-			// This is a problem...
-			continue
-		}
-		if k > max {
-			max = k
-		}
-	}
-	return max
-}
-
 func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr error) {
 	srcGet, srcErr := a.metakvSvc.GetSourceManifests(a.replicationSpec)
 	tgtGet, tgtErr := a.metakvSvc.GetTargetManifests(a.replicationSpec)
@@ -646,7 +646,7 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr err
 		}
 
 		a.srcMtx.Lock()
-		a.sourceCache = make(ManifestsCache)
+		a.sourceCache = make(metadata.ManifestsCache)
 		if srcGet != nil {
 			var maxPull uint64
 			for _, manifest := range *srcGet {
@@ -679,7 +679,7 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr err
 		}
 
 		a.tgtMtx.Lock()
-		a.targetCache = make(ManifestsCache)
+		a.targetCache = make(metadata.ManifestsCache)
 
 		if tgtGet != nil {
 			var maxPull uint64
@@ -1199,7 +1199,7 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		replacementMap := make(ManifestsCache)
+		replacementMap := make(metadata.ManifestsCache)
 		replacementMap[0] = &defaultManifest
 		a.srcMtx.Lock()
 		for _, uid := range srcList {
@@ -1237,7 +1237,7 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		replacementMap := make(ManifestsCache)
+		replacementMap := make(metadata.ManifestsCache)
 		replacementMap[0] = &defaultManifest
 		a.tgtMtx.Lock()
 		for _, uid := range tgtList {
@@ -1352,4 +1352,45 @@ func (a *CollectionsManifestAgent) remoteClusterHasNoCollectionsCapability() (bo
 	}
 
 	return capability.HasCollectionSupport(), nil
+}
+
+func (a *CollectionsManifestAgent) GetAllCachedManifests() (map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest, error) {
+	a.srcMtx.RLock()
+	srcCache := a.sourceCache.Clone()
+	a.srcMtx.RUnlock()
+
+	a.tgtMtx.RLock()
+	tgtCache := a.targetCache.Clone()
+	a.tgtMtx.RUnlock()
+
+	return srcCache, tgtCache, nil
+}
+
+// Should only be called after corresponding checkpoints that refer to these manifests have been persisted
+// Because persisting will go through GC and clean up any manifests not referred by any checkpoints
+func (a *CollectionsManifestAgent) PersistReceivedManifests(srcManifests map[uint64]*metadata.CollectionsManifest, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
+	a.srcMtx.Lock()
+	for srcManifestId, srcManifest := range srcManifests {
+		_, exists := a.sourceCache[srcManifestId]
+		if !exists {
+			a.sourceCache[srcManifestId] = srcManifest
+		}
+	}
+	a.srcMtx.Unlock()
+
+	a.tgtMtx.Lock()
+	for tgtManifestId, tgtManifest := range tgtManifests {
+		_, exists := a.targetCache[tgtManifestId]
+		if !exists {
+			a.targetCache[tgtManifestId] = tgtManifest
+		}
+	}
+	a.tgtMtx.Unlock()
+
+	srcErr, tgtErr, _, _ := a.PersistNeededManifests()
+	if srcErr != nil || tgtErr != nil {
+		return fmt.Errorf("srcErr %v tgtErr %v", srcErr, tgtErr)
+	}
+
+	return nil
 }

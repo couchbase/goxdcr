@@ -8,6 +8,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	service_def "github.com/couchbase/goxdcr/service_def"
+
 	sync "sync"
 )
 
@@ -166,6 +168,54 @@ func (_m *CheckpointsService) GetVbnosFromCheckpointDocs(replicationId string) (
 	return r0, r1
 }
 
+// LoadBrokenMappings provides a mock function with given fields: replicationId
+func (_m *CheckpointsService) LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
+	ret := _m.Called(replicationId)
+
+	var r0 metadata.ShaToCollectionNamespaceMap
+	if rf, ok := ret.Get(0).(func(string) metadata.ShaToCollectionNamespaceMap); ok {
+		r0 = rf(replicationId)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(metadata.ShaToCollectionNamespaceMap)
+		}
+	}
+
+	var r1 *metadata.CollectionNsMappingsDoc
+	if rf, ok := ret.Get(1).(func(string) *metadata.CollectionNsMappingsDoc); ok {
+		r1 = rf(replicationId)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*metadata.CollectionNsMappingsDoc)
+		}
+	}
+
+	var r2 service_def.IncrementerFunc
+	if rf, ok := ret.Get(2).(func(string) service_def.IncrementerFunc); ok {
+		r2 = rf(replicationId)
+	} else {
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).(service_def.IncrementerFunc)
+		}
+	}
+
+	var r3 bool
+	if rf, ok := ret.Get(3).(func(string) bool); ok {
+		r3 = rf(replicationId)
+	} else {
+		r3 = ret.Get(3).(bool)
+	}
+
+	var r4 error
+	if rf, ok := ret.Get(4).(func(string) error); ok {
+		r4 = rf(replicationId)
+	} else {
+		r4 = ret.Error(4)
+	}
+
+	return r0, r1, r2, r3, r4
+}
+
 // PostDelCheckpointsDoc provides a mock function with given fields: replicationId, doc
 func (_m *CheckpointsService) PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) (bool, error) {
 	ret := _m.Called(replicationId, doc)
@@ -229,6 +279,20 @@ func (_m *CheckpointsService) UpsertBrokenMapping(replicationId string, specInte
 	return r0
 }
 
+// UpsertBrokenMappingsDoc provides a mock function with given fields: replicationId, mappingDoc, ckptDoc, internalId
+func (_m *CheckpointsService) UpsertBrokenMappingsDoc(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+	ret := _m.Called(replicationId, mappingDoc, ckptDoc, internalId)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNsMappingsDoc, map[uint16]*metadata.CheckpointsDoc, string) error); ok {
+		r0 = rf(replicationId, mappingDoc, ckptDoc, internalId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UpsertCheckpoints provides a mock function with given fields: replicationId, specInternalId, vbno, ckpt_record
 func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error) {
 	ret := _m.Called(replicationId, specInternalId, vbno, ckpt_record)
@@ -250,16 +314,23 @@ func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specIntern
 	return r0, r1
 }
 
-// UpsertCheckpointsDoc provides a mock function with given fields: replicationId, ckptDocs
-func (_m *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc) error {
-	ret := _m.Called(replicationId, ckptDocs)
+// UpsertCheckpointsDoc provides a mock function with given fields: replicationId, ckptDocs, internalId
+func (_m *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) (bool, error) {
+	ret := _m.Called(replicationId, ckptDocs, internalId)
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, map[uint16]*metadata.CheckpointsDoc) error); ok {
-		r0 = rf(replicationId, ckptDocs)
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string, map[uint16]*metadata.CheckpointsDoc, string) bool); ok {
+		r0 = rf(replicationId, ckptDocs, internalId)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(bool)
 	}
 
-	return r0
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, map[uint16]*metadata.CheckpointsDoc, string) error); ok {
+		r1 = rf(replicationId, ckptDocs, internalId)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }

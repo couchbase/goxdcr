@@ -72,6 +72,7 @@ func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internal
 		s.topicMapMtx.Unlock()
 		return
 	}
+
 	counter := NewMapShaRefCounterWithInternalId(topic, internalId, s.metadataSvc, s.metakvDocKeyGetter(topic), s.logger)
 	s.topicMaps[topic] = counter
 	s.topicMapMtx.Unlock()
@@ -123,11 +124,7 @@ func (s *ShaRefCounterService) GetShaToCollectionNsMap(topic string, doc *metada
 	return compiledShaNamespaceMap, nil
 }
 
-type IncrementerFunc func(shaString string, mapping *metadata.CollectionNamespaceMapping)
-
-type DecrementerFunc func(shaString string)
-
-func (s *ShaRefCounterService) GetIncrementerFunc(topic string) (IncrementerFunc, error) {
+func (s *ShaRefCounterService) GetIncrementerFunc(topic string) (service_def.IncrementerFunc, error) {
 	s.topicMapMtx.RLock()
 	counter, ok := s.topicMaps[topic]
 	s.topicMapMtx.RUnlock()
@@ -139,7 +136,7 @@ func (s *ShaRefCounterService) GetIncrementerFunc(topic string) (IncrementerFunc
 	return counter.RecordOneCount, nil
 }
 
-func (s *ShaRefCounterService) GetDecrementerFunc(topic string) (DecrementerFunc, error) {
+func (s *ShaRefCounterService) GetDecrementerFunc(topic string) (service_def.DecrementerFunc, error) {
 	s.topicMapMtx.RLock()
 	counter, ok := s.topicMaps[topic]
 	s.topicMapMtx.RUnlock()
@@ -234,6 +231,20 @@ func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.Util
 
 	return counter.DelAndCleanup()
 }
+
+func (s *ShaRefCounterService) ReInitUsingMergedMappingDoc(topic string, brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+	s.topicMapMtx.RLock()
+	counter, ok := s.topicMaps[topic]
+	s.topicMapMtx.RUnlock()
+
+	if !ok {
+		return base.ErrorInvalidInput
+	}
+
+	return counter.ReInitUsingMergedMappingDoc(brokenMappingDoc, ckptDocs, internalId)
+}
+
+//func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(doc *metadata.CollectionNsMappingsDoc, ckpt) error {
 
 func UnableToUpsertErr(id string) error {
 	return fmt.Errorf("Unable to clean broken mappings for %v due to concurrent ongoing upsert operation", id)
@@ -528,4 +539,37 @@ func (c *MapShaRefCounter) DelAndCleanup() error {
 	}
 	close(c.singleUpsert)
 	return nil
+}
+
+// Used only when doing a complete overwrite after major merge operations
+func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptsDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+	if brokenMappingDoc == nil {
+		return base.ErrorNilPtr
+	}
+
+	newShaMap, err := brokenMappingDoc.ToShaMap()
+	if err != nil {
+		return err
+	}
+
+	c.lock.Lock()
+	c.refCnt = make(map[string]uint64)
+	c.shaToMapping = make(metadata.ShaToCollectionNamespaceMap)
+
+	for sha, mapping := range newShaMap {
+		c.shaToMapping[sha] = mapping
+	}
+
+	for _, ckptDoc := range ckptsDocs {
+		for _, ckptRecord := range ckptDoc.Checkpoint_records {
+			if ckptRecord == nil || ckptRecord.BrokenMappingSha256 == "" {
+				continue
+			}
+			c.refCnt[ckptRecord.BrokenMappingSha256]++
+		}
+	}
+	c.needToSync = true
+	c.lock.Unlock()
+
+	return c.upsertMapping(internalId, false)
 }

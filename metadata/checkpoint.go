@@ -510,6 +510,16 @@ func compareFailoverLogPositionThenSeqnos(aRecord *CheckpointSortRecord, bRecord
 	var bFailoverUuid uint64
 	var bSeqno uint64
 
+	if aRecord.CheckpointRecord == nil && bRecord.CheckpointRecord != nil {
+		// bRecord is "less than", or should belong in front of aRecord
+		return false, true
+	} else if aRecord.CheckpointRecord != nil && bRecord.CheckpointRecord == nil {
+		return true, false
+	} else if aRecord.CheckpointRecord == nil && bRecord.CheckpointRecord == nil {
+		// Just say yes
+		return true, false
+	}
+
 	if source {
 		aFailoverLog = aRecord.srcFailoverLog
 		bFailoverLog = bRecord.srcFailoverLog
@@ -553,6 +563,9 @@ func (c *CheckpointRecordsList) PrepareSortStructure(srcFailoverlog, tgtFailover
 		return sortRecordsList
 	}
 	for _, checkpointRecord := range *c {
+		if checkpointRecord == nil {
+			continue
+		}
 		sortRecordsList = append(sortRecordsList, &CheckpointSortRecord{
 			CheckpointRecord: checkpointRecord,
 			srcFailoverLog:   srcFailoverlog,

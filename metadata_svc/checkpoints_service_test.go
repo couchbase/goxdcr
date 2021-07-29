@@ -25,19 +25,24 @@ import (
 	"testing"
 )
 
-func setupCkptSvcBoilerPlate() (*service_def.MetadataSvc, *log.LoggerContext) {
+func setupCkptSvcBoilerPlate() (*service_def.MetadataSvc, *log.LoggerContext, *service_def.ReplicationSpecSvc) {
 	metadataSvc := &service_def.MetadataSvc{}
 	loggerCtx := &log.LoggerContext{
 		Log_writers: nil,
 		Log_level:   0,
 	}
-	return metadataSvc, loggerCtx
+	replSpecSvc := &service_def.ReplicationSpecSvc{}
+	return metadataSvc, loggerCtx, replSpecSvc
 }
 
-func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerContext, metadataEntry []*service_def_real.MetadataEntry, brokenMappingMarshalled []byte, newMapMarshalled []byte) {
+func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerContext, metadataEntry []*service_def_real.MetadataEntry, brokenMappingMarshalled []byte, newMapMarshalled []byte, replSpecSvc *service_def.ReplicationSpecSvc) {
 	metadataSvc.On("GetAllMetadataFromCatalog", fmt.Sprintf("%v/%v", CheckpointsCatalogKeyPrefix, replId)).Return(metadataEntry, nil)
 	metadataSvc.On("Get", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey)).Return(brokenMappingMarshalled, nil, nil)
 	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), newMapMarshalled, mock.Anything).Return(nil)
+
+	dummyMap := make(map[string]*metadata.ReplicationSpecification)
+	dummyMap[replId] = nil
+	replSpecSvc.On("AllReplicationSpecs").Return(dummyMap, nil)
 }
 
 const replId = "testReplId"
@@ -48,7 +53,7 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCkptSvcRemoveSourceMapping =================")
 	assert := assert.New(t)
 
-	metadataSvc, loggerCtx := setupCkptSvcBoilerPlate()
+	metadataSvc, loggerCtx, replSpecSvc := setupCkptSvcBoilerPlate()
 
 	// This test will start with two mappings
 	// S1:C1 -> S1T:C1T
@@ -72,10 +77,11 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 	newMapSha := fmt.Sprintf("%x", newMapShaSlice)
 	assert.Equal("67d24325ed5df4d1f04c425606b4d40575032663de206e49a76033ced5dc15ee", newMapSha)
 
-	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice)
+	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc)
 
-	ckptSvc := NewCheckpointsService(metadataSvc, loggerCtx, nil)
+	ckptSvc, err := NewCheckpointsService(metadataSvc, loggerCtx, nil, replSpecSvc)
 	assert.NotNil(ckptSvc)
+	assert.Nil(err)
 
 	docs, err := ckptSvc.CheckpointsDocs(replId, true)
 	assert.Nil(err)

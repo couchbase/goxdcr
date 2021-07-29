@@ -68,9 +68,10 @@ type P2PManagerImpl struct {
 	latestKnownPeers *KnownPeers
 
 	vbMasterCheckHelper VbMasterCheckHelper
+	colManifestSvc      service_def.CollectionsManifestSvc
 }
 
-func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService) (*P2PManagerImpl, error) {
+func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
 	if err != nil {
 		return nil, err
@@ -91,6 +92,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		replSpecSvc:         replicationSpecSvc,
 		cleanupInterval:     cleanupInt,
 		ckptSvc:             ckptSvc,
+		colManifestSvc:      colManifestSvc,
 	}, nil
 }
 
@@ -132,7 +134,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, p.cleanupInterval)
 		case ReqVBMasterChk:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.bucketTopologySvc, p.ckptSvc)
+			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -343,12 +345,12 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		requestCommon := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
 		vbCheckReq := NewVBMasterCheckReq(requestCommon)
 		vbCheckReq.SetBucketVBMap(filteredSubsets)
-		vbCheckReq.ReplicationId = pipeline.Topic()
 		vbCheckReq.PipelineType = pipeline.Type()
 		spec := pipeline.Specification().GetReplicationSpec()
 		if spec == nil {
 			return nil
 		}
+		vbCheckReq.ReplicationId = spec.Id
 		vbCheckReq.SourceBucketName = spec.SourceBucketName
 		return vbCheckReq
 	}
@@ -360,6 +362,7 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		return nil, err
 	}
 
+	// TODO - need to see what to do about error handling
 	result := opts.GetResults()
 
 	respMap := make(map[string]*VBMasterCheckResp)

@@ -1,0 +1,212 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
+	waitForBgJobs
+	echo "RUNNING dataload DONE"
+}
+
+TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+
+declare LOGMSG=$BROKEN_MSG
+
+function runOneReplicationCycleAndPause {
+	local timeIntervalSecs=5
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+	setupCluster
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	local -i currentInstanceCnt
+	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	runDataLoad
+
+  echo "Sleeping 20 seconds before changes left check"
+	sleep 20
+
+	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
+
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	validateXDCRCheckpoints "C1"
+	grepForPanics
+
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
+	grepForPanics
+
+	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	#grepForPanics
+
+	#	echo "============================================================================"
+	#	echo "Cycle $(($cycleCnt + 1)) PASSED"
+	#	echo "============================================================================"
+	#cleanupBucketReplications
+	#cleanupBuckets
+	#cleanupRemoteClusterRefs
+	#echo "Waiting for $timeIntervalSecs seconds before starting another replication"
+	#sleep $timeIntervalSecs
+}
+
+C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
+CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
+CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
+CKPT_RESUME_FOUND="checkpoint documents for"
+TS_PREFIX="ts.Seqno"
+LOADED_BROKEN_MAP="Loaded brokenMap: map"
+LOADED_BROKEN_MAP_NAME="S1.col1"
+
+function runOneRebalanceCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=30
+
+	echo "Sleeping 10 secs before rebalancing node in"
+	sleep 10
+
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	startRebalancingIn "C1"
+	echo "Rebalancing node in is completed"
+
+	echo "Sleeping before checking logs"
+	sleep 15
+
+	#currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
+	#local currentPeerMsgsC1
+	#currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
+
+	#echo "Restarting XDCR processes to trigger p2p discovery"
+	#killGoXdcr "C1"
+	#killGoXdcr "C1P"
+
+	#echo "Sleeping before checking logs"
+	#sleep 15
+
+	#validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(( $currentPeerMsgsC1 + 1 ))
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+}
+
+function runReplicationResume {
+	local logs
+	local logsC1P
+	local resumeFrom0Cnt
+
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 20 seconds for resume to finish"
+	sleep 20
+
+	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
+	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" 1
+	logs=$(getInternalNodeXdcrLog "C1")
+	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
+	if (($foundDocCount == 0)); then
+		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
+		exit 1
+	fi
+
+	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" 1
+
+	logsC1P=$(getInternalNodeXdcrLog "C1P")
+	ckptFoundCount=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
+	if (( $ckptFoundCount > 0 ));then
+	  echo "C1P unable to find upserted checkpoints"
+		exit 1
+	fi
+	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -c "=0")
+	if (( $resumeFrom0Cnt > 0 ));then
+	  echo "C1P has at least one VB that resumed from seqno 0"
+		exit 1
+	fi
+	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME" )
+	if (( $resumeLoadBrokenMapCnt == 0 ));then
+	  echo "C1P did not load broken map from checkpoint migration"
+		exit 1
+	fi
+
+
+	grepForPanics
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running P2P WithBrokenMap"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	runOneReplicationCycleAndPause
+	runOneRebalanceCycle 1 1
+	runReplicationResume
+
+	# 2 jobs - whichever finishes first is done
+	stopWhenAnyBgJobStops 2
+}

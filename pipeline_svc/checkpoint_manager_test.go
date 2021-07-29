@@ -15,7 +15,9 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCombineFailoverlogs(t *testing.T) {
@@ -107,4 +109,37 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 	for _, ckptDoc := range filteredMapTgt {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
 	}
+}
+
+func TestCheckpointSyncHelper(t *testing.T) {
+	fmt.Println("============== Test case start: TestCheckpointSyncHelper =================")
+	defer fmt.Println("============== Test case end: TestCheckpointSyncHelper =================")
+	assert := assert.New(t)
+
+	helper := newCheckpointSyncHelper()
+
+	helper.disableCkptAndWait()
+	_, err := helper.registerCkptOp(false)
+	assert.NotNil(err)
+
+	helper.setCheckpointAllowed()
+	idx, err := helper.registerCkptOp(false)
+	idx2, err2 := helper.registerCkptOp(false)
+	assert.Nil(err)
+	assert.Nil(err2)
+
+	var waitIsFinished uint32
+	go func() {
+		helper.disableCkptAndWait()
+		atomic.StoreUint32(&waitIsFinished, 1)
+	}()
+
+	helper.markTaskDone(idx)
+	time.Sleep(50 * time.Millisecond)
+	assert.True(atomic.LoadUint32(&waitIsFinished) == uint32(0))
+	helper.markTaskDone(idx2)
+	time.Sleep(50 * time.Millisecond)
+	assert.True(atomic.LoadUint32(&waitIsFinished) == uint32(1))
+
+	assert.Len(helper.ongoingOps, 0)
 }

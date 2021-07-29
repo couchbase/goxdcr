@@ -508,11 +508,15 @@ type VBMasterPayload struct {
 
 	NotMyVBs       *VBsPayload // These VBs are not owned by requested node
 	ConflictingVBs *VBsPayload // Requested node believes these VBs to be owned as does sender
+
+	SrcManifests *metadata.ManifestsCache
+	TgtManifests *metadata.ManifestsCache
+
+	BrokenMappingDoc *metadata.CollectionNsMappingsDoc
 }
 
 func (p *VBMasterPayload) RegisterVbsIntersect(vbsIntersect []uint16) {
 	for _, vb := range vbsIntersect {
-		// TODO - actually populate payload?
 		(*p.ConflictingVBs)[vb] = NewPayload()
 	}
 }
@@ -539,6 +543,14 @@ func (p *VBMasterPayload) GetAllCheckpoints() map[uint16]*metadata.CheckpointsDo
 	}
 
 	return retMap
+}
+
+func (p *VBMasterPayload) GetAllManifests() (srcManifests, tgtManifests *metadata.ManifestsCache) {
+	return p.SrcManifests, p.TgtManifests
+}
+
+func (p *VBMasterPayload) GetBrokenMappingDoc() *metadata.CollectionNsMappingsDoc {
+	return p.BrokenMappingDoc
 }
 
 type VBsPayload map[uint16]*Payload
@@ -604,5 +616,26 @@ func (v *VBMasterCheckResp) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.Chec
 	if len(errMap) > 0 {
 		return fmt.Errorf(base.FlattenErrorMap(errMap))
 	}
+	return nil
+}
+
+func (v *VBMasterCheckResp) LoadManifests(srcManifests metadata.ManifestsCache, tgtManifests metadata.ManifestsCache, srcBucketName string) error {
+	payload, found := (*v.responsePayload)[srcBucketName]
+	if !found {
+		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
+	}
+
+	payload.SrcManifests = &srcManifests
+	payload.TgtManifests = &tgtManifests
+	return nil
+}
+
+func (v *VBMasterCheckResp) LoadBrokenMappingDoc(brokenMappingDoc metadata.CollectionNsMappingsDoc, srcBucketName string) error {
+	payload, found := (*v.responsePayload)[srcBucketName]
+	if !found {
+		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
+	}
+
+	payload.BrokenMappingDoc = &brokenMappingDoc
 	return nil
 }

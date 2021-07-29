@@ -71,6 +71,11 @@ type CollectionsManifestSvc interface {
 	// This service should allow multiple calls and each call should be append
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback)
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
+
+	// When a node passes manifests in, store them
+	PersistReceivedManifests(spec *metadata.ReplicationSpecification, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error
+
+	GetAllCachedManifests(spec *metadata.ReplicationSpecification) (map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest, error)
 }
 
 type CollectionsManifestOps interface {

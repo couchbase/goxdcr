@@ -17,6 +17,17 @@ import (
 	"testing"
 )
 
+func getManifest() metadata.CollectionsManifest {
+	file := "../metadata/testData/provisionedManifest.json"
+	data, err := ioutil.ReadFile(file)
+	if err != nil {
+		panic(err)
+	}
+	provisionedManifest, _ := metadata.NewCollectionsManifestFromBytes(data)
+
+	return provisionedManifest
+}
+
 func TestVBMasterCheckResp(t *testing.T) {
 	fmt.Println("============== Test case start: TestVBMasterCheckResp =================")
 	defer fmt.Println("============== Test case end: TestVBMasterCheckResp =================")
@@ -34,7 +45,6 @@ func TestVBMasterCheckResp(t *testing.T) {
 	req := NewVBMasterCheckReq(reqCommon)
 	req.SourceBucketName = bucketName
 
-	//type BucketVBMapType map[string][]uint16
 	bucketMap := make(BucketVBMapType)
 	bucketMap[bucketName] = vbList
 	req.SetBucketVBMap(bucketMap)
@@ -66,6 +76,15 @@ func TestVBMasterCheckResp(t *testing.T) {
 		assert.Equal(testDoc, notMyVbs[vb].CheckpointsDoc)
 	}
 
+	// Test out manifest
+	manifest := getManifest()
+	srcMap := make(metadata.ManifestsCache)
+	tgtMap := make(metadata.ManifestsCache)
+	srcMap[manifest.Uid()] = &manifest
+	tgtMap[manifest.Uid()] = &manifest
+	(*resp.responsePayload)[bucketName].SrcManifests = &srcMap
+	(*resp.responsePayload)[bucketName].TgtManifests = &tgtMap
+
 	marshalBytes, err := resp.Serialize()
 	assert.Nil(err)
 
@@ -78,6 +97,11 @@ func TestVBMasterCheckResp(t *testing.T) {
 	for _, vb := range vbList {
 		assert.Equal(specInternalId, ckptDocsValidate[vb].SpecInternalId)
 	}
+
+	srcManifests, tgtManifests := (*payload)[bucketName].GetAllManifests()
+	assert.Nil(err)
+	assert.Len(*srcManifests, 1)
+	assert.Len(*tgtManifests, 1)
 
 	var respCast ReqRespCommon
 	respCast = newResp
@@ -107,4 +131,20 @@ func TestVBMasterPayloadMap(t *testing.T) {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
 		assert.NotNil(ckptDoc.Checkpoint_records[0])
 	}
+}
+
+func TestManifestLoadTest(t *testing.T) {
+	fmt.Println("============== Test case start: TestManifestLoadTest =================")
+	defer fmt.Println("============== Test case end: TestManifestLoadTest =================")
+	assert := assert.New(t)
+
+	file := "./unitTestData/postSerializeData.json"
+	vbMasterPayload := &VBMasterPayload{}
+	data, err := ioutil.ReadFile(file)
+	assert.Nil(err)
+	err = json.Unmarshal(data, &vbMasterPayload)
+	assert.Nil(err)
+
+	src, tgt := vbMasterPayload.GetAllManifests()
+	fmt.Printf("%v - %v - %v\n", src, tgt, err)
 }

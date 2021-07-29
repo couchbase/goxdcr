@@ -26,13 +26,12 @@ type VBMasterCheckHandler struct {
 
 	bucketTopologySvc service_def.BucketTopologySvc
 	ckptSvc           service_def.CheckpointsService
+	colManifestSvc    service_def.CollectionsManifestSvc
 }
 
 const VBMasterCheckSubscriberId = "VBMasterCheckHandler"
 
-func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string,
-	cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc,
-	ckptSvc service_def.CheckpointsService) *VBMasterCheckHandler {
+func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc) *VBMasterCheckHandler {
 	finCh := make(chan bool)
 	handler := &VBMasterCheckHandler{
 		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval),
@@ -40,6 +39,7 @@ func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, l
 		receiveCh:         reqCh,
 		bucketTopologySvc: bucketTopologySvc,
 		ckptSvc:           ckptSvc,
+		colManifestSvc:    collectionsManifestSvc,
 	}
 	return handler
 }
@@ -62,7 +62,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 	bucketVBsMap := req.GetBucketVBMap()
-	h.logger.Infof("Received VB master check request from %v with the following Bucket -> VBs %v", req.GetSender(), bucketVBsMap)
+	h.logger.Infof("Received VB master check request from %v with specID %v for the following Bucket -> VBs %v", req.GetSender(), req.ReplicationId, bucketVBsMap)
 
 	resp := req.GenerateResponse().(*VBMasterCheckResp)
 	resp.Init()
@@ -80,12 +80,63 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		panic("Shouldn't hit here")
 		// TODO
 	}
+
+	cachedSrcManifests := make(metadata.ManifestsCache)
+	cachedTgtManifests := make(metadata.ManifestsCache)
+	var manifestErr error
+	waitGrp.Add(1)
+	go h.fetchAllManifests(req.ReplicationId, &cachedSrcManifests, &cachedTgtManifests, &manifestErr, waitGrp)
+
+	var brokenMappingErr error
+	var brokenMappingDoc metadata.CollectionNsMappingsDoc
+	waitGrp.Add(1)
+	go h.fetchBrokenMappingDoc(req.ReplicationId, &brokenMappingDoc, &brokenMappingErr, waitGrp)
+
+	// Get all errors in order
 	waitGrp.Wait()
+	if bgErr != nil {
+		h.logger.Errorf("%v", bgErr)
+		resp.ErrorMsg = bgErr.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	if manifestErr != nil {
+		h.logger.Errorf("%v", manifestErr)
+		resp.ErrorMsg = manifestErr.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	if brokenMappingErr != nil {
+		h.logger.Errorf("%v", brokenMappingErr)
+		resp.ErrorMsg = brokenMappingErr.Error()
+		req.CallBack(resp)
+		return
+	}
 
 	err := resp.LoadPipelineCkpts(result, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("when loading pipeline ckpt into response, got %v", err)
 		resp.ErrorMsg = err.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	err = resp.LoadManifests(cachedSrcManifests, cachedTgtManifests, req.SourceBucketName)
+	if err != nil {
+		h.logger.Errorf("when loading manifests into response, got %v", err)
+		resp.ErrorMsg = err.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	err = resp.LoadBrokenMappingDoc(brokenMappingDoc, req.SourceBucketName)
+	if err != nil {
+		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", err)
+		resp.ErrorMsg = err.Error()
+		req.CallBack(resp)
+		return
 	}
 
 	handlerResult, err := req.CallBack(resp)
@@ -192,8 +243,7 @@ func (v *VBMasterCheckHandler) handleResponse(resp *VBMasterCheckResp) {
 func (v *VBMasterCheckHandler) populateMainPipelineCkpts(replSpecId string, waitGrp *sync.WaitGroup, err *error, result *map[uint16]*metadata.CheckpointsDoc) {
 	defer waitGrp.Done()
 
-	// Main pipeline handler for now does not
-	ckptDocs, opErr := v.ckptSvc.CheckpointsDocs(replSpecId, false)
+	ckptDocs, opErr := v.ckptSvc.CheckpointsDocs(replSpecId, true)
 	v.logger.Infof("Handler for %v retrieving CheckpointsDocs request found %v docs", replSpecId, len(ckptDocs))
 	if opErr != nil {
 		*err = opErr
@@ -201,5 +251,46 @@ func (v *VBMasterCheckHandler) populateMainPipelineCkpts(replSpecId string, wait
 	}
 
 	*result = ckptDocs
+
+	for _, ckptDoc := range ckptDocs {
+		records := ckptDoc.Checkpoint_records
+		for _, record := range records {
+			if record == nil {
+				continue
+			}
+		}
+	}
+
 	return
+}
+
+// We depend on CollectionsManifestSvc to always keep only the minimal manifests needed
+// So whatever it returns, most likely it is needed, and no need to go filter through them
+func (v *VBMasterCheckHandler) fetchAllManifests(replId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, errPtr *error, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+	nameOnlySpec := &metadata.ReplicationSpecification{}
+	nameOnlySpec.Id = replId
+	src, tgt, err := v.colManifestSvc.GetAllCachedManifests(nameOnlySpec)
+	if err != nil {
+		*errPtr = err
+		return
+	}
+	*srcManifests = src
+	*tgtManifests = tgt
+}
+
+func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *metadata.CollectionNsMappingsDoc, errPtr *error, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+
+	_, loadedDoc, _, _, err := v.ckptSvc.LoadBrokenMappings(replId)
+	if err != nil {
+		*errPtr = err
+		return
+	}
+	if loadedDoc == nil {
+		*errPtr = fmt.Errorf("Nil doc when loading brokenMapping")
+		return
+	}
+
+	*mappingDoc = *loadedDoc
 }

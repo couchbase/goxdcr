@@ -162,7 +162,7 @@ func setup() error {
 	replication_manager.StartReplicationManager(options.source_kv_host, base.AdminportNumber,
 		repl_spec_svc, remote_cluster_svc,
 		cluster_info_svc, top_svc, metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil),
-		metadata_svc.NewCheckpointsService(metakv_svc, nil, nil), service_impl.NewCAPIService(cluster_info_svc, nil, utils),
+		metadata_svc.NewCheckpointsService(metakv_svc, nil, nil, nil), service_impl.NewCAPIService(cluster_info_svc, nil, utils),
 		audit_svc, uilog_svc, processSetting_svc, buckerSettings_svc, internalSettings_svc)
 
 	logger.Info("Finish setup")

@@ -53,6 +53,38 @@ func (_m *CollectionsManifestSvc) ForceTargetManifestRefresh(spec *metadata.Repl
 	return r0
 }
 
+// GetAllCachedManifests provides a mock function with given fields: spec
+func (_m *CollectionsManifestSvc) GetAllCachedManifests(spec *metadata.ReplicationSpecification) (map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest, error) {
+	ret := _m.Called(spec)
+
+	var r0 map[uint64]*metadata.CollectionsManifest
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) map[uint64]*metadata.CollectionsManifest); ok {
+		r0 = rf(spec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint64]*metadata.CollectionsManifest)
+		}
+	}
+
+	var r1 map[uint64]*metadata.CollectionsManifest
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification) map[uint64]*metadata.CollectionsManifest); ok {
+		r1 = rf(spec)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(map[uint64]*metadata.CollectionsManifest)
+		}
+	}
+
+	var r2 error
+	if rf, ok := ret.Get(2).(func(*metadata.ReplicationSpecification) error); ok {
+		r2 = rf(spec)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
 // GetLastPersistedManifests provides a mock function with given fields: spec
 func (_m *CollectionsManifestSvc) GetLastPersistedManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error) {
 	ret := _m.Called(spec)
@@ -161,6 +193,20 @@ func (_m *CollectionsManifestSvc) PersistNeededManifests(spec *metadata.Replicat
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
 		r0 = rf(spec)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PersistReceivedManifests provides a mock function with given fields: spec, srcManifests, tgtManifests
+func (_m *CollectionsManifestSvc) PersistReceivedManifests(spec *metadata.ReplicationSpecification, srcManifests map[uint64]*metadata.CollectionsManifest, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
+	ret := _m.Called(spec, srcManifests, tgtManifests)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest) error); ok {
+		r0 = rf(spec, srcManifests, tgtManifests)
 	} else {
 		r0 = ret.Error(0)
 	}

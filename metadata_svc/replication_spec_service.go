@@ -206,6 +206,15 @@ func (service *ReplicationSpecService) ReplicationSpec(replicationId string) (*m
 	return spec.Clone(), nil
 }
 
+func (service *ReplicationSpecService) ReplicationSpecReadOnly(replicationId string) (*metadata.ReplicationSpecification, error) {
+	spec, err := service.replicationSpec(replicationId)
+	if err != nil {
+		return nil, err
+	}
+
+	return spec, nil
+}
+
 // this method is cheaper than ReplicationSpec() and should be called only when the spec returned won't be modified or that the modifications do not matter.
 func (service *ReplicationSpecService) replicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
 	val, ok := service.getCache().Get(replicationId)

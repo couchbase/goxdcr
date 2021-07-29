@@ -272,6 +272,29 @@ func (_m *ReplicationSpecSvc) ReplicationSpec(replicationId string) (*metadata.R
 	return r0, r1
 }
 
+// ReplicationSpecReadOnly provides a mock function with given fields: replicationId
+func (_m *ReplicationSpecSvc) ReplicationSpecReadOnly(replicationId string) (*metadata.ReplicationSpecification, error) {
+	ret := _m.Called(replicationId)
+
+	var r0 *metadata.ReplicationSpecification
+	if rf, ok := ret.Get(0).(func(string) *metadata.ReplicationSpecification); ok {
+		r0 = rf(replicationId)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.ReplicationSpecification)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(replicationId)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // ReplicationSpecServiceCallback provides a mock function with given fields: path, value, rev
 func (_m *ReplicationSpecSvc) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error {
 	ret := _m.Called(path, value, rev)

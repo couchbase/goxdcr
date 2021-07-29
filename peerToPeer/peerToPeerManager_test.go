@@ -72,18 +72,13 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	xdcrComp, utilsMock, bucket, replSvc, utilsReal := setupBoilerPlate()
 	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode)
 
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucket, replSvc, 100*time.Millisecond, nil)
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucket, replSvc, 100*time.Millisecond, nil, nil)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	commAPI, err := mgr.Start()
 	assert.NotNil(commAPI)
 	assert.Nil(err)
 
-	//var nilPtr *metadata.ReplicationSpecification
-	//err = mgr.ReplicationSpecChangeCallback("", nilPtr, spec, nil)
-	//assert.Nil(err)
-
-	//type BucketVBMapType map[string][]uint16
 	bucketMap := make(BucketVBMapType)
 	bucketMap[bucketName] = []uint16{0, 1}
 

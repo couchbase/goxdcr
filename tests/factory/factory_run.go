@@ -132,7 +132,7 @@ func invokeFactory() error {
 	bucketSettings_svc := metadata_svc.NewBucketSettingsService(msvc, top_svc, nil)
 	internalSettings_svc := metadata_svc.NewInternalSettingsSvc(msvc, nil)
 
-	checkpoints_svc := metadata_svc.NewCheckpointsService(msvc, nil, nil)
+	checkpoints_svc := metadata_svc.NewCheckpointsService(msvc, nil, nil, nil)
 	capi_svc := service_impl.NewCAPIService(cluster_info_svc, nil, utils)
 
 	replication_manager.StartReplicationManager(options.sourceKVHost, base.AdminportNumber,

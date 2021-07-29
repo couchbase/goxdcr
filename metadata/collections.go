@@ -3037,3 +3037,47 @@ func (p *PipelineEventBrokenMap) upgradeLockAndRemoveOutdatedSourceNamespacesFro
 		p.cachedBrokenMapMtx.RLock()
 	}
 }
+
+type ManifestsCache map[uint64]*CollectionsManifest
+
+func (m ManifestsCache) String() string {
+	var output []string
+	for k, v := range m {
+		output = append(output, fmt.Sprintf("%v:%v\n", k, v))
+	}
+	return strings.Join(output, " ")
+}
+
+func (m ManifestsCache) GetMaxManifestID() uint64 {
+	var max uint64
+	for k, v := range m {
+		if v == nil {
+			// This is a problem...
+			continue
+		}
+		if k > max {
+			max = k
+		}
+	}
+	return max
+}
+
+func (m ManifestsCache) Clone() ManifestsCache {
+	clonedCache := make(ManifestsCache)
+	for k, v := range m {
+		vClone := v.Clone()
+		clonedCache[k] = &vClone
+	}
+	return clonedCache
+}
+
+func (m *ManifestsCache) LoadIfNotExists(other *ManifestsCache) {
+	if other == nil || m == nil {
+		return
+	}
+	for k, v := range *other {
+		if _, exists := (*m)[k]; !exists {
+			(*m)[k] = v
+		}
+	}
+}
