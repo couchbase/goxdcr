@@ -10,43 +10,48 @@ function runTestCase {
 	echo "=============================================="
 	echo "=============== Evaluator Test ==============="
 	echo "=============================================="
-	REPO_PATH=$(cd ../../../../../../../; pwd)
-    export CGO_CFLAGS="-I$REPO_PATH/goproj/src/github.com/couchbase/eventing-ee/evaluator/worker/include -I$REPO_PATH/sigar/include"
-    export CGO_LDFLAGS="-L $REPO_PATH/install/lib"
-    export DYLD_LIBRARY_PATH="$REPO_PATH/install/lib"
-    export GODEBUG=madvdontneed=1
-    export CBAUTH_REVRPC_URL="http://Administrator:wewewe@127.0.0.1:9000"
-    echo "Test start: "; date
+	REPO_PATH=$(
+		cd ../../../../../../../
+		pwd
+	)
+	export CGO_CFLAGS="-I$REPO_PATH/goproj/src/github.com/couchbase/eventing-ee/evaluator/worker/include -I$REPO_PATH/sigar/include"
+	export CGO_LDFLAGS="-L $REPO_PATH/install/lib"
+	export DYLD_LIBRARY_PATH="$REPO_PATH/install/lib"
+	export GODEBUG=madvdontneed=1
+	export CBAUTH_REVRPC_URL="http://Administrator:wewewe@127.0.0.1:9000"
+	echo "Test start: "
+	date
 
-    export EVALUATOR_WORKERS=10
-    export EVALUATOR_QUOTA=1536 #1.5KB
-    cd ../../tests/evaluator
-    go test -run TestEvaluatorError
-    if (($? != 0)); then
-    	exit 1
-    fi
-    go test -run TestEvaluatorWorkloadMultiFunctionsLargeDocs -test.timeout 30m
-    if (($? != 0)); then
-    	exit 1
-    fi
-    go test -run TestEvaluatorWorkloadMultiFunctionsSmallDoc
-    if (($? != 0)); then
-     	exit 1
-    fi
-    go test -run TestEvaluatorWorkloadSingleFunctionLargeDocs -test.timeout 30m
-    if (($? != 0)); then
-    	exit 1
-    fi
-    go test -run TestEvaluatorWorkloadSingleFunctionSmallDocs
-    if (($? != 0)); then
-        exit 1
-    fi
-    go test -run TestEvaluatorWorkloadSlowFunction
-    if (($? != 0)); then
-    	exit 1
-    fi
-    echo "Test end: "; date
-    echo "===================================================="
-   	echo "=============== Evaluator Test PASSED==============="
-  	echo "===================================================="
+	export EVALUATOR_WORKERS=10
+	export EVALUATOR_QUOTA=1536 #1.5KB
+	cd ../../tests/evaluator
+	go test -run TestEvaluatorError
+	if (($? != 0)); then
+		exit 1
+	fi
+	go test -run TestEvaluatorWorkloadMultiFunctionsLargeDocs -test.timeout 30m
+	if (($? != 0)); then
+		exit 1
+	fi
+	go test -run TestEvaluatorWorkloadMultiFunctionsSmallDoc
+	if (($? != 0)); then
+		exit 1
+	fi
+	go test -run TestEvaluatorWorkloadSingleFunctionLargeDocs -test.timeout 30m
+	if (($? != 0)); then
+		exit 1
+	fi
+	go test -run TestEvaluatorWorkloadSingleFunctionSmallDocs
+	if (($? != 0)); then
+		exit 1
+	fi
+	go test -run TestEvaluatorWorkloadSlowFunction
+	if (($? != 0)); then
+		exit 1
+	fi
+	echo "Test end: "
+	date
+	echo "===================================================="
+	echo "=============== Evaluator Test PASSED==============="
+	echo "===================================================="
 }

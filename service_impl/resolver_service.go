@@ -49,7 +49,7 @@ func NewResolverSvc(top_svc service_def.XDCRCompTopologySvc) *ResolverSvc {
 
 func (rs *ResolverSvc) ResolveAsync(aConflict *base.ConflictParams, finish_ch chan bool) {
 	select {
-	// TODO: MB-47102: Handle when InputCh is not created
+	// CCR pipeline cannot start if resolver is not started. So the InputCh always exists at this call
 	case rs.InputCh <- aConflict:
 	case <-finish_ch:
 	}
@@ -207,8 +207,11 @@ func (rs *ResolverSvc) initEvaluator(sourceKVHost string, xdcrRestPort uint16) e
 }
 
 func (rs *ResolverSvc) functionsPathHandler(w http.ResponseWriter, r *http.Request) {
-	// We can do any verification here before sending to js-evaluator's handler.
-	rs.adminService.Handler()(w, r)
+	if rs.top_svc.IsMyClusterDeveloperPreview() {
+		rs.adminService.Handler()(w, r)
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+	}
 }
 
 func (rs *ResolverSvc) execute(libraryName string, functionName string, params []interface{}, timeout int) (interface{}, error) {

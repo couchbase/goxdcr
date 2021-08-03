@@ -60,22 +60,25 @@ var (
 	sourceBucketConnPoolSize = numConflictManagerWorkers
 )
 
-type DataMergedEventAdditional struct {
-	Seqno          uint64
-	Commit_time    time.Duration
-	Resp_wait_time time.Duration
-	Opcode         mc.CommandCode
-	IsExpirySet    bool
-	VBucket        uint16
-	Req_size       int
-	ManifestId     uint64
-}
-
-type DataMergeCasChangedEventAdditional struct {
+type DataMergeEventCommon struct {
 	Seqno       uint64
 	IsExpirySet bool
 	VBucket     uint16
 	ManifestId  uint64
+}
+type DataMergedEventAdditional struct {
+	DataMergeEventCommon
+	Commit_time    time.Duration
+	Resp_wait_time time.Duration
+	Opcode         mc.CommandCode
+	Req_size       int
+}
+
+type DataMergeCasChangedEventAdditional DataMergeEventCommon
+
+type DataMergeFailedEventAdditional struct {
+	DataMergeEventCommon
+	Req_size int
 }
 
 type ConflictManager struct {
@@ -103,8 +106,14 @@ type ConflictManager struct {
 	counter_resolver_sent        uint64 // items sent to resolver
 	counter_result_ch_sent       uint64 // items sent to result_ch
 	counter_setback              uint64
+	failed_merge_docs            map[string][]mergeFailureInfo
+	mapMtx                       sync.RWMutex
 }
-
+type mergeFailureInfo struct {
+	docId string
+	cas   uint64
+	err   string
+}
 type SubdocMutationPathSpec struct {
 	opcode uint8
 	flags  uint8
@@ -130,6 +139,7 @@ func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string,
 		counter_conflict_ch_sent:     0,
 		counter_resolver_sent:        0,
 		counter_result_ch_sent:       0,
+		failed_merge_docs:            map[string][]mergeFailureInfo{},
 	}
 }
 
@@ -182,7 +192,7 @@ func (c *ConflictManager) Stop() error {
 	close(c.finish_ch)
 	c.wait_grp.Wait()
 	base.ConnPoolMgr().RemovePool(c.getPoolName())
-	c.Logger().Infof("%v: ConflictManager stopped.", c.pipeline.FullTopic())
+	c.Logger().Infof("%v: ConflictManager stopped. The merge function used was %v", c.pipeline.FullTopic(), c.mergeFunction)
 	return nil
 }
 func (c *ConflictManager) Attach(pipeline common.Pipeline) (err error) {
@@ -287,7 +297,25 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 				mergedDoc, ok := result.(string)
 				if err != nil || !ok {
 					// TODO: Conflict feed
-					c.Logger().Errorf("TODO: MB-39033. Custom CR: merge failed with error '%v' and Result %v. Add to conflict feed or stop replication", err, v.Result)
+					source := v.Input.Source
+					isExpirySet := false
+					if len(source.Req.Extras) >= 4 {
+						isExpirySet = (binary.BigEndian.Uint32(source.Req.Extras[:4]) != 0)
+					}
+					additionalInfo := DataMergeFailedEventAdditional{
+						DataMergeEventCommon: DataMergeEventCommon{
+							Seqno:       source.Seqno,
+							IsExpirySet: isExpirySet,
+							VBucket:     source.Req.VBucket,
+							ManifestId:  source.GetManifestId(),
+						},
+						Req_size: source.Req.Size(),
+					}
+					c.RaiseEvent(common.NewEvent(common.MergeFailed, nil, c, nil, additionalInfo))
+					failureInfo := mergeFailureInfo{fmt.Sprintf("%s%s%s", base.UdTagBegin, string(v.Input.Source.Req.Key), base.UdTagEnd), v.Input.Source.Req.Cas, err.Error()}
+					c.mapMtx.Lock()
+					c.failed_merge_docs[v.Input.MergeFunction] = append(c.failed_merge_docs[v.Input.MergeFunction], failureInfo)
+					c.mapMtx.Unlock()
 					continue
 				}
 				// set to source
@@ -299,7 +327,7 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 				if req == nil {
 					sourceMeta, _ := base.FindSourceCustomCRXattr(v.Input.Source.Req, v.Input.SourceId)
 					targetMeta, _ := v.Input.Target.FindTargetCustomCRXattr(v.Input.TargetId)
-					c.Logger().Errorf("formatMergedDoc Failed failed. err: %v, sourceMeta: %v, targetMeta: %v", err, sourceMeta, targetMeta)
+					c.Logger().Errorf("conflictManagerWorker failed calling formatMergedDoc. sourceMeta: %v, targetMeta: %v", sourceMeta, targetMeta)
 					panic("mergeXattr failed")
 				}
 				c.sendDocument(id, v.Input, req, client)
@@ -502,14 +530,16 @@ func (c *ConflictManager) sendDocument(id int, input *base.ConflictParams, req *
 					isExpirySet = (binary.BigEndian.Uint32(req.Extras[:4]) != 0)
 				}
 				additionalInfo := DataMergedEventAdditional{
-					Seqno:          input.Source.Seqno,
+					DataMergeEventCommon: DataMergeEventCommon{
+						Seqno:       input.Source.Seqno,
+						IsExpirySet: isExpirySet,
+						VBucket:     req.VBucket,
+						ManifestId:  input.Source.GetManifestId(),
+					},
 					Commit_time:    time.Since(input.Source.Start_time), // time from routing to merged and acknowledged by source cluster
 					Resp_wait_time: time.Since(sent_time),
 					Opcode:         req.Opcode,
-					IsExpirySet:    isExpirySet,
-					VBucket:        req.VBucket,
 					Req_size:       req.Size(),
-					ManifestId:     input.Source.GetManifestId(),
 				}
 				c.RaiseEvent(common.NewEvent(common.DataMerged, nil, c, nil, additionalInfo))
 				if c.Logger().GetLogLevel() >= log.LogLevelDebug {
@@ -849,6 +879,12 @@ func (c *ConflictManager) PrintStatusSummary() {
 			conflict_ch_waittime, conflict_ch_avg, len(c.conflict_ch), conflict_ch_sent,
 			resolver_waittime, resolver_avg, resolver_sent,
 			result_ch_waittime, result_ch_avg, len(c.result_ch), result_ch_sent, atomic.LoadUint64(&c.counter_setback))
+		if len(c.failed_merge_docs) > 0 {
+			c.mapMtx.Lock()
+			c.Logger().Infof("%v: Documents failed merge: %v", c.pipeline.FullTopic(), c.failed_merge_docs)
+			c.failed_merge_docs = map[string][]mergeFailureInfo{}
+			c.mapMtx.Unlock()
+		}
 	} else {
 		c.Logger().Infof("%v state = %v", c.pipeline.FullTopic(), c.pipeline.State())
 	}

@@ -30,6 +30,8 @@ const (
 	DataMerged ComponentEventType = iota
 	// set merge result failed because source Cas changed
 	MergeCasChanged ComponentEventType = iota
+	// Merge failed.
+	MergeFailed ComponentEventType = iota
 	//data is filtered out by the component
 	DataFiltered ComponentEventType = iota
 	//data is unable to be successfully parsed to be filtered
