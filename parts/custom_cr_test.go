@@ -720,7 +720,7 @@ func TestCustomCRFunctionTimeout(t *testing.T) {
 			Email:     "kingarthur@couchbase.com",
 			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
 	assert.Nil(err)
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 	// Expect timeout message
 	filename := "../../../../../../ns_server/logs/n_0/goxdcr.log"
 	b, err := ioutil.ReadFile(filename)

@@ -1054,6 +1054,12 @@ func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipelin
 	registry.Register(service_def.DOCS_MERGE_CAS_CHANGED_METRIC, docs_merge_cas_changed)
 	expiry_merge_cas_changed := metrics.NewCounter()
 	registry.Register(service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC, expiry_merge_cas_changed)
+	docs_merge_failed := metrics.NewCounter()
+	registry.Register(service_def.DOCS_MERGE_FAILED_METRIC, docs_merge_failed)
+	expiry_docs_merge_failed := metrics.NewCounter()
+	registry.Register(service_def.EXPIRY_DOCS_MERGE_FAILED_METRIC, expiry_docs_merge_failed)
+	data_merge_failed := metrics.NewCounter()
+	registry.Register(service_def.DATA_MERGE_FAILED_METRIC, data_merge_failed)
 
 	metric_map := make(map[string]interface{})
 	metric_map[service_def.DOCS_MERGED_METRIC] = docs_merged
@@ -1063,10 +1069,14 @@ func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipelin
 	metric_map[service_def.RESP_WAIT_METRIC] = resp_wait
 	metric_map[service_def.DOCS_MERGE_CAS_CHANGED_METRIC] = docs_merge_cas_changed
 	metric_map[service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC] = expiry_merge_cas_changed
+	metric_map[service_def.DOCS_MERGE_FAILED_METRIC] = docs_merge_failed
+	metric_map[service_def.EXPIRY_DOCS_MERGE_FAILED_METRIC] = expiry_docs_merge_failed
+	metric_map[service_def.DATA_MERGE_FAILED_METRIC] = data_merge_failed
 	conflictMgr_collector.component_map[conflictManager.Id()] = metric_map
 
 	conflictManager.RegisterComponentEventListener(common.DataMerged, conflictMgr_collector)
 	conflictManager.RegisterComponentEventListener(common.MergeCasChanged, conflictMgr_collector)
+	conflictManager.RegisterComponentEventListener(common.MergeFailed, conflictMgr_collector)
 
 	return nil
 }
@@ -1108,6 +1118,15 @@ func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Ev
 
 		if event_otherInfo.IsExpirySet {
 			metric_map[service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		}
+	}
+	if event.EventType == common.MergeFailed {
+		event_otherInfo := event.OtherInfos.(DataMergeFailedEventAdditional)
+		metric_map[service_def.DOCS_MERGE_FAILED_METRIC].(metrics.Counter).Inc(1)
+		metric_map[service_def.DATA_MERGE_FAILED_METRIC].(metrics.Counter).Inc(int64(event_otherInfo.Req_size))
+
+		if event_otherInfo.IsExpirySet {
+			metric_map[service_def.EXPIRY_DOCS_MERGE_FAILED_METRIC].(metrics.Counter).Inc(1)
 		}
 	}
 	return nil

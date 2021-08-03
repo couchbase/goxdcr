@@ -84,10 +84,15 @@ else
 			echo "Cannot find test case ${testCase}"
 			exit 1
 		fi
-		setUpCcrReplication
-		. $testFile
-		runTestCase
-		cleanupCcrReplication
+		if [[ $testFile == *"2_evaluator_test"* ]]; then
+			. $testFile
+			runTestCase
+		else
+			setUpCcrReplication
+			. $testFile
+			runTestCase
+			cleanupCcrReplication
+		fi
 	fi
 
 fi

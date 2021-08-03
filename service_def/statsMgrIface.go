@@ -46,6 +46,11 @@ const (
 	DOCS_MERGE_CAS_CHANGED_METRIC   = "docs_merge_cas_changed"
 	EXPIRY_MERGE_CAS_CHANGED_METRIC = "expiry_merge_cas_changed"
 
+	// the number of docs failed to merge and sent to conflict bucket
+	DOCS_MERGE_FAILED_METRIC        = "docs_merge_failed"
+	DATA_MERGE_FAILED_METRIC        = "data_merge_failed"
+	EXPIRY_DOCS_MERGE_FAILED_METRIC = "expiry_docs_merge_failed"
+
 	// the number of docs processed by pipeline
 	DOCS_PROCESSED_METRIC  = "docs_processed"
 	DATA_REPLICATED_METRIC = "data_replicated"
@@ -239,6 +244,10 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	DATA_MERGED_METRIC:              StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data merged for a replication"},
 	DOCS_MERGE_CAS_CHANGED_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of merges failed because source cas changed"},
 	EXPIRY_MERGE_CAS_CHANGED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of expiry merges failed because source cas changed"},
+
+	DOCS_MERGE_FAILED_METRIC:        StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of conflicting docs failed to merge"},
+	EXPIRY_DOCS_MERGE_FAILED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of conflicting expiry docs failed to merge"},
+	DATA_MERGE_FAILED_METRIC:        StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data failed to merge"},
 
 	DOCS_PROCESSED_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of docs processed for a replication"},
 	DATA_REPLICATED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data replicated for a replication"},

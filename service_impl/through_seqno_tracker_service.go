@@ -780,6 +780,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error 
 	if conflictMgr != nil {
 		conflictMgr.(*pipeline_svc.ConflictManager).RegisterComponentEventListener(common.DataMerged, tsTracker)
 		conflictMgr.(*pipeline_svc.ConflictManager).RegisterComponentEventListener(common.MergeCasChanged, tsTracker)
+		conflictMgr.(*pipeline_svc.ConflictManager).RegisterComponentEventListener(common.MergeFailed, tsTracker)
 	}
 
 	//register pipeline supervisor as through seqno service's error handler
@@ -900,6 +901,19 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).VBucket
 		seqno := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).Seqno
 		manifestId := event.OtherInfos.(pipeline_svc.DataMergedEventAdditional).ManifestId
+		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
+		if !processedAsOSO {
+			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
+		} else {
+			done := session.MarkSeqnoProcessed(0, seqno, manifestId, tsTracker)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
+		}
+	case common.MergeFailed:
+		vbno := event.OtherInfos.(pipeline_svc.DataMergeFailedEventAdditional).VBucket
+		seqno := event.OtherInfos.(pipeline_svc.DataMergeFailedEventAdditional).Seqno
+		manifestId := event.OtherInfos.(pipeline_svc.DataMergeFailedEventAdditional).ManifestId
 		processedAsOSO, session := tsTracker.shouldProcessAsOso(vbno, seqno)
 		if !processedAsOSO {
 			tsTracker.addSentSeqnoAndManifestId(vbno, seqno, manifestId)
