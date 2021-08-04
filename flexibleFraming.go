@@ -8,11 +8,12 @@ import (
 type FrameObjType int
 
 const (
-	FrameBarrier     FrameObjType = iota
-	FrameDurability  FrameObjType = iota
-	FrameDcpStreamId FrameObjType = iota
-	FrameOpenTracing FrameObjType = iota
-	FrameImpersonate FrameObjType = iota
+	FrameBarrier        FrameObjType = iota // 0
+	FrameDurability     FrameObjType = iota // 1
+	FrameDcpStreamId    FrameObjType = iota // 2
+	FrameOpenTracing    FrameObjType = iota // 3
+	FrameImpersonate    FrameObjType = iota // 4
+	FramePreserveExpiry FrameObjType = iota // 5
 )
 
 const MAX_USER_LEN = 128
@@ -54,6 +55,12 @@ func (f *FrameInfo) Validate() error {
 			return ErrorObjLenNotMatch
 		}
 	case FrameImpersonate:
+	case FramePreserveExpiry:
+		if f.ObjLen != 0 {
+			return fmt.Errorf("Invalid FramePreserveExpiry - length is %v\n", f.ObjLen)
+		} else if f.ObjLen != len(f.ObjData) {
+			return ErrorObjLenNotMatch
+		}
 	default:
 		return fmt.Errorf("Unknown FrameInfo type")
 	}

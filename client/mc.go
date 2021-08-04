@@ -5,10 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
-	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/goutils/logging"
-	"github.com/couchbase/goutils/scramsha"
-	"github.com/pkg/errors"
 	"io"
 	"math"
 	"net"
@@ -16,6 +12,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/gomemcached"
+	"github.com/couchbase/goutils/logging"
+	"github.com/couchbase/goutils/scramsha"
+	"github.com/pkg/errors"
 )
 
 type ClientIface interface {
@@ -82,6 +83,15 @@ type ClientContext struct {
 	// VB-state related context
 	// nil means not used in this context
 	VbState *VbStateType
+
+	// Preserve Expiry
+	PreserveExpiry bool
+
+	// Durability Level
+	DurabilityLevel gomemcached.DurabilityLvl
+
+	// Durability Timeout
+	DurabilityTimeout time.Duration
 }
 
 type VbStateType uint8
@@ -92,6 +102,13 @@ const (
 	VbReplica VbStateType = 0x02
 	VbPending VbStateType = 0x03
 	VbDead    VbStateType = 0x04
+)
+
+var (
+	ErrUnSuccessfulHello          = errors.New("Unsuccessful HELLO exchange")
+	ErrInvalidHello               = errors.New("Invalid HELLO response")
+	ErrPreserveExpiryNotSupported = errors.New("PreserveExpiry is not supported")
+	ErrDurabilityNotSupported     = errors.New("Durability is not supported")
 )
 
 func (context *ClientContext) InitExtras(req *gomemcached.MCRequest, client *Client) {
@@ -126,13 +143,18 @@ var Healthy uint32 = 1
 type Features []Feature
 type Feature uint16
 
-const FeatureTcpNoDelay = Feature(0x03)
-const FeatureMutationToken = Feature(0x04) // XATTR bit in data type field with dcp mutations
-const FeatureXattr = Feature(0x06)
-const FeatureXerror = Feature(0x07)
-const FeatureCollections = Feature(0x12)
-const FeatureSnappyCompression = Feature(0x0a)
-const FeatureDataType = Feature(0x0b)
+const (
+	FeatureTcpNoDelay        = Feature(0x03)
+	FeatureMutationToken     = Feature(0x04) // XATTR bit in data type field with dcp mutations
+	FeatureXattr             = Feature(0x06)
+	FeatureXerror            = Feature(0x07)
+	FeatureSnappyCompression = Feature(0x0a)
+	FeatureDataType          = Feature(0x0b)
+	FeatureSyncReplication   = Feature(0x11)
+	FeatureCollections       = Feature(0x12)
+	FeatureOpenTracing       = Feature(0x13)
+	FeaturePreserveExpiry    = Feature(0x14)
+)
 
 type memcachedConnection interface {
 	io.ReadWriteCloser
@@ -151,6 +173,7 @@ type Client struct {
 	hdrBuf []byte
 
 	collectionsEnabled uint32
+	enabledFeatures    map[Feature]bool
 	deadline           time.Time
 	bucket             string
 }
@@ -222,9 +245,10 @@ func (c *Client) getOpaque() uint32 {
 // Wrap an existing transport.
 func Wrap(conn memcachedConnection) (rv *Client, err error) {
 	client := &Client{
-		conn:   conn,
-		hdrBuf: make([]byte, gomemcached.HDR_LEN),
-		opaque: uint32(1),
+		conn:            conn,
+		hdrBuf:          make([]byte, gomemcached.HDR_LEN),
+		opaque:          uint32(1),
+		enabledFeatures: make(map[Feature]bool),
 	}
 	client.setHealthy(true)
 	return client, nil
@@ -363,20 +387,22 @@ func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, err
 		Body:   payload,
 	})
 
-	if err == nil && collectionsEnabled != 0 {
+	if err == nil {
 		collectionsEnabled = 0
 		body := rv.Body
 		if rv.Status != gomemcached.SUCCESS {
-			logging.Errorf("Client.EnableFeatures: Features can't be enabled: HELO status = %v", rv.Status)
-			return nil, errors.New("Unsuccessful HELO exchange")
+			logging.Errorf("Client.EnableFeatures: Features can't be enabled: HELLO status = %v", rv.Status)
+			return nil, ErrUnSuccessfulHello
 		} else if rv.Opcode != gomemcached.HELLO {
-			logging.Errorf("Client.EnableFeatures: Invalid memcached HELO response: opcode %v, expecting %v", rv.Opcode, gomemcached.HELLO)
-			return nil, errors.New("Invalid HELO response")
+			logging.Errorf("Client.EnableFeatures: Invalid memcached HELLO response: opcode %v, expecting %v", rv.Opcode, gomemcached.HELLO)
+			return nil, ErrInvalidHello
 		} else {
 			for i := 0; len(body) > i; i += 2 {
-				if Feature(binary.BigEndian.Uint16(body[i:])) == FeatureCollections {
+				feature := Feature(binary.BigEndian.Uint16(body[i:]))
+				c.enabledFeatures[feature] = true
+
+				if feature == FeatureCollections {
 					collectionsEnabled = 1
-					break
 				}
 			}
 		}
@@ -397,6 +423,33 @@ func (c *Client) setContext(req *gomemcached.MCRequest, context ...*ClientContex
 		if uLen > 0 && uLen <= gomemcached.MAX_USER_LEN {
 			req.UserLen = uLen
 			copy(req.Username[:uLen], context[0].User)
+		}
+
+		if context[0].PreserveExpiry {
+			if !c.IsFeatureEnabled(FeaturePreserveExpiry) {
+				return ErrPreserveExpiryNotSupported
+			}
+			req.FramingExtras = append(req.FramingExtras,
+				gomemcached.FrameInfo{gomemcached.FramePreserveExpiry, 0, []byte("")})
+		}
+
+		if context[0].DurabilityLevel >= gomemcached.DuraMajority {
+			if !c.IsFeatureEnabled(FeatureSyncReplication) {
+				return ErrDurabilityNotSupported
+			}
+			data := make([]byte, 3)
+			data[0] = byte(context[0].DurabilityLevel)
+			len := 1
+			if context[0].DurabilityTimeout > 0 {
+				durabilityTimeoutMillis := context[0].DurabilityTimeout / time.Millisecond
+				if durabilityTimeoutMillis > math.MaxUint16 {
+					durabilityTimeoutMillis = math.MaxUint16
+				}
+				binary.BigEndian.PutUint16(data[1:3], uint16(durabilityTimeoutMillis))
+				len += 2
+			}
+			req.FramingExtras = append(req.FramingExtras,
+				gomemcached.FrameInfo{gomemcached.FrameDurability, len, data})
 		}
 	}
 
@@ -532,6 +585,11 @@ func (c *Client) CollectionsGetCID(scope string, collection string) (*gomemcache
 
 func (c *Client) CollectionEnabled() bool {
 	return atomic.LoadUint32(&c.collectionsEnabled) > 0
+}
+
+func (c *Client) IsFeatureEnabled(feature Feature) bool {
+	enabled, ok := c.enabledFeatures[feature]
+	return ok && enabled
 }
 
 // Get the value for a key, and update expiry
