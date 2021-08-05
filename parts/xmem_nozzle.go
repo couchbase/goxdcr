@@ -391,13 +391,7 @@ func (buf *requestBuffer) adjustRequest(req *base.WrappedMCRequest, index uint16
 	if isCustomCR == false {
 		mc_req.Cas = 0
 	}
-	mc_req.Opaque = getOpaque(index, buf.sequences[int(index)])
-}
-
-// Given the index of the buffer (xmem.buf), and a buffer sequence number, return a unique ID number for this instance of the buffer
-func getOpaque(index, sequence uint16) uint32 {
-	result := uint32(sequence)<<16 + uint32(index)
-	return result
+	mc_req.Opaque = base.GetOpaque(index, buf.sequences[int(index)])
 }
 
 func (buf *requestBuffer) bufferSize() uint16 {
@@ -1583,14 +1577,13 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 	// A list (slice) of req_bytes
 	reqs_bytes_list := [][][]byte{}
 
-	var sequence uint16 = uint16(time.Now().UnixNano())
 	// Slice of requests that have been converted to serialized bytes
 	reqs_bytes := [][]byte{}
 	// Counts the number of requests that will fit into each req_bytes slice
 	numOfReqsInReqBytesBatch := 0
 
 	// establish a opaque based on the current time - and since getting meta doesn't utilize buffer buckets, feed it 0
-	opaque := getOpaque(0, sequence)
+	opaque := base.GetOpaque(0, uint16(time.Now().UnixNano()))
 	sent_key_map := make(map[string]bool, len(bigDoc_map))
 
 	//de-dupe and prepare the packages
@@ -1809,14 +1802,13 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 	// A list (slice) of req_bytes
 	reqs_bytes_list := [][][]byte{}
 
-	var sequence uint16 = uint16(time.Now().UnixNano())
 	// Slice of requests that have been converted to serialized bytes
 	reqs_bytes := [][]byte{}
 	// Counts the number of requests that will fit into each req_bytes slice
 	numOfReqsInReqBytesBatch := 0
 
 	// Establish an opaque based on the current time - and since getting doc doesn't utilize buffer buckets, feed it 0
-	opaque := getOpaque(0, sequence)
+	opaque := base.GetOpaque(0, uint16(time.Now().UnixNano()))
 	sent_key_map := make(map[string]bool, len(get_map))
 
 	// This is the spec for the lookup paths

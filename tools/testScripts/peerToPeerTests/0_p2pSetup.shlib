@@ -1,0 +1,197 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B0")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+
+# Scopes -> Collections
+# ----------------------
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" >/dev/null 2>&1
+	echo "RUNNING dataload DONE"
+}
+
+TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+
+function runOneReplicationCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=5
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+	if (($cycleCnt == 0)); then
+		setupTopologies
+		# Shorten the amount of time pipeline restarts
+		setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+		sleep 5
+		checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+		checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+		checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+		checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	else
+		setupBuckets
+	fi
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+
+	echo "Waiting 20 seconds before checking item count"
+	sleep 20
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	checkUnidirectionalChangesLeft
+	validateXDCRCheckpoints "C1"
+	grepForPanics
+
+	pauseReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
+	grepForPanics
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	echo "Waiting 10 seconds for resume to finish"
+	sleep 10
+	grepForPanics
+
+	checkUnidirectionalChangesLeft
+	grepForPanics
+
+	echo "============================================================================"
+	echo "Cycle $(($cycleCnt + 1)) PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+	echo "Waiting for $timeIntervalSecs seconds before starting another replication"
+	sleep $timeIntervalSecs
+}
+
+function runMultipleReplicationCycles {
+	local totalCount=$1
+
+	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
+		runOneReplicationCycle $i $totalCount
+	done
+}
+C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
+
+
+function runOneRebalanceCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=30
+
+  setupCluster
+  echo "Sleeping 10 secs before rebalancing node in"
+	sleep 10
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	startRebalancingIn "C1"
+	echo "Rebalancing node in is completed"
+
+  echo "Sleeping before checking logs"
+	sleep 15
+	currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
+	local currentPeerMsgsC1
+	currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
+
+	echo "Restarting XDCR processes to trigger p2p discovery"
+	killGoXdcr "C1"
+	killGoXdcr "C1P"
+
+  echo "Sleeping before checking logs"
+  sleep 15
+
+  validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(( $currentPeerMsgsC1 + 1 ))
+
+	#local currentXdcrLogC1
+	#local currentXdcrLogC1P
+	#currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
+	#currentXdcrLogC1P=$(getInternalNodeXdcrLog "C1P")
+
+	#local currentTopologyRestartCnt
+	#local currentTopologyRestartCnt2
+	#currentTopologyRestartCnt=$(echo "$currentXdcrLogC1" | grep -c "$TOPOLOGY_RESTART_MSG")
+	#currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
+	#sleep $timeIntervalSecs
+
+	#validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
+	#validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2
+
+	#startEjectNode "C1P" "C1"
+	#echo "Rebalancing out completed. Letting replication continue with one nodes for $timeIntervalSecs seconds before rebalancing back in"
+
+	#currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
+	#currentXdcrLogC1P=$(getInternalNodeXdcrLog "C1P")
+	#currentTopologyRestartCnt=$(echo "$currentXdcrLogC1" | grep -c "$TOPOLOGY_RESTART_MSG")
+	#currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
+	#sleep $timeIntervalSecs
+
+	#validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
+	#validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+	#sleep $timeIntervalSecs
+}
+
+function runMultipleRebalanceCycles {
+	local totalCount=$1
+
+	for ((i = 0; $i < $totalCount; i = $(($i + 1)))); do
+		runOneRebalanceCycle $i $totalCount
+	done
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running P2P Setup"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	#runMultipleReplicationCycles 1
+	runMultipleRebalanceCycles 1
+
+	# 2 jobs - whichever finishes first is done
+	stopWhenAnyBgJobStops 2
+}

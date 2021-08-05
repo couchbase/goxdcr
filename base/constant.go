@@ -55,6 +55,7 @@ var NodesPath = "/pools/nodes"
 var NodesSelfPath = "/nodes/self"
 var SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 var NodeServicesPath = "/pools/default/nodeServices"
+var XDCRPeerToPeerPath = "xdcr/p2pCommunications"
 var BPath = "/pools/default/b/"
 var DocsPath = "/docs/"
 var CollectionsManifestPath = "/scopes"
@@ -1047,6 +1048,11 @@ var TopologySvcStatusNotFoundCoolDownPeriod = 10 * time.Second
 var HealthCheckInterval = 120 * time.Second
 
 var BucketTopologyWatcherChanLen = 1000
+
+// TODO - make them configurable
+var MaxP2PReceiveChLen = 10000
+var P2POpaqueTimeout = 5 * time.Minute
+var P2POpaqueCleanupInterval = 5 * time.Second
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,

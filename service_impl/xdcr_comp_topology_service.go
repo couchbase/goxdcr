@@ -153,6 +153,38 @@ func (top_svc *XDCRTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, erro
 	return retmap, nil
 }
 
+func (top_svc *XDCRTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
+	nodesList, err := top_svc.getNodeList()
+	if err != nil {
+		return nil, err
+	}
+
+	var hostnameList []string
+	for _, nodeInfoRaw := range nodesList {
+		nodesInfo := nodeInfoRaw.(map[string]interface{})
+
+		thisNode, exists := nodesInfo[base.ThisNodeKey].(bool)
+		if exists && thisNode {
+			// Skip itself
+			continue
+		}
+
+		hostName, exists := nodesInfo[base.HostNameKey].(string)
+		if !exists {
+			continue
+		}
+
+		_, portCheck := base.GetPortNumber(hostName)
+		if portCheck == base.ErrorNoPortNumber {
+			// Append 8091 for now
+			hostName = base.GetHostAddr(hostName, base.DefaultAdminPort)
+		}
+		hostnameList = append(hostnameList, hostName)
+	}
+
+	return hostnameList, nil
+}
+
 // get information about current node from nodeService at /pools/nodes
 func (top_svc *XDCRTopologySvc) getHostInfo() (map[string]interface{}, error) {
 	nodeList, err := top_svc.getNodeList()
@@ -253,6 +285,7 @@ func (top_svc *XDCRTopologySvc) MyConnectionStr() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error) {
+	// TODO - cluster wide credentials
 	return "", "", base.HttpAuthMechPlain, nil, false, nil, nil, nil
 }
 

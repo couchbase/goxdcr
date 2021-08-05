@@ -66,6 +66,9 @@ type XDCRCompTopologySvc interface {
 	//be responsible for
 	XDCRCompToKVNodeMap() (map[string][]string, error)
 
+	// Returns a list of peer admin addresses
+	PeerNodesAdminAddrs() ([]string, error)
+
 	// implements base.ClusterConnectionInfoProvider
 	MyConnectionStr() (string, error)
 	MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error)

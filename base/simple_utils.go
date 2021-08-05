@@ -1868,3 +1868,9 @@ func CasToTime(cas uint64) time.Time {
 func CasDuration(from, to uint64) time.Duration {
 	return time.Duration(to - from)
 }
+
+// Given the index of the buffer (xmem.buf), and a buffer sequence number, return a unique ID number for this instance of the buffer
+func GetOpaque(index, sequence uint16) uint32 {
+	result := uint32(sequence)<<16 + uint32(index)
+	return result
+}

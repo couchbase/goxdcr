@@ -85,7 +85,7 @@ func (s *httpServer) Start() chan error {
 	go func() {
 		defer s.shutdown()
 
-		logger_server.Infof("%s starting ...\n", s.logPrefix)
+		logger_server.Infof("%s starting ... ", s.logPrefix)
 		// ListenAndServe blocks and returns a non-nil error if something wrong happens
 		// ListenAndServe will cause golang library to call ServeHttp()
 		err := s.srv.ListenAndServe()

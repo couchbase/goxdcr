@@ -20,6 +20,7 @@ import (
 	"github.com/couchbase/goxdcr/gen_server"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -35,7 +36,7 @@ import (
 
 import _ "net/http/pprof"
 
-var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
@@ -51,10 +52,12 @@ type Adminport struct {
 	finch              chan bool
 	utils              utilities.UtilsIface
 	prometheusExporter pipeline_utils.ExpVarExporter
+
+	p2pMgr peerToPeer.P2PManager
+	p2pAPI peerToPeer.PeerToPeerCommAPI
 }
 
-func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface) *Adminport {
-
+func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface, p2pMgr peerToPeer.P2PManager) *Adminport {
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
@@ -71,6 +74,7 @@ func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan boo
 		finch:              finch,
 		utils:              utilsIn,
 		prometheusExporter: pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable),
+		p2pMgr:             p2pMgr,
 	}
 
 	msg_callback_func = adminport.processRequest
@@ -103,6 +107,13 @@ func (adminport *Adminport) Start() {
 
 	logger_ap.Infof("http server started %v !\n", hostAddr)
 
+	// Start P2pHelper
+	adminport.p2pAPI, err = adminport.p2pMgr.Start()
+	if err != nil {
+		logger_ap.Errorf("Starting peerToPeerManager resulted in err %v", err)
+		startErrCh <- err
+	}
+
 	for {
 		select {
 		case err = <-startErrCh:
@@ -118,6 +129,7 @@ func (adminport *Adminport) Start() {
 		}
 	}
 done:
+	adminport.p2pMgr.Stop()
 	server.Stop()
 	adminport.Stop_server()
 	if err != nil {
@@ -220,6 +232,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doGetPrometheusStatsRequest(request, false)
 	case XDCRPrometheusStatsHighPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetPrometheusStatsRequest(request, true)
+	case base.XDCRPeerToPeerPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doPostPeerToPeerRequest(request)
 	default:
 		errOutput := base.InvalidPathInHttpRequestError(key)
 		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
@@ -1335,4 +1349,24 @@ func (adminport *Adminport) checkAndRejectChunkedEncoding(request *http.Request)
 		}
 	}
 	return nil, nil
+}
+
+func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doPostPeerToPeerRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
+	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils)
+	if err != nil {
+		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
+	}
+
+	handlerResult, err := adminport.p2pAPI.P2PReceive(req)
+	if err != nil {
+		return response, err
+	}
+	return EncodeObjectIntoResponse(handlerResult)
 }
