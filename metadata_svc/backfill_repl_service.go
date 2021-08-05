@@ -118,8 +118,7 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		replicationIdPlusExtra := b.getReplicationIdFromKey(key)
 		// replicationIdPlusExtra can be either
 		// 1. 63a5f325205fe7f610a7ec19570054da/B1/B2/backfillMappings - backfill mappings
-		// 2. 63a5f325205fe7f610a7ec19570054da/B1/B2/spec - actual replication spec
-		// 3. 63a5f325205fe7f610a7ec19570054da/B1/B2/backfill - actual replication spec
+		// 2. 63a5f325205fe7f610a7ec19570054da/B1/B2/spec - actual backfill replication spec
 		// The replicationId should be:
 		// 63a5f325205fe7f610a7ec19570054da/B1/B2
 		var replicationId string
@@ -131,6 +130,9 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 			}
 		}
 		if replicationId == "" {
+			continue
+		}
+		if !strings.HasSuffix(key, fmt.Sprintf("/%v", SpecKey)) {
 			continue
 		}
 		if specProcessed[replicationId] {
@@ -153,9 +155,16 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 			b.DelBackfillReplSpec(replicationId)
 			continue
 		}
+		if backfillSpec.InternalId == "" && actualSpec.InternalId != "" {
+			backfillSpec.InternalId = actualSpec.InternalId
+		}
+		if backfillSpec.Id == "" && replicationId != "" {
+			backfillSpec.Id = replicationId
+		}
 		if backfillSpec.InternalId != actualSpec.InternalId {
 			// Out of date
-			b.logger.Warnf("Out of date backfill found with internal ID %v - skipping...", backfillSpec.InternalId)
+			b.logger.Warnf("Out of date backfill found with internal ID %v (expecting %v) - deleting it...",
+				backfillSpec.InternalId, actualSpec.InternalId)
 			b.DelBackfillReplSpec(replicationId)
 			continue
 		}
@@ -163,7 +172,7 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		backfillSpec.SetReplicationSpec(actualSpec)
 
 		// Last step is to make sure that the sha mapping is retrieved
-		b.InitTopicShaCounter(backfillSpec.Id)
+		b.InitTopicShaCounterWithInternalId(backfillSpec.Id, backfillSpec.InternalId)
 		mappingsDoc, err := b.GetMappingsDoc(backfillSpec.Id, false /*initIfNotFound*/)
 		if err != nil {
 			b.logger.Errorf("Unable to retrieve mappingDoc for backfill replication %v", backfillSpec.Id)
@@ -185,7 +194,11 @@ func (b *BackfillReplicationService) initCacheFromMetaKV() (err error) {
 		}
 
 		// Finally, done
-		b.updateCacheInternal(replicationId, backfillSpec, false /*lock*/)
+		err = b.updateCacheInternal(replicationId, backfillSpec, false /*lock*/)
+		if err != nil {
+			// A clean cache should not have CAS mismatch error - don't panic but log a serious warning
+			b.logger.Fatalf("updateCacheInternal failed with %v", err)
+		}
 	}
 
 	if len(b.unrecoverableBackfillIds) > 0 {
