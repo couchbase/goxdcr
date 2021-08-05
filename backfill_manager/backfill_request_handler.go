@@ -336,14 +336,8 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 
 // TODO - MB-38931 - once consistent metakv is in place, need to have a listener, handle concurrent updates, etc
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
-	seqnosMap, err := b.getThroughSeqno()
+	seqnosMap, myVBs, err := b.getMaxSeqnosMapToBackfill()
 	if err != nil {
-		b.logger.Errorf("%v unable to get seqno as part of handling backfill pipeline request - %v", b.Id(), err)
-		return err
-	}
-	myVBs, err := b.vbsGetter()
-	if err != nil {
-		b.logger.Errorf("%v unable to get VBs - %v", b.Id(), err)
 		return err
 	}
 
@@ -762,44 +756,9 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 	}
 
 	if len(pairRO.Added) > 0 {
-		myVBs, err := b.vbsGetter()
+		maxSeqnos, newVBsList, err := b.getMaxSeqnosMapToBackfill()
 		if err != nil {
-			return fmt.Errorf("unable to get VBs: %v", err.Error())
-		}
-		// When this is executing, the main pipeline is going to be shutting down and restarting
-		// Since the pipeline is restarting concurrently, and there's no way to get the exact
-		// pipeline shutdown/startup sequence, we need to do the following.
-		//
-		// 1a. If we can grab the throughSeqNoSvc we can try to get the throughSeqnos before
-		//    the pipeline shuts down to be end point of the backfills.
-		// 1b. It's possible that pipeline has already restarted and we grabbed the new instance of tsTracker,
-		//     which returns a very small throughSeqNo. Step 3 will cover this.
-		// 2. Get the latest checkpoint to be the end point of the backfill
-		// 3. Compare 1 vs 2, use the max() of each to be the end point of the backfill
-		tSeqnos, tSeqnoErr := b.getThroughSeqno()
-		ckptSeqnos, ckptSeqnosErr := b.mainpipelineCkptSeqnosGetter()
-
-		maxSeqnos := make(map[uint16]uint64)
-		var newVBsList []uint16
-		for _, vbno := range myVBs {
-			var vbFound bool
-			if tSeqnoErr == nil {
-				seqno, ok := tSeqnos[vbno]
-				if ok && seqno > maxSeqnos[vbno] {
-					maxSeqnos[vbno] = seqno
-					vbFound = true
-				}
-			}
-			if ckptSeqnosErr == nil {
-				seqno, ok := ckptSeqnos[vbno]
-				if ok && seqno > maxSeqnos[vbno] {
-					maxSeqnos[vbno] = seqno
-					vbFound = true
-				}
-			}
-			if vbFound {
-				newVBsList = append(newVBsList, vbno)
-			}
+			return err
 		}
 
 		vbTasksMap, err := metadata.NewBackfillVBTasksMap(pairRO.Added.Clone(), newVBsList, maxSeqnos)
@@ -832,6 +791,49 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 type internalDelBackfillReq struct {
 	specificVBRequested bool
 	vbno                uint16
+}
+
+func (b *BackfillRequestHandler) getMaxSeqnosMapToBackfill() (map[uint16]uint64, []uint16, error) {
+	myVBs, err := b.vbsGetter()
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to get VBs: %v", err.Error())
+	}
+	// When this is executing, the main pipeline is going to be shutting down and restarting
+	// Since the pipeline is restarting concurrently, and there's no way to get the exact
+	// pipeline shutdown/startup sequence, we need to do the following.
+	//
+	// 1a. If we can grab the throughSeqNoSvc we can try to get the throughSeqnos before
+	//    the pipeline shuts down to be end point of the backfills.
+	// 1b. It's possible that pipeline has already restarted and we grabbed the new instance of tsTracker,
+	//     which returns a very small throughSeqNo. Step 3 will cover this.
+	// 2. Get the latest checkpoint to be the end point of the backfill
+	// 3. Compare 1 vs 2, use the max() of each to be the end point of the backfill
+	tSeqnos, tSeqnoErr := b.getThroughSeqno()
+	ckptSeqnos, ckptSeqnosErr := b.mainpipelineCkptSeqnosGetter()
+
+	maxSeqnos := make(map[uint16]uint64)
+	var newVBsList []uint16
+	for _, vbno := range myVBs {
+		var vbFound bool
+		if tSeqnoErr == nil {
+			seqno, ok := tSeqnos[vbno]
+			if ok && seqno >= maxSeqnos[vbno] {
+				maxSeqnos[vbno] = seqno
+				vbFound = true
+			}
+		}
+		if ckptSeqnosErr == nil {
+			seqno, ok := ckptSeqnos[vbno]
+			if ok && seqno >= maxSeqnos[vbno] {
+				maxSeqnos[vbno] = seqno
+				vbFound = true
+			}
+		}
+		if vbFound {
+			newVBsList = append(newVBsList, vbno)
+		}
+	}
+	return maxSeqnos, newVBsList, err
 }
 
 func (b *BackfillRequestHandler) DelAllBackfills() error {

@@ -81,6 +81,7 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	pipelineMgr.On("BackfillMappingStatusUpdate", mock.Anything, mock.Anything).Return(nil)
 	clusterInfoSvcMock.On("GetLocalServerVBucketsMap", mock.Anything, mock.Anything).Return(localVBMapGetter(), nil)
 	xdcrTopologyMock.On("MyKVNodes").Return([]string{"localhost:9000"}, nil)
+
 	setupBackfillReplSvcMock(backfillReplSvc)
 }
 
@@ -97,7 +98,8 @@ func setupBackfillReplSvcNegMock(backfillReplSvc *service_def.BackfillReplSvc) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Return(base.ErrorInvalidInput)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Return(base.ErrorInvalidInput)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Return(nil, base.ErrorInvalidInput)
-	backfillReplSvc.On("SetCompleteBackfillRaiser", mock.Anything).Return(base.ErrorInvalidInput)
+	// SetCompleteBackfillRaiser for now can only return nil
+	backfillReplSvc.On("SetCompleteBackfillRaiser", mock.Anything).Return(nil)
 }
 
 func setupReplStartupSpecs(replSpecSvc *service_def.ReplicationSpecSvc,
