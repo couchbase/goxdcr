@@ -174,7 +174,7 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), time.Second, createVBDoneFunc(), nil, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), time.Second, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
@@ -228,7 +228,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), nil, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -317,7 +317,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), nil, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
