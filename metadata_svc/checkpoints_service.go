@@ -292,7 +292,7 @@ func (ckpt_svc *CheckpointsService) UpsertBrokenMapping(replicationId string, sp
 }
 
 func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, IncrementerFunc, bool, error) {
-	alreadyExists := ckpt_svc.InitTopicShaCounter(replicationId)
+	alreadyExists := ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, "")
 	mappingsDoc, err := ckpt_svc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
 	if err != nil {
 		var emptyMap metadata.ShaToCollectionNamespaceMap

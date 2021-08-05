@@ -56,10 +56,6 @@ func (s *ShaRefCounterService) GetShaNamespaceMap(topic string) (metadata.ShaToC
 
 // Idempotent No-op if already exists
 // Init doesn't set the count to 1 - it sets it to 0 - and then individual counts need to be counted using recorder
-func (s *ShaRefCounterService) InitTopicShaCounter(topic string) (alreadyExists bool) {
-	return s.InitTopicShaCounterWithInternalId(topic, "")
-}
-
 func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internalId string) (alreadyExists bool) {
 	s.topicMapMtx.RLock()
 	_, alreadyExists = s.topicMaps[topic]
@@ -70,6 +66,12 @@ func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internal
 	}
 
 	s.topicMapMtx.Lock()
+	// check again
+	_, alreadyExists = s.topicMaps[topic]
+	if alreadyExists {
+		s.topicMapMtx.Unlock()
+		return
+	}
 	counter := NewMapShaRefCounterWithInternalId(topic, internalId, s.metadataSvc, s.metakvDocKeyGetter(topic), s.logger)
 	s.topicMaps[topic] = counter
 	s.topicMapMtx.Unlock()
@@ -208,7 +210,7 @@ func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error
 
 	// TODO - once consistent metakv is in, the cleanup effort will need to be coordinated
 	// Most likely called by the cluster master
-	return counter.upsertMapping(topic, specInternalId, true /*cleanup*/)
+	return counter.upsertMapping(specInternalId, true)
 }
 
 func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.UtilsIface) error {
@@ -410,7 +412,7 @@ func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mapping *metad
 		c.lock.Unlock()
 	}
 
-	return c.upsertMapping(c.id, internalSpecId, false /*cleanup*/)
+	return c.upsertMapping(internalSpecId, false)
 }
 
 func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.CollectionNsMappingsDoc, error) {
@@ -438,7 +440,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 	return docReturn, nil
 }
 
-func (c *MapShaRefCounter) upsertMapping(topic, specInternalId string, cleanup bool) error {
+func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) error {
 	c.lock.RLock()
 	needToSync := c.needToSync
 	upsertCh := c.singleUpsert
@@ -467,7 +469,7 @@ func (c *MapShaRefCounter) upsertMapping(topic, specInternalId string, cleanup b
 		c.lock.Lock()
 		if c.internalSpecId == "" {
 			c.internalSpecId = specInternalId
-		} else if c.internalSpecId != specInternalId {
+		} else if specInternalId != "" && c.internalSpecId != specInternalId {
 			err = fmt.Errorf("Upserting failed with mismatching internalId %v vs %v", c.internalSpecId, specInternalId)
 			c.lock.Unlock()
 			return err
@@ -500,7 +502,7 @@ func (c *MapShaRefCounter) upsertMapping(topic, specInternalId string, cleanup b
 		}
 		if collectionNsMappingsDoc.SpecInternalId == "" {
 			collectionNsMappingsDoc.SpecInternalId = specInternalId
-		} else if collectionNsMappingsDoc.SpecInternalId != specInternalId {
+		} else if specInternalId != "" && collectionNsMappingsDoc.SpecInternalId != specInternalId {
 			err = fmt.Errorf("Mismatching internalId in metakv %v vs %v", collectionNsMappingsDoc.SpecInternalId, specInternalId)
 			return err
 		}
