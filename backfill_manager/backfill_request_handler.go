@@ -206,27 +206,16 @@ func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.C
 // (synchronously) and then re-create a new spec once the incomingReqCh is read next
 func (b *BackfillRequestHandler) run() {
 	batchPersistCh := make(chan bool, 1)
-	var persistTimer *time.Timer
 
 	requestPersistFunc := func() {
-		if persistTimer == nil {
-			persistTimer = time.AfterFunc(b.persistInterval, func() {
-				select {
-				case batchPersistCh <- true:
-				default:
-					// Already needed to persist
-				}
-			})
-		} else {
-			persistTimer.Reset(b.persistInterval)
+		select {
+		case batchPersistCh <- true:
+		default:
+			// Already needed to persist
 		}
 	}
 
 	cancelPersistFunc := func() {
-		if persistTimer != nil {
-			persistTimer.Stop()
-			persistTimer = nil
-		}
 		// When cancelling, need to remove any potential batches
 		select {
 		case <-batchPersistCh:
@@ -242,7 +231,7 @@ func (b *BackfillRequestHandler) run() {
 		b.latestCachedSourceNotificationMtx.Unlock()
 	}
 
-	var needCoolDown uint32
+	var coolDownTime *time.Time
 	for {
 		select {
 		case <-b.finCh:
@@ -251,13 +240,13 @@ func (b *BackfillRequestHandler) run() {
 			switch reflect.TypeOf(reqAndResp.Request) {
 			case reflect.TypeOf(metadata.CollectionNamespaceMapping{}):
 				err := b.handleBackfillRequestInternal(reqAndResp)
-				b.handlePersist(reqAndResp, err, requestPersistFunc)
+				b.handlePersist(reqAndResp, err, requestPersistFunc, cancelPersistFunc)
 			case reflect.TypeOf(metadata.CollectionNamespaceMappingsDiffPair{}):
 				err := b.handleBackfillRequestDiffPair(reqAndResp)
-				b.handlePersist(reqAndResp, err, requestPersistFunc)
+				b.handlePersist(reqAndResp, err, requestPersistFunc, cancelPersistFunc)
 			case reflect.TypeOf(internalDelBackfillReq{}):
 				err := b.handleSpecialDelBackfill(reqAndResp)
-				b.handlePersist(reqAndResp, err, requestPersistFunc)
+				b.handlePersist(reqAndResp, err, requestPersistFunc, cancelPersistFunc)
 			case reflect.TypeOf(internalVBDiffBackfillReq{}):
 				internalReq := reqAndResp.Request.(internalVBDiffBackfillReq)
 				var addErr error
@@ -271,7 +260,7 @@ func (b *BackfillRequestHandler) run() {
 						panic(fmt.Sprintf("Unknown type %v", reflect.TypeOf(internalReq.req)))
 					}
 				}
-				b.handlePersist(reqAndResp, addErr, requestPersistFunc)
+				b.handlePersist(reqAndResp, addErr, requestPersistFunc, cancelPersistFunc)
 				if len(internalReq.removedVBsList) > 0 {
 					for _, vb := range internalReq.removedVBsList {
 						delReq := internalDelBackfillReq{
@@ -289,34 +278,25 @@ func (b *BackfillRequestHandler) run() {
 				close(reqAndResp.PersistResponse)
 			}
 		case reqAndResp := <-b.doneTaskCh:
-			handleErr := b.handleVBDone(reqAndResp)
-			reqAndResp.HandleResponse <- handleErr
-			if handleErr == nil {
-				requestPersistFunc()
-				// Actual persistence will return to PersistResp
-			} else if handleErr == errorSyncDel {
-				// Handling this VB has led to completion of the backfill spec
-				// The spec has been synchronously deleted, and err returned to persistResponse
-				cancelPersistFunc()
-			} else {
-				// Erroneous state, no persist will take place for this request
-				close(reqAndResp.PersistResponse)
-			}
+			err := b.handleVBDone(reqAndResp)
+			b.handlePersist(reqAndResp, err, requestPersistFunc, cancelPersistFunc)
 		case <-batchPersistCh:
-			if atomic.LoadUint32(&needCoolDown) == 1 {
-				batchPersistCh <- true
-				break
+			if coolDownTime != nil {
+				if coolDownTime.Before(time.Now()) {
+					coolDownTime = nil
+					// Ok to continue
+				} else {
+					// need to wait
+					batchPersistCh <- true
+					break
+				}
 			}
 			// No more incoming requests - done bursting handling, do a single metakv operation
 			select {
 			case persistType := <-b.persistenceNeededCh:
 				err := b.metaKvOp(persistType)
-				atomic.StoreUint32(&needCoolDown, 1)
-				go func() {
-					// Cool down period
-					time.Sleep(b.persistInterval)
-					atomic.StoreUint32(&needCoolDown, 0)
-				}()
+				newTime := time.Now().Add(b.persistInterval)
+				coolDownTime = &newTime
 				if err != nil && persistType != DelOp {
 					b.logger.Errorf("%v experienced error when persisting - %v", b.id, err.Error())
 				}
@@ -347,10 +327,15 @@ func (b *BackfillRequestHandler) run() {
 	}
 }
 
-func (b *BackfillRequestHandler) handlePersist(reqAndResp ReqAndResp, err error, requestPersistFunc func()) {
+func (b *BackfillRequestHandler) handlePersist(reqAndResp ReqAndResp, err error, requestPersistFunc func(), cancelPersistFunc func()) {
 	reqAndResp.HandleResponse <- err
 	if err == nil {
 		requestPersistFunc()
+		// Actual persistence will return to PersistResp
+	} else if err == errorSyncDel {
+		// Handling this VB has led to completion of the backfill spec
+		// The spec has been synchronously deleted, and err returned to persistResponse
+		cancelPersistFunc()
 	} else {
 		close(reqAndResp.PersistResponse)
 	}

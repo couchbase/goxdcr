@@ -275,8 +275,8 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 
 	// Two bursty, concurrent add requests results in a single add
 	assert.Equal(1, addCount)
-	// One later set request should result in a single set
-	assert.Equal(1, setCount)
+	// One later set request should result in either a single set or two sets
+	assert.True(setCount == 1 || setCount == 2)
 
 	// Pretend backfill pipeline started
 	assert.Nil(rh.Attach(backfillPipeline))
