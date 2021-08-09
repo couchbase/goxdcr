@@ -35,6 +35,7 @@ var options struct {
 	ipv4                 string // required/optional/off
 	ipv6                 string // required/optional/off
 	isConvert            bool   // whether xdcr is running in conversion/upgrade mode
+	caFileLocation       string
 
 	// logging related parameters
 	logFileDir          string
@@ -58,6 +59,7 @@ func argParse() {
 		"whether ipv4 is required/optional/off")
 	flag.StringVar(&options.ipv6, "ipv6", "optional",
 		"whether ipv6 is required/optional/off")
+
 	flag.BoolVar(&options.isConvert, "isConvert", false,
 		"whether xdcr is running in convertion/upgrade mode")
 
@@ -68,6 +70,8 @@ func argParse() {
 	flag.Uint64Var(&options.maxNumberOfLogFiles, "maxNumberOfLogFiles", 5,
 		"maximum number of log files")
 
+	flag.StringVar(&options.caFileLocation, "caFile", "",
+		"location of the cluster CA file")
 	flag.Parse()
 }
 
