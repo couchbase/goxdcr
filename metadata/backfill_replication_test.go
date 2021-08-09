@@ -354,7 +354,7 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 
 func TestSameAsWriteLock(t *testing.T) {
 	fmt.Println("============== Test case start: TestSameAsWriteLock =================")
-	fmt.Println("============== Test case end: TestSameAsWriteLock =================")
+	defer fmt.Println("============== Test case end: TestSameAsWriteLock =================")
 	assert := assert.New(t)
 
 	startTs := base.VBTimestamp{}
@@ -373,4 +373,20 @@ func TestSameAsWriteLock(t *testing.T) {
 	// locks should be unlocked so that lock here should succeed
 	backfillTasks1.mutex.Lock()
 	backfillTasks2.mutex.Lock()
+}
+
+func TestPartialVBMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestSameAsWriteLock =================")
+	defer fmt.Println("============== Test case end: TestSameAsWriteLock =================")
+	assert := assert.New(t)
+
+	vbTaskMap := NewVBTasksMap()
+	tasks := NewBackfillTasks()
+	tasks.List = append(tasks.List, &BackfillTask{})
+	vbTaskMap.VBTasksMap[0] = &tasks
+	vbTaskMap.VBTasksMap[1] = &tasks
+
+	assert.Equal(2, vbTaskMap.Len())
+	assert.Equal(1, vbTaskMap.LenWithVBs([]uint16{0}))
+	assert.Equal(0, vbTaskMap.LenWithVBs([]uint16{2}))
 }

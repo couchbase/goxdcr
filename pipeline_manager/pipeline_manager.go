@@ -447,10 +447,6 @@ func (pipelineMgr *PipelineManager) StopSerializer() {
 	}
 }
 
-func backfillPipelineName(topic string) string {
-	return fmt.Sprintf("backfill_%v", topic)
-}
-
 func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	var err error
 	errMap := make(base.ErrorMap)
@@ -984,7 +980,14 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 		errMap["pipelineMgr.StartBackfillPipeline"] = err
 		return errMap
 	}
-	if backfillSpec.VBTasksMap.Len() == 0 {
+
+	var mainPipelineVbs []uint16
+	srcNozzles := mainPipeline.Sources()
+	for _, srcNozzle := range srcNozzles {
+		mainPipelineVbs = append(mainPipelineVbs, srcNozzle.ResponsibleVBs()...)
+	}
+
+	if backfillSpec.VBTasksMap.Len() == 0 || backfillSpec.VBTasksMap.LenWithVBs(mainPipelineVbs) == 0 {
 		errMap["pipelineMgr.StartBackfillPipeline"] = ErrorBackfillSpecHasNoVBTasks
 		return errMap
 	}
@@ -1007,7 +1010,8 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	// (DCP will let Backfill Request Handler will know when each VB is done so the top task for the vb is removed)
 	// And if there are more VBTasks, then another new pipeline will be launched start to handle the next sets of tasks
 	bpCustomSettingMap := make(map[string]interface{})
-	bpCustomSettingMap[parts.DCP_VBTasksMap] = backfillSpec.VBTasksMap.Clone()
+	clonedTaskMap := backfillSpec.VBTasksMap.CloneWithSubsetVBs(mainPipelineVbs)
+	bpCustomSettingMap[parts.DCP_VBTasksMap] = clonedTaskMap
 	rep_status.SetCustomSettings(bpCustomSettingMap)
 
 	pipelineMgr.logger.Infof("Backfill Pipeline %v is constructed. Starting it.", bp.InstanceId())
@@ -1551,6 +1555,8 @@ func backfillStartSuccessful(retErrMap base.ErrorMap, logger *log.CommonLogger, 
 			logger.Infof("Replication %v backfill pipeline is not starting because there is currently no backfill spec", pipelineName)
 		} else if retErrMap.HasError(ErrorBackfillSpecHasNoVBTasks) {
 			logger.Infof("Replication %v's backfill spec does has no tasks to run", pipelineName)
+		} else if len(retErrMap) == 1 && retErrMap.HasError(base.ErrorNoBackfillNeeded) {
+			logger.Infof("Replication %v backfill pipeline is not starting because backfill tasks have all been done", pipelineName)
 		} else {
 			successful = false
 		}

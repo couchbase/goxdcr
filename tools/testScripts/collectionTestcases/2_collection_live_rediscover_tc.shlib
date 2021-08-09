@@ -229,14 +229,15 @@ function runTestCase {
 
 	runDataLoad
 	# After running I/O, router should raise a repaired message
-	# RACE detector let it wait longer
-	sleep 20
-	#
 	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
 	validateBrokenMapDoesNotExist "C1"
 
 	# Under normal I/O load, these should happen closely together
+	# Backfill Pipeline given VBMasterCheck will
+	echo "Sleeping 30..."
+	sleep 30
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2)) $(($currentBackfillInstanceCnt + 3))
+	date
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 2))
 	# No OSO because backfill 2 collections
 	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt))

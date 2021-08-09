@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -99,8 +100,9 @@ func (ckpt_svc *CheckpointsService) CheckpointsDoc(replicationId string, vbno ui
 		return nil, err
 	}
 
-	ckpt_svc.getStopTheWorldMtx(replicationId).RLock()
-	defer ckpt_svc.getStopTheWorldMtx(replicationId).RUnlock()
+	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+	mtx.RLock()
+	defer mtx.RUnlock()
 
 	// Should exist because checkpoint manager must finish loading before allowing ckpt operations
 	shaMap, _ := ckpt_svc.GetShaNamespaceMap(replicationId)
@@ -191,9 +193,9 @@ func (ckpt_svc *CheckpointsService) PostDelCheckpointsDoc(replicationId string, 
 		return
 	}
 
-	ckpt_svc.getStopTheWorldMtx(replicationId).Lock()
-	defer ckpt_svc.getStopTheWorldMtx(replicationId).Unlock()
-
+	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+	mtx.Lock()
+	defer mtx.Unlock()
 	decrementerFunc, err := ckpt_svc.GetDecrementerFunc(replicationId)
 	if err != nil {
 		return
@@ -221,8 +223,9 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 		return err
 	}
 
-	ckpt_svc.getStopTheWorldMtx(replicationId).RLock()
-	defer ckpt_svc.getStopTheWorldMtx(replicationId).RUnlock()
+	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+	mtx.RLock()
+	defer mtx.RUnlock()
 
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
 	err = ckpt_svc.metadata_svc.DelWithCatalog(catalogKey, key, rev)
@@ -242,9 +245,6 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 	ckpt_svc.logger.Debugf("Persisting checkpoint record=%v for vbno=%v replication=%v\n", ckpt_record, vbno, replicationId)
 	var size int
 
-	ckpt_svc.getStopTheWorldMtx(replicationId).RLock()
-	defer ckpt_svc.getStopTheWorldMtx(replicationId).RUnlock()
-
 	if ckpt_record == nil {
 		return size, errors.New("nil checkpoint record")
 	}
@@ -262,6 +262,10 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 	if !added {
 		ckpt_svc.logger.Debug("the ckpt record to be added is the same as the current ckpt record in the ckpt doc. no-op.")
 	} else {
+		mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+		mtx.RLock()
+		defer mtx.RUnlock()
+
 		ckpt_json, err := json.Marshal(ckpt_doc)
 		if err != nil {
 			return size, err
@@ -286,9 +290,6 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 
 // Upserting Checkpoint doc requires a "stop-the-world" situation where refcount needs to be re-initialized
 func (ckpt_svc *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) (bool, error) {
-	ckpt_svc.getStopTheWorldMtx(replicationId).Lock()
-	defer ckpt_svc.getStopTheWorldMtx(replicationId).Unlock()
-
 	var atLeastOneWritten bool
 
 	err := ckpt_svc.validateSpecIsValid(replicationId, internalId)
@@ -296,6 +297,9 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpointsDoc(replicationId string, c
 		return false, err
 	}
 
+	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+	mtx.Lock()
+	defer mtx.Unlock()
 	errMap := make(base.ErrorMap)
 	for vbno, ckptDoc := range ckptDocs {
 		key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
@@ -811,18 +815,20 @@ func (ckpt_svc *CheckpointsService) getStopTheWorldMtx(replId string) *sync.RWMu
 }
 
 func (ckpt_svc *CheckpointsService) UpsertBrokenMappingsDoc(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error {
-	ckpt_svc.getStopTheWorldMtx(replicationId).Lock()
-	defer ckpt_svc.getStopTheWorldMtx(replicationId).Unlock()
-
 	err := ckpt_svc.validateSpecIsValid(replicationId, internalId)
 	if err != nil {
 		return err
 	}
 
+	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+	mtx.Lock()
+	defer mtx.Unlock()
+
 	return ckpt_svc.ReInitUsingMergedMappingDoc(replicationId, mappingDoc, ckptDoc, internalId)
 }
 
-func (ckpt_svc *CheckpointsService) validateSpecIsValid(replicationId string, internalId string) error {
+func (ckpt_svc *CheckpointsService) validateSpecIsValid(fullReplId string, internalId string) error {
+	replicationId, _ := common.DecomposeFullTopic(fullReplId)
 	specCheck, err := ckpt_svc.replicationSpecSvc.ReplicationSpecReadOnly(replicationId)
 	if err != nil {
 		// Spec could have been deleted

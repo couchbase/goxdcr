@@ -274,6 +274,9 @@ type DcpNozzle struct {
 	// this allows multiple  dcp nozzles to be created for a kv node
 	vbnos []uint16
 
+	backfillTasksVbnosParseOnce sync.Once
+	backfillTasksVbnos          []uint16
+
 	vb_stream_status map[uint16]*streamStatusWithLock
 
 	// immutable fields
@@ -622,7 +625,12 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 		outputEndSeqnoMap := make(map[uint16]uint64)
 		dcp.specificVBTasks.GetLock().RLock()
+		originalVBsSorted := base.SortUint16List(dcp.vbnos)
+		var replacementVbnos []uint16
 		for vb, vbTasks := range dcp.specificVBTasks.VBTasksMap {
+			if _, vbIsResponsible := base.SearchUint16List(originalVBsSorted, vb); !vbIsResponsible {
+				continue
+			}
 			if vbTasks != nil && vbTasks.Len() > 0 {
 				topTask, exists, unlockFunc := vbTasks.GetRO(0)
 				if !exists {
@@ -633,6 +641,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 				endSeqno := topTask.GetEndingTimestampSeqno()
 				unlockFunc()
 				outputEndSeqnoMap[vb] = endSeqno
+				replacementVbnos = append(replacementVbnos, vb)
 				vbTasks.GetLock().RLock()
 				for _, task := range vbTasks.List {
 					requestedCollections, unlockFunc := task.RequestedCollections(false)
@@ -650,6 +659,15 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 				}
 				vbTasks.GetLock().RUnlock()
 			}
+		}
+		replacementSorted := base.SortUint16List(replacementVbnos)
+		if !base.AreSortedUint16ListsTheSame(originalVBsSorted, replacementSorted) {
+			removed, _, _ := base.ComputeDeltaOfUint16Lists(originalVBsSorted, replacementSorted, false)
+			dcp.Logger().Infof("VBTasksMap only has a subset of original VBs. Replaced %v with %v by removing %v", originalVBsSorted, replacementSorted, removed)
+			for _, vbRemoved := range removed {
+				go dcp.RaiseEvent(common.NewEvent(common.StreamingBypassed, vbRemoved, dcp, nil, nil))
+			}
+			dcp.vbnos = replacementVbnos
 		}
 		dcp.specificVBTasks.GetLock().RUnlock()
 
@@ -1010,14 +1028,9 @@ func (dcp *DcpNozzle) processData() (err error) {
 				// Sent to the consumer to indicate that the producer has no more messages to stream for the specified vbucket.
 				// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/stream-end.md
 				vbno := m.VBucket
-				stream_status, err := dcp.GetStreamState(vbno)
-				// It is possible for DCP to receive a UPR_STREAMEND even if the original StreamRequest sent was not
-				// successful. In that case, make sure it is a no-op, by checking the status, which should not be active.
-				if err == nil && stream_status == Dcp_Stream_Active {
-					err = dcp.handleStreamEnd(vbno)
-					if err != nil {
-						return err
-					}
+				err = dcp.handleStreamEnd(vbno)
+				if err != nil {
+					return err
 				}
 			} else if m.IsSystemEvent() {
 				dcp.handleSystemEvent(m)
@@ -1085,7 +1098,11 @@ func (dcp *DcpNozzle) handleStreamEnd(vbno uint16) error {
 		err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
 		go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
 	} else {
-		dcp.handleVBError(vbno, err_streamend)
+		stream_status, err := dcp.GetStreamState(vbno)
+		if err != nil || stream_status != Dcp_Stream_Active {
+			dcp.handleVBError(vbno, err_streamend)
+			return err
+		}
 	}
 	return err
 }
@@ -1311,9 +1328,11 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 	err := dcp.getHighSeqnosIfNecessary(streams_to_start)
 	if err != nil {
 		dcp.Logger().Errorf("Getting HighSeqno for %v resulted in %v", streams_to_start, err)
+		dcp.handleGeneralError(err)
 		return err
 	}
 
+	var debugNotStartedVBs []uint16
 	for _, vbno := range streams_to_start {
 		vbts, err := dcp.getTS(vbno, true)
 		if err == nil && vbts != nil {
@@ -1323,6 +1342,8 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 				continue
 			}
 
+		} else {
+			debugNotStartedVBs = append(debugNotStartedVBs, vbno)
 		}
 	}
 	return nil
@@ -1535,12 +1556,12 @@ func (dcp *DcpNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		if !ok || new_ts == nil {
 			panic(fmt.Sprintf("setting %v should have type of map[uint16]*base.VBTimestamp", DCP_VBTimestamp))
 		}
+
 		err := dcp.onUpdateStartingSeqno(new_ts)
 		if err != nil {
 			return err
 		}
 	}
-
 	if statsInterval, ok := settings[DCP_Stats_Interval]; ok {
 		dcp.setStatsInterval(uint32(statsInterval.(int)))
 		dcp.stats_interval_change_ch <- true
@@ -1998,7 +2019,7 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 		mccContext := &mcc.ClientContext{}
 		var vbSeqnoMap map[uint16]uint64
 
-		for _, vb := range dcp.vbnos {
+		for _, vb := range dcp.ResponsibleVBs() {
 			dcp.vbHighSeqnoMap[vb].SetSeqno(0)
 		}
 

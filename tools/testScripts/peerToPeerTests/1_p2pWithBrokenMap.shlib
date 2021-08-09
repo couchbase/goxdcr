@@ -72,6 +72,7 @@ function runOneReplicationCycleAndPause {
 	local -i currentInstanceCnt
 	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
 
+	setCustomManifestRefreshInterval "C1"
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -95,6 +96,13 @@ function runOneReplicationCycleAndPause {
 	echo "Waiting 10 seconds for pipeline to really pause"
 	sleep 10
 	grepForPanics
+
+	createScope "C2" "B1" "S1"
+	createCollection "C2" "B1" "S1" "col1"
+
+	echo "Sleeping 15 secs before resuming replication"
+	sleep 15
+	resumeReplication "C1" "B0" "C2" "B1"
 
 	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	#grepForPanics
@@ -205,7 +213,7 @@ function runTestCase {
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
-	runReplicationResume
+	#runReplicationResume
 
 	# 2 jobs - whichever finishes first is done
 	stopWhenAnyBgJobStops 2

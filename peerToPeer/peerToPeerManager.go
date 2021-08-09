@@ -51,6 +51,8 @@ type P2PManagerImpl struct {
 	bucketTopologySvc service_def.BucketTopologySvc
 	replSpecSvc       service_def.ReplicationSpecSvc
 	ckptSvc           service_def.CheckpointsService
+	colManifestSvc    service_def.CollectionsManifestSvc
+	backfillReplSvc   service_def.BackfillReplSvc
 
 	lifeCycleId string
 	logger      *log.CommonLogger
@@ -68,10 +70,9 @@ type P2PManagerImpl struct {
 	latestKnownPeers *KnownPeers
 
 	vbMasterCheckHelper VbMasterCheckHelper
-	colManifestSvc      service_def.CollectionsManifestSvc
 }
 
-func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc) (*P2PManagerImpl, error) {
+func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
 	if err != nil {
 		return nil, err
@@ -93,6 +94,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		cleanupInterval:     cleanupInt,
 		ckptSvc:             ckptSvc,
 		colManifestSvc:      colManifestSvc,
+		backfillReplSvc:     backfillReplSvc,
 	}, nil
 }
 
@@ -134,7 +136,8 @@ func (p *P2PManagerImpl) runHandlers() error {
 			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, p.cleanupInterval)
 		case ReqVBMasterChk:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc)
+			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
+				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}

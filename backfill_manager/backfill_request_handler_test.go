@@ -264,14 +264,14 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	// Test cool down period is active
 	startTime := time.Now()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Doing another handle will result in a set
 	// Change requestMapping to avoid errorDuplicate
 	requestMapping.AddSingleMapping(dummyNs, dummyNs)
 	assert.Nil(rh.HandleBackfillRequest(requestMapping))
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Two bursty, concurrent add requests results in a single add
 	assert.Equal(1, addCount)
@@ -536,7 +536,8 @@ func TestHandleMigrationDiff(t *testing.T) {
 	assert.NotNil(rh.cachedBackfillSpec)
 }
 
-func TestVBMapChange(t *testing.T) {
+// TODO NEIL MB-47809 - VB Map change needs to be re-implemented once GC concept is introduced
+func Disabled_TestVBMapChange(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestVBMapChange =================")
 	defer fmt.Println("============== Test case end: TestVBMapChange =================")
@@ -614,7 +615,8 @@ func TestVBMapChange(t *testing.T) {
 	assert.Equal(2, rh.cachedBackfillSpec.VBTasksMap.Len())
 }
 
-func TestVBMapChangeType2(t *testing.T) {
+// TODO NEIL MB-47809 - VB Map change needs to be re-implemented once GC concept is introduced
+func Disabled_TestVBMapChangeType2(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestVBMapChangeType2 =================")
 	defer fmt.Println("============== Test case end: TestVBMapChangeType2 =================")
@@ -693,4 +695,96 @@ func TestVBMapChangeType2(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(2, rh.cachedBackfillSpec.VBTasksMap.Len())
+}
+
+func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBackfillReqHandlerCreateReqThenMergePeerReq =================")
+	defer fmt.Println("============== Test case end: TestBackfillReqHandlerCreateReqThenMergePeerReq =================")
+	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	setupBucketTopology(bucketTopologySvc, nil)
+	spec := createTestSpec()
+	seqnoGetter := createSeqnoGetterFunc(100)
+	var addCount int
+	var setCount int
+	var delCount int
+	// Make a dummy namespacemapping
+	collectionNs := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	requestMapping := make(metadata.CollectionNamespaceMapping)
+	requestMapping.AddSingleMapping(collectionNs, collectionNs)
+
+	backfillReplSvc := &service_def.BackfillReplSvc{}
+	brhMockBackfillReplSvcCommon(backfillReplSvc)
+	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
+	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
+	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
+
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), seqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+
+	assert.NotNil(rh)
+	assert.Nil(rh.Start())
+
+	srcNozzleMap := brhMockSourceNozzles()
+	ckptMgr := brhMockCkptMgr()
+	supervisor := brhMockSupervisor()
+	ctx := brhMockPipelineContext(ckptMgr, supervisor)
+	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
+	assert.Nil(rh.Attach(pipeline))
+	assert.Nil(rh.Attach(backfillPipeline))
+
+	// Wait for the go-routine to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Manually put requestMapping into the channel
+	var reqAndResp ReqAndResp
+	reqAndResp.Request = requestMapping
+	reqAndResp.PersistResponse = make(chan error, 1)
+	reqAndResp.HandleResponse = make(chan error, 1)
+
+	rh.incomingReqCh <- reqAndResp
+	err1 := <-reqAndResp.HandleResponse
+	assert.Nil(err1)
+	err2 := <-reqAndResp.PersistResponse
+	assert.Nil(err2)
+	assert.Equal(1024, rh.cachedBackfillSpec.VBTasksMap.Len())
+
+	// Test has 1024 VB's
+	var handleResponses [1024]chan error
+	var persistResponses [1024]chan error
+	var waitGrp sync.WaitGroup
+	for i := uint16(0); i < 1024; i++ {
+		iCopy := i
+		waitGrp.Add(1)
+		go func() {
+			defer waitGrp.Done()
+			var reqAndResp ReqAndResp
+			reqAndResp.Request = iCopy
+			reqAndResp.HandleResponse = make(chan error, 1)
+			reqAndResp.PersistResponse = make(chan error, 1)
+			handleResponses[iCopy] = reqAndResp.HandleResponse
+			persistResponses[iCopy] = reqAndResp.PersistResponse
+			rh.doneTaskCh <- reqAndResp
+		}()
+	}
+	waitGrp.Wait()
+
+	// There's no locking because handler has 1 single go routine
+	// But this test will be a second go routine so sleep until the go routine is done before checking
+	// to make sure no concurrent read/write
+	time.Sleep(100 * time.Millisecond)
+	//Before merging, vb 0 only has 0 task
+	assert.Equal(0, rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len())
+
+	_, tasks0 := getTaskForVB0(sourceBucketName)
+	vbTaskMap := metadata.NewVBTasksMap()
+	vbTaskMap.VBTasksMap[0] = tasks0
+
+	backfillSpec := metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTaskMap, spec)
+	internalReq := internalPeerBackfillTaskMergeReq{backfillSpec: backfillSpec}
+
+	assert.Nil(rh.HandleBackfillRequest(internalReq))
+
+	time.Sleep(100 * time.Millisecond)
+	// After merging, vb 0 has 1 task
+	assert.Equal(1, rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len())
 }

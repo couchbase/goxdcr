@@ -72,7 +72,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	xdcrComp, utilsMock, bucket, replSvc, utilsReal := setupBoilerPlate()
 	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode)
 
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucket, replSvc, 100*time.Millisecond, nil, nil)
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucket, replSvc, 100*time.Millisecond, nil, nil, nil)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	commAPI, err := mgr.Start()

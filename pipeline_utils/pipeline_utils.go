@@ -9,14 +9,11 @@
 package pipeline_utils
 
 import (
-	"errors"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/parts"
 	"strconv"
 	"strings"
 )
-
-var ErrorNoSourceKV = errors.New("Invalid configuration. No source kv node is found.")
 
 func GetSourceVBListPerPipeline(pipeline common.Pipeline) []uint16 {
 	ret := []uint16{}

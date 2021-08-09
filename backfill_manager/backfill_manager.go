@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
@@ -144,18 +145,17 @@ func (p *pipelineSvcWrapper) Stop() error {
 func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	errMap := make(base.ErrorMap)
 
-	topic, exists := settings[base.NameKey].(string)
+	topic, topicExists := settings[base.NameKey].(string)
 	_, exists2 := settings[metadata.CollectionsDelAllBackfillKey].(bool)
-	if exists && exists2 {
+	if topicExists && exists2 {
 		err := p.backfillMgr.DelAllBackfills(topic)
 		if err != nil {
 			errMap[metadata.CollectionsDelAllBackfillKey] = err
 		}
 	}
 
-	topic, exists = settings[base.NameKey].(string)
 	vbno, exists2 := settings[metadata.CollectionsDelVbBackfillKey].(int)
-	if exists && exists2 && vbno >= 0 {
+	if topicExists && exists2 && vbno >= 0 {
 		err := p.backfillMgr.DelBackfillForVB(topic, uint16(vbno))
 		if err != nil {
 			errMap[metadata.CollectionsDelVbBackfillKey] = err
@@ -171,7 +171,21 @@ func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSetting
 		}
 	}
 
+	peerBackfillInfo, exists := settings[peerToPeer.MergeBackfillKey].(peerToPeer.PeersVBMasterCheckRespMap)
+	if topicExists && exists {
+		err := p.backfillMgr.MergeIncomingPeerNodesBackfill(topic, peerBackfillInfo)
+		if err != nil {
+			errMap[peerToPeer.MergeBackfillKey] = err
+		}
+	}
+
 	if len(errMap) > 0 {
+		if len(errMap) == 1 {
+			// Only need to return one error as said error from the caller should require no context
+			for _, retErr := range errMap {
+				return retErr
+			}
+		}
 		return fmt.Errorf(base.FlattenErrorMap(errMap))
 	} else {
 		return nil
@@ -275,7 +289,10 @@ func (b *BackfillMgr) Start() error {
 		return err
 	}
 
-	b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
+	err = b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
+	if err != nil {
+		return err
+	}
 
 	go b.runRetryMonitor()
 
@@ -353,8 +370,12 @@ func (b *BackfillMgr) initCache() error {
 			b.cacheMtx.Unlock()
 			// Default with default manifest in case of error
 		}
-		b.createBackfillRequestHandler(spec)
+		err = b.createBackfillRequestHandler(spec)
+		if err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 
@@ -417,8 +438,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	b.specReqHandlersMtx.Unlock()
 
 	b.logger.Infof("Starting backfill request handler for spec %v internalId %v", replId, internalId)
-	reqHandler.Start()
-	return nil
+	return reqHandler.Start()
 }
 
 func (b *BackfillMgr) deleteBackfillRequestHandler(replId, internalId string) error {
@@ -473,7 +493,7 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 	if !ok || !ok2 {
 		return base.ErrorInvalidInput
 	}
-	b.logger.Infof("Backfill spec change callback for %v detected old %v new %v", changedSpecId, oldSpec, newSpec)
+	b.logger.Infof("Backfill spec change callback for %v detected old %v new %v", changedSpecId, oldSpec.PrintFirstTaskRange(), newSpec.PrintFirstTaskRange())
 	if oldSpec == nil && newSpec != nil {
 		// Requesting a backfill pipeline means that a pipeline will start and for the top task in each VBTasksMap
 		// will be sent to DCP to be run and backfilled
@@ -1682,4 +1702,101 @@ func (b *BackfillMgr) validateReplIdExists(replId string) bool {
 		}
 	}
 	return false
+}
+
+func (b *BackfillMgr) MergeIncomingPeerNodesBackfill(topic string, peerResponses map[string]*peerToPeer.VBMasterCheckResp) error {
+	if len(peerResponses) == 0 {
+		// Nothing to do
+		return nil
+	}
+
+	spec, err := b.replSpecSvc.ReplicationSpec(topic)
+	if err != nil {
+		return err
+	}
+
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[topic]
+	b.specReqHandlersMtx.RUnlock()
+	if handler == nil {
+		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		b.logger.Errorf(err.Error())
+		return err
+	}
+
+	errMap := make(base.ErrorMap)
+	for nodeName, resp := range peerResponses {
+		srcBucketName := resp.SourceBucketName
+		bucketMapPayload := resp.GetReponse()
+		backfillMappingDoc := (*bucketMapPayload)[srcBucketName].GetBackfillMappingDoc()
+		if backfillMappingDoc == nil || backfillMappingDoc.Size() == 0 {
+			// Nothing to do here
+			continue
+		}
+		// Need to reconstruct backfill replication
+		shaMap, err := backfillMappingDoc.ToShaMap()
+		if err != nil {
+			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = fmt.Errorf("nodeRespData BackfillMappingDoc ToShaMap err %v", err)
+			continue
+		}
+
+		if len(shaMap) == 0 {
+			// nothing to do here
+			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = fmt.Errorf("nodeRespData shaMap for %v is empty", err)
+			continue
+		}
+
+		vbTaskMap := (*bucketMapPayload)[srcBucketName].GetBackfillVBTasks()
+		err = vbTaskMap.LoadFromMappingsShaMap(shaMap)
+		if err != nil {
+			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = fmt.Errorf("nodeRespData LoadFromMappingsShaMap err %v", err)
+			continue
+		}
+
+		backfillSpec := metadata.NewBackfillReplicationSpec(topic, backfillMappingDoc.SpecInternalId, vbTaskMap, spec)
+		b.logger.Infof("Replication %v received peer node backfill replication: %v", topic, backfillSpec)
+
+		mergeReq := internalPeerBackfillTaskMergeReq{
+			nodeName:     nodeName,
+			backfillSpec: backfillSpec,
+		}
+		err = handler.HandleBackfillRequest(mergeReq)
+		if err != nil {
+			b.logger.Errorf(fmt.Sprintf("node %v backfill merge request was unable to be merged - %v", nodeName, err))
+			errMap[nodeName] = err
+		}
+	}
+
+	if len(errMap) > 0 {
+		// Unable to merge errors are a bit tricky
+		// 1. If all nodes are unable to merge because of errorPeerVBTasksAlreadyContained
+		//    Then it should be a no-op. Return an overall error that says nothing to be done
+		// 2. If a subset of node was unable to merge because of errorPeerVBTasksAlreadyContained but some are merged
+		//    successfully, then the pipeline should keep going and the nodes that already had contained should be silent
+		// 3. If some node had errorPeerVBTasksAlreadyContained errors and some do not, return the whole errors and try again
+
+		var backfillAlreadyMergedCnt int
+		var nilErrCnt int
+		for _, checkErr := range errMap {
+			if checkErr != nil && checkErr == errorPeerVBTasksAlreadyContained {
+				backfillAlreadyMergedCnt++
+			} else if checkErr == nil {
+				nilErrCnt++
+			}
+		}
+		if backfillAlreadyMergedCnt == len(errMap) {
+			// Case 1 No-Op
+			b.logger.Infof("All backfill info from peer nodes have already been merged or performed. No backfill is needed")
+			return base.ErrorNoBackfillNeeded
+		} else if backfillAlreadyMergedCnt+nilErrCnt == len(errMap) {
+			// Case 2 - be silent
+			b.logger.Infof("Some peer nodes have already been merged or performed. Raise backfill regardless")
+			return nil
+		} else {
+			// Case 3 - return everything
+			return fmt.Errorf(base.FlattenErrorMap(errMap))
+		}
+	} else {
+		return nil
+	}
 }

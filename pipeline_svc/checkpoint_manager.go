@@ -2274,7 +2274,7 @@ func (ckmgr *CheckpointManager) CleanupInMemoryBrokenMap(diffPair *metadata.Coll
 
 // This API can be called from multiple places... i.e. either response from a request, or due to a peer node pushing
 func (ckmgr *CheckpointManager) MergePeerNodesCkptInfo(genericResponse interface{}) error {
-	nodesRespMap, ok := genericResponse.(map[string]*peerToPeer.VBMasterCheckResp)
+	nodesRespMap, ok := genericResponse.(peerToPeer.PeersVBMasterCheckRespMap)
 	if ok {
 		return ckmgr.mergeNodesToVBMasterCheckResp(nodesRespMap)
 	}
@@ -2287,7 +2287,12 @@ func (ckmgr *CheckpointManager) MergePeerNodesCkptInfo(genericResponse interface
 //    and is not worth saving
 // 2. Once invalid ckpts are filtered out, they need to be sorted
 // 3. Sort first by source side
-func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap map[string]*peerToPeer.VBMasterCheckResp) error {
+func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer.PeersVBMasterCheckRespMap) error {
+	if len(respMap) == 0 {
+		// nothing to merge
+		return nil
+	}
+
 	var needToGetFailoverLogs bool
 	combinedSrcManifests := make(metadata.ManifestsCache)
 	combinedTgtManifests := make(metadata.ManifestsCache)
@@ -2371,7 +2376,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap map[string
 		return err
 	}
 
-	nameOnlySpec := &metadata.ReplicationSpecification{Id: ckmgr.pipeline.FullTopic()}
+	nameOnlySpec := &metadata.ReplicationSpecification{Id: ckmgr.pipeline.Topic()}
 	err = ckmgr.collectionsManifestSvc.PersistReceivedManifests(nameOnlySpec, combinedSrcManifests, combinedTgtManifests)
 	if err != nil {
 		// TODO check if manifests persisted

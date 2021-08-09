@@ -507,11 +507,6 @@ function addNodesIn {
 		sleep 10
 
 		local postAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
-		if (( $? != 0 ));then
-		  echo "Sleeping 10 secs and try getting nsServerPoolsDefault again"
-		  postAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
-		fi
-
 
 		if (($postAddNumNodes != $(($preAddNumNodes + 1)))); then
 			echo "Error - adding a node resulted going from $preAddNumNodes to $postAddNumNodes"

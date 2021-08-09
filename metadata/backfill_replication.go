@@ -14,6 +14,7 @@ import (
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	"strings"
 	"sync"
 )
 
@@ -168,22 +169,7 @@ func (b *BackfillReplicationSpec) MergeNewTasks(vbTasksMap *VBTasksMapType, skip
 // When traffic is bursty, it's possible that multiple routers will be raising the same task
 // Returns true if incoming taskmap duplicates a portion of current spec
 func (b *BackfillReplicationSpec) Contains(vbTasksMap *VBTasksMapType) bool {
-	b.VBTasksMap.mutex.RLock()
-	defer b.VBTasksMap.mutex.RUnlock()
-	for vb, newTasks := range vbTasksMap.VBTasksMap {
-		currentTasks, exists, unlockFunc := b.VBTasksMap.Get(vb, false)
-		if !exists {
-			unlockFunc()
-			return false
-		}
-
-		if !currentTasks.Contains(newTasks) {
-			unlockFunc()
-			return false
-		}
-		unlockFunc()
-	}
-	return true
+	return b.VBTasksMap.Contains(vbTasksMap)
 }
 
 func (b *BackfillReplicationSpec) SameSpecGeneric(other GenericSpecification) bool {
@@ -196,6 +182,27 @@ func (b *BackfillReplicationSpec) CloneGeneric() GenericSpecification {
 
 func (b *BackfillReplicationSpec) RedactGeneric() GenericSpecification {
 	return b.Redact()
+}
+
+func (b *BackfillReplicationSpec) PrintFirstTaskRange() string {
+	var combinedStrings []string
+	if b == nil {
+		return ""
+	}
+	if b.VBTasksMap == nil {
+		return "(no task)"
+	}
+	b.VBTasksMap.mutex.RLock()
+	defer b.VBTasksMap.mutex.RUnlock()
+	for vb, tasks := range b.VBTasksMap.VBTasksMap {
+		tasks.mutex.RLock()
+		if tasks.List[0] != nil {
+			combinedStrings = append(combinedStrings, fmt.Sprintf("vb: %v (%v,%v] ", vb,
+				tasks.List[0].GetStartingTimestampSeqno(), tasks.List[0].GetEndingTimestampSeqno()))
+		}
+		tasks.mutex.RUnlock()
+	}
+	return strings.Join(combinedStrings, " ")
 }
 
 type VBTasksMapType struct {
@@ -299,6 +306,28 @@ func (v *VBTasksMapType) Len() int {
 	return len(v.VBTasksMap)
 }
 
+func (v *VBTasksMapType) LenWithVBs(vbs []uint16) int {
+	if v == nil {
+		return 0
+	}
+
+	lookupMap := make(map[uint16]bool)
+	for _, vb := range vbs {
+		lookupMap[vb] = true
+	}
+
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+
+	var count int
+	for vbWithinTaskMap, _ := range v.VBTasksMap {
+		if _, exists := lookupMap[vbWithinTaskMap]; exists {
+			count++
+		}
+	}
+	return count
+}
+
 func (v *VBTasksMapType) GetLock() *sync.RWMutex {
 	if v == nil {
 		// instead of returning a nil lock, return an empty lock
@@ -391,6 +420,24 @@ func (this *VBTasksMapType) Clone() *VBTasksMapType {
 	this.mutex.RLock()
 	defer this.mutex.RUnlock()
 	for k, v := range this.VBTasksMap {
+		clonedTasks := v.Clone()
+		clonedMap.VBTasksMap[k] = clonedTasks
+	}
+	return clonedMap
+}
+
+func (this *VBTasksMapType) CloneWithSubsetVBs(vbsList []uint16) *VBTasksMapType {
+	sortedVBs := base.SortUint16List(vbsList)
+	clonedMap := NewVBTasksMap()
+	if this == nil {
+		return clonedMap
+	}
+	this.mutex.RLock()
+	defer this.mutex.RUnlock()
+	for k, v := range this.VBTasksMap {
+		if _, found := base.SearchUint16List(sortedVBs, k); !found {
+			continue
+		}
 		clonedTasks := v.Clone()
 		clonedMap.VBTasksMap[k] = clonedTasks
 	}
@@ -584,6 +631,26 @@ func (v *VBTasksMapType) DebugString() string {
 	return buffer.String()
 }
 
+func (v *VBTasksMapType) DebugStringSubset(vbs []uint16) interface{} {
+	if v == nil {
+		return "nil VBTasksMapType"
+	}
+	sortedVb := base.SortUint16List(vbs)
+	var buffer bytes.Buffer
+	for i := uint16(0); i < base.NumberOfVbs; i++ {
+		_, found := base.SearchUint16List(sortedVb, i)
+		if !found {
+			continue
+		}
+		tasks, exists, unlockFunc := v.Get(i, false)
+		if exists {
+			buffer.WriteString(fmt.Sprintf("VB %v : %v", i, tasks.PrettyPrint()))
+		}
+		unlockFunc()
+	}
+	return buffer.String()
+}
+
 func (v *VBTasksMapType) AllStartsWithSeqno0() bool {
 	if v == nil {
 		return true
@@ -669,6 +736,47 @@ func (v *VBTasksMapType) PostUnmarshalInit() {
 	}
 }
 
+// Does not clone task - should pre-clone
+func (v *VBTasksMapType) FilterBasedOnVBs(vbsList []uint16) *VBTasksMapType {
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+
+	vbsLookupMap := make(map[uint16]bool)
+	for _, vbno := range vbsList {
+		vbsLookupMap[vbno] = true
+	}
+
+	filteredMap := NewVBTasksMap()
+	filteredMap.mutex.Lock()
+	defer filteredMap.mutex.Unlock()
+	for vbno, tasks := range v.VBTasksMap {
+		if _, exists := vbsLookupMap[vbno]; !exists {
+			continue
+		}
+		filteredMap.VBTasksMap[vbno] = tasks
+	}
+	return filteredMap
+}
+
+func (v *VBTasksMapType) Contains(vbTasksMap *VBTasksMapType) bool {
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for vb, newTasks := range vbTasksMap.VBTasksMap {
+		currentTasks, exists, unlockFunc := v.Get(vb, false)
+		if !exists {
+			unlockFunc()
+			return false
+		}
+
+		if !currentTasks.Contains(newTasks) {
+			unlockFunc()
+			return false
+		}
+		unlockFunc()
+	}
+	return true
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks struct {
 	List  []*BackfillTask
@@ -694,20 +802,6 @@ func (b *BackfillTasks) GetLock() *sync.RWMutex {
 		return &sync.RWMutex{}
 	}
 	return b.mutex
-}
-
-func (b *BackfillTasks) Append(incoming *BackfillTasks) {
-	if b == nil {
-		return
-	}
-
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-	incoming.mutex.RLock()
-	defer incoming.mutex.RUnlock()
-
-	b.List = append(b.List, incoming.List...)
-	return
 }
 
 func (b *BackfillTasks) RemoveFirstElem() {

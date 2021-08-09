@@ -17,6 +17,10 @@ const (
 	StreamingStart ComponentEventType = iota
 	// data streaming ends
 	StreamingEnd ComponentEventType = iota
+	// data streaming bypass - if a backfill taks does not have this VB
+	// This is necessary because it is possible that this node could pull VB task from peer nodes that
+	// have not been GC'ed - and no work is to be done
+	StreamingBypassed ComponentEventType = iota
 	//data received by the component
 	DataReceived ComponentEventType = iota
 	//data is processed by the component

@@ -263,6 +263,17 @@ func SearchUint32List(seqno_list []uint32, seqno uint32) (int, bool) {
 	}
 }
 
+func SearchUint16List(seqno_list []uint16, seqno uint16) (int, bool) {
+	index := sort.Search(len(seqno_list), func(i int) bool {
+		return seqno_list[i] >= seqno
+	})
+	if index < len(seqno_list) && seqno_list[index] == seqno {
+		return index, true
+	} else {
+		return index, false
+	}
+}
+
 type StringList []string
 
 func (s StringList) Len() int           { return len(s) }

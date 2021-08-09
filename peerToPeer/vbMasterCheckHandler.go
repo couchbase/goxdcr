@@ -27,11 +27,14 @@ type VBMasterCheckHandler struct {
 	bucketTopologySvc service_def.BucketTopologySvc
 	ckptSvc           service_def.CheckpointsService
 	colManifestSvc    service_def.CollectionsManifestSvc
+	backfillReplSvc   service_def.BackfillReplSvc
 }
 
 const VBMasterCheckSubscriberId = "VBMasterCheckHandler"
 
-func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc) *VBMasterCheckHandler {
+func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration,
+	bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService,
+	collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc) *VBMasterCheckHandler {
 	finCh := make(chan bool)
 	handler := &VBMasterCheckHandler{
 		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval),
@@ -40,6 +43,7 @@ func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, l
 		bucketTopologySvc: bucketTopologySvc,
 		ckptSvc:           ckptSvc,
 		colManifestSvc:    collectionsManifestSvc,
+		backfillReplSvc:   backfillReplSvc,
 	}
 	return handler
 }
@@ -74,12 +78,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	waitGrp.Add(1)
 	var bgErr error
 	var result map[uint16]*metadata.CheckpointsDoc
-	if req.PipelineType == common.MainPipeline {
-		go h.populateMainPipelineCkpts(req.ReplicationId, waitGrp, &bgErr, &result)
-	} else {
-		panic("Shouldn't hit here")
-		// TODO
-	}
+	go h.populatePipelineCkpts(common.ComposeFullTopic(req.ReplicationId, req.PipelineType), waitGrp, &bgErr, &result)
 
 	cachedSrcManifests := make(metadata.ManifestsCache)
 	cachedTgtManifests := make(metadata.ManifestsCache)
@@ -91,6 +90,11 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	var brokenMappingDoc metadata.CollectionNsMappingsDoc
 	waitGrp.Add(1)
 	go h.fetchBrokenMappingDoc(req.ReplicationId, &brokenMappingDoc, &brokenMappingErr, waitGrp)
+
+	var backfillTasksErr error
+	backfillTasks := metadata.NewVBTasksMap()
+	waitGrp.Add(1)
+	go h.fetchBackfillTasks(req.ReplicationId, backfillTasks, &backfillTasksErr, waitGrp)
 
 	// Get all errors in order
 	waitGrp.Wait()
@@ -111,6 +115,13 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	if brokenMappingErr != nil {
 		h.logger.Errorf("%v", brokenMappingErr)
 		resp.ErrorMsg = brokenMappingErr.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	if backfillTasksErr != nil {
+		h.logger.Errorf("%v", backfillTasksErr)
+		resp.ErrorMsg = backfillTasksErr.Error()
 		req.CallBack(resp)
 		return
 	}
@@ -139,6 +150,15 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
+	err = resp.LoadBackfillTasks(backfillTasks, req.SourceBucketName)
+	if err != nil {
+		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", err)
+		resp.ErrorMsg = err.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	// Final Callback
 	handlerResult, err := req.CallBack(resp)
 	if err != nil || handlerResult != nil && handlerResult.GetError() != nil {
 		var handlerResultErr error
@@ -152,7 +172,6 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketVBMapType, resp *VBMasterCheckResp, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
-	resp.Init()
 	for bucketName, vbsList := range bucketVBsMap {
 		resp.InitBucket(bucketName)
 
@@ -180,7 +199,8 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 			}
 		}
 
-		latestInfo := <-srcNotificationCh
+		var latestInfo service_def.SourceNotification
+		latestInfo = <-srcNotificationCh
 
 		// SourceVBMapRO should only contain one node
 		myVBMap := latestInfo.GetSourceVBMapRO()
@@ -240,7 +260,7 @@ func (v *VBMasterCheckHandler) handleResponse(resp *VBMasterCheckResp) {
 	}
 }
 
-func (v *VBMasterCheckHandler) populateMainPipelineCkpts(replSpecId string, waitGrp *sync.WaitGroup, err *error, result *map[uint16]*metadata.CheckpointsDoc) {
+func (v *VBMasterCheckHandler) populatePipelineCkpts(replSpecId string, waitGrp *sync.WaitGroup, err *error, result *map[uint16]*metadata.CheckpointsDoc) {
 	defer waitGrp.Done()
 
 	ckptDocs, opErr := v.ckptSvc.CheckpointsDocs(replSpecId, true)
@@ -293,4 +313,21 @@ func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *
 	}
 
 	*mappingDoc = *loadedDoc
+}
+
+func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *metadata.VBTasksMapType, backfillErr *error, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+
+	backfillSpec, err := v.backfillReplSvc.BackfillReplSpec(replId)
+	if err != nil {
+		if err != base.ReplNotFoundErr {
+			*backfillErr = err
+		}
+		return
+	}
+
+	if backfillSpec.VBTasksMap != nil {
+		clonedTask := backfillSpec.VBTasksMap.Clone()
+		*backfillTasks = *clonedTask
+	}
 }

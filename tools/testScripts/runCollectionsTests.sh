@@ -46,6 +46,7 @@ if [[ -z "$testCaseNumber" ]]; then
 			continue
 		fi
 		. $testCasesDirectory/$testcase
+		date
 		runTestCase
 	done
 else
