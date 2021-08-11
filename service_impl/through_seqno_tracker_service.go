@@ -25,7 +25,6 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
-	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
@@ -34,6 +33,9 @@ import (
 
 type ThroughSeqnoTrackerSvc struct {
 	*component.AbstractComponent
+
+	// Attached pipeline
+	attachedPipeline common.Pipeline
 
 	// map of vbs that the tracker tracks.
 	vb_map map[uint16]bool
@@ -742,6 +744,7 @@ func NewThroughSeqnoTrackerSvc(logger_ctx *log.LoggerContext, osoSnapshotRaiser 
 func (tsTracker *ThroughSeqnoTrackerSvc) initialize(pipeline common.Pipeline) {
 	tsTracker.rep_id = pipeline.Topic()
 	tsTracker.id = pipeline.FullTopic() + "_" + base.ThroughSeqnoTracker
+	tsTracker.attachedPipeline = pipeline
 	for _, vbno := range pipeline_utils.GetSourceVBListPerPipeline(pipeline) {
 		tsTracker.vb_map[vbno] = true
 
@@ -1106,6 +1109,11 @@ func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForThroughSeqno() {
 			return
 		case <-periodicScanner.C:
 			var doneLists []uint16
+			if !tsTracker.isPipelineRunning() {
+				tsTracker.Logger().Infof("%v bg scanner: pipeline no longer running, stopping", tsTracker.id)
+				return
+			}
+
 			throughSeqnos := tsTracker.GetThroughSeqnos()
 
 			for vbno, lastSeenSeqnoLocked := range tsTracker.vbBackfillLastDCPSeqnoMap {
@@ -1558,14 +1566,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) isPipelineRunning() bool {
 		return true
 	}
 
-	rep_status, _ := pipeline_manager.ReplicationStatus(tsTracker.rep_id)
-	if rep_status != nil {
-		pipeline := rep_status.Pipeline()
-		if pipeline != nil && pipeline_utils.IsPipelineRunning(pipeline.State()) {
-			return true
-		}
-	}
-	return false
+	return pipeline_utils.IsPipelineRunning(tsTracker.attachedPipeline.State())
 }
 
 func maxSeqno(seqno_list []uint64, osoModeActive bool, osoModeSeqno uint64) uint64 {
