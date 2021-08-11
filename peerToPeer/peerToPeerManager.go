@@ -382,7 +382,9 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 
 	respMap := make(map[string]*VBMasterCheckResp)
 	for k, v := range result {
-		respMap[k] = v.RespPtr.(*VBMasterCheckResp)
+		if errMap[k] == nil {
+			respMap[k] = v.RespPtr.(*VBMasterCheckResp)
+		}
 	}
 	var flattenedErr error
 	if len(errMap) > 0 {

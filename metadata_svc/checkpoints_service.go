@@ -280,7 +280,8 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 			ckpt_svc.logger.Debugf("Wrote checkpoint doc key=%v, Size=%v\n", key, ckpt_doc.Size())
 			size = ckpt_doc.Size()
 			err = ckpt_svc.RecordMappings(replicationId, ckpt_record, removedRecords)
-			if err != nil {
+			if err != nil && !strings.HasPrefix(replicationId, base.BackfillPipelineTopicPrefix) {
+				// Backfill pipeline can be cleaned up
 				ckpt_svc.logger.Errorf("Failed to record broken mapping err=%v\n", err)
 			}
 		}

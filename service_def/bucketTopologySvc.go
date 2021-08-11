@@ -9,10 +9,13 @@
 package service_def
 
 import (
+	"errors"
 	"github.com/couchbase/goxdcr/metadata"
 	"sync"
 	"time"
 )
+
+var ErrorBucketTopSvcUndergoingGC = errors.New("Specified bucket/spec is undergoing GC")
 
 // Bucket Topology Service is responsible for coordinating retrieval of bucket
 // topologies from either local or remote nodes in a responsible manner
@@ -31,6 +34,13 @@ type BucketTopologySvc interface {
 	UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+
+	// This service also provides a functionality to register a garbage collection function call associated with a
+	// specific VB. If the time is up and the VB is not owned by this node, then the garbage collect function will
+	// be called
+	// If the VB is owned/re-owned by this node, then the registered garbage collect function will not run and be discarded
+	// Each requestId is unique. If used again, then the gcFunc will replace the previous instance
+	RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error
 
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 }

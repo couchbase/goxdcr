@@ -409,6 +409,7 @@ func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpe
 	var err error
 	b.srcBucketWatchersMtx.Lock()
 	b.srcBucketWatchersCnt[spec.SourceBucketName]--
+	b.srcBucketWatchers[spec.SourceBucketName].handleSpecDeletion(spec.Id)
 	if b.srcBucketWatchersCnt[spec.SourceBucketName] == 0 {
 		err = b.srcBucketWatchers[spec.SourceBucketName].Stop()
 		delete(b.srcBucketWatchers, spec.SourceBucketName)
@@ -728,6 +729,19 @@ func (b *BucketTopologyService) SubscribeToLocalBucketHighSeqnosLegacyFeed(spec 
 	return nil, nil, fmt.Errorf("SubscribeToLocalBucketHighSeqnosLegacyFeed could not find watcher for %v", spec.SourceBucketName)
 }
 
+func (b *BucketTopologyService) RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error {
+	if specId == "" {
+		return base.ErrorInvalidInput
+	}
+	b.srcBucketWatchersMtx.RLock()
+	watcher, exists := b.srcBucketWatchers[srcBucketName]
+	b.srcBucketWatchersMtx.RUnlock()
+	if !exists {
+		return base.ErrorNotFound
+	}
+	return watcher.RegisterGarbageCollect(specId, vbno, requestId, gcFunc, timeToFire)
+}
+
 type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string
@@ -794,7 +808,23 @@ type BucketTopologySvcWatcher struct {
 	highSeqnosIntervalsLegacy     map[string]time.Duration
 	highSeqnosReceiverFiredLegacy map[string]*time.Ticker // Key is replId + subscriberID
 	highSeqnosTrackersMtxLegacy   sync.RWMutex
+
+	// Only applicable to source watcher
+	gcMapMtx sync.RWMutex
+	// ReplicationId -> vbno -> requestId
+	gcMap             GcMapType
+	gcPruneMap        GcMapPruneMapType // To remove really outdated gc requests
+	gcMapUndergoingGc bool
+	gcMapGcAbort      bool
+	gcPruneWindow     time.Duration
 }
+
+type GcMapType map[string]VbnoReqMapType
+type VbnoReqMapType map[uint16]RequestMapType
+type RequestMapType map[string]*GcRequest
+
+type GcMapPruneMapType map[string]VbnoPruneMapType
+type VbnoPruneMapType map[uint16]time.Time
 
 // IntervalFuncMap is keyed by type
 // Each type will have a single len IntervalInnerFuncMap
@@ -821,6 +851,11 @@ type HighSeqnosOpts struct {
 	SubscriberId      string
 }
 
+type GcRequest struct {
+	timeToFire time.Time
+	funcToFire func() error
+}
+
 func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.CommonLogger, source bool, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) *BucketTopologySvcWatcher {
 	watcher := &BucketTopologySvcWatcher{
 		bucketName:                    bucketName,
@@ -844,6 +879,9 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		highSeqnosReceiverFired:       map[string]*time.Ticker{},
 		highSeqnosIntervalsLegacy:     map[string]time.Duration{},
 		highSeqnosReceiverFiredLegacy: map[string]*time.Ticker{},
+		gcMap:                         GcMapType{},
+		gcPruneMap:                    GcMapPruneMapType{},
+		gcPruneWindow:                 base.BucketTopologyGCPruneTime,
 	}
 	return watcher
 }
@@ -865,6 +903,20 @@ func (bw *BucketTopologySvcWatcher) Start() error {
 func (bw *BucketTopologySvcWatcher) run(initDone *sync.WaitGroup) {
 	bw.logger.Infof("Starting watcher for local? %v bucket of %v with UUID %v", bw.source, bw.bucketName, bw.bucketUUID)
 	defer bw.logger.Infof("Stopped watcher for local? %v bucket of %v with UUID %v", bw.source, bw.bucketName, bw.bucketUUID)
+
+	if bw.source {
+		go func() {
+			scanTicker := time.NewTicker(base.BucketTopologyGCScanTime)
+			for {
+				select {
+				case <-bw.finCh:
+					return
+				case <-scanTicker.C:
+					bw.runGC()
+				}
+			}
+		}()
+	}
 
 	for updateType, intervalAndFunc := range bw.intervalFuncMap {
 		for interval, updateFunc := range intervalAndFunc {
@@ -904,6 +956,112 @@ func (bw *BucketTopologySvcWatcher) run(initDone *sync.WaitGroup) {
 			return
 		}
 	}
+}
+
+func (bw *BucketTopologySvcWatcher) runGC() {
+	bw.latestCacheMtx.RLock()
+	populated := bw.cachePopulated
+	lastPopulatedCacheRO := bw.latestCached.CloneRO().(service_def.SourceNotification)
+	bw.latestCacheMtx.RUnlock()
+	if !populated {
+		// Don't do anything
+		return
+	}
+
+	srcVBMap := lastPopulatedCacheRO.GetSourceVBMapRO()
+	if len(srcVBMap) > 1 {
+		// Not supposed to happen
+		var keys []string
+		for key, _ := range srcVBMap {
+			keys = append(keys, key)
+		}
+		bw.logger.Warnf("srcVBMap shows more than one node %v", keys)
+	} else if len(srcVBMap) == 0 {
+		// Possibly because this node is not a KV node
+		return
+	}
+	var sortedVBsList []uint16
+
+	for _, vbsList := range srcVBMap {
+		sortedVBsList = base.SortUint16List(vbsList)
+	}
+
+	var toBeDeleted []func()
+	bw.gcMapMtx.Lock()
+	bw.gcMapUndergoingGc = true
+	bw.gcMapMtx.Unlock()
+
+	bw.gcMapMtx.RLock()
+	if bw.gcMapGcAbort {
+		bw.gcMapMtx.RUnlock()
+		return
+	}
+	for specIdPreCopy, gcForEachSpec := range bw.gcMap {
+		specId := specIdPreCopy
+		for vbnoPreCopy, idMap := range gcForEachSpec {
+			vbno := vbnoPreCopy
+			// See if vb still belongs to this node
+			// If GetSourceVBMapRO() changes to have more than this source node, need to update logic
+			_, vbStillExists := base.SearchVBInSortedList(vbno, sortedVBsList)
+			if vbStillExists {
+				// Don't do any GC since this node still owns the VB and/or has re-owned the VB
+				// However, check to see if this VB has been owned (i.e. never been re-registered)
+				// for an Expiry period. If so, this means that all these registered requests
+				// are out of date and should be removed
+				lastRegisteredTime := bw.gcPruneMap[specId][vbno]
+				if time.Now().After(lastRegisteredTime.Add(bw.gcPruneWindow)) {
+					toBeDeleted = append(toBeDeleted, func() {
+						// Clean up the prune time
+						delete(bw.gcPruneMap[specId], vbno)
+						if len(bw.gcPruneMap[specId]) == 0 {
+							delete(bw.gcPruneMap, specId)
+						}
+						// Clean up this VB for this spec
+						delete(bw.gcMap[specId], vbno)
+						if len(bw.gcMap[specId]) == 0 {
+							delete(bw.gcMap, specId)
+						}
+					})
+				}
+				continue
+			}
+			numberOfIdRequests := len(idMap)
+			var numGCFired int
+			var individualIdDelete []func()
+
+			// Perform GC
+			for id, req := range idMap {
+				if time.Now().After(req.timeToFire) {
+					numGCFired++
+					err := req.funcToFire()
+					if err != nil {
+						bw.logger.Warnf("GC for spec %v vbno %v id %v resulted in err %v",
+							specId, vbno, id, err)
+					}
+					individualIdDelete = append(individualIdDelete, func() {
+						delete(bw.gcMap[specId][vbno], id)
+					})
+				}
+			}
+			if numGCFired == numberOfIdRequests {
+				// Everything fired, no need to keep this around
+				toBeDeleted = append(toBeDeleted, func() { delete(bw.gcMap[specId], vbno) })
+			} else {
+				// Only a few subset need to be removed
+				toBeDeleted = append(toBeDeleted, individualIdDelete...)
+			}
+		}
+	}
+	bw.gcMapMtx.RUnlock()
+
+	bw.gcMapMtx.Lock()
+	bw.gcMapUndergoingGc = false
+	if !bw.gcMapGcAbort {
+		for _, delFunc := range toBeDeleted {
+			delFunc()
+		}
+	}
+	bw.gcMapMtx.Unlock()
 }
 
 func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFunc func() error) {
@@ -1249,6 +1407,61 @@ func (bw *BucketTopologySvcWatcher) cleanupHighSeqnosInternalData(spec *metadata
 		bw.logger.Infof("spec %v Setting overall ticker for %v to %v", spec.Id, chType, shortestIntervalAfterRemoval)
 		bw.watchersTickersMapMtx.RUnlock()
 	}
+}
+
+func (bw *BucketTopologySvcWatcher) RegisterGarbageCollect(specId string, vbno uint16, id string, gcFunc func() error, fireDuration time.Duration) error {
+	bw.gcMapMtx.Lock()
+	defer bw.gcMapMtx.Unlock()
+	if bw.gcMapUndergoingGc {
+		return service_def.ErrorBucketTopSvcUndergoingGC
+	}
+
+	gcForSpec, specExists := bw.gcMap[specId]
+	if !specExists {
+		gcForSpec = make(VbnoReqMapType)
+		bw.gcMap[specId] = gcForSpec
+	}
+
+	gcPruneForSpec, specExpExists := bw.gcPruneMap[specId]
+	if !specExpExists {
+		gcPruneForSpec = make(VbnoPruneMapType)
+		bw.gcPruneMap[specId] = gcPruneForSpec
+	}
+
+	idMap, vbExists := gcForSpec[vbno]
+	if !vbExists {
+		idMap = make(RequestMapType)
+		gcForSpec[vbno] = idMap
+	}
+
+	// Update this VB's last registered timestamp
+	gcPruneForSpec[vbno] = time.Now()
+
+	idMap[id] = &GcRequest{
+		timeToFire: time.Now().Add(fireDuration),
+		funcToFire: gcFunc,
+	}
+	return nil
+}
+
+func (bw *BucketTopologySvcWatcher) handleSpecDeletion(specId string) {
+	// First see if spec exists
+	bw.gcMapMtx.RLock()
+	_, specExists := bw.gcMap[specId]
+	_, specExpExists := bw.gcPruneMap[specId]
+	bw.gcMapMtx.RUnlock()
+
+	if !specExists && !specExpExists {
+		return
+	}
+
+	bw.gcMapMtx.Lock()
+	if bw.gcMapUndergoingGc {
+		bw.gcMapGcAbort = true
+	}
+	delete(bw.gcMap, specId)
+	delete(bw.gcPruneMap, specId)
+	bw.gcMapMtx.Unlock()
 }
 
 type Notification struct {

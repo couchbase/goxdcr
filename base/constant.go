@@ -1056,12 +1056,17 @@ var HealthCheckInterval = 120 * time.Second
 
 var BucketTopologyWatcherChanLen = 1000
 
+// TODO - make these configrable
+var BucketTopologyGCScanTime = 1 * time.Minute
+var BucketTopologyGCPruneTime = 24 * time.Hour
+
 var PeerToPeerCommTimeout = 15 * time.Second
 
 // TODO - make them configurable
 var MaxP2PReceiveChLen = 10000
 var P2POpaqueTimeout = 5 * time.Minute
 var P2POpaqueCleanupInterval = 5 * time.Second
+var P2PVBRelatedGCInterval = 3 * time.Minute
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,

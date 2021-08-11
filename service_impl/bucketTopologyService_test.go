@@ -326,3 +326,58 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 		watcher1.updateOnce(HIGHSEQNOS, updateFuncCpy)
 	}
 }
+
+func TestBucketTopologyWatcherGC(t *testing.T) {
+	fmt.Println("============== Test case start: TestBucketTopologyWatcherGC =================")
+	defer fmt.Println("============== Test case end: TestBucketTopologyWatcherGC =================")
+	assert := assert.New(t)
+
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
+	bucketMap, kvNames := getBucketMap()
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient)
+
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond)
+	assert.NotNil(bts)
+	assert.Nil(err)
+
+	spec, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName, tgtBucketUuid)
+
+	watcher1 := bts.getOrCreateLocalWatcher(spec)
+	customPruneWindow := 250 * time.Millisecond
+	watcher1.gcPruneWindow = customPruneWindow
+	assert.Nil(watcher1.Start())
+	// Stop the pull routine and manually hack around to see if GC works
+	watcher1.Stop()
+
+	delete(watcher1.latestCached.SourceVBMap, "192.168.0.116:12002")
+
+	var gc1Called bool
+	var gc2Called bool
+	gcFunc1 := func() error {
+		gc1Called = true
+		return nil
+	}
+	gcFunc2 := func() error {
+		gc2Called = true
+		return nil
+	}
+	assert.Nil(watcher1.RegisterGarbageCollect(spec.Id, 512, "id1", gcFunc1, 100*time.Millisecond))
+	assert.Nil(watcher1.RegisterGarbageCollect(spec.Id, 0, "id2", gcFunc2, 100*time.Millisecond))
+
+	assert.Equal(1, len(watcher1.gcMap[spec.Id][0]))
+	assert.Equal(1, len(watcher1.gcMap[spec.Id][512]))
+
+	time.Sleep(150 * time.Millisecond)
+	watcher1.runGC()
+	assert.False(gc1Called)
+	assert.True(gc2Called)
+
+	assert.Equal(0, len(watcher1.gcMap[spec.Id][0]))
+	assert.Equal(1, len(watcher1.gcMap[spec.Id][512]))
+
+	time.Sleep(customPruneWindow)
+	watcher1.runGC()
+	assert.Equal(0, len(watcher1.gcMap[spec.Id][512]))
+	assert.Equal(0, len(watcher1.gcMap[spec.Id]))
+	assert.Equal(0, len(watcher1.gcMap))
+}

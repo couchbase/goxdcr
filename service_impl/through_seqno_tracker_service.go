@@ -1120,6 +1120,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForThroughSeqno() {
 	defer killTimer.Stop()
 	defer periodicScanner.Stop()
 
+	// TODO NEIL detect stopped pipeline
 	for {
 		select {
 		case <-killTimer.C:

@@ -206,6 +206,11 @@ func setupBucketTopology(bucketTopologySvc *service_def.BucketTopologySvc, custo
 	}
 	bucketTopologySvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything).Return(sourceCh, nil)
 	bucketTopologySvc.On("UnSubscribeLocalBucketFeed", mock.Anything, mock.Anything).Return(nil)
+	// In the interest of functional unit test, run the registered GC function right away to simulate a GC interval of 0
+	bucketTopologySvc.On("RegisterGarbageCollect", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		gcFunc := args.Get(4).(func() error)
+		go gcFunc()
+	}).Return(nil)
 }
 
 func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
@@ -536,8 +541,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 	assert.NotNil(rh.cachedBackfillSpec)
 }
 
-// TODO NEIL MB-47809 - VB Map change needs to be re-implemented once GC concept is introduced
-func Disabled_TestVBMapChange(t *testing.T) {
+func TestVBMapChange(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestVBMapChange =================")
 	defer fmt.Println("============== Test case end: TestVBMapChange =================")
@@ -611,12 +615,12 @@ func Disabled_TestVBMapChange(t *testing.T) {
 	delNotification.SourceVBMap = delVBMap
 	rh.sourceBucketTopologyCh <- delNotification
 
-	time.Sleep(100 * time.Millisecond)
+	// The clean up will take place in the bg so wait a little bit
+	time.Sleep(500 * time.Millisecond)
 	assert.Equal(2, rh.cachedBackfillSpec.VBTasksMap.Len())
 }
 
-// TODO NEIL MB-47809 - VB Map change needs to be re-implemented once GC concept is introduced
-func Disabled_TestVBMapChangeType2(t *testing.T) {
+func TestVBMapChangeType2(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestVBMapChangeType2 =================")
 	defer fmt.Println("============== Test case end: TestVBMapChangeType2 =================")
@@ -693,7 +697,8 @@ func Disabled_TestVBMapChangeType2(t *testing.T) {
 	delNotification.SourceVBMap = delVBMap
 	rh.sourceBucketTopologyCh <- delNotification
 
-	time.Sleep(100 * time.Millisecond)
+	// The clean up will take place in the bg so wait a little bit
+	time.Sleep(500 * time.Millisecond)
 	assert.Equal(2, rh.cachedBackfillSpec.VBTasksMap.Len())
 }
 

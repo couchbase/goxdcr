@@ -18,6 +18,20 @@ type BucketTopologySvc struct {
 	mock.Mock
 }
 
+// RegisterGarbageCollect provides a mock function with given fields: specId, srcBucketName, vbno, requestId, gcFunc, timeToFire
+func (_m *BucketTopologySvc) RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error {
+	ret := _m.Called(specId, srcBucketName, vbno, requestId, gcFunc, timeToFire)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, uint16, string, func() error, time.Duration) error); ok {
+		r0 = rf(specId, srcBucketName, vbno, requestId, gcFunc, timeToFire)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // ReplicationSpecChangeCallback provides a mock function with given fields: id, oldVal, newVal, wg
 func (_m *BucketTopologySvc) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)

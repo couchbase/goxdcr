@@ -39,6 +39,8 @@ const (
 	DelOp PersistType = iota
 )
 
+const BackfillHandlerPrefix = "backfillHandler"
+
 // Provide a running request serializer that can handle incoming requests
 // and backend operations for backfill mgr
 // Each backfill request handler is responsible for one replication
@@ -92,7 +94,6 @@ type BackfillRequestHandler struct {
 	sourceUnsubscribeFuncMtx sync.Mutex
 	sourceUnsubscribeFunc    func()
 
-	// TODO MB-47809 - need to GC
 	lastMergedMtx sync.RWMutex
 	lastMergedMap map[string]*metadata.VBTasksMapType
 }
@@ -1055,28 +1056,45 @@ func (b *BackfillRequestHandler) GetDelVBSpecificBackfillCb(vbno uint16) (cb bas
 }
 
 func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16) error {
-	// TODO MB-47809 - NEIL - removed VBs cannot be removed until GC is completed
-	//if len(added) == 0 && len(removed) == 0 {
-	if len(added) == 0 {
-		return nil
-	}
-
-	backfillReqRaw, err := b.getCompleteReq()
-	if err != nil {
-		if err == base.ErrorNoBackfillNeeded {
-			err = nil
+	if len(added) > 0 {
+		backfillReqRaw, err := b.getCompleteReq()
+		if err != nil {
+			if err == base.ErrorNoBackfillNeeded {
+				err = nil
+			}
+			return err
 		}
-		return err
+
+		internalDiffReq := internalVBDiffBackfillReq{
+			addedVBsList: added,
+			req:          backfillReqRaw,
+		}
+		go b.handleBackfillRequestWithArgs(internalDiffReq, false)
 	}
 
-	// TODO MB-47809 - NEIL - removed VBs cannot be removed until GC is completed
-	internalDiffReq := internalVBDiffBackfillReq{
-		addedVBsList: added,
-		//removedVBsList: removed,
-		req: backfillReqRaw,
-	}
+	if len(removed) > 0 {
+		requestId := fmt.Sprintf("%v_%v_%v", BackfillHandlerPrefix, b.id, "vbCleanup")
+		gcFuncWVB := func(vbno uint16) error {
+			oneVBReq := internalDelBackfillReq{
+				specificVBRequested: true,
+				vbno:                vbno,
+			}
+			// OK to do this in parallel - test
+			go b.HandleBackfillRequest(oneVBReq)
+			return nil
+		}
 
-	go b.handleBackfillRequestWithArgs(internalDiffReq, false)
+		for _, vb := range removed {
+			vbCpy := vb
+			gcFunc := func() error {
+				return gcFuncWVB(vbCpy)
+			}
+			registerErr := b.bucketTopologySvc.RegisterGarbageCollect(b.spec.Id, b.spec.SourceBucketName, vbCpy, requestId, gcFunc, base.P2PVBRelatedGCInterval)
+			if registerErr != nil {
+				b.logger.Warnf("Unable to register GC callback for VB %v removed %v", vbCpy, registerErr)
+			}
+		}
+	}
 	return nil
 }
 
@@ -1135,11 +1153,49 @@ func (b *BackfillRequestHandler) checkIfDataChanged(req internalPeerBackfillTask
 	return errorPeerVBTasksAlreadyContained
 }
 
+// Record as merged and then register it for garbage collection
 func (b *BackfillRequestHandler) recordRequestAsMerged(req internalPeerBackfillTaskMergeReq) {
+	vbTaskMapClone := req.backfillSpec.VBTasksMap.Clone()
 	b.lastMergedMtx.Lock()
-	defer b.lastMergedMtx.Unlock()
+	b.lastMergedMap[req.nodeName] = vbTaskMapClone
+	b.lastMergedMtx.Unlock()
 
-	b.lastMergedMap[req.nodeName] = req.backfillSpec.VBTasksMap.Clone()
+	nodeNameCpy := req.nodeName
+	requestId := fmt.Sprintf("%v_%v_%v", BackfillHandlerPrefix, b.id, nodeNameCpy)
+	gcFuncWrapper := func(vbno uint16) error {
+		b.lastMergedMtx.Lock()
+		defer b.lastMergedMtx.Unlock()
+		_, exists := b.lastMergedMap[nodeNameCpy]
+		if !exists || b.lastMergedMap[nodeNameCpy].IsNil() || b.lastMergedMap[nodeNameCpy].Len() == 0 {
+			err := fmt.Errorf("GC for %v for VB found no tasks to remove", requestId)
+			return err
+		}
+
+		mtx := b.lastMergedMap[nodeNameCpy].GetLock()
+		mtx.Lock()
+		delete(b.lastMergedMap[nodeNameCpy].VBTasksMap, vbno)
+		mtx.Unlock()
+
+		if b.lastMergedMap[nodeNameCpy].Len() == 0 {
+			delete(b.lastMergedMap, nodeNameCpy)
+		}
+		return nil
+	}
+
+	mtx := vbTaskMapClone.GetLock()
+	mtx.RLock()
+	for vbno, _ := range vbTaskMapClone.VBTasksMap {
+		gcFunc := func() error {
+			return gcFuncWrapper(vbno)
+		}
+
+		registerErr := b.bucketTopologySvc.RegisterGarbageCollect(b.spec.Id, b.spec.SourceBucketName, vbno, requestId, gcFunc, base.P2PVBRelatedGCInterval)
+		if registerErr != nil {
+			// Garbage may lay around until another merge/re-register
+			b.logger.Warnf("Unable to register GC for %v %v %v - %v", b.spec.Id, nodeNameCpy, vbno, registerErr)
+		}
+	}
+	mtx.RUnlock()
 }
 
 type internalDelBackfillReq struct {

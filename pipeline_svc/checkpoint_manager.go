@@ -57,7 +57,8 @@ type CheckpointMgrSvc interface {
 type CheckpointManager struct {
 	*component.AbstractComponent
 
-	pipeline common.Pipeline
+	pipeline      common.Pipeline
+	srcBucketName string
 
 	//checkpoints_svc handles CRUD operation of checkpoint docs in the metadata store
 	checkpoints_svc service_def.CheckpointsService
@@ -162,6 +163,8 @@ type CheckpointManager struct {
 	getBackfillMgr func() service_def.BackfillMgrIface
 
 	initConnOnce sync.Once
+
+	bucketTopologySvc service_def.BucketTopologySvc
 }
 
 type checkpointSyncHelper struct {
@@ -177,6 +180,12 @@ func (h *checkpointSyncHelper) setCheckpointAllowed() {
 	defer h.mtx.Unlock()
 
 	h.checkpointAllowed = true
+}
+
+func (h *checkpointSyncHelper) isCheckpointAllowed() bool {
+	h.mtx.RLock()
+	defer h.mtx.RUnlock()
+	return h.checkpointAllowed
 }
 
 func (h *checkpointSyncHelper) registerCkptOp(setVBTimestamp bool) (int, error) {
@@ -257,7 +266,16 @@ type brokenMappingWithLock struct {
 	lock                        sync.RWMutex
 }
 
-func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username, target_password, target_bucket_name string, target_kv_vb_map base.KvVBMapType, target_cluster_ref *metadata.RemoteClusterReference, target_cluster_version int, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, statsMgr service_def.StatsMgrIface, uiLogSvc service_def.UILogSvc, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, getBackfillMgr func() service_def.BackfillMgrIface) (*CheckpointManager, error) {
+func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
+	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc,
+	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username,
+	target_password, target_bucket_name string, target_kv_vb_map base.KvVBMapType,
+	target_cluster_ref *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface,
+	statsMgr service_def.StatsMgrIface, uiLogSvc service_def.UILogSvc,
+	collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc,
+	getBackfillMgr func() service_def.BackfillMgrIface,
+	bucketTopologySvc service_def.BucketTopologySvc) (*CheckpointManager, error) {
 	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
@@ -295,6 +313,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		backfillReplSvc:           backfillReplSvc,
 		getBackfillMgr:            getBackfillMgr,
 		checkpointAllowedHelper:   newCheckpointSyncHelper(),
+		bucketTopologySvc:         bucketTopologySvc,
 	}, nil
 }
 
@@ -313,6 +332,7 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 		ckmgr.bpVbHasCkpt = make(map[uint16]bool)
 		ckmgr.bpVbMtx.Unlock()
 	}
+	ckmgr.srcBucketName = ckmgr.pipeline.Specification().GetReplicationSpec().SourceBucketName
 
 	//populate the remote bucket information at the time of attaching
 	err := ckmgr.populateRemoteBucketInfo(pipeline)
@@ -915,16 +935,11 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 			return ckptMgrStopped
 		}
 		if !base.IsVbInList(vbno, listOfVbs) {
-			// TODO - MB for GC'ing old checkpoints
-			if !spec.Settings.GetVBMasterCheckEnabled() {
-				// if the vbno is no longer managed by the current checkpoint manager/pipeline,
-				// the checkpoint doc is no longer valid and needs to be deleted
-				// ignore errors, which should have been logged
-				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
-				if err == nil {
-					ckmgr.postDelCheckpointsDocWrapper(topic, ckptDoc, &brokenMappingModified)
-				}
-				deleted_vbnos = append(deleted_vbnos, vbno)
+			// Need to compose an idempotent gc function to clean up VB not owned by this node after some time
+			// Keep the checkpoint around in case peer nodes will need it
+			err = ckmgr.registerGCFunction(topic, vbno)
+			if err != nil {
+				return err
 			}
 		} else {
 			if ckptDoc.SpecInternalId != specInternalId {
@@ -1001,6 +1016,46 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 
 	ckmgr.logger.Infof("Done with setting starting seqno for %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 	return nil
+}
+
+// Newer instances of checkpoint manager will take over the same spec and callerID and thus replace older instances
+func (ckmgr *CheckpointManager) registerGCFunction(topic string, vbno uint16) error {
+	gcFunc := func() error {
+		if ckmgr.IsStopped() {
+			return fmt.Errorf("Ckptmgr instance stopped")
+		}
+
+		// If checkpoint is not allowed then it means SetVBTimestamp hasn't finished executing
+		if !ckmgr.isCheckpointAllowed() {
+			return fmt.Errorf("Ckptmgr checkpoint for %v %v hasn't started stopped", topic, vbno)
+		}
+
+		ckmgr.checkpointAllowedHelper.disableCkptAndWait()
+		defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
+
+		ckptDoc, err := ckmgr.checkpoints_svc.CheckpointsDoc(topic, vbno)
+		if err != nil {
+			return err
+		}
+
+		var brokenMappingModified bool
+		err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+		if err != nil {
+			ckmgr.logger.Errorf("GC DelCheckpointsDoc err %v", err)
+			return err
+		}
+
+		ckmgr.postDelCheckpointsDocWrapper(topic, ckptDoc, &brokenMappingModified)
+		if brokenMappingModified && !ckmgr.IsStopped() {
+			ckmgr.CommitBrokenMappingUpdates()
+		}
+		return nil
+	}
+	err := ckmgr.bucketTopologySvc.RegisterGarbageCollect(topic, ckmgr.srcBucketName, vbno, topic, gcFunc, base.P2PVBRelatedGCInterval)
+	if err != nil {
+		ckmgr.logger.Errorf("Unable to register GC func for %v - %v due to %v", topic, vbno, err)
+	}
+	return err
 }
 
 func (ckmgr *CheckpointManager) initBpMapIfNeeded(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
