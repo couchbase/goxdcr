@@ -91,10 +91,6 @@ func (p2p *P2pCommAPIimpl) P2PReceive(req ReqRespCommon) (HandlerResult, error) 
 	return result, ErrorReceiveChanFull
 }
 
-func getDevOnlyPath() string {
-	return fmt.Sprintf("_goxdcr/%v", base.XDCRPeerToPeerPath)
-}
-
 func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
 	payload, err := req.Serialize()
 	if err != nil {
@@ -102,7 +98,7 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
 	}
 
 	var out interface{}
-	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), getDevOnlyPath(), false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
+	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
 		payload, base.P2PCommTimeout, &out, nil, false, nil)
 	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
 	return result, err

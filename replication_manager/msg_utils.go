@@ -27,7 +27,6 @@ import (
 )
 
 // xdcr prefix for internal settings keys
-var XDCRPrefix = "xdcr"
 var ErrorsKey = "errors"
 
 // constants used for parsing url path
@@ -43,7 +42,7 @@ const (
 	BlockProfileStartPath       = "profile/block/start"
 	BlockProfileStopPath        = "profile/block/stop"
 	BucketSettingsPrefix        = "controller/bucketSettings"
-	XDCRInternalSettingsPath    = "xdcr/internalSettings"
+	XDCRInternalSettingsPath    = base.XDCRPrefix + "/internalSettings"
 	XDCRPrometheusStatsPath     = "_prometheusMetrics"
 	XDCRPrometheusStatsHighPath = "_prometheusMetricsHigh"
 
