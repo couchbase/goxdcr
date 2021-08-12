@@ -168,8 +168,6 @@ const (
 	TopologySvcErrCooldownPeriodKey = "TopologySvcErrCooldownPeriodSec"
 	// Pipeline Supervisor health check interval
 	HealthCheckIntervalKey = "HealthCheckIntervalSec"
-	// Timeout for peer-to-peer intra-XDCR communication
-	PeerToPeerTimeoutKey = "PeerToPeerTimeoutSec"
 
 	TimeoutRuntimeContextStartKey = "TimeoutRuntimeContextStart"
 	TimeoutRuntimeContextStopKey  = "TimeoutRuntimeContextStop"
@@ -249,6 +247,20 @@ const (
 
 	ReplStatusExportBrokenMapTimeoutKey = "ReplStatusExportBrokenMapTimeoutSec"
 	ReplStatusLoadBrokenMapTimeoutKey   = "ReplStatusLoadBrokenMapTimeoutSec"
+
+	BucketTopologyGCScanTimeKey  = "BucketTopologyGCScanTimeMin"
+	BucketTopologyGCPruneTimeKey = "BucketTopologyGCPruneTimeHour"
+
+	P2PCommTimeoutKey           = "P2PCommTimeoutSec"
+	P2PMaxReceiveChLenKey       = "P2PMaxReceiveChLen"
+	P2POpaqueTimeoutKey         = "P2POpaqueTimeoutMin"
+	P2POpaqueCleanupIntervalKey = "P2POpaqueCleanupIntervalSec"
+	P2PVBRelatedGCIntervalKey   = "P2PVBRelatedGCIntervalHour"
+
+	ThroughSeqnoBgScannerFreqKey    = "ThroughSeqnoBgScannerFreqSec"
+	ThroughSeqnoBgScannerLogFreqKey = "ThroughSeqnoBgScannerLogFreqSec"
+
+	PipelineTimeoutP2PProtocolKey = "PipelineTimeoutP2PProtocolSec"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -310,12 +322,12 @@ var StatsLogIntervalConfig = &SettingsConfig{30, &Range{1, 36000}}
 var XmemDefaultRespTimeoutConfig = &SettingsConfig{1000, &Range{1, 3600000}}
 var BypassSanInCertificateCheckConfig = &SettingsConfig{0, &Range{0, 1}}
 var ReplicationSpecGCCntConfig = &SettingsConfig{4, &Range{1, 100}}
-var TimeoutRuntimeContextStartConfig = &SettingsConfig{30, &Range{1, 3600}}
-var TimeoutRuntimeContextStopConfig = &SettingsConfig{5, &Range{1, 3600}}
-var TimeoutPartsStartConfig = &SettingsConfig{30, &Range{1, 3600}}
-var TimeoutPartsStopConfig = &SettingsConfig{10, &Range{1, 3600}}
-var TimeoutDcpCloseUprStreamsConfig = &SettingsConfig{3, &Range{1, 3600}}
-var TimeoutDcpCloseUprFeedConfig = &SettingsConfig{3, &Range{1, 3600}}
+var TimeoutRuntimeContextStartConfig = &SettingsConfig{int(base.TimeoutRuntimeContextStart / time.Second), &Range{1, 3600}}
+var TimeoutRuntimeContextStopConfig = &SettingsConfig{int(base.TimeoutRuntimeContextStop / time.Second), &Range{1, 3600}}
+var TimeoutPartsStartConfig = &SettingsConfig{int(base.TimeoutPartsStart / time.Second), &Range{1, 3600}}
+var TimeoutPartsStopConfig = &SettingsConfig{int(base.TimeoutPartsStop / time.Second), &Range{1, 3600}}
+var TimeoutDcpCloseUprStreamsConfig = &SettingsConfig{int(base.TimeoutDcpCloseUprStreams / time.Second), &Range{1, 3600}}
+var TimeoutDcpCloseUprFeedConfig = &SettingsConfig{int(base.TimeoutDcpCloseUprFeed / time.Second), &Range{1, 3600}}
 var TimeoutHttpsPortLookupConfig = &SettingsConfig{int(base.HttpsPortLookupTimeout / time.Second), &Range{1, 3600}}
 var CpuCollectionIntervalConfig = &SettingsConfig{2000, &Range{10, 3600000}}
 var ResourceManagementIntervalConfig = &SettingsConfig{1000, &Range{10, 3600000}}
@@ -353,7 +365,16 @@ var ReplStatusExportBrokenMapTimeoutConfig = &SettingsConfig{int(base.ReplStatus
 var TopologySvcCooldownConfig = &SettingsConfig{int(base.TopologySvcCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
 var TopologySvcErrCooldownConfig = &SettingsConfig{int(base.TopologySvcErrCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
 var HealthCheckIntervalConfig = &SettingsConfig{int(base.HealthCheckInterval / time.Second), &Range{5, 3600 /*1 hour*/}}
-var PeerToPeerCommTimeoutConfig = &SettingsConfig{int(base.PeerToPeerCommTimeout / time.Second), &Range{1, 60}}
+var BucketTopologyGCScanTimeConfig = &SettingsConfig{int(base.BucketTopologyGCScanTime / time.Minute), &Range{1, 360}}
+var BucketTopologyGCPruneTimeConfig = &SettingsConfig{int(base.BucketTopologyGCPruneTime / time.Hour), &Range{1, 48}}
+var P2PCommTimeoutConfig = &SettingsConfig{int(base.P2PCommTimeout / time.Second), &Range{1, 300}}
+var P2PMaxReceiveChLenConfig = &SettingsConfig{base.MaxP2PReceiveChLen, &Range{500, 50000}}
+var P2POpaqueTimeoutConfig = &SettingsConfig{int(base.P2POpaqueTimeout / time.Minute), &Range{1, 60}}
+var P2POpaqueCleanupIntervalConfig = &SettingsConfig{int(base.P2POpaqueCleanupInterval / time.Second), &Range{1, 600}}
+var P2PVBRelatedGCIntervalConfig = &SettingsConfig{int(base.P2PVBRelatedGCInterval / time.Hour), &Range{1, 336 /*2 weeks*/}}
+var ThroughSeqnoBgScannerFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerFreq / time.Second), &Range{1, 300}}
+var ThroughSeqnoBgScannerLogFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerLogFreq / time.Second), &Range{1, 300}}
+var PipelineTimeoutP2PProtocolConfig = &SettingsConfig{int(base.TimeoutP2PProtocol / time.Second), &Range{10, 300}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -458,7 +479,16 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologySvcCooldownPeriodKey:                  TopologySvcCooldownConfig,
 	TopologySvcErrCooldownPeriodKey:               TopologySvcErrCooldownConfig,
 	HealthCheckIntervalKey:                        HealthCheckIntervalConfig,
-	PeerToPeerTimeoutKey:                          PeerToPeerCommTimeoutConfig,
+	BucketTopologyGCScanTimeKey:                   BucketTopologyGCScanTimeConfig,
+	BucketTopologyGCPruneTimeKey:                  BucketTopologyGCPruneTimeConfig,
+	P2PCommTimeoutKey:                             P2PCommTimeoutConfig,
+	P2PMaxReceiveChLenKey:                         P2PMaxReceiveChLenConfig,
+	P2POpaqueTimeoutKey:                           P2POpaqueTimeoutConfig,
+	P2POpaqueCleanupIntervalKey:                   P2POpaqueCleanupIntervalConfig,
+	P2PVBRelatedGCIntervalKey:                     P2PVBRelatedGCIntervalConfig,
+	ThroughSeqnoBgScannerFreqKey:                  ThroughSeqnoBgScannerFreqConfig,
+	ThroughSeqnoBgScannerLogFreqKey:               ThroughSeqnoBgScannerLogFreqConfig,
+	PipelineTimeoutP2PProtocolKey:                 PipelineTimeoutP2PProtocolConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -653,7 +653,7 @@ var TimeoutPartsStop = 10 * time.Second
 var TimeoutConnectorsStop = 5 * time.Second
 var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
-var TimeoutP2PProtocolStart = 60 * time.Second
+var TimeoutP2PProtocol = 60 * time.Second
 
 // This is for enforcing remote connection network type.
 const TCP = "tcp"   // ipv4/ipv6 are both supported
@@ -1055,18 +1055,17 @@ var TopologySvcStatusNotFoundCoolDownPeriod = 10 * time.Second
 var HealthCheckInterval = 120 * time.Second
 
 var BucketTopologyWatcherChanLen = 1000
-
-// TODO - make these configrable
 var BucketTopologyGCScanTime = 1 * time.Minute
 var BucketTopologyGCPruneTime = 24 * time.Hour
 
-var PeerToPeerCommTimeout = 15 * time.Second
-
-// TODO - make them configurable
+var P2PCommTimeout = 15 * time.Second
 var MaxP2PReceiveChLen = 10000
 var P2POpaqueTimeout = 5 * time.Minute
 var P2POpaqueCleanupInterval = 5 * time.Second
-var P2PVBRelatedGCInterval = 3 * time.Minute
+var P2PVBRelatedGCInterval = 24 * time.Hour
+
+var ThroughSeqnoBgScannerFreq = 5 * time.Second
+var ThroughSeqnoBgScannerLogFreq = 60 * time.Second
 
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
@@ -1123,7 +1122,11 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration,
 	healthCheckInterval time.Duration,
 	blockedIpv4 bool, blockedIpv6 bool,
-	peerToPeerTimeout time.Duration) {
+	peerToPeerTimeout, bucketTopologyGCScanTime, bucketTopologyGCPruneTime time.Duration,
+	maxP2PReceiveChLen int,
+	p2pOpaqueTimeout, p2pOpaqueCleanupInterval, p2pVBRelatedGCInterval,
+	throughSeqnoBgScannerFreq, throughSeqnoBgScannerLogFreq,
+	timeoutP2PProtocol time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1253,7 +1256,20 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 		IpFamilyStr = "ipv4"
 	}
 	IpFamilyOnlyErrorMessage = fmt.Sprintf("The cluster is %v only. ", IpFamilyStr)
-	PeerToPeerCommTimeout = peerToPeerTimeout
+	P2PCommTimeout = peerToPeerTimeout
+	BucketTopologyGCScanTime = bucketTopologyGCScanTime
+	BucketTopologyGCPruneTime = bucketTopologyGCPruneTime
+	MaxP2PReceiveChLen = maxP2PReceiveChLen
+	P2POpaqueTimeout = p2pOpaqueTimeout
+	P2POpaqueCleanupInterval = p2pOpaqueCleanupInterval
+	P2PVBRelatedGCInterval = p2pVBRelatedGCInterval
+	ThroughSeqnoBgScannerFreq = throughSeqnoBgScannerFreq
+	ThroughSeqnoBgScannerLogFreq = throughSeqnoBgScannerLogFreq
+	TimeoutRuntimeContextStart = timeoutRuntimeContextStart
+	TimeoutRuntimeContextStop = timeoutRuntimeContextStop
+	TimeoutPartsStart = timeoutPartsStart
+	TimeoutPartsStop = timeoutPartsStop
+	TimeoutP2PProtocol = timeoutP2PProtocol
 }
 
 // Need to escape the () to result in "META().xattrs" literal

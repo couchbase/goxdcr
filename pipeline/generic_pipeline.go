@@ -268,7 +268,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		execWrapper := func() error {
 			return genericPipeline.runP2PProtocol(&p2pErrMap)
 		}
-		p2pProtocolErr := base.ExecWithTimeout(execWrapper, base.TimeoutP2PProtocolStart, genericPipeline.logger)
+		p2pProtocolErr := base.ExecWithTimeout(execWrapper, base.TimeoutP2PProtocol, genericPipeline.logger)
 		errKey := "genericPipeline.RunP2PProtocol"
 
 		if p2pProtocolErr != nil {

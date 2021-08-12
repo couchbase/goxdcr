@@ -1114,13 +1114,12 @@ func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForThroughSeqno() {
 	// Wait for max time it takes for xmem to finish sending a mutation
 	totalScanTime := time.Duration(base.XmemMaxRetry) * base.XmemMaxRetryInterval
 	killTimer := time.NewTimer(totalScanTime)
-	periodicScanner := time.NewTicker(5 * time.Second /* TODO make this configurable*/)
-	logPrinter := time.NewTicker(10 * time.Second) // Make this 30 seconds and configurable
+	periodicScanner := time.NewTicker(base.ThroughSeqnoBgScannerFreq)
+	logPrinter := time.NewTicker(base.ThroughSeqnoBgScannerLogFreq)
 
 	defer killTimer.Stop()
 	defer periodicScanner.Stop()
 
-	// TODO NEIL detect stopped pipeline
 	for {
 		select {
 		case <-killTimer.C:
