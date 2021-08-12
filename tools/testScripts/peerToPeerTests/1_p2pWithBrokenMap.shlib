@@ -83,7 +83,7 @@ function runOneReplicationCycleAndPause {
 
 	runDataLoad
 
-  echo "Sleeping 20 seconds before changes left check"
+	echo "Sleeping 20 seconds before changes left check"
 	sleep 20
 
 	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
@@ -132,7 +132,6 @@ function runOneRebalanceCycle {
 
 	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
-
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
@@ -184,21 +183,20 @@ function runReplicationResume {
 
 	logsC1P=$(getInternalNodeXdcrLog "C1P")
 	ckptFoundCount=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
-	if (( $ckptFoundCount > 0 ));then
-	  echo "C1P unable to find upserted checkpoints"
+	if (($ckptFoundCount > 0)); then
+		echo "C1P unable to find upserted checkpoints"
 		exit 1
 	fi
 	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -c "=0")
-	if (( $resumeFrom0Cnt > 0 ));then
-	  echo "C1P has at least one VB that resumed from seqno 0"
+	if (($resumeFrom0Cnt > 0)); then
+		echo "C1P has at least one VB that resumed from seqno 0"
 		exit 1
 	fi
-	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME" )
-	if (( $resumeLoadBrokenMapCnt == 0 ));then
-	  echo "C1P did not load broken map from checkpoint migration"
+	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
+	if (($resumeLoadBrokenMapCnt == 0)); then
+		echo "C1P did not load broken map from checkpoint migration"
 		exit 1
 	fi
-
 
 	grepForPanics
 }

@@ -103,7 +103,7 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
 
 	var out interface{}
 	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), getDevOnlyPath(), false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
-		payload, 0, &out, nil, false, nil)
+		payload, base.PeerToPeerCommTimeout, &out, nil, false, nil)
 	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
 	return result, err
 }

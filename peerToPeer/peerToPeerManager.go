@@ -137,7 +137,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 		case ReqVBMasterChk:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
 			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
-				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc)
+				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -266,7 +266,7 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 	}
 
 	err = p.utils.ExponentialBackoffExecutor(fmt.Sprintf("sendPeerToPeerReq(%v)", opCode.String()),
-		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryOp)
+		base.PeerToPeerRetryWaitTime, base.PeerToPeerMaxRetry, base.PeerToPeerRetryFactor, retryOp)
 	if err != nil {
 		p.logger.Errorf("Unable to send %v to some or all the nodes... %v", opCode.String(), err)
 		return err
@@ -296,14 +296,16 @@ func NewSendOpts(sync bool) *SendOpts {
 	}
 }
 
-func (s *SendOpts) GetResults() map[string]*ReqRespPair {
+func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 	retMap := make(map[string]*ReqRespPair)
+	retErrMap := make(base.ErrorMap)
 
 	var waitGrp sync.WaitGroup
 
 	s.respMapMtx.RLock()
 	for serverName, _ := range s.respMap {
 		retMap[serverName] = &ReqRespPair{}
+		retErrMap[serverName] = nil
 	}
 
 	for serverName, ch := range s.respMap {
@@ -312,17 +314,28 @@ func (s *SendOpts) GetResults() map[string]*ReqRespPair {
 		waitGrp.Add(1)
 		go func() {
 			defer waitGrp.Done()
+			timeoutTimer := time.NewTimer(base.PeerToPeerNonExponentialWaitTime)
 			select {
 			case pair := <-chCpy:
+				timeoutTimer.Stop()
 				retMap[serverNameCpy].ReqPtr = pair.ReqPtr
 				retMap[serverNameCpy].RespPtr = pair.RespPtr
+			case <-timeoutTimer.C:
+				retErrMap[serverNameCpy] = base.ErrorExecutionTimedOut
 			}
 		}()
 	}
 	s.respMapMtx.RUnlock()
 	waitGrp.Wait()
 
-	return retMap
+	for serverName, err := range retErrMap {
+		if err == nil {
+			delete(retErrMap, serverName)
+		} else {
+			delete(retMap, serverName)
+		}
+	}
+	return retMap, retErrMap
 }
 
 type ReqRespPair struct {
@@ -365,14 +378,17 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		return nil, err
 	}
 
-	// TODO - need to see what to do about error handling
-	result := opts.GetResults()
+	result, errMap := opts.GetResults()
 
 	respMap := make(map[string]*VBMasterCheckResp)
 	for k, v := range result {
 		respMap[k] = v.RespPtr.(*VBMasterCheckResp)
 	}
-	return respMap, nil
+	var flattenedErr error
+	if len(errMap) > 0 {
+		flattenedErr = fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return respMap, flattenedErr
 }
 
 func (p *P2PManagerImpl) ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error {

@@ -604,6 +604,12 @@ var DefaultHttpTimeoutWaitTime = 200 * time.Millisecond
 var DefaultHttpTimeoutMaxRetry = 10
 var DefaultHttpTimeoutRetryFactor = 2
 
+// For peer-to-peer communication retry - max of ~51 seconds
+var PeerToPeerMaxRetry = 8
+var PeerToPeerRetryWaitTime = 200 * time.Millisecond
+var PeerToPeerRetryFactor = 2
+var PeerToPeerNonExponentialWaitTime = 51 * time.Second
+
 // minimum versions where various features are supported
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
@@ -647,6 +653,7 @@ var TimeoutPartsStop = 10 * time.Second
 var TimeoutConnectorsStop = 5 * time.Second
 var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
+var TimeoutP2PProtocolStart = 60 * time.Second
 
 // This is for enforcing remote connection network type.
 const TCP = "tcp"   // ipv4/ipv6 are both supported
@@ -1049,6 +1056,8 @@ var HealthCheckInterval = 120 * time.Second
 
 var BucketTopologyWatcherChanLen = 1000
 
+var PeerToPeerCommTimeout = 15 * time.Second
+
 // TODO - make them configurable
 var MaxP2PReceiveChLen = 10000
 var P2POpaqueTimeout = 5 * time.Minute
@@ -1108,7 +1117,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
 	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration,
 	healthCheckInterval time.Duration,
-	blockedIpv4 bool, blockedIpv6 bool) {
+	blockedIpv4 bool, blockedIpv6 bool,
+	peerToPeerTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1238,6 +1248,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 		IpFamilyStr = "ipv4"
 	}
 	IpFamilyOnlyErrorMessage = fmt.Sprintf("The cluster is %v only. ", IpFamilyStr)
+	PeerToPeerCommTimeout = peerToPeerTimeout
 }
 
 // Need to escape the () to result in "META().xattrs" literal

@@ -7,6 +7,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	service_def2 "github.com/couchbase/goxdcr/service_def"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"sync"
@@ -14,18 +15,18 @@ import (
 	"time"
 )
 
-func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.CheckpointsService, *log.CommonLogger, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc) {
+func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.CheckpointsService, *log.CommonLogger, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc, *utilsMock.UtilsIface) {
 	bucketTopologySvc := &service_def.BucketTopologySvc{}
 	ckptSvc := &service_def.CheckpointsService{}
 	logger := log.NewLogger("test", nil)
 	colManifestSvc := &service_def.CollectionsManifestSvc{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
+	utils := &utilsMock.UtilsIface{}
 
-	return bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc
+	return bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc, utils
 }
 
-func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16,
-	colManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, backfillSpec *metadata.BackfillReplicationSpec) {
+func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16, colManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, backfillSpec *metadata.BackfillReplicationSpec, utils *utilsMock.UtilsIface) {
 	ckptSvc.On("CheckpointsDocs", replId, mock.Anything).Return(ckptData, nil)
 	nsMappingDoc := &metadata.CollectionNsMappingsDoc{}
 	ckptSvc.On("LoadBrokenMappings", replId).Return(nil, nsMappingDoc, nil, false, nil)
@@ -46,6 +47,8 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 	colManifestSvc.On("GetAllCachedManifests", mock.Anything).Return(manifestCache, manifestCache, nil)
 
 	backfillReplSvc.On("BackfillReplSpec", replId).Return(backfillSpec, nil)
+
+	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 
 var srcBucketName = "bucket"
@@ -56,7 +59,7 @@ func TestVBMasterHandler(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestVBMasterHandler =================")
 	assert := assert.New(t)
 
-	bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc := setupVBCHBoilerPlate()
+	bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc, utils := setupVBCHBoilerPlate()
 
 	vbList := []uint16{0, 1}
 	vbsListNonIntersect := []uint16{2, 3}
@@ -71,10 +74,10 @@ func TestVBMasterHandler(t *testing.T) {
 	vbTaskMap.VBTasksMap[0] = tasks0
 	backfillSpec := metadata.NewBackfillReplicationSpec(replId, "", vbTaskMap, emptySpec)
 
-	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect, colManifestSvc, backfillReplSvc, backfillSpec)
+	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect, colManifestSvc, backfillReplSvc, backfillSpec, utils)
 
 	reqCh := make(chan interface{}, 100)
-	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc, backfillReplSvc)
+	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc, backfillReplSvc, utils)
 
 	var waitGrp sync.WaitGroup
 	assert.Nil(handler.Start())

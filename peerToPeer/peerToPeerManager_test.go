@@ -141,7 +141,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 		vbMasterCheckHandler.receiveCh <- resp
 	}
 
-	results := opts.GetResults()
+	results, _ := opts.GetResults()
 	tgt1Result, found := results[peerNodes[0]]
 	tgt2Result, found2 := results[peerNodes[0]]
 	assert.True(found)

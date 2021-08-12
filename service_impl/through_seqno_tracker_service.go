@@ -1135,7 +1135,7 @@ func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForThroughSeqno() {
 			return
 		case <-logPrinter.C:
 			total, totalDone, waitingOn := tsTracker.bgScanForDoneVBs()
-			tsTracker.Logger().Infof("%v bg scanner: total %v totalDone %v waitingOnVBs %v", total, totalDone, waitingOn)
+			tsTracker.Logger().Infof("%v bg scanner: total %v totalDone %v waitingOnVBs %v", tsTracker.id, total, totalDone, waitingOn)
 		case <-periodicScanner.C:
 			var doneLists []uint16
 			if !tsTracker.isPipelineRunning() {

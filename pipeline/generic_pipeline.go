@@ -263,31 +263,23 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	// Before starting vb timestamp, need to ensure VBMaster
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
 	if !ok || ok && vbMasterCheckConfig.(bool) == true {
-		resp, err := genericPipeline.vbMasterCheckFunc(genericPipeline)
-		if err != nil {
-			errMap["genericPipeline.vbMasterCheckFunc"] = err
-			// Even if vbmaster has issues, the data being sent should still be stored and then forwarded to others
-			// to prevent data loss
+		genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer communication and metadata merging"))
+		p2pErrMap := make(base.ErrorMap)
+		execWrapper := func() error {
+			return genericPipeline.runP2PProtocol(&p2pErrMap)
 		}
+		p2pProtocolErr := base.ExecWithTimeout(execWrapper, base.TimeoutP2PProtocolStart, genericPipeline.logger)
+		errKey := "genericPipeline.RunP2PProtocol"
 
-		// resp is potentially nil if checkFunc failed above
-		if resp != nil {
-			err = genericPipeline.mergeCkptFunc(genericPipeline, resp)
-			if err != nil {
-				errMap[MergeCkptFuncKey] = err
+		if p2pProtocolErr != nil {
+			if p2pProtocolErr == base.ErrorExecutionTimedOut {
+				errMap[errKey] = base.ErrorExecutionTimedOut
+				return errMap
+			} else {
+				return p2pErrMap
 			}
 		}
-
-		if len(errMap) == 1 && errMap.HasError(base.ErrorNoBackfillNeeded) {
-			if genericPipeline.Type() == common.MainPipeline {
-				// Main pipeline should continue to execute
-				genericPipeline.logger.Infof("Pipeline %v will continue to run because the only error is %v",
-					genericPipeline.Topic(), base.ErrorNoBackfillNeeded)
-				errMap = nil
-			}
-		} else if len(errMap) > 0 {
-			return errMap
-		}
+		genericPipeline.ReportProgress(fmt.Sprintf("Done PeerToPeer communication and metadata merging"))
 	}
 
 	//get starting vb timestamp
@@ -377,6 +369,37 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	}
 
 	return errMap
+}
+
+func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap) error {
+	errMap := *errMapPtr
+	resp, err := genericPipeline.vbMasterCheckFunc(genericPipeline)
+	if err != nil {
+		errMap["genericPipeline.vbMasterCheckFunc"] = err
+		// Even if vbmaster has issues, the data being sent should still be stored and then forwarded to others
+		// to prevent data loss
+	}
+
+	// resp is potentially nil if checkFunc failed above
+	if resp != nil {
+		err = genericPipeline.mergeCkptFunc(genericPipeline, resp)
+		if err != nil {
+			errMap[MergeCkptFuncKey] = err
+		}
+	}
+
+	if len(errMap) == 1 && errMap.HasError(base.ErrorNoBackfillNeeded) {
+		if genericPipeline.Type() == common.MainPipeline {
+			// Main pipeline should continue to execute
+			genericPipeline.logger.Infof("Pipeline %v will continue to run because the only error is %v",
+				genericPipeline.Topic(), base.ErrorNoBackfillNeeded)
+			errMap = nil
+		}
+	}
+	if len(errMap) > 1 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return nil
 }
 
 func (genericPipeline *GenericPipeline) stopConnectorsWithTimeout() base.ErrorMap {

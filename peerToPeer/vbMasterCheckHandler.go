@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
 )
@@ -28,13 +29,12 @@ type VBMasterCheckHandler struct {
 	ckptSvc           service_def.CheckpointsService
 	colManifestSvc    service_def.CollectionsManifestSvc
 	backfillReplSvc   service_def.BackfillReplSvc
+	utils             utilities.UtilsIface
 }
 
 const VBMasterCheckSubscriberId = "VBMasterCheckHandler"
 
-func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration,
-	bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService,
-	collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc) *VBMasterCheckHandler {
+func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface) *VBMasterCheckHandler {
 	finCh := make(chan bool)
 	handler := &VBMasterCheckHandler{
 		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval),
@@ -44,6 +44,7 @@ func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, l
 		ckptSvc:           ckptSvc,
 		colManifestSvc:    collectionsManifestSvc,
 		backfillReplSvc:   backfillReplSvc,
+		utils:             utils,
 	}
 	return handler
 }
@@ -67,6 +68,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	}
 	bucketVBsMap := req.GetBucketVBMap()
 	h.logger.Infof("Received VB master check request from %v with specID %v for the following Bucket -> VBs %v", req.GetSender(), req.ReplicationId, bucketVBsMap)
+	stopMetakvMeasureFunc := h.utils.StartDiagStopwatch(fmt.Sprintf("VBMasterCheckHandler(%v,%v)", req.GetSender(), req.ReplicationId), base.DiagInternalThreshold)
 
 	resp := req.GenerateResponse().(*VBMasterCheckResp)
 	resp.Init()
@@ -98,6 +100,8 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	// Get all errors in order
 	waitGrp.Wait()
+	stopMetakvMeasureFunc()
+
 	if bgErr != nil {
 		h.logger.Errorf("%v", bgErr)
 		resp.ErrorMsg = bgErr.Error()
