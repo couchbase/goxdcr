@@ -15,6 +15,8 @@ type EncryptionSettingIface interface {
 type SecuritySvc interface {
 	Start()
 	IsClusterEncryptionLevelStrict() bool
+	EncryptData() bool
+	GetCertificates() [][]byte
 	SetEncryptionLevelChangeCallback(key string, callback SecChangeCallback)
 }
 

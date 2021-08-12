@@ -127,7 +127,7 @@ func main() {
 	// Initializes official utility object to be used throughout
 	utils := utilities.NewUtilities()
 
-	securitySvc := service_impl.NewSecurityService(nil)
+	securitySvc := service_impl.NewSecurityService(options.caFileLocation, nil)
 	cluster_info_svc := service_impl.NewClusterInfoSvc(nil, utils, securitySvc)
 
 	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, cluster_info_svc, nil, utils)

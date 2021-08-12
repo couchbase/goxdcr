@@ -9,9 +9,14 @@
 package service_impl
 
 import (
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
+	"io/ioutil"
 	"sync"
 )
 
@@ -19,6 +24,7 @@ type EncryptionSetting struct {
 	EncrytionEabled  bool
 	StrictEncryption bool // This disables non SSL port and remote cluster ref must use full encryption
 	TlsConfig        cbauth.TLSConfig
+	certificates     [][]byte
 }
 
 func (setting *EncryptionSetting) IsStrictEncryption() bool {
@@ -30,14 +36,16 @@ type SecurityService struct {
 	securityChangeCallbacks map[string]service_def.SecChangeCallback
 	settingMtx              sync.RWMutex
 	callbackMtx             sync.RWMutex
+	certFile                string
 	logger                  *log.CommonLogger
 }
 
-func NewSecurityService(logger_ctx *log.LoggerContext) *SecurityService {
+func NewSecurityService(certFile string, logger_ctx *log.LoggerContext) *SecurityService {
 	return &SecurityService{
 		securityChangeCallbacks: make(map[string]service_def.SecChangeCallback),
 		settingMtx:              sync.RWMutex{},
 		callbackMtx:             sync.RWMutex{},
+		certFile:                certFile,
 		logger:                  log.NewLogger("SecuritySvc", logger_ctx),
 	}
 }
@@ -47,17 +55,33 @@ func (sec *SecurityService) Start() {
 	sec.logger.Infof("Security service started.")
 }
 
-func (sec *SecurityService) GetEncryptionSetting() EncryptionSetting {
+func (sec *SecurityService) getEncryptionSetting() EncryptionSetting {
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
 	return sec.encrytionSetting
 }
+
+func (sec *SecurityService) GetCertificates() [][]byte {
+	sec.settingMtx.RLock()
+	defer sec.settingMtx.RUnlock()
+	certificates := sec.encrytionSetting.certificates
+	if len(certificates) == 0 {
+		return nil
+	}
+	return certificates
+}
+
 func (sec *SecurityService) IsClusterEncryptionLevelStrict() bool {
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
 	return sec.encrytionSetting.IsStrictEncryption()
 }
 
+func (sec *SecurityService) EncryptData() bool {
+	sec.settingMtx.RLock()
+	defer sec.settingMtx.RUnlock()
+	return sec.encrytionSetting.EncrytionEabled
+}
 func (sec *SecurityService) refreshClusterEncryption() error {
 	clusterSetting, err := cbauth.GetClusterEncryptionConfig()
 	if err != nil {
@@ -89,20 +113,67 @@ func (sec *SecurityService) refreshTLSConfig() error {
 	//return nil
 }
 
-// We can refresh the key/certificate once we have the file locations from the commandline
 func (sec *SecurityService) refreshCert() error {
+	if len(sec.certFile) == 0 {
+		sec.logger.Warnf("Certificate location is missing. Cannot refresh certificate.")
+		return nil
+	}
+	certPEMBlock, err := ioutil.ReadFile(sec.certFile)
+	if err != nil {
+		return err
+	}
+
+	certs, err := sec.processCerts(certPEMBlock)
+	if err != nil {
+		return err
+	}
+	sec.settingMtx.Lock()
+	sec.encrytionSetting.certificates = certs
+	sec.settingMtx.Unlock()
+	sec.logger.Infof("Certificates are updated.")
 	return nil
 }
+
+func (sec *SecurityService) processCerts(certPEMBlock []byte) (certs [][]byte, err error) {
+	var skippedBlockTypes []string
+	for {
+		var certDERBlock *pem.Block
+		certDERBlock, certPEMBlock = pem.Decode(certPEMBlock)
+		if certDERBlock == nil {
+			break
+		}
+		if certDERBlock.Type == "CERTIFICATE" {
+			_, err := x509.ParseCertificate(certDERBlock.Bytes)
+			if err != nil {
+				return nil, err
+			}
+			certs = append(certs, certDERBlock.Bytes)
+		} else {
+			skippedBlockTypes = append(skippedBlockTypes, certDERBlock.Type)
+		}
+	}
+	if len(certs) == 0 {
+		if len(skippedBlockTypes) == 0 {
+			return nil, errors.New("Failed to find any PEM data in certificate file.")
+		} else {
+			return nil, fmt.Errorf("Failed to find certificate PEM data in certificate file after skipping the following types: %v", skippedBlockTypes)
+		}
+	}
+	return certs, nil
+}
+
 func (sec *SecurityService) refresh(code uint64) error {
 	sec.logger.Infof("Received security change notification. code %v", code)
-	oldSetting := sec.GetEncryptionSetting()
+	oldSetting := sec.getEncryptionSetting()
 
 	if code&cbauth.CFG_CHANGE_CERTS_TLSCONFIG != 0 {
 		if err := sec.refreshTLSConfig(); err != nil {
+			sec.logger.Error(err.Error())
 			return err
 		}
 
 		if err := sec.refreshCert(); err != nil {
+			sec.logger.Error(err.Error())
 			return err
 		}
 	}
@@ -110,10 +181,11 @@ func (sec *SecurityService) refresh(code uint64) error {
 	if code&cbauth.CFG_CHANGE_CLUSTER_ENCRYPTION != 0 {
 		err := sec.refreshClusterEncryption()
 		if err != nil {
+			sec.logger.Error(err.Error())
 			return err
 		}
 	}
-	newSetting := sec.GetEncryptionSetting()
+	newSetting := sec.getEncryptionSetting()
 	sec.callbackMtx.RLock()
 	defer sec.callbackMtx.RUnlock()
 	for _, funcName := range sec.securityChangeCallbacks {
