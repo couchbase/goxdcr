@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,8 @@ import (
 
 const ModuleName = "P2PManager"
 const randIdLen = 32
+
+var ErrorNoPeerDiscovered error = fmt.Errorf("no peer has been discovered")
 
 type P2PManager interface {
 	Start() (PeerToPeerCommAPI, error)
@@ -114,7 +117,11 @@ func (p *P2PManagerImpl) Start() (PeerToPeerCommAPI, error) {
 		}
 		p.initCommAPI()
 		p.logger.Infof("P2PManagerImpl started with lifeCycleId %v", p.lifeCycleId)
-		go p.sendDiscoveryRequest()
+		go func() {
+			// Give ns_server some time to boot up before sending discovery requests
+			time.Sleep(base.TopologySvcStatusNotFoundCoolDownPeriod)
+			p.sendDiscoveryRequest()
+		}()
 		return p.commAPI, p.loadSpecsFromMetakv()
 	}
 	return nil, fmt.Errorf("P2PManagerImpl already started")
@@ -164,6 +171,12 @@ func (p *P2PManagerImpl) sendDiscoveryRequest() error {
 		return discoveryReq
 	}
 
+	_, err := p.xdcrCompSvc.PeerNodesAdminAddrs()
+	if err != nil && strings.Contains(err.Error(), service_def.UnknownPoolStr) {
+		p.logger.Warnf("%v not sending peer discovery requests since no other nodes have been detected",
+			p.GetLifecycleId())
+		return ErrorNoPeerDiscovered
+	}
 	return p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false))
 }
 
@@ -175,13 +188,11 @@ func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 	retry1 := func() error {
 		peers, retry1Err = p.xdcrCompSvc.PeerNodesAdminAddrs()
 		if retry1Err != nil {
-			p.logger.Errorf("PeerNodesAdminAddrs() err: %v\n", retry1Err)
 			return retry1Err
 		}
 
 		myHostAddr, myHostErr = p.xdcrCompSvc.MyHostAddr()
 		if myHostErr != nil {
-			p.logger.Errorf("Error getting myHostAddr %v", myHostErr)
 			return myHostErr
 		}
 		return nil

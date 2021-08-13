@@ -12,6 +12,8 @@ import (
 	"github.com/couchbase/goxdcr/base"
 )
 
+const UnknownPoolStr = "statusCode=404"
+
 //XDCRCompTopologySvc abstracts the service interface that has the knowledge
 //of xdcr component topology - xdcr components in a cluster running on which nodes;
 //what are the port numbers for the admin port of xdcr component; which kv node that
