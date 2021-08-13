@@ -160,6 +160,7 @@ function runOneRebalanceCycle {
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"
+	grepForPanics
 }
 
 function runReplicationResume {

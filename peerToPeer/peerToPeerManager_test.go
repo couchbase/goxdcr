@@ -167,3 +167,24 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	vbMasterCheckHandler.opaqueMapMtx.RUnlock()
 
 }
+
+func TestPeerToPeerConcurrentMap(t *testing.T) {
+	fmt.Println("============== Test case start: TestPeerToPeerConcurrentMap =================")
+	defer fmt.Println("============== Test case end: TestPeerToPeerConcurrentMap =================")
+	assert := assert.New(t)
+
+	for i := 0; i < 50; i++ {
+		opts := NewSendOpts(true)
+		opts.timeout = 25 * time.Millisecond
+		opts.respMapMtx.Lock()
+		ch1 := make(chan ReqRespPair)
+		opts.respMap["testhost1"] = ch1
+		ch2 := make(chan ReqRespPair)
+		opts.respMap["testhost2"] = ch2
+		ch3 := make(chan ReqRespPair)
+		opts.respMap["testhost3"] = ch3
+		opts.respMapMtx.Unlock()
+		_, errMap := opts.GetResults()
+		assert.Len(errMap, 3)
+	}
+}

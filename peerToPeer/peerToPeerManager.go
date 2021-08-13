@@ -278,6 +278,7 @@ type GetReqFunc func(source, target string) Request
 
 type SendOpts struct {
 	synchronous bool // Do we need to wait until response is heard
+	timeout     time.Duration
 
 	respMapMtx sync.RWMutex
 	respMap    SendOptsMap // If synchronous, then the sent requests and responses are stored
@@ -290,6 +291,7 @@ func NewSendOpts(sync bool) *SendOpts {
 		return &SendOpts{
 			synchronous: true,
 			respMap:     make(SendOptsMap),
+			timeout:     base.PeerToPeerNonExponentialWaitTime,
 		}
 	} else {
 		return &SendOpts{}
@@ -298,14 +300,17 @@ func NewSendOpts(sync bool) *SendOpts {
 
 func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 	retMap := make(map[string]*ReqRespPair)
-	retErrMap := make(base.ErrorMap)
+	type errWrapper struct {
+		err error
+	}
+	retErrMap := make(map[string]*errWrapper)
 
 	var waitGrp sync.WaitGroup
 
 	s.respMapMtx.RLock()
 	for serverName, _ := range s.respMap {
 		retMap[serverName] = &ReqRespPair{}
-		retErrMap[serverName] = nil
+		retErrMap[serverName] = &errWrapper{err: nil}
 	}
 
 	for serverName, ch := range s.respMap {
@@ -314,28 +319,36 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 		waitGrp.Add(1)
 		go func() {
 			defer waitGrp.Done()
-			timeoutTimer := time.NewTimer(base.PeerToPeerNonExponentialWaitTime)
+			timeoutTimer := time.NewTimer(s.timeout)
 			select {
 			case pair := <-chCpy:
 				timeoutTimer.Stop()
 				retMap[serverNameCpy].ReqPtr = pair.ReqPtr
 				retMap[serverNameCpy].RespPtr = pair.RespPtr
 			case <-timeoutTimer.C:
-				retErrMap[serverNameCpy] = base.ErrorExecutionTimedOut
+				retErrMap[serverNameCpy].err = base.ErrorExecutionTimedOut
 			}
 		}()
 	}
 	s.respMapMtx.RUnlock()
 	waitGrp.Wait()
 
-	for serverName, err := range retErrMap {
-		if err == nil {
+	for serverName, serverErrWrapper := range retErrMap {
+		if serverErrWrapper.err == nil {
 			delete(retErrMap, serverName)
 		} else {
 			delete(retMap, serverName)
 		}
 	}
-	return retMap, retErrMap
+
+	// Need to convert back to errorMap
+	errMap := make(base.ErrorMap)
+	for k, v := range retErrMap {
+		if v.err != nil {
+			errMap[k] = v.err
+		}
+	}
+	return retMap, errMap
 }
 
 type ReqRespPair struct {
