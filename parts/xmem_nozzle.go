@@ -2195,7 +2195,7 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 	// Now we need to update CCR metadata either because of new changes or because we have to prune
 	// The max increase in body length is adding 2 uint32 and _xdcr\x00{"id":"<clusterId>","cv":"<18bytes>"}\x00
 	body := req.Body
-	var maxBodyIncrease = 8 + 24 + len(xmem.sourceClusterId) + 18
+	var maxBodyIncrease = 8 /* 2 uint32*/ + 24 + len(xmem.sourceClusterId) + 18
 	newbodyLen := len(body) + maxBodyIncrease
 	newbody, err := xmem.dataPool.GetByteSlice(uint64(newbodyLen))
 	if err != nil {
@@ -2209,13 +2209,17 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 		wrappedReq.SlicesToBeReleased = append(wrappedReq.SlicesToBeReleased, newbody)
 		wrappedReq.SlicesToBeReleasedMtx.Unlock()
 	}
-	pos, err := meta.ConstructCustomCRXattrForSetMeta(newbody, 4, xmem.config.hlvPruningWindow)
+
+	xattrComposer := base.NewXattrComposer(newbody)
+
+	_, err = meta.ConstructCustomCRXattrForSetMeta(xmem.config.hlvPruningWindow, xattrComposer)
 	if err != nil {
 		// TODO (MB-44587): Remove before shipping. This should never happen unless we badly formated _xdcr.pc/_xdcr_mv..
 		panic(fmt.Sprintf("%v, updateCustomCRXattrForTarget encountered error %v. This may cause unnecessary merge.", xmem.Id(), err))
 	}
 
 	if req.DataType&mcc.XattrDataType > 0 {
+		// Preserve all non-CCR Xattributes
 		it, err := base.NewXattrIterator(body)
 		if err != nil {
 			xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' from NewXattrIterator for body %v", xmem.Id(), err, body)
@@ -2230,23 +2234,17 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 			if base.Equals(key, base.XATTR_XDCR) {
 				continue
 			}
-			binary.BigEndian.PutUint32(newbody[pos:pos+4], uint32(len(key)+len(value)+2))
-			pos = pos + 4
-			copy(newbody[pos:pos+len(key)], key)
-			pos = pos + len(key)
-			newbody[pos] = '\x00'
-			pos++
-			copy(newbody[pos:pos+len(value)], value)
-			pos = pos + len(value)
-			newbody[pos] = '\x00'
-			pos++
+			err = xattrComposer.WriteKV(key, value)
+			if err != nil {
+				return err
+			}
 		}
 	}
-	binary.BigEndian.PutUint32(newbody[0:4], uint32(pos-4))
+
 	docWithoutXattr := base.FindSourceBodyWithoutXattr(req)
-	copy(newbody[pos:], docWithoutXattr)
-	pos = pos + len(docWithoutXattr)
-	req.Body = newbody[0:pos]
+	out := xattrComposer.FinishAndAppendDocValue(docWithoutXattr)
+
+	req.Body = out
 	req.DataType = req.DataType | mcc.XattrDataType
 	return nil
 }
