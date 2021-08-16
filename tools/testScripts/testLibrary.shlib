@@ -19,6 +19,7 @@ OSO_BACKFILL_COUNT="oso_received=10000"
 DCP_CONVERT_ERR_MSG="Error converting VBTask to DCP Nozzle Task"
 BROKENEVENT_TYPE=3
 BACKFILL_PIPELINE_TORNDOWN_MSG="Background check task finished"
+GOXDCR_IDLE_CPU_THRESHOLD=10
 
 # These should be imported after clusterRunProvision script
 
@@ -629,4 +630,29 @@ function changeRemoteClusterReferenceToSecure {
 	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=${remoteClusterCert}\""
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
 		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
+}
+
+function testIdleXdcrCPU {
+	local goxdcrCPUsOut
+	local oldIFS
+	local retResult=0
+
+	goxdcrCPUsOut=$(ps -e -o pid,pcpu,comm | grep goxdcr)
+	oldIFS="$IFS"
+	IFS=$'\n'
+
+	local oneXDCRProcess
+	local oneXDCRCPU
+	for oneXDCRProcess in $(echo "$goxdcrCPUsOut"); do
+		oneXDCRCPU=$(echo "$oneXDCRProcess" | awk '{print $2}')
+		if (($(echo "$oneXDCRCPU > $GOXDCR_IDLE_CPU_THRESHOLD" | bc) == 1)); then
+			echo "GOXDCR CPU process is using $oneXDCRCPU% and greater than idle threshold of $GOXDCR_IDLE_CPU_THRESHOLD"
+			retResult=1
+		else
+			echo "GOXDCR CPU process is using $oneXDCRCPU% and under acceptable threshold of $GOXDCR_IDLE_CPU_THRESHOLD"
+		fi
+	done
+	IFS="$oldIFS"
+
+	return $retResult
 }

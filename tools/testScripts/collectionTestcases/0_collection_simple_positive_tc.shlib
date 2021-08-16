@@ -57,8 +57,16 @@ function runTestCase {
 	echo "============================================================================"
 	setupTopologies
 	if (($? != 0)); then
-		exit $?
+		exit 1
 	fi
+
+	echo "Sleeping 10 seconds for XDCR CPUs to have a chance to idle before measurement"
+	sleep 10
+	testIdleXdcrCPU
+	if (($? != 0)); then
+		exit 1
+	fi
+
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"

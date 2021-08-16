@@ -90,6 +90,7 @@ func (h *HandlerCommon) ClearOpaqueBg() {
 			ticker.Stop()
 			return
 		case <-ticker.C:
+		FORLOOP:
 			for {
 				select {
 				case opaque := <-h.opaquesClearCh:
@@ -99,7 +100,7 @@ func (h *HandlerCommon) ClearOpaqueBg() {
 					delete(h.opaqueReqRespCbMap, opaque)
 					h.opaqueMapMtx.Unlock()
 				default:
-					break
+					break FORLOOP
 				}
 			}
 		}
