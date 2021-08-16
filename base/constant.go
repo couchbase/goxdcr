@@ -1287,6 +1287,7 @@ const FilterExpDelKey = "filter_exp_del"
 const FilterExpKey = "filterExpiration"
 const FilterDelKey = "filterDeletion"
 const BypassExpiryKey = "filterBypassExpiry"
+const BypassUncommittedTxnKey = "filterBypassUncommittedTxn"
 
 const MergeFunctionMappingKey = "mergeFunctionMapping"
 const HlvPruningWindowKey = "hlvPruningWindowSec"

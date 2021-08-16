@@ -22,6 +22,8 @@ type Filter interface {
 	// 3. If err is not nil, additional description
 	// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
 	FilterUprEvent(uprEvent *memcached.UprEvent) (bool, error, string, int64)
+
+	SetShouldSkipUncommittedTxn(val bool)
 }
 
 type FilterUtils interface {

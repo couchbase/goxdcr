@@ -298,7 +298,7 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	assert := assert.New(t)
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, recycler, connectivityStatus := setupBoilerPlateRouter()
-	expDelMode = base.FilterExpDelAll
+	expDelMode = base.FilterExpDelAllFiltered
 	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, recycler, nil, nonCollectionsCap, nil, connectivityStatus)
 
 	assert.Nil(err)
@@ -347,7 +347,7 @@ func TestRouterManifestChange(t *testing.T) {
 
 	setupCollectionManifestsSvcRouter(collectionsManifestSvc)
 
-	expDelMode = base.FilterExpDelAll
+	expDelMode = base.FilterExpDelAllFiltered
 
 	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, connectivity)
 
@@ -402,7 +402,7 @@ func TestRouterTargetCollectionDNE(t *testing.T) {
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, connectivity := setupBoilerPlateRouter()
 
-	expDelMode = base.FilterExpDelAll
+	expDelMode = base.FilterExpDelAllFiltered
 
 	mockTargetCollectionDNE(collectionsManifestSvc)
 
@@ -463,7 +463,7 @@ func TestRouterTargetCollectionDNEPersistErr(t *testing.T) {
 
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, connectivity := setupBoilerPlateRouter()
 
-	expDelMode = base.FilterExpDelAll
+	expDelMode = base.FilterExpDelAllFiltered
 
 	mockTargetCollectionDNE(collectionsManifestSvc)
 
@@ -637,7 +637,7 @@ func TestRouterImplicitWithDiffCapabilities(t *testing.T) {
 	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
 	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc, 1)
 
-	expDelMode = base.FilterExpDelAll
+	expDelMode = base.FilterExpDelAllFiltered
 
 	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, nil)
 

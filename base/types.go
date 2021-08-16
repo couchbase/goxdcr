@@ -1066,16 +1066,19 @@ func (a *AtomicBooleanType) Get() bool {
 type FilterExpDelType int
 
 const (
-	filterExpDelStripN   = 0
-	filterExpDelSkipDelN = 1
-	filterExpDelSkipExpN = 2
+	filterExpDelStripN              = 0
+	filterExpDelSkipDelN            = 1
+	filterExpDelSkipExpN            = 2
+	filterExpDelSkipUncommittedTxnN = 4
 )
 
 var FilterExpDelNone FilterExpDelType = 0x0
-var FilterExpDelStripExpiration FilterExpDelType = 1 << filterExpDelStripN  // 0x1
-var FilterExpDelSkipDeletes FilterExpDelType = 1 << filterExpDelSkipDelN    // 0x2
-var FilterExpDelSkipExpiration FilterExpDelType = 1 << filterExpDelSkipExpN // 0x4
-var FilterExpDelAll FilterExpDelType = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration
+var FilterExpDelStripExpiration FilterExpDelType = 1 << filterExpDelStripN               // 0x1
+var FilterExpDelSkipDeletes FilterExpDelType = 1 << filterExpDelSkipDelN                 // 0x2
+var FilterExpDelSkipExpiration FilterExpDelType = 1 << filterExpDelSkipExpN              // 0x4
+var FilterSkipReplUncommittedTxn FilterExpDelType = 1 << filterExpDelSkipUncommittedTxnN // 0x8
+var FilterExpDelAllFiltered = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration
+var FilterExpDelMax = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration | FilterSkipReplUncommittedTxn
 
 func (a *FilterExpDelType) IsStripExpirationSet() bool {
 	return *a&FilterExpDelStripExpiration > 0
@@ -1087,6 +1090,10 @@ func (a *FilterExpDelType) IsSkipDeletesSet() bool {
 
 func (a *FilterExpDelType) IsSkipExpirationSet() bool {
 	return *a&FilterExpDelSkipExpiration > 0
+}
+
+func (a *FilterExpDelType) IsSkipReplicateUncommittedTxnSet() bool {
+	return *a&FilterSkipReplUncommittedTxn > 0
 }
 
 func (a *FilterExpDelType) SetStripExpiration(setVal bool) {
@@ -1110,13 +1117,21 @@ func (a *FilterExpDelType) SetSkipExpiration(setVal bool) {
 	}
 }
 
+func (a *FilterExpDelType) SetSkipReplicateUncommittedTxn(setVal bool) {
+	curValue := *a&FilterSkipReplUncommittedTxn > 0
+	if curValue != setVal {
+		*a ^= 1 << filterExpDelSkipUncommittedTxnN
+	}
+}
+
 func (a FilterExpDelType) String() string {
 	return fmt.Sprintf("%d", a)
 }
 
 func (a FilterExpDelType) LogString() string {
-	return fmt.Sprintf("StripTTL(%v), SkipDeletes(%v), SkipExpiration(%v)",
-		a&FilterExpDelStripExpiration > 0, a&FilterExpDelSkipDeletes > 0, a&FilterExpDelSkipExpiration > 0)
+	return fmt.Sprintf("StripTTL(%v), SkipDeletes(%v), SkipExpiration(%v), SkipUncommittedTxn(%v)",
+		a&FilterExpDelStripExpiration > 0, a&FilterExpDelSkipDeletes > 0, a&FilterExpDelSkipExpiration > 0,
+		a&FilterSkipReplUncommittedTxn > 0)
 }
 
 type CollectionsMgtType int

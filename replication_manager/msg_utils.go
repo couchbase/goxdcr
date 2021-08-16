@@ -79,6 +79,7 @@ const (
 	FilterExpKey                   = "filterExpiration"
 	FilterDelKey                   = "filterDeletion"
 	BypassExpiryKey                = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
+	BypassUncommittedTxnKey        = base.BypassUncommittedTxnKey
 	CollectionsMappingKey          = base.CollectionsMappingKey
 	CollectionsMirrorKey           = base.CollectionsMirrorKey
 	CollectionsMigrateKey          = base.CollectionsMigrateKey
@@ -176,6 +177,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterExpKey:                   metadata.FilterExpKey,
 	FilterDelKey:                   metadata.FilterDelKey,
 	BypassExpiryKey:                metadata.BypassExpiryKey,
+	BypassUncommittedTxnKey:        metadata.BypassUncommittedTxnKey,
 	CollectionsMappingKey:          metadata.CollectionsMgtMappingKey,
 	CollectionsMigrateKey:          metadata.CollectionsMgtMigrateKey,
 	CollectionsMirrorKey:           metadata.CollectionsMgtMirrorKey,
@@ -218,6 +220,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterExpKey:                      FilterExpKey,
 	metadata.FilterDelKey:                      FilterDelKey,
 	metadata.BypassExpiryKey:                   BypassExpiryKey,
+	metadata.BypassUncommittedTxnKey:           BypassUncommittedTxnKey,
 	metadata.CollectionsMgtMappingKey:          CollectionsMappingKey,
 	metadata.CollectionsMgtMigrateKey:          CollectionsMigrateKey,
 	metadata.CollectionsMgtMirrorKey:           CollectionsMirrorKey,

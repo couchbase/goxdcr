@@ -136,7 +136,7 @@ func TestFlagBasedUpdates(t *testing.T) {
 
 	// Turn off one flag
 	existSettings = DefaultReplicationSettings()
-	existSettings.Values[FilterExpDelKey] = base.FilterExpDelAll
+	existSettings.Values[FilterExpDelKey] = base.FilterExpDelAllFiltered
 	checkMode := existSettings.GetExpDelMode()
 	assert.True(checkMode&base.FilterExpDelStripExpiration > 0)
 	assert.True(checkMode&base.FilterExpDelSkipDeletes > 0)
@@ -227,7 +227,7 @@ func TestMultiValueHelperCheckAndConvert(t *testing.T) {
 	changedSettingsMap, errMap := replSettings.UpdateSettingsFromMap(settingsMap)
 	assert.Equal(1, len(changedSettingsMap))
 	assert.Equal(0, len(errMap))
-	assert.Equal(base.FilterExpDelAll, replSettings.Values[FilterExpDelKey].(base.FilterExpDelType))
+	assert.Equal(base.FilterExpDelAllFiltered, replSettings.Values[FilterExpDelKey].(base.FilterExpDelType))
 
 	// Assuming all 3 were specified now
 	mvHelper = NewMultiValueHelper()

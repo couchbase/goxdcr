@@ -1336,7 +1336,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	var err error
 	var filterPrintMsg string = "<nil>"
 
-	filter, err = baseFilter.NewFilter(id, filterExpression, utilsIn)
+	expDelMode := spec.Settings.GetExpDelMode()
+	filter, err = baseFilter.NewFilter(id, filterExpression, utilsIn, expDelMode.IsSkipReplicateUncommittedTxnSet())
 	if err != nil {
 		return nil, err
 	}
@@ -1832,6 +1833,7 @@ func (router *Router) updateExpDelMode(expDelModeObj interface{}) error {
 	router.Logger().Infof("Router %v's Deletion/Expiration filter method: %v\n", router.id, expDelMode.LogString())
 
 	router.expDelMode.Set(expDelMode)
+	router.filter.SetShouldSkipUncommittedTxn(expDelMode.IsSkipReplicateUncommittedTxnSet())
 	return nil
 }
 

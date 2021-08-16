@@ -1163,7 +1163,7 @@ func NewSourceMigrationNamespaceFromColNs(namespace *base.CollectionNamespace) *
 }
 
 func NewSourceMigrationNamespace(expr string, dp base.DataPool) (*SourceNamespace, error) {
-	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp)
+	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp, false)
 	if err != nil {
 		return nil, err
 	}

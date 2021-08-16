@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbaselabs/gojsonsm"
+	"sync/atomic"
 )
 
 const collateErrDesc = " Collate was used to determine outcome"
@@ -29,14 +30,19 @@ type FilterImpl struct {
 	dp                       base.DataPool
 	flags                    base.FilterFlagType
 	slicesToBeReleasedBuf    [][]byte
+	skipUncommittedTxn       uint32
 }
 
-func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool) (*FilterImpl, error) {
+func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool, skipUncommittedTxn bool) (*FilterImpl, error) {
 	filter := &FilterImpl{
 		id:                    id,
 		utils:                 utils,
 		dp:                    dp,
 		slicesToBeReleasedBuf: make([][]byte, 0, 2),
+	}
+
+	if skipUncommittedTxn {
+		filter.skipUncommittedTxn = 1
 	}
 
 	if len(filterExpression) == 0 {
@@ -71,17 +77,29 @@ func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils
 	return filter, nil
 }
 
-func NewFilter(id string, filterExpression string, utils FilterUtils) (*FilterImpl, error) {
+func NewFilter(id string, filterExpression string, utils FilterUtils, skipUncommittedTxn bool) (*FilterImpl, error) {
 	dpPtr := utils.NewDataPool()
 	if dpPtr == nil {
 		return nil, base.ErrorNoDataPool
 	}
 
-	return NewFilterWithSharedDP(id, filterExpression, utils, dpPtr)
+	return NewFilterWithSharedDP(id, filterExpression, utils, dpPtr, skipUncommittedTxn)
 }
 
 func (filter *FilterImpl) GetInternalExpr() string {
 	return filter.filterExpressionInternal
+}
+
+func (filter *FilterImpl) ShouldSkipUncommittedTxn() bool {
+	return atomic.LoadUint32(&filter.skipUncommittedTxn) > 0
+}
+
+func (filter *FilterImpl) SetShouldSkipUncommittedTxn(val bool) {
+	if val {
+		atomic.StoreUint32(&filter.skipUncommittedTxn, 1)
+	} else {
+		atomic.StoreUint32(&filter.skipUncommittedTxn, 0)
+	}
 }
 
 func (filter *FilterImpl) FilterUprEvent(uprEvent *memcached.UprEvent) (bool, error, string, int64) {
@@ -165,8 +183,12 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 		return false, nil, 0, err, errDesc, failedDpCnt
 	}
 
-	// if mutation has transaction xattrs, do not replicate it
-	return !hasTransXattrs, body, endBodyPos, nil, "", failedDpCnt
+	passedFilter := true
+	if filter.ShouldSkipUncommittedTxn() {
+		// if mutation has transaction xattrs, do not replicate it
+		passedFilter = !hasTransXattrs
+	}
+	return passedFilter, body, endBodyPos, nil, "", failedDpCnt
 }
 
 // Passed in body, if not nil, is a decompressed byte slice produced by earlier processing steps
