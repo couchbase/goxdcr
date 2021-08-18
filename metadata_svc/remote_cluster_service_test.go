@@ -2361,7 +2361,7 @@ func setupUtilsAdminBlockedAndSSLIsOK(utilitiesMock *utilsMock.UtilsIface) {
 	nodeAddressesList, _ := testUtils.GetRemoteNodeAddressesListFromNodeList(nodeList, hostname, true, nil, false)
 	utilitiesMock.On("GetRemoteNodeAddressesListFromNodeList", nodeList, hostname, true, mock.Anything, false).Return(nodeAddressesList, nil)
 	clusterInfo, _ := getPools70()
-	utilitiesMock.On("GetClusterInfoWStatusCode", hostnameSSL, base.PoolsPath, mock.Anything, mock.Anything, base.HttpAuthMechHttps, dummySelfSignedCert, false, mock.Anything, mock.Anything, mock.Anything).Return(clusterInfo, nil, http.StatusOK)
+	utilitiesMock.On("GetClusterInfoWStatusCode", hostnameSSL, base.PoolsPath, mock.Anything, mock.Anything, base.HttpAuthMechHttps, dummySelfSignedCert, true, mock.Anything, mock.Anything, mock.Anything).Return(clusterInfo, nil, http.StatusOK)
 	utilitiesMock.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
 }
 

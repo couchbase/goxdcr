@@ -2872,6 +2872,9 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 		defer close(firstWinnerCh)
 		// Attempt to retrieve defaultPoolInfo with what the user initially entered
 		refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+		if err == nil && refHttpAuthMech == base.HttpAuthMechHttps {
+			refSANInCertificate = true
+		}
 	}()
 
 	// If half-mode, no need to do the following to look up ports, etc
@@ -2900,6 +2903,9 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 
 			// now we potentially have valid https address, re-do security settings retrieval
 			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+			if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
+				bgSANInCertificate = true
+			}
 			if bgErr != nil {
 				if len(bgExternalRefHttpsHostName) > 0 {
 					if shouldBail() {
@@ -2909,6 +2915,9 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 					// as a last resort, try that for a third time
 					bgRefHttpsHostName = bgExternalRefHttpsHostName
 					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+					if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
+						bgSANInCertificate = true
+					}
 				}
 			}
 			return
