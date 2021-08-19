@@ -607,15 +607,18 @@ func SortCollectionNamespacePtrList(list CollectionNamespacePtrList) CollectionN
 }
 
 type WrappedUprEvent struct {
-	UprEvent     *mcc.UprEvent
-	ColNamespace *CollectionNamespace
-	Flags        WrappedUprEventFlag
+	UprEvent          *mcc.UprEvent
+	ColNamespace      *CollectionNamespace
+	Flags             WrappedUprEventFlag
+	ByteSliceGetter   func(uint64) ([]byte, error)
+	DecompressedValue []byte
 }
 
 type WrappedUprEventFlag uint64
 
 const (
-	WrappedUprCollectionDNE = 0x1
+	WrappedUprCollectionDNE        = 0x1
+	WrappedUprValueUseDecompressed = 0x2
 )
 
 func (w WrappedUprEventFlag) IsSet() bool {
@@ -628,6 +631,14 @@ func (w WrappedUprEventFlag) CollectionDNE() bool {
 
 func (w *WrappedUprEventFlag) SetCollectionDNE() {
 	*w |= WrappedUprCollectionDNE
+}
+
+func (w WrappedUprEventFlag) ShouldUseDecompressedValue() bool {
+	return w&WrappedUprValueUseDecompressed > 0
+}
+
+func (w *WrappedUprEventFlag) SetShouldUseDecompressedValue() {
+	*w |= WrappedUprValueUseDecompressed
 }
 
 type TargetCollectionInfo struct {
@@ -646,16 +657,17 @@ type TargetCollectionInfo struct {
 }
 
 type WrappedMCRequest struct {
-	Seqno                 uint64
-	Req                   *gomemcached.MCRequest
-	Start_time            time.Time
-	UniqueKey             string
-	SrcColNamespace       *CollectionNamespace
-	SrcColNamespaceMtx    sync.RWMutex
-	ColInfo               *TargetCollectionInfo
-	ColInfoMtx            sync.RWMutex
-	SlicesToBeReleased    [][]byte
-	SlicesToBeReleasedMtx sync.Mutex
+	Seqno                      uint64
+	Req                        *gomemcached.MCRequest
+	Start_time                 time.Time
+	UniqueKey                  string
+	SrcColNamespace            *CollectionNamespace
+	SrcColNamespaceMtx         sync.RWMutex
+	ColInfo                    *TargetCollectionInfo
+	ColInfoMtx                 sync.RWMutex
+	SlicesToBeReleasedByXmem   [][]byte
+	SlicesToBeReleasedByRouter [][]byte
+	SlicesToBeReleasedMtx      sync.Mutex
 
 	// If a single source mutation is translated to multiple target requests, the additional ones are listed here
 	SiblingReqs    []*WrappedMCRequest
@@ -1448,14 +1460,9 @@ type XattrIterator struct {
 }
 
 func NewXattrIterator(body []byte) (*XattrIterator, error) {
-	if len(body) < 4 {
-		return nil, fmt.Errorf("body is too short to contain valid xattrs")
-	}
-	xattrSize := binary.BigEndian.Uint32(body[0:4])
-	// Couchbase doc size is max of 20MB. Xattribute count against this limit.
-	// So if total xattr size is greater than this limit, then something is wrong
-	if xattrSize > MaxDocSizeByte {
-		return nil, fmt.Errorf("xattrs size %v exceeds max doc size", xattrSize)
+	xattrSize, err := GetXattrSize(body)
+	if err != nil {
+		return nil, err
 	}
 	return &XattrIterator{
 		body:   body,

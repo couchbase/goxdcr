@@ -821,7 +821,7 @@ func TestRouterRaceyBrokenMap(t *testing.T) {
 
 	collectionsRouter.routingUpdater = newRoutingUpdater
 	collectionsRouter.ignoreDataFunc = ignoreFunc
-	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent.UprEvent)
+	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent)
 	assert.Nil(lastCalledBackfillMap)
 
 	collectionsRouter.recordUnroutableRequest(wrappedMCR)
@@ -831,7 +831,7 @@ func TestRouterRaceyBrokenMap(t *testing.T) {
 	assert.Equal(1, len(collectionsRouter.brokenMapping))
 
 	time.Sleep(1 * time.Second)
-	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent.UprEvent)
+	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent)
 	assert.Equal(1, ignoreCnt)
 	assert.Nil(collectionsRouter.brokenMapDblChkTicker)
 	assert.NotNil(lastCalledBackfillMap)
@@ -904,7 +904,7 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 
 	collectionsRouter.routingUpdater = newRoutingUpdater
 	collectionsRouter.ignoreDataFunc = ignoreFunc
-	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent.UprEvent)
+	collectionsRouter.RouteReqToLatestTargetManifest(wrappedMCR, wrappedEvent)
 	assert.Nil(lastCalledBackfillMap)
 
 	collectionsRouter.recordUnroutableRequest(wrappedMCR)

@@ -1306,10 +1306,10 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 					xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 				} else {
 					req.SlicesToBeReleasedMtx.Lock()
-					if req.SlicesToBeReleased == nil {
-						req.SlicesToBeReleased = make([][]byte, 0, 1)
+					if req.SlicesToBeReleasedByXmem == nil {
+						req.SlicesToBeReleasedByXmem = make([][]byte, 0, 1)
 					}
-					req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
+					req.SlicesToBeReleasedByXmem = append(req.SlicesToBeReleasedByXmem, body)
 					req.SlicesToBeReleasedMtx.Unlock()
 				}
 				body = snappy.Encode(body, mc_req.Body)
@@ -2203,10 +2203,10 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 	} else {
 		wrappedReq.SlicesToBeReleasedMtx.Lock()
-		if wrappedReq.SlicesToBeReleased == nil {
-			wrappedReq.SlicesToBeReleased = make([][]byte, 0, 2)
+		if wrappedReq.SlicesToBeReleasedByXmem == nil {
+			wrappedReq.SlicesToBeReleasedByXmem = make([][]byte, 0, 2)
 		}
-		wrappedReq.SlicesToBeReleased = append(wrappedReq.SlicesToBeReleased, newbody)
+		wrappedReq.SlicesToBeReleasedByXmem = append(wrappedReq.SlicesToBeReleasedByXmem, newbody)
 		wrappedReq.SlicesToBeReleasedMtx.Unlock()
 	}
 
@@ -2267,10 +2267,10 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 			req.SlicesToBeReleasedMtx.Lock()
 			// For target we need up to 3 byte slices, 1 to decompress, 1 for body with new XATTR, 1 to compress
 			// For merge back to source, we need up to 4 byte slices, 1 to decompress, 2 to format pcas and mv, 1 for new body and XATTR
-			if req.SlicesToBeReleased == nil {
-				req.SlicesToBeReleased = make([][]byte, 0, 4)
+			if req.SlicesToBeReleasedByXmem == nil {
+				req.SlicesToBeReleasedByXmem = make([][]byte, 0, 4)
 			}
-			req.SlicesToBeReleased = append(req.SlicesToBeReleased, body)
+			req.SlicesToBeReleasedByXmem = append(req.SlicesToBeReleasedByXmem, body)
 			req.SlicesToBeReleasedMtx.Unlock()
 		}
 		body, err = snappy.Decode(body, req.Req.Body)
@@ -3615,11 +3615,11 @@ func (xmem *XmemNozzle) RecycleDataObj(incomingReq interface{}) {
 
 func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
 	req.SlicesToBeReleasedMtx.Lock()
-	if req.SlicesToBeReleased != nil {
-		for _, aSlice := range req.SlicesToBeReleased {
+	if req.SlicesToBeReleasedByXmem != nil {
+		for _, aSlice := range req.SlicesToBeReleasedByXmem {
 			xmem.dataPool.PutByteSlice(aSlice)
 		}
-		req.SlicesToBeReleased = nil
+		req.SlicesToBeReleasedByXmem = nil
 	}
 	req.SlicesToBeReleasedMtx.Unlock()
 	if xmem.upstreamObjRecycler != nil {

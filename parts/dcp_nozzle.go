@@ -384,12 +384,12 @@ func NewDcpNozzle(id string,
 		utils:                    utilsIn,
 		vbHandshakeMap:           make(map[uint16]*dcpStreamReqHelper),
 		dcpPrioritySetting:       mcc.PriorityDisabled,
-		wrappedUprPool:           utilities.NewWrappedUprPool(),
 		collectionNamespacePool:  utilities.NewCollectionNamespacePool(),
 		specificManifestGetter:   specificManifestGetter,
 		endSeqnoForDcp:           make(map[uint16]*base.SeqnoWithLock),
 		getHighSeqnoOneAtATime:   make(chan bool, 1),
 		vbHighSeqnoMap:           make(map[uint16]*base.SeqnoWithLock),
+		wrappedUprPool:           utilities.NewWrappedUprPool(base.NewDataPool()),
 	}
 
 	// Allow one caller the ability to execute

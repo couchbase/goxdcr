@@ -121,23 +121,22 @@ func (f *FilterUtilsImpl) ProcessUprEventForFiltering(uprEvent *memcached.UprEve
 }
 
 // check whether transaction xattrs exist in uprEvent
-func (f *FilterUtilsImpl) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64) {
+func (f *FilterUtilsImpl) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool,
+	slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error,
+	additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte) {
 	// by default body is nil and endBodyPos is -1
 	endBodyPos = -1
 
+	uncompressedUprValue = uprEvent.Value
 	if uprEvent.DataType&memcached.SnappyDataType > 0 {
 		body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, needToFilterBody)
 		if err != nil {
 			return
 		}
+		uncompressedUprValue = body
 	}
 
-	if body != nil {
-		hasTxnXattrs, err = f.hasTransactionXattrs(body)
-	} else {
-		// if body is nil, decompression was not needed/performed. simply use uprEvent.Value
-		hasTxnXattrs, err = f.hasTransactionXattrs(uprEvent.Value)
-	}
+	hasTxnXattrs, err = f.hasTransactionXattrs(uncompressedUprValue)
 
 	if body != nil && !needToFilterBody {
 		// if needToFilterBody is false, body does not contain extra bytes for key and cannot be shared with advanced filtering
@@ -145,7 +144,6 @@ func (f *FilterUtilsImpl) CheckForTransactionXattrsInUprEvent(uprEvent *memcache
 		body = nil
 		endBodyPos = -1
 	}
-
 	return
 
 }

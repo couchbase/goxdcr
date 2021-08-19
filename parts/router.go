@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/golang/snappy"
 	"math"
 	"reflect"
 	"strings"
@@ -469,7 +470,7 @@ func (c *CollectionsRouter) UpdateBrokenMappingsPair(brokenMappingsRO *metadata.
 }
 
 // No-Concurrent call
-func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest, eventForMigration *mcc.UprEvent) (colIds []uint32, manifestId uint64, backfillPersistHadErr bool, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, err error) {
+func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.WrappedMCRequest, eventForMigration *base.WrappedUprEvent) (colIds []uint32, manifestId uint64, backfillPersistHadErr bool, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, err error) {
 	if !c.IsRunning() {
 		err = PartStoppedError
 		return
@@ -628,7 +629,7 @@ func (c *CollectionsRouter) implicitMap(namespace *base.CollectionNamespace, lat
 	return manifestId, colId, err
 }
 
-func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, latestTargetManifest *metadata.CollectionsManifest, eventForMigration *mcc.UprEvent) (manifestId uint64, colIds []uint32, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, err error) {
+func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, latestTargetManifest *metadata.CollectionsManifest, eventForMigration *base.WrappedUprEvent) (manifestId uint64, colIds []uint32, unmappedNamespaces metadata.CollectionNamespaceMapping, migrationColIdNsMap map[uint32]*base.CollectionNamespace, err error) {
 	srcNamespace := wrappedMCReq.GetSourceCollectionNamespace()
 	manifestId = latestTargetManifest.Uid()
 	var matchedNamespaces metadata.CollectionNamespaceMapping
@@ -1226,8 +1227,8 @@ func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMc
 	}
 }
 
-func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *base.WrappedMCRequest) (metadata.CollectionNamespaceMapping, base.ErrorMap, map[string]*base.WrappedMCRequest) {
-	if uprEvent == nil {
+func (c *CollectionsRouter) migrationExplicitMap(wrappedUprEvent *base.WrappedUprEvent, mcReq *base.WrappedMCRequest) (metadata.CollectionNamespaceMapping, base.ErrorMap, map[string]*base.WrappedMCRequest) {
+	if wrappedUprEvent == nil || wrappedUprEvent.UprEvent == nil {
 		errMap := make(base.ErrorMap)
 		errMap["migrationExplicitMap"] = base.ErrorInvalidInput
 		return nil, errMap, nil
@@ -1235,7 +1236,7 @@ func (c *CollectionsRouter) migrationExplicitMap(uprEvent *mcc.UprEvent, mcReq *
 	// It is possible that this needs to record unroutable request using mcReq only
 	c.mappingMtx.RLock()
 	defer c.mappingMtx.RUnlock()
-	return c.explicitMappings.GetTargetUsingMigrationFilter(uprEvent, mcReq, c.logger)
+	return c.explicitMappings.GetTargetUsingMigrationFilter(wrappedUprEvent, mcReq, c.logger)
 }
 
 func (c *CollectionsRouter) checkAndDisableFirstMutationKicker() {
@@ -1449,7 +1450,31 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 	req.Opaque = 0
 	req.VBucket = event.VBucket
 	req.Key = event.Key
-	req.Body = event.Value
+	if wrappedEvent.Flags.ShouldUseDecompressedValue() {
+		// The decompresedValue will get recycled before this mcRequest is passed down to Xmem
+		// Copy the data to another recycled slice
+		recycledSlice, err := router.dataPool.GetByteSlice(uint64(len(wrappedEvent.DecompressedValue)))
+		if err != nil {
+			return nil, err
+		}
+		wrapped_req.SlicesToBeReleasedMtx.Lock()
+		if wrapped_req.SlicesToBeReleasedByRouter == nil {
+			wrapped_req.SlicesToBeReleasedByRouter = make([][]byte, 0, 1)
+		}
+		wrapped_req.SlicesToBeReleasedByRouter = append(wrapped_req.SlicesToBeReleasedByRouter, recycledSlice)
+		wrapped_req.SlicesToBeReleasedMtx.Unlock()
+		if wrappedEvent.UprEvent.IsSnappyDataType() {
+			// snappy.Encode performs trim on recycledSlice when it returns
+			recycledSlice = snappy.Encode(recycledSlice, wrappedEvent.DecompressedValue)
+		} else {
+			copy(recycledSlice, wrappedEvent.DecompressedValue)
+			// Recycled slice may have extra garbage at the end. Trim it manually
+			recycledSlice = recycledSlice[0:len(wrappedEvent.DecompressedValue)]
+		}
+		req.Body = recycledSlice
+	} else {
+		req.Body = event.Value
+	}
 	//opCode
 	req.Opcode = event.Opcode
 	req.DataType = event.DataType
@@ -1590,35 +1615,30 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return result, nil
 	}
 
-	// filter data if filter expession has been defined
-	if router.filter != nil {
-		needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
-		if failedDpCnt > 0 {
-			router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
+	needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(wrappedUpr)
+	if failedDpCnt > 0 {
+		router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
+	}
+	if router.Logger().GetLogLevel() >= log.LogLevelDebug && errDesc != "" {
+		router.Logger().Debugf("Matcher doc %v%v%v matched: %v with error: %v and additional info: %v",
+			base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, needToReplicate, err, errDesc)
+	}
+	if !needToReplicate || err != nil {
+		if err != nil {
+			// Let pipeline supervisor do the logging
+			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
+		} else {
+			// if data does not need to be replicated, drop it. return empty result
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
 		}
-		if router.Logger().GetLogLevel() >= log.LogLevelDebug && errDesc != "" {
-			router.Logger().Debugf("Matcher doc %v%v%v matched: %v with error: %v and additional info: %v",
-				base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, needToReplicate, err, errDesc)
-		}
-		if !needToReplicate || err != nil {
-			if err != nil {
-				// Let pipeline supervisor do the logging
-				router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
-			} else {
-				// if data does not need to be replicated, drop it. return empty result
-				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
-			}
-			// Let supervisor set the err instead of the router, to minimize pipeline interruption
-			return result, nil
-		}
+		// Let supervisor set the err instead of the router, to minimize pipeline interruption
+		return result, nil
 	}
 
 	var raiseDataNotReplicated bool
-	if wrappedUpr.Flags.IsSet() {
+	if wrappedUpr.Flags.CollectionDNE() {
 		// Special flag handling here
-		if wrappedUpr.Flags.CollectionDNE() {
-			raiseDataNotReplicated = true
-		}
+		raiseDataNotReplicated = true
 	}
 
 	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
@@ -1672,11 +1692,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 		colIds = append(colIds, 0)
 	} else {
 		var backfillPersistHadErr bool
-		var uprEvent *mcc.UprEvent
-		if origUprEvent != nil && origUprEvent.UprEvent != nil {
-			uprEvent = origUprEvent.UprEvent
-		}
-		colIds, manifestId, backfillPersistHadErr, unmappedNamespaces, migrationColIdNamespaceMap, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest, uprEvent)
+		colIds, manifestId, backfillPersistHadErr, unmappedNamespaces, migrationColIdNamespaceMap, err = router.collectionsRouting[partId].RouteReqToLatestTargetManifest(mcRequest, origUprEvent)
 		// If backfillPersistHadErr is set, then it is:
 		// 1. Safe to re-raise routingUpdate, as each routingUpdate will try to persist again
 		// 2. NOT safe to ignore data - as ignoring data means throughSeqno will move forward
@@ -1988,6 +2004,15 @@ func (router *Router) recycleDataObj(obj interface{}) {
 				router.targetColInfoPool.Put(req.ColInfo)
 			}
 			req.ColInfoMtx.Unlock()
+
+			req.SlicesToBeReleasedMtx.Lock()
+			if len(req.SlicesToBeReleasedByRouter) > 0 {
+				for _, slice := range req.SlicesToBeReleasedByRouter {
+					router.dataPool.PutByteSlice(slice)
+				}
+			}
+			req.SlicesToBeReleasedByRouter = nil
+			req.SlicesToBeReleasedMtx.Unlock()
 			router.mcRequestPool.Put(obj.(*base.WrappedMCRequest))
 		}
 	default:

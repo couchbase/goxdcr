@@ -21,13 +21,16 @@ type Filter interface {
 	// 2. err code
 	// 3. If err is not nil, additional description
 	// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
-	FilterUprEvent(uprEvent *memcached.UprEvent) (bool, error, string, int64)
+	// Note - may modify the wrappedUprEvent as it passes through the filter, if txnFilter is on
+	FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64)
 
 	SetShouldSkipUncommittedTxn(val bool)
 }
 
 type FilterUtils interface {
-	CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64)
+	// uncompressedUprValue is either the original uprValue OR if snappy compressed, the uncompressed value
+	// The data slice will be recycled automatically later
+	CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte)
 	ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, dp base.DataPool, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64)
 	NewDataPool() base.DataPool
 }

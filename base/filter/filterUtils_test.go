@@ -84,23 +84,23 @@ func TestStripXattrAndCompression(t *testing.T) {
 	uprEvent, err := base.RetrieveUprJsonAndConvert(unCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	assert.Equal(docKey, string(uprEvent.Key))
-	assert.Equal(checkMap, uprEvent.Value)
+	assert.Equal(docKey, string(uprEvent.UprEvent.Key))
+	assert.Equal(checkMap, uprEvent.UprEvent.Value)
 	slices := MakeSlicesBuf()
-	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 
 	// Use a fake datapool and test if the utilities can trim it correctly
-	trimSliceCheck, _, _, _ := testUtils.ProcessUprEventForFiltering(uprEvent, nil, 0, fp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	trimSliceCheck, _, _, _ := testUtils.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, fp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Equal("}", string(trimSliceCheck[len(trimSliceCheck)-1]))
 
 	uprEventCompressed, err := base.RetrieveUprJsonAndConvert(compressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	assert.Equal(docKey, string(uprEventCompressed.Key))
-	assert.NotEqual(checkMap, uprEventCompressed.Value)
-	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEventCompressed, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
-	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventCompressed, nil, 0, fp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	assert.Equal(docKey, string(uprEventCompressed.UprEvent.Key))
+	assert.NotEqual(checkMap, uprEventCompressed.UprEvent.Value)
+	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEventCompressed.UprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventCompressed.UprEvent, nil, 0, fp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Equal("}", string(trimSliceCheck[len(trimSliceCheck)-1]))
 
 	assert.Nil(err)
@@ -108,34 +108,34 @@ func TestStripXattrAndCompression(t *testing.T) {
 	uprEventXattr, err := base.RetrieveUprJsonAndConvert(xAttrUncompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEventXattr)
-	assert.Equal(docKey, string(uprEventXattr.Key))
-	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattr, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	assert.Equal(docKey, string(uprEventXattr.UprEvent.Key))
+	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattr.UprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 
-	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattr, nil, 0, fp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattr.UprEvent, nil, 0, fp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Equal("}", string(trimSliceCheck[len(trimSliceCheck)-1]))
 
 	uprEventXattrCompressed, err := base.RetrieveUprJsonAndConvert(xAttrCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEventXattrCompressed)
-	assert.Equal(docKey, string(uprEventXattrCompressed.Key))
-	assert.NotEqual(checkMap, uprEventXattrCompressed.Value)
-	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattrCompressed, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	assert.Equal(docKey, string(uprEventXattrCompressed.UprEvent.Key))
+	assert.NotEqual(checkMap, uprEventXattrCompressed.UprEvent.Value)
+	_, err, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattrCompressed.UprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 
-	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattrCompressed, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventXattrCompressed.UprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Equal("}", string(trimSliceCheck[len(trimSliceCheck)-1]))
 
 	uprEventStripXattr, err := base.RetrieveUprJsonAndConvert(xAttrUncompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEventStripXattr)
 	// Pretend it's not a JSON doc
-	uprEventStripXattr.DataType = mcc.XattrDataType
-	serializedXattr, err, _, _ := testUtils.ProcessUprEventForFiltering(uprEventStripXattr, nil, 0, dp, base.FilterFlagSkipKey, &slices)
+	uprEventStripXattr.UprEvent.DataType = mcc.XattrDataType
+	serializedXattr, err, _, _ := testUtils.ProcessUprEventForFiltering(uprEventStripXattr.UprEvent, nil, 0, dp, base.FilterFlagSkipKey, &slices)
 	assert.Nil(err)
 	serializedXattrStr := `{"[$%XDCRInternalMeta*%$]":{"TestXattr":30,"AnotherXattr":"TestValueString"}}`
 	assert.Equal(serializedXattrStr, string(bytes.Trim(serializedXattr, "\x00")))
-	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventStripXattr, nil, 0, fp, base.FilterFlagSkipKey, &slices)
+	trimSliceCheck, _, _, _ = testUtils.ProcessUprEventForFiltering(uprEventStripXattr.UprEvent, nil, 0, fp, base.FilterFlagSkipKey, &slices)
 	assert.Equal(serializedXattrStr, string(trimSliceCheck))
 
 	fmt.Println("============== Test case end: TestStripXattrAndCompression =================")
@@ -151,8 +151,8 @@ func TestProcessUprEventWithGarbage(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEventStripXattr)
 	// Pretend it's not a JSON doc
-	uprEventStripXattr.DataType = mcc.XattrDataType
-	serializedXattr, err, _, _ := testUtils.ProcessUprEventForFiltering(uprEventStripXattr, nil, 0, fp, base.FilterFlagSkipKey, &slices)
+	uprEventStripXattr.UprEvent.DataType = mcc.XattrDataType
+	serializedXattr, err, _, _ := testUtils.ProcessUprEventForFiltering(uprEventStripXattr.UprEvent, nil, 0, fp, base.FilterFlagSkipKey, &slices)
 	assert.Nil(err)
 	serializedXattrStr := `{"[$%XDCRInternalMeta*%$]":{"TestXattr":30,"AnotherXattr":"TestValueString"}}`
 	assert.Equal(serializedXattrStr, string(bytes.Trim(serializedXattr, "\x00")))
@@ -169,16 +169,16 @@ func TestProcessBinaryFile(t *testing.T) {
 	uprEvent, err := base.RetrieveUprJsonAndConvert(binaryFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	assert.False(uprEvent.DataType&mcc.JSONDataType > 0)
+	assert.False(uprEvent.UprEvent.DataType&mcc.JSONDataType > 0)
 
 	checkMap := map[string]interface{}{
-		base.ReservedWordsMap[base.ExternalKeyKey]: string(uprEvent.Key),
+		base.ReservedWordsMap[base.ExternalKeyKey]: string(uprEvent.UprEvent.Key),
 	}
 	checkSlice, err := json.Marshal(checkMap)
 	assert.Nil(err)
 
 	slices := MakeSlicesBuf()
-	retSlice, err, _, _ := testUtils.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
+	retSlice, err, _, _ := testUtils.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, dp, base.FilterFlagType(0) /*skipXattr*/, &slices)
 	assert.Nil(err)
 
 	assert.Equal(checkSlice, bytes.Trim(retSlice, "\x00"))
@@ -215,7 +215,7 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 		Password: "wewewe",
 	})
 
-	bucket, err := cluster.OpenBucket("b1", "")
+	bucket, err := cluster.OpenBucket("B1", "")
 	if err != nil {
 		return
 	}
@@ -242,6 +242,19 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("NilXattr", nil, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
 	if err != nil {
 		fmt.Printf("Error with Insert3: %v\n", err)
+		return
+	}
+
+	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
+	dummyStagedData := make(map[string]interface{})
+	dummyStagedData["name"] = "neil"
+	txDummyVal := make(map[string]interface{})
+	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
+	txDummyVal["atr_id"] = "atr-690-#18"
+	txDummyVal["staged"] = dummyStagedData
+	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+	if err != nil {
+		fmt.Printf("Error with Insert4: %v\n", err)
 		return
 	}
 

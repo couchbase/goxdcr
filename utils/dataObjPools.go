@@ -21,16 +21,18 @@ type WrappedUprPoolIface interface {
 }
 
 type WrappedUprPool struct {
-	pool sync.Pool
+	pool      sync.Pool
+	slicePool base.DataPool
 }
 
-func NewWrappedUprPool() WrappedUprPoolIface {
+func NewWrappedUprPool(slicePool base.DataPool) WrappedUprPoolIface {
 	newPool := &WrappedUprPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				return &base.WrappedUprEvent{}
 			},
 		},
+		slicePool: slicePool,
 	}
 	return newPool
 }
@@ -40,10 +42,15 @@ func (w *WrappedUprPool) Get() *base.WrappedUprEvent {
 	// Ensure no residue
 	wrappedUprEvent.UprEvent = nil
 	wrappedUprEvent.ColNamespace = nil
+	wrappedUprEvent.Flags = 0
+	wrappedUprEvent.ByteSliceGetter = w.slicePool.GetByteSlice
 	return wrappedUprEvent
 }
 
 func (w *WrappedUprPool) Put(uprEvent *base.WrappedUprEvent) {
+	if uprEvent != nil && uprEvent.Flags.ShouldUseDecompressedValue() {
+		w.slicePool.PutByteSlice(uprEvent.DecompressedValue)
+	}
 	w.pool.Put(uprEvent)
 }
 

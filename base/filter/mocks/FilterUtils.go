@@ -16,7 +16,7 @@ type FilterUtils struct {
 }
 
 // CheckForTransactionXattrsInUprEvent provides a mock function with given fields: uprEvent, dp, slicesToBeReleased, needToFilterBody
-func (_m *FilterUtils) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, []byte, int, error, string, int64) {
+func (_m *FilterUtils) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, []byte, int, error, string, int64, []byte) {
 	ret := _m.Called(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 
 	var r0 bool
@@ -63,7 +63,16 @@ func (_m *FilterUtils) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.U
 		r5 = ret.Get(5).(int64)
 	}
 
-	return r0, r1, r2, r3, r4, r5
+	var r6 []byte
+	if rf, ok := ret.Get(6).(func(*memcached.UprEvent, base.DataPool, *[][]byte, bool) []byte); ok {
+		r6 = rf(uprEvent, dp, slicesToBeReleased, needToFilterBody)
+	} else {
+		if ret.Get(6) != nil {
+			r6 = ret.Get(6).([]byte)
+		}
+	}
+
+	return r0, r1, r2, r3, r4, r5, r6
 }
 
 // NewDataPool provides a mock function with given fields:

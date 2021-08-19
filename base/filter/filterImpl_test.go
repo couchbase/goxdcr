@@ -15,8 +15,10 @@ import (
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -58,7 +60,7 @@ func TestFilterBool(t *testing.T) {
 	fmt.Println("============== Test case end: TestFilterBool =================")
 }
 
-func RetrieveUprFile(fileName string) (*mcc.UprEvent, error) {
+func RetrieveUprFile(fileName string) (*base.WrappedUprEvent, error) {
 	data, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		return nil, err
@@ -70,7 +72,15 @@ func RetrieveUprFile(fileName string) (*mcc.UprEvent, error) {
 		return nil, err
 	}
 
-	return &uprEvent, nil
+	wrappedUpr := &base.WrappedUprEvent{
+		UprEvent:     &uprEvent,
+		ColNamespace: nil,
+		Flags:        0,
+		ByteSliceGetter: func(size uint64) ([]byte, error) {
+			return make([]byte, int(size)), nil
+		},
+	}
+	return wrappedUpr, nil
 }
 
 func TestFilterBool2(t *testing.T) {
@@ -86,7 +96,7 @@ func TestFilterBool2(t *testing.T) {
 	assert.NotNil(filter)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, 0 /*flags*/, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, dp, 0 /*flags*/, &slices)
 	assert.Nil(err)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
@@ -110,7 +120,7 @@ func TestFilterPerf(t *testing.T) {
 	assert.Equal(base.FilterFlagType(3), filter.flags)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, filter.flags, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, dp, filter.flags, &slices)
 	assert.Nil(err)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
@@ -134,7 +144,7 @@ func TestFilterPerfKeyOnly(t *testing.T) {
 	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, filter.flags, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, dp, filter.flags, &slices)
 	assert.Nil(err)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
@@ -158,7 +168,7 @@ func TestKeyPanic(t *testing.T) {
 	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
 
 	slices := make([][]byte, 0, 2)
-	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent, nil, 0, dp, filter.flags, &slices)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, dp, filter.flags, &slices)
 	assert.Nil(err)
 
 	matchResult, err := filter.matcher.Match(dataSlice)
@@ -260,7 +270,7 @@ func TestTxnClientRecordFiltering(t *testing.T) {
 	fmt.Println("============== Test case end: TestTxnClientRecordFiltering =================")
 }
 
-// test that txn attrs, when not mixed with non txn attrs, are filtered out
+// The document here seems to have one Xattr KV pair for transaction, and a weird but valid JSON body
 func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestTransXattrOnlyFilteringWithoutCompression =================")
 	assert := assert.New(t)
@@ -270,35 +280,40 @@ func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "", realUtil, true)
-	assert.Nil(err)
-	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
-	assert.False(result)
+	assert.False(uprEvent.UprEvent.IsSnappyDataType())
+	strippedData, err := base.StripXattrAndGetBody(uprEvent.UprEvent.Value)
 	assert.Nil(err)
 
-	fmt.Println("============== Test case end: TestTransXattrOnlyFilteringWithoutCompression =================")
-}
-
-// test that txn attrs, when not mixed with non txn attrs, are filtered out
-func TestTransXattrOnlyFilteringWithCompression(t *testing.T) {
-	fmt.Println("============== Test case start: TestTransXattrOnlyFilteringWithCompression =================")
-	assert := assert.New(t)
-
-	transXattrFile := "../../utils/testInternalData/uprTransXattrOnlyCompress.json"
-	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
-	assert.Nil(err)
-	assert.NotNil(uprEvent)
+	// Validate that the body is a valid json
+	type dummyStruct struct{}
+	testStruct := dummyStruct{}
+	assert.Nil(json.Unmarshal(strippedData, &testStruct))
 
 	// Make sure filter can detect the transaction xattribute
-	filter, err := NewFilter(filterId, "", realUtil, true)
+	legacyFilter, err := NewFilter(filterId, "", realUtil, true)
 	assert.Nil(err)
-	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.NotNil(legacyFilter)
+	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
 
-	fmt.Println("============== Test case end: TestTransXattrOnlyFilteringWithCompression =================")
+	// Without skip, make sure it replicates and that it can strip the xattribute
+	stripFilter, err := NewFilter(filterId, "", realUtil, false)
+	assert.Nil(err)
+	assert.NotNil(stripFilter)
+	result, err, _, _ = stripFilter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+
+	var dummySlice [][]byte
+	result, body, endPos, err, _, _ := stripFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	assert.True(result)
+	assert.NotNil(body)
+	assert.True(endPos <= len(body))
+	assert.Nil(err)
+	assert.True(reflect.DeepEqual(body, strippedData))
+
+	fmt.Println("============== Test case end: TestTransXattrOnlyFilteringWithoutCompression =================")
 }
 
 // test that txn attrs, when mixed with non txn attrs, are filtered out
@@ -311,14 +326,81 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "", realUtil, true)
+	assert.True(uprEvent.UprEvent.IsSnappyDataType())
 
+	// Before decompress, xattr should have some error
+	xattrIter, err := base.NewXattrIterator(uprEvent.UprEvent.Value)
+	assert.NotNil(err)
+	assert.Nil(xattrIter)
+
+	// Uncompress should have no problem
+	uncompressedUprEventVal, err := snappy.Decode(nil, uprEvent.UprEvent.Value)
 	assert.Nil(err)
-	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+
+	// After decompress, xattr iterator should have no error
+	xattrIter, err = base.NewXattrIterator(uncompressedUprEventVal)
+	assert.Nil(err)
+	assert.NotNil(xattrIter)
+
+	// Calculate total number of xattributes
+	var originalTotalXattrCnt int
+	var transactionXattrFound bool
+	for xattrIter.HasNext() {
+		originalTotalXattrCnt++
+		key, value, err := xattrIter.Next()
+		assert.Nil(err)
+		if string(key) == base.TransactionXattrKey {
+			transactionXattrFound = true
+			assert.NotNil(value)
+		}
+	}
+	assert.True(transactionXattrFound)
+
+	strippedData, err := base.StripXattrAndGetBody(uncompressedUprEventVal)
+	assert.Nil(err)
+
+	// Validate that the body is a valid json
+	type dummyStruct struct{}
+	testStruct := dummyStruct{}
+	assert.Nil(json.Unmarshal(strippedData, &testStruct))
+
+	legacyFilter, err := NewFilter(filterId, "", realUtil, true)
+	assert.Nil(err)
+	assert.NotNil(legacyFilter)
+	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
 
+	sdkFilter, err := NewFilter(filterId, "", realUtil, false)
+	assert.Nil(err)
+	assert.NotNil(sdkFilter)
+	result, err, _, _ = sdkFilter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+
+	var dummySlice [][]byte
+	result, body, endPos, err, _, _ := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	assert.True(result)
+	assert.NotNil(body)
+	assert.True(endPos <= len(body))
+	assert.Nil(err)
+
+	// The body returned is xattributes + body
+	bodyWoXattr, err := base.StripXattrAndGetBody(body)
+	assert.Nil(err)
+	assert.True(reflect.DeepEqual(bodyWoXattr, strippedData))
+
+	// Xattrs should not have SDK transaction Xattribute
+	xattrIter, err = base.NewXattrIterator(body)
+	assert.Nil(err)
+	var postStripXattrCnt int
+	for xattrIter.HasNext() {
+		postStripXattrCnt++
+		key, _, err := xattrIter.Next()
+		assert.NotEqual(key, base.TransactionXattrKey)
+		assert.Nil(err)
+	}
+	assert.Equal(postStripXattrCnt, originalTotalXattrCnt-1)
 	fmt.Println("============== Test case end: TestMixedXattrFilteringWithCompression =================")
 }
 
@@ -618,18 +700,27 @@ func TestReservedWords(t *testing.T) {
 	fmt.Println("============== Test case start: TestCompressionXattrKeyFiltering =================")
 }
 
+// Tests that the ATR record naming scheme is filtered out
 func TestTransactionMB36043(t *testing.T) {
 	assert := assert.New(t)
 
-	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, true)
+	legacyFilter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, true)
 	assert.Nil(err)
-	assert.NotNil(filter)
+	assert.NotNil(legacyFilter)
 
 	txnFile := "./testdata/transactionDoc.json"
 	txnUprEvent, err := base.RetrieveUprJsonAndConvert(txnFile)
 	assert.Nil(err)
 	assert.NotNil(txnUprEvent)
 
-	needToReplicate, _, _, _, _, _ := filter.filterTransactionRelatedUprEvent(txnUprEvent, nil)
+	needToReplicate, _, _, _, _, _ := legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	assert.False(needToReplicate)
+
+	// Even with a new, non-legacy filter, it should still prevent ATR related doc keys from being replicated
+	txFilter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, false)
+	assert.Nil(err)
+	assert.NotNil(txFilter)
+
+	needToReplicate, _, _, _, _, _ = legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
 	assert.False(needToReplicate)
 }

@@ -1280,7 +1280,7 @@ func GetLastBracketPos(slice []byte, size int) (valueSize int) {
 	return
 }
 
-func RetrieveUprJsonAndConvert(fileName string) (*mcc.UprEvent, error) {
+func RetrieveUprJsonAndConvert(fileName string) (*WrappedUprEvent, error) {
 	data, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		return nil, err
@@ -1292,7 +1292,16 @@ func RetrieveUprJsonAndConvert(fileName string) (*mcc.UprEvent, error) {
 		return nil, err
 	}
 
-	return &uprEvent, nil
+	wrappedUpr := &WrappedUprEvent{
+		UprEvent:     &uprEvent,
+		ColNamespace: nil,
+		Flags:        0,
+		ByteSliceGetter: func(size uint64) ([]byte, error) {
+			return make([]byte, int(size)), nil
+		},
+	}
+
+	return wrappedUpr, nil
 }
 
 func ReplaceKeyWordsForExpression(expression string) string {

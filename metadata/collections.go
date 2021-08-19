@@ -13,7 +13,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	mcc "github.com/couchbase/gomemcached/client"
 	base "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/log"
@@ -1455,7 +1454,7 @@ func (c *CollectionNamespaceMapping) Get(src *base.CollectionNamespace, compiled
 	return
 }
 
-func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(uprEvent *mcc.UprEvent, mcReq *base.WrappedMCRequest, logger *log.CommonLogger) (matchedNamespaces CollectionNamespaceMapping, errMap base.ErrorMap, errMCReqMap map[string]*base.WrappedMCRequest) {
+func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(wrappedUprEvent *base.WrappedUprEvent, mcReq *base.WrappedMCRequest, logger *log.CommonLogger) (matchedNamespaces CollectionNamespaceMapping, errMap base.ErrorMap, errMCReqMap map[string]*base.WrappedMCRequest) {
 	if c == nil {
 		errMap = make(base.ErrorMap)
 		errMap["GetTargetUsingMigrationFilter"] = base.ErrorInvalidInput
@@ -1467,18 +1466,18 @@ func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(uprEvent *mcc
 		if k.GetType() != SourceDefaultCollectionFilter {
 			continue
 		}
-		match, matchErr, errDesc, _ := k.filter.FilterUprEvent(uprEvent)
+		match, matchErr, errDesc, _ := k.filter.FilterUprEvent(wrappedUprEvent)
 		if matchErr != nil {
 			if logger != nil && logger.GetLogLevel() >= log.LogLevelDebug {
-				logger.Errorf("Document %v%v%v failed filtering with err: %v - %v", base.UdTagBegin, string(uprEvent.Key),
+				logger.Errorf("Document %v%v%v failed filtering with err: %v - %v", base.UdTagBegin, string(wrappedUprEvent.UprEvent.Key),
 					base.UdTagEnd, matchErr, errDesc)
 			}
 			if errMap == nil {
 				errMap = make(base.ErrorMap)
 				errMCReqMap = make(map[string]*base.WrappedMCRequest)
 			}
-			errMap[string(uprEvent.Key)] = matchErr
-			errMCReqMap[string(uprEvent.Key)] = mcReq
+			errMap[string(wrappedUprEvent.UprEvent.Key)] = matchErr
+			errMCReqMap[string(wrappedUprEvent.UprEvent.Key)] = mcReq
 		}
 
 		if match {

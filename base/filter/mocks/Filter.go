@@ -3,7 +3,8 @@
 package mocks
 
 import (
-	memcached "github.com/couchbase/gomemcached/client"
+	base "github.com/couchbase/goxdcr/base"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -12,34 +13,34 @@ type Filter struct {
 	mock.Mock
 }
 
-// FilterUprEvent provides a mock function with given fields: uprEvent
-func (_m *Filter) FilterUprEvent(uprEvent *memcached.UprEvent) (bool, error, string, int64) {
-	ret := _m.Called(uprEvent)
+// FilterUprEvent provides a mock function with given fields: wrappedUprEvent
+func (_m *Filter) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64) {
+	ret := _m.Called(wrappedUprEvent)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(*memcached.UprEvent) bool); ok {
-		r0 = rf(uprEvent)
+	if rf, ok := ret.Get(0).(func(*base.WrappedUprEvent) bool); ok {
+		r0 = rf(wrappedUprEvent)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(*memcached.UprEvent) error); ok {
-		r1 = rf(uprEvent)
+	if rf, ok := ret.Get(1).(func(*base.WrappedUprEvent) error); ok {
+		r1 = rf(wrappedUprEvent)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	var r2 string
-	if rf, ok := ret.Get(2).(func(*memcached.UprEvent) string); ok {
-		r2 = rf(uprEvent)
+	if rf, ok := ret.Get(2).(func(*base.WrappedUprEvent) string); ok {
+		r2 = rf(wrappedUprEvent)
 	} else {
 		r2 = ret.Get(2).(string)
 	}
 
 	var r3 int64
-	if rf, ok := ret.Get(3).(func(*memcached.UprEvent) int64); ok {
-		r3 = rf(uprEvent)
+	if rf, ok := ret.Get(3).(func(*base.WrappedUprEvent) int64); ok {
+		r3 = rf(wrappedUprEvent)
 	} else {
 		r3 = ret.Get(3).(int64)
 	}
