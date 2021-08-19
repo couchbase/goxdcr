@@ -655,7 +655,7 @@ type WrappedMCRequest struct {
 	ColInfo               *TargetCollectionInfo
 	ColInfoMtx            sync.RWMutex
 	SlicesToBeReleased    [][]byte
-	SlicesToBeReleasedMtx sync.RWMutex
+	SlicesToBeReleasedMtx sync.Mutex
 
 	// If a single source mutation is translated to multiple target requests, the additional ones are listed here
 	SiblingReqs    []*WrappedMCRequest
