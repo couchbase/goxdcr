@@ -45,6 +45,7 @@ var CHECKPOINT_INTERVAL = "checkpoint_interval"
 var ckptRecordMismatch error = errors.New("Checkpoint Records internal version mismatch")
 var targetVbuuidChangedError error = errors.New("target vbuuid has changed")
 var ckptMgrStopped = errors.New("Ckptmgr has stopped")
+var ckptSplitInternalSpecIds = fmt.Errorf("There is split decision on internalSpecIDs")
 
 type CheckpointMgrSvc interface {
 	common.PipelineService
@@ -2389,7 +2390,6 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	}
 
 	// If specIds are different, then something is mid flight
-	// TODO MB-47651 - should we try to do a concensus and reject minority?
 	brokenMapSpecInternalId, err := ckmgr.checkSpecInternalID(combinedBrokenMappingSpecInternalId)
 	if err != nil {
 		return err
@@ -2444,15 +2444,39 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 
 func (ckmgr *CheckpointManager) checkSpecInternalID(combinedBrokenMappingSpecInternalId map[string]string) (string, error) {
 	var brokenMapInternalId string
+	internalIdCntMap := make(map[string]int)
+
 	for _, checkId := range combinedBrokenMappingSpecInternalId {
-		if brokenMapInternalId == "" {
-			brokenMapInternalId = checkId
-		} else {
-			if checkId != brokenMapInternalId {
-				return brokenMapInternalId, fmt.Errorf("inconsistent brokenMap specInternalId returned: %v", combinedBrokenMappingSpecInternalId)
+		internalIdCntMap[checkId]++
+	}
+
+	if len(internalIdCntMap) == 0 {
+		return "", nil
+	} else if len(internalIdCntMap) == 1 {
+		// No disagreements
+		for k, _ := range internalIdCntMap {
+			brokenMapInternalId = k
+		}
+	} else if len(internalIdCntMap) > 1 {
+		// There are disagreements
+		countOfCountMap := make(map[int]int)
+		var maxCnt = -1
+		var majorityId string
+		// First check if there is no consensus
+		for id, cnt := range internalIdCntMap {
+			countOfCountMap[cnt]++
+			if cnt > maxCnt {
+				majorityId = id
+				maxCnt = cnt
 			}
 		}
+		if len(countOfCountMap) == 1 {
+			// No majority
+			return "", ckptSplitInternalSpecIds
+		}
+		brokenMapInternalId = majorityId
 	}
+
 	if brokenMapInternalId != "" {
 		// Check to make sure brokenMap is valid
 		genSpec := ckmgr.pipeline.Specification()

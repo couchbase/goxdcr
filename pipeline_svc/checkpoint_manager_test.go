@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/common/mocks"
 	"github.com/couchbase/goxdcr/metadata"
+	mocks2 "github.com/couchbase/goxdcr/metadata/mocks"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"sync/atomic"
@@ -142,4 +144,43 @@ func TestCheckpointSyncHelper(t *testing.T) {
 	assert.True(atomic.LoadUint32(&waitIsFinished) == uint32(1))
 
 	assert.Len(helper.ongoingOps, 0)
+}
+
+func TestMergeNoConsensusCkpt(t *testing.T) {
+	fmt.Println("============== Test case start: TestMergeNoConsensusCkpt =================")
+	defer fmt.Println("============== Test case end: TestMergeNoConsensusCkpt =================")
+	assert := assert.New(t)
+
+	ckptMgr := &CheckpointManager{}
+
+	result, err := ckptMgr.checkSpecInternalID(nil)
+	assert.Nil(err)
+	assert.Equal("", result)
+
+	// Test majority
+	majorityInternalId := "testInternalId"
+	genSpec := &mocks2.GenericSpecification{}
+	majoritySpec, err := metadata.NewReplicationSpecification("", "", "", "", "")
+	majoritySpec.InternalId = majorityInternalId
+	genSpec.On("GetReplicationSpec").Return(majoritySpec)
+
+	mockPipeline := &mocks.Pipeline{}
+	mockPipeline.On("Specification").Return(genSpec)
+	ckptMgr.pipeline = mockPipeline
+
+	majorityMap := make(map[string]string)
+	majorityMap["node1"] = majorityInternalId
+	majorityMap["node2"] = majorityInternalId
+	majorityMap["node3"] = "spec232tungwoin"
+	result, err = ckptMgr.checkSpecInternalID(majorityMap)
+	assert.Nil(err)
+	assert.Equal(majorityInternalId, result)
+
+	// Test no concensus
+	noConsensusMap := make(map[string]string)
+	noConsensusMap["node1"] = "abc"
+	noConsensusMap["node2"] = "def"
+	noConsensusMap["node3"] = "efg"
+	_, err = ckptMgr.checkSpecInternalID(noConsensusMap)
+	assert.NotNil(err)
 }
