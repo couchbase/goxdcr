@@ -3194,8 +3194,11 @@ func (service *RemoteClusterService) getOrStartNewAgent(ref *metadata.RemoteClus
 
 	service.agentMutex.RLock()
 	if agent, ok := service.agentMap[ref.Id()]; ok {
-		defer service.agentMutex.RUnlock()
+		agentRef := agent.GetReferenceClone()
+		service.agentMutex.RUnlock()
 		if updateFromRef {
+			// Before updating agent's ref, update agent maps if needed so all nodes have up to data maps.
+			service.checkAndUpdateAgentMaps(agentRef, ref, agent)
 			err = agent.UpdateReferenceFrom(ref, userInitiated)
 		}
 		return agent, true, err
