@@ -1807,7 +1807,7 @@ function getBrokenMapEntryId {
 		local oneEvent
 		local eventType
 		local returnEventId
-		oneEvent=$(echo "$errList" | jq '.[0]')
+		oneEvent=$(echo "$errList" | jq ".[$i]")
 		eventType=$(echo "$oneEvent" | jq '.EventType')
 		if ((!eventType == $BROKENEVENT_TYPE)); then
 			continue

@@ -95,6 +95,7 @@ func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *in
 type PipelineEventsManager interface {
 	GetCurrentEvents() *PipelineEventList
 	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap)
+	ClearNonBrokenMapEvents()
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
 	ContainsEvent(eventId int) bool
 	DismissEvent(eventId int) error
@@ -177,6 +178,28 @@ func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc str
 	defer p.events.Mutex.Unlock()
 	p.events.TimeInfos = append(p.events.TimeInfos, time.Now().UnixNano())
 	p.events.EventInfos = append(p.events.EventInfos, newEvent)
+}
+
+// When pipeline is paused, brokenMap events need to stay once pipeline resumes because no further mutations will
+// go through the router and re-trigger the brokenmap events... but other events like warnings, errors, persistent
+// messages, should be reset and then they can be re-triggered as needed
+func (p *PipelineEventsMgr) ClearNonBrokenMapEvents() {
+	p.events.Mutex.Lock()
+	defer p.events.Mutex.Unlock()
+
+	var replacementList []*base.EventInfo
+	var replacementTime []int64
+
+	for i, event := range p.events.EventInfos {
+		if event.EventType != base.BrokenMappingInfoType {
+			continue
+		}
+		replacementList = append(replacementList, event)
+		replacementTime = append(replacementTime, p.events.TimeInfos[i])
+	}
+
+	p.events.EventInfos = replacementList
+	p.events.TimeInfos = replacementTime
 }
 
 func (p *PipelineEventsMgr) LoadLatestBrokenMap(readOnlyBrokenMap metadata.CollectionNamespaceMapping) {
