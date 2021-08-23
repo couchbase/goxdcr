@@ -101,15 +101,6 @@ func setupBoilerPlate() (*log.CommonLogger,
 	// needed for replicationStatus
 	var testRepairer *PipelineUpdater
 
-	// setting up replicationStatus and replicationSpecService
-	//	var repStatusMtx sync.RWMutex
-	//	testReplicationStatus := &replicationStatus.ReplicationStatus{
-	//		Lock:             &repStatusMtx,
-	//		SpecId:           testTopic,
-	//		Logger:           testLogger,
-	//		Pipeline_updater: testRepairer,
-	//		Obj_pool:         base.NewMCRequestPool(testTopic, testLogger)}
-
 	testReplicationSettings := metadata.DefaultReplicationSettings()
 	settingsMap := make(map[string]interface{})
 	settingsMap[metadata.FailureRestartIntervalKey] = 10
@@ -122,13 +113,6 @@ func setupBoilerPlate() (*log.CommonLogger,
 
 	testRepairer = newPipelineUpdater(testTopic, 0 /*retry_interval*/, nil, /*cur_err*/
 		testReplicationStatus, testLogger, pipelineMgr)
-
-	/**
-	 * This should prevent SetDerivedObj -> RuntimeStatus -> rs.Spec() -> rs.Spec_getter going through
-	 * a double mock causing a double lock
-	 */
-	//	specGetterFxLiteral := func(specId string) (*metadata.ReplicationSpecification, error) { return testReplicationSpec, nil }
-	//	testReplicationStatus.Spec_getter = specGetterFxLiteral
 
 	testRemoteClusterRef := &metadata.RemoteClusterReference{}
 
@@ -187,6 +171,8 @@ func setupDetailedMocking(testLogger *log.CommonLogger, pipelineMock *common.Pip
 	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(testRemoteClusterRef, nil)
 	remoteClusterMock.On("ValidateRemoteCluster", testRemoteClusterRef).Return(nil)
 	remoteClusterMock.On("GetConnectivityStatus", mock.Anything).Return(metadata.ConnValid, nil)
+	rcCapability := metadata.UnitTestGetCollectionsCapability()
+	remoteClusterMock.On("GetCapability", mock.Anything).Return(rcCapability, nil)
 
 	var emptyNozzles map[string]commonReal.Nozzle
 	testPipeline.On("Sources").Return(emptyNozzles)
@@ -273,7 +259,7 @@ func TestPipelineMgrRemoveReplicationStatus(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
-	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
+	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc, remoteClusterMock)
 
 	pipelineMgr.GetOrCreateReplicationStatus("testTopic", nil)
 
@@ -524,12 +510,7 @@ func TestUpdateDoubleError(t *testing.T) {
 }
 
 // Used for testing just the pipelineUpdater
-func setupMockPipelineMgr(replSpecSvcMock *service_def.ReplicationSpecSvc,
-	testReplicationSettings *metadata.ReplicationSettings,
-	testTopic string,
-	testRepairer *PipelineUpdater,
-	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
-	uiLogSvcMock *service_def.UILogSvc) *PipelineMgrMock.PipelineMgrForUpdater {
+func setupMockPipelineMgr(replSpecSvcMock *service_def.ReplicationSpecSvc, testReplicationSettings *metadata.ReplicationSettings, testTopic string, testRepairer *PipelineUpdater, xdcrTopologyMock *service_def.XDCRCompTopologySvc, uiLogSvcMock *service_def.UILogSvc, remoteClusterSvc *service_def.RemoteClusterSvc) *PipelineMgrMock.PipelineMgrForUpdater {
 
 	pmMock := &PipelineMgrMock.PipelineMgrForUpdater{}
 
@@ -539,6 +520,7 @@ func setupMockPipelineMgr(replSpecSvcMock *service_def.ReplicationSpecSvc,
 	pmMock.On("GetReplSpecSvc").Return(replSpecSvcMock)
 	pmMock.On("GetXDCRTopologySvc").Return(xdcrTopologyMock)
 	pmMock.On("GetLogSvc").Return(uiLogSvcMock)
+	pmMock.On("GetRemoteClusterSvc").Return(remoteClusterSvc)
 	testReplicationSettings.Active = true
 
 	testRepairer.pipelineMgr = pmMock
@@ -558,7 +540,7 @@ func TestUpdater(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
-	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
+	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc, remoteClusterMock)
 
 	fmt.Printf("Trying to run actual startPipeline... may have %v seconds delay\n", testRepairer.testCustomScheduleTime)
 	errMap := testRepairer.update()
@@ -580,7 +562,7 @@ func TestUpdaterRun(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
-	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
+	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc, remoteClusterMock)
 
 	fmt.Printf("Trying to run actual startPipeline... may have %v seconds delay\n", testRepairer.testCustomScheduleTime)
 	setupLaunchUpdater(testRepairer, true)
@@ -605,7 +587,7 @@ func TestUpdaterSendErrDuringCooldown(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
-	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
+	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc, remoteClusterMock)
 
 	fmt.Printf("Trying to run actual startPipeline... may have %v seconds delay\n", testRepairer.testCustomScheduleTime)
 	setupLaunchUpdater(testRepairer, true)
@@ -646,7 +628,7 @@ func TestPipelineMgrConcurrentGetOrCreateReplicationStatus(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
-	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
+	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc, remoteClusterMock)
 
 	go pipelineMgr.GetOrCreateReplicationStatus("testTopic", nil)
 	go pipelineMgr.GetOrCreateReplicationStatus("testTopic", nil)
@@ -667,7 +649,7 @@ func TestUpdaterCompressionErr(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
-	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
+	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc, remoteClusterMock)
 
 	// At this time, no customSettings
 	origSettings := testRepairer.rep_status.SettingsMap()
@@ -745,7 +727,7 @@ func TestUpdaterCompressionErrRevChanged(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc)
 
-	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc)
+	setupMockPipelineMgr(replSpecSvcMock, testReplicationSettings, testTopic, testRepairer, xdcrTopologyMock, uiLogSvc, remoteClusterMock)
 
 	// At this time, no customSettings
 	origSettings := testRepairer.rep_status.SettingsMap()
@@ -1035,8 +1017,7 @@ func TestNonKVNodeStartPipeline(t *testing.T) {
 
 	startErrMap := make(base.ErrorMap)
 	startErrMap["_"] = ErrorNoKVService
-	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, false, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning,
-		nil, startErrMap)
+	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, false, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, clusterInfoSvc, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, nil, startErrMap)
 	assert.NotNil(testRepairer)
 	errMap := testRepairer.update()
 	assert.Len(errMap, 0)

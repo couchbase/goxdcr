@@ -634,6 +634,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 
 	// Remove all dismissed events
 	rep_status.GetEventsManager().ResetDismissedHistory()
+	rep_status.GetEventsManager().ClearNonBrokenMapEvents()
 
 	// if replication spec has been deleted
 	// or deleted and recreated, which is signaled by change in spec internal id
@@ -1819,6 +1820,7 @@ func (r *PipelineUpdater) reportStatus() {
 func (r *PipelineUpdater) raiseWarningsIfNeeded() {
 	r.raiseCompressionWarningIfNeeded()
 	r.raiseRemoteClusterRestartReasonsIfNeeded()
+	r.raiseNonCollectionTargetIfNeeded()
 }
 
 func (r *PipelineUpdater) raiseRemoteClusterRestartReasonsIfNeeded() {
@@ -1839,6 +1841,32 @@ func (r *PipelineUpdater) raiseRemoteClusterRestartReasonsIfNeeded() {
 	errMsg := fmt.Sprintf("Replication from source bucket '%v' to target bucket '%v' on cluster '%v' has been restarted due to remote-cluster configuration changes\n", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name())
 	r.logger.Warnf(errMsg)
 	r.pipelineMgr.GetLogSvc().Write(errMsg)
+}
+
+func (r *PipelineUpdater) raiseNonCollectionTargetIfNeeded() {
+	spec := r.rep_status.Spec()
+	if spec == nil {
+		return
+	}
+
+	targetClusterRef, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
+	if err != nil || targetClusterRef == nil {
+		return
+	}
+
+	capability, err := r.pipelineMgr.GetRemoteClusterSvc().GetCapability(targetClusterRef)
+	if err != nil {
+		return
+	}
+	if capability.HasCollectionSupport() {
+		// Target has collection support, no warnings needed
+		return
+	}
+	// Raise the following only if verified that target has no collection support
+	errMsg := fmt.Sprintf("Only default collection from source bucket '%v' to target bucket '%v' on cluster '%v' is being replicated because '%v' does not have collections capability\n", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name(), targetClusterRef.Name())
+	r.logger.Warnf(errMsg)
+	r.pipelineMgr.GetLogSvc().Write(errMsg)
+	r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap())
 }
 
 func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {

@@ -21,18 +21,23 @@ func (_m *PipelineEventsManager) AddEvent(eventType base.EventInfoType, eventDes
 	_m.Called(eventType, eventDesc, eventExtras)
 }
 
-// BackfillUpdateCb provides a mock function with given fields: diffPair
+// BackfillUpdateCb provides a mock function with given fields: diffPair, srcManifestsDelta
 func (_m *PipelineEventsManager) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
-	ret := _m.Called(diffPair)
+	ret := _m.Called(diffPair, srcManifestsDelta)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*metadata.CollectionNamespaceMappingsDiffPair) error); ok {
-		r0 = rf(diffPair)
+	if rf, ok := ret.Get(0).(func(*metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
+		r0 = rf(diffPair, srcManifestsDelta)
 	} else {
 		r0 = ret.Error(0)
 	}
 
 	return r0
+}
+
+// ClearNonBrokenMapEvents provides a mock function with given fields:
+func (_m *PipelineEventsManager) ClearNonBrokenMapEvents() {
+	_m.Called()
 }
 
 // ContainsEvent provides a mock function with given fields: eventId
