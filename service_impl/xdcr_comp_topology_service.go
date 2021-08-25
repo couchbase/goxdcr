@@ -96,6 +96,14 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 
 	hostName := base.GetHostName(hostAddr)
 
+	if top_svc.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+		// Since we don't do encryption between local services, we have to use loopback address
+		hostName = base.LocalHostName
+		if top_svc.IsIpv4Blocked() {
+			hostName = base.LocalHostNameIpv6
+		}
+	}
+
 	return base.GetHostAddr(hostName, port), nil
 }
 
