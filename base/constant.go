@@ -1390,3 +1390,7 @@ const (
 )
 
 const PreReplicateVBMasterCheckKey = "preReplicateVBMasterCheck"
+
+const ReplicateCkptIntervalKey = "replicateCkptIntervalMin"
+
+var ReplicateCkptInterval = 60 * time.Minute

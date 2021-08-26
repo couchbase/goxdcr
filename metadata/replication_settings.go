@@ -83,6 +83,7 @@ const (
 	CkptMgrBrokenmapIdleUpdateSrcManDelta = "ckmgrBrokenMapIdleUpdateSrcManDelta"
 
 	PreReplicateVBMasterCheckKey = base.PreReplicateVBMasterCheckKey
+	ReplicateCkptIntervalKey     = base.ReplicateCkptIntervalKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -181,6 +182,8 @@ var DismissEventConfig = &SettingsConfig{-1, &Range{0, math.MaxInt32}}
 
 var PreReplicateVBMasterCheckConfig = &SettingsConfig{true, nil}
 
+var ReplicateCkptIntervalConfig = &SettingsConfig{int(base.ReplicateCkptInterval.Minutes()), &Range{5, 4320 /* 3 days */}}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
@@ -216,6 +219,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	JSFunctionTimeoutKey:              JSFunctionTimeoutConfig,
 	DismissEventKey:                   DismissEventConfig,
 	PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckConfig,
+	ReplicateCkptIntervalKey:          ReplicateCkptIntervalConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -925,6 +929,12 @@ func (s *ReplicationSettings) GetCollectionsRoutingRules() CollectionsMappingRul
 func (s *ReplicationSettings) GetVBMasterCheckEnabled() bool {
 	val, _ := s.GetSettingValueOrDefaultValue(PreReplicateVBMasterCheckKey)
 	return val.(bool)
+}
+
+func (s *ReplicationSettings) GetReplicateCkptInterval() time.Duration {
+	val, _ := s.GetSettingValueOrDefaultValue(ReplicateCkptIntervalKey)
+	minInt := val.(int)
+	return time.Duration(minInt) * time.Minute
 }
 
 type ReplicationSettingsMap map[string]interface{}

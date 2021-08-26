@@ -95,6 +95,7 @@ const (
 	JSFunctionTimeoutKey           = base.JSFunctionTimeoutKey
 	DismissEventKey                = metadata.DismissEventKey
 	PreReplicateVBMasterCheckKey   = base.PreReplicateVBMasterCheckKey
+	ReplicateCkptIntervalKey       = base.ReplicateCkptIntervalKey
 )
 
 // constants for parsing create replication response
@@ -195,6 +196,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	JSFunctionTimeoutKey:              metadata.JSFunctionTimeoutKey,
 	DismissEventKey:                   metadata.DismissEventKey,
 	PreReplicateVBMasterCheckKey:      metadata.PreReplicateVBMasterCheckKey,
+	ReplicateCkptIntervalKey:          metadata.ReplicateCkptIntervalKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -240,6 +242,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.JSFunctionTimeoutKey:              JSFunctionTimeoutKey,
 	metadata.DismissEventKey:                   DismissEventKey,
 	metadata.PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckKey,
+	metadata.ReplicateCkptIntervalKey:          ReplicateCkptIntervalKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
