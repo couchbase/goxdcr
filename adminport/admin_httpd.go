@@ -125,26 +125,34 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	waitch := make(chan interface{}, 1)
-	// send and wait
-	s.reqch <- &httpAdminRequest{srv: s, req: r, waitch: waitch}
-	val := <-waitch
+	execFunc := func() error {
+		waitch := make(chan interface{}, 1)
+		// send and wait
+		s.reqch <- &httpAdminRequest{srv: s, req: r, waitch: waitch}
+		val := <-waitch
 
-	switch v := (val).(type) {
-	case error:
-		http.Error(w, v.Error(), http.StatusInternalServerError)
-		err = fmt.Errorf("%v, %v", ErrorInternal, v)
-		logger_server.Errorf("%v", err)
-	case *Response:
-		if v.TagPrintingBody && logger_server.GetLogLevel() >= log.LogLevelDebug {
-			bodyRedact := base.TagUDBytes(base.DeepCopyByteArray(v.Body))
-			logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v\n", v.StatusCode, string(bodyRedact))
-		} else {
-			logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
+		switch v := (val).(type) {
+		case error:
+			http.Error(w, v.Error(), http.StatusInternalServerError)
+			err = fmt.Errorf("%v, %v", ErrorInternal, v)
+			logger_server.Errorf("%v", err)
+			return err
+		case *Response:
+			if v.TagPrintingBody && logger_server.GetLogLevel() >= log.LogLevelDebug {
+				bodyRedact := base.TagUDBytes(base.DeepCopyByteArray(v.Body))
+				logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v\n", v.StatusCode, string(bodyRedact))
+			} else {
+				logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
+			}
+			w.Header().Set(base.ContentType, v.ContentType.String())
+			w.WriteHeader(v.StatusCode)
+			w.Write(v.Body)
 		}
-		w.Header().Set(base.ContentType, v.ContentType.String())
-		w.WriteHeader(v.StatusCode)
-		w.Write(v.Body)
+		return nil
+	}
+	err = base.ExecWithTimeout(execFunc, base.KeepAlivePeriod, logger_server)
+	if err != nil {
+		logger_server.Errorf(err.Error())
 	}
 }
 
