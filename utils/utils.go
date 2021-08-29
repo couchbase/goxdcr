@@ -2828,6 +2828,37 @@ func (u *Utilities) VerifyTargetBucket(targetBucketName, targetBucketUuid string
 	return nil
 }
 
+func (u *Utilities) GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error) {
+	nodeListObj, ok := bucketInfo[base.NodesKey]
+	if !ok {
+		return "", fmt.Errorf("Error getting %v from bucket info %v", base.NodesKey, bucketInfo)
+	}
+	nodeList, ok := nodeListObj.([]interface{})
+	if !ok {
+		return "", fmt.Errorf("Node list is of wrong type. nodeList=%v", nodeListObj)
+	}
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			return "", fmt.Errorf("Error getting nodeInfoMap from node list %v", nodeList)
+		}
+		thisNode, ok := nodeInfoMap[base.ThisNodeKey]
+		if !ok || thisNode.(bool) != true {
+			continue
+		}
+		hostNameObj, ok := nodeInfoMap[base.HostNameKey]
+		if !ok {
+			return "", fmt.Errorf("Error getting %v from nodeInfoMap %v", base.HostNameKey, nodeInfoMap)
+		}
+		hostName, ok := hostNameObj.(string)
+		if !ok {
+			return "", fmt.Errorf("Hostname %v should be string type.", hostNameObj)
+		}
+		return hostName, nil
+	}
+	return "", fmt.Errorf("Failed to get current server hostname from bucket info %v", bucketInfo)
+}
+
 func (u *Utilities) GetCollectionsManifest(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*metadata.CollectionsManifest, error) {
 	manifestInfo := make(map[string]interface{})
 	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.DefaultPoolBucketsPath+bucketName+base.CollectionsManifestPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &manifestInfo, nil, false, logger)

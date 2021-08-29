@@ -2853,6 +2853,22 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 		}
 	}
 
+	if service.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+		// If source cluster is strict encryption, we cannot send anything to remote 8091 port.
+		// Sending request to 8091 without TLS will succeed if target is not strict. But we don't want to do it.
+		// Sending request to 8091 with TLS will fail if target is strict (target refuses connection) or
+		// if target is not strict (timeout). Either way, instead of trying both in thee code below, we should
+		// replace 8091 with 18091 and try only that.
+		portNo, portNoErr := base.GetPortNumber(refHostName)
+		httpPortNo, httpPortNoErr := base.GetPortNumber(refHttpsHostNameIn)
+		if portNoErr == nil && portNo == base.DefaultAdminPort {
+			refHostName = base.GetHostAddr(base.GetHostName(refHostName), base.DefaultAdminPortSSL)
+		}
+		if httpPortNoErr == nil && httpPortNo == base.DefaultAdminPort {
+			refHttpsHostNameIn = base.GetHostAddr(base.GetHostName(refHttpsHostNameIn), base.DefaultAdminPortSSL)
+		}
+	}
+
 	// First go-routine
 	var refSANInCertificate bool
 	var refHttpAuthMech base.HttpAuthMech
@@ -2886,7 +2902,10 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 			// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
 			// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
 			var err1 error
-			bgRefHttpsHostName, bgExternalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
+			if service.cluster_info_svc.IsClusterEncryptionLevelStrict() == false {
+				// This call is not encrypted. We only do it if it is not strict
+				bgRefHttpsHostName, bgExternalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
+			}
 			if err1 != nil && !tryDefaultSSLAdminPort {
 				// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
 				bgErr = err1

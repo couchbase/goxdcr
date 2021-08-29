@@ -826,6 +826,27 @@ func (_m *UtilsIface) GetConflictResolutionTypeFromBucketInfo(bucketName string,
 	return r0, r1
 }
 
+// GetCurrentHostnameFromBucketInfo provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error) {
+	ret := _m.Called(bucketInfo)
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) string); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetDefaultPoolInfoUsingHttps provides a mock function with given fields: hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	ret := _m.Called(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger)
