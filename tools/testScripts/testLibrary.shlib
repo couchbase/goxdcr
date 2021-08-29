@@ -619,6 +619,7 @@ function changeRemoteClusterReferenceToSecure {
 	fi
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
 	local targetPort=${4:-${CLUSTER_NAME_PORT_MAP[$target]}}
+	local targetSecurePort=${CLUSTER_NAME_SECURE_PORT_MAP[$target]:-$targetPort}
 	local remoteClusterCert=${5:-}
 
 	# Get the target cluster's root certificate if not provided
@@ -627,8 +628,8 @@ function changeRemoteClusterReferenceToSecure {
 	fi
 
 	echo "Change remote cluster reference from $source to $target ($targetHost:$targetPort) to SECURE"
-	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=${remoteClusterCert}\""
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetPort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d encryptionType=full -d demandEncryption=1 --data-urlencode \"certificate=${remoteClusterCert}\""
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters/$target -d name=$target -d hostname=$targetHost:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
 		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
 }
 

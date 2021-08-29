@@ -49,8 +49,46 @@ func (ci_svc *ClusterInfoSvc) GetLocalServerVBucketsMap(clusterConnInfoProvider 
 		return nil, err
 	}
 
-	return ci_svc.utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
+	serverVBMap, err := ci_svc.utils.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
+	if err != nil {
+		return nil, err
+	}
+	return ci_svc.updateLocalServerVBucketMapIfNeeded(serverVBMap, bucketInfo)
+}
 
+// When cluster uses strict encryption, we need to use loopback address for local server
+// and set the key in serverVBMap accordingly
+func (ci_svc *ClusterInfoSvc) updateLocalServerVBucketMapIfNeeded(serverVBMap map[string][]uint16, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
+	if ci_svc.secSvc.IsClusterEncryptionLevelStrict() == false {
+		return serverVBMap, nil
+	}
+	loopback := base.LocalHostName
+	if base.IsIpV4Blocked() {
+		loopback = base.LocalHostNameIpv6
+	}
+	currentHostAddr, err := ci_svc.utils.GetCurrentHostnameFromBucketInfo(bucketInfo)
+	if err != nil {
+		return nil, err
+	}
+	currentHostName := base.GetHostName(currentHostAddr)
+	if currentHostName == loopback {
+		return serverVBMap, nil
+	}
+	newServerVBMap := make(map[string][]uint16)
+	for server, vbs := range serverVBMap {
+		hostName := base.GetHostName(server)
+		if hostName == currentHostName {
+			// Change the map to use loopback
+			port, err := base.GetPortNumber(server)
+			if err != nil {
+				return nil, err
+			}
+			newServerVBMap[base.GetHostAddr(loopback, port)] = vbs
+		} else {
+			newServerVBMap[server] = vbs
+		}
+	}
+	return newServerVBMap, nil
 }
 
 func (ci *ClusterInfoSvc) IsClusterEncryptionLevelStrict() bool {
