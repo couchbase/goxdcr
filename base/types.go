@@ -2463,3 +2463,62 @@ func (k *KvVBMapType) CompileLookupIndex() map[uint16]string {
 
 	return retMap
 }
+
+func (k *KvVBMapType) Clone() KvVBMapType {
+	clonedMap := make(KvVBMapType)
+	if k == nil {
+		return clonedMap
+	}
+
+	for key, val := range *k {
+		clonedList := make([]uint16, len(val))
+		for i, vbno := range val {
+			clonedList[i] = vbno
+		}
+		clonedMap[key] = clonedList
+	}
+	return clonedMap
+}
+
+type DcpStatsMapType map[string]map[string]string
+
+func (t DcpStatsMapType) Clone() DcpStatsMapType {
+	clonedMap := make(DcpStatsMapType)
+
+	for k, vMap := range t {
+		vMapClone := make(map[string]string)
+		for k2, v2 := range vMap {
+			vMapClone[k2] = v2
+		}
+		clonedMap[k] = vMapClone
+	}
+	return clonedMap
+}
+
+type BucketInfoMapType map[string]interface{}
+
+// Shallow copy clone of the values
+func (t BucketInfoMapType) Clone() BucketInfoMapType {
+	clonedMap := make(BucketInfoMapType)
+
+	for k, v := range t {
+		clonedMap[k] = v
+	}
+
+	return clonedMap
+}
+
+type HighSeqnosMapType map[string]map[uint16]uint64
+
+func (h HighSeqnosMapType) Clone() HighSeqnosMapType {
+	clonedMap := make(HighSeqnosMapType)
+
+	for k, vMap := range h {
+		clonedVMap := make(map[uint16]uint64)
+		for k2, v2 := range vMap {
+			clonedVMap[k2] = v2
+		}
+		clonedMap[k] = clonedVMap
+	}
+	return clonedMap
+}

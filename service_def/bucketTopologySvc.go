@@ -10,6 +10,7 @@ package service_def
 
 import (
 	"errors"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	"sync"
 	"time"
@@ -48,22 +49,23 @@ type BucketTopologySvc interface {
 type Notification interface {
 	IsSourceNotification() bool
 	CloneRO() interface{}
+	Clone() interface{}
 }
 
 type SourceNotification interface {
 	Notification
 	GetNumberOfSourceNodes() int
-	GetSourceVBMapRO() map[string][]uint16
-	GetKvVbMapRO() map[string][]uint16
-	GetDcpStatsMap() map[string]map[string]string
-	GetDcpStatsMapLegacy() map[string]map[string]string
-	GetHighSeqnosMap() map[string]map[uint16]uint64
-	GetHighSeqnosMapLegacy() map[string]map[uint16]uint64
+	GetSourceVBMapRO() base.KvVBMapType
+	GetKvVbMapRO() base.KvVBMapType
+	GetDcpStatsMap() base.DcpStatsMapType
+	GetDcpStatsMapLegacy() base.DcpStatsMapType
+	GetHighSeqnosMap() base.HighSeqnosMapType
+	GetHighSeqnosMapLegacy() base.HighSeqnosMapType
 }
 
 type TargetNotification interface {
 	Notification
-	GetTargetServerVBMap() map[string][]uint16
+	GetTargetServerVBMap() base.KvVBMapType
 	GetTargetBucketUUID() string
-	GetTargetBucketInfo() map[string]interface{}
+	GetTargetBucketInfo() base.BucketInfoMapType
 }

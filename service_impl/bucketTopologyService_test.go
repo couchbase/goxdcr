@@ -179,6 +179,35 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	assert.Equal(srcVBMap1, srcVBMap2)
 	assert.Equal(numSrcNodes1, numSrcNodes2)
 
+	// Modifying latestCached should not affect downstream
+	assert.Equal(srcVBMap1, watcher.latestCached.SourceVBMap)
+	watcher.latestCacheMtx.Lock()
+	watcher.latestCached.SourceVBMap["randomTestModification"] = []uint16{1, 2, 3}
+	watcher.latestCacheMtx.Unlock()
+	assert.NotEqual(srcVBMap1, watcher.latestCached.SourceVBMap)
+
+	// Nothing to get
+	select {
+	case <-specNotifyCh:
+		assert.True(false)
+	default:
+		break
+	}
+
+	// The next iteration should be the same
+	time.Sleep(100 * time.Millisecond)
+	notification1New := <-specNotifyCh
+	srcVBMap1New := notification1New.GetSourceVBMapRO()
+	assert.Equal(srcVBMap1New, watcher.latestCached.SourceVBMap)
+	// With the old data not modified - hacky because watcher.latestCached has been reset to the same data
+	// Check by modifying both - and make sure that the references are not shared
+	watcher.latestCacheMtx.Lock()
+	watcher.latestCached.SourceVBMap["randomTestModification"] = []uint16{1, 2, 3}
+	watcher.latestCacheMtx.Unlock()
+	assert.NotEqual(srcVBMap1New, watcher.latestCached.SourceVBMap)
+	srcVBMap1New["randomTestModification"] = []uint16{1, 2, 3}
+	assert.NotEqual(srcVBMap1New, srcVBMap1)
+
 	// Unregister one, the instance should still be there
 	assert.Nil(bts.handleSpecDeletion(spec))
 	assert.Len(bts.srcBucketWatchers, 1)

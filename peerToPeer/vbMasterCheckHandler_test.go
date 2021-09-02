@@ -36,7 +36,7 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 	bucketTopologySvc.On("UnSubscribeLocalBucketFeed", mock.Anything, mock.Anything).Return(nil)
 
 	notificationMock := &service_def.SourceNotification{}
-	retMap := make(map[string][]uint16)
+	retMap := make(base.KvVBMapType)
 	retMap["hostname"] = vbsList
 	notificationMock.On("GetSourceVBMapRO").Return(retMap, nil)
 	notificationCh <- notificationMock

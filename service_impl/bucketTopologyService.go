@@ -604,7 +604,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 			watcher.latestCacheMtx.RUnlock()
 			return fmt.Errorf("Cache is not populated yet to get highseqnos")
 		}
-		kv_vb_map := watcher.latestCached.GetSourceVBMapRO()
+		kv_vb_map := watcher.latestCached.SourceVBMap.Clone()
 		watcher.latestCacheMtx.RUnlock()
 
 		if legacyMode {
@@ -959,16 +959,19 @@ func (bw *BucketTopologySvcWatcher) run(initDone *sync.WaitGroup) {
 }
 
 func (bw *BucketTopologySvcWatcher) runGC() {
+	var lastPopulatedCache service_def.SourceNotification
 	bw.latestCacheMtx.RLock()
 	populated := bw.cachePopulated
-	lastPopulatedCacheRO := bw.latestCached.CloneRO().(service_def.SourceNotification)
+	if populated {
+		lastPopulatedCache = bw.latestCached.Clone().(service_def.SourceNotification)
+	}
 	bw.latestCacheMtx.RUnlock()
 	if !populated {
 		// Don't do anything
 		return
 	}
 
-	srcVBMap := lastPopulatedCacheRO.GetSourceVBMapRO()
+	srcVBMap := lastPopulatedCache.GetSourceVBMapRO()
 	if len(srcVBMap) > 1 {
 		// Not supposed to happen
 		var keys []string
@@ -1104,7 +1107,7 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 		return
 	}
 	bw.latestCacheMtx.RLock()
-	notification := bw.latestCached.CloneRO().(*Notification)
+	notification := bw.latestCached.Clone().(*Notification)
 	bw.latestCacheMtx.RUnlock()
 
 	mutex.RLock()
@@ -1195,10 +1198,10 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 	defer mutex.RUnlock()
 	if bw.cachePopulated {
 		if bw.source {
-			notification := bw.latestCached.CloneRO().(service_def.SourceNotification)
+			notification := bw.latestCached.Clone().(service_def.SourceNotification)
 			specifiedChs[fullSubscriberId].(chan service_def.SourceNotification) <- notification
 		} else {
-			notification := bw.latestCached.CloneRO().(service_def.TargetNotification)
+			notification := bw.latestCached.Clone().(service_def.TargetNotification)
 			specifiedChs[fullSubscriberId].(chan service_def.TargetNotification) <- notification
 		}
 	}
@@ -1469,28 +1472,29 @@ type Notification struct {
 
 	// Source only
 	NumberOfSourceNodes int
-	SourceVBMap         map[string][]uint16
-	KvVbMap             map[string][]uint16
-	DcpStatsMap         map[string]map[string]string
-	DcpStatsMapLegacy   map[string]map[string]string
-	HighSeqnoMap        map[string]map[uint16]uint64
-	HighSeqnoMapLegacy  map[string]map[uint16]uint64
+	SourceVBMap         base.KvVBMapType
+	KvVbMap             base.KvVBMapType
+	DcpStatsMap         base.DcpStatsMapType
+	DcpStatsMapLegacy   base.DcpStatsMapType
+	HighSeqnoMap        base.HighSeqnosMapType
+	HighSeqnoMapLegacy  base.HighSeqnosMapType
 
 	// Target only
 	TargetBucketUUID  string
-	TargetServerVBMap map[string][]uint16
-	TargetBucketInfo  map[string]interface{}
+	TargetServerVBMap base.KvVBMapType
+	TargetBucketInfo  base.BucketInfoMapType
 }
 
 func NewNotification(isSource bool) *Notification {
 	return &Notification{
 		NumberOfSourceNodes: 0,
-		KvVbMap:             make(map[string][]uint16),
-		SourceVBMap:         map[string][]uint16{},
+		KvVbMap:             make(base.KvVBMapType),
+		SourceVBMap:         make(base.KvVBMapType),
 		Source:              isSource,
-		TargetServerVBMap:   map[string][]uint16{},
-		TargetBucketInfo:    map[string]interface{}{},
-		DcpStatsMap:         map[string]map[string]string{},
+		TargetServerVBMap:   make(base.KvVBMapType),
+		TargetBucketInfo:    make(base.BucketInfoMapType),
+		DcpStatsMap:         make(base.DcpStatsMapType),
+		DcpStatsMapLegacy:   make(base.DcpStatsMapType),
 	}
 }
 
@@ -1517,19 +1521,38 @@ func (n *Notification) CloneRO() interface{} {
 	}
 }
 
+func (n *Notification) Clone() interface{} {
+	if n == nil {
+		return nil
+	}
+	return &Notification{
+		NumberOfSourceNodes: n.NumberOfSourceNodes,
+		Source:              n.Source,
+		KvVbMap:             n.KvVbMap.Clone(),
+		SourceVBMap:         n.SourceVBMap.Clone(),
+		TargetBucketUUID:    n.TargetBucketUUID,
+		TargetBucketInfo:    n.TargetBucketInfo.Clone(),
+		TargetServerVBMap:   n.TargetServerVBMap.Clone(),
+		DcpStatsMap:         n.DcpStatsMap.Clone(),
+		DcpStatsMapLegacy:   n.DcpStatsMapLegacy.Clone(),
+		HighSeqnoMap:        n.HighSeqnoMap.Clone(),
+		HighSeqnoMapLegacy:  n.HighSeqnoMapLegacy.Clone(),
+	}
+}
+
 func (n *Notification) GetNumberOfSourceNodes() int {
 	return n.NumberOfSourceNodes
 }
 
-func (n *Notification) GetKvVbMapRO() map[string][]uint16 {
+func (n *Notification) GetKvVbMapRO() base.KvVBMapType {
 	return n.KvVbMap
 }
 
-func (n *Notification) GetSourceVBMapRO() map[string][]uint16 {
+func (n *Notification) GetSourceVBMapRO() base.KvVBMapType {
 	return n.SourceVBMap
 }
 
-func (n *Notification) GetTargetServerVBMap() map[string][]uint16 {
+func (n *Notification) GetTargetServerVBMap() base.KvVBMapType {
 	return n.TargetServerVBMap
 }
 
@@ -1537,22 +1560,22 @@ func (n *Notification) GetTargetBucketUUID() string {
 	return n.TargetBucketUUID
 }
 
-func (n *Notification) GetTargetBucketInfo() map[string]interface{} {
+func (n *Notification) GetTargetBucketInfo() base.BucketInfoMapType {
 	return n.TargetBucketInfo
 }
 
-func (n *Notification) GetDcpStatsMap() map[string]map[string]string {
+func (n *Notification) GetDcpStatsMap() base.DcpStatsMapType {
 	return n.DcpStatsMap
 }
 
-func (n *Notification) GetDcpStatsMapLegacy() map[string]map[string]string {
+func (n *Notification) GetDcpStatsMapLegacy() base.DcpStatsMapType {
 	return n.DcpStatsMapLegacy
 }
 
-func (n *Notification) GetHighSeqnosMap() map[string]map[uint16]uint64 {
+func (n *Notification) GetHighSeqnosMap() base.HighSeqnosMapType {
 	return n.HighSeqnoMap
 }
 
-func (n *Notification) GetHighSeqnosMapLegacy() map[string]map[uint16]uint64 {
+func (n *Notification) GetHighSeqnosMapLegacy() base.HighSeqnosMapType {
 	return n.HighSeqnoMapLegacy
 }

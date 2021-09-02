@@ -424,7 +424,7 @@ func (b *BackfillRequestHandler) getVBs() ([]uint16, error) {
 	return b.getVBsInternal(kv_vb_map)
 }
 
-func (b *BackfillRequestHandler) getVBsInternal(kv_vb_map map[string][]uint16) ([]uint16, error) {
+func (b *BackfillRequestHandler) getVBsInternal(kv_vb_map base.KvVBMapType) ([]uint16, error) {
 	var vbList []uint16
 	for _, vbno := range kv_vb_map {
 		vbList = append(vbList, vbno...)
