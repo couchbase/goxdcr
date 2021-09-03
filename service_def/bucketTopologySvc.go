@@ -50,6 +50,7 @@ type Notification interface {
 	IsSourceNotification() bool
 	CloneRO() interface{}
 	Clone() interface{}
+	GetReplicasInfo() (int, base.VbHostsMapType, base.StringStringMap, []uint16)
 }
 
 type SourceNotification interface {

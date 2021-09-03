@@ -44,6 +44,47 @@ func (_m *TargetNotification) CloneRO() interface{} {
 	return r0
 }
 
+// GetReplicasInfo provides a mock function with given fields:
+func (_m *TargetNotification) GetReplicasInfo() (int, base.VbHostsMapType, base.StringStringMap, []uint16) {
+	ret := _m.Called()
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	var r1 base.VbHostsMapType
+	if rf, ok := ret.Get(1).(func() base.VbHostsMapType); ok {
+		r1 = rf()
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(base.VbHostsMapType)
+		}
+	}
+
+	var r2 base.StringStringMap
+	if rf, ok := ret.Get(2).(func() base.StringStringMap); ok {
+		r2 = rf()
+	} else {
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).(base.StringStringMap)
+		}
+	}
+
+	var r3 []uint16
+	if rf, ok := ret.Get(3).(func() []uint16); ok {
+		r3 = rf()
+	} else {
+		if ret.Get(3) != nil {
+			r3 = ret.Get(3).([]uint16)
+		}
+	}
+
+	return r0, r1, r2, r3
+}
+
 // GetTargetBucketInfo provides a mock function with given fields:
 func (_m *TargetNotification) GetTargetBucketInfo() base.BucketInfoMapType {
 	ret := _m.Called()

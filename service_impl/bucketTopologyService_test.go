@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"io/ioutil"
+	"sync"
 	"testing"
 	"time"
 )
@@ -53,6 +54,12 @@ func getCapability() metadata.Capability {
 	return metadata.UnitTestGetCollectionsCapability()
 }
 
+var replicaMtx sync.RWMutex
+var replicaCnt int
+var replicaMap base.VbHostsMapType
+var replicaTrMap base.StringStringMap
+var replicaMember []uint16
+
 func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification, ref *metadata.RemoteClusterReference, cap metadata.Capability, mcClient *mocks2.ClientIface) {
 	var connStr = "dummyConnStr"
 	xdcrTopologySvc.On("MyConnectionStr").Return(connStr, nil)
@@ -64,6 +71,40 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 		utilsFunc := args.Get(4).(utilities.ExponentialOpFunc)
 		utilsFunc()
 	}).Return(nil)
+
+	// This way of mocking will allow utils.Mock to actually call the real utilities
+	// to parse the mocked input data, and store the data somewhere
+	// Then, each individual get functions will be called to return the appropriately parsed
+	// result back to the caller
+	// This is the correct way to mock, execute, and return on real data
+	getMap1 := func(map[string]interface{}) base.VbHostsMapType {
+		replicaMtx.RLock()
+		defer replicaMtx.RUnlock()
+		return replicaMap
+	}
+	getMap2 := func(map[string]interface{}) base.StringStringMap {
+		replicaMtx.RLock()
+		defer replicaMtx.RUnlock()
+		return replicaTrMap
+	}
+	getCnt := func(map[string]interface{}) int {
+		replicaMtx.RLock()
+		defer replicaMtx.RUnlock()
+		return replicaCnt
+	}
+	getErr := func(map[string]interface{}) error {
+		return nil
+	}
+	getMember := func(map[string]interface{}) []uint16 {
+		replicaMtx.RLock()
+		defer replicaMtx.RUnlock()
+		return replicaMember
+	}
+	utils.On("GetReplicasInfo", mock.Anything).Run(func(args mock.Arguments) {
+		replicaMtx.Lock()
+		replicaMap, replicaTrMap, replicaCnt, replicaMember, _ = utilsReal.GetReplicasInfo(args.Get(0).(map[string]interface{}))
+		replicaMtx.Unlock()
+	}).Return(getMap1, getMap2, getCnt, getMember, getErr)
 
 	bucketUuidGetterFunc := func() string {
 		bucketUuid, _ := utilsReal.GetBucketUuidFromBucketInfo("", bucketInfo, nil)

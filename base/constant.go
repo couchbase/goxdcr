@@ -103,6 +103,7 @@ var CapiPortKey = "capi"
 var CapiSSLPortKey = "capiSSL"
 var DeveloperPreviewKey = "isDeveloperPreview"
 var StatusKey = "status"
+var NumberOfReplicas = "numReplicas"
 
 // Collection consts
 const UIDKey = "uid"

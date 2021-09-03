@@ -86,6 +86,33 @@ func getNodeListWithMinInfoMockK8() ([]interface{}, error) {
 	return testUtils.GetNodeListFromInfoMap(clusterInfo, logger)
 }
 
+func getBucketInfoWithReplicas() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v", testInternalDataDir, "pools_default_buckets_4nodes_2replicas.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
+func getBucketInfoWithReplicasWithNoReplicas() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v", testInternalDataDir, "pools_default_buckets_preRebalance.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
+func getBucketInfoWithReplicasAfterRebalance() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v", testInternalDataDir, "pools_default_buckets_postRebalance.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
 type localNodeList []string
 
 func (list localNodeList) check() bool {
@@ -470,10 +497,10 @@ func TestGetMemcachedSSLPortMapExternal(t *testing.T) {
 func TestGetMemcachedSSLPortMapExternalK8(t *testing.T) {
 	assert := assert.New(t)
 
-	bbucketInfo, err := getBucketDetailedInfoMockK8()
+	bucketInfo, err := getBucketDetailedInfoMockK8()
 	assert.Nil(err)
 
-	nodesExt, ok := bbucketInfo[base.NodeExtKey]
+	nodesExt, ok := bucketInfo[base.NodeExtKey]
 	assert.True(ok)
 
 	nodesExtArray, ok := nodesExt.([]interface{})
@@ -778,4 +805,54 @@ func TestHeartbeatMap(t *testing.T) {
 	for _, status := range heartbeatMap {
 		assert.Equal(base.HeartbeatHealthy, status)
 	}
+}
+
+func TestVBucketMapWithReplicas(t *testing.T) {
+	fmt.Println("============== Test case start: TestVBucketMapWithReplicas =================")
+	defer fmt.Println("============== Test case end: TestVBucketMapWithReplicas =================")
+	assert := assert.New(t)
+
+	bucketInfo := getBucketInfoWithReplicas()
+	assert.NotNil(bucketInfo)
+
+	replicaMap, translateMap, numOfReplicas, _, err := testUtils.GetReplicasInfo(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(2, numOfReplicas)
+
+	// validate replica map
+	serverVbMap, err := testUtils.GetServerVBucketsMap("", "B1", bucketInfo)
+	assert.Nil(err)
+	serverKey := "192.168.0.242:12000" // specific to the getBucketInfoWithReplicas() dataset
+	vbsForThisNode := serverVbMap[serverKey]
+
+	// Replica map should only contain VBs owned by this node
+	assert.Equal(len(vbsForThisNode), len(replicaMap))
+	// Total of 4 nodes
+	assert.Len(translateMap, 4)
+}
+
+func TestVBucketMapWithReplicasEarlyInit(t *testing.T) {
+	fmt.Println("============== Test case start: TestVBucketMapWithReplicasEarlyInit =================")
+	defer fmt.Println("============== Test case end: TestVBucketMapWithReplicasEarlyInit =================")
+	assert := assert.New(t)
+
+	bucketInfo := getBucketInfoWithReplicasWithNoReplicas()
+	assert.NotNil(bucketInfo)
+
+	replicaMap, translateMap, numOfReplicas, memberOfReplica, err := testUtils.GetReplicasInfo(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(1, numOfReplicas)
+	assert.Len(replicaMap, 0)
+	assert.Len(translateMap, 1)
+	assert.Len(memberOfReplica, 0)
+
+	bucketInfo = getBucketInfoWithReplicasAfterRebalance()
+	assert.NotNil(bucketInfo)
+
+	replicaMap, translateMap, numOfReplicas, memberOfReplica, err = testUtils.GetReplicasInfo(bucketInfo)
+	assert.Nil(err)
+	assert.Equal(1, numOfReplicas)
+	assert.NotEqual(len(replicaMap), 0)
+	assert.Len(translateMap, 2)
+	assert.NotEqual(0, len(memberOfReplica))
 }

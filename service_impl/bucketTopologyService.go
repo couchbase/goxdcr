@@ -297,6 +297,7 @@ func (b *BucketTopologyService) updateLocalServerVBucketMapIfNeeded(serverVBMap 
 	}
 	return newServerVBMap, nil
 }
+
 func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
 	topologyFunc := func() error {
 		connStr, err := b.xdcrCompTopologySvc.MyConnectionStr()
@@ -324,6 +325,12 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			return fmt.Errorf("Failed to update local serverVBucket map. err=%v", err)
 		}
 
+		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo)
+		if err != nil {
+			watcher.logger.Errorf("%v replicasInfo error %v", spec.SourceBucketName, err)
+			return err
+		}
+
 		nodes, err := watcher.xdcrCompTopologySvc.MyKVNodes()
 		if err != nil {
 			return fmt.Errorf("Failed to get my KV nodes, err=%v\n", err)
@@ -344,6 +351,10 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		watcher.latestCached.KvVbMap = serverVBMap
 		watcher.latestCached.NumberOfSourceNodes = len(serverVBMap)
 		watcher.latestCached.SourceVBMap = sourceKvVbMap
+		watcher.latestCached.SourceReplicasMap = replicasMap
+		watcher.latestCached.SourceReplicasTranslateMap = translateMap
+		watcher.latestCached.SourceReplicaCnt = numOfReplicas
+		watcher.latestCached.SourceVbReplicasMember = vbReplicaMember
 		watcher.latestCacheMtx.Unlock()
 		return nil
 	}
@@ -397,6 +408,11 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			if err != nil {
 				return err
 			}
+			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo)
+			if err != nil {
+				watcher.logger.Errorf("%v target replicasInfo error %v", spec.TargetBucketName, err)
+				return err
+			}
 
 			watcher.latestCacheMtx.Lock()
 			watcher.cachePopulated = true
@@ -404,6 +420,10 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			watcher.latestCached.TargetServerVBMap = targetServerVBMap
 			watcher.latestCached.TargetBucketUUID = targetBucketUUID
 			watcher.latestCached.TargetBucketInfo = targetBucketInfo
+			watcher.latestCached.TargetReplicasMap = replicasMap
+			watcher.latestCached.TargetReplicasTranslateMap = translateMap
+			watcher.latestCached.TargetReplicaCnt = numOfReplicas
+			watcher.latestCached.TargetVbReplicasMember = vbReplicaMember
 			watcher.latestCacheMtx.Unlock()
 			return nil
 		}
@@ -1531,30 +1551,45 @@ type Notification struct {
 	Source bool
 
 	// Source only
-	NumberOfSourceNodes int
-	SourceVBMap         base.KvVBMapType
-	KvVbMap             base.KvVBMapType
-	DcpStatsMap         base.DcpStatsMapType
-	DcpStatsMapLegacy   base.DcpStatsMapType
-	HighSeqnoMap        base.HighSeqnosMapType
-	HighSeqnoMapLegacy  base.HighSeqnosMapType
+	NumberOfSourceNodes        int
+	SourceVBMap                base.KvVBMapType
+	KvVbMap                    base.KvVBMapType
+	DcpStatsMap                base.DcpStatsMapType
+	DcpStatsMapLegacy          base.DcpStatsMapType
+	HighSeqnoMap               base.HighSeqnosMapType
+	HighSeqnoMapLegacy         base.HighSeqnosMapType
+	SourceReplicaCnt           int
+	SourceReplicasMap          base.VbHostsMapType  // len() of 0 if no replicas
+	SourceReplicasTranslateMap base.StringStringMap // nil if not initialized
+	SourceVbReplicasMember     []uint16
 
 	// Target only
-	TargetBucketUUID  string
-	TargetServerVBMap base.KvVBMapType
-	TargetBucketInfo  base.BucketInfoMapType
+	TargetBucketUUID           string
+	TargetServerVBMap          base.KvVBMapType
+	TargetBucketInfo           base.BucketInfoMapType
+	TargetReplicaCnt           int
+	TargetReplicasMap          base.VbHostsMapType  // len() of 0 if no replicas
+	TargetReplicasTranslateMap base.StringStringMap // nil if not initialized
+	TargetVbReplicasMember     []uint16
 }
 
 func NewNotification(isSource bool) *Notification {
 	return &Notification{
-		NumberOfSourceNodes: 0,
-		KvVbMap:             make(base.KvVBMapType),
-		SourceVBMap:         make(base.KvVBMapType),
-		Source:              isSource,
-		TargetServerVBMap:   make(base.KvVBMapType),
-		TargetBucketInfo:    make(base.BucketInfoMapType),
-		DcpStatsMap:         make(base.DcpStatsMapType),
-		DcpStatsMapLegacy:   make(base.DcpStatsMapType),
+		Source:                     isSource,
+		NumberOfSourceNodes:        0,
+		SourceVBMap:                make(base.KvVBMapType),
+		KvVbMap:                    make(base.KvVBMapType),
+		DcpStatsMap:                make(base.DcpStatsMapType),
+		DcpStatsMapLegacy:          make(base.DcpStatsMapType),
+		HighSeqnoMap:               make(base.HighSeqnosMapType),
+		HighSeqnoMapLegacy:         make(base.HighSeqnosMapType),
+		SourceReplicasMap:          make(base.VbHostsMapType),
+		SourceReplicasTranslateMap: make(base.StringStringMap),
+
+		TargetServerVBMap:          make(base.KvVBMapType),
+		TargetBucketInfo:           make(base.BucketInfoMapType),
+		TargetReplicasMap:          make(base.VbHostsMapType),
+		TargetReplicasTranslateMap: make(base.StringStringMap),
 	}
 }
 
@@ -1566,19 +1601,10 @@ func (n *Notification) CloneRO() interface{} {
 	if n == nil {
 		return nil
 	}
-	return &Notification{
-		NumberOfSourceNodes: n.NumberOfSourceNodes,
-		Source:              n.Source,
-		KvVbMap:             n.KvVbMap,
-		SourceVBMap:         n.SourceVBMap,
-		TargetBucketUUID:    n.TargetBucketUUID,
-		TargetBucketInfo:    n.TargetBucketInfo,
-		TargetServerVBMap:   n.TargetServerVBMap,
-		DcpStatsMap:         n.DcpStatsMap,
-		DcpStatsMapLegacy:   n.DcpStatsMapLegacy,
-		HighSeqnoMap:        n.HighSeqnoMap,
-		HighSeqnoMapLegacy:  n.HighSeqnoMapLegacy,
-	}
+
+	clonedRo := &Notification{}
+	*clonedRo = *n
+	return clonedRo
 }
 
 func (n *Notification) Clone() interface{} {
@@ -1586,17 +1612,26 @@ func (n *Notification) Clone() interface{} {
 		return nil
 	}
 	return &Notification{
-		NumberOfSourceNodes: n.NumberOfSourceNodes,
-		Source:              n.Source,
-		KvVbMap:             n.KvVbMap.Clone(),
-		SourceVBMap:         n.SourceVBMap.Clone(),
-		TargetBucketUUID:    n.TargetBucketUUID,
-		TargetBucketInfo:    n.TargetBucketInfo.Clone(),
-		TargetServerVBMap:   n.TargetServerVBMap.Clone(),
-		DcpStatsMap:         n.DcpStatsMap.Clone(),
-		DcpStatsMapLegacy:   n.DcpStatsMapLegacy.Clone(),
-		HighSeqnoMap:        n.HighSeqnoMap.Clone(),
-		HighSeqnoMapLegacy:  n.HighSeqnoMapLegacy.Clone(),
+		Source:                     n.Source,
+		NumberOfSourceNodes:        n.NumberOfSourceNodes,
+		SourceVBMap:                n.SourceVBMap.Clone(),
+		KvVbMap:                    n.KvVbMap.Clone(),
+		DcpStatsMap:                n.DcpStatsMap.Clone(),
+		DcpStatsMapLegacy:          n.DcpStatsMapLegacy.Clone(),
+		HighSeqnoMap:               n.HighSeqnoMap.Clone(),
+		HighSeqnoMapLegacy:         n.HighSeqnoMapLegacy.Clone(),
+		SourceReplicaCnt:           n.SourceReplicaCnt,
+		SourceReplicasMap:          n.SourceReplicasMap.Clone(),
+		SourceReplicasTranslateMap: n.SourceReplicasTranslateMap.Clone(),
+		SourceVbReplicasMember:     base.CloneUint16List(n.SourceVbReplicasMember),
+
+		TargetBucketUUID:           n.TargetBucketUUID,
+		TargetServerVBMap:          n.TargetServerVBMap.Clone(),
+		TargetBucketInfo:           n.TargetBucketInfo.Clone(),
+		TargetReplicaCnt:           n.TargetReplicaCnt,
+		TargetReplicasMap:          n.TargetReplicasMap.Clone(),
+		TargetReplicasTranslateMap: n.TargetReplicasTranslateMap.Clone(),
+		TargetVbReplicasMember:     base.CloneUint16List(n.TargetVbReplicasMember),
 	}
 }
 
@@ -1638,4 +1673,12 @@ func (n *Notification) GetHighSeqnosMap() base.HighSeqnosMapType {
 
 func (n *Notification) GetHighSeqnosMapLegacy() base.HighSeqnosMapType {
 	return n.HighSeqnoMapLegacy
+}
+
+func (n *Notification) GetReplicasInfo() (int, base.VbHostsMapType, base.StringStringMap, []uint16) {
+	if n.IsSourceNotification() {
+		return n.SourceReplicaCnt, n.SourceReplicasMap, n.SourceReplicasTranslateMap, n.SourceVbReplicasMember
+	} else {
+		return n.TargetReplicaCnt, n.TargetReplicasMap, n.TargetReplicasTranslateMap, n.TargetVbReplicasMember
+	}
 }

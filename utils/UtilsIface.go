@@ -86,6 +86,7 @@ type UtilsIface interface {
 	GetClusterCompatibilityFromNodeList(nodeList []interface{}) (int, error)
 	GetClusterUUIDFromDefaultPoolInfo(defaultPoolInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	GetClusterUUIDFromURI(uri string) (string, error)
+	GetReplicasInfo(bucketInfo map[string]interface{}) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error)
 	GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error)
 
 	// Network related utilities

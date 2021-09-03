@@ -114,6 +114,14 @@ func SortUint16List(list []uint16) []uint16 {
 	return list
 }
 
+func CloneUint16List(list []uint16) []uint16 {
+	cloneList := make([]uint16, len(list))
+	for i, v := range list {
+		cloneList[i] = v
+	}
+	return cloneList
+}
+
 func AreSortedUint16ListsTheSame(sorted_list_1, sorted_list_2 []uint16) bool {
 	if len(sorted_list_1) != len(sorted_list_2) {
 		return false

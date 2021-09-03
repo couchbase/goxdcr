@@ -2522,3 +2522,28 @@ func (h HighSeqnosMapType) Clone() HighSeqnosMapType {
 	}
 	return clonedMap
 }
+
+type VbHostsMapType map[uint16][]string
+
+func (v VbHostsMapType) Clone() VbHostsMapType {
+	cloneMap := make(VbHostsMapType)
+
+	for key, val := range v {
+		cloneList := make([]string, len(val))
+		for i, hostName := range val {
+			cloneList[i] = hostName
+		}
+		cloneMap[key] = cloneList
+	}
+	return cloneMap
+}
+
+type StringStringMap map[string]string
+
+func (s StringStringMap) Clone() StringStringMap {
+	cloneMap := make(StringStringMap)
+	for k, v := range s {
+		cloneMap[k] = v
+	}
+	return cloneMap
+}

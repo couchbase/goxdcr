@@ -2938,3 +2938,144 @@ func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap map[uint16]uint64) (map[uint16]
 	}
 	return vbSeqnoMap, nil
 }
+
+// Given a bucketInfo and bucketName, figure out the VBs that this node is the master of
+// Then return a list of replicas in order for each of the VB
+// 1. Map of vbno -> memcached KV address:port
+// 2. Map of memcached Address -> ns_server address
+// 3. Number of replicas set for this bucket
+// 4. List of VBs that this node is not the owner, but is a member as a replica
+func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error) {
+	nodesList, ok := bucketInfo[base.NodesKey].([]interface{})
+	if !ok {
+		return nil, nil, 0, nil, fmt.Errorf("Unable to get %v from bucketInfo", base.NodesKey)
+	}
+
+	kvToNsServerTranslateMap := make(base.StringStringMap)
+	var foundThisNode bool
+	var thisNodeName string
+	for _, nodeInfoRaw := range nodesList {
+		nodeInfo, ok := nodeInfoRaw.(map[string]interface{})
+		if !ok {
+			return nil, nil, 0, nil, fmt.Errorf("Unable to convert nodeInfoRaw into the right type")
+		}
+		isThisNode, ok := nodeInfo[base.ThisNodeKey].(bool)
+		if ok && isThisNode {
+			foundThisNode = true
+		}
+
+		nsServerHostAndPort, ok := nodeInfo[base.HostNameKey].(string)
+		if !ok {
+			return nil, nil, 0, nil, fmt.Errorf("Unable to convert nodeInfo.hostname to string")
+		}
+		nodeNameWithoutPort := base.GetHostName(nsServerHostAndPort)
+
+		portsMap, ok := nodeInfo[base.PortsKey].(map[string]interface{})
+		if !ok {
+			return nil, nil, 0, nil, fmt.Errorf("Unable to find ports data structure")
+		}
+
+		for portName, portNumberRaw := range portsMap {
+			portNumber, ok := portNumberRaw.(float64)
+			if !ok {
+				return nil, nil, 0, nil, fmt.Errorf("Wrong portNumberType: %v\n", reflect.TypeOf(portNumberRaw))
+			}
+			if portName == base.DirectPortKey {
+				memcachedPort := uint16(portNumber)
+				kvServerAndPort := base.GetHostAddr(nodeNameWithoutPort, memcachedPort)
+				kvToNsServerTranslateMap[kvServerAndPort] = nsServerHostAndPort
+				if isThisNode {
+					thisNodeName = kvServerAndPort
+				}
+			}
+		}
+	}
+	if !foundThisNode {
+		return nil, nil, 0, nil, fmt.Errorf("Unable to determine this node's information given nodesList %v", nodesList)
+	}
+
+	vbServerMap, ok := bucketInfo[base.VBucketServerMapKey].(map[string]interface{})
+	if !ok {
+		return nil, nil, 0, nil, fmt.Errorf("Unable to find vbServerMap")
+	}
+	numOfReplicasFloat, ok := vbServerMap[base.NumberOfReplicas].(float64)
+	if !ok {
+		return nil, nil, 0, nil, fmt.Errorf("Unable to get number of replicas")
+	}
+	numOfReplicas := int(numOfReplicasFloat)
+	if numOfReplicas == 0 {
+		// Nothing to return
+		return nil, nil, 0, nil, nil
+	}
+	serverList, ok := vbServerMap[base.ServerListKey].([]interface{})
+	if !ok {
+		return nil, nil, 0, nil, fmt.Errorf("Unable to find serverList")
+	}
+
+	var thisNodeIndex int = -1
+	for i, serverNameRaw := range serverList {
+		serverName, ok := serverNameRaw.(string)
+		if !ok {
+			return nil, nil, 0, nil, fmt.Errorf("Unable to parse serverName as string")
+		}
+		if serverName == thisNodeName {
+			thisNodeIndex = i
+			break
+		}
+	}
+	if thisNodeIndex == -1 {
+		return nil, nil, 0, nil, fmt.Errorf("Unable to find %v in list %v", thisNodeName, serverList)
+	}
+
+	// Once we have node name, index in the list, and number of replicas, we know what to compile and return
+	vbucketListOfServerIdx, ok := vbServerMap[base.VBucketMapKey].([]interface{})
+	if !ok {
+		return nil, nil, 0, nil, fmt.Errorf("unable to find %v", base.VBucketMapKey)
+	}
+
+	vbReplicaMap := make(base.VbHostsMapType)
+	var vbListForBeingAReplica []uint16
+
+	for vbno, serverIdxListRaw := range vbucketListOfServerIdx {
+		serverIdxList, ok := serverIdxListRaw.([]interface{})
+		if !ok {
+			return nil, nil, 0, nil, fmt.Errorf("wrong type for serverIdxListRaw: %v", reflect.TypeOf(serverIdxListRaw))
+		}
+		// serverList contains the node itself (idx 0) + replicas
+		if len(serverIdxList) != (numOfReplicas + 1) {
+			return nil, nil, 0, nil, fmt.Errorf("for VB %v the list of nodes is of length %v - expected %v", vbno, len(serverIdxList), numOfReplicas+1)
+		}
+		firstNodeIdxFloat, ok := serverIdxList[0].(float64)
+		if !ok {
+			return nil, nil, 0, nil, fmt.Errorf("serverIndex is of wrong type: %v", reflect.TypeOf(serverIdxList[0]))
+		}
+		firstNodeIdx := int(firstNodeIdxFloat)
+		if firstNodeIdx == thisNodeIndex {
+			// This node is the VB master since it is first in the list - rest are replicas
+			for i := 1; i < numOfReplicas+1; i++ {
+				replicaIdxFloat := serverIdxList[i].(float64)
+				replicaIdx := int(replicaIdxFloat)
+				// replicaIdx is -1 if hasn't been assigned yet or is transient. Ignore -1
+				if replicaIdx != -1 {
+					replicaName := serverList[replicaIdx].(string)
+					vbReplicaMap[uint16(vbno)] = append(vbReplicaMap[uint16(vbno)], replicaName)
+				}
+			}
+		} else {
+			// See if this node's index belongs in any of the other VBs
+			var thisNodeIdxIsReplica bool
+			for _, nodeIdxRaw := range serverIdxList {
+				nodeIdxFloat := nodeIdxRaw.(float64)
+				nodeIdx := int(nodeIdxFloat)
+				if nodeIdx == thisNodeIndex {
+					thisNodeIdxIsReplica = true
+					break
+				}
+			}
+			if thisNodeIdxIsReplica {
+				vbListForBeingAReplica = append(vbListForBeingAReplica, uint16(vbno))
+			}
+		}
+	}
+	return vbReplicaMap, kvToNsServerTranslateMap, numOfReplicas, vbListForBeingAReplica, nil
+}
