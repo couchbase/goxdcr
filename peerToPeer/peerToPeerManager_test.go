@@ -11,6 +11,7 @@ package peerToPeer
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/metadata"
+	service_def_real "github.com/couchbase/goxdcr/service_def"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/couchbase/goxdcr/utils"
 	utilsMock2 "github.com/couchbase/goxdcr/utils/mocks"
@@ -21,18 +22,22 @@ import (
 	"time"
 )
 
-func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIface, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, *utils.Utilities) {
+func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIface, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, *utils.Utilities, []error, []int, []string, string, chan service_def_real.SourceNotification) {
 	xdcrComp := &service_def.XDCRCompTopologySvc{}
 	utilsMock := &utilsMock2.UtilsIface{}
 	bucketTopSvc := &service_def.BucketTopologySvc{}
 	replSpecSvc := &service_def.ReplicationSpecSvc{}
 	utilsReal := utils.NewUtilities()
 
-	return xdcrComp, utilsMock, bucketTopSvc, replSpecSvc, utilsReal
+	queryResultErrs := []error{nil, nil}
+	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
+	peerNodes := []string{"10.1.1.1:8091", "10.2.2.2:8091"}
+	myHostAddr := "127.0.0.1:8091"
+	srcCh := make(chan service_def_real.SourceNotification, 50)
+	return xdcrComp, utilsMock, bucketTopSvc, replSpecSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh
 }
 
-func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xdcrComp *service_def.XDCRCompTopologySvc, peerNodes []string, myAddr string,
-	specList []*metadata.ReplicationSpecification, replSpecSvc *service_def.ReplicationSpecSvc, queryErrs []error, queryStatuses []int) {
+func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xdcrComp *service_def.XDCRCompTopologySvc, peerNodes []string, myAddr string, specList []*metadata.ReplicationSpecification, replSpecSvc *service_def.ReplicationSpecSvc, queryErrs []error, queryStatuses []int, srcCh chan service_def_real.SourceNotification, bucketSvc *service_def.BucketTopologySvc) {
 	utilsMock.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsReal.ExponentialBackoffExecutor(args.Get(0).(string), args.Get(1).(time.Duration), args.Get(2).(int), args.Get(3).(int), args.Get(4).(utils.ExponentialOpFunc))
 	}).Return(nil)
@@ -52,6 +57,9 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 		retMap[spec.Id] = spec
 	}
 	replSpecSvc.On("AllReplicationSpecs").Return(retMap, nil)
+
+	bucketSvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything).Return(srcCh, nil)
+	bucketSvc.On("UnSubscribeLocalBucketFeed", mock.Anything, mock.Anything).Return(nil)
 }
 
 func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
@@ -63,16 +71,10 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	spec, _ := metadata.NewReplicationSpecification(bucketName, "", "", "", "")
 	specList := []*metadata.ReplicationSpecification{spec}
 
-	peerNodes := []string{"10.1.1.1:8091", "10.2.2.2:8091"}
-	myHostAddr := "127.0.0.1:8091"
+	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh := setupBoilerPlate()
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc)
 
-	queryResultErrs := []error{nil, nil}
-	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
-
-	xdcrComp, utilsMock, bucket, replSvc, utilsReal := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode)
-
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucket, replSvc, 100*time.Millisecond, nil, nil, nil)
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, nil, nil, nil)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	commAPI, err := mgr.Start()

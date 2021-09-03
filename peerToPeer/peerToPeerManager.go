@@ -73,6 +73,7 @@ type P2PManagerImpl struct {
 	latestKnownPeers *KnownPeers
 
 	vbMasterCheckHelper VbMasterCheckHelper
+	replicaInfoCaches   ReplicaCache
 }
 
 func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc) (*P2PManagerImpl, error) {
@@ -98,6 +99,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		ckptSvc:             ckptSvc,
 		colManifestSvc:      colManifestSvc,
 		backfillReplSvc:     backfillReplSvc,
+		replicaInfoCaches:   NewReplicaCache(bucketTopologySvc, loggerCtx),
 	}, nil
 }
 
@@ -432,8 +434,10 @@ func (p *P2PManagerImpl) ReplicationSpecChangeCallback(id string, oldVal, newVal
 
 	if oldSpec == nil && newSpec != nil {
 		p.vbMasterCheckHelper.HandleSpecCreation(newSpec)
+		p.replicaInfoCaches.HandleSpecCreation(newSpec)
 	} else if oldSpec != nil && newSpec == nil {
 		p.vbMasterCheckHelper.HandleSpecDeletion(oldSpec)
+		p.replicaInfoCaches.HandleSpecDeletion(oldSpec)
 	}
 	return nil
 }
