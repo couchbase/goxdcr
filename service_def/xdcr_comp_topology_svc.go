@@ -60,6 +60,8 @@ type XDCRCompTopologySvc interface {
 	IsIpv6Blocked() bool
 
 	IsMyClusterDeveloperPreview() bool
+	IsMyClusterEncryptionLevelStrict() bool
+
 	// get local host name
 	GetLocalHostName() string
 

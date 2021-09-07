@@ -61,24 +61,22 @@ func testCallbackIncrementCount(string, interface{}, interface{}) error {
 func setupBoilerPlateRCS() (*service_def.UILogSvc,
 	*service_def.MetadataSvc,
 	*service_def.XDCRCompTopologySvc,
-	*service_def.ClusterInfoSvc,
 	*utilsMock.UtilsIface,
 	*RemoteClusterService) {
 
 	uiLogSvcMock := &service_def.UILogSvc{}
 	metadataSvcMock := &service_def.MetadataSvc{}
 	xdcrTopologyMock := &service_def.XDCRCompTopologySvc{}
-	clusterInfoSvcMock := &service_def.ClusterInfoSvc{}
 	utilitiesMock := &utilsMock.UtilsIface{}
 	utilitiesMock.On("ExponentialBackoffExecutor", "GetAllMetadataFromCatalogRemoteCluster", mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything).Return(nil)
 
 	remoteClusterSvc, _ := NewRemoteClusterService(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
-		clusterInfoSvcMock, log.DefaultLoggerContext, utilitiesMock)
+		log.DefaultLoggerContext, utilitiesMock)
 
 	callBackCount = 0
 
-	return uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, remoteClusterSvc
+	return uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, remoteClusterSvc
 }
 
 func jsonMarshalWrapper(ref *metadata.RemoteClusterReference) (key string, value []byte) {
@@ -90,12 +88,9 @@ func jsonMarshalWrapper(ref *metadata.RemoteClusterReference) (key string, value
 func setupMocksRCS(uiLogSvcMock *service_def.UILogSvc,
 	metadataSvcMock *service_def.MetadataSvc,
 	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
-	clusterInfoSvcMock *service_def.ClusterInfoSvc,
 	remoteClusterSvc *RemoteClusterService,
 	remoteClusterRef *metadata.RemoteClusterReference,
 	utilsMockFunc func()) {
-
-	clusterInfoSvcMock.On("IsClusterEncryptionLevelStrict").Return(false)
 
 	// metakv mock
 	setupMetaSvcMockGeneric(metadataSvcMock, remoteClusterRef)
@@ -112,6 +107,7 @@ func setupMocksRCS(uiLogSvcMock *service_def.UILogSvc,
 
 func setupXDCRTopologyMock(topologyMock *service_def.XDCRCompTopologySvc) {
 	topologyMock.On("IsMyClusterEnterprise").Return(true, nil)
+	topologyMock.On("IsMyClusterEncryptionLevelStrict").Return(false)
 }
 
 func setupMetaSvcMockGeneric(metadataSvcMock *service_def.MetadataSvc, remoteClusterRef *metadata.RemoteClusterReference) {
@@ -494,7 +490,7 @@ func createRemoteClusterRefWithHost(id, host string, helper base2.DnsSrvHelperIf
 func TestAddDelRemoteClusterRef(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestAddDelRemoteClusterRef =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -502,7 +498,7 @@ func TestAddDelRemoteClusterRef(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
@@ -535,7 +531,7 @@ func TestAddDelRemoteClusterRef(t *testing.T) {
 func TestAddSecondaryClusterRef(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestAddSecondaryClusterRef =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -546,7 +542,7 @@ func TestAddSecondaryClusterRef(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
@@ -566,7 +562,7 @@ func TestAddSecondaryClusterRef(t *testing.T) {
 func TestGetRefFromCachedMapNoRefresh(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestGetRefFromCachedMapNoRefresh =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -574,7 +570,7 @@ func TestGetRefFromCachedMapNoRefresh(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
@@ -602,7 +598,7 @@ func TestGetRefFromCachedMapNoRefresh(t *testing.T) {
 func TestAddThenSetRemoteClusterRef(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestAddThenSetRemoteClusterRef =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -611,7 +607,7 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -670,7 +666,7 @@ func TestAddThenSetRemoteClusterRef(t *testing.T) {
 func TestAddThenSetCallback(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestAddThenSetCallback =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -678,7 +674,7 @@ func TestAddThenSetCallback(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -721,7 +717,7 @@ func testCallbackReturnsError(string, interface{}, interface{}) error {
 func TestAddThenRemoveSecondaryViaCallback(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestAddThenRemoveSecondaryViaCallback =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -729,7 +725,7 @@ func TestAddThenRemoveSecondaryViaCallback(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -764,7 +760,7 @@ func TestAddThenRemoveSecondaryViaCallback(t *testing.T) {
 func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestAddThenSetThenDelClusterViaCallback =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -779,7 +775,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
 	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", jsonMarshalBytes, revision))
@@ -831,7 +827,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 func TestGetConnectionStringForRemoteCluster(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestGetConnectionStringForRemoteCluster =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -839,7 +835,7 @@ func TestGetConnectionStringForRemoteCluster(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
@@ -900,7 +896,7 @@ func refreshCheckActiveHostNameHelper(agent *RemoteClusterAgent, nodeList base.S
 func TestPositiveRefresh(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveRefresh =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -908,7 +904,7 @@ func TestPositiveRefresh(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -930,7 +926,7 @@ func TestPositiveRefresh(t *testing.T) {
 func TestPositiveRefreshMultiples(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveRefreshMultiples =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -938,7 +934,7 @@ func TestPositiveRefreshMultiples(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -973,7 +969,7 @@ func TestPositiveRefreshMultiples(t *testing.T) {
 func TestRefresh3Nodes2GoesBad(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestRefresh3Nodes2GoesBad =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -981,7 +977,7 @@ func TestRefresh3Nodes2GoesBad(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
@@ -1021,7 +1017,7 @@ func TestRefresh3Nodes2GoesBad(t *testing.T) {
 func TestRefresh4Nodes3GoesBad(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestRefresh4Nodes3GoesBad =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1029,7 +1025,7 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	utilitiesPreMock := &utilsMock.UtilsIface{}
@@ -1095,7 +1091,7 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 func TestRefreshFirstNodeIsBad(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestRefreshFirstNodeIsBad =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1103,7 +1099,7 @@ func TestRefreshFirstNodeIsBad(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
@@ -1135,7 +1131,7 @@ func runFuncGetTimeElapsed(timedFunc func(), waitGrp *sync.WaitGroup, elapsedTim
 func TestPositiveRefreshWDelay(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveRefreshWDelay =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1143,7 +1139,7 @@ func TestPositiveRefreshWDelay(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -1178,7 +1174,7 @@ func TestPositiveRefreshWDelay(t *testing.T) {
 func TestPositiveRefreshWDelayAndAbort(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveRefreshWDelayAndAbort =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1186,7 +1182,7 @@ func TestPositiveRefreshWDelayAndAbort(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -1218,7 +1214,7 @@ func TestPositiveRefreshWDelayAndAbort(t *testing.T) {
 func TestAddThenSetConcurrent(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestAddThenSetConcurrent =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1228,7 +1224,7 @@ func TestAddThenSetConcurrent(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -1256,7 +1252,7 @@ func TestAddThenSetConcurrent(t *testing.T) {
 func TestRefreshAndOverride(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestRefreshAndOverride =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1267,7 +1263,7 @@ func TestRefreshAndOverride(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -1303,7 +1299,7 @@ func TestRefreshAndOverride(t *testing.T) {
 func TestSetDisablesRefresh(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestSetDisablesRefresh =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1314,7 +1310,7 @@ func TestSetDisablesRefresh(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -1359,7 +1355,7 @@ func TestSetDisablesRefresh(t *testing.T) {
 func TestNoWriteAfterDeletes(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNoWriteAfterDeletes =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1367,7 +1363,7 @@ func TestNoWriteAfterDeletes(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// First set the callback before creating agents
@@ -1492,7 +1488,7 @@ func TestAddressPreference(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreference =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1500,7 +1496,7 @@ func TestAddressPreference(t *testing.T) {
 	ref := createRemoteClusterReference(idAndName)
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// test1 - specified no port and alterate address did not give ports
@@ -1547,7 +1543,7 @@ func TestAddressPreferenceInitFail(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPrefrenceInitFail =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1558,7 +1554,7 @@ func TestAddressPreferenceInitFail(t *testing.T) {
 		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, base.ErrorUnauthorized, "", 0, nil, true, false, false, clusterMadHatter, dummyHostNameList)
 	}
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// When there's an error contacting the bootstrap node, agent should still be created and started
@@ -1576,7 +1572,7 @@ func TestAddressPreferenceInitFail(t *testing.T) {
 	assert.Equal(0, len(agent.refNodesList))
 
 	// Pretend the second pull now will return ok
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockGeneric(utilitiesMock, 0*time.Second)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
@@ -1593,7 +1589,7 @@ func TestAddressPreferenceForceExt(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreferenceForceExt =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -1601,7 +1597,7 @@ func TestAddressPreferenceForceExt(t *testing.T) {
 	ref := createRemoteClusterReferenceExtOnly(idAndName)
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0*time.Second /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// test1 - specified no port and alterate address did not give ports
@@ -1648,7 +1644,7 @@ func TestAddressPreferenceChange(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreferenceChange =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -1658,7 +1654,7 @@ func TestAddressPreferenceChange(t *testing.T) {
 	idAndName := "test"
 
 	ref := createRemoteClusterReference(idAndName)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// This is to grab the external node list info populated from actual mock data
@@ -1667,7 +1663,7 @@ func TestAddressPreferenceChange(t *testing.T) {
 	ref.HostName_ = externalNodeListWithMinInfo[0]
 
 	// resetup utilitiesMock knowing this info
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
@@ -1693,7 +1689,7 @@ func TestAddressPreferenceChange(t *testing.T) {
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
@@ -1726,7 +1722,7 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreferenceChangeForceExt =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -1736,7 +1732,7 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 	idAndName := "test"
 
 	ref := createRemoteClusterReference(idAndName)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// This is to grab the external node list info populated from actual mock data
@@ -1745,7 +1741,7 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 	ref.HostName_ = externalNodeListWithMinInfo[0]
 
 	// resetup utilitiesMock knowing this info
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
@@ -1771,7 +1767,7 @@ func TestAddressPreferenceChangeForceExt(t *testing.T) {
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
@@ -1804,7 +1800,7 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreferenceChangeFlipFlop =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -1814,7 +1810,7 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	idAndName := "test"
 
 	ref := createRemoteClusterReference(idAndName)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// This is to grab the external node list info populated from actual mock data
@@ -1824,7 +1820,7 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	ref.HostName_ = externalHostName
 
 	// resetup utilitiesMock knowing this info
-	_, _, _, _, utilitiesMockExt, _ := setupBoilerPlateRCS()
+	_, _, _, utilitiesMockExt, _ := setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMockExt, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMockExt)
 
@@ -1850,7 +1846,7 @@ func TestAddressPreferenceChangeFlipFlop(t *testing.T) {
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true, clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
 
@@ -1877,7 +1873,7 @@ func TestSetHostNamesAndSecuritySettings(t *testing.T) {
 	fmt.Println("============== Test case start: TestSetHostNamesAndSecuritySettings =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -1887,7 +1883,7 @@ func TestSetHostNamesAndSecuritySettings(t *testing.T) {
 	idAndName := "test"
 
 	ref := createRemoteClusterReference(idAndName)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	ref.EncryptionType_ = metadata.EncryptionType_Full
@@ -1908,7 +1904,7 @@ func TestSetHostNamesAndSecuritySettings2(t *testing.T) {
 	fmt.Println("============== Test case start: TestSetHostNamesAndSecuritySettings2 =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -1919,7 +1915,7 @@ func TestSetHostNamesAndSecuritySettings2(t *testing.T) {
 
 	ref := createRemoteClusterReference(idAndName)
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	ref.EncryptionType_ = metadata.EncryptionType_Full
@@ -1962,7 +1958,7 @@ func TestCapabilityChange(t *testing.T) {
 	fmt.Println("============== Test case start: TestCapabilityChange =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -1972,7 +1968,7 @@ func TestCapabilityChange(t *testing.T) {
 	idAndName := "test"
 	ref := createRemoteClusterReference(idAndName)
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	err := remoteClusterSvc.AddRemoteCluster(ref, true /*skipConnectivity*/)
@@ -1990,7 +1986,7 @@ func TestCapabilityChange(t *testing.T) {
 	agent.unitTestBypassMetaKV = true
 
 	// Now pretend target cluster upgraded to Cheshire Cat
-	_, _, _, _, utilitiesMockNew, _ := setupBoilerPlateRCS()
+	_, _, _, utilitiesMockNew, _ := setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMockNew, 0*time.Second, nil, "", 0, nil, true, false, true, clusterCheshireCat, dummyHostNameList)
 
 	// Force a manual refresh to pick up the cheshire cat version
@@ -2015,7 +2011,7 @@ func TestInitializeWithExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 	fmt.Println("============== Test case start: TestInitializeWithExternalModeAndRefreshPullsExtNodeList =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -2025,7 +2021,7 @@ func TestInitializeWithExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, true, true, clusterMadHatter, dummyHostNameList)
 	}
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*userInitiated*/, false /*updateFromRef*/)
@@ -2072,7 +2068,7 @@ func TestInitializeWithoutExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 	fmt.Println("============== Test case start: TestInitializeWithoutExternalModeAndRefreshPullsExtNodeList =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -2082,7 +2078,7 @@ func TestInitializeWithoutExternalModeAndRefreshPullsExtNodeList(t *testing.T) {
 		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, true, true, clusterMadHatter, dummyHostNameList)
 	}
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*userInitiated*/, false /*updateFromRef*/)
@@ -2119,7 +2115,7 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	fmt.Println("============== Test case start: TestAddressPreferenceChangeWithDefaultMode =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -2129,7 +2125,7 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	idAndName := "test"
 
 	ref := createRemoteClusterReferenceIntOnly(idAndName)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// This is to grab the external node list info populated from actual mock data
@@ -2138,7 +2134,7 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	ref.HostName_ = externalNodeListWithMinInfo[0]
 
 	// resetup utilitiesMock knowing this info
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true,
 		clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
@@ -2166,7 +2162,7 @@ func TestAddressPreferenceChangeWithDefaultMode(t *testing.T) {
 	assert.Equal(0, agent.pendingAddressPrefCnt)
 
 	// Now, all the nodes will return internal
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", -1, base.ErrorResourceDoesNotExist, false, false, true,
 		clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
@@ -2207,7 +2203,7 @@ func TestDNSSrv(t *testing.T) {
 
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -2227,7 +2223,7 @@ func TestDNSSrv(t *testing.T) {
 
 	idAndName := "test"
 	ref := createRemoteClusterReferenceDNSSRV(idAndName, srvHelper)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
@@ -2369,7 +2365,7 @@ func TestParallelSecureGet(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestParallelSecureGet =================")
 	defer fmt.Println("============== Test case done: TestParallelSecureGet =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	// 8091 is blocked but 18091 is ok
@@ -2380,7 +2376,7 @@ func TestParallelSecureGet(t *testing.T) {
 	idAndName := "test"
 
 	ref := createSSLRemoteClusterRef(idAndName, nil)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.Nil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
@@ -2406,7 +2402,7 @@ func TestParallelSecureGetFail(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestParallelSecureGetFail =================")
 	defer fmt.Println("============== Test case done: TestParallelSecureGetFail =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	// 8091 and 18091 both blocked
@@ -2417,7 +2413,7 @@ func TestParallelSecureGetFail(t *testing.T) {
 	idAndName := "test"
 
 	ref := createSSLRemoteClusterRef(idAndName, nil)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.NotNil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
@@ -2447,7 +2443,7 @@ func TestDNSSRVReturnAlternate(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestDNSSRVReturnAlternate =================")
 	defer fmt.Println("============== Test case done: TestDNSSRVReturnAlternate =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	// 8091 and 18091 both blocked
@@ -2458,7 +2454,7 @@ func TestDNSSRVReturnAlternate(t *testing.T) {
 	idAndName := "test"
 
 	ref := createSSLRemoteClusterRef(idAndName, nil)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	assert.NotNil(remoteClusterSvc.validateAddRemoteCluster(ref, false))
@@ -2498,7 +2494,7 @@ func TestAgentGetConnectivityStatusForPipelinePause(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestAgentGetConnectivityStatusForPipelinePause =================")
 	assert := assert.New(t)
 
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	utilsMockFunc := func() {
@@ -2508,7 +2504,7 @@ func TestAgentGetConnectivityStatusForPipelinePause(t *testing.T) {
 	idAndName := "test"
 
 	ref := createRemoteClusterReferenceIntOnly(idAndName)
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	// This is to grab the external node list info populated from actual mock data
@@ -2517,7 +2513,7 @@ func TestAgentGetConnectivityStatusForPipelinePause(t *testing.T) {
 	ref.HostName_ = externalNodeListWithMinInfo[0]
 
 	// resetup utilitiesMock knowing this info
-	_, _, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
+	_, _, _, utilitiesMock, _ = setupBoilerPlateRCS()
 	setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, ref.HostName_, -1, base.ErrorNoPortNumber, true, false, true,
 		clusterMadHatter, dummyHostNameList)
 	remoteClusterSvc.updateUtilities(utilitiesMock)
@@ -2554,7 +2550,7 @@ func TestAgentGetConnectivityStatusForPipelinePause(t *testing.T) {
 func TestPassiveAddAndImmediateGet(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPassiveAddAndImmediateGet =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	idAndName := "test"
@@ -2562,7 +2558,7 @@ func TestPassiveAddAndImmediateGet(t *testing.T) {
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 200*time.Millisecond /*networkDelay*/) }
 
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 
 	agent, existed, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
@@ -2604,7 +2600,7 @@ func TestCreateRemoteWithIpFamilyV4Blocked(t *testing.T) {
 	defer fmt.Println("============== Test case End: TestCreateRemoteWithIpFamilyV4Blocked ===============")
 
 	base.NetTCP = base.TCP6 // This blocks IPV4
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	srvHelper := &baseMock.DnsSrvHelperIface{}
@@ -2616,7 +2612,7 @@ func TestCreateRemoteWithIpFamilyV4Blocked(t *testing.T) {
 	idAndName := "test"
 	ref := createRemoteClusterRefWithHost(idAndName, "127.0.0.1:9000", srvHelper, assert)
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 	err := remoteClusterSvc.validateAddRemoteCluster(ref, false)
 	assert.NotNil(err)
@@ -2627,7 +2623,7 @@ func TestCreateRemoteWithIpFamilyV4Blocked(t *testing.T) {
 	// Test when ipv4 is blocked, create remote with ipv4 address 127.0.0.1 is not allowed
 	ref = createRemoteClusterRefWithHost(idAndName, "127.0.0.1", srvHelper, assert)
 	utilsMockFunc = func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 	err = remoteClusterSvc.validateAddRemoteCluster(ref, false)
 	assert.NotNil(err)
@@ -2643,7 +2639,7 @@ func TestCreateRemoteWithIpFamilyV4Blocked(t *testing.T) {
 	//} else {
 	//	ref = createRemoteClusterRefWithHost(idAndName, hostname, srvHelper, assert)
 	//	utilsMockFunc = func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
-	//	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	//	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 	//		remoteClusterSvc, ref, utilsMockFunc)
 	//	err = remoteClusterSvc.validateAddRemoteCluster(ref, false)
 	//	assert.NotNil(err)
@@ -2659,7 +2655,7 @@ func TestCreateRemoteWithIpFamilyV6Blocked(t *testing.T) {
 	fmt.Println("============== Test case start: TestCreateRemoteWithIpFamilyV6Blocked ===============")
 	defer fmt.Println("============== Test case End: TestCreateRemoteWithIpFamilyV6Blocked ===============")
 	base.NetTCP = base.TCP4 // This blocks IPV6
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
 
 	srvHelper := &baseMock.DnsSrvHelperIface{}
@@ -2671,7 +2667,7 @@ func TestCreateRemoteWithIpFamilyV6Blocked(t *testing.T) {
 	idAndName := "test"
 	ref := createRemoteClusterRefWithHost(idAndName, "[::FFFF:C0A8:1]", srvHelper, assert)
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
-	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
 		remoteClusterSvc, ref, utilsMockFunc)
 	err := remoteClusterSvc.validateAddRemoteCluster(ref, false)
 	assert.NotNil(err)

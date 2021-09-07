@@ -41,7 +41,7 @@ type RemoteBucketInfo struct {
 }
 
 func NewRemoteBucketInfo(remoteClusterRefName string, bucketName string, remote_cluster_ref *metadata.RemoteClusterReference,
-	remote_cluster_svc RemoteClusterSvc, cluster_info_svc ClusterInfoSvc, logger *log.CommonLogger, utilsIn utilities.UtilsIface) (*RemoteBucketInfo, error) {
+	remote_cluster_svc RemoteClusterSvc, logger *log.CommonLogger, utilsIn utilities.UtilsIface) (*RemoteBucketInfo, error) {
 	if remoteClusterRefName == "" || bucketName == "" {
 		return nil, errors.New("remoteClusterRefName and bucketName are required")
 	}

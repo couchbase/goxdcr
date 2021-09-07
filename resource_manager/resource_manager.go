@@ -174,7 +174,6 @@ type ResourceManager struct {
 	repl_spec_svc          service_def.ReplicationSpecSvc
 	xdcr_topology_svc      service_def.XDCRCompTopologySvc
 	remote_cluster_svc     service_def.RemoteClusterSvc
-	cluster_info_svc       service_def.ClusterInfoSvc
 	checkpoint_svc         service_def.CheckpointsService
 	uilog_svc              service_def.UILogSvc
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
@@ -247,7 +246,7 @@ type ResourceMgrIface interface {
 }
 
 func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
-	remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService,
+	remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService,
 	uilog_svc service_def.UILogSvc, throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, backfillReplSvc service_def.BackfillReplSvc) ResourceMgrIface {
 
@@ -258,7 +257,6 @@ func NewResourceManager(pipelineMgr pipeline_manager.PipelineMgrIface, repl_spec
 		remote_cluster_svc:         remote_cluster_svc,
 		checkpoint_svc:             checkpoint_svc,
 		logger:                     log.NewLogger(ResourceManagerName, logger_context),
-		cluster_info_svc:           cluster_info_svc,
 		uilog_svc:                  uilog_svc,
 		utils:                      utilsIn,
 		finch:                      make(chan bool),

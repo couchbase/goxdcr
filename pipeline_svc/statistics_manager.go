@@ -143,7 +143,6 @@ type StatisticsManager struct {
 	bucket_name string
 
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc
-	cluster_info_svc          service_def.ClusterInfoSvc
 	xdcr_topology_svc         service_def.XDCRCompTopologySvc
 	remoteClusterSvc          service_def.RemoteClusterSvc
 	cachedCapability          metadata.Capability
@@ -171,7 +170,7 @@ type StatisticsManager struct {
 	highSeqnosFeedUnsubscriber    func() error
 }
 
-func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *StatisticsManager {
+func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *StatisticsManager {
 	stats_mgr := &StatisticsManager{
 		registries:                make(map[string]metrics.Registry),
 		logger:                    log.NewLogger("StatsMgr", logger_ctx),
@@ -186,7 +185,6 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		checkpointed_seqnos:       make(map[uint16]*base.SeqnoWithLock),
 		stats_map:                 make(map[string]string),
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
-		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc,
 		utils:                     utilsIn,
 		remoteClusterSvc:          remoteClusterSvc,

@@ -16,13 +16,13 @@ type PipelineOpSerializerIface struct {
 	mock.Mock
 }
 
-// BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair
+// BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta
 func (_m *PipelineOpSerializerIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
-	ret := _m.Called(topic, diffPair)
+	ret := _m.Called(topic, diffPair, srcManifestsDelta)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair) error); ok {
-		r0 = rf(topic, diffPair)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
+		r0 = rf(topic, diffPair, srcManifestsDelta)
 	} else {
 		r0 = ret.Error(0)
 	}

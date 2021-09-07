@@ -127,10 +127,11 @@ func main() {
 	// Initializes official utility object to be used throughout
 	utils := utilities.NewUtilities()
 
+	// This needs to be started immediately since some of the constructors will start to query the security setting
 	securitySvc := service_impl.NewSecurityService(options.caFileLocation, nil)
-	cluster_info_svc := service_impl.NewClusterInfoSvc(nil, utils, securitySvc)
+	securitySvc.Start()
 
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, cluster_info_svc, nil, utils)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, securitySvc, nil, utils)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -165,12 +166,12 @@ func main() {
 
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
-		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, cluster_info_svc, nil, utils)
+		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil, nil, utils)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, nil, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -194,14 +195,14 @@ func main() {
 		}
 	} else {
 		uilog_svc := service_impl.NewUILogSvc(top_svc, nil, utils)
-		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, cluster_info_svc, nil, utils)
+		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
 		resolver_svc := service_impl.NewResolverSvc(top_svc)
 
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, resolver_svc, nil, utils)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, resolver_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -229,7 +230,7 @@ func main() {
 		}
 
 		backfillReplService, err := metadata_svc.NewBackfillReplicationService(uilog_svc,
-			metakv_svc, log.DefaultLoggerContext, utils, replication_spec_svc, cluster_info_svc, top_svc,
+			metakv_svc, log.DefaultLoggerContext, utils, replication_spec_svc, top_svc,
 			bucketTopologyService)
 		if err != nil {
 			fmt.Printf("Error starting backfill replication service. err=%v\n", err)
@@ -246,11 +247,10 @@ func main() {
 			uint16(options.sourceKVAdminPort),
 			replication_spec_svc,
 			remote_cluster_svc,
-			cluster_info_svc,
 			top_svc,
 			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
 			checkpointsService,
-			service_impl.NewCAPIService(cluster_info_svc, nil, utils),
+			service_impl.NewCAPIService(nil, utils),
 			audit_svc,
 			uilog_svc,
 			processSetting_svc,

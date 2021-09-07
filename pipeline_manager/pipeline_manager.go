@@ -49,7 +49,6 @@ type PipelineManager struct {
 	repl_spec_svc          service_def.ReplicationSpecSvc
 	xdcr_topology_svc      service_def.XDCRCompTopologySvc
 	remote_cluster_svc     service_def.RemoteClusterSvc
-	cluster_info_svc       service_def.ClusterInfoSvc
 	checkpoint_svc         service_def.CheckpointsService
 	uilog_svc              service_def.UILogSvc
 	collectionsManifestSvc service_def.CollectionsManifestSvc
@@ -91,7 +90,6 @@ type PipelineMgrInternalIface interface {
 	GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error)
 	GetLastUpdateResult(topic string) bool // whether or not the last update was successful
 	GetRemoteClusterSvc() service_def.RemoteClusterSvc
-	GetClusterInfoSvc() service_def.ClusterInfoSvc
 	GetLogSvc() service_def.UILogSvc
 	GetReplSpecSvc() service_def.ReplicationSpecSvc
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
@@ -132,7 +130,7 @@ type PipelineMgrBackfillIface interface {
 // Global ptr, should slowly get rid of refences to this global
 var pipeline_mgr *PipelineManager
 
-func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, cluster_info_svc service_def.ClusterInfoSvc, checkpoint_svc service_def.CheckpointsService, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, eventIdWell *int64) *PipelineManager {
+func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, eventIdWell *int64) *PipelineManager {
 	if eventIdWell == nil {
 		// Possible for unit test
 		eventId := int64(-1)
@@ -146,7 +144,6 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		remote_cluster_svc:     remote_cluster_svc,
 		checkpoint_svc:         checkpoint_svc,
 		logger:                 log.NewLogger("PipelineMgr", logger_context),
-		cluster_info_svc:       cluster_info_svc,
 		uilog_svc:              uilog_svc,
 		utils:                  utilsIn,
 		collectionsManifestSvc: collectionsManifestSvc,
@@ -1089,10 +1086,6 @@ func (pipelineMgr *PipelineManager) ReInitStreams(pipelineName string) error {
 // Bunch of getters
 func (pipelineMgr *PipelineManager) GetRemoteClusterSvc() service_def.RemoteClusterSvc {
 	return pipelineMgr.remote_cluster_svc
-}
-
-func (pipelineMgr *PipelineManager) GetClusterInfoSvc() service_def.ClusterInfoSvc {
-	return pipelineMgr.cluster_info_svc
 }
 
 func (pipelineMgr *PipelineManager) GetLogSvc() service_def.UILogSvc {

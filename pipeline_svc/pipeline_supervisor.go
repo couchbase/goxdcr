@@ -56,7 +56,6 @@ type PipelineSupervisor struct {
 	errors_seen      map[string]error
 	errors_seen_lock *sync.RWMutex
 
-	cluster_info_svc  service_def.ClusterInfoSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 	remoteClusterSvc  service_def.RemoteClusterSvc
 	bucketTopologySvc service_def.BucketTopologySvc
@@ -69,12 +68,11 @@ type PipelineSupervisor struct {
 	filterErrCh chan error
 }
 
-func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *PipelineSupervisor {
+func NewPipelineSupervisor(id string, logger_ctx *log.LoggerContext, failure_handler common.SupervisorFailureHandler, xdcr_topology_svc service_def.XDCRCompTopologySvc, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *PipelineSupervisor {
 	supervisor := supervisor.NewGenericSupervisor(id, logger_ctx, failure_handler, nil, utilsIn)
 	pipelineSupervisor := &PipelineSupervisor{GenericSupervisor: supervisor,
 		errors_seen:       make(map[string]error),
 		errors_seen_lock:  &sync.RWMutex{},
-		cluster_info_svc:  cluster_info_svc,
 		xdcr_topology_svc: xdcr_topology_svc,
 		utils:             utilsIn,
 		filterErrCh:       make(chan error, maxFilterErrorsPerInterval),

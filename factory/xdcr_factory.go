@@ -61,7 +61,6 @@ type XDCRFactoryIface interface {
 type XDCRFactory struct {
 	repl_spec_svc            service_def.ReplicationSpecSvc
 	remote_cluster_svc       service_def.RemoteClusterSvc
-	cluster_info_svc         service_def.ClusterInfoSvc
 	xdcr_topology_svc        service_def.XDCRCompTopologySvc
 	checkpoint_svc           service_def.CheckpointsService
 	capi_svc                 service_def.CAPIService
@@ -89,7 +88,7 @@ type BackfillMgrGetter func() service_def.BackfillMgrIface
 
 // set call back functions is done only once
 func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster_svc service_def.RemoteClusterSvc,
-	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	checkpoint_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, uilog_svc service_def.UILogSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc, throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	pipeline_default_logger_ctx *log.LoggerContext, factory_logger_ctx *log.LoggerContext,
@@ -99,7 +98,6 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster
 	bucketTopologySvc service_def.BucketTopologySvc, p2pMgr peerToPeer.P2PManager) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
-		cluster_info_svc:         cluster_info_svc,
 		xdcr_topology_svc:        xdcr_topology_svc,
 		checkpoint_svc:           checkpoint_svc,
 		capi_svc:                 capi_svc,
@@ -1204,7 +1202,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//register pipeline supervisor
 	supervisor := pipeline_svc.NewPipelineSupervisor(base.PipelineSupervisorIdPrefix+pipeline.Topic(), logger_ctx,
-		xdcrf.pipeline_failure_handler, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.utils, xdcrf.remote_cluster_svc,
+		xdcrf.pipeline_failure_handler, xdcrf.xdcr_topology_svc, xdcrf.utils, xdcrf.remote_cluster_svc,
 		xdcrf.bucketTopologySvc)
 	err := ctx.RegisterService(base.PIPELINE_SUPERVISOR_SVC, supervisor)
 	if err != nil {
@@ -1241,12 +1239,12 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 
 	//Create pipeline statistics manager.
 	bucket_name := pipeline.Specification().GetReplicationSpec().SourceBucketName
-	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc, xdcrf.cluster_info_svc,
+	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc,
 		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils, xdcrf.remote_cluster_svc,
 		xdcrf.bucketTopologySvc)
 
 	//register pipeline checkpoint manager
-	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName, targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc, xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr, xdcrf.bucketTopologySvc)
+	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName, targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc, xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr, xdcrf.bucketTopologySvc)
 	if err != nil {
 		xdcrf.logger.Errorf("Failed to construct CheckpointManager for %v. err=%v ckpt_svc=%v, capi_svc=%v, remote_cluster_svc=%v, repl_spec_svc=%v\n", pipeline.Topic(), err, xdcrf.checkpoint_svc, xdcrf.capi_svc,
 			xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc)
@@ -1273,7 +1271,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 			return fmt.Errorf("Unable to retrieve main pipeline service %v", base.TOPOLOGY_CHANGE_DETECT_SVC)
 		}
 	} else {
-		top_detect_svc = pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.cluster_info_svc, xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, logger_ctx, xdcrf.utils, xdcrf.bucketTopologySvc)
+		top_detect_svc = pipeline_svc.NewTopologyChangeDetectorSvc(xdcrf.xdcr_topology_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, logger_ctx, xdcrf.utils, xdcrf.bucketTopologySvc)
 	}
 	err = ctx.RegisterService(base.TOPOLOGY_CHANGE_DETECT_SVC, top_detect_svc)
 	if err != nil {

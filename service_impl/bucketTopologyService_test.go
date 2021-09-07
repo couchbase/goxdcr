@@ -58,6 +58,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	xdcrTopologySvc.On("MyConnectionStr").Return(connStr, nil)
 	xdcrTopologySvc.On("MyCredentials").Return("", "", base.HttpAuthMechPlain, nil, false, nil, nil, nil)
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
+	xdcrTopologySvc.On("IsMyClusterEncryptionLevelStrict").Return(false)
 	utils.On("GetBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo, nil)
 	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsFunc := args.Get(4).(utilities.ExponentialOpFunc)

@@ -45,7 +45,6 @@ type BackfillMgr struct {
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	replSpecSvc            service_def.ReplicationSpecSvc
 	backfillReplSvc        service_def.BackfillReplSvc
-	clusterInfoSvc         service_def.ClusterInfoSvc
 	xdcrTopologySvc        service_def.XDCRCompTopologySvc
 	checkpointsSvc         service_def.CheckpointsService
 	bucketTopologySvc      service_def.BucketTopologySvc
@@ -241,7 +240,7 @@ type BackfillRetryRequest struct {
 	handler                    *BackfillRequestHandler
 }
 
-func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc, replSpecSvc service_def.ReplicationSpecSvc, backfillReplSvc service_def.BackfillReplSvc, pipelineMgr pipeline_manager.PipelineMgrBackfillIface, clusterInfoSvc service_def.ClusterInfoSvc, xdcrTopologySvc service_def.XDCRCompTopologySvc, checkpointsSvc service_def.CheckpointsService, bucketTopologySvc service_def.BucketTopologySvc) *BackfillMgr {
+func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc, replSpecSvc service_def.ReplicationSpecSvc, backfillReplSvc service_def.BackfillReplSvc, pipelineMgr pipeline_manager.PipelineMgrBackfillIface, xdcrTopologySvc service_def.XDCRCompTopologySvc, checkpointsSvc service_def.CheckpointsService, bucketTopologySvc service_def.BucketTopologySvc) *BackfillMgr {
 
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc:            collectionsManifestSvc,
@@ -253,7 +252,6 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		cacheSpecTargetMap:                make(map[string]*metadata.CollectionsManifest),
 		pipelineMgr:                       pipelineMgr,
 		specToReqHandlerMap:               make(map[string]*BackfillRequestHandler),
-		clusterInfoSvc:                    clusterInfoSvc,
 		xdcrTopologySvc:                   xdcrTopologySvc,
 		pipelineSvc:                       &pipelineSvcWrapper{},
 		checkpointsSvc:                    checkpointsSvc,

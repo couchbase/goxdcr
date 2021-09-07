@@ -32,20 +32,6 @@ func (_m *PipelineMgrForUpdater) AutoPauseReplication(topic string) error {
 	return r0
 }
 
-// BackfillMappingStatusUpdate provides a mock function with given fields: topic, diffPair
-func (_m *PipelineMgrForUpdater) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair) error {
-	ret := _m.Called(topic, diffPair)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair) error); ok {
-		r0 = rf(topic, diffPair)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
 // ForceTargetRefreshManifest provides a mock function with given fields: spec
 func (_m *PipelineMgrForUpdater) ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
@@ -55,22 +41,6 @@ func (_m *PipelineMgrForUpdater) ForceTargetRefreshManifest(spec *metadata.Repli
 		r0 = rf(spec)
 	} else {
 		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// GetClusterInfoSvc provides a mock function with given fields:
-func (_m *PipelineMgrForUpdater) GetClusterInfoSvc() service_def.ClusterInfoSvc {
-	ret := _m.Called()
-
-	var r0 service_def.ClusterInfoSvc
-	if rf, ok := ret.Get(0).(func() service_def.ClusterInfoSvc); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(service_def.ClusterInfoSvc)
-		}
 	}
 
 	return r0

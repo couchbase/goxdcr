@@ -144,7 +144,7 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		b.srcBucketWatchers[spec.SourceBucketName] = watcher
 
 		intervalFuncMap := make(IntervalFuncMap)
-		topologyFunc := b.getBucketTopologyUpdater(spec, watcher)
+		topologyFunc := b.getLocalBucketTopologyUpdater(spec, watcher)
 		intervalFuncMap[TOPOLOGY] = make(IntervalInnerFuncMap)
 		intervalFuncMap[TOPOLOGY][b.refreshInterval] = topologyFunc
 
@@ -263,7 +263,41 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 	return dcpStatsFunc
 }
 
-func (b *BucketTopologyService) getBucketTopologyUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
+// When cluster uses strict encryption, we need to use loopback address for local server
+// and set the key in serverVBMap accordingly
+func (b *BucketTopologyService) updateLocalServerVBucketMapIfNeeded(serverVBMap map[string][]uint16, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
+	if b.xdcrCompTopologySvc.IsMyClusterEncryptionLevelStrict() == false {
+		return serverVBMap, nil
+	}
+	loopback := base.LocalHostName
+	if base.IsIpV4Blocked() {
+		loopback = base.LocalHostNameIpv6
+	}
+	currentHostAddr, err := b.utils.GetCurrentHostnameFromBucketInfo(bucketInfo)
+	if err != nil {
+		return nil, err
+	}
+	currentHostName := base.GetHostName(currentHostAddr)
+	if currentHostName == loopback {
+		return serverVBMap, nil
+	}
+	newServerVBMap := make(map[string][]uint16)
+	for server, vbs := range serverVBMap {
+		hostName := base.GetHostName(server)
+		if hostName == currentHostName {
+			// Change the map to use loopback
+			port, err := base.GetPortNumber(server)
+			if err != nil {
+				return nil, err
+			}
+			newServerVBMap[base.GetHostAddr(loopback, port)] = vbs
+		} else {
+			newServerVBMap[server] = vbs
+		}
+	}
+	return newServerVBMap, nil
+}
+func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
 	topologyFunc := func() error {
 		connStr, err := b.xdcrCompTopologySvc.MyConnectionStr()
 		if err != nil {
@@ -285,6 +319,10 @@ func (b *BucketTopologyService) getBucketTopologyUpdater(spec *metadata.Replicat
 			watcher.logger.Errorf("%v bucket server VBMap error %v", spec.SourceBucketName, err)
 			return err
 		}
+		serverVBMap, err = b.updateLocalServerVBucketMapIfNeeded(serverVBMap, bucketInfo)
+		if err != nil {
+			return fmt.Errorf("Failed to update local serverVBucket map. err=%v", err)
+		}
 
 		nodes, err := watcher.xdcrCompTopologySvc.MyKVNodes()
 		if err != nil {
@@ -299,6 +337,7 @@ func (b *BucketTopologyService) getBucketTopologyUpdater(spec *metadata.Replicat
 				sourceKvVbMap[node] = vbnos
 			}
 		}
+
 		watcher.latestCacheMtx.Lock()
 		watcher.cachePopulated = true
 		watcher.latestCached.Source = true

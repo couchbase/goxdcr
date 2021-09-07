@@ -50,7 +50,6 @@ type BackfillReplicationService struct {
 	metadataSvc     service_def.MetadataSvc
 	uiLogSvc        service_def.UILogSvc
 	replSpecSvc     service_def.ReplicationSpecSvc
-	clusterInfoSvc  service_def.ClusterInfoSvc
 	xdcrTopologySvc service_def.XDCRCompTopologySvc
 
 	logger     *log.CommonLogger
@@ -69,7 +68,7 @@ type BackfillReplicationService struct {
 	bucketTopologySvc service_def.BucketTopologySvc
 }
 
-func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc service_def.MetadataSvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface, replSpecSvc service_def.ReplicationSpecSvc, clusterInfoSvc service_def.ClusterInfoSvc, xdcrTopologySvc service_def.XDCRCompTopologySvc, bucketTopologySvc service_def.BucketTopologySvc) (*BackfillReplicationService, error) {
+func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc service_def.MetadataSvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface, replSpecSvc service_def.ReplicationSpecSvc, xdcrTopologySvc service_def.XDCRCompTopologySvc, bucketTopologySvc service_def.BucketTopologySvc) (*BackfillReplicationService, error) {
 	logger := log.NewLogger("BackfillReplSvc", loggerCtx)
 	svc := &BackfillReplicationService{
 		ShaRefCounterService: NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger),
@@ -78,7 +77,6 @@ func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc se
 		logger:               logger,
 		replSpecSvc:          replSpecSvc,
 		utils:                utilsIn,
-		clusterInfoSvc:       clusterInfoSvc,
 		xdcrTopologySvc:      xdcrTopologySvc,
 		bucketTopologySvc:    bucketTopologySvc,
 	}

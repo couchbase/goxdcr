@@ -84,16 +84,14 @@ func (req *apiRequest) CloneAndRedact() *apiRequest {
 //		3. _commit_for_checkpoint: ask the remote vbucket to commit and return back the seqno, or if the remote vbucket's UUID
 //								   has changed due to the topology change, in that case, new vb UUID would be returned
 type CAPIService struct {
-	cluster_info_service *ClusterInfoSvc
-	logger               *log.CommonLogger
-	utils                utilities.UtilsIface
+	logger *log.CommonLogger
+	utils  utilities.UtilsIface
 }
 
-func NewCAPIService(cluster_info_service *ClusterInfoSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) *CAPIService {
+func NewCAPIService(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) *CAPIService {
 	return &CAPIService{
-		cluster_info_service: cluster_info_service,
-		logger:               log.NewLogger("CapiSvc", logger_ctx),
-		utils:                utilsIn,
+		logger: log.NewLogger("CapiSvc", logger_ctx),
+		utils:  utilsIn,
 	}
 }
 

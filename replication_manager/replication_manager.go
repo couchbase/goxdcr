@@ -80,7 +80,6 @@ type replicationManager struct {
 	//remote cluster service handle
 	remote_cluster_svc service_def.RemoteClusterSvc
 	//cluster info service handle
-	cluster_info_svc service_def.ClusterInfoSvc
 	//xdcr topology service handle
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 	//replication settings service handle
@@ -137,7 +136,6 @@ func StartReplicationManager(sourceKVHost string,
 	xdcrRestPort uint16, sourceKVAdminPort uint16,
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
-	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc,
 	checkpoint_svc service_def.CheckpointsService,
@@ -170,7 +168,7 @@ func StartReplicationManager(sourceKVHost string,
 		resolver_svc.Start(sourceKVHost, xdcrRestPort)
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
 			audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
 			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc, bucketTopologySvc,
@@ -448,7 +446,6 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 func (rm *replicationManager) init(
 	repl_spec_svc service_def.ReplicationSpecSvc,
 	remote_cluster_svc service_def.RemoteClusterSvc,
-	cluster_info_svc service_def.ClusterInfoSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	replication_settings_svc service_def.ReplicationSettingsSvc,
 	checkpoint_svc service_def.CheckpointsService,
@@ -469,7 +466,6 @@ func (rm *replicationManager) init(
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
 	rm.remote_cluster_svc = remote_cluster_svc
-	rm.cluster_info_svc = cluster_info_svc
 	rm.xdcr_topology_svc = xdcr_topology_svc
 	rm.replication_settings_svc = replication_settings_svc
 	rm.checkpoint_svc = checkpoint_svc
@@ -485,23 +481,21 @@ func (rm *replicationManager) init(
 	rm.bucketTopologySvc = bucketTopologySvc
 	rm.p2pMgr = p2pMgr
 
-	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc, cluster_info_svc,
+	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
 		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc,
 		rm.bucketTopologySvc, rm.p2pMgr)
 
-	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell)
+	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell)
 	rm.pipelineMgr = pipelineMgrObj
+	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
 
-	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.DefaultLoggerContext, rm.utils, rm.backfillReplSvc)
+	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.DefaultLoggerContext, rm.utils, rm.backfillReplSvc)
 	rm.resourceMgr.Start()
 
-	rm.backfillMgr = backfill_manager.NewBackfillManager(collectionsManifestSvc, repl_spec_svc, backfillReplSvc, pipelineMgrObj, cluster_info_svc, xdcr_topology_svc, checkpoint_svc, rm.bucketTopologySvc)
+	rm.backfillMgr = backfill_manager.NewBackfillManager(collectionsManifestSvc, repl_spec_svc, backfillReplSvc, pipelineMgrObj, xdcr_topology_svc, checkpoint_svc, rm.bucketTopologySvc)
 	rm.backfillMgr.Start()
-
-	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
-	securitySvc.Start()
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
@@ -514,10 +508,6 @@ func ReplicationSpecService() service_def.ReplicationSpecSvc {
 
 func RemoteClusterService() service_def.RemoteClusterSvc {
 	return replication_mgr.remote_cluster_svc
-}
-
-func ClusterInfoService() service_def.ClusterInfoSvc {
-	return replication_mgr.cluster_info_svc
 }
 
 func XDCRCompTopologyService() service_def.XDCRCompTopologySvc {

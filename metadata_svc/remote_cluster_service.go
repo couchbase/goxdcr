@@ -364,7 +364,7 @@ type RemoteClusterAgent struct {
 	// utilites service
 	utils utilities.UtilsIface
 	// for getting cluster security setting
-	clusterInfoSvc service_def.ClusterInfoSvc
+	topologySvc service_def.XDCRCompTopologySvc
 
 	// Each bucket on one remote cluster will have one centralized getter
 	bucketManifestGetters map[string]*BucketManifestGetter
@@ -435,7 +435,7 @@ func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteCl
 	}
 
 	if (ref.DemandEncryption() == false || ref.EncryptionType() != metadata.EncryptionType_Full) &&
-		agent.clusterInfoSvc.IsClusterEncryptionLevelStrict() == true {
+		agent.topologySvc.IsMyClusterEncryptionLevelStrict() == true {
 		agent.connectivityHelper.MarkEncryptionError(true)
 	} else {
 		agent.connectivityHelper.MarkEncryptionError(false)
@@ -2195,7 +2195,6 @@ type RemoteClusterService struct {
 	metakv_svc        service_def.MetadataSvc
 	uilog_svc         service_def.UILogSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
-	cluster_info_svc  service_def.ClusterInfoSvc
 	logger            *log.CommonLogger
 	// key = hostname; value = https address of hostname
 	httpsAddrMap             map[string]string
@@ -2221,14 +2220,13 @@ type RemoteClusterService struct {
 }
 
 func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc,
-	xdcr_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*RemoteClusterService, error) {
 	logger := log.NewLogger("RemClusterSvc", logger_ctx)
 	svc := &RemoteClusterService{
 		metakv_svc:           metakv_svc,
 		uilog_svc:            uilog_svc,
 		xdcr_topology_svc:    xdcr_topology_svc,
-		cluster_info_svc:     cluster_info_svc,
 		logger:               logger,
 		httpsAddrMap:         make(map[string]string),
 		utils:                utilsIn,
@@ -2631,7 +2629,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
 	}
-	if service.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+	if service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict() {
 		if ref.IsEncryptionEnabled() == false || ref.EncryptionType() != metadata.EncryptionType_Full {
 			return wrapAsInvalidRemoteClusterError(base.ErrorRemoteClusterFullEncryptionRequired.Error())
 		}
@@ -2898,7 +2896,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 		}
 	}
 
-	if service.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+	if service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict() {
 		// If source cluster is strict encryption, we cannot send anything to remote 8091 port.
 		// Sending request to 8091 without TLS will succeed if target is not strict. But we don't want to do it.
 		// Sending request to 8091 with TLS will fail if target is strict (target refuses connection) or
@@ -2947,7 +2945,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 			// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
 			// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
 			var err1 error
-			if service.cluster_info_svc.IsClusterEncryptionLevelStrict() == false {
+			if service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict() == false {
 				// This call is not encrypted. We only do it if it is not strict
 				bgRefHttpsHostName, bgExternalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
 			}
@@ -3131,7 +3129,7 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		uiLogSvc:               service.uilog_svc,
 		utils:                  service.utils,
 		logger:                 service.logger,
-		clusterInfoSvc:         service.cluster_info_svc,
+		topologySvc:            service.xdcr_topology_svc,
 		metadataChangeCallback: service.metadata_change_callback,
 		bucketRefCnt:           make(map[string]uint32),
 		bucketManifestGetters:  make(map[string]*BucketManifestGetter),

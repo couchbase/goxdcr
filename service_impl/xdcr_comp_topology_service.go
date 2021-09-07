@@ -27,14 +27,14 @@ var ErrorParsingHostInfo = errors.New("Could not parse current host info from th
 var ErrorParsingServicesInfo = errors.New("Could not parse services from the result server returned.")
 
 type XDCRTopologySvc struct {
-	adminport        uint16
-	xdcrRestPort     uint16
-	isEnterprise     bool
-	ipv4             base.IpFamilySupport
-	ipv6             base.IpFamilySupport
-	cluster_info_svc service_def.ClusterInfoSvc
-	logger           *log.CommonLogger
-	utils            utilities.UtilsIface
+	adminport    uint16
+	xdcrRestPort uint16
+	isEnterprise bool
+	ipv4         base.IpFamilySupport
+	ipv6         base.IpFamilySupport
+	securitySvc  service_def.SecuritySvc
+	logger       *log.CommonLogger
+	utils        utilities.UtilsIface
 
 	cachedNodesList      []interface{}
 	cachedNodesListErr   error
@@ -43,15 +43,15 @@ type XDCRTopologySvc struct {
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
-	isEnterprise bool, ipv4, ipv6 string, cluster_info_svc service_def.ClusterInfoSvc,
+	isEnterprise bool, ipv4, ipv6 string, securitySvc service_def.SecuritySvc,
 	logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface) (*XDCRTopologySvc, error) {
 	top_svc := &XDCRTopologySvc{
-		adminport:        adminport,
-		xdcrRestPort:     xdcrRestPort,
-		isEnterprise:     isEnterprise,
-		cluster_info_svc: cluster_info_svc,
-		logger:           log.NewLogger("TopoSvc", logger_ctx),
-		utils:            utilsIn,
+		adminport:    adminport,
+		xdcrRestPort: xdcrRestPort,
+		isEnterprise: isEnterprise,
+		securitySvc:  securitySvc,
+		logger:       log.NewLogger("TopoSvc", logger_ctx),
+		utils:        utilsIn,
 	}
 	if ipv4 == base.IpFamilyRequiredOption {
 		top_svc.ipv4 = base.IpFamilyRequired
@@ -96,7 +96,7 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 
 	hostName := base.GetHostName(hostAddr)
 
-	if top_svc.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+	if top_svc.IsMyClusterEncryptionLevelStrict() {
 		// Since we don't do encryption between local services, we have to use loopback address
 		hostName = base.LocalHostName
 		if top_svc.IsIpv4Blocked() {
@@ -359,6 +359,9 @@ func (top_svc *XDCRTopologySvc) IsMyClusterDeveloperPreview() bool {
 	}
 }
 
+func (top_svc *XDCRTopologySvc) IsMyClusterEncryptionLevelStrict() bool {
+	return top_svc.securitySvc.IsClusterEncryptionLevelStrict()
+}
 func (top_svc *XDCRTopologySvc) staticHostAddr() string {
 	return "http://" + base.GetHostAddr(top_svc.GetLocalHostName(), top_svc.adminport)
 }

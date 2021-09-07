@@ -55,7 +55,6 @@ var uprEventFile string = "../parts/testdata/perfData.bin"
 
 func setupBoilerPlate() (*log.CommonLogger,
 	*service_def.ThroughSeqnoTrackerSvc,
-	*service_def.ClusterInfoSvc,
 	*service_def.XDCRCompTopologySvc,
 	*utilities.UtilsIface,
 	map[string][]uint16,
@@ -76,7 +75,6 @@ func setupBoilerPlate() (*log.CommonLogger,
 
 	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
 	throughSeqSvc := &service_def.ThroughSeqnoTrackerSvc{}
-	clusterInfoSvc := &service_def.ClusterInfoSvc{}
 	xdcrTopologySvc := &service_def.XDCRCompTopologySvc{}
 	utils := &utilities.UtilsIface{}
 
@@ -111,14 +109,13 @@ func setupBoilerPlate() (*log.CommonLogger,
 
 	backfillReplSvc := &service_def.BackfillReplSvc{}
 
-	return testLogger, throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
+	return testLogger, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc
 }
 
 func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
-	clusterInfoSvc *service_def.ClusterInfoSvc,
 	xdcrTopologySvc *service_def.XDCRCompTopologySvc,
 	utils *utilities.UtilsIface,
 	activeVBs map[string][]uint16,
@@ -168,7 +165,6 @@ func setupCheckpointMgr(
 	capiSvc *service_def.CAPIService,
 	remoteClusterSvc *service_def.RemoteClusterSvc,
 	replSpecSvc *service_def.ReplicationSpecSvc,
-	clusterInfoSvc *service_def.ClusterInfoSvc,
 	xdcrTopologySvc *service_def.XDCRCompTopologySvc,
 	throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	activeVBs map[string][]uint16,
@@ -180,7 +176,7 @@ func setupCheckpointMgr(
 	collectionsManifestSvc *service_def.CollectionsManifestSvc,
 	backfillReplSvc *service_def.BackfillReplSvc) *CheckpointManager {
 
-	ckptManager, _ := NewCheckpointManager(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc, xdcrTopologySvc, throughSeqSvc, activeVBs, "targetUsername", "targetPassword", "targetBucketName", targetKVVbMap, remoteClusterRef, log.DefaultLoggerContext, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, nil, nil)
+	ckptManager, _ := NewCheckpointManager(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqSvc, activeVBs, "targetUsername", "targetPassword", "targetBucketName", targetKVVbMap, remoteClusterRef, log.DefaultLoggerContext, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, nil, nil)
 
 	return ckptManager
 }
@@ -188,20 +184,20 @@ func setupCheckpointMgr(
 func TestStatsMgrWithDCPCollector(t *testing.T) {
 	fmt.Println("============== Test case start: TestStatsMgrWithDCPCollector =================")
 	assert := assert.New(t)
-	_, throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc := setupBoilerPlate()
 
-	setupMocks(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil)
 	assert.NotNil(statsMgr)
 
-	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc,
+	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
 		collectionsManifestSvc, backfillReplSvc)
 	setupInnerMock(runtimeCtx, ckptManager)
@@ -321,20 +317,20 @@ var uprEventFileWithExpiration string = "../parts/testdata/uprEventExpiration.js
 func TestStatsMgrWithExpiration(t *testing.T) {
 	fmt.Println("============== Test case start: TestStatsMgrWithExpiration =================")
 	assert := assert.New(t)
-	_, throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc := setupBoilerPlate()
 
-	setupMocks(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, utils, activeVBs,
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, clusterInfoSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil)
 	assert.NotNil(statsMgr)
 
-	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc, clusterInfoSvc,
+	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
 		collectionsManifestSvc, backfillReplSvc)
 	setupInnerMock(runtimeCtx, ckptManager)

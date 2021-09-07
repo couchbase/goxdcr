@@ -46,22 +46,6 @@ func (_m *PipelineMgrInternalIface) ForceTargetRefreshManifest(spec *metadata.Re
 	return r0
 }
 
-// GetClusterInfoSvc provides a mock function with given fields:
-func (_m *PipelineMgrInternalIface) GetClusterInfoSvc() service_def.ClusterInfoSvc {
-	ret := _m.Called()
-
-	var r0 service_def.ClusterInfoSvc
-	if rf, ok := ret.Get(0).(func() service_def.ClusterInfoSvc); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(service_def.ClusterInfoSvc)
-		}
-	}
-
-	return r0
-}
-
 // GetLastUpdateResult provides a mock function with given fields: topic
 func (_m *PipelineMgrInternalIface) GetLastUpdateResult(topic string) bool {
 	ret := _m.Called(topic)

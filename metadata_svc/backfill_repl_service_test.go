@@ -26,20 +26,19 @@ import (
 	"time"
 )
 
-func setupBoilerPlateBRS() (*service_def.UILogSvc, *service_def.MetadataSvc, *service_def.XDCRCompTopologySvc, *service_def.ClusterInfoSvc, *utilsMock.UtilsIface, *service_def.ReplicationSpecSvc, *service_def.BucketTopologySvc) {
+func setupBoilerPlateBRS() (*service_def.UILogSvc, *service_def.MetadataSvc, *service_def.XDCRCompTopologySvc, *utilsMock.UtilsIface, *service_def.ReplicationSpecSvc, *service_def.BucketTopologySvc) {
 
 	uiLogSvcMock := &service_def.UILogSvc{}
 	metadataSvcMock := &service_def.MetadataSvc{}
 	xdcrTopologyMock := &service_def.XDCRCompTopologySvc{}
-	clusterInfoSvcMock := &service_def.ClusterInfoSvc{}
 	utilitiesMock := &utilsMock.UtilsIface{}
 	replSpecSvcMock := &service_def.ReplicationSpecSvc{}
 	bucketTopologySvcMock := &service_def.BucketTopologySvc{}
 
-	return uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, bucketTopologySvcMock
+	return uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, replSpecSvcMock, bucketTopologySvcMock
 }
 
-func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.MetadataSvc, xdcrTopologySvc *service_def.XDCRCompTopologySvc, clusterInfoSvc *service_def.ClusterInfoSvc, utilsIn *utilsMock.UtilsIface, replSpecSvc *service_def.ReplicationSpecSvc, startupMetadataEntries GetAllMetadataFromCatalogMockFunc, replSpecMap map[string]*metadata.ReplicationSpecification, bucketTopologySvc *service_def.BucketTopologySvc) {
+func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.MetadataSvc, xdcrTopologySvc *service_def.XDCRCompTopologySvc, utilsIn *utilsMock.UtilsIface, replSpecSvc *service_def.ReplicationSpecSvc, startupMetadataEntries GetAllMetadataFromCatalogMockFunc, replSpecMap map[string]*metadata.ReplicationSpecification, bucketTopologySvc *service_def.BucketTopologySvc) {
 
 	metadataSvc.On("GetAllMetadataFromCatalog", mock.Anything).Return(startupMetadataEntries(), nil)
 	// This is cool - it is actually returning the data we are feeding it back
@@ -58,7 +57,6 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.Meta
 		allVBs = append(allVBs, i)
 	}
 	oneNodeAllVBs["localhost"] = allVBs
-	clusterInfoSvc.On("GetLocalServerVBucketsMap", mock.Anything, mock.Anything).Return(oneNodeAllVBs, nil)
 	var kvNodes []string
 	kvNodes = append(kvNodes, "localhost")
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
@@ -84,9 +82,9 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.Meta
 
 type GetAllMetadataFromCatalogMockFunc func() []*serviceDefReal.MetadataEntry
 
-func NewBackfillReplTestSvc(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.MetadataSvc, utilsIn *utilsMock.UtilsIface, replSpecSvc *service_def.ReplicationSpecSvc, clusterInfoSvc *service_def.ClusterInfoSvc, xdcrTopologySvc *service_def.XDCRCompTopologySvc, bucketTopologySvc *service_def.BucketTopologySvc) *BackfillReplicationService {
+func NewBackfillReplTestSvc(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.MetadataSvc, utilsIn *utilsMock.UtilsIface, replSpecSvc *service_def.ReplicationSpecSvc, xdcrTopologySvc *service_def.XDCRCompTopologySvc, bucketTopologySvc *service_def.BucketTopologySvc) *BackfillReplicationService {
 
-	svc, _ := NewBackfillReplicationService(uiLogSvc, metadataSvc, log.DefaultLoggerContext, utilsIn, replSpecSvc, clusterInfoSvc, xdcrTopologySvc, bucketTopologySvc)
+	svc, _ := NewBackfillReplicationService(uiLogSvc, metadataSvc, log.DefaultLoggerContext, utilsIn, replSpecSvc, xdcrTopologySvc, bucketTopologySvc)
 
 	return svc
 }
@@ -194,7 +192,7 @@ func setupMetakvStartupLoadingExistingOne(metadataSvc *service_def.MetadataSvc, 
 func TestBackfillReplSvc(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReplSvc =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, bucketTopologySvc := setupBoilerPlateBRS()
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, replSpecSvcMock, bucketTopologySvc := setupBoilerPlateBRS()
 
 	specName := "testSpec"
 	randInternalId, _ := base.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
@@ -214,10 +212,10 @@ func TestBackfillReplSvc(t *testing.T) {
 	specMap := make(map[string]*metadata.ReplicationSpecification)
 	specMap[specName] = dummySpec
 
-	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap, bucketTopologySvc)
+	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap, bucketTopologySvc)
 	setupMetakvStartupLoadingExistingOne(metadataSvcMock, specName, randInternalId)
 
-	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, clusterInfoSvcMock, xdcrTopologyMock, bucketTopologySvc)
+	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, xdcrTopologyMock, bucketTopologySvc)
 	assert.NotNil(backfillReplSvc)
 
 	// check the backfillSpec
@@ -318,7 +316,7 @@ func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, i
 func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReplSvcAddSetDel =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, bucketTopologySvc := setupBoilerPlateBRS()
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, replSpecSvcMock, bucketTopologySvc := setupBoilerPlateBRS()
 
 	specName := "testSpec"
 	randInternalId, _ := base.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
@@ -333,10 +331,10 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	specMap := make(map[string]*metadata.ReplicationSpecification)
 	specMap[specName] = dummySpec
 
-	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap, bucketTopologySvc)
+	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap, bucketTopologySvc)
 	setupMetakvInitialAddSetDel(metadataSvcMock, specName, randInternalId, dummySpec)
 
-	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, clusterInfoSvcMock, xdcrTopologyMock, bucketTopologySvc)
+	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, xdcrTopologyMock, bucketTopologySvc)
 	assert.NotNil(backfillReplSvc)
 
 	// check the backfillSpec - should not be there
@@ -398,7 +396,7 @@ func TestBackfillMappingError(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillMappingError =================")
 	defer fmt.Println("============== Test case end: TestBackfillMappingError =================")
-	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, bucketTopologySvc := setupBoilerPlateBRS()
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, replSpecSvcMock, bucketTopologySvc := setupBoilerPlateBRS()
 
 	specName := "testSpec"
 	randInternalId, _ := base.GenerateRandomId(base.LengthOfRandomId, base.MaxRetryForRandomIdGeneration)
@@ -417,10 +415,10 @@ func TestBackfillMappingError(t *testing.T) {
 	}
 	specMap := make(map[string]*metadata.ReplicationSpecification)
 	specMap[specName] = dummySpec
-	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap, bucketTopologySvc)
+	setupMocksBRS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, utilitiesMock, replSpecSvcMock, metadataEntriesFunc, specMap, bucketTopologySvc)
 	setupMetakvUnrecoverableErr(metadataSvcMock, specName, randInternalId, nil)
 
-	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, clusterInfoSvcMock, xdcrTopologyMock, bucketTopologySvc)
+	backfillReplSvc := NewBackfillReplTestSvc(uiLogSvcMock, metadataSvcMock, utilitiesMock, replSpecSvcMock, xdcrTopologyMock, bucketTopologySvc)
 	assert.NotNil(backfillReplSvc)
 	backfillReplSvc.completeBackfillCbMtx.Lock()
 	var completeCbCnt uint32

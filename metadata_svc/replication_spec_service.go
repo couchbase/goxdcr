@@ -133,7 +133,6 @@ type ReplicationSpecService struct {
 	metadata_svc           service_def.MetadataSvc
 	uilog_svc              service_def.UILogSvc
 	remote_cluster_svc     service_def.RemoteClusterSvc
-	cluster_info_svc       service_def.ClusterInfoSvc
 	resolver_svc           service_def.ResolverSvcIface
 	cache                  *MetadataCache
 	cache_lock             *sync.Mutex
@@ -154,7 +153,7 @@ type ReplicationSpecService struct {
 }
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc,
-	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, cluster_info_svc service_def.ClusterInfoSvc,
+	metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc,
 	resolver_svc service_def.ResolverSvcIface,
 	logger_ctx *log.LoggerContext, utilities_in utilities.UtilsIface) (*ReplicationSpecService, error) {
 	logger := log.NewLogger("ReplSpecSvc", logger_ctx)
@@ -163,7 +162,6 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		uilog_svc:              uilog_svc,
 		remote_cluster_svc:     remote_cluster_svc,
 		xdcr_comp_topology_svc: xdcr_comp_topology_svc,
-		cluster_info_svc:       cluster_info_svc,
 		resolver_svc:           resolver_svc,
 		cache:                  nil,
 		cache_lock:             &sync.Mutex{},

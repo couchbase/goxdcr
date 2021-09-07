@@ -73,9 +73,6 @@ type CheckpointManager struct {
 	//replication specification service
 	rep_spec_svc service_def.ReplicationSpecSvc
 
-	//cluster info service
-	cluster_info_svc service_def.ClusterInfoSvc
-
 	//xdcr topology service
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
 
@@ -269,7 +266,7 @@ type brokenMappingWithLock struct {
 
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
 	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc,
-	cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc,
+	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, active_vbs map[string][]uint16, target_username,
 	target_password, target_bucket_name string, target_kv_vb_map base.KvVBMapType,
 	target_cluster_ref *metadata.RemoteClusterReference, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface,
@@ -277,7 +274,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc,
 	getBackfillMgr func() service_def.BackfillMgrIface,
 	bucketTopologySvc service_def.BucketTopologySvc) (*CheckpointManager, error) {
-	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || cluster_info_svc == nil || xdcr_topology_svc == nil {
+	if checkpoints_svc == nil || capi_svc == nil || remote_cluster_svc == nil || rep_spec_svc == nil || xdcr_topology_svc == nil {
 		return nil, errors.New("checkpoints_svc, capi_svc, remote_cluster_svc, rep_spec_svc, cluster_info_svc and xdcr_topology_svc can't be nil")
 	}
 	logger := log.NewLogger("CheckpointMgr", logger_ctx)
@@ -289,7 +286,6 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		capi_svc:                  capi_svc,
 		rep_spec_svc:              rep_spec_svc,
 		remote_cluster_svc:        remote_cluster_svc,
-		cluster_info_svc:          cluster_info_svc,
 		xdcr_topology_svc:         xdcr_topology_svc,
 		through_seqno_tracker_svc: through_seqno_tracker_svc,
 		finish_ch:                 make(chan bool, 1),
@@ -425,7 +421,7 @@ func (ckmgr *CheckpointManager) clearBackfillStartingTsIfNeeded(vbno uint16, rol
 func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipeline) error {
 	spec := pipeline.Specification().GetReplicationSpec()
 
-	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name(), spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.cluster_info_svc, ckmgr.logger, ckmgr.utils)
+	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name(), spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.logger, ckmgr.utils)
 	if err != nil {
 		return err
 	}

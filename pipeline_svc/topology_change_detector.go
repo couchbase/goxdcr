@@ -33,7 +33,6 @@ type TopologyChangeDetectorSvc struct {
 
 	//xdcr topology service
 	xdcr_topology_svc  service_def.XDCRCompTopologySvc
-	cluster_info_svc   service_def.ClusterInfoSvc
 	remote_cluster_svc service_def.RemoteClusterSvc
 	repl_spec_svc      service_def.ReplicationSpecSvc
 	logger             *log.CommonLogger
@@ -81,10 +80,9 @@ type TopologyChangeDetectorSvc struct {
 	bucketTopologySvc service_def.BucketTopologySvc
 }
 
-func NewTopologyChangeDetectorSvc(cluster_info_svc service_def.ClusterInfoSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc) *TopologyChangeDetectorSvc {
+func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
-		cluster_info_svc:   cluster_info_svc,
 		remote_cluster_svc: remote_cluster_svc,
 		repl_spec_svc:      repl_spec_svc,
 		AbstractComponent:  comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),

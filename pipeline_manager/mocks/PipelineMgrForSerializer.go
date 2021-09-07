@@ -32,13 +32,13 @@ func (_m *PipelineMgrForSerializer) AutoPauseReplication(topic string) error {
 	return r0
 }
 
-// BackfillMappingUpdate provides a mock function with given fields: topic, diffPair
+// BackfillMappingUpdate provides a mock function with given fields: topic, diffPair, srcManifestsDelta
 func (_m *PipelineMgrForSerializer) BackfillMappingUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
-	ret := _m.Called(topic, diffPair)
+	ret := _m.Called(topic, diffPair, srcManifestsDelta)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair) error); ok {
-		r0 = rf(topic, diffPair)
+	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
+		r0 = rf(topic, diffPair, srcManifestsDelta)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -97,22 +97,6 @@ func (_m *PipelineMgrForSerializer) ForceTargetRefreshManifest(spec *metadata.Re
 		r0 = rf(spec)
 	} else {
 		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// GetClusterInfoSvc provides a mock function with given fields:
-func (_m *PipelineMgrForSerializer) GetClusterInfoSvc() service_def.ClusterInfoSvc {
-	ret := _m.Called()
-
-	var r0 service_def.ClusterInfoSvc
-	if rf, ok := ret.Get(0).(func() service_def.ClusterInfoSvc); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(service_def.ClusterInfoSvc)
-		}
 	}
 
 	return r0

@@ -25,6 +25,8 @@ type EncryptionSetting struct {
 	StrictEncryption bool // This disables non SSL port and remote cluster ref must use full encryption
 	TlsConfig        cbauth.TLSConfig
 	certificates     [][]byte
+	initializer      sync.Once
+	initializedCh    chan bool
 }
 
 func (setting *EncryptionSetting) IsStrictEncryption() bool {
@@ -42,6 +44,9 @@ type SecurityService struct {
 
 func NewSecurityService(certFile string, logger_ctx *log.LoggerContext) *SecurityService {
 	return &SecurityService{
+		encrytionSetting: EncryptionSetting{
+			initializedCh: make(chan bool),
+		},
 		securityChangeCallbacks: make(map[string]service_def.SecChangeCallback),
 		settingMtx:              sync.RWMutex{},
 		callbackMtx:             sync.RWMutex{},
@@ -62,6 +67,7 @@ func (sec *SecurityService) getEncryptionSetting() EncryptionSetting {
 }
 
 func (sec *SecurityService) GetCertificates() [][]byte {
+	<-sec.encrytionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
 	certificates := sec.encrytionSetting.certificates
@@ -72,12 +78,14 @@ func (sec *SecurityService) GetCertificates() [][]byte {
 }
 
 func (sec *SecurityService) IsClusterEncryptionLevelStrict() bool {
+	<-sec.encrytionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
 	return sec.encrytionSetting.IsStrictEncryption()
 }
 
 func (sec *SecurityService) EncryptData() bool {
+	<-sec.encrytionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
 	return sec.encrytionSetting.EncrytionEabled
@@ -185,6 +193,9 @@ func (sec *SecurityService) refresh(code uint64) error {
 			return err
 		}
 	}
+	sec.encrytionSetting.initializer.Do(func() {
+		close(sec.encrytionSetting.initializedCh)
+	})
 	newSetting := sec.getEncryptionSetting()
 	sec.callbackMtx.RLock()
 	defer sec.callbackMtx.RUnlock()
