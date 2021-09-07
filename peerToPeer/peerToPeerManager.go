@@ -243,7 +243,7 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 
 				handlerResult, p2pSendErr := p.commAPI.P2PSend(compiledReq)
 				if p2pSendErr != nil {
-					p.logger.Errorf("P2PSend %v resulted in %v", compiledReq, p2pSendErr)
+					p.logger.Errorf("P2PSend resulted in %v", p2pSendErr)
 					errMapMtx.Lock()
 					errMap[peerAddr] = p2pSendErr
 					errMapMtx.Unlock()

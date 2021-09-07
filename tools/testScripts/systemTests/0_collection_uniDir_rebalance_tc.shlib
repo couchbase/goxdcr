@@ -89,13 +89,13 @@ function runOneReplicationCycle {
 	grepForPanics
 
 	pauseReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 10 seconds for pipeline to really pause"
-	sleep 10
+	echo "Waiting 20 seconds for pipeline to really pause"
+	sleep 20
 	grepForPanics
 
 	resumeReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 10 seconds for resume to finish"
-	sleep 10
+	echo "Waiting 20 seconds for resume to finish"
+	sleep 20
 	grepForPanics
 
 	checkUnidirectionalChangesLeft
