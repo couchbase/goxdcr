@@ -891,7 +891,7 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	vbsReq := make(peerToPeer.BucketVBMapType)
 	vbsReq[srcBucketName] = sourceVBs
 
-	xdcrf.logger.Infof("Running VBMasterCheck for bucket %v", srcBucketName)
+	xdcrf.logger.Infof("Running VBMasterCheck for %v", pipeline.FullTopic())
 	respMap, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)
 	if err != nil {
 		// Should still return response to see if others can merge it

@@ -383,19 +383,12 @@ func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap)
 	// resp is potentially nil if checkFunc failed above
 	if resp != nil {
 		err = genericPipeline.mergeCkptFunc(genericPipeline, resp)
-		if err != nil {
+		// If error returned is ErrorNoBackfillNeeded, then it's considered not an error
+		if err != nil && err != base.ErrorNoBackfillNeeded {
 			errMap[MergeCkptFuncKey] = err
 		}
 	}
 
-	if len(errMap) == 1 && errMap.HasError(base.ErrorNoBackfillNeeded) {
-		if genericPipeline.Type() == common.MainPipeline {
-			// Main pipeline should continue to execute
-			genericPipeline.logger.Infof("Pipeline %v will continue to run because the only error is %v",
-				genericPipeline.Topic(), base.ErrorNoBackfillNeeded)
-			errMap = nil
-		}
-	}
 	if len(errMap) > 1 {
 		return fmt.Errorf(base.FlattenErrorMap(errMap))
 	}
