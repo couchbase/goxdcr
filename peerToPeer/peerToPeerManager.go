@@ -207,9 +207,9 @@ func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 }
 
 func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts) error {
-	peers, myHost, err := p.getSendPreReq()
-	if err != nil {
-		return err
+	peers, myHost, getPreReqErr := p.getSendPreReq()
+	if getPreReqErr != nil {
+		return getPreReqErr
 	}
 
 	peersToRetry := make(map[string]bool)
@@ -224,17 +224,16 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 
 		var errMapMtx sync.RWMutex
 		errMap := make(base.ErrorMap)
-		var err error
 		for peerAddrTransient, _ := range peersToRetry {
 			peerAddr := peerAddrTransient
 			waitGrp.Add(1)
 			go func() {
 				defer waitGrp.Done()
 				compiledReq := getReqFunc(myHost, peerAddr)
-				err = p.receiveHandlers[opCode].RegisterOpaque(compiledReq, cbOpts)
-				if err != nil {
+				registerOpaqueErr := p.receiveHandlers[opCode].RegisterOpaque(compiledReq, cbOpts)
+				if registerOpaqueErr != nil {
 					errMapMtx.Lock()
-					errMap[peerAddr] = err
+					errMap[peerAddr] = registerOpaqueErr
 					errMapMtx.Unlock()
 					peersToRetryMtx.Lock()
 					peersToRetryReplacement[peerAddr] = true
@@ -242,11 +241,11 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 					return
 				}
 
-				handlerResult, err := p.commAPI.P2PSend(compiledReq)
-				if err != nil {
-					p.logger.Errorf("P2PSend %v resulted in %v", compiledReq, err)
+				handlerResult, p2pSendErr := p.commAPI.P2PSend(compiledReq)
+				if p2pSendErr != nil {
+					p.logger.Errorf("P2PSend %v resulted in %v", compiledReq, p2pSendErr)
 					errMapMtx.Lock()
-					errMap[peerAddr] = err
+					errMap[peerAddr] = p2pSendErr
 					errMapMtx.Unlock()
 					peersToRetryMtx.Lock()
 					peersToRetryReplacement[peerAddr] = true
@@ -276,7 +275,7 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 		}
 	}
 
-	err = p.utils.ExponentialBackoffExecutor(fmt.Sprintf("sendPeerToPeerReq(%v)", opCode.String()),
+	err := p.utils.ExponentialBackoffExecutor(fmt.Sprintf("sendPeerToPeerReq(%v)", opCode.String()),
 		base.PeerToPeerRetryWaitTime, base.PeerToPeerMaxRetry, base.PeerToPeerRetryFactor, retryOp)
 	if err != nil {
 		p.logger.Errorf("Unable to send %v to some or all the nodes... %v", opCode.String(), err)

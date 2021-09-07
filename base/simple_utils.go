@@ -871,7 +871,11 @@ func FlattenErrorMap(errMap ErrorMap) string {
 		}
 		buffer.WriteString(k)
 		buffer.WriteString(" : ")
-		buffer.WriteString(v.Error())
+		if v == nil {
+			buffer.WriteString("nil")
+		} else {
+			buffer.WriteString(v.Error())
+		}
 	}
 	return buffer.String()
 }
