@@ -21,7 +21,7 @@ import (
 )
 
 type EncryptionSetting struct {
-	EncrytionEabled  bool
+	EncrytionEnabled bool
 	StrictEncryption bool // This disables non SSL port and remote cluster ref must use full encryption
 	TlsConfig        cbauth.TLSConfig
 	certificates     [][]byte
@@ -38,11 +38,11 @@ type SecurityService struct {
 	securityChangeCallbacks map[string]service_def.SecChangeCallback
 	settingMtx              sync.RWMutex
 	callbackMtx             sync.RWMutex
-	certFile                string
+	caFile                  string
 	logger                  *log.CommonLogger
 }
 
-func NewSecurityService(certFile string, logger_ctx *log.LoggerContext) *SecurityService {
+func NewSecurityService(caFile string, logger_ctx *log.LoggerContext) *SecurityService {
 	return &SecurityService{
 		encrytionSetting: EncryptionSetting{
 			initializedCh: make(chan bool),
@@ -50,14 +50,14 @@ func NewSecurityService(certFile string, logger_ctx *log.LoggerContext) *Securit
 		securityChangeCallbacks: make(map[string]service_def.SecChangeCallback),
 		settingMtx:              sync.RWMutex{},
 		callbackMtx:             sync.RWMutex{},
-		certFile:                certFile,
+		caFile:                  caFile,
 		logger:                  log.NewLogger("SecuritySvc", logger_ctx),
 	}
 }
 
 func (sec *SecurityService) Start() {
 	cbauth.RegisterConfigRefreshCallback(sec.refresh)
-	sec.logger.Infof("Security service started.")
+	sec.logger.Infof("Security service started. Waiting for security context to be initialized")
 }
 
 func (sec *SecurityService) getEncryptionSetting() EncryptionSetting {
@@ -88,7 +88,7 @@ func (sec *SecurityService) EncryptData() bool {
 	<-sec.encrytionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	return sec.encrytionSetting.EncrytionEabled
+	return sec.encrytionSetting.EncrytionEnabled
 }
 func (sec *SecurityService) refreshClusterEncryption() error {
 	clusterSetting, err := cbauth.GetClusterEncryptionConfig()
@@ -99,9 +99,9 @@ func (sec *SecurityService) refreshClusterEncryption() error {
 
 	sec.settingMtx.Lock()
 	defer sec.settingMtx.Unlock()
-	sec.encrytionSetting.EncrytionEabled = clusterSetting.EncryptData
+	sec.encrytionSetting.EncrytionEnabled = clusterSetting.EncryptData
 	sec.encrytionSetting.StrictEncryption = clusterSetting.DisableNonSSLPorts
-	sec.logger.Infof("Cluster Encryption is changed to enabled=%v, strict=%v", sec.encrytionSetting.EncrytionEabled, sec.encrytionSetting.StrictEncryption)
+	sec.logger.Infof("Cluster Encryption is changed to enabled=%v, strict=%v", sec.encrytionSetting.EncrytionEnabled, sec.encrytionSetting.StrictEncryption)
 	return nil
 }
 
@@ -122,11 +122,15 @@ func (sec *SecurityService) refreshTLSConfig() error {
 }
 
 func (sec *SecurityService) refreshCert() error {
-	if len(sec.certFile) == 0 {
+	if sec.encrytionSetting.EncrytionEnabled == false {
+		// no need to read certificate. In case of CE, the certificate files do not exist
+		return nil
+	}
+	if len(sec.caFile) == 0 {
 		sec.logger.Warnf("Certificate location is missing. Cannot refresh certificate.")
 		return nil
 	}
-	certPEMBlock, err := ioutil.ReadFile(sec.certFile)
+	certPEMBlock, err := ioutil.ReadFile(sec.caFile)
 	if err != nil {
 		return err
 	}
@@ -174,6 +178,15 @@ func (sec *SecurityService) refresh(code uint64) error {
 	sec.logger.Infof("Received security change notification. code %v", code)
 	oldSetting := sec.getEncryptionSetting()
 
+	// Update encryption level first.
+	if code&cbauth.CFG_CHANGE_CLUSTER_ENCRYPTION != 0 {
+		err := sec.refreshClusterEncryption()
+		if err != nil {
+			sec.logger.Error(err.Error())
+			return err
+		}
+	}
+
 	if code&cbauth.CFG_CHANGE_CERTS_TLSCONFIG != 0 {
 		if err := sec.refreshTLSConfig(); err != nil {
 			sec.logger.Error(err.Error())
@@ -186,15 +199,9 @@ func (sec *SecurityService) refresh(code uint64) error {
 		}
 	}
 
-	if code&cbauth.CFG_CHANGE_CLUSTER_ENCRYPTION != 0 {
-		err := sec.refreshClusterEncryption()
-		if err != nil {
-			sec.logger.Error(err.Error())
-			return err
-		}
-	}
 	sec.encrytionSetting.initializer.Do(func() {
 		close(sec.encrytionSetting.initializedCh)
+		sec.logger.Infof("Security context is initialized.")
 	})
 	newSetting := sec.getEncryptionSetting()
 	sec.callbackMtx.RLock()
