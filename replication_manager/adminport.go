@@ -397,7 +397,7 @@ func (adminport *Adminport) doCreateRemoteClusterRequest(request *http.Request) 
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
 			go writeRemoteClusterAuditEvent(service_def.CreateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
-
+			go writeRemoteClusterSystemEvent(service_def.CreateRemoteClusterRefSystemEventId, remoteClusterRef)
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
 	}
@@ -444,7 +444,7 @@ func (adminport *Adminport) doChangeRemoteClusterRequest(request *http.Request) 
 			return EncodeRemoteClusterErrorIntoResponse(err)
 		} else {
 			go writeRemoteClusterAuditEvent(service_def.UpdateRemoteClusterRefEventId, remoteClusterRef, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
-
+			go writeRemoteClusterSystemEvent(service_def.UpdateRemoteClusterRefSystemEventId, remoteClusterRef)
 			return NewCreateRemoteClusterResponse(remoteClusterRef)
 		}
 	}
@@ -494,6 +494,7 @@ func (adminport *Adminport) doDeleteRemoteClusterRequest(request *http.Request) 
 	}
 
 	go writeRemoteClusterAuditEvent(service_def.DeleteRemoteClusterRefEventId, ref, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
+	go writeRemoteClusterSystemEvent(service_def.DeleteRemoteClusterRefSystemEventId, ref)
 
 	return NewOKResponse()
 }
@@ -1018,6 +1019,21 @@ func authWebCredsForReplication(request *http.Request, replicationId string, per
 
 func constructBucketPermission(bucketName, suffix string) string {
 	return base.PermissionBucketPrefix + bucketName + suffix
+}
+
+func writeRemoteClusterSystemEvent(eventId service_def.EventIdType, ref *metadata.RemoteClusterReference) {
+	var encryptionType string
+	if ref.DemandEncryption() {
+		encryptionType = ref.EncryptionType()
+	} else {
+		encryptionType = "plain"
+	}
+	args := make(map[string]string)
+	args[base.RemoteClusterName] = ref.Name()
+	args[base.RemoteClusterHostName] = ref.HostName()
+	args[base.RemoteClusterUuid] = ref.Uuid()
+	args[base.RemoteClusterEncryptionType] = encryptionType
+	EventlogService().WriteEvent(eventId, args)
 }
 
 func writeRemoteClusterAuditEvent(eventId uint32, remoteClusterRef *metadata.RemoteClusterReference, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) {

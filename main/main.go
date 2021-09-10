@@ -195,6 +195,7 @@ func main() {
 		}
 	} else {
 		uilog_svc := service_impl.NewUILogSvc(top_svc, nil, utils)
+		eventlog_svc := service_impl.NewEventLog(top_svc, utils, nil)
 		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, nil, utils)
 		if err != nil {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
@@ -253,6 +254,7 @@ func main() {
 			service_impl.NewCAPIService(nil, utils),
 			audit_svc,
 			uilog_svc,
+			eventlog_svc,
 			processSetting_svc,
 			bucketSettings_svc,
 			internalSettings_svc,

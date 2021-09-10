@@ -668,6 +668,10 @@ func (iscl *InternalSettingsChangeListener) internalSettingsChangeHandlerCallbac
 		var waitGrp sync.WaitGroup
 		for _, rep_status := range replication_mgr.pipelineMgr.ReplicationStatusMap() {
 			pipeline := rep_status.Pipeline()
+			if pipeline == nil {
+				continue
+			}
+
 			ckpt_mgr := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
 			if ckpt_mgr == nil {
 				iscl.logger.Infof("CheckpointingManager has not been attached to pipeline %v", pipeline.Topic())

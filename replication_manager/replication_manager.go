@@ -89,7 +89,8 @@ type replicationManager struct {
 	//capi service handle
 	capi_svc service_def.CAPIService
 	//audit service handle
-	audit_svc service_def.AuditSvc
+	audit_svc    service_def.AuditSvc
+	eventlog_svc service_def.EventLogSvc
 	//global setting service
 	global_setting_svc service_def.GlobalSettingsSvc
 	//bucket settings service
@@ -142,6 +143,7 @@ func StartReplicationManager(sourceKVHost string,
 	capi_svc service_def.CAPIService,
 	audit_svc service_def.AuditSvc,
 	uilog_svc service_def.UILogSvc,
+	eventlog_svc service_def.EventLogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
@@ -170,7 +172,7 @@ func StartReplicationManager(sourceKVHost string,
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
-			audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
+			audit_svc, uilog_svc, eventlog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
 			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc, bucketTopologySvc,
 			securitySvc, p2pMgr)
 
@@ -452,6 +454,7 @@ func (rm *replicationManager) init(
 	capi_svc service_def.CAPIService,
 	audit_svc service_def.AuditSvc,
 	uilog_svc service_def.UILogSvc,
+	eventlog_svc service_def.EventLogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
@@ -471,6 +474,7 @@ func (rm *replicationManager) init(
 	rm.checkpoint_svc = checkpoint_svc
 	rm.capi_svc = capi_svc
 	rm.audit_svc = audit_svc
+	rm.eventlog_svc = eventlog_svc
 	rm.adminport_finch = make(chan bool, 1)
 	rm.children_waitgrp = &sync.WaitGroup{}
 	rm.global_setting_svc = global_setting_svc
@@ -525,6 +529,10 @@ func AuditService() service_def.AuditSvc {
 	return replication_mgr.audit_svc
 }
 
+func EventlogService() service_def.EventLogSvc {
+	return replication_mgr.eventlog_svc
+}
+
 func GlobalSettingsService() service_def.GlobalSettingsSvc {
 	return replication_mgr.global_setting_svc
 }
@@ -565,6 +573,7 @@ func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBuc
 	}
 
 	go writeCreateReplicationEvent(spec, realUserId, ips)
+	go writeReplicationSystemEvent(service_def.CreateReplicationSystemEventId, spec, targetCluster)
 
 	logger_rm.Infof("Replication specification %s is created\n", spec.Id)
 
@@ -586,6 +595,7 @@ func DeleteReplication(topic string, realUserId *service_def.RealUserId, ips *se
 	}
 
 	go writeGenericReplicationEvent(service_def.CancelReplicationEventId, spec, realUserId, ips)
+	go writeReplicationSystemEvent(service_def.DeleteReplicationSystemEventId, spec, "")
 
 	logger_rm.Infof("Pipeline %s is deleted\n", topic)
 
@@ -619,6 +629,7 @@ func UpdateDefaultSettings(settings metadata.ReplicationSettingsMap, realUserId 
 		}
 		if len(changedSettingsMap) != 0 {
 			go writeUpdateDefaultReplicationSettingsEvent(&changedSettingsMap, realUserId, ips)
+			go writeUpdateDefaultReplicationSettingsSystemEvent(&changedSettingsMap)
 		}
 		logger_rm.Infof("Updated default replication settings\n")
 	} else {
@@ -710,14 +721,18 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 		logger_rm.Infof("Updated replication settings for replication %v\n", topic)
 
 		go writeUpdateReplicationSettingsEvent(replSpec, &changedSettingsMap, realUserId, ips)
+		go writeUpdateReplicationSettingsSystemEvent(replSpec, &changedSettingsMap)
 
 		// if the active flag has been changed, log Pause/ResumeReplication event
 		active, ok := changedSettingsMap[metadata.ActiveKey]
 		if ok {
 			if active.(bool) {
 				go writeGenericReplicationEvent(service_def.ResumeReplicationEventId, replSpec, realUserId, ips)
+				go writeReplicationSystemEvent(service_def.ResumeReplicationSystemEventId, replSpec, "")
+
 			} else {
 				go writeGenericReplicationEvent(service_def.PauseReplicationEventId, replSpec, realUserId, ips)
+				go writeReplicationSystemEvent(service_def.PauseReplicationSystemEventId, replSpec, "")
 			}
 		}
 		logger_rm.Infof("Done with replication settings auditing for replication %v\n", topic)
@@ -1129,6 +1144,54 @@ func exitProcess_once(byForce bool) {
 	}
 }
 
+// System event log
+func writeReplicationSystemEvent(eventId service_def.EventIdType, spec *metadata.ReplicationSpecification, remoteClusterName string) {
+	args := make(map[string]string)
+	args[service_def.SourceBucketKey] = spec.SourceBucketName
+	args[service_def.TargetBucketKey] = spec.TargetBucketName
+	args[ReplicationId] = spec.GetFullId()
+	if remoteClusterName == "" {
+		res := metadata.DecomposeReplicationId(spec.GetFullId(), nil)
+		targetClusterUuid := res.TargetClusterUUID
+		remoteClusterName = RemoteClusterService().GetRemoteClusterNameFromClusterUuid(targetClusterUuid)
+	}
+	args[service_def.RemoteClusterKey] = remoteClusterName
+	if len(spec.Settings.FilterExpression) == 0 {
+		args[metadata.FilterExpressionKey] = strconv.FormatBool(false)
+	} else {
+		args[metadata.FilterExpressionKey] = strconv.FormatBool(true)
+	}
+	EventlogService().WriteEvent(eventId, args)
+}
+
+func writeUpdateDefaultReplicationSettingsSystemEvent(changedSettingsMap *metadata.ReplicationSettingsMap) {
+	args := make(map[string]string)
+	for key, value := range *changedSettingsMap {
+		args[key] = fmt.Sprintf("%v", value)
+	}
+	EventlogService().WriteEvent(service_def.UpdateDefaultReplicationSettingSystemEventId, args)
+}
+
+func writeUpdateReplicationSettingsSystemEvent(spec *metadata.ReplicationSpecification, changedSettingsMap *metadata.ReplicationSettingsMap) {
+	args := make(map[string]string)
+	args[service_def.SourceBucketKey] = spec.SourceBucketName
+	args[service_def.TargetBucketKey] = spec.TargetBucketName
+	args[ReplicationId] = spec.GetFullId()
+	for key, value := range *changedSettingsMap {
+		if key == metadata.FilterExpressionKey {
+			// Filter expression is considered sensitive data. So log "true" to indicate it exists
+			args[key] = strconv.FormatBool(true)
+		} else if key == metadata.CollectionsMappingRulesKey && value.(metadata.CollectionsMappingRulesType).IsExplicitMigrationRule() == false {
+			args[key] = strconv.FormatBool(true)
+		} else {
+			args[key] = fmt.Sprintf("%v", value)
+		}
+
+	}
+	EventlogService().WriteEvent(service_def.UpdateReplicationSettingSystemEventId, args)
+}
+
+// Audit log events
 func writeGenericReplicationEvent(eventId uint32, spec *metadata.ReplicationSpecification, realUserId *service_def.RealUserId, localRemoteIps *service_def.LocalRemoteIPs) {
 	event, err := constructGenericReplicationEvent(spec, realUserId, localRemoteIps)
 	if err == nil {
