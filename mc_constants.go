@@ -91,6 +91,7 @@ const (
 	UPR_BUFFERACK   = CommandCode(0x5d) // UPR Buffer Acknowledgement
 	UPR_CONTROL     = CommandCode(0x5e) // Set flow control params
 
+	GET_REPLICA   = CommandCode(0x83) // Get from replica
 	SELECT_BUCKET = CommandCode(0x89) // Select bucket
 
 	OBSERVE_SEQNO = CommandCode(0x91) // Sequence Number based Observe

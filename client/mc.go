@@ -55,6 +55,7 @@ type ClientIface interface {
 	SetKeepAliveOptions(interval time.Duration)
 	SetReadDeadline(t time.Time)
 	SetDeadline(t time.Time)
+	SetReplica(r bool)
 	SelectBucket(bucket string) (*gomemcached.MCResponse, error)
 	SetCas(vb uint16, key string, flags int, exp int, cas uint64, body []byte, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	Stats(key string) ([]StatValue, error)
@@ -174,6 +175,7 @@ type Client struct {
 
 	collectionsEnabled uint32
 	enabledFeatures    map[Feature]bool
+	replica            bool
 	deadline           time.Time
 	bucket             string
 }
@@ -518,10 +520,14 @@ func (c *Client) setVbSeqnoContext(req *gomemcached.MCRequest, context ...*Clien
 // Get the value for a key.
 func (c *Client) Get(vb uint16, key string, context ...*ClientContext) (*gomemcached.MCResponse, error) {
 	req := &gomemcached.MCRequest{
-		Opcode:  gomemcached.GET,
 		VBucket: vb,
 		Key:     []byte(key),
 		Opaque:  c.getOpaque(),
+	}
+	if c.replica {
+		req.Opcode = gomemcached.GET_REPLICA
+	} else {
+		req.Opcode = gomemcached.GET
 	}
 	err := c.setContext(req, context...)
 	if err != nil {
@@ -761,6 +767,11 @@ func (c *Client) LastBucket() string {
 	return c.bucket
 }
 
+// Read from replica setting
+func (c *Client) SetReplica(r bool) {
+	c.replica = r
+}
+
 func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
 	key string, flags int, exp int, body []byte, context ...*ClientContext) (*gomemcached.MCResponse, error) {
 	req := &gomemcached.MCRequest{
@@ -931,6 +942,7 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 					}
 					// continue receiving in case of KEY_ENOENT
 				} else if res.Opcode == gomemcached.GET ||
+					res.Opcode == gomemcached.GET_REPLICA ||
 					res.Opcode == gomemcached.SUBDOC_GET ||
 					res.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP {
 					opaque := res.Opaque - opStart
@@ -954,8 +966,12 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 	}()
 
 	memcachedReqPkt := &gomemcached.MCRequest{
-		Opcode:  gomemcached.GET,
 		VBucket: vb,
+	}
+	if c.replica {
+		memcachedReqPkt.Opcode = gomemcached.GET_REPLICA
+	} else {
+		memcachedReqPkt.Opcode = gomemcached.GET
 	}
 	err := c.setContext(memcachedReqPkt, context...)
 	if err != nil {
