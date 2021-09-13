@@ -900,6 +900,20 @@ func (c *Client) Append(vb uint16, key string, data []byte, context ...*ClientCo
 
 // GetBulk gets keys in bulk
 func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MCResponse, subPaths []string, context ...*ClientContext) error {
+	if len(keys) == 1 && len(subPaths) == 0 {
+		res, err := c.Get(vb, keys[0], context...)
+		if res != nil {
+			if res.Status == gomemcached.SUCCESS {
+				rv[keys[0]] = res
+			} else if res.Status == gomemcached.KEY_ENOENT {
+
+				// GetBulk never returns a ENOENT
+				err = nil
+			}
+		}
+		return err
+	}
+
 	stopch := make(chan bool)
 	var wg sync.WaitGroup
 
