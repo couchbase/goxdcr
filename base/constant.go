@@ -799,6 +799,7 @@ var MaxRetryForLiveUpdatePipeline = 5
 var WaitTimeForLiveUpdatePipeline = 2000 * time.Millisecond
 
 // interval for replication spec validity check (seconds)
+// This should be *less* than statsInterval, otherwise it may trigger too many timer resets
 var ReplSpecCheckInterval = 15 * time.Second
 
 // interval for mem stats logging (seconds)

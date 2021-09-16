@@ -1271,7 +1271,7 @@ func (bw *BucketTopologySvcWatcher) unregisterCh(spec *metadata.ReplicationSpeci
 	case HIGHSEQNOSLEGACY:
 		specifiedChs = bw.highSeqnosLegacyChs
 		mutex = &bw.highSeqnosLegacyChsMtx
-		bw.cleanupHighSeqnosInternalData(spec, subscriberId, false)
+		bw.cleanupHighSeqnosInternalData(spec, subscriberId, true)
 	default:
 		panic(fmt.Sprintf("Unknown type %v", chType))
 	}
@@ -1352,10 +1352,37 @@ func (bw *BucketTopologySvcWatcher) setHighSeqnosInterval(opts HighSeqnosOpts, l
 	}
 	mtx.Unlock()
 
+	bw.setWatchersTickerIfNecessary(opts.Spec.Id, shortestInterval, chType)
+}
+
+func (bw *BucketTopologySvcWatcher) setWatchersTickerIfNecessary(specId string, shortestInterval time.Duration, chType string) {
 	bw.watchersTickersMapMtx.RLock()
-	bw.watchersTickersMap[chType].Reset(shortestInterval)
-	bw.logger.Infof("spec %v Setting overall ticker for %v to %v", opts.Spec.Id, chType, shortestInterval)
-	bw.watchersTickersMapMtx.RUnlock()
+	defer bw.watchersTickersMapMtx.RUnlock()
+
+	if shortestInterval < bw.watchersTickersValueMap[chType] {
+		bw.watchersTickersMapMtx.RUnlock()
+		bw.watchersTickersMapMtx.Lock()
+
+		// Check again
+		if shortestInterval < bw.watchersTickersValueMap[chType] {
+			bw.watchersTickersValueMap[chType] = shortestInterval
+			bw.watchersTickersMap[chType].Reset(shortestInterval)
+			bw.logger.Infof("spec %v Setting overall ticker for %v to %v", specId, chType, shortestInterval)
+		}
+
+		bw.watchersTickersMapMtx.Unlock()
+		bw.watchersTickersMapMtx.RLock()
+	}
+}
+
+// Called when a subscriber has unsubscribed and its lowest value no longer applies
+func (bw *BucketTopologySvcWatcher) setWatchersTickerAfterUnsubscribe(specId string, newShortestInterval time.Duration, chType string) {
+	bw.watchersTickersMapMtx.Lock()
+	defer bw.watchersTickersMapMtx.Unlock()
+
+	bw.watchersTickersValueMap[chType] = newShortestInterval
+	bw.watchersTickersMap[chType].Reset(newShortestInterval)
+	bw.logger.Infof("spec %v Setting overall ticker for %v to %v", specId, chType, newShortestInterval)
 }
 
 func (bw *BucketTopologySvcWatcher) shouldSendToCh(name string, updateType string) bool {
@@ -1444,10 +1471,7 @@ func (bw *BucketTopologySvcWatcher) cleanupHighSeqnosInternalData(spec *metadata
 	mtx.Unlock()
 
 	if shortestIntervalAfterRemoval != 0 && shortestIntervalBeforeRemoval != shortestIntervalAfterRemoval {
-		bw.watchersTickersMapMtx.RLock()
-		bw.watchersTickersMap[chType].Reset(shortestIntervalAfterRemoval)
-		bw.logger.Infof("spec %v Setting overall ticker for %v to %v", spec.Id, chType, shortestIntervalAfterRemoval)
-		bw.watchersTickersMapMtx.RUnlock()
+		bw.setWatchersTickerAfterUnsubscribe(spec.Id, shortestIntervalAfterRemoval, chType)
 	}
 }
 

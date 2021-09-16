@@ -287,10 +287,21 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	assert.NotNil(watcher2.Start())
 	assert.Equal(watcher1, watcher2)
 
-	feed1, _, err := bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub1", 110*time.Millisecond)
+	_, _, err = bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub1", 110*time.Millisecond)
 	assert.Nil(err)
 
 	feed2, updater2, err := bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub2", 500*time.Millisecond)
+	assert.Nil(err)
+
+	// Manually check to see that sub1a did not induce another "setting timer to 110" message
+	_, _, err = bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub1a", 110*time.Millisecond)
+	assert.Nil(err)
+	time.Sleep(50 * time.Millisecond)
+	assert.Nil(bts.UnSubscribeToLocalBucketHighSeqnosFeed(spec, "sub1a"))
+
+	// Manually unsubscribe and re-subscribe to check to ensure that 500 is set and then 110 is set again
+	assert.Nil(bts.UnSubscribeToLocalBucketHighSeqnosFeed(spec, "sub1"))
+	feed1, _, err := bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub1", 110*time.Millisecond)
 	assert.Nil(err)
 
 	watcher1.highSeqnosTrackersMtx.RLock()
@@ -355,6 +366,7 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 		updateFuncCpy := updateFunc
 		watcher1.updateOnce(HIGHSEQNOS, updateFuncCpy)
 	}
+
 }
 
 func TestBucketTopologyWatcherGC(t *testing.T) {
