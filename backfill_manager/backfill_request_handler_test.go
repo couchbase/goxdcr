@@ -778,7 +778,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	// to make sure no concurrent read/write
 	time.Sleep(100 * time.Millisecond)
 	//Before merging, vb 0 only has 0 task
-	isNil := rh.cachedBackfillSpec.VBTasksMap == nil
+	isNil := rh.cachedBackfillSpec == nil || rh.cachedBackfillSpec.VBTasksMap == nil
 	assert.True(isNil || rh.cachedBackfillSpec.VBTasksMap.VBTasksMap[0].Len() == 0)
 
 	_, tasks0 := getTaskForVB0(sourceBucketName)

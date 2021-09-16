@@ -157,6 +157,7 @@ type StatisticsManager struct {
 	endSeqnos map[uint16]uint64
 	// For now, backfill pipeline do not dynamically change VB tasks
 	totalBackfillChanges uint64
+	backfillUnsortedVBs  []uint16
 
 	printThroughSeqnoSummaryWhenStopping bool
 
@@ -168,6 +169,9 @@ type StatisticsManager struct {
 
 	highSeqnosFeedUnsubscriberMtx sync.RWMutex
 	highSeqnosFeedUnsubscriber    func() error
+
+	// To be used by a single go-routine that calls processCalculatedStats
+	updateStatsOnceCachedVBList []uint16
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *StatisticsManager {
@@ -423,7 +427,11 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 	if changes_left_old_var != nil {
 		changes_left_old = changes_left_old_var.(metrics.Counter).Count()
 	}
-
+	docs_processed_old_var := oldSample.Get(service_def.DOCS_PROCESSED_METRIC)
+	var docs_processed_old int64 = 0
+	if docs_processed_old_var != nil {
+		docs_processed_old = docs_processed_old_var.(metrics.Counter).Count()
+	}
 	stats_mgr.initOverviewRegistry()
 
 	sample_stats_list_map := make(map[string][]*SampleStats)
@@ -505,7 +513,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 
 	//calculate additional metrics
 	err = stats_mgr.processCalculatedStats(map_for_overview, changes_left_old, docs_written_old, docs_received_dcp_old,
-		docs_opt_repd_old, data_replicated_old, docs_checked_old)
+		docs_opt_repd_old, data_replicated_old, docs_checked_old, docs_processed_old)
 	if err != nil {
 		return err
 	}
@@ -522,20 +530,24 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 }
 
 func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *expvar.Map, changes_left_old,
-	docs_written_old, docs_received_dcp_old, docs_opt_repd_old, data_replicated_old, docs_checked_old int64) error {
+	docs_written_old, docs_received_dcp_old, docs_opt_repd_old, data_replicated_old, docs_checked_old,
+	docs_processed_old int64) error {
+	changes_left_val, docs_processed, sortedVBsList, err := stats_mgr.calculateChangesLeftAndDocProcessed()
+	if err != nil {
+		stats_mgr.logger.Warnf("%v Failed to calculate docs_processed and changes_left. Use old values. err=%v\n", stats_mgr.pipeline.InstanceId(), err)
+		changes_left_val = changes_left_old
+		docs_processed = docs_processed_old
+		// And also use cached vblist since the sortedVBsList returned will be nil
+		sortedVBsList = stats_mgr.updateStatsOnceCachedVBList
+	} else {
+		stats_mgr.updateStatsOnceCachedVBList = sortedVBsList
+	}
 
-	//calculate docs_processed
-	docs_processed := stats_mgr.calculateDocsProcessed()
 	docs_processed_var := new(expvar.Int)
 	docs_processed_var.Set(docs_processed)
 	overview_expvar_map.Set(service_def.DOCS_PROCESSED_METRIC, docs_processed_var)
+	setCounter(stats_mgr.getOverviewRegistry().Get(service_def.DOCS_PROCESSED_METRIC).(metrics.Counter), int(docs_processed))
 
-	//calculate changes_left
-	changes_left_val, err := stats_mgr.calculateChangesLeft(docs_processed)
-	if err != nil {
-		stats_mgr.logger.Warnf("%v Failed to calculate changes_left. Use old changes_left. err=%v\n", stats_mgr.pipeline.InstanceId(), err)
-		changes_left_val = changes_left_old
-	}
 	changes_left_var := new(expvar.Int)
 	changes_left_var.Set(changes_left_val)
 	overview_expvar_map.Set(service_def.CHANGES_LEFT_METRIC, changes_left_var)
@@ -573,7 +585,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	overview_expvar_map.Set(service_def.BANDWIDTH_USAGE_METRIC, bandwidth_usage_var)
 
 	//calculate docs_checked
-	docs_checked := stats_mgr.calculateDocsChecked()
+	docs_checked := stats_mgr.calculateDocsChecked(sortedVBsList)
 	docs_checked_var := new(expvar.Int)
 	docs_checked_var.Set(int64(docs_checked))
 	overview_expvar_map.Set(service_def.DOCS_CHECKED_METRIC, docs_checked_var)
@@ -584,6 +596,9 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	if docs_checked_old < 0 {
 		// a negative value indicates that this is the first stats run and there is no old value yet
 		rate_doc_checks = 0
+	} else if float64(docs_checked)-float64(docs_checked_old) < 0 {
+		// VBs are now moved out of this node that leads to a very lower number than before
+		rate_doc_checks = 0
 	} else {
 		rate_doc_checks = (float64(docs_checked) - float64(docs_checked_old)) / interval_in_sec
 	}
@@ -593,16 +608,7 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	return nil
 }
 
-func (stats_mgr *StatisticsManager) calculateDocsProcessed() int64 {
-	var docs_processed uint64 = 0
-	through_seqno_map := stats_mgr.through_seqno_tracker_svc.GetThroughSeqnos()
-	for _, through_seqno := range through_seqno_map {
-		docs_processed += through_seqno
-	}
-	return int64(docs_processed)
-}
-
-func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
+func (stats_mgr *StatisticsManager) calculateDocsChecked(vbsList []uint16) uint64 {
 	var docs_checked uint64 = 0
 	vbts_map, vbts_map_lock := GetStartSeqnos(stats_mgr.pipeline, stats_mgr.logger)
 	if vbts_map != nil {
@@ -610,6 +616,11 @@ func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 		defer vbts_map_lock.RUnlock()
 
 		for vbno, vbts := range vbts_map {
+			_, found := base.SearchUint16List(vbsList, vbno)
+			if !found {
+				continue
+			}
+
 			start_seqno := vbts.Seqno
 			var docs_checked_vb uint64 = 0
 			checkpointed_seqno := stats_mgr.checkpointed_seqnos[vbno].GetSeqno()
@@ -624,32 +635,53 @@ func (stats_mgr *StatisticsManager) calculateDocsChecked() uint64 {
 	return docs_checked
 }
 
-func (stats_mgr *StatisticsManager) calculateChangesLeft(docs_processed int64) (int64, error) {
+func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocProcessed() (int64, int64, []uint16, error) {
 	switch stats_mgr.pipeline.Type() {
 	case common.MainPipeline:
-		return stats_mgr.calculateChangesLeftMainPipeline(docs_processed)
+		return stats_mgr.calculateChangesLeftAndDocsProcessedMainPipeline()
 	case common.BackfillPipeline:
-		return stats_mgr.calculateChangesLeftBackfillPipeline(docs_processed)
+		return stats_mgr.calculateChangesLeftAndDocsProcessedBackfillPipeline()
 	default:
-		return 0, fmt.Errorf("Invalid pipeline: %v", stats_mgr.pipeline.Type().String())
+		return 0, 0, nil, fmt.Errorf("Invalid pipeline: %v", stats_mgr.pipeline.Type().String())
 	}
 }
 
-func (stats_mgr *StatisticsManager) calculateChangesLeftMainPipeline(docs_processed int64) (int64, error) {
-	total_changes, err := calculateTotalChanges(stats_mgr.logger, stats_mgr.getHighSeqnosAndSourceVBs)
+func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedMainPipeline() (int64, int64, []uint16, error) {
+	// Get throughSeqnoMap first to avoid negative stats
+	throughSeqnoMap := stats_mgr.GetThroughSeqnosFromTsService()
+
+	highSeqnosMap, curKvVbMap := stats_mgr.getHighSeqnosAndSourceVBs()
+	total_changes, vbsList, err := calculateTotalChanges(stats_mgr.logger, highSeqnosMap, curKvVbMap)
 	if err != nil {
-		return 0, err
+		return 0, 0, nil, err
 	}
+
+	docs_processed := stats_mgr.getDocsProcessed(vbsList, throughSeqnoMap)
+
 	changes_left := total_changes - docs_processed
 	stats_mgr.logChangesLeft(total_changes, docs_processed, changes_left)
-	return changes_left, nil
+	return changes_left, docs_processed, vbsList, nil
+}
+
+func (stats_mgr *StatisticsManager) getDocsProcessed(vbsList []uint16, throughSeqnoMap map[uint16]uint64) int64 {
+	var docs_processed int64
+	for vb, seqno := range throughSeqnoMap {
+		if _, found := base.SearchUint16List(vbsList, vb); !found {
+			continue
+		}
+		docs_processed += int64(seqno)
+	}
+	return docs_processed
 }
 func (stats_mgr *StatisticsManager) logChangesLeft(total_changes, docs_processed, changes_left int64) {
 	stats_mgr.logger.Infof("%v total_docs=%v, docs_processed=%v, changes_left=%v\n", stats_mgr.pipeline.FullTopic(), total_changes, docs_processed, changes_left)
 }
 
-func (stats_mgr *StatisticsManager) calculateChangesLeftBackfillPipeline(docs_processed int64) (int64, error) {
+func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedBackfillPipeline() (int64, int64, []uint16, error) {
 	total_changes := int64(stats_mgr.totalBackfillChanges)
+	vbsList := base.SortUint16List(stats_mgr.backfillUnsortedVBs)
+	throughSeqnoMap := stats_mgr.GetThroughSeqnosFromTsService()
+	docs_processed := stats_mgr.getDocsProcessed(vbsList, throughSeqnoMap)
 	changes_left := total_changes - docs_processed
 	if changes_left < 0 {
 		// Since DCP always sends until the end of a snapshot, it's possible that DCP
@@ -657,7 +689,7 @@ func (stats_mgr *StatisticsManager) calculateChangesLeftBackfillPipeline(docs_pr
 		changes_left = 0
 	}
 	stats_mgr.logChangesLeft(total_changes, docs_processed, changes_left)
-	return changes_left, nil
+	return changes_left, docs_processed, vbsList, nil
 }
 
 func (stats_mgr *StatisticsManager) getOverviewRegistry() metrics.Registry {
@@ -827,6 +859,7 @@ func (stats_mgr *StatisticsManager) initializeConfig(settings metadata.Replicati
 				unlockFunc()
 				stats_mgr.endSeqnos[vb] = endSeqno
 				stats_mgr.totalBackfillChanges += endSeqno
+				stats_mgr.backfillUnsortedVBs = append(stats_mgr.backfillUnsortedVBs, vb)
 			}
 		}
 		backfillVBTasks.GetLock().RUnlock()
@@ -1780,7 +1813,7 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
 			// or it may be nil when the underying replication is not paused but has not completed startup process
 			// construct it
-			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
+			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, logger, backfillSpec, highSeqnosMaps)
 			if err != nil {
 				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
 				continue
@@ -1841,14 +1874,14 @@ func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]m
 }
 
 // compute and set changes_left and docs_processed stats. set other stats to 0
-func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, cur_kv_vb_map map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosAndSourceVBMapGetter func() (base.HighSeqnosMapType, base.KvVBMapType)) error {
-	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
+func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, curKvVbMap map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosMap base.HighSeqnosMapType) error {
+	cur_vb_list := base.GetVbListFromKvVbMap(curKvVbMap)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
 		return err
 	}
 
-	total_changes, err := calculateTotalChanges(logger, highSeqnosAndSourceVBMapGetter)
+	total_changes, _, err := calculateTotalChanges(logger, highSeqnosMap, curKvVbMap)
 	if err != nil {
 		return err
 	}
@@ -1880,9 +1913,9 @@ func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, s
 
 	if logBackfillStat {
 		logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v (total_backfill_docs=%v), docs_processed=%v (backfill_docs_processed=%v), changes_left=%v\n",
-			spec.Id, cur_kv_vb_map, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
+			spec.Id, curKvVbMap, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
 	} else {
-		logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
+		logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, curKvVbMap, total_changes, docs_processed, changes_left)
 	}
 
 	overview_stats := new(expvar.Map).Init()
@@ -1905,23 +1938,23 @@ func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, s
 	return nil
 }
 
-func calculateTotalChanges(logger *log.CommonLogger, getHighSeqnosAndVBMap func() (base.HighSeqnosMapType, base.KvVBMapType)) (int64, error) {
+func calculateTotalChanges(logger *log.CommonLogger, highSeqnoKvMap base.HighSeqnosMapType, kvVbMap base.KvVBMapType) (int64, []uint16, error) {
 	var total_changes uint64 = 0
+	var vbsList []uint16
 
-	highSeqnoKvMap, kv_vb_map := getHighSeqnosAndVBMap()
-
-	for serverAddr, vbnos := range kv_vb_map {
+	for serverAddr, vbnos := range kvVbMap {
 		highseqno_map, found := highSeqnoKvMap[serverAddr]
 		if !found {
 			logger.Warnf("Server %v not found in high seqnoMap %v", serverAddr, highSeqnoKvMap)
 			continue
 		}
 		for _, vbno := range vbnos {
+			vbsList = append(vbsList, vbno)
 			current_vb_highseqno := highseqno_map[vbno]
 			total_changes = total_changes + current_vb_highseqno
 		}
 	}
-	return int64(total_changes), nil
+	return int64(total_changes), base.SortUint16List(vbsList), nil
 }
 
 // For a paused pipeline, we need to update what is the total number of changes for the paused backfill pipeline
@@ -1977,9 +2010,9 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 		return nil
 	}
 
-	_, cur_kv_vb_map := highSeqnosAndSourceVBGetter()
+	highSeqnoKvMap, curKvVbMap := highSeqnosAndSourceVBGetter()
 
-	cur_vb_list := base.GetVbListFromKvVbMap(cur_kv_vb_map)
+	cur_vb_list := base.GetVbListFromKvVbMap(curKvVbMap)
 	base.SortUint16List(cur_vb_list)
 	sameList := base.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
 
@@ -2014,7 +2047,7 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 		repl_status.SetVbList(cur_vb_list)
 	}
 
-	total_changes, err := calculateTotalChanges(logger, highSeqnosAndSourceVBGetter)
+	total_changes, _, err := calculateTotalChanges(logger, highSeqnoKvMap, curKvVbMap)
 	if err != nil {
 		return err
 	}
@@ -2036,9 +2069,9 @@ func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, over
 
 	if backfillSpec != nil {
 		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v (totalBackfillDocs=%v), docs_processed=%v (totalBackfillDocsProcessed=%v), changes_left=%v\n",
-			spec.Id, cur_kv_vb_map, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
+			spec.Id, curKvVbMap, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
 	} else {
-		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, cur_kv_vb_map, total_changes, docs_processed, changes_left)
+		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, curKvVbMap, total_changes, docs_processed, changes_left)
 	}
 	return nil
 }
