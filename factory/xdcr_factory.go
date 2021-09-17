@@ -810,6 +810,15 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 		xmemSettings[parts.SETTING_OPTI_REP_THRESHOLD] = optiRepThreshold
 	}
 
+	mainSleepDelay, ok := settings[metadata.DevMainPipelineSendDelay]
+	if ok {
+		xmemSettings[parts.XMEM_DEV_MAIN_SLEEP_DELAY] = mainSleepDelay
+	}
+
+	backfillSleepDelay, ok := settings[metadata.DevBackfillPipelineSendDelay]
+	if ok {
+		xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = backfillSleepDelay
+	}
 	return xmemSettings
 
 }
@@ -946,6 +955,9 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	spec := pipeline.Specification().GetReplicationSpec()
 	repSettings := spec.Settings
 	xmemConnStr := part.(*parts.XmemNozzle).ConnStr()
+
+	xmemSettings[parts.XMEM_DEV_MAIN_SLEEP_DELAY] = metadata.GetSettingFromSettingsMap(settings, metadata.DevMainPipelineSendDelay, 0)
+	xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = metadata.GetSettingFromSettingsMap(settings, metadata.DevBackfillPipelineSendDelay, 0)
 
 	xmemSettings[parts.SETTING_BATCHCOUNT] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchCountKey, repSettings.BatchCount)
 	xmemSettings[parts.SETTING_BATCHSIZE] = metadata.GetSettingFromSettingsMap(settings, metadata.BatchSizeKey, repSettings.BatchSize)

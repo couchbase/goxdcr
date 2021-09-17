@@ -23,7 +23,11 @@ import (
 )
 
 const (
-	//configuration param names
+	// Developer injection section
+	XMEM_DEV_MAIN_SLEEP_DELAY     = base.DevMainPipelineSendDelay
+	XMEM_DEV_BACKFILL_SLEEP_DELAY = base.DevBackfillPipelineSendDelay
+	// end developer injection section
+
 	SETTING_BATCHCOUNT            = "batch_count"
 	SETTING_BATCHSIZE             = "batch_size"
 	SETTING_OPTI_REP_THRESHOLD    = "optimistic_replication_threshold"
@@ -92,6 +96,9 @@ type baseConfig struct {
 	password           string
 	hlvPruningWindow   time.Duration
 	logger             *log.CommonLogger
+
+	devMainSendDelay     uint32
+	devBackfillSendDelay uint32
 }
 
 type documentMetadata struct {
@@ -177,6 +184,12 @@ type SentCasChangedEventAdditional struct {
 
 // does not return error since the assumption is that settings have been validated prior
 func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettingsMap) {
+	if val, ok := settings[XMEM_DEV_MAIN_SLEEP_DELAY]; ok {
+		config.devMainSendDelay = uint32(val.(int))
+	}
+	if val, ok := settings[XMEM_DEV_BACKFILL_SLEEP_DELAY]; ok {
+		config.devBackfillSendDelay = uint32(val.(int))
+	}
 	if val, ok := settings[SETTING_BATCHSIZE]; ok {
 		config.maxSize = val.(int)
 	}

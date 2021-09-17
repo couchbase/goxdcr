@@ -344,7 +344,9 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold ||
 		oldSettings.BandwidthLimit != newSettings.BandwidthLimit ||
 		isOldReplHighPriority != isNewReplHighPriority ||
-		oldSettings.GetExpDelMode() != newSettings.GetExpDelMode() {
+		oldSettings.GetExpDelMode() != newSettings.GetExpDelMode() ||
+		oldSettings.GetDevMainPipelineDelay() != newSettings.GetDevMainPipelineDelay() ||
+		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 

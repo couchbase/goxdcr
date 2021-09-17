@@ -21,6 +21,8 @@ import (
 
 // keys for replication settings
 const (
+	DevMainPipelineSendDelay          = base.DevMainPipelineSendDelay
+	DevBackfillPipelineSendDelay      = base.DevBackfillPipelineSendDelay
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
 	ActiveKey                         = "active"
@@ -102,7 +104,7 @@ var ImmutableSettings = []string{}
 // settings that are internal and should be hidden from outside
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
-	CollectionsDelVbBackfillKey, DismissEventKey}
+	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -129,6 +131,8 @@ const (
 
 var DefaultPipelineStatsIntervalMs = 1000
 
+var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
+var XDCRDevBackfillPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
@@ -178,6 +182,8 @@ var DismissEventConfig = &SettingsConfig{-1, &Range{0, math.MaxInt32}}
 var PreReplicateVBMasterCheckConfig = &SettingsConfig{true, nil}
 
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
+	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
+	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
 	ActiveKey:                         ActiveConfig,
@@ -881,6 +887,14 @@ func (s *ReplicationSettings) GetExpDelMode() base.FilterExpDelType {
 func (s *ReplicationSettings) GetCollectionModes() base.CollectionsMgtType {
 	val, _ := s.GetSettingValueOrDefaultValue(CollectionsMgtMultiKey)
 	return val.(base.CollectionsMgtType)
+}
+
+func (s *ReplicationSettings) GetDevMainPipelineDelay() int {
+	return s.GetIntSettingValue(DevMainPipelineSendDelay)
+}
+
+func (s *ReplicationSettings) GetDevBackfillPipelineDelay() int {
+	return s.GetIntSettingValue(DevBackfillPipelineSendDelay)
 }
 
 func (s *ReplicationSettings) NeedToRestartPipelineDueToCollectionModeChanges(other *ReplicationSettings) bool {

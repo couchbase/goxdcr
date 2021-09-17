@@ -1274,6 +1274,10 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutP2PProtocol = timeoutP2PProtocol
 }
 
+// XDCR Dev hidden replication settings
+const DevMainPipelineSendDelay = "xdcrDevMainSendDelayMs"
+const DevBackfillPipelineSendDelay = "xdcrDevBackfillSendDelayMs"
+
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
 const ExternalKeyKey = "META\\(\\).id"

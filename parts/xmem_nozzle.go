@@ -70,7 +70,8 @@ type RequestToResponse struct {
 	resp *mc.MCResponse
 }
 
-var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_BATCHCOUNT: base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
+var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{
+	SETTING_BATCHCOUNT:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	SETTING_BATCHSIZE:               base.NewSettingDef(reflect.TypeOf((*int)(nil)), true),
 	SETTING_NUMOFRETRY:              base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
 	SETTING_RESP_TIMEOUT:            base.NewSettingDef(reflect.TypeOf((*time.Duration)(nil)), false),
@@ -85,6 +86,8 @@ var xmem_setting_defs base.SettingDefinitions = base.SettingDefinitions{SETTING_
 	XMEM_SETTING_CERTIFICATE:        base.NewSettingDef(reflect.TypeOf((*[]byte)(nil)), false),
 	XMEM_SETTING_SAN_IN_CERITICATE:  base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
 	XMEM_SETTING_INSECURESKIPVERIFY: base.NewSettingDef(reflect.TypeOf((*bool)(nil)), false),
+	XMEM_DEV_MAIN_SLEEP_DELAY:       base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
+	XMEM_DEV_BACKFILL_SLEEP_DELAY:   base.NewSettingDef(reflect.TypeOf((*int)(nil)), false),
 }
 
 var UninitializedReseverationNumber = -1
@@ -1163,6 +1166,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 		xmem.checkAndUpdateSentStats(item)
 
 		if item != nil {
+			xmem.checkSendDelayInjection()
 			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
 			needSendStatus, err := needSend(item, batch, xmem.Logger())
 			if err != nil {
@@ -3552,11 +3556,32 @@ func (xmem *XmemNozzle) ConnStr() string {
 }
 
 func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
+	devMainDelay, ok := settings[XMEM_DEV_MAIN_SLEEP_DELAY]
+	if ok {
+		devMainDelayInt := devMainDelay.(int)
+		oldMainDelayInt := int(atomic.LoadUint32(&xmem.config.devMainSendDelay))
+		atomic.StoreUint32(&xmem.config.devMainSendDelay, uint32(devMainDelayInt))
+		if oldMainDelayInt != devMainDelayInt {
+			xmem.Logger().Infof("%v updated main pipeline delay to %v millisecond(s)\n", xmem.Id(), devMainDelayInt)
+		}
+	}
+	devBackfillDelay, ok := settings[XMEM_DEV_BACKFILL_SLEEP_DELAY]
+	if ok {
+		devBackfillDelayInt := devBackfillDelay.(int)
+		oldBackfillDelayInt := int(atomic.LoadUint32(&xmem.config.devBackfillSendDelay))
+		atomic.StoreUint32(&xmem.config.devBackfillSendDelay, uint32(devBackfillDelayInt))
+		if oldBackfillDelayInt != devBackfillDelayInt {
+			xmem.Logger().Infof("%v updated backfill pipeline delay to %v millisecond(s)\n", xmem.Id(), devBackfillDelay)
+		}
+	}
 	optimisticReplicationThreshold, ok := settings[SETTING_OPTI_REP_THRESHOLD]
 	if ok {
 		optimisticReplicationThresholdInt := optimisticReplicationThreshold.(int)
+		oldOptimisticInt := int(atomic.LoadUint32(&xmem.config.optiRepThreshold))
 		atomic.StoreUint32(&xmem.config.optiRepThreshold, uint32(optimisticReplicationThresholdInt))
-		xmem.Logger().Infof("%v updated optimistic replication threshold to %v\n", xmem.Id(), optimisticReplicationThresholdInt)
+		if oldOptimisticInt != optimisticReplicationThresholdInt {
+			xmem.Logger().Infof("%v updated optimistic replication threshold to %v\n", xmem.Id(), optimisticReplicationThresholdInt)
+		}
 	}
 	return nil
 }
@@ -3711,10 +3736,25 @@ func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
 	xmem.upstreamObjRecycler = recycler
 }
 
+// Should only be done during pipeline construction
 func (xmem *XmemNozzle) SetUpstreamErrReporter(reporter func(interface{})) {
 	xmem.upstreamErrReporter = reporter
 }
 
+// Should only be done during pipeline construction
 func (xmem *XmemNozzle) SetConflictManager(conflictMgr service_def.ConflictManagerIface) {
 	xmem.conflictMgr = conflictMgr
+}
+
+func (xmem *XmemNozzle) checkSendDelayInjection() {
+	if atomic.LoadUint32(&xmem.config.devBackfillSendDelay) > 0 {
+		if _, pipelineType := common.DecomposeFullTopic(xmem.topic); pipelineType == common.BackfillPipeline {
+			time.Sleep(time.Duration(atomic.LoadUint32(&xmem.config.devBackfillSendDelay)) * time.Millisecond)
+		}
+	}
+	if atomic.LoadUint32(&xmem.config.devMainSendDelay) > 0 {
+		if _, pipelineType := common.DecomposeFullTopic(xmem.topic); pipelineType == common.MainPipeline {
+			time.Sleep(time.Duration(atomic.LoadUint32(&xmem.config.devMainSendDelay)) * time.Millisecond)
+		}
+	}
 }
