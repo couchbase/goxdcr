@@ -10,10 +10,8 @@ package service_impl
 
 import (
 	"crypto/x509"
-	"encoding/pem"
-	"errors"
-	"fmt"
 	"github.com/couchbase/cbauth"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	"io/ioutil"
@@ -24,7 +22,8 @@ type EncryptionSetting struct {
 	EncrytionEnabled bool
 	StrictEncryption bool // This disables non SSL port and remote cluster ref must use full encryption
 	TlsConfig        cbauth.TLSConfig
-	certificates     [][]byte
+	caPool           *x509.CertPool // This is generated from the certificates field.
+	certificates     []byte         // This is the content of ca.pem
 	initializer      sync.Once
 	initializedCh    chan bool
 }
@@ -66,17 +65,19 @@ func (sec *SecurityService) getEncryptionSetting() EncryptionSetting {
 	return sec.encrytionSetting
 }
 
-func (sec *SecurityService) GetCertificates() [][]byte {
+func (sec *SecurityService) GetCaPool() *x509.CertPool {
 	<-sec.encrytionSetting.initializedCh
 	sec.settingMtx.RLock()
 	defer sec.settingMtx.RUnlock()
-	certificates := sec.encrytionSetting.certificates
-	if len(certificates) == 0 {
-		return nil
-	}
-	return certificates
+	return sec.encrytionSetting.caPool
 }
 
+func (sec *SecurityService) GetCACertificates() []byte {
+	<-sec.encrytionSetting.initializedCh
+	sec.settingMtx.RLock()
+	defer sec.settingMtx.RUnlock()
+	return sec.encrytionSetting.certificates
+}
 func (sec *SecurityService) IsClusterEncryptionLevelStrict() bool {
 	<-sec.encrytionSetting.initializedCh
 	sec.settingMtx.RLock()
@@ -90,6 +91,7 @@ func (sec *SecurityService) EncryptData() bool {
 	defer sec.settingMtx.RUnlock()
 	return sec.encrytionSetting.EncrytionEnabled
 }
+
 func (sec *SecurityService) refreshClusterEncryption() error {
 	clusterSetting, err := cbauth.GetClusterEncryptionConfig()
 	if err != nil {
@@ -135,43 +137,16 @@ func (sec *SecurityService) refreshCert() error {
 		return err
 	}
 
-	certs, err := sec.processCerts(certPEMBlock)
-	if err != nil {
-		return err
+	caPool := x509.NewCertPool()
+	if ok := caPool.AppendCertsFromPEM(certPEMBlock); !ok {
+		return base.InvalidCerfiticateError
 	}
 	sec.settingMtx.Lock()
-	sec.encrytionSetting.certificates = certs
+	sec.encrytionSetting.caPool = caPool
+	sec.encrytionSetting.certificates = certPEMBlock
 	sec.settingMtx.Unlock()
 	sec.logger.Infof("Certificates are updated.")
 	return nil
-}
-
-func (sec *SecurityService) processCerts(certPEMBlock []byte) (certs [][]byte, err error) {
-	var skippedBlockTypes []string
-	for {
-		var certDERBlock *pem.Block
-		certDERBlock, certPEMBlock = pem.Decode(certPEMBlock)
-		if certDERBlock == nil {
-			break
-		}
-		if certDERBlock.Type == "CERTIFICATE" {
-			_, err := x509.ParseCertificate(certDERBlock.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			certs = append(certs, certDERBlock.Bytes)
-		} else {
-			skippedBlockTypes = append(skippedBlockTypes, certDERBlock.Type)
-		}
-	}
-	if len(certs) == 0 {
-		if len(skippedBlockTypes) == 0 {
-			return nil, errors.New("Failed to find any PEM data in certificate file.")
-		} else {
-			return nil, fmt.Errorf("Failed to find certificate PEM data in certificate file after skipping the following types: %v", skippedBlockTypes)
-		}
-	}
-	return certs, nil
 }
 
 func (sec *SecurityService) refresh(code uint64) error {

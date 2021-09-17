@@ -2660,7 +2660,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	if err != nil {
 		return err
 	}
-	clusterInfo, err, statusCode := service.utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificate(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), service.logger)
+	clusterInfo, err, statusCode := service.utils.GetClusterInfoWStatusCode(hostAddr, base.PoolsPath, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), service.logger)
 	service.logger.Infof("Result from validate remote cluster call: err=%v, statusCode=%v. time taken=%v\n", err, statusCode, time.Since(startTime))
 	if err != nil || statusCode != http.StatusOK {
 		if statusCode == http.StatusUnauthorized {
@@ -2930,7 +2930,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 	go func() {
 		defer close(firstWinnerCh)
 		// Attempt to retrieve defaultPoolInfo with what the user initially entered
-		refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+		refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 		if err == nil && refHttpAuthMech == base.HttpAuthMechHttps {
 			refSANInCertificate = true
 		}
@@ -2964,7 +2964,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 			}
 
 			// now we potentially have valid https address, re-do security settings retrieval
-			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 			if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
 				bgSANInCertificate = true
 			}
@@ -2976,7 +2976,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 					// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
 					// as a last resort, try that for a third time
 					bgRefHttpsHostName = bgExternalRefHttpsHostName
-					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 					if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
 						bgSANInCertificate = true
 					}
@@ -3051,27 +3051,35 @@ func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (st
 func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteClusterReference) error {
 	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCertificates(%v)", ref.Name()), base.DiagInternalThreshold)
 	defer stopFunc()
-	refCertificate := ref.Certificate()
-	if len(refCertificate) == 0 {
+	refCertificates := ref.Certificates()
+	if len(refCertificates) == 0 {
 		return nil
 	}
 
-	// check validity of server root certificate
-	block, _ := pem.Decode(refCertificate)
-	if block == nil {
+	// check validity of server root certificates
+	var rootCerts []*x509.Certificate
+	for {
+		var block *pem.Block
+		block, refCertificates = pem.Decode(refCertificates)
+		if block == nil {
+			break
+		}
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("Failed to parse certificate. err=%v", err)
+		}
+
+		// check the signature of certificate
+		err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
+		if err != nil {
+			return fmt.Errorf("Error validating the signature of certificate. err=%v", err)
+		}
+		rootCerts = append(rootCerts, certificate)
+	}
+	// We should have at least one root certificate
+	if len(rootCerts) == 0 {
 		return base.InvalidCerfiticateError
 	}
-	certificate, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return fmt.Errorf("Failed to parse certificate. err=%v", err)
-	}
-
-	// check the signature of certificate
-	err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
-	if err != nil {
-		return fmt.Errorf("Error validating the signature of certificate. err=%v", err)
-	}
-
 	// check validity of client certificate if it has been provided
 	refClientCertificate := ref.ClientCertificate()
 	if len(refClientCertificate) == 0 {
@@ -3083,16 +3091,33 @@ func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteCl
 		return fmt.Errorf("Error parsing client certificate. err=%v", err)
 	}
 
-	parentCert := certificate
-
 	// clientCert.Certificate contains a chain of certificates, leaf first
 	// e.g., LeafCert, IntermediateCert1, IntermediateCert2
 	// we will be verifying these certificates in the reverse order
-	// first we check IntermediateCert2 is signed by its parent, the server root certificate
+	// first we check IntermediateCert2 is signed by its parent, which
+	// can be any one of the server root certificates
 	// then we check IntermediateCert1 is signed by IntermediateCert2
 	// then we check LeafCert is signed by IntermediateCert1
 	// if any of the certificates has been tempered with, the corresponding check should fail
-	for index := len(clientCert.Certificate) - 1; index >= 0; index-- {
+	chainLen := len(clientCert.Certificate)
+	curCert, err := x509.ParseCertificate(clientCert.Certificate[chainLen-1])
+	if err != nil {
+		return fmt.Errorf("Error parsing certificate chain in client certificate. err=%v", err)
+	}
+	ok := false
+	// Verify that curCert (which is the top of the chain of the clientCert) is signed by one of the CA
+	for _, parentCert := range rootCerts {
+		err = curCert.CheckSignatureFrom(parentCert)
+		if err == nil {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("Client certificate is not signed by any of the root certificates")
+	}
+	parentCert := curCert
+	for index := chainLen - 2; index >= 0; index-- {
 		curCert, err := x509.ParseCertificate(clientCert.Certificate[index])
 		if err != nil {
 			return fmt.Errorf("Error parsing certificate chain in client certificate. err=%v", err)
@@ -3102,7 +3127,6 @@ func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteCl
 				return fmt.Errorf("Error validating the signature of client certficate. err=%v", err)
 			}
 		}
-
 		parentCert = curCert
 	}
 
@@ -3753,7 +3777,7 @@ func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(bucketName strin
 	userName := agent.reference.UserName()
 	password := agent.reference.Password()
 	authMech := agent.reference.HttpAuthMech()
-	cert := agent.reference.Certificate()
+	cert := agent.reference.Certificates()
 	sanInCert := agent.reference.SANInCertificate()
 	clientCert := agent.reference.ClientCertificate()
 	clientKey := agent.reference.ClientKey()

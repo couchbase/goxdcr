@@ -76,9 +76,8 @@ function setEncryptionLevel {
 # When target encryption level is strict: plain and half encryption will fail in connect because target only listen on secure port
 # and will require certificate. Local loopback connects are OK.
 function testCreateRemote {
-	echo "=================================================="
+	echo
 	echo "====== Create Remote Cluster Reference Test ======"
-	echo "=================================================="
 
 	echo
 	echo "===== Setup source cluster to use strict encryption"
@@ -166,15 +165,12 @@ function testCreateRemote {
 	cleanupRemoteClusterRefs
 
 	echo
-	echo "========================================================="
 	echo "====== Passed Create Remote Cluster Reference Test ======"
-	echo "========================================================="
 }
 
 function testChangeTLS {
-	echo "======================================================="
+	echo
 	echo "====== Ongoing replication and Changing TLS Test ======"
-	echo "======================================================="
 
 	echo
 	level="strict"
@@ -387,12 +383,94 @@ function testChangeTLS {
 	setNodeToNodeEncryption "C1" "disable"
 
 	echo
-	echo "=============================================================="
 	echo "====== Passed Ongoing replication and Changing TLS Test ======"
-	echo "=============================================================="
+
+}
+
+function testMultipleCAs {
+	echo
+	echo "===== Test Create remote cluster reference with multiple CAs ========"
+
+	echo
+	cert1="
+-----BEGIN CERTIFICATE-----
+MIIB/TCCAWagAwIBAgIIFqdHnvuBIbgwDQYJKoZIhvcNAQELBQAwJDEiMCAGA1UE
+AxMZQ291Y2hiYXNlIFNlcnZlciAzMTNkOWM2MzAeFw0xMzAxMDEwMDAwMDBaFw00
+OTEyMzEyMzU5NTlaMCQxIjAgBgNVBAMTGUNvdWNoYmFzZSBTZXJ2ZXIgMzEzZDlj
+NjMwgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBALgLoJo6H5dkkPD9E3Bv1q9Y
+2JXbeXbNRaOzawsro1gvXd+PKamBm2VH3TiFFbJ/zEzAQ5+Ib/DixovbtfCXA2nc
+cSFBiHHC9kbE0AwGz3NmRPTgK2nE1fmrfcdPy1UG8/lrxsPuwRqlxzHUKP4dA07R
+xkXlogZhcHU7m87M3ghlAgMBAAGjODA2MA4GA1UdDwEB/wQEAwICpDATBgNVHSUE
+DDAKBggrBgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4GB
+AEqe9ZkMUxC/tYMrB5Y8bxvJeuPRHVg4XC5/KOEcYvdyrlgvRuTi7J+hEFZc1dH5
+H9WQTP7gnjbeqMIcsN4WEUaHytt7SYKm5AfHEEvopWPNZUHx69uzYmJVATwrDFDx
+DZ1twsZmOpgz4zTURpgK5DYrPX2AepcPqNBcb3+6xmeY
+-----END CERTIFICATE-----
+"
+
+	cert2="
+-----BEGIN CERTIFICATE-----
+MIIB/TCCAWagAwIBAgIIFqdJO0EMaogwDQYJKoZIhvcNAQELBQAwJDEiMCAGA1UE
+AxMZQ291Y2hiYXNlIFNlcnZlciBkNTZmMWQ4ZDAeFw0xMzAxMDEwMDAwMDBaFw00
+OTEyMzEyMzU5NTlaMCQxIjAgBgNVBAMTGUNvdWNoYmFzZSBTZXJ2ZXIgZDU2ZjFk
+OGQwgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAN0aX78iKqnhm02QOpjPxF8A
++rtFLsoxGP+l4kp3AYRk6GrVpxjmUrgCelxzQHyqsMUkAyVb05GlwjZm7YWT2omw
+iN1pSyMdBAXDrXaFMJcmi9E2nmNhMmaWAK5387jW3yYi/xkctFDsi4IowcBmIat8
+qD5XJWU9U73JEyRNXnLbAgMBAAGjODA2MA4GA1UdDwEB/wQEAwICpDATBgNVHSUE
+DDAKBggrBgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4GB
+AKMntzugwecfbkEaEpk1zaadZcBxN3dRh6D/UZtL3k3o3AW3AwF/Ci55fW772aYR
++/e0xBN0eAW80Egbug8l2d+BiBSmyy+PCMUYDhFHSDC5hxRGVkMykD/7NAyutyGs
+xpinK6Zd/GBYfkcMBUebaTBzsW8S1C+t8kO28etCx0+X
+-----END CERTIFICATE-----
+"
+
+	remoteClusterCert=$(CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9001/pools/default/certificate)
+
+	# Prepend cert1 to the CA from target to make sure we have multiple certs in the test
+	CAs="${cert1}${remoteClusterCert}"
+	echo "remoteClusterCert=$remoteClusterCert"
+	echo "Create remote cluster ref to use $CAs"
+	createSecureRemoteClusterReference "C1" "C2" "$CAs"
+
+	remote=$(getRemoteCluster "C1" "C2")
+	if (($remote != 1)); then
+		echo "Encryption=strict. Expect create full remote cluster reference C2 at C1 to work."
+		exit 1
+	fi
+
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	# Change the certificates for this remote
+	CAs="${cert1}${remoteClusterCert}${cert2}"
+	echo "Change remote cluster to use $CAs"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/pools/default/remoteClusters/C2 -d name=C2 -d hostname=127.0.0.1:19001 -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${CAs}"
+	if (($? != 0)); then
+		echo "Change remote cluster failed"
+		exit 1
+	fi
+
+	runCbWorkloadGenBucket "C1" "B1" 10000
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	echo
+	echo "===== Passed Create remote cluster reference with multiple CAs ========"
 }
 
 function runTestCase {
+	echo
+	echo "=============================================================="
+	echo "======= Running TLS tests ===================================="
+	echo "=============================================================="
+
 	testForClusterRun
 	if (($? != 0)); then
 		exit $?
@@ -405,6 +483,13 @@ function runTestCase {
 
 	runCbWorkloadGenBucket "C1" "B1" 10000
 
+	grepForPanics
+	testMultipleCAs
 	testCreateRemote
 	testChangeTLS
+	grepForPanics
+
+	echo "=============================================================="
+	echo "======= PASSED TLS tests  ===================================="
+	echo "=============================================================="
 }

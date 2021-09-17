@@ -757,7 +757,7 @@ func (ref *RemoteClusterReference) SetHttpAuthMech(authMech base.HttpAuthMech) {
 	ref.HttpAuthMech_ = authMech
 }
 
-func (ref *RemoteClusterReference) Certificate() []byte {
+func (ref *RemoteClusterReference) Certificates() []byte {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
 	return ref.Certificate_
@@ -1079,7 +1079,7 @@ func (ref *RemoteClusterReference) CheckSRVValidityByUUID(getter GetUUIDFunc, lo
 		if err != nil {
 			continue
 		}
-		checkUuid, err := getter(hostAddr, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificate(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), logger)
+		checkUuid, err := getter(hostAddr, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), logger)
 		if err != nil {
 			// Skip and check a next one
 			continue

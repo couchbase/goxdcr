@@ -12,7 +12,6 @@ package utils
 
 import (
 	"bytes"
-	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -2242,12 +2241,6 @@ func (u *Utilities) InvokeRestWithRetryWithAuth(baseURL string,
 func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
 	var client *http.Client
 	if authMech == base.HttpAuthMechHttps {
-		caPool := x509.NewCertPool()
-		ok := caPool.AppendCertsFromPEM(certificate)
-		if !ok {
-			return nil, base.InvalidCerfiticateError
-		}
-
 		//using a separate tls connection to verify certificate
 		//it can be changed in 1.4 when DialTLS is avaialbe in http.Transport
 		conn, tlsConfig, err := base.MakeTLSConn(ssl_con_str, username, certificate, san_in_certificate, clientCertificate, clientKey, logger)

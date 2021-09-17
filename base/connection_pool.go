@@ -663,8 +663,8 @@ func NewTLSConn(ssl_con_str string, username string, password string, certificat
 	return client, nil
 }
 
-func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_name bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
-	if len(certificate) == 0 {
+func MakeTLSConn(ssl_con_str, username string, certificates []byte, check_server_name bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (*tls.Conn, *tls.Config, error) {
+	if len(certificates) == 0 {
 		return nil, nil, fmt.Errorf("No certificate has been provided. Can't establish ssl connection to %v", ssl_con_str)
 	}
 
@@ -680,17 +680,8 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 	})
 
 	caPool := x509.NewCertPool()
-	ok := caPool.AppendCertsFromPEM(certificate)
+	ok := caPool.AppendCertsFromPEM(certificates)
 	if !ok {
-		return nil, nil, InvalidCerfiticateError
-	}
-
-	block, _ := pem.Decode([]byte(certificate))
-	if block == nil {
-		return nil, nil, InvalidCerfiticateError
-	}
-	cert_remote, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
 		return nil, nil, InvalidCerfiticateError
 	}
 
@@ -704,11 +695,10 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 		tlsConfig.Certificates = []tls.Certificate{clientCert}
 	}
 
-	tlsConfig.BuildNameToCertificate()
 	// If check_server_name is false, we need to disable server name check during tls handshake to prevent it from failing
 	// There is no way to disable just server name check in tls handshake, though.
 	// We have to set InsecureSkipVerify to true to disable the entire certificate check during tls handshake
-	// We will perform cerficate check with server name check disabled after tls handshake
+	// We will perform certificate check with server name check disabled after tls handshake
 	// If check_server_name is true, there is no need for all these complexities.
 	// We can simply set InsecureSkipVerify to false and let tls handshake do all the verifications
 	tlsConfig.InsecureSkipVerify = !check_server_name
@@ -761,17 +751,35 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 		logger.Errorf("TLS handshake failed when connecting to %v, err=%v\n", ssl_con_str, err)
 		return nil, nil, err
 	}
-
 	// If check_server_name is false, certificate check has been disabled during tls handshake
 	// Perform additional certificate check here, with server name verification disabled (i.e., with opts.DNSName not set)
-	if !check_server_name && cert_remote.IsCA {
+	if !check_server_name {
 		connState := tlsConn.ConnectionState()
 		peer_certs := connState.PeerCertificates
 
+		hasCA := false
+		rest := certificates
+		var block *pem.Block
+		for {
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, nil, fmt.Errorf("Failed to parse certificate. err=%v", err)
+			}
+			if cert.IsCA {
+				hasCA = true
+				break
+			}
+		}
 		opts := x509.VerifyOptions{
-			Roots:         tlsConfig.RootCAs,
 			CurrentTime:   time.Now(),
 			Intermediates: x509.NewCertPool(),
+		}
+		if hasCA {
+			opts.Roots = tlsConfig.RootCAs
 		}
 
 		for i, cert := range peer_certs {
@@ -789,7 +797,6 @@ func MakeTLSConn(ssl_con_str, username string, certificate []byte, check_server_
 		}
 	}
 	return tlsConn, tlsConfig, nil
-
 }
 
 func DialTCPWithTimeout(network, address string) (net.Conn, error) {

@@ -8,6 +8,8 @@
 
 package service_def
 
+import "crypto/x509"
+
 type EncryptionSettingIface interface {
 	IsStrictEncryption() bool
 }
@@ -16,7 +18,8 @@ type SecuritySvc interface {
 	Start()
 	IsClusterEncryptionLevelStrict() bool
 	EncryptData() bool
-	GetCertificates() [][]byte
+	GetCACertificates() []byte
+	GetCaPool() *x509.CertPool
 	SetEncryptionLevelChangeCallback(key string, callback SecChangeCallback)
 }
 

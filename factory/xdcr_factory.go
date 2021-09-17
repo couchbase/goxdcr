@@ -616,7 +616,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 			var outNozzle common.Nozzle
 
 			if isCapiReplication {
-				outNozzle, err = xdcrf.constructCAPINozzle(topic, targetUserName, targetPassword, targetClusterRef.Certificate(), vbList, vbCouchApiBaseMap, i, logger_ctx)
+				outNozzle, err = xdcrf.constructCAPINozzle(topic, targetUserName, targetPassword, targetClusterRef.Certificates(), vbList, vbCouchApiBaseMap, i, logger_ctx)
 				if err != nil {
 					return
 				}
@@ -969,7 +969,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xdcrf.disableCollectionIfNeeded(settings, xmemSettings, pipeline.Specification().GetReplicationSpec())
 
 	xmemSettings[parts.XMEM_SETTING_DEMAND_ENCRYPTION] = targetClusterRef.DemandEncryption()
-	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificate()
+	xmemSettings[parts.XMEM_SETTING_CERTIFICATE] = targetClusterRef.Certificates()
 	xmemSettings[parts.XMEM_SETTING_CLIENT_CERTIFICATE] = targetClusterRef.ClientCertificate()
 	xmemSettings[parts.XMEM_SETTING_CLIENT_KEY] = targetClusterRef.ClientKey()
 	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType()

@@ -602,7 +602,7 @@ func (c *ConflictManager) getClientWithRetry() (mcc.ClientIface, error) {
 			c.Logger().Errorf("%v Failed to get client to memcached. GetOrCreatePool() call returned error: %v", c.pipeline.FullTopic(), err)
 			return nil, err
 		}
-		return pool.GetNew(false)
+		return pool.GetNew(true)
 	}
 
 	result, err := c.utils.ExponentialBackoffExecutorWithFinishSignal("conflictManager.getClientWithRetry", base.XmemBackoffTimeNewConn, base.XmemMaxRetryNewConn,

@@ -1959,6 +1959,7 @@ function getErrorListForMainPipeline {
 function createSecureRemoteClusterReference {
 	local source=$1
 	local target=$2
+	local remoteClusterCert=${3:-}
 	if [[ -z "${source:-}" ]] || [[ -z "${target:-}" ]]; then
 		echo "Invalid input"
 		return 1
@@ -1966,11 +1967,11 @@ function createSecureRemoteClusterReference {
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
 	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
 	local targetSecurePort=${CLUSTER_NAME_SECURE_PORT_MAP[$target]:-$targetPort}
-	local remoteClusterCert
 
-	# Get the target cluster's root certificate
-	remoteClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$targetPort/pools/default/certificate)
-
+	# Get the target cluster's root certificate if not provided
+	if [[ -z "${remoteClusterCert:-}" ]]; then
+		remoteClusterCert=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$targetPort/pools/default/certificate)
+	fi
 	echo "Creating SECURE remote cluster reference from $source to $target"
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=127.0.0.1:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
 		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
