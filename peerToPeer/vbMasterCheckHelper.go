@@ -10,6 +10,7 @@ type VbMasterCheckHelper interface {
 	GetUnverifiedSubset(requestedSet BucketVBMapType) (BucketVBMapType, error)
 	HandleSpecCreation(spec *metadata.ReplicationSpecification)
 	HandleSpecDeletion(spec *metadata.ReplicationSpecification)
+	HandleSpecChange(oldSpec, newSpec *metadata.ReplicationSpecification)
 }
 
 type VbMasterCheckHelperImpl struct {
@@ -44,6 +45,10 @@ func (h *VbMasterCheckHelperImpl) HandleSpecDeletion(spec *metadata.ReplicationS
 	} else {
 		panic(fmt.Sprintf("Source bucket %v deleted when it never existed - refCnt Error", spec.SourceBucketName))
 	}
+}
+
+func (h *VbMasterCheckHelperImpl) HandleSpecChange(oldSpec, newSpec *metadata.ReplicationSpecification) {
+	// no-op
 }
 
 type verifiedVbs struct {

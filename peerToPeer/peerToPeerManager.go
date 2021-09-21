@@ -73,10 +73,13 @@ type P2PManagerImpl struct {
 	latestKnownPeers *KnownPeers
 
 	vbMasterCheckHelper VbMasterCheckHelper
-	replicaInfoCaches   ReplicaCache
+	replicator          ReplicaReplicator
 }
 
-func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc) (*P2PManagerImpl, error) {
+func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface,
+	bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc,
+	cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc,
+	backfillReplSvc service_def.BackfillReplSvc) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
 	if err != nil {
 		return nil, err
@@ -99,7 +102,6 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		ckptSvc:             ckptSvc,
 		colManifestSvc:      colManifestSvc,
 		backfillReplSvc:     backfillReplSvc,
-		replicaInfoCaches:   NewReplicaCache(bucketTopologySvc, loggerCtx),
 	}, nil
 }
 
@@ -118,6 +120,7 @@ func (p *P2PManagerImpl) Start() (PeerToPeerCommAPI, error) {
 			return nil, err
 		}
 		p.initCommAPI()
+		p.initReplicator()
 		p.logger.Infof("P2PManagerImpl started with lifeCycleId %v", p.lifeCycleId)
 		go func() {
 			// Give ns_server some time to boot up before sending discovery requests
@@ -434,10 +437,13 @@ func (p *P2PManagerImpl) ReplicationSpecChangeCallback(id string, oldVal, newVal
 
 	if oldSpec == nil && newSpec != nil {
 		p.vbMasterCheckHelper.HandleSpecCreation(newSpec)
-		p.replicaInfoCaches.HandleSpecCreation(newSpec)
+		p.replicator.HandleSpecCreation(newSpec)
 	} else if oldSpec != nil && newSpec == nil {
 		p.vbMasterCheckHelper.HandleSpecDeletion(oldSpec)
-		p.replicaInfoCaches.HandleSpecDeletion(oldSpec)
+		p.replicator.HandleSpecDeletion(oldSpec)
+	} else {
+		p.vbMasterCheckHelper.HandleSpecChange(oldSpec, newSpec)
+		p.replicator.HandleSpecChange(oldSpec, newSpec)
 	}
 	return nil
 }
@@ -456,6 +462,10 @@ func (p *P2PManagerImpl) loadSpecsFromMetakv() error {
 		}
 	}
 	return nil
+}
+
+func (p *P2PManagerImpl) initReplicator() {
+	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.commAPI, p.utils)
 }
 
 func getOpaqueWrapper() uint32 {

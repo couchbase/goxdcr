@@ -37,6 +37,11 @@ func (_m *VbMasterCheckHelper) GetUnverifiedSubset(requestedSet peerToPeer.Bucke
 	return r0, r1
 }
 
+// HandleSpecChange provides a mock function with given fields: oldSpec, newSpec
+func (_m *VbMasterCheckHelper) HandleSpecChange(oldSpec *metadata.ReplicationSpecification, newSpec *metadata.ReplicationSpecification) {
+	_m.Called(oldSpec, newSpec)
+}
+
 // HandleSpecCreation provides a mock function with given fields: spec
 func (_m *VbMasterCheckHelper) HandleSpecCreation(spec *metadata.ReplicationSpecification) {
 	_m.Called(spec)
