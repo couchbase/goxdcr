@@ -663,10 +663,8 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 				watcher.kvMemClientsMtx.Unlock()
 				return err
 			}
-			watcher.statsMapMtx.Lock()
 			oneSeqnoMap, updatedStatsMap, err := b.utils.GetHighSeqNos(vbnos, client, watcher.statsMap, collectionIds)
 			watcher.statsMap = updatedStatsMap
-			watcher.statsMapMtx.Unlock()
 			highseqno_map[serverAddr] = oneSeqnoMap
 
 			if err != nil {
@@ -828,9 +826,8 @@ type BucketTopologySvcWatcher struct {
 	kvMemClientsLegacy    map[string]mcc.ClientIface
 	kvMemClientsLegacyMtx sync.Mutex
 
-	// Used internally to call KV
-	statsMap    map[string]string
-	statsMapMtx sync.RWMutex
+	// Used internally to call KV to prevent garbage - must only be used by one updater goroutine
+	statsMap map[string]string
 
 	// For highSeqnos and highSeqnosLegacy, intervals need to be changed dynamically
 	// The ideas here is to separate operation into the actual GET op and the passing of data to the receiver
@@ -1405,12 +1402,12 @@ func (bw *BucketTopologySvcWatcher) checkHighSeqnosReceiverAwaitingData(name str
 	} else {
 		ticker, found = bw.highSeqnosReceiverFiredLegacy[name]
 	}
+	bw.highSeqnosTrackersMtx.RUnlock()
 	if !found {
 		// It is raceful and possible that the timer did not stop in time during unsubscribing
 		// and the timer has fired already
 		return false
 	}
-	bw.highSeqnosTrackersMtx.RUnlock()
 	select {
 	case <-ticker.C:
 		return true
