@@ -24,8 +24,10 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc := setupBoilerPlate()
 	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc)
 
-	commAPI := NewP2pCommAPIHelper(nil, utilsMock, xdcrComp)
-	replicator := NewReplicaReplicator(bucketSvc, nil, ckptSvc, backfillSpecSvc, commAPI, utilsMock, nil, replSvc)
+	dummyFunc := func(reqs PeersVBPeriodicReplicateReqs) error {
+		return nil
+	}
+	replicator := NewReplicaReplicator(bucketSvc, nil, ckptSvc, backfillSpecSvc, utilsMock, nil, replSvc, dummyFunc)
 	replicator.unitTest = true
 	assert.NotNil(replicator)
 	replicator.Start()

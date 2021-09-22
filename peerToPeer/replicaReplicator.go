@@ -37,8 +37,7 @@ type ReplicaReplicatorImpl struct {
 	colManifestSvc     service_def.CollectionsManifestSvc
 	replicationSpecSvc service_def.ReplicationSpecSvc
 
-	commAPI PeerToPeerCommAPI
-	utils   utilities.UtilsIface
+	utils utilities.UtilsIface
 
 	unitTest bool
 
@@ -54,11 +53,13 @@ type ReplicaReplicatorImpl struct {
 
 	minIntervalMtx sync.Mutex
 	minInterval    time.Duration
+
+	sendReqFunc func(reqs PeersVBPeriodicReplicateReqs) error
 }
 
 const moduleName = "ReplicaReplicator"
 
-func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, loggerCtx *log.LoggerContext, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, commAPI PeerToPeerCommAPI, utils utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, replicationSpecSvc service_def.ReplicationSpecSvc) *ReplicaReplicatorImpl {
+func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, loggerCtx *log.LoggerContext, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, replicationSpecSvc service_def.ReplicationSpecSvc, sendReqsFunc func(reqs PeersVBPeriodicReplicateReqs) error) *ReplicaReplicatorImpl {
 	return &ReplicaReplicatorImpl{
 		bucketTopologySvc:  bucketTopologySvc,
 		logger:             log.NewLogger(moduleName, loggerCtx),
@@ -67,12 +68,12 @@ func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, logge
 		ckptSvc:            ckptSvc,
 		backfillReplSvc:    backfillReplSvc,
 		replicationSpecSvc: replicationSpecSvc,
-		commAPI:            commAPI,
 		utils:              utils,
 		colManifestSvc:     collectionsManifestSvc,
 		finCh:              make(chan bool),
 		tickerReloadCh:     make(chan replicatorReloadPair, 50 /* not likely but give it a buffer */),
 		minInterval:        time.Duration(metadata.ReplicateCkptIntervalConfig.MaxValue) * time.Minute,
+		sendReqFunc:        sendReqsFunc,
 	}
 }
 
@@ -251,9 +252,7 @@ func (r *ReplicaReplicatorImpl) pullAndSend() error {
 		return errors.New(base.FlattenErrorMap(errMap))
 	}
 
-	// TODO - next steps, to remove
-	r.logger.Infof("toSendMap: %v\n", toSendMap)
-	return nil
+	return r.sendReqFunc(toSendMap)
 }
 
 func (r *ReplicaReplicatorImpl) populateInformationFromAgents() map[*metadata.ReplicationSpecification]*VBPeriodicReplicateReq {

@@ -150,6 +150,9 @@ func (p *P2PManagerImpl) runHandlers() error {
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
 			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
 				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils)
+		case ReqPeriodicPush:
+			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
+			p.receiveHandlers[i] = NewPeriodicPushHandler()
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -212,9 +215,9 @@ func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 }
 
 func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts) error {
-	peers, myHost, getPreReqErr := p.getSendPreReq()
-	if getPreReqErr != nil {
-		return getPreReqErr
+	peers, myHost, err := p.getSendPreReq()
+	if err != nil {
+		return err
 	}
 
 	peersToRetry := make(map[string]bool)
@@ -222,6 +225,15 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 		peersToRetry[peer] = true
 	}
 
+	err = p.sendToSpecifiedPeersOnce(opCode, getReqFunc, cbOpts, peersToRetry, myHost)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// getReqFunc must log/handle errors
+func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetry map[string]bool, myHost string) error {
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
 		var peersToRetryMtx sync.Mutex
@@ -235,6 +247,11 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 			go func() {
 				defer waitGrp.Done()
 				compiledReq := getReqFunc(myHost, peerAddr)
+				if compiledReq == nil {
+					// Something is wrong and the getReqFunc should have logged an error
+					// Since this is not network related, no need to retry
+					return
+				}
 				registerOpaqueErr := p.receiveHandlers[opCode].RegisterOpaque(compiledReq, cbOpts)
 				if registerOpaqueErr != nil {
 					errMapMtx.Lock()
@@ -385,15 +402,20 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		return nil, err
 	}
 
+	if pipeline == nil {
+		return nil, fmt.Errorf("Pipeline is nil")
+	}
+	genSpec := pipeline.Specification()
+	if genSpec == nil || genSpec.GetReplicationSpec() == nil {
+		return nil, fmt.Errorf("spec is nil for %v", pipeline.FullTopic())
+	}
+	spec := genSpec.GetReplicationSpec()
+
 	getReqFunc := func(src, tgt string) Request {
 		requestCommon := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
 		vbCheckReq := NewVBMasterCheckReq(requestCommon)
 		vbCheckReq.SetBucketVBMap(filteredSubsets)
 		vbCheckReq.PipelineType = pipeline.Type()
-		spec := pipeline.Specification().GetReplicationSpec()
-		if spec == nil {
-			return nil
-		}
 		vbCheckReq.ReplicationId = spec.Id
 		vbCheckReq.SourceBucketName = spec.SourceBucketName
 		return vbCheckReq
@@ -465,8 +487,77 @@ func (p *P2PManagerImpl) loadSpecsFromMetakv() error {
 }
 
 func (p *P2PManagerImpl) initReplicator() {
-	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.commAPI, p.utils, p.colManifestSvc, p.replSpecSvc)
+	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.utils, p.colManifestSvc, p.replSpecSvc, p.sendPeriodicPushRequest)
 	p.replicator.Start()
+}
+
+func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodicReplicateReqs) error {
+	var waitGrp sync.WaitGroup
+	var errMapMtx sync.RWMutex
+	errMap := make(base.ErrorMap)
+
+	for hostPreCpy, reqsListPreCpy := range compiledRequests {
+		waitGrp.Add(1)
+		host := hostPreCpy
+		reqsList := reqsListPreCpy
+		go func() {
+			defer waitGrp.Done()
+			// First prepare common
+			getReqFunc := func(src, tgt string) Request {
+				requestCommon := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+				peerSendReq := NewPeerVBPeriodicPushReq(requestCommon)
+				okList := &VBPeriodicReplicateReqList{}
+				getReqErrMap := make(base.ErrorMap)
+				for _, req := range *reqsList {
+					preSerializeErr := req.PreSerlialize()
+					if preSerializeErr != nil {
+						preSerializeErr = fmt.Errorf("PeriodicPushReq for %v has PreSerialize error: %v and is not sent to targets", req.GetId(), preSerializeErr)
+						getReqErrMap[req.GetId()] = preSerializeErr
+					} else {
+						*okList = append(*okList, req)
+					}
+				}
+				if len(getReqErrMap) > 0 {
+					errMapMtx.Lock()
+					errMap[fmt.Sprintf("%v_getReqFunc", host)] = fmt.Errorf(base.FlattenErrorMap(getReqErrMap))
+					errMapMtx.Unlock()
+				}
+				if len(*okList) == 0 {
+					return nil
+				} else {
+					peerSendReq.PushRequests = okList
+					return peerSendReq
+				}
+			}
+
+			_, myHostAddr, err := p.getSendPreReq()
+			if err != nil {
+				errMapMtx.Lock()
+				errMap[host] = err
+				errMapMtx.Unlock()
+				return
+			}
+
+			peersToRetry := make(map[string]bool)
+			peersToRetry[host] = true
+
+			opts := NewSendOpts(true)
+			err = p.sendToSpecifiedPeersOnce(ReqPeriodicPush, getReqFunc, opts, peersToRetry, myHostAddr)
+			if err != nil {
+				errMapMtx.Lock()
+				errMap[host] = err
+				errMapMtx.Unlock()
+			}
+			// TODO NEIL - next step, handle the incoming request
+			// fmt.Printf("sending req to host %v - err %v\n", host, err)
+		}()
+		waitGrp.Wait()
+	}
+
+	if len(errMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return nil
 }
 
 func getOpaqueWrapper() uint32 {

@@ -24,10 +24,12 @@ import (
 	"sync"
 )
 
+// Each type below will need a handler
 const (
-	ReqDiscovery   OpCode = iota
-	ReqVBMasterChk OpCode = iota
-	ReqMaxInvalid  OpCode = iota
+	ReqDiscovery    OpCode = iota
+	ReqVBMasterChk  OpCode = iota
+	ReqPeriodicPush OpCode = iota
+	ReqMaxInvalid   OpCode = iota
 )
 
 func (o OpCode) String() string {
@@ -36,6 +38,8 @@ func (o OpCode) String() string {
 		return "Discovery"
 	case ReqVBMasterChk:
 		return "VBMasterCheck"
+	case ReqPeriodicPush:
+		return "PeriodicPush"
 	default:
 		return "?? (InvalidRequest)"
 	}
@@ -305,6 +309,11 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, err er
 		err = reqVBChk.DeSerialize(body)
 		reqVBChk.RequestCommon = reqCommon
 		return reqVBChk, err
+	case ReqPeriodicPush:
+		pushReq := &PeerVBPeriodicPushReq{}
+		err = pushReq.DeSerialize(body)
+		pushReq.RequestCommon = reqCommon
+		return pushReq, err
 	default:
 		return nil, fmt.Errorf("Unknown request %v", reqCommon.ReqType)
 	}
@@ -447,8 +456,16 @@ func NewReplicationPayload(specId, srcBucketName string, pipelineType common.Pip
 }
 
 func (v *ReplicationPayload) CompressPayload() error {
+	if v == nil {
+		return nil
+	}
 	v.mtx.Lock()
 	defer v.mtx.Unlock()
+
+	if v.payload == nil {
+		v.PayloadCompressed = nil
+		return nil
+	}
 
 	responsePayloadMarshalled, err := json.Marshal(v.payload)
 	if err != nil {
@@ -628,6 +645,25 @@ func (v *ReplicationPayload) GetSubsetBasedOnVBs(vbsList []uint16) *ReplicationP
 	return retPayload
 }
 
+func (v *ReplicationPayload) SameAs(other *ReplicationPayload) bool {
+	if v == nil && other != nil {
+		return false
+	} else if v != nil && other == nil {
+		return false
+	} else if v == nil && other == nil {
+		return true
+	}
+
+	v.mtx.RLock()
+	other.mtx.RLock()
+	defer v.mtx.RUnlock()
+	defer other.mtx.RUnlock()
+
+	return v.payload.SameAs(other.payload) && v.ErrorMsg == other.ErrorMsg &&
+		v.ReplicationSpecId == other.ReplicationSpecId && v.SourceBucketName == other.SourceBucketName &&
+		v.PipelineType == other.PipelineType
+}
+
 type PeersVBMasterCheckRespMap map[string]*VBMasterCheckResp
 
 type VBMasterCheckResp struct {
@@ -696,6 +732,31 @@ func (v *VBMasterCheckResp) InitNilPts() {
 
 // Key is bucket name
 type BucketVBMPayloadType map[string]*VBMasterPayload
+
+func (t *BucketVBMPayloadType) SameAs(other *BucketVBMPayloadType) bool {
+	if t == nil && other == nil {
+		return true
+	} else if t != nil && other == nil {
+		return false
+	} else if t == nil && other != nil {
+		return false
+	}
+
+	if len(*t) != len(*other) {
+		return false
+	}
+
+	for k, v := range *t {
+		otherV, exists := (*other)[k]
+		if !exists {
+			return false
+		}
+		if !v.SameAs(otherV) {
+			return false
+		}
+	}
+	return true
+}
 
 type VBMasterPayload struct {
 	mtx sync.RWMutex
@@ -826,6 +887,29 @@ func (p *VBMasterPayload) GetBackfillVBTasks() *metadata.VBTasksMapType {
 	return taskMap
 }
 
+func (p *VBMasterPayload) SameAs(other *VBMasterPayload) bool {
+	if p == nil && other == nil {
+		return true
+	} else if p == nil && other != nil {
+		return false
+	} else if p != nil && other == nil {
+		return false
+	}
+	p.mtx.RLock()
+	other.mtx.RLock()
+	defer p.mtx.RUnlock()
+	defer other.mtx.RUnlock()
+
+	if p.OverallPayloadErr != "" && other.OverallPayloadErr != "" {
+		return p.OverallPayloadErr == other.OverallPayloadErr
+	} else {
+		return p.NotMyVBs.SameAs(other.NotMyVBs) && p.ConflictingVBs.SameAs(other.ConflictingVBs) &&
+			p.PushVBs.SameAs(other.PushVBs) && p.SrcManifests.SameAs(other.SrcManifests) &&
+			p.TgtManifests.SameAs(other.TgtManifests) && p.BrokenMappingDoc.SameAs(other.BrokenMappingDoc) &&
+			p.BackfillMappingDoc.SameAs(other.BackfillMappingDoc)
+	}
+}
+
 type VBsPayload map[uint16]*Payload
 
 func NewVBsPayload(vbsList []uint16) *VBsPayload {
@@ -858,6 +942,31 @@ func (v *VBsPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBsPayload {
 	return &retMap
 }
 
+func (v *VBsPayload) SameAs(other *VBsPayload) bool {
+	if v == nil && other != nil {
+		return false
+	} else if v != nil && other == nil {
+		return false
+	} else if v == nil && other == nil {
+		return true
+	}
+
+	if len(*v) != len(*other) {
+		return false
+	}
+
+	for k, v := range *v {
+		otherV, exists := (*other)[k]
+		if !exists {
+			return false
+		}
+		if !v.SameAs(otherV) {
+			return false
+		}
+	}
+	return true
+}
+
 func NewVBMasterPayload() *VBMasterPayload {
 	notMyVbs := make(VBsPayload)
 	conflictingVBs := make(VBsPayload)
@@ -878,6 +987,18 @@ type Payload struct {
 	BackfillTsks *metadata.BackfillTasks
 }
 
+func (t *Payload) SameAs(other *Payload) bool {
+	if t == nil && other == nil {
+		return true
+	} else if t != nil && other == nil {
+		return false
+	} else if t == nil && other != nil {
+		return false
+	}
+
+	return t.CheckpointsDoc.SameAs(other.CheckpointsDoc) && t.BackfillTsks.SameAs(other.BackfillTsks)
+}
+
 func NewPayload() *Payload {
 	return &Payload{}
 }
@@ -892,7 +1013,6 @@ func (v *VBMasterCheckResp) InitBucket(bucketName string) {
 }
 
 type VBPeriodicReplicateReq struct {
-	RequestCommon
 	MainReplication     *ReplicationPayload
 	BackfillReplication *ReplicationPayload
 }
@@ -954,6 +1074,149 @@ func (v *VBPeriodicReplicateReq) GetSubsetBasedOnVBList(vbsList []uint16) *VBPer
 	return newReq
 }
 
+func (v *VBPeriodicReplicateReq) GetId() string {
+	if v != nil && v.MainReplication != nil {
+		return v.MainReplication.ReplicationSpecId
+	} else if v != nil && v.BackfillReplication != nil {
+		return v.BackfillReplication.ReplicationSpecId
+	} else {
+		return "unknown ID"
+	}
+}
+
+func (v *VBPeriodicReplicateReq) PreSerlialize() error {
+	// Nil ptr serialize to nothing
+	if v == nil {
+		return nil
+	}
+
+	err := v.MainReplication.CompressPayload()
+	if err != nil {
+		return err
+	}
+	err = v.BackfillReplication.CompressPayload()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VBPeriodicReplicateReq) PostSerialize() error {
+	if v == nil {
+		return nil
+	}
+
+	if v.MainReplication != nil {
+		err := v.MainReplication.DecompressPayload()
+		if err != nil {
+			return err
+		}
+	}
+
+	if v.BackfillReplication != nil {
+		err := v.BackfillReplication.DecompressPayload()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (v *VBPeriodicReplicateReq) SameAs(other *VBPeriodicReplicateReq) bool {
+	if v == nil && other != nil {
+		return false
+	} else if v != nil && other == nil {
+		return false
+	} else if v == nil && other == nil {
+		return true
+	}
+
+	return v.MainReplication.SameAs(other.MainReplication) && v.BackfillReplication.SameAs(other.BackfillReplication)
+}
+
 type VBPeriodicReplicateReqList []*VBPeriodicReplicateReq
 
+func (l *VBPeriodicReplicateReqList) SameAs(other *VBPeriodicReplicateReqList) bool {
+	if l == nil && other != nil {
+		return false
+	} else if l != nil && other == nil {
+		return false
+	} else if l == nil && other == nil {
+		return true
+	}
+
+	if len(*l) != len(*other) {
+		return false
+	}
+
+	for i, req := range *l {
+		if !req.SameAs((*other)[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 type PeersVBPeriodicReplicateReqs map[string]*VBPeriodicReplicateReqList
+
+type PeerVBPeriodicPushReq struct {
+	RequestCommon
+	PushRequests *VBPeriodicReplicateReqList
+}
+
+func NewPeerVBPeriodicPushReq(common RequestCommon) *PeerVBPeriodicPushReq {
+	req := &PeerVBPeriodicPushReq{RequestCommon: common}
+	req.ReqType = ReqPeriodicPush
+	return req
+}
+
+func (p *PeerVBPeriodicPushReq) Serialize() ([]byte, error) {
+	if p == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	for _, req := range *p.PushRequests {
+		err := req.PreSerlialize()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return json.Marshal(p)
+}
+
+func (p *PeerVBPeriodicPushReq) DeSerialize(stream []byte) error {
+	err := json.Unmarshal(stream, p)
+	if err != nil {
+		return err
+	}
+
+	if p.PushRequests != nil {
+		for _, req := range *p.PushRequests {
+			postSerializeErr := req.PostSerialize()
+			if postSerializeErr != nil {
+				return postSerializeErr
+			}
+		}
+	}
+
+	return nil
+}
+
+func (p *PeerVBPeriodicPushReq) SameAs(otherRaw interface{}) (bool, error) {
+	other, ok := otherRaw.(*PeerVBPeriodicPushReq)
+	if !ok {
+		return false, getWrongTypeErr("*PeerVBPeriodicPushReq", otherRaw)
+	}
+	if !p.PushRequests.SameAs(other.PushRequests) {
+		return false, fmt.Errorf("Pushrequests are different %v vs %v", p.PushRequests, other.PushRequests)
+	}
+	return p.RequestCommon.SameAs(&other.RequestCommon)
+}
+
+func (p *PeerVBPeriodicPushReq) GenerateResponse() interface{} {
+	// TODO NEIL - next
+	panic("TODO")
+	return nil
+}

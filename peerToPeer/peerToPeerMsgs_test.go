@@ -11,6 +11,7 @@ package peerToPeer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
@@ -147,4 +148,52 @@ func TestManifestLoadTest(t *testing.T) {
 
 	src, tgt := vbMasterPayload.GetAllManifests()
 	fmt.Printf("%v - %v - %v\n", src, tgt, err)
+}
+
+func TestPeriodicPush(t *testing.T) {
+	fmt.Println("============== Test case start: TestPeriodicPush =================")
+	defer fmt.Println("============== Test case end: TestPeriodicPush =================")
+	assert := assert.New(t)
+
+	reqCommon := NewRequestCommon("sender", "target", "", "", uint32(3))
+	pushReq := NewPeerVBPeriodicPushReq(reqCommon)
+
+	specId := "testSpecId"
+	specInternalId := "testSpecIdInternal"
+	mainReplPayload := NewReplicationPayload(specId, specInternalId, common.MainPipeline)
+	backfillPayload := NewReplicationPayload(specId, specInternalId, common.BackfillPipeline)
+
+	bucketName := "bucketName"
+	bucketVBMPayload := make(BucketVBMPayloadType)
+	vbList := []uint16{0, 1}
+	vbMasterPayload := &VBMasterPayload{
+		PushVBs: NewVBsPayload(vbList),
+	}
+	bucketVBMPayload[bucketName] = vbMasterPayload
+
+	mainReplPayload.payload = &bucketVBMPayload
+	backfillPayload.payload = &bucketVBMPayload
+
+	vbPeriodicReq := &VBPeriodicReplicateReq{
+		MainReplication:     &mainReplPayload,
+		BackfillReplication: &backfillPayload,
+	}
+
+	var list VBPeriodicReplicateReqList
+	list = append(list, vbPeriodicReq)
+
+	pushReq.PushRequests = &list
+
+	serializedBytes, err := pushReq.Serialize()
+	assert.Nil(err)
+	assert.NotNil(serializedBytes)
+
+	checkReq := &PeerVBPeriodicPushReq{}
+	err = checkReq.DeSerialize(serializedBytes)
+	assert.Nil(err)
+
+	assert.Equal(ReqPeriodicPush, checkReq.ReqType)
+	assert.Len(*checkReq.PushRequests, 1)
+
+	assert.True(checkReq.SameAs(pushReq))
 }

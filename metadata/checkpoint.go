@@ -121,7 +121,7 @@ func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
 	return nil
 }
 
-func (ckptRecord *CheckpointRecord) IsSame(new_record *CheckpointRecord) bool {
+func (ckptRecord *CheckpointRecord) SameAs(new_record *CheckpointRecord) bool {
 	if ckptRecord == nil && new_record != nil {
 		return false
 	} else if ckptRecord != nil && new_record == nil {
@@ -575,6 +575,22 @@ func (c *CheckpointRecordsList) PrepareSortStructure(srcFailoverlog, tgtFailover
 	return sortRecordsList
 }
 
+func (c *CheckpointRecordsList) SameAs(other CheckpointRecordsList) bool {
+	if c == nil {
+		return false
+	}
+	if len(*c) != len(other) {
+		return false
+	}
+
+	for i, record := range *c {
+		if !record.SameAs(other[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 type CheckpointsDoc struct {
 	//keep "MaxCheckpointsKept" checkpoint record - ordered by new to old, with 0th element being the newest
 	Checkpoint_records CheckpointRecordsList `json:"checkpoints"`
@@ -633,7 +649,7 @@ func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) (added bool, removedRecords []*CheckpointRecord) {
 	length := len(ckptsDoc.Checkpoint_records)
 	if length > 0 {
-		if !ckptsDoc.Checkpoint_records[0].IsSame(record) {
+		if !ckptsDoc.Checkpoint_records[0].SameAs(record) {
 			if length > base.MaxCheckpointRecordsToKeep {
 				for i := base.MaxCheckpointRecordsToKeep - 1; i < length; i++ {
 					removedRecords = append(removedRecords, ckptsDoc.Checkpoint_records[i])
@@ -672,4 +688,15 @@ func (ckptsDoc *CheckpointsDoc) GetCheckpointRecords() []*CheckpointRecord {
 	} else {
 		return ckptsDoc.Checkpoint_records[:base.MaxCheckpointRecordsToRead]
 	}
+}
+
+func (c *CheckpointsDoc) SameAs(other *CheckpointsDoc) bool {
+	if c == nil && other == nil {
+		return true
+	} else if c != nil && other == nil {
+		return false
+	} else if c == nil && other != nil {
+		return false
+	}
+	return c.Checkpoint_records.SameAs(other.Checkpoint_records) && c.SpecInternalId == other.SpecInternalId
 }

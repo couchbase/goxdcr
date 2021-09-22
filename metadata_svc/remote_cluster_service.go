@@ -667,9 +667,9 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 	}
 
 	if !rctx.refOrig.IsSame(rctx.refCache) || rctx.nodeListUpdated || rctx.addressPrefUpdate || rctx.capabilityChanged() {
-		// 1. when refOrig.IsSame(refCache) is true, i.e., when there have been no changes to refCache,
+		// 1. when refOrig.SameAs(refCache) is true, i.e., when there have been no changes to refCache,
 		//    updateReferenceFromNoLock is not called
-		// 2. when refOrig.IsSame(refCache) is false, and refOrig.IsEssentiallySame(refCache) is true,
+		// 2. when refOrig.SameAs(refCache) is false, and refOrig.IsEssentiallySame(refCache) is true,
 		//    i.e., when there have been changes to transient fields like ActiveHostName in refCache,
 		//    updateReferenceFromNoLock is called to get the transient fields updated.
 		//    there are no metakv update or metadata change callback, though

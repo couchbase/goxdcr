@@ -522,6 +522,18 @@ func (sourceManifest *CollectionsManifest) ImplicitMap(targetManifest *Collectio
 	return
 }
 
+func (c *CollectionsManifest) SameAs(other *CollectionsManifest) bool {
+	if c == nil && other != nil {
+		return false
+	} else if c != nil && other == nil {
+		return false
+	} else if c == nil && other == nil {
+		return true
+	}
+
+	return c.uid == other.uid && c.scopes.SameAs(other.scopes)
+}
+
 type CollectionsPtrList []*Collection
 
 func (c CollectionsPtrList) Len() int           { return len(c) }
@@ -668,6 +680,23 @@ func (s ScopesMap) AddNamespace(scopeName, collectionName string) {
 	}
 }
 
+func (s ScopesMap) SameAs(other ScopesMap) bool {
+	if len(s) != len(other) {
+		return false
+	}
+
+	for k, v := range s {
+		otherV, exists := (other)[k]
+		if !exists {
+			return false
+		}
+		if !v.SameAs(&otherV) {
+			return false
+		}
+	}
+	return true
+}
+
 type Scope struct {
 	Uid         uint32 `json:"Uid"`
 	Name        string `json:"Name"`
@@ -753,6 +782,18 @@ func (s Scope) Clone() Scope {
 		Name:        s.Name,
 		Collections: s.Collections.Clone(),
 	}
+}
+
+func (s *Scope) SameAs(other *Scope) bool {
+	if s == nil && other != nil {
+		return false
+	} else if s != nil && other == nil {
+		return false
+	} else if s == nil && other == nil {
+		return true
+	}
+
+	return s.Uid == other.Uid && s.Name == other.Name && s.Collections.IsSameAs(other.Collections)
 }
 
 type Collection struct {
@@ -842,6 +883,9 @@ func (c *CollectionsMap) toCollectionsDetail() (detailList []interface{}) {
 }
 
 func (this *CollectionsMap) IsSameAs(other CollectionsMap) bool {
+	if this == nil {
+		return false
+	}
 	for colName, collection := range *this {
 		otherCollection, ok := other[colName]
 		if !ok {
@@ -985,7 +1029,7 @@ func (c CollectionNamespaceList) IsSame(otherRO CollectionNamespaceList) bool {
 		return false
 	}
 
-	// IsSame() is used often as readers ... pass in clones to prevent sort.Sort as it pivots
+	// SameAs() is used often as readers ... pass in clones to prevent sort.Sort as it pivots
 	aList := SortCollectionsNamespaceList(c.Clone())
 	bList := SortCollectionsNamespaceList(otherRO.Clone())
 
@@ -1823,6 +1867,18 @@ func (b *CollectionNsMappingsDoc) LoadShaMap(shaMap ShaToCollectionNamespaceMap)
 	}
 }
 
+func (b *CollectionNsMappingsDoc) SameAs(other *CollectionNsMappingsDoc) bool {
+	if b == nil && other != nil {
+		return false
+	} else if b != nil && other == nil {
+		return false
+	} else if b == nil && other == nil {
+		return true
+	}
+
+	return b.SpecInternalId == other.SpecInternalId && b.NsMappingRecords.SameAs(other.NsMappingRecords)
+}
+
 type ShaToCollectionNamespaceMap map[string]*CollectionNamespaceMapping
 
 func (s *ShaToCollectionNamespaceMap) Clone() (newMap ShaToCollectionNamespaceMap) {
@@ -1939,6 +1995,26 @@ func (c *CompressedColNamespaceMappingList) SortedInsert(elem *CompressedColName
 	*c = append(*c, nil)
 	copy((*c)[i+1:], (*c)[i:])
 	(*c)[i] = elem
+}
+
+func (c *CompressedColNamespaceMappingList) SameAs(other CompressedColNamespaceMappingList) bool {
+	if c == nil {
+		return false
+	}
+
+	if len(*c) != len(other) {
+		return false
+	}
+
+	for i, v := range *c {
+		if v.Sha256Digest != other[i].Sha256Digest {
+			return false
+		} else if !reflect.DeepEqual(v.CompressedMapping, other[i].CompressedMapping) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMappingRulesType, error) {
@@ -3082,4 +3158,29 @@ func (m *ManifestsCache) LoadIfNotExists(other *ManifestsCache) {
 			(*m)[k] = v
 		}
 	}
+}
+
+func (m *ManifestsCache) SameAs(other *ManifestsCache) bool {
+	if m == nil && other != nil {
+		return false
+	} else if m != nil && other == nil {
+		return false
+	} else if m == nil && other == nil {
+		return true
+	}
+
+	if len(*m) != len(*other) {
+		return false
+	}
+
+	for k, v := range *m {
+		otherV, exists := (*other)[k]
+		if !exists {
+			return false
+		}
+		if !v.SameAs(otherV) {
+			return false
+		}
+	}
+	return true
 }

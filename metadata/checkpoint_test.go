@@ -57,7 +57,7 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 
 	assert.Equal(5, len(checkDoc.Checkpoint_records))
 	assert.NotNil(checkDoc.Checkpoint_records[0])
-	assert.True(checkDoc.Checkpoint_records[0].IsSame(&newCkptRecord))
+	assert.True(checkDoc.Checkpoint_records[0].SameAs(&newCkptRecord))
 	assert.Equal(newCkptRecord.SourceManifestForBackfillMgr, checkDoc.Checkpoint_records[0].SourceManifestForBackfillMgr)
 }
 
