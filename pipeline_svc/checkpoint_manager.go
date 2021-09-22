@@ -2331,6 +2331,13 @@ func (ckmgr *CheckpointManager) MergePeerNodesCkptInfo(genericResponse interface
 		return ckmgr.mergeNodesToVBMasterCheckResp(nodesRespMap)
 	}
 
+	_, ok = genericResponse.(*peerToPeer.ReplicationPayload)
+	if ok {
+		// TODO
+		fmt.Printf("NEIL DEBUG TODO - to handle periodic push replicationPayload\n")
+		return nil
+	}
+
 	return fmt.Errorf("Unhandled type: %v", reflect.TypeOf(genericResponse))
 }
 

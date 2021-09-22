@@ -1029,7 +1029,7 @@ func (c CollectionNamespaceList) IsSame(otherRO CollectionNamespaceList) bool {
 		return false
 	}
 
-	// SameAs() is used often as readers ... pass in clones to prevent sort.Sort as it pivots
+	// this is used often as readers ... pass in clones to prevent sort.Sort as it pivots
 	aList := SortCollectionsNamespaceList(c.Clone())
 	bList := SortCollectionsNamespaceList(otherRO.Clone())
 

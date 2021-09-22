@@ -78,9 +78,11 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc := setupBoilerPlate()
 	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc)
 
+	dummyMerger := func(string, interface{}) error { return nil }
 	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, nil, nil, nil)
 	assert.Nil(err)
 	assert.NotNil(mgr)
+	mgr.SetPushReqMergerOnce(dummyMerger)
 	commAPI, err := mgr.Start()
 	assert.NotNil(commAPI)
 	assert.Nil(err)

@@ -27,15 +27,18 @@ const ModuleName = "P2PManager"
 const randIdLen = 32
 
 var ErrorNoPeerDiscovered error = fmt.Errorf("no peer has been discovered")
+var ErrorNoActiveMergerSet error = fmt.Errorf("No active pipeline is executing to get merger")
 
 type P2PManager interface {
+	VBMasterCheck
+
 	Start() (PeerToPeerCommAPI, error)
 	Stop() error
 	GetLifecycleId() string
 
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 
-	VBMasterCheck
+	SetPushReqMergerOnce(pm func(fullTopic string, req interface{}) error)
 }
 
 type VBMasterCheck interface {
@@ -74,6 +77,10 @@ type P2PManagerImpl struct {
 
 	vbMasterCheckHelper VbMasterCheckHelper
 	replicator          ReplicaReplicator
+
+	mergerSetOnce sync.Once
+	mergerSetCh   chan bool
+	pushReqMerger func(string, interface{}) error
 }
 
 func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface,
@@ -102,6 +109,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		ckptSvc:             ckptSvc,
 		colManifestSvc:      colManifestSvc,
 		backfillReplSvc:     backfillReplSvc,
+		mergerSetCh:         make(chan bool),
 	}, nil
 }
 
@@ -115,6 +123,7 @@ func initReceiveChsMap() map[OpCode]chan interface{} {
 
 func (p *P2PManagerImpl) Start() (PeerToPeerCommAPI, error) {
 	if atomic.CompareAndSwapUint32(&p.started, 0, 1) {
+		p.waitForMergerToBeSet()
 		err := p.runHandlers()
 		if err != nil {
 			return nil, err
@@ -152,7 +161,8 @@ func (p *P2PManagerImpl) runHandlers() error {
 				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils)
 		case ReqPeriodicPush:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-			p.receiveHandlers[i] = NewPeriodicPushHandler()
+			p.receiveHandlers[i] = NewPeriodicPushHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
+				p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils, p.getPushReqMerger())
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -403,7 +413,7 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 	}
 
 	if pipeline == nil {
-		return nil, fmt.Errorf("Pipeline is nil")
+		return nil, base.ErrorNilPipeline
 	}
 	genSpec := pipeline.Specification()
 	if genSpec == nil || genSpec.GetReplicationSpec() == nil {
@@ -566,3 +576,18 @@ func getOpaqueWrapper() uint32 {
 
 // Variable and dynamically updated per number of peer KV nodes
 var P2POpaqueTimeoutAtomicMin uint32 = 5
+
+func (p *P2PManagerImpl) SetPushReqMergerOnce(merger func(fullTopic string, req interface{}) error) {
+	p.mergerSetOnce.Do(func() {
+		p.pushReqMerger = merger
+		close(p.mergerSetCh)
+	})
+}
+
+func (p *P2PManagerImpl) getPushReqMerger() func(string, interface{}) error {
+	return p.pushReqMerger
+}
+
+func (p *P2PManagerImpl) waitForMergerToBeSet() {
+	<-p.mergerSetCh
+}

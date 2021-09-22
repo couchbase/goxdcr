@@ -26,7 +26,6 @@ type OpaqueReqRespCbMap map[uint32]chan ReqRespPair
 type HandlerCommon struct {
 	logger          *log.CommonLogger
 	lifeCycleId     string
-	finCh           chan bool
 	cleanupInterval time.Duration
 
 	opaqueMap          OpaqueMap
@@ -34,9 +33,12 @@ type HandlerCommon struct {
 	opaqueReqRespCbMap OpaqueReqRespCbMap
 	opaqueMapMtx       sync.RWMutex
 	opaquesClearCh     chan uint32
+
+	finCh     chan bool
+	receiveCh chan interface{}
 }
 
-func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan bool, cleanupInterval time.Duration) *HandlerCommon {
+func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan bool, cleanupInterval time.Duration, reqCh chan interface{}) *HandlerCommon {
 	handler := &HandlerCommon{
 		logger:             logger,
 		lifeCycleId:        lifeCycleId,
@@ -47,6 +49,7 @@ func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan b
 		opaquesClearCh:     make(chan uint32, 1000),
 		cleanupInterval:    cleanupInterval,
 		opaqueReqRespCbMap: map[uint32]chan ReqRespPair{},
+		receiveCh:          reqCh,
 	}
 	return handler
 }

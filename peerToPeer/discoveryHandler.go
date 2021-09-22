@@ -16,8 +16,7 @@ import (
 
 type DiscoveryHandler struct {
 	*HandlerCommon
-	finCh     chan bool
-	receiveCh chan interface{}
+	finCh chan bool
 
 	knownPeers *KnownPeers
 }
@@ -32,9 +31,7 @@ type KnownPeers struct {
 func NewDiscoveryHandler(reqCh chan interface{}, logger *log.CommonLogger, lifecycleId string, knownPeers *KnownPeers, cleanupInterval time.Duration) *DiscoveryHandler {
 	finCh := make(chan bool)
 	handler := &DiscoveryHandler{
-		HandlerCommon: NewHandlerCommon(logger, lifecycleId, finCh, cleanupInterval),
-		finCh:         finCh,
-		receiveCh:     reqCh,
+		HandlerCommon: NewHandlerCommon(logger, lifecycleId, finCh, cleanupInterval, reqCh),
 		knownPeers:    knownPeers,
 	}
 	return handler
@@ -77,7 +74,7 @@ func (h *DiscoveryHandler) handleRequest(req *DiscoveryRequest) {
 		resp.LocalLifeCycleId = h.lifeCycleId
 	}
 	if req.RemoteLifeCycleId != "" && req.RemoteLifeCycleId != h.lifeCycleId {
-		resp.DiscoveryErrString = ErrorLifecycleMismatch.Error()
+		resp.ErrorString = ErrorLifecycleMismatch.Error()
 	} else {
 		var needToUpdate bool
 		h.knownPeers.mapMtx.RLock()
@@ -109,12 +106,12 @@ func (h *DiscoveryHandler) handleResponse(resp *DiscoveryResponse) {
 		return
 	}
 
-	if resp.DiscoveryErrString == "" {
+	if resp.ErrorString == "" {
 		// Nothing to do
 		return
 	}
 
-	if resp.DiscoveryErrString == ErrorLifecycleMismatch.Error() {
+	if resp.ErrorString == ErrorLifecycleMismatch.Error() {
 		// Erase the out of match entry and wait for re-discovery
 		h.knownPeers.mapMtx.Lock()
 		h.logger.Infof("Removing peer %v since lifecycle ID mismatched", resp.Sender)

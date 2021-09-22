@@ -24,7 +24,7 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1)
+declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=1000)
 
 # Bucket -> Scopes
 # -----------------
@@ -73,7 +73,7 @@ function runOneReplicationCycle {
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
-	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	createBucketReplication "C1" "B0" "C2" "B1" BackfillHangLooseProperties
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
 

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"testing"
@@ -27,6 +28,24 @@ func getManifest() metadata.CollectionsManifest {
 	provisionedManifest, _ := metadata.NewCollectionsManifestFromBytes(data)
 
 	return provisionedManifest
+}
+
+func getPushFile1() []byte {
+	file := "./unitTestData/periodicPush1.json"
+	data, err := ioutil.ReadFile(file)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+func getPrePushFile() []byte {
+	file := "./unitTestData/p2pReplicaAgentReqWBackfill.json"
+	data, err := ioutil.ReadFile(file)
+	if err != nil {
+		panic(err)
+	}
+	return data
 }
 
 func TestVBMasterCheckResp(t *testing.T) {
@@ -196,4 +215,51 @@ func TestPeriodicPush(t *testing.T) {
 	assert.Len(*checkReq.PushRequests, 1)
 
 	assert.True(checkReq.SameAs(pushReq))
+}
+
+func TestPeriodicPushSendPkt(t *testing.T) {
+	fmt.Println("============== Test case start: TestPeriodicPushSendPkt =================")
+	defer fmt.Println("============== Test case end: TestPeriodicPushSendPkt =================")
+	assert := assert.New(t)
+
+	utilsReal := utils.NewUtilities()
+
+	prePushData := getPrePushFile()
+	prePush := VBPeriodicReplicateReq{}
+	assert.Nil(json.Unmarshal(prePushData, &prePush))
+	assert.Nil(prePush.PostSerialize())
+	assert.NotNil(prePush.MainReplication)
+	assert.NotNil(prePush.BackfillReplication)
+	var atLeastOneBackfill bool
+	for i := uint16(0); i < 512; i++ {
+		if (*(*prePush.BackfillReplication.payload)[prePush.BackfillReplication.SourceBucketName].PushVBs)[i] != nil &&
+			(*(*prePush.BackfillReplication.payload)[prePush.BackfillReplication.SourceBucketName].PushVBs)[i].BackfillTsks != nil {
+			atLeastOneBackfill = true
+		}
+	}
+	assert.True(atLeastOneBackfill)
+
+	data1 := getPushFile1()
+	var reqCommon RequestCommon
+	err := json.Unmarshal(data1, &reqCommon)
+	assert.Nil(err)
+	reqRaw, err := generateRequest(utilsReal, reqCommon, data1)
+	assert.Nil(err)
+	req, ok := reqRaw.(*PeerVBPeriodicPushReq)
+	assert.True(ok)
+	assert.NotNil(req)
+
+	for _, request := range *(req.PushRequests) {
+		for i := uint16(0); i < 512; i++ {
+			assert.NotNil((*(*request.MainReplication.payload)[request.MainReplication.SourceBucketName].PushVBs)[i].CheckpointsDoc)
+		}
+		var atLeastOneBackfill bool
+		for i := uint16(0); i < 512; i++ {
+			assert.NotNil((*(*request.MainReplication.payload)[request.MainReplication.SourceBucketName].PushVBs)[i].CheckpointsDoc)
+			if (*(*request.BackfillReplication.payload)[request.BackfillReplication.SourceBucketName].PushVBs)[i].BackfillTsks != nil {
+				atLeastOneBackfill = true
+			}
+		}
+		assert.True(atLeastOneBackfill)
+	}
 }

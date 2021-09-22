@@ -278,6 +278,7 @@ var ErrorCompressionDcpInvalidHandshake = errors.New("DCP connection is establis
 var ErrorCompressionUnableToInflate = errors.New("Unable to properly uncompress data from DCP")
 var ErrorMaxReached = errors.New("Maximum entries has been reached")
 var ErrorNilPtr = errors.New("Nil pointer given")
+var ErrorNilPipeline = errors.New("Nil pipeline")
 var ErrorNoHostName = errors.New("hostname is missing")
 var ErrorInvalidSettingsKey = errors.New("Invalid settings key")
 var ErrorSizeExceeded = errors.New("Size is larger than maximum allowed")

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/peerToPeer"
+	"github.com/couchbase/goxdcr/pipeline_svc"
 	"reflect"
 	"strings"
 	"sync"
@@ -80,6 +81,7 @@ type PipelineMgrIface interface {
 	UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	DismissEventForPipeline(pipelineName string, eventId int) error
 	HandleClusterEncryptionLevelChange(old, new service_def.EncryptionSettingIface)
+	HandlePeerCkptPush(fullTopic string, dynamicEvt interface{}) error
 }
 
 type PipelineMgrInternalIface interface {
@@ -169,7 +171,7 @@ func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (pipeline.Re
 	if obj == nil {
 		return nil, pipelineMgr.utils.ReplicationStatusNotFoundError(topic)
 	}
-	return obj.(*pipeline.ReplicationStatus), nil
+	return obj.(pipeline.ReplicationStatusIface), nil
 }
 
 // Should be called only from serializer to prevent race
@@ -1158,6 +1160,61 @@ func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair
 		}
 	}
 	return replStatus.GetEventsManager().BackfillUpdateCb(diffPair, srcManifestsDelta)
+}
+
+func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic string, dynamicEvt interface{}) error {
+	// When peers send push requests, use checkpoint manager to merge them
+	// This means getting the corresponding pipeline's ckpt manager
+	// A peer node should only send a push request if the pipeline is running
+	// If there's no source side network partition, this should not fail
+	// so try for a bit before failing
+
+	var checkpointMgr pipeline_svc.CheckpointMgrSvc
+	var opFuncErr error
+	opFunc := func() error {
+		checkpointMgr, opFuncErr = pipelineMgr.handlePeerCkptGetCkptMgr(fullTopic)
+		return opFuncErr
+	}
+
+	err := pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("pipelineMgr.HandlePeerCkptPushGetCkptMgr(%v)", fullTopic),
+		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, opFunc)
+	if err != nil {
+		return err
+	}
+	return checkpointMgr.MergePeerNodesCkptInfo(dynamicEvt)
+}
+
+func (pipelineMgr *PipelineManager) handlePeerCkptGetCkptMgr(fullTopic string) (pipeline_svc.CheckpointMgrSvc, error) {
+	topic, pipelineType := common.DecomposeFullTopic(fullTopic)
+
+	repStatus, err := pipelineMgr.ReplicationStatus(topic)
+	if err != nil {
+		// This shouldn't happen as repStatus should exist if spec exists. If this error shows up, it's a clue that
+		// there is network partition and replicationSpec isn't sync'ed correctly
+		return nil, fmt.Errorf("Peer sent push req for pipeline %v but topic does not exist - %v", topic, err)
+	}
+
+	var pipeline common.Pipeline
+	switch pipelineType {
+	case common.MainPipeline:
+		pipeline = repStatus.Pipeline()
+	case common.BackfillPipeline:
+		pipeline = repStatus.BackfillPipeline()
+	default:
+		// Shouldn't happen
+		return nil, fmt.Errorf("unknown pipeline type %v", pipelineType)
+	}
+
+	if pipeline == nil {
+		// pipeline could be nil in between pipeline restarts restarts
+		return nil, base.ErrorNilPipeline
+	}
+
+	checkpointMgr, ok := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
+	if !ok {
+		return nil, base.ErrorNilPipeline
+	}
+	return checkpointMgr, nil
 }
 
 var updaterStateErrorStr = "Can't move update state from %v to %v"

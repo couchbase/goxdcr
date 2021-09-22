@@ -170,6 +170,7 @@ type ResponseCommon struct {
 	Opaque            uint32
 	LocalLifeCycleId  string
 	RemoteLifeCycleId string
+	ErrorString       string
 }
 
 func NewResponseCommon(opcode OpCode, senderLifeCycleId string, receiverLifeCycleId string, opaque uint32, sender string) ResponseCommon {
@@ -200,7 +201,6 @@ func (r *ResponseCommon) GetOpcode() OpCode {
 
 type DiscoveryResponse struct {
 	ResponseCommon
-	DiscoveryErrString string
 }
 
 func (d *DiscoveryResponse) Serialize() ([]byte, error) {
@@ -247,7 +247,7 @@ func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface) (Re
 		if err != nil {
 			return nil, err
 		}
-		return generateRequest(utils, reqCommon, err, body)
+		return generateRequest(utils, reqCommon, body)
 	} else {
 		err = json.Unmarshal(body, &respCommon)
 		if err != nil {
@@ -276,12 +276,16 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 			panic("Should not be possible")
 		}
 		return resp, nil
+	case ReqPeriodicPush:
+		// NEIL TODO - next
+		return nil, fmt.Errorf("TODO")
 	default:
 		return nil, fmt.Errorf("Unknown response %v", respCommon.RespType)
 	}
 }
 
-func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, err error, body []byte) (ReqRespCommon, error) {
+func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body []byte) (ReqRespCommon, error) {
+	var err error
 	cbFunc := func(resp Response) (HandlerResult, error) {
 		payload, err := resp.Serialize()
 		if err != nil {
@@ -489,6 +493,10 @@ func (v *ReplicationPayload) DecompressPayload() error {
 		if err != nil {
 			return err
 		}
+		err = v.payload.PostDecompressInit()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -523,7 +531,10 @@ func (v *ReplicationPayload) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.Che
 		vbPayload3, found3 := pushVBMap[vb]
 		if found3 {
 			vbPayload3.CheckpointsDoc = ckptDoc
+			continue
 		}
+
+		// Not found...
 	}
 
 	if len(errMap) > 0 {
@@ -610,9 +621,18 @@ func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMa
 		if found2 {
 			vbPayload2.BackfillTsks = tasks
 			tasksLoaded = append(tasksLoaded, vb)
-		} else {
-			taskNotFound = append(taskNotFound, vb)
+			continue
 		}
+
+		pushVBMap := *payload.PushVBs
+		vbPayload3, found3 := pushVBMap[vb]
+		if found3 {
+			vbPayload3.BackfillTsks = tasks
+			tasksLoaded = append(tasksLoaded, vb)
+			continue
+		}
+
+		taskNotFound = append(taskNotFound, vb)
 	}
 	return nil
 }
@@ -756,6 +776,23 @@ func (t *BucketVBMPayloadType) SameAs(other *BucketVBMPayloadType) bool {
 		}
 	}
 	return true
+}
+
+func (t *BucketVBMPayloadType) PostDecompressInit() error {
+	if t == nil {
+		return nil
+	}
+
+	for _, payloadPtr := range *t {
+		if payloadPtr == nil {
+			continue
+		}
+		err := payloadPtr.PostDecompressInit()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type VBMasterPayload struct {
@@ -910,6 +947,33 @@ func (p *VBMasterPayload) SameAs(other *VBMasterPayload) bool {
 	}
 }
 
+func (p *VBMasterPayload) PostDecompressInit() error {
+	if p == nil {
+		return nil
+	}
+
+	var err error
+	if p.NotMyVBs != nil {
+		err = p.NotMyVBs.PostDecompressInit()
+		if err != nil {
+			return err
+		}
+	}
+	if p.ConflictingVBs != nil {
+		err = p.ConflictingVBs.PostDecompressInit()
+		if err != nil {
+			return err
+		}
+	}
+	if p.PushVBs != nil {
+		err = p.PushVBs.PostDecompressInit()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type VBsPayload map[uint16]*Payload
 
 func NewVBsPayload(vbsList []uint16) *VBsPayload {
@@ -965,6 +1029,20 @@ func (v *VBsPayload) SameAs(other *VBsPayload) bool {
 		}
 	}
 	return true
+}
+
+func (v *VBsPayload) PostDecompressInit() error {
+	if v == nil {
+		return nil
+	}
+
+	for _, payload := range *v {
+		if payload == nil || payload.BackfillTsks == nil {
+			continue
+		}
+		payload.BackfillTsks.PostUnmarshalInit()
+	}
+	return nil
 }
 
 func NewVBMasterPayload() *VBMasterPayload {
@@ -1119,7 +1197,6 @@ func (v *VBPeriodicReplicateReq) PostSerialize() error {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -1172,11 +1249,14 @@ func NewPeerVBPeriodicPushReq(common RequestCommon) *PeerVBPeriodicPushReq {
 }
 
 func (p *PeerVBPeriodicPushReq) Serialize() ([]byte, error) {
-	if p == nil {
+	if p == nil || p.PushRequests == nil {
 		return nil, base.ErrorNilPtr
 	}
 
 	for _, req := range *p.PushRequests {
+		if req == nil {
+			continue
+		}
 		err := req.PreSerlialize()
 		if err != nil {
 			return nil, err
@@ -1187,6 +1267,10 @@ func (p *PeerVBPeriodicPushReq) Serialize() ([]byte, error) {
 }
 
 func (p *PeerVBPeriodicPushReq) DeSerialize(stream []byte) error {
+	if p == nil {
+		return base.ErrorNilPtr
+	}
+
 	err := json.Unmarshal(stream, p)
 	if err != nil {
 		return err
@@ -1194,6 +1278,9 @@ func (p *PeerVBPeriodicPushReq) DeSerialize(stream []byte) error {
 
 	if p.PushRequests != nil {
 		for _, req := range *p.PushRequests {
+			if req == nil {
+				continue
+			}
 			postSerializeErr := req.PostSerialize()
 			if postSerializeErr != nil {
 				return postSerializeErr
@@ -1216,7 +1303,22 @@ func (p *PeerVBPeriodicPushReq) SameAs(otherRaw interface{}) (bool, error) {
 }
 
 func (p *PeerVBPeriodicPushReq) GenerateResponse() interface{} {
-	// TODO NEIL - next
-	panic("TODO")
-	return nil
+	responseCommon := NewResponseCommon(p.ReqType, p.RemoteLifeCycleId, p.LocalLifeCycleId, p.Opaque, p.TargetAddr)
+	responseCommon.RespType = p.ReqType
+	resp := &PeerVBPeriodicPushResp{
+		ResponseCommon: responseCommon,
+	}
+	return resp
+}
+
+type PeerVBPeriodicPushResp struct {
+	ResponseCommon
+}
+
+func (p *PeerVBPeriodicPushResp) Serialize() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+func (p *PeerVBPeriodicPushResp) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, p)
 }

@@ -22,8 +22,6 @@ import (
 
 type VBMasterCheckHandler struct {
 	*HandlerCommon
-	finCh     chan bool
-	receiveCh chan interface{}
 
 	bucketTopologySvc service_def.BucketTopologySvc
 	ckptSvc           service_def.CheckpointsService
@@ -37,9 +35,7 @@ const VBMasterCheckSubscriberId = "VBMasterCheckHandler"
 func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface) *VBMasterCheckHandler {
 	finCh := make(chan bool)
 	handler := &VBMasterCheckHandler{
-		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval),
-		finCh:             finCh,
-		receiveCh:         reqCh,
+		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh),
 		bucketTopologySvc: bucketTopologySvc,
 		ckptSvc:           ckptSvc,
 		colManifestSvc:    collectionsManifestSvc,
@@ -236,10 +232,10 @@ func (h *VBMasterCheckHandler) handler() {
 		select {
 		case <-h.finCh:
 			return
-		case req := <-h.receiveCh:
+		case reqOrResp := <-h.receiveCh:
 			// Can be either req or response
-			vbMasterReq, isReq := req.(*VBMasterCheckReq)
-			vbMasterResp, isResp := req.(*VBMasterCheckResp)
+			vbMasterReq, isReq := reqOrResp.(*VBMasterCheckReq)
+			vbMasterResp, isResp := reqOrResp.(*VBMasterCheckResp)
 			if isReq {
 				h.handleRequest(vbMasterReq)
 			} else if isResp {

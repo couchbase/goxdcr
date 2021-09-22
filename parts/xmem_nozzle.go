@@ -1167,6 +1167,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 		if item != nil {
 			xmem.checkSendDelayInjection()
+
 			atomic.AddUint64(&xmem.counter_waittime, uint64(time.Since(item.Start_time).Seconds()*1000))
 			needSendStatus, err := needSend(item, batch, xmem.Logger())
 			if err != nil {
