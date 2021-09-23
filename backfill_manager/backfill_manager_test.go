@@ -498,18 +498,16 @@ func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
 	}
 
 	resp := &peerToPeer.VBMasterCheckResp{
-		ResponseCommon:            peerToPeer.NewResponseCommon(peerToPeer.ReqVBMasterChk, "", "", uint32(6), ""),
-		ResponsePayloadCompressed: nil,
-		ErrorMsg:                  "",
-		ReplicationSpecId:         specIdToUse,
-		SourceBucketName:          specToUse.SourceBucketName,
-		PipelineType:              common.MainPipeline,
+		ResponseCommon:     peerToPeer.NewResponseCommon(peerToPeer.ReqVBMasterChk, "", "", uint32(6), ""),
+		ReplicationPayload: peerToPeer.NewReplicationPayload(specId, specToUse.SourceBucketName, common.MainPipeline),
 	}
 
 	_, tasks0 := getTaskForVB0(specToUse.SourceBucketName)
+	tasks1 := tasks0.Clone()
 
 	vbTaskMap := metadata.NewVBTasksMap()
 	vbTaskMap.VBTasksMap[0] = tasks0
+	vbTaskMap.VBTasksMap[1] = tasks1
 	assert.NotEqual(0, len(tasks0.GetAllCollectionNamespaceMappings()))
 
 	resp.Init()

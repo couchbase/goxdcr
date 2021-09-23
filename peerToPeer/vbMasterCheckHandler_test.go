@@ -132,6 +132,12 @@ func validateResponse(respActual *VBMasterCheckResp, assert *assert.Assertions) 
 	assert.NotNil(shaMap)
 	assert.NotEqual(0, len(backfillMapping.NsMappingRecords))
 	assert.NotEqual(0, backfillMapping.NsMappingRecords.Size())
+
+	// Test subset - NotMyVBs have 2 VBs
+	subsetResp := respActual.GetSubsetBasedOnVBs([]uint16{0})
+	assert.False((*subsetResp.payload)[srcBucketName].NotMyVBs.IsEmpty())
+	ptr := (*subsetResp.payload)[srcBucketName].NotMyVBs
+	assert.Len(*ptr, 1)
 	return
 }
 

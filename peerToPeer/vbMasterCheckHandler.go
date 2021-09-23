@@ -184,14 +184,14 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 		if err != nil {
 			errMsg := fmt.Sprintf("Unable to get vbsList for bucket %v - %v", bucketName, err)
 			h.logger.Warnf(errMsg)
-			(*resp.responsePayload)[bucketName].OverallPayloadErr = errMsg
+			(*resp.payload)[bucketName].OverallPayloadErr = errMsg
 			continue
 		}
 		srcNotificationCh, err := h.bucketTopologySvc.SubscribeToLocalBucketFeed(tempRef, VBMasterCheckSubscriberId)
 		if err != nil {
 			errMsg := fmt.Sprintf("Unable to get srcNotificationCh for bucket %v - %v", bucketName, err)
 			h.logger.Warnf(errMsg)
-			(*resp.responsePayload)[bucketName].OverallPayloadErr = errMsg
+			(*resp.payload)[bucketName].OverallPayloadErr = errMsg
 			continue
 		}
 
@@ -219,13 +219,13 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 		if len(vbsIntersect) > 0 {
 			errMsg := fmt.Sprintf("Bucket %v has VBs intersect of %v", bucketName, vbsIntersect)
 			h.logger.Errorf(errMsg)
-			(*resp.responsePayload)[bucketName].RegisterVbsIntersect(vbsIntersect)
+			(*resp.payload)[bucketName].RegisterVbsIntersect(vbsIntersect)
 			removed, _, _ := base.ComputeDeltaOfUint16Lists(myVbsList, vbsIntersect, true)
 			// Whatever are not intersected are OK
-			(*resp.responsePayload)[bucketName].RegisterNotMyVBs(removed)
+			(*resp.payload)[bucketName].RegisterNotMyVBs(removed)
 		} else {
 			// Everything is not my VBs
-			(*resp.responsePayload)[bucketName].RegisterNotMyVBs(vbsList)
+			(*resp.payload)[bucketName].RegisterNotMyVBs(vbsList)
 		}
 		unsubsFunc()
 	}

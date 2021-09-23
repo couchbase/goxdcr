@@ -21,6 +21,7 @@ type ReplicaCache interface {
 	HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification)
 
 	// Remember to unlock when done and use the resources quickly
+	// Should only unlock if err is nil
 	GetReplicaInfo(spec *metadata.ReplicationSpecification) (replicaCnt int, replicaMap base.VbHostsMapType, replicaTranslateMap base.StringStringMap, unlockFunc func(), err error)
 }
 

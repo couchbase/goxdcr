@@ -52,27 +52,27 @@ func TestVBMasterCheckResp(t *testing.T) {
 	resp := req.GenerateResponse().(*VBMasterCheckResp)
 	resp.Init()
 	resp.InitBucket(bucketName)
-	(*resp.responsePayload)[bucketName] = &VBMasterPayload{
+	(*resp.payload)[bucketName] = &VBMasterPayload{
 		OverallPayloadErr: "",
 		NotMyVBs:          NewVBsPayload(nil),
 		ConflictingVBs:    nil,
 	}
-	(*resp.responsePayload)[bucketName].RegisterNotMyVBs(vbList)
+	(*resp.payload)[bucketName].RegisterNotMyVBs(vbList)
 
 	assert.NotNil(resp)
 	lenCheck := len(vbList)
-	notMyVBs := (*resp.responsePayload)[bucketName].NotMyVBs
+	notMyVBs := (*resp.payload)[bucketName].NotMyVBs
 	assert.Len(*notMyVBs, lenCheck)
 
 	for _, vb := range vbList {
-		notMyVbs := *(*resp.responsePayload)[bucketName].NotMyVBs
+		notMyVbs := *(*resp.payload)[bucketName].NotMyVBs
 		assert.NotEqual(testDoc, notMyVbs[vb].CheckpointsDoc)
 	}
 
 	assert.Nil(resp.LoadPipelineCkpts(ckptDocs, bucketName))
 
 	for _, vb := range vbList {
-		notMyVbs := *(*resp.responsePayload)[bucketName].NotMyVBs
+		notMyVbs := *(*resp.payload)[bucketName].NotMyVBs
 		assert.Equal(testDoc, notMyVbs[vb].CheckpointsDoc)
 	}
 
@@ -82,8 +82,8 @@ func TestVBMasterCheckResp(t *testing.T) {
 	tgtMap := make(metadata.ManifestsCache)
 	srcMap[manifest.Uid()] = &manifest
 	tgtMap[manifest.Uid()] = &manifest
-	(*resp.responsePayload)[bucketName].SrcManifests = &srcMap
-	(*resp.responsePayload)[bucketName].TgtManifests = &tgtMap
+	(*resp.payload)[bucketName].SrcManifests = &srcMap
+	(*resp.payload)[bucketName].TgtManifests = &tgtMap
 
 	marshalBytes, err := resp.Serialize()
 	assert.Nil(err)
@@ -110,7 +110,7 @@ func TestVBMasterCheckResp(t *testing.T) {
 
 	var castBack *VBMasterCheckResp
 	castBack = regIfaceCast.(*VBMasterCheckResp)
-	assert.Equal(castBack.responsePayload, newResp.responsePayload)
+	assert.Equal(castBack.payload, newResp.payload)
 }
 
 func TestVBMasterPayloadMap(t *testing.T) {

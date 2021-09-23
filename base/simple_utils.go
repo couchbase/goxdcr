@@ -1914,3 +1914,22 @@ func GetOpaque(index, sequence uint16) uint32 {
 	result := uint32(sequence)<<16 + uint32(index)
 	return result
 }
+
+func ReverseVBNodesMap(replicaMap map[uint16][]string) map[string][]uint16 {
+	if len(replicaMap) == 0 {
+		return nil
+	}
+	retMap := make(map[string][]uint16)
+
+	for vbno, nodeList := range replicaMap {
+		for _, nodeName := range nodeList {
+			retMap[nodeName] = append(retMap[nodeName], vbno)
+		}
+	}
+
+	for nodeName, unsortedVBlist := range retMap {
+		sortedVBList := SortUint16List(unsortedVBlist)
+		retMap[nodeName] = sortedVBList
+	}
+	return retMap
+}

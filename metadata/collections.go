@@ -3061,13 +3061,16 @@ func (m ManifestsCache) GetMaxManifestID() uint64 {
 	return max
 }
 
-func (m ManifestsCache) Clone() ManifestsCache {
+func (m *ManifestsCache) Clone() *ManifestsCache {
+	if m == nil {
+		return nil
+	}
 	clonedCache := make(ManifestsCache)
-	for k, v := range m {
+	for k, v := range *m {
 		vClone := v.Clone()
 		clonedCache[k] = &vClone
 	}
-	return clonedCache
+	return &clonedCache
 }
 
 func (m *ManifestsCache) LoadIfNotExists(other *ManifestsCache) {

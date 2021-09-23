@@ -1358,12 +1358,20 @@ func (a *CollectionsManifestAgent) GetAllCachedManifests() (map[uint64]*metadata
 	a.srcMtx.RLock()
 	srcCache := a.sourceCache.Clone()
 	a.srcMtx.RUnlock()
+	if srcCache == nil {
+		newSrc := make(metadata.ManifestsCache)
+		srcCache = &newSrc
+	}
 
 	a.tgtMtx.RLock()
 	tgtCache := a.targetCache.Clone()
 	a.tgtMtx.RUnlock()
+	if tgtCache == nil {
+		newTgt := make(metadata.ManifestsCache)
+		tgtCache = &newTgt
+	}
 
-	return srcCache, tgtCache, nil
+	return *srcCache, *tgtCache, nil
 }
 
 // Should only be called after corresponding checkpoints that refer to these manifests have been persisted

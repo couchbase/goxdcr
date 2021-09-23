@@ -26,3 +26,13 @@ func (_m *ReplicaReplicator) HandleSpecCreation(spec *metadata.ReplicationSpecif
 func (_m *ReplicaReplicator) HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification) {
 	_m.Called(oldSpec)
 }
+
+// Start provides a mock function with given fields:
+func (_m *ReplicaReplicator) Start() {
+	_m.Called()
+}
+
+// Stop provides a mock function with given fields:
+func (_m *ReplicaReplicator) Stop() {
+	_m.Called()
+}

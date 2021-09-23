@@ -182,7 +182,7 @@ var DismissEventConfig = &SettingsConfig{-1, &Range{0, math.MaxInt32}}
 
 var PreReplicateVBMasterCheckConfig = &SettingsConfig{true, nil}
 
-var ReplicateCkptIntervalConfig = &SettingsConfig{int(base.ReplicateCkptInterval.Minutes()), &Range{5, 4320 /* 3 days */}}
+var ReplicateCkptIntervalConfig = &SettingsConfig{int(base.ReplicateCkptInterval.Minutes()), &Range{1, 4320 /* 3 days */}}
 
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,

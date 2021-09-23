@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIface, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, *utils.Utilities, []error, []int, []string, string, chan service_def_real.SourceNotification, *service_def.CheckpointsService, *service_def.BackfillReplSvc) {
+func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIface, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, *utils.Utilities, []error, []int, []string, string, chan service_def_real.SourceNotification, *service_def.CheckpointsService, *service_def.BackfillReplSvc, *service_def.CollectionsManifestSvc) {
 	xdcrComp := &service_def.XDCRCompTopologySvc{}
 	utilsMock := &utilsMock2.UtilsIface{}
 	bucketTopSvc := &service_def.BucketTopologySvc{}
@@ -30,16 +30,17 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIfac
 	utilsReal := utils.NewUtilities()
 	ckptSvc := &service_def.CheckpointsService{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
+	colManifestSvc := &service_def.CollectionsManifestSvc{}
 
 	queryResultErrs := []error{nil, nil}
 	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
 	peerNodes := []string{"10.1.1.1:8091", "10.2.2.2:8091"}
 	myHostAddr := "127.0.0.1:8091"
 	srcCh := make(chan service_def_real.SourceNotification, 50)
-	return xdcrComp, utilsMock, bucketTopSvc, replSpecSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc
+	return xdcrComp, utilsMock, bucketTopSvc, replSpecSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc
 }
 
-func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xdcrComp *service_def.XDCRCompTopologySvc, peerNodes []string, myAddr string, specList []*metadata.ReplicationSpecification, replSpecSvc *service_def.ReplicationSpecSvc, queryErrs []error, queryStatuses []int, srcCh chan service_def_real.SourceNotification, bucketSvc *service_def.BucketTopologySvc, ckptSvc *service_def.CheckpointsService, backfillReplSvc *service_def.BackfillReplSvc) {
+func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xdcrComp *service_def.XDCRCompTopologySvc, peerNodes []string, myAddr string, specList []*metadata.ReplicationSpecification, replSpecSvc *service_def.ReplicationSpecSvc, queryErrs []error, queryStatuses []int, srcCh chan service_def_real.SourceNotification, bucketSvc *service_def.BucketTopologySvc, ckptSvc *service_def.CheckpointsService, backfillReplSvc *service_def.BackfillReplSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc) {
 	utilsMock.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsReal.ExponentialBackoffExecutor(args.Get(0).(string), args.Get(1).(time.Duration), args.Get(2).(int), args.Get(3).(int), args.Get(4).(utils.ExponentialOpFunc))
 	}).Return(nil)
@@ -57,6 +58,7 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 	retMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specList {
 		retMap[spec.Id] = spec
+		replSpecSvc.On("ReplicationSpecReadOnly", spec.Id).Return(spec, nil)
 	}
 	replSpecSvc.On("AllReplicationSpecs").Return(retMap, nil)
 
@@ -73,8 +75,8 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	spec, _ := metadata.NewReplicationSpecification(bucketName, "", "", "", "")
 	specList := []*metadata.ReplicationSpecification{spec}
 
-	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillReplSvc)
+	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc := setupBoilerPlate()
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc)
 
 	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, nil, nil, nil)
 	assert.Nil(err)
@@ -111,8 +113,8 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 		vbMasterCheckReq := reqIface.(*VBMasterCheckReq)
 		resp := vbMasterCheckReq.GenerateResponse().(*VBMasterCheckResp)
 		newMap := make(BucketVBMPayloadType)
-		resp.responsePayload = &newMap
-		(*resp.responsePayload)[bucketName] = &VBMasterPayload{
+		resp.payload = &newMap
+		(*resp.payload)[bucketName] = &VBMasterPayload{
 			OverallPayloadErr: "",
 			NotMyVBs:          NewVBsPayload([]uint16{0, 1}),
 			ConflictingVBs:    nil,
@@ -155,12 +157,12 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	assert.NotNil(tgt2Result.ReqPtr)
 	assert.NotNil(tgt2Result.RespPtr)
 	checkResp := tgt1Result.RespPtr.(*VBMasterCheckResp)
-	assert.Len((*checkResp.responsePayload), 1)
-	notMyVbs := (*checkResp.responsePayload)[bucketName].NotMyVBs
+	assert.Len((*checkResp.payload), 1)
+	notMyVbs := (*checkResp.payload)[bucketName].NotMyVBs
 	assert.Len(*notMyVbs, 2)
 	checkResp = tgt2Result.RespPtr.(*VBMasterCheckResp)
-	assert.Len((*checkResp.responsePayload), 1)
-	notMyVbs = (*checkResp.responsePayload)[bucketName].NotMyVBs
+	assert.Len((*checkResp.payload), 1)
+	notMyVbs = (*checkResp.payload)[bucketName].NotMyVBs
 	assert.Len(*notMyVbs, 2)
 
 	time.Sleep(150 * time.Millisecond)

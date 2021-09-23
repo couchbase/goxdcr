@@ -465,7 +465,8 @@ func (p *P2PManagerImpl) loadSpecsFromMetakv() error {
 }
 
 func (p *P2PManagerImpl) initReplicator() {
-	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.commAPI, p.utils)
+	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.commAPI, p.utils, p.colManifestSvc, p.replSpecSvc)
+	p.replicator.Start()
 }
 
 func getOpaqueWrapper() uint32 {

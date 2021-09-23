@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"sync"
 )
 
 const (
@@ -267,7 +268,7 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 		if err != nil {
 			return nil, err
 		}
-		if len(resp.ResponsePayloadCompressed) > 0 && len(*resp.responsePayload) == 0 {
+		if len(resp.PayloadCompressed) > 0 && len(*resp.payload) == 0 {
 			panic("Should not be possible")
 		}
 		return resp, nil
@@ -419,79 +420,55 @@ func (v *VBMasterCheckReq) GenerateResponse() interface{} {
 	responseCommon := NewResponseCommon(v.ReqType, v.RemoteLifeCycleId, v.LocalLifeCycleId, v.Opaque, v.TargetAddr)
 	responseCommon.RespType = v.ReqType
 	resp := &VBMasterCheckResp{
-		ResponseCommon:    responseCommon,
-		ReplicationSpecId: v.ReplicationId,
-		PipelineType:      v.PipelineType,
-		SourceBucketName:  v.SourceBucketName,
+		ResponseCommon:     responseCommon,
+		ReplicationPayload: NewReplicationPayload(v.ReplicationId, v.SourceBucketName, v.PipelineType),
 	}
 	return resp
 }
 
-type PeersVBMasterCheckRespMap map[string]*VBMasterCheckResp
-
-type VBMasterCheckResp struct {
-	ResponseCommon
-
-	responsePayload           *BucketVBMPayloadType
-	ResponsePayloadCompressed []byte
-	ErrorMsg                  string
-
+type ReplicationPayload struct {
+	mtx               sync.RWMutex
+	payload           *BucketVBMPayloadType
+	PayloadCompressed []byte
+	ErrorMsg          string
 	ReplicationSpecId string
 	SourceBucketName  string
 	PipelineType      common.PipelineType
 }
 
-// Unit test
-func NewVBMasterCheckRespGivenPayload(payload BucketVBMPayloadType) *VBMasterCheckResp {
-	return &VBMasterCheckResp{
-		ResponseCommon:            ResponseCommon{},
-		responsePayload:           &payload,
-		ResponsePayloadCompressed: nil,
+func NewReplicationPayload(specId, srcBucketName string, pipelineType common.PipelineType) ReplicationPayload {
+	payload := make(BucketVBMPayloadType)
+	return ReplicationPayload{
+		ReplicationSpecId: specId,
+		SourceBucketName:  srcBucketName,
+		PipelineType:      pipelineType,
+		payload:           &payload,
 	}
 }
 
-func (v *VBMasterCheckResp) GetReponse() *BucketVBMPayloadType {
-	return v.responsePayload
-}
+func (v *ReplicationPayload) CompressPayload() error {
+	v.mtx.Lock()
+	defer v.mtx.Unlock()
 
-// Unit test
-func (v *VBMasterCheckResp) SetReponse(payload *BucketVBMPayloadType) {
-	v.responsePayload = payload
-}
-
-func (v *VBMasterCheckResp) Serialize() ([]byte, error) {
-	responsePayloadMarshalled, err := json.Marshal(v.responsePayload)
-	if err != nil {
-		return nil, err
-	}
-
-	v.ResponsePayloadCompressed = snappy.Encode(nil, responsePayloadMarshalled)
-	return json.Marshal(v)
-}
-
-func (v *VBMasterCheckResp) DeSerialize(bytes []byte) error {
-	err := json.Unmarshal(bytes, v)
+	responsePayloadMarshalled, err := json.Marshal(v.payload)
 	if err != nil {
 		return err
 	}
 
-	v.Init()
-	err = v.decompressPayload()
-	if err != nil {
-		return err
-	}
-
-	v.InitNilPts()
+	v.PayloadCompressed = snappy.Encode(nil, responsePayloadMarshalled)
 	return nil
 }
 
-func (v *VBMasterCheckResp) decompressPayload() error {
-	if len(v.ResponsePayloadCompressed) > 0 {
-		marshalledPayload, snappyErr := snappy.Decode(nil, v.ResponsePayloadCompressed)
+func (v *ReplicationPayload) DecompressPayload() error {
+	v.mtx.Lock()
+	defer v.mtx.Unlock()
+
+	if len(v.PayloadCompressed) > 0 {
+		marshalledPayload, snappyErr := snappy.Decode(nil, v.PayloadCompressed)
 		if snappyErr != nil {
 			return snappyErr
 		}
-		err := json.Unmarshal(marshalledPayload, &v.responsePayload)
+		err := json.Unmarshal(marshalledPayload, &v.payload)
 		if err != nil {
 			return err
 		}
@@ -499,142 +476,12 @@ func (v *VBMasterCheckResp) decompressPayload() error {
 	return nil
 }
 
-func (v *VBMasterCheckResp) InitNilPts() {
-	for bucket, payloadPerBucket := range *v.responsePayload {
-		if payloadPerBucket == nil {
-			(*v.responsePayload)[bucket] = NewVBMasterPayload()
-		} else {
-			if payloadPerBucket.NotMyVBs == nil {
-				payloadPerBucket.NotMyVBs = NewVBsPayload(nil)
-			}
-			if payloadPerBucket.ConflictingVBs == nil {
-				payloadPerBucket.ConflictingVBs = NewVBsPayload(nil)
-			}
-		}
-	}
-}
+func (v *ReplicationPayload) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.CheckpointsDoc, srcBucketName string) error {
+	v.mtx.Lock()
+	defer v.mtx.Unlock()
 
-// Key is bucket name
-type BucketVBMPayloadType map[string]*VBMasterPayload
-
-type VBMasterPayload struct {
-	OverallPayloadErr string // If populated, the data below are invalid
-
-	NotMyVBs       *VBsPayload // These VBs are not owned by requested node
-	ConflictingVBs *VBsPayload // Requested node believes these VBs to be owned as does sender
-
-	SrcManifests *metadata.ManifestsCache
-	TgtManifests *metadata.ManifestsCache
-
-	BrokenMappingDoc   *metadata.CollectionNsMappingsDoc
-	BackfillMappingDoc *metadata.CollectionNsMappingsDoc
-}
-
-func (p *VBMasterPayload) RegisterVbsIntersect(vbsIntersect []uint16) {
-	for _, vb := range vbsIntersect {
-		(*p.ConflictingVBs)[vb] = NewPayload()
-	}
-}
-
-func (p *VBMasterPayload) RegisterNotMyVBs(notMyVbs []uint16) {
-	for _, vb := range notMyVbs {
-		(*p.NotMyVBs)[vb] = NewPayload()
-	}
-}
-
-func (p *VBMasterPayload) GetAllCheckpoints() map[uint16]*metadata.CheckpointsDoc {
-	retMap := make(map[uint16]*metadata.CheckpointsDoc)
-
-	for vb, payload := range *p.NotMyVBs {
-		if payload.CheckpointsDoc != nil {
-			retMap[vb] = payload.CheckpointsDoc
-		}
-	}
-
-	for vb, payload := range *p.ConflictingVBs {
-		if payload.CheckpointsDoc != nil {
-			retMap[vb] = payload.CheckpointsDoc
-		}
-	}
-
-	return retMap
-}
-
-func (p *VBMasterPayload) GetAllManifests() (srcManifests, tgtManifests *metadata.ManifestsCache) {
-	return p.SrcManifests, p.TgtManifests
-}
-
-func (p *VBMasterPayload) GetBrokenMappingDoc() *metadata.CollectionNsMappingsDoc {
-	return p.BrokenMappingDoc
-}
-
-func (p *VBMasterPayload) GetBackfillMappingDoc() *metadata.CollectionNsMappingsDoc {
-	return p.BackfillMappingDoc
-}
-
-func (p *VBMasterPayload) GetBackfillVBTasks() *metadata.VBTasksMapType {
-	taskMap := metadata.NewVBTasksMap()
-
-	for vb, payload := range *p.NotMyVBs {
-		if payload.BackfillTsks != nil {
-			taskMap.VBTasksMap[vb] = payload.BackfillTsks
-			taskMap.VBTasksMap[vb].PostUnmarshalInit()
-		}
-	}
-
-	for vb, payload := range *p.ConflictingVBs {
-		if payload.BackfillTsks != nil {
-			taskMap.VBTasksMap[vb] = payload.BackfillTsks
-			taskMap.VBTasksMap[vb].PostUnmarshalInit()
-		}
-	}
-
-	return taskMap
-}
-
-type VBsPayload map[uint16]*Payload
-
-func NewVBsPayload(vbsList []uint16) *VBsPayload {
-	retMap := make(VBsPayload)
-	for _, vb := range vbsList {
-		retMap[vb] = NewPayload()
-	}
-	return &retMap
-}
-
-func NewVBMasterPayload() *VBMasterPayload {
-	notMyVbs := make(VBsPayload)
-	conflictingVBs := make(VBsPayload)
-	return &VBMasterPayload{
-		OverallPayloadErr: "",
-		NotMyVBs:          &notMyVbs,
-		ConflictingVBs:    &conflictingVBs,
-	}
-}
-
-type Payload struct {
-	CheckpointsDoc *metadata.CheckpointsDoc
-
-	// Backfill replication is decomposed and just the VBTasksMap is transferred
-	BackfillTsks *metadata.BackfillTasks
-}
-
-func NewPayload() *Payload {
-	return &Payload{}
-}
-
-func (v *VBMasterCheckResp) Init() {
-	newMap := make(BucketVBMPayloadType)
-	v.responsePayload = &newMap
-}
-
-func (v *VBMasterCheckResp) InitBucket(bucketName string) {
-	(*v.responsePayload)[bucketName] = NewVBMasterPayload()
-}
-
-func (v *VBMasterCheckResp) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.CheckpointsDoc, srcBucketName string) error {
-	payload, found := (*v.responsePayload)[srcBucketName]
-	if !found {
+	payload, payloadFound := (*v.payload)[srcBucketName]
+	if !payloadFound {
 		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
 	}
 
@@ -652,6 +499,13 @@ func (v *VBMasterCheckResp) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.Chec
 		vbPayload2, found2 := conflictingVBMap[vb]
 		if found2 {
 			vbPayload2.CheckpointsDoc = ckptDoc
+			continue
+		}
+
+		pushVBMap := *payload.PushVBs
+		vbPayload3, found3 := pushVBMap[vb]
+		if found3 {
+			vbPayload3.CheckpointsDoc = ckptDoc
 		}
 	}
 
@@ -661,8 +515,11 @@ func (v *VBMasterCheckResp) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.Chec
 	return nil
 }
 
-func (v *VBMasterCheckResp) LoadManifests(srcManifests metadata.ManifestsCache, tgtManifests metadata.ManifestsCache, srcBucketName string) error {
-	payload, found := (*v.responsePayload)[srcBucketName]
+func (v *ReplicationPayload) LoadManifests(srcManifests metadata.ManifestsCache, tgtManifests metadata.ManifestsCache, srcBucketName string) error {
+	v.mtx.Lock()
+	defer v.mtx.Unlock()
+
+	payload, found := (*v.payload)[srcBucketName]
 	if !found {
 		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
 	}
@@ -672,8 +529,11 @@ func (v *VBMasterCheckResp) LoadManifests(srcManifests metadata.ManifestsCache, 
 	return nil
 }
 
-func (v *VBMasterCheckResp) LoadBrokenMappingDoc(brokenMappingDoc metadata.CollectionNsMappingsDoc, srcBucketName string) error {
-	payload, found := (*v.responsePayload)[srcBucketName]
+func (v *ReplicationPayload) LoadBrokenMappingDoc(brokenMappingDoc metadata.CollectionNsMappingsDoc, srcBucketName string) error {
+	v.mtx.Lock()
+	defer v.mtx.Unlock()
+
+	payload, found := (*v.payload)[srcBucketName]
 	if !found {
 		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
 	}
@@ -682,13 +542,16 @@ func (v *VBMasterCheckResp) LoadBrokenMappingDoc(brokenMappingDoc metadata.Colle
 	return nil
 }
 
-func (v *VBMasterCheckResp) LoadBackfillTasks(backfillTasks *metadata.VBTasksMapType, srcBucketName string) error {
+func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMapType, srcBucketName string) error {
+	v.mtx.Lock()
+	defer v.mtx.Unlock()
+
 	if !backfillTasks.ContainsAtLeastOneTask() {
 		// Nothing to do
 		return nil
 	}
 
-	payload, found := (*v.responsePayload)[srcBucketName]
+	payload, found := (*v.payload)[srcBucketName]
 	if !found {
 		return fmt.Errorf("Bucket %v not found from response payload", srcBucketName)
 	}
@@ -736,3 +599,361 @@ func (v *VBMasterCheckResp) LoadBackfillTasks(backfillTasks *metadata.VBTasksMap
 	}
 	return nil
 }
+
+func (v *ReplicationPayload) GetSubsetBasedOnVBs(vbsList []uint16) *ReplicationPayload {
+	if v == nil {
+		return nil
+	}
+
+	v.mtx.RLock()
+	defer v.mtx.RUnlock()
+
+	retPayload := &ReplicationPayload{
+		ReplicationSpecId: v.ReplicationSpecId,
+		SourceBucketName:  v.SourceBucketName,
+		PipelineType:      v.PipelineType,
+	}
+
+	payloadMap := make(BucketVBMPayloadType)
+	if v.payload != nil {
+		for bucketName, vbMasterPayload := range *v.payload {
+			subsetPayload := vbMasterPayload.GetSubsetBasedOnVBs(vbsList)
+			if subsetPayload.IsEmpty() {
+				continue
+			}
+			payloadMap[bucketName] = subsetPayload
+		}
+	}
+	retPayload.payload = &payloadMap
+	return retPayload
+}
+
+type PeersVBMasterCheckRespMap map[string]*VBMasterCheckResp
+
+type VBMasterCheckResp struct {
+	ResponseCommon
+	ReplicationPayload
+}
+
+// Unit test
+func NewVBMasterCheckRespGivenPayload(payload BucketVBMPayloadType) *VBMasterCheckResp {
+	return &VBMasterCheckResp{
+		ResponseCommon:     ResponseCommon{},
+		ReplicationPayload: ReplicationPayload{payload: &payload},
+	}
+}
+
+func (v *VBMasterCheckResp) GetReponse() *BucketVBMPayloadType {
+	return v.payload
+}
+
+// Unit test
+func (v *VBMasterCheckResp) SetReponse(payload *BucketVBMPayloadType) {
+	v.payload = payload
+}
+
+func (v *VBMasterCheckResp) Serialize() ([]byte, error) {
+	err := v.ReplicationPayload.CompressPayload()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
+}
+
+func (v *VBMasterCheckResp) DeSerialize(bytes []byte) error {
+	err := json.Unmarshal(bytes, v)
+	if err != nil {
+		return err
+	}
+
+	v.Init()
+	err = v.DecompressPayload()
+	if err != nil {
+		return err
+	}
+
+	v.InitNilPts()
+	return nil
+}
+
+func (v *VBMasterCheckResp) InitNilPts() {
+	for bucket, payloadPerBucket := range *v.payload {
+		if payloadPerBucket == nil {
+			(*v.payload)[bucket] = NewVBMasterPayload()
+		} else {
+			if payloadPerBucket.NotMyVBs == nil {
+				payloadPerBucket.NotMyVBs = NewVBsPayload(nil)
+			}
+			if payloadPerBucket.ConflictingVBs == nil {
+				payloadPerBucket.ConflictingVBs = NewVBsPayload(nil)
+			}
+			if payloadPerBucket.PushVBs == nil {
+				payloadPerBucket.PushVBs = NewVBsPayload(nil)
+			}
+		}
+	}
+}
+
+// Key is bucket name
+type BucketVBMPayloadType map[string]*VBMasterPayload
+
+type VBMasterPayload struct {
+	mtx sync.RWMutex
+
+	OverallPayloadErr string // If populated, the data below are invalid
+
+	NotMyVBs       *VBsPayload // These VBs are not owned by requested node
+	ConflictingVBs *VBsPayload // Requested node believes these VBs to be owned as does sender
+	PushVBs        *VBsPayload // Use for push-model
+
+	SrcManifests *metadata.ManifestsCache
+	TgtManifests *metadata.ManifestsCache
+
+	BrokenMappingDoc   *metadata.CollectionNsMappingsDoc // Shallow copied
+	BackfillMappingDoc *metadata.CollectionNsMappingsDoc // Shallow copied
+}
+
+func (p *VBMasterPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBMasterPayload {
+	if p == nil {
+		return nil
+	}
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+
+	retPayload := &VBMasterPayload{
+		NotMyVBs:           p.NotMyVBs.GetSubsetBasedOnVBs(vbsList),
+		ConflictingVBs:     p.ConflictingVBs.GetSubsetBasedOnVBs(vbsList),
+		PushVBs:            p.PushVBs.GetSubsetBasedOnVBs(vbsList),
+		SrcManifests:       p.SrcManifests.Clone(),
+		TgtManifests:       p.TgtManifests.Clone(),
+		BrokenMappingDoc:   p.BrokenMappingDoc,
+		BackfillMappingDoc: p.BackfillMappingDoc,
+	}
+	return retPayload
+}
+
+func (p *VBMasterPayload) IsEmpty() bool {
+	if p == nil {
+		return true
+	}
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.PushVBs.IsEmpty() && p.NotMyVBs.IsEmpty() && p.ConflictingVBs.IsEmpty()
+}
+
+func (p *VBMasterPayload) RegisterVbsIntersect(vbsIntersect []uint16) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	for _, vb := range vbsIntersect {
+		(*p.ConflictingVBs)[vb] = NewPayload()
+	}
+}
+
+func (p *VBMasterPayload) RegisterNotMyVBs(notMyVbs []uint16) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	for _, vb := range notMyVbs {
+		(*p.NotMyVBs)[vb] = NewPayload()
+	}
+}
+
+func (p *VBMasterPayload) RegisterPushVBs(pushVBs []uint16) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	for _, vb := range pushVBs {
+		(*p.PushVBs)[vb] = NewPayload()
+	}
+}
+
+func (p *VBMasterPayload) GetAllCheckpoints() map[uint16]*metadata.CheckpointsDoc {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	retMap := make(map[uint16]*metadata.CheckpointsDoc)
+
+	for vb, payload := range *p.NotMyVBs {
+		if payload.CheckpointsDoc != nil {
+			retMap[vb] = payload.CheckpointsDoc
+		}
+	}
+
+	for vb, payload := range *p.ConflictingVBs {
+		if payload.CheckpointsDoc != nil {
+			retMap[vb] = payload.CheckpointsDoc
+		}
+	}
+
+	return retMap
+}
+
+func (p *VBMasterPayload) GetAllManifests() (srcManifests, tgtManifests *metadata.ManifestsCache) {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.SrcManifests.Clone(), p.TgtManifests.Clone()
+}
+
+// Shallow copy read only
+func (p *VBMasterPayload) GetBrokenMappingDoc() *metadata.CollectionNsMappingsDoc {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.BrokenMappingDoc
+}
+
+func (p *VBMasterPayload) GetBackfillMappingDoc() *metadata.CollectionNsMappingsDoc {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	return p.BackfillMappingDoc
+}
+
+func (p *VBMasterPayload) GetBackfillVBTasks() *metadata.VBTasksMapType {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+	taskMap := metadata.NewVBTasksMap()
+
+	for vb, payload := range *p.NotMyVBs {
+		if payload.BackfillTsks != nil {
+			taskMap.VBTasksMap[vb] = payload.BackfillTsks
+			taskMap.VBTasksMap[vb].PostUnmarshalInit()
+		}
+	}
+
+	for vb, payload := range *p.ConflictingVBs {
+		if payload.BackfillTsks != nil {
+			taskMap.VBTasksMap[vb] = payload.BackfillTsks
+			taskMap.VBTasksMap[vb].PostUnmarshalInit()
+		}
+	}
+
+	return taskMap
+}
+
+type VBsPayload map[uint16]*Payload
+
+func NewVBsPayload(vbsList []uint16) *VBsPayload {
+	retMap := make(VBsPayload)
+	for _, vb := range vbsList {
+		retMap[vb] = NewPayload()
+	}
+	return &retMap
+}
+
+func (v *VBsPayload) IsEmpty() bool {
+	if v == nil {
+		return true
+	}
+	return len(*v) == 0
+}
+
+// The data inside payload should be read only
+func (v *VBsPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBsPayload {
+	if v == nil {
+		return nil
+	}
+
+	retMap := make(VBsPayload)
+	for vbno, payload := range *v {
+		if _, found := base.SearchUint16List(vbsList, vbno); found {
+			retMap[vbno] = payload
+		}
+	}
+	return &retMap
+}
+
+func NewVBMasterPayload() *VBMasterPayload {
+	notMyVbs := make(VBsPayload)
+	conflictingVBs := make(VBsPayload)
+	pushVBs := make(VBsPayload)
+	return &VBMasterPayload{
+		OverallPayloadErr: "",
+		NotMyVBs:          &notMyVbs,
+		ConflictingVBs:    &conflictingVBs,
+		PushVBs:           &pushVBs,
+	}
+}
+
+// Read-only
+type Payload struct {
+	CheckpointsDoc *metadata.CheckpointsDoc
+
+	// Backfill replication is decomposed and just the VBTasksMap is transferred
+	BackfillTsks *metadata.BackfillTasks
+}
+
+func NewPayload() *Payload {
+	return &Payload{}
+}
+
+func (v *VBMasterCheckResp) Init() {
+	newMap := make(BucketVBMPayloadType)
+	v.payload = &newMap
+}
+
+func (v *VBMasterCheckResp) InitBucket(bucketName string) {
+	(*v.payload)[bucketName] = NewVBMasterPayload()
+}
+
+type VBPeriodicReplicateReq struct {
+	RequestCommon
+	MainReplication     *ReplicationPayload
+	BackfillReplication *ReplicationPayload
+}
+
+func (v *VBPeriodicReplicateReq) IsEmpty() bool {
+	return v.MainReplication == nil && v.BackfillReplication == nil
+}
+
+// Note - need to establish RequestCommon later
+func NewVBPeriodicReplicateReq(specId, srcBucketName string, vbs []uint16) *VBPeriodicReplicateReq {
+	mainReplication := NewReplicationPayload(specId, srcBucketName, common.MainPipeline)
+	backfillReplication := NewReplicationPayload(specId, srcBucketName, common.BackfillPipeline)
+
+	(*mainReplication.payload)[srcBucketName] = NewVBMasterPayload()
+	(*mainReplication.payload)[srcBucketName].RegisterPushVBs(vbs)
+	(*backfillReplication.payload)[srcBucketName] = NewVBMasterPayload()
+	(*backfillReplication.payload)[srcBucketName].RegisterPushVBs(vbs)
+
+	//type BucketVBMPayloadType map[string]*VBMasterPayload
+	return &VBPeriodicReplicateReq{
+		MainReplication:     &mainReplication,
+		BackfillReplication: &backfillReplication,
+	}
+}
+
+func (v *VBPeriodicReplicateReq) LoadMainReplication(ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
+	err := v.MainReplication.LoadPipelineCkpts(ckpts, v.MainReplication.SourceBucketName)
+	if err != nil {
+		return err
+	}
+	err = v.MainReplication.LoadManifests(srcManifests, tgtManifests, v.MainReplication.SourceBucketName)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTasksMapType, ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
+	err := v.BackfillReplication.LoadBackfillTasks(vbTasks, v.BackfillReplication.SourceBucketName)
+	if err != nil {
+		return err
+	}
+	err = v.BackfillReplication.LoadPipelineCkpts(ckpts, v.BackfillReplication.SourceBucketName)
+	if err != nil {
+		return err
+	}
+	err = v.BackfillReplication.LoadManifests(srcManifests, tgtManifests, v.BackfillReplication.SourceBucketName)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VBPeriodicReplicateReq) GetSubsetBasedOnVBList(vbsList []uint16) *VBPeriodicReplicateReq {
+	newReq := &VBPeriodicReplicateReq{}
+	newReq.MainReplication = v.MainReplication.GetSubsetBasedOnVBs(vbsList)
+	newReq.BackfillReplication = v.BackfillReplication.GetSubsetBasedOnVBs(vbsList)
+
+	return newReq
+}
+
+type VBPeriodicReplicateReqList []*VBPeriodicReplicateReq
+
+type PeersVBPeriodicReplicateReqs map[string]*VBPeriodicReplicateReqList
