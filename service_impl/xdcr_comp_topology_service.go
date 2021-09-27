@@ -207,6 +207,12 @@ func (top_svc *XDCRTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
 			continue
 		}
 
+		hasKV, hasKVErr := base.NodeHasKVService(nodesInfo)
+		if hasKVErr != nil || !hasKV {
+			// Don't return the address since XDCR deals exclusively with data service nodes only as peers
+			continue
+		}
+
 		_, portCheck := base.GetPortNumber(hostName)
 		if portCheck == base.ErrorNoPortNumber {
 			// Append 8091 for now

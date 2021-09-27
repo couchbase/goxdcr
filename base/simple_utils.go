@@ -1552,22 +1552,9 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 		}
 
 		// To be conservative - any errors parsing service section, if it is missing, etc, just let it pass
-		servicesObj, ok := nodeInfoMap[ServicesKey]
-		if ok {
-			servicesList, ok := servicesObj.([]interface{})
-			if ok {
-				var hasKV bool
-				for _, serviceRaw := range servicesList {
-					service, ok := serviceRaw.(string)
-					if !ok /* being conservative */ || ok && service == KVPortKey {
-						hasKV = true
-						break
-					}
-				}
-				if !hasKV {
-					continue
-				}
-			}
+		hasKV, kvErr := NodeHasKVService(nodeInfoMap)
+		if kvErr == nil && !hasKV {
+			continue
 		}
 
 		clusterMembershipObj, ok := nodeInfoMap[ClusterMembershipKey]
@@ -1593,6 +1580,29 @@ func GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLo
 	}
 
 	return activeNodeList, nil
+}
+
+func NodeHasKVService(nodeInfoMap map[string]interface{}) (bool, error) {
+	servicesObj, ok := nodeInfoMap[ServicesKey]
+	if !ok {
+		return false, fmt.Errorf("Unable to find services section")
+	}
+
+	servicesList, ok := servicesObj.([]interface{})
+	if !ok {
+		return false, fmt.Errorf("Wrong datatype: %v", reflect.TypeOf(servicesObj))
+	}
+
+	var hasKV bool
+	for _, serviceRaw := range servicesList {
+		service, ok := serviceRaw.(string)
+		if !ok /* being conservative */ || ok && service == KVPortKey {
+			hasKV = true
+			break
+		}
+	}
+
+	return hasKV, nil
 }
 
 // Used to encode a uint64 into a unsigned LEB128 32-bit int encoding
