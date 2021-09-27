@@ -263,12 +263,13 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	// Before starting vb timestamp, need to ensure VBMaster
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
 	if !ok || ok && vbMasterCheckConfig.(bool) == true {
-		genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer communication and metadata merging"))
+		waitTimeout := getP2PTimeoutFromSettings(settings)
+		genericPipeline.logger.Infof("Performing PeerToPeer communication and metadata merging with timeout of %v", waitTimeout)
 		p2pErrMap := make(base.ErrorMap)
 		execWrapper := func() error {
 			return genericPipeline.runP2PProtocol(&p2pErrMap)
 		}
-		p2pProtocolErr := base.ExecWithTimeout(execWrapper, base.TimeoutP2PProtocol, genericPipeline.logger)
+		p2pProtocolErr := base.ExecWithTimeout(execWrapper, waitTimeout, genericPipeline.logger)
 		errKey := "genericPipeline.RunP2PProtocol"
 
 		if p2pProtocolErr != nil {
@@ -371,8 +372,19 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	return errMap
 }
 
+func getP2PTimeoutFromSettings(settings metadata.ReplicationSettingsMap) time.Duration {
+	waitDuration, exists := settings[P2PDynamicWaitDurationKey].(time.Duration)
+	if !exists {
+		return base.TimeoutP2PProtocol
+	} else {
+		return waitDuration
+	}
+}
+
 func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap) error {
 	errMap := *errMapPtr
+
+	genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer communication"))
 	resp, err := genericPipeline.vbMasterCheckFunc(genericPipeline)
 	if err != nil {
 		errMap["genericPipeline.vbMasterCheckFunc"] = err
@@ -381,6 +393,7 @@ func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap)
 	}
 
 	// resp is potentially nil if checkFunc failed above
+	genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer metadata merging"))
 	if resp != nil {
 		err = genericPipeline.mergeCkptFunc(genericPipeline, resp)
 		// If error returned is ErrorNoBackfillNeeded, then it's considered not an error

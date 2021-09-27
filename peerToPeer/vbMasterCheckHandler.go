@@ -67,8 +67,8 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 	bucketVBsMap := req.GetBucketVBMap()
-	h.logger.Infof("Received VB master check request from %v with specID %v for the following Bucket -> VBs %v", req.GetSender(), req.ReplicationId, bucketVBsMap)
-	stopMetakvMeasureFunc := h.utils.StartDiagStopwatch(fmt.Sprintf("VBMasterCheckHandler(%v,%v)", req.GetSender(), req.ReplicationId), base.DiagInternalThreshold)
+	h.logger.Infof("Received VB master check request from %v with specID %v opaque %v for the following Bucket -> VBs %v", req.GetSender(), req.ReplicationId, req.GetOpaque(), bucketVBsMap)
+	stopMetakvMeasureFunc := h.utils.StartDiagStopwatch(fmt.Sprintf("VBMasterCheckHandler(%v,%v,%v)", req.GetSender(), req.ReplicationId, req.GetOpcode()), base.DiagVBMasterHandleThreshold)
 
 	resp := req.GenerateResponse().(*VBMasterCheckResp)
 	resp.Init()
@@ -169,7 +169,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		if handlerResult != nil {
 			handlerResultErr = handlerResult.GetError()
 		}
-		h.logger.Errorf("Unable to send resp %v to original req %v - %v %v", resp, req, err, handlerResultErr)
+		h.logger.Errorf("Unable to send resp %v to original req %v opaque %v - %v %v", resp, req, req.GetOpaque(), err, handlerResultErr)
 	}
 	return
 }

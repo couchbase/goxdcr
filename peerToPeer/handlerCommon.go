@@ -63,7 +63,7 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 	h.opaqueMapMtx.Lock()
 	defer h.opaqueMapMtx.Unlock()
 	h.opaqueMap[request.GetOpaque()] = time.AfterFunc(base.P2POpaqueTimeout, func() {
-		h.logger.Errorf("%v Request to %v with opaque %v timed out", request.GetType(), request.GetTarget(), request.GetOpaque())
+		h.logger.Errorf("Request type %v to %v with opaque %v timed out", request.GetType(), request.GetTarget(), request.GetOpaque())
 		h.opaquesClearCh <- request.GetOpaque()
 	})
 	h.opaqueReqMap[request.GetOpaque()] = &request

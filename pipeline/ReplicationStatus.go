@@ -34,8 +34,10 @@ const (
 
 var OVERVIEW_METRICS_KEY = "Overview"
 
+const P2PDynamicWaitDurationKey = "P2PDynamicWaitDuration"
+
 // temporary custom settings that need to be cleared after pipeline update
-var TemporaryCustomSettings = []string{metadata.CompressionTypeKey}
+var TemporaryCustomSettings = []string{metadata.CompressionTypeKey, P2PDynamicWaitDurationKey}
 
 func (rep_state ReplicationState) String() string {
 	if rep_state == Pending {

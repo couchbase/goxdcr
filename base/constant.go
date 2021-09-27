@@ -654,7 +654,7 @@ var TimeoutPartsStop = 10 * time.Second
 var TimeoutConnectorsStop = 5 * time.Second
 var TimeoutDcpCloseUprStreams = 3 * time.Second
 var TimeoutDcpCloseUprFeed = 3 * time.Second
-var TimeoutP2PProtocol = 60 * time.Second
+var TimeoutP2PProtocol = 60 * time.Second // Default if not specified
 
 // This is for enforcing remote connection network type.
 const TCP = "tcp"   // ipv4/ipv6 are both supported
@@ -1360,6 +1360,7 @@ var MaxCountStreamsInactive = 10
 // Stopwatch timers
 var DiagNetworkThreshold = 5000 * time.Millisecond
 var DiagInternalThreshold = 2000 * time.Millisecond
+var DiagVBMasterHandleThreshold = 20 * time.Second
 
 // Pprof goroutines dump types
 type PprofLookupTypes string

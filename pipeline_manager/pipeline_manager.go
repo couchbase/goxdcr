@@ -470,6 +470,8 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 		return errMap
 	}
 
+	pipelineMgr.setP2PWaitTime(rep_status)
+
 	rep_status.RecordProgress("Start pipeline construction")
 
 	p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
@@ -497,6 +499,26 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 		}
 	}
 	return errMap
+}
+
+func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status *pipeline.ReplicationStatus) {
+	numKVNodes, err := pipelineMgr.xdcr_topology_svc.NumberOfKVNodes()
+	if err != nil {
+		numKVNodes = 1
+	}
+	// Subtract itself
+	numKVNodes = numKVNodes - 1
+	if numKVNodes < 0 {
+		// odd
+		numKVNodes = 0
+	}
+	if numKVNodes > 0 {
+		delayMap := make(map[string]interface{})
+		// Each node consists of one minute of wait time
+		waitTime := time.Duration(numKVNodes) * time.Minute
+		delayMap[pipeline.P2PDynamicWaitDurationKey] = waitTime
+		rep_status.SetCustomSettings(delayMap)
+	}
 }
 
 // validate that a pipeline has valid configuration and can be started before starting it
@@ -1660,9 +1682,9 @@ func (r *PipelineUpdater) disableCompression(reason error) {
 }
 
 func (r *PipelineUpdater) resetDisabledFeatures() {
+	r.rep_status.ClearTemporaryCustomSettings()
 	if r.disabledFeatures > 0 {
 		r.logger.Infof("Restoring compression for pipeline: %v the next time it restarts", r.pipeline_name)
-		r.rep_status.ClearTemporaryCustomSettings()
 		r.disabledFeatures = 0
 		r.disabledCompressionReason = DCNotDisabled
 	}
