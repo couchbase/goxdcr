@@ -11,6 +11,7 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/peerToPeer"
 	"reflect"
 	"strings"
 	"sync"
@@ -516,6 +517,10 @@ func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status *pipeline.Replicat
 		delayMap := make(map[string]interface{})
 		// Each node consists of one minute of wait time
 		waitTime := time.Duration(numKVNodes) * time.Minute
+		// OpaqueTimeout is the timeout + some buffer
+		// When rebalance happens and source nodes get added, pipeline will restart and so this section will be called
+		// when a pipeline restarts, and the value will get updated accordingly
+		atomic.StoreUint32(&peerToPeer.P2POpaqueTimeoutAtomicMin, uint32(numKVNodes+1))
 		delayMap[pipeline.P2PDynamicWaitDurationKey] = waitTime
 		rep_status.SetCustomSettings(delayMap)
 	}

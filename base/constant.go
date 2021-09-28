@@ -1062,7 +1062,6 @@ var BucketTopologyGCPruneTime = 24 * time.Hour
 
 var P2PCommTimeout = 15 * time.Second
 var MaxP2PReceiveChLen = 10000
-var P2POpaqueTimeout = 5 * time.Minute
 var P2POpaqueCleanupInterval = 5 * time.Second
 var P2PVBRelatedGCInterval = 24 * time.Hour
 
@@ -1126,7 +1125,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	blockedIpv4 bool, blockedIpv6 bool,
 	peerToPeerTimeout, bucketTopologyGCScanTime, bucketTopologyGCPruneTime time.Duration,
 	maxP2PReceiveChLen int,
-	p2pOpaqueTimeout, p2pOpaqueCleanupInterval, p2pVBRelatedGCInterval,
+	p2pOpaqueCleanupInterval, p2pVBRelatedGCInterval,
 	throughSeqnoBgScannerFreq, throughSeqnoBgScannerLogFreq,
 	timeoutP2PProtocol time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
@@ -1262,7 +1261,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	BucketTopologyGCScanTime = bucketTopologyGCScanTime
 	BucketTopologyGCPruneTime = bucketTopologyGCPruneTime
 	MaxP2PReceiveChLen = maxP2PReceiveChLen
-	P2POpaqueTimeout = p2pOpaqueTimeout
 	P2POpaqueCleanupInterval = p2pOpaqueCleanupInterval
 	P2PVBRelatedGCInterval = p2pVBRelatedGCInterval
 	ThroughSeqnoBgScannerFreq = throughSeqnoBgScannerFreq

@@ -369,7 +369,6 @@ var BucketTopologyGCScanTimeConfig = &SettingsConfig{int(base.BucketTopologyGCSc
 var BucketTopologyGCPruneTimeConfig = &SettingsConfig{int(base.BucketTopologyGCPruneTime / time.Hour), &Range{1, 48}}
 var P2PCommTimeoutConfig = &SettingsConfig{int(base.P2PCommTimeout / time.Second), &Range{1, 300}}
 var P2PMaxReceiveChLenConfig = &SettingsConfig{base.MaxP2PReceiveChLen, &Range{500, 50000}}
-var P2POpaqueTimeoutConfig = &SettingsConfig{int(base.P2POpaqueTimeout / time.Minute), &Range{1, 60}}
 var P2POpaqueCleanupIntervalConfig = &SettingsConfig{int(base.P2POpaqueCleanupInterval / time.Second), &Range{1, 600}}
 var P2PVBRelatedGCIntervalConfig = &SettingsConfig{int(base.P2PVBRelatedGCInterval / time.Hour), &Range{1, 336 /*2 weeks*/}}
 var ThroughSeqnoBgScannerFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerFreq / time.Second), &Range{1, 300}}
@@ -483,7 +482,6 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	BucketTopologyGCPruneTimeKey:                  BucketTopologyGCPruneTimeConfig,
 	P2PCommTimeoutKey:                             P2PCommTimeoutConfig,
 	P2PMaxReceiveChLenKey:                         P2PMaxReceiveChLenConfig,
-	P2POpaqueTimeoutKey:                           P2POpaqueTimeoutConfig,
 	P2POpaqueCleanupIntervalKey:                   P2POpaqueCleanupIntervalConfig,
 	P2PVBRelatedGCIntervalKey:                     P2PVBRelatedGCIntervalConfig,
 	ThroughSeqnoBgScannerFreqKey:                  ThroughSeqnoBgScannerFreqConfig,

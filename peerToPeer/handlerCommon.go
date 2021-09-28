@@ -9,10 +9,10 @@
 package peerToPeer
 
 import (
-	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -62,7 +62,8 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 
 	h.opaqueMapMtx.Lock()
 	defer h.opaqueMapMtx.Unlock()
-	h.opaqueMap[request.GetOpaque()] = time.AfterFunc(base.P2POpaqueTimeout, func() {
+	opaqueTimeoutDuration := time.Duration(atomic.LoadUint32(&P2POpaqueTimeoutAtomicMin)) * time.Minute
+	h.opaqueMap[request.GetOpaque()] = time.AfterFunc(opaqueTimeoutDuration, func() {
 		h.logger.Errorf("Request type %v to %v with opaque %v timed out", request.GetType(), request.GetTarget(), request.GetOpaque())
 		h.opaquesClearCh <- request.GetOpaque()
 	})

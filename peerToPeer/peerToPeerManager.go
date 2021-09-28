@@ -457,3 +457,6 @@ func (p *P2PManagerImpl) loadSpecsFromMetakv() error {
 func getOpaqueWrapper() uint32 {
 	return base.GetOpaque(0, uint16(time.Now().UnixNano()))
 }
+
+// Variable and dynamically updated per number of peer KV nodes
+var P2POpaqueTimeoutAtomicMin uint32 = 5
