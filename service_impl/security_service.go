@@ -124,10 +124,6 @@ func (sec *SecurityService) refreshTLSConfig() error {
 }
 
 func (sec *SecurityService) refreshCert() error {
-	if sec.encrytionSetting.EncrytionEnabled == false {
-		// no need to read certificate. In case of CE, the certificate files do not exist
-		return nil
-	}
 	if len(sec.caFile) == 0 {
 		sec.logger.Warnf("Certificate location is missing. Cannot refresh certificate.")
 		return nil
