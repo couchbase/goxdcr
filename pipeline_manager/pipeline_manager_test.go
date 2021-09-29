@@ -1,4 +1,4 @@
-// +build !pcre
+//go:build !pcre
 
 /*
 Copyright 2017-Present Couchbase, Inc.
@@ -164,6 +164,7 @@ func setupDetailedMocking(testLogger *log.CommonLogger, pipelineMock *common.Pip
 	replSpecSvcMock.On("SetDerivedObj", testTopic, mock.Anything).Return(nil)
 
 	xdcrTopologyMock.On("IsKVNode").Return(isKVNode, nil)
+	xdcrTopologyMock.On("NumberOfKVNodes").Return(1, nil)
 
 	remoteClusterMock.On("RemoteClusterByUuid", "", false).Return(testRemoteClusterRef, nil)
 	remoteClusterMock.On("RemoteClusterByUuid", "", true).Return(testRemoteClusterRef, nil)

@@ -115,12 +115,13 @@ func (reqHelper *dcpStreamReqHelper) getNewVersion() uint16 {
 	newVersion = atomic.AddUint64(&reqHelper.currentVersionWell, 1)
 
 	if newVersion > math.MaxUint16 {
-		errStr := fmt.Sprintf("Error: dcpStreamHelper for vbno: %v internal version overflow", reqHelper.vbno)
+		errStr := fmt.Sprintf("Error: dcpStreamHelper for dcp %v vbno: %v internal version overflow", reqHelper.dcp.Id(), reqHelper.vbno)
 		reqHelper.lock.RLock()
 		defer reqHelper.lock.RUnlock()
 		if !reqHelper.isDisabled {
-			reqHelper.dcp.Logger().Errorf(errStr)
-			reqHelper.dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, nil, nil, errStr))
+			// Something is seriously wrong if interal version overflowed
+			reqHelper.dcp.Logger().Fatalf(errStr)
+			reqHelper.dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, reqHelper.dcp, nil, errStr))
 		}
 		atomic.StoreUint64(&reqHelper.currentVersionWell, 0)
 		newVersion = 0
@@ -287,7 +288,8 @@ type DcpNozzle struct {
 	// lock on uprFeed to avoid race condition
 	lock_uprFeed sync.RWMutex
 
-	finch chan bool
+	finch        chan bool
+	closeFinOnce sync.Once
 
 	bOpen      bool
 	lock_bOpen sync.RWMutex
@@ -390,6 +392,7 @@ func NewDcpNozzle(id string,
 		getHighSeqnoOneAtATime:   make(chan bool, 1),
 		vbHighSeqnoMap:           make(map[uint16]*base.SeqnoWithLock),
 		wrappedUprPool:           utilities.NewWrappedUprPool(base.NewDataPool()),
+		finch:                    make(chan bool),
 	}
 
 	// Allow one caller the ability to execute
@@ -583,8 +586,6 @@ func (dcp *DcpNozzle) initializeCompressionSettings(settings metadata.Replicatio
 }
 
 func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err error) {
-	dcp.finch = make(chan bool)
-
 	err = dcp.initializeCompressionSettings(settings)
 
 	if val, ok := settings[DCP_Priority]; ok {
@@ -790,9 +791,9 @@ func (dcp *DcpNozzle) Stop() error {
 	}
 
 	//notify children routines
-	if dcp.finch != nil {
+	dcp.closeFinOnce.Do(func() {
 		close(dcp.finch)
-	}
+	})
 
 	dcp.closeUprStreamsWithTimeout()
 	dcp.closeUprFeedWithTimeout()
@@ -931,7 +932,6 @@ func (dcp *DcpNozzle) processData() (err error) {
 	defer dcp.childrenWaitGrp.Done()
 	defer dcp.Logger().Infof("%v processData exits\n", dcp.Id())
 
-	finch := dcp.finch
 	uprFeed := dcp.getUprFeed()
 	if uprFeed == nil {
 		dcp.Logger().Infof("%v DCP feed has been closed. processData exits\n", dcp.Id())
@@ -943,7 +943,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 	mutch := uprFeed.GetUprEventCh()
 	for {
 		select {
-		case <-finch:
+		case <-dcp.finch:
 			goto done
 		case m, ok := <-mutch: // mutation from upstream
 			if !ok {
@@ -1276,13 +1276,11 @@ func (dcp *DcpNozzle) startUprStreams() error {
 	init_ch := make(chan bool, 1)
 	init_ch <- true
 
-	finch := dcp.finch
-
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-finch:
+		case <-dcp.finch:
 			goto done
 		case <-init_ch:
 			// dcp.GetVBList() returns the original vb list in dcp.
@@ -1332,7 +1330,6 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 		return err
 	}
 
-	var debugNotStartedVBs []uint16
 	for _, vbno := range streams_to_start {
 		vbts, err := dcp.getTS(vbno, true)
 		if err == nil && vbts != nil {
@@ -1341,9 +1338,6 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 				dcp.Logger().Warnf("%v: startUprStreams errored out, err=%v\n", dcp.Id(), err)
 				continue
 			}
-
-		} else {
-			debugNotStartedVBs = append(debugNotStartedVBs, vbno)
 		}
 	}
 	return nil
@@ -1715,14 +1709,12 @@ func (dcp *DcpNozzle) getMaxMissCount() uint32 {
 func (dcp *DcpNozzle) checkInactiveUprStreams() {
 	defer dcp.childrenWaitGrp.Done()
 
-	fin_ch := dcp.finch
-
 	dcp_inactive_stream_check_ticker := time.NewTicker(dcp_inactive_stream_check_interval)
 	defer dcp_inactive_stream_check_ticker.Stop()
 
 	for {
 		select {
-		case <-fin_ch:
+		case <-dcp.finch:
 			dcp.Logger().Infof("%v checkInactiveUprStreams routine is exiting because dcp nozzle has been stopped\n", dcp.Id())
 			return
 		case <-dcp_inactive_stream_check_ticker.C:

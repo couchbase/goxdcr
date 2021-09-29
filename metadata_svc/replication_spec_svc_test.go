@@ -1,4 +1,4 @@
-// +build !pcre
+//go:build !pcre
 
 /*
 Copyright 2017-Present Couchbase, Inc.
@@ -182,6 +182,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	xdcrTopologyMock.On("MyConnectionStr").Return(myConnectionStr, nil)
 	xdcrTopologyMock.On("MyMemcachedAddr").Return(myConnectionStr, nil)
 	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(isEnterprise, nil)
+	xdcrTopologyMock.On("NumberOfKVNodes").Return(1, nil)
 
 	// LOCAL mock
 	utilitiesMock.On("BucketValidationInfo", hostAddr,
