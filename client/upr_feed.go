@@ -289,6 +289,8 @@ type UprFeed struct {
 	// It is not allowed once a regular/legacy stream was started originally
 	streamsType        DcpStreamType
 	initStreamTypeOnce sync.Once
+
+	transmitCloseOnce sync.Once
 }
 
 // Exported interface - to allow for mocking
@@ -1027,10 +1029,7 @@ loop:
 		}
 	}
 
-	// make sure that feed is closed before we signal transmitCl and exit runFeed
 	feed.Close()
-
-	close(feed.transmitCl)
 	logging.Infof("runFeed exiting")
 }
 
@@ -1097,12 +1096,15 @@ func vbOpaque(opq32 uint32) uint16 {
 // Close this UprFeed.
 func (feed *UprFeed) Close() {
 	feed.muFeedState.Lock()
-	defer feed.muFeedState.Unlock()
 	if feed.feedState != FeedStateClosed {
 		close(feed.closer)
 		feed.feedState = FeedStateClosed
 		feed.negotiator.initialize()
 	}
+	feed.muFeedState.Unlock()
+	feed.transmitCloseOnce.Do(func() {
+		close(feed.transmitCl)
+	})
 }
 
 // check if the UprFeed has been closed
