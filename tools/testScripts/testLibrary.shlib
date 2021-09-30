@@ -20,6 +20,9 @@ DCP_CONVERT_ERR_MSG="Error converting VBTask to DCP Nozzle Task"
 BROKENEVENT_TYPE=3
 BACKFILL_PIPELINE_TORNDOWN_MSG="Background check task finished"
 GOXDCR_IDLE_CPU_THRESHOLD=10
+RECEIVE_P2P_REQ_MSG="Received peer-to-peer push requests"
+RECEIVE_P2P_REQ_DONE_MSG="Done handling peer-to-peer push requests from"
+TS_PREFIX="ts.Seqno"
 
 # These should be imported after clusterRunProvision script
 

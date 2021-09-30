@@ -109,7 +109,7 @@ function runOneRebalanceCycle {
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
 	echo "============================================================================"
 	addNodesIn
-	startRebalancingIn "C1"
+	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
 
 	#echo "Sleeping before checking logs"
@@ -164,6 +164,13 @@ function runTestCase {
 	runOneRebalanceCycle 1 1
 	runReplicationResume
 
-	# 2 jobs - whichever finishes first is done
-	stopWhenAnyBgJobStops 2
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	failoverNode "C1P" "C1"
 }

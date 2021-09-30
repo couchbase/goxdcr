@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"sync"
 	"time"
 )
 
@@ -26,10 +27,10 @@ type PeriodicPushHandler struct {
 	backfillReplSvc service_def.BackfillReplSvc
 	utils           utilities.UtilsIface
 
-	requestMerger func(fullTopic string, request interface{}) error
+	requestMerger func(fullTopic, sender string, request interface{}) error
 }
 
-func NewPeriodicPushHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, merger func(string, interface{}) error) *PeriodicPushHandler {
+func NewPeriodicPushHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, merger func(string, string, interface{}) error) *PeriodicPushHandler {
 	finCh := make(chan bool)
 	return &PeriodicPushHandler{
 		HandlerCommon:   NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh),
@@ -79,31 +80,49 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 	if req.PushRequests == nil {
 		resp.ErrorString = fmt.Sprintf("Received nil push request list")
 	} else {
+		var waitGrp sync.WaitGroup
 		errMap := make(base.ErrorMap)
+		var errMapMtx sync.Mutex
+
 		var unknownCounter = 1
-		for _, onePushRequest := range *req.PushRequests {
-			// TODO - handle this parallelly
-			err := p.storePushRequestInfo(onePushRequest)
-			if err != nil {
-				if onePushRequest.MainReplication == nil && onePushRequest.BackfillReplication == nil {
-					errMap[fmt.Sprintf("unknown_%v", unknownCounter)] = err
-					unknownCounter++
-				} else {
-					var specId string
-					if onePushRequest.MainReplication != nil {
-						specId = onePushRequest.MainReplication.ReplicationSpecId
-					} else {
-						specId = onePushRequest.BackfillReplication.ReplicationSpecId
-					}
-					errMap[specId] = err
-				}
+		p.logger.Infof("Received peer-to-peer push requests from %v", req.Sender)
+		for _, pushReqPtr := range *req.PushRequests {
+			if pushReqPtr == nil {
+				continue
 			}
+			pushReq := *pushReqPtr
+			waitGrp.Add(1)
+			go func() {
+				defer waitGrp.Done()
+				err := p.storePushRequestInfo(pushReq, req.Sender)
+				if err != nil {
+					if pushReq.MainReplication == nil && pushReq.BackfillReplication == nil {
+						errMapMtx.Lock()
+						unknownCounter++
+						errMap[fmt.Sprintf("unknown_%v", unknownCounter)] = err
+						errMapMtx.Unlock()
+					} else {
+						var specId string
+						if pushReq.MainReplication != nil {
+							specId = pushReq.MainReplication.ReplicationSpecId
+						} else {
+							specId = pushReq.BackfillReplication.ReplicationSpecId
+						}
+						errMapMtx.Lock()
+						errMap[specId] = err
+						errMapMtx.Unlock()
+					}
+				}
+			}()
 		}
+		waitGrp.Wait()
 		if len(errMap) > 0 {
 			resp.ErrorString = base.FlattenErrorMap(errMap)
+			p.logger.Warnf("Handling peer-to-peer push requests from %v finished with errs %v", req.Sender, resp.ErrorString)
+		} else {
+			p.logger.Infof("Done handling peer-to-peer push requests from %v", req.Sender)
 		}
 	}
-
 	handlerResult, err := req.CallBack(resp)
 	if err != nil || handlerResult != nil && handlerResult.GetError() != nil {
 		var handlerResultErr error
@@ -127,34 +146,36 @@ func (p *PeriodicPushHandler) handleResponse(resp *PeerVBPeriodicPushResp) {
 	}
 }
 
-func (p *PeriodicPushHandler) storePushRequestInfo(pushReq *VBPeriodicReplicateReq) error {
+// Since these will be using the same ckpt mgr underneath, they must be run sequentially
+func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateReq, sender string) error {
+	errMap := make(base.ErrorMap)
 	if pushReq.MainReplication != nil {
-		err := p.storePushReqInfoByType(pushReq.MainReplication, common.MainPipeline)
-		// TODO - remove after successfully handling store
-		p.logger.Infof("NEIL DEBUG got main replication request with %v, err - %v\n", (*pushReq.MainReplication.payload)[pushReq.MainReplication.SourceBucketName], err)
+		err := p.storePushReqInfoByType(pushReq.MainReplication, common.MainPipeline, sender)
+		if err != nil {
+			errMap[fmt.Sprintf("node %v mainReplication", sender)] = err
+		}
 	}
 
 	if pushReq.BackfillReplication != nil && pushReq.BackfillReplication.payload != nil && (*pushReq.BackfillReplication.payload)[pushReq.BackfillReplication.SourceBucketName] != nil {
-		err := p.storePushReqInfoByType(pushReq.BackfillReplication, common.BackfillPipeline)
-		var atLeastOneFound bool
-		for i := uint16(0); i < 1024; i++ {
-			pushVB := (*(*pushReq.BackfillReplication.payload)[pushReq.BackfillReplication.SourceBucketName].PushVBs)[i]
-			if pushVB != nil && pushVB.BackfillTsks != nil && pushVB.BackfillTsks.Len() > 0 {
-				atLeastOneFound = true
-			}
+		err := p.storePushReqInfoByType(pushReq.BackfillReplication, common.BackfillPipeline, sender)
+		if err != nil {
+			errMap[fmt.Sprintf("node %v backfillReplication", sender)] = err
 		}
-		// TODO - remove after successfully handling store
-		p.logger.Infof("NEIL DEBUG got backfill replication request with %v - %v - atleastOneFOUND? %v\n", (*pushReq.BackfillReplication.payload)[pushReq.BackfillReplication.SourceBucketName], err, atLeastOneFound)
 	}
-	return nil
+
+	if len(errMap) == 0 {
+		return nil
+	} else {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
 }
 
-func (p *PeriodicPushHandler) storePushReqInfoByType(payload *ReplicationPayload, pipelineType common.PipelineType) error {
+func (p *PeriodicPushHandler) storePushReqInfoByType(payload *ReplicationPayload, pipelineType common.PipelineType, sender string) error {
 	// The push request can only happen when a pipeline is running
 	// This means that when a request is received here, pipeline should be active, including this node's
 	// If a peer node sends a request but this node does not have an active pipeline, then it's a race condition
 	// and should be treated as such
 
 	fullTopic := common.ComposeFullTopic(payload.ReplicationSpecId, pipelineType)
-	return p.requestMerger(fullTopic, payload)
+	return p.requestMerger(fullTopic, sender, payload)
 }

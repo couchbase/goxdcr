@@ -81,7 +81,7 @@ type PipelineMgrIface interface {
 	UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	DismissEventForPipeline(pipelineName string, eventId int) error
 	HandleClusterEncryptionLevelChange(old, new service_def.EncryptionSettingIface)
-	HandlePeerCkptPush(fullTopic string, dynamicEvt interface{}) error
+	HandlePeerCkptPush(fullTopic, sender string, dynamicEvt interface{}) error
 }
 
 type PipelineMgrInternalIface interface {
@@ -1162,7 +1162,7 @@ func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair
 	return replStatus.GetEventsManager().BackfillUpdateCb(diffPair, srcManifestsDelta)
 }
 
-func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic string, dynamicEvt interface{}) error {
+func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string, dynamicEvt interface{}) error {
 	// When peers send push requests, use checkpoint manager to merge them
 	// This means getting the corresponding pipeline's ckpt manager
 	// A peer node should only send a push request if the pipeline is running
@@ -1170,28 +1170,44 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic string, dynamic
 	// so try for a bit before failing
 
 	var checkpointMgr pipeline_svc.CheckpointMgrSvc
+	var backfillMgrSvc common.PipelineService
 	var opFuncErr error
 	opFunc := func() error {
-		checkpointMgr, opFuncErr = pipelineMgr.handlePeerCkptGetCkptMgr(fullTopic)
+		checkpointMgr, backfillMgrSvc, opFuncErr = pipelineMgr.handlePeerCkptGetMergeManagers(fullTopic)
 		return opFuncErr
 	}
 
-	err := pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("pipelineMgr.HandlePeerCkptPushGetCkptMgr(%v)", fullTopic),
+	err := pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("pipelineMgr.HandlePeerCkptPushGetMergeManagers(%v)", fullTopic),
 		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, opFunc)
 	if err != nil {
 		return err
 	}
-	return checkpointMgr.MergePeerNodesCkptInfo(dynamicEvt)
+	err = checkpointMgr.MergePeerNodesCkptInfo(dynamicEvt)
+	if err != nil {
+		return err
+	}
+
+	mainPipelineTopic, _ := common.DecomposeFullTopic(fullTopic)
+	settingsMap := make(metadata.ReplicationSettingsMap)
+	settingsMap[base.NameKey] = mainPipelineTopic
+	settingsMap[peerToPeer.PeriodicPushSenderKey] = sender
+	settingsMap[peerToPeer.MergeBackfillKey] = dynamicEvt
+	err = backfillMgrSvc.UpdateSettings(settingsMap)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (pipelineMgr *PipelineManager) handlePeerCkptGetCkptMgr(fullTopic string) (pipeline_svc.CheckpointMgrSvc, error) {
+func (pipelineMgr *PipelineManager) handlePeerCkptGetMergeManagers(fullTopic string) (pipeline_svc.CheckpointMgrSvc, common.PipelineService, error) {
 	topic, pipelineType := common.DecomposeFullTopic(fullTopic)
 
 	repStatus, err := pipelineMgr.ReplicationStatus(topic)
 	if err != nil {
 		// This shouldn't happen as repStatus should exist if spec exists. If this error shows up, it's a clue that
 		// there is network partition and replicationSpec isn't sync'ed correctly
-		return nil, fmt.Errorf("Peer sent push req for pipeline %v but topic does not exist - %v", topic, err)
+		return nil, nil, fmt.Errorf("Peer sent push req for pipeline %v but topic does not exist - %v", topic, err)
 	}
 
 	var pipeline common.Pipeline
@@ -1202,19 +1218,24 @@ func (pipelineMgr *PipelineManager) handlePeerCkptGetCkptMgr(fullTopic string) (
 		pipeline = repStatus.BackfillPipeline()
 	default:
 		// Shouldn't happen
-		return nil, fmt.Errorf("unknown pipeline type %v", pipelineType)
+		return nil, nil, fmt.Errorf("unknown pipeline type %v", pipelineType)
 	}
 
 	if pipeline == nil {
 		// pipeline could be nil in between pipeline restarts restarts
-		return nil, base.ErrorNilPipeline
+		return nil, nil, base.ErrorNilPipeline
 	}
 
 	checkpointMgr, ok := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
 	if !ok {
-		return nil, base.ErrorNilPipeline
+		return nil, nil, base.ErrorNilPipeline
 	}
-	return checkpointMgr, nil
+
+	backfillMgrPipelineSvc := pipeline.RuntimeContext().Service(base.BACKFILL_MGR_SVC)
+	if backfillMgrPipelineSvc == nil {
+		return nil, nil, base.ErrorNilPipeline
+	}
+	return checkpointMgr, backfillMgrPipelineSvc, nil
 }
 
 var updaterStateErrorStr = "Can't move update state from %v to %v"

@@ -523,32 +523,39 @@ function populateKnownNodesString {
 	# n_0@192.168.1.113
 	# n_2@127.0.0.1
 
+	local knownNodesString="knownNodes="
 	local comma=""
 	# knownNodes=n_2@127.0.0.1,n_0@192.168.1.113
-	local knownNodesString="knownNodes="
 	for member in $(echo "$membership"); do
 		knownNodesString="${knownNodesString}${comma}${member}"
 		comma=","
 	done
-
 	echo "$knownNodesString"
 }
 
-function startRebalancingIn {
+function startRebalancingWithKnownNodes {
 	local nodeName=$1
+	local knownNodesString=$2
 	local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
-
-	echo "Starting rebalance process..."
-	knownNodesString=$(populateKnownNodesString $nodeName)
 
 	# This kicks off the rebalancing
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/controller/rebalance -d "$knownNodesString"
 	if (($? != 0)); then
-		echo "Error when trying to rebalance in with known $knownNodesString"
+		echo "Error when trying to rebalance with known $knownNodesString"
 	fi
 
 	sleep 10
 	waitForRebalanceToFinish $nodeName
+}
+
+function startRebalancing {
+	local nodeName=$1
+	local knownNodesString
+
+	echo "Starting rebalance process..."
+	knownNodesString=$(populateKnownNodesString $nodeName)
+
+	startRebalancingWithKnownNodes "$nodeName" "$knownNodesString"
 }
 
 function startEjectNode {
@@ -572,7 +579,7 @@ function startEjectNode {
 
 	local checkHostName
 	local nodeInfo
-	local ejectNodeString
+	local failoverNodeString
 	local knownNodesString
 	local optNodeNameStripped
 
@@ -583,12 +590,12 @@ function startEjectNode {
 			otpNodeName=$(echo "$nodeInfo" | jq '.otpNode')
 			# "n_0@192.168.1.113"
 			otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
-			ejectNodeString="ejectedNodes=$otpNodeNameStripped"
+			failoverNodeString="ejectedNodes=$otpNodeNameStripped"
 			knownNodesString=$(populateKnownNodesString $motherNode)
 			local preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
-			$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/rebalance -d "$ejectNodeString" -d "$knownNodesString"
+			$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/rebalance -d "$failoverNodeString" -d "$knownNodesString"
 			if (($? != 0)); then
-				echo "Error when trying to rebalance with eject $ejectNodeString and known $knownNodesString"
+				echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
 			fi
 			sleep 10
 			waitForRebalanceToFinish $motherNode
@@ -600,6 +607,55 @@ function startEjectNode {
 		fi
 	done
 
+}
+
+function failoverNode {
+	# Essentially we will work off of portname
+	local nodeName=$1
+	local motherNode=$2
+	local localhostIp="127.0.0.1"
+	local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
+	local motherPort=${CLUSTER_NAME_PORT_MAP[$motherNode]:-}
+	local hostNameToLookFor="${localhostIp}:${port}"
+	local otpNodeName
+
+	local nodesList=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq -cr '.[]')
+	#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_0@192.168.1.113","thisNode":true,"hostname":"192.168.1.113:9000","nodeUUID":"cbef3c8c28031971e9e61234560c8f0d","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12000,"httpsCAPI":19500,"httpsMgmt":19000,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"192.168.1.113:9000","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://192.168.1.113:9500/","couchApiBaseHTTPS":"https://192.168.1.113:19500/","systemStats":{"cpu_utilization_rate":16.81045313677862,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17357692928,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":39218356,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":1997575,"mem_used":69419072,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"401","memoryTotal":34359738368,"memoryFree":17357692928,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
+	#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_2@127.0.0.1","hostname":"127.0.0.1:9002","nodeUUID":"7356e3a2ed404e7bec0d2ca43ceb3526","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12004,"httpsCAPI":19502,"httpsMgmt":19002,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"127.0.0.1:9002","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://127.0.0.1:9502/","couchApiBaseHTTPS":"https://127.0.0.1:19502/","systemStats":{"cpu_utilization_rate":20.66955363091272,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17360678912,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":38648300,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":2004302,"mem_used":69085160,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"403","memoryTotal":34359738368,"memoryFree":17360678912,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
+
+	if [[ -z "${nodesList:-}" ]]; then
+		echo "ERROR - nodesList is empty. Did you enter the wrong argument for failoverNode?"
+		exit 1
+	fi
+
+	local checkHostName
+	local nodeInfo
+	local failoverNodeString
+	local knownNodesString
+	local optNodeNameStripped
+
+	for nodeInfo in $(echo "$nodesList"); do
+		checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
+		if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
+			# Found it
+			otpNodeName=$(echo "$nodeInfo" | jq '.otpNode')
+			# "n_0@192.168.1.113"
+			otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
+			failoverNodeString="otpNode=$otpNodeNameStripped"
+			local preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+			$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/failOver -d "$failoverNodeString"
+			if (($? != 0)); then
+				echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
+			fi
+			sleep 10
+			startRebalancing "C1" "$otpNodeNameStripped"
+			local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+			if (($postEjectCnt != $(($preEjectCnt - 1)))); then
+				echo "Error - failover a node resulted going from $preEjectCnt to $postEjectCnt"
+				exit 1
+			fi
+		fi
+	done
 }
 
 function enableDeveloperPreview {

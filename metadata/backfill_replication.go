@@ -777,6 +777,20 @@ func (v *VBTasksMapType) Contains(vbTasksMap *VBTasksMapType) bool {
 	return true
 }
 
+func (v *VBTasksMapType) GetVBs() (retList []uint16) {
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+
+	for vb, tasks := range v.VBTasksMap {
+		if tasks == nil || tasks.Len() == 0 {
+			continue
+		}
+		retList = append(retList, vb)
+	}
+
+	return retList
+}
+
 // Backfill tasks are ordered list of backfill jobs, and to be handled in sequence
 type BackfillTasks struct {
 	List  []*BackfillTask

@@ -120,13 +120,13 @@ func (_m *PipelineMgrIface) HandleClusterEncryptionLevelChange(old service_def.E
 	_m.Called(old, new)
 }
 
-// HandlePeerCkptPush provides a mock function with given fields: fullTopic, dynamicEvt
-func (_m *PipelineMgrIface) HandlePeerCkptPush(fullTopic string, dynamicEvt interface{}) error {
-	ret := _m.Called(fullTopic, dynamicEvt)
+// HandlePeerCkptPush provides a mock function with given fields: fullTopic, sender, dynamicEvt
+func (_m *PipelineMgrIface) HandlePeerCkptPush(fullTopic string, sender string, dynamicEvt interface{}) error {
+	ret := _m.Called(fullTopic, sender, dynamicEvt)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, interface{}) error); ok {
-		r0 = rf(fullTopic, dynamicEvt)
+	if rf, ok := ret.Get(0).(func(string, string, interface{}) error); ok {
+		r0 = rf(fullTopic, sender, dynamicEvt)
 	} else {
 		r0 = ret.Error(0)
 	}

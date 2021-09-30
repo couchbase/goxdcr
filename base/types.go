@@ -2464,6 +2464,20 @@ func (k *KvVBMapType) CompileLookupIndex() map[uint16]string {
 	return retMap
 }
 
+func (k *KvVBMapType) GetSortedVBList() []uint16 {
+	if k == nil {
+		return nil
+	}
+
+	indexMap := k.CompileLookupIndex()
+
+	var vbList []uint16
+	for vb, _ := range indexMap {
+		vbList = append(vbList, vb)
+	}
+	return SortUint16List(vbList)
+}
+
 func (k *KvVBMapType) Clone() KvVBMapType {
 	clonedMap := make(KvVBMapType)
 	if k == nil {

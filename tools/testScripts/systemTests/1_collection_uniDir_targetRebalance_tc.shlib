@@ -127,7 +127,7 @@ function runOneRebalanceCycle {
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
 	echo "============================================================================"
 	addNodesIn
-	startRebalancingIn "C2"
+	startRebalancing "C2"
 	echo "Rebalancing in completed. Letting replication continue with multiple nodes for $timeIntervalSecs seconds, check for stable pipelines before rebalancing out"
 
 	local currentXdcrLogC1

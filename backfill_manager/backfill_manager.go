@@ -170,9 +170,14 @@ func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSetting
 		}
 	}
 
-	peerBackfillInfo, exists := settings[peerToPeer.MergeBackfillKey].(peerToPeer.PeersVBMasterCheckRespMap)
-	if topicExists && exists {
-		err := p.backfillMgr.MergeIncomingPeerNodesBackfill(topic, peerBackfillInfo)
+	pushSender, senderExists := settings[peerToPeer.PeriodicPushSenderKey].(string)
+	if !senderExists {
+		pushSender = "unknown"
+	}
+
+	mergeRequestRaw, mergeBackfillExists := settings[peerToPeer.MergeBackfillKey]
+	if mergeBackfillExists && topicExists {
+		err := p.backfillMgr.MergeIncomingPeerNodesBackfill(topic, mergeRequestRaw, pushSender)
 		if err != nil {
 			errMap[peerToPeer.MergeBackfillKey] = err
 		}
@@ -1725,10 +1730,21 @@ func (b *BackfillMgr) validateReplIdExists(replId string) bool {
 	return false
 }
 
-func (b *BackfillMgr) MergeIncomingPeerNodesBackfill(topic string, peerResponses map[string]*peerToPeer.VBMasterCheckResp) error {
-	if len(peerResponses) == 0 {
+func (b *BackfillMgr) MergeIncomingPeerNodesBackfill(topic string, peerResponsesRaw interface{}, pushSender string) error {
+	peerResponses, isPullRequestType := peerResponsesRaw.(peerToPeer.PeersVBMasterCheckRespMap)
+	if isPullRequestType && len(peerResponses) == 0 {
 		// Nothing to do
 		return nil
+	}
+
+	var peerPushRequest *peerToPeer.ReplicationPayload
+	var isPushRequestType bool
+	if !isPullRequestType {
+		peerPushRequest, isPushRequestType = peerResponsesRaw.(*peerToPeer.ReplicationPayload)
+	}
+
+	if !isPushRequestType && !isPullRequestType {
+		return fmt.Errorf("Invalid peer data type: %v", reflect.TypeOf(peerResponsesRaw))
 	}
 
 	spec, err := b.replSpecSvc.ReplicationSpec(topic)
@@ -1740,52 +1756,16 @@ func (b *BackfillMgr) MergeIncomingPeerNodesBackfill(topic string, peerResponses
 	handler := b.specToReqHandlerMap[topic]
 	b.specReqHandlersMtx.RUnlock()
 	if handler == nil {
-		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		err = fmt.Errorf("Unable to find handler for spec %v", topic)
 		b.logger.Errorf(err.Error())
 		return err
 	}
 
 	errMap := make(base.ErrorMap)
-	for nodeName, resp := range peerResponses {
-		srcBucketName := resp.SourceBucketName
-		bucketMapPayload := resp.GetReponse()
-		backfillMappingDoc := (*bucketMapPayload)[srcBucketName].GetBackfillMappingDoc()
-		if backfillMappingDoc == nil || backfillMappingDoc.Size() == 0 {
-			// Nothing to do here
-			continue
-		}
-		// Need to reconstruct backfill replication
-		shaMap, err := backfillMappingDoc.ToShaMap()
-		if err != nil {
-			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = fmt.Errorf("nodeRespData BackfillMappingDoc ToShaMap err %v", err)
-			continue
-		}
-
-		if len(shaMap) == 0 {
-			// nothing to do here
-			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = fmt.Errorf("nodeRespData shaMap for %v is empty", err)
-			continue
-		}
-
-		vbTaskMap := (*bucketMapPayload)[srcBucketName].GetBackfillVBTasks()
-		err = vbTaskMap.LoadFromMappingsShaMap(shaMap)
-		if err != nil {
-			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = fmt.Errorf("nodeRespData LoadFromMappingsShaMap err %v", err)
-			continue
-		}
-
-		backfillSpec := metadata.NewBackfillReplicationSpec(topic, backfillMappingDoc.SpecInternalId, vbTaskMap, spec)
-		b.logger.Infof("Replication %v received peer node backfill replication: %v", topic, backfillSpec)
-
-		mergeReq := internalPeerBackfillTaskMergeReq{
-			nodeName:     nodeName,
-			backfillSpec: backfillSpec,
-		}
-		err = handler.HandleBackfillRequest(mergeReq)
-		if err != nil {
-			b.logger.Errorf(fmt.Sprintf("node %v backfill merge request was unable to be merged - %v", nodeName, err))
-			errMap[nodeName] = err
-		}
+	if isPullRequestType {
+		b.mergePullResponses(topic, peerResponses, errMap, spec, handler)
+	} else {
+		b.mergePushRequest(topic, peerPushRequest, errMap, spec, handler, pushSender)
 	}
 
 	if len(errMap) > 0 {
@@ -1820,4 +1800,102 @@ func (b *BackfillMgr) MergeIncomingPeerNodesBackfill(topic string, peerResponses
 	} else {
 		return nil
 	}
+}
+
+func (b *BackfillMgr) mergePullResponses(topic string, peerResponses peerToPeer.PeersVBMasterCheckRespMap, errMap base.ErrorMap, spec *metadata.ReplicationSpecification, handler *BackfillRequestHandler) {
+	var err error
+	for nodeName, resp := range peerResponses {
+		srcBucketName := resp.SourceBucketName
+		bucketMapPayload, unlockFunc := resp.GetReponse()
+		if bucketMapPayload == nil {
+			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = base.ErrorNilPtr
+			unlockFunc()
+			continue
+		}
+
+		if (*bucketMapPayload)[srcBucketName] == nil {
+			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = fmt.Errorf("%v - %v", srcBucketName, base.ErrorNilPtr.Error())
+			unlockFunc()
+			continue
+		}
+
+		err = b.mergeP2PReqAndUnlockCommon(bucketMapPayload, srcBucketName, unlockFunc, nodeName, handler, topic, spec)
+		if err != nil {
+			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = err
+		}
+	}
+}
+
+func (b *BackfillMgr) mergePushRequest(topic string, request *peerToPeer.ReplicationPayload, errMap base.ErrorMap, spec *metadata.ReplicationSpecification, handler *BackfillRequestHandler, sender string) {
+	var err error
+	srcBucketName := request.SourceBucketName
+	bucketMapPayload, unlockFunc := request.GetPayloadWithReadLock()
+
+	if bucketMapPayload == nil {
+		errMap[fmt.Sprintf("%v - peerPeriodicPush", request.ReplicationSpecId)] = base.ErrorNilPtr
+		unlockFunc()
+		return
+	}
+
+	if (*bucketMapPayload)[srcBucketName] == nil {
+		errMap[fmt.Sprintf("%v - peerPeriodicPush", request.ReplicationSpecId)] = fmt.Errorf("%v - %v", srcBucketName, base.ErrorNilPtr.Error())
+		unlockFunc()
+		return
+	}
+
+	backfillMappingDoc := (*bucketMapPayload)[srcBucketName].GetBackfillMappingDoc()
+	if backfillMappingDoc == nil || backfillMappingDoc.Size() == 0 {
+		// Nothing to do here
+		unlockFunc()
+		return
+	}
+
+	err = b.mergeP2PReqAndUnlockCommon(bucketMapPayload, srcBucketName, unlockFunc, sender, handler, topic, spec)
+	if err != nil {
+		errMap[sender] = err
+	}
+	return
+}
+
+func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.BucketVBMPayloadType, srcBucketName string, unlockFunc func(), nodeName string, handler *BackfillRequestHandler, topic string, spec *metadata.ReplicationSpecification) error {
+	backfillMappingDoc := (*bucketMapPayload)[srcBucketName].GetBackfillMappingDoc()
+	if backfillMappingDoc == nil || backfillMappingDoc.Size() == 0 {
+		// Nothing to do here
+		unlockFunc()
+		return nil
+	}
+	// Need to reconstruct backfill replication
+	shaMap, err := backfillMappingDoc.ToShaMap()
+	if err != nil {
+		unlockFunc()
+		return fmt.Errorf("nodeRespData BackfillMappingDoc from %v ToShaMap err %v", nodeName, err)
+	}
+
+	if len(shaMap) == 0 {
+		// nothing to do here
+		unlockFunc()
+		return fmt.Errorf("nodeRespData shaMap for %v is empty, err %v", nodeName, err)
+	}
+
+	vbTaskMap := (*bucketMapPayload)[srcBucketName].GetBackfillVBTasks()
+	err = vbTaskMap.LoadFromMappingsShaMap(shaMap)
+	if err != nil {
+		unlockFunc()
+		return fmt.Errorf("nodeRespData LoadFromMappingsShaMap from %v err %v", nodeName, err)
+	}
+	unlockFunc()
+
+	backfillSpec := metadata.NewBackfillReplicationSpec(topic, backfillMappingDoc.SpecInternalId, vbTaskMap, spec)
+	b.logger.Infof("Replication %v received peer node %v backfill replication: %v", topic, nodeName, backfillSpec)
+
+	mergeReq := internalPeerBackfillTaskMergeReq{
+		nodeName:     nodeName,
+		backfillSpec: backfillSpec,
+	}
+	err = handler.HandleBackfillRequest(mergeReq)
+	if err != nil {
+		b.logger.Errorf(fmt.Sprintf("node %v backfill merge request was unable to be merged - %v", nodeName, err))
+		return err
+	}
+	return nil
 }

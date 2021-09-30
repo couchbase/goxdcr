@@ -118,7 +118,7 @@ func TestVBMasterHandler(t *testing.T) {
 }
 
 func validateResponse(respActual *VBMasterCheckResp, assert *assert.Assertions) {
-	bucketMapResp := respActual.GetReponse()
+	bucketMapResp, unlockFunc := respActual.GetReponse()
 	assert.NotNil(bucketMapResp)
 	assert.Equal("", respActual.ErrorMsg)
 	payload := (*bucketMapResp)[srcBucketName]
@@ -132,6 +132,7 @@ func validateResponse(respActual *VBMasterCheckResp, assert *assert.Assertions) 
 	assert.NotNil(shaMap)
 	assert.NotEqual(0, len(backfillMapping.NsMappingRecords))
 	assert.NotEqual(0, backfillMapping.NsMappingRecords.Size())
+	unlockFunc()
 
 	// Test subset - NotMyVBs have 2 VBs
 	subsetResp := respActual.GetSubsetBasedOnVBs([]uint16{0})

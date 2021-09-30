@@ -56,7 +56,10 @@ const ResponseType ReqRespType = iota
 
 const VBUnableToLoad = "VB not able to stored into response"
 
+var ErrorCompleteVBOverlap = fmt.Errorf("VBs ownerships completely overlap")
+
 const MergeBackfillKey = "mergeBackfillInfoFromPeers"
+const PeriodicPushSenderKey = "periodicPushSender"
 
 type RequestCommon struct {
 	Magic             int
@@ -277,8 +280,12 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 		}
 		return resp, nil
 	case ReqPeriodicPush:
-		// NEIL TODO - next
-		return nil, fmt.Errorf("TODO")
+		resp := &PeerVBPeriodicPushResp{}
+		err = resp.DeSerialize(body)
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
 	default:
 		return nil, fmt.Errorf("Unknown response %v", respCommon.RespType)
 	}
@@ -457,6 +464,14 @@ func NewReplicationPayload(specId, srcBucketName string, pipelineType common.Pip
 		PipelineType:      pipelineType,
 		payload:           &payload,
 	}
+}
+
+func (v *ReplicationPayload) GetPayloadWithReadLock() (*BucketVBMPayloadType, func()) {
+	unlockFunc := func() {
+		v.mtx.RUnlock()
+	}
+	v.mtx.RLock()
+	return v.payload, unlockFunc
 }
 
 func (v *ReplicationPayload) CompressPayload() error {
@@ -665,6 +680,95 @@ func (v *ReplicationPayload) GetSubsetBasedOnVBs(vbsList []uint16) *ReplicationP
 	return retPayload
 }
 
+func (v *ReplicationPayload) GetPushVBs() []uint16 {
+	if v == nil {
+		panic("Nil")
+	}
+	v.mtx.RLock()
+	defer v.mtx.RUnlock()
+
+	if v.payload == nil {
+		panic("Nil payload")
+	}
+
+	var retList []uint16
+	for _, vbMasterPayload := range *v.payload {
+		pushVBs := *(vbMasterPayload.PushVBs)
+		for vb, data := range pushVBs {
+			if data.BackfillTsks.Len() > 0 || data.CheckpointsDoc.Len() > 0 {
+				retList = append(retList, vb)
+			}
+		}
+	}
+	return retList
+}
+
+func (v *ReplicationPayload) GetSubsetBasedOnNonIntersectingVBs(vbsList []uint16) *ReplicationPayload {
+	if v == nil {
+		return nil
+	}
+
+	v.mtx.RLock()
+	defer v.mtx.RUnlock()
+
+	retPayload := &ReplicationPayload{
+		ReplicationSpecId: v.ReplicationSpecId,
+		SourceBucketName:  v.SourceBucketName,
+		PipelineType:      v.PipelineType,
+	}
+
+	payloadMap := make(BucketVBMPayloadType)
+	if v.payload != nil {
+		for bucketName, vbMasterPayload := range *v.payload {
+			subsetPayload := vbMasterPayload.GetSubsetBasedOnNonIntersectingVBs(vbsList)
+			if subsetPayload.IsEmpty() {
+				continue
+			}
+			payloadMap[bucketName] = subsetPayload
+		}
+	}
+	retPayload.payload = &payloadMap
+	return retPayload
+}
+
+func (v *ReplicationPayload) IsEmpty() bool {
+	if v == nil {
+		return true
+	}
+
+	v.mtx.RLock()
+	defer v.mtx.RUnlock()
+
+	if v.payload != nil {
+		for _, vbMasterPayload := range *v.payload {
+			if !vbMasterPayload.IsEmpty() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (v *ReplicationPayload) ContainsBackfillCheckpoints() bool {
+	if v == nil {
+		return false
+	}
+
+	v.mtx.RLock()
+	defer v.mtx.RUnlock()
+
+	if v.payload == nil {
+		return false
+	}
+
+	for _, vbMasterPayload := range *v.payload {
+		if vbMasterPayload.ContainsBackfillCheckpoints() {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *ReplicationPayload) SameAs(other *ReplicationPayload) bool {
 	if v == nil && other != nil {
 		return false
@@ -691,16 +795,16 @@ type VBMasterCheckResp struct {
 	ReplicationPayload
 }
 
+func (v *VBMasterCheckResp) GetReponse() (*BucketVBMPayloadType, func()) {
+	return v.GetPayloadWithReadLock()
+}
+
 // Unit test
 func NewVBMasterCheckRespGivenPayload(payload BucketVBMPayloadType) *VBMasterCheckResp {
 	return &VBMasterCheckResp{
 		ResponseCommon:     ResponseCommon{},
 		ReplicationPayload: ReplicationPayload{payload: &payload},
 	}
-}
-
-func (v *VBMasterCheckResp) GetReponse() *BucketVBMPayloadType {
-	return v.payload
 }
 
 // Unit test
@@ -830,6 +934,25 @@ func (p *VBMasterPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBMasterPayload
 	return retPayload
 }
 
+func (p *VBMasterPayload) GetSubsetBasedOnNonIntersectingVBs(vbsList []uint16) *VBMasterPayload {
+	if p == nil {
+		return nil
+	}
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
+
+	retPayload := &VBMasterPayload{
+		NotMyVBs:           p.NotMyVBs.GetSubsetBasedOnNonIntersectingVBs(vbsList),
+		ConflictingVBs:     p.ConflictingVBs.GetSubsetBasedOnNonIntersectingVBs(vbsList),
+		PushVBs:            p.PushVBs.GetSubsetBasedOnNonIntersectingVBs(vbsList),
+		SrcManifests:       p.SrcManifests.Clone(),
+		TgtManifests:       p.TgtManifests.Clone(),
+		BrokenMappingDoc:   p.BrokenMappingDoc,
+		BackfillMappingDoc: p.BackfillMappingDoc,
+	}
+	return retPayload
+}
+
 func (p *VBMasterPayload) IsEmpty() bool {
 	if p == nil {
 		return true
@@ -868,18 +991,29 @@ func (p *VBMasterPayload) GetAllCheckpoints() map[uint16]*metadata.CheckpointsDo
 	defer p.mtx.RUnlock()
 	retMap := make(map[uint16]*metadata.CheckpointsDoc)
 
-	for vb, payload := range *p.NotMyVBs {
-		if payload.CheckpointsDoc != nil {
-			retMap[vb] = payload.CheckpointsDoc
+	if p.NotMyVBs != nil {
+		for vb, payload := range *p.NotMyVBs {
+			if payload.CheckpointsDoc != nil {
+				retMap[vb] = payload.CheckpointsDoc
+			}
 		}
 	}
 
-	for vb, payload := range *p.ConflictingVBs {
-		if payload.CheckpointsDoc != nil {
-			retMap[vb] = payload.CheckpointsDoc
+	if p.ConflictingVBs != nil {
+		for vb, payload := range *p.ConflictingVBs {
+			if payload.CheckpointsDoc != nil {
+				retMap[vb] = payload.CheckpointsDoc
+			}
 		}
 	}
 
+	if p.PushVBs != nil {
+		for vb, payload := range *p.PushVBs {
+			if payload.CheckpointsDoc != nil {
+				retMap[vb] = payload.CheckpointsDoc
+			}
+		}
+	}
 	return retMap
 }
 
@@ -907,20 +1041,32 @@ func (p *VBMasterPayload) GetBackfillVBTasks() *metadata.VBTasksMapType {
 	defer p.mtx.RUnlock()
 	taskMap := metadata.NewVBTasksMap()
 
-	for vb, payload := range *p.NotMyVBs {
-		if payload.BackfillTsks != nil {
-			taskMap.VBTasksMap[vb] = payload.BackfillTsks
-			taskMap.VBTasksMap[vb].PostUnmarshalInit()
+	if p.NotMyVBs != nil {
+		for vb, payload := range *p.NotMyVBs {
+			if payload.BackfillTsks != nil {
+				taskMap.VBTasksMap[vb] = payload.BackfillTsks
+				taskMap.VBTasksMap[vb].PostUnmarshalInit()
+			}
 		}
 	}
 
-	for vb, payload := range *p.ConflictingVBs {
-		if payload.BackfillTsks != nil {
-			taskMap.VBTasksMap[vb] = payload.BackfillTsks
-			taskMap.VBTasksMap[vb].PostUnmarshalInit()
+	if p.ConflictingVBs != nil {
+		for vb, payload := range *p.ConflictingVBs {
+			if payload.BackfillTsks != nil {
+				taskMap.VBTasksMap[vb] = payload.BackfillTsks
+				taskMap.VBTasksMap[vb].PostUnmarshalInit()
+			}
 		}
 	}
 
+	if p.PushVBs != nil {
+		for vb, payload := range *p.PushVBs {
+			if payload.BackfillTsks != nil {
+				taskMap.VBTasksMap[vb] = payload.BackfillTsks
+				taskMap.VBTasksMap[vb].PostUnmarshalInit()
+			}
+		}
+	}
 	return taskMap
 }
 
@@ -974,6 +1120,25 @@ func (p *VBMasterPayload) PostDecompressInit() error {
 	return nil
 }
 
+func (p *VBMasterPayload) ContainsBackfillCheckpoints() bool {
+	if p == nil {
+		return false
+	}
+
+	if p.NotMyVBs != nil && p.NotMyVBs.ContainsBackfillCheckpoints() {
+		return true
+	}
+
+	if p.ConflictingVBs != nil && p.ConflictingVBs.ContainsBackfillCheckpoints() {
+		return true
+	}
+
+	if p.PushVBs != nil && p.PushVBs.ContainsBackfillCheckpoints() {
+		return true
+	}
+	return false
+}
+
 type VBsPayload map[uint16]*Payload
 
 func NewVBsPayload(vbsList []uint16) *VBsPayload {
@@ -1000,6 +1165,20 @@ func (v *VBsPayload) GetSubsetBasedOnVBs(vbsList []uint16) *VBsPayload {
 	retMap := make(VBsPayload)
 	for vbno, payload := range *v {
 		if _, found := base.SearchUint16List(vbsList, vbno); found {
+			retMap[vbno] = payload
+		}
+	}
+	return &retMap
+}
+
+func (v *VBsPayload) GetSubsetBasedOnNonIntersectingVBs(vbsList []uint16) *VBsPayload {
+	if v == nil {
+		return nil
+	}
+
+	retMap := make(VBsPayload)
+	for vbno, payload := range *v {
+		if _, found := base.SearchUint16List(vbsList, vbno); !found {
 			retMap[vbno] = payload
 		}
 	}
@@ -1043,6 +1222,23 @@ func (v *VBsPayload) PostDecompressInit() error {
 		payload.BackfillTsks.PostUnmarshalInit()
 	}
 	return nil
+}
+
+func (v *VBsPayload) ContainsBackfillCheckpoints() bool {
+	if v == nil {
+		return false
+	}
+
+	for _, payload := range *v {
+		if payload == nil {
+			continue
+		}
+		if payload.BackfillTsks != nil && payload.BackfillTsks.Len() > 0 &&
+			payload.CheckpointsDoc != nil && payload.CheckpointsDoc.Len() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func NewVBMasterPayload() *VBMasterPayload {
@@ -1097,6 +1293,10 @@ type VBPeriodicReplicateReq struct {
 
 func (v *VBPeriodicReplicateReq) IsEmpty() bool {
 	return v.MainReplication == nil && v.BackfillReplication == nil
+}
+
+func (v *VBPeriodicReplicateReq) PushReqIsEmpty() bool {
+	return v.IsEmpty() || (len(v.MainReplication.GetPushVBs()) == 0 && len(v.BackfillReplication.GetPushVBs()) == 0)
 }
 
 // Note - need to establish RequestCommon later

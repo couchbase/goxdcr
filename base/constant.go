@@ -1361,6 +1361,9 @@ var MaxCountStreamsInactive = 10
 var DiagNetworkThreshold = 5000 * time.Millisecond
 var DiagInternalThreshold = 2000 * time.Millisecond
 var DiagVBMasterHandleThreshold = 20 * time.Second
+var DiagCkptMergeThreshold = 30 * time.Second
+var DiagCkptStopTheWorldThreshold = 10 * time.Second
+var DiagStopTheWorldAndMergeCkptThreshold = DiagCkptMergeThreshold + DiagCkptStopTheWorldThreshold
 
 // Pprof goroutines dump types
 type PprofLookupTypes string

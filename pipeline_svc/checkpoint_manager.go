@@ -58,8 +58,9 @@ type CheckpointMgrSvc interface {
 type CheckpointManager struct {
 	*component.AbstractComponent
 
-	pipeline      common.Pipeline
-	srcBucketName string
+	pipeline                   common.Pipeline
+	srcBucketName              string
+	bucketTopologySubscriberId string
 
 	//checkpoints_svc handles CRUD operation of checkpoint docs in the metadata store
 	checkpoints_svc service_def.CheckpointsService
@@ -208,6 +209,7 @@ func (h *checkpointSyncHelper) markTaskDone(idx int) {
 		if !taskDone {
 			// At least one task is ongoing
 			canGC = false
+			break
 		}
 	}
 	if canGC {
@@ -504,6 +506,7 @@ func (ckmgr *CheckpointManager) initialize() {
 func (ckmgr *CheckpointManager) composeUserAgent() {
 	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
 	ckmgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName)
+	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v", "ckptMgr", ckmgr.pipeline.InstanceId())
 }
 
 func (ckmgr *CheckpointManager) initConnections() error {
@@ -918,7 +921,6 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	deleted_vbnos := make([]uint16, 0)
 	specInternalId := ckmgr.pipeline.Specification().GetReplicationSpec().InternalId
 
-	// GC is not in yet - so delete old checkpoints if ckpt transfer isn't active
 	genSpec := ckmgr.pipeline.Specification()
 	spec := genSpec.GetReplicationSpec()
 	if spec == nil {
@@ -1026,6 +1028,10 @@ func (ckmgr *CheckpointManager) registerGCFunction(topic string, vbno uint16) er
 		if !ckmgr.isCheckpointAllowed() {
 			return fmt.Errorf("Ckptmgr checkpoint for %v %v hasn't started stopped", topic, vbno)
 		}
+
+		ckmgr.logger.Infof("%v garbage collecting old checkpoint for vb %v", topic, vbno)
+		stopFunc := ckmgr.utils.StartDiagStopwatch(fmt.Sprintf("ckmgr_%v_%v_gc", topic, vbno), base.DiagStopTheWorldAndMergeCkptThreshold)
+		defer stopFunc()
 
 		ckmgr.checkpointAllowedHelper.disableCkptAndWait()
 		defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
@@ -1585,10 +1591,9 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 
 	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(false)
 	if err != nil {
-		ckmgr.logger.Errorf("registerCkptOp failed - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+		ckmgr.logger.Errorf("%v - %v (performCkpt) registerCkptOp failed - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 		return
 	}
-
 	defer ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
 
 	ckmgr.logger.Infof("Start checkpointing for replication %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
@@ -1649,6 +1654,13 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 		ckmgr.logger.Errorf("%v %v checkpointing is disallowed - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 		return
 	}
+
+	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(false)
+	if err != nil {
+		ckmgr.logger.Errorf("%v - %v (performCkpt_internal) registerCkptOp failed - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+		return
+	}
+	defer ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
 
 	ckmgr.logger.Infof("Checkpointing for %v replication %v, vb_list=%v, time_to_wait=%v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vb_list, time_to_wait, interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
@@ -2331,11 +2343,9 @@ func (ckmgr *CheckpointManager) MergePeerNodesCkptInfo(genericResponse interface
 		return ckmgr.mergeNodesToVBMasterCheckResp(nodesRespMap)
 	}
 
-	_, ok = genericResponse.(*peerToPeer.ReplicationPayload)
+	periodicPush, ok := genericResponse.(*peerToPeer.ReplicationPayload)
 	if ok {
-		// TODO
-		fmt.Printf("NEIL DEBUG TODO - to handle periodic push replicationPayload\n")
-		return nil
+		return ckmgr.mergePeerNodesPeriodicPush(periodicPush)
 	}
 
 	return fmt.Errorf("Unhandled type: %v", reflect.TypeOf(genericResponse))
@@ -2358,13 +2368,21 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	var combinedBrokenMapping []*metadata.CollectionNsMappingsDoc
 	combinedBrokenMappingSpecInternalId := make(map[string]string)
 
+	warnMap := make(base.ErrorMap)
 	nodeVbCkptsMap := make(map[string]map[uint16]*metadata.CheckpointsDoc)
 	for node, resp := range respMap {
 		key := resp.SourceBucketName
-		payloadMap := resp.GetReponse()
+		payloadMap, unlockFunc := resp.GetReponse()
+		if payloadMap == nil {
+			unlockFunc()
+			warnMap[node] = base.ErrorNilPtr
+			continue
+		}
 		payload, ok := (*payloadMap)[key]
-		if !ok {
-			return fmt.Errorf("Unable to find payload given bucket key %v", key)
+		if !ok || payload == nil {
+			unlockFunc()
+			warnMap[node] = fmt.Errorf("Unable to find payload given bucket key %v", key)
+			continue
 		}
 
 		oneNodeVbsCkptMap := payload.GetAllCheckpoints()
@@ -2390,6 +2408,11 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			combinedBrokenMapping = append(combinedBrokenMapping, brokenMap)
 			combinedBrokenMappingSpecInternalId[node] = brokenMap.SpecInternalId
 		}
+		unlockFunc()
+	}
+
+	if len(warnMap) > 0 {
+		ckmgr.logger.Warnf("Parsing peer nodes data had errors: %v", base.FlattenErrorMap(warnMap))
 	}
 
 	// If specIds are different, then something is mid flight
@@ -2424,22 +2447,47 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		ckmgr.logger.Warnf("filterCkptsWithoutValidBrokenMaps had errors: %v", err)
 	}
 
+	err = ckmgr.stopTheWorldAndMergeCkpts(filteredMap, combinedShaMap, brokenMapSpecInternalId, &combinedSrcManifests, &combinedTgtManifests, srcFailoverLogs, tgtFailoverLogs)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Failover logs are used for sorting checkpoint purposes and are optional
+func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(checkpointsDocs map[uint16]*metadata.CheckpointsDoc, brokenMappingShaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog) error {
+	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.stopTheWorldAndMergeCkpt", base.DiagStopTheWorldAndMergeCkptThreshold)
+	defer stopFunc()
 	// Before merging, disable checkpointing and wait until all checkpointing tasks are finished
+
+	disableCkptStopTimer := ckmgr.utils.StartDiagStopwatch("ckmgr.stopTheWorldAndMergeCkpt.disableCkptAndWait", base.DiagCkptStopTheWorldThreshold)
 	ckmgr.checkpointAllowedHelper.disableCkptAndWait()
+	disableCkptStopTimer()
 	defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 
-	err = ckmgr.mergeFinalCkpts(filteredMap, srcFailoverLogs, tgtFailoverLogs, combinedShaMap, brokenMapSpecInternalId)
+	err := ckmgr.mergeFinalCkpts(checkpointsDocs, srcFailoverLogs, tgtFailoverLogs, brokenMappingShaMap, brokenMapSpecInternalId)
 	if err != nil {
 		ckmgr.logger.Errorf("megeFinalCkpts error %v", err)
 		return err
 	}
 
-	nameOnlySpec := &metadata.ReplicationSpecification{Id: ckmgr.pipeline.Topic()}
-	err = ckmgr.collectionsManifestSvc.PersistReceivedManifests(nameOnlySpec, combinedSrcManifests, combinedTgtManifests)
-	if err != nil {
-		// TODO check if manifests persisted
-		ckmgr.logger.Errorf("PersistReceivedManifests Error: %v", err)
-		return err
+	if srcManifests != nil || tgtManifests != nil {
+		// Needs to persist at least some manifests
+		nameOnlySpec := &metadata.ReplicationSpecification{Id: ckmgr.pipeline.Topic()}
+		if srcManifests == nil {
+			srcManifests = &metadata.ManifestsCache{}
+		}
+		if tgtManifests == nil {
+			tgtManifests = &metadata.ManifestsCache{}
+		}
+		manifestMeasureStopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.PersistReceivedManifests", base.DiagInternalThreshold)
+		err = ckmgr.collectionsManifestSvc.PersistReceivedManifests(nameOnlySpec, *srcManifests, *tgtManifests)
+		manifestMeasureStopFunc()
+		if err != nil {
+			ckmgr.logger.Errorf("PersistReceivedManifests Error: %v", err)
+			return err
+		}
 	}
 
 	return nil
@@ -2517,6 +2565,9 @@ func filterCkptsWithoutValidBrokenmaps(filteredMap map[uint16]*metadata.Checkpoi
 	for _, ckptDoc := range filteredMap {
 		var replacementList metadata.CheckpointRecordsList
 		for _, ckptRecord := range ckptDoc.Checkpoint_records {
+			if ckptRecord == nil {
+				continue
+			}
 			if ckptRecord.BrokenMappingSha256 == "" {
 				// no brokenmap, ok to keep
 				replacementList = append(replacementList, ckptRecord)
@@ -2735,7 +2786,9 @@ func (ckmgr *CheckpointManager) getOneTimeTgtFailoverLogs(vbsList []uint16) (map
 
 func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMap map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs, tgtFailoverLogs map[uint16]*mcc.FailoverLog, combinedShaMapFromPeers metadata.ShaToCollectionNamespaceMap, peerBrokenMapSpecInternalId string) error {
 	// When merging checkpoints, do not allow concurrent checkpoint operations to occur
+	getCkptDocsStopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.checkpointsDocs", base.DiagInternalThreshold)
 	currDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(ckmgr.pipeline.FullTopic(), true)
+	getCkptDocsStopFunc()
 	if err != nil {
 		ckmgr.logger.Errorf("mergeFinalCkpts CheckpointsDocs err %v\n", err)
 		return err
@@ -2761,9 +2814,13 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMap map[uint16]*metadata
 }
 
 func (ckmgr *CheckpointManager) lockCkptsAndPersistCkptDocs(currDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
-	atomic.StoreUint32(&ckmgr.collectionEnabledVar, 0)
-	defer atomic.StoreUint32(&ckmgr.collectionEnabledVar, 1)
+	disableStop := ckmgr.utils.StartDiagStopwatch("ckmgr.checkpointAllowedHelper.disableCkptAndWait", base.DiagInternalThreshold)
+	ckmgr.checkpointAllowedHelper.disableCkptAndWait()
+	disableStop()
+	defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 
+	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.lockCkptsAndPersistCkptDocs", base.DiagCkptMergeThreshold)
+	defer stopFunc()
 	written, err := ckmgr.checkpoints_svc.UpsertCheckpointsDoc(ckmgr.pipeline.FullTopic(), currDocs, internalId)
 	if err != nil {
 		ckmgr.logger.Errorf("UpsertCheckpointsDoc for %v had errors %v", ckmgr.pipeline.FullTopic(), err)
@@ -2776,7 +2833,7 @@ func (ckmgr *CheckpointManager) lockCkptsAndPersistCkptDocs(currDocs map[uint16]
 			return reloadErr
 		}
 	}
-	return err
+	return nil
 }
 
 func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog, currDocs map[uint16]*metadata.CheckpointsDoc, spec *metadata.ReplicationSpecification) {
@@ -2826,6 +2883,8 @@ func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.Checkp
 }
 
 func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, peersShaMap metadata.ShaToCollectionNamespaceMap, specInternalId string, ckptDocs map[uint16]*metadata.CheckpointsDoc) error {
+	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergeAndPersistBrokenMappingDocs", base.DiagInternalThreshold)
+	defer stopFunc()
 	curNodeShaMap, curNodeMappingDoc, _, _, err := ckmgr.checkpoints_svc.LoadBrokenMappings(specId)
 
 	// merge peers into curNode
@@ -2848,6 +2907,131 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, 
 	}
 
 	return ckmgr.checkpoints_svc.UpsertBrokenMappingsDoc(specId, curNodeMappingDoc, ckptDocs, specInternalId)
+}
+
+func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peerToPeer.ReplicationPayload) error {
+	if periodicPayload == nil {
+		ckmgr.logger.Errorf("Nil periodicPayload")
+		return base.ErrorNilPtr
+	}
+
+	// Before accepting peer nodes' payload, do our due diligence and find out the VBs that this node owns
+	// In the case where a peer node and this node both think it owns the VB, be conservative and do not merge
+	// the information
+	vbList, genSpec, err := ckmgr.getLatestVbList()
+	if err != nil {
+		ckmgr.logger.Errorf("error getting latest vblist: %v", err)
+		return err
+	}
+
+	if periodicPayload.SourceBucketName != genSpec.GetReplicationSpec().SourceBucketName {
+		err := fmt.Errorf("Mismatch source bucket name - expecting %v got %v",
+			genSpec.GetReplicationSpec().SourceBucketName, periodicPayload.SourceBucketName)
+		ckmgr.logger.Errorf(err.Error())
+		return err
+	}
+
+	filteredPayload := periodicPayload.GetSubsetBasedOnNonIntersectingVBs(vbList)
+	if filteredPayload.IsEmpty() {
+		if len(periodicPayload.GetPushVBs()) == 0 {
+			ckmgr.logger.Warnf("Source payload for %v sent by peer is empty", periodicPayload.ReplicationSpecId)
+			return nil
+		} else {
+			// Should not happen
+			ckmgr.logger.Errorf(peerToPeer.ErrorCompleteVBOverlap.Error())
+			return peerToPeer.ErrorCompleteVBOverlap
+		}
+	}
+
+	payloadMap, unlockFunc := filteredPayload.GetPayloadWithReadLock()
+	if payloadMap == nil {
+		unlockFunc()
+		ckmgr.logger.Errorf("Unable to get payload")
+		return base.ErrorNilPtr
+	}
+	payload, ok := (*payloadMap)[filteredPayload.SourceBucketName]
+	if !ok {
+		unlockFunc()
+		err := fmt.Errorf("Unable to find payload given bucket key %v", filteredPayload.SourceBucketName)
+		ckmgr.logger.Errorf(err.Error())
+		return err
+	}
+
+	var combinedBrokenMapping []*metadata.CollectionNsMappingsDoc
+	checkpointsDocs := payload.GetAllCheckpoints()
+	if checkpointsDocs == nil {
+		unlockFunc()
+		err := fmt.Errorf("periodic push payload has nil checkpointsDocs")
+		ckmgr.logger.Errorf(err.Error())
+		return err
+	}
+
+	srcManifests, tgtManifests := payload.GetAllManifests()
+	brokenMap := payload.GetBrokenMappingDoc()
+	var brokenMapSpecInternalId string
+	if brokenMap != nil {
+		combinedBrokenMapping = append(combinedBrokenMapping, brokenMap)
+		brokenMapSpecInternalId = brokenMap.SpecInternalId
+	}
+	unlockFunc()
+
+	if brokenMapSpecInternalId != "" && brokenMapSpecInternalId != genSpec.GetReplicationSpec().InternalId {
+		err := fmt.Errorf("mismatch - brokenMapID is %v while spec's internal ID is %v", brokenMapSpecInternalId,
+			genSpec.GetReplicationSpec().InternalId)
+		ckmgr.logger.Errorf(err.Error())
+		return err
+	}
+
+	ckpts, shaMap, err := filterCkptsWithoutValidBrokenmaps(checkpointsDocs, combinedBrokenMapping)
+	if err != nil {
+		err := fmt.Errorf("filterCkptsWithoutValidBrokenMaps - %v", err)
+		ckmgr.logger.Errorf(err.Error())
+		return err
+	}
+
+	err = ckmgr.stopTheWorldAndMergeCkpts(ckpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, nil, nil)
+	if err != nil {
+		ckmgr.logger.Errorf("stopTheWorldAndMerge - %v", err)
+		return err
+	}
+
+	// Periodic push do not go through pipeline restart, so need to register them for GC
+	for vbno, _ := range ckpts {
+		mainTopic := genSpec.GetReplicationSpec().Id
+		gcErr := ckmgr.registerGCFunction(mainTopic, vbno)
+		if gcErr != nil {
+			ckmgr.logger.Warnf("%v - Unable to register GC for vbno %v - err: %v", mainTopic, vbno, gcErr)
+		}
+		if filteredPayload.ContainsBackfillCheckpoints() {
+			backfillTopic := common.ComposeFullTopic(mainTopic, common.BackfillPipeline)
+			gcErr2 := ckmgr.registerGCFunction(backfillTopic, vbno)
+			if gcErr2 != nil {
+				ckmgr.logger.Warnf("%v - Unable to register GC for vbno %v - err: %v", backfillTopic, vbno, gcErr2)
+			}
+		}
+	}
+	return nil
+}
+
+func (ckmgr *CheckpointManager) getLatestVbList() ([]uint16, metadata.GenericSpecification, error) {
+	if ckmgr.pipeline == nil {
+		return nil, nil, base.ErrorNilPipeline
+	}
+	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.getLatestVBList", base.DiagInternalThreshold)
+	defer stopFunc()
+	genSpec := ckmgr.pipeline.Specification()
+	if genSpec == nil {
+		return nil, nil, fmt.Errorf("Unable to find genSpec")
+	}
+	notificationCh, err := ckmgr.bucketTopologySvc.SubscribeToLocalBucketFeed(genSpec.GetReplicationSpec(), ckmgr.bucketTopologySubscriberId)
+	if err != nil {
+		return nil, nil, err
+	}
+	notification := <-notificationCh
+	roMap := notification.GetSourceVBMapRO()
+	vbList := roMap.GetSortedVBList()
+	ckmgr.bucketTopologySvc.UnSubscribeLocalBucketFeed(genSpec.GetReplicationSpec(), ckmgr.bucketTopologySubscriberId)
+	return vbList, genSpec, nil
 }
 
 func filterKvVbMap(kvVbMap base.KvVBMapType, vbsList []uint16) base.KvVBMapType {

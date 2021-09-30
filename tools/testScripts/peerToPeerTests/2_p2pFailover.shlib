@@ -24,7 +24,7 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=1000)
+declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=120 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=1000)
 
 # Bucket -> Scopes
 # -----------------
@@ -36,7 +36,6 @@ BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
 declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
-
 
 function runDataLoad {
 	echo "RUNNING dataload..."
@@ -77,32 +76,15 @@ function runOneReplicationCycle {
 	printGlobalScopeAndCollectionInfo
 	runDataLoad
 
-
-	pauseReplication "C1" "B0" "C2" "B1"
-  sleep 15
-	resumeReplication "C1" "B0" "C2" "B1"
-
 	echo "Waiting 30 seconds before creating missing collection"
 	sleep 30
 
 	createScope "C2" "B1" "S1"
 	createCollection "C2" "B1" "S1" "col1"
 
-	#checkItemCnt "C1" "B0" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C1" "B0" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 
-	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
-	#validateXDCRCheckpoints "C1"
-	#grepForPanics
-
-
-	#	echo "============================================================================"
-	#	echo "Cycle $(($cycleCnt + 1)) PASSED"
-	#	echo "============================================================================"
-	#cleanupBucketReplications
-	#cleanupBuckets
-	#cleanupRemoteClusterRefs
-	#echo "Waiting for $timeIntervalSecs seconds before starting another replication"
-	#sleep $timeIntervalSecs
+	grepForPanics
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
@@ -122,7 +104,7 @@ function runOneRebalanceCycle {
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
 	echo "============================================================================"
 	addNodesIn
-	startRebalancingIn "C1"
+	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
 
 	echo "============================================================================"
@@ -132,7 +114,7 @@ function runOneRebalanceCycle {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P Setup"
+	echo "Running P2P with brokenmap and failing a node out"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -141,9 +123,60 @@ function runTestCase {
 	runOneRebalanceCycle 1 1
 	runOneReplicationCycle
 
-	echo "Done - Sleeping 5 minutes"
-	sleep 300
+	local currentXdcrLog
+	local -i currentHandlingInstanceCnt
+	local -i currentHandlingInstanceDoneCnt
 
-	# 2 jobs - whichever finishes first is done
-	#stopWhenAnyBgJobStops 2
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
+	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
+
+	echo "Done - Sleeping 5 minutes to ensure multiple requests have been handled"
+
+	# Sleeping 3 minutes mean we should have at least two instances
+	sleep 240
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 2)) $(($currentHandlingInstanceCnt + 5))
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceCnt + 1)) $(($currentHandlingInstanceDoneCnt + 4))
+
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
+	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
+	setReplicationSettings "C1" "B0" "C2" "B1" "xdcrDevBackfillSendDelayMs=0"
+	echo "4 minutes passed -  stopping delay for backfill pipeline and waiting one more minute"
+
+	sleep 60
+	echo "5 minutes passed - giving it one more minute before checking the last instance of peer-to-peer push"
+	sleep 60
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 1)) $(($currentHandlingInstanceCnt + 3))
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceCnt + 0)) $(($currentHandlingInstanceDoneCnt + 3))
+
+	local logsC1
+	local resumeFrom0CntOrig
+	local resumeFrom0CntNew
+	logsC1=$(getInternalNodeXdcrLog "C1")
+	resumeFrom0CntOrig=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
+	echo "Failing node out and seeing if one node owns all the checkpoints"
+	failoverNode "C1P" "C1"
+	echo "Sleeping 30 seconds before checking logs for checkpoint resuming messages"
+	sleep 30
+	logsC1=$(getInternalNodeXdcrLog "C1")
+	resumeFrom0CntNew=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
+
+	# The backfill replication checkpoints were injected to be slow running
+	# this means that out of node 1's 512 VBs, not all 512 will have had traffic/checkpoint
+	# So as long as the count difference is not 512, it should mean that some ckpts were transferred
+	if (($resumeFrom0CntOrig - $resumeFrom0CntNew >= 512)); then
+		echo "Before failover, there are $resumeFrom0CntOrig lines of resuming from 0. After failover, there are $resumeFrom0CntNew"
+		exit 1
+	fi
+	grepForPanics
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	# no need to failover since it is already failed over
 }

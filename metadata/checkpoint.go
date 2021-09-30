@@ -591,6 +591,21 @@ func (c *CheckpointRecordsList) SameAs(other CheckpointRecordsList) bool {
 	return true
 }
 
+func (c *CheckpointRecordsList) Len() int {
+	if c == nil {
+		return 0
+	}
+
+	var count int
+	for _, record := range *c {
+		if record == nil {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 type CheckpointsDoc struct {
 	//keep "MaxCheckpointsKept" checkpoint record - ordered by new to old, with 0th element being the newest
 	Checkpoint_records CheckpointRecordsList `json:"checkpoints"`
@@ -699,4 +714,12 @@ func (c *CheckpointsDoc) SameAs(other *CheckpointsDoc) bool {
 		return false
 	}
 	return c.Checkpoint_records.SameAs(other.Checkpoint_records) && c.SpecInternalId == other.SpecInternalId
+}
+
+// Note - returns only valid non nil checkpoint records
+func (c *CheckpointsDoc) Len() int {
+	if c == nil {
+		return 0
+	}
+	return c.Checkpoint_records.Len()
 }

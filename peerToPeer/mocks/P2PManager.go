@@ -67,6 +67,11 @@ func (_m *P2PManager) ReplicationSpecChangeCallback(id string, oldVal interface{
 	return r0
 }
 
+// SetPushReqMergerOnce provides a mock function with given fields: pm
+func (_m *P2PManager) SetPushReqMergerOnce(pm func(string, string, interface{}) error) {
+	_m.Called(pm)
+}
+
 // Start provides a mock function with given fields:
 func (_m *P2PManager) Start() (peerToPeer.PeerToPeerCommAPI, error) {
 	ret := _m.Called()

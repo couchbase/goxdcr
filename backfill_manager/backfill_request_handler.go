@@ -318,19 +318,14 @@ func (b *BackfillRequestHandler) run() {
 				b.queuedResps = b.queuedResps[:0]
 			}
 		case notification := <-b.sourceBucketTopologyCh:
-			oldVBsList, err := b.getVBs()
-			if err != nil {
-				b.logger.Errorf("Unable to get oldVBList")
-			}
-
+			oldVBsList := b.getVBs()
 			b.latestCachedSourceNotificationMtx.Lock()
 			b.latestCachedSourceNotification = notification
 			newKvVBMap := notification.GetSourceVBMapRO()
+			newVBList := newKvVBMap.GetSortedVBList()
 			b.latestCachedSourceNotificationMtx.Unlock()
 
-			newVBList, _ := b.getVBsInternal(newKvVBMap)
-
-			err = b.handleVBsDiff(base.DiffVBsList(oldVBsList, newVBList))
+			err := b.handleVBsDiff(base.DiffVBsList(oldVBsList, newVBList))
 			if err != nil {
 				b.logger.Errorf("Unable to handle VBs diff due to err %v - oldVBs: %v newVBs: %v", err, oldVBsList, newVBList)
 			}
@@ -417,19 +412,11 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 	return <-reqAndResp.PersistResponse
 }
 
-func (b *BackfillRequestHandler) getVBs() ([]uint16, error) {
+func (b *BackfillRequestHandler) getVBs() []uint16 {
 	b.latestCachedSourceNotificationMtx.RLock()
+	defer b.latestCachedSourceNotificationMtx.RUnlock()
 	kv_vb_map := b.latestCachedSourceNotification.GetSourceVBMapRO()
-	b.latestCachedSourceNotificationMtx.RUnlock()
-	return b.getVBsInternal(kv_vb_map)
-}
-
-func (b *BackfillRequestHandler) getVBsInternal(kv_vb_map base.KvVBMapType) ([]uint16, error) {
-	var vbList []uint16
-	for _, vbno := range kv_vb_map {
-		vbList = append(vbList, vbno...)
-	}
-	return vbList, nil
+	return kv_vb_map.GetSortedVBList()
 }
 
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
@@ -945,10 +932,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 }
 
 func (b *BackfillRequestHandler) getMaxSeqnosMapToBackfill() (map[uint16]uint64, []uint16, error) {
-	myVBs, err := b.getVBs()
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to get VBs: %v", err.Error())
-	}
+	myVBs := b.getVBs()
 	// When this is executing, the main pipeline is going to be shutting down and restarting
 	// Since the pipeline is restarting concurrently, and there's no way to get the exact
 	// pipeline shutdown/startup sequence, we need to do the following.
@@ -988,7 +972,7 @@ func (b *BackfillRequestHandler) getMaxSeqnosMapToBackfill() (map[uint16]uint64,
 			newVBsList = append(newVBsList, vbno)
 		}
 	}
-	return maxSeqnos, newVBsList, err
+	return maxSeqnos, newVBsList, nil
 }
 
 func (b *BackfillRequestHandler) DelAllBackfills() error {
@@ -1074,31 +1058,45 @@ func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16)
 			addedVBsList: added,
 			req:          backfillReqRaw,
 		}
-		go b.handleBackfillRequestWithArgs(internalDiffReq, false)
+		go func() {
+			bgErr := b.handleBackfillRequestWithArgs(internalDiffReq, false)
+			if bgErr != nil {
+				b.logger.Errorf("HandleVBDiff for %v resulted in err %v", b.id, err)
+			}
+		}()
 	}
 
 	if len(removed) > 0 {
-		requestId := fmt.Sprintf("%v_%v_%v", BackfillHandlerPrefix, b.id, "vbCleanup")
-		gcFuncWVB := func(vbno uint16) error {
-			oneVBReq := internalDelBackfillReq{
-				specificVBRequested: true,
-				vbno:                vbno,
-			}
-			go b.HandleBackfillRequest(oneVBReq)
-			return nil
-		}
-
 		for _, vb := range removed {
-			vbCpy := vb
-			gcFunc := func() error {
-				return gcFuncWVB(vbCpy)
-			}
-			registerErr := b.bucketTopologySvc.RegisterGarbageCollect(b.spec.Id, b.spec.SourceBucketName, vbCpy, requestId, gcFunc, base.P2PVBRelatedGCInterval)
-			if registerErr != nil {
-				b.logger.Warnf("Unable to register GC callback for VB %v removed %v", vbCpy, registerErr)
-			}
+			b.registerVbForGC(vb)
 		}
 	}
+	return nil
+}
+
+func (b *BackfillRequestHandler) registerVbForGC(vb uint16) {
+	requestId := b.getGcRequestId()
+	gcFunc := func() error {
+		return b.gcFuncOneVBTask(vb)
+	}
+	registerErr := b.bucketTopologySvc.RegisterGarbageCollect(b.spec.Id, b.spec.SourceBucketName, vb, requestId, gcFunc, base.P2PVBRelatedGCInterval)
+	if registerErr != nil {
+		b.logger.Warnf("Unable to register GC callback for VB %v removed %v", vb, registerErr)
+	}
+	return
+}
+
+func (b *BackfillRequestHandler) getGcRequestId() string {
+	requestId := fmt.Sprintf("%v_%v_%v", BackfillHandlerPrefix, b.id, "vbCleanup")
+	return requestId
+}
+
+func (b *BackfillRequestHandler) gcFuncOneVBTask(vbno uint16) error {
+	oneVBReq := internalDelBackfillReq{
+		specificVBRequested: true,
+		vbno:                vbno,
+	}
+	go b.HandleBackfillRequest(oneVBReq)
 	return nil
 }
 
@@ -1130,7 +1128,8 @@ func (b *BackfillRequestHandler) handlePeerNodesBackfillMerge(reqAndResp ReqAndR
 	}
 
 	if err == nil {
-		b.recordRequestAsMerged(peerNodesReq)
+		b.recordLastMergedReqForGC(peerNodesReq)
+		b.registerNonOwnedVBsForGC(peerNodesReq)
 	}
 	return err
 }
@@ -1157,8 +1156,12 @@ func (b *BackfillRequestHandler) checkIfDataChanged(req internalPeerBackfillTask
 	return errorPeerVBTasksAlreadyContained
 }
 
-// Record as merged and then register it for garbage collection
-func (b *BackfillRequestHandler) recordRequestAsMerged(req internalPeerBackfillTaskMergeReq) {
+// Record as merged and then register last merged info for garbage collection
+// b.lastMergedMap will remember what the peer node has merged so that if it re-sends the information
+// the merge will not happen (on a per VB level)
+// This mergeMap will need to be GC'ed, and is what this method is for - not to be confused
+// with GC'ing backfill tasks that gets send to replica nodes from the VB master
+func (b *BackfillRequestHandler) recordLastMergedReqForGC(req internalPeerBackfillTaskMergeReq) {
 	vbTaskMapClone := req.backfillSpec.VBTasksMap.Clone()
 	b.lastMergedMtx.Lock()
 	b.lastMergedMap[req.nodeName] = vbTaskMapClone
@@ -1200,6 +1203,21 @@ func (b *BackfillRequestHandler) recordRequestAsMerged(req internalPeerBackfillT
 		}
 	}
 	mtx.RUnlock()
+}
+
+func (b *BackfillRequestHandler) registerNonOwnedVBsForGC(req internalPeerBackfillTaskMergeReq) {
+	if req.backfillSpec == nil || req.backfillSpec.VBTasksMap == nil {
+		return
+	}
+
+	sortedVBs := b.getVBs()
+	taskVBs := req.backfillSpec.VBTasksMap.GetVBs()
+	for _, vbToCheck := range taskVBs {
+		if _, found := base.SearchVBInSortedList(vbToCheck, sortedVBs); !found {
+			// VB is not owned by this node and needs to be GCed
+			b.registerVbForGC(vbToCheck)
+		}
+	}
 }
 
 type internalDelBackfillReq struct {

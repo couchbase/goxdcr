@@ -260,7 +260,7 @@ func (r *ReplicaReplicatorImpl) populateInformationFromAgents() map[*metadata.Re
 	r.agentMapMtx.RLock()
 	for _, agent := range r.agentMap {
 		specClone, infoToSerialize, err := agent.GetAndClearInfoToReplicate()
-		if err != nil || infoToSerialize == nil || infoToSerialize.IsEmpty() {
+		if err != nil || infoToSerialize == nil || infoToSerialize.IsEmpty() || infoToSerialize.PushReqIsEmpty() {
 			continue
 		}
 		populateMap[specClone] = infoToSerialize

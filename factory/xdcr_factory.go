@@ -924,10 +924,16 @@ func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, src
 	var err error
 	errMap := make(base.ErrorMap)
 	for peerAddr, resp := range respMap {
-		nodeResp := resp.GetReponse()
+		nodeResp, unlockFunc := resp.GetReponse()
+		if nodeResp == nil {
+			errMap[peerAddr] = base.ErrorNilPtr
+			unlockFunc()
+			continue
+		}
 		requestedBucketInfo, found := (*nodeResp)[srcBucketName]
 		if !found {
 			errMap[peerAddr] = fmt.Errorf("node %v response does not contain info for requested src bucket %v", peerAddr, srcBucketName)
+			unlockFunc()
 			continue
 		}
 		// Convert NotMyVBs into list for comparison
@@ -938,6 +944,7 @@ func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, src
 				respondedVBs = append(respondedVBs, vb)
 			}
 		}
+		unlockFunc()
 
 		removed, _, intersected := base.ComputeDeltaOfUint16Lists(sourceVBs, respondedVBs, true)
 		if len(intersected) != len(sourceVBs) {

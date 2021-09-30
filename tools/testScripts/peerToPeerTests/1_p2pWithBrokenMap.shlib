@@ -121,7 +121,6 @@ C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
 CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
 CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
 CKPT_RESUME_FOUND="checkpoint documents for"
-TS_PREFIX="ts.Seqno"
 LOADED_BROKEN_MAP="Loaded brokenMap: map"
 LOADED_BROKEN_MAP_NAME="S1.col1"
 
@@ -138,24 +137,11 @@ function runOneRebalanceCycle {
 	echo "============================================================================"
 	addNodesIn
 	sleep 5
-	startRebalancingIn "C1"
+	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
 
 	echo "Sleeping before checking logs"
 	sleep 15
-
-	#currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
-	#local currentPeerMsgsC1
-	#currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
-
-	#echo "Restarting XDCR processes to trigger p2p discovery"
-	#killGoXdcr "C1"
-	#killGoXdcr "C1P"
-
-	#echo "Sleeping before checking logs"
-	#sleep 15
-
-	#validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(( $currentPeerMsgsC1 + 1 ))
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
@@ -205,7 +191,7 @@ function runReplicationResume {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P WithBrokenMap"
+	echo "Running P2P with broken map and rebalancing a node in"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -213,8 +199,14 @@ function runTestCase {
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
-	#runReplicationResume
 
-	# 2 jobs - whichever finishes first is done
-	stopWhenAnyBgJobStops 2
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	failoverNode "C1P" "C1"
 }

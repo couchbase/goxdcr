@@ -38,7 +38,7 @@ type P2PManager interface {
 
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 
-	SetPushReqMergerOnce(pm func(fullTopic string, req interface{}) error)
+	SetPushReqMergerOnce(pm func(fullTopic, sender string, req interface{}) error)
 }
 
 type VBMasterCheck interface {
@@ -80,7 +80,7 @@ type P2PManagerImpl struct {
 
 	mergerSetOnce sync.Once
 	mergerSetCh   chan bool
-	pushReqMerger func(string, interface{}) error
+	pushReqMerger func(string, string, interface{}) error
 }
 
 func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface,
@@ -577,14 +577,14 @@ func getOpaqueWrapper() uint32 {
 // Variable and dynamically updated per number of peer KV nodes
 var P2POpaqueTimeoutAtomicMin uint32 = 5
 
-func (p *P2PManagerImpl) SetPushReqMergerOnce(merger func(fullTopic string, req interface{}) error) {
+func (p *P2PManagerImpl) SetPushReqMergerOnce(merger func(fullTopic, sender string, req interface{}) error) {
 	p.mergerSetOnce.Do(func() {
 		p.pushReqMerger = merger
 		close(p.mergerSetCh)
 	})
 }
 
-func (p *P2PManagerImpl) getPushReqMerger() func(string, interface{}) error {
+func (p *P2PManagerImpl) getPushReqMerger() func(string, string, interface{}) error {
 	return p.pushReqMerger
 }
 

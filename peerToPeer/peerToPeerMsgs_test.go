@@ -111,12 +111,13 @@ func TestVBMasterCheckResp(t *testing.T) {
 	newResp := &VBMasterCheckResp{}
 	assert.Nil(newResp.DeSerialize(marshalBytes))
 
-	payload := newResp.GetReponse()
+	payload, unlockFunc := newResp.GetReponse()
 	assert.NotNil((*payload)[bucketName])
 	ckptDocsValidate := (*payload)[bucketName].GetAllCheckpoints()
 	for _, vb := range vbList {
 		assert.Equal(specInternalId, ckptDocsValidate[vb].SpecInternalId)
 	}
+	unlockFunc()
 
 	srcManifests, tgtManifests := (*payload)[bucketName].GetAllManifests()
 	assert.Nil(err)
