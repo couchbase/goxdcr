@@ -284,7 +284,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, err er
 		}
 		var out interface{}
 		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
-			payload, 0, &out, nil, false, nil)
+			payload, base.P2PCommTimeout, &out, nil, false, nil)
 		result := &HandlerResultImpl{
 			Err:            err,
 			HttpStatusCode: statusCode,
