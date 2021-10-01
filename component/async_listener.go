@@ -13,6 +13,8 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,7 +24,8 @@ type AsyncComponentEventListenerImpl struct {
 	event_chan chan *common.Event
 	fin_ch     chan bool
 	done_ch    chan bool
-	isStarted  bool
+	isStarted  uint32
+	stopOnce   sync.Once
 	logger     *log.CommonLogger
 	handlers   map[string]common.AsyncComponentEventHandler
 }
@@ -53,20 +56,17 @@ func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
 }
 
 func (l *AsyncComponentEventListenerImpl) Start() error {
-	if !l.isStarted {
-		go l.start()
-		l.isStarted = true
+	if atomic.CompareAndSwapUint32(&l.isStarted, 0, 1) {
+		go l.run()
 		l.logger.Infof("%v started processing events\n", l.id)
 	}
-
 	return nil
 }
 
-func (l *AsyncComponentEventListenerImpl) start() {
-	fin_ch := l.fin_ch
+func (l *AsyncComponentEventListenerImpl) run() {
 	for {
 		select {
-		case <-fin_ch:
+		case <-l.fin_ch:
 			l.done_ch <- true
 			return
 		case event := <-l.event_chan:
@@ -81,24 +81,29 @@ func (l *AsyncComponentEventListenerImpl) start() {
 }
 
 func (l *AsyncComponentEventListenerImpl) Stop() error {
-	l.logger.Infof("%v stopping processing events\n", l.id)
-	err := base.ExecWithTimeout(l.stop, 500*time.Millisecond, l.logger)
-	if err == nil {
-		l.logger.Infof("%v stopped processing events\n", l.id)
-	} else {
-		l.logger.Warnf("%v failed to stop processing events. Leaving it alone to die. err=%v\n", l.id, err)
-	}
+	var err error
+	l.stopOnce.Do(func() {
+		l.logger.Infof("%v stopping processing events\n", l.id)
+		err = base.ExecWithTimeout(l.stop, 500*time.Millisecond, l.logger)
+		if err == nil {
+			l.logger.Infof("%v stopped processing events\n", l.id)
+		} else {
+			l.logger.Warnf("%v failed to stop processing events. Leaving it alone to die. err=%v\n", l.id, err)
+		}
+	})
 	return err
 }
 
 func (l *AsyncComponentEventListenerImpl) stop() error {
-	if !l.isStarted {
-		return nil
-	}
-
+	// Regardless of if Start() was called before or after Stop(), close this
+	// If run() happens later, it'll read the closed channel and stop instead of hang around forever
 	close(l.fin_ch)
-	<-l.done_ch
-	l.isStarted = false
+
+	if atomic.LoadUint32(&l.isStarted) == 1 {
+		// Start was called before Stop, so do a wait
+		// Otherwise, if Start runs after this routine is finished, not a big deal and don't wait
+		<-l.done_ch
+	}
 
 	return nil
 }
