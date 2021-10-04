@@ -1065,6 +1065,11 @@ func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16)
 			return err
 		}
 
+		if backfillReqRaw == nil {
+			// Should mean that nothing needs to be raised
+			return nil
+		}
+
 		internalDiffReq := internalVBDiffBackfillReq{
 			addedVBsList: added,
 			req:          backfillReqRaw,
@@ -1079,7 +1084,6 @@ func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16)
 				specificVBRequested: true,
 				vbno:                vbno,
 			}
-			// OK to do this in parallel - test
 			go b.HandleBackfillRequest(oneVBReq)
 			return nil
 		}
