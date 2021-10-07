@@ -74,8 +74,8 @@ type PipelineMgrIface interface {
 	UpdatePipeline(pipelineName string, cur_err error) error
 	DeletePipeline(pipelineName string) error
 	CheckPipelines()
-	ReplicationStatusMap() map[string]*pipeline.ReplicationStatus
-	ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error)
+	ReplicationStatusMap() map[string]pipeline.ReplicationStatusIface
+	ReplicationStatus(topic string) (pipeline.ReplicationStatusIface, error)
 	OnExit() error
 	UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	DismissEventForPipeline(pipelineName string, eventId int) error
@@ -128,9 +128,6 @@ type PipelineMgrBackfillIface interface {
 	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error
 }
 
-// Global ptr, should slowly get rid of refences to this global
-var pipeline_mgr *PipelineManager
-
 func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, eventIdWell *int64) *PipelineManager {
 	if eventIdWell == nil {
 		// Possible for unit test
@@ -159,22 +156,12 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 	// initialize serializer - this is the front-end of all user requests
 	pipelineMgrRetVar.serializer = NewPipelineOpSerializer(pipelineMgrRetVar, pipelineMgrRetVar.logger)
 
-	if pipeline_mgr == nil {
-		pipeline_mgr = pipelineMgrRetVar
-	}
-
 	pipelineMgrRetVar.pipeline_factory.SetPipelineStopCallback(pipelineMgrRetVar.UpdateWithStoppedCb)
 
 	return pipelineMgrRetVar
 }
 
-// TO be deprecated, use interface method below
-func ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
-	return pipeline_mgr.ReplicationStatus(topic)
-}
-
-// Use this one - able to be mocked
-func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (*pipeline.ReplicationStatus, error) {
+func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (pipeline.ReplicationStatusIface, error) {
 	obj, err := pipelineMgr.repl_spec_svc.GetDerivedObj(topic)
 	if err != nil {
 		return nil, err
@@ -183,11 +170,6 @@ func (pipelineMgr *PipelineManager) ReplicationStatus(topic string) (*pipeline.R
 		return nil, pipelineMgr.utils.ReplicationStatusNotFoundError(topic)
 	}
 	return obj.(*pipeline.ReplicationStatus), nil
-}
-
-func Update(topic string, cur_err error) error {
-	pipeline_mgr.serializer.Update(topic, cur_err)
-	return nil
 }
 
 // Should be called only from serializer to prevent race
@@ -210,14 +192,6 @@ func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error 
 	}
 
 	return nil
-}
-
-// External APIs
-//This doesn't include the replication status of just deleted replication spec in the map
-// TODO - This should be deprecated. We should really move towards a object-oriented method
-// of calling ReplicationStatusMap
-func ReplicationStatusMap() map[string]*pipeline.ReplicationStatus {
-	return pipeline_mgr.ReplicationStatusMap()
 }
 
 func (pipelineMgr *PipelineManager) UpdatePipeline(topic string, cur_err error) error {
@@ -256,8 +230,8 @@ func (pipelineMgr *PipelineManager) CleanupBackfillCkpts(topic string) error {
 
 // This should really be the method to be used. This is considered part of the interface
 // and can be easily unit tested
-func (pipelineMgr *PipelineManager) ReplicationStatusMap() map[string]*pipeline.ReplicationStatus {
-	ret := make(map[string]*pipeline.ReplicationStatus)
+func (pipelineMgr *PipelineManager) ReplicationStatusMap() map[string]pipeline.ReplicationStatusIface {
+	ret := make(map[string]pipeline.ReplicationStatusIface)
 	specId_list, err := pipelineMgr.repl_spec_svc.AllReplicationSpecIds()
 	if err == nil {
 		for _, specId := range specId_list {
@@ -270,8 +244,8 @@ func (pipelineMgr *PipelineManager) ReplicationStatusMap() map[string]*pipeline.
 	return ret
 }
 
-func LogStatusSummary() {
-	pipeline_mgr.logger.Infof("Replication Status = %v\n", pipeline_mgr.ReplicationStatusMap())
+func (pipelineMgr *PipelineManager) LogStatusSummary() {
+	pipelineMgr.logger.Infof("Replication Status = %v\n", pipelineMgr.ReplicationStatusMap())
 }
 
 func (pipelineMgr *PipelineManager) AllReplicationsForBucket(bucket string) []string {
@@ -314,20 +288,11 @@ func (pipelineMgr *PipelineManager) AllReplications() []string {
 	return pipelineMgr.topics()
 }
 
-func IsPipelineRunning(topic string) bool {
-	rep_status, _ := ReplicationStatus(topic)
-	if rep_status != nil {
-		return (rep_status.RuntimeStatus(true) == pipeline.Replicating)
-	} else {
-		return false
-	}
-}
-
 func (pipelineMgr *PipelineManager) CheckPipelines() {
 	pipelineMgr.validateAndGCSpecs()
 	pipelineMgr.checkRemoteClusterSvcForChangedConfigs()
 	pipelineMgr.checkAndHandleRemoteClusterAuthErrs()
-	LogStatusSummary()
+	pipelineMgr.LogStatusSummary()
 }
 
 func (pipelineMgr *PipelineManager) HandleClusterEncryptionLevelChange(old, new service_def.EncryptionSettingIface) {
@@ -502,7 +467,7 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	return errMap
 }
 
-func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status *pipeline.ReplicationStatus) {
+func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status pipeline.ReplicationStatusIface) {
 	numKVNodes, err := pipelineMgr.xdcr_topology_svc.NumberOfKVNodes()
 	if err != nil {
 		numKVNodes = 1
@@ -574,7 +539,7 @@ func (pipelineMgr *PipelineManager) validatePipeline(topic string) error {
 }
 
 func (pipelineMgr *PipelineManager) getPipelineFromMap(topic string) common.Pipeline {
-	rep_status, _ := ReplicationStatus(topic)
+	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
 	if rep_status != nil {
 		return rep_status.Pipeline()
 	}
@@ -584,7 +549,7 @@ func (pipelineMgr *PipelineManager) getPipelineFromMap(topic string) common.Pipe
 func (pipelineMgr *PipelineManager) removePipelineFromReplicationStatus(p common.Pipeline) error {
 	//	return nil
 	if p != nil {
-		rep_status, _ := ReplicationStatus(p.Topic())
+		rep_status, _ := pipelineMgr.ReplicationStatus(p.Topic())
 		if rep_status != nil {
 			rep_status.RemovePipeline(p)
 		} else {
@@ -831,9 +796,9 @@ func (pipelineMgr *PipelineManager) launchUpdater(topic string, cur_err error, r
 // Should be used internally from serializer only, or only from an internal update op
 func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error) {
 	var repStatus *pipeline.ReplicationStatus
-	repStatus, _ = pipelineMgr.ReplicationStatus(topic)
-	if repStatus != nil {
-		return repStatus, nil
+	repStatusIface, _ := pipelineMgr.ReplicationStatus(topic)
+	if repStatusIface != nil {
+		return repStatusIface.(*pipeline.ReplicationStatus), nil
 	} else {
 		var retErr error
 		repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger, pipelineMgr.eventIdWell, pipelineMgr.utils)

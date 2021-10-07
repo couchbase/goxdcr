@@ -13,7 +13,6 @@ package factory
 import (
 	"errors"
 	"fmt"
-	peerToPeer "github.com/couchbase/goxdcr/peerToPeer"
 	"math"
 	"strconv"
 	"sync"
@@ -26,6 +25,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
+	peerToPeer "github.com/couchbase/goxdcr/peerToPeer"
 	pp "github.com/couchbase/goxdcr/pipeline"
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
 	"github.com/couchbase/goxdcr/pipeline_svc"
@@ -80,6 +80,7 @@ type XDCRFactory struct {
 	utils                    utilities.UtilsIface
 
 	pipelineMgrStopCallback base.PipelineMgrStopCbType
+	replStatusGetter        func(string) (pp.ReplicationStatusIface, error)
 
 	p2pMgr peerToPeer.P2PManager
 }
@@ -95,7 +96,8 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster
 	pipeline_failure_handler common.SupervisorFailureHandler, utilsIn utilities.UtilsIface,
 	resolver_svc service_def.ResolverSvcIface, collectionsManifestSvc service_def.CollectionsManifestSvc,
 	getBackfillMgr BackfillMgrGetter, backfillReplSvc service_def.BackfillReplSvc,
-	bucketTopologySvc service_def.BucketTopologySvc, p2pMgr peerToPeer.P2PManager) *XDCRFactory {
+	bucketTopologySvc service_def.BucketTopologySvc, p2pMgr peerToPeer.P2PManager,
+	replStatusGetter func(topic string) (pp.ReplicationStatusIface, error)) *XDCRFactory {
 	return &XDCRFactory{repl_spec_svc: repl_spec_svc,
 		remote_cluster_svc:       remote_cluster_svc,
 		xdcr_topology_svc:        xdcr_topology_svc,
@@ -114,6 +116,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster
 		backfillReplSvc:          backfillReplSvc,
 		bucketTopologySvc:        bucketTopologySvc,
 		p2pMgr:                   p2pMgr,
+		replStatusGetter:         replStatusGetter,
 	}
 }
 
@@ -1253,7 +1256,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 	bucket_name := pipeline.Specification().GetReplicationSpec().SourceBucketName
 	actualStatsMgr := pipeline_svc.NewStatisticsManager(through_seqno_tracker_svc,
 		xdcrf.xdcr_topology_svc, logger_ctx, kv_vb_map, bucket_name, xdcrf.utils, xdcrf.remote_cluster_svc,
-		xdcrf.bucketTopologySvc)
+		xdcrf.bucketTopologySvc, xdcrf.replStatusGetter)
 
 	//register pipeline checkpoint manager
 	ckptMgr, err := pipeline_svc.NewCheckpointManager(xdcrf.checkpoint_svc, xdcrf.capi_svc, xdcrf.remote_cluster_svc, xdcrf.repl_spec_svc, xdcrf.xdcr_topology_svc, through_seqno_tracker_svc, kv_vb_map, targetUserName, targetPassword, targetBucketName, target_kv_vb_map, targetClusterRef, logger_ctx, xdcrf.utils, actualStatsMgr, xdcrf.uilog_svc, xdcrf.collectionsManifestSvc, xdcrf.backfillReplSvc, xdcrf.getBackfillMgr, xdcrf.bucketTopologySvc)

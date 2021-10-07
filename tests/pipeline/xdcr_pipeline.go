@@ -169,98 +169,98 @@ func setup() error {
 	return nil
 }
 
-func test() {
-	logger.Info("Start testing")
-	settings := make(map[string]interface{})
-	settings[metadata.PipelineLogLevel] = "Info"
-	settings[metadata.CheckpointInterval] = 20
-	settings[metadata.PipelineStatsInterval] = 10000
-	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
-	settings[metadata.BatchCount] = 500
-	settings[metadata.OptimisticReplicationThreshold] = 60
-	settings[metadata.Active] = true
-
-	// create remote cluster reference needed by replication
-	err := testcommon.CreateTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword,
-		options.remoteDemandEncryption, options.remoteCertificateFile)
-	if err != nil {
-		fmt.Println(err.Error())
-		fail(fmt.Sprintf("%v", err))
-	}
-	logger.Info("CreateTestRemoteCluster succeeded")
-
-	defer testcommon.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
-
-	topic, errorsMap, err := replication_manager.CreateReplication(false, options.source_bucket, options.remoteName, options.target_bucket, settings, &service_def.RealUserId{}, nil)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	} else if len(errorsMap) != 0 {
-		fail(fmt.Sprintf("%v", errorsMap))
-	}
-	//delete the replication before we go
-	defer func() {
-		err = replication_manager.DeleteReplication(topic, &service_def.RealUserId{}, nil)
-		if err != nil {
-			fail(fmt.Sprintf("%v", err))
-		}
-		fmt.Printf("Replication %s is deleted\n", topic)
-	}()
-	logger.Info("CreateReplication succeeded")
-
-	time.Sleep(30 * time.Second)
-
-	rep_status, err := pipeline_manager.ReplicationStatus(topic)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-	pipeline := rep_status.Pipeline()
-
-	if pipeline == nil {
-		fail(fmt.Sprintf("Failed to start pipeline %v", topic))
-	}
-
-	err = verifyStartingTimestamps(pipeline, true)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-
-	time.Sleep(30 * time.Second)
-	logger.Info("........Verifying checkpointing ....")
-	ckpt_docs, err := replication_manager.CheckpointService().CheckpointsDocs(topic)
-	if err != nil {
-		fail(err.Error())
-	}
-
-	if len(ckpt_docs) == 0 {
-		logger.Info("Didn't find any checkpoint doc")
-		fail(fmt.Sprintf("No checkpointing happended as it is supposed to"))
-	}
-	settings[metadata.Active] = false
-	replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{}, nil)
-
-	logger.Infof("Replication %s is paused\n", topic)
-	time.Sleep(100 * time.Millisecond)
-
-	settings[metadata.Active] = true
-	errMap, err := replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{}, nil)
-	if err != nil || len(errMap) > 0 {
-		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
-	}
-	time.Sleep(30 * time.Second)
-	pipeline = rep_status.Pipeline()
-	if pipeline == nil {
-		logger.Info("Failed to resume replication")
-		fail(fmt.Sprintf("Failed to resume replication %s", topic))
-	}
-	logger.Infof("Replication %s is resumed\n", topic)
-	err = verifyStartingTimestamps(pipeline, false)
-	if err != nil {
-		fail(fmt.Sprintf("%v", err))
-	}
-
-	time.Sleep(2 * time.Minute)
-
-}
+//func test() {
+//	logger.Info("Start testing")
+//	settings := make(map[string]interface{})
+//	settings[metadata.PipelineLogLevel] = "Info"
+//	settings[metadata.CheckpointInterval] = 20
+//	settings[metadata.PipelineStatsInterval] = 10000
+//	settings[metadata.SourceNozzlePerNode] = NUM_SOURCE_CONN
+//	settings[metadata.BatchCount] = 500
+//	settings[metadata.OptimisticReplicationThreshold] = 60
+//	settings[metadata.Active] = true
+//
+//	// create remote cluster reference needed by replication
+//	err := testcommon.CreateTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteUuid, options.remoteName, options.remoteHostName, options.remoteUserName, options.remotePassword,
+//		options.remoteDemandEncryption, options.remoteCertificateFile)
+//	if err != nil {
+//		fmt.Println(err.Error())
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	logger.Info("CreateTestRemoteCluster succeeded")
+//
+//	defer testcommon.DeleteTestRemoteCluster(replication_manager.RemoteClusterService(), options.remoteName)
+//
+//	topic, errorsMap, err := replication_manager.CreateReplication(false, options.source_bucket, options.remoteName, options.target_bucket, settings, &service_def.RealUserId{}, nil)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	} else if len(errorsMap) != 0 {
+//		fail(fmt.Sprintf("%v", errorsMap))
+//	}
+//	//delete the replication before we go
+//	defer func() {
+//		err = replication_manager.DeleteReplication(topic, &service_def.RealUserId{}, nil)
+//		if err != nil {
+//			fail(fmt.Sprintf("%v", err))
+//		}
+//		fmt.Printf("Replication %s is deleted\n", topic)
+//	}()
+//	logger.Info("CreateReplication succeeded")
+//
+//	time.Sleep(30 * time.Second)
+//
+//	rep_status, err := pipeline_manager.ReplicationStatus(topic)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//	pipeline := rep_status.Pipeline()
+//
+//	if pipeline == nil {
+//		fail(fmt.Sprintf("Failed to start pipeline %v", topic))
+//	}
+//
+//	err = verifyStartingTimestamps(pipeline, true)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//
+//	time.Sleep(30 * time.Second)
+//	logger.Info("........Verifying checkpointing ....")
+//	ckpt_docs, err := replication_manager.CheckpointService().CheckpointsDocs(topic)
+//	if err != nil {
+//		fail(err.Error())
+//	}
+//
+//	if len(ckpt_docs) == 0 {
+//		logger.Info("Didn't find any checkpoint doc")
+//		fail(fmt.Sprintf("No checkpointing happended as it is supposed to"))
+//	}
+//	settings[metadata.Active] = false
+//	replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{}, nil)
+//
+//	logger.Infof("Replication %s is paused\n", topic)
+//	time.Sleep(100 * time.Millisecond)
+//
+//	settings[metadata.Active] = true
+//	errMap, err := replication_manager.UpdateReplicationSettings(topic, settings, &service_def.RealUserId{}, nil)
+//	if err != nil || len(errMap) > 0 {
+//		fail(fmt.Sprintf("err= %v, errMap=%v", err, errMap))
+//	}
+//	time.Sleep(30 * time.Second)
+//	pipeline = rep_status.Pipeline()
+//	if pipeline == nil {
+//		logger.Info("Failed to resume replication")
+//		fail(fmt.Sprintf("Failed to resume replication %s", topic))
+//	}
+//	logger.Infof("Replication %s is resumed\n", topic)
+//	err = verifyStartingTimestamps(pipeline, false)
+//	if err != nil {
+//		fail(fmt.Sprintf("%v", err))
+//	}
+//
+//	time.Sleep(2 * time.Minute)
+//
+//}
 
 func verifyStartingTimestamps(pipeline common.Pipeline, noPreviousCkpts bool) error {
 	settings := pipeline.Settings()
@@ -283,17 +283,6 @@ func verifyStartingTimestamps(pipeline common.Pipeline, noPreviousCkpts bool) er
 	}
 	logger.Infof("Start seqno is verified")
 	return nil
-}
-
-func summary(topic string) {
-	rep_status, _ := pipeline_manager.ReplicationStatus(topic)
-	if rep_status != nil {
-		pipeline := rep_status.Pipeline()
-		targetNozzles := pipeline.Targets()
-		for _, targetNozzle := range targetNozzles {
-			fmt.Println(targetNozzle.(*parts.XmemNozzle).StatusSummary())
-		}
-	}
 }
 
 func fail(msg string) {

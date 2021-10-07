@@ -439,7 +439,7 @@ func (rm *replicationManager) checkReplicationStatus(fin_chan chan bool) {
 		case <-status_check_ticker.C:
 			rm.pipelineMgr.CheckPipelines()
 		case <-stats_update_ticker.C:
-			pipeline_svc.UpdateStats(CheckpointService(), logger_rm, rm.remote_cluster_svc, rm.backfillReplSvc, rm.bucketTopologySvc)
+			pipeline_svc.UpdateStats(CheckpointService(), logger_rm, rm.remote_cluster_svc, rm.backfillReplSvc, rm.bucketTopologySvc, rm.pipelineMgr.ReplicationStatusMap)
 		}
 	}
 }
@@ -488,7 +488,7 @@ func (rm *replicationManager) init(
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
 		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc,
-		rm.bucketTopologySvc, rm.p2pMgr)
+		rm.bucketTopologySvc, rm.p2pMgr, rm.getReplStatus)
 
 	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell)
 	rm.pipelineMgr = pipelineMgrObj
@@ -766,7 +766,7 @@ func GetStatistics(bucket string) (*expvar.Map, error) {
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
-		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId)
+		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId, replication_mgr.pipelineMgr.ReplicationStatus)
 		for i, oneStats := range statsForPipeline {
 			if oneStats == nil {
 				continue
@@ -785,7 +785,7 @@ func GetAllStatistics() (*expvar.Map, error) {
 
 	stats := new(expvar.Map).Init()
 	for _, repId := range repIds {
-		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId)
+		statsForPipeline := pipeline_svc.GetStatisticsForPipeline(repId, replication_mgr.pipelineMgr.ReplicationStatus)
 		for i, oneStats := range statsForPipeline {
 			if oneStats == nil {
 				continue
@@ -925,9 +925,9 @@ func GetReplicationInfos() ([]base.ReplicationInfo, error) {
 	return combinedRepls, nil
 }
 
-func populateReplInfos(replId string, rep_status *pipeline.ReplicationStatus) (replInfos []base.ReplicationInfo) {
+func populateReplInfos(replId string, rep_status pipeline.ReplicationStatusIface) (replInfos []base.ReplicationInfo) {
 	// set stats map
-	expvarMaps := pipeline_svc.GetStatisticsForPipeline(replId)
+	expvarMaps := pipeline_svc.GetStatisticsForPipeline(replId, replication_mgr.pipelineMgr.ReplicationStatus)
 
 	for i, expvarMap := range expvarMaps {
 		if expvarMap == nil {
@@ -1390,4 +1390,8 @@ func (rm *replicationManager) upgradeRemoteClusterRefs() {
 
 func (rm *replicationManager) getBackfillMgr() service_def.BackfillMgrIface {
 	return rm.backfillMgr
+}
+
+func (rm *replicationManager) getReplStatus(topic string) (pipeline.ReplicationStatusIface, error) {
+	return rm.pipelineMgr.ReplicationStatus(topic)
 }

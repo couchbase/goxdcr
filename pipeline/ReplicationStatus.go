@@ -111,6 +111,7 @@ type ReplicationStatusIface interface {
 	GetEventsManager() PipelineEventsManager
 	PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string)
 	LoadLatestBrokenMap()
+	RecordBackfillProgress(progress string)
 }
 
 type ReplicationStatus struct {

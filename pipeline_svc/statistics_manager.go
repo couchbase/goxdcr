@@ -27,7 +27,6 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	pipeline_pkg "github.com/couchbase/goxdcr/pipeline"
-	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -172,9 +171,11 @@ type StatisticsManager struct {
 
 	// To be used by a single go-routine that calls processCalculatedStats
 	updateStatsOnceCachedVBList []uint16
+
+	replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error)
 }
 
-func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc) *StatisticsManager {
+func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error)) *StatisticsManager {
 	stats_mgr := &StatisticsManager{
 		registries:                make(map[string]metrics.Registry),
 		logger:                    log.NewLogger("StatsMgr", logger_ctx),
@@ -193,6 +194,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		utils:                     utilsIn,
 		remoteClusterSvc:          remoteClusterSvc,
 		bucketTopologySvc:         bucketTopologySvc,
+		replStatusGetter:          replStatusGetter,
 	}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 
@@ -202,9 +204,9 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 
 //Statistics of a pipeline which may or may not be running
 //Returns a list of expVar.Map where the idx corresponds to the pipeline Type, so it's possible for one elem to be nil
-func GetStatisticsForPipeline(topic string) []*expvar.Map {
+func GetStatisticsForPipeline(topic string, repStatusGetter func(topic string) (pipeline_pkg.ReplicationStatusIface, error)) []*expvar.Map {
 	var allPipelinesStats []*expvar.Map
-	repl_status, _ := pipeline_manager.ReplicationStatus(topic)
+	repl_status, _ := repStatusGetter(topic)
 	if repl_status == nil {
 		return allPipelinesStats
 	}
@@ -1711,9 +1713,9 @@ func setCounter(counter metrics.Counter, count int) {
 	counter.Inc(int64(count))
 }
 
-func (stats_mgr *StatisticsManager) getReplicationStatus() (*pipeline_pkg.ReplicationStatus, error) {
+func (stats_mgr *StatisticsManager) getReplicationStatus() (pipeline_pkg.ReplicationStatusIface, error) {
 	topic := stats_mgr.pipeline.Topic()
-	return pipeline_manager.ReplicationStatus(topic)
+	return stats_mgr.replStatusGetter(topic)
 }
 
 const updateStatsId = "ReplicationMgrUpdateStats"
@@ -1729,12 +1731,12 @@ func getUpdateStatsInstanceId() string {
 	return fmt.Sprintf("%v_%v", updateStatsId, instanceCnt)
 }
 
-func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, remoteClusterSvc service_def.RemoteClusterSvc, backfillReplSvc service_def.BackfillReplSvc, bucketTopologySvc service_def.BucketTopologySvc) {
+func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, remoteClusterSvc service_def.RemoteClusterSvc, backfillReplSvc service_def.BackfillReplSvc, bucketTopologySvc service_def.BucketTopologySvc, repStatusMapGetter func() map[string]pipeline_pkg.ReplicationStatusIface) {
 	logger.Debugf("updateStats for paused replications")
 
 	subscriberId := getUpdateStatsInstanceId()
 
-	for repl_id, repl_status := range pipeline_manager.ReplicationStatusMap() {
+	for repl_id, repl_status := range repStatusMapGetter() {
 		overview_stats := repl_status.GetOverviewStats(common.MainPipeline)
 		spec := repl_status.Spec()
 		if spec == nil {
@@ -1874,7 +1876,7 @@ func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]m
 }
 
 // compute and set changes_left and docs_processed stats. set other stats to 0
-func constructStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, spec *metadata.ReplicationSpecification, curKvVbMap map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosMap base.HighSeqnosMapType) error {
+func constructStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, spec *metadata.ReplicationSpecification, curKvVbMap map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosMap base.HighSeqnosMapType) error {
 	cur_vb_list := base.GetVbListFromKvVbMap(curKvVbMap)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
@@ -1990,8 +1992,7 @@ func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicat
 	return backfillTotalChanges, checkpointExists, nil
 }
 
-func updateStatsForReplication(repl_status *pipeline_pkg.ReplicationStatus, overview_stats *expvar.Map, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosAndSourceVBGetter func() (base.HighSeqnosMapType, base.KvVBMapType)) error {
-
+func updateStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, overview_stats *expvar.Map, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosAndSourceVBGetter func() (base.HighSeqnosMapType, base.KvVBMapType)) error {
 	// if pipeline is not running, update docs_processed and changes_left stats, which are not being
 	// updated by running pipeline and may have become inaccurate
 
