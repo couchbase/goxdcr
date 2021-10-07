@@ -2793,7 +2793,7 @@ func (u *Utilities) getUnauthorizedError(username string) error {
 	return errors.New(errMsg)
 }
 
-func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte, needExtraBytesInBody bool) ([]byte, error, string, int64, int) {
+func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBeReleased *[][]byte, needExtraBytesInBody, isJson bool) ([]byte, error, string, int64, int) {
 	var dpFailedCnt int64
 	lenOfDecodedData, err := snappy.DecodedLen(incomingBody)
 	lastBodyPos := lenOfDecodedData - 1
@@ -2819,7 +2819,7 @@ func decompressSnappyBody(incomingBody, key []byte, dp DataPoolIface, slicesToBe
 	}
 
 	// Check to make sure the last bracket position is correct
-	if body[lastBodyPos] != '}' {
+	if isJson && body[lastBodyPos] != '}' {
 		return nil, base.ErrorInvalidInput, fmt.Sprintf("XDCR for key %v%v%v after decompression seems to be an invalid JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt, lastBodyPos
 	}
 
@@ -3064,7 +3064,7 @@ func (u *Utilities) ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, body []b
 		if len(body) == 0 {
 			// process/retrieve body only if it has not been passed in
 			if bodyIsCompressed {
-				body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, true /*needExtraBytesInBody*/)
+				body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, true, dataTypeIsJson)
 				if err != nil {
 					return nil, err, additionalErrDesc, totalFailedCnt
 				}
@@ -3139,7 +3139,8 @@ func (u *Utilities) CheckForTransactionXattrsInUprEvent(uprEvent *mcc.UprEvent, 
 	endBodyPos = -1
 
 	if uprEvent.DataType&mcc.SnappyDataType > 0 {
-		body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, needToFilterBody)
+		dataTypeIsJson := uprEvent.DataType&mcc.JSONDataType > 0
+		body, err, additionalErrDesc, totalFailedCnt, endBodyPos = decompressSnappyBody(uprEvent.Value, uprEvent.Key, dp, slicesToBeReleased, needToFilterBody, dataTypeIsJson)
 		if err != nil {
 			return
 		}
