@@ -971,12 +971,8 @@ func (pipelineMgr *PipelineManager) StopBackfillWithStoppedCb(topic string, cb b
 		return err
 	}
 
-	errMap := pipelineMgr.StopBackfillPipeline(topic)
-	if len(errMap) > 0 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
-	} else {
-		return nil
-	}
+	updater.stopBackfillPipeline()
+	return nil
 }
 
 func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.ErrorMap {
@@ -1015,6 +1011,14 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	if backfillSpec.VBTasksMap.Len() == 0 || backfillSpec.VBTasksMap.LenWithVBs(mainPipelineVbs) == 0 {
 		errMap["pipelineMgr.StartBackfillPipeline"] = ErrorBackfillSpecHasNoVBTasks
 		return errMap
+	}
+
+	// First stop any latched backfill pipeline instances that have failed to start before
+	errMap = pipelineMgr.StopBackfillPipeline(mainPipeline.Topic())
+	if len(errMap) > 0 {
+		// Show warnings but continue
+		pipelineMgr.logger.Warnf("Stopping backfill pipeline prior to starting it had error(s): %v - continue to create next iteration of backfill pipeline", errMap)
+		errMap = make(base.ErrorMap)
 	}
 
 	rep_status.RecordBackfillProgress("Start backfill pipeline construction")
@@ -1060,7 +1064,6 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.ErrorMap {
 	errMap := make(base.ErrorMap)
 
-	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s\n", topic)
 	updater, rep_status, err := pipelineMgr.getUpdater(topic, nil)
 	if err != nil {
 		errMap["StopBackfillPipeline"] = err
@@ -1072,10 +1075,11 @@ func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.Erro
 
 	bp := rep_status.BackfillPipeline()
 	if bp == nil {
-		pipelineMgr.logger.Infof("Backfill pipeline for %v does not exist. Nothing to stop", topic)
+		pipelineMgr.logger.Infof("%v had no previously latched instance of backfill pipeline", topic)
 		return nil
 	}
 
+	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s\n", topic)
 	state := bp.State()
 	if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
 		errMap = bp.Stop()
