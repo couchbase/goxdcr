@@ -201,7 +201,7 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.initMetadataChangeMonitor()
 
 		// start adminport
-		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils, replication_mgr.p2pMgr)
+		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils, replication_mgr.p2pMgr, securitySvc)
 		go adminport.Start()
 		logger_rm.Info("Admin port has been launched")
 		// add adminport as children of replication manager supervisor

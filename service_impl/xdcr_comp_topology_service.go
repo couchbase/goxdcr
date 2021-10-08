@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goxdcr/base"
@@ -49,6 +50,8 @@ type XDCRTopologySvc struct {
 	cachedMemcachedAddrInitDone bool
 	cachedMemcachedAddrIsStrict bool
 	cachedMemcachedAddrMtx      sync.RWMutex
+
+	strictSecurityErrLogged uint32
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
@@ -192,33 +195,47 @@ func (top_svc *XDCRTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
 		return nil, err
 	}
 
+	isStrict := top_svc.securitySvc.IsClusterEncryptionLevelStrict()
 	var hostnameList []string
 	for _, nodeInfoRaw := range nodesList {
-		nodesInfo := nodeInfoRaw.(map[string]interface{})
+		nodeInfo := nodeInfoRaw.(map[string]interface{})
 
-		thisNode, exists := nodesInfo[base.ThisNodeKey].(bool)
+		thisNode, exists := nodeInfo[base.ThisNodeKey].(bool)
 		if exists && thisNode {
 			// Skip itself
 			continue
 		}
 
-		hostName, exists := nodesInfo[base.HostNameKey].(string)
+		// hostname may or may not contain port number
+		hostName, exists := nodeInfo[base.HostNameKey].(string)
 		if !exists {
 			continue
 		}
 
-		hasKV, hasKVErr := base.NodeHasKVService(nodesInfo)
+		hasKV, hasKVErr := base.NodeHasKVService(nodeInfo)
 		if hasKVErr != nil || !hasKV {
 			// Don't return the address since XDCR deals exclusively with data service nodes only as peers
 			continue
 		}
 
-		_, portCheck := base.GetPortNumber(hostName)
-		if portCheck == base.ErrorNoPortNumber {
-			// Append 8091 for now
-			hostName = base.GetHostAddr(hostName, base.DefaultAdminPort)
+		adminPort := top_svc.adminport
+		parsedAdminPort, portCheckErr := base.GetPortNumber(hostName)
+		if portCheckErr == nil {
+			adminPort = parsedAdminPort
 		}
-		hostnameList = append(hostnameList, hostName)
+
+		if isStrict {
+			adminPort = base.DefaultAdminPortSSL
+			parsedSecureAdminPort, portErr := top_svc.utils.GetHttpsMgtPortFromNodeInfo(nodeInfo)
+			if portErr == nil {
+				adminPort = uint16(parsedSecureAdminPort)
+			} else {
+				top_svc.logSecureAdminPortErr(nodeInfo)
+			}
+		}
+
+		hostNameWithoutPorts := base.GetHostName(hostName)
+		hostnameList = append(hostnameList, base.GetHostAddr(hostNameWithoutPorts, adminPort))
 	}
 
 	return hostnameList, nil
@@ -277,7 +294,30 @@ func (top_svc *XDCRTopologySvc) getHostAddrFromHostInfo(nodeInfoMap map[string]i
 		// should never get here
 		return "", ErrorParsingHostInfo
 	}
+
+	if top_svc.securitySvc.IsClusterEncryptionLevelStrict() {
+		// Need to massage this into a TLS address
+		sslPort, err := top_svc.utils.GetHttpsMgtPortFromNodeInfo(nodeInfoMap)
+		if err != nil {
+			top_svc.logSecureAdminPortErr(nodeInfoMap)
+			sslPort = int(base.DefaultAdminPortSSL)
+		}
+		hostNameWoPort := base.GetHostName(hostAddrStr)
+		hostAddrStr = base.GetHostAddr(hostNameWoPort, uint16(sslPort))
+	}
 	return hostAddrStr, nil
+}
+
+func (top_svc *XDCRTopologySvc) logSecureAdminPortErr(nodeInfoMap map[string]interface{}) {
+	// This may be an issue... instead of spam, log once an hour so we can at least debug CBSE
+	if atomic.CompareAndSwapUint32(&top_svc.strictSecurityErrLogged, 0, 1) {
+		top_svc.logger.Errorf("Unable to get https mgt port from %v - using default port %v (will be muted for an hour)",
+			nodeInfoMap, base.DefaultAdminPortSSL)
+		go func() {
+			time.Sleep(1 * time.Hour)
+			atomic.StoreUint32(&top_svc.strictSecurityErrLogged, 0)
+		}()
+	}
 }
 
 // get name of current node

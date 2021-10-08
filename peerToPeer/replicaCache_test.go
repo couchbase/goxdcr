@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"io/ioutil"
 	"testing"
 	"time"
@@ -54,8 +55,8 @@ func TestNewReplicaCache(t *testing.T) {
 	spec, _ := metadata.NewReplicationSpecification(srcBucketName, "", "", tgtBucketName, "")
 	specList := []*metadata.ReplicationSpecification{spec}
 
-	xdcrComp, utilsMock, bucketTopSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketTopSvc, ckptSvc, backfillSpecSvc, colManifestSvc)
+	xdcrComp, utilsMock, bucketTopSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc := setupBoilerPlate()
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketTopSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
 
 	cache := NewReplicaCache(bucketTopSvc, nil)
 	assert.NotNil(cache)
@@ -65,9 +66,9 @@ func TestNewReplicaCache(t *testing.T) {
 
 	srcNotification := &service_def.SourceNotification{}
 	bucketInfo := getBucketInfoWithReplicas()
-	replicasMap, translateMap, cnt, members, _ := utilsReal.GetReplicasInfo(bucketInfo)
+	replicasMap, translateMap, cnt, members, _ := utilsReal.GetReplicasInfo(bucketInfo, false)
 
-	srcNotification.On("GetReplicasInfo").Return(cnt, replicasMap, translateMap, members)
+	srcNotification.On("GetReplicasInfo", mock.Anything).Return(cnt, replicasMap, translateMap, members)
 	srcCh <- srcNotification
 
 	time.Sleep(10 * time.Millisecond)

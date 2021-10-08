@@ -1104,6 +1104,27 @@ func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech,
 	return r0, r1
 }
 
+// GetHttpsMgtPortFromNodeInfo provides a mock function with given fields: nodeInfo
+func (_m *UtilsIface) GetHttpsMgtPortFromNodeInfo(nodeInfo map[string]interface{}) (int, error) {
+	ret := _m.Called(nodeInfo)
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) int); ok {
+		r0 = rf(nodeInfo)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(nodeInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetIntExtHostNameKVPortTranslationMap provides a mock function with given fields: mapContainingNodesKey
 func (_m *UtilsIface) GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error) {
 	ret := _m.Called(mapContainingNodesKey)
@@ -1503,13 +1524,13 @@ func (_m *UtilsIface) GetRemoteServerVBucketsMap(connStr string, bucketName stri
 	return r0, r1
 }
 
-// GetReplicasInfo provides a mock function with given fields: bucketInfo
-func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error) {
-	ret := _m.Called(bucketInfo)
+// GetReplicasInfo provides a mock function with given fields: bucketInfo, isStrictlySecure
+func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error) {
+	ret := _m.Called(bucketInfo, isStrictlySecure)
 
 	var r0 base.VbHostsMapType
-	if rf, ok := ret.Get(0).(func(map[string]interface{}) base.VbHostsMapType); ok {
-		r0 = rf(bucketInfo)
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, bool) base.VbHostsMapType); ok {
+		r0 = rf(bucketInfo, isStrictlySecure)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.VbHostsMapType)
@@ -1517,8 +1538,8 @@ func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}) (base.V
 	}
 
 	var r1 base.StringStringMap
-	if rf, ok := ret.Get(1).(func(map[string]interface{}) base.StringStringMap); ok {
-		r1 = rf(bucketInfo)
+	if rf, ok := ret.Get(1).(func(map[string]interface{}, bool) base.StringStringMap); ok {
+		r1 = rf(bucketInfo, isStrictlySecure)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(base.StringStringMap)
@@ -1526,15 +1547,15 @@ func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}) (base.V
 	}
 
 	var r2 int
-	if rf, ok := ret.Get(2).(func(map[string]interface{}) int); ok {
-		r2 = rf(bucketInfo)
+	if rf, ok := ret.Get(2).(func(map[string]interface{}, bool) int); ok {
+		r2 = rf(bucketInfo, isStrictlySecure)
 	} else {
 		r2 = ret.Get(2).(int)
 	}
 
 	var r3 []uint16
-	if rf, ok := ret.Get(3).(func(map[string]interface{}) []uint16); ok {
-		r3 = rf(bucketInfo)
+	if rf, ok := ret.Get(3).(func(map[string]interface{}, bool) []uint16); ok {
+		r3 = rf(bucketInfo, isStrictlySecure)
 	} else {
 		if ret.Get(3) != nil {
 			r3 = ret.Get(3).([]uint16)
@@ -1542,8 +1563,8 @@ func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}) (base.V
 	}
 
 	var r4 error
-	if rf, ok := ret.Get(4).(func(map[string]interface{}) error); ok {
-		r4 = rf(bucketInfo)
+	if rf, ok := ret.Get(4).(func(map[string]interface{}, bool) error); ok {
+		r4 = rf(bucketInfo, isStrictlySecure)
 	} else {
 		r4 = ret.Error(4)
 	}

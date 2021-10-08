@@ -2092,7 +2092,9 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	if ret_client == nil {
 		ret_client, err = u.GetHttpClient(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, host, l)
 		if err != nil {
-			l.Errorf("Failed to get client for request, err=%v, req=%v\n", err, req)
+			// req body could be long and unreadable... print just the header
+			redactedReq := base.CloneAndTagHttpRequest(req)
+			l.Errorf("Failed to get client for request, err=%v, req=%v\n", err, redactedReq.Header)
 			return nil, nil, err
 		}
 	}
@@ -2945,7 +2947,7 @@ func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap map[uint16]uint64) (map[uint16]
 // 2. Map of memcached Address -> ns_server address
 // 3. Number of replicas set for this bucket
 // 4. List of VBs that this node is not the owner, but is a member as a replica
-func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error) {
+func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error) {
 	nodesList, ok := bucketInfo[base.NodesKey].([]interface{})
 	if !ok {
 		return nil, nil, 0, nil, fmt.Errorf("Unable to get %v from bucketInfo", base.NodesKey)
@@ -2973,6 +2975,14 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}) (base.VbH
 		portsMap, ok := nodeInfo[base.PortsKey].(map[string]interface{})
 		if !ok {
 			return nil, nil, 0, nil, fmt.Errorf("Unable to find ports data structure")
+		}
+
+		parsedSecureAdminPort, secureAdminPortErr := u.GetHttpsMgtPortFromNodeInfo(nodeInfo)
+		if isStrictlySecure {
+			if secureAdminPortErr != nil {
+				parsedSecureAdminPort = int(base.DefaultAdminPortSSL)
+			}
+			nsServerHostAndPort = base.GetHostAddr(nodeNameWithoutPort, uint16(parsedSecureAdminPort))
 		}
 
 		for portName, portNumberRaw := range portsMap {

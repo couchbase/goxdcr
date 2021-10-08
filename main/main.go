@@ -224,7 +224,9 @@ func main() {
 			os.Exit(1)
 		}
 
-		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils, base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc, base.HealthCheckInterval)
+		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils,
+			base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc,
+			base.HealthCheckInterval, securitySvc)
 		if err != nil {
 			fmt.Printf("Error starting bucket topology service. err=%v\n", err)
 			os.Exit(1)
@@ -240,7 +242,7 @@ func main() {
 
 		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.DefaultLoggerContext, top_svc, utils, bucketTopologyService,
 			replication_spec_svc, base.P2POpaqueCleanupInterval, checkpointsService, collectionsManifestService,
-			backfillReplService)
+			backfillReplService, securitySvc)
 
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,

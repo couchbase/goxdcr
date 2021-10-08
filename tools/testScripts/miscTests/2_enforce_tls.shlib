@@ -35,43 +35,6 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 declare -a scope1Arr=("S1" "S2")
 BUCKET_NAME_SCOPE_MAP=(["B1"]="S1")
 
-function setNodeToNodeEncryption {
-	local cluster=$1
-	local value=$2
-	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
-
-	# turn on encryption:
-	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=false
-	if (($? != 0)); then
-		echo "Failed to turn off autoFailover"
-		exit $?
-	fi
-	../../../../../../../install/bin/couchbase-cli node-to-node-encryption -c http://127.0.0.1:$port -u $DEFAULT_ADMIN -p $DEFAULT_PW --$value
-	if (($? != 0)); then
-		echo "Failed to set node to node encryption to $value"
-		exit $?
-	fi
-	curl -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=true
-	if (($? != 0)); then
-		echo "Failed to turn on autoFailover"
-		exit $?
-	fi
-	echo "Node to node encryption for $cluster is set to $value" >&1
-}
-
-function setEncryptionLevel {
-	local cluster=$1
-	local value=$2
-	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
-	# set encryption leval
-	curl -POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/settings/security -d "clusterEncryptionLevel=$value"
-	if (($? != 0)); then
-		echo "Failed to set cluster encryption level to $value"
-		exit $?
-	fi
-	echo "Encryption level for $cluster is set to $value" >&1
-}
-
 # When source encryption level is strict: XDCR will only allow full encryption remote. Plain and half will fail.
 # When target encryption level is strict: plain and half encryption will fail in connect because target only listen on secure port
 # and will require certificate. Local loopback connects are OK.

@@ -53,11 +53,12 @@ type Adminport struct {
 	utils              utilities.UtilsIface
 	prometheusExporter pipeline_utils.ExpVarExporter
 
-	p2pMgr peerToPeer.P2PManager
-	p2pAPI peerToPeer.PeerToPeerCommAPI
+	p2pMgr      peerToPeer.P2PManager
+	p2pAPI      peerToPeer.PeerToPeerCommAPI
+	securitySvc service_def.SecuritySvc
 }
 
-func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface, p2pMgr peerToPeer.P2PManager) *Adminport {
+func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface, p2pMgr peerToPeer.P2PManager, securitySvc service_def.SecuritySvc) *Adminport {
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
@@ -75,6 +76,7 @@ func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan boo
 		utils:              utilsIn,
 		prometheusExporter: pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable),
 		p2pMgr:             p2pMgr,
+		securitySvc:        securitySvc,
 	}
 
 	msg_callback_func = adminport.processRequest
@@ -1373,7 +1375,7 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 	if response != nil || err != nil {
 		return response, err
 	}
-	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils)
+	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils, adminport.securitySvc)
 	if err != nil {
 		adminport.Logger().Errorf("Unable to generate req or resp %v\n", err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)

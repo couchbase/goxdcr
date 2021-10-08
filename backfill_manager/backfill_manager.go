@@ -1458,6 +1458,9 @@ func (b *BackfillMgr) onDemandBackfillGetCompleteRequest(specId string, pendingM
 	} else {
 		b.logger.Infof(loggerString)
 	}
+	if backfillReq == nil {
+		// if implicit mapping and backfillReq == nil, no backfill Needed
+	}
 	return backfillReq, err
 }
 

@@ -27,15 +27,16 @@ import (
 	"time"
 )
 
-func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc, *mocks2.ClientIface) {
+func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc, *mocks2.ClientIface, *mocks.SecuritySvc) {
 	remClusterSvc := &mocks.RemoteClusterSvc{}
 	utils := &utilsMock.UtilsIface{}
 	xdcrCompTopologySvc := &mocks.XDCRCompTopologySvc{}
 	utilsReal := utilities.NewUtilities()
 	replSpecSvc := &mocks.ReplicationSpecSvc{}
 	mcClient := &mocks2.ClientIface{}
+	securitySvc := &mocks.SecuritySvc{}
 
-	return remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient
+	return remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc
 }
 
 const (
@@ -68,7 +69,7 @@ var replicaMap base.VbHostsMapType
 var replicaTrMap base.StringStringMap
 var replicaMember []uint16
 
-func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification, ref *metadata.RemoteClusterReference, cap metadata.Capability, mcClient *mocks2.ClientIface) {
+func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification, ref *metadata.RemoteClusterReference, cap metadata.Capability, mcClient *mocks2.ClientIface, securitySvc *mocks.SecuritySvc) {
 	var connStr = "dummyConnStr"
 	xdcrTopologySvc.On("MyConnectionStr").Return(connStr, nil)
 	xdcrTopologySvc.On("MyCredentials").Return("", "", base.HttpAuthMechPlain, nil, false, nil, nil, nil)
@@ -85,32 +86,32 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	// Then, each individual get functions will be called to return the appropriately parsed
 	// result back to the caller
 	// This is the correct way to mock, execute, and return on real data
-	getMap1 := func(map[string]interface{}) base.VbHostsMapType {
+	getMap1 := func(map[string]interface{}, bool) base.VbHostsMapType {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaMap
 	}
-	getMap2 := func(map[string]interface{}) base.StringStringMap {
+	getMap2 := func(map[string]interface{}, bool) base.StringStringMap {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaTrMap
 	}
-	getCnt := func(map[string]interface{}) int {
+	getCnt := func(map[string]interface{}, bool) int {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaCnt
 	}
-	getErr := func(map[string]interface{}) error {
+	getErr := func(map[string]interface{}, bool) error {
 		return nil
 	}
-	getMember := func(map[string]interface{}) []uint16 {
+	getMember := func(map[string]interface{}, bool) []uint16 {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaMember
 	}
-	utils.On("GetReplicasInfo", mock.Anything).Run(func(args mock.Arguments) {
+	utils.On("GetReplicasInfo", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		replicaMtx.Lock()
-		replicaMap, replicaTrMap, replicaCnt, replicaMember, _ = utilsReal.GetReplicasInfo(args.Get(0).(map[string]interface{}))
+		replicaMap, replicaTrMap, replicaCnt, replicaMember, _ = utilsReal.GetReplicasInfo(args.Get(0).(map[string]interface{}), false)
 		replicaMtx.Unlock()
 	}).Return(getMap1, getMap2, getCnt, getMember, getErr)
 
@@ -148,6 +149,8 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	remClusterSvc.On("GetCapability", mock.Anything).Return(cap, nil)
 
 	mcClient.On("StatsMap", mock.Anything).Return(nil, nil)
+
+	securitySvc.On("IsClusterEncryptionLevelStrict").Return(false)
 }
 
 func getBucketMap() (map[string]interface{}, []string) {
@@ -183,11 +186,11 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestBucketTopologyServiceRegister =================")
 	assert := assert.New(t)
 
-	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc := setupBTSBoilerPlate()
 	bucketMap, kvNames := getBucketMap()
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient)
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -276,15 +279,15 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestBucketTopologyServiceRegister =================")
 	assert := assert.New(t)
 
-	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc := setupBTSBoilerPlate()
 	bucketMap, kvNames := getBucketMap()
 
 	spec, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName, tgtBucketUuid)
 	spec2, _ := metadata.NewReplicationSpecification(srcBucketName, srcBucketUuid, tgtClusterUuid, tgtBucketName2, tgtBucketUuid2)
 	specList := []*metadata.ReplicationSpecification{spec, spec2}
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList, nil, getCapability(), mcClient)
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc, 10*time.Second)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc, 10*time.Second, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -319,11 +322,11 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestBucketTopologyServiceHighSeqnos =================")
 	assert := assert.New(t)
 
-	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc := setupBTSBoilerPlate()
 	bucketMap, kvNames := getBucketMap()
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient)
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -423,11 +426,11 @@ func TestBucketTopologyWatcherGC(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestBucketTopologyWatcherGC =================")
 	assert := assert.New(t)
 
-	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient := setupBTSBoilerPlate()
+	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc := setupBTSBoilerPlate()
 	bucketMap, kvNames := getBucketMap()
-	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient)
+	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 

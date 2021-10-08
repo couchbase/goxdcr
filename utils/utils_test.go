@@ -815,7 +815,7 @@ func TestVBucketMapWithReplicas(t *testing.T) {
 	bucketInfo := getBucketInfoWithReplicas()
 	assert.NotNil(bucketInfo)
 
-	replicaMap, translateMap, numOfReplicas, _, err := testUtils.GetReplicasInfo(bucketInfo)
+	replicaMap, translateMap, numOfReplicas, _, err := testUtils.GetReplicasInfo(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(2, numOfReplicas)
 
@@ -839,7 +839,7 @@ func TestVBucketMapWithReplicasEarlyInit(t *testing.T) {
 	bucketInfo := getBucketInfoWithReplicasWithNoReplicas()
 	assert.NotNil(bucketInfo)
 
-	replicaMap, translateMap, numOfReplicas, memberOfReplica, err := testUtils.GetReplicasInfo(bucketInfo)
+	replicaMap, translateMap, numOfReplicas, memberOfReplica, err := testUtils.GetReplicasInfo(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(1, numOfReplicas)
 	assert.Len(replicaMap, 0)
@@ -849,7 +849,7 @@ func TestVBucketMapWithReplicasEarlyInit(t *testing.T) {
 	bucketInfo = getBucketInfoWithReplicasAfterRebalance()
 	assert.NotNil(bucketInfo)
 
-	replicaMap, translateMap, numOfReplicas, memberOfReplica, err = testUtils.GetReplicasInfo(bucketInfo)
+	replicaMap, translateMap, numOfReplicas, memberOfReplica, err = testUtils.GetReplicasInfo(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(1, numOfReplicas)
 	assert.NotEqual(len(replicaMap), 0)

@@ -59,6 +59,7 @@ type P2PManagerImpl struct {
 	ckptSvc           service_def.CheckpointsService
 	colManifestSvc    service_def.CollectionsManifestSvc
 	backfillReplSvc   service_def.BackfillReplSvc
+	securitySvc       service_def.SecuritySvc
 
 	lifeCycleId string
 	logger      *log.CommonLogger
@@ -86,7 +87,7 @@ type P2PManagerImpl struct {
 func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface,
 	bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc,
 	cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc) (*P2PManagerImpl, error) {
+	backfillReplSvc service_def.BackfillReplSvc, securitySvc service_def.SecuritySvc) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
 	if err != nil {
 		return nil, err
@@ -110,6 +111,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		colManifestSvc:      colManifestSvc,
 		backfillReplSvc:     backfillReplSvc,
 		mergerSetCh:         make(chan bool),
+		securitySvc:         securitySvc,
 	}, nil
 }
 
@@ -179,7 +181,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 }
 
 func (p *P2PManagerImpl) initCommAPI() {
-	p.commAPI = NewP2pCommAPIHelper(p.receiveChsMap, p.utils, p.xdcrCompSvc)
+	p.commAPI = NewP2pCommAPIHelper(p.receiveChsMap, p.utils, p.xdcrCompSvc, p.securitySvc)
 }
 
 func (p *P2PManagerImpl) sendDiscoveryRequest() error {
@@ -242,7 +244,6 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 	return nil
 }
 
-// getReqFunc must log/handle errors
 func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetry map[string]bool, myHost string) error {
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
@@ -558,8 +559,6 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 				errMap[host] = err
 				errMapMtx.Unlock()
 			}
-			// TODO NEIL - next step, handle the incoming request
-			// fmt.Printf("sending req to host %v - err %v\n", host, err)
 		}()
 		waitGrp.Wait()
 	}

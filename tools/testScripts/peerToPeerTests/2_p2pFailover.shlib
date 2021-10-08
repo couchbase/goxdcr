@@ -131,24 +131,21 @@ function runTestCase {
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
 
-	echo "Done - Sleeping 5 minutes to ensure multiple requests have been handled"
+  # In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
+	echo "Done - Sleeping 6 minutes to ensure multiple requests have been handled"
 
-	# Sleeping 3 minutes mean we should have at least two instances
-	sleep 240
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 2)) $(($currentHandlingInstanceCnt + 5))
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceCnt + 1)) $(($currentHandlingInstanceDoneCnt + 4))
+	# Sleeping 7 minutes mean we should have at least two instances
+	sleep 420
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 2)) $(($currentHandlingInstanceCnt + 6))
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceDoneCnt + 1)) $(($currentHandlingInstanceDoneCnt + 5))
 
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
 	setReplicationSettings "C1" "B0" "C2" "B1" "xdcrDevBackfillSendDelayMs=0"
-	echo "4 minutes passed -  stopping delay for backfill pipeline and waiting one more minute"
+	echo "6 minutes passed -  stopping delay for backfill pipeline and waiting one more minute"
 
 	sleep 60
-	echo "5 minutes passed - giving it one more minute before checking the last instance of peer-to-peer push"
-	sleep 60
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 1)) $(($currentHandlingInstanceCnt + 3))
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceCnt + 0)) $(($currentHandlingInstanceDoneCnt + 3))
 
 	local logsC1
 	local resumeFrom0CntOrig

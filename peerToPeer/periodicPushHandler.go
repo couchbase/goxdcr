@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -65,6 +66,8 @@ func (p *PeriodicPushHandler) handler() {
 				p.handleRequest(peerVBPeriodicPushReq)
 			} else if isResp {
 				p.handleResponse(peerVBPeriodicPusHResp)
+			} else {
+				p.logger.Errorf("PeriodicPushHandler received invalid format: %v", reflect.TypeOf(reqOrResp))
 			}
 		}
 	}

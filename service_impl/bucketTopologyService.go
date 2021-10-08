@@ -24,6 +24,7 @@ import (
 type BucketTopologyService struct {
 	remClusterSvc       service_def.RemoteClusterSvc
 	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
+	securitySvc         service_def.SecuritySvc
 	utils               utils.UtilsIface
 	refreshInterval     time.Duration
 	logger              *log.CommonLogger
@@ -40,7 +41,7 @@ type BucketTopologyService struct {
 	tgtBucketWatchersMtx sync.RWMutex
 }
 
-func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc, healthCheckInterval time.Duration) (*BucketTopologyService, error) {
+func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc, healthCheckInterval time.Duration, securitySvc service_def.SecuritySvc) (*BucketTopologyService, error) {
 	b := &BucketTopologyService{
 		remClusterSvc:        remClusterSvc,
 		xdcrCompTopologySvc:  xdcrCompTopologySvc,
@@ -52,6 +53,7 @@ func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySv
 		tgtBucketWatchersCnt: map[string]int{},
 		refreshInterval:      refreshInterval,
 		healthCheckInterval:  healthCheckInterval,
+		securitySvc:          securitySvc,
 	}
 	return b, b.loadFromReplSpecSvc(replicationSpecService)
 }
@@ -325,7 +327,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			return fmt.Errorf("Failed to update local serverVBucket map. err=%v", err)
 		}
 
-		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo)
+		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo, b.securitySvc.IsClusterEncryptionLevelStrict())
 		if err != nil {
 			watcher.logger.Errorf("%v replicasInfo error %v", spec.SourceBucketName, err)
 			return err
@@ -408,7 +410,11 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			if err != nil {
 				return err
 			}
-			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo)
+			perUpdateRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+			if err != nil {
+				return err
+			}
+			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps())
 			if err != nil {
 				watcher.logger.Errorf("%v target replicasInfo error %v", spec.TargetBucketName, err)
 				return err

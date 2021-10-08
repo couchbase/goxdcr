@@ -61,7 +61,7 @@ function runOneReplicationCycleAndPause {
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
@@ -94,6 +94,7 @@ function runOneReplicationCycleAndPause {
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
+C1LOOKINGC1PSECUREMSG="Discovered peers: map\\[127.0.0.1:19001"
 CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
 CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
 
@@ -112,11 +113,15 @@ function runOneRebalanceCycle {
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
 
+	setNodeToNodeEncryption "C1" "enable"
+	setEncryptionLevel "C1" "strict"
+
 	echo "Sleeping before checking logs"
 	sleep 15
 	currentXdcrLogC1=$(getInternalNodeXdcrLog "C1")
 	local currentPeerMsgsC1
 	currentPeerMsgsC1=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PMSG")
+	currentPeerMsgsC1Secure=$(echo "$currentXdcrLogC1" | grep -c "$C1LOOKINGC1PSECUREMSG")
 
 	echo "Restarting XDCR processes to trigger p2p discovery"
 	killGoXdcr "C1"
@@ -125,7 +130,8 @@ function runOneRebalanceCycle {
 	echo "Sleeping before checking logs"
 	sleep 15
 
-	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1 + 1))
+	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1))
+	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PSECUREMSG" $(($currentPeerMsgsC1Secure + 1))
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
@@ -134,27 +140,30 @@ function runOneRebalanceCycle {
 
 function runReplicationResume {
 	local logs
+		logs=$(getInternalNodeXdcrLog "C1")
+  	local curCkptsFoundDocsCnt=$(echo "$logs" | grep -c "$CKPT_FOUND_DOCS")
+  	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 20 seconds for resume to finish"
 	sleep 20
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
-	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" 1
 	logs=$(getInternalNodeXdcrLog "C1")
+	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" $(($curCkptsFoundDocsCnt + 1)) $(($curCkptRetrievedCnt + 2))
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then
 		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
 		exit 1
 	fi
 
-	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" 1
+	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCnt + 1)) $(($curCkptRetrievedCnt + 2))
 	grepForPanics
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P Setup secure"
+	echo "Running P2P Setup with security"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -162,7 +171,17 @@ function runTestCase {
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
-	runReplicationResume
+	# replicationResume doesn't work because port 9000 is shut off when strict mode is on
+	#runReplicationResume
+
+	grepForPanics
+
+	# clean up requires turning off security
+	echo "Turning off encryption..."
+	setEncryptionLevel "C1" "control"
+	sleep 5
+	setNodeToNodeEncryption "C1" "disable"
+	sleep 15
 
 	echo "============================================================================"
 	echo "PASSED"

@@ -13,6 +13,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
+	"net/http"
 )
 
 var ErrorInvalidOpcode = fmt.Errorf("Invalid Opcode")
@@ -57,16 +58,19 @@ type PeerToPeerCommAPI interface {
 }
 
 type P2pCommAPIimpl struct {
-	receiveChs     map[OpCode]chan interface{}
-	utils          utils.UtilsIface
+	receiveChs map[OpCode]chan interface{}
+	utils      utils.UtilsIface
+
 	xdcrCompTopSvc service_def.XDCRCompTopologySvc
+	securitySvc    service_def.SecuritySvc
 }
 
-func NewP2pCommAPIHelper(receiveChs map[OpCode]chan interface{}, utils utils.UtilsIface, xdcrCompTopSvc service_def.XDCRCompTopologySvc) *P2pCommAPIimpl {
+func NewP2pCommAPIHelper(receiveChs map[OpCode]chan interface{}, utils utils.UtilsIface, xdcrCompTopSvc service_def.XDCRCompTopologySvc, securitySvc service_def.SecuritySvc) *P2pCommAPIimpl {
 	return &P2pCommAPIimpl{
 		receiveChs:     receiveChs,
 		utils:          utils,
 		xdcrCompTopSvc: xdcrCompTopSvc,
+		securitySvc:    securitySvc,
 	}
 }
 
@@ -97,8 +101,21 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
 		return nil, err
 	}
 
+	authType := base.HttpAuthMechPlain
+	var certificates []byte
+	if p2p.securitySvc.IsClusterEncryptionLevelStrict() {
+		authType = base.HttpAuthMechHttps
+		certificates = p2p.securitySvc.GetCACertificates()
+		if len(certificates) == 0 {
+			return &HandlerResultImpl{
+				Err:            base.ErrorNilCertificate,
+				HttpStatusCode: http.StatusInternalServerError,
+			}, base.ErrorNilCertificateStrictMode
+		}
+	}
+
 	var out interface{}
-	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
+	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, nil, nil, base.MethodPost, base.JsonContentType,
 		payload, base.P2PCommTimeout, &out, nil, false, nil)
 	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
 	return result, err

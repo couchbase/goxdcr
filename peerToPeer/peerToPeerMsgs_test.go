@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
+	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
@@ -240,11 +241,13 @@ func TestPeriodicPushSendPkt(t *testing.T) {
 	}
 	assert.True(atLeastOneBackfill)
 
+	securitySvcMock := &service_def.SecuritySvc{}
+
 	data1 := getPushFile1()
 	var reqCommon RequestCommon
 	err := json.Unmarshal(data1, &reqCommon)
 	assert.Nil(err)
-	reqRaw, err := generateRequest(utilsReal, reqCommon, data1)
+	reqRaw, err := generateRequest(utilsReal, reqCommon, data1, securitySvcMock)
 	assert.Nil(err)
 	req, ok := reqRaw.(*PeerVBPeriodicPushReq)
 	assert.True(ok)

@@ -33,6 +33,7 @@ declare DEFAULT_PW
 CURL="curl -s"
 POOLS_DEFAULT_BUCKETS_PATH="pools/default/buckets"
 CBWORKLOAD_COLLECTION_NUM_ITEMS=10000
+CB_CLI_BIN="../../../../../../../install/bin/couchbase-cli"
 
 # topological globals
 # -----------------
@@ -53,6 +54,7 @@ declare -A BUCKET_REPL_PROPERTIES_MAP
 declare -A BUCKET_REPL_PROPERTIES_OUTPUT_MAP
 declare -A BUCKET_REPL_EXPORT_MAP
 declare -A CLUSTER_DEPENDENCY_MAP
+declare -A CLUSTER_ENCRYPTION_LEVEL_MAP
 
 # optional globals
 # -----------------
@@ -619,42 +621,49 @@ function failoverNode {
 	local hostNameToLookFor="${localhostIp}:${port}"
 	local otpNodeName
 
-	local nodesList=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq -cr '.[]')
-	#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_0@192.168.1.113","thisNode":true,"hostname":"192.168.1.113:9000","nodeUUID":"cbef3c8c28031971e9e61234560c8f0d","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12000,"httpsCAPI":19500,"httpsMgmt":19000,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"192.168.1.113:9000","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://192.168.1.113:9500/","couchApiBaseHTTPS":"https://192.168.1.113:19500/","systemStats":{"cpu_utilization_rate":16.81045313677862,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17357692928,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":39218356,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":1997575,"mem_used":69419072,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"401","memoryTotal":34359738368,"memoryFree":17357692928,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
-	#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_2@127.0.0.1","hostname":"127.0.0.1:9002","nodeUUID":"7356e3a2ed404e7bec0d2ca43ceb3526","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12004,"httpsCAPI":19502,"httpsMgmt":19002,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"127.0.0.1:9002","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://127.0.0.1:9502/","couchApiBaseHTTPS":"https://127.0.0.1:19502/","systemStats":{"cpu_utilization_rate":20.66955363091272,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17360678912,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":38648300,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":2004302,"mem_used":69085160,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"403","memoryTotal":34359738368,"memoryFree":17360678912,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
+	local totalRetryCnt=2
 
-	if [[ -z "${nodesList:-}" ]]; then
-		echo "ERROR - nodesList is empty. Did you enter the wrong argument for failoverNode?"
-		exit 1
-	fi
+	while (($totalRetryCnt > 0)); do
+		local nodesList=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq -cr '.[]')
+		#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_0@192.168.1.113","thisNode":true,"hostname":"192.168.1.113:9000","nodeUUID":"cbef3c8c28031971e9e61234560c8f0d","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12000,"httpsCAPI":19500,"httpsMgmt":19000,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"192.168.1.113:9000","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://192.168.1.113:9500/","couchApiBaseHTTPS":"https://192.168.1.113:19500/","systemStats":{"cpu_utilization_rate":16.81045313677862,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17357692928,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":39218356,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":1997575,"mem_used":69419072,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"401","memoryTotal":34359738368,"memoryFree":17357692928,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
+		#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_2@127.0.0.1","hostname":"127.0.0.1:9002","nodeUUID":"7356e3a2ed404e7bec0d2ca43ceb3526","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12004,"httpsCAPI":19502,"httpsMgmt":19002,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"127.0.0.1:9002","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://127.0.0.1:9502/","couchApiBaseHTTPS":"https://127.0.0.1:19502/","systemStats":{"cpu_utilization_rate":20.66955363091272,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17360678912,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":38648300,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":2004302,"mem_used":69085160,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"403","memoryTotal":34359738368,"memoryFree":17360678912,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
 
-	local checkHostName
-	local nodeInfo
-	local failoverNodeString
-	local knownNodesString
-	local optNodeNameStripped
-
-	for nodeInfo in $(echo "$nodesList"); do
-		checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
-		if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
-			# Found it
-			otpNodeName=$(echo "$nodeInfo" | jq '.otpNode')
-			# "n_0@192.168.1.113"
-			otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
-			failoverNodeString="otpNode=$otpNodeNameStripped"
-			local preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
-			$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/failOver -d "$failoverNodeString"
-			if (($? != 0)); then
-				echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
-			fi
-			sleep 10
-			startRebalancing "C1" "$otpNodeNameStripped"
-			local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
-			if (($postEjectCnt != $(($preEjectCnt - 1)))); then
-				echo "Error - failover a node resulted going from $preEjectCnt to $postEjectCnt"
-				exit 1
-			fi
+		if [[ -z "${nodesList:-}" ]]; then
+			echo "ERROR - nodesList is empty. Did you enter the wrong argument for failoverNode?"
+			exit 1
 		fi
+
+		local checkHostName
+		local nodeInfo
+		local failoverNodeString
+		local knownNodesString
+		local optNodeNameStripped
+
+		for nodeInfo in $(echo "$nodesList"); do
+			checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
+			if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
+				# Found it
+				otpNodeName=$(echo "$nodeInfo" | jq '.otpNode')
+				# "n_0@192.168.1.113"
+				otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
+				failoverNodeString="otpNode=$otpNodeNameStripped"
+				local preEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+				$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$motherPort/controller/failOver -d "$failoverNodeString"
+				if (($? != 0)); then
+					echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
+				fi
+				echo "Wait 20 sec after issuing failover command before rebalancing command..."
+				sleep 20
+				startRebalancing "C1" "$otpNodeNameStripped"
+				local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
+				if (($postEjectCnt != $(($preEjectCnt - 1)))); then
+					echo "Error - failover a node resulted going from $preEjectCnt to $postEjectCnt"
+					totalRetryCnt=$(($totalRetryCnt - 1))
+				else
+					totalRetryCnt=0
+				fi
+			fi
+		done
 	done
 }
 
@@ -1618,8 +1627,15 @@ function resumeReplication {
 		return 1
 	fi
 
-	echo "Resuming replication $restID"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=false >/dev/null 2>&1
+	local encryptionLevel=${CLUSTER_ENCRYPTION_LEVEL_MAP[$srcClusterName]:-}
+	if [[ "$encryptionLevel" == "strict" ]]; then
+		local replicatorId=$(echo "$restID" | sed 's|%2F|/|g')
+		echo "Resuming replication $restID using CLI"
+		$CB_CLI_BIN xdcr-replicate --resume -c 127.0.0.1:${sourcePort} -u $DEFAULT_ADMIN -p $DEFAULT_PW --xdcr-replicator $replicatorId
+	else
+		echo "Resuming replication $restID"
+		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${sourcePort}/settings/replications/${restID} -d pauseRequested=false >/dev/null 2>&1
+	fi
 }
 
 declare INTERNAL_SETTINGS_REST_PATH="xdcr/internalSettings"
@@ -2031,4 +2047,42 @@ function createSecureRemoteClusterReference {
 	echo "Creating SECURE remote cluster reference from $source to $target"
 	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=127.0.0.1:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
 		-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
+}
+
+function setNodeToNodeEncryption {
+	local cluster=$1
+	local value=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+
+	# turn on encryption:
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=false
+	if (($? != 0)); then
+		echo "Failed to turn off autoFailover"
+		exit $?
+	fi
+	$CB_CLI_BIN node-to-node-encryption -c http://127.0.0.1:$port -u $DEFAULT_ADMIN -p $DEFAULT_PW --$value
+	if (($? != 0)); then
+		echo "Failed to set node to node encryption to $value"
+		exit $?
+	fi
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:${port}/settings/autoFailover -d enabled=true
+	if (($? != 0)); then
+		echo "Failed to turn on autoFailover"
+		return 1
+	fi
+	echo "Node to node encryption for $cluster is set to $value" >&1
+}
+
+function setEncryptionLevel {
+	local cluster=$1
+	local value=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+	# set encryption leval
+	$CURL -POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/settings/security -d "clusterEncryptionLevel=$value"
+	if (($? != 0)); then
+		echo "Failed to set cluster encryption level to $value"
+		return 1
+	fi
+	echo "Encryption level for $cluster is set to $value" >&1
+	CLUSTER_ENCRYPTION_LEVEL_MAP[$cluster]="$value"
 }

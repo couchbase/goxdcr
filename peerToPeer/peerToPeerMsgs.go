@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/golang/snappy"
 	"io/ioutil"
@@ -231,7 +232,7 @@ var filterUtils = utilities.NewUtilities()
 var reqMagicCheckFilter, _ = filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), filterUtils, false)
 var respMagicCheckFilter, _ = filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), filterUtils, false)
 
-func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface) (ReqRespCommon, error) {
+func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, securitySvc service_def.SecuritySvc) (ReqRespCommon, error) {
 	body, err := ioutil.ReadAll(httpReq.Body)
 	if err != nil {
 		return nil, err
@@ -250,7 +251,7 @@ func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface) (Re
 		if err != nil {
 			return nil, err
 		}
-		return generateRequest(utils, reqCommon, body)
+		return generateRequest(utils, reqCommon, body, securitySvc)
 	} else {
 		err = json.Unmarshal(body, &respCommon)
 		if err != nil {
@@ -291,16 +292,28 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 	}
 }
 
-func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body []byte) (ReqRespCommon, error) {
-	var err error
+func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body []byte, securitySvc service_def.SecuritySvc) (ReqRespCommon, error) {
 	cbFunc := func(resp Response) (HandlerResult, error) {
 		payload, err := resp.Serialize()
 		if err != nil {
 			return &HandlerResultImpl{}, err
 		}
 		var out interface{}
-		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, base.MethodPost, base.JsonContentType,
-			payload, base.P2PCommTimeout, &out, nil, false, nil)
+		var certificates []byte
+		authMech := base.HttpAuthMechPlain
+		if securitySvc.IsClusterEncryptionLevelStrict() {
+			authMech = base.HttpAuthMechHttps
+			certificates = securitySvc.GetCACertificates()
+			if len(certificates) == 0 {
+				return &HandlerResultImpl{
+					Err:            base.ErrorNilCertificate,
+					HttpStatusCode: http.StatusInternalServerError,
+				}, base.ErrorNilCertificateStrictMode
+			}
+		}
+		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false,
+			"", "", authMech, certificates, true, nil, nil,
+			base.MethodPost, base.JsonContentType, payload, base.P2PCommTimeout, &out, nil, false, nil)
 		result := &HandlerResultImpl{
 			Err:            err,
 			HttpStatusCode: statusCode,
@@ -309,6 +322,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 	}
 	reqCommon.responseCb = cbFunc
 
+	var err error
 	switch reqCommon.ReqType {
 	case ReqDiscovery:
 		reqDisc := &DiscoveryRequest{}
@@ -1309,7 +1323,6 @@ func NewVBPeriodicReplicateReq(specId, srcBucketName string, vbs []uint16) *VBPe
 	(*backfillReplication.payload)[srcBucketName] = NewVBMasterPayload()
 	(*backfillReplication.payload)[srcBucketName].RegisterPushVBs(vbs)
 
-	//type BucketVBMPayloadType map[string]*VBMasterPayload
 	return &VBPeriodicReplicateReq{
 		MainReplication:     &mainReplication,
 		BackfillReplication: &backfillReplication,

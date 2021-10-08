@@ -104,17 +104,13 @@ function runOneReplicationCycleAndPause {
 	sleep 15
 	resumeReplication "C1" "B0" "C2" "B1"
 
-	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
-	#grepForPanics
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	grepForPanics
 
-	#	echo "============================================================================"
-	#	echo "Cycle $(($cycleCnt + 1)) PASSED"
-	#	echo "============================================================================"
-	#cleanupBucketReplications
-	#cleanupBuckets
-	#cleanupRemoteClusterRefs
-	#echo "Waiting for $timeIntervalSecs seconds before starting another replication"
-	#sleep $timeIntervalSecs
+	# Once all is done, pause to re-create checkpoint
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
@@ -154,28 +150,42 @@ function runReplicationResume {
 	local logsC1P
 	local resumeFrom0Cnt
 
+	logs=$(getInternalNodeXdcrLog "C1")
+	local curCkptsFoundDocsCnt=$(echo "$logs" | grep -c "$CKPT_FOUND_DOCS")
+	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
+
+	logsC1P=$(getInternalNodeXdcrLog "C1P")
+	local curCkptsFoundDocsCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_FOUND_DOCS")
+	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
+
 	resumeReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 20 seconds for resume to finish"
 	sleep 20
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
-	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" 1
 	logs=$(getInternalNodeXdcrLog "C1")
+	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" $(($curCkptsFoundDocsCnt + 1)) $(($curCkptsFoundDocsCnt + 2))
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then
 		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
 		exit 1
 	fi
 
-	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" 1
-
 	logsC1P=$(getInternalNodeXdcrLog "C1P")
-	ckptFoundCount=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
-	if (($ckptFoundCount > 0)); then
+	local ckptFoundWith0Count=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
+	local ckptFoundTotalCount=$(echo "$logsC1P" | grep -c "$CKPT_RESUME_FOUND")
+	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
 		echo "C1P unable to find upserted checkpoints"
 		exit 1
 	fi
-	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -c "=0")
+
+	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCntC1P + 1)) $(($curCkptRetrievedCntC1P + 2))
+
+	# Backfill pipeline from C1 could already be finished but the backfill tasks still exist
+	# and there is no ckpt for the backfill tasks... so the backfill tasks would have been
+	# pulled by C1P, but no ckpt pulled
+	# That's ok... so skip checking those
+	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
 	if (($resumeFrom0Cnt > 0)); then
 		echo "C1P has at least one VB that resumed from seqno 0"
 		exit 1
@@ -199,6 +209,7 @@ function runTestCase {
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
+	runReplicationResume
 
 	echo "============================================================================"
 	echo "PASSED"

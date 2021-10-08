@@ -389,6 +389,9 @@ function validateInternalLogWithInstance {
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
 			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
 			exit 1
+		elif [[ ! -z "$maxInstanceCnt" ]] && (($count < $instanceCnt)); then
+			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
+			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]]; then
 			echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count"
 		else

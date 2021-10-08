@@ -16,6 +16,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -240,8 +241,9 @@ func (h *VBMasterCheckHandler) handler() {
 				h.handleRequest(vbMasterReq)
 			} else if isResp {
 				h.handleResponse(vbMasterResp)
+			} else {
+				h.logger.Errorf("VBMasterCheckHandler received invalid format: %v", reflect.TypeOf(reqOrResp))
 			}
-
 		}
 	}
 }

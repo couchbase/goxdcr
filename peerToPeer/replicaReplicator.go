@@ -147,7 +147,7 @@ func (r *ReplicaReplicatorImpl) HandleSpecDeletion(oldSpec *metadata.Replication
 	}
 }
 
-// Go through the all the remote cluster agents and make the replicator's interval the min of
+// Go through the all the agents and make the replicator's interval the min of
 // all the agents' intervals
 func (r *ReplicaReplicatorImpl) refreshIntervalTicker(oldSpecDuration time.Duration) {
 	minIntervalInExistence := time.Duration(metadata.ReplicateCkptIntervalConfig.MaxValue) * time.Minute
@@ -202,7 +202,7 @@ func (r *ReplicaReplicatorImpl) Start() {
 }
 
 func (r *ReplicaReplicatorImpl) Stop() {
-	// nothing yet
+	close(r.finCh)
 }
 
 func (r *ReplicaReplicatorImpl) run() {
@@ -386,7 +386,7 @@ func (a *ReplicatorAgentImpl) GetReplicationInterval() (time.Duration, error) {
 func (a *ReplicatorAgentImpl) ReplicationIsPaused() bool {
 	spec, err := a.replSpecSvc.ReplicationSpecReadOnly(a.specId)
 	if err != nil {
-		a.logger.Errorf("Unable to get repl %v - %v so assuming replication is paused", err)
+		a.logger.Warnf("Unable to get repl %v - %v so assuming replication is paused", err)
 		return true
 	}
 	return !spec.Settings.Active
@@ -497,7 +497,7 @@ func getCombinedVBs(mainCkpts map[uint16]*metadata.CheckpointsDoc, bkptCkpts map
 }
 
 func (a *ReplicatorAgentImpl) GetAndClearInfoToReplicate() (*metadata.ReplicationSpecification, *VBPeriodicReplicateReq, error) {
-	specClone, err := a.replSpecSvc.ReplicationSpec(a.specId)
+	specClone, err := a.replSpecSvc.ReplicationSpecReadOnly(a.specId)
 	if err != nil {
 		return nil, nil, err
 	}

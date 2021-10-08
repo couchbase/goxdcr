@@ -21,8 +21,8 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 	spec2.Settings.Values[metadata.ReplicateCkptIntervalKey] = 5 // 5 minute
 	specList := []*metadata.ReplicationSpecification{spec, spec2}
 
-	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc)
+	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc := setupBoilerPlate()
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
 
 	dummyFunc := func(reqs PeersVBPeriodicReplicateReqs) error {
 		return nil
@@ -39,9 +39,9 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 
 	newSpec := spec.Clone()
 	newSpec.Settings.Values[metadata.ReplicateCkptIntervalKey] = 30 // 30 min
-	_, _, _, replSvc2, _, _, _, _, _, _, _, _, _ := setupBoilerPlate()
+	_, _, _, replSvc2, _, _, _, _, _, _, _, _, _, _ := setupBoilerPlate()
 	specList2 := []*metadata.ReplicationSpecification{newSpec, spec2}
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList2, replSvc2, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc)
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList2, replSvc2, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
 	replicator.replicationSpecSvc = replSvc2
 	replicator.agentMapMtx.Lock()
 	for _, agent := range replicator.agentMap {
