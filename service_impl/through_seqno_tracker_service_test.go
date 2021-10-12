@@ -23,6 +23,7 @@ import (
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"sync/atomic"
 	"testing"
 )
 
@@ -952,9 +953,11 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
 
 	var osoSnapshotSeqnoCheck uint64
+	var osoSnapshotRaisedCnt uint32
 	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
 		// When raising raising a snapshot, the seqno should equal the throughSeqno
 		assert.Equal(osoSnapshotSeqnoCheck, snapshotSeqno)
+		atomic.AddUint32(&osoSnapshotRaisedCnt, 1)
 	}
 
 	mutationEvent := &mcc.UprEvent{
@@ -980,6 +983,8 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 	// 11. 3 sent
 
 	// 1. OSO start
+	through_seqno := svc.GetThroughSeqno(1)
+	assert.Equal(uint64(0), through_seqno)
 	var helperItems = make([]interface{}, 2)
 	helperItems[0] = uint16(1)
 	syncCh := make(chan bool)
@@ -1040,6 +1045,10 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
 	assert.Nil(svc.ProcessEvent(sentEvent))
 
+	// Before OSO ends, throughSeqno should not move
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(0), through_seqno)
+
 	// OSO now ends -
 	osoSnapshotSeqnoCheck = 4
 	helperItems = make([]interface{}, 2)
@@ -1052,12 +1061,138 @@ func TestOSOSentFirstOutOfOrder(t *testing.T) {
 	case <-syncCh:
 		break
 	}
+	assert.Equal(uint32(1), atomic.LoadUint32(&osoSnapshotRaisedCnt))
 
 	// 10. 5 received
 	mutationEvent.Seqno = 5
 	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(commonEvent))
 
-	through_seqno := svc.GetThroughSeqno(1)
+	through_seqno = svc.GetThroughSeqno(1)
 	assert.Equal(uint64(5), through_seqno)
+}
+
+func TestOSOLargeRangeOutOfOrder(t *testing.T) {
+	fmt.Println("============== Test case start: TestOSOLargeRangeOutOfOrder =================")
+	defer fmt.Println("============== Test case end: TestOSOLargeRangeOutOfOrder =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+
+	var osoSnapshotSeqnoCheck uint64
+	var osoSnapshotRaisedCnt uint32
+	svc.osoSnapshotRaiser = func(vbno uint16, snapshotSeqno uint64) {
+		// When raising raising a snapshot, the seqno should equal the throughSeqno
+		assert.Equal(osoSnapshotSeqnoCheck, snapshotSeqno)
+		atomic.AddUint32(&osoSnapshotRaisedCnt, 1)
+	}
+
+	mutationEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+
+	// This test case will simulate the following from DCP
+	// OSO - 3, 2, 1, 4
+	// Non-OSO - 5
+
+	// Try to simulate a middle throughSeqno that does not match OSO snapshot
+	// 1. OSO Start
+	// 2. 3 received
+	// 3. 2 received
+	// 4. 1 received
+	// 5. 1 sent
+	// 6. 2 sent
+	// 7. 3 sent
+	// 8. 4 received
+	// 9. OSO ends
+	// 10.Check throughSeqno
+	// 11. 4 sent
+
+	// 1. OSO start
+	through_seqno := svc.GetThroughSeqno(1)
+	assert.Equal(uint64(0), through_seqno)
+	var helperItems = make([]interface{}, 2)
+	helperItems[0] = uint16(1)
+	syncCh := make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent := common.NewEvent(common.OsoSnapshotReceived, true /*turn on OSO*/, nil, helperItems, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	select {
+	case <-syncCh:
+		break
+	}
+
+	// 2. 3 received
+	mutationEvent.Seqno = 3
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// 3. 2 received
+	mutationEvent.Seqno = 2
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// 4. 1 received
+	mutationEvent.Seqno = 1
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VBucket = 1
+
+	// 5. 1 sent
+	mutationEvent.Seqno = 1
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// 6. 2 sent
+	mutationEvent.Seqno = 2
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// 7. 3 sent
+	mutationEvent.Seqno = 3
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// 8. 4 received
+	mutationEvent.Seqno = 4
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	// Before OSO end, throughSeqno does not move
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(0), through_seqno)
+
+	// 9. OSO now ends - should raise snapshot of {4,4}
+	osoSnapshotSeqnoCheck = 4
+	helperItems = make([]interface{}, 2)
+	helperItems[0] = uint16(1)
+	syncCh = make(chan bool)
+	helperItems[1] = syncCh
+	commonEvent = common.NewEvent(common.OsoSnapshotReceived, false /*turn off OSO*/, nil, helperItems, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	select {
+	case <-syncCh:
+		break
+	}
+
+	// After OSO end, throughSeqno does not move
+	assert.Equal(uint32(1), atomic.LoadUint32(&osoSnapshotRaisedCnt))
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(0), through_seqno)
+
+	// 10. 4 sent
+	mutationEvent.Seqno = 4
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent = common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	assert.Equal(uint32(1), atomic.LoadUint32(&osoSnapshotRaisedCnt))
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(4), through_seqno)
 }

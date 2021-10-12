@@ -1809,9 +1809,6 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	if snapErr != nil {
 		// if we cannot find snapshot for the checkpoint seqno, the checkpoint seqno is still usable in normal cases,
 		// just that we may have to rollback to 0 when rollback is needed
-		// In rare cases, snapshot start/end seqno is needed only when DCP cannot simply use checkpoint seqno as the start seqno.
-		// The logic is in ep-engine/src/failover-table.cc
-		// log the problem and proceed
 		ckmgr.logger.Warnf("%v\n", snapErr.Error())
 	}
 
@@ -2148,11 +2145,24 @@ func (ckmgr *CheckpointManager) getFailoverUUIDForSeqno(vbno uint16, snapEndSeqN
 // find the snapshot to which the checkpoint seqno belongs
 func (ckmgr *CheckpointManager) getSnapshotForSeqno(vbno uint16, seqno uint64) (uint64, uint64, error) {
 	snapshot_history_obj, ok1 := ckmgr.snapshot_history_map[vbno]
+	var latestSnapshotStart uint64
+	var latestSnapshotEnd uint64
+	var earliestSnapshotStart uint64
+	var earliestSnapshotEnd uint64
 	if ok1 {
 		snapshot_history_obj.lock.RLock()
 		defer snapshot_history_obj.lock.RUnlock()
 		for i := len(snapshot_history_obj.snapshot_history) - 1; i >= 0; i-- {
 			cur_snapshot := snapshot_history_obj.snapshot_history[i]
+			if i == len(snapshot_history_obj.snapshot_history)-1 {
+				latestSnapshotStart = cur_snapshot.start_seqno
+				latestSnapshotEnd = cur_snapshot.end_seqno
+			}
+			if i == 0 {
+				earliestSnapshotStart = cur_snapshot.start_seqno
+				earliestSnapshotEnd = cur_snapshot.end_seqno
+			}
+
 			if seqno >= cur_snapshot.start_seqno && seqno <= cur_snapshot.end_seqno {
 				return cur_snapshot.start_seqno, cur_snapshot.end_seqno, nil
 			}
@@ -2162,7 +2172,11 @@ func (ckmgr *CheckpointManager) getSnapshotForSeqno(vbno uint16, seqno uint64) (
 		ckmgr.handleGeneralError(err)
 		return 0, 0, err
 	}
-	return 0, 0, fmt.Errorf("%v Failed to find snapshot for vb=%v, seqno=%v\n", ckmgr.pipeline.FullTopic(), vbno, seqno)
+
+	// kv - https://github.com/couchbase/kv_engine/blob/master/docs/dcp/documentation/commands/stream-request.md
+	// will require that ssStartSeqno <= seqnoToResume <= ssEndSeqno, so return the values accordingly for checkpointing
+	return seqno, seqno, fmt.Errorf("%v Failed to find snapshot for vb=%v seqno=%v earliestSnapshot=[%v,%v] latestSnapshot=[%v,%v]",
+		ckmgr.pipeline.FullTopic(), vbno, seqno, earliestSnapshotStart, earliestSnapshotEnd, latestSnapshotStart, latestSnapshotEnd)
 }
 
 func (ckmgr *CheckpointManager) UpdateVBTimestamps(vbno uint16, rollbackseqno uint64) (*base.VBTimestamp, error) {
