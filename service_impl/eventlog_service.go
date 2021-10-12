@@ -199,7 +199,7 @@ func (service *EventLogSvc) invokeRestWithRetryAfter(baseURL, path string, body 
 				backoff_time = backoff_time + backoff_time
 			}
 		}
-		if res.Body != nil {
+		if res != nil && res.Body != nil {
 			res.Body.Close()
 		}
 		if i < EventReportRetry-1 {
