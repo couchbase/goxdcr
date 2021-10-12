@@ -993,6 +993,9 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	bp, err := pipelineMgr.pipeline_factory.NewSecondaryPipeline(topic, mainPipeline,
 		rep_status.RecordBackfillProgress, common.BackfillPipeline)
 	if err != nil {
+		if errMap == nil {
+			errMap = make(base.ErrorMap)
+		}
 		errMap[fmt.Sprintf("pipelineMgr.pipeline_factory.NewSecondaryPipeline(%v)", topic)] = err
 		return errMap
 	}
@@ -1043,7 +1046,7 @@ func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.Erro
 	bp := rep_status.BackfillPipeline()
 	if bp == nil {
 		pipelineMgr.logger.Infof("%v had no previously latched instance of backfill pipeline", topic)
-		return nil
+		return errMap
 	}
 
 	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s\n", topic)
@@ -1063,7 +1066,7 @@ func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.Erro
 		pipelineMgr.logger.Infof("Backfill Pipeline %v is not in the right state to be stopped. state=%v\n", topic, state)
 	}
 
-	return nil
+	return errMap
 }
 
 // Use this only for unit test

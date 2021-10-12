@@ -587,7 +587,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 		errMap["genericPipeline.SetState.Pipeline_Stopped"] = err
 	}
 
-	genericPipeline.logger.Infof("%v %v has been stopped\n errMap=%v\n", genericPipeline.Type(), genericPipeline.InstanceId(), errMap)
+	genericPipeline.logger.Infof("%v %v has been stopped\n errMap=%v", genericPipeline.Type(), genericPipeline.InstanceId(), errMap)
 	return errMap
 }
 
