@@ -1,5 +1,3 @@
-//go:build !pcre
-
 /*
 Copyright 2017-Present Couchbase, Inc.
 
