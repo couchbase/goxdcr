@@ -306,7 +306,7 @@ func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	assert.Nil(err)
 
 	var dummySlice [][]byte
-	result, body, endPos, err, _, _ := stripFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	result, body, endPos, err, _, _, _ := stripFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
 	assert.True(result)
 	assert.NotNil(body)
 	assert.True(endPos <= len(body))
@@ -379,7 +379,7 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	assert.Nil(err)
 
 	var dummySlice [][]byte
-	result, body, endPos, err, _, _ := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	result, body, endPos, err, _, _, _ := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
 	assert.True(result)
 	assert.NotNil(body)
 	assert.True(endPos <= len(body))
@@ -713,7 +713,7 @@ func TestTransactionMB36043(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(txnUprEvent)
 
-	needToReplicate, _, _, _, _, _ := legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	needToReplicate, _, _, _, _, _, _ := legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
 	assert.False(needToReplicate)
 
 	// Even with a new, non-legacy filter, it should still prevent ATR related doc keys from being replicated
@@ -721,6 +721,6 @@ func TestTransactionMB36043(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(txFilter)
 
-	needToReplicate, _, _, _, _, _ = legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	needToReplicate, _, _, _, _, _, _ = legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
 	assert.False(needToReplicate)
 }

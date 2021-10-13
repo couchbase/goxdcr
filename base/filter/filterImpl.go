@@ -116,7 +116,7 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		filter.slicesToBeReleasedBuf = filter.slicesToBeReleasedBuf[:0]
 	}()
 
-	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt := filter.filterTransactionRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
+	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt, bodyHasBeenModified := filter.filterTransactionRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
 	if err != nil {
 		return false, err, errDesc, totalFailedDpCnt
 	}
@@ -133,10 +133,11 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		}
 	}
 
-	// When body is not nil, it means the body is meant to be used - it contains decompressed values of the original
+	// When body is not nil, and has been modified,
+	// it means the body is meant to be used - it contains decompressed values of the original
 	// compressed DCP document, and it has been stripped of any transactional related xattrs
 	// Save the body so that it can be copied later and reused if it hasn't been done before (determined via flag)
-	if needToReplicate && body != nil && !wrappedUprEvent.Flags.ShouldUseDecompressedValue() {
+	if needToReplicate && body != nil && bodyHasBeenModified && !wrappedUprEvent.Flags.ShouldUseDecompressedValue() {
 		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos))
 		if err != nil {
 			return needToReplicate, err, "wrappedUprEvent.ByteSliceGetter", totalFailedDpCnt
@@ -164,26 +165,26 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 // In this scenario body is a newly allocated byte slice, which holds the decompressed document body,
 // and also contains extra bytes to accommodate key, so that it can be reused by advanced filtering later.
 // In other scenarios body is nil and endBodyPos is -1
-func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64) {
+func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64, bool) {
 	if base.Equals(uprEvent.Key, base.TransactionClientRecordKey) {
 		// filter out transaction client records
-		return false, nil, 0, nil, "", 0
+		return false, nil, 0, nil, "", 0, false
 	}
 
 	// active transaction records look like "_txn:atr-[VbucketId]-#[a-f1-9]+"
 	if base.ActiveTxnRecordRegexp.Match(uprEvent.Key) {
 		// filter out active transaction record
-		return false, nil, 0, nil, "", 0
+		return false, nil, 0, nil, "", 0, false
 	}
 
 	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
 		// these mutations do not have xattrs and do not need xattr processing
-		return true, nil, 0, nil, "", 0
+		return true, nil, 0, nil, "", 0, false
 	}
 
 	if uprEvent.DataType&memcached.XattrDataType == 0 {
 		// no xattrs, no op
-		return true, nil, 0, nil, "", 0
+		return true, nil, 0, nil, "", 0, false
 	}
 
 	// Whether we will need to filter on body later
@@ -192,9 +193,10 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 	// For UPR_MUTATION with xattrs, continue to filter based on whether transaction xattrs are present
 	hasTransXattrs, body, endBodyPos, err, errDesc, failedDpCnt, uncompressedUprValue := filter.utils.CheckForTransactionXattrsInUprEvent(uprEvent, filter.dp, slicesToBeReleased, needToFilterBody)
 	if err != nil {
-		return false, nil, 0, err, errDesc, failedDpCnt
+		return false, nil, 0, err, errDesc, failedDpCnt, false
 	}
 
+	var bodyHasBeenModified bool
 	passedFilter := true
 	if filter.ShouldSkipUncommittedTxn() {
 		// if mutation has transaction xattrs, do not replicate it
@@ -203,17 +205,17 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 		// Strip out transaction xattributes
 		newBodySlice, err := filter.dp.GetByteSlice(uint64(len(uncompressedUprValue)))
 		if err != nil {
-			return false, nil, 0, err, errDesc, failedDpCnt
+			return false, nil, 0, err, errDesc, failedDpCnt, false
 		}
 		*slicesToBeReleased = append(*slicesToBeReleased, newBodySlice)
 
 		xattrIterator, err := base.NewXattrIterator(uncompressedUprValue)
 		if err != nil {
-			return false, nil, 0, err, errDesc, failedDpCnt
+			return false, nil, 0, err, errDesc, failedDpCnt, false
 		}
 		bodyWithoutXttr, err := base.StripXattrAndGetBody(uncompressedUprValue)
 		if err != nil {
-			return false, nil, 0, err, errDesc, failedDpCnt
+			return false, nil, 0, err, errDesc, failedDpCnt, false
 		}
 
 		xattrComposer := base.NewXattrComposer(newBodySlice)
@@ -223,7 +225,7 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 			if err != nil {
 				errDesc = fmt.Sprintf("error during xattribute walk")
 				if err != nil {
-					return false, nil, 0, err, errDesc, failedDpCnt
+					return false, nil, 0, err, errDesc, failedDpCnt, false
 				}
 			}
 			if base.Equals(key, base.TransactionXattrKey) {
@@ -232,14 +234,15 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {
 				errDesc = fmt.Sprintf("error during xattribute composition")
-				return false, nil, 0, err, errDesc, failedDpCnt
+				return false, nil, 0, err, errDesc, failedDpCnt, false
 			}
 		}
 
 		body = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr)
 		endBodyPos = len(body)
+		bodyHasBeenModified = true
 	}
-	return passedFilter, body, endBodyPos, nil, "", failedDpCnt
+	return passedFilter, body, endBodyPos, nil, "", failedDpCnt, bodyHasBeenModified
 }
 
 // Passed in body, if not nil, is a decompressed byte slice produced by earlier processing steps
