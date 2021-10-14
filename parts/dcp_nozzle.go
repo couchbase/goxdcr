@@ -284,6 +284,7 @@ type DcpNozzle struct {
 	sourceBucketName string
 	targetBucketName string
 	client           mcc.ClientIface
+	lock_client      sync.Mutex // lock to avoid client connection leak
 	uprFeed          mcc.UprFeedIface
 	// lock on uprFeed to avoid race condition
 	lock_uprFeed sync.RWMutex
@@ -377,6 +378,7 @@ func NewDcpNozzle(id string,
 		bOpen:                    true, /*bOpen	bool*/
 		lock_bOpen:               sync.RWMutex{},
 		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
+		lock_client:              sync.Mutex{},
 		lock_uprFeed:             sync.RWMutex{},
 		cur_ts:                   make(map[uint16]*vbtsWithLock),
 		vb_stream_status:         make(map[uint16]*streamStatusWithLock),
@@ -465,7 +467,14 @@ func (dcp *DcpNozzle) initializeMemcachedClient(settings metadata.ReplicationSet
 	dcpMcReqFeatures.CompressionType = dcp.memcachedCompressionSetting
 	dcp.savedMcReqFeatures = dcpMcReqFeatures
 
+	dcp.lock_client.Lock()
+	if dcp.state == common.Part_Stopping || dcp.state == common.Part_Stopping {
+		// If xmem start is slow, dcp can still be initializing when pipeline start times out and is being stopped. Don't create DCP connection to avoid connection leak
+		dcp.lock_client.Unlock()
+		return fmt.Errorf("Skipping creating client since DCP is stopping.")
+	}
 	dcp.client, respondedFeatures, err = dcp.utils.GetMemcachedConnectionWFeatures(addr, dcp.sourceBucketName, dcp.user_agent, base.KeepAlivePeriod, dcpMcReqFeatures, dcp.Logger())
+	dcp.lock_client.Unlock()
 
 	if err == nil && (dcp.memcachedCompressionSetting != base.CompressionTypeNone) && (respondedFeatures.CompressionType != dcp.memcachedCompressionSetting) {
 		dcp.Logger().Errorf("%v Attempting to send HELO with compression type: %v, but received response with %v",
@@ -798,8 +807,9 @@ func (dcp *DcpNozzle) Stop() error {
 	dcp.closeUprStreamsWithTimeout()
 	dcp.closeUprFeedWithTimeout()
 
-	// there is no need to lock dcp.client since it is accessed only in two places, Start() and Stop(),
-	// which cannot be called concurrently due to the pipeline updater setup
+	// need to lock dcp.client. Even with pipeline updater setup, if pipeline start is timed out and being restarted,
+	// DCP nozzle could still be creating the client before it realizes that it needs to stop.
+	dcp.lock_client.Lock()
 	if dcp.client != nil {
 		err = dcp.client.Close()
 		if err != nil {
@@ -810,6 +820,7 @@ func (dcp *DcpNozzle) Stop() error {
 	} else {
 		dcp.Logger().Infof("%v skipping closing client since it is nil.", dcp.Id())
 	}
+	dcp.lock_client.Unlock()
 
 	dcp.Logger().Debugf("%v received %v items, sent %v items\n", dcp.Id(), dcp.counterReceived(), dcp.counterSent())
 
