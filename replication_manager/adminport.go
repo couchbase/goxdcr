@@ -571,7 +571,7 @@ func (adminport *Adminport) doCreateReplicationRequest(request *http.Request) (*
 		logger_ap.Errorf("Error creating replication. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, true)
 	} else {
-		return NewCreateReplicationResponse(replicationId, warnings)
+		return NewCreateReplicationResponse(replicationId, warnings, justValidate)
 	}
 }
 
@@ -630,7 +630,8 @@ func (adminport *Adminport) doChangeDefaultReplicationSettingsRequest(request *h
 		return response, err
 	}
 
-	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, "")
+	// Changing default replication settings is not done on the UI normally but through REST or CLI so no need for warnings
+	justValidate, settingsMap, errorsMap, _ := DecodeChangeReplicationSettings(request, "")
 	if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, false)
@@ -687,7 +688,7 @@ func (adminport *Adminport) doViewReplicationSettingsRequest(request *http.Reque
 	}
 
 	// marshal replication settings in replication spec and return it
-	return NewReplicationSettingsResponse(replSpec.Settings)
+	return NewReplicationSettingsResponse(replSpec.Settings, nil, false)
 }
 
 func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Request) (*ap.Response, error) {
@@ -698,15 +699,14 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 	if err != nil {
 		return EncodeReplicationValidationErrorIntoResponse(err)
 	}
-	logger_ap.Infof("Request params: replicationId=%v\n", replicationId)
-
-	justValidate, settingsMap, errorsMap := DecodeChangeReplicationSettings(request, replicationId)
+	justValidate, settingsMap, errorsMap, includeWarnings := DecodeChangeReplicationSettings(request, replicationId)
+	logger_ap.Infof("Request params: replicationId=%v justValidate=%v includeWarnings=%v", replicationId, justValidate, includeWarnings)
 	if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v", errorsMap)
 		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
-	logger_ap.Infof("Request params: justValidate=%v, inputSettings=%v\n", justValidate, settingsMap.CloneAndRedact())
+	logger_ap.Infof("Request params: justValidate=%v includeWarnings=%v inputSettings=%v", justValidate, includeWarnings, settingsMap.CloneAndRedact())
 
 	// "pauseRequested" setting is special - it requires execute permission
 	_, pauseRequestedSpecified := settingsMap[metadata.ActiveKey]
@@ -727,17 +727,15 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return response, err
 	}
 
-	if justValidate {
-		return NewEmptyArrayResponse()
-	}
-
-	err = adminport.performOnetimeUserActions(settingsMap, replicationId)
-	if err != nil {
-		return EncodeReplicationSpecErrorIntoResponse(err)
+	if !justValidate {
+		err = adminport.performOnetimeUserActions(settingsMap, replicationId)
+		if err != nil {
+			return EncodeReplicationSpecErrorIntoResponse(err)
+		}
 	}
 	cleanupTempReplicationSettingKeys(settingsMap)
 
-	errorsMap, err = UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
+	errorsMap, err, warnings := UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), justValidate)
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
@@ -745,13 +743,20 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 		return EncodeErrorsMapIntoResponse(errorsMap, false)
 	}
 
+	if justValidate {
+		logger_ap.Info("Done with doChangeReplicationSettingsRequest (justValidate)")
+		// At this point, no error, just return warnings if any
+		return NewReplicationSettingsResponse(nil, warnings, includeWarnings)
+	}
+
 	// return replication settings after changes
 	replSpec, err := ReplicationSpecService().ReplicationSpec(replicationId)
 	if err != nil {
 		return EncodeReplicationSpecErrorIntoResponse(err)
 	}
+
 	logger_ap.Info("Done with doChangeReplicationSettingsRequest")
-	return NewReplicationSettingsResponse(replSpec.Settings)
+	return NewReplicationSettingsResponse(replSpec.Settings, warnings, includeWarnings)
 }
 
 func ForceManualBackfillRequest(replId string, incomingReq string) error {

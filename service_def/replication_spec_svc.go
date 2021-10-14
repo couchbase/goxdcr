@@ -13,13 +13,24 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 )
 
+type UIWarnings interface {
+	String() string
+	Len() int
+
+	GetSuccessfulWarningStrings() []string
+	GetFieldWarningsOnly() map[string]interface{}
+
+	AppendGeneric(warning string)
+	AddWarning(key string, val string)
+}
+
 type ReplicationSpecSvc interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	ReplicationSpecReadOnly(replicationId string) (*metadata.ReplicationSpecification, error)
 	// additionalInfo is an optional parameter, which, if provided, will be written to replication creation ui log
 	AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error
-	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, []string)
-	ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (base.ErrorMap, error)
+	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, UIWarnings)
+	ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (base.ErrorMap, error, UIWarnings)
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	DelReplicationSpecWithReason(replicationId string, reason string) (*metadata.ReplicationSpecification, error)

@@ -392,6 +392,7 @@ const RemoteClusterAuthErrString = "Authentication failed"
 // constant used by more than one rest apis
 const (
 	JustValidate        = "just_validate"
+	IncludeWarnings     = "include_warnings"
 	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
@@ -1400,3 +1401,8 @@ const PreReplicateVBMasterCheckKey = "preReplicateVBMasterCheck"
 const ReplicateCkptIntervalKey = "replicateCkptIntervalMin"
 
 var ReplicateCkptInterval = 60 * time.Minute
+
+const (
+	SourceNozzlePerNode = "sourceNozzlePerNode"
+	TargetNozzlePerNode = "targetNozzlePerNode"
+)

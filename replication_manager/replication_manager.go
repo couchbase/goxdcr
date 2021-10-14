@@ -555,7 +555,7 @@ func BackfillManager() service_def.BackfillMgrIface {
 
 //CreateReplication create the replication specification in metadata store
 //and start the replication pipeline
-func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (string, map[string]error, error, []string) {
+func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (string, map[string]error, error, service_def.UIWarnings) {
 	logger_rm.Infof("Creating replication - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
 
@@ -656,22 +656,23 @@ func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, o
 	return false
 }
 
-//update the per-replication settings
-func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (map[string]error, error) {
-	logger_rm.Infof("Update replication settings for %v, settings=%v\n", topic, settings.CloneAndRedact())
+// update the per-replication settings only if justValidate is false
+// Warnings should be given only if there are no errors
+func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs, justValidate bool) (map[string]error, error, service_def.UIWarnings) {
+	logger_rm.Infof("Update replication settings for %v, settings=%v, justValidate=%v", topic, settings.CloneAndRedact(), justValidate)
 
 	var internalChangesTookPlace bool
 
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)
 	if err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 
 	// Validate the spec once more with the new settings
 	replSpecificFields, replSpecificErr := constructReplicationSpecificFieldsFromSpec(replSpec)
 	if replSpecificErr != nil {
-		return nil, err
+		return nil, err, nil
 	}
 
 	// Save some old values that we may need
@@ -682,24 +683,27 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	// update replication spec with input settings
 	changedSettingsMap, errorMap := replSpec.Settings.UpdateSettingsFromMap(settings)
 
+	var performRemoteValidation bool
 	// Only Re-evaluate Compression pre-requisites if it is turned on and actually switched algorithms to catch any cluster-wide compression changes
 	compressionType, CompressionOk := changedSettingsMap[metadata.CompressionTypeKey]
-	if CompressionOk && (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
+	if !justValidate && CompressionOk && (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
 		base.GetCompressionType(oldCompressionType) != base.GetCompressionType(compressionType.(int)) {
-		validateRoutineErrorMap, validateErr := ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName,
-			replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings)
-		if len(validateRoutineErrorMap) > 0 {
-			return validateRoutineErrorMap, nil
-		} else if validateErr != nil {
-			return nil, validateErr
-		}
+		// justValidate means UI is in need of immediate update - do not perform RPC call
+		performRemoteValidation = true
 	}
+	validateRoutineErrorMap, validateErr, warnings := ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName, replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings, performRemoteValidation)
+	if len(validateRoutineErrorMap) > 0 {
+		return validateRoutineErrorMap, nil, nil
+	} else if validateErr != nil {
+		return nil, validateErr, nil
+	}
+
 	// If compression is SNAPPY and is not changed, take this oppurtunity to change it to AUTO
 	if oldCompressionType == base.CompressionTypeSnappy && !CompressionOk {
 		changedSettingsMap[metadata.CompressionTypeKey] = base.CompressionTypeAuto
 	}
 	if len(errorMap) != 0 {
-		return errorMap, nil
+		return errorMap, nil, nil
 	}
 
 	// If nonfilter-settings invoked this change, take this opportunity to fix stale infos if there is an existing expression present
@@ -708,15 +712,19 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 
 		_, errorMap = replSpec.Settings.UpdateSettingsFromMap(settings)
 		if len(errorMap) != 0 {
-			return errorMap, fmt.Errorf("Internal XDCR Error related to internal filter management: %v", errorMap)
+			return errorMap, fmt.Errorf("Internal XDCR Error related to internal filter management: %v", errorMap), nil
 		}
 		internalChangesTookPlace = true
+	}
+
+	if justValidate {
+		return nil, nil, warnings
 	}
 
 	if len(changedSettingsMap) != 0 {
 		err = ReplicationSpecService().SetReplicationSpec(replSpec)
 		if err != nil {
-			return nil, err
+			return nil, err, nil
 		}
 		logger_rm.Infof("Updated replication settings for replication %v\n", topic)
 
@@ -740,7 +748,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	} else if internalChangesTookPlace {
 		err = ReplicationSpecService().SetReplicationSpec(replSpec)
 		if err != nil {
-			return nil, err
+			return nil, err, nil
 		}
 		logger_rm.Infof("Internally updated replication settings for replication %v\n", topic)
 
@@ -748,7 +756,7 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 		logger_rm.Infof("Did not update replication settings for replication %v since there are no real changes", topic)
 	}
 
-	return nil, nil
+	return nil, nil, warnings
 }
 
 // get statistics for all running replications
@@ -799,11 +807,11 @@ func GetAllStatistics() (*expvar.Map, error) {
 }
 
 //create and persist the replication specification
-func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
+func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (*metadata.ReplicationSpecification, map[string]error, error, service_def.UIWarnings) {
 	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
 	// validate that everything is alright with the replication configuration before actually creating it
-	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, !justValidate)
 	if err != nil || len(errorMap) > 0 {
 		return nil, errorMap, err, nil
 	}
@@ -838,34 +846,18 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	}
 	spec.Settings = replSettings
 
-	if warnings == nil {
-		warnings = []string{}
-	}
-	checkAndRaiseNumNozzlesWarnings(replSettings, &warnings)
-
 	if justValidate {
 		return spec, nil, nil, warnings
 	}
 
 	//persist it
-	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec, base.FlattenStringArray(warnings))
+	err = replication_mgr.repl_spec_svc.AddReplicationSpec(spec, warnings.String())
 	if err == nil {
 		logger_rm.Infof("Success adding replication specification %s\n", spec.Id)
 		return spec, nil, nil, warnings
 	} else {
 		logger_rm.Errorf("Error adding replication specification %s. err=%v\n", spec.Id, err)
 		return nil, nil, err, nil
-	}
-}
-
-func checkAndRaiseNumNozzlesWarnings(settings *metadata.ReplicationSettings, warnings *[]string) {
-	numSrcNozzlesPerNode := settings.Values[metadata.SourceNozzlePerNodeKey].(int)
-	numTgtNozzlesPerNode := settings.Values[metadata.TargetNozzlePerNodeKey].(int)
-	currentGoMaxProcs := runtime.GOMAXPROCS(0)
-
-	if numSrcNozzlesPerNode+numTgtNozzlesPerNode > currentGoMaxProcs {
-		warnString := fmt.Sprintf("Settings requested %v source nozzles per node and %v target nozzles per node, which is greater than GOMAXPROCS (%v). System performance may be degraded", numSrcNozzlesPerNode, numTgtNozzlesPerNode, currentGoMaxProcs)
-		*warnings = append(*warnings, warnString)
 	}
 }
 

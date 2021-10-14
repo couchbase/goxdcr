@@ -28,9 +28,9 @@ type ReplicationSettingsSvc struct {
 
 func NewReplicationSettingsSvc(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, top_svc service_def.XDCRCompTopologySvc) *ReplicationSettingsSvc {
 	return &ReplicationSettingsSvc{
-		metadata_svc: metadata_svc,
-		xdcr_topology_svc:	top_svc,
-		logger:       log.NewLogger("ReplSettSvc", logger_ctx),
+		metadata_svc:      metadata_svc,
+		xdcr_topology_svc: top_svc,
+		logger:            log.NewLogger("ReplSettSvc", logger_ctx),
 	}
 }
 

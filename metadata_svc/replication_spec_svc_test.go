@@ -52,6 +52,7 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	utilitiesMock := &utilsMock.UtilsIface{}
 	clientMock := &mcMock.ClientIface{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
+	replSettingSvc := &service_def.ReplicationSettingsSvc{}
 
 	emptyCacheEntries := []*service_def_real.MetadataEntry{}
 	replicationSpecsCatalogKey := "replicationSpec"
@@ -65,13 +66,9 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	}).Return(nil)
 	xdcrTopologyMock.On("MyClusterUuid").Return("dummyClusterUUID", nil)
 
-	replSpecSvc, _ := NewReplicationSpecService(uiLogSvcMock,
-		remoteClusterMock,
-		metadataSvcMock,
-		xdcrTopologyMock,
-		nil,
-		log.DefaultLoggerContext,
-		utilitiesMock)
+	replSettingSvc.On("GetDefaultReplicationSettings").Return(metadata.DefaultReplicationSettings(), nil)
+
+	replSpecSvc, _ := NewReplicationSpecService(uiLogSvcMock, remoteClusterMock, metadataSvcMock, xdcrTopologyMock, nil, log.DefaultLoggerContext, utilitiesMock, replSettingSvc)
 
 	sourceBucket := "testSrcBucket"
 	targetBucket := "testTargetBucket"
@@ -268,7 +265,7 @@ func TestValidateNewReplicationSpec(t *testing.T) {
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestValidateNewReplicationSpec =================")
 }
@@ -290,7 +287,7 @@ func TestNegativeConflictResolutionType(t *testing.T) {
 	// Assume XMEM replication type
 	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	// Should have only one error
 	assert.Equal(len(errMap), 1)
 	fmt.Println("============== Test case end: TestNegativeConflictResolutionType =================")
@@ -313,7 +310,7 @@ func TestDifferentConflictResolutionTypeOnCapi(t *testing.T) {
 	// Assume CAPI (elasticsearch) replication type
 	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeCapi
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	// Should pass
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestDifferentConflictResolutionTypeOnCapi =================")
@@ -363,12 +360,12 @@ func TestCompressionPositive(t *testing.T) {
 
 	// Turning off should be allowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeNone
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.Equal(len(errMap), 0)
 
 	// Turning on should be allowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
-	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.Equal(len(errMap), 0)
 
 	fmt.Println("============== Test case end: TestCompressionPositive =================")
@@ -386,12 +383,12 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 
 	// Turning on should be disallowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.NotEqual(len(errMap), 0)
 
 	// Setting to auto should be disallowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
-	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.NotEqual(len(errMap), 0)
 
 	fmt.Println("============== Test case end: TestCompressionNegNotEnterprise =================")
@@ -410,11 +407,11 @@ func TestOriginalRegexInvalidateFilter(t *testing.T) {
 	// Xmem using elas
 	settings[metadata.FilterExpressionKey] = "^abc"
 
-	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.NotNil(err)
 
 	// If it's an existing replication with an old filter, it's ok
-	errMap, err := replSpecSvc.ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket, settings)
+	errMap, err, _ := replSpecSvc.ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Nil(err)
 	assert.Equal(0, len(errMap))
 
@@ -434,7 +431,7 @@ func TestOriginalRegexUpgradedFilter(t *testing.T) {
 	// Xmem using elas
 	settings[metadata.FilterExpressionKey] = base.UpgradeFilter("^abc")
 
-	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestOriginalRegexUpgradedFilter =================")
@@ -452,7 +449,7 @@ func TestStripExpiry(t *testing.T) {
 
 	settings[metadata.FilterExpDelKey] = base.FilterExpDelStripExpiration
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings)
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Equal(len(errMap), 0)
 
 	fmt.Println("============== Test case start: TestStripExpiry =================")
@@ -536,7 +533,7 @@ func TestAddReplicationSpecWhenRefreshNotReady(t *testing.T) {
 		Settings:         metadata.DefaultReplicationSettings(),
 	}
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(spec.SourceBucketName, spec.TargetClusterUUID, spec.TargetBucketName, spec.Settings.ToMap(false))
+	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(spec.SourceBucketName, spec.TargetClusterUUID, spec.TargetBucketName, spec.Settings.ToMap(false), false)
 	assert.Len(errMap, 0)
 
 	assert.Nil(replSpecSvc.AddReplicationSpec(spec, ""))

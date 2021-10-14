@@ -171,7 +171,7 @@ func main() {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, nil, nil, utils)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, nil, nil, utils, nil)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -203,7 +203,9 @@ func main() {
 		}
 		resolver_svc := service_impl.NewResolverSvc(top_svc)
 
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, resolver_svc, nil, utils)
+		replicationSettingSvc := metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc)
+
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, resolver_svc, nil, utils, replicationSettingSvc)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
@@ -251,7 +253,7 @@ func main() {
 			replication_spec_svc,
 			remote_cluster_svc,
 			top_svc,
-			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
+			replicationSettingSvc,
 			checkpointsService,
 			service_impl.NewCAPIService(nil, utils),
 			audit_svc,

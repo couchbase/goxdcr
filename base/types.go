@@ -2561,3 +2561,70 @@ func (s StringStringMap) Clone() StringStringMap {
 	}
 	return cloneMap
 }
+
+type UIWarningImpl struct {
+	GenericWarnings []string
+	FieldWarnings   map[string]interface{}
+}
+
+func NewUIWarning() *UIWarningImpl {
+	return &UIWarningImpl{
+		FieldWarnings: make(map[string]interface{}),
+	}
+}
+
+func (u *UIWarningImpl) AppendGeneric(warning string) {
+	u.GenericWarnings = append(u.GenericWarnings, warning)
+}
+
+func (u *UIWarningImpl) AddWarning(key string, val string) {
+	u.FieldWarnings[key] = val
+}
+
+func (u *UIWarningImpl) String() string {
+	if u == nil {
+		return ""
+	}
+	out, err := json.Marshal(u)
+	if err != nil {
+		return fmt.Sprintf("Internal error: %v", err)
+	}
+	return string(out)
+}
+
+// Successful Creation warnings from UI are essentially pop up boxes with strings in each box
+func (u *UIWarningImpl) GetSuccessfulWarningStrings() []string {
+	if u == nil {
+		return nil
+	}
+
+	var retVal []string
+	for _, warning := range u.GenericWarnings {
+		retVal = append(retVal, warning)
+	}
+
+	for fieldKey, warning := range u.FieldWarnings {
+		retVal = append(retVal, fmt.Sprintf("%v:%v", fieldKey, warning))
+	}
+
+	return retVal
+}
+
+func (u *UIWarningImpl) Len() int {
+	if u == nil {
+		return 0
+	}
+
+	var count int
+	count += len(u.FieldWarnings)
+	count += len(u.GenericWarnings)
+	return count
+}
+
+func (u *UIWarningImpl) GetFieldWarningsOnly() map[string]interface{} {
+	if u == nil {
+		return nil
+	}
+
+	return u.FieldWarnings
+}

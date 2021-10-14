@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/service_def"
 	"io/ioutil"
 	"net/http"
 	"reflect"
@@ -62,8 +63,8 @@ const (
 	BatchSize                      = "docBatchSizeKb"
 	FailureRestartInterval         = "failureRestartInterval"
 	OptimisticReplicationThreshold = "optimisticReplicationThreshold"
-	SourceNozzlePerNode            = "sourceNozzlePerNode"
-	TargetNozzlePerNode            = "targetNozzlePerNode"
+	SourceNozzlePerNode            = base.SourceNozzlePerNode
+	TargetNozzlePerNode            = base.TargetNozzlePerNode
 	MaxExpectedReplicationLag      = "maxExpectedReplicationLag"
 	TimeoutPercentageCap           = "timeoutPercentageCap"
 	LogLevel                       = "logLevel"
@@ -98,10 +99,11 @@ const (
 	ReplicateCkptIntervalKey       = base.ReplicateCkptIntervalKey
 )
 
-// constants for parsing create replication response
+// constants for parsing create/change/view replication response
 const (
 	ReplicationId = "id"
 	Warnings      = "warnings"
+	Result        = "result"
 )
 
 // constants for RegexpValidation request
@@ -337,6 +339,23 @@ func DecodeJustValidateFromRequest(request *http.Request) (bool, error) {
 				return false, err
 			} else {
 				return justValidate, nil
+			}
+		default:
+			// ignore other parameters
+		}
+	}
+	return false, nil
+}
+
+func DecodeIncludeWarningsFromRequest(request *http.Request) (bool, error) {
+	for key, valArr := range request.Form {
+		switch key {
+		case base.IncludeWarnings:
+			includeWarnings, err := getBoolFromValArr(valArr, false)
+			if err != nil {
+				return false, err
+			} else {
+				return includeWarnings, nil
 			}
 		default:
 			// ignore other parameters
@@ -757,7 +776,7 @@ func validateMergeFunctionMapping(settings metadata.ReplicationSettingsMap) erro
 	return nil
 }
 
-func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings metadata.ReplicationSettingsMap, errorsMap base.ErrorMap) {
+func DecodeChangeReplicationSettings(request *http.Request, replicationId string) (justValidate bool, settings metadata.ReplicationSettingsMap, errorsMap base.ErrorMap, includeWarnings bool) {
 	errorsMap = make(base.ErrorMap)
 
 	if err := request.ParseForm(); err != nil {
@@ -768,6 +787,11 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	justValidate, err := DecodeJustValidateFromRequest(request)
 	if err != nil {
 		errorsMap[base.JustValidate] = err
+	}
+
+	includeWarnings, err = DecodeIncludeWarningsFromRequest(request)
+	if err != nil {
+		errorsMap[base.IncludeWarnings] = err
 	}
 
 	var isDefaultSettings bool
@@ -833,6 +857,7 @@ func DecodeChangeReplicationSettings(request *http.Request, replicationId string
 	return
 }
 
+// Temporary keys are used to interact with XDCR and not meant to be visible to the user
 func cleanupTempReplicationSettingKeys(settings metadata.ReplicationSettingsMap) {
 	for key, _ := range settings {
 		if metadata.IsSettingValueTemporary(key) {
@@ -992,20 +1017,38 @@ func DecodeRegexpValidationRequest(request *http.Request) (expression, docId, bu
 	return
 }
 
-func NewCreateReplicationResponse(replicationId string, warnings []string) (*ap.Response, error) {
+func NewCreateReplicationResponse(replicationId string, warnings service_def.UIWarnings, justValidate bool) (*ap.Response, error) {
 	params := make(map[string]interface{})
 	params[ReplicationId] = replicationId
-	if len(warnings) > 0 {
-		params[Warnings] = warnings
+	if warnings != nil && warnings.Len() > 0 {
+		if justValidate {
+			params[Warnings] = warnings.GetFieldWarningsOnly()
+		} else {
+			params[Warnings] = warnings.GetSuccessfulWarningStrings()
+		}
 	}
 	return EncodeObjectIntoResponse(params)
 }
 
-func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings) (*ap.Response, error) {
+func NewReplicationSettingsResponse(settings *metadata.ReplicationSettings, warnings service_def.UIWarnings, includeWarnings bool) (*ap.Response, error) {
 	if settings == nil {
-		return NewEmptyArrayResponse()
+		if warnings == nil || warnings.Len() == 0 {
+			return NewEmptyArrayResponse()
+		} else {
+			params := make(map[string]interface{})
+			params[Warnings] = warnings.GetFieldWarningsOnly()
+			return EncodeObjectIntoResponse(params)
+		}
 	} else {
-		return EncodeObjectIntoResponseSensitive(convertSettingsToRestSettingsMap(settings, false))
+		restMap := convertSettingsToRestSettingsMap(settings, false)
+		if includeWarnings && warnings != nil && warnings.Len() > 0 {
+			params := make(map[string]interface{})
+			params[Result] = restMap
+			params[Warnings] = warnings.GetSuccessfulWarningStrings()
+			return EncodeObjectIntoResponseSensitive(params)
+		} else {
+			return EncodeObjectIntoResponseSensitive(restMap)
+		}
 	}
 }
 

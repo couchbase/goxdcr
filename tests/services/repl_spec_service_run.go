@@ -65,7 +65,7 @@ func startReplicationSpecService() error {
 		fmt.Println(err.Error())
 		return err
 	}
-	service, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metadataSvc, top_svc, cluster_info_svc, nil)
+	service, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metadataSvc, top_svc, cluster_info_svc, nil, nil, nil)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err

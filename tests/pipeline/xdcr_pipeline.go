@@ -149,7 +149,7 @@ func setup() error {
 		fmt.Println(err.Error())
 		return err
 	}
-	repl_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil)
+	repl_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, cluster_info_svc, nil, nil, nil)
 	if err != nil {
 		fmt.Println(err.Error())
 		return err
