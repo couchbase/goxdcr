@@ -83,10 +83,14 @@ function runOneReplicationCycle {
 	echo "Waiting 20 seconds before checking item count"
 	sleep 20
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-
 	checkUnidirectionalChangesLeft
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
 	validateXDCRCheckpoints "C1"
 	grepForPanics
+
+	echo "Sleeping for 5 minutes to let rebalance run"
+	sleep 300
 
 	pauseReplication "C1" "B1" "C2" "B2"
 	echo "Waiting 20 seconds for pipeline to really pause"
@@ -94,10 +98,12 @@ function runOneReplicationCycle {
 	grepForPanics
 
 	resumeReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
+	echo "Waiting 60 seconds for resume to finish"
+	sleep 60
 	grepForPanics
 
+	echo "Sleeping for 5 minutes to let rebalance run"
+	sleep 300
 	checkUnidirectionalChangesLeft
 	grepForPanics
 
@@ -141,8 +147,8 @@ function runOneRebalanceCycle {
 	currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
 	sleep $timeIntervalSecs
 
-	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
-	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2
+	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(( $currentTopologyRestartCnt + 1 ))
+	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2 $(( $currentTopologyRestartCnt2 + 1 ))
 
 	startEjectNode "C1P" "C1"
 	echo "Rebalancing out completed. Letting replication continue with one nodes for $timeIntervalSecs seconds before rebalancing back in"
@@ -153,8 +159,8 @@ function runOneRebalanceCycle {
 	currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
 	sleep $timeIntervalSecs
 
-	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt
-	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2
+	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(( $currentTopologyRestartCnt + 1 ))
+	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2 $(( $currentTopologyRestartCnt2 + 1 ))
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"

@@ -2471,6 +2471,11 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 
 // Failover logs are used for sorting checkpoint purposes and are optional
 func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(checkpointsDocs map[uint16]*metadata.CheckpointsDoc, brokenMappingShaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog) error {
+	if len(checkpointsDocs) == 0 {
+		// Nothing to merge, don't waste time stopping the world
+		return nil
+	}
+
 	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.stopTheWorldAndMergeCkpt", base.DiagStopTheWorldAndMergeCkptThreshold)
 	defer stopFunc()
 	// Before merging, disable checkpointing and wait until all checkpointing tasks are finished
@@ -2804,8 +2809,14 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMap map[uint16]*metadata
 	currDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(ckmgr.pipeline.FullTopic(), true)
 	getCkptDocsStopFunc()
 	if err != nil {
-		ckmgr.logger.Errorf("mergeFinalCkpts CheckpointsDocs err %v\n", err)
-		return err
+		if err == service_def.MetadataNotFoundErr {
+			// Use empty currDocs to merge incoming filteredMap
+			err = nil
+			currDocs = make(map[uint16]*metadata.CheckpointsDoc)
+		} else {
+			ckmgr.logger.Errorf("mergeFinalCkpts CheckpointsDocs err %v\n", err)
+			return err
+		}
 	}
 
 	genSpec := ckmgr.pipeline.Specification()
@@ -2852,7 +2863,10 @@ func (ckmgr *CheckpointManager) lockCkptsAndPersistCkptDocs(currDocs map[uint16]
 
 func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog, currDocs map[uint16]*metadata.CheckpointsDoc, spec *metadata.ReplicationSpecification) {
 	// create empty docs for missing VBs
-	for vb, _ := range filteredMap {
+	for vb, ckptDoc := range filteredMap {
+		if ckptDoc == nil || ckptDoc.Len() == 0 {
+			continue
+		}
 		_, exists := currDocs[vb]
 		if !exists {
 			currDocs[vb] = metadata.NewCheckpointsDoc(spec.InternalId)

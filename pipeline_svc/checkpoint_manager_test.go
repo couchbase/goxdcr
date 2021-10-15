@@ -184,3 +184,45 @@ func TestMergeNoConsensusCkpt(t *testing.T) {
 	_, err = ckptMgr.checkSpecInternalID(noConsensusMap)
 	assert.NotNil(err)
 }
+
+func TestMergEmptyCkpts(t *testing.T) {
+	fmt.Println("============== Test case start: TestMergEmptyCkpts =================")
+	defer fmt.Println("============== Test case end: TestMergEmptyCkpts =================")
+	assert := assert.New(t)
+
+	filteredMap := make(map[uint16]*metadata.CheckpointsDoc)
+	currentDocs := make(map[uint16]*metadata.CheckpointsDoc)
+
+	spec, _ := metadata.NewReplicationSpecification("", "", "", "", "")
+	filteredMap[0] = &metadata.CheckpointsDoc{
+		Checkpoint_records: nil,
+		SpecInternalId:     "",
+		Revision:           nil,
+	}
+
+	assert.Len(currentDocs, 0)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	assert.Len(currentDocs, 0)
+
+	var recordsList metadata.CheckpointRecordsList
+	record := &metadata.CheckpointRecord{}
+	recordsList = append(recordsList, record)
+	filteredMap[0] = &metadata.CheckpointsDoc{
+		Checkpoint_records: recordsList,
+		SpecInternalId:     "testId",
+		Revision:           nil,
+	}
+
+	assert.Len(currentDocs, 0)
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	assert.Len(currentDocs, 1)
+
+	filteredMap[1] = &metadata.CheckpointsDoc{
+		Checkpoint_records: recordsList,
+		SpecInternalId:     "testId",
+		Revision:           nil,
+	}
+	filteredMap[2] = &metadata.CheckpointsDoc{}
+	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, nil, nil, currentDocs, spec)
+	assert.Len(currentDocs, 2)
+}

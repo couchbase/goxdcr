@@ -83,21 +83,27 @@ function runOneReplicationCycle {
 	echo "Waiting 20 seconds before checking item count"
 	sleep 20
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	checkUnidirectionalChangesLeft
 	validateXDCRCheckpoints "C1"
 	grepForPanics
 
+	echo "Sleeping for 5 minutes to let rebalance run"
+	sleep 300
+
 	pauseReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 10 seconds for pipeline to really pause"
-	sleep 10
+	echo "Waiting 20 seconds for pipeline to really pause"
+	sleep 20
 	grepForPanics
 
 	resumeReplication "C1" "B1" "C2" "B2"
-	echo "Waiting 10 seconds for resume to finish"
-	sleep 10
+	echo "Waiting 60 seconds for resume to finish"
+	sleep 60
 	grepForPanics
 
+	echo "Sleeping for 5 minutes to let rebalance run"
+	sleep 300
 	checkUnidirectionalChangesLeft
 	grepForPanics
 
