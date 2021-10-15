@@ -779,7 +779,9 @@ func (xmem *XmemNozzle) Close() error {
 func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	t := time.Now()
 	xmem.Logger().Infof("%v starting ....settings=%v\n", xmem.Id(), settings.CloneAndRedact())
-	defer xmem.Logger().Infof("%v took %vs to start\n", xmem.Id(), time.Since(t).Seconds())
+	defer func() {
+		xmem.Logger().Infof("%v took %vs to start\n", xmem.Id(), time.Since(t).Seconds())
+	}()
 
 	err := xmem.SetState(common.Part_Starting)
 	if err != nil {
