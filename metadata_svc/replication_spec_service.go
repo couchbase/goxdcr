@@ -138,7 +138,7 @@ type ReplicationSpecService struct {
 	replicationSettingSvc  service_def.ReplicationSettingsSvc
 
 	cache                  *MetadataCache
-	cache_lock             *sync.Mutex
+	cache_lock             *sync.Mutex // Lock when update status, update spec or delete a pipeline.
 	logger                 *log.CommonLogger
 	metadataChangeCallback []MetadataChangeHandlerCallback
 	metadataChangeMtx      sync.RWMutex
@@ -1567,9 +1567,9 @@ func (service *ReplicationSpecService) SetDerivedObj(specId string, derivedObj i
 }
 
 func (service *ReplicationSpecService) GetDerivedObj(specId string) (interface{}, error) {
-	service.cache_lock.Lock()
-	defer service.cache_lock.Unlock()
-
+	// No need to lock service.cache_lock since the cache is atomic.Value
+	// If cache is being updated at the same time, the atomic.Value will ensure that
+	// we get a consistent value.
 	cachedVal, ok := service.getCache().Get(specId)
 	if !ok || cachedVal == nil {
 		return nil, fmt.Errorf(base.ReplicationSpecNotFoundErrorMessage)
