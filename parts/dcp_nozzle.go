@@ -468,7 +468,7 @@ func (dcp *DcpNozzle) initializeMemcachedClient(settings metadata.ReplicationSet
 	dcp.savedMcReqFeatures = dcpMcReqFeatures
 
 	dcp.lock_client.Lock()
-	if dcp.state == common.Part_Stopping || dcp.state == common.Part_Stopping {
+	if dcp.state == common.Part_Stopping || dcp.state == common.Part_Stopped {
 		// If xmem start is slow, dcp can still be initializing when pipeline start times out and is being stopped. Don't create DCP connection to avoid connection leak
 		dcp.lock_client.Unlock()
 		return fmt.Errorf("Skipping creating client since DCP is stopping.")
