@@ -140,6 +140,24 @@ func (vbts VBTimestamp) Clone() VBTimestamp {
 	return clonedTs
 }
 
+func (vbts *VBTimestamp) Sanitize() {
+	if vbts.Seqno == 0 {
+		vbts.SnapshotStart = 0
+		vbts.SnapshotEnd = 0
+	} else {
+		if vbts.SnapshotStart > vbts.Seqno || vbts.SnapshotStart == 0 {
+			vbts.SnapshotStart = vbts.Seqno
+		}
+		// Sanitize should only be used on a non-checkpoint VBTimestamp
+		// Since the timestamp is not used as a checkpoint to resume, just set the endTs to be the same
+		// so that DCP resume can work and let DCP roll us back if necessary
+		// Let's not pretend that there is a legit snapshot end that we know of
+		if vbts.SnapshotEnd != vbts.Seqno {
+			vbts.SnapshotEnd = vbts.Seqno
+		}
+	}
+}
+
 type ClusterConnectionInfoProvider interface {
 	MyConnectionStr() (string, error)
 	// returns username, password, http auth mechanism, certificate, whether certificate contains SAN, client certificate, client key

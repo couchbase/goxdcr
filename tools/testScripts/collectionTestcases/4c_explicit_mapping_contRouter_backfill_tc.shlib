@@ -137,8 +137,8 @@ function runTestCase {
 	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection3Arr[@]})
 	setupTopologies
 	printGlobalScopeAndCollectionInfo
-	echo "Sleeping 30 seconds for discovery and automatic backfill"
-	sleep 30
+	echo "Sleeping 120 seconds for discovery and automatic backfill"
+	sleep 120
 
 	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS

@@ -234,8 +234,8 @@ function runTestCase {
 
 	# Under normal I/O load, these should happen closely together
 	# Backfill Pipeline given VBMasterCheck will
-	echo "Sleeping 30..."
-	sleep 30
+	echo "Sleeping 60..."
+	sleep 60
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2)) $(($currentBackfillInstanceCnt + 3))
 	date
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 2))

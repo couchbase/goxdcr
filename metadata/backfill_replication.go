@@ -728,7 +728,7 @@ func (v *VBTasksMapType) PostUnmarshalInit() {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
 	for vb, tasks := range v.VBTasksMap {
-		// Take this opportunity to clean up nil tasks
+		// Take this opportunity to clean up nil tasks and other sanitization
 		tasks.PostUnmarshalInit()
 		if tasks.Len() == 0 {
 			delete(v.VBTasksMap, vb)
@@ -1019,8 +1019,10 @@ func (b *BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNames
  * 5005-15005
  * Try to merge a new task of 0-20000
  * 1. First 5-5000 will soak up the middle, leaving 0-5 (subtask1) and 5000-20000 (subtask2)
- * 2. Run subtask1 through 0-20000, and subtask2 through 0-20000
+ * 2. Run subtask1 through 5005-15005, and subtask2 through 5005-15005
  * Each subtask recursively will figure out what couldn't be "soaked" up and add the unmergable part to the list on the stack
+ * 3. subtask1 (0-5) would have not been soaked up and be appended while subtask2 (5000-20000) would have been broken up into
+ * subtask2a (5000-5005) and subtask2b (15005-20000), and repeat step 2 with subtask2a and subtask2b
  *
  * No locking is to be done as this will be called recursively. top level call should lock it accordingly
  */
@@ -1515,6 +1517,11 @@ func (b *BackfillTask) PostUnmarshalInit() {
 	if b.mutex == nil {
 		b.mutex = &sync.RWMutex{}
 	}
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if b.Timestamps != nil {
+		b.Timestamps.Sanitize()
+	}
 }
 
 // This is specifically used to indicate the start and end of a backfill
@@ -1593,5 +1600,25 @@ func (b *BackfillVBTimestamps) Accomodate(incoming *BackfillVBTimestamps) (fully
 		largerOutOfBounds.EndingTimestamp = incoming.EndingTimestamp
 	}
 
+	smallerOutOfBounds.Sanitize()
+	largerOutOfBounds.Sanitize()
 	return
+}
+
+func (b *BackfillVBTimestamps) Sanitize() {
+	if b.StartingTimestamp != nil {
+		b.StartingTimestamp.Sanitize()
+	}
+	if b.EndingTimestamp != nil {
+		b.EndingTimestamp.Sanitize()
+	}
+}
+
+func (b *BackfillVBTimestamps) tsSnapIsValid() bool {
+	if b == nil {
+		return true
+	}
+
+	return b.StartingTimestamp.SnapshotStart <= b.StartingTimestamp.Seqno &&
+		b.StartingTimestamp.Seqno <= b.StartingTimestamp.SnapshotEnd
 }

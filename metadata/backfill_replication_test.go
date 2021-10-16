@@ -29,6 +29,7 @@ func TestBackfillReplMarshal(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
 	}
+	ts0.Sanitize()
 
 	vb0Task0 := NewBackfillTask(ts0, []CollectionNamespaceMapping{namespaceMapping})
 
@@ -36,6 +37,7 @@ func TestBackfillReplMarshal(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5005, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 15005, 500, 500, manifestsIdPair},
 	}
+	ts1.Sanitize()
 	vb0Task1 := NewBackfillTask(ts1, []CollectionNamespaceMapping{namespaceMapping})
 	_, err := json.Marshal(vb0Task0)
 	assert.Nil(err)
@@ -48,6 +50,7 @@ func TestBackfillReplMarshal(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{1, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{1, 0, 5000, 500, 500, manifestsIdPair},
 	}
+	ts2.Sanitize()
 	vb1Task0 := NewBackfillTask(ts2, []CollectionNamespaceMapping{namespaceMapping})
 
 	vb1Tasks := NewBackfillTasks()
@@ -148,12 +151,18 @@ func TestMergeTask(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
 	}
+	assert.False(ts0.tsSnapIsValid())
+	ts0.Sanitize()
+	assert.True(ts0.tsSnapIsValid())
 	task0 := NewBackfillTask(ts0, []CollectionNamespaceMapping{namespaceMapping})
 
 	ts1 := &BackfillVBTimestamps{
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 100, 500, 500, manifestsIdPair},
 	}
+	assert.False(ts1.tsSnapIsValid())
+	ts1.Sanitize()
+	assert.True(ts1.tsSnapIsValid())
 	task1 := NewBackfillTask(ts1, []CollectionNamespaceMapping{namespaceMapping})
 
 	canFullyMerge, unableToMerge, subTask1, subTask2 := task0.MergeIncomingTask(task1)
@@ -166,11 +175,13 @@ func TestMergeTask(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 0, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 100, 500, 500, manifestsIdPair},
 	}
+	ts2.Sanitize()
 	task2 := NewBackfillTask(ts2, []CollectionNamespaceMapping{namespaceMapping2})
 	canFullyMerge, unableToMerge, subTask1, subTask2 = task0.MergeIncomingTask(task2)
 	assert.False(canFullyMerge)
 	assert.False(unableToMerge)
 	assert.NotNil(subTask1)
+	assert.True(subTask1.Timestamps.tsSnapIsValid())
 	assert.Equal(uint64(0), subTask1.Timestamps.StartingTimestamp.Seqno)
 	assert.Equal(uint64(5), subTask1.Timestamps.EndingTimestamp.Seqno)
 	assert.Nil(subTask2)
@@ -180,6 +191,7 @@ func TestMergeTask(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5001, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 10000, 500, 500, manifestsIdPair},
 	}
+	ts3.Sanitize()
 	task3 := NewBackfillTask(ts3, []CollectionNamespaceMapping{namespaceMapping})
 	canFullyMerge, unableToMerge, subTask1, subTask2 = task0.MergeIncomingTask(task3)
 	assert.False(canFullyMerge)
@@ -202,6 +214,7 @@ func TestMergeTasks(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
 	}
+	ts0.Sanitize()
 
 	vb0Task0 := NewBackfillTask(ts0, []CollectionNamespaceMapping{namespaceMapping})
 
@@ -209,6 +222,7 @@ func TestMergeTasks(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 5005, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 15005, 500, 500, manifestsIdPair},
 	}
+	ts1.Sanitize()
 	vb0Task1 := NewBackfillTask(ts1, []CollectionNamespaceMapping{namespaceMapping})
 
 	totalTasks := NewBackfillTasks()
@@ -220,6 +234,7 @@ func TestMergeTasks(t *testing.T) {
 		StartingTimestamp: &base.VBTimestamp{0, 0, 0, 10, 10, manifestsIdPair},
 		EndingTimestamp:   &base.VBTimestamp{0, 0, 20000, 500, 500, manifestsIdPair},
 	}
+	ts2.Sanitize()
 	vb0Task2 := NewBackfillTask(ts2, []CollectionNamespaceMapping{namespaceMapping})
 
 	unmergableTasks := NewBackfillTasks()
@@ -228,6 +243,9 @@ func TestMergeTasks(t *testing.T) {
 	assert.Equal(3, unmergableTasks.Len())
 
 	assert.True(unmergableTasks.containsStartEndRange(0, 5))
+	for _, task := range unmergableTasks.List {
+		assert.True(task.Timestamps.tsSnapIsValid())
+	}
 	assert.True(unmergableTasks.containsStartEndRange(5000, 5005))
 	assert.True(unmergableTasks.containsStartEndRange(15005, 20000))
 	fmt.Println("============== Test case end: TestMergeTasks =================")
