@@ -198,13 +198,13 @@ func (_m *PipelineMgrForUpdater) StopAllUpdaters() {
 	_m.Called()
 }
 
-// StopBackfillPipeline provides a mock function with given fields: topic
-func (_m *PipelineMgrForUpdater) StopBackfillPipeline(topic string) base.ErrorMap {
-	ret := _m.Called(topic)
+// StopBackfillPipeline provides a mock function with given fields: topic, skipCkpt
+func (_m *PipelineMgrForUpdater) StopBackfillPipeline(topic string, skipCkpt bool) base.ErrorMap {
+	ret := _m.Called(topic, skipCkpt)
 
 	var r0 base.ErrorMap
-	if rf, ok := ret.Get(0).(func(string) base.ErrorMap); ok {
-		r0 = rf(topic)
+	if rf, ok := ret.Get(0).(func(string, bool) base.ErrorMap); ok {
+		r0 = rf(topic, skipCkpt)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.ErrorMap)

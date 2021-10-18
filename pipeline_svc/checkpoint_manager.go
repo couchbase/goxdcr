@@ -185,6 +185,13 @@ func (h *checkpointSyncHelper) setCheckpointAllowed() {
 	h.checkpointAllowed = true
 }
 
+func (h *checkpointSyncHelper) setCheckpointDisallowed() {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+
+	h.checkpointAllowed = false
+}
+
 func (h *checkpointSyncHelper) isCheckpointAllowed() bool {
 	h.mtx.RLock()
 	defer h.mtx.RUnlock()
@@ -709,7 +716,7 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStopWithWait(waitGrp *sync.WaitG
 }
 func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 	if !ckmgr.isCheckpointAllowed() {
-		ckmgr.logger.Errorf("%v %v has not been started - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+		ckmgr.logger.Errorf("%v %v has not been started (or has been disabled) - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 		return
 	}
 
@@ -1362,6 +1369,11 @@ func (ckmgr *CheckpointManager) UpdateSettings(settings metadata.ReplicationSett
 	if bmUpdateOk && bmUpdateOk2 {
 		ckmgr.CleanupInMemoryBrokenMap(diffPair, srcManifestsDelta)
 		return nil
+	}
+
+	bypassCkpt, bypassExists := settings[metadata.CkptMgrBypassCkpt].(bool)
+	if bypassExists && bypassCkpt {
+		ckmgr.checkpointAllowedHelper.setCheckpointDisallowed()
 	}
 
 	checkpoint_interval, err := ckmgr.utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)

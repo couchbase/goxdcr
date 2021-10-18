@@ -81,6 +81,7 @@ const (
 
 	CkptMgrBrokenmapIdleUpdateDiffPair    = "ckmgrBrokenMapIdleUpdateDiffPair"
 	CkptMgrBrokenmapIdleUpdateSrcManDelta = "ckmgrBrokenMapIdleUpdateSrcManDelta"
+	CkptMgrBypassCkpt                     = "ckmgrBypassCkpt"
 
 	PreReplicateVBMasterCheckKey = base.PreReplicateVBMasterCheckKey
 	ReplicateCkptIntervalKey     = base.ReplicateCkptIntervalKey

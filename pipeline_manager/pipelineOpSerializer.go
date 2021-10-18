@@ -81,9 +81,9 @@ type PipelineOpSerializerIface interface {
 	Init(topic string) error
 	ReInit(topic string) error
 	Pause(topic string) error
-
-	// Async Backfill APIs
 	StartBackfill(topic string) error
+
+	// Synchronous Backfill APIs
 	StopBackfill(topic string) error
 	StopBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, cb2 base.StoppedPipelineErrCallback) error
 	CleanBackfill(topic string) error
@@ -112,6 +112,7 @@ type Job struct {
 
 	// Aux inputs for jobs
 	errForUpdateOp error
+	waitGrp        *sync.WaitGroup
 
 	// Input for UpdateWithStoppedCallback
 	callbackForWhenPipelineIsStopped base.StoppedPipelineCallback
@@ -121,6 +122,7 @@ type Job struct {
 	eventId           int
 	diffPair          *metadata.CollectionNamespaceMappingsDiffPair
 	srcManifestsDelta []*metadata.CollectionsManifest
+	skipBackfillCkpt  bool
 
 	// Optional outputs from jobs
 	repStatusCh chan SerializerRepStatusPair
@@ -237,8 +239,17 @@ func (serializer *PipelineOpSerializer) StopBackfill(topic string) error {
 	var stopBackfillJob Job
 	stopBackfillJob.jobType = BackfillPipelineStop
 	stopBackfillJob.pipelineTopic = topic
+	stopBackfillJob.skipBackfillCkpt = true
+	stopBackfillJob.waitGrp = &sync.WaitGroup{}
+	stopBackfillJob.waitGrp.Add(1)
 
-	return serializer.distributeJob(stopBackfillJob)
+	distributeErr := serializer.distributeJob(stopBackfillJob)
+	if distributeErr != nil {
+		return distributeErr
+	}
+
+	stopBackfillJob.waitGrp.Wait()
+	return nil
 }
 
 func (serializer *PipelineOpSerializer) StopBackfillWithCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
@@ -249,10 +260,19 @@ func (serializer *PipelineOpSerializer) StopBackfillWithCb(topic string, cb base
 	var stopBackfillJob Job
 	stopBackfillJob.jobType = BackfillPipelineStopWStoppedCb
 	stopBackfillJob.pipelineTopic = topic
+	stopBackfillJob.skipBackfillCkpt = true
 	stopBackfillJob.callbackForWhenPipelineIsStopped = cb
 	stopBackfillJob.errorCbForFailedStoppedOp = errCb
+	stopBackfillJob.waitGrp = &sync.WaitGroup{}
+	stopBackfillJob.waitGrp.Add(1)
 
-	return serializer.distributeJob(stopBackfillJob)
+	distributeErr := serializer.distributeJob(stopBackfillJob)
+	if distributeErr != nil {
+		return distributeErr
+	}
+
+	stopBackfillJob.waitGrp.Wait()
+	return nil
 }
 
 func (serializer *PipelineOpSerializer) CleanBackfill(topic string) error {
@@ -421,15 +441,17 @@ forloop:
 					serializer.logger.Warnf("Error starting backfill pipeline %v. err=%v", job.pipelineTopic, err)
 				}
 			case BackfillPipelineStop:
-				err := serializer.pipelineMgr.StopBackfill(job.pipelineTopic)
+				err := serializer.pipelineMgr.StopBackfill(job.pipelineTopic, job.skipBackfillCkpt)
 				if err != nil {
 					serializer.logger.Warnf("Error stopping backfill pipeline %v. err=%v", job.pipelineTopic, err)
 				}
+				job.waitGrp.Done()
 			case BackfillPipelineStopWStoppedCb:
-				err := serializer.pipelineMgr.StopBackfillWithStoppedCb(job.pipelineTopic, job.callbackForWhenPipelineIsStopped, job.errorCbForFailedStoppedOp)
+				err := serializer.pipelineMgr.StopBackfillWithStoppedCb(job.pipelineTopic, job.callbackForWhenPipelineIsStopped, job.errorCbForFailedStoppedOp, job.skipBackfillCkpt)
 				if err != nil {
 					serializer.logger.Warnf("Error stopping backfill pipeline with callback %v. err=%v", job.pipelineTopic, err)
 				}
+				job.waitGrp.Done()
 			case BackfillPipelineClean:
 				err := serializer.pipelineMgr.CleanupBackfillPipeline(job.pipelineTopic)
 				if err != nil {

@@ -103,7 +103,7 @@ type PipelineMgrInternalIface interface {
 type PipelineMgrForUpdater interface {
 	PipelineMgrInternalIface
 	StartBackfillPipeline(topic string) base.ErrorMap
-	StopBackfillPipeline(topic string) base.ErrorMap
+	StopBackfillPipeline(topic string, skipCkpt bool) base.ErrorMap
 }
 
 type PipelineMgrForSerializer interface {
@@ -111,8 +111,8 @@ type PipelineMgrForSerializer interface {
 	PauseReplication(topic string) error
 	CleanupPipeline(topic string) error
 	StartBackfill(topic string) error
-	StopBackfill(topic string) error
-	StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
+	StopBackfill(topic string, skipCkpt bool) error
+	StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error
 	CleanupBackfillPipeline(topic string) error
 	UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	DismissEvent(eventId int) error
@@ -123,9 +123,12 @@ type PipelineMgrForSerializer interface {
 type PipelineMgrBackfillIface interface {
 	GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error)
 	RequestBackfill(topic string) error
+
+	// The following 3 calls will be blocking
 	HaltBackfill(topic string) error
 	HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
 	CleanupBackfillCkpts(topic string) error
+
 	ReInitStreams(pipelineName string) error
 	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error
 }
@@ -588,7 +591,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 				bgWaitGrp = &sync.WaitGroup{}
 				stopBackfillPipelineInBg := func() {
 					defer bgWaitGrp.Done()
-					tempMap := pipelineMgr.StopBackfillPipeline(replId)
+					tempMap := pipelineMgr.StopBackfillPipeline(replId, false)
 					bgErrMapMtx.Lock()
 					bgErrMap = tempMap
 					bgErrMapMtx.Unlock()
@@ -889,12 +892,12 @@ func (pipelineMgr *PipelineManager) StartBackfill(topic string) error {
 	return nil
 }
 
-func (pipelineMgr *PipelineManager) StopBackfill(topic string) error {
+func (pipelineMgr *PipelineManager) StopBackfill(topic string, skipCkpt bool) error {
 	updater, _, err := pipelineMgr.getUpdater(topic, nil)
 	if err != nil {
 		return err
 	}
-	updater.stopBackfillPipeline()
+	updater.stopBackfillPipeline(skipCkpt)
 	return nil
 }
 
@@ -920,7 +923,7 @@ func (pipelineMgr *PipelineManager) getUpdater(topic string, curErr error) (*Pip
 	return updater, repStatus, nil
 }
 
-func (pipelineMgr *PipelineManager) StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+func (pipelineMgr *PipelineManager) StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
 	updater, _, err := pipelineMgr.getUpdater(topic, nil)
 	if err != nil {
 		return err
@@ -938,7 +941,7 @@ func (pipelineMgr *PipelineManager) StopBackfillWithStoppedCb(topic string, cb b
 		return err
 	}
 
-	updater.stopBackfillPipeline()
+	updater.stopBackfillPipeline(skipCkpt)
 	return nil
 }
 
@@ -981,7 +984,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	}
 
 	// First stop any latched backfill pipeline instances that have failed to start before
-	errMap = pipelineMgr.StopBackfillPipeline(mainPipeline.Topic())
+	errMap = pipelineMgr.StopBackfillPipeline(mainPipeline.Topic(), false)
 	if len(errMap) > 0 {
 		// Show warnings but continue
 		pipelineMgr.logger.Warnf("Stopping backfill pipeline prior to starting it had error(s): %v - continue to create next iteration of backfill pipeline", errMap)
@@ -1031,7 +1034,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	return errMap
 }
 
-func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.ErrorMap {
+func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string, skipCkpt bool) base.ErrorMap {
 	errMap := make(base.ErrorMap)
 
 	updater, rep_status, err := pipelineMgr.getUpdater(topic, nil)
@@ -1049,9 +1052,20 @@ func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string) base.Erro
 		return errMap
 	}
 
-	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s\n", topic)
+	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s (skipCkpt? %v)", topic, skipCkpt)
 	state := bp.State()
 	if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
+		if skipCkpt {
+			settingsMap := make(metadata.ReplicationSettingsMap)
+			settingsMap[metadata.CkptMgrBypassCkpt] = true
+			ckptMgr := bp.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC)
+			if ckptMgr == nil {
+				pipelineMgr.logger.Warnf("Unable to find ckptmgr to bypass ckpt for backfill pipeline %v", topic)
+			} else {
+				ckptMgr.UpdateSettings(settingsMap)
+			}
+		}
+
 		errMap = bp.Stop()
 		if len(errMap) > 0 {
 			pipelineMgr.logger.Errorf("Received error(s) when stopping backfill pipeline %v - %v\n", topic, base.FlattenErrorMap(errMap))
@@ -1307,6 +1321,11 @@ type updaterIntermediateCb struct {
 	errCb    base.StoppedPipelineErrCallback
 }
 
+type backfillStopChOpts struct {
+	skipCheckpointing bool
+	waitGrp           *sync.WaitGroup
+}
+
 //pipelineRepairer is responsible to repair a failing pipeline
 //it will retry after the retry_interval
 type PipelineUpdater struct {
@@ -1329,7 +1348,7 @@ type PipelineUpdater struct {
 	// startBackfillChannel
 	backfillStartCh chan bool
 	// stopBackfillChannel
-	backfillStopCh chan bool
+	backfillStopCh chan backfillStopChOpts
 	// Backfill ErrorMap
 	backfillErrMapCh chan base.ErrorMap
 
@@ -1471,7 +1490,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error,
 		updateWithCb:           make(chan updaterIntermediateCb, MaxNonblockingQueueJobs),
 		backfillUpdateWithCb:   make(chan updaterIntermediateCb, MaxNonblockingQueueJobs),
 		backfillStartCh:        make(chan bool, 1),
-		backfillStopCh:         make(chan bool, 1),
+		backfillStopCh:         make(chan backfillStopChOpts, 1),
 		backfillErrMapCh:       make(chan base.ErrorMap, 1),
 		rep_status:             rep_status_in,
 		logger:                 logger,
@@ -1545,7 +1564,7 @@ func (r *PipelineUpdater) run() {
 				} else {
 					r.setLastUpdateSuccess()
 				}
-			case <-r.backfillStopCh:
+			case opts := <-r.backfillStopCh:
 				if r.rep_status == nil || r.rep_status.BackfillPipeline() == nil {
 					r.logger.Warnf("Backfill pipeline for %v is already stopped", r.pipeline_name)
 					if r.checkReplicationActiveness() == ReplicationSpecNotActive {
@@ -1559,12 +1578,13 @@ func (r *PipelineUpdater) run() {
 						}
 					}
 				} else {
-					r.logger.Infof("Replication %v's backfill Pipeline is stopping\n", r.pipeline_name)
-					retErrMap = r.pipelineMgr.StopBackfillPipeline(r.pipeline_name)
+					r.logger.Infof("Replication %v's backfill Pipeline is stopping (skipCkpt? %v)", r.pipeline_name, opts.skipCheckpointing)
+					retErrMap = r.pipelineMgr.StopBackfillPipeline(r.pipeline_name, opts.skipCheckpointing)
 					if len(retErrMap) > 0 {
 						r.logger.Infof("Replication %v backfill stop experienced error(s): %v. Will let it die\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 					}
 				}
+				opts.waitGrp.Done()
 			case retErrMap = <-r.backfillErrMapCh:
 				var updateAgain bool
 				if r.getLastResult() {
@@ -2008,8 +2028,8 @@ func (r *PipelineUpdater) startBackfillPipeline() {
 	r.sendStartBackfillPipeline()
 }
 
-func (r *PipelineUpdater) stopBackfillPipeline() {
-	r.sendStopBackfillPipeline()
+func (r *PipelineUpdater) stopBackfillPipeline(skipCkpt bool) {
+	r.sendStopBackfillPipeline(skipCkpt)
 }
 
 // Lock must be held
@@ -2031,13 +2051,18 @@ func (r *PipelineUpdater) sendStartBackfillPipeline() {
 	r.logger.Infof("Replication status received startBackfill, current status=%v\n", r.rep_status)
 }
 
-func (r *PipelineUpdater) sendStopBackfillPipeline() {
-	select {
-	case r.backfillStopCh <- true:
-	default:
-		r.logger.Infof("BackfillStop-now message is already delivered for %v\n", r.pipeline_name)
+func (r *PipelineUpdater) sendStopBackfillPipeline(skipCkpt bool) {
+	waitGrp := &sync.WaitGroup{}
+	waitGrp.Add(1)
+	opts := backfillStopChOpts{
+		skipCheckpointing: skipCkpt,
+		waitGrp:           waitGrp,
 	}
-	r.logger.Infof("Replication status received stopBackfill, current status=%v\n", r.rep_status)
+	select {
+	case r.backfillStopCh <- opts:
+	}
+	r.logger.Infof("Replication status received stopBackfill, current status=%v", r.rep_status)
+	waitGrp.Wait()
 }
 
 func (r *PipelineUpdater) sendUpdateErr(err error) {
@@ -2056,7 +2081,7 @@ func (r *PipelineUpdater) sendUpdateErrMap(errMap base.ErrorMap) {
 	r.logger.Infof("Replication status is updated with error(s) %v, current status=%v\n", base.FlattenErrorMap(errMap), r.rep_status)
 }
 
-func (r PipelineUpdater) sendBackfillStartErrMap(errMap base.ErrorMap) {
+func (r *PipelineUpdater) sendBackfillStartErrMap(errMap base.ErrorMap) {
 	select {
 	case r.backfillErrMapCh <- errMap:
 	default:

@@ -266,13 +266,13 @@ func (_m *PipelineMgrForSerializer) StopAllUpdaters() {
 	_m.Called()
 }
 
-// StopBackfill provides a mock function with given fields: topic
-func (_m *PipelineMgrForSerializer) StopBackfill(topic string) error {
-	ret := _m.Called(topic)
+// StopBackfill provides a mock function with given fields: topic, skipCkpt
+func (_m *PipelineMgrForSerializer) StopBackfill(topic string, skipCkpt bool) error {
+	ret := _m.Called(topic, skipCkpt)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(topic)
+	if rf, ok := ret.Get(0).(func(string, bool) error); ok {
+		r0 = rf(topic, skipCkpt)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -280,13 +280,13 @@ func (_m *PipelineMgrForSerializer) StopBackfill(topic string) error {
 	return r0
 }
 
-// StopBackfillWithStoppedCb provides a mock function with given fields: topic, cb, errCb
-func (_m *PipelineMgrForSerializer) StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
-	ret := _m.Called(topic, cb, errCb)
+// StopBackfillWithStoppedCb provides a mock function with given fields: topic, cb, errCb, skipCkpt
+func (_m *PipelineMgrForSerializer) StopBackfillWithStoppedCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
+	ret := _m.Called(topic, cb, errCb, skipCkpt)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) error); ok {
-		r0 = rf(topic, cb, errCb)
+	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback, bool) error); ok {
+		r0 = rf(topic, cb, errCb, skipCkpt)
 	} else {
 		r0 = ret.Error(0)
 	}
