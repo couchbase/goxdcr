@@ -135,8 +135,9 @@ type CheckpointManager struct {
 	// If there is no checkpoint, then use these as starting point instead of 0
 	// When a rollback is called, if rollback to 0 is requested, then these
 	// starting points should be erased
-	backfillStartingTsMtx sync.RWMutex
-	backfillStartingTs    map[uint16]*base.VBTimestamp
+	backfillTsMtx      sync.RWMutex
+	backfillStartingTs map[uint16]*base.VBTimestamp
+	backfillEndingTs   map[uint16]*base.VBTimestamp
 
 	// Before a pipeline starts, prevent checkpoints from being created
 	// If a ckpt is created before old ones are loaded, it could lead to incorrect
@@ -164,6 +165,9 @@ type CheckpointManager struct {
 	initConnOnce sync.Once
 
 	bucketTopologySvc service_def.BucketTopologySvc
+
+	// Only used to bypass all the un-mockable RPC calls
+	unitTest bool
 }
 
 type checkpointSyncHelper struct {
@@ -309,6 +313,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		uiLogSvc:                  uiLogSvc,
 		collectionsManifestSvc:    collectionsManifestSvc,
 		backfillStartingTs:        make(map[uint16]*base.VBTimestamp),
+		backfillEndingTs:          make(map[uint16]*base.VBTimestamp),
 		backfillReplSvc:           backfillReplSvc,
 		getBackfillMgr:            getBackfillMgr,
 		checkpointAllowedHelper:   newCheckpointSyncHelper(),
@@ -370,8 +375,8 @@ func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
 
 func (ckmgr *CheckpointManager) populateBackfillStartingTs(spec *metadata.BackfillReplicationSpec) error {
 	var atLeastOneValid bool
-	ckmgr.backfillStartingTsMtx.Lock()
-	defer ckmgr.backfillStartingTsMtx.Unlock()
+	ckmgr.backfillTsMtx.Lock()
+	defer ckmgr.backfillTsMtx.Unlock()
 
 	vbTasks := spec.VBTasksMap
 	vbTasks.GetLock().RLock()
@@ -384,6 +389,7 @@ func (ckmgr *CheckpointManager) populateBackfillStartingTs(spec *metadata.Backfi
 		unlockFunc()
 		if timestampsClone != nil && timestampsClone.StartingTimestamp != nil {
 			ckmgr.backfillStartingTs[vb] = timestampsClone.StartingTimestamp
+			ckmgr.backfillEndingTs[vb] = timestampsClone.EndingTimestamp
 			atLeastOneValid = true
 		}
 	}
@@ -399,19 +405,20 @@ func (ckmgr *CheckpointManager) populateBackfillStartingTs(spec *metadata.Backfi
 // allow that to happen by removing the startingTs
 func (ckmgr *CheckpointManager) clearBackfillStartingTsIfNeeded(vbno uint16, rollbackSeqno uint64) {
 	var needToRemove bool
-	ckmgr.backfillStartingTsMtx.RLock()
+	ckmgr.backfillTsMtx.RLock()
 	startTs, exists := ckmgr.backfillStartingTs[vbno]
 	if exists {
 		if rollbackSeqno < startTs.Seqno {
 			needToRemove = true
 		}
 	}
-	ckmgr.backfillStartingTsMtx.RUnlock()
+	ckmgr.backfillTsMtx.RUnlock()
 
 	if needToRemove {
-		ckmgr.backfillStartingTsMtx.Lock()
+		ckmgr.backfillTsMtx.Lock()
 		delete(ckmgr.backfillStartingTs, vbno)
-		ckmgr.backfillStartingTsMtx.Unlock()
+		delete(ckmgr.backfillEndingTs, vbno)
+		ckmgr.backfillTsMtx.Unlock()
 	}
 
 	if rollbackSeqno == 0 {
@@ -421,6 +428,10 @@ func (ckmgr *CheckpointManager) clearBackfillStartingTsIfNeeded(vbno uint16, rol
 }
 
 func (ckmgr *CheckpointManager) populateRemoteBucketInfo(pipeline common.Pipeline) error {
+	if ckmgr.unitTest {
+		return nil
+	}
+
 	spec := pipeline.Specification().GetReplicationSpec()
 
 	remote_bucket, err := service_def.NewRemoteBucketInfo(ckmgr.target_cluster_ref.Name(), spec.TargetBucketName, ckmgr.target_cluster_ref, ckmgr.remote_cluster_svc, ckmgr.logger, ckmgr.utils)
@@ -1179,8 +1190,8 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	defer waitGrp.Done()
 
 	for _, vbno := range listOfVbs {
-		// use math.MaxUint64 as max_seqno to make all checkpoint records eligible
-		vbts, vbStats, brokenMapping, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], math.MaxUint64)
+		seqnoMax := ckmgr.getMaxSeqno(vbno)
+		vbts, vbStats, brokenMapping, targetManifestId, lastSuccessfulBackfillMgrSrcManifestId, err := ckmgr.getDataFromCkpts(vbno, ckptDocs[vbno], seqnoMax)
 		if err != nil {
 			err_info := []interface{}{vbno, err}
 			err_ch <- err_info
@@ -1417,9 +1428,9 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 		}
 	} else if ckmgr.pipeline.Type() == common.BackfillPipeline {
 		// Check to see if there's a starting point to use instead of 0
-		ckmgr.backfillStartingTsMtx.RLock()
+		ckmgr.backfillTsMtx.RLock()
 		startingTs, exists := ckmgr.backfillStartingTs[vbno]
-		ckmgr.backfillStartingTsMtx.RUnlock()
+		ckmgr.backfillTsMtx.RUnlock()
 		if exists {
 			backfillBypassAgreedIndex = true
 			vbts.Vbuuid = startingTs.Vbuuid
@@ -3060,6 +3071,17 @@ func (ckmgr *CheckpointManager) getLatestVbList() ([]uint16, metadata.GenericSpe
 	vbList := roMap.GetSortedVBList()
 	ckmgr.bucketTopologySvc.UnSubscribeLocalBucketFeed(genSpec.GetReplicationSpec(), ckmgr.bucketTopologySubscriberId)
 	return vbList, genSpec, nil
+}
+
+func (ckmgr *CheckpointManager) getMaxSeqno(vbno uint16) uint64 {
+	ckmgr.backfillTsMtx.RLock()
+	defer ckmgr.backfillTsMtx.RUnlock()
+	endTs, exists := ckmgr.backfillEndingTs[vbno]
+	if !exists {
+		return math.MaxUint64
+	} else {
+		return endTs.Seqno
+	}
 }
 
 func filterKvVbMap(kvVbMap base.KvVBMapType, vbsList []uint16) base.KvVBMapType {
