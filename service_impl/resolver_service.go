@@ -237,7 +237,7 @@ func (rs *ResolverSvc) execute(libraryName string, functionName string, params [
 			rs.logger.Warnf("Failed to create a new worker to replace a stale worker. Error: %v", fault.Error())
 		}
 	}
-	res, fault := worker.Run(libraryName, functionName, options, params...)
+	res, fault := worker.Run(nil, libraryName, functionName, options, params...)
 	if fault != nil && fault.Error() != nil {
 		return nil, fmt.Errorf("Javascript Evaluate() returned error: %v", fault.Error())
 	} else {
