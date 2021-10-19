@@ -264,7 +264,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
 	if !ok || ok && vbMasterCheckConfig.(bool) == true {
 		waitTimeout := getP2PTimeoutFromSettings(settings)
-		genericPipeline.logger.Infof("Performing PeerToPeer communication and metadata merging with timeout of %v", waitTimeout)
+		genericPipeline.logger.Infof("%v - Performing PeerToPeer communication and metadata merging with timeout of %v", genericPipeline.FullTopic(), waitTimeout)
 		p2pErrMap := make(base.ErrorMap)
 		execWrapper := func() error {
 			return genericPipeline.runP2PProtocol(&p2pErrMap)

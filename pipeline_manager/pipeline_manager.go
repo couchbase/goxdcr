@@ -493,6 +493,8 @@ func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status pipeline.Replicati
 		atomic.StoreUint32(&peerToPeer.P2POpaqueTimeoutAtomicMin, uint32(numKVNodes+1))
 		delayMap[pipeline.P2PDynamicWaitDurationKey] = waitTime
 		rep_status.SetCustomSettings(delayMap)
+	} else {
+		rep_status.ClearCustomSetting(pipeline.P2PDynamicWaitDurationKey)
 	}
 }
 
