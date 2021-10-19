@@ -63,7 +63,7 @@ func (ctx *PipelineRuntimeCtx) Start(params metadata.ReplicationSettingsMap) err
 
 	topic := ""
 	if ctx.pipeline != nil {
-		topic = ctx.pipeline.Topic()
+		topic = ctx.pipeline.FullTopic()
 	}
 
 	startServicesFunc := func() error {
@@ -106,7 +106,7 @@ func (ctx *PipelineRuntimeCtx) Start(params metadata.ReplicationSettingsMap) err
 func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 	topic := ""
 	if ctx.pipeline != nil {
-		topic = ctx.pipeline.Topic()
+		topic = ctx.pipeline.FullTopic()
 	}
 
 	errMap := make(base.ErrorMap)
@@ -195,7 +195,7 @@ func (ctx *PipelineRuntimeCtx) stopService(name string, service common.PipelineS
 
 	topic := ""
 	if ctx.pipeline != nil {
-		topic = ctx.pipeline.Topic()
+		topic = ctx.pipeline.FullTopic()
 	}
 
 	err := service.Stop()
@@ -212,7 +212,7 @@ func (ctx *PipelineRuntimeCtx) detachService(name string, service common.Pipelin
 
 	topic := ""
 	if ctx.pipeline != nil {
-		topic = ctx.pipeline.Topic()
+		topic = ctx.pipeline.FullTopic()
 	}
 
 	if !service.IsSharable() {
