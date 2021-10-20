@@ -2229,13 +2229,13 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 		// Preserve all non-CCR Xattributes
 		it, err := base.NewXattrIterator(body)
 		if err != nil {
-			xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' from NewXattrIterator for body %v", xmem.Id(), err, body)
+			xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' from NewXattrIterator for key %v%s%v", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
 			return err
 		}
 		for it.HasNext() {
 			key, value, err := it.Next()
 			if err != nil {
-				xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' iterating through XATTR for body %v,", xmem.Id(), err, body)
+				xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' iterating through XATTR for key %v%s%v,", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
 				return err
 			}
 			if base.Equals(key, base.XATTR_XDCR) {
@@ -2690,12 +2690,27 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							} else {
 								// for other non-temporary errors, repair connections
 								if response.Status == mc.XATTR_EINVAL {
-									// There is something wrong with XATTR. Let's print it
-									xattrlen := binary.BigEndian.Uint32(req.Body[0:4])
-									ccrxattrlen := binary.BigEndian.Uint32(req.Body[4:8])
-									xmem.Logger().Errorf("%v received error response %v for request with total xattr length %v, custom CR xattr length %v, body: %v%v%v", xmem.Id(), response.Status, xattrlen, ccrxattrlen, base.UdTagBegin, req.Body, base.UdTagEnd)
+									// There is something wrong with XATTR. This should never happen in released version.
+									// Print the CCR XATTR for debugging
+									if req.DataType&mcc.SnappyDataType == mcc.SnappyDataType {
+										body, err := snappy.Decode(nil, req.Body)
+										if err == nil {
+											xattrlen := binary.BigEndian.Uint32(body[0:4])
+											ccrxattrlen := binary.BigEndian.Uint32(body[4:8])
+											xmem.Logger().Errorf("%v received error response %v for key %v%s%v with compressed body. Total xattr length %v, custom CR xattr length %v, CCR xattr: %v",
+												xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, ccrxattrlen, body[8:ccrxattrlen+8])
+										} else {
+											xmem.Logger().Errorf("%v received error response %v for key %v%s%v with compressed body. Decode failed with error %v",
+												xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, err)
+										}
+									} else {
+										xattrlen := binary.BigEndian.Uint32(req.Body[0:4])
+										ccrxattrlen := binary.BigEndian.Uint32(req.Body[4:8])
+										xmem.Logger().Errorf("%v received error response %v for key %v%s%v with uncompressed body. Total xattr length %v, custom CR xattr length %v, CCR xattr: %v",
+											xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, ccrxattrlen, req.Body[8:ccrxattrlen+8])
+									}
 								}
-								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%v%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
 						} else if req != nil {
