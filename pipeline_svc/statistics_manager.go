@@ -163,6 +163,9 @@ type StatisticsManager struct {
 	highSeqnosDcpCh           chan service_def.SourceNotification
 	getHighSeqnosAndSourceVBs func() (base.HighSeqnosMapType, base.KvVBMapType)
 
+	notificationChMtx  sync.RWMutex
+	latestNotification service_def.SourceNotification
+
 	highSeqnosIntervalUpdater    func(time.Duration)
 	highSeqnosIntervalUpdaterMtx sync.RWMutex
 
@@ -653,6 +656,10 @@ func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedMainPipe
 	throughSeqnoMap := stats_mgr.GetThroughSeqnosFromTsService()
 
 	highSeqnosMap, curKvVbMap := stats_mgr.getHighSeqnosAndSourceVBs()
+	if highSeqnosMap == nil || curKvVbMap == nil {
+		return 0, 0, nil, fmt.Errorf("Not ready yet")
+	}
+
 	total_changes, vbsList, err := calculateTotalChanges(stats_mgr.logger, highSeqnosMap, curKvVbMap)
 	if err != nil {
 		return 0, 0, nil, err
@@ -930,9 +937,12 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
 
 		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType) {
-			select {
-			case notification := <-stats_mgr.highSeqnosDcpCh:
-				return notification.GetHighSeqnosMapLegacy(), notification.GetSourceVBMapRO()
+			stats_mgr.notificationChMtx.RLock()
+			defer stats_mgr.notificationChMtx.RUnlock()
+			if stats_mgr.latestNotification == nil {
+				return nil, nil
+			} else {
+				return stats_mgr.latestNotification.GetHighSeqnosMapLegacy(), stats_mgr.latestNotification.GetSourceVBMapRO()
 			}
 		}
 	} else {
@@ -948,18 +958,35 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
 
 		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType) {
-			select {
-			case notification := <-stats_mgr.highSeqnosDcpCh:
-				return notification.GetHighSeqnosMap(), notification.GetSourceVBMapRO()
+			stats_mgr.notificationChMtx.RLock()
+			defer stats_mgr.notificationChMtx.RUnlock()
+			if stats_mgr.latestNotification == nil {
+				return nil, nil
+			} else {
+				return stats_mgr.latestNotification.GetHighSeqnosMap(), stats_mgr.latestNotification.GetSourceVBMapRO()
 			}
 		}
 	}
 
+	go stats_mgr.watchNotificationCh()
 	stats_mgr.highSeqnosIntervalUpdaterMtx.Lock()
 	stats_mgr.highSeqnosIntervalUpdater = updater
 	stats_mgr.highSeqnosIntervalUpdaterMtx.Unlock()
 
 	return nil
+}
+
+func (stats_mgr *StatisticsManager) watchNotificationCh() {
+	for {
+		select {
+		case <-stats_mgr.finish_ch:
+			return
+		case notification := <-stats_mgr.highSeqnosDcpCh:
+			stats_mgr.notificationChMtx.Lock()
+			stats_mgr.latestNotification = notification
+			stats_mgr.notificationChMtx.Unlock()
+		}
+	}
 }
 
 func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
