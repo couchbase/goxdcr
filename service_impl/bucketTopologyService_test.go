@@ -76,6 +76,15 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
 	xdcrTopologySvc.On("IsMyClusterEncryptionLevelStrict").Return(false)
 	utils.On("GetBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo, nil)
+	serverListFromBucketInfo1 := func(arg map[string]interface{}) []string {
+		ret, _ := utilsReal.GetServersListFromBucketInfo(arg)
+		return ret
+	}
+	serverListFromBucketInfo2 := func(arg map[string]interface{}) error {
+		_, ret := utilsReal.GetServersListFromBucketInfo(arg)
+		return ret
+	}
+	utils.On("GetServersListFromBucketInfo", mock.Anything).Return(serverListFromBucketInfo1, serverListFromBucketInfo2)
 	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsFunc := args.Get(4).(utilities.ExponentialOpFunc)
 		utilsFunc()
@@ -86,32 +95,32 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	// Then, each individual get functions will be called to return the appropriately parsed
 	// result back to the caller
 	// This is the correct way to mock, execute, and return on real data
-	getMap1 := func(map[string]interface{}, bool) base.VbHostsMapType {
+	getMap1 := func(map[string]interface{}, bool, base.StringStringMap, func([]uint16) base.VbHostsMapType) base.VbHostsMapType {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaMap
 	}
-	getMap2 := func(map[string]interface{}, bool) base.StringStringMap {
+	getMap2 := func(map[string]interface{}, bool, base.StringStringMap, func([]uint16) base.VbHostsMapType) base.StringStringMap {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaTrMap
 	}
-	getCnt := func(map[string]interface{}, bool) int {
+	getCnt := func(map[string]interface{}, bool, base.StringStringMap, func([]uint16) base.VbHostsMapType) int {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaCnt
 	}
-	getErr := func(map[string]interface{}, bool) error {
+	getErr := func(map[string]interface{}, bool, base.StringStringMap, func([]uint16) base.VbHostsMapType) error {
 		return nil
 	}
-	getMember := func(map[string]interface{}, bool) []uint16 {
+	getMember := func(map[string]interface{}, bool, base.StringStringMap, func([]uint16) base.VbHostsMapType) []uint16 {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaMember
 	}
-	utils.On("GetReplicasInfo", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	utils.On("GetReplicasInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		replicaMtx.Lock()
-		replicaMap, replicaTrMap, replicaCnt, replicaMember, _ = utilsReal.GetReplicasInfo(args.Get(0).(map[string]interface{}), false)
+		replicaMap, replicaTrMap, replicaCnt, replicaMember, _ = utilsReal.GetReplicasInfo(args.Get(0).(map[string]interface{}), false, nil, nil)
 		replicaMtx.Unlock()
 	}).Return(getMap1, getMap2, getCnt, getMember, getErr)
 
@@ -122,10 +131,10 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	utils.On("GetBucketUuidFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return(bucketUuidGetterFunc(), nil)
 
 	vbMapGetter := func() map[string][]uint16 {
-		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo)
+		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo, nil)
 		return result
 	}
-	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
+	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
@@ -134,6 +143,16 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 		highSeqnosMap[i] = uint64(100 + int(i))
 	}
 	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(highSeqnosMap, nil, nil)
+
+	getHostNameFromBucketInfo1 := func(arg map[string]interface{}) []string {
+		ret, _ := utilsReal.GetHostNamesFromBucketInfo(arg)
+		return ret
+	}
+	getHostNameFromBucketInfo2 := func(arg map[string]interface{}) error {
+		_, ret := utilsReal.GetHostNamesFromBucketInfo(arg)
+		return ret
+	}
+	utils.On("GetHostNamesFromBucketInfo", mock.Anything).Return(getHostNameFromBucketInfo1, getHostNameFromBucketInfo2)
 
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {

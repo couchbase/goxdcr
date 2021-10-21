@@ -192,6 +192,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	default:
 		return nil, nil, base.ErrorSourceBucketTopologyNotReady
 	}
+	defer latestSourceBucketTopology.Recycle()
 
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
@@ -219,6 +220,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 		return nil, nil, base.ErrorSourceBucketTopologyNotReady
 	}
 	targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
+	defer latestTargetBucketTopology.Recycle()
 
 	conflictResolutionType, err := xdcrf.utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
@@ -466,7 +468,9 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
 	// Get a map of kvNode -> vBuckets responsibile for
-	kv_vb_map := srcBucketTopology.GetSourceVBMapRO()
+	ro := srcBucketTopology.GetSourceVBMapRO()
+	// Hard Clone because it's needed downstream and the event will be recycled
+	kv_vb_map := ro.Clone()
 
 	for kvaddr, vbnos := range kv_vb_map {
 

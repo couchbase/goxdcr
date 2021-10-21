@@ -358,10 +358,13 @@ func (b *BackfillReplicationService) GetMyVBs(replSpec *metadata.ReplicationSpec
 
 	latestNotification := <-notificationCh
 	kv_vb_map := latestNotification.GetSourceVBMapRO()
+	defer latestNotification.Recycle()
 
 	var vbList []uint16
-	for _, vbno := range kv_vb_map {
-		vbList = append(vbList, vbno...)
+	for _, vbnos := range kv_vb_map {
+		// Copy since append will share underlying memory and this will get recycled
+		hardCopyVbnos := base.CloneUint16List(vbnos)
+		vbList = append(vbList, hardCopyVbnos...)
 	}
 	return vbList, nil
 }

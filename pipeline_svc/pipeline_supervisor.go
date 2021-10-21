@@ -213,6 +213,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 				} else {
 					pipelineSupervisor.checkPipelineHealth(notification.GetDcpStatsMapLegacy())
 				}
+				notification.Recycle()
 			}
 		}
 	}()

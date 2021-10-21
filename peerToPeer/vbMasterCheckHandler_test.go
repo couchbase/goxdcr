@@ -39,6 +39,7 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 	retMap := make(base.KvVBMapType)
 	retMap["hostname"] = vbsList
 	notificationMock.On("GetSourceVBMapRO").Return(retMap, nil)
+	notificationMock.On("Recycle").Return(nil)
 	notificationCh <- notificationMock
 
 	manifestCache := make(map[uint64]*metadata.CollectionsManifest)

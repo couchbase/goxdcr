@@ -21,6 +21,30 @@ import (
 	"time"
 )
 
+type BucketTopologyObjsPool struct {
+	KvVbMapPool       utils.KvVbMapPool
+	DcpStatsMapPool   utils.DcpStatsMapPool
+	StringStringPool  utils.StringStringMapPool
+	HighSeqnosMapPool utils.HighSeqnosMapPool
+	VbSeqnoMapPool    utils.VbSeqnoMapPool
+	BucketInfoMapPool utils.BucketInfoMapPool
+	VbHostsMapPool    utils.VbHostsMapPool
+	StringSlicePool   utils.StringSlicePool
+}
+
+func NewBucketTopologyObjsPool() *BucketTopologyObjsPool {
+	return &BucketTopologyObjsPool{
+		KvVbMapPool:       utils.NewKvVbMapPool(),
+		DcpStatsMapPool:   utils.NewDcpStatsMapPool(),
+		StringStringPool:  utils.NewStringStringMapPool(),
+		HighSeqnosMapPool: utils.NewHighSeqnosMapPool(),
+		VbSeqnoMapPool:    utils.NewVbSeqnoMapPool(),
+		BucketInfoMapPool: utils.NewBucketInfoMapPool(),
+		VbHostsMapPool:    utils.NewVbHostsMapPool(),
+		StringSlicePool:   utils.NewStringSlicePool(),
+	}
+}
+
 type BucketTopologyService struct {
 	remClusterSvc       service_def.RemoteClusterSvc
 	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
@@ -39,6 +63,8 @@ type BucketTopologyService struct {
 	tgtBucketWatchers    map[string]*BucketTopologySvcWatcher
 	tgtBucketWatchersCnt map[string]int
 	tgtBucketWatchersMtx sync.RWMutex
+
+	objsPool *BucketTopologyObjsPool
 }
 
 func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc, healthCheckInterval time.Duration, securitySvc service_def.SecuritySvc) (*BucketTopologyService, error) {
@@ -54,6 +80,7 @@ func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySv
 		refreshInterval:      refreshInterval,
 		healthCheckInterval:  healthCheckInterval,
 		securitySvc:          securitySvc,
+		objsPool:             NewBucketTopologyObjsPool(),
 	}
 	return b, b.loadFromReplSpecSvc(replicationSpecService)
 }
@@ -142,7 +169,7 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 	defer b.srcBucketWatchersMtx.Unlock()
 	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
 	if !exists {
-		watcher = NewBucketTopologySvcWatcher(spec.SourceBucketName, spec.SourceBucketUUID, b.logger, true, b.xdcrCompTopologySvc)
+		watcher = NewBucketTopologySvcWatcher(spec.SourceBucketName, spec.SourceBucketUUID, b.logger, true, b.xdcrCompTopologySvc, b.objsPool)
 		b.srcBucketWatchers[spec.SourceBucketName] = watcher
 
 		intervalFuncMap := make(IntervalFuncMap)
@@ -182,7 +209,7 @@ func (b *BucketTopologyService) getDcpStatsUpdater(spec *metadata.ReplicationSpe
 		if len(nodes) == 0 {
 			return base.ErrorNoSourceKV
 		}
-		dcp_stats := make(map[string]map[string]string)
+		dcp_stats := b.objsPool.DcpStatsMapPool.Get(nodes)
 		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", spec.SourceBucketName)
 		var features utils.HELOFeatures
 		watcher.kvMemClientsMtx.Lock()
@@ -194,7 +221,8 @@ func (b *BucketTopologyService) getDcpStatsUpdater(spec *metadata.ReplicationSpe
 				return err
 			}
 
-			stats_map, err := client.StatsMap(base.DCP_STAT_NAME)
+			stats_map := b.objsPool.StringStringPool.Get([]string{base.DCP_STAT_NAME})
+			err = client.StatsMapForSpecifiedStats(base.DCP_STAT_NAME, stats_map)
 			if err != nil {
 				watcher.logger.Warnf("%v Error getting dcp stats for kv %v. err=%v", userAgent, serverAddr, err)
 				err1 := client.Close()
@@ -203,6 +231,8 @@ func (b *BucketTopologyService) getDcpStatsUpdater(spec *metadata.ReplicationSpe
 				}
 				delete(watcher.kvMemClients, serverAddr)
 				watcher.kvMemClientsMtx.Unlock()
+				b.objsPool.StringStringPool.Put(stats_map)
+				b.objsPool.DcpStatsMapPool.Put(dcp_stats)
 				return err
 			} else {
 				dcp_stats[serverAddr] = stats_map
@@ -210,6 +240,14 @@ func (b *BucketTopologyService) getDcpStatsUpdater(spec *metadata.ReplicationSpe
 		}
 		watcher.kvMemClientsMtx.Unlock()
 		watcher.latestCacheMtx.Lock()
+		if watcher.latestCached.DcpStatsMap != nil {
+			for _, vMap := range watcher.latestCached.DcpStatsMap {
+				if vMap != nil {
+					b.objsPool.StringStringPool.Put(vMap)
+				}
+			}
+			b.objsPool.DcpStatsMapPool.Put(watcher.latestCached.DcpStatsMap)
+		}
 		watcher.latestCached.DcpStatsMap = dcp_stats
 		watcher.latestCacheMtx.Unlock()
 		return nil
@@ -226,7 +264,7 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 		if len(nodes) == 0 {
 			return base.ErrorNoSourceKV
 		}
-		dcp_stats := make(map[string]map[string]string)
+		dcp_stats := b.objsPool.DcpStatsMapPool.Get(nodes)
 		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcherLegacy %v", spec.SourceBucketName)
 		watcher.kvMemClientsLegacyMtx.Lock()
 		for _, serverAddr := range nodes {
@@ -242,7 +280,12 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 				return err
 			}
 
-			stats_map, err := client.StatsMap(base.DCP_STAT_NAME)
+			stats_map := dcp_stats[serverAddr]
+			if stats_map == nil {
+				stats_map = make(map[string]string)
+			}
+
+			err = client.StatsMapForSpecifiedStats(base.DCP_STAT_NAME, stats_map)
 			if err != nil {
 				watcher.logger.Warnf("%v Error getting dcp stats for kv %v. err=%v", userAgent, serverAddr, err)
 				err1 := client.Close()
@@ -258,6 +301,9 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 		}
 		watcher.kvMemClientsLegacyMtx.Unlock()
 		watcher.latestCacheMtx.Lock()
+		if watcher.latestCached.DcpStatsMapLegacy != nil {
+			b.objsPool.DcpStatsMapPool.Put(watcher.latestCached.DcpStatsMapLegacy)
+		}
 		watcher.latestCached.DcpStatsMapLegacy = dcp_stats
 		watcher.latestCacheMtx.Unlock()
 		return nil
@@ -317,17 +363,26 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			watcher.logger.Errorf("%v bucket bucketInfo error %v", spec.SourceBucketName, err)
 			return err
 		}
-		serverVBMap, err := b.utils.GetServerVBucketsMap(connStr, spec.SourceBucketName, bucketInfo)
+		serversList, err := b.utils.GetServersListFromBucketInfo(bucketInfo)
+		if err != nil {
+			watcher.logger.Errorf("%v bucketInfo unable to parse server list %v", spec.SourceBucketName, err)
+		}
+		serverVBMap, err := b.utils.GetServerVBucketsMap(connStr, spec.SourceBucketName, bucketInfo, b.objsPool.KvVbMapPool.Get(serversList))
 		if err != nil {
 			watcher.logger.Errorf("%v bucket server VBMap error %v", spec.SourceBucketName, err)
 			return err
 		}
 		serverVBMap, err = b.updateLocalServerVBucketMapIfNeeded(serverVBMap, bucketInfo)
 		if err != nil {
-			return fmt.Errorf("Failed to update local serverVBucket map. err=%v", err)
+			return fmt.Errorf("%v Failed to update local serverVBucket map. err=%v", spec.SourceBucketName, err)
 		}
 
-		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo, b.securitySvc.IsClusterEncryptionLevelStrict())
+		nodesList, err := b.utils.GetHostNamesFromBucketInfo(bucketInfo)
+		if err != nil {
+			return fmt.Errorf("%v Failed to get nodesList from bucketInfo err=%v", spec.SourceBucketName, err)
+		}
+
+		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo, b.securitySvc.IsClusterEncryptionLevelStrict(), b.objsPool.StringStringPool.Get(nodesList), b.objsPool.VbHostsMapPool.Get)
 		if err != nil {
 			watcher.logger.Errorf("%v replicasInfo error %v", spec.SourceBucketName, err)
 			return err
@@ -340,7 +395,8 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		if len(nodes) == 0 {
 			return base.ErrorNoSourceKV
 		}
-		sourceKvVbMap := make(map[string][]uint16)
+
+		sourceKvVbMap := b.objsPool.KvVbMapPool.Get(nodes)
 		for _, node := range nodes {
 			if vbnos, ok := serverVBMap[node]; ok {
 				sourceKvVbMap[node] = vbnos
@@ -350,10 +406,25 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		watcher.latestCacheMtx.Lock()
 		watcher.cachePopulated = true
 		watcher.latestCached.Source = true
+		if watcher.latestCached.KvVbMap != nil {
+			watcher.objsPool.KvVbMapPool.Put(watcher.latestCached.KvVbMap)
+		}
 		watcher.latestCached.KvVbMap = serverVBMap
 		watcher.latestCached.NumberOfSourceNodes = len(serverVBMap)
+		if watcher.latestCached.SourceVBMap != nil {
+			watcher.objsPool.KvVbMapPool.Put(watcher.latestCached.SourceVBMap)
+		}
 		watcher.latestCached.SourceVBMap = sourceKvVbMap
+		if watcher.latestCached.SourceReplicasMap != nil {
+			for _, strSlice := range watcher.latestCached.SourceReplicasMap {
+				watcher.objsPool.StringSlicePool.Put(strSlice)
+			}
+			watcher.objsPool.VbHostsMapPool.Put(watcher.latestCached.SourceReplicasMap)
+		}
 		watcher.latestCached.SourceReplicasMap = replicasMap
+		if watcher.latestCached.SourceReplicasTranslateMap != nil {
+			watcher.objsPool.StringStringPool.Put(watcher.latestCached.SourceReplicasTranslateMap)
+		}
 		watcher.latestCached.SourceReplicasTranslateMap = translateMap
 		watcher.latestCached.SourceReplicaCnt = numOfReplicas
 		watcher.latestCached.SourceVbReplicasMember = vbReplicaMember
@@ -394,7 +465,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 	defer b.tgtBucketWatchersMtx.Unlock()
 	watcher, exists := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
 	if !exists {
-		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.logger, false, b.xdcrCompTopologySvc)
+		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.logger, false, b.xdcrCompTopologySvc, b.objsPool)
 		b.tgtBucketWatchers[getTargetWatcherKey(spec)] = watcher
 
 		topologyUpdateFunc := func() error {
@@ -414,7 +485,14 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			if err != nil {
 				return err
 			}
-			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps())
+
+			nodesList, err := b.utils.GetHostNamesFromBucketInfo(targetBucketInfo)
+			if err != nil {
+				fmt.Printf("NEIL DEBUG err: %v\n", err)
+				return err
+			}
+
+			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), b.objsPool.StringStringPool.Get(nodesList), b.objsPool.VbHostsMapPool.Get)
 			if err != nil {
 				watcher.logger.Errorf("%v target replicasInfo error %v", spec.TargetBucketName, err)
 				return err
@@ -423,10 +501,25 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			watcher.latestCacheMtx.Lock()
 			watcher.cachePopulated = true
 			watcher.latestCached.Source = false
+			if watcher.latestCached.TargetServerVBMap != nil {
+				watcher.objsPool.KvVbMapPool.Put(watcher.latestCached.TargetServerVBMap)
+			}
 			watcher.latestCached.TargetServerVBMap = targetServerVBMap
 			watcher.latestCached.TargetBucketUUID = targetBucketUUID
+			if watcher.latestCached.TargetBucketInfo != nil {
+				watcher.objsPool.BucketInfoMapPool.Put(watcher.latestCached.TargetBucketInfo)
+			}
 			watcher.latestCached.TargetBucketInfo = targetBucketInfo
+			if watcher.latestCached.TargetReplicasMap != nil {
+				for _, strSlice := range watcher.latestCached.TargetReplicasMap {
+					watcher.objsPool.StringSlicePool.Put(strSlice)
+				}
+				watcher.objsPool.VbHostsMapPool.Put(watcher.latestCached.TargetReplicasMap)
+			}
 			watcher.latestCached.TargetReplicasMap = replicasMap
+			if watcher.latestCached.TargetReplicasTranslateMap != nil {
+				watcher.objsPool.StringStringPool.Put(watcher.latestCached.TargetReplicasTranslateMap)
+			}
 			watcher.latestCached.TargetReplicasTranslateMap = translateMap
 			watcher.latestCached.TargetReplicaCnt = numOfReplicas
 			watcher.latestCached.TargetVbReplicasMember = vbReplicaMember
@@ -679,20 +772,25 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 			collectionIds = append(collectionIds, base.DefaultCollectionId)
 		}
 
-		highseqno_map := make(map[string]map[uint16]uint64)
+		highseqno_map := b.objsPool.HighSeqnosMapPool.Get(kv_vb_map.GetKeyList())
 		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", spec.SourceBucketName)
+		var freeInCaseOfErrList []map[uint16]uint64
 		watcher.kvMemClientsMtx.Lock()
 		for serverAddr, vbnos := range kv_vb_map {
 			// TODO - optimizing locking
 			client, err := b.utils.GetMemcachedClient(serverAddr, spec.SourceBucketName, watcher.kvMemClients, userAgent, base.KeepAlivePeriod, watcher.logger, features)
 			if err != nil {
 				watcher.kvMemClientsMtx.Unlock()
+				for _, toRecycleMap := range freeInCaseOfErrList {
+					b.objsPool.VbSeqnoMapPool.Put(toRecycleMap)
+				}
+				b.objsPool.HighSeqnosMapPool.Put(highseqno_map)
 				return err
 			}
-			oneSeqnoMap, updatedStatsMap, err := b.utils.GetHighSeqNos(vbnos, client, watcher.statsMap, collectionIds)
-			watcher.statsMap = updatedStatsMap
-			highseqno_map[serverAddr] = oneSeqnoMap
 
+			oneSeqnoMap := b.objsPool.VbSeqnoMapPool.Get(vbnos)
+			freeInCaseOfErrList = append(freeInCaseOfErrList, oneSeqnoMap)
+			oneSeqnoMap, updatedStatsMap, err := b.utils.GetHighSeqNos(vbnos, client, watcher.statsMap, collectionIds, oneSeqnoMap)
 			if err != nil {
 				watcher.logger.Warnf("%v Error getting high seqno for kv %v. err=%v", userAgent, serverAddr, err)
 				err1 := client.Close()
@@ -701,8 +799,14 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 				}
 				delete(watcher.kvMemClients, serverAddr)
 				watcher.kvMemClientsMtx.Unlock()
+				for _, toRecycleMap := range freeInCaseOfErrList {
+					b.objsPool.VbSeqnoMapPool.Put(toRecycleMap)
+				}
+				b.objsPool.HighSeqnosMapPool.Put(highseqno_map)
 				return err
 			} else {
+				watcher.statsMap = updatedStatsMap
+				highseqno_map[serverAddr] = oneSeqnoMap
 				watcher.kvMemClients[serverAddr] = client
 			}
 		}
@@ -710,8 +814,20 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 
 		watcher.latestCacheMtx.Lock()
 		if legacyMode {
+			if watcher.latestCached.HighSeqnoMapLegacy != nil {
+				for _, vbSeqnoMap := range watcher.latestCached.HighSeqnoMapLegacy {
+					b.objsPool.VbSeqnoMapPool.Put(vbSeqnoMap)
+				}
+				b.objsPool.HighSeqnosMapPool.Put(watcher.latestCached.HighSeqnoMapLegacy)
+			}
 			watcher.latestCached.HighSeqnoMapLegacy = highseqno_map
 		} else {
+			if watcher.latestCached.HighSeqnoMap != nil {
+				for _, vbSeqnoMap := range watcher.latestCached.HighSeqnoMap {
+					b.objsPool.VbSeqnoMapPool.Put(vbSeqnoMap)
+				}
+				b.objsPool.HighSeqnosMapPool.Put(watcher.latestCached.HighSeqnoMap)
+			}
 			watcher.latestCached.HighSeqnoMap = highseqno_map
 		}
 		watcher.latestCacheMtx.Unlock()
@@ -879,6 +995,9 @@ type BucketTopologySvcWatcher struct {
 	gcMapUndergoingGc bool
 	gcMapGcAbort      bool
 	gcPruneWindow     time.Duration
+
+	// upstream objPool
+	objsPool *BucketTopologyObjsPool
 }
 
 type GcMapType map[string]VbnoReqMapType
@@ -918,7 +1037,7 @@ type GcRequest struct {
 	funcToFire func() error
 }
 
-func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.CommonLogger, source bool, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) *BucketTopologySvcWatcher {
+func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.CommonLogger, source bool, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, objsPool *BucketTopologyObjsPool) *BucketTopologySvcWatcher {
 	watcher := &BucketTopologySvcWatcher{
 		bucketName:                    bucketName,
 		bucketUUID:                    bucketUuid,
@@ -926,7 +1045,7 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		logger:                        logger,
 		source:                        source,
 		xdcrCompTopologySvc:           xdcrCompTopologySvc,
-		latestCached:                  NewNotification(source),
+		latestCached:                  NewNotification(source, objsPool),
 		topologyNotifyChs:             make(map[string]interface{}),
 		kvMemClients:                  map[string]mcc.ClientIface{},
 		kvMemClientsLegacy:            map[string]mcc.ClientIface{},
@@ -944,6 +1063,7 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		gcMap:                         GcMapType{},
 		gcPruneMap:                    GcMapPruneMapType{},
 		gcPruneWindow:                 base.BucketTopologyGCPruneTime,
+		objsPool:                      objsPool,
 	}
 	return watcher
 }
@@ -1032,6 +1152,8 @@ func (bw *BucketTopologySvcWatcher) runGC() {
 		// Don't do anything
 		return
 	}
+	lastPopulatedCache.SetNumberOfReaders(1) // myself
+	defer lastPopulatedCache.Recycle()
 
 	srcVBMap := lastPopulatedCache.GetSourceVBMapRO()
 	if len(srcVBMap) > 1 {
@@ -1174,8 +1296,10 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 
 	mutex.RLock()
 	defer mutex.RUnlock()
+	notification.SetNumberOfReaders(len(channelsMap))
 	for channelName, chRaw := range channelsMap {
 		if !bw.shouldSendToCh(channelName, updateType) {
+			notification.Recycle()
 			continue
 		}
 		timeout := time.NewTicker(1 * time.Second)
@@ -1261,9 +1385,11 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 	if bw.cachePopulated {
 		if bw.source {
 			notification := bw.latestCached.Clone().(service_def.SourceNotification)
+			notification.SetNumberOfReaders(1)
 			specifiedChs[fullSubscriberId].(chan service_def.SourceNotification) <- notification
 		} else {
 			notification := bw.latestCached.Clone().(service_def.TargetNotification)
+			notification.SetNumberOfReaders(1)
 			specifiedChs[fullSubscriberId].(chan service_def.TargetNotification) <- notification
 		}
 	}
@@ -1554,7 +1680,9 @@ func (bw *BucketTopologySvcWatcher) handleSpecDeletion(specId string) {
 }
 
 type Notification struct {
-	Source bool
+	Source     bool
+	ObjPool    *BucketTopologyObjsPool
+	NumReaders uint32
 
 	// Source only
 	NumberOfSourceNodes        int
@@ -1579,9 +1707,10 @@ type Notification struct {
 	TargetVbReplicasMember     []uint16
 }
 
-func NewNotification(isSource bool) *Notification {
+func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification {
 	return &Notification{
 		Source:                     isSource,
+		ObjPool:                    pool,
 		NumberOfSourceNodes:        0,
 		SourceVBMap:                make(base.KvVBMapType),
 		KvVbMap:                    make(base.KvVBMapType),
@@ -1603,14 +1732,83 @@ func (n *Notification) IsSourceNotification() bool {
 	return n.Source
 }
 
-func (n *Notification) CloneRO() interface{} {
-	if n == nil {
-		return nil
+func (n *Notification) SetNumberOfReaders(readers int) {
+	atomic.StoreUint32(&n.NumReaders, uint32(readers))
+}
+
+func (n *Notification) Recycle() {
+	if n == nil || n.ObjPool == nil {
+		return
 	}
 
-	clonedRo := &Notification{}
-	*clonedRo = *n
-	return clonedRo
+	if atomic.AddUint32(&n.NumReaders, ^uint32(0)) != uint32(0) {
+		return
+	}
+
+	if n.SourceVBMap != nil {
+		n.ObjPool.KvVbMapPool.Put(n.SourceVBMap)
+	}
+
+	if n.KvVbMap != nil {
+		n.ObjPool.KvVbMapPool.Put(n.KvVbMap)
+	}
+
+	if n.DcpStatsMap != nil {
+		for _, vMap := range n.DcpStatsMap {
+			n.ObjPool.StringStringPool.Put(vMap)
+		}
+		n.ObjPool.DcpStatsMapPool.Put(n.DcpStatsMap)
+	}
+
+	if n.DcpStatsMapLegacy != nil {
+		for _, vMap := range n.DcpStatsMapLegacy {
+			n.ObjPool.StringStringPool.Put(vMap)
+		}
+		n.ObjPool.DcpStatsMapPool.Put(n.DcpStatsMapLegacy)
+	}
+
+	if n.HighSeqnoMap != nil {
+		for _, vMap := range n.HighSeqnoMap {
+			n.ObjPool.VbSeqnoMapPool.Put(vMap)
+		}
+		n.ObjPool.HighSeqnosMapPool.Put(n.HighSeqnoMap)
+	}
+
+	if n.HighSeqnoMapLegacy != nil {
+		for _, vMap := range n.HighSeqnoMapLegacy {
+			n.ObjPool.VbSeqnoMapPool.Put(vMap)
+		}
+		n.ObjPool.HighSeqnosMapPool.Put(n.HighSeqnoMapLegacy)
+	}
+	if n.SourceReplicasMap != nil {
+		for _, strSlice := range n.SourceReplicasMap {
+			n.ObjPool.StringSlicePool.Put(strSlice)
+		}
+		n.ObjPool.VbHostsMapPool.Put(n.SourceReplicasMap)
+	}
+
+	if n.SourceReplicasTranslateMap != nil {
+		n.ObjPool.StringStringPool.Put(n.SourceReplicasTranslateMap)
+	}
+
+	if n.TargetServerVBMap != nil {
+		n.ObjPool.KvVbMapPool.Put(n.TargetServerVBMap)
+	}
+
+	if n.TargetBucketInfo != nil {
+		n.ObjPool.BucketInfoMapPool.Put(n.TargetBucketInfo)
+	}
+
+	if n.TargetReplicasMap != nil {
+		for _, strSlice := range n.TargetReplicasMap {
+			n.ObjPool.StringSlicePool.Put(strSlice)
+		}
+		n.ObjPool.VbHostsMapPool.Put(n.TargetReplicasMap)
+	}
+
+	if n.TargetReplicasTranslateMap != nil {
+		n.ObjPool.StringStringPool.Put(n.TargetReplicasTranslateMap)
+	}
 }
 
 func (n *Notification) Clone() interface{} {
@@ -1618,25 +1816,27 @@ func (n *Notification) Clone() interface{} {
 		return nil
 	}
 	return &Notification{
-		Source:                     n.Source,
+		ObjPool: n.ObjPool,
+		Source:  n.Source,
+
 		NumberOfSourceNodes:        n.NumberOfSourceNodes,
-		SourceVBMap:                n.SourceVBMap.Clone(),
-		KvVbMap:                    n.KvVbMap.Clone(),
-		DcpStatsMap:                n.DcpStatsMap.Clone(),
-		DcpStatsMapLegacy:          n.DcpStatsMapLegacy.Clone(),
-		HighSeqnoMap:               n.HighSeqnoMap.Clone(),
-		HighSeqnoMapLegacy:         n.HighSeqnoMapLegacy.Clone(),
+		SourceVBMap:                n.SourceVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
+		KvVbMap:                    n.KvVbMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
+		DcpStatsMap:                n.DcpStatsMap.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
+		DcpStatsMapLegacy:          n.DcpStatsMapLegacy.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
+		HighSeqnoMap:               n.HighSeqnoMap.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
+		HighSeqnoMapLegacy:         n.HighSeqnoMapLegacy.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
 		SourceReplicaCnt:           n.SourceReplicaCnt,
-		SourceReplicasMap:          n.SourceReplicasMap.Clone(),
-		SourceReplicasTranslateMap: n.SourceReplicasTranslateMap.Clone(),
+		SourceReplicasMap:          n.SourceReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
+		SourceReplicasTranslateMap: n.SourceReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
 		SourceVbReplicasMember:     base.CloneUint16List(n.SourceVbReplicasMember),
 
 		TargetBucketUUID:           n.TargetBucketUUID,
-		TargetServerVBMap:          n.TargetServerVBMap.Clone(),
-		TargetBucketInfo:           n.TargetBucketInfo.Clone(),
+		TargetServerVBMap:          n.TargetServerVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
+		TargetBucketInfo:           n.TargetBucketInfo.GreenClone(n.ObjPool.BucketInfoMapPool.Get),
 		TargetReplicaCnt:           n.TargetReplicaCnt,
-		TargetReplicasMap:          n.TargetReplicasMap.Clone(),
-		TargetReplicasTranslateMap: n.TargetReplicasTranslateMap.Clone(),
+		TargetReplicasMap:          n.TargetReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
+		TargetReplicasTranslateMap: n.TargetReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
 		TargetVbReplicasMember:     base.CloneUint16List(n.TargetVbReplicasMember),
 	}
 }

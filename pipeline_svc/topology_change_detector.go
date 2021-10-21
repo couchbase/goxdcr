@@ -461,12 +461,14 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 				kv_vb_map := notification.GetSourceVBMapRO()
 				if updateOnceErr != nil {
 					top_detect_svc.logger.Errorf("Unable to get KV VB Map - %v", updateOnceErr)
+					notification.Recycle()
 					continue
 				}
 
 				number_of_source_nodes := notification.GetNumberOfSourceNodes()
 				if updateOnceErr != nil {
 					top_detect_svc.logger.Errorf("Unable to get number of source nodes - %v", updateOnceErr)
+					notification.Recycle()
 					continue
 				}
 				vblist_supposed := []uint16{}
@@ -482,6 +484,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 				}
 
 				err = top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, updateOnceErr)
+				notification.Recycle()
 			}
 		}
 	}()
