@@ -105,6 +105,10 @@ type SampleStats struct {
 	Mean  float64
 }
 
+type notificationReqOpt struct {
+	sendBack chan service_def.SourceNotification
+}
+
 //StatisticsManager mount the statics collector on the pipeline to collect raw stats
 //It does stats correlation and processing on raw stats periodically (controlled by publish_interval)
 //, then stores the result in expvar
@@ -162,9 +166,7 @@ type StatisticsManager struct {
 
 	highSeqnosDcpCh           chan service_def.SourceNotification
 	getHighSeqnosAndSourceVBs func() (base.HighSeqnosMapType, base.KvVBMapType)
-
-	notificationChMtx  sync.RWMutex
-	latestNotification service_def.SourceNotification
+	latestNotificationReqCh   chan notificationReqOpt
 
 	highSeqnosIntervalUpdater    func(time.Duration)
 	highSeqnosIntervalUpdaterMtx sync.RWMutex
@@ -198,6 +200,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		remoteClusterSvc:          remoteClusterSvc,
 		bucketTopologySvc:         bucketTopologySvc,
 		replStatusGetter:          replStatusGetter,
+		latestNotificationReqCh:   make(chan notificationReqOpt, 100),
 	}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 
@@ -937,13 +940,8 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
 
 		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType) {
-			stats_mgr.notificationChMtx.RLock()
-			defer stats_mgr.notificationChMtx.RUnlock()
-			if stats_mgr.latestNotification == nil {
-				return nil, nil
-			} else {
-				return stats_mgr.latestNotification.GetHighSeqnosMapLegacy(), stats_mgr.latestNotification.GetSourceVBMapRO()
-			}
+			latestNotification := stats_mgr.getNotification()
+			return latestNotification.GetHighSeqnosMapLegacy(), latestNotification.GetSourceVBMapRO()
 		}
 	} else {
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Lock()
@@ -958,13 +956,8 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
 
 		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType) {
-			stats_mgr.notificationChMtx.RLock()
-			defer stats_mgr.notificationChMtx.RUnlock()
-			if stats_mgr.latestNotification == nil {
-				return nil, nil
-			} else {
-				return stats_mgr.latestNotification.GetHighSeqnosMap(), stats_mgr.latestNotification.GetSourceVBMapRO()
-			}
+			latestNotification := stats_mgr.getNotification()
+			return latestNotification.GetHighSeqnosMap(), latestNotification.GetSourceVBMapRO()
 		}
 	}
 
@@ -976,15 +969,32 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 	return nil
 }
 
+func (stats_mgr *StatisticsManager) getNotification() service_def.SourceNotification {
+	opts := notificationReqOpt{
+		sendBack: make(chan service_def.SourceNotification),
+	}
+	stats_mgr.latestNotificationReqCh <- opts
+	select {
+	case notification := <-opts.sendBack:
+		return notification
+	}
+}
+
 func (stats_mgr *StatisticsManager) watchNotificationCh() {
 	for {
 		select {
 		case <-stats_mgr.finish_ch:
 			return
 		case notification := <-stats_mgr.highSeqnosDcpCh:
-			stats_mgr.notificationChMtx.Lock()
-			stats_mgr.latestNotification = notification
-			stats_mgr.notificationChMtx.Unlock()
+		FORLOOP:
+			for {
+				select {
+				case oneRequestor := <-stats_mgr.latestNotificationReqCh:
+					oneRequestor.sendBack <- notification
+				default:
+					break FORLOOP
+				}
+			}
 		}
 	}
 }

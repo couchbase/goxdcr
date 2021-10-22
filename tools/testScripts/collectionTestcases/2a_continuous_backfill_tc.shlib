@@ -58,10 +58,10 @@ function cleanupTestCaseInternalSettings {
 }
 
 function checkChangesLeftBackup {
-	local ongoingThreshold=30000
+	local ongoingThreshold=60000
 	changesLeft=$(getChangesLeft "C1" "B1" "C2" "B2")
 	if (($changesLeft > $ongoingThreshold)); then
-		echo "Changes left is $changesLeft"
+		echo "Changes left is $changesLeft above threshold 60000"
 		echo "Killing workload"
 		kill $BG_WORKLOAD_PID
 		echo "Sleeping 30 seconds before exiting"
