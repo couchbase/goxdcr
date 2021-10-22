@@ -45,6 +45,7 @@ type XDCRTopologySvc struct {
 
 	cachedMemcachedAddr         string
 	cachedMemcachedAddrInitDone bool
+	cachedMemcachedAddrIsStrict bool
 	cachedMemcachedAddrMtx      sync.RWMutex
 }
 
@@ -77,8 +78,9 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 		// If getHostInfo had error because ns_server is overloaded, then we can return the last cached value that
 		// had been requested, since MyMemcachedAddr() is not likely to change, unless strictness has changed
 		var cachedRetVal string
+		currentStrictSetting := top_svc.cluster_info_svc.IsClusterEncryptionLevelStrict()
 		top_svc.cachedMemcachedAddrMtx.RLock()
-		if top_svc.cachedMemcachedAddrInitDone {
+		if top_svc.cachedMemcachedAddrInitDone && top_svc.cachedMemcachedAddrIsStrict == currentStrictSetting {
 			err = nil
 			cachedRetVal = top_svc.cachedMemcachedAddr
 		}
@@ -98,9 +100,17 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 
 	hostName := base.GetHostName(hostAddr)
 
+	strictness := top_svc.cluster_info_svc.IsClusterEncryptionLevelStrict()
+
+	if strictness {
+		// Since we don't do encryption between local services, we have to use loopback address
+		hostName = top_svc.GetLocalHostName()
+	}
+
 	top_svc.cachedMemcachedAddrMtx.Lock()
 	defer top_svc.cachedMemcachedAddrMtx.Unlock()
 	top_svc.cachedMemcachedAddrInitDone = true
+	top_svc.cachedMemcachedAddrIsStrict = strictness
 	top_svc.cachedMemcachedAddr = base.GetHostAddr(hostName, port)
 	return top_svc.cachedMemcachedAddr, nil
 }

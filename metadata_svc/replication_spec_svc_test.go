@@ -88,6 +88,9 @@ func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService,
 		uiLogSvcMock, log.DefaultLoggerContext, utilsNew)
 
 	testPipeline := &common.Pipeline{}
+
+	xdcrTopologyMock.On("IsKVNode").Return(true, nil)
+
 	return pipelineMgr, pipelineMock, checkPointsSvc, testPipeline
 }
 

@@ -16,4 +16,5 @@ import (
 type ClusterInfoSvc interface {
 	// This API should be called on source cluster only
 	GetLocalServerVBucketsMap(clusterConnInfoProvider base.ClusterConnectionInfoProvider, Bucket string) (map[string][]uint16, error)
+	IsClusterEncryptionLevelStrict() bool
 }

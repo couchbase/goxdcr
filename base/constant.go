@@ -235,6 +235,8 @@ var ErrorPipelineStartTimedOutUI = errors.New("Pipeline did not start in a timel
 var ErrorRemoteClusterUninit = errors.New("Remote cluster has not been successfully contacted to figure out user intent for alternate address yet. Will try again next refresh cycle")
 var ErrorTargetNoAltHostName = errors.New("Alternate hostname is not set up on at least one node of the remote cluster")
 var ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
+var ErrorPipelineRestartDueToEncryptionChange = errors.New("Pipeline needs to update due to cluster encryption level change")
+var ErrorRemoteClusterFullEncryptionRequired = errors.New("Cluster encryption level is strict. Remote cluster reference must use full encryption.")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")

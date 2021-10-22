@@ -4,7 +4,7 @@
 //   http://www.apache.org/licenses/LICENSE-2.0
 // Unless required by applicable law or agreed to in writing, software distributed under the
 // License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-// either express or implied. See the License for the refific language governing permissions
+// either express or implied. See the License for the specific language governing permissions
 // and limitations under the License.
 
 // metadata service implementation leveraging gometa
@@ -1438,6 +1438,11 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
 	}
+	if service.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+		if ref.IsEncryptionEnabled() == false || ref.EncryptionType() != metadata.EncryptionType_Full {
+			return wrapAsInvalidRemoteClusterError(base.ErrorRemoteClusterFullEncryptionRequired.Error())
+		}
+	}
 
 	refHostName := ref.HostName()
 	hostName := base.GetHostName(refHostName)
@@ -1589,6 +1594,19 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 	}
 
+	if service.cluster_info_svc.IsClusterEncryptionLevelStrict() {
+		// If source cluster is strict encryption, we cannot send anything to remote 8091 port.
+		// Replace 8091 with 18091 as needed
+		portNo, portNoErr := base.GetPortNumber(refHostName)
+		httpPortNo, httpPortNoErr := base.GetPortNumber(refHttpsHostName)
+		if portNoErr == nil && portNo == base.DefaultAdminPort {
+			refHostName = base.GetHostAddr(base.GetHostName(refHostName), base.DefaultAdminPortSSL)
+		}
+		if httpPortNoErr == nil && httpPortNo == base.DefaultAdminPort {
+			refHttpsHostName = base.GetHostAddr(base.GetHostName(refHttpsHostName), base.DefaultAdminPortSSL)
+		}
+	}
+
 	refHttpAuthMech, defaultPoolInfo, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 	if err != nil {
 		if !ref.IsFullEncryption() {
@@ -1597,11 +1615,14 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 
 		// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
 		// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
-		refHttpsHostName, externalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
-		if err1 != nil {
-			// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
-			errMsg := fmt.Sprintf("Cannot use HostName, %v, as a https address or a http address. Error when using it as a https address=%v\n. Error when using it as a http address=%v\n", ref.HostName(), err, err1)
-			return wrapAsInvalidRemoteClusterError(errMsg)
+		if service.cluster_info_svc.IsClusterEncryptionLevelStrict() == false {
+			// This call is not encrypted. We only do it if it is not strict
+			refHttpsHostName, externalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
+			if err1 != nil {
+				// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
+				errMsg := fmt.Sprintf("Cannot use HostName, %v, as a https address or a http address. Error when using it as a https address=%v\n. Error when using it as a http address=%v\n", ref.HostName(), err, err1)
+				return wrapAsInvalidRemoteClusterError(errMsg)
+			}
 		}
 
 		// now we potentially have valid https address, re-do security settings retrieval

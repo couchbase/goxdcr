@@ -135,7 +135,8 @@ func StartReplicationManager(sourceKVHost string,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
-	utilitiesIn utilities.UtilsIface) {
+	utilitiesIn utilities.UtilsIface,
+	securitySvc service_def.SecuritySvc) {
 
 	replication_mgr.once.Do(func() {
 		// ns_server shutdown protocol: poll stdin and exit upon reciept of EOF
@@ -148,7 +149,8 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.utils = utilitiesIn
 
 		// initializes replication manager
-		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc, uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc, throughput_throttler_svc)
+		replication_mgr.init(repl_spec_svc, remote_cluster_svc, cluster_info_svc, xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc, audit_svc,
+			uilog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc, throughput_throttler_svc, securitySvc)
 
 		// start replication manager supervisor
 		// TODO should we make heart beat settings configurable?
@@ -409,7 +411,8 @@ func (rm *replicationManager) init(
 	global_setting_svc service_def.GlobalSettingsSvc,
 	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
-	throughput_throttler_svc service_def.ThroughputThrottlerSvc) {
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	securitySvc service_def.SecuritySvc) {
 
 	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
@@ -432,6 +435,9 @@ func (rm *replicationManager) init(
 
 	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, cluster_info_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.DefaultLoggerContext, rm.utils)
 	rm.resourceMgr.Start()
+
+	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
+	securitySvc.Start()
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
