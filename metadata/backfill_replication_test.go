@@ -248,6 +248,18 @@ func TestMergeTasks(t *testing.T) {
 	}
 	assert.True(unmergableTasks.containsStartEndRange(5000, 5005))
 	assert.True(unmergableTasks.containsStartEndRange(15005, 20000))
+
+	// Now try to merge a task that overlap with the second on the list
+	ts3 := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 5100, 5100, 15100, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 15000, 15000, 500, manifestsIdPair},
+	}
+	ts3.Sanitize()
+	vb0Task3 := NewBackfillTask(ts3, []CollectionNamespaceMapping{namespaceMapping})
+	unmergableTasks = NewBackfillTasks()
+	assert.Equal(0, unmergableTasks.Len())
+	totalTasks.MergeIncomingTaskIntoTasksNoLock(vb0Task3, &unmergableTasks, 0)
+	assert.Equal(0, unmergableTasks.Len())
 	fmt.Println("============== Test case end: TestMergeTasks =================")
 }
 

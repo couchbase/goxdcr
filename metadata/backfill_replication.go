@@ -1036,14 +1036,14 @@ func (b *BackfillTasks) MergeIncomingTaskIntoTasksNoLock(task *BackfillTask, unm
 	if fullyMerged {
 		return
 	}
-	if unableToMerge {
-		unmergableTasks.List = append(unmergableTasks.List, task)
-		return
-	}
 
 	index++
-	b.MergeIncomingTaskIntoTasksNoLock(subTask1, unmergableTasks, index)
-	b.MergeIncomingTaskIntoTasksNoLock(subTask2, unmergableTasks, index)
+	if unableToMerge {
+		b.MergeIncomingTaskIntoTasksNoLock(task, unmergableTasks, index)
+	} else {
+		b.MergeIncomingTaskIntoTasksNoLock(subTask1, unmergableTasks, index)
+		b.MergeIncomingTaskIntoTasksNoLock(subTask2, unmergableTasks, index)
+	}
 	return
 }
 
