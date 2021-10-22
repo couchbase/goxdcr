@@ -95,26 +95,16 @@ type ReplicaCacheMonitor struct {
 	replicaMap          map[uint16][]string
 	replicaTranslateMap map[string]string
 	replicaMember       []uint16
-	recycleFunc         func()
 }
 
 func (m *ReplicaCacheMonitor) Run() {
 	for {
 		select {
 		case <-m.finCh:
-			m.cacheMtx.RLock()
-			if m.recycleFunc != nil {
-				m.recycleFunc()
-			}
-			m.cacheMtx.RUnlock()
 			return
 		case notification := <-m.sourceCh:
 			m.cacheMtx.Lock()
-			if m.recycleFunc != nil {
-				m.recycleFunc()
-			}
 			m.replicaCnt, m.replicaMap, m.replicaTranslateMap, m.replicaMember = notification.GetReplicasInfo()
-			m.recycleFunc = notification.Recycle
 			m.cacheMtx.Unlock()
 		}
 	}

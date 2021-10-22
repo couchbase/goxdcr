@@ -3079,7 +3079,6 @@ func (ckmgr *CheckpointManager) getLatestVbList() ([]uint16, metadata.GenericSpe
 		return nil, nil, err
 	}
 	notification := <-notificationCh
-	defer notification.Recycle()
 	roMap := notification.GetSourceVBMapRO()
 	vbList := roMap.GetSortedVBList()
 	ckmgr.bucketTopologySvc.UnSubscribeLocalBucketFeed(genSpec.GetReplicationSpec(), ckmgr.bucketTopologySubscriberId)

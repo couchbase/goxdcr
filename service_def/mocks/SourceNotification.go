@@ -28,6 +28,22 @@ func (_m *SourceNotification) Clone() interface{} {
 	return r0
 }
 
+// CloneRO provides a mock function with given fields:
+func (_m *SourceNotification) CloneRO() interface{} {
+	ret := _m.Called()
+
+	var r0 interface{}
+	if rf, ok := ret.Get(0).(func() interface{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(interface{})
+		}
+	}
+
+	return r0
+}
+
 // GetDcpStatsMap provides a mock function with given fields:
 func (_m *SourceNotification) GetDcpStatsMap() base.DcpStatsMapType {
 	ret := _m.Called()
@@ -191,14 +207,4 @@ func (_m *SourceNotification) IsSourceNotification() bool {
 	}
 
 	return r0
-}
-
-// Recycle provides a mock function with given fields:
-func (_m *SourceNotification) Recycle() {
-	_m.Called()
-}
-
-// SetNumberOfReaders provides a mock function with given fields: _a0
-func (_m *SourceNotification) SetNumberOfReaders(_a0 int) {
-	_m.Called(_a0)
 }

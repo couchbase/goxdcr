@@ -66,10 +66,9 @@ func TestNewReplicaCache(t *testing.T) {
 
 	srcNotification := &service_def.SourceNotification{}
 	bucketInfo := getBucketInfoWithReplicas()
-	replicasMap, translateMap, cnt, members, _ := utilsReal.GetReplicasInfo(bucketInfo, false, nil, nil)
+	replicasMap, translateMap, cnt, members, _ := utilsReal.GetReplicasInfo(bucketInfo, false)
 
 	srcNotification.On("GetReplicasInfo", mock.Anything).Return(cnt, replicasMap, translateMap, members)
-	srcNotification.On("Recycle").Return(nil)
 	srcCh <- srcNotification
 
 	time.Sleep(10 * time.Millisecond)

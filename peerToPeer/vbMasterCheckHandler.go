@@ -225,7 +225,6 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 			(*resp.payload)[bucketName].RegisterNotMyVBs(vbsList)
 		}
 		unsubsFunc()
-		latestInfo.Recycle()
 	}
 }
 

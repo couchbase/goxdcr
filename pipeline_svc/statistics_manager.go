@@ -165,7 +165,7 @@ type StatisticsManager struct {
 	printThroughSeqnoSummaryWhenStopping bool
 
 	highSeqnosDcpCh           chan service_def.SourceNotification
-	getHighSeqnosAndSourceVBs func() (base.HighSeqnosMapType, base.KvVBMapType, func())
+	getHighSeqnosAndSourceVBs func() (base.HighSeqnosMapType, base.KvVBMapType)
 	latestNotificationReqCh   chan notificationReqOpt
 
 	highSeqnosIntervalUpdater    func(time.Duration)
@@ -658,8 +658,11 @@ func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedMainPipe
 	// Get throughSeqnoMap first to avoid negative stats
 	throughSeqnoMap := stats_mgr.GetThroughSeqnosFromTsService()
 
-	highSeqnosMap, curKvVbMap, doneFunc := stats_mgr.getHighSeqnosAndSourceVBs()
-	defer doneFunc()
+	highSeqnosMap, curKvVbMap := stats_mgr.getHighSeqnosAndSourceVBs()
+	if highSeqnosMap == nil || curKvVbMap == nil {
+		return 0, 0, nil, fmt.Errorf("Not ready yet")
+	}
+
 	total_changes, vbsList, err := calculateTotalChanges(stats_mgr.logger, highSeqnosMap, curKvVbMap)
 	if err != nil {
 		return 0, 0, nil, err
@@ -936,9 +939,9 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 		}
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
 
-		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType, func()) {
+		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType) {
 			latestNotification := stats_mgr.getNotification()
-			return latestNotification.GetHighSeqnosMapLegacy(), latestNotification.GetSourceVBMapRO(), latestNotification.Recycle
+			return latestNotification.GetHighSeqnosMapLegacy(), latestNotification.GetSourceVBMapRO()
 		}
 	} else {
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Lock()
@@ -952,9 +955,9 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 		}
 		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
 
-		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType, func()) {
+		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType) {
 			latestNotification := stats_mgr.getNotification()
-			return latestNotification.GetHighSeqnosMap(), latestNotification.GetSourceVBMapRO(), latestNotification.Recycle
+			return latestNotification.GetHighSeqnosMap(), latestNotification.GetSourceVBMapRO()
 		}
 	}
 
@@ -987,15 +990,11 @@ func (stats_mgr *StatisticsManager) watchNotificationCh() {
 			for {
 				select {
 				case oneRequestor := <-stats_mgr.latestNotificationReqCh:
-					// Because the channel can length can vary, just do a green clone to be safe
-					notificationForRequestor := notification.Clone().(service_def.SourceNotification)
-					notificationForRequestor.SetNumberOfReaders(1)
 					oneRequestor.sendBack <- notification
 				default:
 					break FORLOOP
 				}
 			}
-			notification.Recycle()
 		}
 	}
 }
@@ -1802,25 +1801,21 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 		remoteClusterCapability, err := remoteClusterSvc.GetCapability(ref)
 		if err != nil {
 			logger.Errorf("Error retrieving capability for remote cluster %v - err: %v", ref.Id(), err)
-			notification.Recycle()
 			continue
 		}
 
 		var highSeqnosMaps map[string]map[uint16]uint64
 		var sourceVBMap map[string][]uint16
-		var recycleFunc func()
 		if remoteClusterCapability.HasCollectionSupport() {
 			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
 				logger.Errorf("Error subscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
-				notification.Recycle()
 				continue
 			}
 
 			highSeqnoFeedNotification := <-highSeqnoFeed
 			highSeqnosMaps = highSeqnoFeedNotification.GetHighSeqnosMap()
 			sourceVBMap = highSeqnoFeedNotification.GetSourceVBMapRO()
-			recycleFunc = highSeqnoFeedNotification.Recycle
 
 			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId)
 			if err != nil {
@@ -1830,22 +1825,20 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
 				logger.Errorf("Error subscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
-				notification.Recycle()
 				continue
 			}
 
 			highSeqnoFeedNotification := <-highSeqnoFeed
 			highSeqnosMaps = highSeqnoFeedNotification.GetHighSeqnosMap()
 			sourceVBMap = highSeqnoFeedNotification.GetSourceVBMapRO()
-			recycleFunc = highSeqnoFeedNotification.Recycle
 
 			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId)
 			if err != nil {
 				logger.Errorf("Error unsubscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
 			}
 		}
-		highSeqnoAndSourceVBGetter := func() (base.HighSeqnosMapType, base.KvVBMapType, func()) {
-			return highSeqnosMaps, sourceVBMap, recycleFunc
+		highSeqnoAndSourceVBGetter := func() (base.HighSeqnosMapType, base.KvVBMapType) {
+			return highSeqnosMaps, sourceVBMap
 		}
 
 		// Check to see if backfill replication exists
@@ -1859,10 +1852,9 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
 			// or it may be nil when the underying replication is not paused but has not completed startup process
 			// construct it
-			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
+			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, logger, backfillSpec, highSeqnosMaps)
 			if err != nil {
 				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
-				notification.Recycle()
 				continue
 			}
 		} else {
@@ -1870,12 +1862,10 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 				err := updateStatsForReplication(repl_status, overview_stats, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
-					notification.Recycle()
 					continue
 				}
 			}
 		}
-		notification.Recycle()
 	}
 }
 
@@ -1923,10 +1913,7 @@ func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]m
 }
 
 // compute and set changes_left and docs_processed stats. set other stats to 0
-func constructStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, spec *metadata.ReplicationSpecification, curKvVbMap map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosMapGetter func() (base.HighSeqnosMapType, base.KvVBMapType, func())) error {
-	highSeqnosMap, _, doneFunc := highSeqnosMapGetter()
-	defer doneFunc()
-
+func constructStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, spec *metadata.ReplicationSpecification, curKvVbMap map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosMap base.HighSeqnosMapType) error {
 	cur_vb_list := base.GetVbListFromKvVbMap(curKvVbMap)
 	docs_processed, err := getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
 	if err != nil {
@@ -2042,7 +2029,7 @@ func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicat
 	return backfillTotalChanges, checkpointExists, nil
 }
 
-func updateStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, overview_stats *expvar.Map, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosAndSourceVBGetter func() (base.HighSeqnosMapType, base.KvVBMapType, func())) error {
+func updateStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, overview_stats *expvar.Map, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosAndSourceVBGetter func() (base.HighSeqnosMapType, base.KvVBMapType)) error {
 	// if pipeline is not running, update docs_processed and changes_left stats, which are not being
 	// updated by running pipeline and may have become inaccurate
 
@@ -2061,8 +2048,7 @@ func updateStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, 
 		return nil
 	}
 
-	highSeqnoKvMap, curKvVbMap, doneFunc := highSeqnosAndSourceVBGetter()
-	defer doneFunc()
+	highSeqnoKvMap, curKvVbMap := highSeqnosAndSourceVBGetter()
 
 	cur_vb_list := base.GetVbListFromKvVbMap(curKvVbMap)
 	base.SortUint16List(cur_vb_list)

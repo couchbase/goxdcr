@@ -336,7 +336,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	}
 
 	getRemoteServerVBMapFunc := func(string, string, map[string]interface{}, bool) map[string][]uint16 {
-		vbMap, _ := utilsReal.GetServerVBucketsMap("", "b2", bucketMap, nil)
+		vbMap, _ := utilsReal.GetServerVBucketsMap("", "b2", bucketMap)
 		return vbMap
 	}
 	getNilFunc := func(string, string, map[string]interface{}, bool) error {

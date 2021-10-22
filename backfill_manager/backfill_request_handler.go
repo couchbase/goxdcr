@@ -235,9 +235,6 @@ func (b *BackfillRequestHandler) run() {
 	select {
 	case notification := <-b.sourceBucketTopologyCh:
 		b.latestCachedSourceNotificationMtx.Lock()
-		if b.latestCachedSourceNotification != nil {
-			b.latestCachedSourceNotification.Recycle()
-		}
 		b.latestCachedSourceNotification = notification
 		b.latestCachedSourceNotificationMtx.Unlock()
 	}
@@ -323,9 +320,6 @@ func (b *BackfillRequestHandler) run() {
 		case notification := <-b.sourceBucketTopologyCh:
 			oldVBsList := b.getVBs()
 			b.latestCachedSourceNotificationMtx.Lock()
-			if b.latestCachedSourceNotification != nil {
-				b.latestCachedSourceNotification.Recycle()
-			}
 			b.latestCachedSourceNotification = notification
 			newKvVBMap := notification.GetSourceVBMapRO()
 			newVBList := newKvVBMap.GetSortedVBList()

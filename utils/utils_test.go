@@ -405,7 +405,7 @@ func TestReplaceKVVBMapExternal(t *testing.T) {
 	assert.Nil(err)
 	assert.NotEqual(0, len(translatedMap))
 
-	kvVbMap, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap, nil)
+	kvVbMap, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap)
 	assert.Nil(err)
 
 	// Before translate, should be internal only
@@ -442,7 +442,7 @@ func TestReplaceKVVBMapExternalK8(t *testing.T) {
 	assert.Nil(err)
 	assert.NotEqual(0, len(translatedMap))
 
-	kvVbMap, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap, nil)
+	kvVbMap, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap)
 	assert.Nil(err)
 
 	// Before translate, should be internal only
@@ -815,12 +815,12 @@ func TestVBucketMapWithReplicas(t *testing.T) {
 	bucketInfo := getBucketInfoWithReplicas()
 	assert.NotNil(bucketInfo)
 
-	replicaMap, translateMap, numOfReplicas, _, err := testUtils.GetReplicasInfo(bucketInfo, false, nil, nil)
+	replicaMap, translateMap, numOfReplicas, _, err := testUtils.GetReplicasInfo(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(2, numOfReplicas)
 
 	// validate replica map
-	serverVbMap, err := testUtils.GetServerVBucketsMap("", "B1", bucketInfo, nil)
+	serverVbMap, err := testUtils.GetServerVBucketsMap("", "B1", bucketInfo)
 	assert.Nil(err)
 	serverKey := "192.168.0.242:12000" // specific to the getBucketInfoWithReplicas() dataset
 	vbsForThisNode := serverVbMap[serverKey]
@@ -839,7 +839,7 @@ func TestVBucketMapWithReplicasEarlyInit(t *testing.T) {
 	bucketInfo := getBucketInfoWithReplicasWithNoReplicas()
 	assert.NotNil(bucketInfo)
 
-	replicaMap, translateMap, numOfReplicas, memberOfReplica, err := testUtils.GetReplicasInfo(bucketInfo, false, nil, nil)
+	replicaMap, translateMap, numOfReplicas, memberOfReplica, err := testUtils.GetReplicasInfo(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(1, numOfReplicas)
 	assert.Len(replicaMap, 0)
@@ -849,7 +849,7 @@ func TestVBucketMapWithReplicasEarlyInit(t *testing.T) {
 	bucketInfo = getBucketInfoWithReplicasAfterRebalance()
 	assert.NotNil(bucketInfo)
 
-	replicaMap, translateMap, numOfReplicas, memberOfReplica, err = testUtils.GetReplicasInfo(bucketInfo, false, nil, nil)
+	replicaMap, translateMap, numOfReplicas, memberOfReplica, err = testUtils.GetReplicasInfo(bucketInfo, false)
 	assert.Nil(err)
 	assert.Equal(1, numOfReplicas)
 	assert.NotEqual(len(replicaMap), 0)

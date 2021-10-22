@@ -28,6 +28,22 @@ func (_m *Notification) Clone() interface{} {
 	return r0
 }
 
+// CloneRO provides a mock function with given fields:
+func (_m *Notification) CloneRO() interface{} {
+	ret := _m.Called()
+
+	var r0 interface{}
+	if rf, ok := ret.Get(0).(func() interface{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(interface{})
+		}
+	}
+
+	return r0
+}
+
 // GetReplicasInfo provides a mock function with given fields:
 func (_m *Notification) GetReplicasInfo() (int, base.VbHostsMapType, base.StringStringMap, []uint16) {
 	ret := _m.Called()
@@ -81,14 +97,4 @@ func (_m *Notification) IsSourceNotification() bool {
 	}
 
 	return r0
-}
-
-// Recycle provides a mock function with given fields:
-func (_m *Notification) Recycle() {
-	_m.Called()
-}
-
-// SetNumberOfReaders provides a mock function with given fields: _a0
-func (_m *Notification) SetNumberOfReaders(_a0 int) {
-	_m.Called(_a0)
 }
