@@ -332,13 +332,13 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 
 	testSpec.MergeNewTasks(NewVBTasksMapWithMTasks(newVbTaskMap), true /*skipFirst*/)
 
-	assert.Equal(4, testSpec.VBTasksMap.VBTasksMap[0].Len())
+	// The new unmerged tasks are combined with the second on the list
+	assert.Equal(3, testSpec.VBTasksMap.VBTasksMap[0].Len())
 	// This is the first ongoing backfill
 	assert.True(testSpec.VBTasksMap.VBTasksMap[0].containsStartEndRange(5, 5000))
 	// Taking the first one away, we are left with
 	assert.True(testSpec.VBTasksMap.VBTasksMap[0].containsStartEndRange(5, 5005))
-	assert.True(testSpec.VBTasksMap.VBTasksMap[0].containsStartEndRange(5005, 15005))
-	assert.True(testSpec.VBTasksMap.VBTasksMap[0].containsStartEndRange(15005, 20000))
+	assert.True(testSpec.VBTasksMap.VBTasksMap[0].containsStartEndRange(5005, 20000))
 
 	// Test removing a namespace
 	dummyNamespaceMapping := make(CollectionNamespaceMapping)
@@ -348,7 +348,7 @@ func TestMergeTasksIntoSpec(t *testing.T) {
 	}
 	dummyNamespaceMapping.AddSingleMapping(&dummyNamespace, &dummyNamespace)
 	assert.False(testSpec.VBTasksMap.RemoveNamespaceMappings(dummyNamespaceMapping))
-	assert.Equal(4, testSpec.VBTasksMap.VBTasksMap[0].Len())
+	assert.Equal(3, testSpec.VBTasksMap.VBTasksMap[0].Len())
 	oldShaMap := testSpec.VBTasksMap.GetAllCollectionNamespaceMappings()
 	assert.Equal(1, len(oldShaMap))
 

@@ -156,7 +156,7 @@ func (b *BackfillReplicationSpec) MergeNewTasks(vbTasksMap *VBTasksMapType, skip
 			backfillTasksForVB.MergeIncomingTaskIntoTasksNoLock(newTask, &unmergableTasks, index)
 
 			for _, unmergableTask := range unmergableTasks.List {
-				backfillTasksForVB.List = append(backfillTasksForVB.List, unmergableTask)
+				backfillTasksForVB.addTask(unmergableTask, skipFirst)
 			}
 
 			backfillTasksForVB.mutex.Unlock()
@@ -1047,6 +1047,20 @@ func (b *BackfillTasks) MergeIncomingTaskIntoTasksNoLock(task *BackfillTask, unm
 	return
 }
 
+func (b *BackfillTasks) addTask(task *BackfillTask, skipFirst bool) {
+	// Look through the list and see if the new task can be combined with an existing one
+	var index int
+	if skipFirst {
+		index++
+	}
+	for ; index < len(b.List); index++ {
+		if b.List[index].combineTask(task) {
+			return
+		}
+	}
+	// Append the task since it cannot be combined
+	b.List = append(b.List, task)
+}
 func (b *BackfillTasks) containsStartEndRange(startSeqno, endSeqno uint64) bool {
 	if b == nil {
 		return false
@@ -1157,6 +1171,19 @@ func generateShas(requestedCollectionMappings []CollectionNamespaceMapping) []st
 		shas = append(shas, fmt.Sprintf("%x", shaSlice[:]))
 	}
 	return shas
+}
+
+func (b *BackfillTask) combineTask(task *BackfillTask) bool {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if b.Timestamps.EndingTimestamp == task.Timestamps.StartingTimestamp {
+		b.Timestamps.EndingTimestamp = task.Timestamps.EndingTimestamp
+		for _, oneMapping := range task.requestedCollections_ {
+			b.AddCollectionNamespaceMappingNoLock(oneMapping)
+		}
+		return true
+	}
+	return false
 }
 
 func (b *BackfillTask) GetEndingTimestampSeqno() uint64 {
