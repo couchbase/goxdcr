@@ -1176,7 +1176,8 @@ func generateShas(requestedCollectionMappings []CollectionNamespaceMapping) []st
 func (b *BackfillTask) combineTask(task *BackfillTask) bool {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	if b.Timestamps.EndingTimestamp == task.Timestamps.StartingTimestamp {
+	// Only combine if the tasks have valid timestamps
+	if b.hasValidTimeStamps() && task.hasValidTimeStamps() && b.Timestamps.EndingTimestamp == task.Timestamps.StartingTimestamp {
 		b.Timestamps.EndingTimestamp = task.Timestamps.EndingTimestamp
 		for _, oneMapping := range task.requestedCollections_ {
 			b.AddCollectionNamespaceMappingNoLock(oneMapping)
@@ -1186,6 +1187,12 @@ func (b *BackfillTask) combineTask(task *BackfillTask) bool {
 	return false
 }
 
+func (b *BackfillTask) hasValidTimeStamps() bool {
+	if b != nil && b.Timestamps != nil && b.Timestamps.StartingTimestamp != nil && b.Timestamps.EndingTimestamp != nil {
+		return true
+	}
+	return false
+}
 func (b *BackfillTask) GetEndingTimestampSeqno() uint64 {
 	if b == nil {
 		return 0
