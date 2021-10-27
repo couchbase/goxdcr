@@ -294,7 +294,7 @@ func execute(funcName string, opt map[api.Option]interface{}, params []interface
 			tmpworker = nil
 		}
 	}
-	result, fault := worker.Run(funcName, funcName, opt, params...)
+	result, fault := worker.Run(nil, funcName, funcName, opt, params...)
 
 	return result, fault
 }
@@ -424,7 +424,6 @@ func doEvaluatorWorkload(t *testing.T, repeat int, funcName string, opt map[api.
 				if fault != nil {
 					fmt.Printf("%v\n", params)
 					fmt.Printf("Thread %v returned fault: %v\n", tid, fault.Error())
-					os.Exit(1)
 				}
 				assert.Nil(fault, fmt.Sprintf("Evaluate returned fault: %v for calling thread %v", fault, tid))
 			}

@@ -148,13 +148,13 @@ function remoteClusterUserPermission {
 	runCbWorkloadGenBucket "C1" "CCR1" 10 "eaccess_test"
 
 	restID=$(getBucketReplicationRestID "C1" "CCR1" "C2" "CCR2")
-	echo "Wait 10 seconds for replication to stop because of EACCESS"
-	sleep 10
+	echo "Wait 30 seconds for replication to stop because of EACCESS"
+	sleep 30
 	echo "Get replication status"
 	curl -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9000/settings/replications/$restID | jq | grep '"pauseRequested": true'
 	if (($? != 0)); then
 		echo "Replication should be paused because of EACCESS error, but it is not."
-		result=1
+		exit 1
 	fi
 	echo "Add data reader to tmpuser"
 	curl -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:9001/settings/rbac/users/local/tmpuser -d password=wewewe -d 'roles=data_reader[*],replication_target[*]'
