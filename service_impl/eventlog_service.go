@@ -115,7 +115,9 @@ func (service *EventLogSvc) writeEvent_internal(eventId service_def.EventIdType,
 	body := make([]byte, MaxEventLength)
 	pos := 0
 	body, pos = base.WriteJsonRawMsg(body, []byte(EventTimeStampKey), pos, base.WriteJsonKey, len(EventTimeStampKey), true)
-	value := time.Now().UTC().Format("2006-01-02T15:04:05.999Z")
+	// Events timestamp must have the format YYYY-MM-DDThh:mm:ss:SSSZ.
+	// To not drop precision in SSSZ when last digits are 0, we have to use 000Z below instead of 999Z
+	value := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	body, pos = base.WriteJsonRawMsg(body, []byte(value), pos, base.WriteJsonValue, len(value), false)
 	body, pos = base.WriteJsonRawMsg(body, []byte(EventComponentKey), pos, base.WriteJsonKey, len(EventComponentKey), false)
 	body, pos = base.WriteJsonRawMsg(body, []byte(EventXdcrComponent), pos, base.WriteJsonValue, len(EventXdcrComponent), false)
@@ -154,7 +156,7 @@ func (service *EventLogSvc) writeEvent_internal(eventId service_def.EventIdType,
 		service.logger.Errorf("Error writing event log for event %v. err = %v\n", eventId, err.Error())
 	} else {
 		if statusCode != 200 {
-			service.logger.Errorf("Error writing Event log for event %v. Received status code %v from http response. Output: %v, Request body: %v", eventId, statusCode, out, body[:pos])
+			service.logger.Errorf("Error writing Event log for event %v. Received status code %v from http response. Output: %v, Request body: %s", eventId, statusCode, out, body[:pos])
 		}
 	}
 }
