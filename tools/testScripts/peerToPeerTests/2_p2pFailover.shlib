@@ -131,7 +131,7 @@ function runTestCase {
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
 
-  # In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
+	# In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
 	echo "Done - Sleeping 6 minutes to ensure multiple requests have been handled"
 
 	# Sleeping 7 minutes mean we should have at least two instances

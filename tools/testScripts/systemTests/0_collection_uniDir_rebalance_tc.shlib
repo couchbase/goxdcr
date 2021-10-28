@@ -147,8 +147,8 @@ function runOneRebalanceCycle {
 	currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
 	sleep $timeIntervalSecs
 
-	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(( $currentTopologyRestartCnt + 1 ))
-	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2 $(( $currentTopologyRestartCnt2 + 1 ))
+	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(($currentTopologyRestartCnt + 1))
+	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2 $(($currentTopologyRestartCnt2 + 1))
 
 	startEjectNode "C1P" "C1"
 	echo "Rebalancing out completed. Letting replication continue with one nodes for $timeIntervalSecs seconds before rebalancing back in"
@@ -159,8 +159,8 @@ function runOneRebalanceCycle {
 	currentTopologyRestartCnt2=$(echo "$currentXdcrLogC1P" | grep -c "$TOPOLOGY_RESTART_MSG")
 	sleep $timeIntervalSecs
 
-	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(( $currentTopologyRestartCnt + 1 ))
-	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2 $(( $currentTopologyRestartCnt2 + 1 ))
+	validateInternalLogWithInstance "C1" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt $(($currentTopologyRestartCnt + 1))
+	validateInternalLogWithInstance "C1P" "$TOPOLOGY_RESTART_MSG" $currentTopologyRestartCnt2 $(($currentTopologyRestartCnt2 + 1))
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"

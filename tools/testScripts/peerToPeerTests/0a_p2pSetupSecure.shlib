@@ -140,9 +140,9 @@ function runOneRebalanceCycle {
 
 function runReplicationResume {
 	local logs
-		logs=$(getInternalNodeXdcrLog "C1")
-  	local curCkptsFoundDocsCnt=$(echo "$logs" | grep -c "$CKPT_FOUND_DOCS")
-  	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
+	logs=$(getInternalNodeXdcrLog "C1")
+	local curCkptsFoundDocsCnt=$(echo "$logs" | grep -c "$CKPT_FOUND_DOCS")
+	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 20 seconds for resume to finish"

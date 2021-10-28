@@ -1,0 +1,100 @@
+# Copyright 2021-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+	["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"inventory":"inventory", "inventory.airport":"inventory.airport1", "inventory.landmark":"inventory.landmark1"}' ["collectionsOSOMode"]="false")
+declare -A ExplicitReplProperties2=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500
+	["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"inventory":"S1", "inventory.airport":"S1.col1", "inventory.landmark":"S1.col2"}' ["collectionsOSOMode"]="false")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+declare -a targetArr=("inventory" "S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${targetArr[@]})
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+declare -a collection2ArrCrippled=("col1" "col3")
+declare -a inventoryArr=("airport" "airport1" "landmark" "landmark1")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]}
+	["S3"]=${collection2ArrCrippled[@]} ["inventory"]=${inventoryArr[@]})
+
+function runDataLoad {
+	travelSample=$(locate travel-sample.zip | grep install | grep samples | head -n 1)
+	runDocLoader "C1" "B1" "$travelSample"
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+function cleanupTestCaseInternalSettings {
+	resetCustomManifestRefreshInterval "C1"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running collections explicit mapping test case with travel sample"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Before doing provisioning, get old internal settings
+	setCustomManifestRefreshInterval "C1"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap cleanupTestCaseInternalSettings EXIT
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	echo "Loading travel sample on source cluster..."
+	runDataLoad
+
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	echo "Waiting 15 seconds before checking changes left is 0"
+	sleep 15
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+
+	grepForPanics
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

@@ -1942,6 +1942,9 @@ func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 	newReq.ColInfoMtx.Lock()
 	newReq.ColInfo = nil
 	newReq.ColInfoMtx.Unlock()
+	newReq.SrcColNamespaceMtx.Lock()
+	newReq.SrcColNamespace = nil
+	newReq.SrcColNamespaceMtx.Unlock()
 	return newReq, nil
 }
 
@@ -1985,13 +1988,6 @@ func (router *Router) recycleDataObj(obj interface{}) {
 	case *base.WrappedMCRequest:
 		if router.mcRequestPool != nil {
 			req := obj.(*base.WrappedMCRequest)
-			req.SrcColNamespaceMtx.Lock()
-			if req.SrcColNamespace != nil {
-				req.SrcColNamespace.ScopeName = ""
-				req.SrcColNamespace.CollectionName = ""
-				router.dcpObjRecycler(req.SrcColNamespace)
-			}
-			req.SrcColNamespaceMtx.Unlock()
 
 			req.ColInfoMtx.Lock()
 			if req.ColInfo != nil && router.targetColInfoPool != nil {

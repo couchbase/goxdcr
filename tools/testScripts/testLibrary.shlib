@@ -149,8 +149,8 @@ function waitForChangesLeft0 {
 }
 
 function checkNonNegativeChangesLeft {
-  local srcCluster=$1
-  validateLogWithInstance "$srcCluster" "changes_left=-" 0
+	local srcCluster=$1
+	validateLogWithInstance "$srcCluster" "changes_left=-" 0
 }
 
 function checkChangesLeftInternal {
