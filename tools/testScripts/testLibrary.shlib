@@ -23,6 +23,7 @@ GOXDCR_IDLE_CPU_THRESHOLD=10
 RECEIVE_P2P_REQ_MSG="Received peer-to-peer push requests"
 RECEIVE_P2P_REQ_DONE_MSG="Done handling peer-to-peer push requests from"
 TS_PREFIX="ts.Seqno"
+PIPELINE_SHUTDOWN_DONE_MSG="status is finished shutting down"
 
 # These should be imported after clusterRunProvision script
 
@@ -52,6 +53,7 @@ function checkItemCnt {
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
@@ -136,6 +138,7 @@ function waitForChangesLeft0 {
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if (($? != 0)); then
 			echo "Failed to get changes_left"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 		if (($changesLeft > 0)); then
@@ -182,6 +185,7 @@ function checkChangesLeftInternal {
 			sleep 10
 		fi
 	done
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
@@ -237,6 +241,7 @@ function checkDocsProcessed {
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+	dumpDebugInfoBeforeExit
 	exit 1
 }
 
@@ -280,11 +285,13 @@ function validateLogWithInstance {
 	if (($count != $instanceCnt)); then
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
 			echo "Error - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, but found $count"
+			dumpDebugInfoBeforeExit
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]]; then
 			echo "Warning - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, found $count"
 		else
 			echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	else
@@ -374,6 +381,63 @@ function getInternalNodeXdcrLog {
 	cat $goxdcrLogFile
 }
 
+function waitForOneReplicationToBeDeleted {
+	local clusterName=$1
+	local currentInstanceCnt=0
+
+	logs=$(getInternalNodeXdcrLog "$clusterName")
+	if !(($? == 0)); then
+		echo "Unable to get log for validation"
+		exit 1
+	fi
+
+	currentInstanceCnt=$(echo "$logs" | grep -c "$PIPELINE_SHUTDOWN_DONE_MSG")
+
+	waitForInternalLogInstance "$clusterName" "$PIPELINE_SHUTDOWN_DONE_MSG" "$(($currentInstanceCnt + 1))" 2
+
+	if ((!$? == 0)); then
+		echo "Timed out waiting for message $PIPELINE_SHUTDOWN_DONE_MSG to increase from $currentInstanceCnt by 1"
+		dumpDebugInfoBeforeExit
+		exit 1
+	fi
+}
+
+# 1 - cluster name
+# 2 - String to look for
+# 3 - Minimum Number of occurrences to wait for
+# 4 - Number of minutes to wait for
+function waitForInternalLogInstance {
+	local clusterName=$1
+	local grepStr="$2"
+	local instanceCnt=$3
+	local minToWait=$4
+	local minElapsed=0
+	local i=0
+
+	while (($minElapsed < $minToWait)); do
+		logs=$(getInternalNodeXdcrLog "$clusterName")
+		if !(($? == 0)); then
+			echo "Unable to get log for validation"
+			exit 1
+		fi
+
+		count=$(echo "$logs" | grep -c "$grepStr")
+		if (($count >= $instanceCnt)); then
+			echo "Found $instanceCnt instances of the string: $grepStr"
+			return
+		fi
+
+		sleep 10
+		i=$(($i + 1))
+		if (($i == 6)); then
+			minElapsed=$(($minElapsed + 1))
+			i=0
+		fi
+	done
+
+	return 1
+}
+
 # 1 - cluster name
 # 2 - String to look for
 # 3 - Number of occurrences
@@ -394,14 +458,17 @@ function validateInternalLogWithInstance {
 	if (($count != $instanceCnt)); then
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
 			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
+			dumpDebugInfoBeforeExit
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]] && (($count < $instanceCnt)); then
 			echo "Error - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, but found $count"
+			dumpDebugInfoBeforeExit
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]]; then
 			echo "Warning - requested count for $grepStr is $instanceCnt or <= $maxInstanceCnt, found $count"
 		else
 			echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
+			dumpDebugInfoBeforeExit
 			exit 1
 		fi
 	else
@@ -415,6 +482,7 @@ function validateXDCRCheckpoints {
 	checkpointOutput=$(getXDCRCheckpoints $cluster)
 	if ! (($? == 0)); then
 		echo "Unable to get checkpoint"
+		dumpDebugInfoBeforeExit
 		exit 1
 	fi
 
@@ -668,4 +736,57 @@ function testIdleXdcrCPU {
 	IFS="$oldIFS"
 
 	return $retResult
+}
+
+function getGoroutinesStack {
+	local clusterName=$1
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+
+	echo "Goroutines for cluster $clusterName..."
+	$CURL http://localhost:$sourcePort/debug/pprof/goroutine?debug=1
+}
+
+function getGoHeap {
+	local clusterName=$1
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+
+	echo "Go heap for cluster $clusterName..."
+	$CURL http://localhost:$sourcePort/debug/pprof/heap?debug=1
+}
+
+function xdcrMemRss {
+	local -A PORT_PID_MAP
+
+	if (($(ps -ef | grep goxdcr | grep -cv grep) == 0)); then
+		echo "No XDCR processes found"
+		return 0
+	fi
+
+	local OLDIFS="$IFS"
+	IFS=$'\n'
+	local sourcePort
+	local pid
+
+	for processLine in $(ps -ef | grep goxdcr | grep sourceKVAdmin); do
+		sourcePort=$(echo "$processLine" | awk '{print $9}' | cut -d= -f2)
+		pid=$(echo "$processLine" | awk '{print $2}')
+		PORT_PID_MAP["$sourcePort"]=$pid
+	done
+	IFS="$OLDIFS"
+
+	for sourcePort in $(echo ${!PORT_PID_MAP[@]}); do
+		pid=${PORT_PID_MAP[$sourcePort]}
+		local RSS=$(ps -o rss= -p $pid)
+		echo "XDCR port $sourcePort Pid $pid - RSS: $RSS"
+	done
+}
+
+function dumpDebugInfoBeforeExit {
+	local clusterName
+
+	xdcrMemRss
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		getGoroutinesStack "$clusterName" >/tmp/$clusterName.pprof.log
+		getGoHeap "$clusterName" >/tmp/$clusterName.hprof.log
+	done
 }

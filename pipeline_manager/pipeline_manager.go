@@ -189,7 +189,7 @@ func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error 
 
 		pipelineMgr.logger.Infof("Stopping pipeline %v since the replication spec has been deleted\n", topic)
 		if updaterObj == nil {
-			pipelineMgr.logger.Errorf("Updater object is nil, may be leaking an updater somewhere\n", topic)
+			pipelineMgr.logger.Errorf("Updater object is nil for pipeline %v, may be leaking an updater somewhere\n", topic)
 		} else {
 			updater := updaterObj.(*PipelineUpdater)
 			updater.stop()
@@ -1537,6 +1537,7 @@ func (r *PipelineUpdater) run() {
 				r.pipelineMgr.StopPipeline(r.rep_status)
 				// Reset runCounter to 0 for unit test
 				atomic.StoreUint64(&r.runCounter, 0)
+				r.logger.Infof("Replication %v's status is finished shutting down\n", r.pipeline_name)
 				return
 			case <-r.update_now_ch:
 				r.logger.Infof("Replication %v's status is changed, update now\n", r.pipeline_name)

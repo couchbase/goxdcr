@@ -96,4 +96,7 @@ function runTestCase {
 	cleanupBuckets
 	cleanupRemoteClusterRefs
 
+	waitForOneReplicationToBeDeleted "C1" &
+	waitForOneReplicationToBeDeleted "C2" &
+	waitForBgJobs
 }

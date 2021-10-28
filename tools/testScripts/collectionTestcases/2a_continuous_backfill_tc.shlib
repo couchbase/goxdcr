@@ -27,7 +27,7 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 #pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
 #declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
@@ -52,7 +52,7 @@ declare -a BG_WORKLOAD_PID
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
 	if [[ ! -z "$BG_WORKLOAD_PID" ]]; then
-		kill $BG_WORKLOAD_PID
+		kill $BG_WORKLOAD_PID 2>/dev/null
 	fi
 	unset BG_WORKLOAD_PID
 }
@@ -61,7 +61,8 @@ function checkChangesLeftBackup {
 	local ongoingThreshold=60000
 	changesLeft=$(getChangesLeft "C1" "B1" "C2" "B2")
 	if (($changesLeft > $ongoingThreshold)); then
-		echo "Changes left is $changesLeft above threshold 60000"
+		echo "Changes left is $changesLeft above threshold $ongoingThreshold"
+		dumpDebugInfoBeforeExit
 		echo "Killing workload"
 		kill $BG_WORKLOAD_PID
 		echo "Sleeping 30 seconds before exiting"
@@ -181,6 +182,13 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+
+	killAllBgJobs
+
+	waitForOneReplicationToBeDeleted "C1" &
+	waitForOneReplicationToBeDeleted "C2" &
+	waitForBgJobs
+
 	cleanupTestCaseInternalSettings
 	# remove trap as no longer needed
 	trap - EXIT

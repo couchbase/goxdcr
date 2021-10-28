@@ -134,4 +134,6 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+
+	waitForOneReplicationToBeDeleted "C1"
 }

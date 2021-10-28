@@ -132,6 +132,11 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+
+	waitForOneReplicationToBeDeleted "C1" &
+	waitForOneReplicationToBeDeleted "C2" &
+	waitForBgJobs
+
 	cleanupTestCaseInternalSettings
 	# remove trap as no longer needed
 	trap - EXIT
