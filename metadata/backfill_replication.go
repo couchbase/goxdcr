@@ -1174,6 +1174,9 @@ func generateShas(requestedCollectionMappings []CollectionNamespaceMapping) []st
 }
 
 func (b *BackfillTask) combineTask(task *BackfillTask) bool {
+	if b == nil {
+		return false
+	}
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	// Only combine if the tasks have valid timestamps
