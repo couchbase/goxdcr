@@ -15,7 +15,7 @@ type ReplicaCache struct {
 }
 
 // GetReplicaInfo provides a mock function with given fields: spec
-func (_m *ReplicaCache) GetReplicaInfo(spec *metadata.ReplicationSpecification) (int, base.VbHostsMapType, base.StringStringMap, func(), error) {
+func (_m *ReplicaCache) GetReplicaInfo(spec *metadata.ReplicationSpecification) (int, *base.VbHostsMapType, *base.StringStringMap, func(), error) {
 	ret := _m.Called(spec)
 
 	var r0 int

@@ -82,7 +82,8 @@ type XDCRFactory struct {
 	pipelineMgrStopCallback base.PipelineMgrStopCbType
 	replStatusGetter        func(string) (pp.ReplicationStatusIface, error)
 
-	p2pMgr peerToPeer.P2PManager
+	p2pMgr      peerToPeer.P2PManager
+	bucketSvcId string
 }
 
 type BackfillMgrGetter func() service_def.BackfillMgrIface
@@ -117,6 +118,7 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster
 		bucketTopologySvc:        bucketTopologySvc,
 		p2pMgr:                   p2pMgr,
 		replStatusGetter:         replStatusGetter,
+		bucketSvcId:              "XDCRFactory" + base.GetIterationId(&factoryIterationId),
 	}
 }
 
@@ -174,24 +176,25 @@ func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline com
 	return pipeline, nil
 }
 
+var factoryIterationId uint32
+
 func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.PipelineType, spec *metadata.ReplicationSpecification, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, func(*common.Pipeline) error, error) {
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
 
-	id := "XDCRFactory"
-
-	sourcebucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, id)
+	sourcebucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, xdcrf.bucketSvcId)
 	if err != nil {
 		xdcrf.logger.Errorf("Error subscribing to local feed for spec %v", spec.Id)
 		return nil, nil, err
 	}
 	var latestSourceBucketTopology service_def.SourceNotification
-	defer xdcrf.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, id)
+	defer xdcrf.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, xdcrf.bucketSvcId)
 	select {
 	case latestSourceBucketTopology = <-sourcebucketFeed:
 	default:
 		return nil, nil, base.ErrorSourceBucketTopologyNotReady
 	}
+	defer latestSourceBucketTopology.Recycle()
 
 	targetClusterRef, err := xdcrf.remote_cluster_svc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
 	if err != nil {
@@ -206,19 +209,20 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	}
 	isCapiReplication := (nozzleType == base.Capi)
 
-	targetBucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, id)
+	targetBucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, xdcrf.bucketSvcId)
 	if err != nil {
 		xdcrf.logger.Errorf("Error subscribing to remote feed for spec %v", spec.Id)
 		return nil, nil, err
 	}
 	var latestTargetBucketTopology service_def.TargetNotification
-	defer xdcrf.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, id)
+	defer xdcrf.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, xdcrf.bucketSvcId)
 	select {
 	case latestTargetBucketTopology = <-targetBucketFeed:
 	default:
 		return nil, nil, base.ErrorSourceBucketTopologyNotReady
 	}
 	targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
+	defer latestTargetBucketTopology.Recycle()
 
 	conflictResolutionType, err := xdcrf.utils.GetConflictResolutionTypeFromBucketInfo(spec.TargetBucketName, targetBucketInfo)
 	if err != nil {
@@ -466,7 +470,9 @@ func (xdcrf *XDCRFactory) constructSourceNozzles(spec *metadata.ReplicationSpeci
 	maxNozzlesPerNode := spec.Settings.SourceNozzlePerNode
 
 	// Get a map of kvNode -> vBuckets responsibile for
-	kv_vb_map := srcBucketTopology.GetSourceVBMapRO()
+	ro := srcBucketTopology.GetSourceVBMapRO()
+	// Hard Clone because it's needed downstream and the event will be recycled
+	kv_vb_map := ro.Clone()
 
 	for kvaddr, vbnos := range kv_vb_map {
 

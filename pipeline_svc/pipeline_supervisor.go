@@ -213,6 +213,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 				} else {
 					pipelineSupervisor.checkPipelineHealth(notification.GetDcpStatsMapLegacy())
 				}
+				notification.Recycle()
 			}
 		}
 	}()
@@ -346,7 +347,7 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 }
 
 // check if any runtime stats indicates that pipeline is broken
-func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth(dcpStats map[string]map[string]string) error {
+func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth(dcpStats base.DcpStatsMapType) error {
 	if !pipeline_utils.IsPipelineRunning(pipelineSupervisor.pipeline.State()) {
 		//the pipeline is no longer running, kill myself
 		message := "Pipeline is no longer running, exit."

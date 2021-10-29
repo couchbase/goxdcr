@@ -385,15 +385,21 @@ func TestReverseVBNodesMap(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestReverseVBNodesMap =================")
 
 	assert := assert.New(t)
-	inputMap := make(map[uint16][]string)
-	inputMap[0] = []string{"node0", "node1"}
-	inputMap[1] = []string{"node1", "node2"}
-	inputMap[2] = []string{"node2", "node3"}
+	inputMap := make(VbHostsMapType)
+	str0 := []string{"node0", "node1"}
+	str1 := []string{"node1", "node2"}
+	str2 := []string{"node2", "node3"}
+	inputMap[0] = &str0
+	inputMap[1] = &str1
+	inputMap[2] = &str2
 
-	output := ReverseVBNodesMap(inputMap)
-	assert.Len(output, 4)
-	assert.Len(output["node0"], 1)
-	assert.Len(output["node1"], 2)
-	assert.Len(output["node2"], 2)
-	assert.Len(output["node3"], 1)
+	output := ReverseVBNodesMap(inputMap, func([]string) *KvVBMapType {
+		retMap := make(KvVBMapType)
+		return &retMap
+	})
+	assert.Len(*output, 4)
+	assert.Len((*output)["node0"], 1)
+	assert.Len((*output)["node1"], 2)
+	assert.Len((*output)["node2"], 2)
+	assert.Len((*output)["node3"], 1)
 }

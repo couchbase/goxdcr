@@ -590,29 +590,25 @@ func TestVBMapChange(t *testing.T) {
 	assert.Equal(3, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	// Let's say a new VB change comes
-	newVBMap := make(map[string][]uint16)
+	newVBMap := make(base.KvVBMapType)
 	newVBMap[vbsNodeName] = []uint16{0, 1, 2, 3}
-	newNotification := &service_impl.Notification{
-		Source:              true,
-		NumberOfSourceNodes: 1,
-		SourceVBMap:         newVBMap,
-		KvVbMap:             nil,
-	}
+	newNotification := service_impl.NewNotification(true, topologyObjPool)
+	newNotification.NumberOfSourceNodes = 1
+	newNotification.SourceVBMap = &newVBMap
+	newNotification.SetNumberOfReaders(1)
 	rh.sourceBucketTopologyCh <- newNotification
 
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(4, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	// VBs are removed
-	delVBMap := make(map[string][]uint16)
+	delVBMap := make(base.KvVBMapType)
 	delVBMap[vbsNodeName] = []uint16{0, 1}
-	delNotification := &service_impl.Notification{
-		Source:              true,
-		NumberOfSourceNodes: 1,
-		SourceVBMap:         delVBMap,
-		KvVbMap:             nil,
-	}
-	delNotification.SourceVBMap = delVBMap
+	delNotification := service_impl.NewNotification(true, topologyObjPool)
+	delNotification.NumberOfSourceNodes = 1
+	delNotification.SourceVBMap = &delVBMap
+	delNotification.SetNumberOfReaders(1)
+	delNotification.SourceVBMap = &delVBMap
 	rh.sourceBucketTopologyCh <- delNotification
 
 	// The clean up will take place in the bg so wait a little bit
@@ -672,29 +668,24 @@ func TestVBMapChangeType2(t *testing.T) {
 	assert.Equal(3, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	// Let's say a new VB change comes
-	newVBMap := make(map[string][]uint16)
+	newVBMap := make(base.KvVBMapType)
 	newVBMap[vbsNodeName] = []uint16{0, 1, 2, 3}
-	newNotification := &service_impl.Notification{
-		Source:              true,
-		NumberOfSourceNodes: 1,
-		SourceVBMap:         newVBMap,
-		KvVbMap:             nil,
-	}
+	newNotification := service_impl.NewNotification(true, topologyObjPool)
+	newNotification.NumberOfSourceNodes = 1
+	newNotification.SourceVBMap = &newVBMap
+	newNotification.SetNumberOfReaders(1)
 	rh.sourceBucketTopologyCh <- newNotification
 
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(4, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	// VBs are removed
-	delVBMap := make(map[string][]uint16)
+	delVBMap := make(base.KvVBMapType)
 	delVBMap[vbsNodeName] = []uint16{0, 1}
-	delNotification := &service_impl.Notification{
-		Source:              true,
-		NumberOfSourceNodes: 1,
-		SourceVBMap:         delVBMap,
-		KvVbMap:             nil,
-	}
-	delNotification.SourceVBMap = delVBMap
+	delNotification := service_impl.NewNotification(true, topologyObjPool)
+	delNotification.NumberOfSourceNodes = 1
+	delNotification.SourceVBMap = &delVBMap
+	delNotification.SetNumberOfReaders(1)
 	rh.sourceBucketTopologyCh <- delNotification
 
 	// The clean up will take place in the bg so wait a little bit

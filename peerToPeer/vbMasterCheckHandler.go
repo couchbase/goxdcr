@@ -171,11 +171,14 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	return
 }
 
+var vbmasterChkHandlerIteration uint32
+
 func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketVBMapType, resp *VBMasterCheckResp, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 	for bucketName, vbsList := range bucketVBsMap {
 		resp.InitBucket(bucketName)
 
+		subsId := VBMasterCheckSubscriberId + base.GetIterationId(&vbmasterChkHandlerIteration)
 		// localFeed only cares about source bucket name
 		tempRef, err := metadata.NewReplicationSpecification(bucketName, "", "", "", "")
 		if err != nil {
@@ -184,7 +187,7 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 			(*resp.payload)[bucketName].OverallPayloadErr = errMsg
 			continue
 		}
-		srcNotificationCh, err := h.bucketTopologySvc.SubscribeToLocalBucketFeed(tempRef, VBMasterCheckSubscriberId)
+		srcNotificationCh, err := h.bucketTopologySvc.SubscribeToLocalBucketFeed(tempRef, subsId)
 		if err != nil {
 			errMsg := fmt.Sprintf("Unable to get srcNotificationCh for bucket %v - %v", bucketName, err)
 			h.logger.Warnf(errMsg)
@@ -193,7 +196,7 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 		}
 
 		unsubsFunc := func() {
-			err = h.bucketTopologySvc.UnSubscribeLocalBucketFeed(tempRef, VBMasterCheckSubscriberId)
+			err = h.bucketTopologySvc.UnSubscribeLocalBucketFeed(tempRef, subsId)
 			if err != nil {
 				h.logger.Warnf("Unable to unsubscribe srcNotificationCh for bucket %v - %v", bucketName, err)
 				// Not an error remote side cares about
@@ -209,7 +212,7 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 		for key, _ := range myVBMap {
 			oneKey = key
 		}
-		myVbsList := myVBMap[oneKey]
+		myVbsList := base.CloneUint16List(myVBMap[oneKey])
 		_, _, vbsIntersect := base.ComputeDeltaOfUint16Lists(myVbsList, vbsList, true)
 		// Given my list and another list of VBs that I should not own,
 		// if there is any intersection, then that's an issue
@@ -225,6 +228,7 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 			(*resp.payload)[bucketName].RegisterNotMyVBs(vbsList)
 		}
 		unsubsFunc()
+		latestInfo.Recycle()
 	}
 }
 

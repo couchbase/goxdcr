@@ -760,7 +760,40 @@ func (u *Utilities) GetMemcachedClient(serverAddr, bucketName string, kv_mem_cli
 	}
 }
 
-func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
+func (u *Utilities) GetServersListFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error) {
+	vbucketServerMapObj, ok := bucketInfo[base.VBucketServerMapKey]
+	if !ok {
+		// The returned error will be displayed on UI. We don't want to include the bucketInfo map since it is too much info for UI.
+		u.logger_utils.Errorf("Error getting vbucket server map from bucket info. bucketInfo=%v", bucketInfo)
+		return nil, fmt.Errorf("Error getting %v from bucket info", base.VBucketServerMapKey)
+	}
+	vbucketServerMap, ok := vbucketServerMapObj.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("Vbucket server map is of wrong type. vbucketServerMap=%v", vbucketServerMapObj)
+	}
+
+	// get server list
+	serverListObj, ok := vbucketServerMap[base.ServerListKey]
+	if !ok {
+		return nil, fmt.Errorf("Error getting server list from vbucket server map. vbucketServerMap=%v", vbucketServerMap)
+	}
+	serverList, ok := serverListObj.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("Server list is of wrong type. serverList=%v", serverListObj)
+	}
+
+	servers := make([]string, len(serverList))
+	for index, serverName := range serverList {
+		serverNameStr, ok := serverName.(string)
+		if !ok {
+			return nil, fmt.Errorf("Server name is of wrong type. serverName=%v", serverName)
+		}
+		servers[index] = serverNameStr
+	}
+	return servers, nil
+}
+
+func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMap *base.KvVBMapType) (map[string][]uint16, error) {
 	vbucketServerMapObj, ok := bucketInfo[base.VBucketServerMapKey]
 	if !ok {
 		// The returned error will be displayed on UI. We don't want to include the bucketInfo map since it is too much info for UI.
@@ -770,25 +803,6 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 	vbucketServerMap, ok := vbucketServerMapObj.(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("Vbucket server map is of wrong type. connStr=%v, bucketName=%v, vbucketServerMap=%v\n", connStr, bucketName, vbucketServerMapObj)
-	}
-
-	// get server list
-	serverListObj, ok := vbucketServerMap[base.ServerListKey]
-	if !ok {
-		return nil, fmt.Errorf("Error getting server list from vbucket server map. connStr=%v, bucketName=%v, vbucketServerMap=%v\n", connStr, bucketName, vbucketServerMap)
-	}
-	serverList, ok := serverListObj.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("Server list is of wrong type. connStr=%v, bucketName=%v, serverList=%v\n", connStr, bucketName, serverListObj)
-	}
-
-	servers := make([]string, len(serverList))
-	for index, serverName := range serverList {
-		serverNameStr, ok := serverName.(string)
-		if !ok {
-			return nil, fmt.Errorf("Server name is of wrong type. connStr=%v, bucketName=%v, serverName=%v\n", connStr, bucketName, serverName)
-		}
-		servers[index] = serverNameStr
 	}
 
 	// get vbucket "map"
@@ -801,7 +815,22 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 		return nil, fmt.Errorf("Vbucket map is of wrong type. connStr=%v, bucketName=%v, vbucketMap=%v\n", connStr, bucketName, vbucketMapObj)
 	}
 
-	serverVBMap := make(map[string][]uint16)
+	servers, err := u.GetServersListFromBucketInfo(bucketInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	var serverVBMap map[string][]uint16
+	var keepMap map[string]bool
+	if recycledMap != nil {
+		keepMap = make(map[string]bool)
+		serverVBMap = *recycledMap
+		for server, _ := range serverVBMap {
+			serverVBMap[server] = serverVBMap[server][:0]
+		}
+	} else {
+		serverVBMap = make(map[string][]uint16)
+	}
 
 	for vbno, indexListObj := range vbucketMap {
 		indexList, ok := indexListObj.([]interface{})
@@ -824,6 +853,9 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 		}
 
 		server := servers[indexInt]
+		if keepMap != nil {
+			keepMap[server] = true
+		}
 		var vbList []uint16
 		vbList, ok = serverVBMap[server]
 		if !ok {
@@ -832,11 +864,19 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 		vbList = append(vbList, uint16(vbno))
 		serverVBMap[server] = vbList
 	}
+
+	if recycledMap != nil {
+		for checkName, _ := range serverVBMap {
+			if _, exists := keepMap[checkName]; !exists {
+				delete(serverVBMap, checkName)
+			}
+		}
+	}
 	return serverVBMap, nil
 }
 
 func (u *Utilities) GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (kvVbMap map[string][]uint16, err error) {
-	kvVbMap, err = u.GetServerVBucketsMap(connStr, bucketName, bucketInfo)
+	kvVbMap, err = u.GetServerVBucketsMap(connStr, bucketName, bucketInfo, nil)
 	if err != nil {
 		return
 	}
@@ -1273,7 +1313,7 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 			err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
 			return err
 		}
-		bucketKVVBMap, err = u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo)
+		bucketKVVBMap, err = u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo, nil)
 		if err != nil {
 			return err
 		}
@@ -2757,6 +2797,33 @@ func (u *Utilities) VerifyTargetBucket(targetBucketName, targetBucketUuid string
 	return nil
 }
 
+func (u *Utilities) GetHostNamesFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error) {
+	nodeListObj, ok := bucketInfo[base.NodesKey]
+	if !ok {
+		return nil, fmt.Errorf("Error getting %v from bucket info %v", base.NodesKey, bucketInfo)
+	}
+	nodeList, ok := nodeListObj.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("Node list is of wrong type. nodeList=%v", nodeListObj)
+	}
+	var retList []string
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("Error getting nodeInfoMap from node list %v", nodeList)
+		}
+		hostNameObj, ok := nodeInfoMap[base.HostNameKey]
+		if !ok {
+			return nil, fmt.Errorf("Error getting %v from nodeInfoMap %v", base.HostNameKey, nodeInfoMap)
+		}
+		hostName, ok := hostNameObj.(string)
+		if ok {
+			retList = append(retList, hostName)
+		}
+	}
+	return retList, nil
+}
+
 func (u *Utilities) GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error) {
 	nodeListObj, ok := bucketInfo[base.NodesKey]
 	if !ok {
@@ -2860,23 +2927,28 @@ func (u *Utilities) DumpStackTraceAfterThreshold(id string, threshold time.Durat
 	return u.StartDebugExec(id, threshold, dumpStackTrace)
 }
 
-func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_map map[string]string, collectionIds []uint32) (map[uint16]uint64, map[string]string, error) {
-	highseqno_map := make(map[uint16]uint64)
+func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, error) {
+	var highseqno_map map[uint16]uint64
+	if recycledVbSeqnoMap != nil {
+		highseqno_map = *recycledVbSeqnoMap
+	} else {
+		highseqno_map = make(map[uint16]uint64)
+	}
 
 	var err error
 	if len(collectionIds) == 0 {
 		// Get all the seqno across everything in the bucket using traditional stats map
-		if stats_map != nil {
+		if stats_map != nil && *stats_map != nil {
 			// stats_map is not nill when GetHighSeqNos is called from per-replication stats manager, reuse stats_map to avoid memory over-allocation and re-allocation
-			err = conn.StatsMapForSpecifiedStats(base.VBUCKET_SEQNO_STAT_NAME, stats_map)
+			err = conn.StatsMapForSpecifiedStats(base.VBUCKET_SEQNO_STAT_NAME, *stats_map)
 		} else {
 			// stats_map is nill when GetHighSeqNos is called on paused replications. do not reuse stats_map
-			stats_map, err = conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
+			*stats_map, err = conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
 		}
 		if err != nil {
 			return nil, nil, err
 		}
-		err = u.ParseHighSeqnoStat(vbnos, stats_map, highseqno_map)
+		err = u.ParseHighSeqnoStat(vbnos, *stats_map, highseqno_map)
 	} else {
 		// Need to get high sequence numbers across one or a set of collections only
 		mccContext := &mcc.ClientContext{}
@@ -2895,7 +2967,7 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 	if err != nil {
 		return nil, nil, err
 	} else {
-		return highseqno_map, stats_map, nil
+		return &highseqno_map, stats_map, nil
 	}
 }
 
@@ -2947,13 +3019,20 @@ func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap map[uint16]uint64) (map[uint16]
 // 2. Map of memcached Address -> ns_server address
 // 3. Number of replicas set for this bucket
 // 4. List of VBs that this node is not the owner, but is a member as a replica
-func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error) {
+func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool, recycledStringStringMap *base.StringStringMap, recycledVbHostMapGetter func(vbnos []uint16) *base.VbHostsMapType, recycledStringSliceGetter func() *[]string) (*base.VbHostsMapType, *base.StringStringMap, int, []uint16, error) {
 	nodesList, ok := bucketInfo[base.NodesKey].([]interface{})
 	if !ok {
 		return nil, nil, 0, nil, fmt.Errorf("Unable to get %v from bucketInfo", base.NodesKey)
 	}
 
-	kvToNsServerTranslateMap := make(base.StringStringMap)
+	var kvToNsServerTranslateMap *base.StringStringMap
+	if recycledStringStringMap != nil {
+		kvToNsServerTranslateMap = recycledStringStringMap
+	} else {
+		newMap := make(base.StringStringMap)
+		kvToNsServerTranslateMap = &newMap
+	}
+
 	var foundThisNode bool
 	var thisNodeName string
 	for _, nodeInfoRaw := range nodesList {
@@ -2993,7 +3072,7 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 			if portName == base.DirectPortKey {
 				memcachedPort := uint16(portNumber)
 				kvServerAndPort := base.GetHostAddr(nodeNameWithoutPort, memcachedPort)
-				kvToNsServerTranslateMap[kvServerAndPort] = nsServerHostAndPort
+				(*kvToNsServerTranslateMap)[kvServerAndPort] = nsServerHostAndPort
 				if isThisNode {
 					thisNodeName = kvServerAndPort
 				}
@@ -3043,9 +3122,38 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 		return nil, nil, 0, nil, fmt.Errorf("unable to find %v", base.VBucketMapKey)
 	}
 
-	vbReplicaMap := make(base.VbHostsMapType)
+	var vbReplicaMap *base.VbHostsMapType
 	var vbListForBeingAReplica []uint16
 
+	// First pass - figure out the VBs if recycled map getter is present
+	if recycledVbHostMapGetter != nil {
+		var vbListForThisNode []uint16
+		for vbno, serverIdxListRaw := range vbucketListOfServerIdx {
+			serverIdxList, ok := serverIdxListRaw.([]interface{})
+			if !ok {
+				return nil, nil, 0, nil, fmt.Errorf("wrong type for serverIdxListRaw: %v", reflect.TypeOf(serverIdxListRaw))
+			}
+			// serverList contains the node itself (idx 0) + replicas
+			if len(serverIdxList) != (numOfReplicas + 1) {
+				return nil, nil, 0, nil, fmt.Errorf("for VB %v the list of nodes is of length %v - expected %v", vbno, len(serverIdxList), numOfReplicas+1)
+			}
+			firstNodeIdxFloat, ok := serverIdxList[0].(float64)
+			if !ok {
+				return nil, nil, 0, nil, fmt.Errorf("serverIndex is of wrong type: %v", reflect.TypeOf(serverIdxList[0]))
+			}
+			firstNodeIdx := int(firstNodeIdxFloat)
+			if firstNodeIdx == thisNodeIndex {
+				vbListForThisNode = append(vbListForThisNode, uint16(vbno))
+			}
+		}
+
+		vbReplicaMap = recycledVbHostMapGetter(vbListForThisNode)
+	} else {
+		newVBReplicaMap := make(base.VbHostsMapType)
+		vbReplicaMap = &newVBReplicaMap
+	}
+
+	// Second pass
 	for vbno, serverIdxListRaw := range vbucketListOfServerIdx {
 		serverIdxList, ok := serverIdxListRaw.([]interface{})
 		if !ok {
@@ -3068,7 +3176,15 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 				// replicaIdx is -1 if hasn't been assigned yet or is transient. Ignore -1
 				if replicaIdx != -1 {
 					replicaName := serverList[replicaIdx].(string)
-					vbReplicaMap[uint16(vbno)] = append(vbReplicaMap[uint16(vbno)], replicaName)
+					if (*vbReplicaMap)[uint16(vbno)] == nil {
+						if recycledStringSliceGetter == nil {
+							var newSlice []string
+							(*vbReplicaMap)[uint16(vbno)] = &newSlice
+						} else {
+							(*vbReplicaMap)[uint16(vbno)] = recycledStringSliceGetter()
+						}
+					}
+					*(*vbReplicaMap)[uint16(vbno)] = append(*(*vbReplicaMap)[uint16(vbno)], replicaName)
 				}
 			}
 		} else {

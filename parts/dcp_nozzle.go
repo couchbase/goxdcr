@@ -255,7 +255,7 @@ func (reqHelper *dcpStreamReqHelper) getDisabledError() error {
 
 type DcpNozzleIface interface {
 	common.Nozzle
-	CheckStuckness(dcp_stats map[string]map[string]string) error
+	CheckStuckness(dcp_stats base.DcpStatsMapType) error
 	CollectionEnabled() bool
 	GetStreamState(vbno uint16) (DcpStreamState, error)
 	SetMaxMissCount(max_dcp_miss_count int)
@@ -1782,7 +1782,7 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 }
 
 // check if dcp is stuck
-func (dcp *DcpNozzle) CheckStuckness(dcp_stats map[string]map[string]string) error {
+func (dcp *DcpNozzle) CheckStuckness(dcp_stats base.DcpStatsMapType) error {
 	counter_received := dcp.counterReceived()
 	if counter_received > dcp.counter_received_last {
 		// dcp is ok if received more items from dcp
@@ -1811,7 +1811,7 @@ func (dcp *DcpNozzle) CheckStuckness(dcp_stats map[string]map[string]string) err
 	return nil
 }
 
-func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats map[string]map[string]string) bool {
+func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats base.DcpStatsMapType) bool {
 	// Each dcp nozzle has an "items_remaining" stats in stats_map.
 	// An example key for the stats is "eq_dcpq:xdcr:dcp_f58e0727200a19771e4459925908dd66/default/target_10.17.2.102:12000_0:items_remaining"
 	xdcr_items_remaining_key := base.DCP_XDCR_STATS_PREFIX + dcp.Id() + base.DCP_XDCR_ITEMS_REMAINING_SUFFIX

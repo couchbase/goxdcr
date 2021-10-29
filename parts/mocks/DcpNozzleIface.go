@@ -3,6 +3,7 @@
 package mocks
 
 import (
+	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	log "github.com/couchbase/goxdcr/log"
 
@@ -35,7 +36,7 @@ func (_m *DcpNozzleIface) AsyncComponentEventListeners() map[string]common.Async
 }
 
 // CheckStuckness provides a mock function with given fields: dcp_stats
-func (_m *DcpNozzleIface) CheckStuckness(dcp_stats map[string]map[string]string) error {
+func (_m *DcpNozzleIface) CheckStuckness(dcp_stats base.DcpStatsMapType) error {
 	ret := _m.Called(dcp_stats)
 
 	var r0 error

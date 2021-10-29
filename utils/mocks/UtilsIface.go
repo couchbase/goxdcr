@@ -1007,31 +1007,31 @@ func (_m *UtilsIface) GetExternalMgtHostAndPort(nodeInfo map[string]interface{},
 	return r0, r1, r2
 }
 
-// GetHighSeqNos provides a mock function with given fields: vbnos, conn, stats_map, collectionIds
-func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, stats_map map[string]string, collectionIds []uint32) (map[uint16]uint64, map[string]string, error) {
-	ret := _m.Called(vbnos, conn, stats_map, collectionIds)
+// GetHighSeqNos provides a mock function with given fields: vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap
+func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, error) {
+	ret := _m.Called(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
 
-	var r0 map[uint16]uint64
-	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface, map[string]string, []uint32) map[uint16]uint64); ok {
-		r0 = rf(vbnos, conn, stats_map, collectionIds)
+	var r0 *map[uint16]uint64
+	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface, *map[string]string, []uint32, *map[uint16]uint64) *map[uint16]uint64); ok {
+		r0 = rf(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[uint16]uint64)
+			r0 = ret.Get(0).(*map[uint16]uint64)
 		}
 	}
 
-	var r1 map[string]string
-	if rf, ok := ret.Get(1).(func([]uint16, memcached.ClientIface, map[string]string, []uint32) map[string]string); ok {
-		r1 = rf(vbnos, conn, stats_map, collectionIds)
+	var r1 *map[string]string
+	if rf, ok := ret.Get(1).(func([]uint16, memcached.ClientIface, *map[string]string, []uint32, *map[uint16]uint64) *map[string]string); ok {
+		r1 = rf(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(map[string]string)
+			r1 = ret.Get(1).(*map[string]string)
 		}
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface, map[string]string, []uint32) error); ok {
-		r2 = rf(vbnos, conn, stats_map, collectionIds)
+	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface, *map[string]string, []uint32, *map[uint16]uint64) error); ok {
+		r2 = rf(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -1074,6 +1074,29 @@ func (_m *UtilsIface) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string, map[string]interface{}, *log.CommonLogger) error); ok {
 		r1 = rf(adminHostAddr, nodeInfo, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetHostNamesFromBucketInfo provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) GetHostNamesFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error) {
+	ret := _m.Called(bucketInfo)
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) []string); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1524,38 +1547,38 @@ func (_m *UtilsIface) GetRemoteServerVBucketsMap(connStr string, bucketName stri
 	return r0, r1
 }
 
-// GetReplicasInfo provides a mock function with given fields: bucketInfo, isStrictlySecure
-func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool) (base.VbHostsMapType, base.StringStringMap, int, []uint16, error) {
-	ret := _m.Called(bucketInfo, isStrictlySecure)
+// GetReplicasInfo provides a mock function with given fields: bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter
+func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool, recycledStringStringMap *base.StringStringMap, recycledVbHostMapGetter func([]uint16) *base.VbHostsMapType, recycledStringSliceGetter func() *[]string) (*base.VbHostsMapType, *base.StringStringMap, int, []uint16, error) {
+	ret := _m.Called(bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter)
 
-	var r0 base.VbHostsMapType
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, bool) base.VbHostsMapType); ok {
-		r0 = rf(bucketInfo, isStrictlySecure)
+	var r0 *base.VbHostsMapType
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) *base.VbHostsMapType); ok {
+		r0 = rf(bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(base.VbHostsMapType)
+			r0 = ret.Get(0).(*base.VbHostsMapType)
 		}
 	}
 
-	var r1 base.StringStringMap
-	if rf, ok := ret.Get(1).(func(map[string]interface{}, bool) base.StringStringMap); ok {
-		r1 = rf(bucketInfo, isStrictlySecure)
+	var r1 *base.StringStringMap
+	if rf, ok := ret.Get(1).(func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) *base.StringStringMap); ok {
+		r1 = rf(bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter)
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(base.StringStringMap)
+			r1 = ret.Get(1).(*base.StringStringMap)
 		}
 	}
 
 	var r2 int
-	if rf, ok := ret.Get(2).(func(map[string]interface{}, bool) int); ok {
-		r2 = rf(bucketInfo, isStrictlySecure)
+	if rf, ok := ret.Get(2).(func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) int); ok {
+		r2 = rf(bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter)
 	} else {
 		r2 = ret.Get(2).(int)
 	}
 
 	var r3 []uint16
-	if rf, ok := ret.Get(3).(func(map[string]interface{}, bool) []uint16); ok {
-		r3 = rf(bucketInfo, isStrictlySecure)
+	if rf, ok := ret.Get(3).(func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) []uint16); ok {
+		r3 = rf(bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter)
 	} else {
 		if ret.Get(3) != nil {
 			r3 = ret.Get(3).([]uint16)
@@ -1563,8 +1586,8 @@ func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}, isStric
 	}
 
 	var r4 error
-	if rf, ok := ret.Get(4).(func(map[string]interface{}, bool) error); ok {
-		r4 = rf(bucketInfo, isStrictlySecure)
+	if rf, ok := ret.Get(4).(func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) error); ok {
+		r4 = rf(bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter)
 	} else {
 		r4 = ret.Error(4)
 	}
@@ -1609,13 +1632,13 @@ func (_m *UtilsIface) GetSecuritySettingsAndDefaultPoolInfo(hostAddr string, hos
 	return r0, r1, r2, r3
 }
 
-// GetServerVBucketsMap provides a mock function with given fields: connStr, bucketName, bucketInfo
-func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
-	ret := _m.Called(connStr, bucketName, bucketInfo)
+// GetServerVBucketsMap provides a mock function with given fields: connStr, bucketName, bucketInfo, recycledMap
+func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bucketInfo map[string]interface{}, recycledMap *base.KvVBMapType) (map[string][]uint16, error) {
+	ret := _m.Called(connStr, bucketName, bucketInfo, recycledMap)
 
 	var r0 map[string][]uint16
-	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}) map[string][]uint16); ok {
-		r0 = rf(connStr, bucketName, bucketInfo)
+	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}, *base.KvVBMapType) map[string][]uint16); ok {
+		r0 = rf(connStr, bucketName, bucketInfo, recycledMap)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string][]uint16)
@@ -1623,8 +1646,31 @@ func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bu
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, map[string]interface{}) error); ok {
-		r1 = rf(connStr, bucketName, bucketInfo)
+	if rf, ok := ret.Get(1).(func(string, string, map[string]interface{}, *base.KvVBMapType) error); ok {
+		r1 = rf(connStr, bucketName, bucketInfo, recycledMap)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetServersListFromBucketInfo provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) GetServersListFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error) {
+	ret := _m.Called(bucketInfo)
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) []string); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
 	} else {
 		r1 = ret.Error(1)
 	}

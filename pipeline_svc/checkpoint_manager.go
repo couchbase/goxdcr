@@ -524,7 +524,7 @@ func (ckmgr *CheckpointManager) initialize() {
 func (ckmgr *CheckpointManager) composeUserAgent() {
 	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
 	ckmgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName)
-	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v", "ckptMgr", ckmgr.pipeline.InstanceId())
+	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v_%v", "ckptMgr", ckmgr.pipeline.Type().String(), ckmgr.pipeline.InstanceId())
 }
 
 func (ckmgr *CheckpointManager) initConnections() error {
@@ -3079,6 +3079,7 @@ func (ckmgr *CheckpointManager) getLatestVbList() ([]uint16, metadata.GenericSpe
 		return nil, nil, err
 	}
 	notification := <-notificationCh
+	defer notification.Recycle()
 	roMap := notification.GetSourceVBMapRO()
 	vbList := roMap.GetSortedVBList()
 	ckmgr.bucketTopologySvc.UnSubscribeLocalBucketFeed(genSpec.GetReplicationSpec(), ckmgr.bucketTopologySubscriberId)

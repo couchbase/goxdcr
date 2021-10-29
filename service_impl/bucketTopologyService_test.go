@@ -65,8 +65,8 @@ func getCapability() metadata.Capability {
 
 var replicaMtx sync.RWMutex
 var replicaCnt int
-var replicaMap base.VbHostsMapType
-var replicaTrMap base.StringStringMap
+var replicaMap *base.VbHostsMapType
+var replicaTrMap *base.StringStringMap
 var replicaMember []uint16
 
 func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks.XDCRCompTopologySvc, utils *utilsMock.UtilsIface, bucketInfo map[string]interface{}, utilsReal *utilities.Utilities, kvNodes []string, replSpecSvc *mocks.ReplicationSpecSvc, specsList []*metadata.ReplicationSpecification, ref *metadata.RemoteClusterReference, cap metadata.Capability, mcClient *mocks2.ClientIface, securitySvc *mocks.SecuritySvc) {
@@ -76,6 +76,15 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
 	xdcrTopologySvc.On("IsMyClusterEncryptionLevelStrict").Return(false)
 	utils.On("GetBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo, nil)
+	serverListFromBucketInfo1 := func(arg map[string]interface{}) []string {
+		ret, _ := utilsReal.GetServersListFromBucketInfo(arg)
+		return ret
+	}
+	serverListFromBucketInfo2 := func(arg map[string]interface{}) error {
+		_, ret := utilsReal.GetServersListFromBucketInfo(arg)
+		return ret
+	}
+	utils.On("GetServersListFromBucketInfo", mock.Anything).Return(serverListFromBucketInfo1, serverListFromBucketInfo2)
 	utils.On("ExponentialBackoffExecutor", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		utilsFunc := args.Get(4).(utilities.ExponentialOpFunc)
 		utilsFunc()
@@ -86,32 +95,32 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	// Then, each individual get functions will be called to return the appropriately parsed
 	// result back to the caller
 	// This is the correct way to mock, execute, and return on real data
-	getMap1 := func(map[string]interface{}, bool) base.VbHostsMapType {
+	getMap1 := func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) *base.VbHostsMapType {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaMap
 	}
-	getMap2 := func(map[string]interface{}, bool) base.StringStringMap {
+	getMap2 := func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) *base.StringStringMap {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaTrMap
 	}
-	getCnt := func(map[string]interface{}, bool) int {
+	getCnt := func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) int {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaCnt
 	}
-	getErr := func(map[string]interface{}, bool) error {
+	getErr := func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) error {
 		return nil
 	}
-	getMember := func(map[string]interface{}, bool) []uint16 {
+	getMember := func(map[string]interface{}, bool, *base.StringStringMap, func([]uint16) *base.VbHostsMapType, func() *[]string) []uint16 {
 		replicaMtx.RLock()
 		defer replicaMtx.RUnlock()
 		return replicaMember
 	}
-	utils.On("GetReplicasInfo", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	utils.On("GetReplicasInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		replicaMtx.Lock()
-		replicaMap, replicaTrMap, replicaCnt, replicaMember, _ = utilsReal.GetReplicasInfo(args.Get(0).(map[string]interface{}), false)
+		replicaMap, replicaTrMap, replicaCnt, replicaMember, _ = utilsReal.GetReplicasInfo(args.Get(0).(map[string]interface{}), false, nil, nil, nil)
 		replicaMtx.Unlock()
 	}).Return(getMap1, getMap2, getCnt, getMember, getErr)
 
@@ -122,18 +131,29 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	utils.On("GetBucketUuidFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return(bucketUuidGetterFunc(), nil)
 
 	vbMapGetter := func() map[string][]uint16 {
-		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo)
+		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo, nil)
 		return result
 	}
-	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
+	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
 	highSeqnosMap := make(map[uint16]uint64)
+	translateMap := make(map[string]string)
 	for i := uint16(0); i < 1024; i++ {
 		highSeqnosMap[i] = uint64(100 + int(i))
 	}
-	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(highSeqnosMap, nil, nil)
+	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&highSeqnosMap, &translateMap, nil)
+
+	getHostNameFromBucketInfo1 := func(arg map[string]interface{}) []string {
+		ret, _ := utilsReal.GetHostNamesFromBucketInfo(arg)
+		return ret
+	}
+	getHostNameFromBucketInfo2 := func(arg map[string]interface{}) error {
+		_, ret := utilsReal.GetHostNamesFromBucketInfo(arg)
+		return ret
+	}
+	utils.On("GetHostNamesFromBucketInfo", mock.Anything).Return(getHostNameFromBucketInfo1, getHostNameFromBucketInfo2)
 
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {
@@ -233,9 +253,9 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	assert.Equal(numSrcNodes1, numSrcNodes2)
 
 	// Modifying latestCached should not affect downstream
-	assert.Equal(srcVBMap1, watcher.latestCached.SourceVBMap)
+	assert.Equal(srcVBMap1, *watcher.latestCached.SourceVBMap)
 	watcher.latestCacheMtx.Lock()
-	watcher.latestCached.SourceVBMap["randomTestModification"] = []uint16{1, 2, 3}
+	(*watcher.latestCached.SourceVBMap)["randomTestModification"] = []uint16{1, 2, 3}
 	watcher.latestCacheMtx.Unlock()
 	assert.NotEqual(srcVBMap1, watcher.latestCached.SourceVBMap)
 
@@ -251,11 +271,11 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	notification1New := <-specNotifyCh
 	srcVBMap1New := notification1New.GetSourceVBMapRO()
-	assert.Equal(srcVBMap1New, watcher.latestCached.SourceVBMap)
+	assert.Equal(srcVBMap1New, *watcher.latestCached.SourceVBMap)
 	// With the old data not modified - hacky because watcher.latestCached has been reset to the same data
 	// Check by modifying both - and make sure that the references are not shared
 	watcher.latestCacheMtx.Lock()
-	watcher.latestCached.SourceVBMap["randomTestModification"] = []uint16{1, 2, 3}
+	(*watcher.latestCached.SourceVBMap)["randomTestModification"] = []uint16{1, 2, 3}
 	watcher.latestCacheMtx.Unlock()
 	assert.NotEqual(srcVBMap1New, watcher.latestCached.SourceVBMap)
 	srcVBMap1New["randomTestModification"] = []uint16{1, 2, 3}
@@ -443,7 +463,7 @@ func TestBucketTopologyWatcherGC(t *testing.T) {
 	// Stop the pull routine and manually hack around to see if GC works
 	watcher1.Stop()
 
-	delete(watcher1.latestCached.SourceVBMap, "192.168.0.116:12002")
+	delete(*watcher1.latestCached.SourceVBMap, "192.168.0.116:12002")
 
 	var gc1Called bool
 	var gc2Called bool

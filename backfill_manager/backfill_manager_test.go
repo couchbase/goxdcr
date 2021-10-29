@@ -55,8 +55,8 @@ var defaultSeqnoGetter = func() map[uint16]uint64 {
 
 const vbsNodeName = "localhost:9000"
 
-var vbsGetter = func(customList []uint16) map[string][]uint16 {
-	retMap := make(map[string][]uint16)
+var vbsGetter = func(customList []uint16) *base.KvVBMapType {
+	retMap := make(base.KvVBMapType)
 
 	var list []uint16
 	if customList == nil {
@@ -67,12 +67,12 @@ var vbsGetter = func(customList []uint16) map[string][]uint16 {
 		list = customList
 	}
 	retMap[vbsNodeName] = list
-	return retMap
+	return &retMap
 }
 
 func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *service_def.ReplicationSpecSvc, pipelineMgr *pipeline_mgr.PipelineMgrBackfillIface,
 	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
-	checkpointSvcMock *service_def.CheckpointsService, seqnoGetter func() map[uint16]uint64, localVBMapGetter func([]uint16) map[string][]uint16, backfillReplSvc *service_def.BackfillReplSvc, additionalSpecIds []string, bucketTopologySvc *service_def.BucketTopologySvc) {
+	checkpointSvcMock *service_def.CheckpointsService, seqnoGetter func() map[uint16]uint64, localVBMapGetter func([]uint16) *base.KvVBMapType, backfillReplSvc *service_def.BackfillReplSvc, additionalSpecIds []string, bucketTopologySvc *service_def.BucketTopologySvc) {
 
 	returnedSpec, _ := metadata.NewReplicationSpecification(sourceBucketName, sourceBucketUUID, targetClusterUUID, targetBucketName, targetBucketUUID)
 	var specList = []string{returnedSpec.Id}
@@ -109,13 +109,21 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	setupBackfillReplSvcMock(backfillReplSvc)
 }
 
+var topologyObjPool = service_impl.NewBucketTopologyObjsPool()
+
 func getDefaultSourceNotification(customVBsList []uint16) service_def_real.SourceNotification {
-	notification := &service_impl.Notification{
-		Source:              true,
-		NumberOfSourceNodes: 1,
-		SourceVBMap:         vbsGetter(customVBsList),
-		KvVbMap:             nil,
-	}
+	notification := service_impl.NewNotification(true, topologyObjPool)
+	notification.NumberOfSourceNodes = 1
+	notification.SourceVBMap = vbsGetter(customVBsList)
+	notification.KvVbMap = vbsGetter(customVBsList)
+	notification.SetNumberOfReaders(50)
+	//notification := &service_impl.Notification{
+	//	Source:              true,
+	//	NumberOfSourceNodes: 1,
+	//	SourceVBMap:         vbsGetter(customVBsList),
+	//	KvVbMap:             nil,
+	//	NumReaders:          1,
+	//}
 	return notification
 }
 
@@ -309,6 +317,8 @@ func TestBackfillMgrSourceCollectionCleanedUp(t *testing.T) {
 	assert.NotNil(backfillMgr)
 
 	assert.Nil(backfillMgr.Start())
+
+	time.Sleep(1 * time.Second)
 
 	bytes, err := ioutil.ReadFile(targetv7)
 	if err != nil {

@@ -12,29 +12,13 @@ type Notification struct {
 	mock.Mock
 }
 
-// Clone provides a mock function with given fields:
-func (_m *Notification) Clone() interface{} {
-	ret := _m.Called()
+// Clone provides a mock function with given fields: numOfReaders
+func (_m *Notification) Clone(numOfReaders int) interface{} {
+	ret := _m.Called(numOfReaders)
 
 	var r0 interface{}
-	if rf, ok := ret.Get(0).(func() interface{}); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(interface{})
-		}
-	}
-
-	return r0
-}
-
-// CloneRO provides a mock function with given fields:
-func (_m *Notification) CloneRO() interface{} {
-	ret := _m.Called()
-
-	var r0 interface{}
-	if rf, ok := ret.Get(0).(func() interface{}); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(int) interface{}); ok {
+		r0 = rf(numOfReaders)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(interface{})
@@ -45,7 +29,7 @@ func (_m *Notification) CloneRO() interface{} {
 }
 
 // GetReplicasInfo provides a mock function with given fields:
-func (_m *Notification) GetReplicasInfo() (int, base.VbHostsMapType, base.StringStringMap, []uint16) {
+func (_m *Notification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.StringStringMap, []uint16) {
 	ret := _m.Called()
 
 	var r0 int
@@ -55,21 +39,21 @@ func (_m *Notification) GetReplicasInfo() (int, base.VbHostsMapType, base.String
 		r0 = ret.Get(0).(int)
 	}
 
-	var r1 base.VbHostsMapType
-	if rf, ok := ret.Get(1).(func() base.VbHostsMapType); ok {
+	var r1 *base.VbHostsMapType
+	if rf, ok := ret.Get(1).(func() *base.VbHostsMapType); ok {
 		r1 = rf()
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(base.VbHostsMapType)
+			r1 = ret.Get(1).(*base.VbHostsMapType)
 		}
 	}
 
-	var r2 base.StringStringMap
-	if rf, ok := ret.Get(2).(func() base.StringStringMap); ok {
+	var r2 *base.StringStringMap
+	if rf, ok := ret.Get(2).(func() *base.StringStringMap); ok {
 		r2 = rf()
 	} else {
 		if ret.Get(2) != nil {
-			r2 = ret.Get(2).(base.StringStringMap)
+			r2 = ret.Get(2).(*base.StringStringMap)
 		}
 	}
 
@@ -97,4 +81,9 @@ func (_m *Notification) IsSourceNotification() bool {
 	}
 
 	return r0
+}
+
+// Recycle provides a mock function with given fields:
+func (_m *Notification) Recycle() {
+	_m.Called()
 }

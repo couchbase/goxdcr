@@ -22,7 +22,7 @@ type ReplicaCache interface {
 
 	// Remember to unlock when done and use the resources quickly
 	// Should only unlock if err is nil
-	GetReplicaInfo(spec *metadata.ReplicationSpecification) (replicaCnt int, replicaMap base.VbHostsMapType, replicaTranslateMap base.StringStringMap, unlockFunc func(), err error)
+	GetReplicaInfo(spec *metadata.ReplicationSpecification) (replicaCnt int, replicaMap *base.VbHostsMapType, replicaTranslateMap *base.StringStringMap, unlockFunc func(), err error)
 }
 
 const ReplicaCacheSubscriberId = "p2pReplicaCache"
@@ -44,13 +44,25 @@ func NewReplicaCache(bucketTopologySvc service_def.BucketTopologySvc, loggerCtx 
 	return cache
 }
 
+var replicaCacheIteration uint32
+
 func (r *ReplicaCacheImpl) HandleSpecCreation(spec *metadata.ReplicationSpecification) {
-	sourceNotificationCh, err := r.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, ReplicaCacheSubscriberId)
+	replicaCacheId := ReplicaCacheSubscriberId + base.GetIterationId(&replicaCacheIteration)
+	sourceNotificationCh, err := r.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, replicaCacheId)
 	if err != nil {
 		r.logger.Errorf("Unable to handle spec creation for spec %v due to %v", spec.Id, err)
 		return
 	}
-	monitor := NewReplicaCacheMonitor(sourceNotificationCh)
+
+	unsubsFunc := func() {
+		err := r.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, replicaCacheId)
+		if err != nil {
+			r.logger.Errorf("Unable to handle spec deletion for spec %v due to %v", spec.Id, err)
+			return
+		}
+	}
+
+	monitor := NewReplicaCacheMonitor(sourceNotificationCh, unsubsFunc)
 	go monitor.Run()
 	r.specsMonitorMtx.Lock()
 	r.specsMonitorMap[spec.Id] = monitor
@@ -58,11 +70,6 @@ func (r *ReplicaCacheImpl) HandleSpecCreation(spec *metadata.ReplicationSpecific
 }
 
 func (r *ReplicaCacheImpl) HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification) {
-	err := r.bucketTopologySvc.UnSubscribeLocalBucketFeed(oldSpec, ReplicaCacheSubscriberId)
-	if err != nil {
-		r.logger.Errorf("Unable to handle spec deletion for spec %v due to %v", oldSpec.Id, err)
-		return
-	}
 	r.specsMonitorMtx.Lock()
 	monitor := r.specsMonitorMap[oldSpec.Id]
 	delete(r.specsMonitorMap, oldSpec.Id)
@@ -72,7 +79,7 @@ func (r *ReplicaCacheImpl) HandleSpecDeletion(oldSpec *metadata.ReplicationSpeci
 	}
 }
 
-func (r *ReplicaCacheImpl) GetReplicaInfo(spec *metadata.ReplicationSpecification) (replicaCnt int, replicaMap base.VbHostsMapType, replicaTranslateMap base.StringStringMap, unlockFunc func(), err error) {
+func (r *ReplicaCacheImpl) GetReplicaInfo(spec *metadata.ReplicationSpecification) (replicaCnt int, replicaMap *base.VbHostsMapType, replicaTranslateMap *base.StringStringMap, unlockFunc func(), err error) {
 	r.specsMonitorMtx.RLock()
 	monitor := r.specsMonitorMap[spec.Id]
 	r.specsMonitorMtx.RUnlock()
@@ -87,44 +94,56 @@ func (r *ReplicaCacheImpl) GetReplicaInfo(spec *metadata.ReplicationSpecificatio
 }
 
 type ReplicaCacheMonitor struct {
-	sourceCh chan service_def.SourceNotification
-	finCh    chan bool
+	sourceCh   chan service_def.SourceNotification
+	finCh      chan bool
+	unsubsFunc func()
 
-	cacheMtx            sync.RWMutex
-	replicaCnt          int
-	replicaMap          map[uint16][]string
-	replicaTranslateMap map[string]string
-	replicaMember       []uint16
+	cacheMtx           sync.RWMutex
+	latestNotification service_def.Notification
 }
 
 func (m *ReplicaCacheMonitor) Run() {
 	for {
 		select {
 		case <-m.finCh:
+			m.cacheMtx.RLock()
+			if m.latestNotification != nil {
+				m.latestNotification.Recycle()
+			}
+			m.cacheMtx.RUnlock()
 			return
 		case notification := <-m.sourceCh:
 			m.cacheMtx.Lock()
-			m.replicaCnt, m.replicaMap, m.replicaTranslateMap, m.replicaMember = notification.GetReplicasInfo()
+			if m.latestNotification != nil {
+				m.latestNotification.Recycle()
+			}
+			m.latestNotification = notification.Clone(1).(service_def.SourceNotification)
 			m.cacheMtx.Unlock()
+			notification.Recycle()
 		}
 	}
 }
 
 func (m *ReplicaCacheMonitor) Stop() {
 	close(m.finCh)
+	if m.unsubsFunc != nil {
+		m.unsubsFunc()
+	}
 }
 
-func (m *ReplicaCacheMonitor) GetReplicaInfo() (int, map[uint16][]string, map[string]string, func()) {
+func (m *ReplicaCacheMonitor) GetReplicaInfo() (int, *base.VbHostsMapType, *base.StringStringMap, func()) {
 	unlockFunc := func() {
 		m.cacheMtx.RUnlock()
 	}
 	m.cacheMtx.RLock()
-	return m.replicaCnt, m.replicaMap, m.replicaTranslateMap, unlockFunc
+	replicaCnt, replicaMap, translateMap, _ := m.latestNotification.GetReplicasInfo()
+	return replicaCnt, replicaMap, translateMap, unlockFunc
 }
 
-func NewReplicaCacheMonitor(srcCh chan service_def.SourceNotification) *ReplicaCacheMonitor {
+func NewReplicaCacheMonitor(srcCh chan service_def.SourceNotification, unsubsFunc func()) *ReplicaCacheMonitor {
 	return &ReplicaCacheMonitor{
-		finCh:    make(chan bool),
-		sourceCh: srcCh,
+		finCh:      make(chan bool),
+		sourceCh:   srcCh,
+		unsubsFunc: unsubsFunc,
 	}
 }

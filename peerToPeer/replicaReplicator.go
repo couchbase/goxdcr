@@ -37,7 +37,8 @@ type ReplicaReplicatorImpl struct {
 	colManifestSvc     service_def.CollectionsManifestSvc
 	replicationSpecSvc service_def.ReplicationSpecSvc
 
-	utils utilities.UtilsIface
+	utils          utilities.UtilsIface
+	reverseMapPool utilities.KvVbMapPool
 
 	unitTest bool
 
@@ -74,6 +75,7 @@ func NewReplicaReplicator(bucketTopologySvc service_def.BucketTopologySvc, logge
 		tickerReloadCh:     make(chan replicatorReloadPair, 50 /* not likely but give it a buffer */),
 		minInterval:        time.Duration(metadata.ReplicateCkptIntervalConfig.MaxValue) * time.Minute,
 		sendReqFunc:        sendReqsFunc,
+		reverseMapPool:     utilities.NewKvVbMapPool(),
 	}
 }
 
@@ -285,9 +287,9 @@ func (r *ReplicaReplicatorImpl) reOrganizePopulateMap(specToReqMap map[*metadata
 			continue
 		}
 
-		nodeVBOwnership := base.ReverseVBNodesMap(replicaMap)
-		for nodeKVName, vbsList := range nodeVBOwnership {
-			nodeNsServerName, nsServerFound := replicaTranslateMap[nodeKVName]
+		nodeVBOwnership := base.ReverseVBNodesMap(*replicaMap, r.reverseMapPool.Get)
+		for nodeKVName, vbsList := range *nodeVBOwnership {
+			nodeNsServerName, nsServerFound := (*replicaTranslateMap)[nodeKVName]
 			if !nsServerFound {
 				errMap[spec.Id] = fmt.Errorf("ns_server entry not found given %v", nodeKVName)
 				continue
@@ -299,7 +301,7 @@ func (r *ReplicaReplicatorImpl) reOrganizePopulateMap(specToReqMap map[*metadata
 			}
 			*peerNodeToRequestListMap[nodeNsServerName] = append(*peerNodeToRequestListMap[nodeNsServerName], subReq)
 		}
-
+		r.reverseMapPool.Put(nodeVBOwnership)
 		unlockFunc()
 	}
 

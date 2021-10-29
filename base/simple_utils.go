@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	mc "github.com/couchbase/gomemcached"
@@ -1915,21 +1916,34 @@ func GetOpaque(index, sequence uint16) uint32 {
 	return result
 }
 
-func ReverseVBNodesMap(replicaMap map[uint16][]string) map[string][]uint16 {
+func ReverseVBNodesMap(replicaMap VbHostsMapType, getMap func(keys []string) *KvVBMapType) *KvVBMapType {
+	retMap := getMap(nil)
 	if len(replicaMap) == 0 {
-		return nil
+		return retMap
 	}
-	retMap := make(map[string][]uint16)
 
-	for vbno, nodeList := range replicaMap {
-		for _, nodeName := range nodeList {
-			retMap[nodeName] = append(retMap[nodeName], vbno)
+	for _, nodeList := range replicaMap {
+		for _, nodeName := range *nodeList {
+			_, found := (*retMap)[nodeName]
+			if found {
+				(*retMap)[nodeName] = (*retMap)[nodeName][:0]
+			}
 		}
 	}
 
-	for nodeName, unsortedVBlist := range retMap {
+	for vbno, nodeList := range replicaMap {
+		for _, nodeName := range *nodeList {
+			(*retMap)[nodeName] = append((*retMap)[nodeName], vbno)
+		}
+	}
+
+	for nodeName, unsortedVBlist := range *retMap {
 		sortedVBList := SortUint16List(unsortedVBlist)
-		retMap[nodeName] = sortedVBList
+		(*retMap)[nodeName] = sortedVBList
 	}
 	return retMap
+}
+
+func GetIterationId(counter *uint32) string {
+	return fmt.Sprintf("%v", atomic.AddUint32(counter, 1))
 }

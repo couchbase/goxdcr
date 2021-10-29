@@ -48,9 +48,9 @@ type BucketTopologySvc interface {
 
 type Notification interface {
 	IsSourceNotification() bool
-	CloneRO() interface{}
-	Clone() interface{}
-	GetReplicasInfo() (int, base.VbHostsMapType, base.StringStringMap, []uint16)
+	Clone(numOfReaders int) interface{}
+	GetReplicasInfo() (int, *base.VbHostsMapType, *base.StringStringMap, []uint16)
+	Recycle()
 }
 
 type SourceNotification interface {

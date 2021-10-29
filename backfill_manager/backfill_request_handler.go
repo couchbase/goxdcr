@@ -47,6 +47,7 @@ const BackfillHandlerPrefix = "backfillHandler"
 type BackfillRequestHandler struct {
 	*component.AbstractComponent
 	id              string
+	bucketSvcId     string
 	logger          *log.CommonLogger
 	backfillReplSvc service_def.BackfillReplSvc
 	startOnce       sync.Once
@@ -89,10 +90,8 @@ type BackfillRequestHandler struct {
 
 	latestCachedSourceNotification    service_def.SourceNotification
 	latestCachedSourceNotificationMtx sync.RWMutex
+	latestVBs                         []uint16
 	getCompleteReq                    func() (interface{}, error)
-
-	sourceUnsubscribeFuncMtx sync.Mutex
-	sourceUnsubscribeFunc    func()
 
 	lastMergedMtx sync.RWMutex
 	lastMergedMap map[string]*metadata.VBTasksMapType
@@ -111,10 +110,13 @@ type ReqAndResp struct {
 	Force           bool
 }
 
+var backfillReqHandlerCounter uint32
+
 func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
 		logger:                       logger,
+		bucketSvcId:                  common.ComposeFullTopic(replId, common.BackfillPipeline) + "_backfillReqHandler_" + base.GetIterationId(&backfillReqHandlerCounter),
 		id:                           replId,
 		finCh:                        make(chan bool),
 		incomingReqCh:                make(chan ReqAndResp),
@@ -153,20 +155,12 @@ func (b *BackfillRequestHandler) Start() error {
 			b.logger.Errorf("Error getting replicationSpec %v", err)
 			return
 		}
-		b.sourceBucketTopologyCh, err = b.bucketTopologySvc.SubscribeToLocalBucketFeed(replSpec, b.id)
+		b.sourceBucketTopologyCh, err = b.bucketTopologySvc.SubscribeToLocalBucketFeed(replSpec, b.bucketSvcId)
 		if err != nil {
 			b.logger.Errorf("Error subscribing to local bucket feed %v", err)
 			return
 		}
-		b.sourceUnsubscribeFuncMtx.Lock()
-		if atomic.LoadUint32(&b.stopRequested) == 0 {
-			b.sourceUnsubscribeFunc = func() {
-				b.bucketTopologySvc.UnSubscribeLocalBucketFeed(replSpec, b.id)
-			}
-		}
-		b.sourceUnsubscribeFuncMtx.Unlock()
 
-		b.childrenWaitgrp.Add(1)
 		go b.run()
 	})
 	return err
@@ -176,13 +170,6 @@ func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.C
 	defer waitGrp.Done()
 	atomic.StoreUint32(&b.stopRequested, 1)
 	close(b.finCh)
-	b.childrenWaitgrp.Done()
-
-	b.sourceUnsubscribeFuncMtx.Lock()
-	if b.sourceUnsubscribeFunc != nil {
-		b.sourceUnsubscribeFunc()
-	}
-	b.sourceUnsubscribeFuncMtx.Unlock()
 
 	var componentErr base.ComponentError
 	componentErr.ComponentId = b.id
@@ -235,14 +222,17 @@ func (b *BackfillRequestHandler) run() {
 	select {
 	case notification := <-b.sourceBucketTopologyCh:
 		b.latestCachedSourceNotificationMtx.Lock()
+		b.latestCachedSourceNotification = notification.Clone(1).(service_def.SourceNotification)
 		b.latestCachedSourceNotification = notification
 		b.latestCachedSourceNotificationMtx.Unlock()
+		notification.Recycle()
 	}
 
 	var coolDownTime *time.Time
 	for {
 		select {
 		case <-b.finCh:
+			b.bucketTopologySvc.UnSubscribeLocalBucketFeed(b.spec, b.bucketSvcId)
 			return
 		case reqAndResp := <-b.incomingReqCh:
 			switch reflect.TypeOf(reqAndResp.Request) {
@@ -319,16 +309,22 @@ func (b *BackfillRequestHandler) run() {
 			}
 		case notification := <-b.sourceBucketTopologyCh:
 			oldVBsList := b.getVBs()
-			b.latestCachedSourceNotificationMtx.Lock()
-			b.latestCachedSourceNotification = notification
 			newKvVBMap := notification.GetSourceVBMapRO()
 			newVBList := newKvVBMap.GetSortedVBList()
-			b.latestCachedSourceNotificationMtx.Unlock()
-
-			err := b.handleVBsDiff(base.DiffVBsList(oldVBsList, newVBList))
+			err := b.handleVBsDiff(base.DiffVBsList(base.CloneUint16List(oldVBsList), base.CloneUint16List(newVBList)))
 			if err != nil {
 				b.logger.Errorf("Unable to handle VBs diff due to err %v - oldVBs: %v newVBs: %v", err, oldVBsList, newVBList)
 			}
+
+			// Once diffed, update last cached
+			b.latestCachedSourceNotificationMtx.Lock()
+			if b.latestCachedSourceNotification != nil {
+				b.latestCachedSourceNotification.Recycle()
+			}
+			b.latestCachedSourceNotification = notification.Clone(1).(service_def.SourceNotification)
+			kv_vb_map := b.latestCachedSourceNotification.GetSourceVBMapRO()
+			b.latestVBs = kv_vb_map.GetSortedVBList()
+			b.latestCachedSourceNotificationMtx.Unlock()
 		}
 	}
 }
@@ -415,8 +411,7 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 func (b *BackfillRequestHandler) getVBs() []uint16 {
 	b.latestCachedSourceNotificationMtx.RLock()
 	defer b.latestCachedSourceNotificationMtx.RUnlock()
-	kv_vb_map := b.latestCachedSourceNotification.GetSourceVBMapRO()
-	return kv_vb_map.GetSortedVBList()
+	return b.latestVBs
 }
 
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {

@@ -50,7 +50,7 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.Meta
 		replSpecSvc.On("ReplicationSpec", specName).Return(actualSpec, nil)
 	}
 
-	oneNodeAllVBs := make(map[string][]uint16)
+	oneNodeAllVBs := make(base.KvVBMapType)
 	var allVBs []uint16
 	var i uint16
 	for i = 0; i < 1024; i++ {
@@ -65,7 +65,7 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.Meta
 	notification := &service_impl.Notification{
 		Source:              true,
 		NumberOfSourceNodes: 1,
-		SourceVBMap:         oneNodeAllVBs,
+		SourceVBMap:         &oneNodeAllVBs,
 		KvVbMap:             nil,
 	}
 	go func() {

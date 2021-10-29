@@ -349,19 +349,23 @@ func (b *BackfillReplicationService) BackfillReplSpec(replicationId string) (*me
 	return spec, nil
 }
 
+var backfillReplSvcIteration uint32
+
 func (b *BackfillReplicationService) GetMyVBs(replSpec *metadata.ReplicationSpecification) ([]uint16, error) {
-	notificationCh, err := b.bucketTopologySvc.SubscribeToLocalBucketFeed(replSpec, BackfillReplSvcId)
+	bucketSvcId := BackfillReplSvcId + base.GetIterationId(&backfillReplSvcIteration)
+	notificationCh, err := b.bucketTopologySvc.SubscribeToLocalBucketFeed(replSpec, bucketSvcId)
 	if err != nil {
 		return nil, err
 	}
-	defer b.bucketTopologySvc.UnSubscribeLocalBucketFeed(replSpec, BackfillReplSvcId)
+	defer b.bucketTopologySvc.UnSubscribeLocalBucketFeed(replSpec, bucketSvcId)
 
 	latestNotification := <-notificationCh
 	kv_vb_map := latestNotification.GetSourceVBMapRO()
+	defer latestNotification.Recycle()
 
 	var vbList []uint16
-	for _, vbno := range kv_vb_map {
-		vbList = append(vbList, vbno...)
+	for _, vbnos := range kv_vb_map {
+		vbList = append(vbList, vbnos...)
 	}
 	return vbList, nil
 }
