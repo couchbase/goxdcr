@@ -38,6 +38,14 @@ type XDCRTopologySvc struct {
 	cachedNodesListErr   error
 	cachedNodesListTimer *time.Timer
 	cachedNodesListMtx   sync.RWMutex
+
+	cachedIsKVNode         bool
+	cachedIsKVNodeInitDone bool
+	cachedIsKVNodeMtx      sync.RWMutex
+
+	cachedMemcachedAddr         string
+	cachedMemcachedAddrInitDone bool
+	cachedMemcachedAddrMtx      sync.RWMutex
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
@@ -66,7 +74,16 @@ func (top_svc *XDCRTopologySvc) MyHostAddr() (string, error) {
 func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 	nodeInfoMap, err := top_svc.getHostInfo()
 	if err != nil {
-		return "", err
+		// If getHostInfo had error because ns_server is overloaded, then we can return the last cached value that
+		// had been requested, since MyMemcachedAddr() is not likely to change, unless strictness has changed
+		var cachedRetVal string
+		top_svc.cachedMemcachedAddrMtx.RLock()
+		if top_svc.cachedMemcachedAddrInitDone {
+			err = nil
+			cachedRetVal = top_svc.cachedMemcachedAddr
+		}
+		top_svc.cachedMemcachedAddrMtx.RUnlock()
+		return cachedRetVal, err
 	}
 
 	port, err := top_svc.getHostMemcachedPortFromHostInfo(nodeInfoMap)
@@ -81,7 +98,11 @@ func (top_svc *XDCRTopologySvc) MyMemcachedAddr() (string, error) {
 
 	hostName := base.GetHostName(hostAddr)
 
-	return base.GetHostAddr(hostName, port), nil
+	top_svc.cachedMemcachedAddrMtx.Lock()
+	defer top_svc.cachedMemcachedAddrMtx.Unlock()
+	top_svc.cachedMemcachedAddrInitDone = true
+	top_svc.cachedMemcachedAddr = base.GetHostAddr(hostName, port)
+	return top_svc.cachedMemcachedAddr, nil
 }
 
 func (top_svc *XDCRTopologySvc) MyAdminPort() (uint16, error) {
@@ -285,29 +306,45 @@ func (top_svc *XDCRTopologySvc) staticHostAddr() string {
 func (top_svc *XDCRTopologySvc) IsKVNode() (bool, error) {
 	nodeInfoMap, err := top_svc.getHostInfo()
 	if err != nil {
-		return false, err
+		// If getHostInfo had error because ns_server is overloaded, then we can return the last cached value that
+		// had been requested, since IsKVNode() is not likely to change often unless this node is rebalanced
+		// out of a cluster - which should be ok because with peer-to-peer implementation, there will be VB master check
+		// prior to replication start
+		var cachedRetVal bool
+		top_svc.cachedIsKVNodeMtx.RLock()
+		if top_svc.cachedIsKVNodeInitDone {
+			cachedRetVal = top_svc.cachedIsKVNode
+			err = nil
+		}
+		top_svc.cachedIsKVNodeMtx.RUnlock()
+		return cachedRetVal, err
 	}
 
 	services, ok := nodeInfoMap[base.ServicesKey]
 	if !ok {
-		//if services is not there, it maybe a node prior to sherlock
-		return true, nil
+		// Should not be the case
+		return true, fmt.Errorf("Unable to get key %v", base.ServicesKey)
 	}
 	serviceStrs, ok := services.([]interface{})
 	if !ok {
 		return false, ErrorParsingServicesInfo
 	}
 
+	top_svc.cachedIsKVNodeMtx.Lock()
+	defer top_svc.cachedIsKVNodeMtx.Unlock()
 	for _, serviceStr := range serviceStrs {
 		svcStr, ok := serviceStr.(string)
 		if !ok {
 			return false, ErrorParsingServicesInfo
-
 		}
 		if svcStr == "kv" {
+			top_svc.cachedIsKVNodeInitDone = true
+			top_svc.cachedIsKVNode = true
 			return true, nil
 		}
 	}
+	top_svc.cachedIsKVNodeInitDone = true
+	top_svc.cachedIsKVNode = false
 	return false, nil
 }
 
