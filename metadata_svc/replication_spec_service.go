@@ -242,7 +242,7 @@ func (service *ReplicationSpecService) validateReplicationSpecDoesNotAlreadyExis
 	}
 }
 
-func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16, targetBucket string, targetBucketInfo map[string]interface{}) (allKvConnStrs []string, username, password string, err error) {
+func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef *metadata.RemoteClusterReference, targetKVVBMap map[string][]uint16) (allKvConnStrs []string, username, password string, err error) {
 	if len(targetKVVBMap) == 0 {
 		err = errors.New("kv vb map is empty")
 		return
@@ -256,30 +256,8 @@ func (service *ReplicationSpecService) populateConnectionCreds(targetClusterRef 
 		i++
 	}
 
-	hasRBACSupport := false
-	isTargetES := service.utils.CheckWhetherClusterIsESBasedOnBucketInfo(targetBucketInfo)
-	if !isTargetES {
-		var targetClusterCompatibility int
-		targetClusterCompatibility, err = service.utils.GetClusterCompatibilityFromBucketInfo(targetBucketInfo, service.logger)
-		if err != nil {
-			err = fmt.Errorf("Error retrieving cluster compatibility on bucket %v. err=%v", targetBucket, err)
-			return
-		}
-
-		hasRBACSupport = base.IsClusterCompatible(targetClusterCompatibility, base.VersionForRBACAndXattrSupport)
-	}
-
-	if hasRBACSupport {
-		username = targetClusterRef.UserName()
-		password = targetClusterRef.Password()
-	} else {
-		username = targetBucket
-		password, err = service.utils.GetBucketPasswordFromBucketInfo(targetBucket, targetBucketInfo, service.logger)
-		if err != nil {
-			err = fmt.Errorf("Error retrieving password on bucket %v. err=%v", targetBucket, err)
-			return
-		}
-	}
+	username = targetClusterRef.UserName()
+	password = targetClusterRef.Password()
 	return
 }
 
@@ -435,7 +413,7 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 	var err error
 	var warnings []string
 
-	allKvConnStrs, username, password, populateErr := service.populateConnectionCreds(targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo)
+	allKvConnStrs, username, password, populateErr := service.populateConnectionCreds(targetClusterRef, targetKVVBMap)
 	if populateErr != nil {
 		return populateErr, warnings
 	}

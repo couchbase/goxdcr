@@ -340,7 +340,7 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	var defaultPoolInfo map[string]interface{}
 	if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
 		// if updateSecuritySettings is true, get up to date security settings from target
-		sanInCertificate, httpAuthMech, defaultPoolInfo, err = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
+		httpAuthMech, defaultPoolInfo, err = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
 		if err != nil {
 			rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id(), connStr, err)
 			return nil, err
@@ -1493,17 +1493,6 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 		if !isEnterprise_remote {
 			return wrapAsInvalidRemoteClusterError("Remote cluster is not enterprise version and does not support SSL.")
 		}
-
-		// if ref is half secured, validate that target clusters is spock and up
-		if ref.IsHalfEncryption() {
-			rbacCompatible, err := service.cluster_info_svc.IsClusterCompatible(ref, base.VersionForRBACAndXattrSupport)
-			if err != nil {
-				return wrapAsInvalidRemoteClusterError("Failed to get target cluster version information")
-			}
-			if !rbacCompatible {
-				return wrapAsInvalidRemoteClusterError("Remote cluster has a version lower than 5.0 and does not support half-SSL type remote cluster references.")
-			}
-		}
 	}
 	// get remote cluster uuid from the map
 	if updateRef {
@@ -1600,7 +1589,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 	}
 
-	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+	refHttpAuthMech, defaultPoolInfo, err := service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 	if err != nil {
 		if !ref.IsFullEncryption() {
 			return wrapAsInvalidRemoteClusterError(err.Error())
@@ -1616,13 +1605,13 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 
 		// now we potentially have valid https address, re-do security settings retrieval
-		refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+		refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 		if err != nil {
 			if len(externalRefHttpsHostName) > 0 {
 				// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
 				// as a last resort, try that for a third time
 				refHttpsHostName = externalRefHttpsHostName
-				refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+				refHttpAuthMech, defaultPoolInfo, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificate(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
 			}
 			if err != nil {
 				return wrapAsInvalidRemoteClusterError(err.Error())
@@ -1677,8 +1666,9 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 	ref.SetHttpsHostName(refHttpsHostName)
 	ref.SetActiveHttpsHostName(refHttpsHostName)
 
-	ref.SetSANInCertificate(refSANInCertificate)
-	service.logger.Infof("Set hostName=%v, httpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
+	// Remote Cluster target must all support SANInCertificate by now
+	ref.SetSANInCertificate(true)
+	service.logger.Infof("Set hostName=%v, httpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, true, refHttpAuthMech, ref.Id())
 	return nil
 }
 

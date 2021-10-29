@@ -375,7 +375,7 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initia
 				return nil, err
 			}
 			// hostAddr not used in full encryption mode
-			san_in_certificate, _, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
+			_, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
 				ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, false /*scramShaEnabled*/, ckmgr.logger)
 			if err != nil {
 				return nil, err
@@ -622,7 +622,6 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	ckmgr.logger.Infof("Found %v checkpoint documents for replication %v\n", len(ckptDocs), topic)
 
 	deleted_vbnos := make([]uint16, 0)
-	target_support_xattr_now := base.IsClusterCompatible(ckmgr.target_cluster_version, base.VersionForRBACAndXattrSupport)
 	specInternalId := ckmgr.pipeline.Specification().InternalId
 
 	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
@@ -633,20 +632,6 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 			// ignore errors, which should have been logged
 			ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
 			deleted_vbnos = append(deleted_vbnos, vbno)
-		} else if target_support_xattr_now {
-			target_support_xattr_in_ckpt_doc := base.IsClusterCompatible(ckptDoc.TargetClusterVersion, base.VersionForRBACAndXattrSupport)
-			if !target_support_xattr_in_ckpt_doc && ckptDoc.XattrSeqno > 0 {
-				// if target did not support xattr when checkpoint records were created,
-				// and target supports xattr now when pipeline is being restarted,
-				// and the corresponding vbucket has seen xattr enabled mutations
-				// we need to rollback to 0 for vbuckets that have seen xattr enabled mutations
-				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
-				if err != nil {
-					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
-					return err
-				}
-				deleted_vbnos = append(deleted_vbnos, vbno)
-			}
 		} else {
 			if ckptDoc.SpecInternalId != specInternalId {
 				// if specInternalId does not match, replication spec has been deleted and recreated

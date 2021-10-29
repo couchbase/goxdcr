@@ -155,6 +155,9 @@ const (
 	// Pipeline Supervisor health check interval
 	HealthCheckIntervalKey = "HealthCheckIntervalSec"
 	HealthCheckTimeoutKey  = "HealthCheckTimeoutSec"
+	// Cooldown period for topology service before hitting ns_server REST endpoint again
+	TopologySvcCooldownPeriodKey    = "TopologySvcCooldownPeriodSec"
+	TopologySvcErrCooldownPeriodKey = "TopologySvcErrCooldownPeriodSec"
 
 	TimeoutRuntimeContextStartKey = "TimeoutRuntimeContextStart"
 	TimeoutRuntimeContextStopKey  = "TimeoutRuntimeContextStop"
@@ -310,6 +313,8 @@ var ResourceMgrKVDetectionRetryIntervalConfig = &SettingsConfig{int(base.Resourc
 var HealthCheckIntervalConfig = &SettingsConfig{int(base.HealthCheckInterval / time.Second), &Range{5, 3600 /*1 hour*/}}
 var HealthCheckTimeoutConfig = &SettingsConfig{int(base.HealthCheckTimeout / time.Second), &Range{5, 3600 /*1 hour*/}}
 var MaxCountDCPStreamsInactiveConfig = &SettingsConfig{base.MaxCountStreamsInactive, &Range{1, 40}}
+var TopologySvcCooldownConfig = &SettingsConfig{int(base.TopologySvcCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
+var TopologySvcErrCooldownConfig = &SettingsConfig{int(base.TopologySvcErrCoolDownPeriod / time.Second), &Range{1, 3600 /*1 hour*/}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -403,6 +408,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	HealthCheckIntervalKey:                        HealthCheckIntervalConfig,
 	HealthCheckTimeoutKey:                         HealthCheckTimeoutConfig,
 	MaxCountDCPStreamsInactiveKey:                 MaxCountDCPStreamsInactiveConfig,
+	TopologySvcCooldownPeriodKey:                  TopologySvcCooldownConfig,
+	TopologySvcErrCooldownPeriodKey:               TopologySvcErrCooldownConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -471,8 +471,6 @@ var PipelineSerializerRetryWaitTime = 100 * time.Millisecond
 var PipelineSerializerRetryFactor = 2
 
 // minimum versions where various features are supported
-var VersionForSANInCertificateSupport = []int{4, 0}
-var VersionForRBACAndXattrSupport = []int{5, 0}
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
@@ -882,6 +880,9 @@ var ResourceMgrKVDetectionRetryInterval = 60 * time.Second
 var HealthCheckInterval = 120 * time.Second
 var HealthCheckTimeout = 10 * time.Second
 
+var TopologySvcCoolDownPeriod = 60 * time.Second
+var TopologySvcErrCoolDownPeriod = 120 * time.Second
+
 func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeCountBeforeRestart,
 	maxTopologyStableCountBeforeRestart, maxWorkersForCheckpointing int,
 	timeoutCheckpointBeforeStop time.Duration, capiDataChanSizeMultiplier int,
@@ -927,7 +928,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	filteringInternalKey string, filteringInternalXattr string,
 	remoteClusterAlternateAddrChangeCnt int, resourceMgrKVDetectionRetryInterval time.Duration,
 	healthCheckInterval time.Duration, healthCheckTimeout time.Duration,
-	maxCountDcpStreamsInactive int) {
+	maxCountDcpStreamsInactive int,
+	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1038,6 +1040,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	HealthCheckInterval = healthCheckInterval
 	HealthCheckTimeout = healthCheckTimeout
 	MaxCountStreamsInactive = maxCountDcpStreamsInactive
+	TopologySvcCoolDownPeriod = topologyCooldownPeriod
+	TopologySvcErrCoolDownPeriod = topologyErrCooldownPeriod
 }
 
 // Need to escape the () to result in "META().xattrs" literal

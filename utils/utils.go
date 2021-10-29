@@ -51,7 +51,7 @@ func (f *HELOFeatures) NumberOfActivatedFeatures() int {
 }
 
 type Utilities struct {
-	logger_utils *log.CommonLogger
+	logger_utils                 *log.CommonLogger
 	reusableNoKeepAliveTransport *http.Transport
 }
 
@@ -78,7 +78,7 @@ func NewUtilities() *Utilities {
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
-			DisableKeepAlives: true,
+			DisableKeepAlives:     true,
 		},
 	}
 	return retVar
@@ -2327,13 +2327,13 @@ func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, c
 		conn.Close()
 
 		tr := &http.Transport{TLSClientConfig: tlsConfig,
-			Dial: base.DialTCPWithTimeout,
+			Dial:              base.DialTCPWithTimeout,
 			DisableKeepAlives: !keepClientAlive}
 		client = &http.Client{Transport: tr,
 			Timeout: base.DefaultHttpTimeout}
 
 	} else {
-		if !keepClientAlive{
+		if !keepClientAlive {
 			client = &http.Client{Transport: u.reusableNoKeepAliveTransport, Timeout: base.DefaultHttpTimeout}
 		} else {
 			client = &http.Client{Timeout: base.DefaultHttpTimeout}
@@ -2602,13 +2602,11 @@ func (u *Utilities) ExponentialBackoffExecutorWithFinishSignal(name string, init
 // or called from remote cluster reference refresh code, where a pre-mature timeout can be tolerated
 // This method also returns defaultPoolInfo of target for more flexibility
 // CALLER BEWARE: defaultPoolInfo is returned ONLY when either scram sha or ssl is enabled, so as to avoid unnecessary work
-func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string,
-	certificate []byte, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (sanInCertificate bool,
-	httpAuthMech base.HttpAuthMech, defaultPoolInfo map[string]interface{}, err error) {
+func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAddr, username, password string, certificate, clientCertificate, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (httpAuthMech base.HttpAuthMech, defaultPoolInfo map[string]interface{}, err error) {
 	if !scramShaEnabled && len(certificate) == 0 {
 		// security settings are irrelevant if we are not using scram sha or ssl
 		// note that a nil defaultPoolInfo is returned in this case
-		return false, base.HttpAuthMechPlain, nil, nil
+		return base.HttpAuthMechPlain, nil, nil
 	}
 
 	if scramShaEnabled {
@@ -2618,11 +2616,11 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechScramSha
 		} else if err != TargetMayNotSupportScramShaError {
-			return false, base.HttpAuthMechPlain, nil, err
+			return base.HttpAuthMechPlain, nil, err
 		} else {
 			if len(certificate) == 0 {
 				// certificate not provided, cannot fall back to https. return error right away
-				return false, base.HttpAuthMechPlain, nil, fmt.Errorf("Cannot connect to target %v using \"half\" secure mode. Received unauthorized error when using Scram-Sha authentication. Cannot use https because server certificate has not been provided.", hostAddr)
+				return base.HttpAuthMechPlain, nil, fmt.Errorf("Cannot connect to target %v using \"half\" secure mode. Received unauthorized error when using Scram-Sha authentication. Cannot use https because server certificate has not been provided.", hostAddr)
 			} else {
 				// proceed to fall back to https
 			}
@@ -2637,7 +2635,7 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
 		} else {
-			return false, base.HttpAuthMechPlain, nil, err
+			return base.HttpAuthMechPlain, nil, err
 		}
 	}
 
@@ -2647,18 +2645,18 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 	nodeList, err := u.GetNodeListFromInfoMap(defaultPoolInfo, logger)
 	if err != nil || len(nodeList) == 0 {
 		err = fmt.Errorf("Can't get nodes information for cluster %v, err=%v", hostAddr, err)
-		return false, base.HttpAuthMechPlain, nil, err
+		return base.HttpAuthMechPlain, nil, err
 	}
 
 	clusterCompatibility, err := u.GetClusterCompatibilityFromNodeList(nodeList)
 	if err != nil {
-		return false, base.HttpAuthMechPlain, nil, err
+		return base.HttpAuthMechPlain, nil, err
 	}
 
 	targetHasScramShaSupport := base.IsClusterCompatible(clusterCompatibility, base.VersionForHttpScramShaSupport)
 	if scramShaEnabled && targetHasScramShaSupport && httpAuthMech != base.HttpAuthMechScramSha {
 		// do not fall back to https if target is vulcan and up
-		return false, base.HttpAuthMechPlain, nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v using SCRAM-SHA authentication. Please check whether SCRAM-SHA is enabled on target.", hostAddr)
+		return base.HttpAuthMechPlain, nil, fmt.Errorf("Failed to retrieve secruity settings from host=%v using SCRAM-SHA authentication. Please check whether SCRAM-SHA is enabled on target.", hostAddr)
 	}
 
 	if scramShaEnabled && !targetHasScramShaSupport && httpAuthMech == base.HttpAuthMechScramSha {
@@ -2669,11 +2667,10 @@ func (u *Utilities) GetSecuritySettingsAndDefaultPoolInfo(hostAddr, hostHttpsAdd
 		if err == nil {
 			httpAuthMech = base.HttpAuthMechHttps
 		} else {
-			return false, base.HttpAuthMechPlain, nil, err
+			return base.HttpAuthMechPlain, nil, err
 		}
 	}
-	sanInCertificate = base.IsClusterCompatible(clusterCompatibility, base.VersionForSANInCertificateSupport)
-	return sanInCertificate, httpAuthMech, defaultPoolInfo, nil
+	return httpAuthMech, defaultPoolInfo, nil
 }
 
 func (u *Utilities) GetDefaultPoolInfoUsingScramSha(hostAddr, username, password string, logger *log.CommonLogger) (map[string]interface{}, error) {
