@@ -267,3 +267,30 @@ func TestPeriodicPushSendPkt(t *testing.T) {
 		assert.True(atLeastOneBackfill)
 	}
 }
+
+func TestPeriodicPushSendPktCorners(t *testing.T) {
+	fmt.Println("============== Test case start: TestPeriodicPushSendPktCorners =================")
+	defer fmt.Println("============== Test case end: TestPeriodicPushSendPktCorners =================")
+	assert := assert.New(t)
+
+	//func (v *VBPeriodicReplicateReq) PreSerlialize() error {
+	nilPreReq := &VBPeriodicReplicateReq{}
+	assert.Nil(nilPreReq.PreSerlialize())
+	nilPreReq.PostSerialize()
+	data, err := json.Marshal(nilPreReq)
+	assert.Nil(err)
+
+	checkReq := &VBPeriodicReplicateReq{}
+	assert.Nil(json.Unmarshal(data, &checkReq))
+
+	requestCommon := NewRequestCommon("src", "tgt", "lifecycle", "", 0)
+	peerSendReq := NewPeerVBPeriodicPushReq(requestCommon)
+	nilList := &VBPeriodicReplicateReqList{}
+	peerSendReq.PushRequests = nilList
+
+	var nilReq *PeerVBPeriodicPushReq
+	data, err = json.Marshal(nilReq)
+	assert.Nil(err)
+
+	assert.Nil(json.Unmarshal(data, &checkReq))
+}

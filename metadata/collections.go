@@ -136,7 +136,7 @@ func (c *CollectionsManifest) GetScopeAndCollectionName(collectionId uint32) (sc
 
 func (c *CollectionsManifest) GetCollectionId(scopeName, collectionName string) (uint32, error) {
 	if c == nil {
-		return 0, base.ErrorInvalidInput
+		return 0, fmt.Errorf("Nil collectionsManifest")
 	}
 	scope, exists := c.Scopes()[scopeName]
 	if !exists {
@@ -1386,7 +1386,7 @@ func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 
 func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 	if c == nil {
-		return base.ErrorInvalidInput
+		return fmt.Errorf("CollectionNamespaceMapping is nil when calling UnmarshalJSON")
 	}
 
 	metaObj := newCollectionNsMetaObj()
@@ -1697,7 +1697,7 @@ func (c *CollectionNamespaceMapping) Diff(other CollectionNamespaceMapping) (add
 // Because the lists may not be ordered, we need to calculate sha256 with lists ordered
 func (c *CollectionNamespaceMapping) Sha256() (result [sha256.Size]byte, err error) {
 	if c == nil {
-		err = base.ErrorInvalidInput
+		err = fmt.Errorf("Calling Sha256() on a nil CollectionNamespaceMapping")
 		return
 	}
 
@@ -1792,7 +1792,7 @@ func (b *CollectionNsMappingsDoc) Size() int {
 
 func (b *CollectionNsMappingsDoc) ToShaMap() (ShaToCollectionNamespaceMap, error) {
 	if b == nil {
-		return nil, base.ErrorInvalidInput
+		return nil, fmt.Errorf("Calling ToShaMap() on a nil CollectionNsMappingsDoc")
 	}
 
 	errorMap := make(base.ErrorMap)

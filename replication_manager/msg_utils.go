@@ -734,7 +734,8 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 //Validate source mapping - which means we need to get manifests
 func validateSrcNamespacesExist(targetClusterName string, srcBucket string, targetBucketName string, rulesToCheck base.CollectionsMgtType, mappingRules metadata.CollectionsMappingRulesType) error {
 	if targetBucketName == "" || srcBucket == "" || targetClusterName == "" {
-		return base.ErrorInvalidInput
+		return fmt.Errorf("One of the following is empty: tgtBucketName: %v srcBucket %v targetClusterName %v",
+			targetBucketName, srcBucket, targetClusterName)
 	}
 
 	var err error

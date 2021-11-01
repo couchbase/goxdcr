@@ -299,6 +299,7 @@ func (r *ReplicaReplicatorImpl) reOrganizePopulateMap(specToReqMap map[*metadata
 			if peerNodeToRequestListMap[nodeNsServerName] == nil {
 				peerNodeToRequestListMap[nodeNsServerName] = &VBPeriodicReplicateReqList{}
 			}
+
 			*peerNodeToRequestListMap[nodeNsServerName] = append(*peerNodeToRequestListMap[nodeNsServerName], subReq)
 		}
 		r.reverseMapPool.Put(nodeVBOwnership)

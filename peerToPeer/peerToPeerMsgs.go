@@ -235,7 +235,7 @@ var respMagicCheckFilter, _ = filter.NewFilter("magicCheckResp", fmt.Sprintf("Ma
 func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, securitySvc service_def.SecuritySvc) (ReqRespCommon, error) {
 	body, err := ioutil.ReadAll(httpReq.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading httpReq.Body resulted in err: %v", err)
 	}
 
 	isRequestType, _, reqFilterErr := reqMagicCheckFilter.FilterByteSlice(body)
@@ -249,13 +249,13 @@ func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, sec
 	if isRequestType {
 		err = json.Unmarshal(body, &reqCommon)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("unmarshalling request with reqCommon %v had err %v", reqCommon, err)
 		}
 		return generateRequest(utils, reqCommon, body, securitySvc)
 	} else {
 		err = json.Unmarshal(body, &respCommon)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("unmarshalling response with respCommon %v had err %v", respCommon, err)
 		}
 		return generateResp(respCommon, err, body)
 	}
@@ -267,14 +267,14 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 		respDisc := &DiscoveryResponse{}
 		err = respDisc.DeSerialize(body)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("respDiscovery deSerialize err: %v", err)
 		}
 		return respDisc, nil
 	case ReqVBMasterChk:
 		resp := &VBMasterCheckResp{}
 		err = resp.DeSerialize(body)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("respVBMastChk deSerialize err: %v", err)
 		}
 		if len(resp.PayloadCompressed) > 0 && len(*resp.payload) == 0 {
 			panic("Should not be possible")
@@ -284,7 +284,7 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 		resp := &PeerVBPeriodicPushResp{}
 		err = resp.DeSerialize(body)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("respPeriodicPush deSerialize err: %v", err)
 		}
 		return resp, nil
 	default:
@@ -296,7 +296,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 	cbFunc := func(resp Response) (HandlerResult, error) {
 		payload, err := resp.Serialize()
 		if err != nil {
-			return &HandlerResultImpl{}, err
+			return &HandlerResultImpl{}, fmt.Errorf("generating response %v err: %v", resp.GetType(), err)
 		}
 		var out interface{}
 		var certificates []byte
@@ -318,7 +318,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 			Err:            err,
 			HttpStatusCode: statusCode,
 		}
-		return result, err
+		return result, fmt.Errorf("response %v callback err: %v", resp.GetType(), err)
 	}
 	reqCommon.responseCb = cbFunc
 
@@ -327,16 +327,25 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 	case ReqDiscovery:
 		reqDisc := &DiscoveryRequest{}
 		err = reqDisc.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("reqDiscovery deSerialize err: %v", err)
+		}
 		reqDisc.RequestCommon = reqCommon
 		return reqDisc, err
 	case ReqVBMasterChk:
 		reqVBChk := &VBMasterCheckReq{}
 		err = reqVBChk.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("reqVBMasterChk deSerialize err: %v", err)
+		}
 		reqVBChk.RequestCommon = reqCommon
 		return reqVBChk, err
 	case ReqPeriodicPush:
 		pushReq := &PeerVBPeriodicPushReq{}
 		err = pushReq.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("reqPeriodicPush deSerialize err: %v", err)
+		}
 		pushReq.RequestCommon = reqCommon
 		return pushReq, err
 	default:
