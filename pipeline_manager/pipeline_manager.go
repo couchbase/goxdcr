@@ -1220,7 +1220,7 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string,
 }
 
 func (pipelineMgr *PipelineManager) handlePeerCkptGetMergeManagers(fullTopic string) (pipeline_svc.CheckpointMgrSvc, common.PipelineService, error) {
-	topic, pipelineType := common.DecomposeFullTopic(fullTopic)
+	topic, _ := common.DecomposeFullTopic(fullTopic)
 
 	repStatus, err := pipelineMgr.ReplicationStatus(topic)
 	if err != nil {
@@ -1229,28 +1229,20 @@ func (pipelineMgr *PipelineManager) handlePeerCkptGetMergeManagers(fullTopic str
 		return nil, nil, fmt.Errorf("Peer sent push req for pipeline %v but topic does not exist - %v", topic, err)
 	}
 
-	var pipeline common.Pipeline
-	switch pipelineType {
-	case common.MainPipeline:
-		pipeline = repStatus.Pipeline()
-	case common.BackfillPipeline:
-		pipeline = repStatus.BackfillPipeline()
-	default:
-		// Shouldn't happen
-		return nil, nil, fmt.Errorf("unknown pipeline type %v", pipelineType)
-	}
+	// Always get the main pipeline for merging purposes
+	repStatusPipeline := repStatus.Pipeline()
 
-	if pipeline == nil {
+	if repStatusPipeline == nil {
 		// pipeline could be nil in between pipeline restarts restarts
 		return nil, nil, base.ErrorNilPipeline
 	}
 
-	checkpointMgr, ok := pipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
+	checkpointMgr, ok := repStatusPipeline.RuntimeContext().Service(base.CHECKPOINT_MGR_SVC).(pipeline_svc.CheckpointMgrSvc)
 	if !ok {
 		return nil, nil, base.ErrorNilPipeline
 	}
 
-	backfillMgrPipelineSvc := pipeline.RuntimeContext().Service(base.BACKFILL_MGR_SVC)
+	backfillMgrPipelineSvc := repStatusPipeline.RuntimeContext().Service(base.BACKFILL_MGR_SVC)
 	if backfillMgrPipelineSvc == nil {
 		return nil, nil, base.ErrorNilPipeline
 	}
