@@ -27,7 +27,6 @@ type PeriodicPushHandler struct {
 	ckptSvc         service_def.CheckpointsService
 	colManifestSvc  service_def.CollectionsManifestSvc
 	backfillReplSvc service_def.BackfillReplSvc
-	replSpecSvc     service_def.ReplicationSpecSvc
 	utils           utilities.UtilsIface
 
 	requestMerger func(fullTopic, sender string, request interface{}) error
@@ -36,13 +35,12 @@ type PeriodicPushHandler struct {
 func NewPeriodicPushHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, merger func(string, string, interface{}) error, replSpecSvc service_def.ReplicationSpecSvc) *PeriodicPushHandler {
 	finCh := make(chan bool)
 	return &PeriodicPushHandler{
-		HandlerCommon:   NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh),
+		HandlerCommon:   NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh, replSpecSvc),
 		ckptSvc:         ckptSvc,
 		colManifestSvc:  colManifestSvc,
 		backfillReplSvc: backfillReplSvc,
 		utils:           utils,
 		requestMerger:   merger,
-		replSpecSvc:     replSpecSvc,
 	}
 }
 

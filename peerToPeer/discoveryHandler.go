@@ -10,6 +10,7 @@ package peerToPeer
 
 import (
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 	"time"
 )
@@ -28,10 +29,10 @@ type KnownPeers struct {
 	mapMtx   sync.RWMutex
 }
 
-func NewDiscoveryHandler(reqCh chan interface{}, logger *log.CommonLogger, lifecycleId string, knownPeers *KnownPeers, cleanupInterval time.Duration) *DiscoveryHandler {
+func NewDiscoveryHandler(reqCh chan interface{}, logger *log.CommonLogger, lifecycleId string, knownPeers *KnownPeers, cleanupInterval time.Duration, replicationSpecSvc service_def.ReplicationSpecSvc) *DiscoveryHandler {
 	finCh := make(chan bool)
 	handler := &DiscoveryHandler{
-		HandlerCommon: NewHandlerCommon(logger, lifecycleId, finCh, cleanupInterval, reqCh),
+		HandlerCommon: NewHandlerCommon(logger, lifecycleId, finCh, cleanupInterval, reqCh, replicationSpecSvc),
 		knownPeers:    knownPeers,
 	}
 	return handler

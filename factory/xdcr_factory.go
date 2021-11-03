@@ -912,6 +912,15 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	xdcrf.logger.Infof("Running VBMasterCheck for %v", pipeline.FullTopic())
 	respMap, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)
 	if err != nil {
+		// If err is because spec is deleted from under us or if it's paused, don't do anything
+		replCheck, replErr := xdcrf.repl_spec_svc.ReplicationSpecReadOnly(spec.Id)
+		if replErr != nil {
+			return nil, base.ErrorOpInterrupted
+		}
+		if !replCheck.Settings.Active {
+			return nil, base.ErrorOpInterrupted
+		}
+
 		// Should still return response to see if others can merge it
 		return respMap, err
 	}

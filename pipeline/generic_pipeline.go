@@ -387,6 +387,11 @@ func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap)
 	genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer communication"))
 	resp, err := genericPipeline.vbMasterCheckFunc(genericPipeline)
 	if err != nil {
+		if err == base.ErrorOpInterrupted {
+			// Pipeline paused or repl deleted
+			return err
+		}
+
 		errMap["genericPipeline.vbMasterCheckFunc"] = err
 		// Even if vbmaster has issues, the data being sent should still be stored and then forwarded to others
 		// to prevent data loss

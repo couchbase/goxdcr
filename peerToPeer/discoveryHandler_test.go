@@ -3,6 +3,7 @@ package peerToPeer
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/log"
+	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"sync"
@@ -13,7 +14,7 @@ import (
 
 const lifecycleId = "testLifecycleId"
 
-func discoveryHandlerBoilerPlate() (chan interface{}, *log.CommonLogger, string, *KnownPeers, time.Duration) {
+func discoveryHandlerBoilerPlate() (chan interface{}, *log.CommonLogger, string, *KnownPeers, time.Duration, *service_def.ReplicationSpecSvc) {
 	reqCh := make(chan interface{})
 	logger := log.NewLogger("unitTest", log.DefaultLoggerContext)
 	lifeCycleId := lifecycleId
@@ -22,8 +23,9 @@ func discoveryHandlerBoilerPlate() (chan interface{}, *log.CommonLogger, string,
 		mapMtx:   sync.RWMutex{},
 	}
 	cleanupInterval := 50 * time.Millisecond
+	replSpecSvc := &service_def.ReplicationSpecSvc{}
 
-	return reqCh, logger, lifeCycleId, knownPeers, cleanupInterval
+	return reqCh, logger, lifeCycleId, knownPeers, cleanupInterval, replSpecSvc
 }
 
 func TestDiscoveryHandler(t *testing.T) {

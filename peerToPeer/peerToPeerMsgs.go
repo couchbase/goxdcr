@@ -46,6 +46,19 @@ func (o OpCode) String() string {
 	}
 }
 
+func (o OpCode) IsInterruptable() bool {
+	switch o {
+	case ReqDiscovery:
+		return false
+	case ReqVBMasterChk:
+		return true
+	case ReqPeriodicPush:
+		return false
+	default:
+		return false
+	}
+}
+
 const OpcodeMin = ReqDiscovery
 const OpcodeMax = ReqMaxInvalid
 
@@ -350,6 +363,17 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		return pushReq, err
 	default:
 		return nil, fmt.Errorf("Unknown request %v", reqCommon.ReqType)
+	}
+}
+
+func getFinChKeyHelper(reqRaw interface{}) (string, error) {
+	req := reqRaw.(ReqRespCommon)
+	switch req.GetOpcode() {
+	case ReqVBMasterChk:
+		checkReq := reqRaw.(*VBMasterCheckReq)
+		return getReplSpecFinChMapKeyInternal(checkReq.ReplicationId, checkReq.InternalSpecId), nil
+	default:
+		return "", fmt.Errorf("Type %v is not interruptable", req.GetOpcode())
 	}
 }
 

@@ -84,6 +84,7 @@ func TestVBMasterHandler(t *testing.T) {
 
 	reqCh := make(chan interface{}, 100)
 	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc, backfillReplSvc, utils, replSpecSvc)
+	handler.HandleSpecCreation(replSpec)
 
 	var waitGrp sync.WaitGroup
 	assert.Nil(handler.Start())
@@ -115,6 +116,7 @@ func TestVBMasterHandler(t *testing.T) {
 
 	req.SourceBucketName = srcBucketName
 	req.ReplicationId = replId
+	req.InternalSpecId = replSpec.InternalId
 	req.bucketVBMap = make(BucketVBMapType)
 	req.bucketVBMap[srcBucketName] = vbList
 

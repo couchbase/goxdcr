@@ -114,6 +114,9 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 		common := NewRequestCommon(src, tgt, "", "", opaque)
 		vbCheckReq := NewVBMasterCheckReq(common)
 		vbCheckReq.SetBucketVBMap(filteredSubsets)
+		vbCheckReq.ReplicationId = spec.Id
+		vbCheckReq.SourceBucketName = spec.SourceBucketName
+		vbCheckReq.InternalSpecId = spec.InternalId
 		return vbCheckReq
 	}
 

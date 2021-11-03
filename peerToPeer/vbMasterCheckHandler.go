@@ -28,7 +28,6 @@ type VBMasterCheckHandler struct {
 	ckptSvc           service_def.CheckpointsService
 	colManifestSvc    service_def.CollectionsManifestSvc
 	backfillReplSvc   service_def.BackfillReplSvc
-	replSpecSvc       service_def.ReplicationSpecSvc
 	utils             utilities.UtilsIface
 }
 
@@ -37,12 +36,11 @@ const VBMasterCheckSubscriberId = "VBMasterCheckHandler"
 func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, replicationSpecSvc service_def.ReplicationSpecSvc) *VBMasterCheckHandler {
 	finCh := make(chan bool)
 	handler := &VBMasterCheckHandler{
-		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh),
+		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh, replicationSpecSvc),
 		bucketTopologySvc: bucketTopologySvc,
 		ckptSvc:           ckptSvc,
 		colManifestSvc:    collectionsManifestSvc,
 		backfillReplSvc:   backfillReplSvc,
-		replSpecSvc:       replicationSpecSvc,
 		utils:             utils,
 	}
 	return handler
@@ -66,18 +64,9 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
-	checkSpec, err := h.replSpecSvc.ReplicationSpecReadOnly(req.ReplicationId)
-	if err != nil {
-		err = fmt.Errorf("Getting spec %v got err %v", req.ReplicationId, err)
-		h.logger.Errorf(err.Error())
-		resp := req.GenerateResponse().(*VBMasterCheckResp)
-		resp.Init()
-		resp.ErrorMsg = err.Error()
-		req.CallBack(resp)
-		return
-	}
-	if req.InternalSpecId != "" && checkSpec.InternalId != "" && checkSpec.InternalId != req.InternalSpecId {
-		err = fmt.Errorf("Mismatch internalID for VB master check request from %v with specID %v - given %v when we have %v", req.GetSender(), req.ReplicationId, req.InternalSpecId, checkSpec.InternalId)
+	finCh, existsErr := h.GetSpecDelNotification(req.ReplicationId, req.InternalSpecId)
+	if existsErr != nil {
+		err := fmt.Errorf("VB master check request from %v with specID %v internalID %v does not exist", req.GetSender(), req.ReplicationId, req.InternalSpecId)
 		h.logger.Errorf(err.Error())
 		resp := req.GenerateResponse().(*VBMasterCheckResp)
 		resp.Init()
@@ -92,32 +81,32 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	resp := req.GenerateResponse().(*VBMasterCheckResp)
 	resp.Init()
-	resp.InternalSpecId = checkSpec.InternalId
+	resp.InternalSpecId = req.InternalSpecId
 
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
-	go h.populateBucketVBMapsIntoResp(bucketVBsMap, resp, waitGrp)
+	go h.populateBucketVBMapsIntoResp(bucketVBsMap, resp, waitGrp, finCh)
 
 	waitGrp.Add(1)
 	var bgErr error
 	var result map[uint16]*metadata.CheckpointsDoc
-	go h.populatePipelineCkpts(common.ComposeFullTopic(req.ReplicationId, req.PipelineType), waitGrp, &bgErr, &result)
+	go h.populatePipelineCkpts(common.ComposeFullTopic(req.ReplicationId, req.PipelineType), waitGrp, &bgErr, &result, finCh)
 
 	cachedSrcManifests := make(metadata.ManifestsCache)
 	cachedTgtManifests := make(metadata.ManifestsCache)
 	var manifestErr error
 	waitGrp.Add(1)
-	go h.fetchAllManifests(req.ReplicationId, &cachedSrcManifests, &cachedTgtManifests, &manifestErr, waitGrp)
+	go h.fetchAllManifests(req.ReplicationId, &cachedSrcManifests, &cachedTgtManifests, &manifestErr, waitGrp, finCh)
 
 	var brokenMappingErr error
 	var brokenMappingDoc metadata.CollectionNsMappingsDoc
 	waitGrp.Add(1)
-	go h.fetchBrokenMappingDoc(req.ReplicationId, &brokenMappingDoc, &brokenMappingErr, waitGrp)
+	go h.fetchBrokenMappingDoc(req.ReplicationId, &brokenMappingDoc, &brokenMappingErr, waitGrp, finCh)
 
 	var backfillTasksErr error
 	backfillTasks := metadata.NewVBTasksMap()
 	waitGrp.Add(1)
-	go h.fetchBackfillTasks(req.ReplicationId, backfillTasks, &backfillTasksErr, waitGrp)
+	go h.fetchBackfillTasks(req.ReplicationId, backfillTasks, &backfillTasksErr, waitGrp, finCh)
 
 	// Get all errors in order
 	waitGrp.Wait()
@@ -151,7 +140,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
-	err = resp.LoadPipelineCkpts(result, req.SourceBucketName)
+	err := resp.LoadPipelineCkpts(result, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("when loading pipeline ckpt into response, got %v", err)
 		resp.ErrorMsg = err.Error()
@@ -197,7 +186,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 var vbmasterChkHandlerIteration uint32
 
-func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketVBMapType, resp *VBMasterCheckResp, waitGrp *sync.WaitGroup) {
+func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketVBMapType, resp *VBMasterCheckResp, waitGrp *sync.WaitGroup, finCh chan bool) {
 	defer waitGrp.Done()
 	for bucketName, vbsList := range bucketVBsMap {
 		resp.InitBucket(bucketName)
@@ -225,6 +214,16 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 				h.logger.Warnf("Unable to unsubscribe srcNotificationCh for bucket %v - %v", bucketName, err)
 				// Not an error remote side cares about
 			}
+		}
+
+		select {
+		case <-finCh:
+			// Don't proceed
+			unsubsFunc()
+			return
+		default:
+			// Nothing
+			break
 		}
 
 		var latestInfo service_def.SourceNotification
@@ -279,7 +278,9 @@ func (h *VBMasterCheckHandler) handler() {
 func (v *VBMasterCheckHandler) handleResponse(resp *VBMasterCheckResp) {
 	req, retCh, found := v.GetReqAndClearOpaque(resp.GetOpaque())
 	if !found {
-		v.logger.Warnf("Unable to find opaque %v", resp.GetOpaque())
+		v.logger.Errorf("Unable to find opaque %v", resp.GetOpaque())
+		// Unable to find opaque means the original request has timed out
+		return
 	}
 	if retCh != nil {
 		retPair := ReqRespPair{
@@ -290,10 +291,27 @@ func (v *VBMasterCheckHandler) handleResponse(resp *VBMasterCheckResp) {
 	}
 }
 
-func (v *VBMasterCheckHandler) populatePipelineCkpts(replSpecId string, waitGrp *sync.WaitGroup, err *error, result *map[uint16]*metadata.CheckpointsDoc) {
+func (v *VBMasterCheckHandler) populatePipelineCkpts(replSpecId string, waitGrp *sync.WaitGroup, err *error, result *map[uint16]*metadata.CheckpointsDoc, finCh chan bool) {
 	defer waitGrp.Done()
 
-	ckptDocs, opErr := v.ckptSvc.CheckpointsDocs(replSpecId, true)
+	var ckptDocs map[uint16]*metadata.CheckpointsDoc
+	var opErr error
+	doneCh := make(chan bool)
+
+	go func() {
+		ckptDocs, opErr = v.ckptSvc.CheckpointsDocs(replSpecId, true)
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+		// Regular path
+		break
+	case <-finCh:
+		*err = base.ErrorOpInterrupted
+		return
+	}
+
 	v.logger.Infof("Handler for %v retrieving CheckpointsDocs request found %v docs", replSpecId, len(ckptDocs))
 	if opErr != nil {
 		*err = opErr
@@ -310,17 +328,33 @@ func (v *VBMasterCheckHandler) populatePipelineCkpts(replSpecId string, waitGrp 
 			}
 		}
 	}
-
 	return
 }
 
 // We depend on CollectionsManifestSvc to always keep only the minimal manifests needed
 // So whatever it returns, most likely it is needed, and no need to go filter through them
-func (v *VBMasterCheckHandler) fetchAllManifests(replId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, errPtr *error, waitGrp *sync.WaitGroup) {
+func (v *VBMasterCheckHandler) fetchAllManifests(replId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, errPtr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
 	defer waitGrp.Done()
-	nameOnlySpec := &metadata.ReplicationSpecification{}
-	nameOnlySpec.Id = replId
-	src, tgt, err := v.colManifestSvc.GetAllCachedManifests(nameOnlySpec)
+	var src map[uint64]*metadata.CollectionsManifest
+	var tgt map[uint64]*metadata.CollectionsManifest
+	var err error
+
+	doneCh := make(chan bool)
+	go func() {
+		nameOnlySpec := &metadata.ReplicationSpecification{}
+		nameOnlySpec.Id = replId
+		src, tgt, err = v.colManifestSvc.GetAllCachedManifests(nameOnlySpec)
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+		break
+	case <-finCh:
+		*errPtr = base.ErrorOpInterrupted
+		return
+	}
+
 	if err != nil {
 		*errPtr = err
 		return
@@ -329,10 +363,26 @@ func (v *VBMasterCheckHandler) fetchAllManifests(replId string, srcManifests *me
 	*tgtManifests = tgt
 }
 
-func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *metadata.CollectionNsMappingsDoc, errPtr *error, waitGrp *sync.WaitGroup) {
+func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *metadata.CollectionNsMappingsDoc, errPtr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
 	defer waitGrp.Done()
 
-	_, loadedDoc, _, _, err := v.ckptSvc.LoadBrokenMappings(replId)
+	var err error
+	var loadedDoc *metadata.CollectionNsMappingsDoc
+	doneCh := make(chan bool)
+
+	go func() {
+		_, loadedDoc, _, _, err = v.ckptSvc.LoadBrokenMappings(replId)
+		close(doneCh)
+	}()
+
+	select {
+	case <-doneCh:
+		break
+	case <-finCh:
+		*errPtr = base.ErrorOpInterrupted
+		return
+	}
+
 	if err != nil {
 		*errPtr = err
 		return
@@ -341,12 +391,19 @@ func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *
 		*errPtr = fmt.Errorf("Nil doc when loading brokenMapping")
 		return
 	}
-
 	*mappingDoc = *loadedDoc
 }
 
-func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *metadata.VBTasksMapType, backfillErr *error, waitGrp *sync.WaitGroup) {
+func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *metadata.VBTasksMapType, backfillErr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
 	defer waitGrp.Done()
+
+	select {
+	case <-finCh:
+		*backfillErr = base.ErrorOpInterrupted
+		return
+	default:
+		break
+	}
 
 	backfillSpec, err := v.backfillReplSvc.BackfillReplSpec(replId)
 	if err != nil {

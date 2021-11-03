@@ -9,7 +9,10 @@
 package peerToPeer
 
 import (
+	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"sync"
 	"sync/atomic"
@@ -36,9 +39,13 @@ type HandlerCommon struct {
 
 	finCh     chan bool
 	receiveCh chan interface{}
+
+	replSpecSvc    service_def.ReplicationSpecSvc
+	replSpecFinMtx sync.RWMutex
+	replSpecFinCh  map[string]chan bool
 }
 
-func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan bool, cleanupInterval time.Duration, reqCh chan interface{}) *HandlerCommon {
+func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan bool, cleanupInterval time.Duration, reqCh chan interface{}, replicationSpecSvc service_def.ReplicationSpecSvc) *HandlerCommon {
 	handler := &HandlerCommon{
 		logger:             logger,
 		lifeCycleId:        lifeCycleId,
@@ -50,6 +57,8 @@ func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan b
 		cleanupInterval:    cleanupInterval,
 		opaqueReqRespCbMap: map[uint32]chan ReqRespPair{},
 		receiveCh:          reqCh,
+		replSpecSvc:        replicationSpecSvc,
+		replSpecFinCh:      make(map[string]chan bool),
 	}
 	return handler
 }
@@ -63,6 +72,29 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 	}
 	h.opaqueMapMtx.RUnlock()
 
+	if opts.synchronous {
+		ch := make(chan ReqRespPair)
+		opts.respMapMtx.Lock()
+		opts.respMap[request.GetTarget()] = ch
+		opts.respMapMtx.Unlock()
+		h.opaqueReqRespCbMap[request.GetOpaque()] = ch
+		if request.GetOpcode().IsInterruptable() {
+			finChKey, err := getFinChKeyHelper(request)
+			if err != nil {
+				h.logger.Errorf("Unable to get finChKey for %v - coding error?", request.GetOpcode())
+			} else {
+				finCh, getErr := h.getSpecDelNotificationInternal(finChKey)
+				if getErr != nil {
+					// Likely spec got deleted underneath
+					getErr = fmt.Errorf("Unable to getSpecDelNotificationInternal with key %v - %v", finChKey, getErr)
+					h.logger.Errorf(getErr.Error())
+					return getErr
+				}
+				opts.finCh = finCh
+			}
+		}
+	}
+
 	h.opaqueMapMtx.Lock()
 	defer h.opaqueMapMtx.Unlock()
 	opaqueTimeoutDuration := time.Duration(atomic.LoadUint32(&P2POpaqueTimeoutAtomicMin)) * time.Minute
@@ -71,14 +103,6 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 		h.opaquesClearCh <- request.GetOpaque()
 	})
 	h.opaqueReqMap[request.GetOpaque()] = &request
-
-	if opts.synchronous {
-		ch := make(chan ReqRespPair)
-		opts.respMapMtx.Lock()
-		opts.respMap[request.GetTarget()] = ch
-		opts.respMapMtx.Unlock()
-		h.opaqueReqRespCbMap[request.GetOpaque()] = ch
-	}
 	return nil
 }
 
@@ -136,4 +160,50 @@ func (h *HandlerCommon) sendBackSynchronously(retCh chan ReqRespPair, retPair Re
 		h.logger.Errorf("Unable to respond to caller given %v timed out", retPair)
 		break
 	}
+}
+
+func getReplSpecFinChMapKey(spec *metadata.ReplicationSpecification) string {
+	return getReplSpecFinChMapKeyInternal(spec.Id, spec.InternalId)
+}
+
+func getReplSpecFinChMapKeyInternal(specId, internalId string) string {
+	return fmt.Sprintf("%v_%v", specId, internalId)
+}
+
+func (h *HandlerCommon) HandleSpecCreation(newSpec *metadata.ReplicationSpecification) {
+	h.replSpecFinMtx.Lock()
+	defer h.replSpecFinMtx.Unlock()
+	h.replSpecFinCh[getReplSpecFinChMapKey(newSpec)] = make(chan bool)
+}
+
+func (h *HandlerCommon) HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification) {
+	h.replSpecFinMtx.Lock()
+	defer h.replSpecFinMtx.Unlock()
+	close(h.replSpecFinCh[getReplSpecFinChMapKey(oldSpec)])
+	delete(h.replSpecFinCh, getReplSpecFinChMapKey(oldSpec))
+}
+
+func (h *HandlerCommon) HandleSpecChange(oldSpec, newSpec *metadata.ReplicationSpecification) {
+	if oldSpec.Settings.Active && !newSpec.Settings.Active {
+		h.replSpecFinMtx.Lock()
+		defer h.replSpecFinMtx.Unlock()
+		close(h.replSpecFinCh[getReplSpecFinChMapKey(oldSpec)])
+		h.replSpecFinCh[getReplSpecFinChMapKey(newSpec)] = make(chan bool)
+	}
+}
+
+func (h *HandlerCommon) getSpecDelNotificationInternal(key string) (chan bool, error) {
+	h.replSpecFinMtx.RLock()
+	defer h.replSpecFinMtx.RUnlock()
+
+	finCh, exists := h.replSpecFinCh[key]
+	if !exists {
+		return nil, base.ErrorResourceDoesNotExist
+	}
+	return finCh, nil
+}
+
+func (h *HandlerCommon) GetSpecDelNotification(specId, internalId string) (chan bool, error) {
+	key := getReplSpecFinChMapKeyInternal(specId, internalId)
+	return h.getSpecDelNotificationInternal(key)
 }

@@ -49,6 +49,10 @@ type Handler interface {
 	Start() error
 	Stop() error
 	RegisterOpaque(req Request, opts *SendOpts) error
+	HandleSpecCreation(newSpec *metadata.ReplicationSpecification)
+	HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification)
+	HandleSpecChange(oldSpec, newSpec *metadata.ReplicationSpecification)
+	GetSpecDelNotification(specId, internalId string) (chan bool, error)
 }
 
 type P2PManagerImpl struct {
@@ -73,6 +77,7 @@ type P2PManagerImpl struct {
 
 	receiveHandlerFinCh chan bool
 	receiveHandlers     map[OpCode]Handler
+	receiveHandlersMtx  sync.RWMutex
 
 	latestKnownPeers *KnownPeers
 
@@ -152,11 +157,14 @@ func (p *P2PManagerImpl) GetLifecycleId() string {
 }
 
 func (p *P2PManagerImpl) runHandlers() error {
+	p.receiveHandlersMtx.Lock()
+	defer p.receiveHandlersMtx.Unlock()
+
 	for i := OpcodeMin; i < OpcodeMax; i++ {
 		switch i {
 		case ReqDiscovery:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, p.cleanupInterval)
+			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, p.cleanupInterval, p.replSpecSvc)
 		case ReqVBMasterChk:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
 			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
@@ -223,6 +231,7 @@ func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+
 	return peers, myHostAddr, nil
 }
 
@@ -263,7 +272,9 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					// Since this is not network related, no need to retry
 					return
 				}
+				p.receiveHandlersMtx.RLock()
 				registerOpaqueErr := p.receiveHandlers[opCode].RegisterOpaque(compiledReq, cbOpts)
+				p.receiveHandlersMtx.RUnlock()
 				if registerOpaqueErr != nil {
 					errMapMtx.Lock()
 					errMap[peerAddr] = registerOpaqueErr
@@ -322,6 +333,7 @@ type GetReqFunc func(source, target string) Request
 type SendOpts struct {
 	synchronous bool // Do we need to wait until response is heard
 	timeout     time.Duration
+	finCh       chan bool
 
 	respMapMtx sync.RWMutex
 	respMap    SendOptsMap // If synchronous, then the sent requests and responses are stored
@@ -335,6 +347,7 @@ func NewSendOpts(sync bool) *SendOpts {
 			synchronous: true,
 			respMap:     make(SendOptsMap),
 			timeout:     base.PeerToPeerNonExponentialWaitTime,
+			finCh:       make(chan bool),
 		}
 	} else {
 		return &SendOpts{}
@@ -370,6 +383,9 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 				retMap[serverNameCpy].RespPtr = pair.RespPtr
 			case <-timeoutTimer.C:
 				retErrMap[serverNameCpy].err = fmt.Errorf("%v - did not hear back from node after %v. Could be due to peer node being busy to respond in time or this XDCR being too busy to handle incoming requests", base.ErrorExecutionTimedOut, s.timeout)
+			case <-s.finCh:
+				retErrMap[serverNameCpy].err = base.ErrorOpInterrupted
+				return
 			}
 		}()
 	}
@@ -472,12 +488,27 @@ func (p *P2PManagerImpl) ReplicationSpecChangeCallback(id string, oldVal, newVal
 	if oldSpec == nil && newSpec != nil {
 		p.vbMasterCheckHelper.HandleSpecCreation(newSpec)
 		p.replicator.HandleSpecCreation(newSpec)
+		p.receiveHandlersMtx.RLock()
+		for _, handler := range p.receiveHandlers {
+			handler.HandleSpecCreation(newSpec)
+		}
+		p.receiveHandlersMtx.RUnlock()
 	} else if oldSpec != nil && newSpec == nil {
 		p.vbMasterCheckHelper.HandleSpecDeletion(oldSpec)
 		p.replicator.HandleSpecDeletion(oldSpec)
+		p.receiveHandlersMtx.RLock()
+		for _, handler := range p.receiveHandlers {
+			handler.HandleSpecDeletion(oldSpec)
+		}
+		p.receiveHandlersMtx.RUnlock()
 	} else {
 		p.vbMasterCheckHelper.HandleSpecChange(oldSpec, newSpec)
 		p.replicator.HandleSpecChange(oldSpec, newSpec)
+		p.receiveHandlersMtx.RLock()
+		for _, handler := range p.receiveHandlers {
+			handler.HandleSpecChange(oldSpec, newSpec)
+		}
+		p.receiveHandlersMtx.RUnlock()
 	}
 	return nil
 }
