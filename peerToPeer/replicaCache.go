@@ -9,6 +9,7 @@
 package peerToPeer
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -89,7 +90,7 @@ func (r *ReplicaCacheImpl) GetReplicaInfo(spec *metadata.ReplicationSpecificatio
 		return
 	}
 
-	replicaCnt, replicaMap, replicaTranslateMap, unlockFunc = monitor.GetReplicaInfo()
+	replicaCnt, replicaMap, replicaTranslateMap, unlockFunc, err = monitor.GetReplicaInfo()
 	return
 }
 
@@ -131,13 +132,17 @@ func (m *ReplicaCacheMonitor) Stop() {
 	}
 }
 
-func (m *ReplicaCacheMonitor) GetReplicaInfo() (int, *base.VbHostsMapType, *base.StringStringMap, func()) {
+func (m *ReplicaCacheMonitor) GetReplicaInfo() (int, *base.VbHostsMapType, *base.StringStringMap, func(), error) {
 	unlockFunc := func() {
 		m.cacheMtx.RUnlock()
 	}
 	m.cacheMtx.RLock()
+	if m.latestNotification == nil {
+		m.cacheMtx.RUnlock()
+		return -1, nil, nil, nil, fmt.Errorf("ReplicaCache has not received a source event yet")
+	}
 	replicaCnt, replicaMap, translateMap, _ := m.latestNotification.GetReplicasInfo()
-	return replicaCnt, replicaMap, translateMap, unlockFunc
+	return replicaCnt, replicaMap, translateMap, unlockFunc, nil
 }
 
 func NewReplicaCacheMonitor(srcCh chan service_def.SourceNotification, unsubsFunc func()) *ReplicaCacheMonitor {
