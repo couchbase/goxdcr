@@ -3080,7 +3080,8 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 		}
 	}
 	if !foundThisNode {
-		return nil, nil, 0, nil, fmt.Errorf("Unable to determine this node's information given nodesList %v", nodesList)
+		// If this node is not rebalanced into the cluster yet, this node won't be an owner of any VB's
+		return nil, nil, 0, nil, base.ErrorNoSourceNozzle
 	}
 
 	vbServerMap, ok := bucketInfo[base.VBucketServerMapKey].(map[string]interface{})

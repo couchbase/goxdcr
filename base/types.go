@@ -2718,6 +2718,16 @@ func (v *VbHostsMapType) GetKeyList() []uint16 {
 	return retList
 }
 
+func (v *VbHostsMapType) Clear() *VbHostsMapType {
+	if v == nil {
+		return nil
+	}
+	for k, _ := range *v {
+		delete(*v, k)
+	}
+	return v
+}
+
 type StringStringMap map[string]string
 
 func (s StringStringMap) Clone() StringStringMap {
@@ -2816,4 +2826,15 @@ func (s StringStringMap) GreenClone(strStrPool func(keys []string) *StringString
 		(*recycledMap)[key] = val
 	}
 	return recycledMap
+}
+
+func (s *StringStringMap) Clear() *StringStringMap {
+	if s == nil {
+		return nil
+	}
+
+	for k, _ := range *s {
+		delete(*s, k)
+	}
+	return s
 }

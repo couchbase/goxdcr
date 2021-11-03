@@ -377,8 +377,17 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 
 		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo, b.securitySvc.IsClusterEncryptionLevelStrict(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
 		if err != nil {
-			watcher.logger.Errorf("%v replicasInfo error %v", spec.SourceBucketName, err)
-			return err
+			if err != watcher.replicaLastWarnErr {
+				watcher.replicaLastWarnErr = err
+				watcher.logger.Warnf("%v replicasInfo error %v", spec.SourceBucketName, err)
+			}
+			// Continue anyway as it is most likely due to node uninit
+			replicasMap = watcher.objsPool.VbHostsMapPool.Get(nil).Clear()
+			translateMap = watcher.objsPool.StringStringPool.Get(nil).Clear()
+			numOfReplicas = 0
+			vbReplicaMember = []uint16{}
+		} else {
+			watcher.replicaLastWarnErr = nil
 		}
 
 		nodes, err := watcher.xdcrCompTopologySvc.MyKVNodes()
@@ -476,8 +485,17 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 
 			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
 			if err != nil {
-				watcher.logger.Errorf("%v target replicasInfo error %v", spec.TargetBucketName, err)
-				return err
+				if err != watcher.replicaLastWarnErr {
+					watcher.replicaLastWarnErr = err
+					watcher.logger.Warnf("%v target replicasInfo error %v", spec.TargetBucketName, err)
+				}
+				// Odd error but continue anyway
+				replicasMap = watcher.objsPool.VbHostsMapPool.Get(nil).Clear()
+				translateMap = watcher.objsPool.StringStringPool.Get(nil).Clear()
+				numOfReplicas = 0
+				vbReplicaMember = []uint16{}
+			} else {
+				watcher.replicaLastWarnErr = nil
 			}
 
 			watcher.latestCacheMtx.Lock()
@@ -961,6 +979,8 @@ type BucketTopologySvcWatcher struct {
 	gcPruneWindow     time.Duration
 
 	objsPool *BucketTopologyObjsPool
+
+	replicaLastWarnErr error
 }
 
 type GcMapType map[string]VbnoReqMapType
