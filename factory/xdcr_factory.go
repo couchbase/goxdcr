@@ -916,20 +916,24 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 		return respMap, err
 	}
 
-	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs)
+	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs, spec.InternalId)
 	if err != nil {
 		xdcrf.logger.Errorf("Error checkNoOtherVBMasters: %v\n", err)
 		// Should still return response to see if others can merge it
 		return respMap, err
 	}
-
 	return respMap, nil
 }
 
-func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, srcBucketName string, sourceVBs []uint16) error {
+func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, srcBucketName string, sourceVBs []uint16, internalId string) error {
 	var err error
 	errMap := make(base.ErrorMap)
 	for peerAddr, resp := range respMap {
+		if resp.InternalSpecId != "" && resp.InternalSpecId != internalId {
+			errMap[peerAddr] = fmt.Errorf("Mismatch internalId: received %v - locally %v", resp.InternalSpecId, internalId)
+			continue
+		}
+
 		nodeResp, unlockFunc := resp.GetReponse()
 		if nodeResp == nil {
 			errMap[peerAddr] = base.ErrorNilPtr

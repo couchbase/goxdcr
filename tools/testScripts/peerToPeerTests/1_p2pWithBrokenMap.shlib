@@ -164,7 +164,11 @@ function runReplicationResume {
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")
-	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" $(($curCkptsFoundDocsCnt + 1)) $(($curCkptsFoundDocsCnt + 2))
+	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
+	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
+		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill)"
+		exit 1
+	fi
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then
 		echo "C1 unable to retrieve checkpoint docs... were they deleted?"

@@ -93,7 +93,7 @@ func (r *ReplicaReplicatorImpl) HandleSpecCreation(newSpec *metadata.Replication
 	if r.unitTest {
 		randSecInt = 0
 	}
-	agent := NewReplicatorAgent(newSpec, r.logger, r.utils, r.ckptSvc, r.backfillReplSvc, r.colManifestSvc, randSecInt, r.replicationSpecSvc)
+	agent := NewReplicatorAgent(newSpec, r.logger, r.utils, r.ckptSvc, r.backfillReplSvc, r.colManifestSvc, randSecInt, r.replicationSpecSvc, newSpec.InternalId)
 	r.agentMapMtx.Lock()
 	r.agentMap[newSpec.Id] = agent
 	r.agentMapMtx.Unlock()
@@ -329,6 +329,7 @@ type ReplicatorAgentImpl struct {
 
 	specId        string
 	srcBucketName string
+	internalId    string
 
 	finCh    chan bool
 	reloadCh chan agentReloadPair
@@ -342,7 +343,10 @@ type agentReloadPair struct {
 	callbackFunc    func()
 }
 
-func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.CommonLogger, utils utilities.UtilsIface, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, colManifestSvc service_def.CollectionsManifestSvc, randSecInt int, replicationSpecSvc service_def.ReplicationSpecSvc) *ReplicatorAgentImpl {
+func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.CommonLogger, utils utilities.UtilsIface,
+	ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc,
+	colManifestSvc service_def.CollectionsManifestSvc, randSecInt int, replicationSpecSvc service_def.ReplicationSpecSvc,
+	internalId string) *ReplicatorAgentImpl {
 
 	return &ReplicatorAgentImpl{
 		logger:          logger,
@@ -356,6 +360,7 @@ func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.Com
 		backfillReplSvc: backfillReplSvc,
 		colManifestSvc:  colManifestSvc,
 		replSpecSvc:     replicationSpecSvc,
+		internalId:      internalId,
 	}
 }
 
@@ -436,10 +441,25 @@ func (a *ReplicatorAgentImpl) run() {
 // Fetch all data and get them ready to be replicated
 func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicateReq, error) {
 	backfillSpec, _ := a.backfillReplSvc.BackfillReplSpec(a.specId)
+	if backfillSpec.InternalId != a.internalId {
+		return nil, fmt.Errorf("BackfillSpec Internal ID mismatch - expected %v got %v", a.internalId, backfillSpec.InternalId)
+	}
+
+	checkSpec, err := a.replSpecSvc.ReplicationSpecReadOnly(a.specId)
+	if err != nil {
+		return nil, err
+	}
+	if checkSpec.InternalId != a.internalId {
+		return nil, fmt.Errorf("ReplSpec Internal ID mismatch - expected %v got %v", a.internalId, checkSpec.InternalId)
+	}
 
 	mainCkpts, mainCkptErr := a.ckptSvc.CheckpointsDocs(a.specId, true)
 	if mainCkptErr != nil {
 		mainCkpts = nil
+	}
+
+	if !metadata.VBsCkptsDocMap(mainCkpts).InternalIdMatch(a.internalId) {
+		return nil, fmt.Errorf("MainCkpts internalID mismatch - expected %v", a.internalId)
 	}
 
 	var bkptCkpts map[uint16]*metadata.CheckpointsDoc
@@ -449,6 +469,9 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 		bkptCkpts, backfillErr = a.ckptSvc.CheckpointsDocs(backfillReplId, true)
 		if backfillErr != nil {
 			bkptCkpts = nil
+		}
+		if !metadata.VBsCkptsDocMap(bkptCkpts).InternalIdMatch(a.internalId) {
+			return nil, fmt.Errorf("BackfillCkpt internalID mismatch - expected %v", a.internalId)
 		}
 	}
 
@@ -464,8 +487,8 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 	}
 
 	combinedVBs := getCombinedVBs(mainCkpts, bkptCkpts)
-	req := NewVBPeriodicReplicateReq(a.specId, a.srcBucketName, combinedVBs)
-	err := req.LoadMainReplication(mainCkpts, srcManifests, tgtManifests)
+	req := NewVBPeriodicReplicateReq(a.specId, a.srcBucketName, combinedVBs, a.internalId)
+	err = req.LoadMainReplication(mainCkpts, srcManifests, tgtManifests)
 	if err != nil {
 		return nil, err
 	}

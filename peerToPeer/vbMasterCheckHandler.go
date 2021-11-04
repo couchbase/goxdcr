@@ -28,12 +28,13 @@ type VBMasterCheckHandler struct {
 	ckptSvc           service_def.CheckpointsService
 	colManifestSvc    service_def.CollectionsManifestSvc
 	backfillReplSvc   service_def.BackfillReplSvc
+	replSpecSvc       service_def.ReplicationSpecSvc
 	utils             utilities.UtilsIface
 }
 
 const VBMasterCheckSubscriberId = "VBMasterCheckHandler"
 
-func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface) *VBMasterCheckHandler {
+func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, replicationSpecSvc service_def.ReplicationSpecSvc) *VBMasterCheckHandler {
 	finCh := make(chan bool)
 	handler := &VBMasterCheckHandler{
 		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh),
@@ -41,6 +42,7 @@ func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, l
 		ckptSvc:           ckptSvc,
 		colManifestSvc:    collectionsManifestSvc,
 		backfillReplSvc:   backfillReplSvc,
+		replSpecSvc:       replicationSpecSvc,
 		utils:             utils,
 	}
 	return handler
@@ -63,12 +65,34 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		h.logger.Warnf("Received nil req")
 		return
 	}
+
+	checkSpec, err := h.replSpecSvc.ReplicationSpecReadOnly(req.ReplicationId)
+	if err != nil {
+		err = fmt.Errorf("Getting spec %v got err %v", req.ReplicationId, err)
+		h.logger.Errorf(err.Error())
+		resp := req.GenerateResponse().(*VBMasterCheckResp)
+		resp.Init()
+		resp.ErrorMsg = err.Error()
+		req.CallBack(resp)
+		return
+	}
+	if req.InternalSpecId != "" && checkSpec.InternalId != "" && checkSpec.InternalId != req.InternalSpecId {
+		err = fmt.Errorf("Mismatch internalID for VB master check request from %v with specID %v - given %v when we have %v", req.GetSender(), req.ReplicationId, req.InternalSpecId, checkSpec.InternalId)
+		h.logger.Errorf(err.Error())
+		resp := req.GenerateResponse().(*VBMasterCheckResp)
+		resp.Init()
+		resp.ErrorMsg = err.Error()
+		req.CallBack(resp)
+		return
+	}
+
 	bucketVBsMap := req.GetBucketVBMap()
 	h.logger.Infof("Received VB master check request from %v with specID %v opaque %v for the following Bucket -> VBs %v", req.GetSender(), req.ReplicationId, req.GetOpaque(), bucketVBsMap)
 	stopMetakvMeasureFunc := h.utils.StartDiagStopwatch(fmt.Sprintf("VBMasterCheckHandler(%v,%v,%v)", req.GetSender(), req.ReplicationId, req.GetOpcode()), base.DiagVBMasterHandleThreshold)
 
 	resp := req.GenerateResponse().(*VBMasterCheckResp)
 	resp.Init()
+	resp.InternalSpecId = checkSpec.InternalId
 
 	waitGrp := &sync.WaitGroup{}
 	waitGrp.Add(1)
@@ -127,7 +151,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
-	err := resp.LoadPipelineCkpts(result, req.SourceBucketName)
+	err = resp.LoadPipelineCkpts(result, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("when loading pipeline ckpt into response, got %v", err)
 		resp.ErrorMsg = err.Error()

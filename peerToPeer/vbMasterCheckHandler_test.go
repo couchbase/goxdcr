@@ -15,18 +15,19 @@ import (
 	"time"
 )
 
-func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.CheckpointsService, *log.CommonLogger, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc, *utilsMock.UtilsIface) {
+func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.CheckpointsService, *log.CommonLogger, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc, *utilsMock.UtilsIface, *service_def.ReplicationSpecSvc) {
 	bucketTopologySvc := &service_def.BucketTopologySvc{}
 	ckptSvc := &service_def.CheckpointsService{}
 	logger := log.NewLogger("test", nil)
 	colManifestSvc := &service_def.CollectionsManifestSvc{}
 	backfillReplSvc := &service_def.BackfillReplSvc{}
 	utils := &utilsMock.UtilsIface{}
+	replSpecSvc := &service_def.ReplicationSpecSvc{}
 
-	return bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc, utils
+	return bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc, utils, replSpecSvc
 }
 
-func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16, colManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, backfillSpec *metadata.BackfillReplicationSpec, utils *utilsMock.UtilsIface) {
+func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*metadata.CheckpointsDoc, bucketTopologySvc *service_def.BucketTopologySvc, vbsList []uint16, colManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, backfillSpec *metadata.BackfillReplicationSpec, utils *utilsMock.UtilsIface, replSpecSvc *service_def.ReplicationSpecSvc, spec *metadata.ReplicationSpecification) {
 	ckptSvc.On("CheckpointsDocs", replId, mock.Anything).Return(ckptData, nil)
 	nsMappingDoc := &metadata.CollectionNsMappingsDoc{}
 	ckptSvc.On("LoadBrokenMappings", replId).Return(nil, nsMappingDoc, nil, false, nil)
@@ -50,17 +51,19 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 	backfillReplSvc.On("BackfillReplSpec", replId).Return(backfillSpec, nil)
 
 	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
+
+	replSpecSvc.On("ReplicationSpecReadOnly", mock.Anything).Return(spec, nil)
 }
 
 var srcBucketName = "bucket"
-var replId = "replId"
+var replId = "TBD"
 
 func TestVBMasterHandler(t *testing.T) {
 	fmt.Println("============== Test case start: TestVBMasterHandler =================")
 	defer fmt.Println("============== Test case end: TestVBMasterHandler =================")
 	assert := assert.New(t)
 
-	bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc, utils := setupVBCHBoilerPlate()
+	bucketTopologySvc, ckptSvc, logger, colManifestSvc, backfillReplSvc, utils, replSpecSvc := setupVBCHBoilerPlate()
 
 	vbList := []uint16{0, 1}
 	vbsListNonIntersect := []uint16{2, 3}
@@ -73,12 +76,14 @@ func TestVBMasterHandler(t *testing.T) {
 
 	vbTaskMap := metadata.NewVBTasksMap()
 	vbTaskMap.VBTasksMap[0] = tasks0
-	backfillSpec := metadata.NewBackfillReplicationSpec(replId, "", vbTaskMap, emptySpec)
+	replSpec, _ := metadata.NewReplicationSpecification(srcBucketName, tgtBucketName, "test", "test", "test")
+	replId = replSpec.Id
+	backfillSpec := metadata.NewBackfillReplicationSpec(replId, replSpec.InternalId, vbTaskMap, emptySpec)
 
-	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect, colManifestSvc, backfillReplSvc, backfillSpec, utils)
+	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect, colManifestSvc, backfillReplSvc, backfillSpec, utils, replSpecSvc, replSpec)
 
 	reqCh := make(chan interface{}, 100)
-	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc, backfillReplSvc, utils)
+	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc, backfillReplSvc, utils, replSpecSvc)
 
 	var waitGrp sync.WaitGroup
 	assert.Nil(handler.Start())

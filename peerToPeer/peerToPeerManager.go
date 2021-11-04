@@ -160,11 +160,11 @@ func (p *P2PManagerImpl) runHandlers() error {
 		case ReqVBMasterChk:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
 			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
-				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils)
+				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils, p.replSpecSvc)
 		case ReqPeriodicPush:
 			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
 			p.receiveHandlers[i] = NewPeriodicPushHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
-				p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils, p.getPushReqMerger())
+				p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils, p.getPushReqMerger(), p.replSpecSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -429,6 +429,7 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		vbCheckReq.PipelineType = pipeline.Type()
 		vbCheckReq.ReplicationId = spec.Id
 		vbCheckReq.SourceBucketName = spec.SourceBucketName
+		vbCheckReq.InternalSpecId = spec.InternalId
 		return vbCheckReq
 	}
 

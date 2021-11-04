@@ -606,6 +606,20 @@ func (c *CheckpointRecordsList) Len() int {
 	return count
 }
 
+type VBsCkptsDocMap map[uint16]*CheckpointsDoc
+
+func (v VBsCkptsDocMap) InternalIdMatch(internalId string) bool {
+	for _, ckptDoc := range v {
+		if ckptDoc == nil {
+			continue
+		}
+		if ckptDoc.SpecInternalId != internalId {
+			return false
+		}
+	}
+	return true
+}
+
 type CheckpointsDoc struct {
 	//keep "MaxCheckpointsKept" checkpoint record - ordered by new to old, with 0th element being the newest
 	Checkpoint_records CheckpointRecordsList `json:"checkpoints"`

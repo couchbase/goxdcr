@@ -368,6 +368,7 @@ type VBMasterCheckReq struct {
 
 	// For now, only one ckpt request for one replication
 	ReplicationId    string
+	InternalSpecId   string
 	SourceBucketName string // already in replicationId but for ease of use
 	PipelineType     common.PipelineType
 }
@@ -464,7 +465,7 @@ func (v *VBMasterCheckReq) GenerateResponse() interface{} {
 	responseCommon.RespType = v.ReqType
 	resp := &VBMasterCheckResp{
 		ResponseCommon:     responseCommon,
-		ReplicationPayload: NewReplicationPayload(v.ReplicationId, v.SourceBucketName, v.PipelineType),
+		ReplicationPayload: NewReplicationPayload(v.ReplicationId, v.SourceBucketName, v.PipelineType, v.InternalSpecId),
 	}
 	return resp
 }
@@ -477,15 +478,17 @@ type ReplicationPayload struct {
 	ReplicationSpecId string
 	SourceBucketName  string
 	PipelineType      common.PipelineType
+	InternalSpecId    string
 }
 
-func NewReplicationPayload(specId, srcBucketName string, pipelineType common.PipelineType) ReplicationPayload {
+func NewReplicationPayload(specId, srcBucketName string, pipelineType common.PipelineType, internalSpecId string) ReplicationPayload {
 	payload := make(BucketVBMPayloadType)
 	return ReplicationPayload{
 		ReplicationSpecId: specId,
 		SourceBucketName:  srcBucketName,
 		PipelineType:      pipelineType,
 		payload:           &payload,
+		InternalSpecId:    internalSpecId,
 	}
 }
 
@@ -808,7 +811,7 @@ func (v *ReplicationPayload) SameAs(other *ReplicationPayload) bool {
 
 	return v.payload.SameAs(other.payload) && v.ErrorMsg == other.ErrorMsg &&
 		v.ReplicationSpecId == other.ReplicationSpecId && v.SourceBucketName == other.SourceBucketName &&
-		v.PipelineType == other.PipelineType
+		v.PipelineType == other.PipelineType && v.InternalSpecId == other.InternalSpecId
 }
 
 type PeersVBMasterCheckRespMap map[string]*VBMasterCheckResp
@@ -1323,9 +1326,9 @@ func (v *VBPeriodicReplicateReq) PushReqIsEmpty() bool {
 }
 
 // Note - need to establish RequestCommon later
-func NewVBPeriodicReplicateReq(specId, srcBucketName string, vbs []uint16) *VBPeriodicReplicateReq {
-	mainReplication := NewReplicationPayload(specId, srcBucketName, common.MainPipeline)
-	backfillReplication := NewReplicationPayload(specId, srcBucketName, common.BackfillPipeline)
+func NewVBPeriodicReplicateReq(specId, srcBucketName string, vbs []uint16, internalId string) *VBPeriodicReplicateReq {
+	mainReplication := NewReplicationPayload(specId, srcBucketName, common.MainPipeline, internalId)
+	backfillReplication := NewReplicationPayload(specId, srcBucketName, common.BackfillPipeline, internalId)
 
 	(*mainReplication.payload)[srcBucketName] = NewVBMasterPayload()
 	(*mainReplication.payload)[srcBucketName].RegisterPushVBs(vbs)

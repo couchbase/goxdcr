@@ -181,8 +181,8 @@ func TestPeriodicPush(t *testing.T) {
 
 	specId := "testSpecId"
 	specInternalId := "testSpecIdInternal"
-	mainReplPayload := NewReplicationPayload(specId, specInternalId, common.MainPipeline)
-	backfillPayload := NewReplicationPayload(specId, specInternalId, common.BackfillPipeline)
+	mainReplPayload := NewReplicationPayload(specId, specInternalId, common.MainPipeline, "")
+	backfillPayload := NewReplicationPayload(specId, specInternalId, common.BackfillPipeline, "")
 
 	bucketName := "bucketName"
 	bucketVBMPayload := make(BucketVBMPayloadType)

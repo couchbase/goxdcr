@@ -38,13 +38,13 @@ func TestFactoryParseVBMasterResp(t *testing.T) {
 
 	respMap["testHost"] = peerToPeer.NewVBMasterCheckRespGivenPayload(payloadType)
 
-	err := checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs)
+	err := checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs, "")
 	assert.Nil(err)
 
 	// Take out one VB and test
 	delete(notMyVbs, sourceVBs[0])
 	respMap["testHost"] = peerToPeer.NewVBMasterCheckRespGivenPayload(payloadType)
 
-	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs)
+	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs, "")
 	assert.NotNil(err)
 }

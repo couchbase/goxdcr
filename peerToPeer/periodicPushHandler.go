@@ -13,6 +13,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
@@ -26,12 +27,13 @@ type PeriodicPushHandler struct {
 	ckptSvc         service_def.CheckpointsService
 	colManifestSvc  service_def.CollectionsManifestSvc
 	backfillReplSvc service_def.BackfillReplSvc
+	replSpecSvc     service_def.ReplicationSpecSvc
 	utils           utilities.UtilsIface
 
 	requestMerger func(fullTopic, sender string, request interface{}) error
 }
 
-func NewPeriodicPushHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, merger func(string, string, interface{}) error) *PeriodicPushHandler {
+func NewPeriodicPushHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, merger func(string, string, interface{}) error, replSpecSvc service_def.ReplicationSpecSvc) *PeriodicPushHandler {
 	finCh := make(chan bool)
 	return &PeriodicPushHandler{
 		HandlerCommon:   NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh),
@@ -40,6 +42,7 @@ func NewPeriodicPushHandler(reqCh chan interface{}, logger *log.CommonLogger, li
 		backfillReplSvc: backfillReplSvc,
 		utils:           utils,
 		requestMerger:   merger,
+		replSpecSvc:     replSpecSvc,
 	}
 }
 
@@ -152,15 +155,39 @@ func (p *PeriodicPushHandler) handleResponse(resp *PeerVBPeriodicPushResp) {
 // Since these will be using the same ckpt mgr underneath, they must be run sequentially
 func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateReq, sender string) error {
 	errMap := make(base.ErrorMap)
+	var checkSpec *metadata.ReplicationSpecification
+	var err error
 	if pushReq.MainReplication != nil {
-		err := p.storePushReqInfoByType(pushReq.MainReplication, common.MainPipeline, sender)
+		checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.MainReplication.ReplicationSpecId)
+		if err != nil {
+			errMap[fmt.Sprintf("node %v mainReplication", sender)] = err
+			return fmt.Errorf(base.FlattenErrorMap(errMap))
+		}
+		if pushReq.MainReplication.InternalSpecId != "" && pushReq.MainReplication.InternalSpecId != checkSpec.InternalId {
+			errMap[fmt.Sprintf("node %v mainReplication", sender)] = fmt.Errorf("Mismatch internalSpecID for %v: Expected %v got %v",
+				checkSpec.Id, checkSpec.InternalId, pushReq.MainReplication.InternalSpecId)
+			return fmt.Errorf(base.FlattenErrorMap(errMap))
+		}
+		err = p.storePushReqInfoByType(pushReq.MainReplication, common.MainPipeline, sender)
 		if err != nil {
 			errMap[fmt.Sprintf("node %v mainReplication", sender)] = err
 		}
 	}
 
 	if pushReq.BackfillReplication != nil && pushReq.BackfillReplication.payload != nil && (*pushReq.BackfillReplication.payload)[pushReq.BackfillReplication.SourceBucketName] != nil {
-		err := p.storePushReqInfoByType(pushReq.BackfillReplication, common.BackfillPipeline, sender)
+		if checkSpec == nil {
+			checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.MainReplication.ReplicationSpecId)
+			if err != nil {
+				errMap[fmt.Sprintf("node %v backfillReplication", sender)] = err
+				return fmt.Errorf(base.FlattenErrorMap(errMap))
+			}
+		}
+		if pushReq.BackfillReplication.InternalSpecId != "" && pushReq.BackfillReplication.InternalSpecId != checkSpec.InternalId {
+			errMap[fmt.Sprintf("node %v backfillReplication", sender)] = fmt.Errorf("Mismatch internalSpecID for %v: Expected %v got %v",
+				checkSpec.Id, checkSpec.InternalId, pushReq.BackfillReplication.InternalSpecId)
+			return fmt.Errorf(base.FlattenErrorMap(errMap))
+		}
+		err = p.storePushReqInfoByType(pushReq.BackfillReplication, common.BackfillPipeline, sender)
 		if err != nil {
 			errMap[fmt.Sprintf("node %v backfillReplication", sender)] = err
 		}

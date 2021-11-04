@@ -509,7 +509,7 @@ func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
 
 	resp := &peerToPeer.VBMasterCheckResp{
 		ResponseCommon:     peerToPeer.NewResponseCommon(peerToPeer.ReqVBMasterChk, "", "", uint32(6), ""),
-		ReplicationPayload: peerToPeer.NewReplicationPayload(specId, specToUse.SourceBucketName, common.MainPipeline),
+		ReplicationPayload: peerToPeer.NewReplicationPayload(specId, specToUse.SourceBucketName, common.MainPipeline, ""),
 	}
 
 	_, tasks0 := getTaskForVB0(specToUse.SourceBucketName)
