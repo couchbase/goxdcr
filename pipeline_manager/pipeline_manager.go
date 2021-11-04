@@ -1537,7 +1537,7 @@ func (r *PipelineUpdater) run() {
 				r.pipelineMgr.StopPipeline(r.rep_status)
 				// Reset runCounter to 0 for unit test
 				atomic.StoreUint64(&r.runCounter, 0)
-				r.logger.Infof("Replication %v's status is finished shutting down\n", r.pipeline_name)
+				r.logger.Infof("Replication %v status is finished shutting down\n", r.pipeline_name)
 				return
 			case <-r.update_now_ch:
 				r.logger.Infof("Replication %v's status is changed, update now\n", r.pipeline_name)

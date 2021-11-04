@@ -1083,6 +1083,9 @@ function cleanupRemoteClusterRefs {
 }
 
 function cleanupBucketReplications {
+	# Certain functions only exist under test library
+	[[ $(type -t killAllBgJobs) == function ]] && killAllBgJobs
+
 	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
 		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
 		local restID=$(echo "${BUCKET_REPL_EXPORT_MAP[$replKey]}" | sed 's/"//g')
@@ -1092,9 +1095,14 @@ function cleanupBucketReplications {
 		local targetCluster=$(echo "$replKey" | cut -d, -f3)
 		local targetBucket=$(echo "$replKey" | cut -d, -f4)
 
+		if [[ $(type -t waitForOneReplicationToBeDeleted) == function ]]; then
+			waitForOneReplicationToBeDeleted "$sourceCluster" "$sourceBucket" "$targetBucket" &
+			sleep 2
+		fi
 		echo "DELETING replication from sourceCluster $sourceCluster sourceBucket $sourceBucket to targetCluster $targetCluster targetBucket $targetBucket..."
 		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
 	done
+	[[ $(type -t waitForBgJobs) == function ]] && waitForBgJobs
 }
 
 function findCbDocLoader {

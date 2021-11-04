@@ -383,6 +383,8 @@ function getInternalNodeXdcrLog {
 
 function waitForOneReplicationToBeDeleted {
 	local clusterName=$1
+	local srcBucketName=$2
+	local tgtBucketName=$3
 	local currentInstanceCnt=0
 
 	logs=$(getInternalNodeXdcrLog "$clusterName")
@@ -391,12 +393,12 @@ function waitForOneReplicationToBeDeleted {
 		exit 1
 	fi
 
-	currentInstanceCnt=$(echo "$logs" | grep -c "$PIPELINE_SHUTDOWN_DONE_MSG")
-
-	waitForInternalLogInstance "$clusterName" "$PIPELINE_SHUTDOWN_DONE_MSG" "$(($currentInstanceCnt + 1))" 2
+	#	2021-11-03T17:44:45.353-07:00 INFO GOXDCR.PipelineMgr: Replication ebf93073d83a1951c6454753536a6eb5/B1/B2's status is finished shutting down
+	currentInstanceCnt=$(echo "$logs" | grep "$PIPELINE_SHUTDOWN_DONE_MSG" | grep -c "$srcBucketName\/$tgtBucketName")
+	waitForInternalLogInstance "$clusterName" "$PIPELINE_SHUTDOWN_DONE_MSG" "$(($currentInstanceCnt + 1))" 2 "$srcBucketName\/$tgtBucketName"
 
 	if ((!$? == 0)); then
-		echo "Timed out waiting for message $PIPELINE_SHUTDOWN_DONE_MSG to increase from $currentInstanceCnt by 1"
+		echo "Timed out waiting for message $PIPELINE_SHUTDOWN_DONE_MSG with buckets "$srcBucketName/$tgtBucketName" to increase from $currentInstanceCnt by 1"
 		dumpDebugInfoBeforeExit
 		exit 1
 	fi
@@ -411,6 +413,7 @@ function waitForInternalLogInstance {
 	local grepStr="$2"
 	local instanceCnt=$3
 	local minToWait=$4
+	local optionalGrepStr=${5:-}
 	local minElapsed=0
 	local i=0
 
@@ -421,10 +424,18 @@ function waitForInternalLogInstance {
 			exit 1
 		fi
 
-		count=$(echo "$logs" | grep -c "$grepStr")
-		if (($count >= $instanceCnt)); then
-			echo "Found $instanceCnt instances of the string: $grepStr"
-			return
+		if [[ -z "$optionalGrepStr" ]]; then
+			count=$(echo "$logs" | grep -c "$grepStr")
+			if (($count >= $instanceCnt)); then
+				echo "Found $instanceCnt instances of the string: $grepStr"
+				return
+			fi
+		else
+			count=$(echo "$logs" | grep "$grepStr" | grep -c "$optionalGrepStr")
+			if (($count >= $instanceCnt)); then
+				echo "Found $instanceCnt instances of the string: $grepStr with $optionalGrepStr"
+				return
+			fi
 		fi
 
 		sleep 10
