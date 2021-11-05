@@ -604,12 +604,30 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 		delete(ckpt_svc.stopTheWorldMtx, oldSpec.Id)
 		ckpt_svc.specsMtx.Unlock()
 	} else {
+		if oldSpec == nil && newSpec != nil {
+			waitGrp := sync.WaitGroup{}
+			waitGrp.Add(2)
+			go ckpt_svc.cleanOldLeftoverCkpts(newSpec.Id, newSpec.InternalId, &waitGrp)
+			go ckpt_svc.cleanOldLeftoverCkpts(common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline), newSpec.InternalId, &waitGrp)
+			waitGrp.Wait()
+		}
 		ckpt_svc.specsMtx.Lock()
 		ckpt_svc.cachedSpecs[newSpec.Id] = newSpec
 		ckpt_svc.stopTheWorldMtx[newSpec.Id] = &sync.RWMutex{}
 		ckpt_svc.specsMtx.Unlock()
 	}
 	return nil
+}
+
+func (ckpt_svc *CheckpointsService) cleanOldLeftoverCkpts(id, internalId string, w *sync.WaitGroup) {
+	defer w.Done()
+	oldCkptDocs, err := ckpt_svc.CheckpointsDocs(id, false)
+	if err == nil && oldCkptDocs != nil {
+		if !metadata.VBsCkptsDocMap(oldCkptDocs).InternalIdMatch(internalId) {
+			ckpt_svc.logger.Warnf("Old ckpt docs with the same replId %v found - cleaning them up", id)
+			ckpt_svc.DelCheckpointsDocs(id)
+		}
+	}
 }
 
 func (ckpt_svc *CheckpointsService) BackfillReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}) error {
