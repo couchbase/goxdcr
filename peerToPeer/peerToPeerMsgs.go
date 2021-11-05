@@ -332,7 +332,10 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 			Err:            err,
 			HttpStatusCode: statusCode,
 		}
-		return result, fmt.Errorf("response %v callback err: %v", resp.GetType(), err)
+		if err != nil {
+			err = fmt.Errorf("response %v callback err: %v", resp.GetType(), err)
+		}
+		return result, err
 	}
 	reqCommon.responseCb = cbFunc
 

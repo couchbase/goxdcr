@@ -151,7 +151,7 @@ function runReplicationResume {
 	local resumeFrom0Cnt
 
 	logs=$(getInternalNodeXdcrLog "C1")
-	local curCkptsFoundDocsCnt=$(echo "$logs" | grep -c "$CKPT_FOUND_DOCS")
+	local curCkptsFoundDocsCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
 	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
 
 	logsC1P=$(getInternalNodeXdcrLog "C1P")

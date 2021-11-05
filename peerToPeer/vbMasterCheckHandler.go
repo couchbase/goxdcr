@@ -179,7 +179,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		if handlerResult != nil {
 			handlerResultErr = handlerResult.GetError()
 		}
-		h.logger.Errorf("Unable to send resp %v to original req %v opaque %v - %v %v", resp, req, req.GetOpaque(), err, handlerResultErr)
+		h.logger.Errorf("Unable to send resp %v to original req %v opaque %v - %v %v", resp.ReplicationSpecId, req.Sender, req.GetOpaque(), err, handlerResultErr)
 	}
 	return
 }
