@@ -11,10 +11,10 @@
 # =============================
 # cluster -> Bucket(s)
 # -----------------
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P0"]=9001 ["C1P1"]=9002 ["C1P2"]=9003 ["C2"]=9004)
 # For uni directional, just have one node rebalancing in
-CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
+CLUSTER_DEPENDENCY_MAP=(["C1P0"]="C1" ["C1P1"]="C1" ["C1P2"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P0"]=13001 ["C1P1"]=13002 ["C1P2"]=13003 ["C2"]=13004)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
 
@@ -46,6 +46,7 @@ function runDataLoad {
 }
 
 TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+P2P_PULL_ERR_MSG="Ckpt Pull and merge had errors but will continue to replicate"
 
 declare LOGMSG=$BROKEN_MSG
 
@@ -147,65 +148,86 @@ function runOneRebalanceCycle {
 
 function runReplicationResume {
 	local logs
-	local logsC1P
 	local resumeFrom0Cnt
+	local -A curDepsCkptsFoundDocsCntMap
+	local -A curDepsCkptRetrievedCntMap
 
 	logs=$(getInternalNodeXdcrLog "C1")
 	local curCkptsFoundDocsCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
 	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
 
-	logsC1P=$(getInternalNodeXdcrLog "C1P")
-	local curCkptsFoundDocsCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_FOUND_DOCS")
-	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
+	local tempLogs
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		tempLogs=$(getInternalNodeXdcrLog "$dependentClusterName")
+		curDepsCkptsFoundDocsCntMap["$dependentClusterName"]=$(echo "$tempLogs" | grep -c "$CKPT_FOUND_DOCS")
+		curDepsCkptRetrievedCntMap["$dependentClusterName"]=$(echo "$tempLogs" | grep -c "$CKPT_RETRIEVED")
+	done
 
 	resumeReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
+
+	# The more nodes, the more time it takes to resume
+	local waitTime=$((20 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	echo "Waiting $waitTime seconds for resume to finish"
+	sleep $waitTime
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")
+
+	# The msg below is displayed whenever a peer node pulls from this node
 	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
-	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
-		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill) when looking for $(($curCkptsFoundDocsCnt + 1)) counts"
+	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + ${#CLUSTER_DEPENDENCY_MAP[@]})))); then
+		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill)"
 		exit 1
 	fi
+
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then
 		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
 		exit 1
 	fi
 
-	logsC1P=$(getInternalNodeXdcrLog "C1P")
-	local ckptFoundWith0Count=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
-	local ckptFoundTotalCount=$(echo "$logsC1P" | grep -c "$CKPT_RESUME_FOUND")
-	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
-		echo "C1P unable to find upserted checkpoints"
-		exit 1
-	fi
+	local ckptFoundWith0Count
+	local ckptFoundTotalCount
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		tempLogs=$(getInternalNodeXdcrLog "$dependentClusterName")
+		ckptFoundWith0Count=$(echo "$tempLogs" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
+		ckptFoundTotalCount=$(echo "$tempLogs" | grep -c "$CKPT_RESUME_FOUND")
+		if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
+			echo "$dependentClusterName unable to find upserted checkpoints"
+			exit 1
+		fi
+	done
 
-	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCntC1P + 1)) $(($curCkptRetrievedCntC1P + 2))
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		local oneNodeCurRetrievedCkptCnt="${curDepsCkptRetrievedCntMap[$dependentClusterName]}"
+		validateInternalLogWithInstance "$dependentClusterName" "$CKPT_RETRIEVED" $(($oneNodeCurRetrievedCkptCnt + 1)) $(($oneNodeCurRetrievedCkptCnt + 2))
+	done
 
 	# Backfill pipeline from C1 could already be finished but the backfill tasks still exist
 	# and there is no ckpt for the backfill tasks... so the backfill tasks would have been
 	# pulled by C1P, but no ckpt pulled
 	# That's ok... so skip checking those
-	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
-	if (($resumeFrom0Cnt > 0)); then
-		echo "C1P has at least one VB that resumed from seqno 0"
-		exit 1
-	fi
-	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
-	if (($resumeLoadBrokenMapCnt == 0)); then
-		echo "C1P did not load broken map from checkpoint migration"
-		exit 1
-	fi
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		tempLogs=$(getInternalNodeXdcrLog "$dependentClusterName")
+
+		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
+		if (($resumeFrom0Cnt > 0)); then
+			echo "$dependentClusterName has at least one VB that resumed from seqno 0"
+			exit 1
+		fi
+		resumeLoadBrokenMapCnt=$(echo "$tempLogs" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
+		if (($resumeLoadBrokenMapCnt == 0)); then
+			echo "$dependentClusterName did not load broken map from checkpoint migration"
+			exit 1
+		fi
+	done
 
 	grepForPanics
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P with broken map and rebalancing a node in"
+	echo "Running large scaled cluster with P2P checkpoint pull after rebalancing"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -214,6 +236,11 @@ function runTestCase {
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
 	runReplicationResume
+
+	# ensure that p2p did not fail
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		validateInternalLogWithInstance "$dependentClusterName" "$P2P_PULL_ERR_MSG" 0
+	done
 
 	echo "============================================================================"
 	echo "PASSED"

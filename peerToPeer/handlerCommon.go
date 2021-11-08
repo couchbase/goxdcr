@@ -77,7 +77,9 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 		opts.respMapMtx.Lock()
 		opts.respMap[request.GetTarget()] = ch
 		opts.respMapMtx.Unlock()
+		h.opaqueMapMtx.Lock()
 		h.opaqueReqRespCbMap[request.GetOpaque()] = ch
+		h.opaqueMapMtx.Unlock()
 		if request.GetOpcode().IsInterruptable() {
 			finChKey, err := getFinChKeyHelper(request)
 			if err != nil {

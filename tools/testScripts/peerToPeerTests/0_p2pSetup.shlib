@@ -24,7 +24,7 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
 
 # Bucket -> Scopes
 # -----------------
@@ -172,5 +172,5 @@ function runTestCase {
 	cleanupRemoteClusterRefs
 
 	echo "Cleaning up topology..."
-	failoverNode "C1P" "C1"
+	restoreClusterBack "C1"
 }

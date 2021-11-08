@@ -325,7 +325,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
 		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck,
-		xdcrf.MergePeerNodesCkptsResponse)
+		xdcrf.MergePeerNodesCkptsResponse, xdcrf.utils)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -910,9 +910,9 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	vbsReq[srcBucketName] = sourceVBs
 
 	xdcrf.logger.Infof("Running VBMasterCheck for %v", pipeline.FullTopic())
-	respMap, err := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)
-	if err != nil {
-		// If err is because spec is deleted from under us or if it's paused, don't do anything
+	respMap, rpcErr := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)
+	if rpcErr != nil {
+		// If err is because spec is deleted from under us or if it's paused, don't do anything and bail
 		replCheck, replErr := xdcrf.repl_spec_svc.ReplicationSpecReadOnly(spec.Id)
 		if replErr != nil {
 			return nil, base.ErrorOpInterrupted
@@ -921,17 +921,18 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 			return nil, base.ErrorOpInterrupted
 		}
 
-		// Should still return response to see if others can merge it
-		return respMap, err
+		// Should still proceed to check if anybody else claims as VB master as myself
+		// Once that test is passed, return the responses for merging
+		xdcrf.logger.Warnf("Error with Peer-To-Peer checkpoint pull, starting with local ckpts only: %v", rpcErr)
 	}
 
-	err = checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs, spec.InternalId)
-	if err != nil {
-		xdcrf.logger.Errorf("Error checkNoOtherVBMasters: %v\n", err)
+	vbMasterCheckErr := checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs, spec.InternalId)
+	if vbMasterCheckErr != nil {
+		xdcrf.logger.Errorf("Error checkNoOtherVBMasters: %v", vbMasterCheckErr)
 		// Should still return response to see if others can merge it
-		return respMap, err
+		return respMap, vbMasterCheckErr
 	}
-	return respMap, nil
+	return respMap, rpcErr
 }
 
 func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, srcBucketName string, sourceVBs []uint16, internalId string) error {

@@ -25,7 +25,7 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
 
 # Bucket -> Scopes
 # -----------------
@@ -170,7 +170,7 @@ function runReplicationResume {
 	logs=$(getInternalNodeXdcrLog "C1")
 	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
 	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
-		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill), expecting $(( $curCkptsFoundDocsCnt + 1 ))"
+		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill), expecting $(($curCkptsFoundDocsCnt + 1))"
 		exit 1
 	fi
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
@@ -235,5 +235,5 @@ function runTestCase {
 	cleanupRemoteClusterRefs
 
 	echo "Cleaning up topology..."
-	failoverNode "C1P" "C1"
+	restoreClusterBack "C1"
 }

@@ -499,6 +499,8 @@ function addNodesIn {
 		local nodeName=${CLUSTER_DEPENDENCY_MAP[$dependentClusterName]:-}
 		local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
 
+		echo "Found $dependentClusterName adding $dependentNodePort ($nodeName) to $port"
+
 		local preAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
 		result=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="https://127.0.0.1:1${dependentNodePort}")
 		if (($? != 0)); then
@@ -609,6 +611,81 @@ function startEjectNode {
 		fi
 	done
 
+}
+
+# Similar to failoverNode but cleans everything up
+# TODO neil - find a way to refactor duplicate code
+function restoreClusterBack {
+	# Essentially we will work off of portname
+	local nodeName=$1
+	local localhostIp="127.0.0.1"
+	local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
+	local hostNameToLookFor="${localhostIp}:${port}"
+	local otpNodeName
+
+	local totalFoundNode=0
+
+	local preEjectCnt=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq length)
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		local dependentNodePort=${CLUSTER_NAME_PORT_MAP[$dependentClusterName]:-}
+		local motherNode=${CLUSTER_DEPENDENCY_MAP[$dependentClusterName]:-}
+		local port=${CLUSTER_NAME_PORT_MAP[$motherNode]:-}
+
+		echo "Found $dependentClusterName removing $dependentNodePort ($motherNode) to $port"
+		hostNameToLookFor="${localhostIp}:${dependentNodePort}"
+
+		local nodesList=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq -cr '.[]')
+		#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_0@192.168.1.113","thisNode":true,"hostname":"192.168.1.113:9000","nodeUUID":"cbef3c8c28031971e9e61234560c8f0d","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12000,"httpsCAPI":19500,"httpsMgmt":19000,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"192.168.1.113:9000","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://192.168.1.113:9500/","couchApiBaseHTTPS":"https://192.168.1.113:19500/","systemStats":{"cpu_utilization_rate":16.81045313677862,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17357692928,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":39218356,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":1997575,"mem_used":69419072,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"401","memoryTotal":34359738368,"memoryFree":17357692928,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
+		#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_2@127.0.0.1","hostname":"127.0.0.1:9002","nodeUUID":"7356e3a2ed404e7bec0d2ca43ceb3526","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12004,"httpsCAPI":19502,"httpsMgmt":19002,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"127.0.0.1:9002","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://127.0.0.1:9502/","couchApiBaseHTTPS":"https://127.0.0.1:19502/","systemStats":{"cpu_utilization_rate":20.66955363091272,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17360678912,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":38648300,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":2004302,"mem_used":69085160,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"403","memoryTotal":34359738368,"memoryFree":17360678912,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
+
+		if [[ -z "${nodesList:-}" ]]; then
+			echo "ERROR - nodesList is empty. Did you enter the wrong nodeName for failoverNode?"
+			exit 1
+		fi
+
+		local checkHostName
+		local nodeInfo
+		local failoverNodeString
+		local knownNodesString
+		local optNodeNameStripped
+		local foundFailoverNode=0
+
+		for nodeInfo in $(echo "$nodesList"); do
+			checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
+			if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
+				foundFailoverNode=1
+				# Found it
+				otpNodeName=$(echo "$nodeInfo" | jq '.otpNode')
+				# "n_0@192.168.1.113"
+				otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
+				failoverNodeString="otpNode=$otpNodeNameStripped"
+				$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/controller/failOver -d "$failoverNodeString"
+				if (($? != 0)); then
+					echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
+				fi
+				echo "Wait 10 sec after issuing failover command ..."
+				sleep 10
+
+			fi
+		done
+		if (($foundFailoverNode == 0)); then
+			echo "Could not find $hostNameToLookFor"
+			return 1
+		else
+			totalFoundNode=$(($totalFoundNode + 1))
+		fi
+	done
+
+	if (($totalFoundNode > 0)); then
+		startRebalancing "C1" "$otpNodeNameStripped"
+		echo "Sleeping 20 seconds before checking"
+		sleep 20
+		local postEjectCnt=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq length)
+		if (($postEjectCnt != $(($preEjectCnt - $totalFoundNode)))); then
+			echo "Error - failover $totalFoundNode nodes resulted going from $preEjectCnt to $postEjectCnt"
+			return 1
+		fi
+	fi
 }
 
 function failoverNode {
@@ -1480,10 +1557,10 @@ function printSingleClusterBucketScopeAndCollection {
 	manifestOutput=$(getManifest $clusterName $bucketName)
 	if (($? != 0)); then
 		echo "Error retrieving manifest - Cluster $clusterName bucket $bucketName scope $scopeName"
-		continue
+		return
 	elif [[ -z "$manifestOutput" ]]; then
 		echo "Retrieved empty manifest JSON - Cluster $clusterName bucket $bucketName scope $scopeName"
-		continue
+		return
 	fi
 
 	manifestVersion=$(echo "$manifestOutput" | jq '.uid')

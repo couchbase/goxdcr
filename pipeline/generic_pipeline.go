@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
 )
@@ -127,6 +128,9 @@ type GenericPipeline struct {
 
 	vbMasterCheckFunc VBMasterCheckFunc
 	mergeCkptFunc     MergeVBMasterRespCkptsFunc
+
+	utils                   utilities.UtilsIface
+	p2pVbMasterCheckTimeout time.Duration
 }
 
 //Get the runtime context of this pipeline
@@ -263,22 +267,14 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	// Before starting vb timestamp, need to ensure VBMaster
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
 	if !ok || ok && vbMasterCheckConfig.(bool) == true {
-		waitTimeout := getP2PTimeoutFromSettings(settings)
-		genericPipeline.logger.Infof("%v - Performing PeerToPeer communication and metadata merging with timeout of %v", genericPipeline.FullTopic(), waitTimeout)
+		genericPipeline.p2pVbMasterCheckTimeout = getP2PTimeoutFromSettings(settings)
+		genericPipeline.logger.Infof("%v - Performing PeerToPeer communication and metadata merging with timeout of %v",
+			genericPipeline.FullTopic(), genericPipeline.p2pVbMasterCheckTimeout)
 		p2pErrMap := make(base.ErrorMap)
-		execWrapper := func() error {
-			return genericPipeline.runP2PProtocol(&p2pErrMap)
-		}
-		p2pProtocolErr := base.ExecWithTimeout(execWrapper, waitTimeout, genericPipeline.logger)
-		errKey := "genericPipeline.RunP2PProtocol"
-
-		if p2pProtocolErr != nil {
-			if p2pProtocolErr == base.ErrorExecutionTimedOut {
-				errMap[errKey] = base.ErrorExecutionTimedOut
-				return errMap
-			} else {
-				return p2pErrMap
-			}
+		genericPipeline.runP2PProtocol(&p2pErrMap)
+		if len(p2pErrMap) > 0 {
+			// Any P2P pull error should be ignored for now and continue
+			genericPipeline.logger.Warnf("P2P PreReplicate for %v Ckpt Pull and merge had errors but will continue to replicate: %v", genericPipeline.FullTopic(), p2pErrMap)
 		}
 		genericPipeline.ReportProgress(fmt.Sprintf("Done PeerToPeer communication and metadata merging"))
 	}
@@ -381,36 +377,37 @@ func getP2PTimeoutFromSettings(settings metadata.ReplicationSettingsMap) time.Du
 	}
 }
 
-func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap) error {
+func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap) {
 	errMap := *errMapPtr
 
 	genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer communication"))
-	resp, err := genericPipeline.vbMasterCheckFunc(genericPipeline)
-	if err != nil {
-		if err == base.ErrorOpInterrupted {
+	stopRpcMeasurement := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v_vbMasterCheckFunc", genericPipeline.FullTopic()), genericPipeline.p2pVbMasterCheckTimeout)
+	resp, vbMasterCheckErr := genericPipeline.vbMasterCheckFunc(genericPipeline)
+	if vbMasterCheckErr != nil {
+		if vbMasterCheckErr == base.ErrorOpInterrupted {
 			// Pipeline paused or repl deleted
-			return err
+			return
 		}
 
-		errMap["genericPipeline.vbMasterCheckFunc"] = err
+		errMap["genericPipeline.vbMasterCheckFunc"] = vbMasterCheckErr
 		// Even if vbmaster has issues, the data being sent should still be stored and then forwarded to others
 		// to prevent data loss
 	}
+	stopRpcMeasurement()
 
 	// resp is potentially nil if checkFunc failed above
 	genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer metadata merging"))
 	if resp != nil {
-		err = genericPipeline.mergeCkptFunc(genericPipeline, resp)
+		stopMergeMeasurement := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v_vbMasterMergeFunc", genericPipeline.FullTopic()), base.DiagCkptMergeThreshold)
+		mergeCkptErr := genericPipeline.mergeCkptFunc(genericPipeline, resp)
 		// If error returned is ErrorNoBackfillNeeded, then it's considered not an error
-		if err != nil && err != base.ErrorNoBackfillNeeded {
-			errMap[MergeCkptFuncKey] = err
+		if mergeCkptErr != nil && mergeCkptErr != base.ErrorNoBackfillNeeded {
+			errMap[MergeCkptFuncKey] = mergeCkptErr
 		}
+		stopMergeMeasurement()
 	}
 
-	if len(errMap) > 1 {
-		return fmt.Errorf(base.FlattenErrorMap(errMap))
-	}
-	return nil
+	return
 }
 
 func (genericPipeline *GenericPipeline) stopConnectorsWithTimeout() base.ErrorMap {
@@ -630,7 +627,7 @@ func NewGenericPipeline(t string,
 	return pipeline
 }
 
-func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc) *GenericPipeline {
+func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, utils utilities.UtilsIface) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
 		targets:                            targets,
@@ -650,6 +647,7 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 		pipelineType:                       pipelineType,
 		vbMasterCheckFunc:                  vbMasterCheckFunc,
 		mergeCkptFunc:                      mergeCkptFunc,
+		utils:                              utils,
 	}
 	// NOTE: Calling initialize here as part of constructor
 	pipeline.initialize()

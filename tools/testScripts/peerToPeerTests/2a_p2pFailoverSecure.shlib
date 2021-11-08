@@ -25,7 +25,7 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=120 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=2 ["xdcrDevBackfillSendDelayMs"]=1000)
+declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=120 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=2 ["xdcrDevBackfillSendDelayMs"]=1000 ["preReplicateVBMasterCheck"]="true")
 
 # Bucket -> Scopes
 # -----------------

@@ -141,7 +141,7 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 func (p *PeriodicPushHandler) handleResponse(resp *PeerVBPeriodicPushResp) {
 	_, _, found := p.GetReqAndClearOpaque(resp.GetOpaque())
 	if !found {
-		p.logger.Errorf("Unable to find opaque %v", resp.GetOpaque())
+		p.logger.Errorf("PeriodicPushHandler Unable to find opaque %v", resp.GetOpaque())
 		return
 	}
 

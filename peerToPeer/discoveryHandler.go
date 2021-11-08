@@ -103,7 +103,7 @@ func (h *DiscoveryHandler) handleRequest(req *DiscoveryRequest) {
 func (h *DiscoveryHandler) handleResponse(resp *DiscoveryResponse) {
 	_, _, found := h.GetReqAndClearOpaque(resp.GetOpaque())
 	if !found {
-		h.logger.Errorf("Unable to find opaque %v", resp.GetOpaque())
+		h.logger.Errorf("DiscoveryHandler Unable to find opaque %v", resp.GetOpaque())
 		return
 	}
 

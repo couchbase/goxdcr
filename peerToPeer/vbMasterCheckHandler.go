@@ -278,7 +278,7 @@ func (h *VBMasterCheckHandler) handler() {
 func (v *VBMasterCheckHandler) handleResponse(resp *VBMasterCheckResp) {
 	req, retCh, found := v.GetReqAndClearOpaque(resp.GetOpaque())
 	if !found {
-		v.logger.Errorf("Unable to find opaque %v", resp.GetOpaque())
+		v.logger.Errorf("VBMasterCheckHandler Unable to find opaque %v", resp.GetOpaque())
 		// Unable to find opaque means the original request has timed out
 		return
 	}
