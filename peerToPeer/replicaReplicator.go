@@ -440,8 +440,8 @@ func (a *ReplicatorAgentImpl) run() {
 
 // Fetch all data and get them ready to be replicated
 func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicateReq, error) {
-	backfillSpec, _ := a.backfillReplSvc.BackfillReplSpec(a.specId)
-	if backfillSpec.InternalId != a.internalId {
+	backfillSpec, err := a.backfillReplSvc.BackfillReplSpec(a.specId)
+	if err == nil && backfillSpec != nil && backfillSpec.InternalId != a.internalId {
 		return nil, fmt.Errorf("BackfillSpec Internal ID mismatch - expected %v got %v", a.internalId, backfillSpec.InternalId)
 	}
 
