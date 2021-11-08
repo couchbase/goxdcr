@@ -14,6 +14,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"reflect"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/couchbase/cbauth"
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
@@ -24,17 +33,9 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"net"
-	"net/http"
-	"net/url"
-	"reflect"
-	"runtime"
-	"strconv"
-	"strings"
-	"time"
-)
 
-import _ "net/http/pprof"
+	_ "net/http/pprof"
+)
 
 var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
@@ -1301,6 +1302,11 @@ func (adminport *Adminport) doBucketSettingsChangeRequest(request *http.Request)
 func (adminport *Adminport) doViewXDCRInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doViewXDCRInternalSettingsRequest\n")
 
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	internalSettings := InternalSettingsService().GetInternalSettings()
 
 	return NewXDCRInternalSettingsResponse(internalSettings)
@@ -1308,6 +1314,11 @@ func (adminport *Adminport) doViewXDCRInternalSettingsRequest(request *http.Requ
 
 func (adminport *Adminport) doChangeXDCRInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doChangeXDCRInternalSettingsRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	settingsMap, errorsMap := DecodeSettingsFromXDCRInternalSettingsRequest(request)
 	if len(errorsMap) > 0 {

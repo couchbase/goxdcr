@@ -563,7 +563,10 @@ const (
 	PermissionXDCRAdminInternalRead   = "cluster.admin.internal.xdcr!read"
 	PermissionXDCRAdminInternalWrite  = "cluster.admin.internal.xdcr!write"
 	PermissionXDCRPrometheusRead      = "cluster.admin.internal.stats!read"
-	PermissionXDCRInternalRead        = "cluster.xdcr.internal!read"
+
+	//  XDCR Admin has following permissions but not cluster.admin.internal.xdcr
+	PermissionXDCRInternalRead  = "cluster.xdcr.internal!read"
+	PermissionXDCRInternalWrite = "cluster.xdcr.internal!write"
 )
 
 // constants for parsing conflict resolution type setting in bucket metadata
