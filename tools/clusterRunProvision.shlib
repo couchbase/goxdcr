@@ -492,21 +492,18 @@ function waitForRebalanceToFinish {
 	echo ""
 }
 
-function addNodesIn {
-	local dependentClusterName
-	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
-		local dependentNodePort=${CLUSTER_NAME_PORT_MAP[$dependentClusterName]:-}
-		local nodeName=${CLUSTER_DEPENDENCY_MAP[$dependentClusterName]:-}
-		local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
+function addOneNodeIn {
+	local dependentClusterName=$1
+	local dependentNodePort=${CLUSTER_NAME_PORT_MAP[$dependentClusterName]:-}
+	local nodeName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
+	local retryCnt=0
 
-		echo "Found $dependentClusterName adding $dependentNodePort ($nodeName) to $port"
-
+	for ((retryCnt = 0; $retryCnt < 5; retryCnt = $(($retryCnt + 1)))); do
+		echo "Adding $dependentClusterName:$dependentNodePort ($nodeName) to $port"
 		local preAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
-		result=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="https://127.0.0.1:1${dependentNodePort}")
-		if (($? != 0)); then
-			echo "Adding nodeInfo resulted in error..."
-			exit 1
-		fi
+		echo $CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="https://127.0.0.1:1${dependentNodePort}"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="https://127.0.0.1:1${dependentNodePort}"
 
 		echo "Waiting for membership update"
 		sleep 10
@@ -515,8 +512,18 @@ function addNodesIn {
 
 		if (($postAddNumNodes != $(($preAddNumNodes + 1)))); then
 			echo "Error - adding a node resulted going from $preAddNumNodes to $postAddNumNodes"
-			exit 1
+		else
+			return 0
 		fi
+	done
+}
+
+function addNodesIn {
+	local dependentClusterName
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		local nodeName=${CLUSTER_DEPENDENCY_MAP[$dependentClusterName]:-}
+
+		addOneNodeIn $dependentClusterName $nodeName
 	done
 }
 
@@ -610,7 +617,6 @@ function startEjectNode {
 			fi
 		fi
 	done
-
 }
 
 # Similar to failoverNode but cleans everything up

@@ -436,6 +436,8 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 			err = c.upsertCollectionNsMappingsDoc(docReturn, true /*addOp*/)
 			return docReturn, err
 		} else {
+			err = fmt.Errorf("GetMappingsDoc was requested for %v but was not found", c.id)
+			c.logger.Errorf(err.Error())
 			return nil, err
 		}
 	} else if err != nil {

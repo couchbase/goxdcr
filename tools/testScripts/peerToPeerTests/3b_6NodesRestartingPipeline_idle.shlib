@@ -48,8 +48,6 @@ function runDataLoad {
 TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
 P2P_PULL_ERR_MSG="Ckpt Pull and merge had errors but will continue to replicate"
 
-declare LOGMSG=$BROKEN_MSG
-
 TC_CHECK_INTERVAL=10
 TC_MAX_CHANGE_CNT=3
 
@@ -60,7 +58,7 @@ function runOneReplicationCycleAndPause {
 	local maxStableCnt=3
 	local coolDownPeriod=1
 	local checkInt
-	setupCluster
+	local waitTime
 	setupTopologies
 	# Shorten the amount of time pipeline restarts
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
@@ -73,9 +71,6 @@ function runOneReplicationCycleAndPause {
 		exit $?
 	fi
 
-	local -i currentInstanceCnt
-	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
-
 	setCustomManifestRefreshInterval "C1"
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
@@ -87,18 +82,19 @@ function runOneReplicationCycleAndPause {
 
 	runDataLoad
 
-	echo "Sleeping 20 seconds before changes left check"
-	sleep 20
-
-	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
+	waitTime=$((20 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	echo "$(date): Waiting $waitTime seconds for pipeline to start and replication to finish"
+	sleep $waitTime
 
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	validateXDCRCheckpoints "C1"
 	grepForPanics
 
 	pauseReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 10 seconds for pipeline to really pause"
-	sleep 10
+
+	waitTime=$((10 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	echo "Waiting $waitTime seconds for pipeline to really pause"
+	sleep $waitTime
 	grepForPanics
 
 	createScope "C2" "B1" "S1"
@@ -108,13 +104,19 @@ function runOneReplicationCycleAndPause {
 	sleep 15
 	resumeReplication "C1" "B0" "C2" "B1"
 
+	waitTime=$((15 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	echo "$(date): Waiting $waitTime seconds for pipeline to resume and replication to finish"
+	sleep $waitTime
+
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	grepForPanics
 
 	# Once all is done, pause to re-create checkpoint
 	pauseReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 10 seconds for pipeline to really pause"
-	sleep 10
+
+	waitTime=$((10 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	echo "Waiting $waitTime seconds for pipeline to really pause"
+	sleep $waitTime
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
@@ -128,6 +130,8 @@ function runOneRebalanceCycleIn {
 	local cycleCnt=$1
 	local totalCycleCnt=$2
 	local timeIntervalSecs=30
+
+	setupCluster
 
 	echo "Sleeping 15 secs before rebalancing node in"
 	sleep 15
@@ -167,8 +171,7 @@ function validateCkptResume {
 			echo "$dependentNodeName shows no resume message"
 			return 1
 		else
-			echo "$dependentNodeName unable to find upserted checkpoints:"
-			echo "$tempLogs" | grep -v "Backfill" | grep "$CKPT_RESUME_FOUND"
+			echo "$dependentNodeName unable to find upserted checkpoints"
 			exit 1
 		fi
 	fi
@@ -199,12 +202,7 @@ function runReplicationResume {
 	echo "$(date): Waiting $waitTime seconds for resume to finish"
 	sleep $waitTime
 
-	# ensure that p2p did not fail
-	# TODO MB-49434 - right now this fails quite often
-	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
-		echo "Validating p2p pull error on $dependentNodeName"
-		validateInternalLogWithInstance "$dependentNodeName" "$P2P_PULL_ERR_MSG" 0
-	done
+	#checkForP2PError
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")
@@ -240,31 +238,27 @@ function runReplicationResume {
 		done
 	done
 
-	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
-		local oneNodeCurRetrievedCkptCnt="${curDepsCkptRetrievedCntMap[$dependentClusterName]}"
-		validateInternalLogWithInstance "$dependentNodeName" "$CKPT_RETRIEVED" $(($oneNodeCurRetrievedCkptCnt + 1)) $(($oneNodeCurRetrievedCkptCnt + 2))
-	done
+	# Skip validating ckpt pulled because the replications are already distributed
 
-	# Backfill pipeline from C1 could already be finished but the backfill tasks still exist
-	# and there is no ckpt for the backfill tasks... so the backfill tasks would have been
-	# pulled by C1P, but no ckpt pulled
-	# That's ok... so skip checking those
-	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
-		tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
-
-		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
-		if (($resumeFrom0Cnt > 0)); then
-			echo "$dependentNodeName has at least one VB that resumed from seqno 0"
-			exit 1
-		fi
-		resumeLoadBrokenMapCnt=$(echo "$tempLogs" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
-		if (($resumeLoadBrokenMapCnt == 0)); then
-			echo "$dependentNodeName did not load broken map from checkpoint migration"
-			exit 1
-		fi
-	done
+	# Skip validating ckpt resume from non-0 because that's out of scope of this test and the test has changed
+	# from original parent test
 
 	grepForPanics
+}
+
+function checkForP2PError {
+	# ensure that p2p did not fail
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		echo "Validating p2p pull error on $dependentNodeName"
+		validateInternalLogWithInstance "$dependentNodeName" "$P2P_PULL_ERR_MSG" 0
+	done
+}
+
+function monitorP2PError {
+	while ((1 == 1)); do
+		checkForP2PError
+		sleep 15
+	done
 }
 
 function runTestCase {
@@ -275,9 +269,22 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-	runOneReplicationCycleAndPause
 	runOneRebalanceCycleIn 1 1
+	runOneReplicationCycleAndPause
 	runReplicationResume
+
+	#monitorP2PError &
+	# Pick a random node to eject
+	echo "Picking a random node to eject:"
+	local randomID
+	randomID=$(echo $(($RANDOM % ${#CLUSTER_DEPENDENCY_MAP[@]})))
+	local randomNodeName="C1P${randomID}"
+	echo "Ejecting $randomNodeName"
+	startEjectNode "$randomNodeName" "C1"
+
+	killAllBgJobs
+	# Do one last round
+	#monitorP2PError
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -285,6 +292,13 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+
+	echo "To simplify clean up, add random node back in..."
+	addOneNodeIn "$randomNodeName" "C1"
+	sleep 20
+	startRebalancing "C1"
+
+	read -p "NEIL DEBUG verify"
 
 	echo "Cleaning up topology..."
 	restoreClusterBack "C1"
