@@ -409,6 +409,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
 	ckpt_entries, err := ckpt_svc.metadata_svc.GetAllMetadataFromCatalog(catalogKey)
 	if err != nil {
+		ckpt_svc.logger.Errorf("%v had error when getting key %v - %v", replicationId, catalogKey, err)
 		return nil, err
 	}
 
@@ -419,6 +420,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 	if brokenMappingsNeeded {
 		shaToBrokenMapping, CollectionNsMappingsDoc, refCounterRecorder, ckptSvcCntIsPopulated, err = ckpt_svc.LoadBrokenMappings(replicationId)
 		if err != nil {
+			ckpt_svc.logger.Errorf("Error when getting brokenMapping for %v - %v", replicationId, err)
 			return nil, err
 		}
 	}

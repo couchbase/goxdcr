@@ -441,6 +441,7 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 			return nil, err
 		}
 	} else if err != nil {
+		c.logger.Errorf("GetMappingsDoc %v retrieval got error %v", c.id, err)
 		return nil, err
 	}
 

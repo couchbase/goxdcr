@@ -312,11 +312,12 @@ func (v *VBMasterCheckHandler) populatePipelineCkpts(replSpecId string, waitGrp 
 		return
 	}
 
-	v.logger.Infof("Handler for %v retrieving CheckpointsDocs request found %v docs", replSpecId, len(ckptDocs))
 	if opErr != nil {
+		v.logger.Errorf("Error getting ckpt docs for %v - %v", replSpecId, opErr)
 		*err = opErr
 		return
 	}
+	v.logger.Infof("Handler for %v retrieving CheckpointsDocs request found %v docs", replSpecId, len(ckptDocs))
 
 	*result = ckptDocs
 

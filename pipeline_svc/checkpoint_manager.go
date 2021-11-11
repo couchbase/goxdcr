@@ -928,6 +928,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	ckmgr.logger.Infof("Getting checkpoint for %v %v\n", ckmgr.pipeline.Type().String(), topic)
 	ckptDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(topic, true /*needBrokenMapping*/)
 	if err != nil {
+		ckmgr.logger.Errorf("Getting checkpoint for %v had error %v", ckmgr.pipeline.FullTopic(), err)
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
@@ -966,6 +967,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 				// restart pipeline if it fails
 				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
 				if err != nil {
+					ckmgr.logger.Errorf("Deleting checkpoint docs %v for vb %v had an err %v", topic, vbno, err)
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
 				}
@@ -1541,7 +1543,7 @@ func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
 	ckmgr.cachedBrokenMap.lock.RUnlock()
 	err := ckmgr.checkpoints_svc.PreUpsertBrokenMapping(ckmgr.pipeline.FullTopic(), ckmgr.pipeline.Specification().GetReplicationSpec().InternalId, &preUpsertMap)
 	if err != nil {
-		ckmgr.logger.Warnf("Unable to pre-persist brokenMapping: %v", err)
+		ckmgr.logger.Warnf("Unable to pre-persist brokenMapping for %v: %v", ckmgr.pipeline.FullTopic(), err)
 	}
 
 }

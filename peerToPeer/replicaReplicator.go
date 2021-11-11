@@ -455,6 +455,7 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 
 	mainCkpts, mainCkptErr := a.ckptSvc.CheckpointsDocs(a.specId, true)
 	if mainCkptErr != nil {
+		a.logger.Errorf("Error getting ckpt docs for %v - %v", a.specId, mainCkptErr)
 		mainCkpts = nil
 	}
 

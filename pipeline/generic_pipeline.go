@@ -161,7 +161,7 @@ func (genericPipeline *GenericPipeline) startPartsWithTimeout(ssl_port_map map[s
 			waitGrp.Wait()
 			if len(err_ch) != 0 {
 				partErrs := base.FormatErrMsgWithUpperLimit(err_ch, MaxNumberOfErrorsToTrack)
-				err := fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.Topic(), base.FlattenErrorMap(partErrs))
+				err := fmt.Errorf("Pipeline %v failed to start, err=%v\n", genericPipeline.FullTopic(), base.FlattenErrorMap(partErrs))
 				genericPipeline.logger.Errorf("%v", err)
 				// This func is run serially so no need for lock - if changes in the future, need lock
 				errMap.AddErrors(partErrs)
@@ -353,7 +353,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 			return errMap
 		}
 	}
-	genericPipeline.logger.Debugf("%v All incoming nozzles have been opened", genericPipeline.Topic())
+	genericPipeline.logger.Debugf("%v All incoming nozzles have been opened", genericPipeline.FullTopic())
 	genericPipeline.ReportProgress("All incoming nozzles have been opened")
 
 	err = genericPipeline.SetState(common.Pipeline_Running)
@@ -361,7 +361,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		genericPipeline.logger.Infof("----------- %v %s has been started----------", genericPipeline.Type(), genericPipeline.InstanceId())
 		genericPipeline.ReportProgress("Pipeline is running")
 	} else {
-		err = fmt.Errorf("Pipeline %s failed to start", genericPipeline.Topic())
+		err = fmt.Errorf("Pipeline %s when setting state to Pipeline_Running: %v", genericPipeline.FullTopic(), err)
 		errMap["genericPipeline.SetState.Pipeline_running"] = err
 	}
 
