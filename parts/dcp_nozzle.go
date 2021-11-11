@@ -760,14 +760,17 @@ func (dcp *DcpNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	// start gen_server
 	dcp.start_time = time.Now()
 
-	//start datachan length stats collection
-	dcp.childrenWaitGrp.Add(1)
-	go dcp.collectDcpDataChanLen(settings)
-
 	uprFeed := dcp.getUprFeed()
 	if uprFeed != nil {
 		uprFeed.StartFeedWithConfig(base.UprFeedDataChanLength)
 	}
+
+	//start datachan length stats collection
+	// We start collectDcpDataChanLen after StartFeedWithConfig
+	// This is because StartFeedWithConfig initializes the even feed channel
+	// which is accessed by collectDcpDataChanLen
+	dcp.childrenWaitGrp.Add(1)
+	go dcp.collectDcpDataChanLen(settings)
 
 	// start data processing routine
 	dcp.childrenWaitGrp.Add(1)
