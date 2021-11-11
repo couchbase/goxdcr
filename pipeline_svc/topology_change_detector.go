@@ -136,17 +136,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 				}
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v Starting...", pipeline.Topic())
 
-				err = top_detect_svc.monitorSource()
-				if err != nil {
-					startErr = err
-					return
-				}
-
-				err = top_detect_svc.monitorTarget()
-				if err != nil {
-					startErr = err
-					return
-				}
+				go top_detect_svc.initializeMonitors()
 
 				top_detect_svc.number_of_source_nodes, err = top_detect_svc.xdcr_topology_svc.NumberOfKVNodes()
 				if err != nil {
@@ -173,6 +163,34 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 	}
 
 	return nil
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) initializeMonitors() {
+	initMonitors := func() error {
+		stopFunc := top_detect_svc.utils.StartDiagStopwatch(fmt.Sprintf("TopologyDetectSvc_%v_initializeMonitors", top_detect_svc.Id()), base.DiagTopologyMonitorThreshold)
+		defer stopFunc()
+		var initWaitGrp sync.WaitGroup
+		var srcErr error
+		var tgtErr error
+		initWaitGrp.Add(2)
+		go func() {
+			srcErr = top_detect_svc.monitorSource(&initWaitGrp)
+		}()
+		go func() {
+			tgtErr = top_detect_svc.monitorTarget(&initWaitGrp)
+		}()
+		initWaitGrp.Wait()
+		if srcErr != nil || tgtErr != nil {
+			return fmt.Errorf("TopDetectSvc for %v MonitorSrc error: %v MonitorTgt error: %v", top_detect_svc.Id(), srcErr, tgtErr)
+		} else {
+			return nil
+		}
+	}
+	execErr := base.ExecWithTimeout(initMonitors, base.TimeoutRuntimeContextStart, top_detect_svc.logger)
+	if execErr != nil {
+		top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, execErr))
+	}
+	return
 }
 
 // Should only called by main pipeline
@@ -427,20 +445,26 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Detach(pipeline common.Pipeline
 	return nil
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
+func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.WaitGroup) error {
 	var err error
 	var replicationSpec *metadata.ReplicationSpecification
+	top_detect_svc.pipelinesMtx.RLock()
 	mainPipeline := top_detect_svc.pipelines[0]
+	top_detect_svc.pipelinesMtx.RUnlock()
 	genSpec := mainPipeline.Specification()
 	if genSpec == nil {
-		err = base.ErrorNilPtr
+		err = fmt.Errorf("mainPipeline has no spec")
+		initWg.Done()
+		return err
 	} else {
 		replicationSpec = genSpec.GetReplicationSpec()
 	}
 	sourceVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToLocalBucketFeed(replicationSpec, mainPipeline.InstanceId())
 	if err != nil {
+		initWg.Done()
 		return err
 	}
+	initWg.Done()
 
 	//initialize source vb list to set up a baseline for source topology change detection
 	top_detect_svc.vblist_original = pipeline_utils.GetSourceVBListPerPipeline(mainPipeline)
@@ -491,20 +515,27 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource() error {
 	return nil
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget() error {
+func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.WaitGroup) error {
 	var err error
 	var spec *metadata.ReplicationSpecification
+	top_detect_svc.pipelinesMtx.RLock()
 	mainPipeline := top_detect_svc.pipelines[0]
+	top_detect_svc.pipelinesMtx.RUnlock()
 	genSpec := mainPipeline.Specification()
 	if genSpec == nil {
-		err = base.ErrorNilPtr
+		err = fmt.Errorf("main pipeline has no spec")
+		initWg.Done()
+		return err
 	} else {
 		spec = genSpec.GetReplicationSpec()
 	}
 	targetVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, mainPipeline.InstanceId())
+
 	if err != nil {
+		initWg.Done()
 		return err
 	}
+	initWg.Done()
 
 	// Init with initial info
 	firstNotification := <-targetVbUpdateCh

@@ -1368,6 +1368,7 @@ var DiagVBMasterHandleThreshold = 20 * time.Second
 var DiagCkptMergeThreshold = 30 * time.Second
 var DiagCkptStopTheWorldThreshold = 10 * time.Second
 var DiagStopTheWorldAndMergeCkptThreshold = DiagCkptMergeThreshold + DiagCkptStopTheWorldThreshold
+var DiagTopologyMonitorThreshold = 5 * time.Second
 
 // Pprof goroutines dump types
 type PprofLookupTypes string
