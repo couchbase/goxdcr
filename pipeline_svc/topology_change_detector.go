@@ -480,6 +480,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 			case notification := <-sourceVbUpdateCh:
 				var updateOnceErr error
 				if top_detect_svc.pipelineHasStopped() {
+					notification.Recycle()
 					return
 				}
 				kv_vb_map := notification.GetSourceVBMapRO()
@@ -509,6 +510,12 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 
 				err = top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, updateOnceErr)
 				notification.Recycle()
+				if err != nil {
+					if err == errPipelinesDetached {
+						return
+					}
+					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when handling source topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
+				}
 			}
 		}
 	}()
@@ -555,15 +562,16 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				return
 			case notification := <-targetVbUpdateCh:
 				if top_detect_svc.pipelineHasStopped() {
+					notification.Recycle()
 					return
 				}
 				targetBucketUUID := notification.GetTargetBucketUUID()
 
 				// validate target bucket uuid
 				if spec.TargetBucketUUID != "" && targetBucketUUID != "" && spec.TargetBucketUUID != targetBucketUUID {
-
 					shouldTryAgain := top_detect_svc.validateTargetBucketUUIDDifferences(spec)
 					if shouldTryAgain {
+						notification.Recycle()
 						continue
 					}
 				}
@@ -579,6 +587,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
 				}
 				err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
+				notification.Recycle()
 				if err != nil {
 					if err == errPipelinesDetached {
 						return
