@@ -951,28 +951,32 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		return
 	}
 
+	diffPair := metadata.CollectionNamespaceMappingsDiffPair{}
 	if modes.IsImplicitMapping() {
-		diffPair := metadata.CollectionNamespaceMappingsDiffPair{}
 
 		oldSrcToTargetMapping, _, _ := oldSourceManifest.ImplicitMap(latestTgtManifest)
 		srcToTargetMapping, _, _ := newSourceManifest.ImplicitMap(latestTgtManifest)
 
-		added, removed := oldSrcToTargetMapping.Diff(srcToTargetMapping)
-		diffPair.Added = added
+		// We only care about "removed", which should be sent to request handler to ensure backfill task cleanup
+		// "Added" is not needed because implicit mapping means that new collections start from seqno 0, so no need
+		// to backfill
+		_, removed := oldSrcToTargetMapping.Diff(srcToTargetMapping)
 		diffPair.Removed = removed
-
-		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
-		b.markNewSourceManifest(replId, newSourceManifest.Uid())
-		return
+	} else {
+		diffPair, err = b.compileExplicitBackfillReq(spec, modes, oldSourceManifest, latestTgtManifest, newSourceManifest, latestTgtManifest)
+		if err != nil {
+			b.logger.Errorf("%v Error compiling explicit backfillReq: %v", spec.Id, err)
+			return
+		}
 	}
 
-	diffPair, err := b.compileExplicitBackfillReq(spec, modes, oldSourceManifest, latestTgtManifest, newSourceManifest, latestTgtManifest)
-	if err != nil {
-		b.logger.Errorf("%v Error compiling explicit backfillReq: %v", spec.Id, err)
-		return
-	}
 	b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
-	err = b.raiseBackfillReq(replId, diffPair, false, newSourceManifest.Uid())
+
+	// Only raise backfill req if necessary because each req will result in a metakv set (could be expensive)
+	if len(diffPair.Added) > 0 || len(diffPair.Removed) > 0 {
+		err = b.raiseBackfillReq(replId, diffPair, false, newSourceManifest.Uid())
+	}
+
 	if errMeansReqNeedsToBeRetried(err) {
 		req := BackfillRetryRequest{
 			replId:                     replId,

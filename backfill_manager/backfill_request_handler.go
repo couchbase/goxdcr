@@ -80,7 +80,6 @@ type BackfillRequestHandler struct {
 	specStillExists func() bool
 
 	cachedBackfillSpec           *metadata.BackfillReplicationSpec
-	delOpBackfillId              string
 	mainpipelineCkptSeqnosGetter SeqnosGetter
 	restreamPipelineFatalFunc    func()
 
@@ -651,7 +650,6 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 	var err error
 	if backfillDone && !hasMoreTasks {
 		// TODO - once metakv is in, this need to be revisited
-		b.delOpBackfillId = b.cachedBackfillSpec.Id
 		b.cachedBackfillSpec = nil
 		// At this point, there is no more tasks in the backfill spec
 		// This is only possible if all the tasks are done
@@ -678,7 +676,7 @@ func (b *BackfillRequestHandler) metaKvOp(op PersistType) error {
 	case SetOp:
 		return b.backfillReplSvc.SetBackfillReplSpec(b.cachedBackfillSpec)
 	default:
-		_, err := b.backfillReplSvc.DelBackfillReplSpec(b.delOpBackfillId)
+		_, err := b.backfillReplSvc.DelBackfillReplSpec(b.id)
 		return err
 	}
 }
@@ -1010,7 +1008,6 @@ func (b *BackfillRequestHandler) handleSpecialDelBackfill(reqAndResp ReqAndResp)
 		return b.requestPersistence(SetOp, reqAndResp.PersistResponse)
 	} else {
 		b.logger.Infof("%v - handling delete all backfill request", b.id)
-		b.delOpBackfillId = b.id
 		b.cachedBackfillSpec = nil
 		delErr := b.requestPersistence(DelOp, reqAndResp.PersistResponse)
 		if delErr == nil {

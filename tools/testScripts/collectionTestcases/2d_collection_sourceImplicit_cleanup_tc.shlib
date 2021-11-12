@@ -25,7 +25,9 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+#pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
+#declare -A DefaultBucketReplProperties=(["filterExpression"]="$pcre_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevBackfillSendDelayMs"]=1000)
 
 # Bucket -> Scopes
 # -----------------
@@ -47,84 +49,13 @@ function runDataLoad {
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
-function dismissLevel0 {
-	local eventId
-	getBrokenMapEntryId "C1"
-	eventId=$?
-	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
-		exit 1
-	fi
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
-}
-
-function dismissLevel1 {
-	local eventId
-	getBrokenMapEntryId "C1" "S1"
-	eventId=$?
-	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
-		exit 1
-	fi
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
-}
-
-function dismissLevel2 {
-	local eventId
-	getBrokenMapEntryId "C1" "S1" "col1"
-	eventId=$?
-	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
-		exit 1
-	fi
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
-	getBrokenMapEntryId "C1" "S1" "col2"
-	eventId=$?
-	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
-		exit 1
-	fi
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
-}
-
-function dismissLevel3 {
-	local eventId
-	getBrokenMapEntryId "C1" "S1" "col1" "S1" "col1"
-	eventId=$?
-	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
-		exit 1
-	fi
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
-	getBrokenMapEntryId "C1" "S1" "col2" "S1" "col2"
-	eventId=$?
-	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
-		exit 1
-	fi
-	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
-}
-
-function pickARandomLevelToDismissBrokenMap {
-	randomCase=$(echo $(($RANDOM % 4)))
-	echo "Randomly picking to dismiss broken map with level $randomCase..."
-	case $randomCase in
-	0)
-		dismissLevel0
-		;;
-	1)
-		dismissLevel1
-		;;
-	2)
-		dismissLevel2
-		;;
-	3)
-		dismissLevel3
-		;;
-	esac
-}
-
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running live rediscover test case"
+	echo "Running implicit mapping source col delete during backfill test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -177,72 +108,22 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B2" 0
 
-	# One broken msg for B1.S1.c1 -> B2.S1.c1 and one for B1.S1.c2 -> B2.S1.c2
-	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 2))
-
-	# Validate brokenmap exists
-	validateBrokenMapExists "C1"
-	validateBrokenMapEntry "C1" "S1" "col1" "S1" "col1"
-	validateBrokenMapEntry "C1" "S1" "col2" "S1" "col2"
-
-	# We can only pick one so randomly pick one
-	pickARandomLevelToDismissBrokenMap
-	sleep 5
-	validateBrokenMapDoesNotExist "C1"
-
-	# Pause and resume pipeline should free up dismissal and brokenMap should show up again
-	pauseReplication "C1" "B1" "C2" "B2"
-	sleep 5
-	resumeReplication "C1" "B1" "C2" "B2"
-	sleep 5
-	validateBrokenMapExists "C1"
-
-	# run data load again to ensure brokenMapping is updated and displayed correctly
-	runDataLoad
-
-	# Try removing "S1.col2" and see if brokenMap entry gets removed
-	deleteCollection "C1" "B1" "S1" "col2"
-	validateBrokenMapExists "C1"
-	validateBrokenMapEntryDNE "C1" "S2" "col2" "S1" "col2"
-
-	# Repair it to set up correctly for original backfill test
-	createCollection "C1" "B1" "S1" "col2"
-	runDataLoad
-
 	# Then re-setup the implicit matching that matches
 	BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 	setupTopologies
-	echo "Sleeping 30 seconds for discovery and automatic backfill"
+	echo "Waiting for backfill to start..."
 	sleep 30
 
-	printGlobalScopeAndCollectionInfo
+	# By this point backfill should exist
+	checkNoErrorInErrorList "C1"
 
-	# After sleeping, the backfill manager should have triggered the backfill
-	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
-	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
-	# Before running I/O, ckptMgr will raise a repaired message
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1))
+	# Delete the source collection to force backfill to be cleaned up
+	deleteCollection "C1" "B1" "S1" "col1"
+	deleteCollection "C1" "B1" "S1" "col2"
 
-	# Sometimes racey detection will detect collection manifest changes mid flight and raise more than one backfill
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
-
-	runDataLoad
-	# After running I/O, router should raise a repaired message
-	validateLogWithInstance "C1" "$REPAIR_MSG" $(($currentRepairedInstanceCnt + 1)) $(($currentRepairedInstanceCnt + 2))
-	validateBrokenMapDoesNotExist "C1"
-
-	# Under normal I/O load, these should happen closely together
-	# Backfill Pipeline given VBMasterCheck will
-	echo "Sleeping 60..."
+	echo "Finished deleting source collections, wait a minute to make sure no errors show up..."
 	sleep 60
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2)) $(($currentBackfillInstanceCnt + 3))
-	date
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 2))
-	# No OSO because backfill 2 collections
-	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt))
-	grepForPanics
-	validateXDCRCheckpoints "C1"
-	validateXDCRCheckpoints "C2"
+	checkNoErrorInErrorList "C1"
 
 	echo "============================================================================"
 	echo "PASSED"

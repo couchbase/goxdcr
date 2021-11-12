@@ -625,7 +625,7 @@ function validateBrokenMapExists {
 	fi
 }
 
-function validateBrokenMapDoesNotExist {
+function checkNoErrorInErrorList {
 	local errList
 	local cluster=$1
 
@@ -639,6 +639,11 @@ function validateBrokenMapDoesNotExist {
 		echo "Error list exists when it should not"
 		exit 1
 	fi
+}
+
+function validateBrokenMapDoesNotExist {
+	local cluster=$1
+	checkNoErrorInErrorList $cluster
 }
 
 # Ensures that a specified linkage is broken
