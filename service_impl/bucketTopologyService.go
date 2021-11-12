@@ -1292,11 +1292,12 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 			notification.Recycle()
 			continue
 		}
-		timeout := time.NewTicker(1 * time.Second)
+		timeout := time.NewTimer(1 * time.Second)
 		if bw.source {
 			select {
 			case chRaw.(chan service_def.SourceNotification) <- notification:
-			// sent
+				// sent
+				timeout.Stop()
 			case <-timeout.C:
 				// provide a bail out path
 				notification.Recycle()
@@ -1305,14 +1306,14 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 		} else {
 			select {
 			case chRaw.(chan service_def.TargetNotification) <- notification:
-			// sent
+				// sent
+				timeout.Stop()
 			case <-timeout.C:
 				// provide a bail out path
 				notification.Recycle()
 				continue
 			}
 		}
-
 	}
 }
 
