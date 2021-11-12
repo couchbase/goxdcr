@@ -226,7 +226,13 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 	} else if specActiveOld && !specActive {
 		//stop replication
 		rscl.logger.Infof("Stopping pipeline %v since the replication spec has been changed to inactive\n", topic)
-		stopErr := replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+		callback, errCb, needCb := needSpecialCallbackUpdate(topic, newSpec.InternalId, oldSettings, newSpec.Settings)
+		var stopErr error
+		if needCb {
+			stopErr = replication_mgr.pipelineMgr.UpdatePipelineWithStoppedCb(topic, callback, errCb)
+		} else {
+			stopErr = replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+		}
 		if needToRestreamPipelineEvenIfStopped(oldSettings, newSpec.Settings) {
 			rscl.logger.Infof("Cleaning up pipeline %v because of setting change\n", topic)
 			cleanErr := replication_mgr.pipelineMgr.ReInitStreams(topic)
@@ -248,11 +254,20 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 		}
 		// start replication
 		rscl.logger.Infof("Starting pipeline %v since the replication spec has been changed to active\n", topic)
-		return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
-
+		if oldSpec != nil {
+			// We are resuming replication. Need to check if we need to raise backfill before start
+			callback, errCb, needCb := needSpecialCallbackUpdate(topic, newSpec.InternalId, oldSettings, newSpec.Settings)
+			if needCb {
+				return replication_mgr.pipelineMgr.UpdatePipelineWithStoppedCb(topic, callback, errCb)
+			} else {
+				return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+			}
+		} else {
+			return replication_mgr.pipelineMgr.UpdatePipeline(topic, nil)
+		}
 	} else {
 		// this is the case where pipeline is not running and spec is not active.
-		// Need to initiate the status if this is a newly created pasued replication
+		// Need to initiate the status if this is a newly created paused replication
 		if oldSpec == nil {
 			replication_mgr.pipelineMgr.InitiateRepStatus(newSpec.Id)
 		} else {
@@ -262,6 +277,11 @@ func (rscl *ReplicationSpecChangeListener) replicationSpecChangeHandlerCallback(
 				if cleanErr != nil {
 					rscl.logger.Errorf("unable to cleanup %v due to %v - pipeline may be missing earlier data. Recommended manual delete and recreation", topic, cleanErr)
 				}
+			}
+			// Need to raise backfill even if stopped
+			callback, errCb, needCb := needSpecialCallbackUpdate(topic, newSpec.InternalId, oldSettings, newSpec.Settings)
+			if needCb {
+				return replication_mgr.pipelineMgr.UpdatePipelineWithStoppedCb(topic, callback, errCb)
 			}
 		}
 		return nil
