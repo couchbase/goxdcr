@@ -311,11 +311,13 @@ func (b *BackfillRequestHandler) run() {
 			oldVBsList := b.getVBs()
 			newKvVBMap := notification.GetSourceVBMapRO()
 			newVBList := newKvVBMap.GetSortedVBList()
-			err := b.handleVBsDiff(base.DiffVBsList(base.CloneUint16List(oldVBsList), base.CloneUint16List(newVBList)))
-			if err != nil {
-				b.logger.Errorf("Unable to handle VBs diff due to err %v - oldVBs: %v newVBs: %v", err, oldVBsList, newVBList)
+			// Don't raise backfill request if this is the first time getting a list of VBs, i.e. starting up
+			if len(oldVBsList) > 0 {
+				err := b.handleVBsDiff(base.DiffVBsList(base.CloneUint16List(oldVBsList), base.CloneUint16List(newVBList)))
+				if err != nil {
+					b.logger.Errorf("Unable to handle VBs diff due to err %v - oldVBs: %v newVBs: %v", err, oldVBsList, newVBList)
+				}
 			}
-
 			// Once diffed, update last cached
 			b.latestCachedSourceNotificationMtx.Lock()
 			if b.latestCachedSourceNotification != nil {
