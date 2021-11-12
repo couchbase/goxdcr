@@ -1609,6 +1609,8 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 
 // local API. supports periodical checkpoint operations
 func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.WaitGroup) {
+	defer wait_grp.Done()
+
 	if !ckmgr.isCheckpointAllowed() {
 		ckmgr.logger.Errorf("%v %v has not been started - checkpointing is skipped", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 		return
@@ -1648,7 +1650,10 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		ckmgr.PreCommitBrokenMapping()
 	}
 
-	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, wait_grp, ckmgr.getCheckpointInterval(), through_seqno_map, high_seqno_and_vbuuid_map, &total_committing_time, srcManifestIds, tgtManifestIds)
+	var dummyWaitGrp sync.WaitGroup
+	dummyWaitGrp.Add(1)
+	ckmgr.performCkpt_internal(ckmgr.getMyVBs(), fin_ch, &dummyWaitGrp, ckmgr.getCheckpointInterval(), through_seqno_map, high_seqno_and_vbuuid_map, &total_committing_time, srcManifestIds, tgtManifestIds)
+	dummyWaitGrp.Wait()
 
 	if ckmgr.collectionEnabled() {
 		ckmgr.CommitBrokenMappingUpdates()
