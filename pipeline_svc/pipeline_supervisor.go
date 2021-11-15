@@ -183,28 +183,57 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 
 	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
 	var dcpStatsCh chan service_def.SourceNotification
-	if remoteClusterCapability.HasCollectionSupport() {
-		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
-	} else {
-		dcpStatsCh, err = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
-	}
-	if err != nil {
-		return err
-	}
 
-	pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started with interval: %v", pipelineSupervisor.Id(), base.HealthCheckInterval)
+	initCh := make(chan bool, 1)
+	initCh <- true
+	// When finCh is closed, to know whether or not initCh has been run as to whether or not wait for the init part to be done
+	var initHasRun bool
+	// Holds a variable to say whether or not closing portion needs to unsubscribe, and acts as semaphore
+	initDoneCh := make(chan bool, 1)
+
 	go func() {
 		for {
 			select {
-			case <-fin_ch:
-				pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped\n", pipelineSupervisor.Id())
-				if remoteClusterCapability.HasCollectionSupport() {
-					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
-				} else {
-					err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
+			case <-initCh:
+				pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started with interval: %v", pipelineSupervisor.Id(), base.HealthCheckInterval)
+				stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_subscribeDcpStatsFeed", pipelineSupervisor), base.DiagInternalThreshold)
+				initHasRun = true
+				initMonitors := func() error {
+					var initErr error
+					if remoteClusterCapability.HasCollectionSupport() {
+						dcpStatsCh, initErr = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
+					} else {
+						dcpStatsCh, initErr = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
+					}
+					stopFunc()
+					if initErr == nil {
+						initDoneCh <- true
+					} else {
+						initDoneCh <- false
+					}
+					return initErr
 				}
-				if err != nil {
-					pipelineSupervisor.Logger().Errorf("Unable to unsubscribe from DcpStatsFeed: %v", err)
+				execErr := base.ExecWithTimeout(initMonitors, base.TimeoutRuntimeContextStart, pipelineSupervisor.Logger())
+				if execErr != nil {
+					pipelineSupervisor.setError(pipelineSupervisor.Id(), fmt.Errorf("Subscribing to bucketTopologySvc: %v", execErr))
+					// Don't exit - set the error and let Stop() gets called so clean up will ensue
+				}
+			case <-fin_ch:
+				pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped (originally started? %v)\n", pipelineSupervisor.Id(), initHasRun)
+				if initHasRun {
+					needToUnsubscribe := <-initDoneCh
+					if needToUnsubscribe {
+						stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_unSubscribeDcpStatsFeed", pipelineSupervisor), base.DiagInternalThreshold)
+						if remoteClusterCapability.HasCollectionSupport() {
+							err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
+						} else {
+							err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
+						}
+						stopFunc()
+						if err != nil {
+							pipelineSupervisor.Logger().Errorf("Unable to unsubscribe from DcpStatsFeed: %v", err)
+						}
+					}
 				}
 				return
 			case notification := <-dcpStatsCh:
