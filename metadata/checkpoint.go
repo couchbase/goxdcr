@@ -32,6 +32,7 @@ const (
 	SourceManifestForBackfillMgr string = "source_manifest_backfill_mgr"
 	TargetManifest               string = "target_manifest"
 	BrokenCollectionsMapSha      string = "brokenCollectionsMapSha256"
+	CreationTime                 string = "creationTime"
 )
 
 type CheckpointRecord struct {
@@ -60,6 +61,8 @@ type CheckpointRecord struct {
 	// Broken mapping (if any) associated with the checkpoint - this is populated automatically by checkpointsService
 	brokenMappings    CollectionNamespaceMapping
 	brokenMappingsMtx sync.RWMutex
+	// Epoch timestamp of when this record was created
+	CreationTime uint64 `json:"creationTime"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -84,7 +87,7 @@ func (c *CheckpointRecord) Size() int {
 	return totalSize
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed, srcManifestForDCP, srcManifestForBackfill, tgtManifest uint64, brokenMappings CollectionNamespaceMapping) (*CheckpointRecord, error) {
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed, srcManifestForDCP, srcManifestForBackfill, tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
 	record := &CheckpointRecord{
 		Failover_uuid:                failoverUuid,
 		Seqno:                        seqno,
@@ -97,6 +100,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		SourceManifestForBackfillMgr: srcManifestForBackfill,
 		TargetManifest:               tgtManifest,
 		brokenMappings:               brokenMappings,
+		CreationTime:                 creationTime,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -139,7 +143,8 @@ func (ckptRecord *CheckpointRecord) SameAs(new_record *CheckpointRecord) bool {
 		ckptRecord.SourceManifestForDCP == new_record.SourceManifestForDCP &&
 		ckptRecord.SourceManifestForBackfillMgr == new_record.SourceManifestForBackfillMgr &&
 		ckptRecord.TargetManifest == new_record.TargetManifest &&
-		ckptRecord.BrokenMappingSha256 == new_record.BrokenMappingSha256 {
+		ckptRecord.BrokenMappingSha256 == new_record.BrokenMappingSha256 &&
+		ckptRecord.CreationTime == new_record.CreationTime {
 		return true
 	} else {
 		return false
@@ -162,6 +167,7 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.SourceManifestForBackfillMgr = other.SourceManifestForBackfillMgr
 	ckptRecord.TargetManifest = other.TargetManifest
 	ckptRecord.LoadBrokenMapping(*other.BrokenMappings())
+	ckptRecord.CreationTime = other.CreationTime
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -244,6 +250,11 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	brokenMapSha, ok := fieldMap[BrokenCollectionsMapSha]
 	if ok {
 		ckptRecord.BrokenMappingSha256 = brokenMapSha.(string)
+	}
+
+	creationTime, ok := fieldMap[CreationTime]
+	if ok {
+		ckptRecord.CreationTime = uint64(creationTime.(float64))
 	}
 
 	return nil
