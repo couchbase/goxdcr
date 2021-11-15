@@ -298,8 +298,6 @@ function runTestCase {
 	sleep 20
 	startRebalancing "C1"
 
-	read -p "NEIL DEBUG verify"
-
 	echo "Cleaning up topology..."
 	restoreClusterBack "C1"
 }

@@ -884,6 +884,7 @@ func (xdcrf *XDCRFactory) CheckpointBeforeStop(pipeline common.Pipeline) error {
 	return nil
 }
 
+// genericPipeline.vbMasterCheckFunc
 func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error) {
 	if pipeline == nil {
 		return nil, errors.New("pipeline=nil")
@@ -899,17 +900,17 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	}
 	srcBucketName := spec.SourceBucketName
 
-	// Get a list of responsible VBs
-	var sourceVBs []uint16
-	for _, sourceNozzle := range pipeline.Sources() {
-		setOfVBs := sourceNozzle.ResponsibleVBs()
-		sourceVBs = append(sourceVBs, setOfVBs...)
+	// Filter out the list of VBs to only ones that we really need to pull
+	sourceVBs := xdcrf.preReplicationVBMasterFilter(pipeline)
+	if len(sourceVBs) == 0 {
+		// Error code text is close enough
+		return nil, base.ErrorNoBackfillNeeded
 	}
 
 	vbsReq := make(peerToPeer.BucketVBMapType)
 	vbsReq[srcBucketName] = sourceVBs
 
-	xdcrf.logger.Infof("Running VBMasterCheck for %v", pipeline.FullTopic())
+	xdcrf.logger.Infof("Running VBMasterCheck for %v with the following VBs: %v", pipeline.FullTopic(), sourceVBs)
 	respMap, rpcErr := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)
 	if rpcErr != nil {
 		// If err is because spec is deleted from under us or if it's paused, don't do anything and bail
@@ -1556,4 +1557,63 @@ func (xdcrf *XDCRFactory) MergePeerNodesCkptsResponse(pipeline common.Pipeline, 
 	settingsMap[base.NameKey] = pipeline.Topic()
 	settingsMap[peerToPeer.MergeBackfillKey] = resp
 	return backfillMgrPipelineSvc.UpdateSettings(settingsMap)
+}
+
+// Given a list of VBs, take out VBs that do not need to pull, and return that list
+func (xdcrf *XDCRFactory) preReplicationVBMasterFilter(pipeline common.Pipeline) []uint16 {
+	// Get a list of responsible VBs
+	var sourceVBs []uint16
+	dedupMap := make(map[uint16]bool)
+	for _, sourceNozzle := range pipeline.Sources() {
+		setOfVBs := sourceNozzle.ResponsibleVBs()
+		sourceVBs = append(sourceVBs, setOfVBs...)
+		for _, vbno := range setOfVBs {
+			dedupMap[vbno] = true
+		}
+	}
+
+	// TODO - MB-49503 - this needs to check backfill pipeline also in the future to ensure correctness
+	pipelineTopic := pipeline.Topic()
+
+	ckptDocs, err := xdcrf.checkpoint_svc.CheckpointsDocs(pipelineTopic, false)
+	if err != nil {
+		xdcrf.logger.Errorf("When pulling ckptDocs for %v - got err %v", pipelineTopic, err)
+		// claim that everything needs to be pulled
+		return sourceVBs
+	}
+
+	pushIntervalMinInt, ok := pipeline.Settings()[base.ReplicateCkptIntervalKey].(int)
+	if !ok {
+		pushIntervalMinInt = int(base.ReplicateCkptInterval.Minutes())
+	}
+	// Note: subtracting is adding a negative duration
+	expirationTimeUnix := time.Now().Add(-time.Duration(pushIntervalMinInt) * time.Minute).Unix()
+
+	for vbno, ckptDoc := range ckptDocs {
+		if _, isSourceVB := dedupMap[vbno]; !isSourceVB {
+			continue
+		}
+		if ckptDoc == nil {
+			continue
+		}
+		var latestTimestamp uint64
+		for _, ckptRecord := range ckptDoc.Checkpoint_records {
+			if ckptRecord == nil {
+				continue
+			}
+			if ckptRecord.CreationTime > latestTimestamp {
+				latestTimestamp = ckptRecord.CreationTime
+			}
+		}
+		if latestTimestamp > uint64(expirationTimeUnix) {
+			// The ckpt is valid - do not pull from others
+			delete(dedupMap, vbno)
+		}
+	}
+
+	var returnVBsList []uint16
+	for vbno, _ := range dedupMap {
+		returnVBsList = append(returnVBsList, vbno)
+	}
+	return returnVBsList
 }

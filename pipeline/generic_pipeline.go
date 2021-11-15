@@ -384,8 +384,9 @@ func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap)
 	stopRpcMeasurement := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v_vbMasterCheckFunc", genericPipeline.FullTopic()), genericPipeline.p2pVbMasterCheckTimeout)
 	resp, vbMasterCheckErr := genericPipeline.vbMasterCheckFunc(genericPipeline)
 	if vbMasterCheckErr != nil {
-		if vbMasterCheckErr == base.ErrorOpInterrupted {
+		if vbMasterCheckErr == base.ErrorOpInterrupted || vbMasterCheckErr == base.ErrorNoBackfillNeeded {
 			// Pipeline paused or repl deleted
+			stopRpcMeasurement()
 			return
 		}
 
