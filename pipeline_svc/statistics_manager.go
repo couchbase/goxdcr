@@ -114,6 +114,7 @@ type notificationReqOpt struct {
 //, then stores the result in expvar
 //The result in expvar can be exposed to outside via different channels - log or to ns_server.
 type StatisticsManager struct {
+	*component.AbstractComponent
 	//a map of registry with the part id as key
 	//the aggregated metrics for the pipeline is the entry with key="Overall"
 	//this map will be exported to expval, but only
@@ -135,6 +136,7 @@ type StatisticsManager struct {
 	finish_ch chan bool
 	done_ch   chan bool
 	wait_grp  *sync.WaitGroup
+	initDone  chan bool
 
 	pipeline common.Pipeline
 
@@ -171,9 +173,6 @@ type StatisticsManager struct {
 	highSeqnosIntervalUpdater    func(time.Duration)
 	highSeqnosIntervalUpdaterMtx sync.RWMutex
 
-	highSeqnosFeedUnsubscriberMtx sync.RWMutex
-	highSeqnosFeedUnsubscriber    func() error
-
 	// To be used by a single go-routine that calls processCalculatedStats
 	updateStatsOnceCachedVBList []uint16
 
@@ -181,9 +180,11 @@ type StatisticsManager struct {
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error)) *StatisticsManager {
+	localLogger := log.NewLogger(StatsMgrId, logger_ctx)
 	stats_mgr := &StatisticsManager{
+		AbstractComponent:         component.NewAbstractComponentWithLogger(StatsMgrId, localLogger),
 		registries:                make(map[string]metrics.Registry),
-		logger:                    log.NewLogger("StatsMgr", logger_ctx),
+		logger:                    localLogger,
 		bucket_name:               bucket_name,
 		finish_ch:                 make(chan bool, 1),
 		done_ch:                   make(chan bool, 1),
@@ -201,6 +202,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		bucketTopologySvc:         bucketTopologySvc,
 		replStatusGetter:          replStatusGetter,
 		latestNotificationReqCh:   make(chan notificationReqOpt, 100),
+		initDone:                  make(chan bool),
 	}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 
@@ -264,9 +266,11 @@ func (stats_mgr *StatisticsManager) setUpdateInterval(update_interval int) {
 	stats_mgr.highSeqnosIntervalUpdaterMtx.RLock()
 	if stats_mgr.highSeqnosIntervalUpdater != nil {
 		stats_mgr.highSeqnosIntervalUpdater(time.Duration(update_interval) * time.Millisecond)
+		stats_mgr.logger.Infof("%v set update interval to %v ms\n", stats_mgr.pipeline.InstanceId(), update_interval)
+	} else {
+		stats_mgr.logger.Warnf("%v unable to set update interval to %v ms because init isn't finished yet\n", stats_mgr.pipeline.InstanceId(), update_interval)
 	}
 	stats_mgr.highSeqnosIntervalUpdaterMtx.RUnlock()
-	stats_mgr.logger.Infof("%v set update interval to %v ms\n", stats_mgr.pipeline.InstanceId(), update_interval)
 }
 
 //updateStats runs until it get finish signal
@@ -658,6 +662,10 @@ func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedMainPipe
 	// Get throughSeqnoMap first to avoid negative stats
 	throughSeqnoMap := stats_mgr.GetThroughSeqnosFromTsService()
 
+	stats_mgr.waitForBucketTopologySvcSubscription() // getHighSeqnosAndSourceVBs() need to be set
+	if stats_mgr.getHighSeqnosAndSourceVBs == nil {
+		return 0, 0, nil, fmt.Errorf("initialization did not run")
+	}
 	highSeqnosMap, curKvVbMap, doneFunc := stats_mgr.getHighSeqnosAndSourceVBs()
 	defer doneFunc()
 	if highSeqnosMap == nil || curKvVbMap == nil {
@@ -895,15 +903,6 @@ func (stats_mgr *StatisticsManager) Stop() error {
 		stats_mgr.through_seqno_tracker_svc.PrintStatusSummary()
 	}
 
-	stats_mgr.highSeqnosFeedUnsubscriberMtx.RLock()
-	if stats_mgr.highSeqnosFeedUnsubscriber != nil {
-		err := stats_mgr.highSeqnosFeedUnsubscriber()
-		if err != nil {
-			stats_mgr.logger.Warnf("%v Unsubscribing feed resulted in %v", stats_mgr.pipeline.InstanceId(), err)
-		}
-	}
-	stats_mgr.highSeqnosFeedUnsubscriberMtx.RUnlock()
-
 	stats_mgr.wait_grp.Wait()
 	stats_mgr.logger.Infof("%v StatisticsManager Stopped", stats_mgr.pipeline.InstanceId())
 
@@ -922,60 +921,103 @@ func (stats_mgr *StatisticsManager) initDataFeeds() error {
 	}
 	stats_mgr.cachedCapability = rcCapability
 
-	var features utilities.HELOFeatures
-	var updater func(duration time.Duration)
-	if !rcCapability.HasCollectionSupport() {
-		// If remote cluster does not support collection, then only get stats for default collection
-		// This is reverse logic because to only get stat for the default collection, we need to enable collection
-		// so we can ask specifically for a subset, aka the default collection
-		features.Collections = true
-		stats_mgr.highSeqnosFeedUnsubscriberMtx.Lock()
-		stats_mgr.highSeqnosDcpCh, updater, err = stats_mgr.bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, stats_mgr.pipeline.InstanceId(), stats_mgr.getUpdateInterval())
-		if err != nil {
-			stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
-			return err
-		}
-		stats_mgr.highSeqnosFeedUnsubscriber = func() error {
-			return stats_mgr.bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec, stats_mgr.pipeline.InstanceId())
-		}
-		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
+	stats_mgr.wait_grp.Add(1)
+	go stats_mgr.subscribeToBucketTopologySvc(rcCapability, spec)
 
-		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType, func()) {
-			latestNotification := stats_mgr.getNotification()
-			if latestNotification == nil {
-				// StatsMgr stopped
-				return nil, nil, func() {}
-			}
-			return latestNotification.GetHighSeqnosMapLegacy(), latestNotification.GetSourceVBMapRO(), latestNotification.Recycle
-		}
-	} else {
-		stats_mgr.highSeqnosFeedUnsubscriberMtx.Lock()
-		stats_mgr.highSeqnosDcpCh, updater, err = stats_mgr.bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, stats_mgr.pipeline.InstanceId(), stats_mgr.getUpdateInterval())
-		if err != nil {
-			stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
-			return err
-		}
-		stats_mgr.highSeqnosFeedUnsubscriber = func() error {
-			return stats_mgr.bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, stats_mgr.pipeline.InstanceId())
-		}
-		stats_mgr.highSeqnosFeedUnsubscriberMtx.Unlock()
-
-		stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType, func()) {
-			latestNotification := stats_mgr.getNotification()
-			if latestNotification == nil {
-				// StatsMgr stopped
-				return nil, nil, func() {}
-			}
-			return latestNotification.GetHighSeqnosMap(), latestNotification.GetSourceVBMapRO(), latestNotification.Recycle
-		}
-	}
-
+	stats_mgr.wait_grp.Add(1)
 	go stats_mgr.watchNotificationCh()
-	stats_mgr.highSeqnosIntervalUpdaterMtx.Lock()
-	stats_mgr.highSeqnosIntervalUpdater = updater
-	stats_mgr.highSeqnosIntervalUpdaterMtx.Unlock()
 
 	return nil
+}
+
+func (stats_mgr *StatisticsManager) waitForBucketTopologySvcSubscription() {
+	select {
+	case <-stats_mgr.finish_ch:
+		return
+	case <-stats_mgr.initDone:
+		return
+	}
+}
+
+func (stats_mgr *StatisticsManager) subscribeToBucketTopologySvc(rcCapability metadata.Capability, spec *metadata.ReplicationSpecification) {
+	defer stats_mgr.wait_grp.Done()
+
+	var initSubscribeErr error
+	var updater func(duration time.Duration)
+	initCh := make(chan bool, 1)
+	initCh <- true
+	var initHasRun bool
+	subscribedCh := make(chan bool, 1)
+
+	for {
+		select {
+		case <-initCh:
+			initHasRun = true
+			subscribeFunc := func() error {
+				stopFunc := stats_mgr.utils.StartDiagStopwatch(fmt.Sprintf("%v_subscribeHighSeqno", stats_mgr.pipeline.InstanceId()), base.DiagInternalThreshold)
+				if !rcCapability.HasCollectionSupport() {
+					// If remote cluster does not support collection, then only get stats for default collection
+					// This is reverse logic because to only get stat for the default collection, we need to enable collection
+					// so we can ask specifically for a subset, aka the default collection
+					stats_mgr.highSeqnosDcpCh, updater, initSubscribeErr = stats_mgr.bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, stats_mgr.pipeline.InstanceId(), stats_mgr.getUpdateInterval())
+					stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType, func()) {
+						latestNotification := stats_mgr.getNotification()
+						if latestNotification == nil {
+							// StatsMgr stopped
+							return nil, nil, func() {}
+						}
+						return latestNotification.GetHighSeqnosMapLegacy(), latestNotification.GetSourceVBMapRO(), latestNotification.Recycle
+					}
+				} else {
+					stats_mgr.highSeqnosDcpCh, updater, initSubscribeErr = stats_mgr.bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, stats_mgr.pipeline.InstanceId(), stats_mgr.getUpdateInterval())
+					stats_mgr.getHighSeqnosAndSourceVBs = func() (base.HighSeqnosMapType, base.KvVBMapType, func()) {
+						latestNotification := stats_mgr.getNotification()
+						if latestNotification == nil {
+							// StatsMgr stopped
+							return nil, nil, func() {}
+						}
+						return latestNotification.GetHighSeqnosMap(), latestNotification.GetSourceVBMapRO(), latestNotification.Recycle
+					}
+				}
+				stopFunc()
+				if initSubscribeErr == nil {
+					subscribedCh <- true
+					stats_mgr.highSeqnosIntervalUpdaterMtx.Lock()
+					stats_mgr.highSeqnosIntervalUpdater = updater
+					stats_mgr.highSeqnosIntervalUpdaterMtx.Unlock()
+				} else {
+					subscribedCh <- false
+				}
+				close(stats_mgr.initDone)
+				return initSubscribeErr
+			}
+			execErr := base.ExecWithTimeout(subscribeFunc, base.TimeoutRuntimeContextStart, stats_mgr.Logger())
+			if execErr != nil {
+				stats_mgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, stats_mgr, nil, fmt.Errorf("Subscribing to bucketTopologySvc: %v", execErr)))
+				// Don't exit - set the error and let Stop() gets called so clean up will ensue
+			}
+		case <-stats_mgr.finish_ch:
+			if initHasRun {
+				select {
+				case shouldUnSub := <-subscribedCh:
+					if shouldUnSub {
+						stopFunc := stats_mgr.utils.StartDiagStopwatch(fmt.Sprintf("%v_UnSubscribeHighSeqno", stats_mgr.pipeline.InstanceId()), base.DiagInternalThreshold)
+						var unSubErr error
+						if !rcCapability.HasCollectionSupport() {
+							unSubErr = stats_mgr.bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec, stats_mgr.pipeline.InstanceId())
+						} else {
+							unSubErr = stats_mgr.bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, stats_mgr.pipeline.InstanceId())
+						}
+						if unSubErr != nil {
+							stats_mgr.logger.Warnf("%v Unsubscribing feed resulted in %v", stats_mgr.pipeline.InstanceId(), unSubErr)
+						}
+						stopFunc()
+					}
+				}
+			}
+			return
+		}
+	}
 }
 
 func (stats_mgr *StatisticsManager) getNotification() service_def.SourceNotification {
@@ -992,6 +1034,8 @@ func (stats_mgr *StatisticsManager) getNotification() service_def.SourceNotifica
 }
 
 func (stats_mgr *StatisticsManager) watchNotificationCh() {
+	defer stats_mgr.wait_grp.Done()
+	stats_mgr.waitForBucketTopologySvcSubscription()
 	for {
 		select {
 		case <-stats_mgr.finish_ch:

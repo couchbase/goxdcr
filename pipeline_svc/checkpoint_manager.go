@@ -36,6 +36,7 @@ import (
 const (
 	XDCRCheckpointing string = "xdcrCheckpointing"
 	CheckpointMgrId   string = "CheckpointMgr"
+	StatsMgrId        string = "StatsMgr"
 	TimeCommiting     string = "time_commiting"
 	Vbno              string = "vbno"
 )

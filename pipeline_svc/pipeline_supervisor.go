@@ -196,7 +196,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 			select {
 			case <-initCh:
 				pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started with interval: %v", pipelineSupervisor.Id(), base.HealthCheckInterval)
-				stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_subscribeDcpStatsFeed", pipelineSupervisor), base.DiagInternalThreshold)
+				stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_subscribeDcpStatsFeed", pipelineSupervisor.pipeline.InstanceId()), base.DiagInternalThreshold)
 				initHasRun = true
 				initMonitors := func() error {
 					var initErr error
@@ -223,7 +223,7 @@ func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
 				if initHasRun {
 					needToUnsubscribe := <-initDoneCh
 					if needToUnsubscribe {
-						stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_unSubscribeDcpStatsFeed", pipelineSupervisor), base.DiagInternalThreshold)
+						stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_unSubscribeDcpStatsFeed", pipelineSupervisor.pipeline.InstanceId()), base.DiagInternalThreshold)
 						if remoteClusterCapability.HasCollectionSupport() {
 							err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
 						} else {
