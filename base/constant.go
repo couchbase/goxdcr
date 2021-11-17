@@ -1060,6 +1060,7 @@ const FilterExpDelKey = "filter_exp_del"
 const FilterExpKey = "filterExpiration"
 const FilterDelKey = "filterDeletion"
 const BypassExpiryKey = "filterBypassExpiry"
+const BypassUncommittedTxnKey = "filterBypassUncommittedTxn"
 
 // UI+ns_server returned document content, keyed by special keys
 const (

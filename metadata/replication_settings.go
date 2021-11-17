@@ -41,12 +41,13 @@ const (
 	// the unit for backlogThreshold is millisecond
 	// the default value is 1000 (millisecond)
 	BacklogThresholdKey = "backlogThreshold"
-	// FilterExpDelKey is a combination flag of the 3 below it
+	// FilterExpDelKey is a combination flag of the keys below it
 	FilterExpDelKey = base.FilterExpDelKey
-	// These 3 are used for REST input/output into an internal flag of FilterExpDelKey
-	FilterExpKey    = base.FilterExpKey
-	FilterDelKey    = base.FilterDelKey
-	BypassExpiryKey = base.BypassExpiryKey
+	// These keys are used for REST input/output into an internal flag of FilterExpDelKey
+	FilterExpKey            = base.FilterExpKey
+	FilterDelKey            = base.FilterDelKey
+	BypassExpiryKey         = base.BypassExpiryKey
+	BypassUncommittedTxnKey = base.BypassUncommittedTxnKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -70,6 +71,7 @@ var MultiValueMap map[string]string = map[string]string{
 	FilterExpKey:    FilterExpDelKey,
 	FilterDelKey:    FilterExpDelKey,
 	BypassExpiryKey: FilterExpDelKey,
+	BypassUncommittedTxnKey:  FilterExpDelKey,
 }
 
 var MaxBatchCount = 10000
@@ -96,7 +98,7 @@ var BandwidthLimitConfig = &SettingsConfig{0, &Range{0, 1000000}}
 var CompressionTypeConfig = &SettingsConfig{base.CompressionTypeAuto, &Range{base.CompressionTypeStartMarker + 1, base.CompressionTypeEndMarker - 1}}
 var PriorityConfig = &SettingsConfig{base.PriorityTypeHigh, nil}
 var BacklogThresholdConfig = &SettingsConfig{base.BacklogThresholdDefault, &Range{10, 10000000}}
-var FilterExpDelConfig = &SettingsConfig{base.FilterExpDelNone, &Range{int(base.FilterExpDelNone), int(base.FilterExpDelAll)}}
+var FilterExpDelConfig = &SettingsConfig{base.FilterExpDelNone, &Range{int(base.FilterExpDelNone), int(base.FilterExpDelMax)}}
 
 // Set to keyOnly as default because prior to adv filtering, this config did not exist
 var FilterVersionConfig = &SettingsConfig{base.FilterVersionKeyOnly, nil}
@@ -266,6 +268,8 @@ func (r *ReplicationMultiValueHelper) handleFilterExpDelKey(curConfig base.Filte
 		curConfig.SetSkipDeletes(boolVal)
 	case BypassExpiryKey:
 		curConfig.SetStripExpiration(boolVal)
+	case BypassUncommittedTxnKey:
+		curConfig.SetSkipReplicateUncommittedTxn(boolVal)
 	}
 	retVal = curConfig
 	return
@@ -287,6 +291,9 @@ func (r *ReplicationMultiValueHelper) handleFilterExpDelKeyImport(s *Replication
 	}
 	if val, ok := r.flagKeyIssued[BypassExpiryKey]; ok {
 		curVal.SetStripExpiration(val)
+	}
+	if val, ok := r.flagKeyIssued[BypassUncommittedTxnKey]; ok {
+		curVal.SetSkipReplicateUncommittedTxn(val)
 	}
 
 	sm[FilterExpDelKey] = curVal
@@ -442,6 +449,7 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 func (s *ReplicationSettings) exportFlagTypeValues() {
 	expDelMode := s.GetExpDelMode()
 	s.Values[BypassExpiryKey] = expDelMode.IsStripExpirationSet()
+	s.Values[BypassUncommittedTxnKey] = expDelMode.IsSkipReplicateUncommittedTxnSet()
 	s.Values[FilterExpKey] = expDelMode.IsSkipExpirationSet()
 	s.Values[FilterDelKey] = expDelMode.IsSkipDeletesSet()
 }

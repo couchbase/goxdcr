@@ -85,7 +85,7 @@ type Router struct {
  * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
  * 3+ Rest should be relatively obv
  */
-func NewRouter(id string, topic string, filterExpression string,
+func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	downStreamParts map[string]common.Part,
 	routingMap map[uint16]string,
 	sourceCRMode base.ConflictResolutionMode,
@@ -98,7 +98,15 @@ func NewRouter(id string, topic string, filterExpression string,
 	var err error
 	var filterPrintMsg string = "<nil>"
 
-	filter, err = NewFilter(id, filterExpression, utilsIn)
+	topic := spec.Id
+	filterExpression, ok := spec.Settings.Values[metadata.FilterExpressionKey].(string)
+	if !ok {
+		// No filterExpression
+		filterExpression = ""
+	}
+
+	expDelMode := spec.Settings.GetExpDelMode()
+	filter, err = NewFilter(id, filterExpression, utilsIn, expDelMode.IsSkipReplicateUncommittedTxnSet())
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +310,7 @@ func (router *Router) updateExpDelMode(expDelModeObj interface{}) error {
 	router.Logger().Infof("Router %v's Deletion/Expiration filter method: %v\n", router.id, expDelMode.LogString())
 
 	router.expDelMode.Set(expDelMode)
+	router.filter.SetShouldSkipUncommittedTxn(expDelMode.IsSkipReplicateUncommittedTxnSet())
 	return nil
 }
 

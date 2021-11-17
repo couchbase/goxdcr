@@ -16,6 +16,7 @@ import (
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"sync/atomic"
 )
 
 type FilterIface interface {
@@ -25,6 +26,8 @@ type FilterIface interface {
 	// 3. If err is not nil, additional description
 	// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
 	FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64)
+
+	SetShouldSkipUncommittedTxn(val bool)
 }
 
 const collateErrDesc = " Collate was used to determine outcome"
@@ -38,9 +41,10 @@ type Filter struct {
 	dp                       utilities.DataPoolIface
 	flags                    base.FilterFlagType
 	slicesToBeReleasedBuf    [][]byte
+	skipUncommittedTxn       uint32
 }
 
-func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (*Filter, error) {
+func NewFilter(id string, filterExpression string, utils utilities.UtilsIface, skipUncommittedTxn bool) (*Filter, error) {
 	dpPtr := utilities.NewDataPool()
 	if dpPtr == nil {
 		return nil, base.ErrorNoDataPool
@@ -51,6 +55,10 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 		utils:                 utils,
 		dp:                    dpPtr,
 		slicesToBeReleasedBuf: make([][]byte, 0, 2),
+	}
+
+	if skipUncommittedTxn {
+		filter.skipUncommittedTxn = 1
 	}
 
 	if len(filterExpression) == 0 {
@@ -83,6 +91,22 @@ func NewFilter(id string, filterExpression string, utils utilities.UtilsIface) (
 	}
 
 	return filter, nil
+}
+
+func (filter *Filter) GetInternalExpr() string {
+	return filter.filterExpressionInternal
+}
+
+func (filter *Filter) ShouldSkipUncommittedTxn() bool {
+	return atomic.LoadUint32(&filter.skipUncommittedTxn) > 0
+}
+
+func (filter *Filter) SetShouldSkipUncommittedTxn(val bool) {
+	if val {
+		atomic.StoreUint32(&filter.skipUncommittedTxn, 1)
+	} else {
+		atomic.StoreUint32(&filter.skipUncommittedTxn, 0)
+	}
 }
 
 func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64) {
@@ -166,8 +190,12 @@ func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, s
 		return false, nil, 0, err, errDesc, failedDpCnt
 	}
 
-	// if mutation has transaction xattrs, do not replicate it
-	return !hasTransXattrs, body, endBodyPos, nil, "", failedDpCnt
+	passedFilter := true
+	if filter.ShouldSkipUncommittedTxn() {
+		// if mutation has transaction xattrs, do not replicate it
+		passedFilter = !hasTransXattrs
+	}
+	return passedFilter, body, endBodyPos, nil, "", failedDpCnt
 }
 
 // Passed in body, if not nil, is a decompressed byte slice produced by earlier processing steps

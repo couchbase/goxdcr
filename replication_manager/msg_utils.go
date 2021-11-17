@@ -76,6 +76,7 @@ const (
 	FilterExpKey                   = "filterExpiration"
 	FilterDelKey                   = "filterDeletion"
 	BypassExpiryKey                = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
+	BypassUncommittedTxnKey        = base.BypassUncommittedTxnKey
 )
 
 // constants for parsing create replication response
@@ -155,6 +156,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterExpKey:                   metadata.FilterExpKey,
 	FilterDelKey:                   metadata.FilterDelKey,
 	BypassExpiryKey:                metadata.BypassExpiryKey,
+	BypassUncommittedTxnKey:        metadata.BypassUncommittedTxnKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -182,6 +184,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterExpKey:                      FilterExpKey,
 	metadata.FilterDelKey:                      FilterDelKey,
 	metadata.BypassExpiryKey:                   BypassExpiryKey,
+	metadata.BypassUncommittedTxnKey:           BypassUncommittedTxnKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

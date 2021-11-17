@@ -211,14 +211,14 @@ func TestRouterExpDelAllMode(t *testing.T) {
 	fmt.Println("============== Test case start: TestRouterExpDelAllMode =================")
 	assert := assert.New(t)
 
-	routerId, topic, filterExpression, downStreamParts,
+	routerId, _, _, downStreamParts,
 		routingMap, crMode, loggerCtx,
 		req_creater, utilsMock, throughputThrottlerSvc,
 		needToThrottle, expDelMode := setupBoilerPlateRouter()
 
 	expDelMode = base.FilterExpDelAll
 
-	router, err := NewRouter(routerId, topic, filterExpression, downStreamParts,
+	router, err := NewRouter(routerId, nil /* nil spec breaks test*/, downStreamParts,
 		routingMap, crMode, loggerCtx, req_creater, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode)
 
 	assert.Nil(err)

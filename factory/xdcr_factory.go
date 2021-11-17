@@ -531,7 +531,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
-	router, err := parts.NewRouter(routerId, spec.Id, spec.Settings.FilterExpression, downStreamParts, vbNozzleMap, sourceCRMode,
+	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode,
 		logger_ctx, pipeline_manager.NewMCRequestObj, xdcrf.utils, xdcrf.throughput_throttler_svc,
 		spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode())
 	if err != nil {
