@@ -756,10 +756,10 @@ func (ckpt_svc *CheckpointsService) handleManifestsChange(spec *metadata.Replica
 	}
 
 	// Only need to handle source changes
-	_, _, removed, err := newManifests.Source.Diff(oldManifests.Source)
-	if err != nil {
-		ckpt_svc.logger.Errorf("Unable to diff between manifests %v and %v", oldManifests.Source.Uid(), newManifests.Source.Uid())
-		return err
+	_, _, removed, diffErr := newManifests.Source.Diff(oldManifests.Source)
+	if diffErr != nil {
+		ckpt_svc.logger.Errorf("Unable to diff between manifests %v and %v: %v", oldManifests.Source.Uid(), newManifests.Source.Uid(), diffErr)
+		return diffErr
 	}
 
 	if len(removed) == 0 {
@@ -767,33 +767,33 @@ func (ckpt_svc *CheckpointsService) handleManifestsChange(spec *metadata.Replica
 	}
 
 	// If there are source namespaces that are removed, then any of the mappings need to be removed as well
-	changed, err := ckpt_svc.removeMappingFromCkptDocs(spec.Id, spec.InternalId, removed)
+	changed, mainRemoveErr := ckpt_svc.removeMappingFromCkptDocs(spec.Id, spec.InternalId, removed)
 	if changed {
 		ckpt_svc.logger.Infof("Replication %v checkpoints mapping changed due to collections manifest changes", spec.Id)
 	}
-	if err != nil {
-		ckpt_svc.logger.Warnf("Unable to remove mappings %v from ckpt docs due to err %v", removed.String(), err)
+	if mainRemoveErr != nil {
+		ckpt_svc.logger.Warnf("%v Unable to remove mappings %v from ckpt docs due to err %v", spec.Id, removed.String(), mainRemoveErr)
 	}
 
 	// Do the same for any checkpoints related to backfill replication
-	backfillSpec, err2 := ckpt_svc.getBackfillReplSpec(spec.Id)
-	if err2 == nil && backfillSpec != nil {
+	var backfillRemoveErr error
+	backfillSpec, backfillFoundErr := ckpt_svc.getBackfillReplSpec(spec.Id)
+	if backfillFoundErr == nil && backfillSpec != nil {
 		backfillSpecId := base.CompileBackfillPipelineSpecId(spec.Id)
-		changed, err2 := ckpt_svc.removeMappingFromCkptDocs(backfillSpecId, backfillSpec.InternalId, removed)
+		changed, backfillRemoveErr = ckpt_svc.removeMappingFromCkptDocs(backfillSpecId, backfillSpec.InternalId, removed)
 		if changed {
 			ckpt_svc.logger.Infof("Backfill Replication %v checkpoints mapping changed due to collections manifest changes", backfillSpecId)
 		}
-		if err2 != nil {
-			ckpt_svc.logger.Warnf("Unable to remove mappings %v from backfill ckpt docs due to err %v", removed.String(), err2)
+		if backfillRemoveErr != nil {
+			ckpt_svc.logger.Warnf("%v Unable to remove mappings %v from backfill ckpt docs due to err %v", spec.Id, removed.String(), backfillRemoveErr)
 		}
 	}
-	if err != nil {
-		return err
-	} else if err2 != nil {
-		return err2
-	} else {
-		return nil
+
+	if mainRemoveErr != nil || backfillRemoveErr != nil {
+		return fmt.Errorf("CkptSvc %v Removing mapping from main pipeline: %v from backfillPipeline: %v", spec.Id, mainRemoveErr, backfillRemoveErr)
 	}
+
+	return nil
 }
 
 func (ckpt_svc *CheckpointsService) GetCkptsMappingsCleanupCallback(specId, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {

@@ -956,7 +956,7 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 			a.srcMtx.RUnlock()
 			a.srcMtx.Lock()
 		}
-		a.logger.Infof("CollectionsManifestAgent: Updated source manifest from old version %v to new version %v\n", a.lastTargetPull, manifest.Uid())
+		a.logger.Infof("CollectionsManifestAgent: Updated source manifest from old version %v to new version %v\n", a.lastSourcePull, manifest.Uid())
 		oldManifest, ok = a.sourceCache[a.lastSourcePull]
 		a.lastSourcePull = manifest.Uid()
 		a.sourceCache[manifest.Uid()] = manifest
