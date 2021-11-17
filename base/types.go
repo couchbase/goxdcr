@@ -1099,7 +1099,7 @@ const (
 	filterExpDelStripN              = 0
 	filterExpDelSkipDelN            = 1
 	filterExpDelSkipExpN            = 2
-	filterExpDelSkipUncommittedTxnN = 4
+	filterExpDelSkipUncommittedTxnN = 3
 )
 
 var FilterExpDelNone FilterExpDelType = 0x0
