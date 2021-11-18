@@ -48,7 +48,8 @@ type TopologyChangeDetectorSvc struct {
 	target_topology_stable_count int
 	// list of vbs managed by the current node when pipeline was first started
 	// used for source topology change detection
-	vblist_original []uint16
+	vblist_original        []uint16
+	vblistOriginalInitDone chan bool
 	// list of vbs managed by the current node in the last topology change check time
 	// used for source topology change detection
 	vblist_last []uint16
@@ -83,16 +84,17 @@ type TopologyChangeDetectorSvc struct {
 func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc) *TopologyChangeDetectorSvc {
 	logger := log.NewLogger("TopoChangeDet", logger_ctx)
 	return &TopologyChangeDetectorSvc{xdcr_topology_svc: xdcr_topology_svc,
-		remote_cluster_svc: remote_cluster_svc,
-		repl_spec_svc:      repl_spec_svc,
-		AbstractComponent:  comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),
-		finish_ch:          make(chan bool, 1),
-		wait_grp:           &sync.WaitGroup{},
-		logger:             logger,
-		vblist_last:        make([]uint16, 0),
-		httpsAddrMap:       make(map[string]string),
-		utils:              utilsIn,
-		bucketTopologySvc:  bucketTopologySvc,
+		remote_cluster_svc:     remote_cluster_svc,
+		repl_spec_svc:          repl_spec_svc,
+		AbstractComponent:      comp.NewAbstractComponentWithLogger("TopoChangeDet", logger),
+		finish_ch:              make(chan bool, 1),
+		wait_grp:               &sync.WaitGroup{},
+		logger:                 logger,
+		vblist_last:            make([]uint16, 0),
+		httpsAddrMap:           make(map[string]string),
+		utils:                  utilsIn,
+		bucketTopologySvc:      bucketTopologySvc,
+		vblistOriginalInitDone: make(chan bool),
 	}
 }
 
@@ -469,6 +471,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 	//initialize source vb list to set up a baseline for source topology change detection
 	top_detect_svc.vblist_original = pipeline_utils.GetSourceVBListPerPipeline(mainPipeline)
 	base.SortUint16List(top_detect_svc.vblist_original)
+	close(top_detect_svc.vblistOriginalInitDone)
 
 	go func() {
 		for {
@@ -547,7 +550,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 	// Init with initial info
 	firstNotification := <-targetVbUpdateCh
 	target_server_vb_map := firstNotification.GetTargetServerVBMap()
+
+	// Wait for vblistOriginal to be done first
 	// monitorSource must have had occurred first already
+	<-top_detect_svc.vblistOriginalInitDone
 	top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
 
 	go func() {
