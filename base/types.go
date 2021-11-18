@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
 	mrand "math/rand"
 	"reflect"
 	"sync"
@@ -95,10 +96,12 @@ type ErrorInfo struct {
 }
 
 type WrappedMCRequest struct {
-	Seqno      uint64
-	Req        *gomemcached.MCRequest
-	Start_time time.Time
-	UniqueKey  string
+	Seqno                      uint64
+	Req                        *gomemcached.MCRequest
+	Start_time                 time.Time
+	UniqueKey                  string
+	SlicesToBeReleasedByRouter [][]byte
+	SlicesToBeReleasedMtx      sync.Mutex
 }
 
 func (req *WrappedMCRequest) ConstructUniqueKey() {
@@ -531,6 +534,165 @@ func (a FilterExpDelType) LogString() string {
 		a&FilterSkipReplUncommittedTxn > 0)
 }
 
+func GetXattrSize(body []byte) (uint32, error) {
+	if len(body) < 4 {
+		return 0, fmt.Errorf("body is too short to contain valid xattrs")
+	}
+	xattrSize := binary.BigEndian.Uint32(body[0:4])
+	// Couchbase doc size is max of 20MB. Xattribute count against this limit.
+	// So if total xattr size is greater than this limit, then something is wrong
+	if xattrSize > MaxDocSizeByte {
+		return 0, fmt.Errorf("xattrs size %v exceeds max doc size", xattrSize)
+	}
+	return xattrSize, nil
+}
+
+// NOTE: Assumes that Xattribute is present
+func StripXattrAndGetBody(bodyWithXattr []byte) ([]byte, error) {
+	xattrSize, err := GetXattrSize(bodyWithXattr)
+	if err != nil {
+		return nil, err
+	}
+	return bodyWithXattr[xattrSize+4:], nil
+}
+
+// An xattribute composer will compose given xattr key value pairs, and then format it properly
+// prior to attaching the rest of the document body/value
+type XattrComposer struct {
+	// Precompiled length slice of data to include
+	// - Xattr section
+	// - Document Value after the Xattr section
+	body []byte
+
+	// cursor
+	pos int
+
+	rawMode         composerMode
+	rawModeStartPos int
+
+	atLeastOneXattr bool
+}
+
+type composerMode int
+
+var errComposerIncorrectMode = fmt.Errorf("composer is in an incorrect mode for this operation")
+
+const (
+	compNonRawMode    composerMode = iota
+	compKeyMode       composerMode = iota
+	compValueMode     composerMode = iota
+	compValueDoneMode composerMode = iota
+)
+
+func NewXattrComposer(dst []byte) *XattrComposer {
+	return &XattrComposer{
+		body: dst,
+		pos:  4, /* Start at 4 since first uint32 indicates size for entire xattr section */
+	}
+}
+
+// Raw composer is used in the middle of an xattr such as for testing
+func NewXattrRawComposer(dst []byte) *XattrComposer {
+	return &XattrComposer{
+		body: dst,
+		pos:  0,
+	}
+}
+
+func (x *XattrComposer) WriteKV(key, value []byte) error {
+	if x.rawMode != compNonRawMode {
+		return errComposerIncorrectMode
+	}
+	x.atLeastOneXattr = true
+	WriteXattrKVPair(x.body, key, value, &x.pos)
+	return nil
+}
+
+// Note - The destination must be big enough
+func WriteXattrKVPair(dst, key, value []byte, pos *int) {
+	// Two bytes are for the '\x00' below
+	binary.BigEndian.PutUint32(dst[*pos:*pos+4], uint32(len(key)+len(value)+2))
+	*pos = *pos + 4
+	copy(dst[*pos:*pos+len(key)], key)
+	*pos = *pos + len(key)
+	dst[*pos] = '\x00'
+	*pos++
+	copy(dst[*pos:*pos+len(value)], value)
+	*pos = *pos + len(value)
+	dst[*pos] = '\x00'
+	*pos++
+}
+
+// Raw mode allows Key and Values to be written in sequence and then calculate the size of the KV pair
+// at the end once both K and V have been written
+func (x *XattrComposer) StartRawMode() error {
+	if x.rawMode != compNonRawMode {
+		return errComposerIncorrectMode
+	}
+	x.rawMode = compKeyMode
+
+	// Reserve the first 4 bytes for total length of the xattribute once value is committed
+	x.rawModeStartPos = x.pos
+	x.pos += 4
+	return nil
+}
+
+func (x *XattrComposer) RawWriteKey(key []byte) error {
+	if x.rawMode != compKeyMode {
+		return errComposerIncorrectMode
+	}
+
+	x.atLeastOneXattr = true
+	copy(x.body[x.pos:x.pos+len(key)], key)
+	x.pos += len(key)
+	x.body[x.pos] = '\x00'
+	x.pos++
+	x.rawMode = compValueMode
+	return nil
+}
+
+// Allow the caller to gain access to destination slice and position pointer
+// Caller must increment the position pointer appropriately
+func (x *XattrComposer) RawHijackValue() (body []byte, pos *int, err error) {
+	if x.rawMode != compValueMode {
+		return nil, nil, errComposerIncorrectMode
+	}
+	x.rawMode = compValueDoneMode
+
+	return x.body, &x.pos, nil
+}
+
+func (x *XattrComposer) CommitRawKVPair() (int, error) {
+	if x.rawMode != compValueDoneMode {
+		return -1, errComposerIncorrectMode
+	}
+
+	x.body[x.pos] = '\x00'
+	x.pos++
+
+	// Now, knowing key and value size, mark the beginning
+	binary.BigEndian.PutUint32(x.body[x.rawModeStartPos:x.rawModeStartPos+4], uint32(x.pos-(x.rawModeStartPos+4)))
+	x.rawMode = compNonRawMode
+
+	return x.pos, nil
+}
+
+// Once all the Xattributes are finished, calculate the whole xattr section and append doc value
+// Remember to set Xattr flag
+func (x *XattrComposer) FinishAndAppendDocValue(val []byte) []byte {
+	if !x.atLeastOneXattr {
+		// No xattr written - do not do anything
+		copy(x.body[0:len(val)], val)
+		return x.body[0:len(val)]
+	}
+
+	// Write the entire Xattr size at the beginning of body
+	binary.BigEndian.PutUint32(x.body[0:4], uint32(x.pos-4))
+	copy(x.body[x.pos:], val)
+	x.pos = x.pos + len(val)
+	return x.body[0:x.pos]
+}
+
 type XattrIterator struct {
 	body []byte
 	// end position of xattrs
@@ -644,4 +806,38 @@ func (list_obj *SortedSeqnoListWithLock) TruncateSeqnos(through_seqno uint64) {
 	} else if index > 0 {
 		list_obj.seqno_list = seqno_list[index:]
 	}
+}
+
+type WrappedUprEvent struct {
+	UprEvent          *mcc.UprEvent
+	Flags             WrappedUprEventFlag
+	ByteSliceGetter   func(uint64) ([]byte, error)
+	DecompressedValue []byte
+}
+
+type WrappedUprEventFlag uint64
+
+const (
+	WrappedUprCollectionDNE        = 0x1 // Not used - backported from 7.0+
+	WrappedUprValueUseDecompressed = 0x2
+)
+
+func (w WrappedUprEventFlag) IsSet() bool {
+	return uint64(w) > uint64(0)
+}
+
+func (w WrappedUprEventFlag) CollectionDNE() bool {
+	return w&WrappedUprCollectionDNE > 0
+}
+
+func (w *WrappedUprEventFlag) SetCollectionDNE() {
+	*w |= WrappedUprCollectionDNE
+}
+
+func (w WrappedUprEventFlag) ShouldUseDecompressedValue() bool {
+	return w&WrappedUprValueUseDecompressed > 0
+}
+
+func (w *WrappedUprEventFlag) SetShouldUseDecompressedValue() {
+	*w |= WrappedUprValueUseDecompressed
 }

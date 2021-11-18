@@ -26,4 +26,6 @@ type Connector interface {
 	AddDownStream(partId string, part Part) error
 
 	UpdateSettings(settings metadata.ReplicationSettingsMap) error
+
+	GetUpstreamObjRecycler() func(obj interface{})
 }

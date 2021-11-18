@@ -16,6 +16,7 @@ import (
 type ExponentialOpFunc func() error
 type ExponentialOpFunc2 func(interface{}) (interface{}, error)
 type ReleaseMemFunc func()
+type RecycleObjFunc func(obj interface{})
 
 type HELOFeatures struct {
 	Xattribute      bool
@@ -38,7 +39,7 @@ type UtilsIface interface {
 	GetMemcachedSSLPortMap(hostName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, bucket string, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error)
 	GetMemcachedRawConn(serverAddr, username, password, bucketName string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
 	ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, body []byte, endBodyPos int, dp DataPoolIface, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64)
-	CheckForTransactionXattrsInUprEvent(uprEvent *mcc.UprEvent, dp DataPoolIface, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64)
+	CheckForTransactionXattrsInUprEvent(uprEvent *mcc.UprEvent, dp DataPoolIface, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte)
 	/**
 	 * ------------------------
 	 * Local-Cluster Utilities

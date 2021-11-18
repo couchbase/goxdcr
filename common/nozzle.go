@@ -9,8 +9,6 @@
 
 package common
 
-import ()
-
 //Nozzle models the openning that data streaming out of the source system
 //and the outlet where the data flowing into the target system.
 //
@@ -35,4 +33,13 @@ type Nozzle interface {
 
 	// Returns a list of its responsible VBs (Read-only)
 	ResponsibleVBs() []uint16
+
+	// To avoid garbage
+	RecycleDataObj(obj interface{})
+}
+
+type OutNozzle interface {
+	Nozzle
+
+	SetUpstreamObjRecycler(func(interface{}))
 }

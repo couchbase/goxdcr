@@ -14,6 +14,7 @@ import (
 	common "github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
+	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 )
 
@@ -36,15 +37,19 @@ type Router struct {
 	routing_callback *Routing_Callback_Func
 
 	stateLock sync.RWMutex
+
+	upstreamObjRecycler utilities.RecycleObjFunc
 }
 
 func NewRouter(id string, downStreamParts map[string]common.Part,
 	routing_callback *Routing_Callback_Func,
-	logger_context *log.LoggerContext, logger_module string) *Router {
+	logger_context *log.LoggerContext, logger_module string,
+	upstreamObjRecycler utilities.RecycleObjFunc) *Router {
 	router := &Router{
-		AbstractComponent: component.NewAbstractComponentWithLogger(id, log.NewLogger(logger_module, logger_context)),
-		downStreamParts:   downStreamParts,
-		routing_callback:  routing_callback,
+		AbstractComponent:   component.NewAbstractComponentWithLogger(id, log.NewLogger(logger_module, logger_context)),
+		downStreamParts:     downStreamParts,
+		routing_callback:    routing_callback,
+		upstreamObjRecycler: upstreamObjRecycler,
 	}
 	return router
 }
@@ -98,4 +103,8 @@ func (router *Router) SetRoutingCallBackFunc(routing_callback *Routing_Callback_
 	defer router.stateLock.Unlock()
 
 	router.routing_callback = routing_callback
+}
+
+func (router *Router) GetUpstreamObjRecycler() func(interface{}) {
+	return router.upstreamObjRecycler
 }

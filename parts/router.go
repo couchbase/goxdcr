@@ -22,6 +22,8 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/golang/snappy"
+	"reflect"
 	"sync/atomic"
 	"time"
 )
@@ -74,6 +76,11 @@ type Router struct {
 	// whether the current replication is a high priority replication
 	// when Priority or Ongoing setting is changed, this field will be updated through UpdateSettings() call
 	isHighReplication *base.AtomicBooleanType
+
+	// Instead of wasting memory, use these datapools
+	dcpObjRecycler utilities.RecycleObjFunc
+	dataPool       utilities.DataPoolIface
+	mcRequestPool  *base.MCRequestPool
 }
 
 /**
@@ -93,7 +100,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 	utilsIn utilities.UtilsIface,
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc,
 	isHighReplication bool,
-	filterExpDelType base.FilterExpDelType) (*Router, error) {
+	filterExpDelType base.FilterExpDelType,
+	dcpObjRecycler utilities.RecycleObjFunc) (*Router, error) {
 	var filter *Filter
 	var err error
 	var filterPrintMsg string = "<nil>"
@@ -124,30 +132,60 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification,
 		utils:                  utilsIn,
 		isHighReplication:      base.NewAtomicBooleanType(isHighReplication),
 		throughputThrottlerSvc: throughputThrottlerSvc,
+		dataPool:               utilities.NewDataPool(),
+		mcRequestPool:          base.NewMCRequestPool(spec.Id, nil /*logger*/),
+		dcpObjRecycler:         dcpObjRecycler,
 	}
 
 	router.expDelMode.Set(filterExpDelType)
 
 	// routingFunc is the main intelligence of the router's functionality
 	var routingFunc connector.Routing_Callback_Func = router.route
-	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter")
+	router.Router = connector.NewRouter(id, downStreamParts, &routingFunc, logger_context, "XDCRRouter", router.recycleDataObj)
 
 	router.Logger().Infof("%v created with %d downstream parts isHighReplication=%v and filter=%v\n", router.id, len(downStreamParts), isHighReplication, filterPrintMsg)
 	return router, nil
 }
 
-func (router *Router) ComposeMCRequest(event *mcc.UprEvent) (*base.WrappedMCRequest, error) {
+func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*base.WrappedMCRequest, error) {
 	wrapped_req, err := router.newWrappedMCRequest()
 	if err != nil {
 		return nil, err
 	}
+
+	event := wrappedEvent.UprEvent
 
 	req := wrapped_req.Req
 	req.Cas = event.Cas
 	req.Opaque = 0
 	req.VBucket = event.VBucket
 	req.Key = event.Key
-	req.Body = event.Value
+
+	if wrappedEvent.Flags.ShouldUseDecompressedValue() {
+		// The decompresedValue will get recycled before this mcRequest is passed down to Xmem
+		// Copy the data to another recycled slice
+		recycledSlice, err := router.dataPool.GetByteSlice(uint64(len(wrappedEvent.DecompressedValue)))
+		if err != nil {
+			return nil, err
+		}
+		wrapped_req.SlicesToBeReleasedMtx.Lock()
+		if wrapped_req.SlicesToBeReleasedByRouter == nil {
+			wrapped_req.SlicesToBeReleasedByRouter = make([][]byte, 0, 1)
+		}
+		wrapped_req.SlicesToBeReleasedByRouter = append(wrapped_req.SlicesToBeReleasedByRouter, recycledSlice)
+		wrapped_req.SlicesToBeReleasedMtx.Unlock()
+		if wrappedEvent.UprEvent.IsSnappyDataType() {
+			// snappy.Encode performs trim on recycledSlice when it returns
+			recycledSlice = snappy.Encode(recycledSlice, wrappedEvent.DecompressedValue)
+		} else {
+			copy(recycledSlice, wrappedEvent.DecompressedValue)
+			// Recycled slice may have extra garbage at the end. Trim it manually
+			recycledSlice = recycledSlice[0:len(wrappedEvent.DecompressedValue)]
+		}
+		req.Body = recycledSlice
+	} else {
+		req.Body = event.Value
+	}
 	//opCode
 	req.Opcode = event.Opcode
 	req.DataType = event.DataType
@@ -206,11 +244,13 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 
 	result := make(map[string]interface{})
 
-	// only *mc.UprEvent type data is accepted
-	uprEvent, ok := data.(*mcc.UprEvent)
+	wrappedUpr, ok := data.(*base.WrappedUprEvent)
 	if !ok {
 		return nil, ErrorInvalidDataForRouter
 	}
+
+	// only *mc.UprEvent type data is accepted
+	uprEvent := wrappedUpr.UprEvent
 
 	if router.routingMap == nil {
 		return nil, ErrorNoRoutingMapForRouter
@@ -228,30 +268,30 @@ func (router *Router) route(data interface{}) (map[string]interface{}, error) {
 		return result, nil
 	}
 
-	// filter data if filter expession has been defined
-	if router.filter != nil {
-		needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(uprEvent)
-		if failedDpCnt > 0 {
-			router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
+	needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(wrappedUpr)
+	if failedDpCnt > 0 {
+		router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
+	}
+	if router.Logger().GetLogLevel() >= log.LogLevelDebug && errDesc != "" {
+		router.Logger().Debugf("Matcher doc %v%v%v matched: %v with error: %v and additional info: %v",
+			base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, needToReplicate, err, errDesc)
+	}
+	if !needToReplicate || err != nil {
+		if err != nil {
+			// Let pipeline supervisor do the logging
+			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
+		} else {
+			// if data does not need to be replicated, drop it. return empty result
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
 		}
-		if router.Logger().GetLogLevel() >= log.LogLevelDebug && errDesc != "" {
-			router.Logger().Debugf("Matcher doc %v%v%v matched: %v with error: %v and additional info: %v",
-				base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, needToReplicate, err, errDesc)
-		}
-		if !needToReplicate || err != nil {
-			if err != nil {
-				// Let pipeline supervisor do the logging
-				router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
-			} else {
-				// if data does not need to be replicated, drop it. return empty result
-				router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, nil))
-			}
-			// Let supervisor set the err instead of the router, to minimize pipeline interruption
-			return result, nil
-		}
+		// Let supervisor set the err instead of the router, to minimize pipeline interruption
+		return result, nil
 	}
 
-	mcRequest, err := router.ComposeMCRequest(uprEvent)
+	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
+
+	defer router.dcpObjRecycler(wrappedUpr)
+
 	if err != nil {
 		return nil, router.utils.NewEnhancedError("Error creating new memcached request.", err)
 	}
@@ -354,13 +394,9 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 }
 
 func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
-	if router.req_creator != nil {
-		return router.req_creator(router.topic)
-	} else {
-		return &base.WrappedMCRequest{Seqno: 0,
-			Req: &mc.MCRequest{},
-		}, nil
-	}
+	newReq := router.mcRequestPool.Get()
+	newReq.Req = &mc.MCRequest{}
+	return newReq, nil
 }
 
 // Returns bool indicating if the data should continue to be sent
@@ -388,4 +424,28 @@ func (router *Router) ProcessExpDelTTL(uprEvent *mcc.UprEvent) bool {
 	}
 
 	return true
+}
+
+func (router *Router) recycleDataObj(obj interface{}) {
+	switch obj.(type) {
+	case *base.WrappedUprEvent:
+		if router.dcpObjRecycler != nil {
+			router.dcpObjRecycler(obj)
+		}
+	case *base.WrappedMCRequest:
+		if router.mcRequestPool != nil {
+			req := obj.(*base.WrappedMCRequest)
+			req.SlicesToBeReleasedMtx.Lock()
+			if len(req.SlicesToBeReleasedByRouter) > 0 {
+				for _, slice := range req.SlicesToBeReleasedByRouter {
+					router.dataPool.PutByteSlice(slice)
+				}
+			}
+			req.SlicesToBeReleasedByRouter = nil
+			req.SlicesToBeReleasedMtx.Unlock()
+			router.mcRequestPool.Put(obj.(*base.WrappedMCRequest))
+		}
+	default:
+		panic(fmt.Sprintf("Coding bug type is %v", reflect.TypeOf(obj)))
+	}
 }

@@ -1335,3 +1335,10 @@ func (capi *CapiNozzle) getLastSentBatches() string {
 func (capi *CapiNozzle) ResponsibleVBs() []uint16 {
 	return capi.vbList
 }
+
+func (capi *CapiNozzle) RecycleDataObj(incomingReq interface{}) {
+	req, ok := incomingReq.(*base.WrappedMCRequest)
+	if ok {
+		capi.recycleDataObj(req)
+	}
+}

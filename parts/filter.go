@@ -25,7 +25,7 @@ type FilterIface interface {
 	// 2. err code
 	// 3. If err is not nil, additional description
 	// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
-	FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64)
+	FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64)
 
 	SetShouldSkipUncommittedTxn(val bool)
 }
@@ -109,9 +109,9 @@ func (filter *Filter) SetShouldSkipUncommittedTxn(val bool) {
 	}
 }
 
-func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, string, int64) {
-	if uprEvent == nil {
-		return false, base.ErrorInvalidInput, "UprEvent is nil", 0
+func (filter *Filter) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64) {
+	if wrappedUprEvent == nil || wrappedUprEvent.UprEvent == nil {
+		return false, base.ErrorInvalidInput, "UprEvent or wrappedUprEvent is nil", 0
 	}
 
 	// filter.slicesToBeReleasedBuf may be used to store temporary objects created in this method
@@ -123,7 +123,7 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 		filter.slicesToBeReleasedBuf = filter.slicesToBeReleasedBuf[:0]
 	}()
 
-	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt := filter.filterTransactionRelatedUprEvent(uprEvent, &filter.slicesToBeReleasedBuf)
+	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt, bodyHasBeenModified := filter.filterTransactionRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
 	if err != nil {
 		return false, err, errDesc, totalFailedDpCnt
 	}
@@ -135,14 +135,28 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 	var matched bool
 	var failedDpCnt int64
 	if filter.hasFilterExpression {
-		matched, err, errDesc, failedDpCnt = filter.filterUprEvent(uprEvent, body, endBodyPos, &filter.slicesToBeReleasedBuf)
+		matched, err, errDesc, failedDpCnt = filter.filterUprEvent(wrappedUprEvent.UprEvent, body, endBodyPos, &filter.slicesToBeReleasedBuf)
 		if failedDpCnt > 0 {
 			totalFailedDpCnt += failedDpCnt
 		}
 		return matched, err, errDesc, totalFailedDpCnt
 	}
 
-	return true, nil, "", totalFailedDpCnt
+	// When body is not nil, and has been modified,
+	// it means the body is meant to be used - it contains decompressed values of the original
+	// compressed DCP document, and it has been stripped of any transactional related xattrs
+	// Save the body so that it can be copied later and reused if it hasn't been done before (determined via flag)
+	if needToReplicate && body != nil && bodyHasBeenModified && !wrappedUprEvent.Flags.ShouldUseDecompressedValue() {
+		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos))
+		if err != nil {
+			return needToReplicate, err, "wrappedUprEvent.ByteSliceGetter", totalFailedDpCnt
+		}
+		wrappedUprEvent.Flags.SetShouldUseDecompressedValue()
+		copy(valueBod, body[0:endBodyPos])
+		valueBod = valueBod[0:endBodyPos] // Ensure trailing garbage are removed and len() calls are accurate
+		wrappedUprEvent.DecompressedValue = valueBod
+	}
+	return needToReplicate, err, errDesc, totalFailedDpCnt
 }
 
 // Returns:
@@ -158,26 +172,26 @@ func (filter *Filter) FilterUprEvent(uprEvent *mcc.UprEvent) (bool, error, strin
 // In this scenario body is a newly allocated byte slice, which holds the decompressed document body,
 // and also contains extra bytes to accommodate key, so that it can be reused by advanced filtering later.
 // In other scenarios body is nil and endBodyPos is -1
-func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64) {
+func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64, bool) {
 	if base.Equals(uprEvent.Key, base.TransactionClientRecordKey) {
 		// filter out transaction client records
-		return false, nil, 0, nil, "", 0
+		return false, nil, 0, nil, "", 0, false
 	}
 
 	// active transaction records look like "_txn:atr-[VbucketId]-#[a-f1-9]+"
 	if base.ActiveTxnRecordRegexp.Match(uprEvent.Key) {
 		// filter out active transaction record
-		return false, nil, 0, nil, "", 0
+		return false, nil, 0, nil, "", 0, false
 	}
 
 	if uprEvent.Opcode == mc.UPR_DELETION || uprEvent.Opcode == mc.UPR_EXPIRATION {
 		// these mutations do not have xattrs and do not need xattr processing
-		return true, nil, 0, nil, "", 0
+		return true, nil, 0, nil, "", 0, false
 	}
 
 	if uprEvent.DataType&mcc.XattrDataType == 0 {
 		// no xattrs, no op
-		return true, nil, 0, nil, "", 0
+		return true, nil, 0, nil, "", 0, false
 	}
 
 	// Whether we will need to filter on body later
@@ -185,17 +199,59 @@ func (filter *Filter) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, s
 
 	// For UPR_MUTATION with xattrs, continue to filter based on whether transaction xattrs are present
 
-	hasTransXattrs, body, endBodyPos, err, errDesc, failedDpCnt := filter.utils.CheckForTransactionXattrsInUprEvent(uprEvent, filter.dp, slicesToBeReleased, needToFilterBody)
+	hasTransXattrs, body, endBodyPos, err, errDesc, failedDpCnt, uncompressedUprValue := filter.utils.CheckForTransactionXattrsInUprEvent(uprEvent, filter.dp, slicesToBeReleased, needToFilterBody)
 	if err != nil {
-		return false, nil, 0, err, errDesc, failedDpCnt
+		return false, nil, 0, err, errDesc, failedDpCnt, false
 	}
 
 	passedFilter := true
+	var bodyHasBeenModified bool
 	if filter.ShouldSkipUncommittedTxn() {
 		// if mutation has transaction xattrs, do not replicate it
 		passedFilter = !hasTransXattrs
+	} else if hasTransXattrs {
+		// Strip out transaction xattributes
+		newBodySlice, err := filter.dp.GetByteSlice(uint64(len(uncompressedUprValue)))
+		if err != nil {
+			return false, nil, 0, err, errDesc, failedDpCnt, false
+		}
+		*slicesToBeReleased = append(*slicesToBeReleased, newBodySlice)
+
+		xattrIterator, err := base.NewXattrIterator(uncompressedUprValue)
+		if err != nil {
+			return false, nil, 0, err, errDesc, failedDpCnt, false
+		}
+		bodyWithoutXttr, err := base.StripXattrAndGetBody(uncompressedUprValue)
+		if err != nil {
+			return false, nil, 0, err, errDesc, failedDpCnt, false
+		}
+
+		xattrComposer := base.NewXattrComposer(newBodySlice)
+
+		for xattrIterator.HasNext() {
+			key, value, err := xattrIterator.Next()
+			if err != nil {
+				errDesc = fmt.Sprintf("error during xattribute walk")
+				if err != nil {
+					return false, nil, 0, err, errDesc, failedDpCnt, false
+				}
+			}
+			if base.Equals(key, base.TransactionXattrKey) {
+				continue
+			}
+			err = xattrComposer.WriteKV(key, value)
+			if err != nil {
+				errDesc = fmt.Sprintf("error during xattribute composition")
+				return false, nil, 0, err, errDesc, failedDpCnt, false
+			}
+		}
+
+		body = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr)
+		endBodyPos = len(body)
+		bodyHasBeenModified = true
 	}
-	return passedFilter, body, endBodyPos, nil, "", failedDpCnt
+
+	return passedFilter, body, endBodyPos, nil, "", failedDpCnt, bodyHasBeenModified
 }
 
 // Passed in body, if not nil, is a decompressed byte slice produced by earlier processing steps

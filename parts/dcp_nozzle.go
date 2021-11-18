@@ -337,6 +337,9 @@ type DcpNozzle struct {
 
 	dcpPrioritySetting mcc.PriorityType
 	lockSetting        sync.RWMutex
+
+	// Datapools for reusing memory
+	wrappedUprPool utilities.WrappedUprPoolIface
 }
 
 func NewDcpNozzle(id string,
@@ -367,6 +370,7 @@ func NewDcpNozzle(id string,
 		utils:                    utilsIn,
 		vbHandshakeMap:           make(map[uint16]*dcpStreamReqHelper),
 		dcpPrioritySetting:       mcc.PriorityDisabled,
+		wrappedUprPool:           utilities.NewWrappedUprPool(utilities.NewDataPool()),
 	}
 
 	for _, vbno := range vbnos {
@@ -924,8 +928,14 @@ func (dcp *DcpNozzle) processData() (err error) {
 						if !dcp.is_capi {
 							dcp.handleXattr(m)
 						}
+						wrappedUpr, err := dcp.composeWrappedUprEvent(m)
+						if err != nil {
+							dcp.handleGeneralError(err)
+							dcp.Logger().Errorf("Composing wrappedUpr had error %v", err)
+							return err
+						}
 						// forward mutation downstream through connector
-						if err := dcp.Connector().Forward(m); err != nil {
+						if err := dcp.Connector().Forward(wrappedUpr); err != nil {
 							dcp.handleGeneralError(err)
 							goto done
 						}
@@ -966,6 +976,12 @@ func (dcp *DcpNozzle) GetXattrSeqnos() map[uint16]uint64 {
 		xattr_seqnos[vbno] = atomic.LoadUint64(xattr_seqno_obj)
 	}
 	return xattr_seqnos
+}
+
+func (dcp *DcpNozzle) composeWrappedUprEvent(m *mcc.UprEvent) (*base.WrappedUprEvent, error) {
+	wrappedEvent := dcp.wrappedUprPool.Get()
+	wrappedEvent.UprEvent = m
+	return wrappedEvent, nil
 }
 
 func (dcp *DcpNozzle) onExit() {
@@ -1541,4 +1557,17 @@ func (dcp *DcpNozzle) getDcpDataChanLen() {
 
 func (dcp *DcpNozzle) ResponsibleVBs() []uint16 {
 	return dcp.vbnos
+}
+
+func (dcp *DcpNozzle) RecycleDataObj(req interface{}) {
+	switch req.(type) {
+	case *base.WrappedUprEvent:
+		if dcp.wrappedUprPool != nil {
+			wrappedReq := req.(*base.WrappedUprEvent)
+			wrappedReq.UprEvent = nil
+			dcp.wrappedUprPool.Put(req.(*base.WrappedUprEvent))
+		}
+	default:
+		panic("Coding error")
+	}
 }

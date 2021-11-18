@@ -815,6 +815,8 @@ type XmemNozzle struct {
 	stateLock sync.RWMutex
 
 	vbList []uint16
+
+	upstreamObjRecycler utilities.RecycleObjFunc
 }
 
 func NewXmemNozzle(id string,
@@ -2991,12 +2993,6 @@ func (xmem *XmemNozzle) bytesInDataChan() int {
 	return int(atomic.LoadInt32(&xmem.bytes_in_dataChan))
 }
 
-func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
-	if xmem.dataObj_recycler != nil {
-		xmem.dataObj_recycler(xmem.topic, req)
-	}
-}
-
 func (xmem *XmemNozzle) getLastTenBatchSize() string {
 	xmem.last_ten_batches_size_lock.RLock()
 	defer xmem.last_ten_batches_size_lock.RUnlock()
@@ -3074,4 +3070,21 @@ func (xmem *XmemNozzle) getClientWithRetry(xmem_id string, pool base.ConnPool, f
 
 func (xmem *XmemNozzle) ResponsibleVBs() []uint16 {
 	return xmem.vbList
+}
+
+func (xmem *XmemNozzle) RecycleDataObj(incomingReq interface{}) {
+	req, ok := incomingReq.(*base.WrappedMCRequest)
+	if ok {
+		xmem.recycleDataObj(req)
+	}
+}
+
+func (xmem *XmemNozzle) SetUpstreamObjRecycler(recycler func(interface{})) {
+	xmem.upstreamObjRecycler = recycler
+}
+
+func (xmem *XmemNozzle) recycleDataObj(req *base.WrappedMCRequest) {
+	if xmem.upstreamObjRecycler != nil {
+		xmem.upstreamObjRecycler(req)
+	}
 }
