@@ -1355,6 +1355,19 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 
 	fullSubscriberId := compileFullSubscriberId(spec, subscriberId)
 
+	bw.latestCacheMtx.RLock()
+	cachePopulated := bw.cachePopulated
+	var initialSrcNotification service_def.SourceNotification
+	var initialTgtNotification service_def.TargetNotification
+	if cachePopulated {
+		if bw.source {
+			initialSrcNotification = bw.latestCached.Clone(1).(service_def.SourceNotification)
+		} else {
+			initialTgtNotification = bw.latestCached.Clone(1).(service_def.TargetNotification)
+		}
+	}
+	bw.latestCacheMtx.RUnlock()
+
 	mutex.Lock()
 	defer mutex.Unlock()
 	if bw.source {
@@ -1366,19 +1379,11 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 	}
 
 	// When someone first registers and subscribes, it prob expects some data - feed it the latest if it's not nil
-	if bw.cachePopulated {
+	if cachePopulated {
 		if bw.source {
-			bw.latestCacheMtx.RLock()
-			notification := bw.latestCached.Clone(1).(service_def.SourceNotification)
-			bw.latestCacheMtx.RUnlock()
-			//notification.SetNumberOfReaders(1)
-			specifiedChs[fullSubscriberId].(chan service_def.SourceNotification) <- notification
+			specifiedChs[fullSubscriberId].(chan service_def.SourceNotification) <- initialSrcNotification
 		} else {
-			bw.latestCacheMtx.RLock()
-			notification := bw.latestCached.Clone(1).(service_def.TargetNotification)
-			bw.latestCacheMtx.RUnlock()
-			//notification.SetNumberOfReaders(1)
-			specifiedChs[fullSubscriberId].(chan service_def.TargetNotification) <- notification
+			specifiedChs[fullSubscriberId].(chan service_def.TargetNotification) <- initialTgtNotification
 		}
 	}
 	return specifiedChs[fullSubscriberId]
