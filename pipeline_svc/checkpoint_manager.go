@@ -164,6 +164,8 @@ type CheckpointManager struct {
 	getBackfillMgr func() service_def.BackfillMgrIface
 
 	initConnOnce sync.Once
+	initConnDone chan bool
+	initConnErr  error
 
 	bucketTopologySvc service_def.BucketTopologySvc
 
@@ -326,6 +328,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		getBackfillMgr:            getBackfillMgr,
 		checkpointAllowedHelper:   newCheckpointSyncHelper(),
 		bucketTopologySvc:         bucketTopologySvc,
+		initConnDone:              make(chan bool),
 	}, nil
 }
 
@@ -462,15 +465,24 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 	ckmgr.startRandomizedCheckpointingTicker()
 
 	//initialize connections
-	err = ckmgr.initConnections()
-	if err != nil {
-		return err
-	}
+	ckmgr.wait_grp.Add(1)
+	go ckmgr.initConnBg()
 
 	//start checkpointing loop
 	ckmgr.wait_grp.Add(1)
 	go ckmgr.checkpointing()
 	return nil
+}
+
+func (ckmgr *CheckpointManager) initConnBg() {
+	initInBg := func() error {
+		defer ckmgr.wait_grp.Done()
+		return ckmgr.initConnections()
+	}
+	execErr := base.ExecWithTimeout(initInBg, base.TimeoutRuntimeContextStart, ckmgr.Logger())
+	if execErr != nil {
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, fmt.Errorf("Ckmgr %v initConnection error %v", ckmgr.pipeline.FullTopic(), execErr)))
+	}
 }
 
 func (ckmgr *CheckpointManager) initializeConfig(settings metadata.ReplicationSettingsMap) error {
@@ -529,13 +541,13 @@ func (ckmgr *CheckpointManager) composeUserAgent() {
 }
 
 func (ckmgr *CheckpointManager) initConnections() error {
-	var overallErr error
 	ckmgr.initConnOnce.Do(func() {
+		defer close(ckmgr.initConnDone)
 		if ckmgr.target_cluster_ref.IsFullEncryption() {
 			err := ckmgr.initSSLConStrMap()
 			if err != nil {
 				ckmgr.logger.Errorf("%v %v failed to initialize ssl connection string map, err=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), err)
-				overallErr = err
+				ckmgr.initConnErr = err
 				return
 			}
 		}
@@ -544,16 +556,25 @@ func (ckmgr *CheckpointManager) initConnections() error {
 			client, err := ckmgr.getNewMemcachedClient(server_addr, true /*initializing*/)
 			if err != nil {
 				ckmgr.logger.Errorf("%v %v failed to construct memcached client for %v, err=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), server_addr, err)
-				overallErr = err
+				ckmgr.initConnErr = err
 				return
 			}
-			// no need to lock since this is done during initialization
+			ckmgr.kv_mem_clients_lock.Lock()
 			ckmgr.kv_mem_clients[server_addr] = client
+			ckmgr.kv_mem_clients_lock.Unlock()
 		}
-
 		return
 	})
-	return overallErr
+
+	ckmgr.waitForInitConnDone()
+	return ckmgr.initConnErr
+}
+
+func (ckmgr *CheckpointManager) waitForInitConnDone() {
+	select {
+	case <-ckmgr.initConnDone:
+		return
+	}
 }
 
 func (ckmgr *CheckpointManager) initSSLConStrMap() error {
@@ -626,6 +647,7 @@ func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initia
 }
 
 func (ckmgr *CheckpointManager) closeConnections() {
+	ckmgr.waitForInitConnDone()
 	ckmgr.kv_mem_clients_lock.Lock()
 	defer ckmgr.kv_mem_clients_lock.Unlock()
 	for server_addr, client := range ckmgr.kv_mem_clients {
@@ -638,6 +660,7 @@ func (ckmgr *CheckpointManager) closeConnections() {
 }
 
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool) map[uint16][]uint64 {
+	ckmgr.waitForInitConnDone()
 	ckmgr.kv_mem_clients_lock.Lock()
 	defer ckmgr.kv_mem_clients_lock.Unlock()
 
