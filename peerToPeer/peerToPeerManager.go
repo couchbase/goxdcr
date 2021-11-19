@@ -205,7 +205,7 @@ func (p *P2PManagerImpl) sendDiscoveryRequest() error {
 			p.GetLifecycleId())
 		return ErrorNoPeerDiscovered
 	}
-	return p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false))
+	return p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
 }
 
 func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
@@ -341,12 +341,12 @@ type SendOpts struct {
 
 type SendOptsMap map[string]chan ReqRespPair
 
-func NewSendOpts(sync bool) *SendOpts {
+func NewSendOpts(sync bool, timeout time.Duration) *SendOpts {
 	if sync {
 		return &SendOpts{
 			synchronous: true,
 			respMap:     make(SendOptsMap),
-			timeout:     base.PeerToPeerNonExponentialWaitTime,
+			timeout:     timeout,
 			finCh:       make(chan bool),
 		}
 	} else {
@@ -449,7 +449,7 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		return vbCheckReq
 	}
 
-	opts := NewSendOpts(true)
+	opts := NewSendOpts(true, metadata.GetP2PTimeoutFromSettings(pipeline.Settings()))
 	err = p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	if err != nil {
 		p.logger.Errorf("sendToEachPeerOnce err %v", err)
@@ -584,7 +584,7 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 			peersToRetry := make(map[string]bool)
 			peersToRetry[host] = true
 
-			opts := NewSendOpts(true)
+			opts := NewSendOpts(true, base.PeerToPeerNonExponentialWaitTime)
 			err = p.sendToSpecifiedPeersOnce(ReqPeriodicPush, getReqFunc, opts, peersToRetry, myHostAddr)
 			if err != nil {
 				errMapMtx.Lock()

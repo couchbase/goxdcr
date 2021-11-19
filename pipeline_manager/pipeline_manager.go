@@ -491,10 +491,10 @@ func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status pipeline.Replicati
 		// When rebalance happens and source nodes get added, pipeline will restart and so this section will be called
 		// when a pipeline restarts, and the value will get updated accordingly
 		atomic.StoreUint32(&peerToPeer.P2POpaqueTimeoutAtomicMin, uint32(numKVNodes+1))
-		delayMap[pipeline.P2PDynamicWaitDurationKey] = waitTime
+		delayMap[metadata.P2PDynamicWaitDurationKey] = waitTime
 		rep_status.SetCustomSettings(delayMap)
 	} else {
-		rep_status.ClearCustomSetting(pipeline.P2PDynamicWaitDurationKey)
+		rep_status.ClearCustomSetting(metadata.P2PDynamicWaitDurationKey)
 	}
 }
 

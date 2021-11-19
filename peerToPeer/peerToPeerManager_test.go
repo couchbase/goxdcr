@@ -10,6 +10,7 @@ package peerToPeer
 
 import (
 	"fmt"
+	base2 "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	service_def_real "github.com/couchbase/goxdcr/service_def"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
@@ -136,7 +137,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 		responses = append(responses, resp)
 	}
 
-	opts := NewSendOpts(true)
+	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
 	err = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	assert.Nil(err)
 
@@ -194,7 +195,7 @@ func TestPeerToPeerConcurrentMap(t *testing.T) {
 	assert := assert.New(t)
 
 	for i := 0; i < 50; i++ {
-		opts := NewSendOpts(true)
+		opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
 		opts.timeout = 25 * time.Millisecond
 		opts.respMapMtx.Lock()
 		ch1 := make(chan ReqRespPair)

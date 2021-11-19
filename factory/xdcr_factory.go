@@ -924,7 +924,7 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 
 		// Should still proceed to check if anybody else claims as VB master as myself
 		// Once that test is passed, return the responses for merging
-		xdcrf.logger.Warnf("Error with Peer-To-Peer checkpoint pull, starting with local ckpts only: %v", rpcErr)
+		xdcrf.logger.Warnf("Error with Peer-To-Peer checkpoint pull, starting with local ckpts only for the errored out nodes: %v", rpcErr)
 	}
 
 	vbMasterCheckErr := checkNoOtherVBMasters(respMap, srcBucketName, sourceVBs, spec.InternalId)

@@ -267,7 +267,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	// Before starting vb timestamp, need to ensure VBMaster
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
 	if !ok || ok && vbMasterCheckConfig.(bool) == true {
-		genericPipeline.p2pVbMasterCheckTimeout = getP2PTimeoutFromSettings(settings)
+		genericPipeline.p2pVbMasterCheckTimeout = metadata.GetP2PTimeoutFromSettings(settings)
 		genericPipeline.logger.Infof("%v - Performing PeerToPeer communication and metadata merging with timeout of %v",
 			genericPipeline.FullTopic(), genericPipeline.p2pVbMasterCheckTimeout)
 		p2pErrMap := make(base.ErrorMap)
@@ -368,15 +368,6 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	return errMap
 }
 
-func getP2PTimeoutFromSettings(settings metadata.ReplicationSettingsMap) time.Duration {
-	waitDuration, exists := settings[P2PDynamicWaitDurationKey].(time.Duration)
-	if !exists {
-		return base.TimeoutP2PProtocol
-	} else {
-		return waitDuration
-	}
-}
-
 func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap) {
 	errMap := *errMapPtr
 
@@ -407,7 +398,6 @@ func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap)
 		}
 		stopMergeMeasurement()
 	}
-
 	return
 }
 

@@ -1197,3 +1197,14 @@ func GetSettingFromSettingsMap(settings ReplicationSettingsMap, setting_name str
 
 	return default_value
 }
+
+func GetP2PTimeoutFromSettings(settings ReplicationSettingsMap) time.Duration {
+	waitDuration, exists := settings[P2PDynamicWaitDurationKey].(time.Duration)
+	if !exists {
+		return base.TimeoutP2PProtocol
+	} else {
+		return waitDuration
+	}
+}
+
+const P2PDynamicWaitDurationKey = "P2PDynamicWaitDuration"

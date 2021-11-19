@@ -2,6 +2,7 @@ package peerToPeer
 
 import (
 	"fmt"
+	base2 "github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
@@ -46,7 +47,7 @@ func TestDiscoveryHandler(t *testing.T) {
 		return &HandlerResultImpl{Err: nil, HttpStatusCode: http.StatusOK}, nil
 	}
 	discoveryReq := NewP2PDiscoveryReq(reqCommon)
-	handler.RegisterOpaque(discoveryReq, NewSendOpts(false))
+	handler.RegisterOpaque(discoveryReq, NewSendOpts(false, base2.PeerToPeerNonExponentialWaitTime))
 
 	handler.receiveCh <- discoveryReq
 
