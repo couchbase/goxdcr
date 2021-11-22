@@ -195,7 +195,7 @@ function runReplicationResume {
 	resumeReplication "C1" "B0" "C2" "B1"
 
 	# The more nodes, the more time it takes to resume
-	local waitTime=$((20 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	local waitTime=$((40 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
 	echo "$(date): Waiting $waitTime seconds for resume to finish"
 	sleep $waitTime
 
