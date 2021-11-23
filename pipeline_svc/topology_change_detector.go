@@ -172,18 +172,18 @@ func (top_detect_svc *TopologyChangeDetectorSvc) initializeMonitors() {
 		stopFunc := top_detect_svc.utils.StartDiagStopwatch(fmt.Sprintf("TopologyDetectSvc_%v_initializeMonitors", top_detect_svc.Id()), base.DiagTopologyMonitorThreshold)
 		defer stopFunc()
 		var initWaitGrp sync.WaitGroup
-		var srcErr error
-		var tgtErr error
+		var initSrcErr error
+		var initTgtErr error
 		initWaitGrp.Add(2)
 		go func() {
-			srcErr = top_detect_svc.monitorSource(&initWaitGrp)
+			top_detect_svc.monitorSource(&initWaitGrp, &initSrcErr)
 		}()
 		go func() {
-			tgtErr = top_detect_svc.monitorTarget(&initWaitGrp)
+			top_detect_svc.monitorTarget(&initWaitGrp, &initTgtErr)
 		}()
 		initWaitGrp.Wait()
-		if srcErr != nil || tgtErr != nil {
-			return fmt.Errorf("TopDetectSvc for %v MonitorSrc error: %v MonitorTgt error: %v", top_detect_svc.Id(), srcErr, tgtErr)
+		if initSrcErr != nil || initTgtErr != nil {
+			return fmt.Errorf("TopDetectSvc for %v MonitorSrc error: %v MonitorTgt error: %v", top_detect_svc.Id(), initSrcErr, initTgtErr)
 		} else {
 			return nil
 		}
@@ -447,24 +447,24 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Detach(pipeline common.Pipeline
 	return nil
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.WaitGroup) error {
-	var err error
+func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.WaitGroup, initErr *error) {
 	var replicationSpec *metadata.ReplicationSpecification
 	top_detect_svc.pipelinesMtx.RLock()
 	mainPipeline := top_detect_svc.pipelines[0]
 	top_detect_svc.pipelinesMtx.RUnlock()
 	genSpec := mainPipeline.Specification()
 	if genSpec == nil {
-		err = fmt.Errorf("mainPipeline has no spec")
+		*initErr = fmt.Errorf("mainPipeline has no spec")
 		initWg.Done()
-		return err
+		return
 	} else {
 		replicationSpec = genSpec.GetReplicationSpec()
 	}
-	sourceVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToLocalBucketFeed(replicationSpec, mainPipeline.InstanceId())
-	if err != nil {
+	sourceVbUpdateCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToLocalBucketFeed(replicationSpec, mainPipeline.InstanceId())
+	if subscribeErr != nil {
+		*initErr = subscribeErr
 		initWg.Done()
-		return err
+		return
 	}
 	initWg.Done()
 
@@ -511,7 +511,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 					updateOnceErr = source_topology_changedErr
 				}
 
-				err = top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, updateOnceErr)
+				err := top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, updateOnceErr)
 				notification.Recycle()
 				if err != nil {
 					if err == errPipelinesDetached {
@@ -522,28 +522,27 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 			}
 		}
 	}()
-	return nil
+	return
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.WaitGroup) error {
-	var err error
+func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.WaitGroup, initErr *error) {
 	var spec *metadata.ReplicationSpecification
 	top_detect_svc.pipelinesMtx.RLock()
 	mainPipeline := top_detect_svc.pipelines[0]
 	top_detect_svc.pipelinesMtx.RUnlock()
 	genSpec := mainPipeline.Specification()
 	if genSpec == nil {
-		err = fmt.Errorf("main pipeline has no spec")
+		*initErr = fmt.Errorf("main pipeline has no spec")
 		initWg.Done()
-		return err
+		return
 	} else {
 		spec = genSpec.GetReplicationSpec()
 	}
-	targetVbUpdateCh, err := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, mainPipeline.InstanceId())
-
-	if err != nil {
+	targetVbUpdateCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, mainPipeline.InstanceId())
+	if subscribeErr != nil {
+		*initErr = subscribeErr
 		initWg.Done()
-		return err
+		return
 	}
 	initWg.Done()
 
@@ -590,9 +589,9 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				var errToHandleTargetChange error
 				if len(diff_vb_list) > 0 {
 					errToHandleTargetChange = target_topology_changedErr
-					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
+					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating target topology change. err=%v", top_detect_svc.mainPipelineTopic, errToHandleTargetChange)
 				}
-				err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
+				err := top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
 				notification.Recycle()
 				if err != nil {
 					if err == errPipelinesDetached {
@@ -603,7 +602,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 			}
 		}
 	}()
-	return nil
+	return
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) validateTargetBucketUUIDDifferences(spec *metadata.ReplicationSpecification) (shouldTryAgain bool) {
