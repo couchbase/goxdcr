@@ -1259,9 +1259,12 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 		panic(fmt.Sprintf("Unknown type: %v", updateType))
 	}
 
-	// If no one is subscribed, no need to run the updater
-	// Except for topology, which is for sure needed
-	if updateType != TOPOLOGY {
+	// If no one is subscribed, no need to run the updater except for
+	// - TOPOLOGY, which is for sure needed
+	// - HIGHSEQNOS, this is needed for active as well as paused pipeline status which will subscribe, calculate and unsubscribe.
+	// If we don't update HIGHSEQNOS when there is no subscriber, paused replication status will not be accurate,
+	// and if topology change causing server name change, we will incorrectly report total_changes as 0 and changes_left as negative for paused pipeline.
+	if updateType != TOPOLOGY && updateType != HIGHSEQNOS && updateType != HIGHSEQNOSLEGACY {
 		mutex.RLock()
 		chanLen := len(channelsMap)
 		mutex.RUnlock()
