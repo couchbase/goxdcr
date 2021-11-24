@@ -327,6 +327,7 @@ var ErrorNoBackfillNeeded = errors.New("No backfill needed")
 var ErrorNilCertificate = errors.New("Nil certificate")
 var ErrorNilCertificateStrictMode = errors.New("cluster encryption is set to strict mode and unable to retrieve a valid certificate")
 var ErrorOpInterrupted = errors.New("Operation interrupted")
+var ErrorNoVbSpecified = errors.New("No vb being specified")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

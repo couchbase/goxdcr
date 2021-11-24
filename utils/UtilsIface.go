@@ -75,11 +75,11 @@ type UtilsIface interface {
 	GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error)
 	GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
 	GetEvictionPolicyFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error)
-	GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, error)
+	GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, []uint16, error)
 	GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error)
 	LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error)
 	LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error)
-	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error
+	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error)
 	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)
 
 	// Cluster related utilities

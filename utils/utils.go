@@ -219,24 +219,35 @@ func (u *Utilities) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interf
 }
 
 //convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
-func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error {
-	var err error
+// Returns a list of vbnos that was not able to parsed. If all vbnos were not parsed, then return an error instead
+func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error) {
+	var unableToParseVBs []uint16
+	if len(vbnos) == 0 {
+		return nil, base.ErrorNoVbSpecified
+	}
+
 	for _, vbno := range vbnos {
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 		highseqnostr, ok := stats_map[stats_key]
 		if !ok || highseqnostr == "" {
-			err = fmt.Errorf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed", vbno)
-			return err
+			u.logger_utils.Warnf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed", vbno)
+			unableToParseVBs = append(unableToParseVBs, vbno)
+			continue
 		}
-		highseqno, err := strconv.ParseUint(highseqnostr, 10, 64)
-		if err != nil {
-			u.logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v", vbno, highseqnostr)
-			err = fmt.Errorf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
-			return err
+		highseqno, parseIntErr := strconv.ParseUint(highseqnostr, 10, 64)
+		if parseIntErr != nil {
+			// Log error instead of because format errors seem to be more serious
+			// So far hasn't been hit in testing anyway
+			u.logger_utils.Errorf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v", vbno, highseqnostr)
+			unableToParseVBs = append(unableToParseVBs, vbno)
+			continue
 		}
 		highseqno_map[vbno] = highseqno
 	}
-	return nil
+	if len(unableToParseVBs) == len(vbnos) {
+		return nil, fmt.Errorf("All Requested VBs %v were not able to be parsed from statsMap %v", vbnos, stats_map)
+	}
+	return unableToParseVBs, nil
 }
 
 //convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
@@ -2927,7 +2938,11 @@ func (u *Utilities) DumpStackTraceAfterThreshold(id string, threshold time.Durat
 	return u.StartDebugExec(id, threshold, dumpStackTrace)
 }
 
-func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, error) {
+func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, []uint16, error) {
+	if len(vbnos) == 0 {
+		return nil, nil, nil, base.ErrorNoVbSpecified
+	}
+
 	var highseqno_map map[uint16]uint64
 	if recycledVbSeqnoMap != nil {
 		highseqno_map = *recycledVbSeqnoMap
@@ -2936,6 +2951,7 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 	}
 
 	var err error
+	var unableToBeParsedVBs []uint16
 	if len(collectionIds) == 0 {
 		// Get all the seqno across everything in the bucket using traditional stats map
 		if stats_map != nil && *stats_map != nil {
@@ -2946,9 +2962,9 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 			*stats_map, err = conn.StatsMap(base.VBUCKET_SEQNO_STAT_NAME)
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		err = u.ParseHighSeqnoStat(vbnos, *stats_map, highseqno_map)
+		unableToBeParsedVBs, err = u.ParseHighSeqnoStat(vbnos, *stats_map, highseqno_map)
 	} else {
 		// Need to get high sequence numbers across one or a set of collections only
 		mccContext := &mcc.ClientContext{}
@@ -2957,7 +2973,7 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 			mccContext.CollId = collectionId
 			vbSeqnoMap, err = conn.GetAllVbSeqnos(vbSeqnoMap, mccContext)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			PopulateMaxVbSeqnoMap(vbSeqnoMap, highseqno_map)
 		}
@@ -2965,9 +2981,9 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 	}
 
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	} else {
-		return &highseqno_map, stats_map, nil
+		return &highseqno_map, stats_map, unableToBeParsedVBs, nil
 	}
 }
 

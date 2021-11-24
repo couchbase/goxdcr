@@ -1008,7 +1008,7 @@ func (_m *UtilsIface) GetExternalMgtHostAndPort(nodeInfo map[string]interface{},
 }
 
 // GetHighSeqNos provides a mock function with given fields: vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap
-func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, error) {
+func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, []uint16, error) {
 	ret := _m.Called(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
 
 	var r0 *map[uint16]uint64
@@ -1036,7 +1036,7 @@ func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, 
 		r2 = ret.Error(2)
 	}
 
-	return r0, r1, r2
+	return r0, r1, nil, r2
 }
 
 // GetHostAddrFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, isHttps, logger, useExternal
@@ -1937,7 +1937,7 @@ func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map
 }
 
 // ParseHighSeqnoStat provides a mock function with given fields: vbnos, stats_map, highseqno_map
-func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) error {
+func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error) {
 	ret := _m.Called(vbnos, stats_map, highseqno_map)
 
 	var r0 error
@@ -1947,7 +1947,7 @@ func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]st
 		r0 = ret.Error(0)
 	}
 
-	return r0
+	return nil, r0
 }
 
 // ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, body, endBodyPos, dp, flags, slicesBuf

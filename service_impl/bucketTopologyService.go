@@ -766,6 +766,13 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 		highseqno_map := watcher.objsPool.HighSeqnosMapPool.Get(kv_vb_map.GetKeyList())
 		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", spec.SourceBucketName)
 		var freeInCaseOfErrList []*map[uint16]uint64
+
+		// Temp notification is used for if partial VBs are not parsed
+		watcher.latestCacheMtx.RLock()
+		temporaryNotification := watcher.latestCached.Clone(1).(*Notification)
+		watcher.latestCacheMtx.RUnlock()
+		defer temporaryNotification.Recycle()
+
 		watcher.kvMemClientsMtx.Lock()
 		for serverAddr, vbnos := range kv_vb_map {
 			// TODO - optimizing locking
@@ -781,8 +788,13 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 
 			oneSeqnoMap := watcher.objsPool.VbSeqnoMapPool.Get(vbnos)
 			freeInCaseOfErrList = append(freeInCaseOfErrList, oneSeqnoMap)
-			oneSeqnoMap, updatedStatsMap, err := b.utils.GetHighSeqNos(vbnos, client, &watcher.statsMap, collectionIds, oneSeqnoMap)
+			oneSeqnoMap, updatedStatsMap, vbsUnableToParse, err := b.utils.GetHighSeqNos(vbnos, client, &watcher.statsMap, collectionIds, oneSeqnoMap)
 			if err != nil {
+				if err == base.ErrorNoVbSpecified {
+					err = fmt.Errorf("KV node %v has no vbucket assigned to it", serverAddr)
+				}
+				// We should really return err if nothing could be parsed, because this means the update() call has
+				// failed and subscribers will not hear back any event at all
 				watcher.logger.Warnf("%v Error getting high seqno for kv %v. err=%v", userAgent, serverAddr, err)
 				err1 := client.Close()
 				if err1 != nil {
@@ -796,6 +808,20 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 				watcher.objsPool.HighSeqnosMapPool.Put(highseqno_map)
 				return err
 			} else {
+				if len(vbsUnableToParse) > 0 && temporaryNotification != nil {
+					// If partial VBs were not able to be parsed (i.e stuck rebalancing, etc), and we have old data,
+					// then we could try our best to set so that the stats will be as accurate as possible...
+					// instead of getting stuck, use the previous instance of the statsMap to find old data
+					lastCachedData := temporaryNotification.HighSeqnoMap
+					if lastCachedData == nil || len(*lastCachedData) == 0 || (*lastCachedData)[serverAddr] == nil {
+						// cache not instantiated yet... just use whatever we have and do replacement at the end
+					} else {
+						lastSeqnoMap := (*lastCachedData)[serverAddr]
+						for _, failedVB := range vbsUnableToParse {
+							(*oneSeqnoMap)[failedVB] = lastSeqnoMap[failedVB]
+						}
+					}
+				}
 				watcher.statsMap = *updatedStatsMap
 				(*highseqno_map)[serverAddr] = *oneSeqnoMap
 				watcher.kvMemClients[serverAddr] = client
