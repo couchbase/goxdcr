@@ -13,6 +13,7 @@ import (
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/golang/snappy"
 	"sync"
 	"unsafe"
 )
@@ -683,6 +684,95 @@ func (v *VBsCkptsDocMap) SameAs(other VBsCkptsDocMap) bool {
 	return true
 }
 
+// Outputs:
+// 1. Compressed map of ckpts
+// 2. A deduped map of brokenMapSha -> snappy compressed broken map referred by all ckpts in the docs
+func (v *VBsCkptsDocMap) SnappyCompress() (VBsCkptsDocSnappyMap, ShaMappingCompressedMap, error) {
+	if v == nil {
+		return nil, nil, base.ErrorNilPtr
+	}
+
+	snapCkptMap := make(VBsCkptsDocSnappyMap)
+	snapShaMap := make(ShaMappingCompressedMap)
+	errorMap := make(base.ErrorMap)
+
+	for vbno, ckptsDoc := range *v {
+		if ckptsDoc == nil {
+			continue
+		}
+
+		compressedCkptsDoc, oneSnapShaMap, compressErr := ckptsDoc.SnappyCompress()
+		if compressErr != nil {
+			errorMap[fmt.Sprintf("CkptDoc for %v marshalErr", vbno)] = compressErr
+			continue
+		}
+
+		snapShaMap.Merge(oneSnapShaMap)
+		snapCkptMap[vbno] = compressedCkptsDoc
+	}
+
+	if len(errorMap) > 0 {
+		return nil, nil, fmt.Errorf(base.FlattenErrorMap(errorMap))
+	}
+	return snapCkptMap, snapShaMap, nil
+}
+
+type VBsCkptsDocSnappyMap map[uint16][]byte
+
+func (v *VBsCkptsDocSnappyMap) SnappyDecompress(snappyShaMap ShaMappingCompressedMap) (VBsCkptsDocMap, error) {
+	if v == nil || snappyShaMap == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	errMap := make(base.ErrorMap)
+	regularMap := make(VBsCkptsDocMap)
+	for vbno, compresedBytes := range *v {
+		if compresedBytes == nil {
+			regularMap[vbno] = nil
+		} else {
+			ckptDoc, err := NewCheckpointsDocFromSnappy(compresedBytes, snappyShaMap)
+			if err != nil {
+				errMap[fmt.Sprintf("vbno: %v", vbno)] = err
+				continue
+			}
+			regularMap[vbno] = ckptDoc
+		}
+	}
+
+	if len(errMap) > 0 {
+		return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return regularMap, nil
+}
+
+type ShaMappingCompressedMap map[string][]byte
+
+func (s *ShaMappingCompressedMap) Merge(other ShaMappingCompressedMap) {
+	if s == nil {
+		return
+	}
+
+	for sha, snappyVal := range other {
+		if _, exists := (*s)[sha]; !exists {
+			(*s)[sha] = snappyVal
+		}
+	}
+}
+
+func (s *ShaMappingCompressedMap) Get(sha string) (*CollectionNamespaceMapping, error) {
+	if s == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	if _, exists := (*s)[sha]; !exists {
+		return nil, base.ErrorNotFound
+	}
+
+	retMapping := &CollectionNamespaceMapping{}
+	deCompressErr := retMapping.SnappyDecompress((*s)[sha])
+	return retMapping, deCompressErr
+}
+
 type CheckpointsDoc struct {
 	//keep "MaxCheckpointsKept" checkpoint record - ordered by new to old, with 0th element being the newest
 	Checkpoint_records CheckpointRecordsList `json:"checkpoints"`
@@ -773,6 +863,17 @@ func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {
 	return ckpt_doc
 }
 
+func NewCheckpointsDocFromSnappy(snappyBytes []byte, compressedMap ShaMappingCompressedMap) (*CheckpointsDoc, error) {
+	ckptDoc := &CheckpointsDoc{}
+	err := ckptDoc.SnappyDecompress(snappyBytes, compressedMap)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return ckptDoc, nil
+}
+
 //Not concurrency safe. It should be used by one goroutine only
 func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) (added bool, removedRecords []*CheckpointRecord) {
 	length := len(ckptsDoc.Checkpoint_records)
@@ -811,6 +912,9 @@ func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) (added bool,
 // too bad that we cannot hide ckptsDoc.Checkpoint_records by renaming it to ckptsDoc.checkpoint_records
 // since it would have disabled json marshaling
 func (ckptsDoc *CheckpointsDoc) GetCheckpointRecords() []*CheckpointRecord {
+	if ckptsDoc == nil {
+		return nil
+	}
 	if len(ckptsDoc.Checkpoint_records) <= base.MaxCheckpointRecordsToRead {
 		return ckptsDoc.Checkpoint_records
 	} else {
@@ -835,4 +939,83 @@ func (c *CheckpointsDoc) Len() int {
 		return 0
 	}
 	return c.Checkpoint_records.Len()
+}
+
+func (c *CheckpointsDoc) SnappyCompress() ([]byte, ShaMappingCompressedMap, error) {
+	marshalledBytes, err := json.Marshal(c)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	snapShaMap := make(ShaMappingCompressedMap)
+	errorMap := make(base.ErrorMap)
+	records := c.GetCheckpointRecords()
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		brokenMap := record.BrokenMappings()
+		if brokenMap == nil {
+			// Record has no broken map
+			continue
+		}
+		brokenMapSha := record.BrokenMappingSha256
+
+		_, dedupMapExists := snapShaMap[brokenMapSha]
+		if !dedupMapExists {
+			compressedBytes, compressErr := brokenMap.ToSnappyCompressed()
+			if compressErr != nil {
+				errorMap[fmt.Sprintf("BrokenMap: %v", brokenMap.String())] = fmt.Errorf("Unable to snappyCompress")
+			}
+			snapShaMap[brokenMapSha] = compressedBytes
+		}
+	}
+
+	if len(errorMap) > 0 {
+		return nil, nil, fmt.Errorf(base.FlattenErrorMap(errorMap))
+	}
+
+	return snappy.Encode(nil, marshalledBytes), snapShaMap, nil
+}
+
+func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappingCompressedMap) error {
+	if c == nil || shaCompressedMap == nil || len(shaCompressedMap) == 0 {
+		return base.ErrorNilPtr
+	}
+
+	uncompressedCkptDocBytes, err := snappy.Decode(nil, data)
+	if err != nil {
+		return fmt.Errorf("snappy.Decode ckptDoc data err %v", err)
+	}
+
+	err = json.Unmarshal(uncompressedCkptDocBytes, c)
+	if err != nil {
+		return err
+	}
+
+	errMap := make(base.ErrorMap)
+
+	records := c.GetCheckpointRecords()
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+
+		brokenMapSha := record.BrokenMappingSha256
+		brokenMap, brokenMapLookupErr := shaCompressedMap.Get(brokenMapSha)
+		if brokenMapLookupErr != nil {
+			errMap[brokenMapSha] = brokenMapLookupErr
+			continue
+		}
+		err = record.LoadBrokenMapping(*brokenMap)
+		if err != nil {
+			errMap[brokenMapSha] = err
+			continue
+		}
+	}
+
+	if len(errMap) > 0 {
+		return fmt.Errorf(base.FlattenErrorMap(errMap))
+	}
+	return nil
 }

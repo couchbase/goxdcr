@@ -9,6 +9,8 @@
 package metadata_svc
 
 import (
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"time"
@@ -28,6 +30,7 @@ type CheckpointsServiceCache interface {
 }
 
 type CheckpointsServiceCacheImpl struct {
+	logger        *log.CommonLogger
 	ckptInterval  time.Duration
 	isActive      bool
 	isInitialized bool
@@ -42,12 +45,12 @@ type CheckpointsServiceCacheImpl struct {
 	externalInvalidateCh chan *invalidateReq
 	externalValidateCh   chan *validateReq
 
-	latestCache           metadata.VBsCkptsDocMap
-	latestCompressedCache VBsCkptsDocSnappyMap
+	// These caches (specifically shaMap) will grow until cache is invalidated
+	// Currently, periodic push path will trigger a call to InvalidateCache()
+	// Whenever this is no longer true, will need to revisit to prevent cache bloating up
+	latestCompressedCache   metadata.VBsCkptsDocSnappyMap
+	latestCompressedShaMaps metadata.ShaMappingCompressedMap
 }
-
-// TODO - compression next
-type VBsCkptsDocSnappyMap map[uint16][]byte
 
 type cacheReq struct {
 	clonedRetVal metadata.VBsCkptsDocMap
@@ -84,17 +87,19 @@ func NewCacheRequest() *cacheReq {
 	return &cacheReq{resultReady: make(chan bool)}
 }
 
-func NewCheckpointsServiceCache() *CheckpointsServiceCacheImpl {
+func NewCheckpointsServiceCache(logger *log.CommonLogger) *CheckpointsServiceCacheImpl {
 	cache := &CheckpointsServiceCacheImpl{
-		finCh:                 make(chan bool),
-		activeUpdateCh:        make(chan *metadata.ReplicationSpecification, 5), // Shouldn't have so many updates anyway
-		invalidateCh:          make(chan bool),
-		requestCh:             make(chan *cacheReq, 1000), // TODO - all these consts...
-		setCh:                 make(chan *cacheReq),       // Try to be synchronous
-		setOneCh:              make(chan *individualSetReq, 1024),
-		latestCompressedCache: map[uint16][]byte{},
-		externalInvalidateCh:  make(chan *invalidateReq, 10), // blocking
-		externalValidateCh:    make(chan *validateReq, 10),   // blocking
+		logger:                  logger,
+		finCh:                   make(chan bool),
+		activeUpdateCh:          make(chan *metadata.ReplicationSpecification, 5), // Shouldn't have so many updates anyway
+		invalidateCh:            make(chan bool),
+		requestCh:               make(chan *cacheReq, base.CkptCacheReqChLen),
+		setCh:                   make(chan *cacheReq), // Try to be synchronous
+		setOneCh:                make(chan *individualSetReq, base.NumberOfVbs),
+		latestCompressedCache:   map[uint16][]byte{},
+		latestCompressedShaMaps: map[string][]byte{},
+		externalInvalidateCh:    make(chan *invalidateReq, base.CkptCacheCtrlChLen), // blocking
+		externalValidateCh:      make(chan *validateReq, base.CkptCacheCtrlChLen),   // blocking
 	}
 	go cache.Run()
 	return cache
@@ -216,31 +221,21 @@ func (c *CheckpointsServiceCacheImpl) Run() {
 		case spec := <-c.activeUpdateCh:
 			if !spec.Settings.Active && c.isActive {
 				// Replication paused:
-				//c.invalidateTicker.Stop()
 				c.isActive = spec.Settings.Active
+				c.requestInvalidateCache()
 			} else if spec.Settings.Active && !c.isActive {
 				// Replication resumed:
-				// To be safe, invalidate cache
+				// To be safe, invalidate cache and let pipeline resume restore a valid copy
 				c.requestInvalidateCache()
-
-				// Start a timer that invalidates the cache every ckpt interval
-				//specCkptInterval := time.Duration(spec.Settings.CheckpointInterval) * time.Second
-				//c.invalidateTicker.Reset(specCkptInterval)
-				//c.ckptInterval = specCkptInterval
 				c.isActive = spec.Settings.Active
 			} else {
 				// Not pipeline pause nor resume
-				// If ckpt interval changed, update the timer
-				//specCkptInterval := time.Duration(spec.Settings.CheckpointInterval) * time.Second
-				//if specCkptInterval != c.ckptInterval {
-				//	c.requestInvalidateCache()
-				//	//c.invalidateTicker.Reset(specCkptInterval)
-				//}
 			}
 		case <-c.invalidateCh:
-			c.latestCache = nil
+			c.latestCompressedShaMaps = nil
+			c.latestCompressedCache = nil
 		case getReq := <-c.requestCh:
-			if len(c.invalidateCh) > 0 || c.latestCache == nil || len(c.latestCache) == 0 ||
+			if len(c.invalidateCh) > 0 || c.latestCompressedCache == nil || len(c.latestCompressedCache) == 0 ||
 				len(c.setCh) > 0 || len(c.setOneCh) > 0 {
 				// Cache is going to be invalidated or updated, do not return them
 				if getReq.individualVbRequested {
@@ -253,28 +248,64 @@ func (c *CheckpointsServiceCacheImpl) Run() {
 			} else {
 				if getReq.individualVbRequested {
 					getReq.clonedRetVal = make(metadata.VBsCkptsDocMap)
-					if c.latestCache[getReq.individualVbReq] == nil {
+					if c.latestCompressedCache[getReq.individualVbReq] == nil {
 						getReq.clonedRetVal[getReq.individualVbReq] = nil
 						getReq.errorCode = service_def.MetadataNotFoundErr
 					} else {
-						getReq.clonedRetVal[getReq.individualVbReq] = c.latestCache[getReq.individualVbReq].Clone()
+						compressedBytes := c.latestCompressedCache[getReq.individualVbReq]
+						ckptDoc, err := metadata.NewCheckpointsDocFromSnappy(compressedBytes, c.latestCompressedShaMaps)
+						if err != nil {
+							getReq.errorCode = err
+							c.requestInvalidateCache()
+						} else {
+							getReq.clonedRetVal[getReq.individualVbReq] = ckptDoc
+						}
 					}
 				} else {
-					getReq.clonedRetVal = c.latestCache.Clone()
+					regCkptDocs, err := c.latestCompressedCache.SnappyDecompress(c.latestCompressedShaMaps)
+					if err != nil {
+						getReq.errorCode = err
+						c.requestInvalidateCache()
+					} else {
+						getReq.clonedRetVal = regCkptDocs
+					}
 				}
 			}
 			close(getReq.resultReady)
 		case setReq := <-c.setCh:
-			c.latestCache = setReq.clonedRetVal
-			// cache is valid
-			c.validateCache()
+			snappyCkpt, snappyShaMaps, err := setReq.clonedRetVal.SnappyCompress()
+			if err != nil {
+				c.logger.Errorf("Unable to snappyCompress %v", setReq.clonedRetVal)
+				c.requestInvalidateCache()
+			} else {
+				// cache is valid
+				c.latestCompressedCache = snappyCkpt
+				c.latestCompressedShaMaps = snappyShaMaps
+				c.validateCache()
+			}
 			close(setReq.resultReady)
 		case setOneReq := <-c.setOneCh:
-			if c.latestCache == nil {
-				c.latestCache = make(metadata.VBsCkptsDocMap)
+			if c.latestCompressedShaMaps == nil {
+				c.latestCompressedShaMaps = make(metadata.ShaMappingCompressedMap)
 			}
-			c.latestCache[setOneReq.vbno] = setOneReq.ckptDoc
-			// cache is valid
+			if c.latestCompressedCache == nil {
+				c.latestCompressedCache = make(metadata.VBsCkptsDocSnappyMap)
+			}
+
+			if setOneReq.ckptDoc == nil {
+				// Passing in a nil doc means "unset"
+				c.latestCompressedCache[setOneReq.vbno] = nil
+			} else {
+				snappyBytes, snappyShaMap, err := setOneReq.ckptDoc.SnappyCompress()
+				if err != nil {
+					c.logger.Errorf("Unable to snappy compress vbno %v doc %v: %v", setOneReq.vbno, setOneReq.ckptDoc, err)
+					c.requestInvalidateCache()
+				} else {
+					c.latestCompressedCache[setOneReq.vbno] = snappyBytes
+					c.latestCompressedShaMaps.Merge(snappyShaMap)
+				}
+			}
+
 			c.validateCache()
 			close(setOneReq.setDone)
 		case oneInvalidateReq := <-c.externalInvalidateCh:

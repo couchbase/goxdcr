@@ -1139,7 +1139,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	maxP2PReceiveChLen int,
 	p2pOpaqueCleanupInterval, p2pVBRelatedGCInterval,
 	throughSeqnoBgScannerFreq, throughSeqnoBgScannerLogFreq,
-	timeoutP2PProtocol time.Duration) {
+	timeoutP2PProtocol time.Duration,
+	ckptCacheCtrlLen, ckptCacheReqLen int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1282,6 +1283,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutPartsStart = timeoutPartsStart
 	TimeoutPartsStop = timeoutPartsStop
 	TimeoutP2PProtocol = timeoutP2PProtocol
+	CkptCacheCtrlChLen = ckptCacheReqLen
+	CkptCacheReqChLen = ckptCacheReqLen
 }
 
 // XDCR Dev hidden replication settings
@@ -1414,3 +1417,6 @@ const (
 	SourceNozzlePerNode = "sourceNozzlePerNode"
 	TargetNozzlePerNode = "targetNozzlePerNode"
 )
+
+var CkptCacheCtrlChLen = 10
+var CkptCacheReqChLen = 1000

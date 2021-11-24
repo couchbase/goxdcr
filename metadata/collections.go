@@ -1384,6 +1384,18 @@ func (c *CollectionNamespaceMapping) MarshalJSON() ([]byte, error) {
 	return json.Marshal(metaObj)
 }
 
+func (c *CollectionNamespaceMapping) SnappyCompress() ([]byte, error) {
+	if c == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	uncompressedBytes, err := c.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	return snappy.Encode(nil, uncompressedBytes), nil
+}
+
 func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 	if c == nil {
 		return fmt.Errorf("CollectionNamespaceMapping is nil when calling UnmarshalJSON")
@@ -1438,6 +1450,19 @@ func (c *CollectionNamespaceMapping) UnmarshalJSON(b []byte) error {
 	} else {
 		return nil
 	}
+}
+
+func (c *CollectionNamespaceMapping) SnappyDecompress(data []byte) error {
+	if c == nil {
+		return base.ErrorNilPtr
+	}
+
+	uncompressedData, err := snappy.Decode(nil, data)
+	if err != nil {
+		return err
+	}
+
+	return c.UnmarshalJSON(uncompressedData)
 }
 
 func (c *CollectionNamespaceMapping) MigrateString() string {

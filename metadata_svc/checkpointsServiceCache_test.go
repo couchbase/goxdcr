@@ -18,7 +18,7 @@ import (
 func TestCheckpointsServiceCacheImpl_Run(t *testing.T) {
 	assert := assert.New(t)
 
-	ckptCache := NewCheckpointsServiceCache()
+	ckptCache := NewCheckpointsServiceCache(nil)
 	go ckptCache.Run()
 
 	testSpec, _ := metadata.NewReplicationSpecification("srcBucket", "bucketUUID", "targetCluster", "targetBucket", "tgtBucketUuid")
@@ -35,7 +35,7 @@ func TestCheckpointsServiceCacheImpl_Run(t *testing.T) {
 func TestCheckpointsServiceCacheImplGetAndSet(t *testing.T) {
 	assert := assert.New(t)
 
-	ckptCache := NewCheckpointsServiceCache()
+	ckptCache := NewCheckpointsServiceCache(nil)
 	go ckptCache.Run()
 
 	docs, err := ckptCache.GetLatestDocs()

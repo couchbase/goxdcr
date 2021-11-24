@@ -685,8 +685,8 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 		ckpt_svc.cachedSpecs[newSpec.Id] = newSpec
 		ckpt_svc.stopTheWorldMtx[newSpec.Id] = &sync.RWMutex{}
 		if ckpt_svc.ckptCaches[newSpec.Id] == nil {
-			ckpt_svc.ckptCaches[newSpec.Id] = NewCheckpointsServiceCache()
-			ckpt_svc.ckptCaches[common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)] = NewCheckpointsServiceCache()
+			ckpt_svc.ckptCaches[newSpec.Id] = NewCheckpointsServiceCache(ckpt_svc.logger)
+			ckpt_svc.ckptCaches[common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)] = NewCheckpointsServiceCache(ckpt_svc.logger)
 		}
 		ckpt_svc.ckptCaches[newSpec.Id].SpecChangeCb(oldSpec, newSpec)
 		ckpt_svc.ckptCaches[common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)].SpecChangeCb(oldSpec, newSpec)

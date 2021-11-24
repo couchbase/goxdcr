@@ -261,6 +261,9 @@ const (
 	ThroughSeqnoBgScannerLogFreqKey = "ThroughSeqnoBgScannerLogFreqSec"
 
 	PipelineTimeoutP2PProtocolKey = "PipelineTimeoutP2PProtocolSec"
+
+	CkptCacheCtrlChLenKey = "CkptCacheCtrlChLen"
+	CkptCacheReqChLenKey  = "CkptCacheReqChLen"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -374,6 +377,8 @@ var P2PVBRelatedGCIntervalConfig = &SettingsConfig{int(base.P2PVBRelatedGCInterv
 var ThroughSeqnoBgScannerFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerFreq / time.Second), &Range{1, 300}}
 var ThroughSeqnoBgScannerLogFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerLogFreq / time.Second), &Range{1, 300}}
 var PipelineTimeoutP2PProtocolConfig = &SettingsConfig{int(base.TimeoutP2PProtocol / time.Second), &Range{10, 300}}
+var CkptCacheCtrlChLenConfig = &SettingsConfig{int(base.CkptCacheCtrlChLen), &Range{1, 5000}}
+var CkptCacheReqChLenConfig = &SettingsConfig{int(base.CkptCacheReqChLen), &Range{1, 5000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -487,6 +492,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ThroughSeqnoBgScannerFreqKey:                  ThroughSeqnoBgScannerFreqConfig,
 	ThroughSeqnoBgScannerLogFreqKey:               ThroughSeqnoBgScannerLogFreqConfig,
 	PipelineTimeoutP2PProtocolKey:                 PipelineTimeoutP2PProtocolConfig,
+	CkptCacheCtrlChLenKey:                         CkptCacheCtrlChLenConfig,
+	CkptCacheReqChLenKey:                          CkptCacheReqChLenConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
