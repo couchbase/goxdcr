@@ -2544,7 +2544,7 @@ func GetKeysListFromStrStrMap(a map[string]string) []string {
 	return retList
 }
 
-type DcpStatsMapType map[string]StringStringMap
+type DcpStatsMapType map[string]*StringStringMap
 
 func (t *DcpStatsMapType) GetKeyList() []string {
 	if t == nil || *t == nil {
@@ -2565,11 +2565,15 @@ func (t *DcpStatsMapType) Clone() DcpStatsMapType {
 	clonedMap := make(DcpStatsMapType)
 
 	for k, vMap := range *t {
-		vMapClone := make(map[string]string)
-		for k2, v2 := range vMap {
-			vMapClone[k2] = v2
+		if vMap == nil {
+			clonedMap[k] = nil
+		} else {
+			vMapClone := make(StringStringMap)
+			for k2, v2 := range *vMap {
+				vMapClone[k2] = v2
+			}
+			clonedMap[k] = &vMapClone
 		}
-		clonedMap[k] = vMapClone
 	}
 	return clonedMap
 }
@@ -2581,13 +2585,16 @@ func (t *DcpStatsMapType) GreenClone(dcpStatsPool func(keys []string) *DcpStatsM
 
 	recycledMap := dcpStatsPool(t.GetKeyList())
 	for key, vMap := range *t {
-		recycledStrStr := strStrPool(GetKeysListFromStrStrMap(vMap))
-		for key2, val2 := range vMap {
-			(*recycledStrStr)[key2] = val2
+		if vMap == nil {
+			(*recycledMap)[key] = nil
+		} else {
+			recycledStrStr := strStrPool(GetKeysListFromStrStrMap(*vMap))
+			for key2, val2 := range *vMap {
+				(*recycledStrStr)[key2] = val2
+			}
+			(*recycledMap)[key] = recycledStrStr
 		}
-		(*recycledMap)[key] = *recycledStrStr
 	}
-
 	return recycledMap
 }
 
@@ -2632,7 +2639,7 @@ func (t *BucketInfoMapType) GetKeyList() []string {
 	return retList
 }
 
-type HighSeqnosMapType map[string]map[uint16]uint64
+type HighSeqnosMapType map[string]*map[uint16]uint64
 
 func GetVBListFromSeqnosMap(a map[uint16]uint64) []uint16 {
 	var retList []uint16
@@ -2646,11 +2653,15 @@ func (h HighSeqnosMapType) Clone() HighSeqnosMapType {
 	clonedMap := make(HighSeqnosMapType)
 
 	for k, vMap := range h {
-		clonedVMap := make(map[uint16]uint64)
-		for k2, v2 := range vMap {
-			clonedVMap[k2] = v2
+		if vMap == nil {
+			clonedMap[k] = nil
+		} else {
+			clonedVMap := make(map[uint16]uint64)
+			for k2, v2 := range *vMap {
+				clonedVMap[k2] = v2
+			}
+			clonedMap[k] = &clonedVMap
 		}
-		clonedMap[k] = clonedVMap
 	}
 	return clonedMap
 }
@@ -2673,11 +2684,15 @@ func (h *HighSeqnosMapType) GreenClone(highSeqnoPool func(keys []string) *HighSe
 
 	recycledVbSeqnoMap := highSeqnoPool(h.GetKeyList())
 	for key, vbSeqnoMap := range *h {
-		recycledSeqnoMap := vbSeqnoPool(GetVBListFromSeqnosMap(vbSeqnoMap))
-		for vbno, seqno := range vbSeqnoMap {
-			(*recycledSeqnoMap)[vbno] = seqno
+		if vbSeqnoMap == nil {
+			(*recycledVbSeqnoMap)[key] = nil
+		} else {
+			recycledSeqnoMap := vbSeqnoPool(GetVBListFromSeqnosMap(*vbSeqnoMap))
+			for vbno, seqno := range *vbSeqnoMap {
+				(*recycledSeqnoMap)[vbno] = seqno
+			}
+			(*recycledVbSeqnoMap)[key] = recycledSeqnoMap
 		}
-		(*recycledVbSeqnoMap)[key] = *recycledSeqnoMap
 	}
 	return recycledVbSeqnoMap
 }

@@ -1828,8 +1828,8 @@ func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats base.DcpStatsMapType
 
 	for _, kv_node := range kv_nodes {
 		per_node_stats_map, ok := dcp_stats[kv_node]
-		if ok {
-			if items_remaining_stats_str, ok := per_node_stats_map[xdcr_items_remaining_key]; ok {
+		if ok && per_node_stats_map != nil {
+			if items_remaining_stats_str, ok := (*per_node_stats_map)[xdcr_items_remaining_key]; ok {
 				items_remaining_stats_int, err := strconv.ParseInt(items_remaining_stats_str, base.ParseIntBase, base.ParseIntBitSize)
 				if err != nil {
 					dcp.Logger().Errorf("%v Items remaining stats, %v, is not of integer type.", dcp.Id(), items_remaining_stats_str)

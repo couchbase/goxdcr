@@ -1863,7 +1863,7 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			continue
 		}
 
-		var highSeqnosMaps map[string]map[uint16]uint64
+		var highSeqnosMaps base.HighSeqnosMapType
 		var sourceVBMap map[string][]uint16
 		var recycleFunc func()
 		if remoteClusterCapability.HasCollectionSupport() {
@@ -2053,13 +2053,13 @@ func calculateTotalChanges(logger *log.CommonLogger, highSeqnoKvMap base.HighSeq
 
 	for serverAddr, vbnos := range kvVbMap {
 		highseqno_map, found := highSeqnoKvMap[serverAddr]
-		if !found {
+		if !found || highseqno_map == nil {
 			logger.Warnf("Server %v not found in high seqnoMap %v", serverAddr, highSeqnoKvMap)
 			continue
 		}
 		for _, vbno := range vbnos {
 			vbsList = append(vbsList, vbno)
-			current_vb_highseqno := highseqno_map[vbno]
+			current_vb_highseqno := (*highseqno_map)[vbno]
 			total_changes = total_changes + current_vb_highseqno
 		}
 	}

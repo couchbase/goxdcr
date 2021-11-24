@@ -233,7 +233,7 @@ func (b *BucketTopologyService) getDcpStatsUpdater(spec *metadata.ReplicationSpe
 				watcher.objsPool.DcpStatsMapPool.Put(dcp_stats)
 				return err
 			} else {
-				(*dcp_stats)[serverAddr] = *stats_map
+				(*dcp_stats)[serverAddr] = stats_map
 			}
 		}
 		watcher.kvMemClientsMtx.Unlock()
@@ -275,10 +275,11 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 
 			stats_map := (*dcp_stats)[serverAddr]
 			if stats_map == nil {
-				stats_map = make(map[string]string)
+				newStatsMap := make(base.StringStringMap)
+				stats_map = &newStatsMap
 			}
 
-			err = client.StatsMapForSpecifiedStats(base.DCP_STAT_NAME, stats_map)
+			err = client.StatsMapForSpecifiedStats(base.DCP_STAT_NAME, *stats_map)
 			if err != nil {
 				watcher.logger.Warnf("%v Error getting dcp stats for kv %v. err=%v", userAgent, serverAddr, err)
 				err1 := client.Close()
@@ -823,7 +824,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 					}
 				}
 				watcher.statsMap = *updatedStatsMap
-				(*highseqno_map)[serverAddr] = *oneSeqnoMap
+				(*highseqno_map)[serverAddr] = oneSeqnoMap
 				watcher.kvMemClients[serverAddr] = client
 			}
 		}
@@ -1791,28 +1792,36 @@ func (n *Notification) Recycle() {
 
 	if n.DcpStatsMap != nil {
 		for _, vMap := range *n.DcpStatsMap {
-			n.ObjPool.StringStringPool.Put(&vMap)
+			if vMap != nil {
+				n.ObjPool.StringStringPool.Put(vMap)
+			}
 		}
 		n.ObjPool.DcpStatsMapPool.Put(n.DcpStatsMap)
 	}
 
 	if n.DcpStatsMapLegacy != nil {
 		for _, vMap := range *n.DcpStatsMapLegacy {
-			n.ObjPool.StringStringPool.Put(&vMap)
+			if vMap != nil {
+				n.ObjPool.StringStringPool.Put(vMap)
+			}
 		}
 		n.ObjPool.DcpStatsMapPool.Put(n.DcpStatsMapLegacy)
 	}
 
 	if n.HighSeqnoMap != nil {
 		for _, vMap := range *n.HighSeqnoMap {
-			n.ObjPool.VbSeqnoMapPool.Put(&vMap)
+			if vMap != nil {
+				n.ObjPool.VbSeqnoMapPool.Put(vMap)
+			}
 		}
 		n.ObjPool.HighSeqnosMapPool.Put(n.HighSeqnoMap)
 	}
 
 	if n.HighSeqnoMapLegacy != nil {
 		for _, vMap := range *n.HighSeqnoMapLegacy {
-			n.ObjPool.VbSeqnoMapPool.Put(&vMap)
+			if vMap != nil {
+				n.ObjPool.VbSeqnoMapPool.Put(vMap)
+			}
 		}
 		n.ObjPool.HighSeqnosMapPool.Put(n.HighSeqnoMapLegacy)
 	}
