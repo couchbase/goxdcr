@@ -2761,6 +2761,10 @@ func NewUIWarning() *UIWarningImpl {
 	}
 }
 
+func (u *UIWarningImpl) isEmpty() bool {
+	return len(u.GenericWarnings) == 0 && len(u.FieldWarnings) == 0
+}
+
 func (u *UIWarningImpl) AppendGeneric(warning string) {
 	u.GenericWarnings = append(u.GenericWarnings, warning)
 }
@@ -2770,7 +2774,7 @@ func (u *UIWarningImpl) AddWarning(key string, val string) {
 }
 
 func (u *UIWarningImpl) String() string {
-	if u == nil {
+	if u == nil || u.isEmpty() {
 		return ""
 	}
 	out, err := json.Marshal(u)
