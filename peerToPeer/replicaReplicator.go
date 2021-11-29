@@ -38,7 +38,7 @@ type ReplicaReplicatorImpl struct {
 	replicationSpecSvc service_def.ReplicationSpecSvc
 
 	utils          utilities.UtilsIface
-	reverseMapPool utilities.KvVbMapPool
+	reverseMapPool *utilities.KvVbMapPool
 
 	unitTest bool
 

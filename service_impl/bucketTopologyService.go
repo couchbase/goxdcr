@@ -22,14 +22,14 @@ import (
 )
 
 type BucketTopologyObjsPool struct {
-	KvVbMapPool       utils.KvVbMapPool
-	DcpStatsMapPool   utils.DcpStatsMapPool
-	StringStringPool  utils.StringStringMapPool
-	HighSeqnosMapPool utils.HighSeqnosMapPool
-	VbSeqnoMapPool    utils.VbSeqnoMapPool
-	BucketInfoMapPool utils.BucketInfoMapPool
-	VbHostsMapPool    utils.VbHostsMapPool
-	StringSlicePool   utils.StringSlicePool
+	KvVbMapPool       *utils.KvVbMapPool
+	DcpStatsMapPool   *utils.DcpStatsMapPool
+	StringStringPool  *utils.StringStringMapPool
+	HighSeqnosMapPool *utils.HighSeqnosMapPool
+	VbSeqnoMapPool    *utils.VbSeqnoMapPool
+	BucketInfoMapPool *utils.BucketInfoMapPool
+	VbHostsMapPool    *utils.VbHostsMapPool
+	StringSlicePool   *utils.StringSlicePool
 }
 
 func NewBucketTopologyObjsPool() *BucketTopologyObjsPool {
@@ -819,7 +819,13 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 					} else {
 						lastSeqnoMap := (*lastCachedData)[serverAddr]
 						for _, failedVB := range vbsUnableToParse {
-							(*oneSeqnoMap)[failedVB] = lastSeqnoMap[failedVB]
+							var seqnoToReuse uint64
+							if lastSeqnoMap != nil {
+								if seqno, exists := (*lastSeqnoMap)[failedVB]; exists {
+									seqnoToReuse = seqno
+								}
+							}
+							(*oneSeqnoMap)[failedVB] = seqnoToReuse
 						}
 					}
 				}

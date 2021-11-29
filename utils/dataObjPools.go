@@ -15,6 +15,8 @@ import (
 	"sync"
 )
 
+// TODO - we should revisit these to use *WrappedUprPool instead to make sure pools do not get copied
+// Right now, there is only one user. If it ever becomes > 1 user, then it'll be a problem (i.e. bucketTopologySvc)
 type WrappedUprPoolIface interface {
 	Get() *base.WrappedUprEvent
 	Put(uprEvent *base.WrappedUprEvent)
@@ -119,17 +121,12 @@ func (t *TargetCollectionInfoPool) Put(tc *base.TargetCollectionInfo) {
 	t.pool.Put(tc)
 }
 
-type KvVbMapPool interface {
-	Get(keys []string) *base.KvVBMapType
-	Put(*base.KvVBMapType)
-}
-
-type KvVbMapPoolImpl struct {
+type KvVbMapPool struct {
 	pool sync.Pool
 }
 
 // User needs to filter if nodes is not provided
-func (k *KvVbMapPoolImpl) Get(nodes []string) *base.KvVBMapType {
+func (k *KvVbMapPool) Get(nodes []string) *base.KvVBMapType {
 	kvVbMap := k.pool.Get().(*base.KvVBMapType)
 	if len(nodes) == 0 {
 		return kvVbMap
@@ -151,12 +148,12 @@ func (k *KvVbMapPoolImpl) Get(nodes []string) *base.KvVBMapType {
 	return kvVbMap
 }
 
-func (k *KvVbMapPoolImpl) Put(kvVbMap *base.KvVBMapType) {
+func (k *KvVbMapPool) Put(kvVbMap *base.KvVBMapType) {
 	k.pool.Put(kvVbMap)
 }
 
-func NewKvVbMapPool() KvVbMapPool {
-	newPool := &KvVbMapPoolImpl{
+func NewKvVbMapPool() *KvVbMapPool {
+	newPool := &KvVbMapPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(base.KvVBMapType)
@@ -167,19 +164,14 @@ func NewKvVbMapPool() KvVbMapPool {
 	return newPool
 }
 
-type DcpStatsMapPool interface {
-	// Get() will not clean the inner map
-	Get(keys []string) *base.DcpStatsMapType
-	Put(*base.DcpStatsMapType)
-}
-
-type DcpStatsMapPoolImpl struct {
+type DcpStatsMapPool struct {
 	pool sync.Pool
 }
 
+// Get() will not clean the inner map
 // The inner map of DcpStatsMap will be re-used and the component reusing it
 // should take care of the clean-up
-func (d *DcpStatsMapPoolImpl) Get(nodes []string) *base.DcpStatsMapType {
+func (d *DcpStatsMapPool) Get(nodes []string) *base.DcpStatsMapType {
 	nodesStatsMap := d.pool.Get().(*base.DcpStatsMapType)
 	for oldNodeName, _ := range *nodesStatsMap {
 		var found bool
@@ -196,12 +188,12 @@ func (d *DcpStatsMapPoolImpl) Get(nodes []string) *base.DcpStatsMapType {
 	return nodesStatsMap
 }
 
-func (d *DcpStatsMapPoolImpl) Put(incoming *base.DcpStatsMapType) {
+func (d *DcpStatsMapPool) Put(incoming *base.DcpStatsMapType) {
 	d.pool.Put(incoming)
 }
 
-func NewDcpStatsMapPool() DcpStatsMapPool {
-	newPool := &DcpStatsMapPoolImpl{
+func NewDcpStatsMapPool() *DcpStatsMapPool {
+	newPool := &DcpStatsMapPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(base.DcpStatsMapType)
@@ -212,17 +204,12 @@ func NewDcpStatsMapPool() DcpStatsMapPool {
 	return newPool
 }
 
-type HighSeqnosMapPool interface {
-	Get(keys []string) *base.HighSeqnosMapType
-	Put(*base.HighSeqnosMapType)
-}
-
-type HighSeqnosMapPoolImpl struct {
+type HighSeqnosMapPool struct {
 	pool sync.Pool
 }
 
 // The internal seqnoMap cleaniness is responsible by the caller
-func (s *HighSeqnosMapPoolImpl) Get(keys []string) *base.HighSeqnosMapType {
+func (s *HighSeqnosMapPool) Get(keys []string) *base.HighSeqnosMapType {
 	retMap := s.pool.Get().(*base.HighSeqnosMapType)
 	for oldKey, _ := range *retMap {
 		var found bool
@@ -239,12 +226,12 @@ func (s *HighSeqnosMapPoolImpl) Get(keys []string) *base.HighSeqnosMapType {
 	return retMap
 }
 
-func (s *HighSeqnosMapPoolImpl) Put(incoming *base.HighSeqnosMapType) {
+func (s *HighSeqnosMapPool) Put(incoming *base.HighSeqnosMapType) {
 	s.pool.Put(incoming)
 }
 
-func NewHighSeqnosMapPool() *HighSeqnosMapPoolImpl {
-	return &HighSeqnosMapPoolImpl{
+func NewHighSeqnosMapPool() *HighSeqnosMapPool {
+	return &HighSeqnosMapPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(base.HighSeqnosMapType)
@@ -254,16 +241,11 @@ func NewHighSeqnosMapPool() *HighSeqnosMapPoolImpl {
 	}
 }
 
-type StringStringMapPool interface {
-	Get(keys []string) *base.StringStringMap
-	Put(*base.StringStringMap)
-}
-
-type StringStringMapPoolImpl struct {
+type StringStringMapPool struct {
 	pool sync.Pool
 }
 
-func (s *StringStringMapPoolImpl) Get(keys []string) *base.StringStringMap {
+func (s *StringStringMapPool) Get(keys []string) *base.StringStringMap {
 	retMap := s.pool.Get().(*base.StringStringMap)
 	for oldKey, _ := range *retMap {
 		var found bool
@@ -282,12 +264,12 @@ func (s *StringStringMapPoolImpl) Get(keys []string) *base.StringStringMap {
 	return retMap
 }
 
-func (s *StringStringMapPoolImpl) Put(incoming *base.StringStringMap) {
+func (s *StringStringMapPool) Put(incoming *base.StringStringMap) {
 	s.pool.Put(incoming)
 }
 
-func NewStringStringMapPool() *StringStringMapPoolImpl {
-	return &StringStringMapPoolImpl{
+func NewStringStringMapPool() *StringStringMapPool {
+	return &StringStringMapPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(base.StringStringMap)
@@ -297,16 +279,11 @@ func NewStringStringMapPool() *StringStringMapPoolImpl {
 	}
 }
 
-type VbSeqnoMapPool interface {
-	Get(vbnos []uint16) *map[uint16]uint64
-	Put(*map[uint16]uint64)
-}
-
-type VbSeqnoMapPoolImpl struct {
+type VbSeqnoMapPool struct {
 	pool sync.Pool
 }
 
-func (v *VbSeqnoMapPoolImpl) Get(vbnos []uint16) *map[uint16]uint64 {
+func (v *VbSeqnoMapPool) Get(vbnos []uint16) *map[uint16]uint64 {
 	retMap := v.pool.Get().(*map[uint16]uint64)
 	for oldVb, _ := range *retMap {
 		var found bool
@@ -325,12 +302,12 @@ func (v *VbSeqnoMapPoolImpl) Get(vbnos []uint16) *map[uint16]uint64 {
 	return retMap
 }
 
-func (v *VbSeqnoMapPoolImpl) Put(incoming *map[uint16]uint64) {
+func (v *VbSeqnoMapPool) Put(incoming *map[uint16]uint64) {
 	v.pool.Put(incoming)
 }
 
-func NewVbSeqnoMapPool() *VbSeqnoMapPoolImpl {
-	return &VbSeqnoMapPoolImpl{
+func NewVbSeqnoMapPool() *VbSeqnoMapPool {
+	return &VbSeqnoMapPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(map[uint16]uint64)
@@ -340,20 +317,15 @@ func NewVbSeqnoMapPool() *VbSeqnoMapPoolImpl {
 	}
 }
 
-type BucketInfoMapPool interface {
-	Get(keys []string) *base.BucketInfoMapType
-	Put(mapType *base.BucketInfoMapType)
-}
-
-type BucketInfoMapPoolImpl struct {
+type BucketInfoMapPool struct {
 	pool sync.Pool
 }
 
-func (b *BucketInfoMapPoolImpl) Put(incoming *base.BucketInfoMapType) {
+func (b *BucketInfoMapPool) Put(incoming *base.BucketInfoMapType) {
 	b.pool.Put(incoming)
 }
 
-func (b *BucketInfoMapPoolImpl) Get(keys []string) *base.BucketInfoMapType {
+func (b *BucketInfoMapPool) Get(keys []string) *base.BucketInfoMapType {
 	retMap := b.pool.Get().(*base.BucketInfoMapType)
 	for oldKey, _ := range *retMap {
 		var found bool
@@ -373,8 +345,8 @@ func (b *BucketInfoMapPoolImpl) Get(keys []string) *base.BucketInfoMapType {
 	return retMap
 }
 
-func NewBucketInfoMapPool() *BucketInfoMapPoolImpl {
-	return &BucketInfoMapPoolImpl{
+func NewBucketInfoMapPool() *BucketInfoMapPool {
+	return &BucketInfoMapPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(base.BucketInfoMapType)
@@ -384,17 +356,12 @@ func NewBucketInfoMapPool() *BucketInfoMapPoolImpl {
 	}
 }
 
-type VbHostsMapPool interface {
-	Get(vbnos []uint16) *base.VbHostsMapType
-	Put(*base.VbHostsMapType)
-}
-
-type VbHostsMapPoolImpl struct {
+type VbHostsMapPool struct {
 	pool         sync.Pool
-	strSlicePool StringSlicePool
+	strSlicePool *StringSlicePool
 }
 
-func (v *VbHostsMapPoolImpl) Get(vbnos []uint16) *base.VbHostsMapType {
+func (v *VbHostsMapPool) Get(vbnos []uint16) *base.VbHostsMapType {
 	retMap := v.pool.Get().(*base.VbHostsMapType)
 	for oldVb, _ := range *retMap {
 		var found bool
@@ -414,15 +381,15 @@ func (v *VbHostsMapPoolImpl) Get(vbnos []uint16) *base.VbHostsMapType {
 	return retMap
 }
 
-func (v *VbHostsMapPoolImpl) Put(incoming *base.VbHostsMapType) {
+func (v *VbHostsMapPool) Put(incoming *base.VbHostsMapType) {
 	for _, strSlice := range *incoming {
 		v.strSlicePool.Put(strSlice)
 	}
 	v.pool.Put(incoming)
 }
 
-func NewVbHostsMapPool(strSlicePool StringSlicePool) *VbHostsMapPoolImpl {
-	return &VbHostsMapPoolImpl{
+func NewVbHostsMapPool(strSlicePool *StringSlicePool) *VbHostsMapPool {
+	return &VbHostsMapPool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(base.VbHostsMapType)
@@ -433,27 +400,22 @@ func NewVbHostsMapPool(strSlicePool StringSlicePool) *VbHostsMapPoolImpl {
 	}
 }
 
-type StringSlicePool interface {
-	Get() *[]string
-	Put(*[]string)
-}
-
-type StringSlicePoolImpl struct {
+type StringSlicePool struct {
 	pool sync.Pool
 }
 
-func (s *StringSlicePoolImpl) Put(incoming *[]string) {
+func (s *StringSlicePool) Put(incoming *[]string) {
 	s.pool.Put(incoming)
 }
 
-func (s *StringSlicePoolImpl) Get() *[]string {
+func (s *StringSlicePool) Get() *[]string {
 	strSlice := s.pool.Get().(*[]string)
 	*strSlice = (*strSlice)[:0]
 	return strSlice
 }
 
-func NewStringSlicePool() *StringSlicePoolImpl {
-	return &StringSlicePoolImpl{
+func NewStringSlicePool() *StringSlicePool {
+	return &StringSlicePool{
 		pool: sync.Pool{
 			New: func() interface{} {
 				var retSlice []string
