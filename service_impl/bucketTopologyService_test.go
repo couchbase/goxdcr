@@ -463,7 +463,9 @@ func TestBucketTopologyWatcherGC(t *testing.T) {
 	// Stop the pull routine and manually hack around to see if GC works
 	watcher1.Stop()
 
+	watcher1.latestCacheMtx.Lock()
 	delete(*watcher1.latestCached.SourceVBMap, "192.168.0.116:12002")
+	watcher1.latestCacheMtx.Unlock()
 
 	var gc1Called bool
 	var gc2Called bool

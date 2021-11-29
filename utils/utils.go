@@ -2943,11 +2943,12 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 		return nil, nil, nil, base.ErrorNoVbSpecified
 	}
 
-	var highseqno_map map[uint16]uint64
+	var highseqno_map *map[uint16]uint64
 	if recycledVbSeqnoMap != nil {
-		highseqno_map = *recycledVbSeqnoMap
+		highseqno_map = recycledVbSeqnoMap
 	} else {
-		highseqno_map = make(map[uint16]uint64)
+		newMap := make(map[uint16]uint64)
+		highseqno_map = &newMap
 	}
 
 	var err error
@@ -2964,7 +2965,7 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		unableToBeParsedVBs, err = u.ParseHighSeqnoStat(vbnos, *stats_map, highseqno_map)
+		unableToBeParsedVBs, err = u.ParseHighSeqnoStat(vbnos, *stats_map, *highseqno_map)
 	} else {
 		// Need to get high sequence numbers across one or a set of collections only
 		mccContext := &mcc.ClientContext{}
@@ -2975,15 +2976,15 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			PopulateMaxVbSeqnoMap(vbSeqnoMap, highseqno_map)
+			PopulateMaxVbSeqnoMap(vbSeqnoMap, *highseqno_map)
 		}
-		highseqno_map, err = FilterVbSeqnoMap(vbnos, highseqno_map)
+		err = FilterVbSeqnoMap(vbnos, highseqno_map)
 	}
 
 	if err != nil {
 		return nil, nil, nil, err
 	} else {
-		return &highseqno_map, stats_map, unableToBeParsedVBs, nil
+		return highseqno_map, stats_map, unableToBeParsedVBs, nil
 	}
 }
 
@@ -2997,23 +2998,25 @@ func PopulateMaxVbSeqnoMap(latestVbSeqnoMap, maxVbSeqnoMap map[uint16]uint64) {
 }
 
 // Make sure vbSeqnoMap only contains entries in vbnos
-func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap map[uint16]uint64) (map[uint16]uint64, error) {
+func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap *map[uint16]uint64) error {
 	if len(vbnos) == 0 {
-		if len(vbSeqnoMap) > 0 {
-			vbSeqnoMap = make(map[uint16]uint64)
+		if len(*vbSeqnoMap) > 0 {
+			for k, _ := range *vbSeqnoMap {
+				delete(*vbSeqnoMap, k)
+			}
 		}
-		return vbSeqnoMap, nil
+		return nil
 	}
 
 	// Shouldn't be the case
-	if len(vbnos) > len(vbSeqnoMap) {
-		return vbSeqnoMap, fmt.Errorf("Asking for vb's %v when seqnoMap only contains %v", vbnos, vbSeqnoMap)
+	if len(vbnos) > len(*vbSeqnoMap) {
+		return fmt.Errorf("Asking for vb's %v when seqnoMap only contains %v", vbnos, vbSeqnoMap)
 	}
 
 	sortedVbnos := base.SortUint16List(vbnos)
 	sortedVbnosLen := len(sortedVbnos)
 	var vbsToDelete []uint16
-	for vbno, _ := range vbSeqnoMap {
+	for vbno, _ := range *vbSeqnoMap {
 		i := sort.Search(sortedVbnosLen, func(i int) bool { return sortedVbnos[i] >= vbno })
 		if i < sortedVbnosLen && sortedVbnos[i] == vbno {
 			// Vbno entry of vbSeqnoMap exists in the vbnos list
@@ -3024,9 +3027,9 @@ func FilterVbSeqnoMap(vbnos []uint16, vbSeqnoMap map[uint16]uint64) (map[uint16]
 	}
 
 	for _, vbno := range vbsToDelete {
-		delete(vbSeqnoMap, vbno)
+		delete(*vbSeqnoMap, vbno)
 	}
-	return vbSeqnoMap, nil
+	return nil
 }
 
 // Given a bucketInfo and bucketName, figure out the VBs that this node is the master of

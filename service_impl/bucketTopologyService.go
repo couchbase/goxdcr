@@ -789,7 +789,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 
 			oneSeqnoMap := watcher.objsPool.VbSeqnoMapPool.Get(vbnos)
 			freeInCaseOfErrList = append(freeInCaseOfErrList, oneSeqnoMap)
-			oneSeqnoMap, updatedStatsMap, vbsUnableToParse, err := b.utils.GetHighSeqNos(vbnos, client, &watcher.statsMap, collectionIds, oneSeqnoMap)
+			_, updatedStatsMap, vbsUnableToParse, err := b.utils.GetHighSeqNos(vbnos, client, &watcher.statsMap, collectionIds, oneSeqnoMap)
 			if err != nil {
 				if err == base.ErrorNoVbSpecified {
 					err = fmt.Errorf("KV node %v has no vbucket assigned to it", serverAddr)

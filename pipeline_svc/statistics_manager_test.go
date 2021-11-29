@@ -385,7 +385,7 @@ func TestFilterVBSeqnoMap(t *testing.T) {
 	assert.Equal(3, len(maxVbSeqnoMap))
 
 	var filterVbs []uint16 = []uint16{0, 1}
-	maxVbSeqnoMap, err := utils.FilterVbSeqnoMap(filterVbs, maxVbSeqnoMap)
+	err := utils.FilterVbSeqnoMap(filterVbs, &maxVbSeqnoMap)
 	assert.Equal(2, len(maxVbSeqnoMap))
 	assert.Nil(err)
 
