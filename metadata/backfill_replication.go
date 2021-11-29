@@ -196,7 +196,7 @@ func (b *BackfillReplicationSpec) PrintFirstTaskRange() string {
 	defer b.VBTasksMap.mutex.RUnlock()
 	for vb, tasks := range b.VBTasksMap.VBTasksMap {
 		tasks.mutex.RLock()
-		if tasks.List[0] != nil {
+		if len(tasks.List) > 0 && tasks.List[0] != nil {
 			combinedStrings = append(combinedStrings, fmt.Sprintf("vb: %v (%v,%v] ", vb,
 				tasks.List[0].GetStartingTimestampSeqno(), tasks.List[0].GetEndingTimestampSeqno()))
 		}
@@ -339,6 +339,22 @@ func (v *VBTasksMapType) GetLock() *sync.RWMutex {
 	} else {
 		return &sync.RWMutex{}
 	}
+}
+
+func (v *VBTasksMapType) ContainsAtLeastOneTaskForVBs(vbs []uint16) bool {
+	sortedVBs := base.SortUint16List(vbs)
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+	for vbno, tasks := range v.VBTasksMap {
+		_, found := base.SearchUint16List(sortedVBs, vbno)
+		if !found {
+			continue
+		}
+		if tasks != nil && tasks.Len() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *VBTasksMapType) ContainsAtLeastOneTask() bool {

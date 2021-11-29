@@ -415,6 +415,12 @@ func (b *BackfillRequestHandler) getVBs() []uint16 {
 	return b.latestVBs
 }
 
+func (b *BackfillRequestHandler) getVBsClone() []uint16 {
+	b.latestCachedSourceNotificationMtx.RLock()
+	defer b.latestCachedSourceNotificationMtx.RUnlock()
+	return base.CloneUint16List(b.latestVBs)
+}
+
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
 	seqnosMap, myVBs, err := b.getMaxSeqnosMapToBackfill()
 	if err != nil {
@@ -506,7 +512,7 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 
 func (b *BackfillRequestHandler) figureOutIfCkptExists(reqRO metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) bool {
 	var shouldSkipFirst = true
-	if b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask() {
+	if b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(b.getVBsClone()) {
 		b.pipelinesMtx.RLock()
 		pipeline, _ := b.getPipeline(common.BackfillPipeline)
 		if pipeline != nil && (pipeline.State() == common.Pipeline_Initial || pipeline.State() == common.Pipeline_Stopped) {
@@ -644,7 +650,6 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 	var hasMoreTasks bool
 	if backfillDone {
 		hasMoreTasks = b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask()
-		b.vbsDoneNotifier(hasMoreTasks)
 	}
 
 	var err error
@@ -665,6 +670,11 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 		if err != nil {
 			b.logger.Warnf("HandVBDone %v setOp err %v", b.id, err)
 		}
+	}
+
+	if backfillDone {
+		// This notifier will kick off another pipeline ... so only do it after persistent has finished
+		b.vbsDoneNotifier(hasMoreTasks)
 	}
 	return err
 }
@@ -1035,6 +1045,7 @@ func (b *BackfillRequestHandler) GetDelVBSpecificBackfillCb(vbno uint16) (cb bas
 
 func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16) error {
 	if len(added) > 0 {
+		// TODO - MB-49736
 		backfillReqRaw, err := b.getCompleteReq()
 		if err != nil {
 			if err == base.ErrorNoBackfillNeeded {

@@ -753,7 +753,7 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 		backfillSpec, _ := ckmgr.backfillReplSvc.BackfillReplSpec(ckmgr.pipeline.Topic())
 		specExists = backfillSpec != nil
 		if specExists {
-			if !backfillSpec.VBTasksMap.ContainsAtLeastOneTask() {
+			if !backfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(ckmgr.getMyVBs()) {
 				// If Backfill spec does not have any more VB tasks, then it is considered finished
 				// and the checkpoints are to be deleted, so do not checkpoint
 				specExists = false

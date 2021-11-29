@@ -475,6 +475,7 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 			return nil, fmt.Errorf("BackfillCkpt internalID mismatch - expected %v", a.internalId)
 		}
 	}
+	// TODO - need to filter out information so that only the VBs of which I'm the master is sent to the replicas
 
 	if mainCkpts != nil && backfillErr != nil {
 		return nil, fmt.Errorf("Unable to get mainCkpt %v backfillCkpt %v", mainCkptErr, backfillErr)
