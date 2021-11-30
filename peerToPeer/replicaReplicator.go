@@ -93,7 +93,8 @@ func (r *ReplicaReplicatorImpl) HandleSpecCreation(newSpec *metadata.Replication
 	if r.unitTest {
 		randSecInt = 0
 	}
-	agent := NewReplicatorAgent(newSpec, r.logger, r.utils, r.ckptSvc, r.backfillReplSvc, r.colManifestSvc, randSecInt, r.replicationSpecSvc, newSpec.InternalId)
+	agent := NewReplicatorAgent(newSpec, r.logger, r.utils, r.ckptSvc, r.backfillReplSvc, r.colManifestSvc, randSecInt,
+		r.replicationSpecSvc, newSpec.InternalId, r.bucketTopologySvc)
 	r.agentMapMtx.Lock()
 	r.agentMap[newSpec.Id] = agent
 	r.agentMapMtx.Unlock()
@@ -322,20 +323,29 @@ type ReplicatorAgentImpl struct {
 	initDelay time.Duration
 	utils     utilities.UtilsIface
 
-	ckptSvc         service_def.CheckpointsService
-	backfillReplSvc service_def.BackfillReplSvc
-	colManifestSvc  service_def.CollectionsManifestSvc
-	replSpecSvc     service_def.ReplicationSpecSvc
+	ckptSvc           service_def.CheckpointsService
+	backfillReplSvc   service_def.BackfillReplSvc
+	colManifestSvc    service_def.CollectionsManifestSvc
+	replSpecSvc       service_def.ReplicationSpecSvc
+	bucketTopologySvc service_def.BucketTopologySvc
 
+	spec          *metadata.ReplicationSpecification
 	specId        string
 	srcBucketName string
 	internalId    string
+	bucketSvcId   string
 
 	finCh    chan bool
 	reloadCh chan agentReloadPair
 
 	latestInfoMtx sync.Mutex
 	latestInfo    *VBPeriodicReplicateReq
+
+	sourceBucketTopologyCh chan service_def.SourceNotification
+
+	latestCachedSourceNotification    service_def.SourceNotification
+	latestCachedSourceNotificationMtx sync.RWMutex
+	latestVBs                         []uint16
 }
 
 type agentReloadPair struct {
@@ -343,24 +353,26 @@ type agentReloadPair struct {
 	callbackFunc    func()
 }
 
-func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.CommonLogger, utils utilities.UtilsIface,
-	ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc,
-	colManifestSvc service_def.CollectionsManifestSvc, randSecInt int, replicationSpecSvc service_def.ReplicationSpecSvc,
-	internalId string) *ReplicatorAgentImpl {
+var agentSubscriberCounter uint32
 
+func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.CommonLogger, utils utilities.UtilsIface, ckptSvc service_def.CheckpointsService, backfillReplSvc service_def.BackfillReplSvc, colManifestSvc service_def.CollectionsManifestSvc, randSecInt int, replicationSpecSvc service_def.ReplicationSpecSvc, internalId string, bucketTopologySvc service_def.BucketTopologySvc) *ReplicatorAgentImpl {
 	return &ReplicatorAgentImpl{
-		logger:          logger,
-		specId:          spec.Id,
-		srcBucketName:   spec.SourceBucketName,
-		reloadCh:        make(chan agentReloadPair, 10),
-		finCh:           make(chan bool),
-		initDelay:       time.Duration(randSecInt) * time.Second,
-		utils:           utils,
-		ckptSvc:         ckptSvc,
-		backfillReplSvc: backfillReplSvc,
-		colManifestSvc:  colManifestSvc,
-		replSpecSvc:     replicationSpecSvc,
-		internalId:      internalId,
+		logger:                 logger,
+		spec:                   spec,
+		specId:                 spec.Id,
+		srcBucketName:          spec.SourceBucketName,
+		bucketSvcId:            spec.Id + "_replAgent_" + base.GetIterationId(&agentSubscriberCounter),
+		reloadCh:               make(chan agentReloadPair, 10),
+		finCh:                  make(chan bool),
+		initDelay:              time.Duration(randSecInt) * time.Second,
+		utils:                  utils,
+		ckptSvc:                ckptSvc,
+		backfillReplSvc:        backfillReplSvc,
+		colManifestSvc:         colManifestSvc,
+		replSpecSvc:            replicationSpecSvc,
+		internalId:             internalId,
+		sourceBucketTopologyCh: make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen),
+		bucketTopologySvc:      bucketTopologySvc,
 	}
 }
 
@@ -409,11 +421,30 @@ func (a *ReplicatorAgentImpl) run() {
 		a.logger.Errorf("Unable to get replication interval %v - %v", a.specId, err)
 		return
 	}
+	a.sourceBucketTopologyCh, err = a.bucketTopologySvc.SubscribeToLocalBucketFeed(a.spec, a.bucketSvcId)
+	if err != nil {
+		a.logger.Errorf("%v - Unable to subscribe to local bucket feed %v", a.specId, err)
+		return
+	}
+
 	ticker := time.NewTicker(interval)
 	for {
 		select {
 		case <-a.finCh:
+			err := a.bucketTopologySvc.UnSubscribeLocalBucketFeed(a.spec, a.bucketSvcId)
+			if err != nil {
+				a.logger.Errorf("%v - Unable to subscribe to local bucket feed %v", a.specId, err)
+			}
 			return
+		case notification := <-a.sourceBucketTopologyCh:
+			a.latestCachedSourceNotificationMtx.Lock()
+			if a.latestCachedSourceNotification != nil {
+				a.latestCachedSourceNotification.Recycle()
+			}
+			a.latestCachedSourceNotification = notification.Clone(1).(service_def.SourceNotification)
+			kv_vb_map := a.latestCachedSourceNotification.GetSourceVBMapRO()
+			a.latestVBs = kv_vb_map.GetSortedVBList()
+			a.latestCachedSourceNotificationMtx.Unlock()
 		case timeAndCb := <-a.reloadCh:
 			ticker.Reset(timeAndCb.newTimeInterval)
 			timeAndCb.callbackFunc()
@@ -438,12 +469,19 @@ func (a *ReplicatorAgentImpl) run() {
 
 }
 
+func (a *ReplicatorAgentImpl) getVBsListClone() []uint16 {
+	a.latestCachedSourceNotificationMtx.RLock()
+	defer a.latestCachedSourceNotificationMtx.RUnlock()
+	return base.CloneUint16List(a.latestVBs)
+}
+
 // Fetch all data and get them ready to be replicated
 func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicateReq, error) {
-	backfillSpec, err := a.backfillReplSvc.BackfillReplSpec(a.specId)
-	if err == nil && backfillSpec != nil && backfillSpec.InternalId != a.internalId {
-		return nil, fmt.Errorf("BackfillSpec Internal ID mismatch - expected %v got %v", a.internalId, backfillSpec.InternalId)
+	backfillSpecPreClone, err := a.backfillReplSvc.BackfillReplSpec(a.specId)
+	if err == nil && backfillSpecPreClone != nil && backfillSpecPreClone.InternalId != a.internalId {
+		return nil, fmt.Errorf("BackfillSpec Internal ID mismatch - expected %v got %v", a.internalId, backfillSpecPreClone.InternalId)
 	}
+	backfillSpec := backfillSpecPreClone.Clone()
 
 	checkSpec, err := a.replSpecSvc.ReplicationSpecReadOnly(a.specId)
 	if err != nil {
@@ -475,10 +513,28 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 			return nil, fmt.Errorf("BackfillCkpt internalID mismatch - expected %v", a.internalId)
 		}
 	}
-	// TODO - need to filter out information so that only the VBs of which I'm the master is sent to the replicas
-
 	if mainCkpts != nil && backfillErr != nil {
 		return nil, fmt.Errorf("Unable to get mainCkpt %v backfillCkpt %v", mainCkptErr, backfillErr)
+	}
+
+	// need to filter out information so that only the VBs of which I'm the master is sent to the replicas
+	// This is so that backfill ckpts + tasks are in tandem with mainline ckpts, and we're not "gossipping"
+	// out-of-date checkpoints/backfillTasks/BackfillCkpt tuples that can potentially propagate back to the
+	// VB master itself and dirty the master
+	myVBList := base.SortUint16List(a.getVBsListClone())
+	for vbno, _ := range mainCkpts {
+		_, found := base.SearchUint16List(myVBList, vbno)
+		if !found {
+			delete(mainCkpts, vbno)
+		}
+	}
+	if len(bkptCkpts) > 0 {
+		for vbno, _ := range bkptCkpts {
+			_, found := base.SearchUint16List(myVBList, vbno)
+			if !found {
+				delete(bkptCkpts, vbno)
+			}
+		}
 	}
 
 	nameOnlySpec := &metadata.ReplicationSpecification{}
@@ -490,16 +546,25 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 
 	combinedVBs := getCombinedVBs(mainCkpts, bkptCkpts)
 	req := NewVBPeriodicReplicateReq(a.specId, a.srcBucketName, combinedVBs, a.internalId)
-	err = req.LoadMainReplication(mainCkpts, srcManifests, tgtManifests)
-	if err != nil {
-		return nil, err
-	}
-
-	if backfillSpec != nil && backfillSpec.VBTasksMap != nil && backfillSpec.VBTasksMap.ContainsAtLeastOneTask() {
-		err = req.LoadBackfillReplication(backfillSpec.VBTasksMap, bkptCkpts, srcManifests, tgtManifests)
+	var hasThingsToSend bool
+	if len(mainCkpts) > 0 {
+		err = req.LoadMainReplication(mainCkpts, srcManifests, tgtManifests)
 		if err != nil {
 			return nil, err
 		}
+		hasThingsToSend = true
+	}
+
+	if backfillSpec != nil && backfillSpec.VBTasksMap != nil && backfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(myVBList) {
+		err = req.LoadBackfillReplication(backfillSpec.VBTasksMap.FilterBasedOnVBs(myVBList), bkptCkpts, srcManifests, tgtManifests)
+		if err != nil {
+			return nil, err
+		}
+		hasThingsToSend = true
+	}
+
+	if !hasThingsToSend {
+		return nil, fmt.Errorf("Nothing to send yet")
 	}
 
 	return req, nil
