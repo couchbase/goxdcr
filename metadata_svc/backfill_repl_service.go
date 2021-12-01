@@ -678,8 +678,9 @@ func (b *BackfillReplicationService) ReplicationSpecChangeCallback(id string, ol
 			}
 			return err
 		}
-		backfillSpec.SetReplicationSpec(newSpec)
-		b.updateCache(id, backfillSpec)
+		newBackfillSpec := backfillSpec.Clone()
+		newBackfillSpec.SetReplicationSpec(newSpec)
+		b.updateCache(id, newBackfillSpec)
 	}
 	return nil
 }
