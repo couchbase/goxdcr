@@ -533,11 +533,13 @@ func (ckmgr *CheckpointManager) initialize() {
 	ckmgr.cachedBrokenMap.lock.Unlock()
 }
 
+var ckmgrIterationId uint32
+
 // compose user agent string for HELO command
 func (ckmgr *CheckpointManager) composeUserAgent() {
 	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
 	ckmgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName)
-	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v_%v", "ckptMgr", ckmgr.pipeline.Type().String(), ckmgr.pipeline.InstanceId())
+	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v_%v_%v", "ckptMgr", ckmgr.pipeline.Type().String(), ckmgr.pipeline.InstanceId(), base.GetIterationId(&ckmgrIterationId))
 }
 
 func (ckmgr *CheckpointManager) initConnections() error {

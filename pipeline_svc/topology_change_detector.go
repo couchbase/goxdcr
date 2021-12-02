@@ -28,6 +28,8 @@ var source_topology_changedErr = errors.New("Topology has changed on source clus
 var target_topology_changedErr = errors.New("Topology has changed on target cluster")
 var errPipelinesDetached = errors.New("No more pipelines are attached to this service")
 
+var topologyDetectorIterationId uint32
+
 type TopologyChangeDetectorSvc struct {
 	*comp.AbstractComponent
 
@@ -78,7 +80,8 @@ type TopologyChangeDetectorSvc struct {
 	// Main pipeline to start or register once
 	startOnce sync.Once
 
-	bucketTopologySvc service_def.BucketTopologySvc
+	bucketTopologySvc     service_def.BucketTopologySvc
+	bucketTopSubscriberId string
 }
 
 func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc) *TopologyChangeDetectorSvc {
@@ -107,11 +110,13 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline
 		top_detect_svc.capi = pipeline.Specification().GetReplicationSpec().Settings.IsCapi()
 		pipelineType = "main"
 		top_detect_svc.mainPipelineTopic = pipeline.Topic()
+		top_detect_svc.bucketTopSubscriberId = fmt.Sprintf("%v_%v_%v", "topologySvc", pipeline.InstanceId(), base.GetIterationId(&topologyDetectorIterationId))
 	}
 
 	top_detect_svc.logger.Infof("Attaching %v pipeline %v", pipelineType, pipeline.Topic())
 	top_detect_svc.pipelines = append(top_detect_svc.pipelines, pipeline)
 	top_detect_svc.detachCbs = append(top_detect_svc.detachCbs, nil)
+
 	return nil
 }
 
@@ -460,7 +465,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 	} else {
 		replicationSpec = genSpec.GetReplicationSpec()
 	}
-	sourceVbUpdateCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToLocalBucketFeed(replicationSpec, mainPipeline.InstanceId())
+	sourceVbUpdateCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToLocalBucketFeed(replicationSpec, top_detect_svc.bucketTopSubscriberId)
 	if subscribeErr != nil {
 		*initErr = subscribeErr
 		initWg.Done()
@@ -477,7 +482,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 		for {
 			select {
 			case <-top_detect_svc.finish_ch:
-				top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, mainPipeline.InstanceId())
+				top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, top_detect_svc.bucketTopSubscriberId)
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v received finish signal and is exiting", top_detect_svc.mainPipelineTopic)
 				return
 			case notification := <-sourceVbUpdateCh:
@@ -538,7 +543,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 	} else {
 		spec = genSpec.GetReplicationSpec()
 	}
-	targetVbUpdateCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, mainPipeline.InstanceId())
+	targetVbUpdateCh, subscribeErr := top_detect_svc.bucketTopologySvc.SubscribeToRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
 	if subscribeErr != nil {
 		*initErr = subscribeErr
 		initWg.Done()
@@ -559,7 +564,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 		for {
 			select {
 			case <-top_detect_svc.finish_ch:
-				err := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, mainPipeline.InstanceId())
+				err := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
 				if err != nil {
 					top_detect_svc.logger.Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
 				}
