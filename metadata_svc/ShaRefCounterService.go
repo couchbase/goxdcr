@@ -252,16 +252,17 @@ func UnableToUpsertErr(id string) error {
 
 // Used to keep track of brokenmapping SHA and the count of checkpoint records referring to it
 type MapShaRefCounter struct {
-	id             string
-	lock           sync.RWMutex
-	singleUpsert   chan bool
-	refCnt         map[string]uint64                    // map of sha to refCnt (1/2)
-	shaToMapping   metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping (2/2)
-	needToSync     bool                                 // needs to sync refCnt to shaMap and then also persist to metakv
-	internalSpecId string
-	metadataSvc    service_def.MetadataSvc
-	metakvOpKey    string
-	logger         *log.CommonLogger
+	id                 string
+	lock               sync.RWMutex
+	singleUpsert       chan bool
+	refCnt             map[string]uint64                    // map of sha to refCnt (1/2)
+	shaToMapping       metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping (2/2)
+	needToSync         bool                                 // needs to sync refCnt to shaMap and then also persist to metakv
+	needToSyncRevision uint64
+	internalSpecId     string
+	metadataSvc        service_def.MetadataSvc
+	metakvOpKey        string
+	logger             *log.CommonLogger
 }
 
 func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc service_def.MetadataSvc,
@@ -329,7 +330,7 @@ func (c *MapShaRefCounter) RecordOneCount(shaString string, mapping *metadata.Co
 	defer c.lock.Unlock()
 	if _, exists := c.shaToMapping[shaString]; !exists {
 		c.shaToMapping[shaString] = mapping
-		c.needToSync = true
+		c.setNeedToSyncNoLock(true)
 	}
 	c.refCnt[shaString]++
 }
@@ -340,7 +341,7 @@ func (c *MapShaRefCounter) UnrecordOneCount(shaString string) {
 	if count, exists := c.refCnt[shaString]; exists && count > 0 {
 		c.refCnt[shaString]--
 		if c.refCnt[shaString] == 0 {
-			c.needToSync = true
+			c.setNeedToSyncNoLock(true)
 		}
 	}
 }
@@ -348,6 +349,7 @@ func (c *MapShaRefCounter) UnrecordOneCount(shaString string) {
 func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc *metadata.CollectionNsMappingsDoc) error {
 	c.lock.RLock()
 	upsertCh := c.singleUpsert
+	needToSyncRev := c.needToSyncRevision
 	c.lock.RUnlock()
 
 	select {
@@ -371,7 +373,9 @@ func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc *metadata.CollectionNsMappin
 			err := c.upsertCollectionNsMappingsDoc(doc, false /*new*/)
 			if err == nil {
 				c.lock.Lock()
-				c.needToSync = false
+				if c.needToSyncRevision == needToSyncRev {
+					c.setNeedToSyncNoLock(false)
+				}
 				c.lock.Unlock()
 			}
 		}
@@ -418,7 +422,7 @@ func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mapping *metad
 		if !exists {
 			c.shaToMapping[shaString] = mapping
 			c.refCnt[shaString] = 0
-			c.needToSync = true
+			c.setNeedToSyncNoLock(true)
 		}
 		c.lock.Unlock()
 	}
@@ -454,9 +458,16 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 	return docReturn, nil
 }
 
+// Write lock must be held
+func (c *MapShaRefCounter) setNeedToSyncNoLock(val bool) {
+	c.needToSync = val
+	c.needToSyncRevision++
+}
+
 func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) error {
 	c.lock.RLock()
 	needToSync := c.needToSync
+	needToSyncRev := c.needToSyncRevision
 	upsertCh := c.singleUpsert
 	c.lock.RUnlock()
 
@@ -470,14 +481,21 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 		var err error
 		// Got the go-ahead to do the upsert
 		defer func() {
-			upsertCh <- true
-		}()
-		defer func() {
 			if err == nil {
+				var needToReUpsert bool
 				c.lock.Lock()
-				c.needToSync = false
+				if c.needToSyncRevision == needToSyncRev {
+					c.setNeedToSyncNoLock(false)
+				} else {
+					// Someone jumped in, will need to re-upsert
+					needToReUpsert = true
+				}
 				c.lock.Unlock()
+				if needToReUpsert {
+					defer c.upsertMapping(specInternalId, cleanup)
+				}
 			}
+			upsertCh <- true
 		}()
 
 		c.lock.Lock()
@@ -571,7 +589,7 @@ func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadat
 			c.refCnt[ckptRecord.BrokenMappingSha256]++
 		}
 	}
-	c.needToSync = true
+	c.setNeedToSyncNoLock(true)
 	c.lock.Unlock()
 
 	return c.upsertMapping(internalId, false)

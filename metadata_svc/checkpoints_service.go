@@ -36,7 +36,6 @@ type BrokenMapShaRefCounter struct {
 	lock           sync.RWMutex
 	refCnt         map[string]uint64
 	shaToMapping   metadata.ShaToCollectionNamespaceMap
-	needToSync     bool // needs to sync refCnt to shaMap and then also persist to metakv
 	internalSpecId string
 }
 
