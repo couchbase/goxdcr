@@ -151,6 +151,10 @@ func (b *BucketTopologyService) SubscribeToLocalBucketFeed(spec *metadata.Replic
 		return nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
 	}
 
+	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
+		return nil, base.ErrorNoSourceNozzle
+	}
+
 	b.srcBucketWatchersMtx.Lock()
 	defer b.srcBucketWatchersMtx.Unlock()
 	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
@@ -680,6 +684,10 @@ func (b *BucketTopologyService) SubscribeToLocalBucketDcpStatsFeed(spec *metadat
 		return nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
 	}
 
+	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
+		return nil, base.ErrorNoSourceNozzle
+	}
+
 	b.srcBucketWatchersMtx.Lock()
 	defer b.srcBucketWatchersMtx.Unlock()
 	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
@@ -697,6 +705,10 @@ func (b *BucketTopologyService) SubscribeToLocalBucketDcpStatsLegacyFeed(spec *m
 
 	if spec.SourceBucketName == "" {
 		return nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
+	}
+
+	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
+		return nil, base.ErrorNoSourceNozzle
 	}
 
 	b.srcBucketWatchersMtx.Lock()
@@ -861,6 +873,10 @@ func (b *BucketTopologyService) SubscribeToLocalBucketHighSeqnosFeed(spec *metad
 		return nil, nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
 	}
 
+	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
+		return nil, nil, base.ErrorNoSourceNozzle
+	}
+
 	b.srcBucketWatchersMtx.Lock()
 	defer b.srcBucketWatchersMtx.Unlock()
 	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
@@ -895,6 +911,10 @@ func (b *BucketTopologyService) SubscribeToLocalBucketHighSeqnosLegacyFeed(spec 
 
 	if spec.SourceBucketName == "" {
 		return nil, nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
+	}
+
+	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
+		return nil, nil, base.ErrorNoSourceNozzle
 	}
 
 	b.srcBucketWatchersMtx.Lock()
@@ -940,7 +960,6 @@ type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string
 	source     bool
-	spec       *metadata.ReplicationSpecification // Set once
 
 	finCh     chan bool
 	startOnce sync.Once
@@ -1014,6 +1033,9 @@ type BucketTopologySvcWatcher struct {
 	objsPool *BucketTopologyObjsPool
 
 	replicaLastWarnErr error
+
+	nonKVNodeLastTimeWarned    time.Time
+	nonKVNodeLastTimeWarnedMtx sync.Mutex
 }
 
 type GcMapType map[string]VbnoReqMapType
@@ -1270,6 +1292,21 @@ func (bw *BucketTopologySvcWatcher) runGC() {
 }
 
 func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFunc func() error) {
+	if isKvNode, isKvNodeErr := bw.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
+		logAgainUnix := time.Now().Add(-(1 * time.Hour)).Unix()
+		var logAgain bool
+		bw.nonKVNodeLastTimeWarnedMtx.Lock()
+		lastLoggedTimeUnix := bw.nonKVNodeLastTimeWarned.Unix()
+		if logAgainUnix > lastLoggedTimeUnix {
+			logAgain = true
+			bw.nonKVNodeLastTimeWarned = time.Now()
+		}
+		bw.nonKVNodeLastTimeWarnedMtx.Unlock()
+		if logAgain {
+			bw.logger.Warnf("BucketTopologySvcWather for bucket %v not running because this node is not a KV node", bw.bucketName)
+		}
+	}
+
 	var mutex *sync.RWMutex
 	var channelsMap map[string]interface{}
 	switch updateType {
