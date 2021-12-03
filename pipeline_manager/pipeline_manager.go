@@ -443,7 +443,7 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 
 	pipelineMgr.setP2PWaitTime(rep_status)
 
-	rep_status.RecordProgress("Start pipeline construction")
+	rep_status.RecordProgress(common.ProgressStartConstruction)
 
 	p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
 	if err != nil {
@@ -451,7 +451,7 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 		return errMap
 	}
 
-	rep_status.RecordProgress("Pipeline is constructed")
+	rep_status.RecordProgress(common.ProgressConstructionDone)
 	rep_status.SetPipeline(p)
 
 	pipelineMgr.logger.Infof("Pipeline %v is constructed. Starting it.", p.InstanceId())

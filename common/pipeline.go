@@ -67,6 +67,25 @@ func DecomposeFullTopic(fullTopic string) (string, PipelineType) {
 
 type PipelineProgressRecorder func(progress string)
 
+const (
+	ProgressStartConstruction = "Start pipeline construction"
+	ProgressConstructionDone  = "Pipeline is constructed"
+	ProgressNozzlesWired      = "Source nozzles have been wired to target nozzles"
+	ProgressP2PComm           = "Performing PeerToPeer communication"
+	ProgressP2PMerge          = "Performing PeerToPeer metadata merging"
+	ProgressP2PDoneMerge      = "Done PeerToPeer communication and metadata merging"
+	ProgressRuntimeCtxStarted = "The runtime context has been started"
+	ProgressPartsStarted      = "All parts have been started"
+	ProgressOutNozzleOpened   = "All outgoing nozzles have been opened"
+	ProgressInNozzleOpened    = "All incoming nozzles have been opened"
+	ProgressPipelineRunning   = "Pipeline is running"
+
+	ProgressAsyncStopped      = "Async listeners have been stopped"
+	ProgressRuntimeCtxStopped = "Runtime context has been stopped"
+	ProgressSrcNozzleClose    = "Source nozzles have been closed"
+	ProgressPipelineStopped   = "Pipeline has been stopped"
+)
+
 //interface for Pipeline
 type Pipeline interface {
 	//Name of the Pipeline

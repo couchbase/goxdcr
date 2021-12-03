@@ -276,7 +276,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 			// Any P2P pull error should be ignored for now and continue
 			genericPipeline.logger.Warnf("P2P PreReplicate for %v Ckpt Pull and merge had errors but will continue to replicate: %v", genericPipeline.FullTopic(), p2pErrMap)
 		}
-		genericPipeline.ReportProgress(fmt.Sprintf("Done PeerToPeer communication and metadata merging"))
+		genericPipeline.ReportProgress(common.ProgressP2PDoneMerge)
 	}
 
 	//get starting vb timestamp
@@ -293,8 +293,8 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		errMap[PipelineContextStart] = err
 		return errMap
 	}
-	genericPipeline.logger.Debugf("%v The runtime context has been started", genericPipeline.InstanceId())
-	genericPipeline.ReportProgress("The runtime context has been started")
+	genericPipeline.logger.Debugf("%v %v", genericPipeline.InstanceId(), common.ProgressRuntimeCtxStarted)
+	genericPipeline.ReportProgress(common.ProgressRuntimeCtxStarted)
 
 	var ssl_port_map map[string]uint16
 	if genericPipeline.sslPortMapConstructor != nil {
@@ -328,8 +328,8 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		return errMap
 	}
 
-	genericPipeline.logger.Infof("%v %v All parts have been started", genericPipeline.Type(), genericPipeline.Topic())
-	genericPipeline.ReportProgress("All parts have been started")
+	genericPipeline.logger.Infof("%v %v %v", genericPipeline.Type(), genericPipeline.Topic(), common.ProgressPartsStarted)
+	genericPipeline.ReportProgress(common.ProgressPartsStarted)
 
 	//open targets
 	for _, target := range genericPipeline.targets {
@@ -340,8 +340,8 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 			return errMap
 		}
 	}
-	genericPipeline.logger.Debugf("%v All outgoing nozzles have been opened", genericPipeline.Topic())
-	genericPipeline.ReportProgress("All outgoing nozzles have been opened")
+	genericPipeline.logger.Debugf("%v %v", genericPipeline.Topic(), common.ProgressOutNozzleOpened)
+	genericPipeline.ReportProgress(common.ProgressOutNozzleOpened)
 
 	//open source
 	for _, source := range genericPipeline.sources {
@@ -353,13 +353,13 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 			return errMap
 		}
 	}
-	genericPipeline.logger.Debugf("%v All incoming nozzles have been opened", genericPipeline.FullTopic())
-	genericPipeline.ReportProgress("All incoming nozzles have been opened")
+	genericPipeline.logger.Debugf("%v %v", genericPipeline.FullTopic(), common.ProgressInNozzleOpened)
+	genericPipeline.ReportProgress(common.ProgressInNozzleOpened)
 
 	err = genericPipeline.SetState(common.Pipeline_Running)
 	if err == nil {
 		genericPipeline.logger.Infof("----------- %v %s has been started----------", genericPipeline.Type(), genericPipeline.InstanceId())
-		genericPipeline.ReportProgress("Pipeline is running")
+		genericPipeline.ReportProgress(common.ProgressPipelineRunning)
 	} else {
 		err = fmt.Errorf("Pipeline %s when setting state to Pipeline_Running: %v", genericPipeline.FullTopic(), err)
 		errMap["genericPipeline.SetState.Pipeline_running"] = err
@@ -371,7 +371,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap) {
 	errMap := *errMapPtr
 
-	genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer communication"))
+	genericPipeline.ReportProgress(common.ProgressP2PComm)
 	stopRpcMeasurement := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v_vbMasterCheckFunc", genericPipeline.FullTopic()), genericPipeline.p2pVbMasterCheckTimeout)
 	resp, vbMasterCheckErr := genericPipeline.vbMasterCheckFunc(genericPipeline)
 	if vbMasterCheckErr != nil {
@@ -388,7 +388,7 @@ func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap)
 	stopRpcMeasurement()
 
 	// resp is potentially nil if checkFunc failed above
-	genericPipeline.ReportProgress(fmt.Sprintf("Performing PeerToPeer metadata merging"))
+	genericPipeline.ReportProgress(common.ProgressP2PMerge)
 	if resp != nil {
 		stopMergeMeasurement := genericPipeline.utils.StartDiagStopwatch(fmt.Sprintf("%v_vbMasterMergeFunc", genericPipeline.FullTopic()), base.DiagCkptMergeThreshold)
 		mergeCkptErr := genericPipeline.mergeCkptFunc(genericPipeline, resp)
@@ -549,12 +549,12 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 		asyncEventListener.Stop()
 	}
 	genericPipeline.logger.Infof("%v %v Async listeners have been stopped", genericPipeline.Type(), genericPipeline.InstanceId())
-	genericPipeline.ReportProgress("Async listeners have been stopped")
+	genericPipeline.ReportProgress(common.ProgressAsyncStopped)
 
 	// stop services before stopping parts to avoid spurious errors from services
 	contextErrMap := genericPipeline.context.Stop()
 	base.ConcatenateErrors(errMap, contextErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
-	genericPipeline.ReportProgress("Runtime context has been stopped")
+	genericPipeline.ReportProgress(common.ProgressRuntimeCtxStopped)
 
 	//close the sources
 	for _, source := range genericPipeline.sources {
@@ -564,8 +564,8 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 			errMap[fmt.Sprintf("genericPipeline.%v.Close", source.Id())] = err
 		}
 	}
-	genericPipeline.logger.Infof("%v %v source nozzles have been closed", genericPipeline.Type(), genericPipeline.InstanceId())
-	genericPipeline.ReportProgress("Source nozzles have been closed")
+	genericPipeline.logger.Infof("%v %v %v", genericPipeline.Type(), genericPipeline.InstanceId(), common.ProgressSrcNozzleClose)
+	genericPipeline.ReportProgress(common.ProgressSrcNozzleClose)
 
 	partsErrMap := genericPipeline.stopPartsWithTimeout()
 	base.ConcatenateErrors(errMap, partsErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
@@ -573,7 +573,7 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	connectorsErrMap := genericPipeline.stopConnectorsWithTimeout()
 	base.ConcatenateErrors(errMap, connectorsErrMap, MaxNumberOfErrorsToTrack, genericPipeline.logger)
 
-	genericPipeline.ReportProgress("Pipeline has been stopped")
+	genericPipeline.ReportProgress(common.ProgressPipelineStopped)
 
 	err = genericPipeline.SetState(common.Pipeline_Stopped)
 	if err != nil {

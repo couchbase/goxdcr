@@ -143,7 +143,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 		return nil, err
 	}
 
-	progress_recorder("Pipeline has been constructed")
+	progress_recorder(common.ProgressConstructionDone)
 
 	xdcrf.logger.Infof("Pipeline %v has been constructed", topic)
 	return pipeline, nil
@@ -319,7 +319,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 			outNozzle.SetUpstreamObjRecycler(sourceNozzle.Connector().GetUpstreamObjRecycler())
 		}
 	}
-	progress_recorder("Source nozzles have been wired to target nozzles")
+	progress_recorder(common.ProgressNozzlesWired)
 
 	// construct and initializes the pipeline
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,

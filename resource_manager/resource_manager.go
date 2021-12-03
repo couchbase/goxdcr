@@ -30,6 +30,8 @@ import (
 
 const ResourceManagerName = "ResourceMgr"
 
+var pipelineNotRunning = fmt.Errorf("pipeline is not running yet")
+
 // runtime stats collected from active replications
 type ReplStats struct {
 	changesLeft         int64
@@ -640,7 +642,7 @@ func (rm *ResourceManager) collectReplStats() map[*metadata.GenericSpecification
 		spec := *specPtr
 		replStats, err := rm.getStatsFromReplication(spec)
 		if err != nil {
-			if spec.Type() == metadata.MainReplication {
+			if err != pipelineNotRunning && spec.Type() == metadata.MainReplication {
 				rm.logger.Warnf("Could not retrieve runtime stats for %v. err=%v\n", spec.GetFullId(), err)
 			}
 		} else {
@@ -1123,6 +1125,11 @@ func (rm *ResourceManager) getStatsFromReplication(spec metadata.GenericSpecific
 	rs, err := rm.pipelineMgr.ReplicationStatus(spec.GetReplicationSpec().Id)
 	if err != nil {
 		return nil, err
+	}
+
+	curProgress := rs.GetProgress()
+	if curProgress != common.ProgressPipelineRunning {
+		return nil, pipelineNotRunning
 	}
 
 	statsMap := rs.GetOverviewStats(pipelineType)
