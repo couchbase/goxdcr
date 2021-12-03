@@ -125,12 +125,8 @@ type KvVbMapPool struct {
 	pool sync.Pool
 }
 
-// User needs to filter if nodes is not provided
 func (k *KvVbMapPool) Get(nodes []string) *base.KvVBMapType {
 	kvVbMap := k.pool.Get().(*base.KvVBMapType)
-	if len(nodes) == 0 {
-		return kvVbMap
-	}
 	for oldNodeName, value := range *kvVbMap {
 		var found bool
 		for _, nodeName := range nodes {
