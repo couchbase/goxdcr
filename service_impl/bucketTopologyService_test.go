@@ -74,6 +74,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	xdcrTopologySvc.On("MyConnectionStr").Return(connStr, nil)
 	xdcrTopologySvc.On("MyCredentials").Return("", "", base.HttpAuthMechPlain, nil, false, nil, nil, nil)
 	xdcrTopologySvc.On("MyKVNodes").Return(kvNodes, nil)
+	xdcrTopologySvc.On("IsKVNode").Return(true, nil)
 	xdcrTopologySvc.On("IsMyClusterEncryptionLevelStrict").Return(false)
 	utils.On("GetBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketInfo, nil)
 	serverListFromBucketInfo1 := func(arg map[string]interface{}) []string {
