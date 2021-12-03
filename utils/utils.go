@@ -230,7 +230,6 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 		highseqnostr, ok := stats_map[stats_key]
 		if !ok || highseqnostr == "" {
-			u.logger_utils.Warnf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed", vbno)
 			unableToParseVBs = append(unableToParseVBs, vbno)
 			continue
 		}
@@ -246,6 +245,8 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 	}
 	if len(unableToParseVBs) == len(vbnos) {
 		return nil, fmt.Errorf("All Requested VBs %v were not able to be parsed from statsMap %v", vbnos, stats_map)
+	} else if len(unableToParseVBs) > 0 {
+		u.logger_utils.Warnf("(Requested VBs: %v) Can't find high seqno for vbnos=%v in stats map. Source topology may have changed", vbnos, unableToParseVBs)
 	}
 	return unableToParseVBs, nil
 }

@@ -908,7 +908,7 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	}
 
 	vbsReq := make(peerToPeer.BucketVBMapType)
-	vbsReq[srcBucketName] = sourceVBs
+	vbsReq[srcBucketName] = base.SortUint16List(sourceVBs)
 
 	xdcrf.logger.Infof("Running VBMasterCheck for %v with the following VBs: %v", pipeline.FullTopic(), sourceVBs)
 	respMap, rpcErr := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)

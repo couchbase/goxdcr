@@ -364,6 +364,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		serversList, err := b.utils.GetServersListFromBucketInfo(bucketInfo)
 		if err != nil {
 			watcher.logger.Errorf("%v bucketInfo unable to parse server list %v", spec.SourceBucketName, err)
+			return err
 		}
 		serverVBMap, err := b.utils.GetServerVBucketsMap(connStr, spec.SourceBucketName, bucketInfo, watcher.objsPool.KvVbMapPool.Get(serversList))
 		if err != nil {

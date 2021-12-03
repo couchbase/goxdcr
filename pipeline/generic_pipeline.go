@@ -241,7 +241,7 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 //settings - a map of parameter to start the pipeline. it can contain initialization paramters
 //			 for each processing steps and for runtime context of the pipeline.
 func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSettingsMap) base.ErrorMap {
-	genericPipeline.logger.Infof("Starting %v %s\n %s \n settings = %v\n", genericPipeline.Type().String(), genericPipeline.InstanceId(), genericPipeline.Layout(), settings.CloneAndRedact())
+	genericPipeline.logger.Infof("Starting %v %s\n%s \n%s \nsettings = %v\n", genericPipeline.Type().String(), genericPipeline.InstanceId(), genericPipeline.Layout(), genericPipeline.Summary(), settings.CloneAndRedact())
 	var errMap base.ErrorMap = make(base.ErrorMap)
 	var err error
 
@@ -809,6 +809,17 @@ func (genericPipeline *GenericPipeline) Layout() string {
 		content = content + fmt.Sprintf("%s%s%s\n", dcpSection, routerSection, targetNozzleSection)
 	}
 	return fmt.Sprintf("%s\n%s\n%s\n", header, content, footer)
+}
+
+func (genericPipeline *GenericPipeline) Summary() string {
+	spec := genericPipeline.spec.GetReplicationSpec()
+	var totalVBs []uint16
+	for _, sourceNozzle := range genericPipeline.Sources() {
+		vbsList := sourceNozzle.ResponsibleVBs()
+		totalVBs = append(totalVBs, vbsList...)
+	}
+	return fmt.Sprintf("Remote Cluster: %v SourceBucket: %v TargetBucket: %v SortedVBs: %v\n",
+		spec.TargetClusterUUID, spec.SourceBucketName, spec.TargetBucketName, base.SortUint16List(totalVBs))
 }
 
 func (genericPipeline *GenericPipeline) GetState() common.PipelineState {
