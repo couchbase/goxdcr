@@ -311,9 +311,9 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 
 // When cluster uses strict encryption, we need to use loopback address for local server
 // and set the key in serverVBMap accordingly
-func (b *BucketTopologyService) updateLocalServerVBucketMapIfNeeded(serverVBMap map[string][]uint16, bucketInfo map[string]interface{}) (map[string][]uint16, error) {
+func (b *BucketTopologyService) updateLocalServerVBucketMapIfNeeded(serverVBMap *base.KvVBMapType, bucketInfo map[string]interface{}) error {
 	if b.xdcrCompTopologySvc.IsMyClusterEncryptionLevelStrict() == false {
-		return serverVBMap, nil
+		return nil
 	}
 	loopback := base.LocalHostName
 	if base.IsIpV4Blocked() {
@@ -321,27 +321,25 @@ func (b *BucketTopologyService) updateLocalServerVBucketMapIfNeeded(serverVBMap 
 	}
 	currentHostAddr, err := b.utils.GetCurrentHostnameFromBucketInfo(bucketInfo)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	currentHostName := base.GetHostName(currentHostAddr)
 	if currentHostName == loopback {
-		return serverVBMap, nil
+		return nil
 	}
-	newServerVBMap := make(map[string][]uint16)
-	for server, vbs := range serverVBMap {
+	for server, vbs := range *serverVBMap {
 		hostName := base.GetHostName(server)
 		if hostName == currentHostName {
 			// Change the map to use loopback
 			port, err := base.GetPortNumber(server)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			newServerVBMap[base.GetHostAddr(loopback, port)] = vbs
-		} else {
-			newServerVBMap[server] = vbs
+			delete((*serverVBMap), server)
+			(*serverVBMap)[base.GetHostAddr(loopback, port)] = vbs
 		}
 	}
-	return newServerVBMap, nil
+	return nil
 }
 
 func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
@@ -366,12 +364,12 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			watcher.logger.Errorf("%v bucketInfo unable to parse server list %v", spec.SourceBucketName, err)
 			return err
 		}
-		serverVBMap, err := b.utils.GetServerVBucketsMap(connStr, spec.SourceBucketName, bucketInfo, watcher.objsPool.KvVbMapPool.Get(serversList))
+		serverVBMap, err := b.utils.GetServerVBucketsMap(connStr, spec.SourceBucketName, bucketInfo, watcher.objsPool.KvVbMapPool.Get, serversList)
 		if err != nil {
 			watcher.logger.Errorf("%v bucket server VBMap error %v", spec.SourceBucketName, err)
 			return err
 		}
-		serverVBMap, err = b.updateLocalServerVBucketMapIfNeeded(serverVBMap, bucketInfo)
+		err = b.updateLocalServerVBucketMapIfNeeded(serverVBMap, bucketInfo)
 		if err != nil {
 			return fmt.Errorf("%v Failed to update local serverVBucket map. err=%v", spec.SourceBucketName, err)
 		}
@@ -380,7 +378,6 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		if err != nil {
 			return fmt.Errorf("%v Failed to get nodesList from bucketInfo err=%v", spec.SourceBucketName, err)
 		}
-
 		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(bucketInfo, b.securitySvc.IsClusterEncryptionLevelStrict(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
 		if err != nil {
 			if err != watcher.replicaLastWarnErr {
@@ -406,7 +403,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 
 		sourceKvVbMap := watcher.objsPool.KvVbMapPool.Get(nodes)
 		for _, node := range nodes {
-			if vbnos, ok := serverVBMap[node]; ok {
+			if vbnos, ok := (*serverVBMap)[node]; ok {
 				(*sourceKvVbMap)[node] = vbnos
 			}
 		}
@@ -417,8 +414,8 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			watcher.source = true
 		}
 		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
-		replacementNotification.KvVbMap = (*base.KvVBMapType)(&serverVBMap) // So far this seems to be ok (no leak)
-		replacementNotification.NumberOfSourceNodes = len(serverVBMap)
+		replacementNotification.KvVbMap = serverVBMap
+		replacementNotification.NumberOfSourceNodes = len(*serverVBMap)
 		replacementNotification.SourceVBMap = sourceKvVbMap
 		replacementNotification.SourceReplicasMap = replicasMap
 		replacementNotification.SourceReplicasTranslateMap = translateMap

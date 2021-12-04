@@ -88,7 +88,7 @@ type UtilsIface interface {
 	GetClusterUUIDFromURI(uri string) (string, error)
 	GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool, recycledStringStringMap *base.StringStringMap, recycledVbHostMapGetter func(vbnos []uint16) *base.VbHostsMapType, recycledStringSliceGetter func() *[]string) (*base.VbHostsMapType, *base.StringStringMap, int, []uint16, error)
 	GetServersListFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error)
-	GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMap *base.KvVBMapType) (map[string][]uint16, error)
+	GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMapGetter func(nodes []string) *base.KvVBMapType, serversList []string) (*base.KvVBMapType, error)
 	GetHostNamesFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error)
 
 	// Network related utilities
@@ -144,7 +144,7 @@ type UtilsIface interface {
 	RemoteBucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
 		logger *log.CommonLogger, useExternal bool) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)
-	TranslateKvVbMap(kvVBMap base.BucketKVVbMap, targetBucketInfo map[string]interface{})
+	TranslateKvVbMap(kvVBMap base.KvVBMapType, targetBucketInfo map[string]interface{})
 	VerifyTargetBucket(targetBucketName, targetBucketUuid string, remoteClusterRef *metadata.RemoteClusterReference, logger *log.CommonLogger) error
 
 	// Collections related utilities

@@ -405,8 +405,9 @@ func TestReplaceKVVBMapExternal(t *testing.T) {
 	assert.Nil(err)
 	assert.NotEqual(0, len(translatedMap))
 
-	kvVbMap, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap, nil)
+	kvVbMapPtr, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap, nil, nil)
 	assert.Nil(err)
+	kvVbMap := *kvVbMapPtr
 
 	// Before translate, should be internal only
 	var nodeNameList []string
@@ -442,8 +443,9 @@ func TestReplaceKVVBMapExternalK8(t *testing.T) {
 	assert.Nil(err)
 	assert.NotEqual(0, len(translatedMap))
 
-	kvVbMap, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap, nil)
+	kvVbMapPtr, err := testUtils.GetServerVBucketsMap("dummyConnStr", "b2", bucketInfoMap, nil, nil)
 	assert.Nil(err)
+	kvVbMap := *kvVbMapPtr
 
 	// Before translate, should be internal only
 	var nodeNameList []string
@@ -820,10 +822,10 @@ func TestVBucketMapWithReplicas(t *testing.T) {
 	assert.Equal(2, numOfReplicas)
 
 	// validate replica map
-	serverVbMap, err := testUtils.GetServerVBucketsMap("", "B1", bucketInfo, nil)
+	serverVbMap, err := testUtils.GetServerVBucketsMap("", "B1", bucketInfo, nil, nil)
 	assert.Nil(err)
 	serverKey := "192.168.0.242:12000" // specific to the getBucketInfoWithReplicas() dataset
-	vbsForThisNode := serverVbMap[serverKey]
+	vbsForThisNode := (*serverVbMap)[serverKey]
 
 	// Replica map should only contain VBs owned by this node
 	assert.Equal(len(vbsForThisNode), len(*replicaMap))

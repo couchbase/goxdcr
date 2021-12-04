@@ -1029,14 +1029,23 @@ func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, 
 		}
 	}
 
-	var r2 error
-	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface, *map[string]string, []uint32, *map[uint16]uint64) error); ok {
+	var r2 []uint16
+	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface, *map[string]string, []uint32, *map[uint16]uint64) []uint16); ok {
 		r2 = rf(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
 	} else {
-		r2 = ret.Error(2)
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).([]uint16)
+		}
 	}
 
-	return r0, r1, nil, r2
+	var r3 error
+	if rf, ok := ret.Get(3).(func([]uint16, memcached.ClientIface, *map[string]string, []uint32, *map[uint16]uint64) error); ok {
+		r3 = rf(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // GetHostAddrFromNodeInfo provides a mock function with given fields: adminHostAddr, nodeInfo, isHttps, logger, useExternal
@@ -1632,22 +1641,22 @@ func (_m *UtilsIface) GetSecuritySettingsAndDefaultPoolInfo(hostAddr string, hos
 	return r0, r1, r2, r3
 }
 
-// GetServerVBucketsMap provides a mock function with given fields: connStr, bucketName, bucketInfo, recycledMap
-func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bucketInfo map[string]interface{}, recycledMap *base.KvVBMapType) (map[string][]uint16, error) {
-	ret := _m.Called(connStr, bucketName, bucketInfo, recycledMap)
+// GetServerVBucketsMap provides a mock function with given fields: connStr, bucketName, bucketInfo, recycledMapGetter, serversList
+func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bucketInfo map[string]interface{}, recycledMapGetter func([]string) *base.KvVBMapType, serversList []string) (*base.KvVBMapType, error) {
+	ret := _m.Called(connStr, bucketName, bucketInfo, recycledMapGetter, serversList)
 
-	var r0 map[string][]uint16
-	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}, *base.KvVBMapType) map[string][]uint16); ok {
-		r0 = rf(connStr, bucketName, bucketInfo, recycledMap)
+	var r0 *base.KvVBMapType
+	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}, func([]string) *base.KvVBMapType, []string) *base.KvVBMapType); ok {
+		r0 = rf(connStr, bucketName, bucketInfo, recycledMapGetter, serversList)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string][]uint16)
+			r0 = ret.Get(0).(*base.KvVBMapType)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, string, map[string]interface{}, *base.KvVBMapType) error); ok {
-		r1 = rf(connStr, bucketName, bucketInfo, recycledMap)
+	if rf, ok := ret.Get(1).(func(string, string, map[string]interface{}, func([]string) *base.KvVBMapType, []string) error); ok {
+		r1 = rf(connStr, bucketName, bucketInfo, recycledMapGetter, serversList)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1940,14 +1949,23 @@ func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map
 func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error) {
 	ret := _m.Called(vbnos, stats_map, highseqno_map)
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, map[uint16]uint64) error); ok {
+	var r0 []uint16
+	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, map[uint16]uint64) []uint16); ok {
 		r0 = rf(vbnos, stats_map, highseqno_map)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint16)
+		}
 	}
 
-	return nil, r0
+	var r1 error
+	if rf, ok := ret.Get(1).(func([]uint16, map[string]string, map[uint16]uint64) error); ok {
+		r1 = rf(vbnos, stats_map, highseqno_map)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, body, endBodyPos, dp, flags, slicesBuf
@@ -2204,7 +2222,7 @@ func (_m *UtilsIface) StartDiagStopwatch(id string, threshold time.Duration) fun
 }
 
 // TranslateKvVbMap provides a mock function with given fields: kvVBMap, targetBucketInfo
-func (_m *UtilsIface) TranslateKvVbMap(kvVBMap base.BucketKVVbMap, targetBucketInfo map[string]interface{}) {
+func (_m *UtilsIface) TranslateKvVbMap(kvVBMap base.KvVBMapType, targetBucketInfo map[string]interface{}) {
 	_m.Called(kvVBMap, targetBucketInfo)
 }
 

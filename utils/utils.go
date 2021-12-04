@@ -805,7 +805,7 @@ func (u *Utilities) GetServersListFromBucketInfo(bucketInfo map[string]interface
 	return servers, nil
 }
 
-func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMap *base.KvVBMapType) (map[string][]uint16, error) {
+func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMapGetter func(nodes []string) *base.KvVBMapType, serversList []string) (*base.KvVBMapType, error) {
 	vbucketServerMapObj, ok := bucketInfo[base.VBucketServerMapKey]
 	if !ok {
 		// The returned error will be displayed on UI. We don't want to include the bucketInfo map since it is too much info for UI.
@@ -832,16 +832,17 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 		return nil, err
 	}
 
-	var serverVBMap map[string][]uint16
+	var serverVBMap *base.KvVBMapType
 	var keepMap map[string]bool
-	if recycledMap != nil {
+	if recycledMapGetter != nil {
 		keepMap = make(map[string]bool)
-		serverVBMap = *recycledMap
-		for server, _ := range serverVBMap {
-			serverVBMap[server] = serverVBMap[server][:0]
+		serverVBMap = recycledMapGetter(serversList)
+		for server, _ := range *serverVBMap {
+			(*serverVBMap)[server] = (*serverVBMap)[server][:0]
 		}
 	} else {
-		serverVBMap = make(map[string][]uint16)
+		newMap := make(base.KvVBMapType)
+		serverVBMap = &newMap
 	}
 
 	for vbno, indexListObj := range vbucketMap {
@@ -869,33 +870,33 @@ func (u *Utilities) GetServerVBucketsMap(connStr, bucketName string, bucketInfo 
 			keepMap[server] = true
 		}
 		var vbList []uint16
-		vbList, ok = serverVBMap[server]
+		vbList, ok = (*serverVBMap)[server]
 		if !ok {
 			vbList = make([]uint16, 0)
 		}
 		vbList = append(vbList, uint16(vbno))
-		serverVBMap[server] = vbList
+		(*serverVBMap)[server] = vbList
 	}
 
-	if recycledMap != nil {
-		for checkName, _ := range serverVBMap {
+	if recycledMapGetter != nil {
+		for checkName, _ := range *serverVBMap {
 			if _, exists := keepMap[checkName]; !exists {
-				delete(serverVBMap, checkName)
+				delete(*serverVBMap, checkName)
 			}
 		}
 	}
 	return serverVBMap, nil
 }
 
-func (u *Utilities) GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (kvVbMap map[string][]uint16, err error) {
-	kvVbMap, err = u.GetServerVBucketsMap(connStr, bucketName, bucketInfo, nil)
+func (u *Utilities) GetRemoteServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (map[string][]uint16, error) {
+	kvVbMapPtr, err := u.GetServerVBucketsMap(connStr, bucketName, bucketInfo, nil, nil)
 	if err != nil {
-		return
+		return nil, err
 	}
 	if useExternal {
-		u.TranslateKvVbMap(kvVbMap, bucketInfo)
+		u.TranslateKvVbMap(*kvVbMapPtr, bucketInfo)
 	}
-	return
+	return *kvVbMapPtr, nil
 }
 
 // get bucket type setting from bucket info
@@ -1325,11 +1326,12 @@ func (u *Utilities) bucketValidationInfoInternal(hostAddr, bucketName, username,
 			err = fmt.Errorf("Error retrieving EvictionPolicy setting on bucket %v. err=%v", bucketName, err)
 			return err
 		}
-		bucketKVVBMap, err = u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo, nil)
+		bucketKVVBMapPtr, err := u.GetServerVBucketsMap(hostAddr, bucketName, bucketInfo, nil, nil)
 		if err != nil {
+			err = fmt.Errorf("Error getServerVBucketsMap on bucket %v. err=%v", bucketName, err)
 			return err
 		}
-
+		bucketKVVBMap = *bucketKVVBMapPtr
 		if remote {
 			u.TranslateKvVbMap(bucketKVVBMap, bucketInfo)
 		}
@@ -2702,7 +2704,7 @@ func (u *Utilities) GetDefaultPoolInfoUsingHttps(hostHttpsAddr, username, passwo
 }
 
 // Given the KVVBMap, translate the map so that the server keys are replaced with external server keys, if applicable
-func (u *Utilities) TranslateKvVbMap(kvVBMap base.BucketKVVbMap, targetBucketInfo map[string]interface{}) {
+func (u *Utilities) TranslateKvVbMap(kvVBMap base.KvVBMapType, targetBucketInfo map[string]interface{}) {
 	translationMap, translationErr := u.GetIntExtHostNameKVPortTranslationMap(targetBucketInfo)
 	if translationErr != nil && translationErr != base.ErrorResourceDoesNotExist {
 		u.logger_utils.Warnf("Error constructing internal -> external address translation table. err=%v", translationErr)

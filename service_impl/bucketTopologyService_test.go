@@ -131,12 +131,18 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	}
 	utils.On("GetBucketUuidFromBucketInfo", mock.Anything, mock.Anything, mock.Anything).Return(bucketUuidGetterFunc(), nil)
 
-	vbMapGetter := func() map[string][]uint16 {
-		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo, nil)
+	vbMapGetter := func() *base.KvVBMapType {
+		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo, nil, nil)
 		return result
 	}
-	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
-	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
+
+	vbMapObjGetter := func() map[string][]uint16 {
+		result, _ := utilsReal.GetServerVBucketsMap("", "", bucketInfo, nil, nil)
+		return map[string][]uint16(*result)
+	}
+
+	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
+	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapObjGetter(), nil)
 	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
 
 	highSeqnosMap := make(map[uint16]uint64)
@@ -144,7 +150,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	for i := uint16(0); i < 1024; i++ {
 		highSeqnosMap[i] = uint64(100 + int(i))
 	}
-	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&highSeqnosMap, &translateMap, nil)
+	utils.On("GetHighSeqNos", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&highSeqnosMap, &translateMap, nil, nil)
 
 	getHostNameFromBucketInfo1 := func(arg map[string]interface{}) []string {
 		ret, _ := utilsReal.GetHostNamesFromBucketInfo(arg)
