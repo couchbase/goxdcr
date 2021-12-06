@@ -266,7 +266,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 
 	// Before starting vb timestamp, need to ensure VBMaster
 	vbMasterCheckConfig, ok := settings[base.PreReplicateVBMasterCheckKey]
-	if !ok || ok && vbMasterCheckConfig.(bool) == true {
+	if (!ok || ok && vbMasterCheckConfig.(bool) == true) && genericPipeline.Type() == common.MainPipeline {
 		genericPipeline.p2pVbMasterCheckTimeout = metadata.GetP2PTimeoutFromSettings(settings)
 		genericPipeline.logger.Infof("%v - Performing PeerToPeer communication and metadata merging with timeout of %v",
 			genericPipeline.FullTopic(), genericPipeline.p2pVbMasterCheckTimeout)

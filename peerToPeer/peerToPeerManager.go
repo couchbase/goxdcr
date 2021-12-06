@@ -442,7 +442,6 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		requestCommon := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
 		vbCheckReq := NewVBMasterCheckReq(requestCommon)
 		vbCheckReq.SetBucketVBMap(filteredSubsets)
-		vbCheckReq.PipelineType = pipeline.Type()
 		vbCheckReq.ReplicationId = spec.Id
 		vbCheckReq.SourceBucketName = spec.SourceBucketName
 		vbCheckReq.InternalSpecId = spec.InternalId

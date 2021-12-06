@@ -1564,22 +1564,14 @@ func (xdcrf *XDCRFactory) preReplicationVBMasterFilter(pipeline common.Pipeline)
 	// Get a list of responsible VBs
 	var sourceVBs []uint16
 	dedupMap := make(map[uint16]bool)
+	backfillDedupMap := make(map[uint16]bool)
 	for _, sourceNozzle := range pipeline.Sources() {
 		setOfVBs := sourceNozzle.ResponsibleVBs()
 		sourceVBs = append(sourceVBs, setOfVBs...)
 		for _, vbno := range setOfVBs {
 			dedupMap[vbno] = true
+			backfillDedupMap[vbno] = true
 		}
-	}
-
-	// TODO - MB-49503 - this needs to check backfill pipeline also in the future to ensure correctness
-	pipelineTopic := pipeline.Topic()
-
-	ckptDocs, err := xdcrf.checkpoint_svc.CheckpointsDocs(pipelineTopic, false)
-	if err != nil {
-		xdcrf.logger.Errorf("When pulling ckptDocs for %v - got err %v", pipelineTopic, err)
-		// claim that everything needs to be pulled
-		return sourceVBs
 	}
 
 	pushIntervalMinInt, ok := pipeline.Settings()[base.ReplicateCkptIntervalKey].(int)
@@ -1588,6 +1580,37 @@ func (xdcrf *XDCRFactory) preReplicationVBMasterFilter(pipeline common.Pipeline)
 	}
 	// Note: subtracting is adding a negative duration
 	expirationTimeUnix := time.Now().Add(-time.Duration(pushIntervalMinInt) * time.Minute).Unix()
+
+	mainPipelineTopic := pipeline.Topic()
+	backfillPipelineTopic := common.ComposeFullTopic(mainPipelineTopic, common.BackfillPipeline)
+
+	var waitGrp sync.WaitGroup
+	waitGrp.Add(2)
+	go xdcrf.fetchCkptsAndFilterBasedOnExpiration(mainPipelineTopic, sourceVBs, dedupMap, expirationTimeUnix, &waitGrp)
+	go xdcrf.fetchCkptsAndFilterBasedOnExpiration(backfillPipelineTopic, sourceVBs, backfillDedupMap, expirationTimeUnix, &waitGrp)
+	waitGrp.Wait()
+
+	// Combine backfillDedupMap and dedupMap into one entity
+	for vbno, _ := range backfillDedupMap {
+		dedupMap[vbno] = true
+	}
+
+	var returnVBsList []uint16
+	for vbno, _ := range dedupMap {
+		returnVBsList = append(returnVBsList, vbno)
+	}
+	return returnVBsList
+}
+
+func (xdcrf *XDCRFactory) fetchCkptsAndFilterBasedOnExpiration(pipelineTopic string, sourceVBs []uint16, dedupMap map[uint16]bool, expirationTimeUnix int64, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	ckptDocs, err := xdcrf.checkpoint_svc.CheckpointsDocs(pipelineTopic, false)
+	if err != nil {
+		xdcrf.logger.Errorf("When pulling ckptDocs for %v - got err %v", pipelineTopic, err)
+		// claim that everything needs to be pulled
+		return
+	}
 
 	for vbno, ckptDoc := range ckptDocs {
 		if _, isSourceVB := dedupMap[vbno]; !isSourceVB {
@@ -1610,10 +1633,5 @@ func (xdcrf *XDCRFactory) preReplicationVBMasterFilter(pipeline common.Pipeline)
 			delete(dedupMap, vbno)
 		}
 	}
-
-	var returnVBsList []uint16
-	for vbno, _ := range dedupMap {
-		returnVBsList = append(returnVBsList, vbno)
-	}
-	return returnVBsList
+	return
 }

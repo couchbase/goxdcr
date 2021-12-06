@@ -17,6 +17,7 @@ import (
 	"math/rand"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -2421,6 +2422,8 @@ func (ckmgr *CheckpointManager) MergePeerNodesCkptInfo(genericResponse interface
 	return fmt.Errorf("Unhandled type: %v", reflect.TypeOf(genericResponse))
 }
 
+type nodeVbCkptMap map[string]metadata.VBsCkptsDocMap
+
 // Merging pre-requisites:
 // 1. For each checkpoint, the VBUUID must exist in the src and target failover log. If not, ckpt is not valid
 //    and is not worth saving
@@ -2439,7 +2442,8 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	combinedBrokenMappingSpecInternalId := make(map[string]string)
 
 	warnMap := make(base.ErrorMap)
-	nodeVbCkptsMap := make(map[string]map[uint16]*metadata.CheckpointsDoc)
+	nodeVbMainCkptsMap := make(nodeVbCkptMap)
+	nodeVbBackfillCkptsMap := make(nodeVbCkptMap)
 	for node, resp := range respMap {
 		key := resp.SourceBucketName
 		payloadMap, unlockFunc := resp.GetReponse()
@@ -2455,7 +2459,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			continue
 		}
 
-		oneNodeVbsCkptMap := payload.GetAllCheckpoints()
+		oneNodeVbsCkptMap := payload.GetAllCheckpoints(common.MainPipeline)
 		if len(oneNodeVbsCkptMap) > 0 {
 			for _, ckptDoc := range oneNodeVbsCkptMap {
 				for _, ckptRecord := range ckptDoc.Checkpoint_records {
@@ -2466,7 +2470,20 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 			}
 			needToGetFailoverLogs = true
 			ckmgr.logger.Infof("Received peerToPeer checkpoint data from node %v replId %v", node, resp.ReplicationSpecId)
-			nodeVbCkptsMap[node] = oneNodeVbsCkptMap
+			nodeVbMainCkptsMap[node] = oneNodeVbsCkptMap
+		}
+		oneNodeVbsBackfillCkptMap := payload.GetAllCheckpoints(common.BackfillPipeline)
+		if len(oneNodeVbsBackfillCkptMap) > 0 {
+			for _, ckptDoc := range oneNodeVbsBackfillCkptMap {
+				for _, ckptRecord := range ckptDoc.Checkpoint_records {
+					if ckptRecord == nil {
+						continue
+					}
+				}
+			}
+			needToGetFailoverLogs = true
+			ckmgr.logger.Infof("Received peerToPeer backfill checkpoint data from node %v replId %v", node, resp.ReplicationSpecId)
+			nodeVbBackfillCkptsMap[node] = oneNodeVbsBackfillCkptMap
 		}
 
 		srcManifests, tgtManifests := payload.GetAllManifests()
@@ -2501,23 +2518,23 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		}
 	}
 
-	filteredMap := filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptsMap, srcFailoverLogs)
-	vbsThatNeedTargetFailoverlogs := findVbsThatNeedTargetFailoverLogs(filteredMap)
+	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbMainCkptsMap, nodeVbBackfillCkptsMap}, srcFailoverLogs)
+	vbsThatNeedTargetFailoverlogs := findVbsThatNeedTargetFailoverLogs(filteredMaps)
 	if len(vbsThatNeedTargetFailoverlogs) > 0 {
 		tgtFailoverLogs, err = ckmgr.getOneTimeTgtFailoverLogs(vbsThatNeedTargetFailoverlogs)
 		if err != nil {
 			ckmgr.logger.Errorf("unable to get failoverlog from target(s) %v", err)
 			return err
 		}
-		filteredMap = filterInvalidCkptsBasedOnTargetFailover(filteredMap, tgtFailoverLogs)
+		filteredMaps = filterInvalidCkptsBasedOnTargetFailover(filteredMaps, tgtFailoverLogs)
 	}
-	filteredMap, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMap, combinedBrokenMapping)
+	filteredMaps, combinedShaMap, err := filterCkptsWithoutValidBrokenmaps(filteredMaps, combinedBrokenMapping)
 	if err != nil {
 		// filteredMap may still be valid... continue
 		ckmgr.logger.Warnf("filterCkptsWithoutValidBrokenMaps had errors: %v", err)
 	}
 
-	err = ckmgr.stopTheWorldAndMergeCkpts(filteredMap, combinedShaMap, brokenMapSpecInternalId, &combinedSrcManifests, &combinedTgtManifests, srcFailoverLogs, tgtFailoverLogs)
+	err = ckmgr.stopTheWorldAndMergeCkpts(filteredMaps, combinedShaMap, brokenMapSpecInternalId, &combinedSrcManifests, &combinedTgtManifests, srcFailoverLogs, tgtFailoverLogs)
 	if err != nil {
 		return err
 	}
@@ -2526,8 +2543,12 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 }
 
 // Failover logs are used for sorting checkpoint purposes and are optional
-func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(checkpointsDocs map[uint16]*metadata.CheckpointsDoc, brokenMappingShaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog) error {
-	if len(checkpointsDocs) == 0 {
+func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(pipelinesCkptDocs []metadata.VBsCkptsDocMap, brokenMappingShaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog) error {
+	if len(pipelinesCkptDocs) != int(common.PipelineTypeInvalidEnd) {
+		return fmt.Errorf("Invalid number of pipelines: %v vs %v", len(pipelinesCkptDocs), int(common.PipelineTypeInvalidEnd))
+	}
+
+	if len(pipelinesCkptDocs[common.MainPipeline]) == 0 && len(pipelinesCkptDocs[common.BackfillPipeline]) == 0 {
 		// Nothing to merge, don't waste time stopping the world
 		return nil
 	}
@@ -2541,7 +2562,7 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(checkpointsDocs map[ui
 	disableCkptStopTimer()
 	defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 
-	err := ckmgr.mergeFinalCkpts(checkpointsDocs, srcFailoverLogs, tgtFailoverLogs, brokenMappingShaMap, brokenMapSpecInternalId)
+	err := ckmgr.mergeFinalCkpts(pipelinesCkptDocs, srcFailoverLogs, tgtFailoverLogs, brokenMappingShaMap, brokenMapSpecInternalId)
 	if err != nil {
 		ckmgr.logger.Errorf("megeFinalCkpts error %v", err)
 		return err
@@ -2564,7 +2585,6 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(checkpointsDocs map[ui
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -2620,7 +2640,7 @@ func (ckmgr *CheckpointManager) checkSpecInternalID(combinedBrokenMappingSpecInt
 	return brokenMapInternalId, nil
 }
 
-func filterCkptsWithoutValidBrokenmaps(filteredMap map[uint16]*metadata.CheckpointsDoc, compressedBrokenMappings []*metadata.CollectionNsMappingsDoc) (map[uint16]*metadata.CheckpointsDoc, metadata.ShaToCollectionNamespaceMap, error) {
+func filterCkptsWithoutValidBrokenmaps(filteredMaps []metadata.VBsCkptsDocMap, compressedBrokenMappings []*metadata.CollectionNsMappingsDoc) ([]metadata.VBsCkptsDocMap, metadata.ShaToCollectionNamespaceMap, error) {
 	errMap := make(base.ErrorMap)
 	var errCnt int
 	combinedShaMap := make(metadata.ShaToCollectionNamespaceMap)
@@ -2637,79 +2657,57 @@ func filterCkptsWithoutValidBrokenmaps(filteredMap map[uint16]*metadata.Checkpoi
 		}
 	}
 
-	for _, ckptDoc := range filteredMap {
-		var replacementList metadata.CheckpointRecordsList
-		for _, ckptRecord := range ckptDoc.Checkpoint_records {
-			if ckptRecord == nil {
-				continue
-			}
-			if ckptRecord.BrokenMappingSha256 == "" {
-				// no brokenmap, ok to keep
-				replacementList = append(replacementList, ckptRecord)
-			} else {
-				if brokenMapping, exists := combinedShaMap[ckptRecord.BrokenMappingSha256]; exists && brokenMapping != nil {
-					err := ckptRecord.LoadBrokenMapping(*brokenMapping)
-					if err != nil {
-						errMap[fmt.Sprintf("loadBrokenMapping error %v", errCnt)] = err
-						continue
-					}
-					// BrokenMapping is found, ok to keep
+	for _, filteredMap := range filteredMaps {
+		for _, ckptDoc := range filteredMap {
+			var replacementList metadata.CheckpointRecordsList
+			for _, ckptRecord := range ckptDoc.Checkpoint_records {
+				if ckptRecord == nil {
+					continue
+				}
+				if ckptRecord.BrokenMappingSha256 == "" {
+					// no brokenmap, ok to keep
 					replacementList = append(replacementList, ckptRecord)
+				} else {
+					if brokenMapping, exists := combinedShaMap[ckptRecord.BrokenMappingSha256]; exists && brokenMapping != nil {
+						err := ckptRecord.LoadBrokenMapping(*brokenMapping)
+						if err != nil {
+							errMap[fmt.Sprintf("loadBrokenMapping error %v", errCnt)] = err
+							continue
+						}
+						// BrokenMapping is found, ok to keep
+						replacementList = append(replacementList, ckptRecord)
+					}
 				}
 			}
+			ckptDoc.Checkpoint_records = replacementList
 		}
-		ckptDoc.Checkpoint_records = replacementList
 	}
 
 	if len(errMap) > 0 {
-		return filteredMap, combinedShaMap, errors.New(base.FlattenErrorMap(errMap))
+		return filteredMaps, combinedShaMap, errors.New(base.FlattenErrorMap(errMap))
 	}
-	return filteredMap, combinedShaMap, nil
+	return filteredMaps, combinedShaMap, nil
 }
 
-func filterInvalidCkptsBasedOnTargetFailover(ckptsMap map[uint16]*metadata.CheckpointsDoc, tgtFailoverLogs map[uint16]*mcc.FailoverLog) map[uint16]*metadata.CheckpointsDoc {
-	combinedMap := make(map[uint16]*metadata.CheckpointsDoc)
+func filterInvalidCkptsBasedOnTargetFailover(ckptsMaps []metadata.VBsCkptsDocMap, tgtFailoverLogs map[uint16]*mcc.FailoverLog) []metadata.VBsCkptsDocMap {
+	mainPipelineMap := make(metadata.VBsCkptsDocMap)
+	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
+	var combinedMap metadata.VBsCkptsDocMap
 
-	for vbno, ckptDoc := range ckptsMap {
-		failoverLog, found := tgtFailoverLogs[vbno]
-		if !found || failoverLog == nil {
+	for i, ckptsMap := range ckptsMaps {
+		switch i {
+		case int(common.MainPipeline):
+			combinedMap = mainPipelineMap
+		case int(common.BackfillPipeline):
+			combinedMap = backfillPipelineMap
+		default:
+			panic(fmt.Sprintf("wrong integer %v", i))
+		}
+		if ckptsMap == nil {
 			continue
 		}
-
-		_, exists := combinedMap[vbno]
-		if !exists {
-			// It's ok for checkpointRecords to be emptyList
-			combinedMap[vbno] = ckptDoc.CloneWithoutRecords()
-		}
-
-		// Validate that this record is valid
-		for _, ckptRecord := range ckptDoc.Checkpoint_records {
-			if ckptRecord == nil {
-				continue
-			}
-
-			ckptRecordVbUuid := ckptRecord.Target_vb_opaque.Value().(uint64)
-
-			for _, vbUuidSeqnoPair := range *failoverLog {
-				failoverVbUuid := vbUuidSeqnoPair[0]
-
-				if ckptRecordVbUuid == failoverVbUuid {
-					// Usable checkpoint based purely off of source bucket info
-					combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
-					continue
-				}
-			}
-		}
-	}
-	return combinedMap
-}
-
-func filterInvalidCkptsBasedOnSourceFailover(ckptsMap map[string]map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs map[uint16]*mcc.FailoverLog) map[uint16]*metadata.CheckpointsDoc {
-	combinedMap := make(map[uint16]*metadata.CheckpointsDoc)
-
-	for _, vbCkpts := range ckptsMap {
-		for vbno, ckptDoc := range vbCkpts {
-			failoverLog, found := srcFailoverLogs[vbno]
+		for vbno, ckptDoc := range ckptsMap {
+			failoverLog, found := tgtFailoverLogs[vbno]
 			if !found || failoverLog == nil {
 				continue
 			}
@@ -2726,7 +2724,7 @@ func filterInvalidCkptsBasedOnSourceFailover(ckptsMap map[string]map[uint16]*met
 					continue
 				}
 
-				ckptRecordVbUuid := ckptRecord.Failover_uuid
+				ckptRecordVbUuid := ckptRecord.Target_vb_opaque.Value().(uint64)
 
 				for _, vbUuidSeqnoPair := range *failoverLog {
 					failoverVbUuid := vbUuidSeqnoPair[0]
@@ -2740,16 +2738,79 @@ func filterInvalidCkptsBasedOnSourceFailover(ckptsMap map[string]map[uint16]*met
 			}
 		}
 	}
-	return combinedMap
+	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
 }
 
-func findVbsThatNeedTargetFailoverLogs(filteredMap map[uint16]*metadata.CheckpointsDoc) []uint16 {
-	var retVBList []uint16
-	for vbno, doc := range filteredMap {
-		if len(doc.Checkpoint_records) > base.MaxCheckpointRecordsToKeep {
-			//We need to further filter down the checkpoints - may need filtering using target
-			retVBList = append(retVBList, vbno)
+func filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptMaps []nodeVbCkptMap, srcFailoverLogs map[uint16]*mcc.FailoverLog) []metadata.VBsCkptsDocMap {
+	mainPipelineMap := make(metadata.VBsCkptsDocMap)
+	backfillPipelineMap := make(metadata.VBsCkptsDocMap)
+	var combinedMap metadata.VBsCkptsDocMap
+
+	for i, ckptsMap := range nodeVbCkptMaps {
+		switch i {
+		case int(common.MainPipeline):
+			combinedMap = mainPipelineMap
+		case int(common.BackfillPipeline):
+			combinedMap = backfillPipelineMap
+		default:
+			panic(fmt.Sprintf("wrong integer %v", i))
 		}
+		if ckptsMap == nil {
+			continue
+		}
+		for _, vbCkpts := range ckptsMap {
+			for vbno, ckptDoc := range vbCkpts {
+				failoverLog, found := srcFailoverLogs[vbno]
+				if !found || failoverLog == nil {
+					continue
+				}
+
+				_, exists := combinedMap[vbno]
+				if !exists {
+					// It's ok for checkpointRecords to be emptyList
+					combinedMap[vbno] = ckptDoc.CloneWithoutRecords()
+				}
+
+				// Validate that this record is valid
+				for _, ckptRecord := range ckptDoc.Checkpoint_records {
+					if ckptRecord == nil {
+						continue
+					}
+
+					ckptRecordVbUuid := ckptRecord.Failover_uuid
+
+					for _, vbUuidSeqnoPair := range *failoverLog {
+						failoverVbUuid := vbUuidSeqnoPair[0]
+
+						if ckptRecordVbUuid == failoverVbUuid {
+							// Usable checkpoint based purely off of source bucket info
+							combinedMap[vbno].Checkpoint_records = append(combinedMap[vbno].Checkpoint_records, ckptRecord)
+							continue
+						}
+					}
+				}
+			}
+		}
+	}
+	return []metadata.VBsCkptsDocMap{mainPipelineMap, backfillPipelineMap}
+}
+
+func findVbsThatNeedTargetFailoverLogs(filteredMaps []metadata.VBsCkptsDocMap) []uint16 {
+	dedupMap := make(map[uint16]bool)
+	for _, filteredMap := range filteredMaps {
+		if filteredMap == nil {
+			continue
+		}
+		for vbno, doc := range filteredMap {
+			if len(doc.Checkpoint_records) > base.MaxCheckpointRecordsToKeep {
+				//We need to further filter down the checkpoints - may need filtering using target
+				dedupMap[vbno] = true
+			}
+		}
+	}
+	var retVBList []uint16
+	for vbno, _ := range dedupMap {
+		retVBList = append(retVBList, vbno)
 	}
 	return retVBList
 }
@@ -2859,21 +2920,12 @@ func (ckmgr *CheckpointManager) getOneTimeTgtFailoverLogs(vbsList []uint16) (map
 	return compiledMap, nil
 }
 
-func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMap map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs, tgtFailoverLogs map[uint16]*mcc.FailoverLog, combinedShaMapFromPeers metadata.ShaToCollectionNamespaceMap, peerBrokenMapSpecInternalId string) error {
+// This merge function is called in two different paths: 1. Pull model vs 2. Push model (only on main pipeline's)
+// When pulling, both main and backfill pipelines are stopped, and the main pipeline's checkpoint manager is responsible
+// for merging both types of ckpts
+// When pushing, this should only be called when backfill pipeline is stopped and called as part of the stopped callback
+func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkptsDocMap, srcFailoverLogs, tgtFailoverLogs map[uint16]*mcc.FailoverLog, combinedShaMapFromPeers metadata.ShaToCollectionNamespaceMap, peerBrokenMapSpecInternalId string) error {
 	// When merging checkpoints, do not allow concurrent checkpoint operations to occur
-	getCkptDocsStopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.checkpointsDocs", base.DiagInternalThreshold)
-	currDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(ckmgr.pipeline.FullTopic(), true)
-	getCkptDocsStopFunc()
-	if err != nil {
-		if err == service_def.MetadataNotFoundErr {
-			// Use empty currDocs to merge incoming filteredMap
-			err = nil
-			currDocs = make(map[uint16]*metadata.CheckpointsDoc)
-		} else {
-			ckmgr.logger.Errorf("mergeFinalCkpts CheckpointsDocs err %v\n", err)
-			return err
-		}
-	}
 
 	genSpec := ckmgr.pipeline.Specification()
 	if genSpec == nil {
@@ -2884,33 +2936,88 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMap map[uint16]*metadata
 		return base.ErrorNilPtr
 	}
 
-	combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec)
+	errList := make([]error, len(filteredMaps))
+	var waitGrp sync.WaitGroup
+	for iRaw, filteredMapRaw := range filteredMaps {
+		var ckptTopic string
+		var needToReload bool
 
-	err = ckmgr.mergeAndPersistBrokenMappingDocs(spec.Id, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs)
-	if err != nil {
-		return err
+		// Copy before passing to go-routines
+		i := iRaw
+		filteredMap := filteredMapRaw
+		switch i {
+		case int(common.MainPipeline):
+			ckptTopic = ckmgr.pipeline.Topic()
+			// If this pipeline ckmgr is main pipeline, need to reload after merging main pipeline ckpt
+			// Backfill pipeline merge runs during stopped callback, no need to reload
+			needToReload = true
+		case int(common.BackfillPipeline):
+			ckptTopic = common.ComposeFullTopic(ckmgr.pipeline.Topic(), common.BackfillPipeline)
+		default:
+			return base.ErrorNotSupported
+		}
+
+		waitGrp.Add(1)
+		go func() {
+			defer waitGrp.Done()
+			getCkptDocsStopFunc := ckmgr.utils.StartDiagStopwatch(fmt.Sprintf("ckmgr.checkpointsDocs.%v", ckptTopic), base.DiagInternalThreshold)
+			currDocs, err := ckmgr.checkpoints_svc.CheckpointsDocs(ckptTopic, true)
+			getCkptDocsStopFunc()
+			if err != nil {
+				if err == service_def.MetadataNotFoundErr {
+					// Use empty currDocs to merge incoming filteredMap
+					err = nil
+					currDocs = make(map[uint16]*metadata.CheckpointsDoc)
+				} else {
+					ckmgr.logger.Errorf("mergeFinalCkpts %v CheckpointsDocs err %v\n", ckptTopic, err)
+					errList[i] = err
+					return
+				}
+			}
+
+			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec)
+
+			err = ckmgr.mergeAndPersistBrokenMappingDocs(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs)
+			if err != nil {
+				errList[i] = err
+				return
+			}
+			errList[i] = ckmgr.mergePersistCkptDocs(currDocs, ckptTopic, peerBrokenMapSpecInternalId, needToReload)
+		}()
+
+	}
+	waitGrp.Wait()
+
+	var needToReturnErr bool
+	var errStrs []string
+	for _, checkErr := range errList {
+		if checkErr != nil {
+			needToReturnErr = true
+			errStrs = append(errStrs, checkErr.Error())
+		} else {
+			errStrs = append(errStrs, "")
+		}
 	}
 
-	return ckmgr.lockCkptsAndPersistCkptDocs(currDocs, peerBrokenMapSpecInternalId)
+	if !needToReturnErr {
+		return nil
+	} else {
+		return fmt.Errorf(strings.Join(errStrs, " "))
+	}
 }
 
-func (ckmgr *CheckpointManager) lockCkptsAndPersistCkptDocs(currDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
-	disableStop := ckmgr.utils.StartDiagStopwatch("ckmgr.checkpointAllowedHelper.disableCkptAndWait", base.DiagInternalThreshold)
-	ckmgr.checkpointAllowedHelper.disableCkptAndWait()
-	disableStop()
-	defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
-
-	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.lockCkptsAndPersistCkptDocs", base.DiagCkptMergeThreshold)
+func (ckmgr *CheckpointManager) mergePersistCkptDocs(currDocs map[uint16]*metadata.CheckpointsDoc, ckptTopic, internalId string, needToReload bool) error {
+	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergePersistCkptDocs", base.DiagCkptMergeThreshold)
 	defer stopFunc()
-	written, err := ckmgr.checkpoints_svc.UpsertCheckpointsDoc(ckmgr.pipeline.FullTopic(), currDocs, internalId)
+	written, err := ckmgr.checkpoints_svc.UpsertCheckpointsDoc(ckptTopic, currDocs, internalId)
 	if err != nil {
-		ckmgr.logger.Errorf("UpsertCheckpointsDoc for %v had errors %v", ckmgr.pipeline.FullTopic(), err)
+		ckmgr.logger.Errorf("UpsertCheckpointsDoc for %v had errors %v", ckptTopic, err)
 		return err
 	}
-	if written {
-		_, reloadErr := ckmgr.checkpoints_svc.CheckpointsDocs(ckmgr.pipeline.FullTopic(), true)
+	if written && needToReload {
+		_, reloadErr := ckmgr.checkpoints_svc.CheckpointsDocs(ckptTopic, true)
 		if reloadErr != nil {
-			ckmgr.logger.Errorf("UpsertCheckpointsDoc reloading for %v had errors %v", ckmgr.pipeline.FullTopic(), reloadErr)
+			ckmgr.logger.Errorf("UpsertCheckpointsDoc reloading for %v had errors %v", ckptTopic, reloadErr)
 			return reloadErr
 		}
 	}
@@ -3042,10 +3149,11 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 	}
 
 	var combinedBrokenMapping []*metadata.CollectionNsMappingsDoc
-	checkpointsDocs := payload.GetAllCheckpoints()
-	if checkpointsDocs == nil {
+	mainCkptDocs := payload.GetAllCheckpoints(common.MainPipeline)
+	backfillCkptDocs := payload.GetAllCheckpoints(common.BackfillPipeline)
+	if mainCkptDocs == nil && backfillCkptDocs == nil {
 		unlockFunc()
-		err := fmt.Errorf("periodic push payload has nil checkpointsDocs")
+		err := fmt.Errorf("periodic push payload for %v has both nil main and backfill ckpt docs", periodicPayload.ReplicationSpecId)
 		ckmgr.logger.Errorf(err.Error())
 		return err
 	}
@@ -3066,31 +3174,29 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 		return err
 	}
 
-	ckpts, shaMap, err := filterCkptsWithoutValidBrokenmaps(checkpointsDocs, combinedBrokenMapping)
+	pipelinesCkpts, shaMap, err := filterCkptsWithoutValidBrokenmaps([]metadata.VBsCkptsDocMap{mainCkptDocs, backfillCkptDocs}, combinedBrokenMapping)
 	if err != nil {
 		err := fmt.Errorf("filterCkptsWithoutValidBrokenMaps - %v", err)
 		ckmgr.logger.Errorf(err.Error())
 		return err
 	}
 
-	err = ckmgr.stopTheWorldAndMergeCkpts(ckpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, nil, nil)
+	err = ckmgr.stopTheWorldAndMergeCkpts(pipelinesCkpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, nil, nil)
 	if err != nil {
 		ckmgr.logger.Errorf("stopTheWorldAndMerge - %v", err)
 		return err
 	}
 
 	// Periodic push do not go through pipeline restart, so need to register them for GC
-	for vbno, _ := range ckpts {
-		mainTopic := genSpec.GetReplicationSpec().Id
-		gcErr := ckmgr.registerGCFunction(mainTopic, vbno)
-		if gcErr != nil {
-			ckmgr.logger.Warnf("%v - Unable to register GC for vbno %v - err: %v", mainTopic, vbno, gcErr)
+	for i, ckpts := range pipelinesCkpts {
+		if ckpts == nil {
+			continue
 		}
-		if filteredPayload.ContainsBackfillCheckpoints() {
-			backfillTopic := common.ComposeFullTopic(mainTopic, common.BackfillPipeline)
-			gcErr2 := ckmgr.registerGCFunction(backfillTopic, vbno)
-			if gcErr2 != nil {
-				ckmgr.logger.Warnf("%v - Unable to register GC for vbno %v - err: %v", backfillTopic, vbno, gcErr2)
+		registerTopic := common.ComposeFullTopic(genSpec.GetReplicationSpec().Id, common.PipelineType(i))
+		for vbno, _ := range ckpts {
+			gcErr := ckmgr.registerGCFunction(registerTopic, vbno)
+			if gcErr != nil {
+				ckmgr.logger.Warnf("%v - Unable to register GC for vbno %v - err: %v", registerTopic, vbno, gcErr)
 			}
 		}
 	}

@@ -45,15 +45,17 @@ function runDataLoad {
 	echo "RUNNING dataload DONE"
 }
 
-TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+declare LOGMSG=$BROKEN_MSG
+declare BACKFILL_CKPT_RETRIEVED="Received peerToPeer backfill checkpoint data from node"
 
-function runOneReplicationCycle {
+function runOneReplicationCycleAndPause {
 	local timeIntervalSecs=5
 	local checkInterval=10
 	local maxChangeCnt=3
 	local maxStableCnt=3
 	local coolDownPeriod=1
 	local checkInt
+	setupCluster
 	setupTopologies
 	# Shorten the amount of time pipeline restarts
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
@@ -66,6 +68,9 @@ function runOneReplicationCycle {
 		exit $?
 	fi
 
+	local -i currentInstanceCnt
+	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+
 	setCustomManifestRefreshInterval "C1"
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
@@ -74,99 +79,134 @@ function runOneReplicationCycle {
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" BackfillHangLooseProperties
 	printGlobalScopeAndCollectionInfo
+
 	runDataLoad
 
-	echo "Waiting 30 seconds before creating missing collection"
-	sleep 30
+	echo "Sleeping 20 seconds before changes left check"
+	sleep 20
+
+	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
+
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	validateXDCRCheckpoints "C1"
+	grepForPanics
 
 	createScope "C2" "B1" "S1"
 	createCollection "C2" "B1" "S1" "col1"
 
-	checkItemCnt "C1" "B0" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	echo "Sleeping 30 secs for backfill to start"
+	sleep 30
 
-	grepForPanics
+	# Once all is done, pause to create checkpoints
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
 CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
 CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
+CKPT_RESUME_FOUND="checkpoint documents for"
+LOADED_BROKEN_MAP="Loaded brokenMap: map"
+LOADED_BROKEN_MAP_NAME="S1.col1"
 
 function runOneRebalanceCycle {
 	local cycleCnt=$1
 	local totalCycleCnt=$2
 	local timeIntervalSecs=30
 
-	setupCluster
-	echo "Sleeping 10 secs before rebalancing node in"
-	sleep 10
+	echo "Sleeping 15 secs before rebalancing node in"
+	sleep 15
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
 	echo "============================================================================"
 	addNodesIn
+	sleep 5
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
+
+	echo "Sleeping before checking logs"
+	sleep 15
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"
+	grepForPanics
+}
+
+function runReplicationResume {
+	local logs
+	local logsC1P
+
+	logs=$(getInternalNodeXdcrLog "C1")
+	local curCkptsFoundDocsCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
+	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
+
+	logsC1P=$(getInternalNodeXdcrLog "C1P")
+	local curCkptsFoundDocsCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_FOUND_DOCS")
+	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
+	local curBackfillRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$BACKFILL_CKPT_RETRIEVED")
+	local curBackfillResumeNon0CntC1P=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "BackfillPipeline" | grep -cv "${TS_PREFIX}=0")
+
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 20 seconds for resume to finish"
+	sleep 20
+
+	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
+	logs=$(getInternalNodeXdcrLog "C1")
+	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
+	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
+		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill) when looking for $(($curCkptsFoundDocsCnt + 1)) counts"
+		exit 1
+	fi
+	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
+	if (($foundDocCount == 0)); then
+		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
+		exit 1
+	fi
+
+	logsC1P=$(getInternalNodeXdcrLog "C1P")
+	local ckptFoundWith0Count=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
+	local ckptFoundTotalCount=$(echo "$logsC1P" | grep -c "$CKPT_RESUME_FOUND")
+	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
+		echo "C1P unable to find upserted checkpoints"
+		exit 1
+	fi
+
+	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCntC1P + 1))
+	validateInternalLogWithInstance "C1P" "$BACKFILL_CKPT_RETRIEVED" $(($curBackfillRetrievedCntC1P + 1))
+
+	local resumeFrom0Cnt
+	local bpResumeFromNon0Cnt
+	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX"  | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
+	if (($resumeFrom0Cnt > 0)); then
+		echo "C1P main pipeline has at least one VB that resumed from seqno 0"
+		exit 1
+	fi
+	bpResumeFromNon0Cnt=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "BackfillPipeline" | grep -cv "${TS_PREFIX}=0")
+
+	if (( $curBackfillResumeNon0CntC1P == $bpResumeFromNon0Cnt ));then
+	  # Resume from non-0 stayed constant
+		echo "C1P backfill pipeline did not seem to have resumed from non-0 ckpts"
+		exit 1
+	fi
+
+	# No broken map should be restored because backfill is under way for the S1.col1 -> S1.col1 that was broken
+	grepForPanics
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P with brokenmap and failing a node out"
+	echo "Running P2P pulling both main and backfill pipeline ckpts"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
+	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
-	runOneReplicationCycle
-
-	local currentXdcrLog
-	local -i currentHandlingInstanceCnt
-	local -i currentHandlingInstanceDoneCnt
-
-	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
-	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
-	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
-
-	# In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
-	echo "Done - Sleeping 6 minutes to ensure multiple requests have been handled"
-
-	# Sleeping 7 minutes mean we should have at least two instances up to 7 max
-	sleep 420
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 2)) $(($currentHandlingInstanceCnt + 7))
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceDoneCnt + 1)) $(($currentHandlingInstanceDoneCnt + 7))
-
-	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
-	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
-	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
-	setReplicationSettings "C1" "B0" "C2" "B1" "xdcrDevBackfillSendDelayMs=0"
-	echo "6 minutes passed -  stopping delay for backfill pipeline and waiting one more minute"
-
-	sleep 60
-
-	local logsC1
-	local resumeFrom0CntOrig
-	local resumeFrom0CntNew
-	logsC1=$(getInternalNodeXdcrLog "C1")
-	resumeFrom0CntOrig=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
-	echo "Failing node out and seeing if one node owns all the checkpoints"
-	failoverNode "C1P" "C1"
-	echo "Sleeping 30 seconds before checking logs for checkpoint resuming messages"
-	sleep 30
-	logsC1=$(getInternalNodeXdcrLog "C1")
-	resumeFrom0CntNew=$(echo "$logsC1" | grep -c "$TS_PREFIX=0")
-
-	# The backfill replication checkpoints were injected to be slow running
-	# this means that out of node 1's 512 VBs, not all 512 will have had traffic/checkpoint
-	# So as long as the count difference is not 512, it should mean that some ckpts were transferred
-	if (($resumeFrom0CntOrig - $resumeFrom0CntNew >= 512)); then
-		echo "Before failover, there are $resumeFrom0CntOrig lines of resuming from 0. After failover, there are $resumeFrom0CntNew"
-		exit 1
-	fi
-	grepForPanics
+	runReplicationResume
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -175,5 +215,6 @@ function runTestCase {
 	cleanupBuckets
 	cleanupRemoteClusterRefs
 
-	# no need to failover since it is already failed over
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
 }

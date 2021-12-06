@@ -88,9 +88,14 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	go h.populateBucketVBMapsIntoResp(bucketVBsMap, resp, waitGrp, finCh)
 
 	waitGrp.Add(1)
-	var bgErr error
-	var result map[uint16]*metadata.CheckpointsDoc
-	go h.populatePipelineCkpts(common.ComposeFullTopic(req.ReplicationId, req.PipelineType), waitGrp, &bgErr, &result, finCh)
+	var mainCkptFetchErr error
+	var mainPipelineCkpts map[uint16]*metadata.CheckpointsDoc
+	go h.populatePipelineCkpts(common.ComposeFullTopic(req.ReplicationId, common.MainPipeline), waitGrp, &mainCkptFetchErr, &mainPipelineCkpts, finCh)
+
+	waitGrp.Add(1)
+	var backfillCkptFetchErr error
+	var backfillPipelineCkpts map[uint16]*metadata.CheckpointsDoc
+	go h.populatePipelineCkpts(common.ComposeFullTopic(req.ReplicationId, common.BackfillPipeline), waitGrp, &backfillCkptFetchErr, &backfillPipelineCkpts, finCh)
 
 	cachedSrcManifests := make(metadata.ManifestsCache)
 	cachedTgtManifests := make(metadata.ManifestsCache)
@@ -112,37 +117,52 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	waitGrp.Wait()
 	stopMetakvMeasureFunc()
 
-	if bgErr != nil {
-		h.logger.Errorf("%v", bgErr)
-		resp.ErrorMsg = bgErr.Error()
+	if mainCkptFetchErr != nil {
+		h.logger.Errorf("%v - fetchMainCkpt error %v", req.ReplicationId, mainCkptFetchErr)
+		resp.ErrorMsg = mainCkptFetchErr.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	if backfillCkptFetchErr != nil {
+		h.logger.Errorf("%v - fetchBackfillCkpt error %v", req.ReplicationId, backfillCkptFetchErr)
+		resp.ErrorMsg = backfillCkptFetchErr.Error()
 		req.CallBack(resp)
 		return
 	}
 
 	if manifestErr != nil {
-		h.logger.Errorf("%v", manifestErr)
+		h.logger.Errorf("%v - manifest error %v", req.ReplicationId, manifestErr)
 		resp.ErrorMsg = manifestErr.Error()
 		req.CallBack(resp)
 		return
 	}
 
 	if brokenMappingErr != nil {
-		h.logger.Errorf("%v", brokenMappingErr)
+		h.logger.Errorf("%v - brokenMapping error %v", req.ReplicationId, brokenMappingErr)
 		resp.ErrorMsg = brokenMappingErr.Error()
 		req.CallBack(resp)
 		return
 	}
 
 	if backfillTasksErr != nil {
-		h.logger.Errorf("%v", backfillTasksErr)
+		h.logger.Errorf("%v - backfillTasks error %v", req.ReplicationId, backfillTasksErr)
 		resp.ErrorMsg = backfillTasksErr.Error()
 		req.CallBack(resp)
 		return
 	}
 
-	err := resp.LoadPipelineCkpts(result, req.SourceBucketName)
+	err := resp.LoadMainPipelineCkpt(mainPipelineCkpts, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("when loading pipeline ckpt into response, got %v", err)
+		h.logger.Errorf("%v when loading pipeline ckpt into response, got %v", req.ReplicationId, err)
+		resp.ErrorMsg = err.Error()
+		req.CallBack(resp)
+		return
+	}
+
+	err = resp.LoadBackfillPipelineCkpt(backfillPipelineCkpts, req.SourceBucketName)
+	if err != nil {
+		h.logger.Errorf("%v when loading pipeline ckpt into response, got %v", req.ReplicationId, err)
 		resp.ErrorMsg = err.Error()
 		req.CallBack(resp)
 		return
@@ -150,7 +170,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err = resp.LoadManifests(cachedSrcManifests, cachedTgtManifests, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("when loading manifests into response, got %v", err)
+		h.logger.Errorf("%v when loading manifests into response, got %v", req.ReplicationId, err)
 		resp.ErrorMsg = err.Error()
 		req.CallBack(resp)
 		return
@@ -158,7 +178,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err = resp.LoadBrokenMappingDoc(brokenMappingDoc, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", err)
+		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", req.ReplicationId, err)
 		resp.ErrorMsg = err.Error()
 		req.CallBack(resp)
 		return
@@ -166,7 +186,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err = resp.LoadBackfillTasks(backfillTasks, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", err)
+		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", req.ReplicationId, err)
 		resp.ErrorMsg = err.Error()
 		req.CallBack(resp)
 		return

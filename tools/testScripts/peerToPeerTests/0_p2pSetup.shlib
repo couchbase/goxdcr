@@ -140,7 +140,7 @@ function runReplicationResume {
 	sleep 20
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
-	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" 1
+	validateInternalLogWithInstance "C1" "$CKPT_FOUND_DOCS" 2
 	logs=$(getInternalNodeXdcrLog "C1")
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then

@@ -398,7 +398,6 @@ type VBMasterCheckReq struct {
 	ReplicationId    string
 	InternalSpecId   string
 	SourceBucketName string // already in replicationId but for ease of use
-	PipelineType     common.PipelineType
 }
 
 func (v *VBMasterCheckReq) GetBucketVBMap() BucketVBMapType {
@@ -482,9 +481,6 @@ func (v *VBMasterCheckReq) SameAs(otherRaw interface{}) (bool, error) {
 	if v.ReplicationId != other.ReplicationId {
 		return false, nil
 	}
-	if v.PipelineType != other.PipelineType {
-		return false, nil
-	}
 	return v.RequestCommon.SameAs(&other.RequestCommon)
 }
 
@@ -493,7 +489,7 @@ func (v *VBMasterCheckReq) GenerateResponse() interface{} {
 	responseCommon.RespType = v.ReqType
 	resp := &VBMasterCheckResp{
 		ResponseCommon:     responseCommon,
-		ReplicationPayload: NewReplicationPayload(v.ReplicationId, v.SourceBucketName, v.PipelineType, v.InternalSpecId),
+		ReplicationPayload: NewReplicationPayload(v.ReplicationId, v.SourceBucketName, v.InternalSpecId),
 	}
 	return resp
 }
@@ -505,16 +501,14 @@ type ReplicationPayload struct {
 	ErrorMsg          string
 	ReplicationSpecId string
 	SourceBucketName  string
-	PipelineType      common.PipelineType
 	InternalSpecId    string
 }
 
-func NewReplicationPayload(specId, srcBucketName string, pipelineType common.PipelineType, internalSpecId string) ReplicationPayload {
+func NewReplicationPayload(specId, srcBucketName, internalSpecId string) ReplicationPayload {
 	payload := make(BucketVBMPayloadType)
 	return ReplicationPayload{
 		ReplicationSpecId: specId,
 		SourceBucketName:  srcBucketName,
-		PipelineType:      pipelineType,
 		payload:           &payload,
 		InternalSpecId:    internalSpecId,
 	}
@@ -569,8 +563,15 @@ func (v *ReplicationPayload) DecompressPayload() error {
 	}
 	return nil
 }
+func (v *ReplicationPayload) LoadBackfillPipelineCkpt(backfillCkpts map[uint16]*metadata.CheckpointsDoc, srcBucketName string) error {
+	return v.loadCkptInternal(backfillCkpts, srcBucketName, common.BackfillPipeline)
+}
 
-func (v *ReplicationPayload) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.CheckpointsDoc, srcBucketName string) error {
+func (v *ReplicationPayload) LoadMainPipelineCkpt(ckptDocs map[uint16]*metadata.CheckpointsDoc, srcBucketName string) error {
+	return v.loadCkptInternal(ckptDocs, srcBucketName, common.MainPipeline)
+}
+
+func (v *ReplicationPayload) loadCkptInternal(ckptDocs map[uint16]*metadata.CheckpointsDoc, srcBucketName string, pipelineType common.PipelineType) error {
 	v.mtx.Lock()
 	defer v.mtx.Unlock()
 
@@ -584,7 +585,14 @@ func (v *ReplicationPayload) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.Che
 		notMyVBMap := *payload.NotMyVBs
 		vbPayload, found := notMyVBMap[vb]
 		if found {
-			vbPayload.CheckpointsDoc = ckptDoc
+			switch pipelineType {
+			case common.MainPipeline:
+				vbPayload.CheckpointsDoc = ckptDoc
+			case common.BackfillPipeline:
+				vbPayload.BackfillCkptDoc = ckptDoc
+			default:
+				return base.ErrorNotSupported
+			}
 			continue
 		}
 
@@ -592,14 +600,28 @@ func (v *ReplicationPayload) LoadPipelineCkpts(ckptDocs map[uint16]*metadata.Che
 		conflictingVBMap := *payload.ConflictingVBs
 		vbPayload2, found2 := conflictingVBMap[vb]
 		if found2 {
-			vbPayload2.CheckpointsDoc = ckptDoc
+			switch pipelineType {
+			case common.MainPipeline:
+				vbPayload2.CheckpointsDoc = ckptDoc
+			case common.BackfillPipeline:
+				vbPayload2.BackfillCkptDoc = ckptDoc
+			default:
+				return base.ErrorNotSupported
+			}
 			continue
 		}
 
 		pushVBMap := *payload.PushVBs
 		vbPayload3, found3 := pushVBMap[vb]
 		if found3 {
-			vbPayload3.CheckpointsDoc = ckptDoc
+			switch pipelineType {
+			case common.MainPipeline:
+				vbPayload3.CheckpointsDoc = ckptDoc
+			case common.BackfillPipeline:
+				vbPayload3.BackfillCkptDoc = ckptDoc
+			default:
+				return base.ErrorNotSupported
+			}
 			continue
 		}
 
@@ -665,7 +687,7 @@ func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMa
 	}
 	payload.BackfillMappingDoc = backfillMappingDoc
 
-	// LoadPipelineCkpts has already been done so all the VBs struct would have been set up
+	// LoadMainPipelineCkpt has already been done so all the VBs struct would have been set up
 	var tasksLoaded []uint16
 	var taskEmpty []uint16
 	var taskNotFound []uint16
@@ -717,7 +739,6 @@ func (v *ReplicationPayload) GetSubsetBasedOnVBs(vbsList []uint16) *ReplicationP
 	retPayload := &ReplicationPayload{
 		ReplicationSpecId: v.ReplicationSpecId,
 		SourceBucketName:  v.SourceBucketName,
-		PipelineType:      v.PipelineType,
 	}
 
 	payloadMap := make(BucketVBMPayloadType)
@@ -768,7 +789,6 @@ func (v *ReplicationPayload) GetSubsetBasedOnNonIntersectingVBs(vbsList []uint16
 	retPayload := &ReplicationPayload{
 		ReplicationSpecId: v.ReplicationSpecId,
 		SourceBucketName:  v.SourceBucketName,
-		PipelineType:      v.PipelineType,
 	}
 
 	payloadMap := make(BucketVBMPayloadType)
@@ -839,7 +859,7 @@ func (v *ReplicationPayload) SameAs(other *ReplicationPayload) bool {
 
 	return v.payload.SameAs(other.payload) && v.ErrorMsg == other.ErrorMsg &&
 		v.ReplicationSpecId == other.ReplicationSpecId && v.SourceBucketName == other.SourceBucketName &&
-		v.PipelineType == other.PipelineType && v.InternalSpecId == other.InternalSpecId
+		v.InternalSpecId == other.InternalSpecId
 }
 
 type PeersVBMasterCheckRespMap map[string]*VBMasterCheckResp
@@ -1040,35 +1060,44 @@ func (p *VBMasterPayload) RegisterPushVBs(pushVBs []uint16) {
 	}
 }
 
-func (p *VBMasterPayload) GetAllCheckpoints() map[uint16]*metadata.CheckpointsDoc {
+func (p *VBMasterPayload) GetAllCheckpoints(pipelineType common.PipelineType) map[uint16]*metadata.CheckpointsDoc {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
 	retMap := make(map[uint16]*metadata.CheckpointsDoc)
 
 	if p.NotMyVBs != nil {
 		for vb, payload := range *p.NotMyVBs {
-			if payload.CheckpointsDoc != nil {
-				retMap[vb] = payload.CheckpointsDoc
-			}
+			p.setRetMapFromPayload(pipelineType, payload, retMap, vb)
 		}
 	}
 
 	if p.ConflictingVBs != nil {
 		for vb, payload := range *p.ConflictingVBs {
-			if payload.CheckpointsDoc != nil {
-				retMap[vb] = payload.CheckpointsDoc
-			}
+			p.setRetMapFromPayload(pipelineType, payload, retMap, vb)
 		}
 	}
 
 	if p.PushVBs != nil {
 		for vb, payload := range *p.PushVBs {
-			if payload.CheckpointsDoc != nil {
-				retMap[vb] = payload.CheckpointsDoc
-			}
+			p.setRetMapFromPayload(pipelineType, payload, retMap, vb)
 		}
 	}
 	return retMap
+}
+
+func (p *VBMasterPayload) setRetMapFromPayload(pipelineType common.PipelineType, payload *Payload, retMap map[uint16]*metadata.CheckpointsDoc, vb uint16) {
+	switch pipelineType {
+	case common.MainPipeline:
+		if payload.CheckpointsDoc != nil {
+			retMap[vb] = payload.CheckpointsDoc
+		}
+	case common.BackfillPipeline:
+		if payload.BackfillCkptDoc != nil {
+			retMap[vb] = payload.BackfillCkptDoc
+		}
+	default:
+		panic("Not supported type")
+	}
 }
 
 func (p *VBMasterPayload) GetAllManifests() (srcManifests, tgtManifests *metadata.ManifestsCache) {
@@ -1312,7 +1341,8 @@ type Payload struct {
 	CheckpointsDoc *metadata.CheckpointsDoc
 
 	// Backfill replication is decomposed and just the VBTasksMap is transferred
-	BackfillTsks *metadata.BackfillTasks
+	BackfillTsks    *metadata.BackfillTasks
+	BackfillCkptDoc *metadata.CheckpointsDoc
 }
 
 func (t *Payload) SameAs(other *Payload) bool {
@@ -1322,9 +1352,23 @@ func (t *Payload) SameAs(other *Payload) bool {
 		return false
 	} else if t == nil && other != nil {
 		return false
+	} else if t.CheckpointsDoc == nil && other.CheckpointsDoc != nil || t.CheckpointsDoc != nil && other.CheckpointsDoc == nil {
+		return false
+	} else if t.BackfillCkptDoc == nil && other.BackfillCkptDoc != nil || t.BackfillCkptDoc != nil && other.BackfillCkptDoc == nil {
+		return false
 	}
 
-	return t.CheckpointsDoc.SameAs(other.CheckpointsDoc) && t.BackfillTsks.SameAs(other.BackfillTsks)
+	if t.CheckpointsDoc != nil && !t.CheckpointsDoc.SameAs(other.CheckpointsDoc) {
+		return false
+	}
+	if t.BackfillTsks != nil && !t.BackfillTsks.SameAs(other.BackfillTsks) {
+		return false
+	}
+	if t.BackfillCkptDoc != nil && !t.BackfillCkptDoc.SameAs(other.BackfillCkptDoc) {
+		return false
+	}
+
+	return true
 }
 
 func NewPayload() *Payload {
@@ -1341,40 +1385,75 @@ func (v *VBMasterCheckResp) InitBucket(bucketName string) {
 }
 
 type VBPeriodicReplicateReq struct {
-	MainReplication     *ReplicationPayload
-	BackfillReplication *ReplicationPayload
+	*ReplicationPayload
 }
 
 func (v *VBPeriodicReplicateReq) IsEmpty() bool {
-	return v.MainReplication == nil && v.BackfillReplication == nil
+	return v.ReplicationPayload == nil
 }
 
 func (v *VBPeriodicReplicateReq) PushReqIsEmpty() bool {
-	return v.IsEmpty() || (len(v.MainReplication.GetPushVBs()) == 0 && len(v.BackfillReplication.GetPushVBs()) == 0)
+	return v.IsEmpty() || len(v.ReplicationPayload.GetPushVBs()) == 0
+}
+
+func (v *VBPeriodicReplicateReq) MainReplicationExists() bool {
+	if v.PushReqIsEmpty() {
+		return false
+	}
+	v.mtx.RLock()
+	defer v.mtx.RUnlock()
+
+	if v.payload == nil {
+		panic("Nil payload")
+	}
+
+	for _, vbMasterPayload := range *v.payload {
+		pushVBs := *(vbMasterPayload.PushVBs)
+		for _, data := range pushVBs {
+			if data.CheckpointsDoc.Len() > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (v *VBPeriodicReplicateReq) BackfillReplicationExists() bool {
+	if v.PushReqIsEmpty() {
+		return false
+	}
+	v.mtx.RLock()
+	defer v.mtx.RUnlock()
+
+	for _, vbMasterPayload := range *v.payload {
+		pushVBs := *(vbMasterPayload.PushVBs)
+		for _, data := range pushVBs {
+			if data.BackfillTsks.Len() > 0 || data.BackfillCkptDoc.Len() > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Note - need to establish RequestCommon later
 func NewVBPeriodicReplicateReq(specId, srcBucketName string, vbs []uint16, internalId string) *VBPeriodicReplicateReq {
-	mainReplication := NewReplicationPayload(specId, srcBucketName, common.MainPipeline, internalId)
-	backfillReplication := NewReplicationPayload(specId, srcBucketName, common.BackfillPipeline, internalId)
+	replicationPayload := NewReplicationPayload(specId, srcBucketName, internalId)
 
-	(*mainReplication.payload)[srcBucketName] = NewVBMasterPayload()
-	(*mainReplication.payload)[srcBucketName].RegisterPushVBs(vbs)
-	(*backfillReplication.payload)[srcBucketName] = NewVBMasterPayload()
-	(*backfillReplication.payload)[srcBucketName].RegisterPushVBs(vbs)
+	(*replicationPayload.payload)[srcBucketName] = NewVBMasterPayload()
+	(*replicationPayload.payload)[srcBucketName].RegisterPushVBs(vbs)
 
-	return &VBPeriodicReplicateReq{
-		MainReplication:     &mainReplication,
-		BackfillReplication: &backfillReplication,
-	}
+	req := &VBPeriodicReplicateReq{}
+	req.ReplicationPayload = &replicationPayload
+	return req
 }
 
 func (v *VBPeriodicReplicateReq) LoadMainReplication(ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
-	err := v.MainReplication.LoadPipelineCkpts(ckpts, v.MainReplication.SourceBucketName)
+	err := v.ReplicationPayload.LoadMainPipelineCkpt(ckpts, v.ReplicationPayload.SourceBucketName)
 	if err != nil {
 		return err
 	}
-	err = v.MainReplication.LoadManifests(srcManifests, tgtManifests, v.MainReplication.SourceBucketName)
+	err = v.ReplicationPayload.LoadManifests(srcManifests, tgtManifests, v.ReplicationPayload.SourceBucketName)
 	if err != nil {
 		return err
 	}
@@ -1382,15 +1461,16 @@ func (v *VBPeriodicReplicateReq) LoadMainReplication(ckpts map[uint16]*metadata.
 }
 
 func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTasksMapType, ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
-	err := v.BackfillReplication.LoadBackfillTasks(vbTasks, v.BackfillReplication.SourceBucketName)
+	err := v.ReplicationPayload.LoadBackfillTasks(vbTasks, v.ReplicationPayload.SourceBucketName)
 	if err != nil {
 		return err
 	}
-	err = v.BackfillReplication.LoadPipelineCkpts(ckpts, v.BackfillReplication.SourceBucketName)
+	err = v.ReplicationPayload.LoadBackfillPipelineCkpt(ckpts, v.ReplicationPayload.SourceBucketName)
 	if err != nil {
 		return err
 	}
-	err = v.BackfillReplication.LoadManifests(srcManifests, tgtManifests, v.BackfillReplication.SourceBucketName)
+	// the srcManifests and tgtManifests should be the same as LoadMainReplication
+	err = v.ReplicationPayload.LoadManifests(srcManifests, tgtManifests, v.ReplicationPayload.SourceBucketName)
 	if err != nil {
 		return err
 	}
@@ -1399,17 +1479,13 @@ func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTas
 
 func (v *VBPeriodicReplicateReq) GetSubsetBasedOnVBList(vbsList []uint16) *VBPeriodicReplicateReq {
 	newReq := &VBPeriodicReplicateReq{}
-	newReq.MainReplication = v.MainReplication.GetSubsetBasedOnVBs(vbsList)
-	newReq.BackfillReplication = v.BackfillReplication.GetSubsetBasedOnVBs(vbsList)
-
+	newReq.ReplicationPayload = v.ReplicationPayload.GetSubsetBasedOnVBs(vbsList)
 	return newReq
 }
 
 func (v *VBPeriodicReplicateReq) GetId() string {
-	if v != nil && v.MainReplication != nil {
-		return v.MainReplication.ReplicationSpecId
-	} else if v != nil && v.BackfillReplication != nil {
-		return v.BackfillReplication.ReplicationSpecId
+	if v != nil && v.ReplicationPayload != nil {
+		return v.ReplicationPayload.ReplicationSpecId
 	} else {
 		return "unknown ID"
 	}
@@ -1421,11 +1497,7 @@ func (v *VBPeriodicReplicateReq) PreSerlialize() error {
 		return nil
 	}
 
-	err := v.MainReplication.CompressPayload()
-	if err != nil {
-		return err
-	}
-	err = v.BackfillReplication.CompressPayload()
+	err := v.ReplicationPayload.CompressPayload()
 	if err != nil {
 		return err
 	}
@@ -1437,15 +1509,8 @@ func (v *VBPeriodicReplicateReq) PostSerialize() error {
 		return nil
 	}
 
-	if v.MainReplication != nil {
-		err := v.MainReplication.DecompressPayload()
-		if err != nil {
-			return err
-		}
-	}
-
-	if v.BackfillReplication != nil {
-		err := v.BackfillReplication.DecompressPayload()
+	if v.ReplicationPayload != nil {
+		err := v.ReplicationPayload.DecompressPayload()
 		if err != nil {
 			return err
 		}
@@ -1461,8 +1526,7 @@ func (v *VBPeriodicReplicateReq) SameAs(other *VBPeriodicReplicateReq) bool {
 	} else if v == nil && other == nil {
 		return true
 	}
-
-	return v.MainReplication.SameAs(other.MainReplication) && v.BackfillReplication.SameAs(other.BackfillReplication)
+	return v.ReplicationPayload.SameAs(other.ReplicationPayload)
 }
 
 type VBPeriodicReplicateReqList []*VBPeriodicReplicateReq

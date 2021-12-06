@@ -1182,17 +1182,16 @@ func (pipelineMgr *PipelineManager) BackfillMappingUpdate(topic string, diffPair
 }
 
 func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string, dynamicEvt interface{}) error {
-	// When peers send push requests, use checkpoint manager to merge them
-	// This means getting the corresponding pipeline's ckpt manager
+	// When peers send push requests, use the main pipeline's checkpoint manager to merge them
 	// A peer node should only send a push request if the pipeline is running
 	// If there's no source side network partition, this should not fail
 	// so try for a bit before failing
 
-	var checkpointMgr pipeline_svc.CheckpointMgrSvc
+	var mainPipelineCkptMgr pipeline_svc.CheckpointMgrSvc
 	var backfillMgrSvc common.PipelineService
 	var opFuncErr error
 	opFunc := func() error {
-		checkpointMgr, backfillMgrSvc, opFuncErr = pipelineMgr.handlePeerCkptGetMergeManagers(fullTopic)
+		mainPipelineCkptMgr, backfillMgrSvc, opFuncErr = pipelineMgr.handlePeerCkptGetMergeManagers(fullTopic)
 		return opFuncErr
 	}
 
@@ -1201,9 +1200,40 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string,
 	if err != nil {
 		return err
 	}
-	err = checkpointMgr.MergePeerNodesCkptInfo(dynamicEvt)
-	if err != nil {
-		return err
+
+	mainTopic, pipelineType := common.DecomposeFullTopic(fullTopic)
+
+	switch pipelineType {
+	case common.MainPipeline:
+		err = mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
+		if err != nil {
+			return err
+		}
+	case common.BackfillPipeline:
+		// For backfill pipeline, just use the stopped Cb method
+		var stoppedWaitGrp sync.WaitGroup
+		stoppedWaitGrp.Add(1)
+		cbFunc := func() error {
+			defer stoppedWaitGrp.Done()
+			return mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
+		}
+		var cbErr error
+		errCb := func(err error) {
+			cbErr = err
+		}
+		if registerErr := pipelineMgr.HaltBackfillWithCb(mainTopic, cbFunc, errCb); registerErr != nil {
+			return fmt.Errorf("Unable to register haltBackfillCb for %v", fullTopic)
+		}
+		stoppedWaitGrp.Wait()
+		// After halting it, we need to restart it
+		if registerErr := pipelineMgr.RequestBackfill(mainTopic); registerErr != nil {
+			return fmt.Errorf("Unable to register starting backfill for %v", fullTopic)
+		}
+		if cbErr != nil {
+			return cbErr
+		}
+	default:
+		return base.ErrorNotSupported
 	}
 
 	mainPipelineTopic, _ := common.DecomposeFullTopic(fullTopic)

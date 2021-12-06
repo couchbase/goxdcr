@@ -100,18 +100,13 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 				defer waitGrp.Done()
 				err := p.storePushRequestInfo(pushReq, req.Sender)
 				if err != nil {
-					if pushReq.MainReplication == nil && pushReq.BackfillReplication == nil {
+					specId := pushReq.ReplicationSpecId
+					if specId == "" {
 						errMapMtx.Lock()
 						unknownCounter++
 						errMap[fmt.Sprintf("unknown_%v", unknownCounter)] = err
 						errMapMtx.Unlock()
 					} else {
-						var specId string
-						if pushReq.MainReplication != nil {
-							specId = pushReq.MainReplication.ReplicationSpecId
-						} else {
-							specId = pushReq.BackfillReplication.ReplicationSpecId
-						}
 						errMapMtx.Lock()
 						errMap[specId] = err
 						errMapMtx.Unlock()
@@ -150,43 +145,48 @@ func (p *PeriodicPushHandler) handleResponse(resp *PeerVBPeriodicPushResp) {
 	}
 }
 
-// Since these will be using the same ckpt mgr underneath, they must be run sequentially
 func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateReq, sender string) error {
 	errMap := make(base.ErrorMap)
 	var checkSpec *metadata.ReplicationSpecification
 	var err error
-	if pushReq.MainReplication != nil {
-		checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.MainReplication.ReplicationSpecId)
+
+	if pushReq.PushReqIsEmpty() {
+		p.logger.Warnf("Received empty pushReq %v from %v", pushReq.ReplicationSpecId, sender)
+		return nil
+	}
+
+	if pushReq.MainReplicationExists() {
+		checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.ReplicationSpecId)
 		if err != nil {
 			errMap[fmt.Sprintf("node %v mainReplication", sender)] = err
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
 		}
-		if pushReq.MainReplication.InternalSpecId != "" && pushReq.MainReplication.InternalSpecId != checkSpec.InternalId {
+		if pushReq.InternalSpecId != "" && pushReq.InternalSpecId != checkSpec.InternalId {
 			errMap[fmt.Sprintf("node %v mainReplication", sender)] = fmt.Errorf("Mismatch internalSpecID for %v: Expected %v got %v",
-				checkSpec.Id, checkSpec.InternalId, pushReq.MainReplication.InternalSpecId)
+				checkSpec.Id, checkSpec.InternalId, pushReq.InternalSpecId)
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
 		}
-		err = p.storePushReqInfoByType(pushReq.MainReplication, common.MainPipeline, sender)
+		err = p.storePushReqInfoByType(pushReq.ReplicationPayload, common.MainPipeline, sender)
 		if err != nil {
 			errMap[fmt.Sprintf("node %v mainReplication", sender)] = err
 		}
 	}
 
-	if pushReq.BackfillReplication != nil && pushReq.BackfillReplication.payload != nil && (*pushReq.BackfillReplication.payload)[pushReq.BackfillReplication.SourceBucketName] != nil {
+	if pushReq.BackfillReplicationExists() {
 		if checkSpec == nil {
-			checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.MainReplication.ReplicationSpecId)
+			checkSpec, err = p.replSpecSvc.ReplicationSpecReadOnly(pushReq.ReplicationSpecId)
 			if err != nil {
 				errMap[fmt.Sprintf("node %v backfillReplication", sender)] = err
 				return fmt.Errorf(base.FlattenErrorMap(errMap))
 			}
 		}
-		if pushReq.BackfillReplication.InternalSpecId != "" && pushReq.BackfillReplication.InternalSpecId != checkSpec.InternalId {
+		if pushReq.InternalSpecId != "" && pushReq.InternalSpecId != checkSpec.InternalId {
 			errMap[fmt.Sprintf("node %v backfillReplication", sender)] = fmt.Errorf("Mismatch internalSpecID for %v: Expected %v got %v",
-				checkSpec.Id, checkSpec.InternalId, pushReq.BackfillReplication.InternalSpecId)
+				checkSpec.Id, checkSpec.InternalId, pushReq.InternalSpecId)
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
 		}
-		err = p.storePushReqInfoByType(pushReq.BackfillReplication, common.BackfillPipeline, sender)
-		if err != nil {
+		err = p.storePushReqInfoByType(pushReq.ReplicationPayload, common.BackfillPipeline, sender)
+		if err != nil && err != base.ErrorNoBackfillNeeded {
 			errMap[fmt.Sprintf("node %v backfillReplication", sender)] = err
 		}
 	}

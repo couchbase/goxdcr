@@ -13,7 +13,6 @@ package backfill_manager
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/peerToPeer"
 	pipeline_mgr "github.com/couchbase/goxdcr/pipeline_manager/mocks"
@@ -509,7 +508,7 @@ func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
 
 	resp := &peerToPeer.VBMasterCheckResp{
 		ResponseCommon:     peerToPeer.NewResponseCommon(peerToPeer.ReqVBMasterChk, "", "", uint32(6), ""),
-		ReplicationPayload: peerToPeer.NewReplicationPayload(specId, specToUse.SourceBucketName, common.MainPipeline, ""),
+		ReplicationPayload: peerToPeer.NewReplicationPayload(specId, specToUse.SourceBucketName, ""),
 	}
 
 	_, tasks0 := getTaskForVB0(specToUse.SourceBucketName)

@@ -3,6 +3,7 @@ package peerToPeer
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	service_def2 "github.com/couchbase/goxdcr/service_def"
@@ -31,6 +32,10 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 	ckptSvc.On("CheckpointsDocs", replId, mock.Anything).Return(ckptData, nil)
 	nsMappingDoc := &metadata.CollectionNsMappingsDoc{}
 	ckptSvc.On("LoadBrokenMappings", replId).Return(nil, nsMappingDoc, nil, false, nil)
+
+	// For backfill, just return the same thing
+	ckptSvc.On("CheckpointsDocs", common.ComposeFullTopic(replId, common.BackfillPipeline), mock.Anything).Return(ckptData, nil)
+	ckptSvc.On("LoadBrokenMappings", common.ComposeFullTopic(replId, common.BackfillPipeline)).Return(nil, nsMappingDoc, nil, false, nil)
 
 	notificationCh := make(chan service_def2.SourceNotification, 1)
 	bucketTopologySvc.On("SubscribeToLocalBucketFeed", mock.Anything, mock.Anything).Return(notificationCh, nil)
@@ -130,7 +135,7 @@ func validateResponse(respActual *VBMasterCheckResp, assert *assert.Assertions) 
 	assert.NotNil(bucketMapResp)
 	assert.Equal("", respActual.ErrorMsg)
 	payload := (*bucketMapResp)[srcBucketName]
-	ckptMap := payload.GetAllCheckpoints()
+	ckptMap := payload.GetAllCheckpoints(common.MainPipeline)
 	assert.NotEqual(0, len(ckptMap))
 	assert.NotNil(payload.BackfillMappingDoc)
 	backfillMapping := payload.GetBackfillMappingDoc()
@@ -147,6 +152,11 @@ func validateResponse(respActual *VBMasterCheckResp, assert *assert.Assertions) 
 	assert.False((*subsetResp.payload)[srcBucketName].NotMyVBs.IsEmpty())
 	ptr := (*subsetResp.payload)[srcBucketName].NotMyVBs
 	assert.Len(*ptr, 1)
+
+	for _, notMyVBPayload := range *ptr {
+		assert.NotNil(notMyVBPayload.BackfillCkptDoc)
+		assert.NotNil(notMyVBPayload.CheckpointsDoc)
+	}
 	return
 }
 

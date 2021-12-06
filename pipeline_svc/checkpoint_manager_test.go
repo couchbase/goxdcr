@@ -68,7 +68,7 @@ func TestCombineFailoverlogs(t *testing.T) {
 		Checkpoint_records: []*metadata.CheckpointRecord{goodRecord, badRecord},
 	}
 
-	checkMap := make(map[string]map[uint16]*metadata.CheckpointsDoc)
+	checkMap := make(nodeVbCkptMap)
 	nodeName := "node"
 	checkMap[nodeName] = make(map[uint16]*metadata.CheckpointsDoc)
 	checkMap[nodeName][0] = goodDoc
@@ -76,7 +76,8 @@ func TestCombineFailoverlogs(t *testing.T) {
 	checkMap[nodeName][2] = badDoc
 	checkMap[nodeName][3] = goodDoc // vb3 isn't included
 
-	result := filterInvalidCkptsBasedOnSourceFailover(checkMap, failoverLogMap)
+	results := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{checkMap, nil}, failoverLogMap)
+	result := results[0]
 	assert.Len(result, 3)
 
 	assert.Len(result[0].Checkpoint_records, 1)
@@ -94,7 +95,7 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 	srcFailoverLogsSlice, err := ioutil.ReadFile("./unitTestdata/srcFailoverLogs.json")
 	assert.Nil(err)
 
-	nodeVbCkptsMap := make(map[string]map[uint16]*metadata.CheckpointsDoc)
+	nodeVbCkptsMap := make(nodeVbCkptMap)
 	assert.Nil(json.Unmarshal(nodeVbCkptsMapSlice, &nodeVbCkptsMap))
 	srcFailoverLogs := make(map[uint16]*mcc.FailoverLog)
 	assert.Nil(json.Unmarshal(srcFailoverLogsSlice, &srcFailoverLogs))
@@ -107,7 +108,8 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 		}
 	}
 
-	filteredMap := filterInvalidCkptsBasedOnSourceFailover(nodeVbCkptsMap, srcFailoverLogs)
+	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbCkptsMap, nil}, srcFailoverLogs)
+	filteredMap := filteredMaps[0]
 	for _, ckptDoc := range filteredMap {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
 	}
@@ -116,7 +118,8 @@ func TestCombineFailoverlogsWithData(t *testing.T) {
 	assert.Nil(err)
 	tgtFailoverLogs := make(map[uint16]*mcc.FailoverLog)
 	assert.Nil(json.Unmarshal(tgtFailoverLogsSlice, &tgtFailoverLogs))
-	filteredMapTgt := filterInvalidCkptsBasedOnTargetFailover(filteredMap, tgtFailoverLogs)
+	filteredMapTgts := filterInvalidCkptsBasedOnTargetFailover([]metadata.VBsCkptsDocMap{filteredMap, nil}, tgtFailoverLogs)
+	filteredMapTgt := filteredMapTgts[0]
 	for _, ckptDoc := range filteredMapTgt {
 		assert.NotEqual(0, len(ckptDoc.Checkpoint_records))
 	}

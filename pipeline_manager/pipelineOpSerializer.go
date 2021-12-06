@@ -62,6 +62,8 @@ func (p PipelineMgtOpType) String() string {
 		return "BackfillPipelineStart"
 	case BackfillPipelineStop:
 		return "BackfillPipelineStop"
+	case BackfillPipelineStopWStoppedCb:
+		return "BackfillPipelineStopWStoppedCb"
 	case BackfillPipelineClean:
 		return "BackfillPipelineClean"
 	case DismissEvent:
