@@ -2493,7 +2493,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		combinedTgtManifests.LoadIfNotExists(tgtManifests)
 
 		brokenMap := payload.GetBrokenMappingDoc()
-		if brokenMap != nil {
+		if brokenMap != nil && brokenMap.SpecInternalId != "" {
 			combinedBrokenMapping = append(combinedBrokenMapping, brokenMap)
 			combinedBrokenMappingSpecInternalId[node] = brokenMap.SpecInternalId
 		}
