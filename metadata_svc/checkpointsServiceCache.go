@@ -35,10 +35,10 @@ type CheckpointsServiceCacheImpl struct {
 	isActive      bool
 	isInitialized bool
 
-	finCh          chan bool
-	activeUpdateCh chan *metadata.ReplicationSpecification
-	invalidateCh   chan bool
-	//invalidateTicker     time.Ticker
+	cacheEnabled         bool
+	finCh                chan bool
+	activeUpdateCh       chan *metadata.ReplicationSpecification
+	invalidateCh         chan bool
 	requestCh            chan *cacheReq
 	setCh                chan *cacheReq
 	setOneCh             chan *individualSetReq
@@ -219,24 +219,27 @@ func (c *CheckpointsServiceCacheImpl) Run() {
 		case <-c.finCh:
 			return
 		case spec := <-c.activeUpdateCh:
-			if !spec.Settings.Active && c.isActive {
-				// Replication paused:
-				c.isActive = spec.Settings.Active
-				c.requestInvalidateCache()
-			} else if spec.Settings.Active && !c.isActive {
-				// Replication resumed:
-				// To be safe, invalidate cache and let pipeline resume restore a valid copy
-				c.requestInvalidateCache()
-				c.isActive = spec.Settings.Active
+			c.cacheEnabled = spec.Settings.GetCkptSvcCacheEnabled()
+			if c.cacheEnabled {
+				if !spec.Settings.Active && c.isActive {
+					// Replication paused:
+					c.isActive = spec.Settings.Active
+					c.requestInvalidateCache()
+				} else if spec.Settings.Active && !c.isActive {
+					// Replication resumed:
+					// To be safe, invalidate cache and let pipeline resume restore a valid copy
+					c.requestInvalidateCache()
+					c.isActive = spec.Settings.Active
+				}
 			} else {
-				// Not pipeline pause nor resume
+				c.requestInvalidateCache()
 			}
 		case <-c.invalidateCh:
 			c.latestCompressedShaMaps = nil
 			c.latestCompressedCache = nil
 		case getReq := <-c.requestCh:
 			if len(c.invalidateCh) > 0 || c.latestCompressedCache == nil || len(c.latestCompressedCache) == 0 ||
-				len(c.setCh) > 0 || len(c.setOneCh) > 0 {
+				len(c.setCh) > 0 || len(c.setOneCh) > 0 || !c.cacheEnabled {
 				// Cache is going to be invalidated or updated, do not return them
 				if getReq.individualVbRequested {
 					getReq.clonedRetVal = make(metadata.VBsCkptsDocMap)
@@ -273,40 +276,43 @@ func (c *CheckpointsServiceCacheImpl) Run() {
 			}
 			close(getReq.resultReady)
 		case setReq := <-c.setCh:
-			snappyCkpt, snappyShaMaps, err := setReq.clonedRetVal.SnappyCompress()
-			if err != nil {
-				c.logger.Errorf("Unable to snappyCompress %v", setReq.clonedRetVal)
-				c.requestInvalidateCache()
-			} else {
-				// cache is valid
-				c.latestCompressedCache = snappyCkpt
-				c.latestCompressedShaMaps = snappyShaMaps
-				c.validateCache()
+			if c.cacheEnabled {
+				snappyCkpt, snappyShaMaps, err := setReq.clonedRetVal.SnappyCompress()
+				if err != nil {
+					c.logger.Errorf("Unable to snappyCompress %v", setReq.clonedRetVal)
+					c.requestInvalidateCache()
+				} else {
+					// cache is valid
+					c.latestCompressedCache = snappyCkpt
+					c.latestCompressedShaMaps = snappyShaMaps
+					c.validateCache()
+				}
 			}
 			close(setReq.resultReady)
 		case setOneReq := <-c.setOneCh:
-			if c.latestCompressedShaMaps == nil {
-				c.latestCompressedShaMaps = make(metadata.ShaMappingCompressedMap)
-			}
-			if c.latestCompressedCache == nil {
-				c.latestCompressedCache = make(metadata.VBsCkptsDocSnappyMap)
-			}
-
-			if setOneReq.ckptDoc == nil {
-				// Passing in a nil doc means "unset"
-				c.latestCompressedCache[setOneReq.vbno] = nil
-			} else {
-				snappyBytes, snappyShaMap, err := setOneReq.ckptDoc.SnappyCompress()
-				if err != nil {
-					c.logger.Errorf("Unable to snappy compress vbno %v doc %v: %v", setOneReq.vbno, setOneReq.ckptDoc, err)
-					c.requestInvalidateCache()
-				} else {
-					c.latestCompressedCache[setOneReq.vbno] = snappyBytes
-					c.latestCompressedShaMaps.Merge(snappyShaMap)
+			if c.cacheEnabled {
+				if c.latestCompressedShaMaps == nil {
+					c.latestCompressedShaMaps = make(metadata.ShaMappingCompressedMap)
 				}
-			}
+				if c.latestCompressedCache == nil {
+					c.latestCompressedCache = make(metadata.VBsCkptsDocSnappyMap)
+				}
 
-			c.validateCache()
+				if setOneReq.ckptDoc == nil {
+					// Passing in a nil doc means "unset"
+					c.latestCompressedCache[setOneReq.vbno] = nil
+				} else {
+					snappyBytes, snappyShaMap, err := setOneReq.ckptDoc.SnappyCompress()
+					if err != nil {
+						c.logger.Errorf("Unable to snappy compress vbno %v doc %v: %v", setOneReq.vbno, setOneReq.ckptDoc, err)
+						c.requestInvalidateCache()
+					} else {
+						c.latestCompressedCache[setOneReq.vbno] = snappyBytes
+						c.latestCompressedShaMaps.Merge(snappyShaMap)
+					}
+				}
+				c.validateCache()
+			}
 			close(setOneReq.setDone)
 		case oneInvalidateReq := <-c.externalInvalidateCh:
 			c.requestInvalidateCache()

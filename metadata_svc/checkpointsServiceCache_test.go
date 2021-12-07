@@ -36,6 +36,7 @@ func TestCheckpointsServiceCacheImplGetAndSet(t *testing.T) {
 	assert := assert.New(t)
 
 	ckptCache := NewCheckpointsServiceCache(nil)
+	ckptCache.cacheEnabled = true
 	go ckptCache.Run()
 
 	docs, err := ckptCache.GetLatestDocs()

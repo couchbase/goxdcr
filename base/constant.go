@@ -1420,3 +1420,5 @@ const (
 
 var CkptCacheCtrlChLen = 10
 var CkptCacheReqChLen = 1000
+
+const CkptSvcCacheEnabled = "ckptSvcCacheEnabled"

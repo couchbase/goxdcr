@@ -97,6 +97,7 @@ const (
 	DismissEventKey                = metadata.DismissEventKey
 	PreReplicateVBMasterCheckKey   = base.PreReplicateVBMasterCheckKey
 	ReplicateCkptIntervalKey       = base.ReplicateCkptIntervalKey
+	CkptSvcCacheEnabledKey         = metadata.CkptSvcCacheEnabledKey
 )
 
 // constants for parsing create/change/view replication response
@@ -199,6 +200,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	DismissEventKey:                   metadata.DismissEventKey,
 	PreReplicateVBMasterCheckKey:      metadata.PreReplicateVBMasterCheckKey,
 	ReplicateCkptIntervalKey:          metadata.ReplicateCkptIntervalKey,
+	CkptSvcCacheEnabledKey:            metadata.CkptSvcCacheEnabledKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -245,6 +247,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DismissEventKey:                   DismissEventKey,
 	metadata.PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckKey,
 	metadata.ReplicateCkptIntervalKey:          ReplicateCkptIntervalKey,
+	metadata.CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

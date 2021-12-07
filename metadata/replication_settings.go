@@ -85,6 +85,8 @@ const (
 
 	PreReplicateVBMasterCheckKey = base.PreReplicateVBMasterCheckKey
 	ReplicateCkptIntervalKey     = base.ReplicateCkptIntervalKey
+
+	CkptSvcCacheEnabledKey = base.CkptSvcCacheEnabled
 )
 
 // keys to facilitate redaction of replication settings map
@@ -185,6 +187,8 @@ var PreReplicateVBMasterCheckConfig = &SettingsConfig{true, nil}
 
 var ReplicateCkptIntervalConfig = &SettingsConfig{int(base.ReplicateCkptInterval.Minutes()), &Range{1, 4320 /* 3 days */}}
 
+var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
@@ -221,6 +225,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DismissEventKey:                   DismissEventConfig,
 	PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckConfig,
 	ReplicateCkptIntervalKey:          ReplicateCkptIntervalConfig,
+	CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -929,6 +934,11 @@ func (s *ReplicationSettings) GetCollectionsRoutingRules() CollectionsMappingRul
 
 func (s *ReplicationSettings) GetVBMasterCheckEnabled() bool {
 	val, _ := s.GetSettingValueOrDefaultValue(PreReplicateVBMasterCheckKey)
+	return val.(bool)
+}
+
+func (s *ReplicationSettings) GetCkptSvcCacheEnabled() bool {
+	val, _ := s.GetSettingValueOrDefaultValue(CkptSvcCacheEnabledKey)
 	return val.(bool)
 }
 
