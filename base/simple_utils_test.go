@@ -403,3 +403,15 @@ func TestReverseVBNodesMap(t *testing.T) {
 	assert.Len((*output)["node2"], 2)
 	assert.Len((*output)["node3"], 1)
 }
+
+func TestSanitizeSeqnoMapKey(t *testing.T) {
+	fmt.Println("============== Test case start: SanitizeSeqnoMapKey =================")
+	defer fmt.Println("============== Test case end: SanitizeSeqnoMapKey =================")
+
+	assert := assert.New(t)
+
+	key := ComposeVBHighSeqnoStatsKey(123)
+	vbno, err := DecomposeVBHighSeqnoStatsKey(key)
+	assert.Nil(err)
+	assert.Equal(uint16(123), vbno)
+}

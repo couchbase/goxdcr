@@ -427,7 +427,9 @@ const (
 const (
 	//Bucket sequence number statistics
 	VBUCKET_SEQNO_STAT_NAME            = "vbucket-seqno"
-	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = "vb_%v:high_seqno"
+	VBUCKET_PREFIX                     = "vb_"
+	HIGH_SEQNO_CONST                   = ":high_seqno"
+	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = VBUCKET_PREFIX + "%v" + HIGH_SEQNO_CONST
 	VBUCKET_UUID_STAT_KEY_FORMAT       = "vb_%v:uuid"
 	DCP_STAT_NAME                      = "dcp"
 	DCP_XDCR_STATS_PREFIX              = "eq_dcpq:xdcr:"

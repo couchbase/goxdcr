@@ -1947,3 +1947,24 @@ func ReverseVBNodesMap(replicaMap VbHostsMapType, getMap func(keys []string) *Kv
 func GetIterationId(counter *uint32) string {
 	return fmt.Sprintf("%v", atomic.AddUint32(counter, 1))
 }
+
+func ComposeVBHighSeqnoStatsKey(vbno uint16) string {
+	return fmt.Sprintf(VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
+}
+
+func DecomposeVBHighSeqnoStatsKey(key string) (uint16, error) {
+	if !strings.Contains(key, HIGH_SEQNO_CONST) {
+		return 0, fmt.Errorf("key (%v) does not contain %v", key, HIGH_SEQNO_CONST)
+	}
+	if !strings.Contains(key, VBUCKET_PREFIX) {
+		return 0, fmt.Errorf("key (%v) does not contain %v", key, VBUCKET_PREFIX)
+	}
+	innerString := strings.TrimSuffix(key, HIGH_SEQNO_CONST)
+	innerString = strings.TrimPrefix(innerString, VBUCKET_PREFIX)
+
+	vbnoInt, err := strconv.Atoi(innerString)
+	if err != nil {
+		return 0, err
+	}
+	return uint16(vbnoInt), nil
+}

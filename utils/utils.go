@@ -227,7 +227,7 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 	}
 
 	for _, vbno := range vbnos {
-		stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
+		stats_key := base.ComposeVBHighSeqnoStatsKey(vbno)
 		highseqnostr, ok := stats_map[stats_key]
 		if !ok || highseqnostr == "" {
 			unableToParseVBs = append(unableToParseVBs, vbno)
@@ -2959,6 +2959,7 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 	if len(collectionIds) == 0 {
 		// Get all the seqno across everything in the bucket using traditional stats map
 		if stats_map != nil && *stats_map != nil {
+			sanitizeHighSeqnoStatsMap(vbnos, stats_map)
 			// stats_map is not nill when GetHighSeqNos is called from per-replication stats manager, reuse stats_map to avoid memory over-allocation and re-allocation
 			err = conn.StatsMapForSpecifiedStats(base.VBUCKET_SEQNO_STAT_NAME, *stats_map)
 		} else {
@@ -2988,6 +2989,28 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 		return nil, nil, nil, err
 	} else {
 		return highseqno_map, stats_map, unableToBeParsedVBs, nil
+	}
+}
+
+// Ensure that only the VBs being requested are entries in the stats_map
+// For speed, does not inspect any non high_seqno related stats (avoid map iteration)
+func sanitizeHighSeqnoStatsMap(vbnos []uint16, stats_map *map[string]string) {
+	unsortedVBs := base.CloneUint16List(vbnos)
+	sortedVBs := base.SortUint16List(unsortedVBs)
+
+	for vbno := uint16(0); vbno < base.NumberOfVbs; vbno++ {
+		_, vbShouldExist := base.SearchUint16List(sortedVBs, vbno)
+		if vbShouldExist {
+			keyShouldExist := base.ComposeVBHighSeqnoStatsKey(vbno)
+			if _, exists := (*stats_map)[keyShouldExist]; !exists {
+				(*stats_map)[keyShouldExist] = ""
+			}
+		} else {
+			keyShouldNotExist := base.ComposeVBHighSeqnoStatsKey(vbno)
+			if _, exists := (*stats_map)[keyShouldNotExist]; exists {
+				delete(*stats_map, keyShouldNotExist)
+			}
+		}
 	}
 }
 
