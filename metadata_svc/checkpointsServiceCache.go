@@ -92,7 +92,7 @@ func NewCheckpointsServiceCache(logger *log.CommonLogger) *CheckpointsServiceCac
 		logger:                  logger,
 		finCh:                   make(chan bool),
 		activeUpdateCh:          make(chan *metadata.ReplicationSpecification, 5), // Shouldn't have so many updates anyway
-		invalidateCh:            make(chan bool),
+		invalidateCh:            make(chan bool, 1),
 		requestCh:               make(chan *cacheReq, base.CkptCacheReqChLen),
 		setCh:                   make(chan *cacheReq), // Try to be synchronous
 		setOneCh:                make(chan *individualSetReq, base.NumberOfVbs),
