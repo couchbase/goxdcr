@@ -497,8 +497,11 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 		mainCkpts = nil
 	}
 
-	if !metadata.VBsCkptsDocMap(mainCkpts).InternalIdMatch(a.internalId) {
-		return nil, fmt.Errorf("MainCkpts internalID mismatch - expected %v", a.internalId)
+	if mainCkpts != nil {
+		castedDocs := metadata.VBsCkptsDocMap(mainCkpts)
+		if !castedDocs.InternalIdMatch(a.internalId) {
+			return nil, fmt.Errorf("MainCkpts internalID mismatch - expected %v", a.internalId)
+		}
 	}
 
 	var bkptCkpts map[uint16]*metadata.CheckpointsDoc
@@ -509,8 +512,11 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 		if backfillErr != nil {
 			bkptCkpts = nil
 		}
-		if !metadata.VBsCkptsDocMap(bkptCkpts).InternalIdMatch(a.internalId) {
-			return nil, fmt.Errorf("BackfillCkpt internalID mismatch - expected %v", a.internalId)
+		if bkptCkpts != nil {
+			castedDocs := metadata.VBsCkptsDocMap(bkptCkpts)
+			if !castedDocs.InternalIdMatch(a.internalId) {
+				return nil, fmt.Errorf("BackfillCkpt internalID mismatch - expected %v", a.internalId)
+			}
 		}
 	}
 	if mainCkpts != nil && backfillErr != nil {

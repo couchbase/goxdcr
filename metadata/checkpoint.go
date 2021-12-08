@@ -617,14 +617,66 @@ func (c *CheckpointRecordsList) Len() int {
 	return count
 }
 
+func (c *CheckpointRecordsList) Clone() CheckpointRecordsList {
+	if c == nil {
+		return nil
+	}
+
+	var retList CheckpointRecordsList
+	for _, ckptRecord := range *c {
+		retList = append(retList, ckptRecord.Clone())
+	}
+	return retList
+}
+
 type VBsCkptsDocMap map[uint16]*CheckpointsDoc
 
-func (v VBsCkptsDocMap) InternalIdMatch(internalId string) bool {
-	for _, ckptDoc := range v {
+func (v *VBsCkptsDocMap) InternalIdMatch(internalId string) bool {
+	if v == nil || *v == nil {
+		return false
+	}
+
+	for _, ckptDoc := range *v {
 		if ckptDoc == nil {
 			continue
 		}
 		if ckptDoc.SpecInternalId != internalId {
+			return false
+		}
+	}
+	return true
+}
+
+func (v *VBsCkptsDocMap) Clone() VBsCkptsDocMap {
+	if v == nil || *v == nil {
+		return nil
+	}
+
+	result := make(VBsCkptsDocMap)
+	for vbno, ckptDoc := range *v {
+		result[vbno] = ckptDoc.Clone()
+	}
+	return result
+}
+
+func (v *VBsCkptsDocMap) SameAs(other VBsCkptsDocMap) bool {
+	if v == nil || *v == nil {
+		if other == nil {
+			return true
+		}
+		return false
+	}
+
+	if len(*v) != len(other) {
+		return false
+	}
+
+	for vbno, ckptRecord := range *v {
+		bRecord, found := other[vbno]
+		if !found {
+			return false
+		}
+		if !ckptRecord.SameAs(bRecord) {
 			return false
 		}
 	}
@@ -649,6 +701,18 @@ func (c *CheckpointsDoc) CloneWithoutRecords() *CheckpointsDoc {
 	}
 }
 
+func (c *CheckpointsDoc) Clone() *CheckpointsDoc {
+	if c == nil {
+		return nil
+	}
+	retVal := &CheckpointsDoc{
+		Checkpoint_records: c.Checkpoint_records.Clone(),
+		SpecInternalId:     c.SpecInternalId,
+		Revision:           c.Revision,
+	}
+	return retVal
+}
+
 func (c *CheckpointsDoc) Size() int {
 	if c == nil {
 		return 0
@@ -671,6 +735,30 @@ func (ckpt *CheckpointRecord) ToMap() map[string]interface{} {
 	ckpt_record_map[TargetVbOpaque] = ckpt.Target_vb_opaque
 	ckpt_record_map[TargetSeqno] = ckpt.Target_Seqno
 	return ckpt_record_map
+}
+
+func (c *CheckpointRecord) Clone() *CheckpointRecord {
+	if c == nil {
+		return nil
+	}
+
+	retVal := &CheckpointRecord{
+		Failover_uuid:                c.Failover_uuid,
+		Seqno:                        c.Seqno,
+		Dcp_snapshot_seqno:           c.Dcp_snapshot_seqno,
+		Dcp_snapshot_end_seqno:       c.Dcp_snapshot_end_seqno,
+		Target_vb_opaque:             c.Target_vb_opaque,
+		Target_Seqno:                 c.Target_Seqno,
+		Filtered_Items_Cnt:           c.Filtered_Items_Cnt,
+		Filtered_Failed_Cnt:          c.Filtered_Failed_Cnt,
+		SourceManifestForDCP:         c.SourceManifestForDCP,
+		SourceManifestForBackfillMgr: c.SourceManifestForBackfillMgr,
+		TargetManifest:               c.TargetManifest,
+		BrokenMappingSha256:          c.BrokenMappingSha256,
+		brokenMappings:               c.brokenMappings.Clone(),
+		brokenMappingsMtx:            sync.RWMutex{},
+	}
+	return retVal
 }
 
 func NewCheckpointsDoc(specInternalId string) *CheckpointsDoc {

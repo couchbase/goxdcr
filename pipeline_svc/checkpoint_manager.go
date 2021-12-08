@@ -1631,6 +1631,7 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	ckmgr.CommitBrokenMappingUpdates()
 	ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
+	ckmgr.checkpoints_svc.UpsertCheckpointsDone(ckmgr.pipeline.FullTopic())
 
 }
 
@@ -1686,6 +1687,8 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 		ckmgr.CommitBrokenMappingUpdates()
 		ckmgr.collectionsManifestSvc.PersistNeededManifests(ckmgr.pipeline.Specification().GetReplicationSpec())
 	}
+
+	ckmgr.checkpoints_svc.UpsertCheckpointsDone(ckmgr.pipeline.FullTopic())
 
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 
@@ -2940,7 +2943,6 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 	var waitGrp sync.WaitGroup
 	for iRaw, filteredMapRaw := range filteredMaps {
 		var ckptTopic string
-		var needToReload bool
 
 		// Copy before passing to go-routines
 		i := iRaw
@@ -2948,9 +2950,6 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 		switch i {
 		case int(common.MainPipeline):
 			ckptTopic = ckmgr.pipeline.Topic()
-			// If this pipeline ckmgr is main pipeline, need to reload after merging main pipeline ckpt
-			// Backfill pipeline merge runs during stopped callback, no need to reload
-			needToReload = true
 		case int(common.BackfillPipeline):
 			ckptTopic = common.ComposeFullTopic(ckmgr.pipeline.Topic(), common.BackfillPipeline)
 		default:
@@ -2982,7 +2981,7 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 				errList[i] = err
 				return
 			}
-			errList[i] = ckmgr.mergePersistCkptDocs(currDocs, ckptTopic, peerBrokenMapSpecInternalId, needToReload)
+			errList[i] = ckmgr.mergePersistCkptDocs(currDocs, ckptTopic, peerBrokenMapSpecInternalId)
 		}()
 
 	}
@@ -3006,20 +3005,18 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 	}
 }
 
-func (ckmgr *CheckpointManager) mergePersistCkptDocs(currDocs map[uint16]*metadata.CheckpointsDoc, ckptTopic, internalId string, needToReload bool) error {
+func (ckmgr *CheckpointManager) mergePersistCkptDocs(currDocs map[uint16]*metadata.CheckpointsDoc, ckptTopic, internalId string) error {
 	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergePersistCkptDocs", base.DiagCkptMergeThreshold)
 	defer stopFunc()
-	written, err := ckmgr.checkpoints_svc.UpsertCheckpointsDoc(ckptTopic, currDocs, internalId)
+	err := ckmgr.checkpoints_svc.UpsertCheckpointsDoc(ckptTopic, currDocs, internalId)
 	if err != nil {
 		ckmgr.logger.Errorf("UpsertCheckpointsDoc for %v had errors %v", ckptTopic, err)
 		return err
 	}
-	if written && needToReload {
-		_, reloadErr := ckmgr.checkpoints_svc.CheckpointsDocs(ckptTopic, true)
-		if reloadErr != nil {
-			ckmgr.logger.Errorf("UpsertCheckpointsDoc reloading for %v had errors %v", ckptTopic, reloadErr)
-			return reloadErr
-		}
+	_, reloadErr := ckmgr.checkpoints_svc.CheckpointsDocs(ckptTopic, true)
+	if reloadErr != nil {
+		ckmgr.logger.Errorf("UpsertCheckpointsDoc reloading for %v had errors %v", ckptTopic, reloadErr)
+		return reloadErr
 	}
 	return nil
 }

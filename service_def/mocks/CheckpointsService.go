@@ -315,22 +315,29 @@ func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specIntern
 }
 
 // UpsertCheckpointsDoc provides a mock function with given fields: replicationId, ckptDocs, internalId
-func (_m *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) (bool, error) {
+func (_m *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	ret := _m.Called(replicationId, ckptDocs, internalId)
 
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(string, map[uint16]*metadata.CheckpointsDoc, string) bool); ok {
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, map[uint16]*metadata.CheckpointsDoc, string) error); ok {
 		r0 = rf(replicationId, ckptDocs, internalId)
 	} else {
-		r0 = ret.Get(0).(bool)
+		r0 = ret.Error(0)
 	}
 
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string, map[uint16]*metadata.CheckpointsDoc, string) error); ok {
-		r1 = rf(replicationId, ckptDocs, internalId)
+	return r0
+}
+
+// UpsertCheckpointsDone provides a mock function with given fields: replicationId
+func (_m *CheckpointsService) UpsertCheckpointsDone(replicationId string) error {
+	ret := _m.Called(replicationId)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(replicationId)
 	} else {
-		r1 = ret.Error(1)
+		r0 = ret.Error(0)
 	}
 
-	return r0, r1
+	return r0
 }
