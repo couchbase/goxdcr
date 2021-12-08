@@ -1896,6 +1896,7 @@ RE:
 		}
 		if r.rep_status != nil {
 			r.rep_status.ClearErrors()
+			r.rep_status.GetEventsManager().ClearNonBrokenMapEventsWithString(common.ProgressP2PComm)
 		}
 		r.clearErrors()
 		errMap = make(base.ErrorMap) // clear errMap

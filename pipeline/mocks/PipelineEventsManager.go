@@ -17,8 +17,17 @@ type PipelineEventsManager struct {
 }
 
 // AddEvent provides a mock function with given fields: eventType, eventDesc, eventExtras
-func (_m *PipelineEventsManager) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) {
-	_m.Called(eventType, eventDesc, eventExtras)
+func (_m *PipelineEventsManager) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) int64 {
+	ret := _m.Called(eventType, eventDesc, eventExtras)
+
+	var r0 int64
+	if rf, ok := ret.Get(0).(func(base.EventInfoType, string, base.EventsMap) int64); ok {
+		r0 = rf(eventType, eventDesc, eventExtras)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	return r0
 }
 
 // BackfillUpdateCb provides a mock function with given fields: diffPair, srcManifestsDelta
@@ -38,6 +47,11 @@ func (_m *PipelineEventsManager) BackfillUpdateCb(diffPair *metadata.CollectionN
 // ClearNonBrokenMapEvents provides a mock function with given fields:
 func (_m *PipelineEventsManager) ClearNonBrokenMapEvents() {
 	_m.Called()
+}
+
+// ClearNonBrokenMapEventsWithString provides a mock function with given fields: substr
+func (_m *PipelineEventsManager) ClearNonBrokenMapEventsWithString(substr string) {
+	_m.Called(substr)
 }
 
 // ContainsEvent provides a mock function with given fields: eventId

@@ -911,7 +911,11 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 	vbsReq[srcBucketName] = base.SortUint16List(sourceVBs)
 
 	xdcrf.logger.Infof("Running VBMasterCheck for %v with the following VBs: %v", pipeline.FullTopic(), sourceVBs)
+
+	// Update UI status to let them know that pipeline isn't technically running yet
+	eventId, replStatus, replStatusErr := xdcrf.notifyUIOfP2P(pipeline, sourceVBs)
 	respMap, rpcErr := xdcrf.p2pMgr.CheckVBMaster(vbsReq, pipeline)
+	xdcrf.dismissUIOfP2P(eventId, replStatusErr, replStatus)
 	if rpcErr != nil {
 		// If err is because spec is deleted from under us or if it's paused, don't do anything and bail
 		replCheck, replErr := xdcrf.repl_spec_svc.ReplicationSpecReadOnly(spec.Id)
@@ -934,6 +938,36 @@ func (xdcrf *XDCRFactory) PreReplicationVBMasterCheck(pipeline common.Pipeline) 
 		return respMap, vbMasterCheckErr
 	}
 	return respMap, rpcErr
+}
+
+func (xdcrf *XDCRFactory) dismissUIOfP2P(eventId int64, replStatusErr error, replStatus pp.ReplicationStatusIface) {
+	if replStatusErr != nil {
+		return
+	}
+
+	if eventId < 0 {
+		xdcrf.logger.Errorf("Received an invalid eventID: %v", eventId)
+		return
+	}
+
+	dismissErr := replStatus.GetEventsManager().DismissEvent(int(eventId))
+	if dismissErr != nil {
+		xdcrf.logger.Warnf("Unable to dismiss event message: %v - due to err", common.ProgressP2PComm, dismissErr)
+	}
+}
+
+func (xdcrf *XDCRFactory) notifyUIOfP2P(pipeline common.Pipeline, vbs []uint16) (int64, pp.ReplicationStatusIface, error) {
+	var eventId int64 = -1
+	replStatus, replStatusErr := xdcrf.replStatusGetter(pipeline.Topic())
+	if replStatusErr != nil {
+		return eventId, nil, replStatusErr
+	}
+
+	hostName, _ := xdcrf.xdcr_topology_svc.MyHost()
+	eventsMgr := replStatus.GetEventsManager()
+	progressMsg := fmt.Sprintf("%v: %v for the following VBs: %v", hostName, common.ProgressP2PComm, vbs)
+	eventId = eventsMgr.AddEvent(base.LowPriorityMsg, progressMsg, base.EventsMap{})
+	return eventId, replStatus, nil
 }
 
 func checkNoOtherVBMasters(respMap map[string]*peerToPeer.VBMasterCheckResp, srcBucketName string, sourceVBs []uint16, internalId string) error {

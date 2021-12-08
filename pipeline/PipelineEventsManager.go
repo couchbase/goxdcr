@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
+	"strings"
 	"sync"
 	"time"
 )
@@ -104,8 +105,9 @@ func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *in
 
 type PipelineEventsManager interface {
 	GetCurrentEvents() *PipelineEventList
-	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap)
+	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) (eventId int64)
 	ClearNonBrokenMapEvents()
+	ClearNonBrokenMapEventsWithString(substr string)
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
 	ContainsEvent(eventId int) bool
 	DismissEvent(eventId int) error
@@ -173,7 +175,7 @@ func (p *PipelineEventsMgr) getEvent(eventId int) (*base.EventInfo, error) {
 	return nil, base.ErrorNotFound
 }
 
-func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) {
+func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) int64 {
 	if eventExtras.IsNil() {
 		eventExtras.Init()
 	}
@@ -188,6 +190,7 @@ func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc str
 	defer p.events.Mutex.Unlock()
 	p.events.TimeInfos = append(p.events.TimeInfos, time.Now().UnixNano())
 	p.events.EventInfos = append(p.events.EventInfos, newEvent)
+	return newEvent.EventId
 }
 
 // When pipeline is paused, brokenMap events need to stay once pipeline resumes because no further mutations will
@@ -206,6 +209,27 @@ func (p *PipelineEventsMgr) ClearNonBrokenMapEvents() {
 		}
 		replacementList = append(replacementList, event)
 		replacementTime = append(replacementTime, p.events.TimeInfos[i])
+	}
+
+	p.events.EventInfos = replacementList
+	p.events.TimeInfos = replacementTime
+}
+
+func (p *PipelineEventsMgr) ClearNonBrokenMapEventsWithString(substr string) {
+	p.events.Mutex.Lock()
+	defer p.events.Mutex.Unlock()
+
+	var replacementList []*base.EventInfo
+	var replacementTime []int64
+
+	for i, event := range p.events.EventInfos {
+		if event.EventType != base.BrokenMappingInfoType {
+			continue
+		}
+		if !strings.Contains(event.EventDesc, substr) {
+			replacementList = append(replacementList, event)
+			replacementTime = append(replacementTime, p.events.TimeInfos[i])
+		}
 	}
 
 	p.events.EventInfos = replacementList
