@@ -659,6 +659,7 @@ function restoreClusterBack {
 
 		IFS=$'\n'
 		for nodeInfo in $(echo "$nodesList"); do
+			IFS="$OLDIFS"
 			checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
 			if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
 				foundFailoverNode=1
@@ -667,15 +668,14 @@ function restoreClusterBack {
 				# "n_0@192.168.1.113"
 				otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
 				failoverNodeString="otpNode=$otpNodeNameStripped"
-				# use hard-coded curl because of IFS change
-				curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/controller/failOver -d "$failoverNodeString"
+				$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/controller/failOver -d "$failoverNodeString"
 				if (($? != 0)); then
 					echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
 				fi
 				echo "Wait 10 sec after issuing failover command ..."
 				sleep 10
-
 			fi
+			IFS=$'\n'
 		done
 		IFS="$OLDIFS"
 		if (($foundFailoverNode == 0)); then
@@ -725,8 +725,11 @@ function failoverNode {
 		local failoverNodeString
 		local knownNodesString
 		local optNodeNameStripped
+		local OLDIFS="$IFS"
 
+		IFS=$'\n'
 		for nodeInfo in $(echo "$nodesList"); do
+			IFS="$OLDIFS"
 			checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
 			if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
 				# Found it
@@ -750,7 +753,9 @@ function failoverNode {
 					totalRetryCnt=0
 				fi
 			fi
+			IFS=$'\n'
 		done
+		IFS="$OLDIFS"
 	done
 }
 
