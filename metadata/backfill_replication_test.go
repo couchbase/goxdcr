@@ -420,3 +420,52 @@ func TestPartialVBMap(t *testing.T) {
 	assert.Equal(1, vbTaskMap.LenWithVBs([]uint16{0}))
 	assert.Equal(0, vbTaskMap.LenWithVBs([]uint16{2}))
 }
+
+func TestDiffTasksCleanup(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestSameAsWriteLock =================")
+	defer fmt.Println("============== Test case end: TestSameAsWriteLock =================")
+
+	startTs := base.VBTimestamp{}
+	endTs := base.VBTimestamp{Seqno: 100}
+	backfillTs := BackfillVBTimestamps{StartingTimestamp: &startTs, EndingTimestamp: &endTs}
+
+	nsMapping := make(CollectionNamespaceMapping)
+	srcMapping := &base.CollectionNamespace{"S1", "col1"}
+	tgtMapping := &base.CollectionNamespace{"S1T", "col1t"}
+	nsMapping.AddSingleMapping(srcMapping, tgtMapping)
+
+	nsMapping2 := make(CollectionNamespaceMapping)
+	srcMapping2 := &base.CollectionNamespace{"S2", "col2"}
+	tgtMapping2 := &base.CollectionNamespace{"S2T", "col2t"}
+	nsMapping2.AddSingleMapping(srcMapping2, tgtMapping2)
+
+	// Do a "layering of tasks"
+	oneTask := NewBackfillTask(&backfillTs, []CollectionNamespaceMapping{nsMapping})
+	duoTask := NewBackfillTask(&backfillTs, []CollectionNamespaceMapping{nsMapping, nsMapping2})
+
+	// One Layer of task
+	uniLayerTasks := NewBackfillTasks()
+	uniLayerTasks.List = append(uniLayerTasks.List, oneTask)
+
+	duoLayerTasks := NewBackfillTasks()
+	duoLayerTasks.List = append(duoLayerTasks.List, duoTask)
+
+	// VB 0 has one layer, VB1 has two layers
+	vbTaskMap := NewVBTasksMap()
+	vbTaskMap.VBTasksMap[0] = &uniLayerTasks
+	vbTaskMap.VBTasksMap[1] = &duoLayerTasks
+
+	modified := vbTaskMap.RemoveNamespaceMappings(nsMapping)
+	assert.True(modified)
+
+	assert.Nil(vbTaskMap.VBTasksMap[0])
+	assert.NotNil(vbTaskMap.VBTasksMap[1])
+
+	modified = vbTaskMap.RemoveNamespaceMappings(nsMapping2)
+	assert.True(modified)
+
+	assert.Nil(vbTaskMap.VBTasksMap[0])
+	assert.Nil(vbTaskMap.VBTasksMap[1])
+	assert.Equal(0, vbTaskMap.Len())
+}
