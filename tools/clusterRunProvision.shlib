@@ -655,7 +655,9 @@ function restoreClusterBack {
 		local knownNodesString
 		local optNodeNameStripped
 		local foundFailoverNode=0
+		local OLDIFS="$IFS"
 
+		IFS=$'\n'
 		for nodeInfo in $(echo "$nodesList"); do
 			checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
 			if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
@@ -665,7 +667,8 @@ function restoreClusterBack {
 				# "n_0@192.168.1.113"
 				otpNodeNameStripped=$(echo "$otpNodeName" | sed 's/"//g')
 				failoverNodeString="otpNode=$otpNodeNameStripped"
-				$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/controller/failOver -d "$failoverNodeString"
+				# use hard-coded curl because of IFS change
+				curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/controller/failOver -d "$failoverNodeString"
 				if (($? != 0)); then
 					echo "Error when trying to rebalance with eject $failoverNodeString and known $knownNodesString"
 				fi
@@ -674,6 +677,7 @@ function restoreClusterBack {
 
 			fi
 		done
+		IFS="$OLDIFS"
 		if (($foundFailoverNode == 0)); then
 			echo "Could not find $hostNameToLookFor"
 			return 1
