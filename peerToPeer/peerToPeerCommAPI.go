@@ -43,6 +43,7 @@ type Request interface {
 
 type Response interface {
 	ReqRespCommon
+	GetErrorString() string
 }
 
 type HandlerResult interface {

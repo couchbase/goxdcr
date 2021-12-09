@@ -70,7 +70,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		h.logger.Errorf(err.Error())
 		resp := req.GenerateResponse().(*VBMasterCheckResp)
 		resp.Init()
-		resp.ErrorMsg = err.Error()
+		resp.ErrorString = err.Error()
 		req.CallBack(resp)
 		return
 	}
@@ -119,76 +119,106 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	if mainCkptFetchErr != nil {
 		h.logger.Errorf("%v - fetchMainCkpt error %v", req.ReplicationId, mainCkptFetchErr)
-		resp.ErrorMsg = mainCkptFetchErr.Error()
-		req.CallBack(resp)
+		resp.ErrorString = mainCkptFetchErr.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	if backfillCkptFetchErr != nil {
 		h.logger.Errorf("%v - fetchBackfillCkpt error %v", req.ReplicationId, backfillCkptFetchErr)
-		resp.ErrorMsg = backfillCkptFetchErr.Error()
-		req.CallBack(resp)
+		resp.ErrorString = backfillCkptFetchErr.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	if manifestErr != nil {
 		h.logger.Errorf("%v - manifest error %v", req.ReplicationId, manifestErr)
-		resp.ErrorMsg = manifestErr.Error()
-		req.CallBack(resp)
+		resp.ErrorString = manifestErr.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	if brokenMappingErr != nil {
 		h.logger.Errorf("%v - brokenMapping error %v", req.ReplicationId, brokenMappingErr)
-		resp.ErrorMsg = brokenMappingErr.Error()
-		req.CallBack(resp)
+		resp.ErrorString = brokenMappingErr.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	if backfillTasksErr != nil {
 		h.logger.Errorf("%v - backfillTasks error %v", req.ReplicationId, backfillTasksErr)
-		resp.ErrorMsg = backfillTasksErr.Error()
-		req.CallBack(resp)
+		resp.ErrorString = backfillTasksErr.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	err := resp.LoadMainPipelineCkpt(mainPipelineCkpts, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("%v when loading pipeline ckpt into response, got %v", req.ReplicationId, err)
-		resp.ErrorMsg = err.Error()
-		req.CallBack(resp)
+		resp.ErrorString = err.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	err = resp.LoadBackfillPipelineCkpt(backfillPipelineCkpts, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("%v when loading pipeline ckpt into response, got %v", req.ReplicationId, err)
-		resp.ErrorMsg = err.Error()
-		req.CallBack(resp)
+		resp.ErrorString = err.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	err = resp.LoadManifests(cachedSrcManifests, cachedTgtManifests, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("%v when loading manifests into response, got %v", req.ReplicationId, err)
-		resp.ErrorMsg = err.Error()
-		req.CallBack(resp)
+		resp.ErrorString = err.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	err = resp.LoadBrokenMappingDoc(brokenMappingDoc, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", req.ReplicationId, err)
-		resp.ErrorMsg = err.Error()
-		req.CallBack(resp)
+		resp.ErrorString = err.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 
 	err = resp.LoadBackfillTasks(backfillTasks, req.SourceBucketName)
 	if err != nil {
 		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", req.ReplicationId, err)
-		resp.ErrorMsg = err.Error()
-		req.CallBack(resp)
+		resp.ErrorString = err.Error()
+		_, cbErr := req.CallBack(resp)
+		if cbErr != nil {
+			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+		}
 		return
 	}
 

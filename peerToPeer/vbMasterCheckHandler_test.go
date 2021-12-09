@@ -143,7 +143,7 @@ func TestVBMasterHandler(t *testing.T) {
 func validateResponse(respActual *VBMasterCheckResp, assert *assert.Assertions) {
 	bucketMapResp, unlockFunc := respActual.GetReponse()
 	assert.NotNil(bucketMapResp)
-	assert.Equal("", respActual.ErrorMsg)
+	assert.Equal("", respActual.ErrorString)
 	payload := (*bucketMapResp)[srcBucketName]
 	ckptMap := payload.GetAllCheckpoints(common.MainPipeline)
 	assert.NotEqual(0, len(ckptMap))

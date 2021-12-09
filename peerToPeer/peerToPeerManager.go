@@ -381,6 +381,10 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 				timeoutTimer.Stop()
 				retMap[serverNameCpy].ReqPtr = pair.ReqPtr
 				retMap[serverNameCpy].RespPtr = pair.RespPtr
+				responseAPI := pair.RespPtr.(Response)
+				if responseAPI.GetErrorString() != "" {
+					retErrMap[serverNameCpy].err = fmt.Errorf(responseAPI.GetErrorString())
+				}
 			case <-timeoutTimer.C:
 				retErrMap[serverNameCpy].err = fmt.Errorf("%v - did not hear back from node after %v. Could be due to peer node being busy to respond in time or this XDCR being too busy to handle incoming requests", base.ErrorExecutionTimedOut, s.timeout)
 			case <-s.finCh:

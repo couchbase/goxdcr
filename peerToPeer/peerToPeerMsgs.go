@@ -216,6 +216,10 @@ func (r *ResponseCommon) GetOpcode() OpCode {
 	return r.RespType
 }
 
+func (r *ResponseCommon) GetErrorString() string {
+	return r.ErrorString
+}
+
 type DiscoveryResponse struct {
 	ResponseCommon
 }
@@ -498,7 +502,6 @@ type ReplicationPayload struct {
 	mtx               sync.RWMutex
 	payload           *BucketVBMPayloadType
 	PayloadCompressed []byte
-	ErrorMsg          string
 	ReplicationSpecId string
 	SourceBucketName  string
 	InternalSpecId    string
@@ -857,7 +860,7 @@ func (v *ReplicationPayload) SameAs(other *ReplicationPayload) bool {
 	defer v.mtx.RUnlock()
 	defer other.mtx.RUnlock()
 
-	return v.payload.SameAs(other.payload) && v.ErrorMsg == other.ErrorMsg &&
+	return v.payload.SameAs(other.payload) &&
 		v.ReplicationSpecId == other.ReplicationSpecId && v.SourceBucketName == other.SourceBucketName &&
 		v.InternalSpecId == other.InternalSpecId
 }
