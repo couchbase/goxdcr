@@ -24,12 +24,14 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=120 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=1000 ["preReplicateVBMasterCheck"]="true")
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S1.col1"}')
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S3.col3"}')
 
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
+declare -a B1ScopeArr=("S1" "S2" "S3")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]=${B1ScopeArr[@]})
 
 # Scopes -> Collections
 # ----------------------
@@ -40,13 +42,13 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 function runDataLoad {
 	echo "RUNNING dataload..."
 	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
-	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
 	waitForBgJobs
 	echo "RUNNING dataload DONE"
 }
 
+TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+
 declare LOGMSG=$BROKEN_MSG
-declare BACKFILL_CKPT_RETRIEVED="Received peerToPeer backfill checkpoint data from node"
 
 function runOneReplicationCycleAndPause {
 	local timeIntervalSecs=5
@@ -68,16 +70,13 @@ function runOneReplicationCycleAndPause {
 		exit $?
 	fi
 
-	local -i currentInstanceCnt
-	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
-
 	setCustomManifestRefreshInterval "C1"
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
-	createBucketReplication "C1" "B0" "C2" "B1" BackfillHangLooseProperties
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
 
 	runDataLoad
@@ -85,27 +84,19 @@ function runOneReplicationCycleAndPause {
 	echo "Sleeping 20 seconds before changes left check"
 	sleep 20
 
-	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
-
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	validateXDCRCheckpoints "C1"
 	grepForPanics
 
-	createScope "C2" "B1" "S1"
-	createCollection "C2" "B1" "S1" "col1"
-
-	echo "Sleeping 30 secs for backfill to start"
-	sleep 30
-
-	# Once all is done, pause to create checkpoints
 	pauseReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 10 seconds for pipeline to really pause"
 	sleep 10
+	grepForPanics
+
+	checkItemCnt "C1" "B0" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 }
 
-C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
-CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
-CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
 CKPT_RESUME_FOUND="checkpoint documents for"
 LOADED_BROKEN_MAP="Loaded brokenMap: map"
 LOADED_BROKEN_MAP_NAME="S1.col1"
@@ -135,70 +126,9 @@ function runOneRebalanceCycle {
 	grepForPanics
 }
 
-function runReplicationResume {
-	local logs
-	local logsC1P
-
-	logs=$(getInternalNodeXdcrLog "C1")
-	local curCkptsFoundDocsCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
-	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
-
-	logsC1P=$(getInternalNodeXdcrLog "C1P")
-	local curCkptsFoundDocsCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_FOUND_DOCS")
-	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
-	local curBackfillRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$BACKFILL_CKPT_RETRIEVED")
-	local curBackfillResumeNon0CntC1P=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "BackfillPipeline" | grep -cv "${TS_PREFIX}=0")
-
-	resumeReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
-
-	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
-	logs=$(getInternalNodeXdcrLog "C1")
-	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
-	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $(($curCkptsFoundDocsCnt + 2)))); then
-		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill) when looking for $(($curCkptsFoundDocsCnt + 1)) counts"
-		exit 1
-	fi
-	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
-	if (($foundDocCount == 0)); then
-		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
-		exit 1
-	fi
-
-	logsC1P=$(getInternalNodeXdcrLog "C1P")
-	local ckptFoundWith0Count=$(echo "$logsC1P" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
-	local ckptFoundTotalCount=$(echo "$logsC1P" | grep -c "$CKPT_RESUME_FOUND")
-	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
-		echo "C1P unable to find upserted checkpoints"
-		exit 1
-	fi
-
-	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" $(($curCkptRetrievedCntC1P + 1))
-	validateInternalLogWithInstance "C1P" "$BACKFILL_CKPT_RETRIEVED" $(($curBackfillRetrievedCntC1P + 1))
-
-	local resumeFrom0Cnt
-	local bpResumeFromNon0Cnt
-	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
-	if (($resumeFrom0Cnt > 0)); then
-		echo "C1P main pipeline has at least one VB that resumed from seqno 0"
-		exit 1
-	fi
-	bpResumeFromNon0Cnt=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "BackfillPipeline" | grep -cv "${TS_PREFIX}=0")
-
-	if (($curBackfillResumeNon0CntC1P == $bpResumeFromNon0Cnt)); then
-		# Resume from non-0 stayed constant
-		echo "C1P backfill pipeline did not seem to have resumed from non-0 ckpts"
-		exit 1
-	fi
-
-	# No broken map should be restored because backfill is under way for the S1.col1 -> S1.col1 that was broken
-	grepForPanics
-}
-
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P pulling both main and backfill pipeline ckpts"
+	echo "Running P2P with broken map and rebalancing a node in"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -206,7 +136,23 @@ function runTestCase {
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
-	runReplicationResume
+
+	echo "Sleeping 120 seconds for topology change detector to kick in"
+	sleep 120
+
+	echo "Changing explicit mapping - new target collection should receive backfill"
+	setReplicationSettings "C1" "B0" "C2" "B1" 'colMappingRules={"S1.col1":"S3.col2"}' 'collectionsExplicitMapping=true'
+
+	echo "Rebalancing node 1 out of the cluster so node 0 owns all VBs"
+	restoreClusterBack "C1"
+
+	echo "Resuming pipeline where Backfills should take place for the other collection"
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 20 seconds for resume to finish"
+	sleep 20
+
+	newCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B1" $newCount
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -214,7 +160,4 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
-
-	echo "Cleaning up topology..."
-	restoreClusterBack "C1"
 }

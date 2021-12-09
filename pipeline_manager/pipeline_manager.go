@@ -1852,6 +1852,9 @@ RE:
 		r.logger.Infof("Replication %v has been updated. Back to business\n", r.pipeline_name)
 	} else if base.CheckErrorMapForError(errMap, ReplicationSpecNotActive, true /*exactMatch*/) {
 		r.logger.Infof("Replication %v has been paused. no need to update\n", r.pipeline_name)
+		// It is possible that pipeline is set "paused" and won't be started again so now is the time
+		// to execute callbacks if any
+		r.executeQueuedCallbacks()
 	} else if base.CheckErrorMapForError(errMap, service_def.MetadataNotFoundErr, true /*exactMatch */) {
 		r.logger.Infof("Replication %v has been deleted. no need to update\n", r.pipeline_name)
 	} else if base.CheckErrorMapForError(errMap, ErrorNoKVService, true) {
