@@ -98,20 +98,21 @@ function runOneReplicationCycleAndPause {
 	sleep 10
 	grepForPanics
 
-	createScope "C2" "B1" "S1"
-	createCollection "C2" "B1" "S1" "col1"
+	# At this stage, we have S2.col1 -> S2.col1 data transferred but S1.col1 -> X (broken)
+	#createScope "C2" "B1" "S1"
+	#createCollection "C2" "B1" "S1" "col1"
 
-	echo "Sleeping 15 secs before resuming replication"
-	sleep 15
-	resumeReplication "C1" "B0" "C2" "B1"
+	#echo "Sleeping 15 secs before resuming replication"
+	#sleep 15
+	#resumeReplication "C1" "B0" "C2" "B1"
 
-	checkChangesLeftInternal "C1" "B0" "C2" "B1"
-	grepForPanics
+	#checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	#grepForPanics
 
 	# Once all is done, pause to re-create checkpoint
-	pauseReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 10 seconds for pipeline to really pause"
-	sleep 10
+	#pauseReplication "C1" "B0" "C2" "B1"
+	#echo "Waiting 10 seconds for pipeline to really pause"
+	#sleep 10
 }
 
 C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
@@ -163,8 +164,8 @@ function runReplicationResume {
 	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
 
 	resumeReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
+	echo "Waiting 40 seconds for resume to finish"
+	sleep 40
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")

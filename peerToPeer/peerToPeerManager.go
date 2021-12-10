@@ -304,6 +304,10 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					peersToRetryMtx.Lock()
 					peersToRetryReplacement[peerAddr] = true
 					peersToRetryMtx.Unlock()
+				} else {
+					cbOpts.sentTimesMtx.Lock()
+					cbOpts.sentTimesMap[peerAddr] = time.Now()
+					cbOpts.sentTimesMtx.Unlock()
 				}
 			}()
 		}
@@ -330,7 +334,13 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 
 type GetReqFunc func(source, target string) Request
 
+type PeerNodesTimeMap map[string]time.Time
+type PeerNodesDurationMap map[string]time.Duration
+
 type SendOpts struct {
+	sentTimesMap PeerNodesTimeMap
+	sentTimesMtx sync.RWMutex
+
 	synchronous bool // Do we need to wait until response is heard
 	timeout     time.Duration
 	finCh       chan bool
@@ -342,24 +352,34 @@ type SendOpts struct {
 type SendOptsMap map[string]chan ReqRespPair
 
 func NewSendOpts(sync bool, timeout time.Duration) *SendOpts {
+	newOpt := &SendOpts{sentTimesMap: make(PeerNodesTimeMap)}
 	if sync {
-		return &SendOpts{
-			synchronous: true,
-			respMap:     make(SendOptsMap),
-			timeout:     timeout,
-			finCh:       make(chan bool),
-		}
-	} else {
-		return &SendOpts{}
+		newOpt.synchronous = true
+		newOpt.respMap = make(SendOptsMap)
+		newOpt.timeout = timeout
+		newOpt.finCh = make(chan bool)
 	}
+	return newOpt
 }
 
-func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
+func (s *SendOpts) GetSentTime(key string) (time.Time, error) {
+	s.sentTimesMtx.RLock()
+	defer s.sentTimesMtx.RUnlock()
+
+	if _, exists := s.sentTimesMap[key]; !exists {
+		return time.Now(), base.ErrorNotFound
+	}
+	return s.sentTimesMap[key], nil
+}
+
+func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap, PeerNodesDurationMap) {
 	retMap := make(map[string]*ReqRespPair)
 	type errWrapper struct {
 		err error
 	}
 	retErrMap := make(map[string]*errWrapper)
+	ackTimeMap := make(PeerNodesDurationMap)
+	var ackDurationMapMtx sync.RWMutex
 
 	var waitGrp sync.WaitGroup
 
@@ -385,6 +405,12 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 				if response.GetErrorString() != "" {
 					retErrMap[serverNameCpy].err = fmt.Errorf(response.GetErrorString())
 				}
+				sentTime, sentTimeErr := s.GetSentTime(serverNameCpy)
+				if sentTimeErr == nil {
+					ackDurationMapMtx.Lock()
+					ackTimeMap[serverNameCpy] = time.Since(sentTime)
+					ackDurationMapMtx.Unlock()
+				}
 			case <-timeoutTimer.C:
 				retErrMap[serverNameCpy].err = fmt.Errorf("%v - did not hear back from node after %v. Could be due to peer node being busy to respond in time or this XDCR being too busy to handle incoming requests", base.ErrorExecutionTimedOut, s.timeout)
 			case <-s.finCh:
@@ -403,7 +429,6 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 			delete(retMap, serverName)
 		}
 	}
-
 	// Need to convert back to errorMap
 	errMap := make(base.ErrorMap)
 	for k, v := range retErrMap {
@@ -411,7 +436,8 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap) {
 			errMap[k] = v.err
 		}
 	}
-	return retMap, errMap
+
+	return retMap, errMap, ackTimeMap
 }
 
 type ReqRespPair struct {
@@ -459,7 +485,11 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		return nil, err
 	}
 
-	result, errMap := opts.GetResults()
+	result, errMap, durationMap := opts.GetResults()
+
+	if len(durationMap) > 0 {
+		p.logger.Infof("CheckVBMaster peer nodes' successful response times: %v", durationMap)
+	}
 
 	respMap := make(map[string]*VBMasterCheckResp)
 	for k, v := range result {

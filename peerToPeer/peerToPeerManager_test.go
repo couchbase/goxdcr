@@ -162,7 +162,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 		vbMasterCheckHandler.receiveCh <- resp
 	}
 
-	results, _ := opts.GetResults()
+	results, _, _ := opts.GetResults()
 	tgt1Result, found := results[peerNodes[0]]
 	tgt2Result, found2 := results[peerNodes[0]]
 	assert.True(found)
@@ -205,7 +205,7 @@ func TestPeerToPeerConcurrentMap(t *testing.T) {
 		ch3 := make(chan ReqRespPair)
 		opts.respMap["testhost3"] = ch3
 		opts.respMapMtx.Unlock()
-		_, errMap := opts.GetResults()
+		_, errMap, _ := opts.GetResults()
 		assert.Len(errMap, 3)
 	}
 }
