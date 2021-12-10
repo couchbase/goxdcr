@@ -342,6 +342,9 @@ func (v *VBMasterCheckHandler) populatePipelineCkpts(replSpecId string, waitGrp 
 	*result = ckptDocs
 
 	for _, ckptDoc := range ckptDocs {
+		if ckptDoc == nil {
+			continue
+		}
 		records := ckptDoc.Checkpoint_records
 		for _, record := range records {
 			if record == nil {
