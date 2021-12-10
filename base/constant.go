@@ -1411,7 +1411,7 @@ const PreReplicateVBMasterCheckKey = "preReplicateVBMasterCheck"
 
 const ReplicateCkptIntervalKey = "replicateCkptIntervalMin"
 
-var ReplicateCkptInterval = 60 * time.Minute
+var ReplicateCkptInterval = 20 * time.Minute
 
 const (
 	SourceNozzlePerNode = "sourceNozzlePerNode"
