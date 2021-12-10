@@ -26,6 +26,20 @@ func (_m *Response) DeSerialize(_a0 []byte) error {
 	return r0
 }
 
+// GetErrorString provides a mock function with given fields:
+func (_m *Response) GetErrorString() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
 // GetOpaque provides a mock function with given fields:
 func (_m *Response) GetOpaque() uint32 {
 	ret := _m.Called()
