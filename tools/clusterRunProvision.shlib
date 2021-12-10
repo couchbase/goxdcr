@@ -598,8 +598,11 @@ function startEjectNode {
 	local failoverNodeString
 	local knownNodesString
 	local optNodeNameStripped
+	local OLDIFS="$IFS"
 
+  IFS=$'\n'
 	for nodeInfo in $(echo "$nodesList"); do
+	  IFS="$OLDIFS"
 		checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
 		if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
 			# Found it
@@ -621,7 +624,9 @@ function startEjectNode {
 				exit 1
 			fi
 		fi
+		IFS=$'\n'
 	done
+	IFS="$OLDIFS"
 }
 
 # Similar to failoverNode but cleans everything up
