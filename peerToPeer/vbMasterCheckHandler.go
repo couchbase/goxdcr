@@ -362,12 +362,14 @@ func (v *VBMasterCheckHandler) populatePipelineCkpts(replSpecId string, waitGrp 
 		return
 	}
 
+	v.logger.Infof("Handler for %v retrieving CheckpointsDocs request found %v docs", replSpecId, len(ckptDocs))
 	if opErr != nil {
-		v.logger.Errorf("Error getting ckpt docs for %v - %v", replSpecId, opErr)
-		*err = opErr
+		if opErr != service_def.MetadataNotFoundErr {
+			v.logger.Errorf("Error getting ckpt docs for %v - %v", replSpecId, opErr)
+			*err = opErr
+		}
 		return
 	}
-	v.logger.Infof("Handler for %v retrieving CheckpointsDocs request found %v docs", replSpecId, len(ckptDocs))
 
 	*result = ckptDocs
 
@@ -438,7 +440,9 @@ func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *
 	}
 
 	if err != nil {
-		*errPtr = err
+		if err != service_def.MetadataNotFoundErr {
+			*errPtr = err
+		}
 		return
 	}
 	if loadedDoc == nil {
