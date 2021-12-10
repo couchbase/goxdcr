@@ -582,6 +582,9 @@ func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadat
 	}
 
 	for _, ckptDoc := range ckptsDocs {
+		if ckptDoc == nil {
+			continue
+		}
 		for _, ckptRecord := range ckptDoc.Checkpoint_records {
 			if ckptRecord == nil || ckptRecord.BrokenMappingSha256 == "" {
 				continue
