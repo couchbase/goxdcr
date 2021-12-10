@@ -968,11 +968,16 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	}
 
 	// Before construction, check to ensure there are actually tasks to run
-	backfillSpec, err := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
-	if backfillSpec == nil || err != nil {
+	backfillSpecRO, err := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
+	if backfillSpecRO == nil || err != nil {
 		errMap["pipelineMgr.StartBackfillPipeline"] = err
 		return errMap
 	}
+
+	// It is possible that the "cached" version of the backfill spec is being updated since read
+	// Clone a copy of it here to ensure that all the checks below are valid and data won't be changed
+	// once the checks are done
+	backfillSpec := backfillSpecRO.Clone()
 
 	var mainPipelineVbs []uint16
 	srcNozzles := mainPipeline.Sources()
