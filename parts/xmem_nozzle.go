@@ -2195,7 +2195,7 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 		return err
 	}
 
-	if needTo, err := meta.NeedUpdate(xmem.config.hlvPruningWindow); needTo == false || err != nil {
+	if needTo, err := meta.NeedUpdate(time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec)) * time.Second); needTo == false || err != nil {
 		return err
 	}
 
@@ -2219,7 +2219,7 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 
 	xattrComposer := base.NewXattrComposer(newbody)
 
-	_, err = meta.ConstructCustomCRXattrForSetMeta(xmem.config.hlvPruningWindow, xattrComposer)
+	_, err = meta.ConstructCustomCRXattrForSetMeta(time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
 	if err != nil {
 		// TODO (MB-44587): Remove before shipping. This should never happen unless we badly formated _xdcr.pc/_xdcr_mv..
 		panic(fmt.Sprintf("%v, updateCustomCRXattrForTarget encountered error %v. This may cause unnecessary merge.", xmem.Id(), err))
@@ -3599,6 +3599,15 @@ func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap)
 		atomic.StoreUint32(&xmem.config.optiRepThreshold, uint32(optimisticReplicationThresholdInt))
 		if oldOptimisticInt != optimisticReplicationThresholdInt {
 			xmem.Logger().Infof("%v updated optimistic replication threshold to %v\n", xmem.Id(), optimisticReplicationThresholdInt)
+		}
+	}
+	hlvPruningWindow, ok := settings[HLV_PRUNING_WINDOW]
+	if ok {
+		hlvPruningWindowInt := hlvPruningWindow.(int)
+		oldvPruningWindowInt := int(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))
+		atomic.StoreUint32(&xmem.config.hlvPruningWindowSec, uint32(hlvPruningWindowInt))
+		if oldvPruningWindowInt != hlvPruningWindowInt {
+			xmem.Logger().Infof("%v updated %v to %v\n", xmem.Id(), HLV_PRUNING_WINDOW, hlvPruningWindowInt)
 		}
 	}
 	return nil

@@ -720,10 +720,11 @@ func TestCustomCRFunctionTimeout(t *testing.T) {
 			Email:     "kingarthur@couchbase.com",
 			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
 	assert.Nil(err)
-	time.Sleep(30 * time.Second)
+	time.Sleep(40 * time.Second)
 	// Expect timeout message
 	filename := "../../../../../../ns_server/logs/n_0/goxdcr.log"
 	b, err := ioutil.ReadFile(filename)
+	assert.Nil(err)
 	s := string(b)
 	expected := fmt.Sprintf("loopForever stopped after running beyond %v ms", timeout)
 	assert.Contains(s, expected, fmt.Sprintf("%v does not contain expected message '%v'", filename, expected))

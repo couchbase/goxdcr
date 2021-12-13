@@ -162,7 +162,7 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	input := <-rs.InputCh
 	source := input.Source
 	target := input.Target
-	timeout := input.Timeout
+	timeoutMs := input.TimeoutMs
 	var params []interface{}
 	sourceTime := base.CasToTime(source.Req.Cas).String()
 	targetTime := base.CasToTime(target.Resp.Cas).String()
@@ -179,7 +179,7 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 	params = append(params, string(targetBody))
 	params = append(params, targetTime)
 	params = append(params, string(input.TargetId))
-	res, err := rs.execute(input.MergeFunction, input.MergeFunction, params, timeout)
+	res, err := rs.execute(input.MergeFunction, input.MergeFunction, params, timeoutMs)
 	input.ResultNotifier.NotifyMergeResult(input, res, err)
 }
 
@@ -214,11 +214,11 @@ func (rs *ResolverSvc) functionsPathHandler(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (rs *ResolverSvc) execute(libraryName string, functionName string, params []interface{}, timeout int) (interface{}, error) {
+func (rs *ResolverSvc) execute(libraryName string, functionName string, params []interface{}, timeoutMs uint32) (interface{}, error) {
 	if rs.started == false {
 		return nil, fmt.Errorf("ResolverSvc is not started.")
 	}
-	options := map[evaluatorApi.Option]interface{}{evaluatorApi.Timeout: timeout}
+	options := map[evaluatorApi.Option]interface{}{evaluatorApi.Timeout: int(timeoutMs)}
 	worker := <-rs.workerPool
 	defer func() {
 		rs.workerPool <- worker

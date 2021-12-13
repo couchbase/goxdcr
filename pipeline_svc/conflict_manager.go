@@ -15,16 +15,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 	"io"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/couchbase/goxdcr/pipeline_utils"
-
-	"github.com/couchbase/goxdcr/parts"
 
 	mcc "github.com/couchbase/gomemcached/client"
 
@@ -95,9 +93,10 @@ type ConflictManager struct {
 	utils             utilities.UtilsIface
 	sourceBucketName  string
 	mergeFunction     string
+	mergeFuncMutex    sync.RWMutex
 	userAgent         string
-	pruningWindow     time.Duration
-	functionTimeout   int
+	pruningWindowSec  uint32
+	functionTimeoutMs uint32
 
 	counter_conflict_ch_waittime uint64 // time waiting to put conflict into conflict_ch
 	counter_resolver_waittime    uint64 // time waiting to put conflict to resolver's input_ch
@@ -156,21 +155,25 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	c.sourceBucketName = c.pipeline.Specification().GetReplicationSpec().SourceBucketName
 
 	// At replication creation, we verify that the merge function is created. Here we only get its name from setting
+	var mergeFunction string
 	if mergeFunctionMapping, exists := settingsMap[base.MergeFunctionMappingKey]; exists {
 		if f, ok := mergeFunctionMapping.(base.MergeFunctionMappingType); ok {
-			c.mergeFunction = f[base.BucketMergeFunctionKey]
+			mergeFunction = f[base.BucketMergeFunctionKey]
+			c.setMergeFunction(mergeFunction)
 		} else {
 			c.Logger().Errorf("Type of mergeFunctionMapping is %v", reflect.TypeOf(mergeFunctionMapping))
 		}
 	}
-	if c.mergeFunction == "" {
+	if mergeFunction == "" {
 		return fmt.Errorf("%v: Default merge function is not set for the pipeline.", c.pipeline.FullTopic())
 	}
 	if value, ok := settingsMap[base.HlvPruningWindowKey]; ok {
-		c.pruningWindow = time.Duration(value.(int)) * time.Second
+		pruningWindowInt := value.(int)
+		atomic.StoreUint32(&c.pruningWindowSec, uint32(pruningWindowInt))
 	}
 	if value, ok := settingsMap[base.JSFunctionTimeoutKey]; ok {
-		c.functionTimeout = value.(int)
+		timeoutInt := value.(int)
+		atomic.StoreUint32(&c.functionTimeoutMs, uint32(timeoutInt))
 	}
 	c.result_ch = make(chan *base.MergeInputAndResult, resultChannelsize)
 	c.conflict_ch = make(chan *base.ConflictParams, conflictChannelSize)
@@ -181,7 +184,7 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	// Start the goroutine that will move data from conflict_ch to Resolver
 	c.wait_grp.Add(1)
 	go c.sendToResolverSvc()
-	c.Logger().Infof("%v: ConflictManager started with merge function %v and function timeout %v.", c.pipeline.FullTopic(), c.mergeFunction, c.functionTimeout)
+	c.Logger().Infof("%v: ConflictManager started with %v %v:%v and function timeout %v.", c.pipeline.FullTopic(), base.MergeFunctionMappingKey, base.BucketMergeFunctionKey, mergeFunction, atomic.LoadUint32(&c.functionTimeoutMs))
 	return nil
 }
 func (c *ConflictManager) Stop() error {
@@ -192,7 +195,7 @@ func (c *ConflictManager) Stop() error {
 	close(c.finish_ch)
 	c.wait_grp.Wait()
 	base.ConnPoolMgr().RemovePool(c.getPoolName())
-	c.Logger().Infof("%v: ConflictManager stopped. The merge function used was %v", c.pipeline.FullTopic(), c.mergeFunction)
+	c.Logger().Infof("%v: ConflictManager stopped. The merge function used was %v.", c.pipeline.FullTopic(), c.getMergeFunction())
 	return nil
 }
 func (c *ConflictManager) Attach(pipeline common.Pipeline) (err error) {
@@ -225,12 +228,23 @@ func (c *ConflictManager) IsSharable() bool {
 }
 func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	if value, exists := settings[base.HlvPruningWindowKey]; exists {
-		c.pruningWindow = time.Duration(value.(int)) * time.Second
-		c.Logger().Infof("%v is changedd to %v", base.HlvPruningWindowKey, c.pruningWindow)
+		pruningWindowInt := value.(int)
+		atomic.StoreUint32(&c.pruningWindowSec, uint32(pruningWindowInt))
+		c.Logger().Infof("%v: %v is set to %v.", c.pipeline.FullTopic(), base.HlvPruningWindowKey, uint32(c.pruningWindowSec))
 	}
 	if value, exists := settings[base.JSFunctionTimeoutKey]; exists {
-		c.functionTimeout = value.(int)
-		c.Logger().Infof("%v is changedd to %v", base.JSFunctionTimeoutKey, c.functionTimeout)
+		valueInt := value.(int)
+		atomic.StoreUint32(&c.functionTimeoutMs, uint32(valueInt))
+		c.Logger().Infof("%v: %v is set to %v.", c.pipeline.FullTopic(), base.JSFunctionTimeoutKey, uint32(valueInt))
+	}
+	if value, exists := settings[base.MergeFunctionMappingKey]; exists {
+		if f, ok := value.(base.MergeFunctionMappingType); ok {
+			mergeFunction := f[base.BucketMergeFunctionKey]
+			c.setMergeFunction(mergeFunction)
+			c.Logger().Infof("%v: %v for %v is set to %v.", c.pipeline.FullTopic(), base.MergeFunctionMappingKey, base.BucketMergeFunctionKey, mergeFunction)
+		} else {
+			c.Logger().Errorf("%v: Type of %v is %v", c.pipeline.FullTopic(), base.MergeFunctionMappingKey, reflect.TypeOf(value))
+		}
 	}
 	return nil
 }
@@ -242,9 +256,9 @@ func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target 
 		target,
 		sourceId,
 		targetId,
-		c.mergeFunction,
+		c.getMergeFunction(),
 		c,
-		c.functionTimeout,
+		atomic.LoadUint32(&c.functionTimeoutMs),
 		recycler,
 	}
 	// Send to the larger conflict channel instead of ResolverSvc input channel so XMEM will not block
@@ -312,7 +326,7 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 						Req_size: source.Req.Size(),
 					}
 					c.RaiseEvent(common.NewEvent(common.MergeFailed, nil, c, nil, additionalInfo))
-					failureInfo := mergeFailureInfo{fmt.Sprintf("%s%s%s", base.UdTagBegin, string(v.Input.Source.Req.Key), base.UdTagEnd), v.Input.Source.Req.Cas, err.Error()}
+					failureInfo := mergeFailureInfo{fmt.Sprintf("%s%q%s", base.UdTagBegin, v.Input.Source.Req.Key, base.UdTagEnd), v.Input.Source.Req.Cas, err.Error()}
 					c.mapMtx.Lock()
 					c.failed_merge_docs[v.Input.MergeFunction] = append(c.failed_merge_docs[v.Input.MergeFunction], failureInfo)
 					c.mapMtx.Unlock()
@@ -576,7 +590,7 @@ func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byt
 	// TODO (MB-41808): data pool
 	mergedMvSlice := make([]byte, mvlen)
 	mergedPcasSlice := make([]byte, pcaslen)
-	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice, c.pruningWindow)
+	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice, time.Duration(atomic.LoadUint32(&c.pruningWindowSec))*time.Second)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom CR: failed to merge metadata for document key %s, error: %v source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
 			c.pipeline.FullTopic(), bytes.Trim(input.Source.Req.Key, "\x00"), err,
@@ -854,6 +868,18 @@ func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target 
 	}
 }
 
+func (c *ConflictManager) getMergeFunction() string {
+	c.mergeFuncMutex.RLock()
+	defer c.mergeFuncMutex.RUnlock()
+	return c.mergeFunction
+}
+
+func (c *ConflictManager) setMergeFunction(mergeFunc string) {
+	c.mergeFuncMutex.Lock()
+	defer c.mergeFuncMutex.Unlock()
+	c.mergeFunction = mergeFunc
+}
+
 func (c *ConflictManager) PrintStatusSummary() {
 	if c.pipeline.State() == common.Pipeline_Running {
 		var conflict_ch_avg float64 = 0
@@ -874,8 +900,9 @@ func (c *ConflictManager) PrintStatusSummary() {
 		if result_ch_sent > 0 {
 			result_ch_avg = float64(result_ch_waittime) / float64(result_ch_sent)
 		}
-		c.Logger().Infof("%v conflict_ch: wait %v (avg %v), len %v, sent %v; resolver: wait %v (avg %v), sent %v; result_ch: wait %v (avg %v), len %v, sent %v(setback: %v)",
+		c.Logger().Infof("%v mergeFunction: %v, conflict_ch: wait %v (avg %v), len %v, sent %v; resolver: wait %v (avg %v), sent %v; result_ch: wait %v (avg %v), len %v, sent %v(setback: %v)",
 			c.pipeline.FullTopic(),
+			c.getMergeFunction(),
 			conflict_ch_waittime, conflict_ch_avg, len(c.conflict_ch), conflict_ch_sent,
 			resolver_waittime, resolver_avg, resolver_sent,
 			result_ch_waittime, result_ch_avg, len(c.result_ch), result_ch_sent, atomic.LoadUint64(&c.counter_setback))

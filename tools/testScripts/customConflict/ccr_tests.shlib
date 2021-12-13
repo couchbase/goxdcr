@@ -89,20 +89,10 @@ function changeMergeFunctionsForAllReplications {
 			bucket2=${CLUSTER_NAME_BUCKET_MAP[$cluster2]}
 			if [[ "$cluster1" != "$cluster2" ]]; then
 				value="{\"default\":\"$mergeFunc\"}"
+				echo "setReplicationSettings $cluster1 $bucket1 $cluster2 $bucket2 mergeFunctionMapping=$value"
 				setReplicationSettings $cluster1 $bucket1 $cluster2 $bucket2 "mergeFunctionMapping=$value"
 				if (($? != 0)); then
 					echo "Failed: createBucketReplication $cluster1 $bucket1 $cluster2 $bucket2 CCRReplProperties"
-					exit 1
-				fi
-				pauseReplication $cluster1 $bucket1 $cluster2 $bucket2
-				if (($? != 0)); then
-					echo "Failed: pauseReplication $cluster1 $bucket1 $cluster2 $bucket2"
-					exit 1
-				fi
-				sleep 5
-				resumeReplication $cluster1 $bucket1 $cluster2 $bucket2
-				if (($? != 0)); then
-					echo "Failed: resumeReplication $cluster1 $bucket1 $cluster2 $bucket2"
 					exit 1
 				fi
 			fi

@@ -828,6 +828,10 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 	if ok {
 		xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = backfillSleepDelay
 	}
+	hlvPruningWindowSec, ok := settings[metadata.HlvPruningWindowKey]
+	if ok {
+		xmemSettings[parts.HLV_PRUNING_WINDOW] = hlvPruningWindowSec
+	}
 	return xmemSettings
 
 }
@@ -1410,6 +1414,9 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForService(pipeline common.Pipe
 	case *pipeline_svc.BandwidthThrottler:
 		xdcrf.logger.Debug("Construct update settings for BandwidthThrottler")
 		return xdcrf.constructUpdateSettingsForBandwidthThrottler(pipeline, settings)
+	case *pipeline_svc.ConflictManager:
+		xdcrf.logger.Debugf("Construct settings for ConflictManager")
+		return xdcrf.constructUpdateSettingsForConflictManager(pipeline, settings)
 	}
 	return settings, nil
 }
@@ -1494,6 +1501,23 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForBandwidthThrottler(pipeline 
 	number_of_source_nodes := settings[pipeline_svc.NUMBER_OF_SOURCE_NODES]
 	if number_of_source_nodes != nil {
 		s[pipeline_svc.NUMBER_OF_SOURCE_NODES] = number_of_source_nodes
+	}
+	return s, nil
+}
+
+func (xdcrf *XDCRFactory) constructUpdateSettingsForConflictManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
+	if xdcrf.logger.GetLogLevel() >= log.LogLevelDebug {
+		xdcrf.logger.Debugf("constructUpdateSettingsForConflictManager called with settings=%v\n", settings.CloneAndRedact())
+	}
+	s := make(metadata.ReplicationSettingsMap)
+	if hlvPruningWindow, ok := settings[base.HlvPruningWindowKey]; ok {
+		s[base.HlvPruningWindowKey] = hlvPruningWindow
+	}
+	if functionTimeout, ok := settings[base.JSFunctionTimeoutKey]; ok {
+		s[base.JSFunctionTimeoutKey] = functionTimeout
+	}
+	if mergeFunctionMapping, ok := settings[base.MergeFunctionMappingKey]; ok {
+		s[base.MergeFunctionMappingKey] = mergeFunctionMapping
 	}
 	return s, nil
 }

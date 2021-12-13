@@ -359,6 +359,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 	// perform live update on pipeline if qualifying settings have been changed
 	isOldReplHighPriority := rscl.resourceManager.IsReplHighPriority(topic, oldSettings.GetPriority())
 	isNewReplHighPriority := rscl.resourceManager.IsReplHighPriority(topic, newSettings.GetPriority())
+	oldMergeFuncMapping := oldSettings.GetMergeFunctionMapping()
+	newMergeFuncMapping := newSettings.GetMergeFunctionMapping()
 	if oldSettings.LogLevel != newSettings.LogLevel || oldSettings.CheckpointInterval != newSettings.CheckpointInterval ||
 		oldSettings.StatsInterval != newSettings.StatsInterval ||
 		oldSettings.OptimisticReplicationThreshold != newSettings.OptimisticReplicationThreshold ||
@@ -366,7 +368,10 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		isOldReplHighPriority != isNewReplHighPriority ||
 		oldSettings.GetExpDelMode() != newSettings.GetExpDelMode() ||
 		oldSettings.GetDevMainPipelineDelay() != newSettings.GetDevMainPipelineDelay() ||
-		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() {
+		oldSettings.GetJsFunctionTimeoutMs() != newSettings.GetJsFunctionTimeoutMs() ||
+		oldSettings.GetHlvPruningWindowSec() != newSettings.GetHlvPruningWindowSec() ||
+		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() ||
+		len(newMergeFuncMapping) > 0 && newMergeFuncMapping.SameAs(oldMergeFuncMapping) == false {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 

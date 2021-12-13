@@ -500,6 +500,7 @@ func TestEvaluatorError(t *testing.T) {
 	res, err = checkFunction(funcName)
 	assert.Nil(err)
 	assert.Equal(http.StatusOK, res)
+	opt[api.Timeout] = 3000 // 3s
 	result, fault := execute(funcName, opt, params)
 	fmt.Printf("funcName: %v \nresult: %v\nFault: %v\n", funcName, result, fault.Error())
 	assert.NotNil(fault)

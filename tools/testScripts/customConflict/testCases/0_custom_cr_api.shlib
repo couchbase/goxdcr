@@ -237,6 +237,7 @@ function mergeFunctionTimeoutTest {
 			fi
 		done
 	done
+	echo "Change all replication to use simpleMerge"
 	changeMergeFunctionsForAllReplications "simpleMerge"
 	if (($? != 0)); then
 		echo "failed to change merge functions to simpleMerge"

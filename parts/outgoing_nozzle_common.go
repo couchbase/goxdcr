@@ -88,14 +88,14 @@ type baseConfig struct {
 	//the maximum number of idle round that xmem can have
 	//exceeding this number indicate the possibility of stuck
 	//due to network issues
-	maxIdleCount       uint32
-	connPoolNamePrefix string
-	connPoolSize       int
-	connectStr         string
-	username           string
-	password           string
-	hlvPruningWindow   time.Duration
-	logger             *log.CommonLogger
+	maxIdleCount        uint32
+	connPoolNamePrefix  string
+	connPoolSize        int
+	connectStr          string
+	username            string
+	password            string
+	hlvPruningWindowSec uint32 // Interval for pruning PV in seconds
+	logger              *log.CommonLogger
 
 	devMainSendDelay     uint32
 	devBackfillSendDelay uint32
@@ -218,7 +218,7 @@ func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettings
 		config.optiRepThreshold = uint32(val.(int))
 	}
 	if val, ok := settings[HLV_PRUNING_WINDOW]; ok {
-		config.hlvPruningWindow = time.Duration(val.(int)) * time.Second
+		config.hlvPruningWindowSec = uint32(val.(int))
 	}
 }
 

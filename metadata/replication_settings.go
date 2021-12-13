@@ -907,6 +907,23 @@ func (s *ReplicationSettings) GetDevBackfillPipelineDelay() int {
 	return s.GetIntSettingValue(DevBackfillPipelineSendDelay)
 }
 
+func (s *ReplicationSettings) GetJsFunctionTimeoutMs() int {
+	return s.GetIntSettingValue(JSFunctionTimeoutKey)
+}
+
+func (s *ReplicationSettings) GetHlvPruningWindowSec() int {
+	return s.GetIntSettingValue(HlvPruningWindowKey)
+}
+
+func (s *ReplicationSettings) GetMergeFunctionMapping() base.MergeFunctionMappingType {
+	if value, ok := s.Values[MergeFunctionMappingKey]; ok {
+		if res, ok := value.(base.MergeFunctionMappingType); ok {
+			return res
+		}
+	}
+	return base.MergeFunctionMappingType{}
+}
+
 func (s *ReplicationSettings) NeedToRestartPipelineDueToCollectionModeChanges(other *ReplicationSettings) bool {
 	return s.GetCollectionModes() != other.GetCollectionModes()
 }
