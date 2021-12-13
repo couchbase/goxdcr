@@ -342,6 +342,10 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpointsDoc(replicationId string, c
 
 	errMap := make(base.ErrorMap)
 	for vbno, ckptDoc := range ckptDocs {
+		if ckptDoc == nil || ckptDoc.Len() == 0 {
+			continue
+		}
+
 		key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
 
 		ckpt_json, err := json.Marshal(ckptDoc)
