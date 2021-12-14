@@ -806,3 +806,173 @@ function dumpDebugInfoBeforeExit {
 		getGoHeap "$clusterName" >/tmp/$clusterName.hprof.log
 	done
 }
+
+function checkOpenSSL {
+	if (($(openssl version | grep -c "LibreSSL 2.8.3") == 1)); then
+		echo "Running this test requires brew version of openssl. Press brew install/upgrade openssl and link it to your bashProfile"
+		exit 1
+	fi
+}
+
+function setupCertsForTesting {
+	checkOpenSSL
+	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
+	# before below, store the ns_server absolute path
+	local nsServerDir="../../../../../../../ns_server/"
+	pushd $(pwd)
+	cd $nsServerDir
+	local nsServerDirAbsolute=$(pwd)
+	echo "ns_server directory: $nsServerDirAbsolute"
+	popd
+
+	pushd $(pwd)
+	local clusterName
+	cd /tmp/ || exit
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		# On the server to be certificate-protected, create working directories:
+		rm -rf servercertfiles_$clusterName
+		mkdir servercertfiles_$clusterName || exit
+		cd servercertfiles_$clusterName
+		mkdir -p {public,private,requests} || exit
+		# Create a private key for the cluster.
+		openssl genrsa -out ca.key 2048
+
+		# Create the certificate (that is, the file that will contain the public key) for the cluster. The certificate is
+		# intended to be self-signed, meaning that it will not be vouched for by any other authority. This means that it can
+		# be created directly, based on the existing private key ca.key, without assistance from a third party.
+		openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
+			-subj "/CN=Couchbase Root CA"
+		#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
+		# -subj "/CN=Couchbase Server"
+
+		# The lines below here will at least get some verification failure
+		#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
+		#  -subj "/C=UA/O=MyCompany/CN=MyCompanyRootCA"
+
+		CLUSTER_ROOT_CERTIFICATE_MAP["$clusterName"]=$(cat "ca.pem")
+
+		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+		local nodeDirIdx=$(echo "$port % 10" | bc)
+
+		#Create a private key for the individual node.
+		openssl genrsa -out private/couchbase.default.svc.key 2048
+
+		# Create a certificate signing request for the node certificate.
+		openssl req -new -key private/couchbase.default.svc.key \
+			-out requests/couchbase.default.svc.csr -subj "/CN=Couchbase Server"
+
+		# Define certificate extensions for the node.
+		#				cat >server.ext <<EOF
+		#[req]
+		#distinguished_name = cn_only
+		#x509_extensions = ca_ext
+		#[ cn_only ]
+		#commonName = Common Name (eg: your user, host, or server name)
+		#commonName_max = 64
+		#commonName_default = CA
+		#[ca_ext]
+		#basicConstraints = CA:TRUE
+		#subjectKeyIdentifier = hash
+		#authorityKeyIdentifier = keyid:always,issuer:always
+		#keyUsage = cRLSign, keyCertSign
+		#EOF
+
+		cat >server.ext <<EOF
+basicConstraints=CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage=serverAuth
+keyUsage = digitalSignature,keyEncipherment
+EOF
+
+		# Create a customized certificate extensions file, which adds per node constraints to the generic constraints already specified.
+		cp ./server.ext ./server.ext.tmp
+
+		echo "subjectAltName = IP:127.0.0.1" \
+			>>./server.ext.tmp
+
+		# Create the node certificate, applying the certificate and digital signature of the appropriate authority, and the
+		# customized extensions file for the node, to the materials in the signing request.
+		openssl x509 -CA ca.pem -CAkey ca.key -CAcreateserial -days 365 -req \
+			-in requests/couchbase.default.svc.csr \
+			-out public/couchbase.default.svc.pem \
+			-extfile server.ext.tmp
+
+		# Rename the node certificate and node private key.
+		local chainFileName="node${nodeDirIdx}_chain.pem"
+		local pKeyFileName="node${nodeDirIdx}_pkey.key"
+		cd ./public
+		mv couchbase.default.svc.pem $chainFileName
+		cd ../private
+		mv couchbase.default.svc.key $pKeyFileName
+		cd ..
+
+		# Deploy the node certificate and node private key.
+		local couchbaseDir="$nsServerDirAbsolute/data/n_${nodeDirIdx}/"
+		mkdir -p $couchbaseDir/inbox/ || exit
+		cp ./public/$chainFileName $couchbaseDir/inbox/chain.pem
+		cp ./private/$pKeyFileName $couchbaseDir/inbox/pkey.key
+		NODE_CERT_MAP["$clusterName"]="$PWD/public/$chainFileName"
+		NODE_KEY_MAP["$clusterName"]="$PWD/private/$pKeyFileName"
+
+		# Upload the root certificate for the cluster. Use the following REST command:
+		curl -X POST --data-binary "@./ca.pem" \
+			http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/controller/uploadClusterCA
+
+		# Reload the node certificate from disk, for the current node:
+		curl -X POST \
+			http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/node/controller/reloadCertificate
+
+		# currently still in the servercertfiles_CX
+		rm -rf clientcertfiles
+		mkdir clientcertfiles
+		cd clientcertfiles
+
+		# Create an extensions file for the use of all clients
+		cat >client.ext <<EOF
+basicConstraints = CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage = clientAuth
+keyUsage = digitalSignature
+EOF
+
+		cp ./client.ext ./client.ext.tmp
+
+		echo "subjectAltName = email:john.smith@mail.com" \
+			>>./client.ext.tmp
+
+		# Create a client private key.
+		openssl genrsa -out ./travel-sample.key 2048
+
+		# Generate the client-certificate signing-request.
+		openssl req -new -key ./travel-sample.key -out ./travel-sample.csr -subj "/CN=Administrator"
+
+		# Create the client certificate. In this example, the customized extensions file, client.ext.tmp, is used.
+		openssl x509 -CA ../ca.pem -CAkey ../ca.key \
+			-CAcreateserial -days 365 -req -in ./travel-sample.csr \
+			-out ./travel-sample.pem -extfile ./client.ext.tmp
+
+		local clientCertName="node${nodeDirIdx}_client.pem"
+		local clientKeyName="node${nodeDirIdx}_client.key"
+
+		mv travel-sample.pem $clientCertName
+		mv travel-sample.key $clientKeyName
+
+		CLIENT_CERT_MAP["$clusterName"]="$PWD/$clientCertName"
+		CLIENT_KEY_MAP["$clusterName"]="$PWD/$clientKeyName"
+
+		# Back to "root" directory before the server_certfiles...
+		cd ..
+	done
+
+	popd
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		echo "NODE CERT for $clusterName: ${NODE_CERT_MAP[$clusterName]}"
+		echo "NODE KEY for $clusterName: ${NODE_KEY_MAP[$clusterName]}"
+		echo "NODE CLIENT CERT for $clusterName: ${CLIENT_CERT_MAP[$clusterName]}"
+		echo "NODE CLIENT KEY for $clusterName: ${CLIENT_KEY_MAP[$clusterName]}"
+	done
+}
