@@ -381,6 +381,26 @@ function getInternalNodeXdcrLog {
 	cat $goxdcrLogFile
 }
 
+# Used only if the log needs to be clean for parsing purposes
+function clearInternalNodeXdcrLog {
+  	local clusterName=$1
+  	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+  	if [[ -z "$port" ]]; then
+  		echo "Invalid clustername $clusterName"
+  		return 1
+  	fi
+
+  	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+
+  	local goxdcrLogFile=${logfileDir}/goxdcr.log
+  	if ! [[ -f "$goxdcrLogFile" ]]; then
+  		echo "Unable to find file $goxdcrLogFile"
+  		return 1
+  	fi
+
+  echo "" > $goxdcrLogFile
+}
+
 function waitForOneReplicationToBeDeleted {
 	local clusterName=$1
 	local srcBucketName=$2
