@@ -600,9 +600,9 @@ function startEjectNode {
 	local optNodeNameStripped
 	local OLDIFS="$IFS"
 
-  IFS=$'\n'
+	IFS=$'\n'
 	for nodeInfo in $(echo "$nodesList"); do
-	  IFS="$OLDIFS"
+		IFS="$OLDIFS"
 		checkHostName=$(echo "$nodeInfo" | jq '.hostname' | sed 's/"//g')
 		if [[ "$checkHostName" == "$hostNameToLookFor" ]]; then
 			# Found it
