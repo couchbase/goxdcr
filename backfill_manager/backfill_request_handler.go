@@ -395,18 +395,32 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 	reqAndResp.HandleResponse = make(chan error, 1)
 	reqAndResp.PersistResponse = make(chan error, 1)
 
+	select {
+	case <-b.finCh:
+		return errorStopped
 	// goes to handleVBDone()
-	b.doneTaskCh <- reqAndResp
-	err := <-reqAndResp.HandleResponse
-	if err != nil {
-		if err == errorSyncDel {
-			// The backfill replication was deleted because this vb being done meant the every task was finished
-			err = nil
-		}
-		return err
+	case b.doneTaskCh <- reqAndResp:
 	}
 
-	return <-reqAndResp.PersistResponse
+	select {
+	case <-b.finCh:
+		return errorStopped
+	case err := <-reqAndResp.HandleResponse:
+		if err != nil {
+			if err == errorSyncDel {
+				// The backfill replication was deleted because this vb being done meant the every task was finished
+				err = nil
+			}
+			return err
+		}
+	}
+	select {
+	case <-b.finCh:
+		return errorStopped
+	case err := <-reqAndResp.PersistResponse:
+		return err
+	}
+	return nil
 }
 
 func (b *BackfillRequestHandler) getVBs() []uint16 {
