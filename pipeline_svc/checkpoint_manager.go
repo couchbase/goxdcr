@@ -979,6 +979,9 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		if ckmgr.IsStopped() {
 			return ckptMgrStopped
 		}
+		if ckptDoc == nil {
+			continue
+		}
 		if !base.IsVbInList(vbno, listOfVbs) {
 			// Need to compose an idempotent gc function to clean up VB not owned by this node after some time
 			// Keep the checkpoint around in case peer nodes will need it
