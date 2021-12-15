@@ -383,22 +383,22 @@ function getInternalNodeXdcrLog {
 
 # Used only if the log needs to be clean for parsing purposes
 function clearInternalNodeXdcrLog {
-  	local clusterName=$1
-  	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-  	if [[ -z "$port" ]]; then
-  		echo "Invalid clustername $clusterName"
-  		return 1
-  	fi
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
 
-  	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
+	local logfileDir=$(getInternalNsServerLogDir "$clusterName")
 
-  	local goxdcrLogFile=${logfileDir}/goxdcr.log
-  	if ! [[ -f "$goxdcrLogFile" ]]; then
-  		echo "Unable to find file $goxdcrLogFile"
-  		return 1
-  	fi
+	local goxdcrLogFile=${logfileDir}/goxdcr.log
+	if ! [[ -f "$goxdcrLogFile" ]]; then
+		echo "Unable to find file $goxdcrLogFile"
+		return 1
+	fi
 
-  echo "" > $goxdcrLogFile
+	echo "" >$goxdcrLogFile
 }
 
 function waitForOneReplicationToBeDeleted {
@@ -848,7 +848,6 @@ function setupCertsForTesting {
 	pushd $(pwd)
 	local clusterName
 	cd /tmp/ || exit
-
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		# On the server to be certificate-protected, create working directories:
 		rm -rf servercertfiles_$clusterName
@@ -983,6 +982,8 @@ EOF
 		CLIENT_CERT_MAP["$clusterName"]="$PWD/$clientCertName"
 		CLIENT_KEY_MAP["$clusterName"]="$PWD/$clientKeyName"
 
+		# Back to clientcertfiles
+		cd ..
 		# Back to "root" directory before the server_certfiles...
 		cd ..
 	done

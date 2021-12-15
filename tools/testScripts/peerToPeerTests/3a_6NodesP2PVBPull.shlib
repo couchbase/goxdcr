@@ -277,7 +277,7 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-  # These tests require a clean log
+	# These tests require a clean log
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		clearInternalNodeXdcrLog "$clusterName"
 	done
