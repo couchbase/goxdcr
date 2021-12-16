@@ -170,6 +170,7 @@ type DataSentEventAdditional struct {
 	VBucket        uint16
 	Req_size       int
 	ManifestId     uint64
+	FailedTargetCR bool
 }
 
 type DataFilteredAdditional struct {

@@ -2752,6 +2752,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						Commit_time:    committing_time,
 						Resp_wait_time: resp_wait_time,
 						ManifestId:     manifestId,
+						FailedTargetCR: base.IsEExistsError(response.Status),
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 

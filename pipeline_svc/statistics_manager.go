@@ -42,7 +42,7 @@ const (
 var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_METRIC, service_def.DOCS_MERGED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.DOCS_FILTERED_METRIC,
 	service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC, service_def.RATE_REPLICATED_METRIC,
 	service_def.BANDWIDTH_USAGE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC, service_def.MERGE_LATENCY_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC}
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC}
 
 // stats to clear when replications are paused
 // 1. all rate type stats
@@ -62,7 +62,8 @@ var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.D
 	service_def.RESP_WAIT_METRIC, service_def.META_LATENCY_METRIC, service_def.DCP_DISPATCH_TIME_METRIC, service_def.DCP_DATACH_LEN, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC,
 	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC, service_def.GET_DOC_LATENCY_METRIC,
 	service_def.DOCS_MERGED_METRIC, service_def.DATA_MERGED_METRIC, service_def.EXPIRY_DOCS_MERGED_METRIC, service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC}
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC,
+}
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
 
@@ -1243,6 +1244,16 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.DELETION_FAILED_CR_SOURCE_METRIC, deletion_failed_cr)
 		set_failed_cr := metrics.NewCounter()
 		registry.Register(service_def.SET_FAILED_CR_SOURCE_METRIC, set_failed_cr)
+		docs_failed_cr_target := metrics.NewCounter()
+		registry.Register(service_def.DOCS_FAILED_CR_TARGET_METRIC, docs_failed_cr_target)
+		add_failed_cr_target := metrics.NewCounter()
+		registry.Register(service_def.ADD_FAILED_CR_TARGET_METRIC, add_failed_cr_target)
+		expiry_failed_cr_target := metrics.NewCounter()
+		registry.Register(service_def.EXPIRY_FAILED_CR_TARGET_METRIC, expiry_failed_cr_target)
+		deletion_failed_cr_target := metrics.NewCounter()
+		registry.Register(service_def.DELETION_FAILED_CR_TARGET_METRIC, deletion_failed_cr_target)
+		set_failed_cr_target := metrics.NewCounter()
+		registry.Register(service_def.SET_FAILED_CR_TARGET_METRIC, set_failed_cr_target)
 		target_docs_skipped := metrics.NewCounter()
 		registry.Register(service_def.TARGET_DOCS_SKIPPED_METRIC, target_docs_skipped)
 		expiry_target_docs_skipped := metrics.NewCounter()
@@ -1286,6 +1297,11 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.EXPIRY_FAILED_CR_SOURCE_METRIC] = expiry_failed_cr
 		metric_map[service_def.DELETION_FAILED_CR_SOURCE_METRIC] = deletion_failed_cr
 		metric_map[service_def.SET_FAILED_CR_SOURCE_METRIC] = set_failed_cr
+		metric_map[service_def.DOCS_FAILED_CR_TARGET_METRIC] = docs_failed_cr_target
+		metric_map[service_def.ADD_FAILED_CR_TARGET_METRIC] = add_failed_cr_target
+		metric_map[service_def.DELETION_FAILED_CR_TARGET_METRIC] = deletion_failed_cr_target
+		metric_map[service_def.EXPIRY_FAILED_CR_TARGET_METRIC] = expiry_failed_cr_target
+		metric_map[service_def.SET_FAILED_CR_TARGET_METRIC] = set_failed_cr_target
 		metric_map[service_def.TARGET_DOCS_SKIPPED_METRIC] = target_docs_skipped
 		metric_map[service_def.EXPIRY_TARGET_DOCS_SKIPPED_METRIC] = expiry_target_docs_skipped
 		metric_map[service_def.DELETION_TARGET_DOCS_SKIPPED_METRIC] = deletion_target_docs_skipped
@@ -1349,19 +1365,33 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		if opti_replicated {
 			metric_map[service_def.DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
 		}
-
+		if event_otherInfo.FailedTargetCR {
+			metric_map[service_def.DOCS_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+		}
 		expiry_set := event_otherInfo.IsExpirySet
 		if expiry_set {
 			metric_map[service_def.EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			if event_otherInfo.FailedTargetCR {
+				metric_map[service_def.EXPIRY_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+			}
 		}
 
 		req_opcode := event_otherInfo.Opcode
 		if req_opcode == base.DELETE_WITH_META {
 			metric_map[service_def.DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			if event_otherInfo.FailedTargetCR {
+				metric_map[service_def.DELETION_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+			}
 		} else if req_opcode == base.SET_WITH_META {
 			metric_map[service_def.SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			if event_otherInfo.FailedTargetCR {
+				metric_map[service_def.SET_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+			}
 		} else if req_opcode == base.ADD_WITH_META {
 			metric_map[service_def.ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			if event_otherInfo.FailedTargetCR {
+				metric_map[service_def.ADD_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+			}
 		} else {
 			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id())
 		}

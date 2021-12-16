@@ -65,10 +65,19 @@ const (
 	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
-	DOCS_FAILED_CR_SOURCE_METRIC        = "docs_failed_cr_source"
-	EXPIRY_FAILED_CR_SOURCE_METRIC      = "expiry_failed_cr_source"
-	DELETION_FAILED_CR_SOURCE_METRIC    = "deletion_failed_cr_source"
-	SET_FAILED_CR_SOURCE_METRIC         = "set_failed_cr_source"
+	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
+	EXPIRY_FAILED_CR_SOURCE_METRIC   = "expiry_failed_cr_source"
+	DELETION_FAILED_CR_SOURCE_METRIC = "deletion_failed_cr_source"
+	SET_FAILED_CR_SOURCE_METRIC      = "set_failed_cr_source"
+
+	// the number of add/set/delete/expire that failed conflict resolution on the target cluster side
+	DOCS_FAILED_CR_TARGET_METRIC     = "docs_failed_cr_target"
+	ADD_FAILED_CR_TARGET_METRIC      = "add_failed_cr_target"
+	DELETION_FAILED_CR_TARGET_METRIC = "deletion_failed_cr_target"
+	EXPIRY_FAILED_CR_TARGET_METRIC   = "expiry_failed_cr_target"
+	SET_FAILED_CR_TARGET_METRIC      = "set_failed_cr_target"
+
+	// for Custom CR, document skipped because they originate from target
 	TARGET_DOCS_SKIPPED_METRIC          = "target_docs_skipped"
 	EXPIRY_TARGET_DOCS_SKIPPED_METRIC   = "expiry_target_docs_skipped"
 	DELETION_TARGET_DOCS_SKIPPED_METRIC = "deletion_target_docs_skipped"
@@ -265,6 +274,12 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	EXPIRY_FAILED_CR_SOURCE_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that specifically had expiry flag set"},
 	DELETION_FAILED_CR_SOURCE_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that were delete operations"},
 	SET_FAILED_CR_SOURCE_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that failed source-side conflict resolution that were set operations"},
+
+	DOCS_FAILED_CR_TARGET_METRIC:     StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents failed conflict resolution at target cluster"},
+	ADD_FAILED_CR_TARGET_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of ADD failed conflict resolution at target cluster"},
+	DELETION_FAILED_CR_TARGET_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of DELETE failed conflict resolution at target cluster"},
+	EXPIRY_FAILED_CR_TARGET_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of EXPIRE failed conflict resolution at target cluster"},
+	SET_FAILED_CR_TARGET_METRIC:      StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of SET failed conflict resolution at target cluster"},
 
 	TARGET_DOCS_SKIPPED_METRIC:          StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents that was not replicated to the target because they originated from the target"},
 	EXPIRY_TARGET_DOCS_SKIPPED_METRIC:   StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Subset of the number of documents that originated from the target that specifically had expiry flag set"},
