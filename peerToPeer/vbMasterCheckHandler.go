@@ -449,7 +449,6 @@ func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *
 		*errPtr = fmt.Errorf("Nil doc when loading brokenMapping")
 		return
 	}
-	fmt.Printf("NEIL DEBUG loaded doc %v\n", loadedDoc)
 	*mappingDoc = *loadedDoc
 }
 

@@ -201,7 +201,6 @@ function runReplicationResume {
 	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
 	if (($resumeLoadBrokenMapCnt == 0)); then
 		echo "C1P did not load broken map from checkpoint migration"
-		read -p "NEIL DEBUG here"
 		exit 1
 	fi
 

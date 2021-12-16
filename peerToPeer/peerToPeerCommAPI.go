@@ -83,13 +83,16 @@ func (p2p *P2pCommAPIimpl) P2PReceive(req ReqRespCommon) (HandlerResult, error) 
 	receiveCh, found := p2p.receiveChs[reqType]
 	if !found {
 		result.Err = ErrorInvalidOpcode
+		result.HttpStatusCode = http.StatusInternalServerError
 		return result, ErrorInvalidOpcode
 	}
 
 	select {
 	case receiveCh <- req:
+		result.HttpStatusCode = http.StatusOK
 		return result, nil
 	default:
+		result.HttpStatusCode = http.StatusInternalServerError
 		result.Err = ErrorReceiveChanFull
 	}
 
@@ -118,6 +121,10 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
 	var out interface{}
 	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, nil, nil, base.MethodPost, base.JsonContentType,
 		payload, base.P2PCommTimeout, &out, nil, false, nil)
+	// utils returns this error because body is empty, which is fine
+	if err == base.ErrorResourceDoesNotExist {
+		err = nil
+	}
 	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
 	return result, err
 }

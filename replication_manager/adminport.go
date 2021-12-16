@@ -1386,7 +1386,7 @@ func (adminport *Adminport) checkAndRejectChunkedEncoding(request *http.Request)
 }
 
 func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Debugf("doPostPeerToPeerRequest")
+	logger_ap.Infof("doPostPeerToPeerRequest from %v", request.Host)
 	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
@@ -1399,7 +1399,8 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 
 	handlerResult, err := adminport.p2pAPI.P2PReceive(req)
 	if err != nil {
-		return response, err
+		adminport.Logger().Errorf("P2PReceive resulted in err %v", err)
+		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
-	return EncodeObjectIntoResponse(handlerResult)
+	return EncodeObjectIntoResponseWithStatusCode(handlerResult.GetError(), handlerResult.GetHttpStatusCode())
 }

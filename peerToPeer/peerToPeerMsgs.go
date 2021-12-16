@@ -332,6 +332,10 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false,
 			"", "", authMech, certificates, true, nil, nil,
 			base.MethodPost, base.JsonContentType, payload, base.P2PCommTimeout, &out, nil, false, nil)
+		// utils returns this error because body is empty, which is fine
+		if err == base.ErrorResourceDoesNotExist {
+			err = nil
+		}
 		result := &HandlerResultImpl{
 			Err:            err,
 			HttpStatusCode: statusCode,
