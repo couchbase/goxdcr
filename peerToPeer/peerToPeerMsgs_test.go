@@ -11,10 +11,12 @@ package peerToPeer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
+	"strings"
 	"testing"
 )
 
@@ -268,7 +270,6 @@ func TestPeriodicPushSendPktCorners(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestPeriodicPushSendPktCorners =================")
 	assert := assert.New(t)
 
-	//func (v *VBPeriodicReplicateReq) PreSerlialize() error {
 	nilPreReq := &VBPeriodicReplicateReq{}
 	assert.Nil(nilPreReq.PreSerlialize())
 	nilPreReq.PostSerialize()
@@ -288,4 +289,22 @@ func TestPeriodicPushSendPktCorners(t *testing.T) {
 	assert.Nil(err)
 
 	assert.Nil(json.Unmarshal(data, &checkReq))
+}
+
+func TestInvalidSnappyPacket(t *testing.T) {
+	fmt.Println("============== Test case start: TestInvalidSnappyPacket =================")
+	defer fmt.Println("============== Test case end: TestInvalidSnappyPacket =================")
+	assert := assert.New(t)
+
+	failedPacketFile := "./testdata/failedPacket.json"
+	failedPacketBytes, err := ioutil.ReadFile(failedPacketFile)
+	if err != nil {
+		panic(err)
+	}
+	failedPacket := &VBMasterCheckResp{}
+	err = failedPacket.DeSerialize(failedPacketBytes)
+	assert.Nil(err)
+
+	assert.NotEqual("", failedPacket.GetErrorString())
+	assert.True(strings.Contains(failedPacket.GetErrorString(), base.ErrorDoesNotExistString))
 }

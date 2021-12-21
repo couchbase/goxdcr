@@ -66,6 +66,7 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 	backfillReplSvc.On("BackfillReplSpec", replId).Return(backfillSpec, nil)
 
 	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
+	utils.On("ExponentialBackoffExecutor", "VBMasterCheckHandler.GetSpecDelNotification", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	replSpecSvc.On("ReplicationSpecReadOnly", mock.Anything).Return(spec, nil)
 }

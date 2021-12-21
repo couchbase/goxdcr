@@ -294,8 +294,14 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 			return nil, fmt.Errorf("respVBMastChk deSerialize err: %v", err)
 		}
 		if len(resp.PayloadCompressed) > 0 && len(*resp.payload) == 0 {
-			return nil, fmt.Errorf("respVBMasterChk from %v for %v - %v has payloadCompressed but no payload after deserialization",
-				resp.Sender, resp.ReplicationSpecId, resp.InternalSpecId)
+			if resp.GetErrorString() != "" {
+				// There was an error - clear the payload
+				resp.PayloadCompressed = nil
+				resp.payload = nil
+			} else {
+				return nil, fmt.Errorf("respVBMasterChk from %v for %v - %v has payloadCompressed but no payload after deserialization",
+					resp.Sender, resp.ReplicationSpecId, resp.InternalSpecId)
+			}
 		}
 		return resp, nil
 	case ReqPeriodicPush:

@@ -222,6 +222,10 @@ function runTestCase {
 	runOneRebalanceCycle 1 1
 	runReplicationResume
 
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
+	done
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

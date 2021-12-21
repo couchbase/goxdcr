@@ -275,6 +275,10 @@ function runTestCase {
 	runOneReplicationCycleAndPause
 	runReplicationResume
 
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
+	done
+
 	#monitorP2PError &
 	# Pick a random node to eject
 	echo "Picking a random node to eject:"

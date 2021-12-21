@@ -432,6 +432,7 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap, PeerNod
 	// Need to convert back to errorMap
 	errMap := make(base.ErrorMap)
 	for k, v := range retErrMap {
+		// It is possible that a peer node doesn't have
 		if v.err != nil {
 			errMap[k] = v.err
 		}

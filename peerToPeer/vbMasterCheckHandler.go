@@ -64,13 +64,25 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
-	finCh, existsErr := h.GetSpecDelNotification(req.ReplicationId, req.InternalSpecId)
-	if existsErr != nil {
-		err := fmt.Errorf("VB master check request from %v with specID %v internalID %v does not exist", req.GetSender(), req.ReplicationId, req.InternalSpecId)
-		h.logger.Errorf(err.Error())
+	// It is possible that a peer node has received a spec and is running VBMasterCheck
+	// when this node hasn't even gotten the spec set up yet from metakv
+	// Retry for a max of 3 seconds
+	var finCh chan bool
+	var getFinChError error
+	retryFunc := func() error {
+		var existsErr error
+		finCh, existsErr = h.GetSpecDelNotification(req.ReplicationId, req.InternalSpecId)
+		if existsErr != nil {
+			existsErr = fmt.Errorf("VB master check request from %v with specID %v internalID %v does not exist", req.GetSender(), req.ReplicationId, req.InternalSpecId)
+		}
+		return existsErr
+	}
+	getFinChError = h.utils.ExponentialBackoffExecutor("VBMasterCheckHandler.GetSpecDelNotification", base.BucketInfoOpWaitTime,
+		base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, retryFunc)
+	if getFinChError != nil {
 		resp := req.GenerateResponse().(*VBMasterCheckResp)
 		resp.Init()
-		resp.ErrorString = err.Error()
+		resp.ErrorString = getFinChError.Error()
 		req.CallBack(resp)
 		return
 	}
@@ -331,6 +343,9 @@ func (v *VBMasterCheckHandler) handleResponse(resp *VBMasterCheckResp) {
 		v.logger.Errorf("VBMasterCheckHandler Unable to find opaque %v", resp.GetOpaque())
 		// Unable to find opaque means the original request has timed out
 		return
+	}
+	if resp.GetErrorString() != "" {
+		v.logger.Warnf("%v", resp.GetErrorString())
 	}
 	if retCh != nil {
 		retPair := ReqRespPair{
