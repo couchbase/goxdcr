@@ -682,15 +682,14 @@ func (v *VBTasksMapType) AllStartsWithSeqno0() bool {
 		tasks.mutex.RLock()
 		for _, task := range tasks.List {
 			task.mutex.RLock()
-			if task.Timestamps == nil || task.Timestamps.StartingTimestamp == nil {
-				// Very odd
-				continue
-			}
-			if task.Timestamps.StartingTimestamp.Seqno > 0 {
+
+			if task.Timestamps != nil && task.Timestamps.StartingTimestamp != nil &&
+				task.Timestamps.StartingTimestamp.Seqno > 0 {
 				task.mutex.RUnlock()
 				tasks.mutex.RUnlock()
 				return false
 			}
+
 			task.mutex.RUnlock()
 		}
 		tasks.mutex.RUnlock()
