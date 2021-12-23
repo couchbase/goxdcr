@@ -170,6 +170,8 @@ type CheckpointManager struct {
 
 	bucketTopologySvc service_def.BucketTopologySvc
 
+	getHighSeqnoAndVBUuidFromTargetCh chan bool
+
 	// Only used to bypass all the un-mockable RPC calls
 	unitTest bool
 }
@@ -297,39 +299,40 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	logger := log.NewLogger("CheckpointMgr", logger_ctx)
 
 	return &CheckpointManager{
-		AbstractComponent:         component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
-		pipeline:                  nil,
-		checkpoints_svc:           checkpoints_svc,
-		capi_svc:                  capi_svc,
-		rep_spec_svc:              rep_spec_svc,
-		remote_cluster_svc:        remote_cluster_svc,
-		xdcr_topology_svc:         xdcr_topology_svc,
-		through_seqno_tracker_svc: through_seqno_tracker_svc,
-		finish_ch:                 make(chan bool, 1),
-		checkpoint_ticker_ch:      make(chan *time.Ticker, 1000),
-		logger:                    logger,
-		cur_ckpts:                 make(map[uint16]*checkpointRecordWithLock),
-		active_vbs:                active_vbs,
-		target_username:           target_username,
-		target_password:           target_password,
-		target_bucket_name:        target_bucket_name,
-		target_kv_vb_map:          target_kv_vb_map,
-		wait_grp:                  &sync.WaitGroup{},
-		failoverlog_map:           make(map[uint16]*failoverlogWithLock),
-		snapshot_history_map:      make(map[uint16]*snapshotHistoryWithLock),
-		kv_mem_clients:            make(map[string]mcc.ClientIface),
-		target_cluster_ref:        target_cluster_ref,
-		utils:                     utilsIn,
-		statsMgr:                  statsMgr,
-		uiLogSvc:                  uiLogSvc,
-		collectionsManifestSvc:    collectionsManifestSvc,
-		backfillStartingTs:        make(map[uint16]*base.VBTimestamp),
-		backfillEndingTs:          make(map[uint16]*base.VBTimestamp),
-		backfillReplSvc:           backfillReplSvc,
-		getBackfillMgr:            getBackfillMgr,
-		checkpointAllowedHelper:   newCheckpointSyncHelper(),
-		bucketTopologySvc:         bucketTopologySvc,
-		initConnDone:              make(chan bool),
+		AbstractComponent:                 component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
+		pipeline:                          nil,
+		checkpoints_svc:                   checkpoints_svc,
+		capi_svc:                          capi_svc,
+		rep_spec_svc:                      rep_spec_svc,
+		remote_cluster_svc:                remote_cluster_svc,
+		xdcr_topology_svc:                 xdcr_topology_svc,
+		through_seqno_tracker_svc:         through_seqno_tracker_svc,
+		finish_ch:                         make(chan bool, 1),
+		checkpoint_ticker_ch:              make(chan *time.Ticker, 1000),
+		logger:                            logger,
+		cur_ckpts:                         make(map[uint16]*checkpointRecordWithLock),
+		active_vbs:                        active_vbs,
+		target_username:                   target_username,
+		target_password:                   target_password,
+		target_bucket_name:                target_bucket_name,
+		target_kv_vb_map:                  target_kv_vb_map,
+		wait_grp:                          &sync.WaitGroup{},
+		failoverlog_map:                   make(map[uint16]*failoverlogWithLock),
+		snapshot_history_map:              make(map[uint16]*snapshotHistoryWithLock),
+		kv_mem_clients:                    make(map[string]mcc.ClientIface),
+		target_cluster_ref:                target_cluster_ref,
+		utils:                             utilsIn,
+		statsMgr:                          statsMgr,
+		uiLogSvc:                          uiLogSvc,
+		collectionsManifestSvc:            collectionsManifestSvc,
+		backfillStartingTs:                make(map[uint16]*base.VBTimestamp),
+		backfillEndingTs:                  make(map[uint16]*base.VBTimestamp),
+		backfillReplSvc:                   backfillReplSvc,
+		getBackfillMgr:                    getBackfillMgr,
+		checkpointAllowedHelper:           newCheckpointSyncHelper(),
+		bucketTopologySvc:                 bucketTopologySvc,
+		initConnDone:                      make(chan bool),
+		getHighSeqnoAndVBUuidFromTargetCh: make(chan bool, 1),
 	}, nil
 }
 
@@ -532,6 +535,8 @@ func (ckmgr *CheckpointManager) initialize() {
 	ckmgr.cachedBrokenMap.lock.Lock()
 	ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
 	ckmgr.cachedBrokenMap.lock.Unlock()
+
+	ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
 }
 
 var ckmgrIterationId uint32
@@ -664,13 +669,29 @@ func (ckmgr *CheckpointManager) closeConnections() {
 
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool) map[uint16][]uint64 {
 	ckmgr.waitForInitConnDone()
-	ckmgr.kv_mem_clients_lock.Lock()
-	defer ckmgr.kv_mem_clients_lock.Unlock()
+
+	// get singular access to run to prevent concurrent calls into this function
+	<-ckmgr.getHighSeqnoAndVBUuidFromTargetCh
+	defer func() {
+		ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
+	}()
+
+	serverClientStatsMap := make(map[string]base.StringStringMap)
+	var serverClientStatsMapMtx sync.RWMutex
+	var waitGrp sync.WaitGroup
+	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
+		waitGrp.Add(1)
+		go ckmgr.getTargetKVStatsMapWithRetry(serverAddr, vbnos, fin_ch, serverClientStatsMap, &serverClientStatsMapMtx, &waitGrp)
+	}
+	waitGrp.Wait()
 
 	// A map of vbucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid in that order
 	high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
 	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
-		ckmgr.getHighSeqnoAndVBUuidForServerWithRetry(serverAddr, vbnos, high_seqno_and_vbuuid_map, fin_ch)
+		if _, found := serverClientStatsMap[serverAddr]; !found {
+			continue
+		}
+		ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], high_seqno_and_vbuuid_map)
 	}
 	ckmgr.logger.Infof("high_seqno_and_vbuuid_map=%v\n", high_seqno_and_vbuuid_map)
 	return high_seqno_and_vbuuid_map
@@ -678,12 +699,16 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool
 
 // checkpointing cannot be done without high seqno and vbuuid from target
 // if retrieval of such stats fails, retry
-func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAddr string, vbnos []uint16, high_seqno_and_vbuuid_map map[uint16][]uint64, fin_ch chan bool) {
+func (ckmgr *CheckpointManager) getTargetKVStatsMapWithRetry(serverAddr string, vbnos []uint16, fin_ch chan bool,
+	serverClientStatsMap map[string]base.StringStringMap, serverClientStatsMapMtx *sync.RWMutex, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
 	var stats_map map[string]string
 
 	statMapOp := func(param interface{}) (interface{}, error) {
 		var err error
+		ckmgr.kv_mem_clients_lock.RLock()
 		client, ok := ckmgr.kv_mem_clients[serverAddr]
+		ckmgr.kv_mem_clients_lock.RUnlock()
 		if !ok {
 			// memcached connection may have been closed in previous retries. create a new one
 			client, err = ckmgr.getNewMemcachedClient(serverAddr, false /*initializing*/)
@@ -691,7 +716,9 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 				ckmgr.logger.Warnf("%v %v Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), serverAddr, vbnos)
 				return nil, err
 			} else {
+				ckmgr.kv_mem_clients_lock.Lock()
 				ckmgr.kv_mem_clients[serverAddr] = client
+				ckmgr.kv_mem_clients_lock.Unlock()
 			}
 		}
 
@@ -702,7 +729,9 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 			if clientCloseErr != nil {
 				ckmgr.logger.Warnf("%v %v error from closing connection for %v is %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), serverAddr, err)
 			}
+			ckmgr.kv_mem_clients_lock.Lock()
 			delete(ckmgr.kv_mem_clients, serverAddr)
+			ckmgr.kv_mem_clients_lock.Unlock()
 		}
 		return nil, err
 	}
@@ -714,7 +743,9 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidForServerWithRetry(serverAd
 		ckmgr.logger.Errorf("%v %v Retrieval of high seqno and vbuuid stats failed after %v retries. serverAddr=%v, vbnos=%v\n",
 			ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), base.MaxRemoteMcRetry, serverAddr, vbnos)
 	} else {
-		ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, stats_map, high_seqno_and_vbuuid_map)
+		serverClientStatsMapMtx.Lock()
+		serverClientStatsMap[serverAddr] = stats_map
+		serverClientStatsMapMtx.Unlock()
 	}
 }
 
