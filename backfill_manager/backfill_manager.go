@@ -785,7 +785,7 @@ func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string) (
 	maxSeqnoMap := make(map[uint16]uint64)
 
 	for vb, ckptDoc := range ckptDocs {
-		if ckptDoc.SpecInternalId != internalId {
+		if ckptDoc == nil || ckptDoc.SpecInternalId != internalId {
 			continue
 		}
 		var maxSeqno uint64
