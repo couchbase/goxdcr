@@ -3060,8 +3060,8 @@ func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.Checkp
 		if ckptDoc == nil || ckptDoc.Len() == 0 {
 			continue
 		}
-		_, exists := currDocs[vb]
-		if !exists {
+		docs, exists := currDocs[vb]
+		if !exists || docs == nil {
 			currDocs[vb] = metadata.NewCheckpointsDoc(spec.InternalId)
 		}
 	}
@@ -3070,7 +3070,7 @@ func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.Checkp
 	// with what is incoming and filtered, to consolidate into a full list of checkpoints
 	for vb, ckptDoc := range currDocs {
 		_, exists := filteredMap[vb]
-		if !exists {
+		if !exists || ckptDoc == nil {
 			continue
 		}
 
