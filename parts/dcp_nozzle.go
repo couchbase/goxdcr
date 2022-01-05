@@ -273,7 +273,8 @@ type DcpNozzle struct {
 
 	// the list of vbuckets that the dcp nozzle is responsible for
 	// this allows multiple  dcp nozzles to be created for a kv node
-	vbnos []uint16
+	vbnosLock sync.RWMutex
+	vbnos     []uint16
 
 	backfillTasksVbnosParseOnce sync.Once
 	backfillTasksVbnos          []uint16
@@ -373,6 +374,7 @@ func NewDcpNozzle(id string,
 	dcp := &DcpNozzle{
 		sourceBucketName:         sourceBucketName,
 		targetBucketName:         targetBucketName,
+		vbnosLock:                sync.RWMutex{},
 		vbnos:                    vbnos,
 		AbstractPart:             part, /*AbstractPart*/
 		bOpen:                    true, /*bOpen	bool*/
@@ -635,7 +637,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 		outputEndSeqnoMap := make(map[uint16]uint64)
 		dcp.specificVBTasks.GetLock().RLock()
-		originalVBsSorted := base.SortUint16List(dcp.vbnos)
+		originalVBsSorted := base.SortUint16List(dcp.ResponsibleVBs())
 		var replacementVbnos []uint16
 		for vb, vbTasks := range dcp.specificVBTasks.VBTasksMap {
 			if _, vbIsResponsible := base.SearchUint16List(originalVBsSorted, vb); !vbIsResponsible {
@@ -677,7 +679,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 			for _, vbRemoved := range removed {
 				go dcp.RaiseEvent(common.NewEvent(common.StreamingBypassed, vbRemoved, dcp, nil, nil))
 			}
-			dcp.vbnos = replacementVbnos
+			dcp.setResponsibleVBs(replacementVbnos)
 		}
 		dcp.specificVBTasks.GetLock().RUnlock()
 
@@ -1297,10 +1299,9 @@ func (dcp *DcpNozzle) startUprStreams() error {
 		case <-dcp.finch:
 			goto done
 		case <-init_ch:
-			// dcp.GetVBList() returns the original vb list in dcp.
-			// hence a copy is needed when the list needs to be modified
+			// dcp.ResponsibleVBs() returns a copy so it is safe to use
 			vbsList = dcp.ResponsibleVBs()
-			err = dcp.startUprStreams_internal(base.DeepCopyUint16Array(vbsList))
+			err = dcp.startUprStreams_internal(vbsList)
 			if err != nil {
 				return err
 			}
@@ -1911,7 +1912,21 @@ func (dcp *DcpNozzle) getDcpDataChanLen() {
 
 // This should be used for externally
 func (dcp *DcpNozzle) ResponsibleVBs() []uint16 {
-	return dcp.vbnos
+	state := dcp.State()
+	if state == common.Part_Initial || state == common.Part_Starting {
+		dcp.vbnosLock.RLock()
+		retlist := base.DeepCopyUint16Array(dcp.vbnos)
+		dcp.vbnosLock.RUnlock()
+		return retlist
+	} else {
+		return dcp.vbnos
+	}
+}
+
+func (dcp *DcpNozzle) setResponsibleVBs(vbnos []uint16) {
+	dcp.vbnosLock.Lock()
+	dcp.vbnos = vbnos
+	dcp.vbnosLock.Unlock()
 }
 
 func (dcp *DcpNozzle) checkDefaultCollectionExistence() error {
@@ -2037,7 +2052,8 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 				return fmt.Errorf("Unable to GetAllVbSeqnos %v\n", err)
 			}
 
-			for _, vb := range dcp.vbnos {
+			vblist := dcp.ResponsibleVBs()
+			for _, vb := range vblist {
 				highSeqno, exists := vbSeqnoMap[vb]
 				if !exists {
 					dcp.Logger().Warnf("DCP VBHighSeqno for colID %v did not return vb %v", collectionId, vb)
