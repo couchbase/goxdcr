@@ -654,7 +654,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 				replacementVbnos = append(replacementVbnos, vb)
 				vbTasks.GetLock().RLock()
 				for _, task := range vbTasks.List {
-					requestedCollections, unlockFunc := task.RequestedCollections(false)
+					requestedCollections, unlockFunc2 := task.RequestedCollections(false)
 					for _, colNsMapping := range requestedCollections {
 						for srcMapping, _ := range colNsMapping {
 							if !atLeastOneMigrationTask && srcMapping.GetType() == metadata.SourceDefaultCollectionFilter {
@@ -665,7 +665,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 							}
 						}
 					}
-					unlockFunc()
+					unlockFunc2()
 				}
 				vbTasks.GetLock().RUnlock()
 			}

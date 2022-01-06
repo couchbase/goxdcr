@@ -143,6 +143,12 @@ func (b *BackfillReplicationSpec) MergeNewTasks(vbTasksMap *VBTasksMapType, skip
 			continue
 		}
 
+		if newTasks == backfillTasksForVB {
+			// Same object, continue and do not merge nor RE-lock into a deadlock
+			unlockFunc()
+			continue
+		}
+
 		newTasks.mutex.Lock()
 		// Need to merge
 		for _, newTask := range newTasks.List {
