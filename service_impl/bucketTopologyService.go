@@ -1357,35 +1357,40 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 		return
 	}
 
+	var waitGrp sync.WaitGroup
 	notification.SetNumberOfReaders(len(channelsMap))
 	for channelName, chRaw := range channelsMap {
 		if !bw.shouldSendToCh(channelName, updateType) {
 			notification.Recycle()
 			continue
 		}
-		timeout := time.NewTimer(1 * time.Second)
-		if bw.source {
-			select {
-			case chRaw.(chan service_def.SourceNotification) <- notification:
-				// sent
-				timeout.Stop()
-			case <-timeout.C:
-				// provide a bail out path
-				notification.Recycle()
-				continue
+
+		waitGrp.Add(1)
+		go func(chRaw interface{}, isSource bool) {
+			defer waitGrp.Done()
+			timeout := time.NewTimer(1 * time.Second)
+			if isSource {
+				select {
+				case chRaw.(chan service_def.SourceNotification) <- notification:
+					// sent
+					timeout.Stop()
+				case <-timeout.C:
+					// provide a bail out path
+					notification.Recycle()
+				}
+			} else {
+				select {
+				case chRaw.(chan service_def.TargetNotification) <- notification:
+					// sent
+					timeout.Stop()
+				case <-timeout.C:
+					// provide a bail out path
+					notification.Recycle()
+				}
 			}
-		} else {
-			select {
-			case chRaw.(chan service_def.TargetNotification) <- notification:
-				// sent
-				timeout.Stop()
-			case <-timeout.C:
-				// provide a bail out path
-				notification.Recycle()
-				continue
-			}
-		}
+		}(chRaw, bw.source)
 	}
+	waitGrp.Wait()
 }
 
 func (bw *BucketTopologySvcWatcher) Stop() error {
