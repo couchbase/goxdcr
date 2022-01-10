@@ -37,12 +37,14 @@ package adminport
 
 import (
 	"fmt"
-	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
 	"net/http"
 	"sync"
+
+	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
+
+	_ "expvar"
 )
-import _ "expvar"
 
 var logger_server *log.CommonLogger = log.NewLogger("HttpServer", log.DefaultLoggerContext)
 
@@ -125,35 +127,41 @@ func (s *httpServer) systemHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	execFunc := func() error {
-		waitch := make(chan interface{}, 1)
-		// send and wait
-		s.reqch <- &httpAdminRequest{srv: s, req: r, waitch: waitch}
-		val := <-waitch
+	actionStr := fmt.Sprintf("Method=%s, URL=%s", r.Method, r.URL)
+	base.ExecWithTimeout3(
+		actionStr,
 
-		switch v := (val).(type) {
-		case error:
-			http.Error(w, v.Error(), http.StatusInternalServerError)
-			err = fmt.Errorf("%v, %v", ErrorInternal, v)
-			logger_server.Errorf("%v", err)
-			return err
-		case *Response:
-			if v.TagPrintingBody && logger_server.GetLogLevel() >= log.LogLevelDebug {
-				bodyRedact := base.TagUDBytes(base.DeepCopyByteArray(v.Body))
-				logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v\n", v.StatusCode, string(bodyRedact))
-			} else {
-				logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
+		// Call this closure first as action
+		func(waitch chan interface{}) error {
+			s.reqch <- &httpAdminRequest{srv: s, req: r, waitch: waitch}
+			return nil
+		},
+
+		// Call this closure if response is received within timeout
+		func(val interface{}) error {
+			switch v := (val).(type) {
+			case error:
+				http.Error(w, v.Error(), http.StatusInternalServerError)
+				err := fmt.Errorf("%v, %v", ErrorInternal, v)
+				logger_server.Errorf("%v", err)
+			case *Response:
+				if v.TagPrintingBody && logger_server.GetLogLevel() >= log.LogLevelDebug {
+					bodyRedact := base.TagUDBytes(base.DeepCopyByteArray(v.Body))
+					logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v\n", v.StatusCode, string(bodyRedact))
+				} else {
+					logger_server.Debugf("Response from goxdcr rest server. status=%v\n body in string form=%v", v.StatusCode, string(v.Body))
+				}
+				w.Header().Set(base.ContentType, v.ContentType.String())
+				w.WriteHeader(v.StatusCode)
+				w.Write(v.Body)
+				return nil
 			}
-			w.Header().Set(base.ContentType, v.ContentType.String())
-			w.WriteHeader(v.StatusCode)
-			w.Write(v.Body)
-		}
-		return nil
-	}
-	err = base.ExecWithTimeout(execFunc, base.KeepAlivePeriod, logger_server)
-	if err != nil {
-		logger_server.Errorf(err.Error())
-	}
+			return nil
+		},
+
+		base.KeepAlivePeriod,
+		logger_server)
+
 }
 
 // concrete type implementing Request interface

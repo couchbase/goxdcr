@@ -95,6 +95,46 @@ func ExecWithTimeout2(action Action2, input interface{}, timeout_duration time.D
 	}
 }
 
+// ExecWithTimeout3 is a variant which executes action and if response is received
+// within timeout rspHandler is called. actionStr is the contextual info which is
+// logged when timeout occurs. The action should be spawned in a go-routine.
+func ExecWithTimeout3(actionStr string,
+	action func(finch chan interface{}) error,
+	rspHandler func(val interface{}) error,
+	timeoutDur time.Duration,
+	logger *log.CommonLogger) (err error) {
+
+	waitch := make(chan interface{}, 1)
+	// We do not close the waitch channel
+	// This is because some other goroutine (in action) might be writing to it
+	// while this function potentially closing it, which may cause panic
+
+	errch := make(chan error, 1)
+
+	go func(ch chan error) {
+		err = action(waitch)
+		if err != nil {
+			errch <- err
+		}
+	}(errch)
+
+	timeoutticker := time.NewTicker(timeoutDur)
+	defer timeoutticker.Stop()
+
+	select {
+	case <-timeoutticker.C:
+		logger.Infof("Executing Action timed out. action: %s", actionStr)
+		logger.Info("****************************")
+		logger.Errorf(ErrorExecutionTimedOut.Error())
+	case err = <-errch:
+		return err
+	case val := <-waitch:
+		rspHandler(val)
+	}
+
+	return
+}
+
 func GetVbListFromKvVbMap(kv_vb_map map[string][]uint16) []uint16 {
 	vb_list := make([]uint16, 0)
 	for _, kv_vb_list := range kv_vb_map {
