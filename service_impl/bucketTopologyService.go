@@ -408,6 +408,11 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			}
 		}
 
+		storageBackend, err := b.utils.BucketStorageBackend(bucketInfo)
+		if err != nil {
+			// This shouldn't happen.
+			watcher.logger.Errorf("%v Failed to get source storageBackend. Error=%v", spec.SourceBucketName, err.Error())
+		}
 		watcher.latestCacheMtx.Lock()
 		if !watcher.cachePopulated {
 			watcher.cachePopulated = true
@@ -421,6 +426,8 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		replacementNotification.SourceReplicasTranslateMap = translateMap
 		replacementNotification.SourceReplicaCnt = numOfReplicas
 		replacementNotification.SourceVbReplicasMember = vbReplicaMember
+		replacementNotification.SourceStorageBackend = storageBackend
+
 		watcher.latestCached.Recycle()
 		watcher.latestCached = replacementNotification
 		watcher.latestCacheMtx.Unlock()
@@ -501,6 +508,12 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 				watcher.replicaLastWarnErr = nil
 			}
 
+			storageBackend, err := b.utils.BucketStorageBackend(targetBucketInfo)
+			if err != nil {
+				// This shouldn't happen.
+				watcher.logger.Errorf("%v Failed to get target storageBackend. Error=%v", spec.TargetBucketName, err.Error())
+			}
+
 			watcher.latestCacheMtx.Lock()
 			if !watcher.cachePopulated {
 				watcher.cachePopulated = true
@@ -515,6 +528,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			replacementNotification.TargetReplicasTranslateMap = translateMap
 			replacementNotification.TargetReplicaCnt = numOfReplicas
 			replacementNotification.TargetVbReplicasMember = vbReplicaMember
+			replacementNotification.TargetStorageBackend = storageBackend
 			watcher.latestCached.Recycle()
 			watcher.latestCached = replacementNotification
 			watcher.latestCacheMtx.Unlock()
@@ -1765,6 +1779,7 @@ type Notification struct {
 	SourceReplicasMap          *base.VbHostsMapType  // len() of 0 if no replicas
 	SourceReplicasTranslateMap *base.StringStringMap // nil if not initialized
 	SourceVbReplicasMember     []uint16
+	SourceStorageBackend       string
 
 	// Target only
 	TargetBucketUUID           string
@@ -1774,6 +1789,7 @@ type Notification struct {
 	TargetReplicasMap          *base.VbHostsMapType  // len() of 0 if no replicas
 	TargetReplicasTranslateMap *base.StringStringMap // nil if not initialized
 	TargetVbReplicasMember     []uint16
+	TargetStorageBackend       string
 }
 
 func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification {
@@ -1921,6 +1937,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		SourceReplicasMap:          n.SourceReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
 		SourceReplicasTranslateMap: n.SourceReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
 		SourceVbReplicasMember:     base.CloneUint16List(n.SourceVbReplicasMember),
+		SourceStorageBackend:       n.SourceStorageBackend,
 
 		TargetBucketUUID:           n.TargetBucketUUID,
 		TargetServerVBMap:          n.TargetServerVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
@@ -1929,6 +1946,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		TargetReplicasMap:          n.TargetReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
 		TargetReplicasTranslateMap: n.TargetReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
 		TargetVbReplicasMember:     base.CloneUint16List(n.TargetVbReplicasMember),
+		TargetStorageBackend:       n.TargetStorageBackend,
 	}
 }
 
@@ -1944,6 +1962,10 @@ func (n *Notification) GetSourceVBMapRO() base.KvVBMapType {
 	return *n.SourceVBMap
 }
 
+func (n *Notification) GetSourceStorageBackend() string {
+	return n.SourceStorageBackend
+}
+
 func (n *Notification) GetTargetServerVBMap() base.KvVBMapType {
 	return *n.TargetServerVBMap
 }
@@ -1956,6 +1978,9 @@ func (n *Notification) GetTargetBucketInfo() base.BucketInfoMapType {
 	return *n.TargetBucketInfo
 }
 
+func (n *Notification) GetTargetStorageBackend() string {
+	return n.TargetStorageBackend
+}
 func (n *Notification) GetDcpStatsMap() base.DcpStatsMapType {
 	return *n.DcpStatsMap
 }

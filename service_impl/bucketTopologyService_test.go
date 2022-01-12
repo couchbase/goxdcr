@@ -161,6 +161,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 		return ret
 	}
 	utils.On("GetHostNamesFromBucketInfo", mock.Anything).Return(getHostNameFromBucketInfo1, getHostNameFromBucketInfo2)
+	utils.On("BucketStorageBackend", mock.Anything).Return("CouchStore", nil)
 
 	replMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specsList {

@@ -795,7 +795,7 @@ func (xdcrf *XDCRFactory) ConstructUpdateSettingsForPart(pipeline common.Pipelin
 		return xdcrf.constructUpdateSettingsForCapiNozzle(pipeline, settings), nil
 	} else if _, ok := part.(*parts.DcpNozzle); ok {
 		xdcrf.logger.Debugf("Construct update settings for DcpNozzle %s", part.Id())
-		return xdcrf.constructUpdateSettingsForDcpNozzle(pipeline, settings), nil
+		return xdcrf.constructUpdateSettingsForDcpNozzle(pipeline, settings)
 	} else {
 		return settings, nil
 	}
@@ -847,7 +847,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCapiNozzle(pipeline common.P
 	return capiSettings
 }
 
-func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) metadata.ReplicationSettingsMap {
+func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	dcpSettings := make(metadata.ReplicationSettingsMap)
 
 	vbTimestamp, ok := settings[base.VBTimestamps]
@@ -861,8 +861,10 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pi
 	}
 
 	repSettings := pipeline.Specification().GetReplicationSpec().Settings
-	constructSharedSettingsForDcpNozzle(settings, dcpSettings, repSettings)
-	return dcpSettings
+	if err := xdcrf.constructSharedSettingsForDcpNozzle(settings, dcpSettings, repSettings, pipeline); err != nil {
+		return nil, err
+	}
+	return dcpSettings, nil
 }
 
 func (xdcrf *XDCRFactory) SetStartSeqno(pipeline common.Pipeline) error {
@@ -1141,11 +1143,15 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		}
 	}
 
-	constructSharedSettingsForDcpNozzle(settings, dcpNozzleSettings, repSettings)
+	if err := xdcrf.constructSharedSettingsForDcpNozzle(settings, dcpNozzleSettings, repSettings,
+		pipeline); err != nil {
+		return nil, err
+	}
 	return dcpNozzleSettings, nil
 }
 
-func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMap, dcpNozzleSettings metadata.ReplicationSettingsMap, repSettings *metadata.ReplicationSettings) {
+func (xdcrf *XDCRFactory) constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMap, dcpNozzleSettings metadata.ReplicationSettingsMap, repSettings *metadata.ReplicationSettings,
+	pipeline common.Pipeline) error {
 	// dcp priority settings could have been set through replStatus.customSettings.
 	dcpPriority, ok := settings[parts.DCP_Priority]
 	if ok {
@@ -1201,7 +1207,27 @@ func constructSharedSettingsForDcpNozzle(settings metadata.ReplicationSettingsMa
 		if len(shaToCollectionsMap) == 1 && vbTasksMap.AllStartsWithSeqno0() {
 			dcpNozzleSettings[parts.DCP_EnableOSO] = true
 		}
+		// OSO is disabled for magma
+		if dcpNozzleSettings[parts.DCP_EnableOSO] == true {
+			spec := pipeline.Specification().GetReplicationSpec()
+			notificationCh, err := xdcrf.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, xdcrf.bucketSvcId)
+			if err != nil {
+				return err
+			}
+			defer xdcrf.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, xdcrf.bucketSvcId)
+
+			latestNotification := <-notificationCh
+			defer latestNotification.Recycle()
+			storageBackend := latestNotification.GetSourceStorageBackend()
+
+			if storageBackend == base.Magma {
+				xdcrf.logger.Infof("%v: Disable OSO because source %v is %v",
+					pipeline.FullTopic(), base.StorageBackendKey, base.Magma)
+				dcpNozzleSettings[parts.DCP_EnableOSO] = false
+			}
+		}
 	}
+	return nil
 }
 
 func createMigrationVBTasksMap() interface{} {

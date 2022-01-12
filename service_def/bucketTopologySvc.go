@@ -62,6 +62,7 @@ type SourceNotification interface {
 	GetDcpStatsMapLegacy() base.DcpStatsMapType
 	GetHighSeqnosMap() base.HighSeqnosMapType
 	GetHighSeqnosMapLegacy() base.HighSeqnosMapType
+	GetSourceStorageBackend() string
 }
 
 type TargetNotification interface {
@@ -69,4 +70,5 @@ type TargetNotification interface {
 	GetTargetServerVBMap() base.KvVBMapType
 	GetTargetBucketUUID() string
 	GetTargetBucketInfo() base.BucketInfoMapType
+	GetTargetStorageBackend() string
 }

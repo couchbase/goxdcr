@@ -463,6 +463,18 @@ func (u *Utilities) LocalBucketUUID(local_connStr string, bucketName string, log
 	return u.BucketUUID(local_connStr, bucketName, "", "", base.HttpAuthMechPlain, nil, false, nil, nil, logger)
 }
 
+func (u *Utilities) BucketStorageBackend(bucketInfo map[string]interface{}) (string, error) {
+	storageBackendObj, ok := bucketInfo[base.StorageBackendKey]
+	if !ok {
+		return "", fmt.Errorf("Error looking up %v from bucketInfo", base.StorageBackendKey)
+	}
+	storageBackend, ok := storageBackendObj.(string)
+	if !ok {
+		return "", fmt.Errorf("%v is of wrong type. Expect string but got %v.", base.StorageBackendKey, reflect.TypeOf(storageBackendObj))
+	}
+	return storageBackend, nil
+}
+
 func (u *Utilities) ReplicationStatusNotFoundError(topic string) error {
 	return fmt.Errorf("Cannot find replication status for topic %v", topic)
 }

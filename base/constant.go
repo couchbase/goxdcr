@@ -104,6 +104,10 @@ var CapiSSLPortKey = "capiSSL"
 var DeveloperPreviewKey = "isDeveloperPreview"
 var StatusKey = "status"
 var NumberOfReplicas = "numReplicas"
+var StorageBackendKey = "storageBackend"
+
+// Value for StorageBackendKey
+var Magma = "magma"
 
 // Collection consts
 const UIDKey = "uid"

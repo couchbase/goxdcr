@@ -79,6 +79,8 @@ type UtilsIface interface {
 	GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error)
 	LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error)
 	LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error)
+	BucketStorageBackend(bucketInfo map[string]interface{}) (string, error)
+
 	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error)
 	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)
 
