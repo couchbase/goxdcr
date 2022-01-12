@@ -15,6 +15,8 @@ import (
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/stretchr/testify/assert"
+	"io/ioutil"
+	"math"
 	"sort"
 	"testing"
 )
@@ -127,4 +129,82 @@ func TestCheckpointSortByFailoverLog(t *testing.T) {
 	// Failover log that shows up first is higher priority
 	assert.Equal(validFailoverLog, outputList[0].Failover_uuid)
 	assert.Equal(validFailoverLog2, outputList[1].Failover_uuid)
+}
+
+func TestCheckpointSortByFailoverLogRealData(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCheckpointSortByFailoverLogRealData =================")
+	defer fmt.Println("============== Test case end: TestCheckpointSortByFailoverLogRealData =================")
+
+	testDataDir := "./testData/sortCkptData"
+	srcFailoverLogFile := testDataDir + "/srcFailoverLogs.json"
+	tgtFailoverLogFile := testDataDir + "/tgtFailoverLogs.json"
+	ckptsFile := testDataDir + "/currDocs.json"
+	peersFile := testDataDir + "/peerDocs.json"
+
+	srcFailoverLogBytes, err := ioutil.ReadFile(srcFailoverLogFile)
+	assert.Nil(err)
+	tgtFailoverLogBytes, err := ioutil.ReadFile(tgtFailoverLogFile)
+	assert.Nil(err)
+	ckptBytes, err := ioutil.ReadFile(ckptsFile)
+	assert.Nil(err)
+	peerBytes, err := ioutil.ReadFile(peersFile)
+	assert.Nil(err)
+
+	srcFailoverLogs := make(map[uint16]*mcc.FailoverLog)
+	tgtFailoverLogs := make(map[uint16]*mcc.FailoverLog)
+	ckpts := make(map[uint16]*CheckpointsDoc)
+	peerCkpts := make(map[uint16]*CheckpointsDoc)
+
+	assert.Nil(json.Unmarshal(srcFailoverLogBytes, &srcFailoverLogs))
+	assert.Nil(json.Unmarshal(tgtFailoverLogBytes, &tgtFailoverLogs))
+	assert.Nil(json.Unmarshal(ckptBytes, &ckpts))
+	assert.Nil(json.Unmarshal(peerBytes, &peerCkpts))
+
+	var nonNilDocCounter int
+	var nonConformedVBList []uint16
+	// The tgtFailoverLog captured above is nil, but should still work
+	for vb, ckptDocs := range ckpts {
+		srcFailoverLog := srcFailoverLogs[vb]
+		assert.NotNil(ckptDocs)
+		assert.NotNil(srcFailoverLog)
+
+		if ckptDocs == nil || ckptDocs.Checkpoint_records == nil {
+			continue
+		}
+
+		curRecordToSort := ckptDocs.Checkpoint_records.PrepareSortStructure(srcFailoverLog, nil)
+		if curRecordToSort == nil {
+			continue
+		}
+
+		var combinedRecords CheckpointSortRecordsList
+		combinedRecords = append(combinedRecords, curRecordToSort...)
+		assert.NotNil(combinedRecords[0])
+
+		peerRecord, exists := peerCkpts[vb]
+		if exists && peerRecord.Checkpoint_records != nil {
+			peerRecordToSort := peerRecord.Checkpoint_records.PrepareSortStructure(srcFailoverLog, nil)
+			combinedRecords = append(combinedRecords, peerRecordToSort...)
+		}
+
+		sort.Sort(combinedRecords)
+		regList := combinedRecords.ToRegularList()
+		ckpts[vb].Checkpoint_records = regList
+		var prevSeqno uint64 = math.MaxUint64
+		for _, ckptRecord := range regList {
+			if prevSeqno == math.MaxUint64 {
+				prevSeqno = ckptRecord.Seqno
+			} else {
+				if ckptRecord.Seqno > prevSeqno {
+					nonConformedVBList = append(nonConformedVBList, vb)
+				}
+			}
+		}
+
+		nonNilDocCounter++
+	}
+
+	assert.NotEqual(0, nonNilDocCounter)
+	assert.Len(nonConformedVBList, 0)
 }

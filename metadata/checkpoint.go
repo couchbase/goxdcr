@@ -536,12 +536,16 @@ func compareFailoverLogPositionThenSeqnos(aRecord *CheckpointSortRecord, bRecord
 		aFailoverLog = aRecord.srcFailoverLog
 		bFailoverLog = bRecord.srcFailoverLog
 		aFailoverUuid = aRecord.Failover_uuid
+		bFailoverUuid = bRecord.Failover_uuid
 		aSeqno = aRecord.Seqno
+		bSeqno = bRecord.Seqno
 	} else {
 		aFailoverLog = aRecord.tgtFailoverLog
 		bFailoverLog = bRecord.tgtFailoverLog
 		aFailoverUuid = aRecord.Target_vb_opaque.Value().(uint64)
+		bFailoverUuid = bRecord.Target_vb_opaque.Value().(uint64)
 		aSeqno = aRecord.Target_Seqno
+		bSeqno = bRecord.Target_Seqno
 	}
 
 	aFailoverPos, aFound := findIdxGivenRecordAndFailoverlog(aFailoverUuid, aFailoverLog)

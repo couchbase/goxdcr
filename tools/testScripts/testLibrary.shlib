@@ -276,7 +276,7 @@ function validateLogWithInstance {
 	local instanceCnt=$3
 	local maxInstanceCnt=${4:-}
 
-	logs=$(getClusterLogs "$clusterName")
+	local logs=$(getClusterLogs "$clusterName")
 	if ! (($? == 0)); then
 		echo "Unable to get log for validation"
 		return 1
@@ -997,4 +997,75 @@ EOF
 		echo "NODE CLIENT CERT for $clusterName: ${CLIENT_CERT_MAP[$clusterName]}"
 		echo "NODE CLIENT KEY for $clusterName: ${CLIENT_KEY_MAP[$clusterName]}"
 	done
+}
+
+# Test validation function that looks at pipeline resumes lifecycle
+# and makes sure that for each VB XDCR is not rolling backwards
+#
+# Input:
+# 1. clusterName to look at the log
+# 2. Remote Cluster name
+# 3. Source Bucket Name
+# 4. Target Bucket Name
+function validateCheckpointResumeSeqnos {
+	local logNodeName=$1
+	local remClusterName=$2
+	local srcBucketName=$3
+	local tgtBucketName=$4
+
+	local remClusterUUID
+	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
+	local result=$?
+	if ((!$result == 0)); then
+		echo "Unable to parse UUID return code $result"
+		return 1
+	fi
+
+	echo "Parsing log for $logNodeName pipeline ${remClusterUUID}/${srcBucketName}/${tgtBucketName} for VB timestamps..."
+	local vbsSeqnosOutput
+	vbsSeqnosOutput=$(getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" | parseSetVBTimestamps)
+
+	local OLDIFS="$IFS"
+	local oneLine
+	local atLeastOneFound
+	IFS=$'\n'
+	for oneLine in $(echo "$vbsSeqnosOutput"); do
+		local vb
+		local seqnos
+		local -a seqnosArr
+		# VB 1023: 865,4939,4939,5246,4939,5246,6354,5246,6354
+		if [[ "$oneLine" =~ VB\ ([0-9]+): ]]; then
+			vb=${BASH_REMATCH[1]}
+			seqnos=$(echo "$oneLine" | cut -d: -f2 | xargs | tr ',' $'\n')
+			local preVal
+			local curVal
+			preVal=""
+			curVal=""
+			for curVal in $(echo "$seqnos"); do
+				if [[ -z "${preVal:-}" ]]; then
+					# first
+					preVal=$curVal
+				else
+					if (($curVal < $preVal)); then
+						# Checkpoint resuming rolled backwards
+						echo "Found at least one VB where checkpoint is resuming from an earlier point ($vb): $oneLine"
+						IFS="$OLDIFS"
+						exit 1
+					fi
+					preVal=$curVal
+				fi
+			done
+			atLeastOneFound=1
+		else
+			echo "Unable to parse \"$oneLine\""
+			IFS="$OLDIFS"
+			exit 1
+		fi
+	done
+	IFS="$OLDIFS"
+
+	if [[ -z "${atLeastOneFound:-}" ]];then
+	    echo "Unable to parse"
+	    getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" > /tmp/getSetVBTimestamp
+	fi
 }

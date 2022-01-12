@@ -1858,6 +1858,94 @@ function getClusterLogs {
 	$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag 2>&1
 }
 
+# 1. Node ID's log to get
+# 2. Cluster name to look for
+function getClusterUuidUsingNameFromLogs {
+	local logNodeName=$1
+	local clusterName=$2
+
+	local logs
+	logs=$(getInternalNodeXdcrLog "$logNodeName")
+	if ! (($? == 0)); then
+		# echo "Unable to get log for validation"
+		return 1
+	fi
+
+	local clusterCbStrings
+	clusterCbStrings=$(echo "$logs" | grep "remoteClusterChangedCallback called on id")
+	local oneLine
+	local OLDIFS="$IFS"
+	IFS=$'\n'
+	for oneLine in $(echo "$clusterCbStrings"); do
+		if [[ "$oneLine" =~ name:${clusterName} ]]; then
+			if [[ "$oneLine" =~ uuid:([[:alnum:]]+) ]]; then
+				echo ${BASH_REMATCH[1]}
+				IFS="$OLDIFS"
+				return 0
+			fi
+		fi
+	done
+	IFS="$OLDIFS"
+	return 2
+}
+
+# 1. Node log to be looking for
+# 2. ClusterName
+# 3. Source Bucket Name
+# 4. Target Bucket Name
+function getSetVBTimestampMsgsFromLogs {
+	local logNodeName=$1
+	local clusterName=$2
+	local srcBucketName=$3
+	local tgtBucketName=$4
+
+	local clusterUuid
+	clusterUuid=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$clusterName")
+	local retVal=$?
+	if ((!$retVal == 0)); then
+		echo "Unable to get clusterUUID with return code $retVal"
+		return 1
+	fi
+
+	getInternalNodeXdcrLog "$logNodeName" | grep "MainPipeline ${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
+}
+
+# Usage: Grep "Set VBTimestamp" from the logs and then pass to this function via pipe
+function parseSetVBTimestamps {
+	local -A VbSeqnoMap
+	local input
+	local OLDIFS="$IFS"
+	input=$(cat)
+	IFS=$'\n'
+	for oneLine in $(echo "$input"); do
+		local vb=$(echo "$oneLine" | awk '{print $8}' | sed 's/,//g' | sed 's/vb=//g')
+		local startingSeqno=$(echo "$oneLine" | awk '{print $9}' | sed 's/,//g' | sed 's/ts.Seqno=//g')
+		if [[ -z "$vb" ]] || [[ -z "$startingSeqno" ]]; then
+			echo "Unable to parse"
+			IFS="$OLDIFS"
+			return 1
+		fi
+
+		if [[ -z "${VbSeqnoMap["$vb"]:-}" ]]; then
+			# First entry
+			VbSeqnoMap["$vb"]="$startingSeqno"
+		else
+			local val="${VbSeqnoMap["$vb"]}"
+			local newVal="${val},${startingSeqno}"
+			VbSeqnoMap["$vb"]="$newVal"
+		fi
+	done
+	IFS="$OLDIFS"
+
+	# Print
+	local i=0
+	for ((i = 0; $i < 1024; i = $(($i + 1)))); do
+		if [[ ! -z "${VbSeqnoMap["$i"]:-}" ]]; then
+			echo "VB $i: ${VbSeqnoMap["$i"]}"
+		fi
+	done
+}
+
 function getXDCRCheckpoints {
 	local clusterName=$1
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
