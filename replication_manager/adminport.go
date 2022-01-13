@@ -1386,20 +1386,21 @@ func (adminport *Adminport) checkAndRejectChunkedEncoding(request *http.Request)
 }
 
 func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doPostPeerToPeerRequest from %v", request.Host)
+	localRemoteIPs := getLocalAndRemoteIps(request)
+	logger_ap.Infof("doPostPeerToPeerRequest from %v", localRemoteIPs.Remote)
 	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
 	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils, adminport.securitySvc)
 	if err != nil {
-		adminport.Logger().Errorf("Unable to generate req or resp %v\n", err)
+		adminport.Logger().Errorf("Unable to generate req or resp from %v err: %v\n", localRemoteIPs.Remote, err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 
 	handlerResult, err := adminport.p2pAPI.P2PReceive(req)
 	if err != nil {
-		adminport.Logger().Errorf("P2PReceive resulted in err %v", err)
+		adminport.Logger().Errorf("P2PReceive from %v resulted in err %v", localRemoteIPs.Remote, err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 	return EncodeObjectIntoResponseWithStatusCode(handlerResult.GetError(), handlerResult.GetHttpStatusCode())

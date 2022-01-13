@@ -1,0 +1,273 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P0"]=9001 ["C1P1"]=9002 ["C1P2"]=9003 ["C1P3"]=9004 ["C1P4"]=9005 ["C2"]=9006)
+CLUSTER_DEPENDENCY_MAP=(["C1P0"]="C1" ["C1P1"]="C1" ["C1P2"]="C1" ["C1P3"]="C1" ["C1P4"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P0"]=13001 ["C1P1"]=13002 ["C1P2"]=13003 ["C1P3"]=13004 ["C1P4"]=13005 ["C2"]=13006)
+
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S0" "S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection0Arr=("col1")
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S0"]=${collection0Arr[@]} ["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
+	waitForBgJobs
+	echo "RUNNING dataload DONE"
+}
+
+TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+P2P_PULL_ERR_MSG="Ckpt Pull and merge had errors but will continue to replicate"
+
+declare LOGMSG=$BROKEN_MSG
+
+TC_CHECK_INTERVAL=10
+TC_MAX_CHANGE_CNT=3
+
+function runOneReplicationCycle {
+	local timeIntervalSecs=5
+	local checkInterval=$TC_CHECK_INTERVAL
+	local maxChangeCnt=$TC_MAX_CHANGE_CNT
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+
+	local -i currentInstanceCnt
+	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+
+	createScope "C2" "B1" "S1"
+	createCollection "C2" "B1" "S1" "col1"
+
+	# Create empty scope on S0
+	deleteCollection "C1" "B0" "S0" "col1"
+	deleteCollection "C1" "B0" "S0" "_default"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	runDataLoad
+
+	echo "Sleeping 20 seconds before changes left check"
+	sleep 20
+
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	grepForPanics
+}
+
+C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
+CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
+CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
+CKPT_RESUME_FOUND="checkpoint documents for"
+LOADED_BROKEN_MAP="Loaded brokenMap: map"
+LOADED_BROKEN_MAP_NAME="S1.col1"
+
+function runOneRebalanceCycleIn {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=30
+
+	echo "Sleeping 15 secs before rebalancing node in"
+	sleep 15
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	sleep 5
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+	grepForPanics
+}
+
+function rebalanceNodesOut {
+	local numOfNodeToEject=$1
+	local i
+
+	for ((i = 1; $i < $numOfNodeToEject; i = $(($i + 1)))); do
+		local nodeNameToEject="C1P${i}"
+		startEjectNode "$nodeNameToEject" "C1"
+	done
+}
+
+function validateCkptResume {
+	local dependentNodeName=$1
+	tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
+	# CKPT_RESUME_FOUND="checkpoint documents for"
+	ckptFoundWith0Count=$(echo "$tempLogs" | grep -v "Backfill" | grep "$CKPT_RESUME_FOUND" | grep -c " 0 ")
+	ckptFoundTotalCount=$(echo "$tempLogs" | grep -v "Backfill" | grep -c "$CKPT_RESUME_FOUND")
+	if (($ckptFoundWith0Count == $ckptFoundTotalCount)); then
+		if (($ckptFoundTotalCount == 0)); then
+			echo "$dependentNodeName shows no resume message"
+			return 1
+		else
+			echo "$dependentNodeName unable to find upserted checkpoints:"
+			echo "$tempLogs" | grep -v "Backfill" | grep "$CKPT_RESUME_FOUND"
+			exit 1
+		fi
+	fi
+}
+
+function runReplicationResume {
+	local logs
+	local resumeFrom0Cnt
+	local -A curDepsCkptsFoundDocsCntMap
+	local -A curDepsCkptRetrievedCntMap
+	local dependentNodeName
+
+	logs=$(getInternalNodeXdcrLog "C1")
+	local curCkptsFoundDocsCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
+	local curCkptRetrievedCnt=$(echo "$logs" | grep -c "$CKPT_RETRIEVED")
+
+	local tempLogs
+	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		tempLogs=$(getInternalNodeXdcrLog "$dependentClusterName")
+		curDepsCkptsFoundDocsCntMap["$dependentClusterName"]=$(echo "$tempLogs" | grep -c "$CKPT_FOUND_DOCS")
+		curDepsCkptRetrievedCntMap["$dependentClusterName"]=$(echo "$tempLogs" | grep -c "$CKPT_RETRIEVED")
+	done
+
+	resumeReplication "C1" "B0" "C2" "B1"
+
+	# The more nodes, the more time it takes to resume
+	local waitTime=$((40 * ${#CLUSTER_DEPENDENCY_MAP[@]}))
+	echo "$(date): Waiting $waitTime seconds for resume to finish"
+	sleep $waitTime
+
+	# ensure that p2p did not fail
+	# TODO MB-49434 - right now this fails quite often
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		echo "Validating p2p pull error on $dependentNodeName"
+		validateInternalLogWithInstance "$dependentNodeName" "$P2P_PULL_ERR_MSG" 0
+	done
+
+	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
+	logs=$(getInternalNodeXdcrLog "C1")
+
+	# The msg below is displayed whenever a peer node pulls from this node
+	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
+	# The acceptable count should be at least one more than current and less than twice the number of nodes
+	# Twice because it is possible for a node to do two pulls: one for main and one for a backfill pipeline, but
+	# backfill pipeline is not guaranteed
+	local expectedMax=$(((($curCkptsFoundDocsCnt + ${#CLUSTER_DEPENDENCY_MAP[@]})) * 2))
+	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $expectedMax)); then
+		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill)... expecting > $curCkptsFoundDocsCnt and <= $expectedMax"
+		exit 1
+	fi
+
+	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
+	if (($foundDocCount == 0)); then
+		echo "C1 unable to retrieve checkpoint docs... were they deleted?"
+		exit 1
+	fi
+
+	local ckptFoundWith0Count
+	local ckptFoundTotalCount
+	local retry
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		validateCkptResume "$dependentNodeName"
+		retry=0
+		while ((!$? == 0 && $retry < 5)); do
+			echo "Trying again $retry out of 5..."
+			sleep 10
+			validateCkptResume "$dependentNodeName"
+			retry=$(($retry + 1))
+		done
+	done
+
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		local oneNodeCurRetrievedCkptCnt="${curDepsCkptRetrievedCntMap[$dependentClusterName]}"
+		validateInternalLogWithInstance "$dependentNodeName" "$CKPT_RETRIEVED" $(($oneNodeCurRetrievedCkptCnt + 1)) $(($oneNodeCurRetrievedCkptCnt + 2))
+	done
+
+	# Backfill pipeline from C1 could already be finished but the backfill tasks still exist
+	# and there is no ckpt for the backfill tasks... so the backfill tasks would have been
+	# pulled by C1P, but no ckpt pulled
+	# That's ok... so skip checking those
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
+
+		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
+		if (($resumeFrom0Cnt > 0)); then
+			echo "$dependentNodeName has at least one VB that resumed from seqno 0"
+			exit 1
+		fi
+		resumeLoadBrokenMapCnt=$(echo "$tempLogs" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
+		if (($resumeLoadBrokenMapCnt == 0)); then
+			echo "$dependentNodeName did not load broken map from checkpoint migration"
+			exit 1
+		fi
+	done
+
+	grepForPanics
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running large scaled cluster with node rebalanced in first and an empty scope"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	setupCluster
+	runOneRebalanceCycleIn 1 1
+	setupBuckets
+	runOneReplicationCycle
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
+	done
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		validateInternalLogWithInstance "$clusterName" "Unable to generate req or resp respVBMastChk" 0
+	done
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
+}

@@ -296,7 +296,7 @@ func TestInvalidSnappyPacket(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestInvalidSnappyPacket =================")
 	assert := assert.New(t)
 
-	failedPacketFile := "./testdata/failedPacket.json"
+	failedPacketFile := "./unitTestData/failedPacket.json"
 	failedPacketBytes, err := ioutil.ReadFile(failedPacketFile)
 	if err != nil {
 		panic(err)
@@ -307,4 +307,67 @@ func TestInvalidSnappyPacket(t *testing.T) {
 
 	assert.NotEqual("", failedPacket.GetErrorString())
 	assert.True(strings.Contains(failedPacket.GetErrorString(), base.ErrorDoesNotExistString))
+}
+
+func TestRespMarshalBigManifest(t *testing.T) {
+	fmt.Println("============== Test case start: TestRespMarshalBigManifest =================")
+	defer fmt.Println("============== Test case end: TestRespMarshalBigManifest =================")
+	assert := assert.New(t)
+
+	dataFile := "./unitTestData/1kCollectionManifestMap.json"
+	testRespMarshalBigManifestGivenFile(dataFile, assert)
+
+	dataFile = "./unitTestData/1kCollectionWithNoDefaultColletion.json"
+	testRespMarshalBigManifestGivenFile(dataFile, assert)
+}
+
+func testRespMarshalBigManifestGivenFile(dataFile string, assert *assert.Assertions) {
+	data, err := ioutil.ReadFile(dataFile)
+	assert.Nil(err)
+	checkMap := make(map[string]interface{})
+	assert.Nil(json.Unmarshal(data, &checkMap))
+
+	checkManifest, err := metadata.NewCollectionsManifestFromMap(checkMap)
+	assert.Nil(err)
+	assert.NotNil(checkManifest)
+
+	cachedSrcManifests := make(metadata.ManifestsCache)
+	cachedTgtManifests := make(metadata.ManifestsCache)
+	cachedSrcManifests[checkManifest.Uid()] = &checkManifest
+	cachedTgtManifests[checkManifest.Uid()] = &checkManifest
+
+	var srcBucketName = "srcBucket"
+	respCommon := NewResponseCommon(ReqVBMasterChk, "", "", 0, "")
+	resp := &VBMasterCheckResp{
+		ResponseCommon:     respCommon,
+		ReplicationPayload: NewReplicationPayload("dummySpec", srcBucketName, "dummyInternal"),
+	}
+	resp.Init()
+	resp.InitBucket(srcBucketName)
+	assert.NotNil(resp)
+
+	assert.Nil(resp.LoadManifests(cachedSrcManifests, cachedTgtManifests, srcBucketName))
+	respBytes, err := resp.Serialize()
+	assert.Nil(err)
+	assert.NotNil(respBytes)
+
+	checkPacket := &VBMasterCheckResp{}
+	err = checkPacket.DeSerialize(respBytes)
+	assert.Nil(err)
+}
+
+func TestPerfVBChkResp(t *testing.T) {
+	fmt.Println("============== Test case start: TestPerfVBChkResp =================")
+	defer fmt.Println("============== Test case end: TestPerfVBChkResp =================")
+	assert := assert.New(t)
+
+	perfVBChkResp := "./unitTestData/perfFailedVBChkResp.json"
+	perfVBChkRespBytes, err := ioutil.ReadFile(perfVBChkResp)
+	if err != nil {
+		panic(err)
+	}
+
+	failedPacket := &VBMasterCheckResp{}
+	err = failedPacket.DeSerialize(perfVBChkRespBytes)
+	assert.Nil(err)
 }

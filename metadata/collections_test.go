@@ -26,6 +26,8 @@ var testDir string = "testData/"
 var emptyManifest string = testDir + "emptyCollectionManifest.json"
 var provisionedFile string = testDir + "provisionedManifest.json"
 var provisionedFileCustom string = testDir + "provisionedManifestv2.json"
+var oneThousandFile string = testDir + "1kCollection.json"
+var oneThousandFileV2 string = testDir + "1kCollectionWithNoDefaultColletion.json"
 var sourcev7 string = testDir + "diffSourcev7.json"
 var targetv7 string = testDir + "diffTargetv7.json"
 var targetv9 string = testDir + "diffTargetv9.json"
@@ -1660,4 +1662,50 @@ func TestPipelineEventBrokenMap_Frozen(t *testing.T) {
 
 	pipelineBm.ExportToEvent(initialEvent, &idWell, false)
 
+}
+
+func TestUnmarshal1kCollectionManifest(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestUnmarshal1kCollectionManifest =================")
+	defer fmt.Println("============== Test case start: TestUnmarshal1kCollectionManifest =================")
+	data, err := ioutil.ReadFile(oneThousandFile)
+	assert.Nil(err)
+
+	manifestInfoMap := make(map[string]interface{})
+	assert.Nil(json.Unmarshal(data, &manifestInfoMap))
+
+	manifest, err := NewCollectionsManifestFromMap(manifestInfoMap)
+	assert.Nil(err)
+	assert.NotNil(manifest)
+
+	reMarshalledBytes, err := json.Marshal(&manifest)
+	assert.Nil(err)
+
+	checkMap := make(map[string]interface{})
+	assert.Nil(json.Unmarshal(reMarshalledBytes, &checkMap))
+
+	checkManifest, err := NewCollectionsManifestFromMap(manifestInfoMap)
+	assert.Nil(err)
+	assert.NotNil(checkManifest)
+
+	// Now try v2 where a default source collection is deleted
+	data, err = ioutil.ReadFile(oneThousandFile)
+	assert.Nil(err)
+
+	manifestInfoMap = make(map[string]interface{})
+	assert.Nil(json.Unmarshal(data, &manifestInfoMap))
+
+	manifest, err = NewCollectionsManifestFromMap(manifestInfoMap)
+	assert.Nil(err)
+	assert.NotNil(manifest)
+
+	reMarshalledBytes, err = json.Marshal(&manifest)
+	assert.Nil(err)
+
+	checkMap = make(map[string]interface{})
+	assert.Nil(json.Unmarshal(reMarshalledBytes, &checkMap))
+
+	checkManifest, err = NewCollectionsManifestFromMap(manifestInfoMap)
+	assert.Nil(err)
+	assert.NotNil(checkManifest)
 }

@@ -9,7 +9,6 @@
 package peerToPeer
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
@@ -258,7 +257,7 @@ func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, sec
 	isRequestType, _, reqFilterErr := reqMagicCheckFilter.FilterByteSlice(body)
 	_, _, respFilterErr := respMagicCheckFilter.FilterByteSlice(body)
 	if reqFilterErr != nil && respFilterErr != nil {
-		return nil, fmt.Errorf("Unable to determine magic... body %v\n", hex.Dump(body))
+		return nil, fmt.Errorf("Unable to determine magic")
 	}
 
 	var reqCommon RequestCommon
@@ -284,14 +283,14 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 		respDisc := &DiscoveryResponse{}
 		err = respDisc.DeSerialize(body)
 		if err != nil {
-			return nil, fmt.Errorf("respDiscovery deSerialize err: %v", err)
+			return nil, fmt.Errorf("respDiscoveryResp deSerialize err: %v", err)
 		}
 		return respDisc, nil
 	case ReqVBMasterChk:
 		resp := &VBMasterCheckResp{}
 		err = resp.DeSerialize(body)
 		if err != nil {
-			return nil, fmt.Errorf("respVBMastChk deSerialize err: %v", err)
+			return nil, fmt.Errorf("respVBMastChkResp deSerialize err: %v", err)
 		}
 		if len(resp.PayloadCompressed) > 0 && len(*resp.payload) == 0 {
 			if resp.GetErrorString() != "" {
@@ -299,7 +298,7 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 				resp.PayloadCompressed = nil
 				resp.payload = nil
 			} else {
-				return nil, fmt.Errorf("respVBMasterChk from %v for %v - %v has payloadCompressed but no payload after deserialization",
+				return nil, fmt.Errorf("respVBMasterChkResp from %v for %v - %v has payloadCompressed but no payload after deserialization",
 					resp.Sender, resp.ReplicationSpecId, resp.InternalSpecId)
 			}
 		}
@@ -308,7 +307,7 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 		resp := &PeerVBPeriodicPushResp{}
 		err = resp.DeSerialize(body)
 		if err != nil {
-			return nil, fmt.Errorf("respPeriodicPush deSerialize err: %v", err)
+			return nil, fmt.Errorf("respPeriodicPushResp deSerialize err: %v", err)
 		}
 		return resp, nil
 	default:
@@ -359,7 +358,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		reqDisc := &DiscoveryRequest{}
 		err = reqDisc.DeSerialize(body)
 		if err != nil {
-			err = fmt.Errorf("reqDiscovery deSerialize err: %v", err)
+			err = fmt.Errorf("reqDiscoveryReq deSerialize err: %v", err)
 		}
 		reqDisc.RequestCommon = reqCommon
 		return reqDisc, err
@@ -367,7 +366,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		reqVBChk := &VBMasterCheckReq{}
 		err = reqVBChk.DeSerialize(body)
 		if err != nil {
-			err = fmt.Errorf("reqVBMasterChk deSerialize err: %v", err)
+			err = fmt.Errorf("reqVBMasterChkReq deSerialize err: %v", err)
 		}
 		reqVBChk.RequestCommon = reqCommon
 		return reqVBChk, err
@@ -375,7 +374,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		pushReq := &PeerVBPeriodicPushReq{}
 		err = pushReq.DeSerialize(body)
 		if err != nil {
-			err = fmt.Errorf("reqPeriodicPush deSerialize err: %v", err)
+			err = fmt.Errorf("reqPeriodicPushReq deSerialize err: %v", err)
 		}
 		pushReq.RequestCommon = reqCommon
 		return pushReq, err

@@ -726,8 +726,15 @@ func NewScope(name string, scopeDetail map[string]interface{}) (Scope, error) {
 	uid32 := uint32(uid64)
 
 	collectionsDetail, ok := scopeDetail[base.CollectionsKey].([]interface{})
-	if !ok {
-		return Scope{}, base.ErrorInvalidInput
+	isScopeEmpty := scopeDetail[base.CollectionsKey] == nil
+	if !ok && !isScopeEmpty {
+		return Scope{}, fmt.Errorf("Unable to parse collections - type of %v", reflect.TypeOf(scopeDetail[base.CollectionsKey]))
+	}
+
+	// It is possible that when marshalled and unmarshalled as part of P2P payload
+	// a scope without any collection may have base.CollectionsKey listed as nil
+	if isScopeEmpty {
+		collectionsDetail = nil
 	}
 
 	collectionsMap, err := NewCollectionsMap(collectionsDetail)
