@@ -1689,7 +1689,7 @@ func TestUnmarshal1kCollectionManifest(t *testing.T) {
 	assert.NotNil(checkManifest)
 
 	// Now try v2 where a default source collection is deleted
-	data, err = ioutil.ReadFile(oneThousandFile)
+	data, err = ioutil.ReadFile(oneThousandFileV2)
 	assert.Nil(err)
 
 	manifestInfoMap = make(map[string]interface{})
