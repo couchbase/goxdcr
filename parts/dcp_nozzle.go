@@ -1963,8 +1963,9 @@ func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
 }
 
 func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
-	if dcp.specificVBTasks.IsNil() || dcp.specificVBTasks.Len() == 0 {
+	if dcp.specificVBTasks.IsNil() || dcp.specificVBTasks.Len() == 0 || len(vbnos) == 0 {
 		// Main pipeline, no need to get high Seqno
+		// Backfill pipeline with this DCP nozzle not assigned any task, no need to get highseqnos
 		return nil
 	}
 

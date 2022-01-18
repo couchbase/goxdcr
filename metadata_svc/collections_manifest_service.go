@@ -462,7 +462,7 @@ func (a *CollectionsManifestAgent) notifyManifestsChange(oldSrc, newSrc, oldTgt,
 	newPair := metadata.NewCollectionsManifestPair(newSrc, newTgt)
 	err := a.metadataChangeCb(a.replicationSpec.Id, oldPair, newPair)
 	if err != nil {
-		a.logger.Errorf("Error with callback: %v\n", err.Error())
+		a.logger.Errorf("%v - Error with callback: %v\n", a.id, err.Error())
 	}
 }
 
@@ -591,16 +591,16 @@ func (a *CollectionsManifestAgent) persistNeededManifestsInternal() (srcErr, tgt
 	defer a.hashMtx.Unlock()
 
 	if srcHashErr != nil {
-		a.logger.Warnf("Not storing source hash due to err: %v\n", srcHashErr)
+		a.logger.Warnf("%v - Not storing source hash due to err: %v\n", a.id, srcHashErr)
 	} else if tgtHashErr != nil {
-		a.logger.Warnf("Not storing target hash due to err: %v\n", tgtHashErr)
+		a.logger.Warnf("%v - Not storing target hash due to err: %v\n", a.id, tgtHashErr)
 	}
 
 	if srcHashErr == nil && !reflect.DeepEqual(a.persistedSrcListHash, srcListHash) {
 		// metakv is out of date
 		srcErr = a.metakvSvc.UpsertSourceManifests(a.replicationSpec, &srcMetaList)
 		if srcErr != nil {
-			a.logger.Warnf("Upserting source resulted in err: %v\n", srcErr)
+			a.logger.Warnf("%v - Upserting source resulted in err: %v\n", a.id, srcErr)
 		} else {
 			srcUpdated = true
 		}
@@ -612,7 +612,7 @@ func (a *CollectionsManifestAgent) persistNeededManifestsInternal() (srcErr, tgt
 	if tgtHashErr == nil && !reflect.DeepEqual(a.persistedTgtListHash, tgtListHash) {
 		tgtErr = a.metakvSvc.UpsertTargetManifests(a.replicationSpec, &tgtMetaList)
 		if tgtErr != nil {
-			a.logger.Warnf("Upserting target resulted in err: %v\n", tgtErr)
+			a.logger.Warnf("%v - Upserting target resulted in err: %v\n", a.id, tgtErr)
 		} else {
 			tgtUpdated = true
 		}
@@ -633,7 +633,7 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr err
 	tgtGet, tgtErr := a.metakvSvc.GetTargetManifests(a.replicationSpec)
 
 	if srcErr != nil && srcErr != service_def.MetadataNotFoundErr {
-		a.logger.Warnf("Unable to load source from metakv: %v\n", srcErr)
+		a.logger.Warnf("%v - Unable to load source from metakv: %v\n", a.id, srcErr)
 	} else {
 		if srcGet != nil {
 			a.hashMtx.Lock()
@@ -666,7 +666,7 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr err
 	}
 
 	if tgtErr != nil && tgtErr != service_def.MetadataNotFoundErr {
-		a.logger.Warnf("Unable to load target from metakv: %v\n", tgtErr)
+		a.logger.Warnf("%v - Unable to load target from metakv: %v\n", a.id, tgtErr)
 	} else {
 		if tgtGet != nil {
 			a.hashMtx.Lock()
@@ -749,7 +749,7 @@ func (a *CollectionsManifestAgent) Start() error {
 			}
 
 			if srcErr != nil || tgtErr != nil {
-				a.logger.Warnf("CollectionsManifestAgent %v starting sourceErr: %v tgtErr: %v", a.replicationSpec.Id, srcErr, tgtErr)
+				a.logger.Warnf("%v - starting sourceErr: %v tgtErr: %v", a.replicationSpec.Id, srcErr, tgtErr)
 				// For now - since collections isn't officially supported, just log the warning and return nil
 				return nil
 			}
@@ -934,14 +934,14 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 	err = a.utilities.ExponentialBackoffExecutor(sourceRefreshStr, waitTime, maxRetry,
 		base.BucketInfoOpRetryFactor, getRetry)
 	if err != nil {
-		a.logger.Errorf("refreshSource err: %v\n", err)
+		a.logger.Errorf("%v - refreshSource err: %v\n", a.id, err)
 		if lock {
 			a.srcMtx.Lock()
 			defer a.srcMtx.Unlock()
 		}
 		maxID := a.sourceCache.GetMaxManifestID()
 		if maxID < a.lastSourcePull {
-			a.logger.Warnf("%v is unable to pull a higher source manifest, going back in time from %v to %v", a.lastSourcePull, maxID)
+			a.logger.Warnf("%v - %v is unable to pull a higher source manifest, going back in time from %v to %v", a.id, a.lastSourcePull, maxID)
 		}
 		a.lastSourcePull = maxID
 		return
@@ -956,7 +956,7 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 			a.srcMtx.RUnlock()
 			a.srcMtx.Lock()
 		}
-		a.logger.Infof("CollectionsManifestAgent: Updated source manifest from old version %v to new version %v\n", a.lastSourcePull, manifest.Uid())
+		a.logger.Infof("%v - Updated source manifest from old version %v to new version %v\n", a.id, a.lastSourcePull, manifest.Uid())
 		oldManifest, ok = a.sourceCache[a.lastSourcePull]
 		a.lastSourcePull = manifest.Uid()
 		a.sourceCache[manifest.Uid()] = manifest
@@ -1034,21 +1034,21 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 		bucketName := a.replicationSpec.TargetBucketName
 		manifest, err = a.remoteClusterSvc.GetManifestByUuid(clusterUuid, bucketName, force, a.tempAgent)
 		if err != nil && err != ErrorRemoteClusterNoCollectionsCapability {
-			a.logger.Errorf("RemoteClusterService GetManifest on %v for bucket %v returned %v\n", clusterUuid, bucketName, err)
+			a.logger.Errorf("%v - RemoteClusterService GetManifest on %v for bucket %v returned %v\n", a.id, clusterUuid, bucketName, err)
 			return err
 		}
 		return nil
 	}
 	err = a.utilities.ExponentialBackoffExecutor(targetRefreshStr, waitTime, maxRetry, base.RemoteMcRetryFactor, getRetry)
 	if err != nil || manifest == nil {
-		a.logger.Errorf("refreshTarget returned err: %v\n", err)
+		a.logger.Errorf("%v - refreshTarget returned err: %v\n", a.id, err)
 		if lock {
 			a.tgtMtx.Lock()
 			defer a.tgtMtx.Unlock()
 		}
 		maxID := a.targetCache.GetMaxManifestID()
 		if maxID < a.lastTargetPull {
-			a.logger.Warnf("%v is unable to pull a higher target manifest, going back in time from %v to %v", a.lastTargetPull, maxID)
+			a.logger.Warnf("%v - %v is unable to pull a higher target manifest, going back in time from %v to %v", a.id, a.lastTargetPull, maxID)
 		}
 		a.lastTargetPull = maxID
 		return
@@ -1063,7 +1063,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 			a.tgtMtx.RUnlock()
 			a.tgtMtx.Lock()
 		}
-		a.logger.Infof("CollectionsManifestAgent: Updated target manifest from old version %v to new version %v\n", a.lastTargetPull, manifest.Uid())
+		a.logger.Infof("%v -  Updated target manifest from old version %v to new version %v\n", a.id, a.lastTargetPull, manifest.Uid())
 		oldManifest, ok = a.targetCache[a.lastTargetPull]
 		a.lastTargetPull = manifest.Uid()
 		a.targetCache[manifest.Uid()] = manifest
@@ -1279,7 +1279,7 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 	if len(srcErr) > 0 || len(tgtErr) > 0 {
 		err = fmt.Errorf("Pruning %v, unable to find srcMmanifests %v and targetManifests %v",
 			a.replicationSpec.Id, srcErr, tgtErr)
-		a.logger.Warnf(err.Error())
+		a.logger.Warnf("%v - %v", a.id, err.Error())
 	}
 	return err
 }
