@@ -76,7 +76,7 @@ func (mcl *MetakvChangeListener) Start() error {
 
 func (mcl *MetakvChangeListener) observeChildren() {
 	defer mcl.children_waitgrp.Done()
-	err := metakv.RunObserveChildrenV2(mcl.dirpath, mcl.metakvCallback, mcl.cancel_chan)
+	err := metakv.RunObserveChildren(mcl.dirpath, mcl.metakvCallback, mcl.cancel_chan)
 	// call failure call back only when there are real errors
 	// err may be nil when observeChildren is canceled, in which case there is no need to call failure call back
 	mcl.failureCallback(err)
