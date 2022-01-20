@@ -50,7 +50,7 @@ var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_M
 var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC,
 	service_def.TIME_COMMITING_METRIC, service_def.NUM_FAILEDCKPTS_METRIC, service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC,
 	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC,
-	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC}
+	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC}
 
 // keys for metrics in overview
 var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.DOCS_CHECKED_METRIC, service_def.DOCS_WRITTEN_METRIC, service_def.EXPIRY_DOCS_WRITTEN_METRIC, service_def.DELETION_DOCS_WRITTEN_METRIC,
@@ -62,7 +62,7 @@ var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.D
 	service_def.RESP_WAIT_METRIC, service_def.META_LATENCY_METRIC, service_def.DCP_DISPATCH_TIME_METRIC, service_def.DCP_DATACH_LEN, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC,
 	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC, service_def.GET_DOC_LATENCY_METRIC,
 	service_def.DOCS_MERGED_METRIC, service_def.DATA_MERGED_METRIC, service_def.EXPIRY_DOCS_MERGED_METRIC, service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC,
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC,
 }
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
@@ -603,6 +603,11 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	docs_checked_var.Set(int64(docs_checked))
 	overview_expvar_map.Set(service_def.DOCS_CHECKED_METRIC, docs_checked_var)
 	setCounter(stats_mgr.getOverviewRegistry().Get(service_def.DOCS_CHECKED_METRIC).(metrics.Counter), int(docs_checked))
+
+	theoreticalUncompressedDataReplicated := stats_mgr.getOverviewRegistry().Get(service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC).(metrics.Counter).Count()
+	theoreticalUncompressedDataReplicatedVar := new(expvar.Int)
+	theoreticalUncompressedDataReplicatedVar.Set(theoreticalUncompressedDataReplicated)
+	overview_expvar_map.Set(service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC, theoreticalUncompressedDataReplicatedVar)
 
 	//calculate rate_doc_checks
 	var rate_doc_checks float64
@@ -1284,6 +1289,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.SET_DOCS_CAS_CHANGED_METRIC, set_cas_changed)
 		add_cas_changed := metrics.NewCounter()
 		registry.Register(service_def.ADD_DOCS_CAS_CHANGED_METRIC, add_cas_changed)
+		data_replicated_uncompressed := metrics.NewCounter()
+		registry.Register(service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC, data_replicated_uncompressed)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1316,6 +1323,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC] = deletion_cas_changed
 		metric_map[service_def.SET_DOCS_CAS_CHANGED_METRIC] = set_cas_changed
 		metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC] = add_cas_changed
+		metric_map[service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC] = data_replicated_uncompressed
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -1330,6 +1338,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentCasChangedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentUncompressedListener, outNozzle_collector)
 
 	return nil
 }
@@ -1362,6 +1371,7 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		resp_wait_time := event_otherInfo.Resp_wait_time
 		metric_map[service_def.DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		metric_map[service_def.DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
+		metric_map[service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC].(metrics.Counter).Inc(int64(event_otherInfo.UncompressedReqSize))
 		if opti_replicated {
 			metric_map[service_def.DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
 		}

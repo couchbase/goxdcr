@@ -2758,15 +2758,16 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 				if req != nil && req.Opaque == response.Opaque {
 					additionalInfo := DataSentEventAdditional{Seqno: seqno,
-						IsOptRepd:      xmem.optimisticRep(req),
-						Opcode:         req.Opcode,
-						IsExpirySet:    (binary.BigEndian.Uint32(req.Extras[4:8]) != 0),
-						VBucket:        req.VBucket,
-						Req_size:       req.Size(),
-						Commit_time:    committing_time,
-						Resp_wait_time: resp_wait_time,
-						ManifestId:     manifestId,
-						FailedTargetCR: base.IsEExistsError(response.Status),
+						IsOptRepd:           xmem.optimisticRep(req),
+						Opcode:              req.Opcode,
+						IsExpirySet:         (binary.BigEndian.Uint32(req.Extras[4:8]) != 0),
+						VBucket:             req.VBucket,
+						Req_size:            req.Size(),
+						Commit_time:         committing_time,
+						Resp_wait_time:      resp_wait_time,
+						ManifestId:          manifestId,
+						FailedTargetCR:      base.IsEExistsError(response.Status),
+						UncompressedReqSize: req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 
