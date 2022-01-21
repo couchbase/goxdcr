@@ -2368,7 +2368,8 @@ func (u *Utilities) ConstructHttpRequest(
 	case base.UserAuthModeLocal:
 		err := cbauth.SetRequestAuth(req)
 		if err != nil {
-			l.Errorf("Failed to set authentication to request. err=%v\n req=%v\n", err, req)
+			l.Errorf("Failed to set authentication to request. err=%v\n", err)
+			l.Debugf("req=%v\n", req)
 			return nil, "", err
 		}
 	case base.UserAuthModeBasic:
