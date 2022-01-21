@@ -3107,6 +3107,9 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, 
 	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergeAndPersistBrokenMappingDocs", base.DiagInternalThreshold)
 	defer stopFunc()
 	curNodeShaMap, curNodeMappingDoc, _, _, err := ckmgr.checkpoints_svc.LoadBrokenMappings(specId)
+	if err != nil {
+		return err
+	}
 
 	// merge peers into curNode
 	for peerSha, peerMapping := range peersShaMap {
