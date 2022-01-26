@@ -1284,6 +1284,14 @@ func (b *BackfillTask) MergeIncomingTask(task *BackfillTask) (canFullyMerge, una
 		return
 	}
 
+	// Defensive check - previous code path's calls should lower chance of this from happening but seems that there
+	// seems to be potential situations where this still occurs
+	if b == task {
+		// same object, continue and do not merge nor RE-lock into a deadlock
+		canFullyMerge = true
+		return
+	}
+
 	b.mutex.Lock()
 	task.mutex.RLock()
 	defer b.mutex.Unlock()

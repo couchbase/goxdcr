@@ -462,7 +462,7 @@ func (genericPipeline *GenericPipeline) stopPartsWithTimeout() base.ErrorMap {
 	if err != nil {
 		// if err is not nill, it is possible that stopPartsFunc is still running and may still access errMap
 		// return errMap1 instead of errMap to avoid race conditions
-		genericPipeline.logger.Warnf("%v error stopping pipeline parts.", genericPipeline.InstanceId(), err)
+		genericPipeline.logger.Warnf("%v error stopping pipeline parts %v", genericPipeline.InstanceId(), err)
 		errMap1 := make(base.ErrorMap)
 		errMap1["genericPipeline.StopParts"] = err
 		return errMap1

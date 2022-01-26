@@ -92,8 +92,11 @@ type BackfillRequestHandler struct {
 	latestVBs                         []uint16
 	getCompleteReq                    func() (interface{}, error)
 
-	lastMergedMtx sync.RWMutex
-	lastMergedMap map[string]*metadata.VBTasksMapType
+	lastPullMergeMtx  sync.RWMutex
+	lastPullMergedMap map[string]*metadata.VBTasksMapType
+
+	lastPushMergeMtx  sync.RWMutex
+	lastPushMergedMap map[string]*metadata.VBTasksMapType
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -133,7 +136,8 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		getCompleteReq:               getCompleteReq,
 		sourceBucketTopologyCh:       make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen),
 		replicationSpecSvc:           replicationSpecSvc,
-		lastMergedMap:                map[string]*metadata.VBTasksMapType{},
+		lastPullMergedMap:            map[string]*metadata.VBTasksMapType{},
+		lastPushMergedMap:            map[string]*metadata.VBTasksMapType{},
 	}
 }
 
@@ -668,7 +672,6 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 
 	var err error
 	if backfillDone && !hasMoreTasks {
-		// TODO - once metakv is in, this need to be revisited
 		b.cachedBackfillSpec = nil
 		// At this point, there is no more tasks in the backfill spec
 		// This is only possible if all the tasks are done
@@ -1164,10 +1167,19 @@ func (b *BackfillRequestHandler) checkIfDataChanged(req internalPeerBackfillTask
 	if req.backfillSpec == nil || req.backfillSpec.VBTasksMap.IsNil() {
 		return fmt.Errorf("Nil backfill spec for checkingDataChanged")
 	}
-	b.lastMergedMtx.RLock()
-	defer b.lastMergedMtx.RUnlock()
 
-	lastVBMTasks, exists := b.lastMergedMap[req.nodeName]
+	var lastMap map[string]*metadata.VBTasksMapType
+	if req.pushMode {
+		b.lastPushMergeMtx.RLock()
+		defer b.lastPushMergeMtx.RUnlock()
+		lastMap = b.lastPushMergedMap
+	} else {
+		b.lastPullMergeMtx.RLock()
+		defer b.lastPullMergeMtx.RUnlock()
+		lastMap = b.lastPullMergedMap
+	}
+
+	lastVBMTasks, exists := lastMap[req.nodeName]
 	if !exists {
 		return nil
 	}
@@ -1181,44 +1193,64 @@ func (b *BackfillRequestHandler) checkIfDataChanged(req internalPeerBackfillTask
 	return errorPeerVBTasksAlreadyContained
 }
 
+func (b *BackfillRequestHandler) gcLastMergedMap(vbno uint16, nodeName, requestId string, pushMode bool) error {
+	var cleanUpMap map[string]*metadata.VBTasksMapType
+	if pushMode {
+		b.lastPushMergeMtx.Lock()
+		defer b.lastPushMergeMtx.Unlock()
+		cleanUpMap = b.lastPushMergedMap
+	} else {
+		b.lastPullMergeMtx.Lock()
+		defer b.lastPullMergeMtx.Unlock()
+		cleanUpMap = b.lastPullMergedMap
+	}
+
+	_, exists := cleanUpMap[nodeName]
+	if !exists || cleanUpMap[nodeName].IsNil() || cleanUpMap[nodeName].Len() == 0 {
+		err := fmt.Errorf("GC for %v for VB found no tasks to remove", requestId)
+		return err
+	}
+
+	mtx := cleanUpMap[nodeName].GetLock()
+	mtx.Lock()
+	delete(cleanUpMap[nodeName].VBTasksMap, vbno)
+	mtx.Unlock()
+
+	if cleanUpMap[nodeName].Len() == 0 {
+		delete(cleanUpMap, nodeName)
+	}
+	return nil
+}
+
 // Record as merged and then register last merged info for garbage collection
-// b.lastMergedMap will remember what the peer node has merged so that if it re-sends the information
+// b.lastPullMergedMap will remember what the peer node has merged so that if it re-sends the information
 // the merge will not happen (on a per VB level)
 // This mergeMap will need to be GC'ed, and is what this method is for - not to be confused
 // with GC'ing backfill tasks that gets send to replica nodes from the VB master
 func (b *BackfillRequestHandler) recordLastMergedReqForGC(req internalPeerBackfillTaskMergeReq) {
 	vbTaskMapClone := req.backfillSpec.VBTasksMap.Clone()
-	b.lastMergedMtx.Lock()
-	b.lastMergedMap[req.nodeName] = vbTaskMapClone
-	b.lastMergedMtx.Unlock()
+
+	if req.pushMode {
+		b.lastPushMergeMtx.Lock()
+		b.lastPushMergedMap[req.nodeName] = vbTaskMapClone
+		b.lastPushMergeMtx.Unlock()
+	} else {
+		b.lastPullMergeMtx.Lock()
+		b.lastPullMergedMap[req.nodeName] = vbTaskMapClone
+		b.lastPullMergeMtx.Unlock()
+	}
 
 	nodeNameCpy := req.nodeName
 	requestId := fmt.Sprintf("%v_%v_%v", BackfillHandlerPrefix, b.id, nodeNameCpy)
-	gcFuncWrapper := func(vbno uint16) error {
-		b.lastMergedMtx.Lock()
-		defer b.lastMergedMtx.Unlock()
-		_, exists := b.lastMergedMap[nodeNameCpy]
-		if !exists || b.lastMergedMap[nodeNameCpy].IsNil() || b.lastMergedMap[nodeNameCpy].Len() == 0 {
-			err := fmt.Errorf("GC for %v for VB found no tasks to remove", requestId)
-			return err
-		}
-
-		mtx := b.lastMergedMap[nodeNameCpy].GetLock()
-		mtx.Lock()
-		delete(b.lastMergedMap[nodeNameCpy].VBTasksMap, vbno)
-		mtx.Unlock()
-
-		if b.lastMergedMap[nodeNameCpy].Len() == 0 {
-			delete(b.lastMergedMap, nodeNameCpy)
-		}
-		return nil
+	if req.pushMode {
+		requestId = fmt.Sprintf("%v_push", requestId)
 	}
 
 	mtx := vbTaskMapClone.GetLock()
 	mtx.RLock()
 	for vbno, _ := range vbTaskMapClone.VBTasksMap {
 		gcFunc := func() error {
-			return gcFuncWrapper(vbno)
+			return b.gcLastMergedMap(vbno, nodeNameCpy, requestId, req.pushMode)
 		}
 
 		registerErr := b.bucketTopologySvc.RegisterGarbageCollect(b.spec.Id, b.spec.SourceBucketName, vbno, requestId, gcFunc, base.P2PVBRelatedGCInterval)
@@ -1259,4 +1291,5 @@ type internalVBDiffBackfillReq struct {
 type internalPeerBackfillTaskMergeReq struct {
 	nodeName     string
 	backfillSpec *metadata.BackfillReplicationSpec
+	pushMode     bool
 }

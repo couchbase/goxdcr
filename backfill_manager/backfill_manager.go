@@ -1826,7 +1826,7 @@ func (b *BackfillMgr) mergePullResponses(topic string, peerResponses peerToPeer.
 			continue
 		}
 
-		err = b.mergeP2PReqAndUnlockCommon(bucketMapPayload, srcBucketName, unlockFunc, nodeName, handler, topic, spec)
+		err = b.mergeP2PReqAndUnlockCommon(bucketMapPayload, srcBucketName, unlockFunc, nodeName, handler, topic, spec, false)
 		if err != nil {
 			errMap[fmt.Sprintf("%v_%v", topic, nodeName)] = err
 		}
@@ -1857,14 +1857,14 @@ func (b *BackfillMgr) mergePushRequest(topic string, request *peerToPeer.Replica
 		return
 	}
 
-	err = b.mergeP2PReqAndUnlockCommon(bucketMapPayload, srcBucketName, unlockFunc, sender, handler, topic, spec)
+	err = b.mergeP2PReqAndUnlockCommon(bucketMapPayload, srcBucketName, unlockFunc, sender, handler, topic, spec, true)
 	if err != nil {
 		errMap[sender] = err
 	}
 	return
 }
 
-func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.BucketVBMPayloadType, srcBucketName string, unlockFunc func(), nodeName string, handler *BackfillRequestHandler, topic string, spec *metadata.ReplicationSpecification) error {
+func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.BucketVBMPayloadType, srcBucketName string, unlockFunc func(), nodeName string, handler *BackfillRequestHandler, topic string, spec *metadata.ReplicationSpecification, pushMode bool) error {
 	backfillMappingDoc := (*bucketMapPayload)[srcBucketName].GetBackfillMappingDoc()
 	if backfillMappingDoc == nil || backfillMappingDoc.Size() == 0 {
 		// Nothing to do here
@@ -1893,11 +1893,16 @@ func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.Bu
 	unlockFunc()
 
 	backfillSpec := metadata.NewBackfillReplicationSpec(topic, backfillMappingDoc.SpecInternalId, vbTaskMap, spec)
-	b.logger.Infof("Replication %v received peer node %v backfill replication: %v", topic, nodeName, backfillSpec)
+	var pushOrPullStr = "pull"
+	if pushMode {
+		pushOrPullStr = "push"
+	}
+	b.logger.Infof("Replication %v received peer node %v %v backfill replication: %v", topic, pushOrPullStr, nodeName, backfillSpec)
 
 	mergeReq := internalPeerBackfillTaskMergeReq{
 		nodeName:     nodeName,
 		backfillSpec: backfillSpec,
+		pushMode:     pushMode,
 	}
 	err = handler.HandleBackfillRequest(mergeReq)
 	if err != nil {
