@@ -853,16 +853,22 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			defer b.pipelinesMtx.RUnlock()
 			_, i := b.getPipeline(common.BackfillPipeline)
 			b.logger.Errorf(err.Error())
-			b.raisePipelineErrors[i](err)
+			if i >= 0 && b.raisePipelineErrors[i] != nil {
+				b.raisePipelineErrors[i](err)
+			}
 			return err
 		}
 		err := b.HandleVBTaskDone(vbno)
 		if err != nil && err != errorVbAlreadyDone && !b.IsStopped() && atomic.LoadUint32(&b.backfillPipelineAttached) == 1 {
 			b.logger.Errorf("Process LastSeenSeqnoDoneProcessed for % vbno %v resulted with %v", b.Id(), vbno, err)
 			// When err is not nil, the backfill job needs to be redone
+			b.pipelinesMtx.RLock()
 			_, i := b.getPipeline(common.BackfillPipeline)
 			b.logger.Errorf(err.Error())
-			b.raisePipelineErrors[i](err)
+			if i >= 0 && b.raisePipelineErrors[i] != nil {
+				b.raisePipelineErrors[i](err)
+			}
+			b.pipelinesMtx.RUnlock()
 		}
 	default:
 		b.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, b.id)
