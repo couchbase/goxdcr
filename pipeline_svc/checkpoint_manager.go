@@ -873,20 +873,17 @@ func (ckmgr *CheckpointManager) setCheckpointInterval(ckpt_interval int) {
 	ckmgr.logger.Infof("%v %v set ckpt_interval to %v s\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), ckpt_interval)
 }
 
-func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque metadata.TargetVBOpaque) error {
+func (ckmgr *CheckpointManager) updateCurrentVBOpaque(vbno uint16, vbOpaque metadata.TargetVBOpaque) {
 	obj, ok := ckmgr.cur_ckpts[vbno]
 	if ok {
 		obj.lock.Lock()
 		defer obj.lock.Unlock()
 		record := obj.ckpt
 		record.Target_vb_opaque = vbOpaque
-		return nil
 	} else {
 		err := fmt.Errorf("%v %v Trying to update vbopaque on vb=%v which is not in MyVBList", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 		ckmgr.handleGeneralError(err)
-		return err
 	}
-
 }
 
 // handle fatal error, raise error event to pipeline supervisor
@@ -1300,6 +1297,36 @@ func (ckmgr *CheckpointManager) startSeqnoGetter(getter_id int, listOfVbs []uint
 	}
 }
 
+func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16) {
+	obj, ok := ckmgr.cur_ckpts[vbno]
+	if !ok {
+		err := fmt.Errorf("%v %v Trying to check vbopaque on vb=%v which is not in MyVBList", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
+		ckmgr.handleGeneralError(err)
+		return
+	}
+
+	needToPopulate := true
+	if obj != nil {
+		obj.lock.RLock()
+		if obj.ckpt != nil {
+			needToPopulate = obj.ckpt.Target_vb_opaque == nil
+		}
+		obj.lock.RUnlock()
+	}
+
+	if !needToPopulate {
+		return
+	}
+
+	_, curRemoteVBOpaque, err := ckmgr.capi_svc.PreReplicate(ckmgr.remote_bucket, service_def.NewEmptyRemoteVBReplicationStatus(vbno), ckmgr.support_ckpt)
+	if err != nil {
+		ckmgr.logger.Errorf("%v %v populateTargetVBOpaque(pre_replicate) failed for %v. err=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno, err)
+		ckmgr.handleGeneralError(err)
+		return
+	}
+	ckmgr.updateCurrentVBOpaque(vbno, curRemoteVBOpaque)
+}
+
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
 func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, service_def.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
@@ -1514,6 +1541,14 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 			vbts.SnapshotEnd = startingTs.SnapshotEnd
 			vbts.ManifestIDs = startingTs.ManifestIDs
 		}
+		// Usually, in the cases of Main pipelines, when there are no checkpoints (or no agreeable checkpoints)
+		// the checkpoint manager will start at seqno 0, which is clean and guarantees no data loss
+		// In the case of backfill pipelines, when there is no backfill checkpoint (or if there is no agreeable checkpoint)
+		// the above will set the starting point accordingly
+		// However, if there are backfill checkpoints and they all do not match because of
+		//    checkpoint's startSeqno > backfillTaskEndSeqno
+		// then the vbopaque will never be populated and will need to be populated to ensure that ckpt operations can take place
+		ckmgr.populateTargetVBOpaqueIfNeeded(vbno)
 	}
 
 	//update current ckpt map
