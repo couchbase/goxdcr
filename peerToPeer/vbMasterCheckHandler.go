@@ -88,6 +88,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	}
 
 	bucketVBsMap := req.GetBucketVBMap()
+	startTime := time.Now()
 	h.logger.Infof("Received VB master check request from %v with specID %v opaque %v for the following Bucket -> VBs %v", req.GetSender(), req.ReplicationId, req.GetOpaque(), bucketVBsMap)
 	stopMetakvMeasureFunc := h.utils.StartDiagStopwatch(fmt.Sprintf("VBMasterCheckHandler(%v,%v,%v)", req.GetSender(), req.ReplicationId, req.GetOpcode()), base.DiagVBMasterHandleThreshold)
 
@@ -130,7 +131,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	stopMetakvMeasureFunc()
 
 	if mainCkptFetchErr != nil {
-		h.logger.Errorf("%v - fetchMainCkpt error %v", req.ReplicationId, mainCkptFetchErr)
+		h.logger.Errorf("%v (%v) - fetchMainCkpt error %v", req.ReplicationId, req.GetOpaque(), mainCkptFetchErr)
 		resp.ErrorString = mainCkptFetchErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -140,7 +141,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	}
 
 	if backfillCkptFetchErr != nil {
-		h.logger.Errorf("%v - fetchBackfillCkpt error %v", req.ReplicationId, backfillCkptFetchErr)
+		h.logger.Errorf("%v (%v) - fetchBackfillCkpt error %v", req.ReplicationId, req.GetOpaque(), backfillCkptFetchErr)
 		resp.ErrorString = backfillCkptFetchErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -150,7 +151,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	}
 
 	if manifestErr != nil {
-		h.logger.Errorf("%v - manifest error %v", req.ReplicationId, manifestErr)
+		h.logger.Errorf("%v (%v) - manifest error %v", req.ReplicationId, req.GetOpaque(), manifestErr)
 		resp.ErrorString = manifestErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -160,7 +161,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	}
 
 	if brokenMappingErr != nil {
-		h.logger.Errorf("%v - brokenMapping error %v", req.ReplicationId, brokenMappingErr)
+		h.logger.Errorf("%v (%v) - brokenMapping error %v", req.ReplicationId, req.GetOpaque(), brokenMappingErr)
 		resp.ErrorString = brokenMappingErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -170,7 +171,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	}
 
 	if backfillTasksErr != nil {
-		h.logger.Errorf("%v - backfillTasks error %v", req.ReplicationId, backfillTasksErr)
+		h.logger.Errorf("%v (%v) - backfillTasks error %v", req.ReplicationId, req.GetOpaque(), backfillTasksErr)
 		resp.ErrorString = backfillTasksErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -181,7 +182,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err := resp.LoadMainPipelineCkpt(mainPipelineCkpts, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("%v when loading pipeline ckpt into response, got %v", req.ReplicationId, err)
+		h.logger.Errorf("%v (%v) - when loading pipeline ckpt into response, got %v", req.ReplicationId, req.GetOpaque(), err)
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -192,7 +193,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err = resp.LoadBackfillPipelineCkpt(backfillPipelineCkpts, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("%v when loading pipeline ckpt into response, got %v", req.ReplicationId, err)
+		h.logger.Errorf("%v (%v) - when loading pipeline ckpt into response, got %v", req.ReplicationId, req.GetOpaque(), err)
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -203,7 +204,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err = resp.LoadManifests(cachedSrcManifests, cachedTgtManifests, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("%v when loading manifests into response, got %v", req.ReplicationId, err)
+		h.logger.Errorf("%v (%v) - when loading manifests into response, got %v", req.ReplicationId, req.GetOpaque(), err)
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -214,7 +215,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err = resp.LoadBrokenMappingDoc(brokenMappingDoc, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", req.ReplicationId, err)
+		h.logger.Errorf("%v (%v) - when loading brokenMappingDoc into response, got %v", req.ReplicationId, req.GetOpaque(), err)
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -225,7 +226,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 
 	err = resp.LoadBackfillTasks(backfillTasks, req.SourceBucketName)
 	if err != nil {
-		h.logger.Errorf("when loading brokenMappingDoc into response, got %v", req.ReplicationId, err)
+		h.logger.Errorf("%v (%v) - when loading brokenMappingDoc into response, got %v", req.ReplicationId, req.GetOpaque(), err)
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
@@ -235,13 +236,17 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	}
 
 	// Final Callback
+	doneProcessedTime := time.Now()
 	handlerResult, err := req.CallBack(resp)
 	if err != nil || handlerResult != nil && handlerResult.GetError() != nil {
 		var handlerResultErr error
 		if handlerResult != nil {
 			handlerResultErr = handlerResult.GetError()
 		}
-		h.logger.Errorf("Unable to send resp %v to original req %v opaque %v - %v %v", resp.ReplicationSpecId, req.Sender, req.GetOpaque(), err, handlerResultErr)
+		h.logger.Errorf("Unable to send resp %v to original req %v (%v) - %v %v", resp.ReplicationSpecId, req.Sender, req.GetOpaque(), err, handlerResultErr)
+	} else {
+		h.logger.Infof("Replied to VB master check request from %v with specID %v (%v) - total elapsed time %v processing time: %v",
+			req.GetSender(), req.ReplicationId, req.GetOpaque(), time.Since(startTime), doneProcessedTime.Sub(startTime))
 	}
 	return
 }
