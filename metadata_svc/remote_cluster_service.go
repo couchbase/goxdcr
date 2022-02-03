@@ -3086,50 +3086,10 @@ func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteCl
 		return nil
 	}
 
-	clientCert, err := tls.X509KeyPair(refClientCertificate, ref.ClientKey())
+	_, err := tls.X509KeyPair(refClientCertificate, ref.ClientKey())
 	if err != nil {
 		return fmt.Errorf("Error parsing client certificate. err=%v", err)
 	}
-
-	// clientCert.Certificate contains a chain of certificates, leaf first
-	// e.g., LeafCert, IntermediateCert1, IntermediateCert2
-	// we will be verifying these certificates in the reverse order
-	// first we check IntermediateCert2 is signed by its parent, which
-	// can be any one of the server root certificates
-	// then we check IntermediateCert1 is signed by IntermediateCert2
-	// then we check LeafCert is signed by IntermediateCert1
-	// if any of the certificates has been tempered with, the corresponding check should fail
-	chainLen := len(clientCert.Certificate)
-	curCert, err := x509.ParseCertificate(clientCert.Certificate[chainLen-1])
-	if err != nil {
-		return fmt.Errorf("Error parsing certificate chain in client certificate. err=%v", err)
-	}
-	ok := false
-	// Verify that curCert (which is the top of the chain of the clientCert) is signed by one of the CA
-	for _, parentCert := range rootCerts {
-		err = curCert.CheckSignatureFrom(parentCert)
-		if err == nil {
-			ok = true
-			break
-		}
-	}
-	if !ok {
-		return fmt.Errorf("Client certificate is not signed by any of the root certificates")
-	}
-	parentCert := curCert
-	for index := chainLen - 2; index >= 0; index-- {
-		curCert, err := x509.ParseCertificate(clientCert.Certificate[index])
-		if err != nil {
-			return fmt.Errorf("Error parsing certificate chain in client certificate. err=%v", err)
-		} else {
-			err = curCert.CheckSignatureFrom(parentCert)
-			if err != nil {
-				return fmt.Errorf("Error validating the signature of client certficate. err=%v", err)
-			}
-		}
-		parentCert = curCert
-	}
-
 	return nil
 }
 
