@@ -53,6 +53,7 @@ type Handler interface {
 	HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification)
 	HandleSpecChange(oldSpec, newSpec *metadata.ReplicationSpecification)
 	GetSpecDelNotification(specId, internalId string) (chan bool, error)
+	GetReqAndClearOpaque(opaque uint32) (*Request, chan ReqRespPair, bool)
 }
 
 type P2PManagerImpl struct {
@@ -73,7 +74,7 @@ type P2PManagerImpl struct {
 	commAPI         PeerToPeerCommAPI
 	cleanupInterval time.Duration
 
-	receiveChsMap map[OpCode]chan interface{}
+	receiveChsMap map[OpCode][]chan interface{}
 
 	receiveHandlerFinCh chan bool
 	receiveHandlers     map[OpCode]Handler
@@ -120,11 +121,8 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 	}, nil
 }
 
-func initReceiveChsMap() map[OpCode]chan interface{} {
-	receiveMap := make(map[OpCode]chan interface{})
-	for i := OpcodeMin; i < OpcodeMax; i++ {
-		receiveMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
-	}
+func initReceiveChsMap() map[OpCode][]chan interface{} {
+	receiveMap := make(map[OpCode][]chan interface{})
 	return receiveMap
 }
 
@@ -163,14 +161,20 @@ func (p *P2PManagerImpl) runHandlers() error {
 	for i := OpcodeMin; i < OpcodeMax; i++ {
 		switch i {
 		case ReqDiscovery:
-			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
 			p.receiveHandlers[i] = NewDiscoveryHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.latestKnownPeers, p.cleanupInterval, p.replSpecSvc)
 		case ReqVBMasterChk:
-			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
 			p.receiveHandlers[i] = NewVBMasterCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
 				p.bucketTopologySvc, p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils, p.replSpecSvc)
 		case ReqPeriodicPush:
-			p.receiveChsMap[i] = make(chan interface{}, base.MaxP2PReceiveChLen)
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
 			p.receiveHandlers[i] = NewPeriodicPushHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
 				p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils, p.getPushReqMerger(), p.replSpecSvc)
 		default:
@@ -254,6 +258,8 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 }
 
 func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetry map[string]bool, myHost string) error {
+	successOpaqueMap := make(map[string]*uint32)
+
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
 		var peersToRetryMtx sync.Mutex
@@ -261,6 +267,12 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 
 		var errMapMtx sync.RWMutex
 		errMap := make(base.ErrorMap)
+
+		for peerAddr, _ := range peersToRetry {
+			var uintVal uint32
+			successOpaqueMap[peerAddr] = &uintVal
+		}
+
 		for peerAddrTransient, _ := range peersToRetry {
 			peerAddr := peerAddrTransient
 			waitGrp.Add(1)
@@ -294,6 +306,10 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					peersToRetryMtx.Lock()
 					peersToRetryReplacement[peerAddr] = true
 					peersToRetryMtx.Unlock()
+					// If unable to send properly, there is no reason to hear back from an opaque
+					p.receiveHandlersMtx.RLock()
+					p.receiveHandlers[opCode].GetReqAndClearOpaque(compiledReq.GetOpaque())
+					p.receiveHandlersMtx.RUnlock()
 					return
 				}
 
@@ -304,10 +320,15 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					peersToRetryMtx.Lock()
 					peersToRetryReplacement[peerAddr] = true
 					peersToRetryMtx.Unlock()
+					// If unable to send properly, there is no reason to hear back from an opaque
+					p.receiveHandlersMtx.RLock()
+					p.receiveHandlers[opCode].GetReqAndClearOpaque(compiledReq.GetOpaque())
+					p.receiveHandlersMtx.RUnlock()
 				} else {
 					cbOpts.sentTimesMtx.Lock()
 					cbOpts.sentTimesMap[peerAddr] = time.Now()
 					cbOpts.sentTimesMtx.Unlock()
+					atomic.StoreUint32(successOpaqueMap[peerAddr], compiledReq.GetOpaque())
 				}
 			}()
 		}
@@ -328,6 +349,14 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 	if err != nil {
 		p.logger.Errorf("Unable to send %v to some or all the nodes... %v", opCode.String(), err)
 		return err
+	} else {
+		printOpaqueMap := make(map[string]uint32)
+		for k, vPtr := range successOpaqueMap {
+			printOpaqueMap[k] = *vPtr
+		}
+		if len(successOpaqueMap) > 0 {
+			p.logger.Infof("Sent request type %v to nodes with opaque: %v", opCode.String(), printOpaqueMap)
+		}
 	}
 	return nil
 }

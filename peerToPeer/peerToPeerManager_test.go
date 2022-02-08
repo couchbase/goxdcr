@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 )
@@ -159,12 +160,12 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	vbMasterCheckHandler.opaqueMapMtx.RUnlock()
 
 	for _, resp := range responses {
-		vbMasterCheckHandler.receiveCh <- resp
+		vbMasterCheckHandler.receiveRespCh <- resp
 	}
 
 	results, _, _ := opts.GetResults()
 	tgt1Result, found := results[peerNodes[0]]
-	tgt2Result, found2 := results[peerNodes[0]]
+	tgt2Result, found2 := results[peerNodes[1]]
 	assert.True(found)
 	assert.True(found2)
 	assert.NotNil(tgt1Result.ReqPtr)
@@ -208,4 +209,166 @@ func TestPeerToPeerConcurrentMap(t *testing.T) {
 		_, errMap, _ := opts.GetResults()
 		assert.Len(errMap, 3)
 	}
+}
+
+func TestSendSameHostDualSimultaneousReqs(t *testing.T) {
+	fmt.Println("============== Test case start: TestSendSameHostDualSimultaneousReqs =================")
+	defer fmt.Println("============== Test case end: TestSendSameHostDualSimultaneousReqs =================")
+	assert := assert.New(t)
+
+	bucketName := "bucketName"
+	spec, _ := metadata.NewReplicationSpecification(bucketName, "", "", "", "")
+	specList := []*metadata.ReplicationSpecification{spec}
+
+	peerNodes := []string{"10.1.1.1:8091", "10.2.2.2:8091"}
+	myHostAddr := "127.0.0.1:8091"
+
+	queryResultErrs := []error{nil, nil}
+	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
+
+	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc := setupBoilerPlate()
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc)
+
+	dummyMerger := func(string, string, interface{}) error { return nil }
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc)
+	assert.Nil(err)
+	assert.NotNil(mgr)
+	mgr.SetPushReqMergerOnce(dummyMerger)
+	commAPI, err := mgr.Start()
+	assert.NotNil(commAPI)
+	assert.Nil(err)
+
+	bucketMap := make(BucketVBMapType)
+	bucketMap[bucketName] = []uint16{0, 1}
+
+	filteredSubsets, err := mgr.vbMasterCheckHelper.GetUnverifiedSubset(bucketMap)
+	assert.Nil(err)
+
+	handler, found := mgr.receiveHandlers[ReqVBMasterChk]
+	assert.True(found)
+	assert.NotNil(handler)
+	assert.Nil(handler.Start())
+
+	getReqFunc := func(src, tgt string) Request {
+		var opaque uint32
+		if tgt == peerNodes[0] {
+			opaque = uint32(0)
+		} else if tgt == peerNodes[1] {
+			opaque = uint32(1)
+		} else {
+			panic("Invalid func")
+		}
+		common := NewRequestCommon(src, tgt, "", "", opaque)
+		vbCheckReq := NewVBMasterCheckReq(common)
+		vbCheckReq.SetBucketVBMap(filteredSubsets)
+		vbCheckReq.ReplicationId = spec.Id
+		vbCheckReq.SourceBucketName = spec.SourceBucketName
+		vbCheckReq.InternalSpecId = spec.InternalId
+		return vbCheckReq
+	}
+
+	getReqFunc2 := func(src, tgt string) Request {
+		var opaque uint32
+		if tgt == peerNodes[0] {
+			opaque = uint32(2)
+		} else if tgt == peerNodes[1] {
+			opaque = uint32(3)
+		} else {
+			panic("Invalid func")
+		}
+		common := NewRequestCommon(src, tgt, "", "", opaque)
+		vbCheckReq := NewVBMasterCheckReq(common)
+		vbCheckReq.SetBucketVBMap(filteredSubsets)
+		vbCheckReq.ReplicationId = spec.Id
+		vbCheckReq.SourceBucketName = spec.SourceBucketName
+		vbCheckReq.InternalSpecId = spec.InternalId
+		return vbCheckReq
+	}
+
+	var responses []*VBMasterCheckResp
+	for _, peerNode := range peerNodes {
+		req := getReqFunc(myHostAddr, peerNode)
+		var reqIface interface{} = req
+		vbMasterCheckReq := reqIface.(*VBMasterCheckReq)
+		resp := vbMasterCheckReq.GenerateResponse().(*VBMasterCheckResp)
+		newMap := make(BucketVBMPayloadType)
+		resp.payload = &newMap
+		(*resp.payload)[bucketName] = &VBMasterPayload{
+			OverallPayloadErr: "",
+			NotMyVBs:          NewVBsPayload([]uint16{0, 1}),
+			ConflictingVBs:    nil,
+		}
+		responses = append(responses, resp)
+	}
+
+	// Do it again for second type of req
+	for _, peerNode := range peerNodes {
+		req := getReqFunc2(myHostAddr, peerNode)
+		var reqIface interface{} = req
+		vbMasterCheckReq := reqIface.(*VBMasterCheckReq)
+		resp := vbMasterCheckReq.GenerateResponse().(*VBMasterCheckResp)
+		newMap := make(BucketVBMPayloadType)
+		resp.payload = &newMap
+		(*resp.payload)[bucketName] = &VBMasterPayload{
+			OverallPayloadErr: "",
+			NotMyVBs:          NewVBsPayload([]uint16{0, 1}),
+			ConflictingVBs:    nil,
+		}
+		responses = append(responses, resp)
+	}
+
+	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
+	err = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
+	assert.Nil(err)
+
+	opts2 := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
+	err = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc2, opts2)
+	assert.Nil(err)
+
+	// recast
+	var handlerIface interface{} = handler
+	vbMasterCheckHandler, ok := handlerIface.(*VBMasterCheckHandler)
+	assert.True(ok)
+	assert.NotNil(vbMasterCheckHandler)
+
+	vbMasterCheckHandler.opaqueMapMtx.RLock()
+	assert.Len(vbMasterCheckHandler.opaqueReqRespCbMap, 4)
+	assert.Len(vbMasterCheckHandler.opaqueMap, 4)
+	assert.Len(vbMasterCheckHandler.opaqueReqMap, 4)
+	vbMasterCheckHandler.opaqueMapMtx.RUnlock()
+
+	for _, resp := range responses {
+		vbMasterCheckHandler.receiveRespCh <- resp
+	}
+
+	var waitGrp sync.WaitGroup
+	waitGrp.Add(1)
+	go func() {
+		results, _, _ := opts.GetResults()
+		tgt1Result, found := results[peerNodes[0]]
+		tgt2Result, found2 := results[peerNodes[1]]
+		assert.True(found)
+		assert.True(found2)
+		assert.NotNil(tgt1Result.ReqPtr)
+		assert.NotNil(tgt1Result.RespPtr)
+		assert.NotNil(tgt2Result.ReqPtr)
+		assert.NotNil(tgt2Result.RespPtr)
+		waitGrp.Done()
+	}()
+
+	waitGrp.Add(1)
+	go func() {
+		results, _, _ := opts2.GetResults()
+		tgt1Result, found := results[peerNodes[0]]
+		tgt2Result, found2 := results[peerNodes[1]]
+		assert.True(found)
+		assert.True(found2)
+		assert.NotNil(tgt1Result.ReqPtr)
+		assert.NotNil(tgt1Result.RespPtr)
+		assert.NotNil(tgt2Result.ReqPtr)
+		assert.NotNil(tgt2Result.RespPtr)
+		waitGrp.Done()
+	}()
+
+	waitGrp.Wait()
 }

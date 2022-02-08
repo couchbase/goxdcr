@@ -29,10 +29,10 @@ type KnownPeers struct {
 	mapMtx   sync.RWMutex
 }
 
-func NewDiscoveryHandler(reqCh chan interface{}, logger *log.CommonLogger, lifecycleId string, knownPeers *KnownPeers, cleanupInterval time.Duration, replicationSpecSvc service_def.ReplicationSpecSvc) *DiscoveryHandler {
+func NewDiscoveryHandler(reqCh []chan interface{}, logger *log.CommonLogger, lifecycleId string, knownPeers *KnownPeers, cleanupInterval time.Duration, replicationSpecSvc service_def.ReplicationSpecSvc) *DiscoveryHandler {
 	finCh := make(chan bool)
 	handler := &DiscoveryHandler{
-		HandlerCommon: NewHandlerCommon(logger, lifecycleId, finCh, cleanupInterval, reqCh, replicationSpecSvc),
+		HandlerCommon: NewHandlerCommon("DiscoveryHandler", logger, lifecycleId, finCh, cleanupInterval, reqCh, replicationSpecSvc),
 		knownPeers:    knownPeers,
 	}
 	return handler
@@ -49,21 +49,23 @@ func (h *DiscoveryHandler) Stop() error {
 	return nil
 }
 
+// Discovery requests are light weight and can just use one go-routine to handle both
 func (h *DiscoveryHandler) handler() {
 	for {
 		select {
 		case <-h.finCh:
 			return
-		case req := <-h.receiveCh:
+		case req := <-h.receiveReqCh:
 			// Can be either req or response
 			discoveryReq, isReq := req.(*DiscoveryRequest)
-			discoveryResp, isResp := req.(*DiscoveryResponse)
 			if isReq {
 				h.handleRequest(discoveryReq)
-			} else if isResp {
+			}
+		case resp := <-h.receiveRespCh:
+			discoveryResp, isResp := resp.(*DiscoveryResponse)
+			if isResp {
 				h.handleResponse(discoveryResp)
 			}
-
 		}
 	}
 }

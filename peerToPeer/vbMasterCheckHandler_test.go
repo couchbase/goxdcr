@@ -99,7 +99,8 @@ func TestVBMasterHandler(t *testing.T) {
 	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect, colManifestSvc, backfillReplSvc, backfillSpec, utils, replSpecSvc, replSpec)
 
 	reqCh := make(chan interface{}, 100)
-	handler := NewVBMasterCheckHandler(reqCh, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc, backfillReplSvc, utils, replSpecSvc)
+	respCh := make(chan interface{}, 100)
+	handler := NewVBMasterCheckHandler([]chan interface{}{reqCh, respCh}, logger, "", 100*time.Millisecond, bucketTopologySvc, ckptSvc, colManifestSvc, backfillReplSvc, utils, replSpecSvc)
 	handler.HandleSpecCreation(replSpec)
 
 	var waitGrp sync.WaitGroup
@@ -137,7 +138,7 @@ func TestVBMasterHandler(t *testing.T) {
 	req.bucketVBMap[srcBucketName] = vbList
 
 	waitGrp.Add(1)
-	handler.receiveCh <- req
+	handler.receiveReqCh <- req
 	waitGrp.Wait()
 }
 

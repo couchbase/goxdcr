@@ -33,10 +33,10 @@ type VBMasterCheckHandler struct {
 
 const VBMasterCheckSubscriberId = "VBMasterCheckHandler"
 
-func NewVBMasterCheckHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, replicationSpecSvc service_def.ReplicationSpecSvc) *VBMasterCheckHandler {
+func NewVBMasterCheckHandler(reqChs []chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, bucketTopologySvc service_def.BucketTopologySvc, ckptSvc service_def.CheckpointsService, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, replicationSpecSvc service_def.ReplicationSpecSvc) *VBMasterCheckHandler {
 	finCh := make(chan bool)
 	handler := &VBMasterCheckHandler{
-		HandlerCommon:     NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh, replicationSpecSvc),
+		HandlerCommon:     NewHandlerCommon(VBMasterCheckSubscriberId, logger, lifeCycleId, finCh, cleanupInterval, reqChs, replicationSpecSvc),
 		bucketTopologySvc: bucketTopologySvc,
 		ckptSvc:           ckptSvc,
 		colManifestSvc:    collectionsManifestSvc,
@@ -135,7 +135,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = mainCkptFetchErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -145,7 +145,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = backfillCkptFetchErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -155,7 +155,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = manifestErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -165,7 +165,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = brokenMappingErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -175,7 +175,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = backfillTasksErr.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -186,7 +186,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -197,7 +197,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -208,7 +208,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -219,7 +219,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -230,7 +230,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		resp.ErrorString = err.Error()
 		_, cbErr := req.CallBack(resp)
 		if cbErr != nil {
-			h.logger.Errorf("Responding back to %v has err %v", req.Sender, cbErr)
+			h.logger.Errorf("Responding back to %v (%v) has err %v", req.Sender, req.GetOpaque(), cbErr)
 		}
 		return
 	}
@@ -245,8 +245,8 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		}
 		h.logger.Errorf("Unable to send resp %v to original req %v (%v) - %v %v", resp.ReplicationSpecId, req.Sender, req.GetOpaque(), err, handlerResultErr)
 	} else {
-		h.logger.Infof("Replied to VB master check request from %v with specID %v (%v) - total elapsed time %v processing time: %v",
-			req.GetSender(), req.ReplicationId, req.GetOpaque(), time.Since(startTime), doneProcessedTime.Sub(startTime))
+		h.logger.Infof("Replied to VB master check request from %v with specID %v (%v) - total elapsed time: %v processing time: %v timeInQueue: %v",
+			req.GetSender(), req.ReplicationId, req.GetOpaque(), time.Since(startTime), doneProcessedTime.Sub(startTime), startTime.Sub(req.GetEnqueuedTime()))
 	}
 	return
 }
@@ -323,23 +323,38 @@ func (h *VBMasterCheckHandler) populateBucketVBMapsIntoResp(bucketVBsMap BucketV
 }
 
 func (h *VBMasterCheckHandler) handler() {
-	for {
-		select {
-		case <-h.finCh:
-			return
-		case reqOrResp := <-h.receiveCh:
-			// Can be either req or response
-			vbMasterReq, isReq := reqOrResp.(*VBMasterCheckReq)
-			vbMasterResp, isResp := reqOrResp.(*VBMasterCheckResp)
-			if isReq {
-				h.handleRequest(vbMasterReq)
-			} else if isResp {
-				h.handleResponse(vbMasterResp)
-			} else {
-				h.logger.Errorf("VBMasterCheckHandler received invalid format: %v", reflect.TypeOf(reqOrResp))
+	go func() {
+		for {
+			select {
+			case <-h.finCh:
+				return
+			case req := <-h.receiveReqCh:
+				vbMasterReq, isReq := req.(*VBMasterCheckReq)
+				if isReq {
+					h.handleRequest(vbMasterReq)
+				} else {
+					h.logger.Errorf("VBMasterCheckHandler (Req) received invalid format: %v", reflect.TypeOf(req))
+				}
 			}
 		}
-	}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-h.finCh:
+				return
+			case resp := <-h.receiveRespCh:
+				vbMasterResp, isResp := resp.(*VBMasterCheckResp)
+				if isResp {
+					h.handleResponse(vbMasterResp)
+				} else {
+					h.logger.Errorf("VBMasterCheckHandler (resp) received invalid format: %v", reflect.TypeOf(resp))
+				}
+			}
+		}
+	}()
+
 }
 
 func (v *VBMasterCheckHandler) handleResponse(resp *VBMasterCheckResp) {

@@ -25,8 +25,9 @@ import (
 
 const lifecycleId = "testLifecycleId"
 
-func discoveryHandlerBoilerPlate() (chan interface{}, *log.CommonLogger, string, *KnownPeers, time.Duration, *service_def.ReplicationSpecSvc) {
+func discoveryHandlerBoilerPlate() ([]chan interface{}, *log.CommonLogger, string, *KnownPeers, time.Duration, *service_def.ReplicationSpecSvc) {
 	reqCh := make(chan interface{})
+	respCh := make(chan interface{})
 	logger := log.NewLogger("unitTest", log.DefaultLoggerContext)
 	lifeCycleId := lifecycleId
 	knownPeers := &KnownPeers{
@@ -36,7 +37,7 @@ func discoveryHandlerBoilerPlate() (chan interface{}, *log.CommonLogger, string,
 	cleanupInterval := 50 * time.Millisecond
 	replSpecSvc := &service_def.ReplicationSpecSvc{}
 
-	return reqCh, logger, lifeCycleId, knownPeers, cleanupInterval, replSpecSvc
+	return []chan interface{}{reqCh, respCh}, logger, lifeCycleId, knownPeers, cleanupInterval, replSpecSvc
 }
 
 func TestDiscoveryHandler(t *testing.T) {
@@ -53,13 +54,13 @@ func TestDiscoveryHandler(t *testing.T) {
 	reqCommon := NewRequestCommon("testSender", "testTarget", "", lifecycleId, opaque)
 	reqCommon.responseCb = func(resp Response) (HandlerResult, error) {
 		atomic.StoreUint32(&cbCalled, 1)
-		handler.receiveCh <- resp
+		handler.receiveRespCh <- resp
 		return &HandlerResultImpl{Err: nil, HttpStatusCode: http.StatusOK}, nil
 	}
 	discoveryReq := NewP2PDiscoveryReq(reqCommon)
 	handler.RegisterOpaque(discoveryReq, NewSendOpts(false, base2.PeerToPeerNonExponentialWaitTime))
 
-	handler.receiveCh <- discoveryReq
+	handler.receiveReqCh <- discoveryReq
 
 	handler.opaqueMapMtx.RLock()
 	assert.NotNil(handler.opaqueMap[opaque])

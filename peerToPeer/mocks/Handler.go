@@ -14,6 +14,38 @@ type Handler struct {
 	mock.Mock
 }
 
+// GetReqAndClearOpaque provides a mock function with given fields: opaque
+func (_m *Handler) GetReqAndClearOpaque(opaque uint32) (*peerToPeer.Request, chan peerToPeer.ReqRespPair, bool) {
+	ret := _m.Called(opaque)
+
+	var r0 *peerToPeer.Request
+	if rf, ok := ret.Get(0).(func(uint32) *peerToPeer.Request); ok {
+		r0 = rf(opaque)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*peerToPeer.Request)
+		}
+	}
+
+	var r1 chan peerToPeer.ReqRespPair
+	if rf, ok := ret.Get(1).(func(uint32) chan peerToPeer.ReqRespPair); ok {
+		r1 = rf(opaque)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(chan peerToPeer.ReqRespPair)
+		}
+	}
+
+	var r2 bool
+	if rf, ok := ret.Get(2).(func(uint32) bool); ok {
+		r2 = rf(opaque)
+	} else {
+		r2 = ret.Get(2).(bool)
+	}
+
+	return r0, r1, r2
+}
+
 // GetSpecDelNotification provides a mock function with given fields: specId, internalId
 func (_m *Handler) GetSpecDelNotification(specId string, internalId string) (chan bool, error) {
 	ret := _m.Called(specId, internalId)

@@ -1386,8 +1386,7 @@ func (adminport *Adminport) checkAndRejectChunkedEncoding(request *http.Request)
 }
 
 func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.Response, error) {
-	localRemoteIPs := getLocalAndRemoteIps(request)
-	logger_ap.Infof("doPostPeerToPeerRequest from %v", localRemoteIPs.Remote)
+	localRemoteIPs := getLocalAndRemoteIps(request) // The remoteIP is not really accurate since ns_server redirects
 	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
@@ -1397,10 +1396,11 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 		adminport.Logger().Errorf("Unable to generate req or resp from %v err: %v\n", localRemoteIPs.Remote, err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
+	logger_ap.Infof("doPostPeerToPeerRequest of type %v from %v", req.GetType(), req.GetSender())
 
 	handlerResult, err := adminport.p2pAPI.P2PReceive(req)
 	if err != nil {
-		adminport.Logger().Errorf("P2PReceive from %v resulted in err %v", localRemoteIPs.Remote, err)
+		adminport.Logger().Errorf("P2PReceive from %v resulted in err %v", req.GetSender(), err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 	return EncodeObjectIntoResponseWithStatusCode(handlerResult.GetError(), handlerResult.GetHttpStatusCode())

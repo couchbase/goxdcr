@@ -14,9 +14,11 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
+	"time"
 )
 
 var ErrorInvalidOpcode = fmt.Errorf("Invalid Opcode")
+var ErrorInvalidMagic = fmt.Errorf("Invalid Magic")
 var ErrorReceiveChanFull = fmt.Errorf("Opcode receiver channel is full")
 var ErrorLifecycleMismatch = fmt.Errorf("Lifecycle mismatch")
 
@@ -31,6 +33,8 @@ type ReqRespCommon interface {
 	GetType() ReqRespType
 	GetSender() string
 	GetOpaque() uint32
+	RecordEnqueuedTime()
+	GetEnqueuedTime() time.Time
 }
 
 type Request interface {
@@ -59,14 +63,14 @@ type PeerToPeerCommAPI interface {
 }
 
 type P2pCommAPIimpl struct {
-	receiveChs map[OpCode]chan interface{}
+	receiveChs map[OpCode][]chan interface{}
 	utils      utils.UtilsIface
 
 	xdcrCompTopSvc service_def.XDCRCompTopologySvc
 	securitySvc    service_def.SecuritySvc
 }
 
-func NewP2pCommAPIHelper(receiveChs map[OpCode]chan interface{}, utils utils.UtilsIface, xdcrCompTopSvc service_def.XDCRCompTopologySvc, securitySvc service_def.SecuritySvc) *P2pCommAPIimpl {
+func NewP2pCommAPIHelper(receiveChs map[OpCode][]chan interface{}, utils utils.UtilsIface, xdcrCompTopSvc service_def.XDCRCompTopologySvc, securitySvc service_def.SecuritySvc) *P2pCommAPIimpl {
 	return &P2pCommAPIimpl{
 		receiveChs:     receiveChs,
 		utils:          utils,
@@ -75,20 +79,27 @@ func NewP2pCommAPIHelper(receiveChs map[OpCode]chan interface{}, utils utils.Uti
 	}
 }
 
-func (p2p *P2pCommAPIimpl) P2PReceive(req ReqRespCommon) (HandlerResult, error) {
+func (p2p *P2pCommAPIimpl) P2PReceive(reqResp ReqRespCommon) (HandlerResult, error) {
 	result := &HandlerResultImpl{}
 
-	reqType := req.GetOpcode()
+	reqType := reqResp.GetType()
+	if reqType == InvalidType {
+		result.Err = ErrorInvalidMagic
+		result.HttpStatusCode = http.StatusInternalServerError
+		return result, ErrorInvalidMagic
+	}
 
-	receiveCh, found := p2p.receiveChs[reqType]
+	reqOpcode := reqResp.GetOpcode()
+	receiveChs, found := p2p.receiveChs[reqOpcode]
 	if !found {
 		result.Err = ErrorInvalidOpcode
 		result.HttpStatusCode = http.StatusInternalServerError
 		return result, ErrorInvalidOpcode
 	}
 
+	reqResp.RecordEnqueuedTime()
 	select {
-	case receiveCh <- req:
+	case receiveChs[reqType] <- reqResp:
 		result.HttpStatusCode = http.StatusOK
 		return result, nil
 	default:

@@ -288,6 +288,7 @@ function runTestCase {
 
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$P2P_UNABLE_TO_RESPOND_MSG" 0
 	done
 
 	echo "============================================================================"

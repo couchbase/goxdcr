@@ -25,6 +25,7 @@ RECEIVE_P2P_REQ_DONE_MSG="Done handling peer-to-peer push requests from"
 TS_PREFIX="ts.Seqno"
 PIPELINE_SHUTDOWN_DONE_MSG="status is finished shutting down"
 P2P_DESERIALIZATION_ERR_MSG="has payloadCompressed but no payload after deserialization"
+P2P_UNABLE_TO_RESPOND_MSG="Unable to respond to caller"
 
 # These should be imported after clusterRunProvision script
 

@@ -27,6 +27,7 @@ type OpaqueReqMap map[uint32]*Request
 type OpaqueReqRespCbMap map[uint32]chan ReqRespPair
 
 type HandlerCommon struct {
+	id              string
 	logger          *log.CommonLogger
 	lifeCycleId     string
 	cleanupInterval time.Duration
@@ -37,16 +38,18 @@ type HandlerCommon struct {
 	opaqueMapMtx       sync.RWMutex
 	opaquesClearCh     chan uint32
 
-	finCh     chan bool
-	receiveCh chan interface{}
+	finCh         chan bool
+	receiveReqCh  chan interface{}
+	receiveRespCh chan interface{}
 
 	replSpecSvc    service_def.ReplicationSpecSvc
 	replSpecFinMtx sync.RWMutex
 	replSpecFinCh  map[string]chan bool
 }
 
-func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan bool, cleanupInterval time.Duration, reqCh chan interface{}, replicationSpecSvc service_def.ReplicationSpecSvc) *HandlerCommon {
+func NewHandlerCommon(id string, logger *log.CommonLogger, lifeCycleId string, finCh chan bool, cleanupInterval time.Duration, reqCh []chan interface{}, replicationSpecSvc service_def.ReplicationSpecSvc) *HandlerCommon {
 	handler := &HandlerCommon{
+		id:                 id,
 		logger:             logger,
 		lifeCycleId:        lifeCycleId,
 		finCh:              finCh,
@@ -56,7 +59,8 @@ func NewHandlerCommon(logger *log.CommonLogger, lifeCycleId string, finCh chan b
 		opaquesClearCh:     make(chan uint32, 1000),
 		cleanupInterval:    cleanupInterval,
 		opaqueReqRespCbMap: map[uint32]chan ReqRespPair{},
-		receiveCh:          reqCh,
+		receiveReqCh:       reqCh[RequestType],
+		receiveRespCh:      reqCh[ResponseType],
 		replSpecSvc:        replicationSpecSvc,
 		replSpecFinCh:      make(map[string]chan bool),
 	}
@@ -72,14 +76,12 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 	}
 	h.opaqueMapMtx.RUnlock()
 
+	var ch chan ReqRespPair
 	if opts.synchronous {
-		ch := make(chan ReqRespPair)
+		ch = make(chan ReqRespPair)
 		opts.respMapMtx.Lock()
 		opts.respMap[request.GetTarget()] = ch
 		opts.respMapMtx.Unlock()
-		h.opaqueMapMtx.Lock()
-		h.opaqueReqRespCbMap[request.GetOpaque()] = ch
-		h.opaqueMapMtx.Unlock()
 		if request.GetOpcode().IsInterruptable() {
 			finChKey, err := getFinChKeyHelper(request)
 			if err != nil {
@@ -99,9 +101,12 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 
 	h.opaqueMapMtx.Lock()
 	defer h.opaqueMapMtx.Unlock()
+	if opts.synchronous {
+		h.opaqueReqRespCbMap[request.GetOpaque()] = ch
+	}
 	opaqueTimeoutDuration := time.Duration(atomic.LoadUint32(&P2POpaqueTimeoutAtomicMin)) * time.Minute
 	h.opaqueMap[request.GetOpaque()] = time.AfterFunc(opaqueTimeoutDuration, func() {
-		h.logger.Errorf("Request type %v to %v with opaque %v timed out", request.GetType(), request.GetTarget(), request.GetOpaque())
+		h.logger.Errorf("Request type %v to %v with opaque %v timed out (chan %v)", request.GetOpcode(), request.GetTarget(), request.GetOpaque(), &ch)
 		h.opaquesClearCh <- request.GetOpaque()
 	})
 	h.opaqueReqMap[request.GetOpaque()] = &request
@@ -120,20 +125,40 @@ func (h *HandlerCommon) ClearOpaqueBg() {
 			ticker.Stop()
 			return
 		case <-ticker.C:
-		FORLOOP:
-			for {
-				select {
-				case opaque := <-h.opaquesClearCh:
-					h.opaqueMapMtx.Lock()
-					delete(h.opaqueMap, opaque)
-					delete(h.opaqueReqMap, opaque)
-					delete(h.opaqueReqRespCbMap, opaque)
-					h.opaqueMapMtx.Unlock()
-				default:
-					break FORLOOP
-				}
-			}
+			h.clearOpaqueOnce()
 		}
+	}
+}
+
+func (h *HandlerCommon) clearOpaqueOnce() {
+	// Should not take more than a second
+	var counter int
+	startTime := time.Now()
+	var locked bool
+
+FORLOOP:
+	for {
+		select {
+		case opaque := <-h.opaquesClearCh:
+			if !locked {
+				locked = true
+				h.opaqueMapMtx.Lock()
+			}
+			delete(h.opaqueMap, opaque)
+			delete(h.opaqueReqMap, opaque)
+			delete(h.opaqueReqRespCbMap, opaque)
+			counter++
+		default:
+			break FORLOOP
+		}
+	}
+
+	if locked {
+		h.opaqueMapMtx.Unlock()
+	}
+	elapsedTime := time.Since(startTime)
+	if elapsedTime > 1*time.Second {
+		h.logger.Warnf("%v - Clearing %v opaque took %v", h.id, counter, elapsedTime)
 	}
 }
 
@@ -159,7 +184,13 @@ func (h *HandlerCommon) sendBackSynchronously(retCh chan ReqRespPair, retPair Re
 	case retCh <- retPair:
 	// Done
 	case <-timer.C:
-		h.logger.Errorf("Unable to respond to caller given %v timed out", retPair)
+		if retPair.RespPtr != nil {
+			h.logger.Errorf("Unable to respond to caller given type %v opaque %v timed out chan %v",
+				retPair.RespPtr.(Response).GetOpcode(),
+				retPair.RespPtr.(Response).GetOpaque(), &retCh)
+		} else {
+			h.logger.Errorf("Unable to respond to caller given %v timed out chan %v", retPair, &retCh)
+		}
 		break
 	}
 }

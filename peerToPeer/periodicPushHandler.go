@@ -32,10 +32,10 @@ type PeriodicPushHandler struct {
 	requestMerger func(fullTopic, sender string, request interface{}) error
 }
 
-func NewPeriodicPushHandler(reqCh chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, merger func(string, string, interface{}) error, replSpecSvc service_def.ReplicationSpecSvc) *PeriodicPushHandler {
+func NewPeriodicPushHandler(reqChs []chan interface{}, logger *log.CommonLogger, lifeCycleId string, cleanupInterval time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, utils utilities.UtilsIface, merger func(string, string, interface{}) error, replSpecSvc service_def.ReplicationSpecSvc) *PeriodicPushHandler {
 	finCh := make(chan bool)
 	return &PeriodicPushHandler{
-		HandlerCommon:   NewHandlerCommon(logger, lifeCycleId, finCh, cleanupInterval, reqCh, replSpecSvc),
+		HandlerCommon:   NewHandlerCommon("PeriodicPushHandler", logger, lifeCycleId, finCh, cleanupInterval, reqChs, replSpecSvc),
 		ckptSvc:         ckptSvc,
 		colManifestSvc:  colManifestSvc,
 		backfillReplSvc: backfillReplSvc,
@@ -56,22 +56,37 @@ func (p *PeriodicPushHandler) Stop() error {
 }
 
 func (p *PeriodicPushHandler) handler() {
-	for {
-		select {
-		case <-p.finCh:
-			return
-		case reqOrResp := <-p.receiveCh:
-			peerVBPeriodicPushReq, isReq := reqOrResp.(*PeerVBPeriodicPushReq)
-			peerVBPeriodicPusHResp, isResp := reqOrResp.(*PeerVBPeriodicPushResp)
-			if isReq {
-				p.handleRequest(peerVBPeriodicPushReq)
-			} else if isResp {
-				p.handleResponse(peerVBPeriodicPusHResp)
-			} else {
-				p.logger.Errorf("PeriodicPushHandler received invalid format: %v", reflect.TypeOf(reqOrResp))
+	go func() {
+		for {
+			select {
+			case <-p.finCh:
+				return
+			case req := <-p.receiveReqCh:
+				peerVBPeriodicPushReq, isReq := req.(*PeerVBPeriodicPushReq)
+				if isReq {
+					p.handleRequest(peerVBPeriodicPushReq)
+				} else {
+					p.logger.Errorf("PeriodicPushHandler (Req) received invalid format: %v", reflect.TypeOf(req))
+				}
 			}
 		}
-	}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-p.finCh:
+				return
+			case resp := <-p.receiveRespCh:
+				peerVBPeriodicPushResp, isResp := resp.(*PeerVBPeriodicPushResp)
+				if isResp {
+					p.handleResponse(peerVBPeriodicPushResp)
+				} else {
+					p.logger.Errorf("PeriodicPushHandler (Resp) received invalid format: %v", reflect.TypeOf(resp))
+				}
+			}
+		}
+	}()
 }
 
 func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {

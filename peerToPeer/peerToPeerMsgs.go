@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"reflect"
 	"sync"
+	"time"
 )
 
 // Each type below will need a handler
@@ -64,8 +65,11 @@ const OpcodeMax = ReqMaxInvalid
 const ReqMagic = 0x001
 const RespMagic = 0x100
 
-const RequestType ReqRespType = iota
-const ResponseType ReqRespType = iota
+const (
+	RequestType  ReqRespType = iota
+	ResponseType ReqRespType = iota
+	InvalidType  ReqRespType = iota
+)
 
 const VBUnableToLoad = "VB not able to stored into response"
 
@@ -83,6 +87,10 @@ type RequestCommon struct {
 	LocalLifeCycleId  string
 	RemoteLifeCycleId string
 
+	// For debugging and/or stats
+	timeMtx      sync.RWMutex
+	enqueuedTime time.Time
+
 	responseCb func(resp Response) (HandlerResult, error)
 }
 
@@ -98,7 +106,13 @@ func NewRequestCommon(sender, target, localLifecycle, remoteLifecycle string, op
 }
 
 func (p *RequestCommon) GetType() ReqRespType {
-	return RequestType
+	if p.Magic == ReqMagic {
+		return RequestType
+	} else if p.Magic == RespMagic {
+		return ResponseType
+	} else {
+		return InvalidType
+	}
 }
 
 func (p *RequestCommon) CallBack(resp Response) (HandlerResult, error) {
@@ -115,6 +129,18 @@ func (p *RequestCommon) GetTarget() string {
 
 func (p *RequestCommon) GetOpaque() uint32 {
 	return p.Opaque
+}
+
+func (p *RequestCommon) RecordEnqueuedTime() {
+	p.timeMtx.Lock()
+	defer p.timeMtx.Unlock()
+	p.enqueuedTime = time.Now()
+}
+
+func (p *RequestCommon) GetEnqueuedTime() time.Time {
+	p.timeMtx.RLock()
+	defer p.timeMtx.RUnlock()
+	return p.enqueuedTime
 }
 
 func getWrongTypeErr(expectedStr string, raw interface{}) error {
@@ -187,6 +213,9 @@ type ResponseCommon struct {
 	LocalLifeCycleId  string
 	RemoteLifeCycleId string
 	ErrorString       string
+
+	timeMtx      sync.RWMutex
+	enqueuedTime time.Time
 }
 
 func NewResponseCommon(opcode OpCode, senderLifeCycleId string, receiverLifeCycleId string, opaque uint32, sender string) ResponseCommon {
@@ -217,6 +246,18 @@ func (r *ResponseCommon) GetOpcode() OpCode {
 
 func (r *ResponseCommon) GetErrorString() string {
 	return r.ErrorString
+}
+
+func (r *ResponseCommon) RecordEnqueuedTime() {
+	r.timeMtx.Lock()
+	defer r.timeMtx.Unlock()
+	r.enqueuedTime = time.Now()
+}
+
+func (r *ResponseCommon) GetEnqueuedTime() time.Time {
+	r.timeMtx.RLock()
+	defer r.timeMtx.RUnlock()
+	return r.enqueuedTime
 }
 
 type DiscoveryResponse struct {
