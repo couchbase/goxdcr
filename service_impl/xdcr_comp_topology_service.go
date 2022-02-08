@@ -156,7 +156,16 @@ func (top_svc *XDCRTopologySvc) NumberOfKVNodes() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return len(nodeList), nil
+
+	var numKVNodes int
+	for _, nodeInfoRaw := range nodeList {
+		nodeInfo := nodeInfoRaw.(map[string]interface{})
+		hasKV, hasKVErr := base.NodeHasKVService(nodeInfo)
+		if hasKVErr == nil && hasKV {
+			numKVNodes++
+		}
+	}
+	return numKVNodes, nil
 }
 
 func (top_svc *XDCRTopologySvc) IsMyClusterEnterprise() (bool, error) {
