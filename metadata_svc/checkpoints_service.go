@@ -72,6 +72,8 @@ type CheckpointsService struct {
 	ckptCaches  map[string]CheckpointsServiceCache
 	// Certain situations such as merging checkpoints from other nodes require coarse locking
 	stopTheWorldMtx map[string]*sync.RWMutex
+	// Callers to brokenMap related method must be serialized due to ref counting
+	getBrokenMapAccessTokenMap map[string]chan bool
 
 	backfillSpecsMtx    sync.RWMutex
 	cachedBackfillSpecs map[string]*metadata.BackfillReplicationSpec
@@ -82,14 +84,15 @@ type CheckpointsService struct {
 func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, utils utilities.UtilsIface, replicationSpecService service_def.ReplicationSpecSvc) (*CheckpointsService, error) {
 	logger := log.NewLogger("CheckpointSvc", logger_ctx)
 	ckptSvc := &CheckpointsService{metadata_svc: metadata_svc,
-		logger:               logger,
-		ShaRefCounterService: NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger),
-		cachedSpecs:          make(map[string]*metadata.ReplicationSpecification),
-		ckptCaches:           map[string]CheckpointsServiceCache{},
-		cachedBackfillSpecs:  make(map[string]*metadata.BackfillReplicationSpec),
-		utils:                utils,
-		replicationSpecSvc:   replicationSpecService,
-		stopTheWorldMtx:      map[string]*sync.RWMutex{},
+		logger:                     logger,
+		ShaRefCounterService:       NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger),
+		cachedSpecs:                make(map[string]*metadata.ReplicationSpecification),
+		ckptCaches:                 map[string]CheckpointsServiceCache{},
+		cachedBackfillSpecs:        make(map[string]*metadata.BackfillReplicationSpec),
+		utils:                      utils,
+		replicationSpecSvc:         replicationSpecService,
+		stopTheWorldMtx:            map[string]*sync.RWMutex{},
+		getBrokenMapAccessTokenMap: make(map[string]chan bool),
 	}
 	return ckptSvc, ckptSvc.initWithSpecs()
 }
@@ -381,7 +384,6 @@ func (ckpt_svc *CheckpointsService) PreUpsertBrokenMapping(replicationId string,
 	if oneBrokenMapping == nil {
 		return nil
 	}
-
 	return ckpt_svc.RegisterMapping(replicationId, specInternalId, oneBrokenMapping)
 }
 
@@ -390,6 +392,21 @@ func (ckpt_svc *CheckpointsService) UpsertBrokenMapping(replicationId string, sp
 }
 
 func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
+	accessTokenCh, err := ckpt_svc.getCkptDocsWithBrokenMappingAccess(replicationId)
+	if err != nil {
+		ckpt_svc.logger.Errorf("Unable to get access token for replId %v due to err %v", replicationId, err)
+		return nil, nil, nil, false, err
+	}
+	// Get the actual go-ahead
+	<-accessTokenCh
+	// Once gotten it, will need to return it once done
+	defer func() {
+		accessTokenCh <- true
+	}()
+	return ckpt_svc.loadBrokenMappingsInternal(replicationId)
+}
+
+func (ckpt_svc *CheckpointsService) loadBrokenMappingsInternal(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
 	alreadyExists := ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, "")
 	mappingsDoc, err := ckpt_svc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
 	if err != nil {
@@ -448,10 +465,23 @@ func (ckpt_svc *CheckpointsService) getCache(replicationId string) (CheckpointsS
 	}
 }
 
-// Should be called non-concurrently per pipeline if brokenMappingsNeeded is true
 // When brokenMappingsNeeded is true, the ckpts will have mappings populated, which takes more work
 func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error) {
 	checkpointsDocs := make(map[uint16]*metadata.CheckpointsDoc)
+
+	if brokenMappingsNeeded {
+		accessTokenCh, err := ckpt_svc.getCkptDocsWithBrokenMappingAccess(replicationId)
+		if err != nil {
+			ckpt_svc.logger.Errorf("Unable to get access token for replId %v due to err %v", replicationId, err)
+			return nil, err
+		}
+		// Get the actual go-ahead
+		<-accessTokenCh
+		// Once gotten it, will need to return it once done
+		defer func() {
+			accessTokenCh <- true
+		}()
+	}
 
 	cache, cacheErr := ckpt_svc.getCache(replicationId)
 	if cacheErr == nil {
@@ -473,7 +503,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 	var refCounterRecorder service_def.IncrementerFunc
 	var ckptSvcCntIsPopulated bool
 	if brokenMappingsNeeded {
-		shaToBrokenMapping, CollectionNsMappingsDoc, refCounterRecorder, ckptSvcCntIsPopulated, err = ckpt_svc.LoadBrokenMappings(replicationId)
+		shaToBrokenMapping, CollectionNsMappingsDoc, refCounterRecorder, ckptSvcCntIsPopulated, err = ckpt_svc.loadBrokenMappingsInternal(replicationId)
 		if err != nil {
 			ckpt_svc.logger.Errorf("Error when getting brokenMapping for %v - %v", replicationId, err)
 			return nil, err
@@ -527,7 +557,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 			return checkpointsDocs, err
 		}
 
-		shaToBrokenMapping, _, _, _, err = ckpt_svc.LoadBrokenMappings(replicationId)
+		shaToBrokenMapping, _, _, _, err = ckpt_svc.loadBrokenMappingsInternal(replicationId)
 		if err != nil {
 			ckpt_svc.logger.Errorf("Unable to refresh brokenmapping cache - %v", err)
 			return checkpointsDocs, err
@@ -667,6 +697,7 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 		ckpt_svc.specsMtx.Lock()
 		delete(ckpt_svc.cachedSpecs, oldSpec.Id)
 		delete(ckpt_svc.stopTheWorldMtx, oldSpec.Id)
+		ckpt_svc.delCheckpointsDocsSerializeMapNoLock(oldSpec.Id)
 		if ckpt_svc.ckptCaches[oldSpec.Id] != nil {
 			ckpt_svc.ckptCaches[oldSpec.Id].SpecChangeCb(oldSpec, newSpec)
 			delete(ckpt_svc.ckptCaches, oldSpec.Id)
@@ -694,6 +725,7 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 		}
 		ckpt_svc.ckptCaches[newSpec.Id].SpecChangeCb(oldSpec, newSpec)
 		ckpt_svc.ckptCaches[common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)].SpecChangeCb(oldSpec, newSpec)
+		ckpt_svc.initCheckpointsDocsSerializeMapNoLock(newSpec.Id)
 		ckpt_svc.specsMtx.Unlock()
 	}
 	return nil
@@ -896,9 +928,24 @@ func (ckpt_svc *CheckpointsService) initWithSpecs() error {
 	for specId, spec := range specs {
 		ckpt_svc.cachedSpecs[specId] = spec
 		ckpt_svc.stopTheWorldMtx[specId] = &sync.RWMutex{}
+		ckpt_svc.initCheckpointsDocsSerializeMapNoLock(specId)
 	}
 
 	return nil
+}
+
+func (ckpt_svc *CheckpointsService) initCheckpointsDocsSerializeMapNoLock(specId string) {
+	for i := common.PipelineTypeBegin; i < common.PipelineTypeInvalidEnd; i++ {
+		ckpt_svc.getBrokenMapAccessTokenMap[common.ComposeFullTopic(specId, i)] = make(chan bool, 1)
+		ckpt_svc.getBrokenMapAccessTokenMap[common.ComposeFullTopic(specId, i)] <- true
+	}
+}
+
+func (ckpt_svc *CheckpointsService) delCheckpointsDocsSerializeMapNoLock(specId string) {
+	for i := common.PipelineTypeBegin; i < common.PipelineTypeInvalidEnd; i++ {
+		delete(ckpt_svc.getBrokenMapAccessTokenMap, common.ComposeFullTopic(specId, i))
+		delete(ckpt_svc.getBrokenMapAccessTokenMap, common.ComposeFullTopic(specId, i))
+	}
 }
 
 func (ckpt_svc *CheckpointsService) getStopTheWorldMtx(replId string) *sync.RWMutex {
@@ -948,4 +995,22 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpointsDone(replicationId string) 
 	}
 	cache.ValidateCache()
 	return nil
+}
+
+// loading broken mappings into checkpointDocs is an operation that requires ref counting (ShaRefCounterService)
+// So each request per replicationId must be serialized
+func (ckpt_svc *CheckpointsService) getCkptDocsWithBrokenMappingAccess(replicationId string) (chan bool, error) {
+	var errKeys []string
+	ckpt_svc.specsMtx.RLock()
+	accessCh, found := ckpt_svc.getBrokenMapAccessTokenMap[replicationId]
+	if !found {
+		for k, _ := range ckpt_svc.getBrokenMapAccessTokenMap {
+			errKeys = append(errKeys, k)
+		}
+	}
+	ckpt_svc.specsMtx.RUnlock()
+	if !found {
+		return nil, fmt.Errorf("The map does not include %v but does have %v", replicationId, errKeys)
+	}
+	return accessCh, nil
 }

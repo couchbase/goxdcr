@@ -1641,7 +1641,6 @@ func (ckmgr *CheckpointManager) PreCommitBrokenMapping() {
 	if err != nil {
 		ckmgr.logger.Warnf("Unable to pre-persist brokenMapping for %v: %v", ckmgr.pipeline.FullTopic(), err)
 	}
-
 }
 
 func (ckmgr *CheckpointManager) CommitBrokenMappingUpdates() {
@@ -3143,6 +3142,7 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, 
 	defer stopFunc()
 	curNodeShaMap, curNodeMappingDoc, _, _, err := ckmgr.checkpoints_svc.LoadBrokenMappings(specId)
 	if err != nil {
+		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocs LoadBrokenMappings err: %v", err)
 		return err
 	}
 
@@ -3162,6 +3162,7 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, 
 
 	err = curNodeMappingDoc.LoadShaMap(curNodeShaMap)
 	if err != nil {
+		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocs LoadShaMap err: %v", err)
 		return err
 	}
 

@@ -247,6 +247,7 @@ function runTestCase {
 	# ensure that p2p did not fail
 	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		validateInternalLogWithInstance "$dependentClusterName" "$P2P_PULL_ERR_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$CKPT_MAPPING_NOT_FOUND_MSG" 0
 	done
 
 	echo "============================================================================"
