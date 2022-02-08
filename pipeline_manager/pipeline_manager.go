@@ -485,8 +485,8 @@ func (pipelineMgr *PipelineManager) setP2PWaitTime(rep_status pipeline.Replicati
 	}
 	if numKVNodes > 0 {
 		delayMap := make(map[string]interface{})
-		// Each node consists of one minute of wait time
-		waitTime := time.Duration(numKVNodes) * time.Minute
+		// waitTime is a guesstimate allowance
+		waitTime := time.Duration(numKVNodes) * 30 * time.Second
 		// OpaqueTimeout is the timeout + some buffer
 		// When rebalance happens and source nodes get added, pipeline will restart and so this section will be called
 		// when a pipeline restarts, and the value will get updated accordingly

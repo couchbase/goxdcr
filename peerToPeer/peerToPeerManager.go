@@ -640,7 +640,7 @@ func getOpaqueWrapper() uint32 {
 }
 
 // Variable and dynamically updated per number of peer KV nodes
-var P2POpaqueTimeoutAtomicMin uint32 = 5
+var P2POpaqueTimeoutAtomicMin uint32 = 2
 
 func (p *P2PManagerImpl) SetPushReqMergerOnce(merger func(fullTopic, sender string, req interface{}) error) {
 	p.mergerSetOnce.Do(func() {
