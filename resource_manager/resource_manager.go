@@ -11,6 +11,12 @@ package resource_manager
 import (
 	"bytes"
 	"fmt"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unsafe"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
@@ -21,11 +27,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
-	"strconv"
-	"sync"
-	"sync/atomic"
-	"time"
-	"unsafe"
 )
 
 const ResourceManagerName = "ResourceMgr"
@@ -471,6 +472,7 @@ func (rm *ResourceManager) getSystemStats() (*SystemStats, error) {
 		return nil, err
 	}
 
+	rm.logger.Infof("cgroup supported = %t", systemStats.IsCGroupSupported())
 	atomic.StorePointer(&rm.systemStats, unsafe.Pointer(systemStats))
 	return systemStats, nil
 }
@@ -576,6 +578,7 @@ func (rm *ResourceManager) collectCpuUsageOnce() {
 		rm.setTotalCpu(-1)
 		rm.setIdleCpu(-1)
 	} else {
+		rm.logger.Debugf("totalCPU = %d, idleCPU = %d\n", accumulativeTotalCpu, accumulativeIdleCpu)
 		rm.setTotalCpu(accumulativeTotalCpu)
 		rm.setIdleCpu(accumulativeIdleCpu)
 	}
