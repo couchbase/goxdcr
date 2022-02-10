@@ -70,6 +70,7 @@ const (
 	CollectionsManualBackfillKey  = base.ManualBackfillKey
 	CollectionsDelAllBackfillKey  = base.CollectionsDelAllBackfillKey
 	CollectionsDelVbBackfillKey   = base.CollectionsDelSingleVBBackfillKey
+	CollectionsVBRollbackTo0Key   = "vbRollbackToZero"
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey

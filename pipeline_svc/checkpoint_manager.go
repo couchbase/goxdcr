@@ -2426,7 +2426,7 @@ func (ckmgr *CheckpointManager) NotifyBackfillMgrRollbackTo0(vbno uint16) {
 
 	settingsMap := make(map[string]interface{})
 	settingsMap[base.NameKey] = topic
-	settingsMap[metadata.CollectionsDelVbBackfillKey] = int(vbno)
+	settingsMap[metadata.CollectionsVBRollbackTo0Key] = int(vbno)
 	backfillMgrPipelineSvc.UpdateSettings(settingsMap)
 }
 

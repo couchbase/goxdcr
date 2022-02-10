@@ -248,6 +248,9 @@ func (b *BackfillRequestHandler) run() {
 			case reflect.TypeOf(internalDelBackfillReq{}):
 				err := b.handleSpecialDelBackfill(reqAndResp)
 				b.handlePersist(reqAndResp, err, requestPersistFunc, cancelPersistFunc)
+			case reflect.TypeOf(internalRollbackTo0Req{}):
+				err := b.handleRollbackTo0(reqAndResp)
+				b.handlePersist(reqAndResp, err, requestPersistFunc, cancelPersistFunc)
 			case reflect.TypeOf(internalVBDiffBackfillReq{}):
 				internalReq := reqAndResp.Request.(internalVBDiffBackfillReq)
 				var addErr error
@@ -1008,6 +1011,30 @@ func (b *BackfillRequestHandler) DelAllBackfills() error {
 	return b.HandleBackfillRequest(delBackfillReq)
 }
 
+func (b *BackfillRequestHandler) handleRollbackTo0(reqAndResp ReqAndResp) error {
+	req, ok := reqAndResp.Request.(internalRollbackTo0Req)
+	if !ok {
+		panic(fmt.Sprintf("Wrong type: %v\n", reflect.TypeOf(req)))
+	}
+
+	if b.cachedBackfillSpec == nil || b.cachedBackfillSpec.VBTasksMap.IsNil() {
+		b.logger.Errorf("Backfill %v for vb %v rollback to 0 is requested but there is no backfill task", b.id,
+			req.vbno)
+		return base.ErrorNoBackfillNeeded
+	}
+
+	vbTasks, exists, unlockFunc := b.cachedBackfillSpec.VBTasksMap.Get(req.vbno, true)
+	defer unlockFunc()
+	if !exists {
+		b.logger.Errorf("Backfill %v for vb %v rollback to 0 is requested but there is no backfill task for said VB",
+			b.id, req.vbno)
+		return base.ErrorNoBackfillNeeded
+	}
+
+	vbTasks.RollbackTo0(req.vbno)
+	return b.requestPersistence(SetOp, reqAndResp.PersistResponse)
+}
+
 func (b *BackfillRequestHandler) handleSpecialDelBackfill(reqAndResp ReqAndResp) error {
 	req, ok := reqAndResp.Request.(internalDelBackfillReq)
 	if !ok {
@@ -1062,6 +1089,25 @@ func (b *BackfillRequestHandler) GetDelVBSpecificBackfillCb(vbno uint16) (cb bas
 
 	errCb = func(err error) {
 		b.logger.Errorf("Unable to delete vbSpecificRequest due to %v. Extraneous backfill may occur", err)
+	}
+	return cb, errCb
+}
+
+func (b *BackfillRequestHandler) GetRollbackTo0VBSpecificBackfillCb(vbno uint16, delCkpts func() error) (cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) {
+	cb = func() error {
+		rollbackReq := internalRollbackTo0Req{
+			vbno: vbno,
+		}
+		handlerErr := b.HandleBackfillRequest(rollbackReq)
+		if handlerErr != nil {
+			return handlerErr
+		}
+
+		return delCkpts()
+	}
+
+	errCb = func(err error) {
+		b.logger.Errorf("%v Unable to send rollbackTo0 request due to %v", b.id, err)
 	}
 	return cb, errCb
 }
@@ -1292,4 +1338,8 @@ type internalPeerBackfillTaskMergeReq struct {
 	nodeName     string
 	backfillSpec *metadata.BackfillReplicationSpec
 	pushMode     bool
+}
+
+type internalRollbackTo0Req struct {
+	vbno uint16
 }

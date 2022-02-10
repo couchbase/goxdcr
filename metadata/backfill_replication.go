@@ -1158,6 +1158,58 @@ func (b *BackfillTasks) PostUnmarshalInit() {
 	b.List = cleanedupList
 }
 
+// Rolling back to 0 means that there should be only one task starting from seqno 0 to whatever the last end range is
+// At the same time, this task should have all the mappings
+func (b *BackfillTasks) RollbackTo0(vbno uint16) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	var maxEndSeqno uint64
+	for _, task := range b.List {
+		taskEndSeqno := task.GetEndingTimestampSeqno()
+		if taskEndSeqno > maxEndSeqno {
+			maxEndSeqno = taskEndSeqno
+		}
+	}
+
+	if maxEndSeqno == 0 {
+		// No valid task exists
+		b.List = []*BackfillTask{}
+		return
+	}
+
+	replacementTask := NewBackfillTask(&BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{
+			Vbno:          vbno,
+			Vbuuid:        0,
+			Seqno:         0,
+			SnapshotStart: 0,
+			SnapshotEnd:   0,
+			ManifestIDs:   base.CollectionsManifestIdPair{},
+		},
+		EndingTimestamp: &base.VBTimestamp{
+			Vbno:          vbno,
+			Vbuuid:        0,
+			Seqno:         maxEndSeqno,
+			SnapshotStart: 0,
+			SnapshotEnd:   maxEndSeqno,
+			ManifestIDs:   base.CollectionsManifestIdPair{},
+		},
+	}, nil)
+
+	// Now this replacementTask should contain all pre-existing tasks' mappings
+	for _, task := range b.List {
+		nsMappings, unlockFunc := task.RequestedCollections(false)
+		for _, oneMapping := range nsMappings {
+			replacementTask.AddCollectionNamespaceMappingNoLock(oneMapping)
+		}
+		unlockFunc()
+	}
+
+	// One task to rule them all
+	b.List = []*BackfillTask{replacementTask}
+}
+
 // Each backfill task should be RO once created
 // And new tasks can be created to split/merge existing ones
 type BackfillTask struct {

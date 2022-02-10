@@ -521,3 +521,46 @@ func TestIdenticalReMerge(t *testing.T) {
 	// Without fix, second pass will deadlock
 	backfillSpec.MergeNewTasks(vbTaskMap, false)
 }
+
+func TestRollbackTo0(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRollbackTo0 =================")
+	defer fmt.Println("============== Test case end: TestRollbackTo0 =================")
+
+	namespaceMapping := make(CollectionNamespaceMapping)
+	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
+
+	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	ts0 := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 10, 10, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 500, manifestsIdPair},
+	}
+	ts0.Sanitize()
+
+	vb0Task0 := NewBackfillTask(ts0, []CollectionNamespaceMapping{namespaceMapping})
+
+	differentNsMapping := make(CollectionNamespaceMapping)
+	diffTargetNamespace := &base.CollectionNamespace{"nonDefaultScope", "nonDefaultCollection"}
+	differentNsMapping.AddSingleMapping(defaultNamespace, diffTargetNamespace)
+	ts1 := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 5005, 10, 10, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 15005, 500, 500, manifestsIdPair},
+	}
+	ts1.Sanitize()
+	vb0Task1 := NewBackfillTask(ts1, []CollectionNamespaceMapping{differentNsMapping})
+
+	totalTasks := NewBackfillTasks()
+	totalTasks.List = append(totalTasks.List, vb0Task0)
+	totalTasks.List = append(totalTasks.List, vb0Task1)
+
+	// Rolling back to 0 will have a single range + 2 mappings
+	totalTasks.RollbackTo0(0)
+	assert.Equal(1, totalTasks.Len())
+	backfillTask, exists, unlockFunc := totalTasks.GetRO(0)
+	assert.True(exists)
+	assert.Equal(uint64(0), backfillTask.GetStartingTimestampSeqno())
+	assert.Equal(uint64(15005), backfillTask.GetEndingTimestampSeqno())
+	unlockFunc()
+	assert.Len(totalTasks.GetAllCollectionNamespaceMappings(), 2)
+}

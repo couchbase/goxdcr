@@ -161,6 +161,14 @@ func (p *pipelineSvcWrapper) UpdateSettings(settings metadata.ReplicationSetting
 		}
 	}
 
+	vbno, exists3 := settings[metadata.CollectionsVBRollbackTo0Key].(int)
+	if topicExists && exists3 && vbno >= 0 {
+		err := p.backfillMgr.HandleRollbackTo0ForVB(topic, uint16(vbno))
+		if err != nil {
+			errMap[metadata.CollectionsVBRollbackTo0Key] = err
+		}
+	}
+
 	backfillMapping, exists := settings[metadata.CollectionsManualBackfillKey].(metadata.CollectionNamespaceMapping)
 	topic, exists2 = settings[base.NameKey].(string)
 	if exists && exists2 {
@@ -1695,6 +1703,38 @@ func (b *BackfillMgr) DelBackfillForVB(topic string, vbno uint16) error {
 	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb)
 	if err != nil {
 		b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - backfill for VB %v may occur", topic, err, vbno)
+		return err
+	}
+	err = b.pipelineMgr.RequestBackfill(topic)
+	if err != nil {
+		b.logger.Errorf("Unable to request backfill pipeline to start for %v : %v - may require manual restart of pipeline", topic, err)
+		return err
+	}
+	return nil
+}
+
+func (b *BackfillMgr) HandleRollbackTo0ForVB(topic string, vbno uint16) error {
+	b.specReqHandlersMtx.RLock()
+	handler := b.specToReqHandlerMap[topic]
+	b.specReqHandlersMtx.RUnlock()
+
+	if handler == nil {
+		// This should not happen
+		err := fmt.Errorf("Unable to find handler for spec %v", topic)
+		b.logger.Errorf(err.Error())
+		return err
+	}
+
+	// When rolling back to 0, we should delete checkpoints otherwise a non-0 resume leading to DCP rollback
+	// means that it'll come back to this path yet again
+	deleteCkptsWrapper := func() error {
+		return b.checkpointsSvc.DelCheckpointsDoc(common.ComposeFullTopic(topic, common.BackfillPipeline), vbno)
+	}
+
+	cb, errCb := handler.GetRollbackTo0VBSpecificBackfillCb(vbno, deleteCkptsWrapper)
+	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb)
+	if err != nil {
+		b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - vbno %v rollback to zero from DCP will trigger this process again", topic, err, vbno)
 		return err
 	}
 	err = b.pipelineMgr.RequestBackfill(topic)
