@@ -647,7 +647,7 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 			peersToRetry := make(map[string]bool)
 			peersToRetry[host] = true
 
-			opts := NewSendOpts(true, base.PeerToPeerNonExponentialWaitTime)
+			opts := NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime)
 			err = p.sendToSpecifiedPeersOnce(ReqPeriodicPush, getReqFunc, opts, peersToRetry, myHostAddr)
 			if err != nil {
 				errMapMtx.Lock()
@@ -655,8 +655,8 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 				errMapMtx.Unlock()
 			}
 		}()
-		waitGrp.Wait()
 	}
+	waitGrp.Wait()
 
 	if len(errMap) > 0 {
 		return fmt.Errorf(base.FlattenErrorMap(errMap))

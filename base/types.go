@@ -2615,18 +2615,6 @@ func (t *BucketInfoMapType) Clone() BucketInfoMapType {
 	return clonedMap
 }
 
-func (t *BucketInfoMapType) GreenClone(poolGet func(keys []string) *BucketInfoMapType) *BucketInfoMapType {
-	if t == nil || *t == nil {
-		return nil
-	}
-
-	recycledVbSeqnoMap := poolGet(t.GetKeyList())
-	for key, shallowVal := range *t {
-		(*recycledVbSeqnoMap)[key] = shallowVal
-	}
-	return recycledVbSeqnoMap
-}
-
 func (t *BucketInfoMapType) GetKeyList() []string {
 	if t == nil || *t == nil {
 		return nil

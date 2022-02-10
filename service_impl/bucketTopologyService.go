@@ -27,7 +27,6 @@ type BucketTopologyObjsPool struct {
 	StringStringPool  *utils.StringStringMapPool
 	HighSeqnosMapPool *utils.HighSeqnosMapPool
 	VbSeqnoMapPool    *utils.VbSeqnoMapPool
-	BucketInfoMapPool *utils.BucketInfoMapPool
 	VbHostsMapPool    *utils.VbHostsMapPool
 	StringSlicePool   *utils.StringSlicePool
 }
@@ -40,7 +39,6 @@ func NewBucketTopologyObjsPool() *BucketTopologyObjsPool {
 		StringStringPool:  utils.NewStringStringMapPool(),
 		HighSeqnosMapPool: utils.NewHighSeqnosMapPool(),
 		VbSeqnoMapPool:    utils.NewVbSeqnoMapPool(),
-		BucketInfoMapPool: utils.NewBucketInfoMapPool(),
 		VbHostsMapPool:    utils.NewVbHostsMapPool(stringSlicePool),
 		StringSlicePool:   stringSlicePool,
 	}
@@ -523,7 +521,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			replacementNotification := watcher.latestCached.Clone(1).(*Notification)
 			replacementNotification.TargetServerVBMap = (*base.KvVBMapType)(&targetServerVBMap)
 			replacementNotification.TargetBucketUUID = targetBucketUUID
-			replacementNotification.TargetBucketInfo = (*base.BucketInfoMapType)(&targetBucketInfo)
+			replacementNotification.TargetBucketInfo = (base.BucketInfoMapType)(targetBucketInfo)
 			replacementNotification.TargetReplicasMap = replicasMap
 			replacementNotification.TargetReplicasTranslateMap = translateMap
 			replacementNotification.TargetReplicaCnt = numOfReplicas
@@ -1784,7 +1782,7 @@ type Notification struct {
 	// Target only
 	TargetBucketUUID           string
 	TargetServerVBMap          *base.KvVBMapType
-	TargetBucketInfo           *base.BucketInfoMapType
+	TargetBucketInfo           base.BucketInfoMapType
 	TargetReplicaCnt           int
 	TargetReplicasMap          *base.VbHostsMapType  // len() of 0 if no replicas
 	TargetReplicasTranslateMap *base.StringStringMap // nil if not initialized
@@ -1821,7 +1819,7 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 		SourceReplicasTranslateMap: &sourceReplicasTranslateMap,
 
 		TargetServerVBMap:          &targetServerVBMap,
-		TargetBucketInfo:           &targetBucketInfo,
+		TargetBucketInfo:           targetBucketInfo,
 		TargetReplicasMap:          &targetReplicasMap,
 		TargetReplicasTranslateMap: &targetReplicasTranslateMap,
 	}
@@ -1899,10 +1897,6 @@ func (n *Notification) Recycle() {
 		n.ObjPool.KvVbMapPool.Put(n.TargetServerVBMap)
 	}
 
-	if n.TargetBucketInfo != nil {
-		n.ObjPool.BucketInfoMapPool.Put(n.TargetBucketInfo)
-	}
-
 	if n.TargetReplicasMap != nil {
 		n.ObjPool.VbHostsMapPool.Put(n.TargetReplicasMap)
 	}
@@ -1941,7 +1935,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 
 		TargetBucketUUID:           n.TargetBucketUUID,
 		TargetServerVBMap:          n.TargetServerVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
-		TargetBucketInfo:           n.TargetBucketInfo.GreenClone(n.ObjPool.BucketInfoMapPool.Get),
+		TargetBucketInfo:           n.TargetBucketInfo.Clone(),
 		TargetReplicaCnt:           n.TargetReplicaCnt,
 		TargetReplicasMap:          n.TargetReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
 		TargetReplicasTranslateMap: n.TargetReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
@@ -1975,7 +1969,7 @@ func (n *Notification) GetTargetBucketUUID() string {
 }
 
 func (n *Notification) GetTargetBucketInfo() base.BucketInfoMapType {
-	return *n.TargetBucketInfo
+	return n.TargetBucketInfo
 }
 
 func (n *Notification) GetTargetStorageBackend() string {
