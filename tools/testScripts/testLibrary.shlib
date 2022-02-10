@@ -1001,6 +1001,71 @@ EOF
 	done
 }
 
+# Usage: pass the node log to this function
+# Input: vb#
+function validateVBTaskExistsInternnal {
+	local vb=$1
+	local input=$(cat)
+
+	local lastVBsTaskInstance
+	lastVBsTaskInstance=$(echo "$input" | grep "VBTaskMap:map" | tail -n 1 | tr ' ' $'\n' | grep "[[:alnum:]]:0x" | cut -d':' -f1)
+
+	if (($(echo "$lastVBsTaskInstance" | grep -c "$vb") == 0)); then
+		echo "Last instance of VB task does not contain VB $vb"
+		return 1
+	fi
+}
+
+function validateLastBackfillContainsVBTask {
+	local logNodeName=$1
+	local remClusterName=$2
+	local vb=$3
+
+	local remClusterUUID
+	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
+	local result=$?
+	if ((!$result == 0)); then
+		echo "Unable to parse UUID return code $result"
+		return 1
+	fi
+
+	local inputToInternal
+	inputToInternal=$(getInternalNodeXdcrLog "$logNodeName")
+	echo "$inputToInternal" | validateVBTaskExistsInternnal "$vb"
+	if ((!$? == 0)); then
+		exit 1
+	fi
+}
+
+# Look at the logs to find one VB for backfill pipeline that is not 0
+# Input:
+# 1. clusterName to look at the log
+# 2. Remote Cluster name
+# 3. Source Bucket Name
+# 4. Target Bucket Name
+function getNon0StartingBackfillVB {
+	local logNodeName=$1
+	local remClusterName=$2
+	local srcBucketName=$3
+	local tgtBucketName=$4
+	local firstNon0VB
+
+	local remClusterUUID
+	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
+	local result=$?
+	if ((!$result == 0)); then
+		echo "Unable to parse UUID return code $result"
+		return 1
+	fi
+
+	firstNon0VB=$(getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" "backfill" | getFirstNon0VB)
+	result=$?
+	if (($result == 0)); then
+		echo "$firstNon0VB"
+	fi
+	return $result
+}
+
 # Test validation function that looks at pipeline resumes lifecycle
 # and makes sure that for each VB XDCR is not rolling backwards
 #
@@ -1066,8 +1131,23 @@ function validateCheckpointResumeSeqnos {
 	done
 	IFS="$OLDIFS"
 
-	if [[ -z "${atLeastOneFound:-}" ]];then
-	    echo "Unable to parse"
-	    getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" > /tmp/getSetVBTimestamp
+	if [[ -z "${atLeastOneFound:-}" ]]; then
+		echo "Unable to parse"
+		getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" >/tmp/getSetVBTimestamp
 	fi
+}
+
+function getLastSetVBTimestampSeqno {
+	local logNodeName=$1
+	local remClusterName=$2
+	local srcBucketName=$3
+	local tgtBucketName=$4
+	local vbno=$5
+	local backfill=${6:-}
+	local output
+	output=$(getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" "${backfill:-}" | grep "vb=$vbno" | parseSetVBTimestamps)
+
+	local seqno
+	seqno=$(echo "$output" | tr ',' ' ' | awk '{print $NF}')
+	echo "$seqno"
 }

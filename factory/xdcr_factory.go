@@ -860,6 +860,16 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pi
 		dcpSettings[parts.DCP_Stats_Interval] = statsInterval
 	}
 
+	devMainVbRollback, ok := settings[metadata.DevMainPipelineRollbackTo0VB]
+	if ok {
+		dcpSettings[parts.DCP_DEV_MAIN_ROLLBACK_VB] = devMainVbRollback
+	}
+
+	devBackfillVbRollback, ok := settings[metadata.DevBackfillRollbackTo0VB]
+	if ok {
+		dcpSettings[parts.DCP_DEV_BACKFILL_ROLLBACK_VB] = devBackfillVbRollback
+	}
+
 	repSettings := pipeline.Specification().GetReplicationSpec().Settings
 	if err := xdcrf.constructSharedSettingsForDcpNozzle(settings, dcpSettings, repSettings, pipeline); err != nil {
 		return nil, err
@@ -1125,6 +1135,9 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	if ckpt_svc == nil {
 		return nil, fmt.Errorf("No checkpoint manager has been registered with the pipeline %v", pipeline.Topic())
 	}
+
+	dcpNozzleSettings[parts.DCP_DEV_MAIN_ROLLBACK_VB] = metadata.GetSettingFromSettingsMap(settings, metadata.DevMainPipelineRollbackTo0VB, -1)
+	dcpNozzleSettings[parts.DCP_DEV_BACKFILL_ROLLBACK_VB] = metadata.GetSettingFromSettingsMap(settings, metadata.DevBackfillRollbackTo0VB, -1)
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
 	dcpNozzleSettings[parts.DCP_Stats_Interval] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)

@@ -1898,6 +1898,7 @@ function getSetVBTimestampMsgsFromLogs {
 	local clusterName=$2
 	local srcBucketName=$3
 	local tgtBucketName=$4
+	local backfillPipeline=${5:-}
 
 	local clusterUuid
 	clusterUuid=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$clusterName")
@@ -1907,7 +1908,11 @@ function getSetVBTimestampMsgsFromLogs {
 		return 1
 	fi
 
-	getInternalNodeXdcrLog "$logNodeName" | grep "MainPipeline ${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
+	if [[ -z "${backfillPipeline:-}" ]]; then
+		getInternalNodeXdcrLog "$logNodeName" | grep "MainPipeline ${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
+	else
+		getInternalNodeXdcrLog "$logNodeName" | grep "BackfillPipeline backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
+	fi
 }
 
 # Usage: Grep "Set VBTimestamp" from the logs and then pass to this function via pipe
@@ -1944,6 +1949,36 @@ function parseSetVBTimestamps {
 			echo "VB $i: ${VbSeqnoMap["$i"]}"
 		fi
 	done
+}
+
+# Usage: Grep "Set VBTimestamp" from the logs and then pass to this function via pipe
+function getFirstNon0VB {
+	local -A VbSeqnoMap
+	local input
+	local OLDIFS="$IFS"
+	input=$(cat)
+	IFS=$'\n'
+	for oneLine in $(echo "$input"); do
+		local vb=$(echo "$oneLine" | awk '{print $8}' | sed 's/,//g' | sed 's/vb=//g')
+		local startingSeqno=$(echo "$oneLine" | awk '{print $9}' | sed 's/,//g' | sed 's/ts.Seqno=//g')
+		if [[ -z "$vb" ]] || [[ -z "$startingSeqno" ]]; then
+			echo "Unable to parse"
+			IFS="$OLDIFS"
+			return 1
+		fi
+
+		if [[ "$startingSeqno" == 0 ]]; then
+			continue
+		fi
+
+		# Found a non-0 starting one
+		IFS="$OLDIFS"
+		echo "$vb"
+		return 0
+	done
+	IFS="$OLDIFS"
+	echo "Did not find one"
+	return 1
 }
 
 function getXDCRCheckpoints {

@@ -1295,6 +1295,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 // XDCR Dev hidden replication settings
 const DevMainPipelineSendDelay = "xdcrDevMainSendDelayMs"
 const DevBackfillPipelineSendDelay = "xdcrDevBackfillSendDelayMs"
+const DevMainPipelineRollbackTo0VB = "xdcrDevMainRollbackTo0VB"
+const DevBackfillRollbackTo0VB = "xdcrDevBackfillRollbackTo0VB"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"

@@ -1,0 +1,169 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+# For uni directional, just have one node rebalancing in
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=120 ["statsInterval"]=500 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=1000 ["preReplicateVBMasterCheck"]="true")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
+	waitForBgJobs
+	echo "RUNNING dataload DONE"
+}
+
+declare LOGMSG=$BROKEN_MSG
+
+function runOneReplicationCycleAndPause {
+	local timeIntervalSecs=5
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+	setupCluster
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	local -i currentInstanceCnt
+	currentInstanceCnt=$(getClusterLogs "C1" | grep -c "$LOGMSG")
+
+	setCustomManifestRefreshInterval "C1"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B0" "C2" "B1" BackfillHangLooseProperties
+	printGlobalScopeAndCollectionInfo
+
+	runDataLoad
+
+	echo "Sleeping 20 seconds before changes left check"
+	sleep 20
+
+	validateLogWithInstance "C1" "$LOGMSG" $(($currentInstanceCnt + 1))
+
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	validateXDCRCheckpoints "C1"
+	grepForPanics
+
+	createScope "C2" "B1" "S1"
+	createCollection "C2" "B1" "S1" "col1"
+
+	echo "Sleeping 30 secs for backfill to start"
+	sleep 30
+
+	# Once all is done, pause to create checkpoints
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 10 seconds for pipeline to really pause"
+	sleep 10
+}
+
+LOADED_BROKEN_MAP="Loaded brokenMap: map"
+LOADED_BROKEN_MAP_NAME="S1.col1"
+
+function runReplicationResume {
+	local logs
+	local logsC1P
+
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 5 seconds for resume to finish"
+	sleep 5
+
+	# No broken map should be restored because backfill is under way for the S1.col1 -> S1.col1 that was broken
+	grepForPanics
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running rollback to 0 on backfill"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	clearInternalNodeXdcrLog "C1"
+
+	runOneReplicationCycleAndPause
+
+	# Run a resume and pause immediately to get the VB
+	runReplicationResume
+	pauseReplication "C1" "B0" "C2" "B1"
+	local VBToRollback
+	VBToRollback=$(getNon0StartingBackfillVB "C1" "C2" "B0" "B1")
+	if ((!$? == 0)); then
+		echo "Unable to get non0-starting VB for backfill pipeline"
+		exit 1
+	fi
+
+	echo "Found VB $VBToRollback that has checkpoint to inject to force a rollback"
+
+	setReplicationSettings "C1" "B0" "C2" "B1" "xdcrDevBackfillRollbackTo0VB=$VBToRollback"
+	setReplicationSettings "C1" "B0" "C2" "B1" "xdcrDevBackfillSendDelayMs=0"
+
+	runReplicationResume
+	sleep 10
+	setReplicationSettings "C1" "B0" "C2" "B1" "manualBackfill=S1.col1"
+
+	echo "Sleeping 30 for backfill to run"
+	sleep 30
+
+	validateLastBackfillContainsVBTask "C1" "C2" $VBToRollback
+	local lastSeqno
+	lastSeqno=$(getLastSetVBTimestampSeqno "C1" "C2" "B0" "B1" "$VBToRollback" "backfill")
+	if (($lastSeqno > 0)); then
+		echo "VB $VBToRollback to $lastSeqno instead of 0"
+		exit 1
+	fi
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

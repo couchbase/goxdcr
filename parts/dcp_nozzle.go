@@ -31,6 +31,11 @@ import (
 )
 
 const (
+	// Developer injection section
+	DCP_DEV_MAIN_ROLLBACK_VB     = base.DevMainPipelineRollbackTo0VB
+	DCP_DEV_BACKFILL_ROLLBACK_VB = base.DevBackfillRollbackTo0VB
+	// end developer injection section
+
 	// start settings key name
 	DCP_VBTimestamp         = "VBTimestamps"
 	DCP_VBTimestampUpdater  = "VBTimestampUpdater"
@@ -358,6 +363,9 @@ type DcpNozzle struct {
 	vbHighSeqnoMap         map[uint16]*base.SeqnoWithLock
 	savedMcReqFeatures     utilities.HELOFeatures
 	isCollectionsMigration bool
+
+	devInjectionMainRollbackVb     int // -1 means not enabled
+	devInjectionBackfillRollbackVb int // -1 means not enabled
 }
 
 func NewDcpNozzle(id string,
@@ -372,31 +380,33 @@ func NewDcpNozzle(id string,
 	part := NewAbstractPartWithLogger(id, log.NewLogger("DcpNozzle", logger_context))
 
 	dcp := &DcpNozzle{
-		sourceBucketName:         sourceBucketName,
-		targetBucketName:         targetBucketName,
-		vbnosLock:                sync.RWMutex{},
-		vbnos:                    vbnos,
-		AbstractPart:             part, /*AbstractPart*/
-		bOpen:                    true, /*bOpen	bool*/
-		lock_bOpen:               sync.RWMutex{},
-		childrenWaitGrp:          sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
-		lock_client:              sync.Mutex{},
-		lock_uprFeed:             sync.RWMutex{},
-		cur_ts:                   make(map[uint16]*vbtsWithLock),
-		vb_stream_status:         make(map[uint16]*streamStatusWithLock),
-		xdcr_topology_svc:        xdcr_topology_svc,
-		stats_interval_change_ch: make(chan bool, 1),
-		is_capi:                  is_capi,
-		utils:                    utilsIn,
-		vbHandshakeMap:           make(map[uint16]*dcpStreamReqHelper),
-		dcpPrioritySetting:       mcc.PriorityDisabled,
-		collectionNamespacePool:  utilities.NewCollectionNamespacePool(),
-		specificManifestGetter:   specificManifestGetter,
-		endSeqnoForDcp:           make(map[uint16]*base.SeqnoWithLock),
-		getHighSeqnoOneAtATime:   make(chan bool, 1),
-		vbHighSeqnoMap:           make(map[uint16]*base.SeqnoWithLock),
-		wrappedUprPool:           utilities.NewWrappedUprPool(base.NewDataPool()),
-		finch:                    make(chan bool),
+		sourceBucketName:               sourceBucketName,
+		targetBucketName:               targetBucketName,
+		vbnosLock:                      sync.RWMutex{},
+		vbnos:                          vbnos,
+		AbstractPart:                   part, /*AbstractPart*/
+		bOpen:                          true, /*bOpen	bool*/
+		lock_bOpen:                     sync.RWMutex{},
+		childrenWaitGrp:                sync.WaitGroup{}, /*childrenWaitGrp sync.WaitGroup*/
+		lock_client:                    sync.Mutex{},
+		lock_uprFeed:                   sync.RWMutex{},
+		cur_ts:                         make(map[uint16]*vbtsWithLock),
+		vb_stream_status:               make(map[uint16]*streamStatusWithLock),
+		xdcr_topology_svc:              xdcr_topology_svc,
+		stats_interval_change_ch:       make(chan bool, 1),
+		is_capi:                        is_capi,
+		utils:                          utilsIn,
+		vbHandshakeMap:                 make(map[uint16]*dcpStreamReqHelper),
+		dcpPrioritySetting:             mcc.PriorityDisabled,
+		collectionNamespacePool:        utilities.NewCollectionNamespacePool(),
+		specificManifestGetter:         specificManifestGetter,
+		endSeqnoForDcp:                 make(map[uint16]*base.SeqnoWithLock),
+		getHighSeqnoOneAtATime:         make(chan bool, 1),
+		vbHighSeqnoMap:                 make(map[uint16]*base.SeqnoWithLock),
+		wrappedUprPool:                 utilities.NewWrappedUprPool(base.NewDataPool()),
+		finch:                          make(chan bool),
+		devInjectionBackfillRollbackVb: -1,
+		devInjectionMainRollbackVb:     -1,
 	}
 
 	// Allow one caller the ability to execute
@@ -602,6 +612,8 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	if val, ok := settings[DCP_Priority]; ok {
 		dcp.setDcpPrioritySetting(val.(mcc.PriorityType))
 	}
+
+	dcp.initializeDevInjections(settings)
 
 	dcp.initializeUprHandshakeHelpers()
 
@@ -998,22 +1010,10 @@ func (dcp *DcpNozzle) processData() (err error) {
 					if ignoreResponse {
 						dcp.Logger().Infof("%v ignored rollback message for vb %v with version %v and rollbackseqno %v since it has already been acknowledged\n", dcp.Id(), vbno, m.Opaque, rollbackseq)
 					} else {
-						//need to request the uprstream for the vbucket again
-						updated_ts, err := dcp.vbtimestamp_updater(vbno, rollbackseq)
-						if err != nil {
-							err = fmt.Errorf("Failed to request dcp stream after receiving roll-back for vb=%v. err=%v\n", vbno, err)
-							dcp.Logger().Errorf("%v %v", dcp.Id(), err)
-							dcp.handleGeneralError(err)
-							return err
+						err2 := dcp.performRollback(vbno, rollbackseq)
+						if err2 != nil {
+							return err2
 						}
-						err = dcp.setTS(vbno, updated_ts, true)
-						if err != nil {
-							err = fmt.Errorf("Failed to update start seqno for vb=%v. err=%v\n", vbno, err)
-							dcp.Logger().Errorf("%v %v", dcp.Id(), err)
-							dcp.handleGeneralError(err)
-							return err
-						}
-						dcp.startUprStream(vbno, updated_ts)
 					}
 				} else if m.Status == mc.SUCCESS {
 					vbno := m.VBucket
@@ -1104,6 +1104,26 @@ func (dcp *DcpNozzle) processData() (err error) {
 	}
 done:
 	return
+}
+
+func (dcp *DcpNozzle) performRollback(vbno uint16, rollbackseq uint64) error {
+	//need to request the uprstream for the vbucket again
+	updated_ts, err := dcp.vbtimestamp_updater(vbno, rollbackseq)
+	if err != nil {
+		err = fmt.Errorf("Failed to request dcp stream after receiving roll-back for vb=%v. err=%v\n", vbno, err)
+		dcp.Logger().Errorf("%v %v", dcp.Id(), err)
+		dcp.handleGeneralError(err)
+		return err
+	}
+	err = dcp.setTS(vbno, updated_ts, true)
+	if err != nil {
+		err = fmt.Errorf("Failed to update start seqno for vb=%v. err=%v\n", vbno, err)
+		dcp.Logger().Errorf("%v %v", dcp.Id(), err)
+		dcp.handleGeneralError(err)
+		return err
+	}
+	dcp.startUprStream(vbno, updated_ts)
+	return nil
 }
 
 func (dcp *DcpNozzle) handleStreamEnd(vbno uint16) error {
@@ -1348,6 +1368,18 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 	for _, vbno := range streams_to_start {
 		vbts, err := dcp.getTS(vbno, true)
 		if err == nil && vbts != nil {
+			if int(vbts.Vbno) == dcp.devInjectionMainRollbackVb && dcp.isMainPipeline() ||
+				int(vbts.Vbno) == dcp.devInjectionBackfillRollbackVb && !dcp.isMainPipeline() {
+				dcp.Logger().Infof("Dev injection for vb %v received start seqno %v... forcing a rollback to 0", vbno, vbts.Seqno)
+				dcp.devInjectionBackfillRollbackVb = -1
+				dcp.devInjectionMainRollbackVb = -1
+				injectErr := dcp.performRollback(vbts.Vbno, 0)
+				if injectErr != nil {
+					dcp.Logger().Errorf("Inject error: %v", injectErr)
+				}
+				continue
+			}
+
 			err = dcp.startUprStream(vbno, vbts)
 			if err != nil {
 				dcp.Logger().Warnf("%v: startUprStreams errored out, err=%v\n", dcp.Id(), err)
@@ -1977,8 +2009,12 @@ func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
 	}
 }
 
+func (dcp *DcpNozzle) isMainPipeline() bool {
+	return dcp.specificVBTasks.IsNil() || dcp.specificVBTasks.Len() == 0
+}
+
 func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
-	if dcp.specificVBTasks.IsNil() || dcp.specificVBTasks.Len() == 0 || len(vbnos) == 0 {
+	if dcp.isMainPipeline() || len(vbnos) == 0 {
 		// Main pipeline, no need to get high Seqno
 		// Backfill pipeline with this DCP nozzle not assigned any task, no need to get highseqnos
 		return nil
@@ -2066,4 +2102,20 @@ func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
 		}
 	}
 	return nil
+}
+
+func (dcp *DcpNozzle) initializeDevInjections(settings metadata.ReplicationSettingsMap) {
+	if val, ok := settings[DCP_DEV_MAIN_ROLLBACK_VB]; ok {
+		intVal, ok2 := val.(int)
+		if ok2 && intVal >= 0 {
+			dcp.devInjectionMainRollbackVb = intVal
+		}
+	}
+
+	if val, ok := settings[DCP_DEV_BACKFILL_ROLLBACK_VB]; ok {
+		intVal, ok2 := val.(int)
+		if ok2 && intVal >= 0 {
+			dcp.devInjectionBackfillRollbackVb = intVal
+		}
+	}
 }

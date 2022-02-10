@@ -160,6 +160,8 @@ var MissingOldSettingsInRequest = errors.New("Invalid http request. No old repli
 var RestKeyToSettingsKeyMap = map[string]string{
 	base.DevMainPipelineSendDelay:     metadata.DevMainPipelineSendDelay,
 	base.DevBackfillPipelineSendDelay: metadata.DevBackfillPipelineSendDelay,
+	base.DevMainPipelineRollbackTo0VB: metadata.DevMainPipelineRollbackTo0VB,
+	base.DevBackfillRollbackTo0VB:     metadata.DevBackfillRollbackTo0VB,
 	base.Type:                         metadata.ReplicationTypeKey,
 	FilterExpression:                  metadata.FilterExpressionKey,
 	PauseRequested:                    metadata.ActiveKey,
@@ -207,6 +209,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevMainPipelineSendDelay:          base.DevMainPipelineSendDelay,
 	metadata.DevBackfillPipelineSendDelay:      base.DevBackfillPipelineSendDelay,
+	metadata.DevMainPipelineRollbackTo0VB:      base.DevMainPipelineRollbackTo0VB,
+	metadata.DevBackfillRollbackTo0VB:          base.DevBackfillRollbackTo0VB,
 	metadata.ReplicationTypeKey:                base.Type,
 	metadata.FilterExpressionKey:               FilterExpression,
 	metadata.ActiveKey:                         PauseRequested,

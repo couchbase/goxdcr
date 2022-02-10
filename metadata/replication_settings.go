@@ -23,6 +23,8 @@ import (
 const (
 	DevMainPipelineSendDelay          = base.DevMainPipelineSendDelay
 	DevBackfillPipelineSendDelay      = base.DevBackfillPipelineSendDelay
+	DevBackfillRollbackTo0VB          = base.DevBackfillRollbackTo0VB
+	DevMainPipelineRollbackTo0VB      = base.DevMainPipelineRollbackTo0VB
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
 	ActiveKey                         = "active"
@@ -108,7 +110,8 @@ var ImmutableSettings = []string{}
 // settings that are internal and should be hidden from outside
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
-	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay}
+	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
+	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -137,6 +140,8 @@ var DefaultPipelineStatsIntervalMs = 1000
 
 var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
 var XDCRDevBackfillPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
+var XDCRDevMainPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
+var XDCRDevBackfillPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
@@ -192,6 +197,8 @@ var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
+	DevMainPipelineRollbackTo0VB:      XDCRDevMainPipelineRollbackConfig,
+	DevBackfillRollbackTo0VB:          XDCRDevBackfillPipelineRollbackConfig,
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
 	ActiveKey:                         ActiveConfig,
