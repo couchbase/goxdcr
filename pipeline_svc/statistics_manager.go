@@ -1926,7 +1926,7 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			sourceVBMap = highSeqnoFeedNotification.GetSourceVBMapRO()
 			recycleFunc = highSeqnoFeedNotification.Recycle
 
-			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId)
+			err = bucketTopologySvc.UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec, subscriberId)
 			if err != nil {
 				logger.Errorf("Error unsubscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
 			}

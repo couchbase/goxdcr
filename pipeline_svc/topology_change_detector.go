@@ -482,13 +482,20 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 		for {
 			select {
 			case <-top_detect_svc.finish_ch:
-				top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, top_detect_svc.bucketTopSubscriberId)
+				err := top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, top_detect_svc.bucketTopSubscriberId)
+				if err != nil {
+					top_detect_svc.logger.Warnf("Unsubscribing local bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
+				}
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v received finish signal and is exiting", top_detect_svc.mainPipelineTopic)
 				return
 			case notification := <-sourceVbUpdateCh:
 				var updateOnceErr error
 				if top_detect_svc.pipelineHasStopped() {
 					notification.Recycle()
+					err := top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, top_detect_svc.bucketTopSubscriberId)
+					if err != nil {
+						top_detect_svc.logger.Warnf("Unsubscribing local bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
+					}
 					return
 				}
 				kv_vb_map := notification.GetSourceVBMapRO()
@@ -573,6 +580,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 			case notification := <-targetVbUpdateCh:
 				if top_detect_svc.pipelineHasStopped() {
 					notification.Recycle()
+					err := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
+					if err != nil {
+						top_detect_svc.logger.Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
+					}
 					return
 				}
 				targetBucketUUID := notification.GetTargetBucketUUID()
