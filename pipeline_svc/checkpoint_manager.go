@@ -3165,7 +3165,6 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, 
 		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocs LoadShaMap err: %v", err)
 		return err
 	}
-
 	return ckmgr.checkpoints_svc.UpsertBrokenMappingsDoc(specId, curNodeMappingDoc, ckptDocs, specInternalId)
 }
 

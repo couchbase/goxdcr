@@ -79,13 +79,13 @@ func (_m *PipelineMgrBackfillIface) HaltBackfill(topic string) error {
 	return r0
 }
 
-// HaltBackfillWithCb provides a mock function with given fields: topic, callback, errCb
-func (_m *PipelineMgrBackfillIface) HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
-	ret := _m.Called(topic, callback, errCb)
+// HaltBackfillWithCb provides a mock function with given fields: topic, callback, errCb, skipCkpt
+func (_m *PipelineMgrBackfillIface) HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
+	ret := _m.Called(topic, callback, errCb, skipCkpt)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) error); ok {
-		r0 = rf(topic, callback, errCb)
+	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback, bool) error); ok {
+		r0 = rf(topic, callback, errCb, skipCkpt)
 	} else {
 		r0 = ret.Error(0)
 	}

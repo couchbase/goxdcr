@@ -126,7 +126,7 @@ type PipelineMgrBackfillIface interface {
 
 	// The following 3 calls will be blocking
 	HaltBackfill(topic string) error
-	HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error
+	HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error
 	CleanupBackfillCkpts(topic string) error
 
 	ReInitStreams(pipelineName string) error
@@ -225,8 +225,8 @@ func (pipelineMgr *PipelineManager) HaltBackfill(pipelineName string) error {
 
 // If backfill pipeline dne or is stopped, callbacks will be called
 // Only if backfill pipeline is not stopped, will the callback be skipped
-func (pipelineMgr *PipelineManager) HaltBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
-	return pipelineMgr.serializer.StopBackfillWithCb(pipelineName, cb, errCb)
+func (pipelineMgr *PipelineManager) HaltBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
+	return pipelineMgr.serializer.StopBackfillWithCb(pipelineName, cb, errCb, skipCkpt)
 }
 
 func (pipelineMgr *PipelineManager) CleanupBackfillCkpts(topic string) error {
@@ -1226,7 +1226,7 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string,
 		errCb := func(err error) {
 			cbErr = err
 		}
-		if registerErr := pipelineMgr.HaltBackfillWithCb(mainTopic, cbFunc, errCb); registerErr != nil {
+		if registerErr := pipelineMgr.HaltBackfillWithCb(mainTopic, cbFunc, errCb, false); registerErr != nil {
 			return fmt.Errorf("Unable to register haltBackfillCb for %v", fullTopic)
 		}
 		stoppedWaitGrp.Wait()

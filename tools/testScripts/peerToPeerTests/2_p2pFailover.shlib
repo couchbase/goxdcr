@@ -134,18 +134,28 @@ function runTestCase {
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
 
 	# In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
-	echo "Done - Sleeping 6 minutes to ensure multiple requests have been handled"
+	echo "Done - Sleeping 10 minutes to ensure multiple requests have been handled"
 
-	# Sleeping 7 minutes mean we should have at least two instances up to 7 max
-	sleep 420
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 2)) $(($currentHandlingInstanceCnt + 7))
-	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceDoneCnt + 1)) $(($currentHandlingInstanceDoneCnt + 7))
+	# Sleeping 10 minutes mean we should have at least a few instances
+	sleep 600
+
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 3)) $(($currentHandlingInstanceCnt + 15))
+	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceDoneCnt + 3)) $(($currentHandlingInstanceDoneCnt + 15))
+
+	# 1024 VB's divided among 2 nodes, given 512 VB's at least 80 VBs should have checkpoints
+	# as a generous threshold
+	validateBackfillCkptTookPlaceForVBs "C1" "C2" "B0" "B1" "80"
+	validateBackfillCkptTookPlaceForVBs "C1P" "C2" "B0" "B1" "80"
+
+	# Ensure that VB tasks are at least being finished
+	validateVBTasksProgress "C1" "C2" "B0" "B1"
+	validateVBTasksProgress "C1P" "C2" "B0" "B1"
 
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
 	setReplicationSettings "C1" "B0" "C2" "B1" "xdcrDevBackfillSendDelayMs=0"
-	echo "6 minutes passed -  stopping delay for backfill pipeline and waiting one more minute"
+	echo "stopping delay for backfill pipeline and waiting one more minute"
 
 	sleep 60
 

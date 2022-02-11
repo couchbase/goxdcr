@@ -541,7 +541,7 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			if !oldNamespaceMappings.SameAs(newNamespaceMappings) && newSpec.ReplicationSpec().Settings.Active {
 				removedScopesMap := b.populateRemovedScopesMap(newNamespaceMappings, oldNamespaceMappings)
 				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(base.CompileBackfillPipelineSpecId(newSpec.Id), newSpec.InternalId, removedScopesMap)
-				err := b.pipelineMgr.HaltBackfillWithCb(changedSpecId, cb, errCb)
+				err := b.pipelineMgr.HaltBackfillWithCb(changedSpecId, cb, errCb, false)
 				if err != nil {
 					b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - backfill pipeline may be executing out of date backfills", changedSpecId, err)
 					return err
@@ -1700,7 +1700,7 @@ func (b *BackfillMgr) DelBackfillForVB(topic string, vbno uint16) error {
 	}
 
 	cb, errCb := handler.GetDelVBSpecificBackfillCb(vbno)
-	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb)
+	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb, false)
 	if err != nil {
 		b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - backfill for VB %v may occur", topic, err, vbno)
 		return err
@@ -1732,7 +1732,14 @@ func (b *BackfillMgr) HandleRollbackTo0ForVB(topic string, vbno uint16) error {
 	}
 
 	cb, errCb := handler.GetRollbackTo0VBSpecificBackfillCb(vbno, deleteCkptsWrapper)
-	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb)
+	// When a VB is requested to roll back to 0, there's a chance other VBs need to roll back too
+	// And since rollback to 0 check happens pretty quickly on the KV side, when this is happening
+	// it means most other VBs that do not need to rollback have not proceeded too far
+	// Checkpointing could take some time and so it may be worth skipping the checkpoint here
+	// to handle this VB, so that if another VB needs to rollback to 0, this path is called again
+	// relatively quickly
+	// Once all the VBs that need to rollback to 0 has rolled back, checkpointing will then take place
+	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb, true)
 	if err != nil {
 		b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - vbno %v rollback to zero from DCP will trigger this process again", topic, err, vbno)
 		return err

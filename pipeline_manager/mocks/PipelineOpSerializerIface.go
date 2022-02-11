@@ -170,13 +170,13 @@ func (_m *PipelineOpSerializerIface) StopBackfill(topic string) error {
 	return r0
 }
 
-// StopBackfillWithCb provides a mock function with given fields: pipelineName, cb, cb2
-func (_m *PipelineOpSerializerIface) StopBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, cb2 base.StoppedPipelineErrCallback) error {
-	ret := _m.Called(pipelineName, cb, cb2)
+// StopBackfillWithCb provides a mock function with given fields: pipelineName, cb, errCb, skipCkpt
+func (_m *PipelineOpSerializerIface) StopBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
+	ret := _m.Called(pipelineName, cb, errCb, skipCkpt)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) error); ok {
-		r0 = rf(pipelineName, cb, cb2)
+	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback, bool) error); ok {
+		r0 = rf(pipelineName, cb, errCb, skipCkpt)
 	} else {
 		r0 = ret.Error(0)
 	}

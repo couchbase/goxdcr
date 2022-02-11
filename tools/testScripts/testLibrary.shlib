@@ -411,7 +411,7 @@ function waitForOneReplicationToBeDeleted {
 	local currentInstanceCnt=0
 
 	logs=$(getInternalNodeXdcrLog "$clusterName")
-	if !(($? == 0)); then
+	if ((!$? == 0)); then
 		echo "Unable to get log for validation"
 		exit 1
 	fi
@@ -442,7 +442,7 @@ function waitForInternalLogInstance {
 
 	while (($minElapsed < $minToWait)); do
 		logs=$(getInternalNodeXdcrLog "$clusterName")
-		if !(($? == 0)); then
+		if ((!$? == 0)); then
 			echo "Unable to get log for validation"
 			exit 1
 		fi
@@ -1137,6 +1137,82 @@ function validateCheckpointResumeSeqnos {
 	fi
 }
 
+# Test validation function that looks at backfill pipeline resumes lifecycle
+# to make sure that at there are at least X VB's that have been checkpointed
+#
+# Input:
+# 1. clusterName to look at the log
+# 2. Remote Cluster name
+# 3. Source Bucket Name
+# 4. Target Bucket Name
+function validateBackfillCkptTookPlaceForVBs {
+	local logNodeName=$1
+	local remClusterName=$2
+	local srcBucketName=$3
+	local tgtBucketName=$4
+	local minVBsToHaveCkpt=$5
+
+	local remClusterUUID
+	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
+	local result=$?
+	if ((!$result == 0)); then
+		echo "Unable to parse UUID return code $result"
+		return 1
+	fi
+
+	echo "Parsing log for $logNodeName pipeline backfill_${remClusterUUID}/${srcBucketName}/${tgtBucketName} for VB timestamps..."
+	local vbsSeqnosOutput
+	vbsSeqnosOutput=$(getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" "backfill" | parseSetVBTimestamps)
+
+	local OLDIFS="$IFS"
+	local oneLine
+	local atLeastOneFound
+	local atLeastOneVBHasCkpt
+	local -A vbHasCkptMap
+	IFS=$'\n'
+	for oneLine in $(echo "$vbsSeqnosOutput"); do
+		local vb
+		local seqnos
+		local -a seqnosArr
+		# VB 1023: 865,4939,4939,5246,4939,5246,6354,5246,6354
+		if [[ "$oneLine" =~ VB\ ([0-9]+): ]]; then
+			vb=${BASH_REMATCH[1]}
+			seqnos=$(echo "$oneLine" | cut -d: -f2 | xargs | tr ',' $'\n')
+			local preVal
+			local curVal
+			curVal=""
+			for curVal in $(echo "$seqnos"); do
+				if (($curVal > 0)); then
+					vbHasCkptMap["$vb"]="true"
+					atLeastOneVBHasCkpt="true"
+				fi
+			done
+			atLeastOneFound=1
+		else
+			echo "Unable to parse \"$oneLine\""
+			IFS="$OLDIFS"
+			exit 1
+		fi
+	done
+	IFS="$OLDIFS"
+
+	if [[ -z "${atLeastOneFound:-}" ]]; then
+		echo "Unable to parse"
+		getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" >/tmp/getSetVBTimestamp
+	fi
+
+	local totalVBsThatHaveCkpt
+	if [[ -z "${atLeastOneVBHasCkpt:-}" ]]; then
+		totalVBsThatHaveCkpt=0
+	else
+		totalVBsThatHaveCkpt="${#vbHasCkptMap[@]}"
+	fi
+	if (($totalVBsThatHaveCkpt < $minVBsToHaveCkpt)); then
+		echo "For node $logNodeName requested to have at least $minVBsToHaveCkpt VBs to have checkpoint but only $totalVBsThatHaveCkpt have checkpoints"
+		exit 1
+	fi
+}
+
 function getLastSetVBTimestampSeqno {
 	local logNodeName=$1
 	local remClusterName=$2
@@ -1150,4 +1226,46 @@ function getLastSetVBTimestampSeqno {
 	local seqno
 	seqno=$(echo "$output" | tr ',' ' ' | awk '{print $NF}')
 	echo "$seqno"
+}
+
+# Ensure that VB tasks are progressing and that there are less tasks (less VBs) over time
+function validateVBTasksProgress {
+	local logNodeName=$1
+	local remClusterName=$2
+	local srcBucketName=$3
+	local tgtBucketName=$4
+
+	local clusterUuid
+	clusterUuid=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
+	local retVal=$?
+	if ((!$retVal == 0)); then
+		echo "Unable to get clusterUUID with return code $retVal"
+		return 1
+	fi
+
+	local vbTasksMsgs
+	vbTasksMsgs=$(getInternalNodeXdcrLog "$logNodeName" | grep "Applying custom settings for ${clusterUuid}/${srcBucketName}/${tgtBucketName}")
+
+	local OLDIFS="$IFS"
+	IFS=$'\n'
+
+	local prevLineCnt=0
+	local curLineCnt
+	local staticCounter=0
+	local maxStaticCount=3
+	for oneVBTasks in $(echo "$vbTasksMsgs"); do
+		# This many number of VBs being supplied for tasks
+		curLineCnt=$(echo "$oneVBTasks" | tr ' ' $'\n' | grep -c "[[:alnum:]]:0x")
+		if (($prevLineCnt == 0)); then
+			prevLineCnt=$curLineCnt
+		elif (($curLineCnt >= $prevLineCnt)); then
+			staticCounter=$(($staticCounter + 1))
+			if (($staticCounter == $maxStaticCount)); then
+				echo "VB task has remained the same for $maxStaticCount times"
+				IFS="$OLDIFS"
+				exit 1
+			fi
+		fi
+	done
+	IFS="$OLDIFS"
 }

@@ -87,7 +87,7 @@ type PipelineOpSerializerIface interface {
 
 	// Synchronous Backfill APIs
 	StopBackfill(topic string) error
-	StopBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, cb2 base.StoppedPipelineErrCallback) error
+	StopBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error
 	CleanBackfill(topic string) error
 
 	// Synchronous User APIs - call and get data from a channel
@@ -254,7 +254,7 @@ func (serializer *PipelineOpSerializer) StopBackfill(topic string) error {
 	return nil
 }
 
-func (serializer *PipelineOpSerializer) StopBackfillWithCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
+func (serializer *PipelineOpSerializer) StopBackfillWithCb(topic string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
 	if serializer.isStopped() {
 		return SerializerStoppedErr
 	}
@@ -262,7 +262,7 @@ func (serializer *PipelineOpSerializer) StopBackfillWithCb(topic string, cb base
 	var stopBackfillJob Job
 	stopBackfillJob.jobType = BackfillPipelineStopWStoppedCb
 	stopBackfillJob.pipelineTopic = topic
-	stopBackfillJob.skipBackfillCkpt = true
+	stopBackfillJob.skipBackfillCkpt = skipCkpt
 	stopBackfillJob.callbackForWhenPipelineIsStopped = cb
 	stopBackfillJob.errorCbForFailedStoppedOp = errCb
 	stopBackfillJob.waitGrp = &sync.WaitGroup{}
