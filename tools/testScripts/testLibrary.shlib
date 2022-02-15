@@ -777,6 +777,79 @@ function testIdleXdcrCPU {
 	return $retResult
 }
 
+function getXDCRPid {
+	local clusterName="$1"
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+
+	local pid
+	pid=$(ps -ef | grep goxdcr | grep "=$sourcePort" | awk '{print $2}')
+	local result=$?
+	echo "$pid"
+	return $result
+}
+
+function getXdcrRSS {
+	local clusterName="$1"
+	local pid
+
+	pid=$(getXDCRPid $clusterName)
+	if ((!$? == 0)); then
+		return 1
+	fi
+
+	local rss
+	local result
+	rss=$(ps -xm -o rss,comm -p $pid | grep goxdcr | awk '{print $1}')
+	result=$?
+	echo "$rss"
+	return $result
+}
+
+function monitorXdcrProcessMem {
+	local clusterName=$1
+	local numOfMinutes=$2
+	local oldPid
+	local pid
+	local oldRss=0
+	local origRss=0
+	local rss
+	local percentage
+	local xdcrPort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+
+	oldPid=$(getXDCRPid $clusterName)
+
+	local i
+	for ((i = 0; $i < $numOfMinutes; i = (($i + 1)))); do
+		pid=$(getXDCRPid $clusterName)
+		if ((!$pid == $oldPid)); then
+			echo "$clusterName XDCR process PID went from $oldPid to $pid. Might have exploded"
+			return 1
+		fi
+
+		rss=$(getXdcrRSS $clusterName)
+		if (($oldRss == 0)); then
+			oldRss=$rss
+			origRss=$rss
+			echo "Start monitoring memory for node $clusterName... current RSS: $rss"
+		elif (($rss == 0)); then
+			echo "$clusterName got 0 rss??"
+		else
+			if (($rss > $oldRss)); then
+				percentage=$(echo "scale=2; ($rss-$oldRss)/$oldRss * 100" | bc)
+				echo "$clusterName XDCR size increased from $oldRss to $rss ($percentage %)"
+				curl -s http://localhost:$xdcrPort/debug/pprof/heap >/tmp/heap_$xdcrPort.$i
+			else
+				percentage=$(echo "scale=2; ($oldRss-$rss)/$oldRss * 100" | bc)
+				echo "$clusterName XDCR size decreased from $oldRss to $rss ($percentage %)"
+			fi
+			oldRss=$rss
+		fi
+		sleep 60
+	done
+	percentage=$(echo "scale=2; ($rss-$origRss)/$origRss * 100" | bc)
+	echo "Done monitoring memory for node $clusterName. From $origRss to $rss ($percentage %)"
+}
+
 function getGoroutinesStack {
 	local clusterName=$1
 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}

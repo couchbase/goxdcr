@@ -1,0 +1,175 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P0"]=9001 ["C2"]=9002 ["C1P1"]=9003 ["C1P2"]=9004 ["C1P3"]=9005 ["C1P4"]=9006 ["C1P5"]=9007 ["C1P6"]=9008 ["C1P7"]=9009)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C1P0"]="C1" ["C1P1"]="C1" ["C1P2"]="C1" ["C1P3"]="C1" ["C1P4"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P0"]=13001 ["C2"]=13002 ["C1P1"]=13003 ["C1P2"]=13004 ["C1P3"]=13005 ["C1P4"]=13006 ["C1P5"]=13007 ["C1P6"]=13008 ["C1P7"]=13009)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A BackfillHangLooseProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevCkptMgrForceGCWaitSec"]=600 ["replicateCkptIntervalMin"]=1 ["xdcrDevBackfillSendDelayMs"]=1000 ["preReplicateVBMasterCheck"]="true")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
+	waitForBgJobs
+	echo "RUNNING dataload DONE"
+}
+
+TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+
+declare -a collectionArray=()
+function runOneReplicationCycle {
+	local timeIntervalSecs=5
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+
+	for ((i = 1; i < 501; i = (($i + 1)))); do
+		collectionArray[${#collectionArray[@]}]="col$i"
+	done
+	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collectionArray[@]})
+
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setCustomManifestRefreshInterval "C1"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B0" "C2" "B1" BackfillHangLooseProperties
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+
+	echo "Waiting 30 seconds before creating missing collection"
+	sleep 30
+
+	createScope "C2" "B1" "S1"
+	createCollection "C2" "B1" "S1" "col1"
+
+	grepForPanics
+}
+
+C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
+CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
+CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
+
+function runOneRebalanceCycle {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=30
+
+	setupCluster
+	echo "Sleeping 10 secs before rebalancing node in"
+	sleep 10
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running P2P large-scaled push monitoring"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	runOneRebalanceCycle 1 1
+	runOneReplicationCycle
+	setReplicationSettings "C1" "B0" "C2" "B1" "manualBackfill=S1.col1"
+
+	local currentXdcrLog
+	local -i currentHandlingInstanceCnt
+	local -i currentHandlingInstanceDoneCnt
+
+	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
+	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
+
+	# In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
+	echo "Done - Sleeping 10 minutes to monitor memory"
+
+	local pids=""
+	local nodeName
+	for nodeName in "${!CLUSTER_NAME_XDCR_PORT_MAP[@]}"; do
+		monitorXdcrProcessMem "$nodeName" 10 &
+		pids+=" $!"
+	done
+	for p in $pids; do
+		wait $p
+	done
+
+	# Sleeping 7 minutes mean we should have at least two instances up to 7 max
+	echo "stopping delay for backfill pipeline and waiting one more minute"
+
+	sleep 60
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$P2P_UNABLE_TO_RESPOND_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$CKPT_MAPPING_NOT_FOUND_MSG" 0
+	done
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
+}

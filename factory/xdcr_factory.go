@@ -1485,6 +1485,7 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 func (xdcrf *XDCRFactory) constructSettingsForCheckpointManager(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	s := make(metadata.ReplicationSettingsMap)
 	s[pipeline_svc.CHECKPOINT_INTERVAL] = metadata.GetSettingFromSettingsMap(settings, metadata.CheckpointIntervalKey, pipeline.Specification().GetReplicationSpec().Settings.CheckpointInterval)
+	s[metadata.DevCkptMgrForceGCWaitSec] = metadata.GetSettingFromSettingsMap(settings, metadata.DevCkptMgrForceGCWaitSec, nil)
 	xdcrf.disableCollectionIfNeeded(settings, s, pipeline.Specification().GetReplicationSpec())
 	return s, nil
 }
@@ -1525,6 +1526,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForCheckpointManager(pipeline c
 	if checkpoint_interval != nil {
 		s[pipeline_svc.CHECKPOINT_INTERVAL] = checkpoint_interval
 	}
+	s[metadata.DevCkptMgrForceGCWaitSec] = metadata.GetSettingFromSettingsMap(settings, metadata.DevCkptMgrForceGCWaitSec, nil)
 	return s, nil
 }
 

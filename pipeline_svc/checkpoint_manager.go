@@ -174,6 +174,8 @@ type CheckpointManager struct {
 
 	// Only used to bypass all the un-mockable RPC calls
 	unitTest bool
+
+	xdcrDevInjectGcWaitSec uint32
 }
 
 type checkpointSyncHelper struct {
@@ -498,6 +500,11 @@ func (ckmgr *CheckpointManager) initializeConfig(settings metadata.ReplicationSe
 		ckmgr.setCheckpointInterval(ckpt_interval)
 	} else {
 		return fmt.Errorf("%v %v %v should be provided in settings", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), CHECKPOINT_INTERVAL)
+	}
+
+	devInjWaitSec, err := ckmgr.utils.GetIntSettingFromSettings(settings, metadata.DevCkptMgrForceGCWaitSec)
+	if err == nil {
+		ckmgr.xdcrDevInjectGcWaitSec = uint32(devInjWaitSec)
 	}
 
 	if _, exists := settings[parts.ForceCollectionDisableKey]; exists {
@@ -970,12 +977,16 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		return err
 	}
 
-	defer ckmgr.logger.Infof("%v Done with SetVBTimestamps", ckmgr.pipeline.FullTopic())
+	startTime := time.Now()
+	defer func() {
+		ckmgr.logger.Infof("%v Done with SetVBTimestamps (took %v)", ckmgr.pipeline.InstanceId(), time.Since(startTime))
+	}()
 	defer func() {
 		ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
 		ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 	}()
-	ckmgr.logger.Infof("Set start seqnos for %v...", ckmgr.pipeline.FullTopic())
+	// Pipeline instances may overlap, so use instance ID instead
+	ckmgr.logger.Infof("Set start seqnos for %v...", ckmgr.pipeline.InstanceId())
 
 	listOfVbs := ckmgr.getMyVBs()
 
@@ -1464,6 +1475,11 @@ func (ckmgr *CheckpointManager) UpdateSettings(settings metadata.ReplicationSett
 	bypassCkpt, bypassExists := settings[metadata.CkptMgrBypassCkpt].(bool)
 	if bypassExists && bypassCkpt {
 		ckmgr.checkpointAllowedHelper.setCheckpointDisallowed()
+	}
+
+	devInjWaitSec, err := ckmgr.utils.GetIntSettingFromSettings(settings, metadata.DevCkptMgrForceGCWaitSec)
+	if err == nil && devInjWaitSec >= 0 {
+		atomic.StoreUint32(&ckmgr.xdcrDevInjectGcWaitSec, uint32(devInjWaitSec))
 	}
 
 	checkpoint_interval, err := ckmgr.utils.GetIntSettingFromSettings(settings, CHECKPOINT_INTERVAL)
@@ -2628,6 +2644,12 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(pipelinesCkptDocs []me
 	// Before merging, disable checkpointing and wait until all checkpointing tasks are finished
 
 	disableCkptStopTimer := ckmgr.utils.StartDiagStopwatch("ckmgr.stopTheWorldAndMergeCkpt.disableCkptAndWait", base.DiagCkptStopTheWorldThreshold)
+	injWaitSec := int(atomic.LoadUint32(&ckmgr.xdcrDevInjectGcWaitSec))
+	if injWaitSec > 0 {
+		ckmgr.logger.Infof("XDCR Developer injection found and waiting for %v seconds for stopping the world...", injWaitSec)
+		time.Sleep(time.Duration(injWaitSec) * time.Second)
+	}
+
 	ckmgr.checkpointAllowedHelper.disableCkptAndWait()
 	disableCkptStopTimer()
 	defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()

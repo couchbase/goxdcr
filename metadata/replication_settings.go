@@ -25,6 +25,7 @@ const (
 	DevBackfillPipelineSendDelay      = base.DevBackfillPipelineSendDelay
 	DevBackfillRollbackTo0VB          = base.DevBackfillRollbackTo0VB
 	DevMainPipelineRollbackTo0VB      = base.DevMainPipelineRollbackTo0VB
+	DevCkptMgrForceGCWaitSec          = base.DevCkptMgrForceGCWaitSec
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
 	ActiveKey                         = "active"
@@ -112,7 +113,7 @@ var ImmutableSettings = []string{}
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
-	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB}
+	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -143,6 +144,7 @@ var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 100
 var XDCRDevBackfillPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
 var XDCRDevMainPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
 var XDCRDevBackfillPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
+var XDCRDevCkptGcWaitConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
@@ -200,6 +202,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
 	DevMainPipelineRollbackTo0VB:      XDCRDevMainPipelineRollbackConfig,
 	DevBackfillRollbackTo0VB:          XDCRDevBackfillPipelineRollbackConfig,
+	DevCkptMgrForceGCWaitSec:          XDCRDevCkptGcWaitConfig,
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
 	ActiveKey:                         ActiveConfig,
