@@ -1975,6 +1975,14 @@ func (s ShaToCollectionNamespaceMap) SameAs(other ShaToCollectionNamespaceMap) b
 	return len(added) == 0 && len(removed) == 0
 }
 
+func (s *ShaToCollectionNamespaceMap) Merge(other ShaToCollectionNamespaceMap) {
+	for k, v := range other {
+		if _, exists := (*s)[k]; !exists {
+			(*s)[k] = v
+		}
+	}
+}
+
 type CompressedColNamespaceMapping struct {
 	// Snappy compressed byte slice of CollectionNamespaceMapping
 	CompressedMapping []byte `json:compressedMapping`

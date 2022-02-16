@@ -721,6 +721,18 @@ func (v *VBsCkptsDocMap) SnappyCompress() (VBsCkptsDocSnappyMap, ShaMappingCompr
 	return snapCkptMap, snapShaMap, nil
 }
 
+// This merge and replace will merge if the VBs do not intersect
+// or replace if the incoming map and the current map has intersect
+func (v *VBsCkptsDocMap) MergeAndReplace(incoming VBsCkptsDocMap) {
+	if v == nil || *v == nil || incoming == nil {
+		return
+	}
+	for vbno, ckptDocs := range incoming {
+		// replace
+		(*v)[vbno] = ckptDocs
+	}
+}
+
 type VBsCkptsDocSnappyMap map[uint16][]byte
 
 func (v *VBsCkptsDocSnappyMap) SnappyDecompress(snappyShaMap ShaMappingCompressedMap) (VBsCkptsDocMap, error) {

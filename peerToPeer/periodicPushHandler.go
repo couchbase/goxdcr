@@ -64,7 +64,9 @@ func (p *PeriodicPushHandler) handler() {
 			case req := <-p.receiveReqCh:
 				peerVBPeriodicPushReq, isReq := req.(*PeerVBPeriodicPushReq)
 				if isReq {
-					p.handleRequest(peerVBPeriodicPushReq)
+					// The idea is that the backend merger for multiple periodic push requests should consolidate them
+					// Do not let handleRequest become a bottleneck
+					go p.handleRequest(peerVBPeriodicPushReq)
 				} else {
 					p.logger.Errorf("PeriodicPushHandler (Req) received invalid format: %v", reflect.TypeOf(req))
 				}
@@ -104,7 +106,8 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 		var errMapMtx sync.Mutex
 
 		var unknownCounter = 1
-		p.logger.Infof("Received peer-to-peer push requests from %v", req.Sender)
+		p.logger.Infof("Received peer-to-peer push requests from %v (opaque %v)", req.Sender, req.GetOpaque())
+		startTime := time.Now()
 		for _, pushReqPtr := range *req.PushRequests {
 			if pushReqPtr == nil {
 				continue
@@ -132,9 +135,11 @@ func (p *PeriodicPushHandler) handleRequest(req *PeerVBPeriodicPushReq) {
 		waitGrp.Wait()
 		if len(errMap) > 0 {
 			resp.ErrorString = base.FlattenErrorMap(errMap)
-			p.logger.Warnf("Handling peer-to-peer push requests from %v finished with errs %v", req.Sender, resp.ErrorString)
+			p.logger.Warnf("Handling peer-to-peer push requests from %v finished with errs %v (opaque %v timeTaken %v)",
+				req.Sender, resp.ErrorString, req.GetOpaque(), time.Since(startTime))
 		} else {
-			p.logger.Infof("Done handling peer-to-peer push requests from %v", req.Sender)
+			p.logger.Infof("Done handling peer-to-peer push requests from %v (opaque %v timeTaken %v)",
+				req.Sender, req.GetOpaque(), time.Since(startTime))
 		}
 	}
 	handlerResult, err := req.CallBack(resp)

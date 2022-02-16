@@ -176,6 +176,12 @@ type CheckpointManager struct {
 	unitTest bool
 
 	xdcrDevInjectGcWaitSec uint32
+
+	periodicPushRequested chan bool
+
+	periodicPushDedupMtx sync.RWMutex
+	periodicPushDedupArg *MergeCkptArgs
+	periodicMerger       periodicMergerType // can be replaced for unit test
 }
 
 type checkpointSyncHelper struct {
@@ -285,6 +291,42 @@ type brokenMappingWithLock struct {
 	lock                        sync.RWMutex
 }
 
+// 0th element is Main pipeline Vbs->CkptDocs
+// 1st element is Backfill pipeline
+type VBsCkptsDocMaps []metadata.VBsCkptsDocMap
+
+func (m *VBsCkptsDocMaps) Merge(ckpts VBsCkptsDocMaps) {
+	if m == nil || *m == nil || ckpts == nil {
+		// m should really not be nil when this is called
+		return
+	}
+
+	for i := common.MainPipeline; i < common.PipelineTypeInvalidEnd; i++ {
+		if (*m)[i] == nil {
+			(*m)[i] = ckpts[i]
+		} else {
+			(*m)[i].MergeAndReplace(ckpts[i])
+		}
+	}
+}
+
+type MergeCkptArgs struct {
+	PipelinesCkptDocs       VBsCkptsDocMaps
+	BrokenMappingShaMap     metadata.ShaToCollectionNamespaceMap
+	BrokenMapSpecInternalId string
+	SrcManifests            *metadata.ManifestsCache
+	TgtManifests            *metadata.ManifestsCache
+	// Failover logs are used for sorting checkpoint purposes and are optional
+	SrcFailoverLogs map[uint16]*mcc.FailoverLog
+	TgtFailoverLogs map[uint16]*mcc.FailoverLog
+	// push mode only
+	PushRespChs []chan error
+}
+
+type MergeCkptArgsGetter func() *MergeCkptArgs
+
+type periodicMergerType func()
+
 func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_svc service_def.CAPIService,
 	remote_cluster_svc service_def.RemoteClusterSvc, rep_spec_svc service_def.ReplicationSpecSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
@@ -300,7 +342,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	}
 	logger := log.NewLogger("CheckpointMgr", logger_ctx)
 
-	return &CheckpointManager{
+	ckmgr := &CheckpointManager{
 		AbstractComponent:                 component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
 		pipeline:                          nil,
 		checkpoints_svc:                   checkpoints_svc,
@@ -335,7 +377,12 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		bucketTopologySvc:                 bucketTopologySvc,
 		initConnDone:                      make(chan bool),
 		getHighSeqnoAndVBUuidFromTargetCh: make(chan bool, 1),
-	}, nil
+		periodicPushRequested:             make(chan bool, 1),
+	}
+
+	// So that unit test can override this and test it
+	ckmgr.periodicMerger = ckmgr.periodicMergerImpl
+	return ckmgr, nil
 }
 
 func (ckmgr *CheckpointManager) Attach(pipeline common.Pipeline) error {
@@ -477,6 +524,8 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 	//start checkpointing loop
 	ckmgr.wait_grp.Add(1)
 	go ckmgr.checkpointing()
+
+	go ckmgr.periodicMerger()
 	return nil
 }
 
@@ -2620,25 +2669,43 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 		ckmgr.logger.Warnf("filterCkptsWithoutValidBrokenMaps had errors: %v", err)
 	}
 
-	err = ckmgr.stopTheWorldAndMergeCkpts(filteredMaps, combinedShaMap, brokenMapSpecInternalId, &combinedSrcManifests, &combinedTgtManifests, srcFailoverLogs, tgtFailoverLogs)
-	if err != nil {
+	err, done := ckmgr.preStopGcCheck(filteredMaps)
+	if done {
 		return err
 	}
 
+	getterFunc := func() *MergeCkptArgs {
+		return &MergeCkptArgs{
+			PipelinesCkptDocs:       filteredMaps,
+			BrokenMappingShaMap:     combinedShaMap,
+			BrokenMapSpecInternalId: brokenMapSpecInternalId,
+			SrcManifests:            &combinedSrcManifests,
+			TgtManifests:            &combinedTgtManifests,
+			SrcFailoverLogs:         srcFailoverLogs,
+			TgtFailoverLogs:         tgtFailoverLogs,
+		}
+	}
+
+	err = ckmgr.stopTheWorldAndMergeCkpts(getterFunc)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-// Failover logs are used for sorting checkpoint purposes and are optional
-func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(pipelinesCkptDocs []metadata.VBsCkptsDocMap, brokenMappingShaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog) error {
+func (ckmgr *CheckpointManager) preStopGcCheck(pipelinesCkptDocs []metadata.VBsCkptsDocMap) (error, bool) {
 	if len(pipelinesCkptDocs) != int(common.PipelineTypeInvalidEnd) {
-		return fmt.Errorf("Invalid number of pipelines: %v vs %v", len(pipelinesCkptDocs), int(common.PipelineTypeInvalidEnd))
+		return fmt.Errorf("Invalid number of pipelines: %v vs %v", len(pipelinesCkptDocs), int(common.PipelineTypeInvalidEnd)), true
 	}
 
 	if len(pipelinesCkptDocs[common.MainPipeline]) == 0 && len(pipelinesCkptDocs[common.BackfillPipeline]) == 0 {
 		// Nothing to merge, don't waste time stopping the world
-		return nil
+		return nil, true
 	}
+	return nil, false
+}
 
+func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGetter) error {
 	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.stopTheWorldAndMergeCkpt", base.DiagStopTheWorldAndMergeCkptThreshold)
 	defer stopFunc()
 	// Before merging, disable checkpointing and wait until all checkpointing tasks are finished
@@ -2654,9 +2721,24 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(pipelinesCkptDocs []me
 	disableCkptStopTimer()
 	defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 
+	// Once finished waiting, get all the accumulated information during this time that needs to be merged and do it in one shot
+	ckptArgs := getter()
+	if ckptArgs == nil {
+		return nil
+	}
+	pipelinesCkptDocs := ckptArgs.PipelinesCkptDocs
+	brokenMappingShaMap := ckptArgs.BrokenMappingShaMap
+	brokenMapSpecInternalId := ckptArgs.BrokenMapSpecInternalId
+	srcManifests := ckptArgs.SrcManifests
+	tgtManifests := ckptArgs.TgtManifests
+	srcFailoverLogs := ckptArgs.SrcFailoverLogs
+	tgtFailoverLogs := ckptArgs.TgtFailoverLogs
+	respChs := ckptArgs.PushRespChs
+
 	err := ckmgr.mergeFinalCkpts(pipelinesCkptDocs, srcFailoverLogs, tgtFailoverLogs, brokenMappingShaMap, brokenMapSpecInternalId)
 	if err != nil {
 		ckmgr.logger.Errorf("megeFinalCkpts error %v", err)
+		respToGcCh(respChs, err)
 		return err
 	}
 
@@ -2674,10 +2756,38 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(pipelinesCkptDocs []me
 		manifestMeasureStopFunc()
 		if err != nil {
 			ckmgr.logger.Errorf("PersistReceivedManifests Error: %v", err)
+			respToGcCh(respChs, err)
 			return err
 		}
 	}
+
+	if len(respChs) > 0 {
+		// Periodic push do not go through pipeline restart, so need to register them for GC
+		for i, ckpts := range pipelinesCkptDocs {
+			if ckpts == nil {
+				continue
+			}
+			genSpec := ckmgr.pipeline.Specification()
+			registerTopic := common.ComposeFullTopic(genSpec.GetReplicationSpec().Id, common.PipelineType(i))
+			for vbno, _ := range ckpts {
+				gcErr := ckmgr.registerGCFunction(registerTopic, vbno)
+				if gcErr != nil {
+					ckmgr.logger.Warnf("%v - Unable to register GC for vbno %v - err: %v", registerTopic, vbno, gcErr)
+				}
+			}
+		}
+	}
+
+	respToGcCh(respChs, nil)
 	return nil
+}
+
+func respToGcCh(respCh []chan error, err error) {
+	if len(respCh) > 0 {
+		for _, ch := range respCh {
+			ch <- err
+		}
+	}
 }
 
 func (ckmgr *CheckpointManager) checkSpecInternalID(combinedBrokenMappingSpecInternalId map[string]string) (string, error) {
@@ -3271,24 +3381,64 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 		return err
 	}
 
-	err = ckmgr.stopTheWorldAndMergeCkpts(pipelinesCkpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, nil, nil)
-	if err != nil {
-		ckmgr.logger.Errorf("stopTheWorldAndMerge - %v", err)
+	err, done := ckmgr.preStopGcCheck(pipelinesCkpts)
+	if done {
 		return err
 	}
 
-	// Periodic push do not go through pipeline restart, so need to register them for GC
-	for i, ckpts := range pipelinesCkpts {
-		if ckpts == nil {
-			continue
+	respCh := make(chan error)
+	err = ckmgr.requestPeriodicMerge(pipelinesCkpts, shaMap, brokenMapSpecInternalId, srcManifests, tgtManifests, respCh)
+	if err != nil {
+		return err
+	}
+
+	retErr := <-respCh
+	return retErr
+}
+
+func (ckmgr *CheckpointManager) requestPeriodicMerge(pipelinesCkpts []metadata.VBsCkptsDocMap, shaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, respCh chan error) error {
+	ckmgr.periodicPushDedupMtx.Lock()
+	if ckmgr.periodicPushDedupArg == nil {
+		// This means that there is no back pressure happening and this periodic push request is the first one to be merged
+		// for this pipeline
+		ckmgr.periodicPushDedupArg = &MergeCkptArgs{
+			PipelinesCkptDocs:       pipelinesCkpts,
+			BrokenMappingShaMap:     shaMap,
+			BrokenMapSpecInternalId: brokenMapSpecInternalId,
+			SrcManifests:            srcManifests,
+			TgtManifests:            tgtManifests,
+			SrcFailoverLogs:         nil,
+			TgtFailoverLogs:         nil,
+			PushRespChs:             []chan error{respCh},
 		}
-		registerTopic := common.ComposeFullTopic(genSpec.GetReplicationSpec().Id, common.PipelineType(i))
-		for vbno, _ := range ckpts {
-			gcErr := ckmgr.registerGCFunction(registerTopic, vbno)
-			if gcErr != nil {
-				ckmgr.logger.Warnf("%v - Unable to register GC for vbno %v - err: %v", registerTopic, vbno, gcErr)
-			}
+	} else {
+		// This means that there is a push request already in place and haven't gotten to execute yet
+		if brokenMapSpecInternalId != "" && ckmgr.periodicPushDedupArg.BrokenMapSpecInternalId != "" &&
+			brokenMapSpecInternalId != ckmgr.periodicPushDedupArg.BrokenMapSpecInternalId {
+			ckmgr.periodicPushDedupMtx.Unlock()
+			return fmt.Errorf("BrokenMapSpecInternalId mismatch: %v vs %v", brokenMapSpecInternalId, ckmgr.periodicPushDedupArg.BrokenMapSpecInternalId)
 		}
+		// Since push requests are sent with payload that should only contain VB master information,
+		// if multiple nodes push to this node at the same time, the following merges should take care of non-intersecting
+		// information.
+		// If the same VB master pushed before and is re-pushing again because this node is slow, then
+		// the merge functions below should merge when necessary (i.e. shaMap) or replace when necessary (pipelinesCkptDocs)
+		ckmgr.periodicPushDedupArg.PipelinesCkptDocs.Merge(pipelinesCkpts)
+		ckmgr.periodicPushDedupArg.BrokenMappingShaMap.Merge(shaMap)
+		ckmgr.periodicPushDedupArg.SrcManifests.LoadIfNotExists(srcManifests)
+		ckmgr.periodicPushDedupArg.TgtManifests.LoadIfNotExists(tgtManifests)
+		ckmgr.periodicPushDedupArg.PushRespChs = append(ckmgr.periodicPushDedupArg.PushRespChs, respCh)
+	}
+	ckmgr.periodicPushDedupMtx.Unlock()
+
+	select {
+	case <-ckmgr.finish_ch:
+		// the periodic pusher is probably not working anymore
+		return fmt.Errorf("%v is stopping and unable to handle merge", ckmgr.Id())
+	case ckmgr.periodicPushRequested <- true:
+	// First one requested
+	default:
+		// already delivered
 	}
 	return nil
 }
@@ -3323,6 +3473,36 @@ func (ckmgr *CheckpointManager) getMaxSeqno(vbno uint16) uint64 {
 		return math.MaxUint64
 	} else {
 		return endTs.Seqno
+	}
+}
+
+func (ckmgr *CheckpointManager) periodicBatchGetter() *MergeCkptArgs {
+	ckmgr.periodicPushDedupMtx.Lock()
+	defer ckmgr.periodicPushDedupMtx.Unlock()
+
+	if ckmgr.periodicPushDedupArg == nil {
+		return nil
+	}
+
+	// Do a copy to be able to free up the batch pointer
+	returnedArg := &MergeCkptArgs{}
+	*returnedArg = *ckmgr.periodicPushDedupArg
+	// Clear the current batch so the next caller will start a new batch
+	ckmgr.periodicPushDedupArg = nil
+	return returnedArg
+}
+
+func (ckmgr *CheckpointManager) periodicMergerImpl() {
+	for {
+		select {
+		case <-ckmgr.finish_ch:
+			return
+		case <-ckmgr.periodicPushRequested:
+			err := ckmgr.stopTheWorldAndMergeCkpts(ckmgr.periodicBatchGetter)
+			if err != nil {
+				ckmgr.logger.Errorf("%v stopTheWorldAndMerge - %v", ckmgr.Id(), err)
+			}
+		}
 	}
 }
 
