@@ -1087,7 +1087,7 @@ func (b *BackfillRequestHandler) GetDelVBSpecificBackfillCb(vbno uint16) (cb bas
 		return b.HandleBackfillRequest(delReq)
 	}
 
-	errCb = func(err error) {
+	errCb = func(err error, cbCalled bool) {
 		b.logger.Errorf("Unable to delete vbSpecificRequest due to %v. Extraneous backfill may occur", err)
 	}
 	return cb, errCb
@@ -1106,7 +1106,7 @@ func (b *BackfillRequestHandler) GetRollbackTo0VBSpecificBackfillCb(vbno uint16,
 		return delCkpts()
 	}
 
-	errCb = func(err error) {
+	errCb = func(err error, cbCalled bool) {
 		b.logger.Errorf("%v Unable to send rollbackTo0 request due to %v", b.id, err)
 	}
 	return cb, errCb

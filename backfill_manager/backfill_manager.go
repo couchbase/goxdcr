@@ -699,7 +699,7 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(specId, internalSpecId, removedScopesMap)
 				err = cb()
 				if err != nil {
-					errCb(err)
+					errCb(err, true)
 				}
 			}
 			if err != nil {
@@ -709,7 +709,7 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 		return nil
 	}
 
-	errCallback := func(err error) {
+	errCallback := func(err error, cbCalled bool) {
 		// Do nothing, because callback above will retry if needed
 	}
 
@@ -768,7 +768,7 @@ func (b *BackfillMgr) GetRouterMappingChangeHandler(specId, internalSpecId strin
 		return nil
 	}
 
-	errCb := func(err error) {
+	errCb := func(err error, cbCalled bool) {
 		b.explicitMappingCbGenericErrHandler(err, specId, diff)
 	}
 	return callback, errCb

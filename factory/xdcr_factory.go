@@ -662,7 +662,7 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 		callback, errCb := xdcrf.getBackfillMgr().GetRouterMappingChangeHandler(spec.Id, spec.InternalId, diff)
 		err := xdcrf.pipelineMgrStopCallback(spec.Id, callback, errCb)
 		if err != nil {
-			errCb(err)
+			errCb(err, true)
 		}
 	}
 

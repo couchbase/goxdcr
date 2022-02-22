@@ -1849,7 +1849,7 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 }
 
 type StoppedPipelineCallback func() error
-type StoppedPipelineErrCallback func(err error)
+type StoppedPipelineErrCallback func(err error, cbCalled bool)
 
 type PipelineMgrStopCbType func(string, StoppedPipelineCallback, StoppedPipelineErrCallback) error
 

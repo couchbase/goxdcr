@@ -915,7 +915,7 @@ func TestPipelineMgrCallbacks(t *testing.T) {
 		callbackCount++
 		return nil
 	}
-	errFunc := func(err error) {
+	errFunc := func(err error, cbCalled bool) {
 		errCount++
 	}
 	pipelineMgr.UpdateWithStoppedCb("testTopic", callback, errFunc)

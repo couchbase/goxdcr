@@ -912,7 +912,7 @@ func (ckpt_svc *CheckpointsService) GetCkptsMappingsCleanupCallback(specId, spec
 		_, err := ckpt_svc.removeMappingFromCkptDocs(specId, specInternalId, toBeRemoved)
 		return err
 	}
-	errCb := func(err error) {
+	errCb := func(err error, cbCalled bool) {
 		// checkpoint cleanup err is fine, they'll get rolled over
 		ckpt_svc.logger.Warnf("Unable to remove mappings %v from backfill ckpt docs due to err %v", toBeRemoved.String(), err)
 	}

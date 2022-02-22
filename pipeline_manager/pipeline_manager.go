@@ -853,7 +853,7 @@ func (pipelineMgr *PipelineManager) UpdateWithStoppedCb(topic string, callback b
 	if err != nil {
 		// Unable to register the callback - this means the callback will not get to execute
 		// and thus the errCb() will need to be called
-		errCb(err)
+		errCb(err, false)
 	}
 	return err
 }
@@ -937,7 +937,7 @@ func (pipelineMgr *PipelineManager) StopBackfillWithStoppedCb(topic string, cb b
 	if err != nil {
 		// Unable to register the callback - this means the callback will not get to execute
 		// and thus the errCb() will need to be called
-		errCb(err)
+		errCb(err, false)
 	}
 	if err != nil {
 		return err
@@ -1223,7 +1223,11 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string,
 			return mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
 		}
 		var cbErr error
-		errCb := func(err error) {
+		errCb := func(err error, cbCalled bool) {
+			// errCb can be called when we fail to register cbFunc. So we need to clear WaitGrp in order to avoid goroutine leak.
+			if cbCalled == false {
+				defer stoppedWaitGrp.Done()
+			}
 			cbErr = err
 		}
 		if registerErr := pipelineMgr.HaltBackfillWithCb(mainTopic, cbFunc, errCb, false); registerErr != nil {
@@ -1607,6 +1611,9 @@ func (r *PipelineUpdater) run() {
 							r.soakUpBackfillStartCh()
 						}
 					}
+					// With P2P, callbacks are registered in a channel and called after backfill pipeline stops.
+					// Here backfill pipeline is already stopped. We need to clear the callbacks in the channel.
+					r.executeQueuedCallbacks()
 				} else {
 					r.logger.Infof("Replication %v's backfill Pipeline is stopping (skipCkpt? %v)", r.pipeline_name, opts.skipCheckpointing)
 					retErrMap = r.pipelineMgr.StopBackfillPipeline(r.pipeline_name, opts.skipCheckpointing)
@@ -2281,7 +2288,7 @@ func (r *PipelineUpdater) registerPipelineStoppedCb(cb updaterIntermediateCb) er
 		r.sendUpdateNow()
 		return nil
 	default:
-		r.logger.Errorf("pipeline %v updater unable to register callback because channel is full")
+		r.logger.Errorf("pipeline %v updater unable to register callback because channel is full", r.pipeline_name)
 		return base.ErrorMaxReached
 	}
 }
@@ -2305,7 +2312,7 @@ func (r *PipelineUpdater) executeQueuedCallbacks() {
 			r.logger.Infof("%v calling one callback...", r.pipeline_name)
 			err := cb.callback()
 			if err != nil {
-				cb.errCb(err)
+				cb.errCb(err, true)
 			}
 		default:
 			return
@@ -2320,7 +2327,7 @@ func (r *PipelineUpdater) executeQueuedBackfillCallbacks() {
 			r.logger.Infof("%v calling one backfill callback...", r.pipeline_name)
 			err := cb.callback()
 			if err != nil {
-				cb.errCb(err)
+				cb.errCb(err, true)
 			}
 		default:
 			return
