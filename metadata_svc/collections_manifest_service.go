@@ -52,6 +52,8 @@ type CollectionsManifestService struct {
 	srcBucketGetterMtx     sync.RWMutex
 	srcBucketGetters       map[string]*BucketManifestGetter
 	srcBucketGettersRefCnt map[string]uint64
+
+	xdcrInjDelaySec uint32
 }
 
 func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc,
@@ -196,6 +198,25 @@ func (c *CollectionsManifestService) ReplicationSpecChangeCallback(id string, ol
 		c.handleNewReplSpec(newSpec, false /*starting*/)
 	} else if oldSpec != nil && newSpec == nil {
 		c.handleDelReplSpec(oldSpec)
+	} else if newSpec != nil {
+		// replSpecChange
+		delaySec := newSpec.Settings.GetIntSettingValue(metadata.DevColManifestSvcDelaySec)
+		portSpecifier := newSpec.Settings.GetIntSettingValue(metadata.DevNsServerPortSpecifier)
+		if delaySec > 0 {
+			if portSpecifier > 0 {
+				myhostAddr, _ := c.xdcrTopologySvc.MyHostAddr()
+				myPortNumber, _ := base.GetPortNumber(myhostAddr)
+				// If err, myPortNumber is 0 and won't match portSpecifier anyway
+				if int(myPortNumber) == portSpecifier {
+					c.logger.Infof("XDCR Dev Injection for this node %v set delay to %v seconds", portSpecifier, delaySec)
+					atomic.StoreUint32(&c.xdcrInjDelaySec, uint32(delaySec))
+				}
+			} else {
+				c.logger.Infof("XDCR Dev Injection set delay to %v seconds", delaySec)
+			}
+		} else if delaySec == 0 {
+			atomic.StoreUint32(&c.xdcrInjDelaySec, 0)
+		}
 	}
 	return nil
 }
@@ -279,6 +300,11 @@ func (c *CollectionsManifestService) SetMetadataChangeHandlerCallback(callBack b
 }
 
 func (c *CollectionsManifestService) metadataChangeCb(specId string, oldManifestPair, newManifestPair interface{}) error {
+	if delaySec := atomic.LoadUint32(&c.xdcrInjDelaySec); delaySec > 0 {
+		c.logger.Infof("XDCR Dev Injection Manifest pair callback notify force delay of %v seconds", delaySec)
+		time.Sleep(time.Duration(delaySec) * time.Second)
+	}
+
 	c.metadataChangeCbMtx.RLock()
 	defer c.metadataChangeCbMtx.RUnlock()
 

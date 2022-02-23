@@ -11,8 +11,9 @@
 # =============================
 # cluster -> Bucket(s)
 # -----------------
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002)
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=1300 ["C2"]=13002)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
@@ -26,7 +27,7 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 #pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
-declare -A SlowBackfillBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevBackfillSendDelayMs"]=1000)
+declare -A SlowBackfillBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevBackfillSendDelayMs"]=1000 ["replicateCkptIntervalMin"]=20)
 
 # Bucket -> Scopes
 # -----------------
@@ -54,12 +55,24 @@ function cleanupTestCaseInternalSettings {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running implicit mapping source col delete during backfill test case"
+	echo "Running multi-node implicit mapping source col delete with failover during backfill test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
 		exit $?
 	fi
+
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+
+	setupCluster
+	echo "Sleeping 10 secs before rebalancing node in"
+	sleep 10
+	addNodesIn
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
 
 	# First setup mis-matching mapping meaning all the data reside in C1
 	setupTopologies
@@ -68,6 +81,13 @@ function runTestCase {
 	fi
 	# Before doing provisioning, get old internal settings
 	setCustomManifestRefreshInterval "C1"
+	sleep 5
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap cleanupTestCaseInternalSettings EXIT
@@ -116,14 +136,49 @@ function runTestCase {
 	# By this point backfill should exist
 	checkNoErrorInErrorList "C1"
 
+	local delaySec=600
+	echo "Force a node C1P to be respond to manifest changes after $delaySec seconds"
+	local c1pPort=${CLUSTER_NAME_PORT_MAP["C1P"]}
+	# Set the push interval to 1 min as well as now is the time to receive the push, not before
+	setReplicationSettings "C1" "B1" "C2" "B2" "xdcrDevNsServerPort=$c1pPort" "xdcrDevColManifestSvcDelaySec=$delaySec" "replicateCkptIntervalMin=1"
+
+	# ensure manifest has been pulled
+	local manifestMsg="Updated source manifest from old version"
+	c1Log=$(getInternalNodeXdcrLog "C1")
+	local c1MsgCntOrig=$(echo "$c1Log" | grep -c "$manifestMsg")
+
 	# Delete the source collection to force backfill to be cleaned up
 	deleteCollection "C1" "B1" "S1" "col1"
 	deleteCollection "C1" "B1" "S1" "col2"
 
-	echo "Finished deleting source collections, wait a minute to make sure no errors show up..."
-	sleep 60
-	checkNoErrorInErrorList "C1"
+	echo "After deleting collection waiting for C1 to pull a manifest"
+	local c1MsgCnt=$c1MsgCntOrig
+	while (($c1MsgCnt <= $c1MsgCntOrig)); do
+		c1Log=$(getInternalNodeXdcrLog "C1")
+		c1MsgCnt=$(echo "$c1Log" | grep -c "$manifestMsg")
+		sleep 20
+	done
 
+	echo "Finished deleting source collections and now waiting for C1 to receive a push from C1P..."
+	local c1CntOrig=0
+	local c1Cnt
+	local c1Log
+	c1Log=$(getInternalNodeXdcrLog "C1")
+	c1CntOrig=$(echo "$c1Log" | grep -c "$P2P_BACKFILL_PUSH_RECEIVED_MSG")
+	c1Cnt=$c1CntOrig
+	while (($c1Cnt <= $c1CntOrig)); do
+		c1Log=$(getInternalNodeXdcrLog "C1")
+		c1Cnt=$(echo "$c1Log" | grep -c "$P2P_BACKFILL_PUSH_RECEIVED_MSG")
+		sleep 20
+	done
+	echo "C1 has received a push from C1P that should have an out-of-date backfill information"
+
+	echo "Failing C1P out of the cluster and so that C1 should have to begin out-of-date backfill tasks"
+	failoverNode "C1P" "C1"
+	echo "Sleeping 120 seconds before checking for errors"
+	sleep 120
+	checkNoErrorInErrorList "C1"
+	validateInternalLogWithInstance "C1" "$UNABLE_TO_GET_HIGH_SEQNO_MSG" 0
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

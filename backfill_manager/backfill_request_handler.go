@@ -305,7 +305,7 @@ func (b *BackfillRequestHandler) run() {
 				newTime := time.Now().Add(b.persistInterval)
 				coolDownTime = &newTime
 				if err != nil && persistType != DelOp {
-					b.logger.Errorf("%v experienced error when persisting - %v", b.id, err.Error())
+					b.logger.Errorf("%v experienced error when persisting (type %v) - %v", b.id, persistType, err.Error())
 				}
 				// Return the error code to all the callers that are waiting
 				for _, respCh := range b.queuedResps {
@@ -643,10 +643,13 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 	b.backfillPipelineTotalVBsDone++
 
 	if b.cachedBackfillSpec == nil {
-		panic("Cannot be nil")
+		b.pipelinesMtx.Unlock()
+		// In a rare situation if a cached backfill spec is changed underneath, it is possibly due to factors like
+		// source manifest changes where things get cleaned up and there is no longer a need to backfill
+		// Return this error will cause pipeline to restart, which should be ok
+		return fmt.Errorf("%v - handleVBDone saw a nil backfill spec", b.Id())
 	} else {
 		b.cachedBackfillSpec.VBTasksMap.MarkOneVBTaskDone(vbno)
-
 		// Need to also delete the checkpoints associated with this VB
 		// So that when backfill pipeline restarts and if there's another task to be done
 		// the old obsolete checkpoints will not be used
@@ -656,6 +659,7 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 		} else {
 			err := checkpointMgr.DelSingleVBCheckpoint(pipeline.FullTopic(), vbno)
 			if err != nil {
+				b.pipelinesMtx.Unlock()
 				b.logger.Errorf("Unable to delete checkpoint doc for %v vbno %v err %v", pipeline.FullTopic(), vbno, err)
 				return err
 			}
@@ -945,6 +949,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 			}
 		} else if b.cachedBackfillSpec.VBTasksMap.Len() == 0 {
 			// The whole spec is now deleted because of the pairRO.Removed
+			b.cachedBackfillSpec = nil
 			delErr := b.requestPersistence(DelOp, resp.PersistResponse)
 			if delErr == nil {
 				return errorSyncDel
@@ -1197,7 +1202,7 @@ func (b *BackfillRequestHandler) handlePeerNodesBackfillMerge(reqAndResp ReqAndR
 
 	err = b.updateBackfillSpec(reqAndResp.PersistResponse, peerNodesReq.backfillSpec.VBTasksMap, nil, nil, false)
 	if err != nil {
-		b.logger.Errorf(err.Error())
+		b.logger.Errorf("%v updateBackfillSpec err %v", b.Id(), err.Error())
 		return err
 	}
 

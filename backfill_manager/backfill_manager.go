@@ -1944,7 +1944,7 @@ func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.Bu
 	if pushMode {
 		pushOrPullStr = "push"
 	}
-	b.logger.Infof("Replication %v received peer node %v %v backfill replication: %v", topic, pushOrPullStr, nodeName, backfillSpec)
+	b.logger.Infof("Replication %v received peer node %v backfill replication from %v: %v", topic, pushOrPullStr, nodeName, backfillSpec)
 
 	mergeReq := internalPeerBackfillTaskMergeReq{
 		nodeName:     nodeName,

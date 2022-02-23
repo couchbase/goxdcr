@@ -26,6 +26,8 @@ const (
 	DevBackfillRollbackTo0VB          = base.DevBackfillRollbackTo0VB
 	DevMainPipelineRollbackTo0VB      = base.DevMainPipelineRollbackTo0VB
 	DevCkptMgrForceGCWaitSec          = base.DevCkptMgrForceGCWaitSec
+	DevColManifestSvcDelaySec         = base.DevColManifestSvcDelaySec
+	DevNsServerPortSpecifier          = base.DevNsServerPortSpecifier
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
 	ActiveKey                         = "active"
@@ -113,7 +115,8 @@ var ImmutableSettings = []string{}
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
-	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec}
+	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
+	DevNsServerPortSpecifier}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -145,6 +148,8 @@ var XDCRDevBackfillPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0,
 var XDCRDevMainPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
 var XDCRDevBackfillPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{-1, 1023}}
 var XDCRDevCkptGcWaitConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
+var XDCRDevColManifestSvcDelayConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
+var XDCRDevNsServerPortSpecifierConfig = &SettingsConfig{0 /*not specified*/, &Range{0, 65535}}
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
@@ -203,6 +208,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineRollbackTo0VB:      XDCRDevMainPipelineRollbackConfig,
 	DevBackfillRollbackTo0VB:          XDCRDevBackfillPipelineRollbackConfig,
 	DevCkptMgrForceGCWaitSec:          XDCRDevCkptGcWaitConfig,
+	DevColManifestSvcDelaySec:         XDCRDevColManifestSvcDelayConfig,
+	DevNsServerPortSpecifier:          XDCRDevNsServerPortSpecifierConfig,
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
 	ActiveKey:                         ActiveConfig,

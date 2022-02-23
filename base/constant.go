@@ -1298,6 +1298,8 @@ const DevBackfillPipelineSendDelay = "xdcrDevBackfillSendDelayMs"
 const DevMainPipelineRollbackTo0VB = "xdcrDevMainRollbackTo0VB"
 const DevBackfillRollbackTo0VB = "xdcrDevBackfillRollbackTo0VB"
 const DevCkptMgrForceGCWaitSec = "xdcrDevCkptMgrForceGCWaitSec"
+const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
+const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
