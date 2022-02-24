@@ -595,9 +595,9 @@ func (c *CollectionsRouter) handleExplicitMappingUpdate(latestSourceManifest, la
 	// 4. Start pipelines
 	added, removed := c.explicitMappings.Diff(explicitMap)
 	pair := metadata.CollectionNamespaceMappingsDiffPair{
-		Added:                     added,
-		Removed:                   removed,
-		RouterLatestSrcManifestId: lastKnownSrcManifestId,
+		Added:                      added,
+		Removed:                    removed,
+		CorrespondingSrcManifestId: lastKnownSrcManifestId,
 	}
 	c.explicitMapChangeHandler(pair)
 

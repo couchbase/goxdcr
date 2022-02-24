@@ -94,7 +94,7 @@ func TestVBMasterHandler(t *testing.T) {
 	vbTaskMap.VBTasksMap[0] = tasks0
 	replSpec, _ := metadata.NewReplicationSpecification(srcBucketName, tgtBucketName, "test", "test", "test")
 	replId = replSpec.Id
-	backfillSpec := metadata.NewBackfillReplicationSpec(replId, replSpec.InternalId, vbTaskMap, emptySpec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(replId, replSpec.InternalId, vbTaskMap, emptySpec, 0)
 
 	setupMocks2(ckptSvc, ckptData, bucketTopologySvc, vbsListNonIntersect, colManifestSvc, backfillReplSvc, backfillSpec, utils, replSpecSvc, replSpec)
 

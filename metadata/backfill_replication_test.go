@@ -513,7 +513,7 @@ func TestIdenticalReMerge(t *testing.T) {
 	vbTaskMap.VBTasksMap[0] = &uniLayerTasks
 	vbTaskMap.VBTasksMap[1] = &duoLayerTasks
 
-	backfillSpec := NewBackfillReplicationSpec("testId", "intID", nil, nil)
+	backfillSpec := NewBackfillReplicationSpec("testId", "intID", nil, nil, 0)
 	assert.NotNil(backfillSpec)
 
 	// First pass should work

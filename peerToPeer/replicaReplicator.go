@@ -562,7 +562,8 @@ func (a *ReplicatorAgentImpl) FetchLatestReplicationsInfo() (*VBPeriodicReplicat
 	}
 
 	if backfillSpec != nil && backfillSpec.VBTasksMap != nil && backfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(myVBList) {
-		err = req.LoadBackfillReplication(backfillSpec.VBTasksMap.FilterBasedOnVBs(myVBList), bkptCkpts, srcManifests, tgtManifests)
+		err = req.LoadBackfillReplication(backfillSpec.VBTasksMap.FilterBasedOnVBs(myVBList), bkptCkpts, srcManifests,
+			tgtManifests, backfillSpec.SourceManifestUid)
 		if err != nil {
 			return nil, err
 		}

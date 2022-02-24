@@ -115,7 +115,6 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	authType := base.HttpAuthMechPlain
 	var certificates []byte
 	if p2p.securitySvc.IsClusterEncryptionLevelStrict() {

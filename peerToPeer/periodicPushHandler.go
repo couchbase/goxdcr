@@ -17,6 +17,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -187,7 +188,7 @@ func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateRe
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
 		}
 		err = p.storePushReqInfoByType(pushReq.ReplicationPayload, common.MainPipeline, sender)
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), base.ErrorNoBackfillNeeded.Error()) {
 			errMap[fmt.Sprintf("node %v mainReplication", sender)] = err
 		}
 	}
@@ -206,7 +207,7 @@ func (p *PeriodicPushHandler) storePushRequestInfo(pushReq VBPeriodicReplicateRe
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
 		}
 		err = p.storePushReqInfoByType(pushReq.ReplicationPayload, common.BackfillPipeline, sender)
-		if err != nil && err != base.ErrorNoBackfillNeeded {
+		if err != nil && !strings.Contains(err.Error(), base.ErrorNoBackfillNeeded.Error()) {
 			errMap[fmt.Sprintf("node %v backfillReplication", sender)] = err
 		}
 	}

@@ -972,7 +972,7 @@ func TestPipelineMgrStartMainNotStarting(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
-	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec, 0)
 	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, collectionsManifestSvc, backfillReplSvc, mainPipelineStopped, backfillSpec, nil)
 
 	assert.NotNil(pipelineMgr)
@@ -990,7 +990,7 @@ func TestPipelineMgrStartNoVBTasks(t *testing.T) {
 		testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock,
 		ckptMock, collectionsManifestSvc, backfillReplSvc := setupBoilerPlate()
 
-	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(testTopic, testReplicationSpec.InternalId, nil, testReplicationSpec, 0)
 	setupDetailedMocking(testLogger, pipelineMock, replSpecSvcMock, xdcrTopologyMock, true, remoteClusterMock, pipelineMgr, testRepairer, testReplicationStatus, testTopic, testReplicationSettings, testReplicationSpec, testRemoteClusterRef, testPipeline, uiLogSvc, replStatusMock, ckptMock, collectionsManifestSvc, backfillReplSvc, mainPipelineRunning, backfillSpec, nil)
 
 	assert.NotNil(pipelineMgr)

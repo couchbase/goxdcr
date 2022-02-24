@@ -30,14 +30,17 @@ import (
 	"time"
 )
 
-func setupBRHBoilerPlate() (*log.CommonLogger, *service_def.BackfillReplSvc, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc) {
+func setupBRHBoilerPlate() (*log.CommonLogger, *service_def.BackfillReplSvc, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, func() (uint64, error)) {
 	logger := log.NewLogger("BackfillReqHandler", log.DefaultLoggerContext)
 	backfillReplSvc := &service_def.BackfillReplSvc{}
 	bucketTopologySvc := &service_def.BucketTopologySvc{}
 	replSpecSvc := &service_def.ReplicationSpecSvc{}
 	dummySpec, _ := metadata.NewReplicationSpecification("sourceBucketName", "sourceBucketUUID", "targetClusterUUID", "targetBucketName", "targetBucketUUID")
 	replSpecSvc.On("ReplicationSpec", mock.Anything).Return(dummySpec, nil)
-	return logger, backfillReplSvc, bucketTopologySvc, replSpecSvc
+	srcManifestGetter := func() (uint64, error) {
+		return 0, nil
+	}
+	return logger, backfillReplSvc, bucketTopologySvc, replSpecSvc, srcManifestGetter
 }
 
 func createSeqnoGetterFunc(topSeqno uint64) SeqnosGetter {
@@ -172,9 +175,9 @@ var unitTestFullTopic string = "BackfillReqHandlerFullTopic"
 func TestBackfillReqHandlerStartStop(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
-	logger, backfillReplSvc, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, backfillReplSvc, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), time.Second, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), time.Second, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
@@ -216,7 +219,7 @@ func setupBucketTopology(bucketTopologySvc *service_def.BucketTopologySvc, custo
 func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerCreateReqThenMarkDone =================")
-	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
@@ -233,7 +236,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -303,7 +306,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerCreateReqThenMarkDoneThenDel =================")
-	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
@@ -322,7 +325,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -414,7 +417,7 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	fmt.Println("============== Test case start: TestBackfillHandlerExplicitMapChange =================")
 	defer fmt.Println("============== Test case end: TestBackfillHandlerExplicitMapChange =================")
 
-	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
@@ -434,7 +437,7 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -461,7 +464,7 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	pair.Removed = requestMapping
 	err = rh.HandleBackfillRequest(pair)
 	assert.Nil(err)
-	assert.Equal(0, rh.cachedBackfillSpec.VBTasksMap.Len())
+	assert.Nil(rh.cachedBackfillSpec)
 
 	var info parts.CollectionsRoutingInfo
 	info.ExplicitBackfillMap = pair
@@ -481,7 +484,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 	fmt.Println("============== Test case start: TestHandleMigrationDiff =================")
 	defer fmt.Println("============== Test case end: TestHandleMigrationDiff =================")
 
-	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
@@ -501,7 +504,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -546,7 +549,7 @@ func TestVBMapChange(t *testing.T) {
 	fmt.Println("============== Test case start: TestVBMapChange =================")
 	defer fmt.Println("============== Test case end: TestVBMapChange =================")
 
-	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	customVBs := []uint16{0, 1, 2}
 	setupBucketTopology(bucketTopologySvc, customVBs)
 	spec := createTestSpec()
@@ -567,7 +570,7 @@ func TestVBMapChange(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(requestMapping), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(requestMapping), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -621,7 +624,7 @@ func TestVBMapChangeType2(t *testing.T) {
 	fmt.Println("============== Test case start: TestVBMapChangeType2 =================")
 	defer fmt.Println("============== Test case end: TestVBMapChangeType2 =================")
 
-	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	customVBs := []uint16{0, 1, 2}
 	setupBucketTopology(bucketTopologySvc, customVBs)
 	spec := createTestSpec()
@@ -645,7 +648,7 @@ func TestVBMapChangeType2(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(requestMapping), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), mainPipelineSeqnoGetter, nil, nil, bucketTopologySvc, completeGetter(requestMapping), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -697,7 +700,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestBackfillReqHandlerCreateReqThenMergePeerReq =================")
 	defer fmt.Println("============== Test case end: TestBackfillReqHandlerCreateReqThenMergePeerReq =================")
-	logger, _, bucketTopologySvc, replSpecSvc := setupBRHBoilerPlate()
+	logger, _, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
@@ -715,7 +718,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), seqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), seqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -776,7 +779,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	vbTaskMap := metadata.NewVBTasksMap()
 	vbTaskMap.VBTasksMap[0] = tasks0
 
-	backfillSpec := metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTaskMap, spec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTaskMap, spec, 0)
 	internalReq := internalPeerBackfillTaskMergeReq{backfillSpec: backfillSpec}
 
 	assert.Nil(rh.HandleBackfillRequest(internalReq))

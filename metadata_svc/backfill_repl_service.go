@@ -769,7 +769,7 @@ func (b *BackfillReplicationService) handleUnrecoverableBackfills() {
 			}
 
 			// Ensure that backfillspecs are empty so raising the complete backfill will become the first task
-			emptyBackfillSpec := metadata.NewBackfillReplicationSpec(backfillSpecId, internalId, metadata.NewVBTasksMap(), nil)
+			emptyBackfillSpec := metadata.NewBackfillReplicationSpec(backfillSpecId, internalId, metadata.NewVBTasksMap(), nil, 0)
 			marshalledData, err := json.Marshal(emptyBackfillSpec)
 			if err != nil {
 				b.logger.Warnf("handleUnrecoverableBackfills received err %v when marshalling empty backfill spec. Backfill may not raise correctly", backfillSpecId)

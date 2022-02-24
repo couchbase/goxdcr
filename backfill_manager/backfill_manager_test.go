@@ -152,7 +152,7 @@ func setupBackfillSpecs(backfillReplSvc *service_def.BackfillReplSvc, parentSpec
 	backfillSpecs := make(map[string]*metadata.BackfillReplicationSpec)
 	for specId, spec := range parentSpecs {
 		vbTaskMap := metadata.NewVBTasksMap()
-		bSpec := metadata.NewBackfillReplicationSpec(specId, "dummy", vbTaskMap, spec)
+		bSpec := metadata.NewBackfillReplicationSpec(specId, "dummy", vbTaskMap, spec, 0)
 		backfillSpecs[specId] = bSpec
 	}
 	if len(backfillSpecs) == 0 {
@@ -406,9 +406,9 @@ func TestBackfillMgrRetry(t *testing.T) {
 	task1 := BackfillRetryRequest{
 		replId: specId,
 		req: metadata.CollectionNamespaceMappingsDiffPair{
-			Added:                     nil,
-			Removed:                   nil,
-			RouterLatestSrcManifestId: 2,
+			Added:                      nil,
+			Removed:                    nil,
+			CorrespondingSrcManifestId: 2,
 		},
 		force:                      false,
 		correspondingSrcManifestId: 2,
@@ -417,9 +417,9 @@ func TestBackfillMgrRetry(t *testing.T) {
 	task2 := BackfillRetryRequest{
 		replId: specId,
 		req: metadata.CollectionNamespaceMappingsDiffPair{
-			Added:                     nil,
-			Removed:                   nil,
-			RouterLatestSrcManifestId: 1,
+			Added:                      nil,
+			Removed:                    nil,
+			CorrespondingSrcManifestId: 1,
 		},
 		force:                      false,
 		correspondingSrcManifestId: 1,
@@ -428,9 +428,9 @@ func TestBackfillMgrRetry(t *testing.T) {
 	task3 := BackfillRetryRequest{
 		replId: specId,
 		req: metadata.CollectionNamespaceMappingsDiffPair{
-			Added:                     nil,
-			Removed:                   nil,
-			RouterLatestSrcManifestId: 1,
+			Added:                      nil,
+			Removed:                    nil,
+			CorrespondingSrcManifestId: 1,
 		},
 		force:                      false,
 		correspondingSrcManifestId: 1,
@@ -524,12 +524,14 @@ func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
 	bucketVBMapType, unlockFunc := resp.GetReponse()
 	(*bucketVBMapType)[specToUse.SourceBucketName].RegisterNotMyVBs([]uint16{0})
 	unlockFunc()
-	assert.Nil(resp.LoadBackfillTasks(vbTaskMap, specToUse.SourceBucketName))
+	assert.Nil(resp.LoadBackfillTasks(vbTaskMap, specToUse.SourceBucketName, 1))
 	checkResp, unlockFunc := resp.GetReponse()
 	payload := (*checkResp)[specToUse.SourceBucketName]
 	vb0Tasks := payload.GetBackfillVBTasks().VBTasksMap[0]
+	manifestId := payload.GetBackfillVBTasksManifestsId()
 	unlockFunc()
 	assert.NotEqual(0, vb0Tasks.Len())
+	assert.Equal(uint64(1), manifestId)
 
 	peersMap := make(peerToPeer.PeersVBMasterCheckRespMap)
 	peersMap["dummyNode"] = resp

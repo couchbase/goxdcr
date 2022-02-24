@@ -75,13 +75,15 @@ type BackfillRequestHandler struct {
 	getThroughSeqno        SeqnosGetter
 	vbsDoneNotifier        MyVBsTasksDoneNotifier
 	getCompleteBackfillReq func() interface{}
+	getLatestSrcManifestId func() (uint64, error)
 
 	spec            *metadata.ReplicationSpecification
 	specStillExists func() bool
 
-	cachedBackfillSpec           *metadata.BackfillReplicationSpec
-	mainpipelineCkptSeqnosGetter SeqnosGetter
-	restreamPipelineFatalFunc    func()
+	lastHandledBackfillSrcManifestId uint64 // This is in use even for if after cachedBackfillSpec is set to nil
+	cachedBackfillSpec               *metadata.BackfillReplicationSpec
+	mainpipelineCkptSeqnosGetter     SeqnosGetter
+	restreamPipelineFatalFunc        func()
 
 	bucketTopologySvc      service_def.BucketTopologySvc
 	sourceBucketTopologyCh chan service_def.SourceNotification
@@ -114,7 +116,7 @@ type ReqAndResp struct {
 
 var backfillReqHandlerCounter uint32
 
-func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc, getLatestSrcManifestId func() (uint64, error)) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
 		logger:                       logger,
@@ -138,6 +140,7 @@ func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string
 		replicationSpecSvc:           replicationSpecSvc,
 		lastPullMergedMap:            map[string]*metadata.VBTasksMapType{},
 		lastPushMergedMap:            map[string]*metadata.VBTasksMapType{},
+		getLatestSrcManifestId:       getLatestSrcManifestId,
 	}
 }
 
@@ -443,6 +446,11 @@ func (b *BackfillRequestHandler) getVBsClone() []uint16 {
 }
 
 func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAndResp) error {
+	latestSrcManifestId, err := b.getLatestSrcManifestId()
+	if err != nil {
+		return err
+	}
+
 	seqnosMap, myVBs, err := b.getMaxSeqnosMapToBackfill()
 	if err != nil {
 		return err
@@ -468,7 +476,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 		return err
 	}
 
-	err = b.updateBackfillSpec(reqAndResp.PersistResponse, vbTasksMap, reqRO, seqnosMap, reqAndResp.Force)
+	err = b.updateBackfillSpec(reqAndResp.PersistResponse, vbTasksMap, reqRO, seqnosMap, reqAndResp.Force, latestSrcManifestId)
 	if err != nil {
 		b.logger.Errorf(err.Error())
 		return err
@@ -477,7 +485,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestInternal(reqAndResp ReqAnd
 }
 
 // reqRO and seqnosMap is only needed for logging purposes
-func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap *metadata.VBTasksMapType, reqRO metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64, force bool) error {
+func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, vbTasksMap *metadata.VBTasksMapType, reqRO metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64, force bool, srcManifestId uint64) error {
 	clonedSpec := b.spec.Clone()
 
 	exists := b.cachedBackfillSpec != nil
@@ -491,17 +499,28 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 		}
 	}
 	if !exists {
-		backfillSpec := metadata.NewBackfillReplicationSpec(clonedSpec.Id, clonedSpec.InternalId, vbTasksMap, clonedSpec)
+		err := b.checkIfReqIsOutdated(force, srcManifestId)
+		if err != nil {
+			return err
+		}
+
+		backfillSpec := metadata.NewBackfillReplicationSpec(clonedSpec.Id, clonedSpec.InternalId, vbTasksMap, clonedSpec, srcManifestId)
 		b.cachedBackfillSpec = backfillSpec
 		if reqRO != nil && seqnosMap != nil {
 			b.logNewBackfillMsg(reqRO, seqnosMap)
 		}
-		err := b.requestPersistence(AddOp, persistResponse)
+		b.recordSrcManifestIdAsLatestHandled(srcManifestId)
+		err = b.requestPersistence(AddOp, persistResponse)
 		if err != nil {
 			b.logger.Errorf("requestPersistence (add) err %v", err)
 			return err
 		}
 	} else {
+		err := b.checkIfReqIsOutdated(force, srcManifestId)
+		if err != nil {
+			return err
+		}
+
 		if force {
 			// Force means remove all previous mapping so it can be re-added
 			nameSpaceMappingForIncomingTask := vbTasksMap.GetAllCollectionNamespaceMappings()
@@ -511,7 +530,8 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 		} else if b.cachedBackfillSpec.Contains(vbTasksMap) {
 			// already handled - redundant request
 			// Just request persistence to ensure synchronization
-			err := b.requestPersistence(SetOp, persistResponse)
+			b.recordSrcManifestIdAsLatestHandled(srcManifestId)
+			err = b.requestPersistence(SetOp, persistResponse)
 			if err != nil {
 				b.logger.Errorf("requestPersistence err %v", err)
 				return err
@@ -520,13 +540,33 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 		}
 
 		shouldSkipFirst := b.figureOutIfCkptExists(reqRO, seqnosMap)
-
 		b.cachedBackfillSpec.MergeNewTasks(vbTasksMap, shouldSkipFirst)
-		err := b.requestPersistence(SetOp, persistResponse)
+		b.recordSrcManifestIdAsLatestHandled(srcManifestId)
+		err = b.requestPersistence(SetOp, persistResponse)
 		if err != nil {
 			b.logger.Errorf("requestPersistence err %v", err)
 			return err
 		}
+	}
+	return nil
+}
+
+func (b *BackfillRequestHandler) recordSrcManifestIdAsLatestHandled(srcManifestId uint64) {
+	if b.cachedBackfillSpec != nil {
+		if srcManifestId > b.cachedBackfillSpec.SourceManifestUid {
+			b.cachedBackfillSpec.SourceManifestUid = srcManifestId
+		}
+	}
+	if srcManifestId > b.lastHandledBackfillSrcManifestId {
+		b.lastHandledBackfillSrcManifestId = srcManifestId
+	}
+}
+
+func (b *BackfillRequestHandler) checkIfReqIsOutdated(force bool, srcManifestId uint64) error {
+	if !force && srcManifestId < b.lastHandledBackfillSrcManifestId {
+		b.logger.Warnf("%v - ignoring a merge task as current src manifest is %v but a merge task was requested with src manifest %v",
+			b.Id(), b.lastHandledBackfillSrcManifestId, srcManifestId)
+		return fmt.Errorf("Ignoring handling older requests")
 	}
 	return nil
 }
@@ -933,13 +973,14 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 		if err != nil {
 			return err
 		}
-		err = b.updateBackfillSpec(resp.PersistResponse, vbTasksMap, pairRO.Added, maxSeqnos, resp.Force)
+		err = b.updateBackfillSpec(resp.PersistResponse, vbTasksMap, pairRO.Added, maxSeqnos, resp.Force, pairRO.CorrespondingSrcManifestId)
 		return err
 	} else {
 		if b.cachedBackfillSpec == nil {
 			// odd situation - fixed mapping when there is nothing broken
 			// This could happen to a cleanly started pipeline and explicit mapping was removed
 			// Use the same return path as delOp - to bypass any actual metakv op
+			b.recordSrcManifestIdAsLatestHandled(pairRO.CorrespondingSrcManifestId)
 			delErr := b.requestPersistence(DelOp, resp.PersistResponse)
 			if delErr == nil {
 				return errorSyncDel
@@ -950,6 +991,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 		} else if b.cachedBackfillSpec.VBTasksMap.Len() == 0 {
 			// The whole spec is now deleted because of the pairRO.Removed
 			b.cachedBackfillSpec = nil
+			b.recordSrcManifestIdAsLatestHandled(pairRO.CorrespondingSrcManifestId)
 			delErr := b.requestPersistence(DelOp, resp.PersistResponse)
 			if delErr == nil {
 				return errorSyncDel
@@ -958,6 +1000,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 				return delErr
 			}
 		} else {
+			b.recordSrcManifestIdAsLatestHandled(pairRO.CorrespondingSrcManifestId)
 			err := b.requestPersistence(SetOp, resp.PersistResponse)
 			if err != nil {
 				b.logger.Warnf("handleBackfillRequestDiffPair %v setErr %v", b.id, err)
@@ -1200,7 +1243,7 @@ func (b *BackfillRequestHandler) handlePeerNodesBackfillMerge(reqAndResp ReqAndR
 		return err
 	}
 
-	err = b.updateBackfillSpec(reqAndResp.PersistResponse, peerNodesReq.backfillSpec.VBTasksMap, nil, nil, false)
+	err = b.updateBackfillSpec(reqAndResp.PersistResponse, peerNodesReq.backfillSpec.VBTasksMap, nil, nil, false, peerNodesReq.backfillSpec.SourceManifestUid)
 	if err != nil {
 		b.logger.Errorf("%v updateBackfillSpec err %v", b.Id(), err.Error())
 		return err

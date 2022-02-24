@@ -122,9 +122,10 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 	go h.fetchBrokenMappingDoc(req.ReplicationId, &brokenMappingDoc, &brokenMappingErr, waitGrp, finCh)
 
 	var backfillTasksErr error
+	var backfillTaskSrcManifestId uint64
 	backfillTasks := metadata.NewVBTasksMap()
 	waitGrp.Add(1)
-	go h.fetchBackfillTasks(req.ReplicationId, backfillTasks, &backfillTasksErr, waitGrp, finCh)
+	go h.fetchBackfillTasks(req.ReplicationId, backfillTasks, &backfillTasksErr, &backfillTaskSrcManifestId, waitGrp, finCh)
 
 	// Get all errors in order
 	waitGrp.Wait()
@@ -224,7 +225,7 @@ func (h *VBMasterCheckHandler) handleRequest(req *VBMasterCheckReq) {
 		return
 	}
 
-	err = resp.LoadBackfillTasks(backfillTasks, req.SourceBucketName)
+	err = resp.LoadBackfillTasks(backfillTasks, req.SourceBucketName, backfillTaskSrcManifestId)
 	if err != nil {
 		h.logger.Errorf("%v (%v) - when loading brokenMappingDoc into response, got %v", req.ReplicationId, req.GetOpaque(), err)
 		resp.ErrorString = err.Error()
@@ -487,7 +488,7 @@ func (v *VBMasterCheckHandler) fetchBrokenMappingDoc(replId string, mappingDoc *
 	*mappingDoc = *loadedDoc
 }
 
-func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *metadata.VBTasksMapType, backfillErr *error, waitGrp *sync.WaitGroup, finCh chan bool) {
+func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *metadata.VBTasksMapType, backfillErr *error, backfillTaskSrcManifestId *uint64, waitGrp *sync.WaitGroup, finCh chan bool) {
 	defer waitGrp.Done()
 
 	select {
@@ -509,5 +510,6 @@ func (v *VBMasterCheckHandler) fetchBackfillTasks(replId string, backfillTasks *
 	if backfillSpec.VBTasksMap != nil {
 		clonedTask := backfillSpec.VBTasksMap.Clone()
 		*backfillTasks = *clonedTask
+		*backfillTaskSrcManifestId = backfillSpec.SourceManifestUid
 	}
 }

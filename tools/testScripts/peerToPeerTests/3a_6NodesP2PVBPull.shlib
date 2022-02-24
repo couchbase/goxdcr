@@ -48,7 +48,6 @@ function runDataLoad {
 }
 
 TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
-P2P_PULL_ERR_MSG="Ckpt Pull and merge had errors but will continue to replicate"
 
 declare LOGMSG=$BROKEN_MSG
 
@@ -271,7 +270,7 @@ function runReplicationResume {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running large scaled cluster with P2P checkpoint pull after rebalancing"
+	echo "Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited

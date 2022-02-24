@@ -33,16 +33,20 @@ type BackfillReplicationSpec struct {
 	// For vb's that have backfill needs, each vb contains a list of ordered jobs to backfill
 	VBTasksMap *VBTasksMapType
 
+	// Corresponding source manifest UID that correlates to the VBTaskMap
+	SourceManifestUid uint64
+
 	// revision number to be used by metadata service. not included in json
 	revision interface{}
 }
 
-func NewBackfillReplicationSpec(id, internalId string, vbTasksMap *VBTasksMapType, parentSpec *ReplicationSpecification) *BackfillReplicationSpec {
+func NewBackfillReplicationSpec(id, internalId string, vbTasksMap *VBTasksMapType, parentSpec *ReplicationSpecification, srcManifestId uint64) *BackfillReplicationSpec {
 	spec := &BackfillReplicationSpec{
-		Id:               id,
-		InternalId:       internalId,
-		VBTasksMap:       vbTasksMap,
-		replicationSpec_: parentSpec,
+		Id:                id,
+		InternalId:        internalId,
+		VBTasksMap:        vbTasksMap,
+		replicationSpec_:  parentSpec,
+		SourceManifestUid: srcManifestId,
 	}
 	spec.PostUnmarshalInit()
 	return spec
@@ -62,7 +66,7 @@ func (b *BackfillReplicationSpec) SameAs(other *BackfillReplicationSpec) bool {
 	} else if (b == nil && other != nil) || (b != nil && other == nil) {
 		return false
 	} else {
-		return b.Id == other.Id && b.InternalId == other.InternalId && b.VBTasksMap.SameAs(other.VBTasksMap)
+		return b.Id == other.Id && b.InternalId == other.InternalId && b.VBTasksMap.SameAs(other.VBTasksMap) && b.SourceManifestUid == other.SourceManifestUid
 	}
 }
 
@@ -103,8 +107,9 @@ func (b *BackfillReplicationSpec) Clone() *BackfillReplicationSpec {
 		return nil
 	}
 	clonedSpec := &BackfillReplicationSpec{
-		Id:         b.Id,
-		InternalId: b.InternalId,
+		Id:                b.Id,
+		InternalId:        b.InternalId,
+		SourceManifestUid: b.SourceManifestUid,
 	}
 	if b.replicationSpec_ != nil {
 		clonedSpec.replicationSpec_ = b.replicationSpec_.Clone()

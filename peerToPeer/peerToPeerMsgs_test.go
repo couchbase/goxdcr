@@ -49,6 +49,15 @@ func getPrePushFile() []byte {
 	return data
 }
 
+func getPushWithManifestIdFile() []byte {
+	file := "./unitTestData/pushWithManifestId.json"
+	data, err := ioutil.ReadFile(file)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
 func TestVBMasterCheckResp(t *testing.T) {
 	fmt.Println("============== Test case start: TestVBMasterCheckResp =================")
 	defer fmt.Println("============== Test case end: TestVBMasterCheckResp =================")
@@ -370,4 +379,26 @@ func TestPerfVBChkResp(t *testing.T) {
 	failedPacket := &VBMasterCheckResp{}
 	err = failedPacket.DeSerialize(perfVBChkRespBytes)
 	assert.Nil(err)
+}
+
+func TestDeserializeGetManifestId(t *testing.T) {
+	fmt.Println("============== Test case start: TestDeserializeGetManifestId =================")
+	defer fmt.Println("============== Test case end: TestDeserializeGetManifestId =================")
+	assert := assert.New(t)
+
+	reqBytes := getPushWithManifestIdFile()
+	pushReq := &PeerVBPeriodicPushReq{}
+	assert.Nil(pushReq.DeSerialize(reqBytes))
+
+	for _, onePushReq := range *pushReq.PushRequests {
+		payload, unlock := onePushReq.GetPayloadWithReadLock()
+		assert.NotNil(payload)
+		assert.NotEqual(0, len(*payload))
+		for _, v := range *payload {
+			pushVB := v.PushVBs
+			assert.NotNil(pushVB)
+			assert.Equal(uint64(7), v.GetBackfillVBTasksManifestsId())
+		}
+		unlock()
+	}
 }

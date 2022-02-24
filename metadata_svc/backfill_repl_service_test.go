@@ -90,7 +90,7 @@ func NewBackfillReplTestSvc(uiLogSvc *service_def.UILogSvc, metadataSvc *service
 }
 
 func constructBackfillRevSlice(id, internalId string) []byte {
-	backfillSpec := metadata.NewBackfillReplicationSpec(id, internalId, constructDummyTasksMap(), nil)
+	backfillSpec := metadata.NewBackfillReplicationSpec(id, internalId, constructDummyTasksMap(), nil, 0)
 	slice, err := json.Marshal(backfillSpec)
 	if err != nil {
 		panic(fmt.Sprintf("%v", err.Error()))
@@ -219,7 +219,7 @@ func TestBackfillReplSvc(t *testing.T) {
 	assert.NotNil(backfillReplSvc)
 
 	// check the backfillSpec
-	backfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMap(), dummySpec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMap(), dummySpec, 0)
 	checkSpec, err := backfillReplSvc.backfillSpec(specName)
 	assert.Nil(err)
 	assert.NotNil(checkSpec)
@@ -290,7 +290,7 @@ func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, i
 
 	// Then it will try to set the new subspec
 	backfillReplKey := getBackfillReplicationDocKeyFunc(specId)
-	subsetBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, constructDummyTasksMapCustom(Subset), dummySpec)
+	subsetBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, constructDummyTasksMapCustom(Subset), dummySpec, 0)
 	subsetDocVal, err := json.Marshal(subsetBackfillSpec)
 	if err != nil {
 		panic("Json marshal err")
@@ -338,7 +338,7 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	assert.NotNil(backfillReplSvc)
 
 	// check the backfillSpec - should not be there
-	backfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMap(), dummySpec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMap(), dummySpec, 0)
 	checkSpec, err := backfillReplSvc.backfillSpec(specName)
 	assert.Equal(base.ReplNotFoundErr, err)
 	assert.Nil(checkSpec)
@@ -351,7 +351,7 @@ func TestBackfillReplSvcAddSetDel(t *testing.T) {
 	assert.True(checkSpec.SameAs(backfillSpec))
 
 	// Do a set with a smaller subset of tasks
-	subsetBackfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMapCustom(Subset), dummySpec)
+	subsetBackfillSpec := metadata.NewBackfillReplicationSpec(specName, randInternalId, constructDummyTasksMapCustom(Subset), dummySpec, 0)
 	assert.Nil(backfillReplSvc.SetBackfillReplSpec(subsetBackfillSpec))
 	checkSpec, err = backfillReplSvc.backfillSpec(specName)
 	assert.Nil(err)
@@ -381,7 +381,7 @@ func setupMetakvUnrecoverableErr(metadataSvc *service_def.MetadataSvc, specId, i
 
 	// Set should be an empty doc - since the recovery effort is trying to have a clean slate
 	backfillReplKey := getBackfillReplicationDocKeyFunc(specId)
-	emptyBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, metadata.NewVBTasksMap(), nil)
+	emptyBackfillSpec := metadata.NewBackfillReplicationSpec(specId, internalId, metadata.NewVBTasksMap(), nil, 0)
 	marshalledData, err := json.Marshal(emptyBackfillSpec)
 	if err != nil {
 		panic(err)

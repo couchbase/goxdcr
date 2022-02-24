@@ -714,7 +714,7 @@ func (v *ReplicationPayload) LoadBrokenMappingDoc(brokenMappingDoc metadata.Coll
 	return nil
 }
 
-func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMapType, srcBucketName string) error {
+func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMapType, srcBucketName string, srcManifestId uint64) error {
 	v.mtx.Lock()
 	defer v.mtx.Unlock()
 
@@ -755,6 +755,7 @@ func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMa
 		vbPayload, found := notMyVBMap[vb]
 		if found {
 			vbPayload.BackfillTsks = tasks
+			vbPayload.SourceManifestId = srcManifestId
 			tasksLoaded = append(tasksLoaded, vb)
 			continue
 		}
@@ -764,6 +765,7 @@ func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMa
 		vbPayload2, found2 := conflictingVBMap[vb]
 		if found2 {
 			vbPayload2.BackfillTsks = tasks
+			vbPayload2.SourceManifestId = srcManifestId
 			tasksLoaded = append(tasksLoaded, vb)
 			continue
 		}
@@ -772,6 +774,7 @@ func (v *ReplicationPayload) LoadBackfillTasks(backfillTasks *metadata.VBTasksMa
 		vbPayload3, found3 := pushVBMap[vb]
 		if found3 {
 			vbPayload3.BackfillTsks = tasks
+			vbPayload3.SourceManifestId = srcManifestId
 			tasksLoaded = append(tasksLoaded, vb)
 			continue
 		}
@@ -1206,6 +1209,39 @@ func (p *VBMasterPayload) GetBackfillVBTasks() *metadata.VBTasksMapType {
 	return taskMap
 }
 
+func (p *VBMasterPayload) GetBackfillVBTasksManifestsId() uint64 {
+	var manifestId uint64
+
+	if p.NotMyVBs != nil {
+		for _, payload := range *p.NotMyVBs {
+			if payload.BackfillTsks != nil && payload.SourceManifestId > manifestId {
+				manifestId = payload.SourceManifestId
+			}
+		}
+	}
+
+	if p.ConflictingVBs != nil {
+		for _, payload := range *p.ConflictingVBs {
+			if payload.BackfillTsks != nil && payload.SourceManifestId > manifestId {
+				manifestId = payload.SourceManifestId
+			}
+		}
+	}
+
+	debugMap := make(map[uint16]uint64)
+	if p.PushVBs != nil {
+		for vb, payload := range *p.PushVBs {
+			if payload.BackfillTsks != nil {
+				debugMap[vb] = payload.SourceManifestId
+			}
+			if payload.BackfillTsks != nil && payload.SourceManifestId > manifestId {
+				manifestId = payload.SourceManifestId
+			}
+		}
+	}
+	return manifestId
+}
+
 func (p *VBMasterPayload) SameAs(other *VBMasterPayload) bool {
 	if p == nil && other == nil {
 		return true
@@ -1394,8 +1430,9 @@ type Payload struct {
 	CheckpointsDoc *metadata.CheckpointsDoc
 
 	// Backfill replication is decomposed and just the VBTasksMap is transferred
-	BackfillTsks    *metadata.BackfillTasks
-	BackfillCkptDoc *metadata.CheckpointsDoc
+	BackfillTsks     *metadata.BackfillTasks
+	BackfillCkptDoc  *metadata.CheckpointsDoc
+	SourceManifestId uint64 // Corresponding manifest ID with backfillTsks
 }
 
 func (t *Payload) SameAs(other *Payload) bool {
@@ -1418,6 +1455,9 @@ func (t *Payload) SameAs(other *Payload) bool {
 		return false
 	}
 	if t.BackfillCkptDoc != nil && !t.BackfillCkptDoc.SameAs(other.BackfillCkptDoc) {
+		return false
+	}
+	if t.SourceManifestId != other.SourceManifestId {
 		return false
 	}
 
@@ -1513,8 +1553,8 @@ func (v *VBPeriodicReplicateReq) LoadMainReplication(ckpts map[uint16]*metadata.
 	return nil
 }
 
-func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTasksMapType, ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
-	err := v.ReplicationPayload.LoadBackfillTasks(vbTasks, v.ReplicationPayload.SourceBucketName)
+func (v *VBPeriodicReplicateReq) LoadBackfillReplication(vbTasks *metadata.VBTasksMapType, ckpts map[uint16]*metadata.CheckpointsDoc, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest, srcManifestUid uint64) error {
+	err := v.ReplicationPayload.LoadBackfillTasks(vbTasks, v.ReplicationPayload.SourceBucketName, srcManifestUid)
 	if err != nil {
 		return err
 	}

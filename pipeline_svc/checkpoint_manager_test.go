@@ -282,7 +282,7 @@ func setupBackfillPipelineMock(spec *metadata.ReplicationSpecification, supervis
 	taskMap[0] = tasks
 	vbTaskMap := metadata.NewVBTasksMap()
 	vbTaskMap.VBTasksMap = taskMap
-	backfillSpec := metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTaskMap, spec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTaskMap, spec, 0)
 
 	genericSpec := &mocks2.GenericSpecification{}
 	genericSpec.On("GetReplicationSpec").Return(spec)

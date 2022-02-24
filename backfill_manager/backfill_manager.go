@@ -376,7 +376,7 @@ func (b *BackfillMgr) initCache() error {
 			defaultManifest := metadata.NewDefaultCollectionsManifest()
 			b.cacheSpecSourceMap[replId] = &defaultManifest
 			// Create a map entry - setting this value depends on when pipeline starts
-			b.cacheSpecLastSuccessfulManifestId[replId] = 0
+			b.cacheSpecLastSuccessfulManifestId[replId] = defaultManifest.Uid()
 			b.cacheSpecTargetMap[replId] = &defaultManifest
 			b.cacheMtx.Unlock()
 			// Default with default manifest in case of error
@@ -435,6 +435,10 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		return b.onDemandBackfillGetCompleteRequest(replId, nil)
 	}
 
+	getLastCachedSrcManifestId := func() (uint64, error) {
+		return b.getLastHandledSourceManifestId(replId)
+	}
+
 	var err error
 	b.specReqHandlersMtx.Lock()
 	if _, exists := b.specToReqHandlerMap[replId]; exists {
@@ -444,7 +448,7 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 	}
 	reqHandler := NewCollectionBackfillRequestHandler(b.logger, replId, b.backfillReplSvc, spec, seqnoGetter,
 		base.BackfillPersistInterval, vbsTasksDoneNotifier, mainPipelineCkptSeqnosGetter, restreamPipelineFatalFunc,
-		specCheckFunc, b.bucketTopologySvc, getCompleteReq, b.replSpecSvc)
+		specCheckFunc, b.bucketTopologySvc, getCompleteReq, b.replSpecSvc, getLastCachedSrcManifestId)
 	b.specToReqHandlerMap[replId] = reqHandler
 	b.specReqHandlersMtx.Unlock()
 
@@ -492,7 +496,7 @@ func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSp
 	b.logger.Infof("Backfill Manager for replication %v received last persisted manifests of %v and %v",
 		spec.Id, manifestPair.Source, manifestPair.Target)
 	b.cacheSpecSourceMap[spec.Id] = manifestPair.Source
-	b.cacheSpecLastSuccessfulManifestId[spec.Id] = 0
+	b.cacheSpecLastSuccessfulManifestId[spec.Id] = manifestPair.Source.Uid()
 	b.cacheSpecTargetMap[spec.Id] = manifestPair.Target
 	b.cacheMtx.Unlock()
 	return nil
@@ -727,7 +731,7 @@ func (b *BackfillMgr) explicitMappingCbGenericErrHandler(err error, specId strin
 				replId:                     specId,
 				req:                        diff,
 				force:                      false,
-				correspondingSrcManifestId: diff.RouterLatestSrcManifestId,
+				correspondingSrcManifestId: diff.CorrespondingSrcManifestId,
 				handler:                    b.internalGetHandler(specId),
 			}
 			b.retryBackfillRequest(req)
@@ -959,7 +963,9 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 		return
 	}
 
-	diffPair := metadata.CollectionNamespaceMappingsDiffPair{}
+	diffPair := metadata.CollectionNamespaceMappingsDiffPair{
+		CorrespondingSrcManifestId: newSourceManifest.Uid(),
+	}
 	if modes.IsImplicitMapping() {
 
 		oldSrcToTargetMapping, _, _ := oldSourceManifest.ImplicitMap(latestTgtManifest)
@@ -1015,12 +1021,36 @@ func (b *BackfillMgr) internalGetHandler(replId string) *BackfillRequestHandler 
 }
 
 func (b *BackfillMgr) markNewSourceManifest(replId string, newSourceManifestId uint64) {
-	b.cacheMtx.Lock()
+	b.cacheMtx.RLock()
 	manifestId, replExists := b.cacheSpecLastSuccessfulManifestId[replId]
+	b.cacheMtx.RUnlock()
 	if replExists && newSourceManifestId > manifestId {
-		b.cacheSpecLastSuccessfulManifestId[replId] = newSourceManifestId
+		b.cacheMtx.Lock()
+		manifestId, _ = b.cacheSpecLastSuccessfulManifestId[replId]
+		if newSourceManifestId > manifestId {
+			b.cacheSpecLastSuccessfulManifestId[replId] = newSourceManifestId
+		}
+		b.cacheMtx.Unlock()
+	} else if !replExists {
+		// Odd case, but set it anyway
+		b.cacheMtx.Lock()
+		manifestId, replExists = b.cacheSpecLastSuccessfulManifestId[replId]
+		if !replExists || newSourceManifestId > manifestId {
+			b.cacheSpecLastSuccessfulManifestId[replId] = newSourceManifestId
+		}
+		b.cacheMtx.Unlock()
 	}
-	b.cacheMtx.Unlock()
+}
+
+func (b *BackfillMgr) getLastHandledSourceManifestId(replId string) (uint64, error) {
+	b.cacheMtx.RLock()
+	defer b.cacheMtx.RUnlock()
+
+	manifestId, replExists := b.cacheSpecLastSuccessfulManifestId[replId]
+	if !replExists {
+		return 0, fmt.Errorf("Unable to find latest handled manifest ID for %v", replId)
+	}
+	return manifestId, nil
 }
 
 func (b *BackfillMgr) handleSrcAndTgtChanges(replId string, oldSourceManifest, newSourceManifest, oldTargetManifest, newTargetManifest *metadata.CollectionsManifest) {
@@ -1143,7 +1173,8 @@ func (b *BackfillMgr) cleanupInvalidImplicitBackfillMappings(replId string, oldS
 			}
 		}
 		cleanupPair := metadata.CollectionNamespaceMappingsDiffPair{
-			Removed: cleanupNamespace,
+			Removed:                    cleanupNamespace,
+			CorrespondingSrcManifestId: newSourceManifest.Uid(),
 		}
 		err = b.raiseBackfillReq(replId, cleanupPair, false, newSourceManifest.Uid())
 		if errMeansReqNeedsToBeRetried(err) {
@@ -1216,8 +1247,9 @@ func (b *BackfillMgr) populateBackfillReqForExplicitMapping(replId string, oldSo
 			return nil, true
 		}
 		diffPair := metadata.CollectionNamespaceMappingsDiffPair{
-			Added:   explicitMapping,
-			Removed: nil,
+			Added:                      explicitMapping,
+			Removed:                    nil,
+			CorrespondingSrcManifestId: newSourceManifest.Uid(),
 		}
 		backfillReq = diffPair
 	} else {
@@ -1262,8 +1294,9 @@ func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpeci
 	}
 	added, removed := oldExplicitMap.Diff(newExplicitMap)
 	diffPair := metadata.CollectionNamespaceMappingsDiffPair{
-		Added:   added,
-		Removed: removed,
+		Added:                      added,
+		Removed:                    removed,
+		CorrespondingSrcManifestId: newSourceManifest.Uid(),
 	}
 	return diffPair, nil
 }
@@ -1315,15 +1348,21 @@ func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added me
 		return base.ErrorNotFound
 	}
 
+	srcUid, err := b.getLastHandledSourceManifestId(replId)
+	if err != nil {
+		b.logger.Errorf("Unable to find manifestID for spec %v", replId)
+	}
+
 	mapPair := metadata.CollectionNamespaceMappingsDiffPair{
-		Added:   added,
-		Removed: removed,
+		Added:                      added,
+		Removed:                    removed,
+		CorrespondingSrcManifestId: srcUid,
 	}
 
 	handleRequestWrapper := func(interface{}) (interface{}, error) {
 		return nil, handler.HandleBackfillRequest(mapPair)
 	}
-	_, err := b.utils.ExponentialBackoffExecutorWithFinishSignal("explicitMapChange", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, handleRequestWrapper, nil, handlerFinCh)
+	_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("explicitMapChange", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, handleRequestWrapper, nil, handlerFinCh)
 	if err != nil {
 		if strings.Contains(err.Error(), base.FinClosureStr) {
 			// If finClosure, then this means that the handler has been told to stop, which means spec was deleted
@@ -1937,9 +1976,11 @@ func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.Bu
 		unlockFunc()
 		return fmt.Errorf("nodeRespData LoadFromMappingsShaMap from %v err %v", nodeName, err)
 	}
+
+	manifestId := (*bucketMapPayload)[srcBucketName].GetBackfillVBTasksManifestsId()
 	unlockFunc()
 
-	backfillSpec := metadata.NewBackfillReplicationSpec(topic, backfillMappingDoc.SpecInternalId, vbTaskMap, spec)
+	backfillSpec := metadata.NewBackfillReplicationSpec(topic, backfillMappingDoc.SpecInternalId, vbTaskMap, spec, manifestId)
 	var pushOrPullStr = "pull"
 	if pushMode {
 		pushOrPullStr = "push"
