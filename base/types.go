@@ -2544,6 +2544,14 @@ func GetKeysListFromStrStrMap(a map[string]string) []string {
 	return retList
 }
 
+func GetKeysListFromStrBoolMap(a map[string]bool) []string {
+	var retList []string
+	for k, _ := range a {
+		retList = append(retList, k)
+	}
+	return retList
+}
+
 type DcpStatsMapType map[string]*StringStringMap
 
 func (t *DcpStatsMapType) GetKeyList() []string {

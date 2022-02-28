@@ -209,7 +209,8 @@ func (p *P2PManagerImpl) sendDiscoveryRequest() error {
 			p.GetLifecycleId())
 		return ErrorNoPeerDiscovered
 	}
-	return p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
+	err, _ = p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
+	return err
 }
 
 func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
@@ -239,10 +240,10 @@ func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 	return peers, myHostAddr, nil
 }
 
-func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts) error {
+func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts) (error, map[string]bool) {
 	peers, myHost, err := p.getSendPreReq()
 	if err != nil {
-		return err
+		return err, nil
 	}
 
 	peersToRetry := make(map[string]bool)
@@ -250,15 +251,21 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 		peersToRetry[peer] = true
 	}
 
-	err = p.sendToSpecifiedPeersOnce(opCode, getReqFunc, cbOpts, peersToRetry, myHost)
+	var peersFailedToSend map[string]bool
+	err, peersFailedToSend = p.sendToSpecifiedPeersOnce(opCode, getReqFunc, cbOpts, peersToRetry, myHost)
 	if err != nil {
-		return err
+		// Major failure - unable to send to all nodes
+		return err, peersFailedToSend
 	}
-	return nil
+	return nil, peersFailedToSend
 }
 
-func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetry map[string]bool, myHost string) error {
+func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetryOrig map[string]bool, myHost string) (error, map[string]bool) {
 	successOpaqueMap := make(map[string]*uint32)
+	peersToRetry := make(map[string]bool)
+	for k, v := range peersToRetryOrig {
+		peersToRetry[k] = v
+	}
 
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
@@ -336,8 +343,8 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 
 		peersToRetryMtx.Lock()
 		defer peersToRetryMtx.Unlock()
-		if len(peersToRetryReplacement) > 0 {
-			peersToRetry = peersToRetryReplacement
+		peersToRetry = peersToRetryReplacement
+		if len(peersToRetry) > 0 {
 			return fmt.Errorf(base.FlattenErrorMap(errMap))
 		} else {
 			return nil
@@ -346,19 +353,26 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 
 	err := p.utils.ExponentialBackoffExecutor(fmt.Sprintf("sendPeerToPeerReq(%v)", opCode.String()),
 		base.PeerToPeerRetryWaitTime, base.PeerToPeerMaxRetry, base.PeerToPeerRetryFactor, retryOp)
-	if err != nil {
-		p.logger.Errorf("Unable to send %v to some or all the nodes... %v", opCode.String(), err)
-		return err
+	if err != nil && len(peersToRetry) == len(peersToRetryOrig) {
+		p.logger.Errorf("Unable to send %v to all the nodes... %v", opCode.String(), err)
+		return err, peersToRetry
 	} else {
 		printOpaqueMap := make(map[string]uint32)
 		for k, vPtr := range successOpaqueMap {
 			printOpaqueMap[k] = *vPtr
 		}
 		if len(successOpaqueMap) > 0 {
-			p.logger.Infof("Sent request type %v to nodes with opaque: %v", opCode.String(), printOpaqueMap)
+			if err != nil {
+				p.logger.Infof("Sent request type %v to a subset of nodes with opaque: %v... failed to send to nodes: %v",
+					opCode.String(), printOpaqueMap, base.GetKeysListFromStrBoolMap(peersToRetry))
+			} else {
+				p.logger.Infof("Successfully sent request type %v to nodes with opaque: %v", opCode.String(), printOpaqueMap)
+			}
+		} else {
+			p.logger.Infof("Successfully sent request type %v to nodes %v", opCode.String(), peersToRetryOrig)
 		}
 	}
-	return nil
+	return nil, peersToRetry
 }
 
 type GetReqFunc func(source, target string) Request
@@ -470,6 +484,19 @@ func (s *SendOpts) GetResults() (map[string]*ReqRespPair, base.ErrorMap, PeerNod
 	return retMap, errMap, ackTimeMap
 }
 
+func (s *SendOpts) RemovePeers(toRemove map[string]bool) {
+	if len(toRemove) == 0 {
+		return
+	}
+
+	s.respMapMtx.Lock()
+	defer s.respMapMtx.Unlock()
+
+	for k, _ := range toRemove {
+		delete(s.respMap, k)
+	}
+}
+
 type ReqRespPair struct {
 	ReqPtr  interface{}
 	RespPtr interface{}
@@ -509,12 +536,14 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 	}
 
 	opts := NewSendOpts(true, metadata.GetP2PTimeoutFromSettings(pipeline.Settings()))
-	err = p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
+	err, peersFailedToSend := p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	if err != nil {
+		// Major error unable to send to all peers, otherwise continue to get the rest that was able to sent
 		p.logger.Errorf("sendToEachPeerOnce err %v", err)
 		return nil, err
 	}
 
+	opts.RemovePeers(peersFailedToSend)
 	result, errMap, durationMap := opts.GetResults()
 
 	if len(durationMap) > 0 {
@@ -648,7 +677,7 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 			peersToRetry[host] = true
 
 			opts := NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime)
-			err = p.sendToSpecifiedPeersOnce(ReqPeriodicPush, getReqFunc, opts, peersToRetry, myHostAddr)
+			err, _ = p.sendToSpecifiedPeersOnce(ReqPeriodicPush, getReqFunc, opts, peersToRetry, myHostAddr)
 			if err != nil {
 				errMapMtx.Lock()
 				errMap[host] = err

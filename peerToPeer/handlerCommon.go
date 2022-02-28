@@ -19,8 +19,6 @@ import (
 	"time"
 )
 
-var SyncChRespondTimeout = 10 * time.Second
-
 type OpaqueMap map[uint32]*time.Timer
 type OpaqueReqMap map[uint32]*Request
 
@@ -179,7 +177,7 @@ func (h *HandlerCommon) GetReqAndClearOpaque(opaque uint32) (*Request, chan ReqR
 }
 
 func (h *HandlerCommon) sendBackSynchronously(retCh chan ReqRespPair, retPair ReqRespPair) {
-	timer := time.NewTimer(SyncChRespondTimeout)
+	timer := time.NewTimer(base.PeerToPeerNonExponentialWaitTime + 1*time.Second)
 	select {
 	case retCh <- retPair:
 	// Done

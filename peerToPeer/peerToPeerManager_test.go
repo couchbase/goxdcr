@@ -139,7 +139,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	}
 
 	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
-	err = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
+	err, _ = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	assert.Nil(err)
 
 	// Now find the opaques
@@ -318,11 +318,11 @@ func TestSendSameHostDualSimultaneousReqs(t *testing.T) {
 	}
 
 	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
-	err = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
+	err, _ = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	assert.Nil(err)
 
 	opts2 := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
-	err = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc2, opts2)
+	err, _ = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc2, opts2)
 	assert.Nil(err)
 
 	// recast
