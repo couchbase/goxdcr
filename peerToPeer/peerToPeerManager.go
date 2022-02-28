@@ -297,7 +297,7 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					return
 				}
 
-				handlerResult, p2pSendErr := p.commAPI.P2PSend(compiledReq)
+				handlerResult, p2pSendErr := p.commAPI.P2PSend(compiledReq, p.logger)
 				if p2pSendErr != nil {
 					p.logger.Errorf("P2PSend resulted in %v", p2pSendErr)
 					errMapMtx.Lock()

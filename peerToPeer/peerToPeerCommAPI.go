@@ -11,6 +11,7 @@ package peerToPeer
 import (
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"net/http"
@@ -55,11 +56,11 @@ type HandlerResult interface {
 	GetHttpStatusCode() int
 }
 
-type P2PSendType func(req Request) (HandlerResult, error)
+type P2PSendType func(req Request, log *log.CommonLogger) (HandlerResult, error)
 
 type PeerToPeerCommAPI interface {
 	P2PReceive(reqOrResp ReqRespCommon) (HandlerResult, error)
-	P2PSend(req Request) (HandlerResult, error)
+	P2PSend(req Request, log *log.CommonLogger) (HandlerResult, error)
 }
 
 type P2pCommAPIimpl struct {
@@ -110,7 +111,7 @@ func (p2p *P2pCommAPIimpl) P2PReceive(reqResp ReqRespCommon) (HandlerResult, err
 	return result, ErrorReceiveChanFull
 }
 
-func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
+func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (HandlerResult, error) {
 	payload, err := req.Serialize()
 	if err != nil {
 		return nil, err
@@ -130,7 +131,7 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request) (HandlerResult, error) {
 
 	var out interface{}
 	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, nil, nil, base.MethodPost, base.JsonContentType,
-		payload, base.P2PCommTimeout, &out, nil, false, nil)
+		payload, base.P2PCommTimeout, &out, nil, false, logger)
 	// utils returns this error because body is empty, which is fine
 	if err == base.ErrorResourceDoesNotExist {
 		err = nil

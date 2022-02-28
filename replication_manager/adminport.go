@@ -1391,7 +1391,7 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 	if response != nil || err != nil {
 		return response, err
 	}
-	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils, adminport.securitySvc)
+	req, err := peerToPeer.GenerateP2PReqOrResp(request, adminport.utils, adminport.securitySvc, adminport.Logger())
 	if err != nil {
 		adminport.Logger().Errorf("Unable to generate req or resp from %v err: %v\n", localRemoteIPs.Remote, err)
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)

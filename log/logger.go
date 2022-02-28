@@ -166,13 +166,13 @@ func NewLogger(module string, logger_context *LoggerContext) *CommonLogger {
 }
 
 func (l *CommonLogger) logMsgf(level LogLevel, format string, v ...interface{}) {
-	if l.context.Log_level >= level {
+	if l != nil && l.context.Log_level >= level {
 		l.loggers[level].logger.Printf(l.processCommonFields(level)+format, v...)
 	}
 }
 
 func (l *CommonLogger) logMsg(level LogLevel, msg string) {
-	if l.context.Log_level >= level {
+	if l != nil && l.context.Log_level >= level {
 		l.loggers[level].logger.Println(l.processCommonFields(level) + msg)
 	}
 }

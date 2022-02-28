@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -289,7 +290,7 @@ var filterUtils = utilities.NewUtilities()
 var reqMagicCheckFilter, _ = filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), filterUtils, false)
 var respMagicCheckFilter, _ = filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), filterUtils, false)
 
-func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, securitySvc service_def.SecuritySvc) (ReqRespCommon, error) {
+func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, securitySvc service_def.SecuritySvc, logger *log.CommonLogger) (ReqRespCommon, error) {
 	body, err := ioutil.ReadAll(httpReq.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading httpReq.Body resulted in err: %v", err)
@@ -308,7 +309,7 @@ func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, sec
 		if err != nil {
 			return nil, fmt.Errorf("unmarshalling request with reqCommon %v had err %v", reqCommon, err)
 		}
-		return generateRequest(utils, reqCommon, body, securitySvc)
+		return generateRequest(utils, reqCommon, body, securitySvc, logger)
 	} else {
 		err = json.Unmarshal(body, &respCommon)
 		if err != nil {
@@ -356,7 +357,7 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 	}
 }
 
-func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body []byte, securitySvc service_def.SecuritySvc) (ReqRespCommon, error) {
+func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body []byte, securitySvc service_def.SecuritySvc, logger *log.CommonLogger) (ReqRespCommon, error) {
 	cbFunc := func(resp Response) (HandlerResult, error) {
 		payload, err := resp.Serialize()
 		if err != nil {
@@ -377,7 +378,7 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		}
 		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false,
 			"", "", authMech, certificates, true, nil, nil,
-			base.MethodPost, base.JsonContentType, payload, base.P2PCommTimeout, &out, nil, false, nil)
+			base.MethodPost, base.JsonContentType, payload, base.P2PCommTimeout, &out, nil, false, logger)
 		// utils returns this error because body is empty, which is fine
 		if err == base.ErrorResourceDoesNotExist {
 			err = nil
