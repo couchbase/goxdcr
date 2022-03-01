@@ -3349,8 +3349,12 @@ func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peer
 		return err
 	}
 
-	retErr := <-respCh
-	return retErr
+	select {
+	case retErr := <-respCh:
+		return retErr
+	case <-ckmgr.finish_ch:
+		return fmt.Errorf("%v is stopped and unable to handle merge", ckmgr.Id())
+	}
 }
 
 func (ckmgr *CheckpointManager) requestPeriodicMerge(pipelinesCkpts []metadata.VBsCkptsDocMap, shaMap metadata.ShaToCollectionNamespaceMap, brokenMapSpecInternalId string, srcManifests *metadata.ManifestsCache, tgtManifests *metadata.ManifestsCache, respCh chan error) error {
