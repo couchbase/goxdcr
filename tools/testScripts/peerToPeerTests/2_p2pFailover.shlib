@@ -128,10 +128,14 @@ function runTestCase {
 	local currentXdcrLog
 	local -i currentHandlingInstanceCnt
 	local -i currentHandlingInstanceDoneCnt
+	local -i currentBackfillStartCntC1
+	local -i currentBackfillStartCntC1P
 
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
+	currentBackfillStartCntC1=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_START_MSG")
+	currentBackfillStartCntC1P=$(getInternalNodeXdcrLog "C1P" | grep -c "$BACKFILL_START_MSG")
 
 	# In a long running test, metakv could get slow and so p2p may take some time to actually run since it requires stop the world
 	echo "Done - Sleeping 10 minutes to ensure multiple requests have been handled"
@@ -142,11 +146,6 @@ function runTestCase {
 	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_MSG" $(($currentHandlingInstanceCnt + 3)) $(($currentHandlingInstanceCnt + 15))
 	validateInternalLogWithInstance "C1" "$RECEIVE_P2P_REQ_DONE_MSG" $(($currentHandlingInstanceDoneCnt + 3)) $(($currentHandlingInstanceDoneCnt + 15))
 
-	# 1024 VB's divided among 2 nodes, given 512 VB's at least 80 VBs should have checkpoints
-	# as a generous threshold
-	validateBackfillCkptTookPlaceForVBs "C1" "C2" "B0" "B1" "80"
-	validateBackfillCkptTookPlaceForVBs "C1P" "C2" "B0" "B1" "80"
-
 	# Ensure that VB tasks are at least being finished
 	validateVBTasksProgress "C1" "C2" "B0" "B1"
 	validateVBTasksProgress "C1P" "C2" "B0" "B1"
@@ -154,10 +153,15 @@ function runTestCase {
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
 	currentHandlingInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_MSG")
 	currentHandlingInstanceDoneCnt=$(echo "$currentXdcrLog" | grep -c "$RECEIVE_P2P_REQ_DONE_MSG")
-	setReplicationSettings "C1" "B0" "C2" "B1" "xdcrDevBackfillSendDelayMs=0"
-	echo "stopping delay for backfill pipeline and waiting one more minute"
 
-	sleep 60
+	# Pause replication and resume to see how many ckpts backfill has
+	pauseReplication "C1" "B0" "C2" "B1"
+	sleep 15
+	resumeReplication "C1" "B0" "C2" "B1"
+	sleep 15
+	local node1Non0VBResumeCnt
+	node1Non0VBResumeCnt=$(getNumOfBackfillCkptTookPlaceVB "C1" "C2" "B0" "B1")
+	echo "For node C1, it had $node1Non0VBResumeCnt VBs that resumed from 0 prior to failover"
 
 	local logsC1
 	local resumeFrom0CntOrig
@@ -178,6 +182,17 @@ function runTestCase {
 		echo "Before failover, there are $resumeFrom0CntOrig lines of resuming from 0. After failover, there are $resumeFrom0CntNew"
 		exit 1
 	fi
+
+	# This test starts out with 2 nodes each taking care of 512 VBs
+	# One node now owns all the ckpts
+	# So for backfill ckpt push to have worked, it means it must have resumed
+	# with non-0 seqno for at least one more VBs than it originally resumed
+	validateBackfillCkptTookPlaceForVBs "C1" "C2" "B0" "B1" "$(($node1Non0VBResumeCnt + 1))"
+
+	# Make sure backfill pipeline only starts once for node C1P and a few times only for node C1 and not more than that
+	validateInternalLogWithInstance "C1" "$BACKFILL_START_MSG" $(($currentBackfillStartCntC1 + 3)) $(($currentBackfillStartCntC1 + 5))
+	validateInternalLogWithInstance "C1P" "$BACKFILL_START_MSG" $(($currentBackfillStartCntC1P + 2)) $(($currentBackfillStartCntC1P + 3))
+
 	grepForPanics
 
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do

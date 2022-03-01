@@ -250,12 +250,17 @@ function runReplicationResume {
 	# and there is no ckpt for the backfill tasks... so the backfill tasks would have been
 	# pulled by C1P, but no ckpt pulled
 	# That's ok... so skip checking those
+	# We have X number of dependency nodes
+	local vbsPerNode
+	vbsPerNode=$(echo "1024/(${#CLUSTER_DEPENDENCY_MAP[@]} + 1)" | bc)
 	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
 
 		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
-		if (($resumeFrom0Cnt > 0)); then
-			echo "$dependentNodeName has at least one VB that resumed from seqno 0"
+		if (($resumeFrom0Cnt > $vbsPerNode)); then
+			# If each main pipeline has more its share of VBs that it owns and started from seqno 0, most likely
+			# it means that its responsible share of the VBs did not resume correctly
+			echo "$dependentNodeName has at least $resumeFrom0Cnt VB that resumed from seqno 0"
 			exit 1
 		fi
 		resumeLoadBrokenMapCnt=$(echo "$tempLogs" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")

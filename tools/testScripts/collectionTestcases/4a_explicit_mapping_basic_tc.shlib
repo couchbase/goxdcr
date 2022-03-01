@@ -111,8 +111,8 @@ function runTestCase {
 	echo "Changing explicit mapping - new target collection should now receive backfill"
 	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S2.col2":"S3.col2"}'
 
-	echo "Waiting 5 seconds before checking item count for backfill"
-	sleep 5
+	echo "Waiting 60 seconds before checking item count for backfill"
+	sleep 60
 	checkItemCnt "C2" "B2" $checkCount
 
 	# Backfill should have been raised

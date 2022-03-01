@@ -22,8 +22,9 @@ import (
 type ShaRefCounterService struct {
 	metadataSvc service_def.MetadataSvc
 	// Map of replicationId -> map of sha's -> refCnts
-	topicMapMtx sync.RWMutex
-	topicMaps   map[string]*MapShaRefCounter
+	topicMapMtx        sync.RWMutex
+	topicMaps          map[string]*MapShaRefCounter
+	topicGcDisabledSet map[string]bool
 
 	// Given a replication ID, return the key to use for metadataSvc
 	metakvDocKeyGetter func(string) string
@@ -36,6 +37,7 @@ func NewShaRefCounterService(metakvDocKeyGetter func(string) string,
 	logger *log.CommonLogger) *ShaRefCounterService {
 	return &ShaRefCounterService{
 		topicMaps:          make(map[string]*MapShaRefCounter),
+		topicGcDisabledSet: make(map[string]bool),
 		metakvDocKeyGetter: metakvDocKeyGetter,
 		metadataSvc:        metadataSvc,
 		logger:             logger,
@@ -145,7 +147,19 @@ func (s *ShaRefCounterService) GetDecrementerFunc(topic string) (service_def.Dec
 		return nil, base.ErrorInvalidInput
 	}
 
-	return counter.UnrecordOneCount, nil
+	// If refCounting is disabled, then do not allow a decrement
+	decrementWrapper := func(shaStr string) {
+		s.topicMapMtx.RLock()
+		disableIsSet, exists := s.topicGcDisabledSet[topic]
+		s.topicMapMtx.RUnlock()
+
+		if exists && disableIsSet {
+			// Do not let count be decremented
+		} else {
+			counter.UnrecordOneCount(shaStr)
+		}
+	}
+	return decrementWrapper, nil
 }
 
 func (s *ShaRefCounterService) GCDocUsingLatestCounterInfo(topic string, doc *metadata.CollectionNsMappingsDoc) error {
@@ -205,8 +219,6 @@ func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error
 		return base.ErrorInvalidInput
 	}
 
-	// TODO - once consistent metakv is in, the cleanup effort will need to be coordinated
-	// Most likely called by the cluster master
 	return counter.upsertMapping(specInternalId, true)
 }
 
@@ -227,12 +239,14 @@ func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.Util
 
 	s.topicMapMtx.Lock()
 	delete(s.topicMaps, topic)
+	delete(s.topicGcDisabledSet, topic)
 	s.topicMapMtx.Unlock()
 
 	return counter.DelAndCleanup()
 }
 
-func (s *ShaRefCounterService) ReInitUsingMergedMappingDoc(topic string, brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+// After this call, the ref count should be synchronized
+func (s *ShaRefCounterService) reInitUsingMergedMappingDoc(topic string, brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	s.topicMapMtx.RLock()
 	counter, ok := s.topicMaps[topic]
 	s.topicMapMtx.RUnlock()
@@ -244,7 +258,33 @@ func (s *ShaRefCounterService) ReInitUsingMergedMappingDoc(topic string, brokenM
 	return counter.ReInitUsingMergedMappingDoc(brokenMappingDoc, ckptDocs, internalId)
 }
 
-//func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(doc *metadata.CollectionNsMappingsDoc, ckpt) error {
+func (s *ShaRefCounterService) DisableRefCntDecrement(topic string) {
+	s.topicMapMtx.RLock()
+	disabledSet, exists := s.topicGcDisabledSet[topic]
+	s.topicMapMtx.RUnlock()
+
+	if !exists || exists && !disabledSet {
+		s.topicMapMtx.Lock()
+		s.topicGcDisabledSet[topic] = true
+		s.topicMapMtx.Unlock()
+	}
+}
+
+func (s *ShaRefCounterService) EnableRefCntDecrement(topic string) {
+	s.topicMapMtx.RLock()
+	disabledSet, exists := s.topicGcDisabledSet[topic]
+	s.topicMapMtx.RUnlock()
+
+	if exists && disabledSet {
+		// When re-enables ref cnt after being disabled, this means that the ref cnt may be inaccurate and requires a
+		// global recount
+		s.topicMapMtx.Lock()
+		s.topicGcDisabledSet[topic] = false
+		s.topicMapMtx.Unlock()
+	}
+}
+
+//func (c *MapShaRefCounter) reInitUsingMergedMappingDoc(doc *metadata.CollectionNsMappingsDoc, ckpt) error {
 
 func UnableToUpsertErr(id string) error {
 	return fmt.Errorf("Unable to clean broken mappings for %v due to concurrent ongoing upsert operation", id)
@@ -595,5 +635,7 @@ func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadat
 	c.setNeedToSyncNoLock(true)
 	c.lock.Unlock()
 
-	return c.upsertMapping(internalId, false)
+	// Since this path is called when no other ckpt operation is occuring (or when decrementing is not possible),
+	// take the opportunity to clean up
+	return c.upsertMapping(internalId, true)
 }

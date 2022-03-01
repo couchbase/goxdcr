@@ -1767,7 +1767,7 @@ func (b *BackfillMgr) HandleRollbackTo0ForVB(topic string, vbno uint16) error {
 	// When rolling back to 0, we should delete checkpoints otherwise a non-0 resume leading to DCP rollback
 	// means that it'll come back to this path yet again
 	deleteCkptsWrapper := func() error {
-		return b.checkpointsSvc.DelCheckpointsDoc(common.ComposeFullTopic(topic, common.BackfillPipeline), vbno)
+		return b.checkpointsSvc.DelCheckpointsDoc(common.ComposeFullTopic(topic, common.BackfillPipeline), vbno, "")
 	}
 
 	cb, errCb := handler.GetRollbackTo0VBSpecificBackfillCb(vbno, deleteCkptsWrapper)

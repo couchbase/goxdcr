@@ -121,7 +121,7 @@ func brhMockSourceNozzles() map[string]commonReal.Nozzle {
 	return retMap
 }
 
-func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState commonReal.PipelineState, ctx *common.PipelineRuntimeContext) (*common.Pipeline, *common.Pipeline) {
+func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState commonReal.PipelineState, ctx *common.PipelineRuntimeContext, spec *metadata.ReplicationSpecification) (*common.Pipeline, *common.Pipeline) {
 	pipeline := &common.Pipeline{}
 
 	pipeline.On("GetAsyncListenerMap").Return(nil)
@@ -131,6 +131,7 @@ func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState 
 	pipeline.On("RuntimeContext").Return(ctx)
 	pipeline.On("FullTopic").Return(unitTestFullTopic)
 	pipeline.On("Type").Return(commonReal.MainPipeline)
+	pipeline.On("Specification").Return(spec)
 
 	backfillPipeline := &common.Pipeline{}
 
@@ -141,6 +142,7 @@ func brhMockFakePipeline(sourcesMap map[string]commonReal.Nozzle, pipelineState 
 	backfillPipeline.On("RuntimeContext").Return(ctx)
 	backfillPipeline.On("FullTopic").Return(unitTestFullTopic)
 	backfillPipeline.On("Type").Return(commonReal.BackfillPipeline)
+	backfillPipeline.On("Specification").Return(spec)
 
 	return pipeline, backfillPipeline
 }
@@ -245,7 +247,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	ckptMgr := brhMockCkptMgr()
 	supervisor := brhMockSupervisor()
 	ctx := brhMockPipelineContext(ckptMgr, supervisor)
-	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
+	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx, spec)
 	assert.Nil(rh.Attach(pipeline))
 
 	// Wait for the go-routine to start
@@ -334,7 +336,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	ckptMgr := brhMockCkptMgr()
 	supervisor := brhMockSupervisor()
 	ctx := brhMockPipelineContext(ckptMgr, supervisor)
-	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
+	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx, nil)
 	assert.Nil(rh.Attach(pipeline))
 	assert.Nil(rh.Attach(backfillPipeline))
 
@@ -727,7 +729,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	ckptMgr := brhMockCkptMgr()
 	supervisor := brhMockSupervisor()
 	ctx := brhMockPipelineContext(ckptMgr, supervisor)
-	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx)
+	pipeline, backfillPipeline := brhMockFakePipeline(srcNozzleMap, commonReal.Pipeline_Running, ctx, nil)
 	assert.Nil(rh.Attach(pipeline))
 	assert.Nil(rh.Attach(backfillPipeline))
 

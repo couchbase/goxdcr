@@ -30,6 +30,7 @@ CKPT_MAPPING_NOT_FOUND_MSG="Error when getting brokenMapping for"
 P2P_BACKFILL_PUSH_RECEIVED_MSG="received peer node push backfill replication"
 UNABLE_TO_GET_HIGH_SEQNO_MSG="Unable to find any collection ID for getHighSeqno"
 P2P_PULL_ERR_MSG="Unable to respond to caller given type"
+BACKFILL_START_MSG="Starting BackfillPipeline"
 
 # These should be imported after clusterRunProvision script
 
@@ -1228,6 +1229,20 @@ function validateBackfillCkptTookPlaceForVBs {
 	local tgtBucketName=$4
 	local minVBsToHaveCkpt=$5
 
+	local totalVBsThatHaveCkpt
+	totalVBsThatHaveCkpt=$(getNumOfBackfillCkptTookPlaceVB "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName")
+	if (($totalVBsThatHaveCkpt < $minVBsToHaveCkpt)); then
+		echo "For node $logNodeName requested to have at least $minVBsToHaveCkpt VBs to have checkpoint but only $totalVBsThatHaveCkpt have checkpoints"
+		exit 1
+	fi
+}
+
+function getNumOfBackfillCkptTookPlaceVB {
+	local logNodeName=$1
+	local remClusterName=$2
+	local srcBucketName=$3
+	local tgtBucketName=$4
+
 	local remClusterUUID
 	remClusterUUID=$(getClusterUuidUsingNameFromLogs "$logNodeName" "$remClusterName")
 	local result=$?
@@ -1236,7 +1251,6 @@ function validateBackfillCkptTookPlaceForVBs {
 		return 1
 	fi
 
-	echo "Parsing log for $logNodeName pipeline backfill_${remClusterUUID}/${srcBucketName}/${tgtBucketName} for VB timestamps..."
 	local vbsSeqnosOutput
 	vbsSeqnosOutput=$(getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" "backfill" | parseSetVBTimestamps)
 
@@ -1275,6 +1289,7 @@ function validateBackfillCkptTookPlaceForVBs {
 	if [[ -z "${atLeastOneFound:-}" ]]; then
 		echo "Unable to parse"
 		getSetVBTimestampMsgsFromLogs "$logNodeName" "$remClusterName" "$srcBucketName" "$tgtBucketName" >/tmp/getSetVBTimestamp
+		return 1
 	fi
 
 	local totalVBsThatHaveCkpt
@@ -1283,10 +1298,8 @@ function validateBackfillCkptTookPlaceForVBs {
 	else
 		totalVBsThatHaveCkpt="${#vbHasCkptMap[@]}"
 	fi
-	if (($totalVBsThatHaveCkpt < $minVBsToHaveCkpt)); then
-		echo "For node $logNodeName requested to have at least $minVBsToHaveCkpt VBs to have checkpoint but only $totalVBsThatHaveCkpt have checkpoints"
-		exit 1
-	fi
+
+	echo "$totalVBsThatHaveCkpt"
 }
 
 function getLastSetVBTimestampSeqno {

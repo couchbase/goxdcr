@@ -16,11 +16,9 @@ import (
 
 type CheckpointsService interface {
 	CheckpointsDoc(replicationId string, vbno uint16) (*metadata.CheckpointsDoc, error)
-	DelCheckpointsDoc(replicationId string, vbno uint16) error
-	PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) (modified bool, err error)
+	DelCheckpointsDoc(replicationId string, vbno uint16, specInternalId string) error
 	DelCheckpointsDocs(replicationId string) error
 	UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error)
-	UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error
 	UpsertCheckpointsDone(replicationId string) error // Used by ckmgr to notify that it is done with individual VBs
 	CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error)
 	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
@@ -34,7 +32,9 @@ type CheckpointsService interface {
 	GetCkptsMappingsCleanupCallback(specId, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)
 
 	LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, IncrementerFunc, bool, error)
-	UpsertBrokenMappingsDoc(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error
+	UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error
+	DisableRefCntDecrement(topic string)
+	EnableRefCntDecrement(topic string)
 }
 
 type IncrementerFunc func(shaString string, mapping *metadata.CollectionNamespaceMapping)

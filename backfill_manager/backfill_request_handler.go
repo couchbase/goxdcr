@@ -697,7 +697,12 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 		if !ok {
 			panic("Unable to find ckptmgr")
 		} else {
-			err := checkpointMgr.DelSingleVBCheckpoint(pipeline.FullTopic(), vbno)
+			var internalId string
+			replSpec := pipeline.Specification().GetReplicationSpec()
+			if replSpec != nil {
+				internalId = replSpec.InternalId
+			}
+			err := checkpointMgr.DelSingleVBCheckpoint(pipeline.FullTopic(), vbno, internalId)
 			if err != nil {
 				b.pipelinesMtx.Unlock()
 				b.logger.Errorf("Unable to delete checkpoint doc for %v vbno %v err %v", pipeline.FullTopic(), vbno, err)

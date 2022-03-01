@@ -53,7 +53,7 @@ type CheckpointMgrSvc interface {
 	common.PipelineService
 
 	CheckpointsExist(topic string) (bool, error)
-	DelSingleVBCheckpoint(topic string, vbno uint16) error
+	DelSingleVBCheckpoint(topic string, vbno uint16, internalId string) error
 	MergePeerNodesCkptInfo(genericResponse interface{}) error
 }
 
@@ -995,7 +995,7 @@ func (ckmgr *CheckpointManager) CheckpointsExist(topic string) (bool, error) {
 }
 
 // Used by backfill pipeline only
-func (ckmgr *CheckpointManager) DelSingleVBCheckpoint(topic string, vbno uint16) error {
+func (ckmgr *CheckpointManager) DelSingleVBCheckpoint(topic string, vbno uint16, internalId string) error {
 	ckmgr.bpVbMtx.RLock()
 	hasCkpt := ckmgr.bpVbHasCkpt[vbno]
 	ckmgr.bpVbMtx.RUnlock()
@@ -1004,11 +1004,20 @@ func (ckmgr *CheckpointManager) DelSingleVBCheckpoint(topic string, vbno uint16)
 		return nil
 	}
 
-	err := ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+	err := ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno, internalId)
 	if err == service_def.MetadataNotFoundErr {
 		err = nil
 	}
 	return err
+}
+
+// Used by backfill pipeline only
+func (ckmgr *CheckpointManager) DisableRefCntGC(topic string) {
+	ckmgr.checkpoints_svc.DisableRefCntDecrement(topic)
+}
+
+func (ckmgr *CheckpointManager) EnableRefCntGC(topic string) {
+	ckmgr.checkpoints_svc.EnableRefCntDecrement(topic)
 }
 
 /**
@@ -1061,7 +1070,6 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		return base.ErrorNilPtr
 	}
 
-	var brokenMappingModified bool
 	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
 	for vbno, ckptDoc := range ckptDocs {
 		if ckmgr.IsStopped() {
@@ -1083,21 +1091,15 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 				// the checkpoint doc is for the old replication spec and needs to be deleted
 				// unlike the IsVbInList check above, it is critial for the checkpoint doc deletion to succeed here
 				// restart pipeline if it fails
-				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+				err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno, ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
 				if err != nil {
 					ckmgr.logger.Errorf("Deleting checkpoint docs %v for vb %v had an err %v", topic, vbno, err)
 					ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 					return err
 				}
-				ckmgr.postDelCheckpointsDocWrapper(topic, ckptDoc, &brokenMappingModified)
 				deleted_vbnos = append(deleted_vbnos, vbno)
 			}
 		}
-	}
-
-	if brokenMappingModified && !ckmgr.IsStopped() {
-		// For potential deleted checkpoints, ensure the brokenMapping is synced with metakv
-		ckmgr.CommitBrokenMappingUpdates()
 	}
 
 	for _, deleted_vbno := range deleted_vbnos {
@@ -1174,21 +1176,10 @@ func (ckmgr *CheckpointManager) registerGCFunction(topic string, vbno uint16) er
 		ckmgr.checkpointAllowedHelper.disableCkptAndWait()
 		defer ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
 
-		ckptDoc, err := ckmgr.checkpoints_svc.CheckpointsDoc(topic, vbno)
-		if err != nil {
-			return err
-		}
-
-		var brokenMappingModified bool
-		err = ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno)
+		err := ckmgr.checkpoints_svc.DelCheckpointsDoc(topic, vbno, ckmgr.pipeline.Specification().GetReplicationSpec().InternalId)
 		if err != nil {
 			ckmgr.logger.Errorf("GC DelCheckpointsDoc err %v", err)
 			return err
-		}
-
-		ckmgr.postDelCheckpointsDocWrapper(topic, ckptDoc, &brokenMappingModified)
-		if brokenMappingModified && !ckmgr.IsStopped() {
-			ckmgr.CommitBrokenMappingUpdates()
 		}
 		return nil
 	}
@@ -1227,21 +1218,6 @@ func (ckmgr *CheckpointManager) markBpCkptStored(vbno uint16) {
 		ckmgr.bpVbMtx.Unlock()
 	}
 	return
-}
-
-// Should only be called during pipeline startup times
-func (ckmgr *CheckpointManager) postDelCheckpointsDocWrapper(topic string, ckptDoc *metadata.CheckpointsDoc, brokenMappingModified *bool) {
-	if ckptDoc == nil || ckmgr.IsStopped() {
-		return
-	}
-
-	modified, err := ckmgr.checkpoints_svc.PostDelCheckpointsDoc(topic, ckptDoc)
-	if err != nil {
-		ckmgr.logger.Warnf("Checkpoint service postDelCheckpointsDoc returned %v", err)
-	}
-	if modified {
-		*brokenMappingModified = true
-	}
 }
 
 func (ckmgr *CheckpointManager) loadCollectionMappingsFromCkptDocs(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
@@ -3125,9 +3101,9 @@ func (ckmgr *CheckpointManager) getOneTimeTgtFailoverLogs(vbsList []uint16) (map
 // This merge function is called in two different paths: 1. Pull model vs 2. Push model (only on main pipeline's)
 // When pulling, both main and backfill pipelines are stopped, and the main pipeline's checkpoint manager is responsible
 // for merging both types of ckpts
-// When pushing, this should only be called when backfill pipeline is stopped and called as part of the stopped callback
+// When pushing, either one or both are potentially running, but only backfill pipeline's ckptMgr may perform ckpt
+// while this is happening
 func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkptsDocMap, srcFailoverLogs, tgtFailoverLogs map[uint16]*mcc.FailoverLog, combinedShaMapFromPeers metadata.ShaToCollectionNamespaceMap, peerBrokenMapSpecInternalId string) error {
-	// When merging checkpoints, do not allow concurrent checkpoint operations to occur
 
 	genSpec := ckmgr.pipeline.Specification()
 	if genSpec == nil {
@@ -3174,13 +3150,10 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 			}
 
 			combinePeerCkptDocsWithLocalCkptDoc(filteredMap, srcFailoverLogs, tgtFailoverLogs, currDocs, spec)
-
-			err = ckmgr.mergeAndPersistBrokenMappingDocs(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs)
+			err = ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts(ckptTopic, combinedShaMapFromPeers, peerBrokenMapSpecInternalId, currDocs)
 			if err != nil {
 				errList[i] = err
-				return
 			}
-			errList[i] = ckmgr.mergePersistCkptDocs(currDocs, ckptTopic, peerBrokenMapSpecInternalId)
 		}()
 
 	}
@@ -3202,22 +3175,6 @@ func (ckmgr *CheckpointManager) mergeFinalCkpts(filteredMaps []metadata.VBsCkpts
 	} else {
 		return fmt.Errorf(strings.Join(errStrs, " "))
 	}
-}
-
-func (ckmgr *CheckpointManager) mergePersistCkptDocs(currDocs map[uint16]*metadata.CheckpointsDoc, ckptTopic, internalId string) error {
-	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergePersistCkptDocs", base.DiagCkptMergeThreshold)
-	defer stopFunc()
-	err := ckmgr.checkpoints_svc.UpsertCheckpointsDoc(ckptTopic, currDocs, internalId)
-	if err != nil {
-		ckmgr.logger.Errorf("UpsertCheckpointsDoc for %v had errors %v", ckptTopic, err)
-		return err
-	}
-	_, reloadErr := ckmgr.checkpoints_svc.CheckpointsDocs(ckptTopic, true)
-	if reloadErr != nil {
-		ckmgr.logger.Errorf("UpsertCheckpointsDoc reloading for %v had errors %v", ckptTopic, reloadErr)
-		return reloadErr
-	}
-	return nil
 }
 
 func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.CheckpointsDoc, srcFailoverLogs map[uint16]*mcc.FailoverLog, tgtFailoverLogs map[uint16]*mcc.FailoverLog, currDocs map[uint16]*metadata.CheckpointsDoc, spec *metadata.ReplicationSpecification) {
@@ -3269,12 +3226,12 @@ func combinePeerCkptDocsWithLocalCkptDoc(filteredMap map[uint16]*metadata.Checkp
 	}
 }
 
-func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, peersShaMap metadata.ShaToCollectionNamespaceMap, specInternalId string, ckptDocs map[uint16]*metadata.CheckpointsDoc) error {
-	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergeAndPersistBrokenMappingDocs", base.DiagInternalThreshold)
+func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocsAndCkpts(specId string, peersShaMap metadata.ShaToCollectionNamespaceMap, specInternalId string, ckptDocs map[uint16]*metadata.CheckpointsDoc) error {
+	stopFunc := ckmgr.utils.StartDiagStopwatch("ckmgr.mergeAndPersistBrokenMappingDocsAndCkpts", base.DiagInternalThreshold)
 	defer stopFunc()
 	curNodeShaMap, curNodeMappingDoc, _, _, err := ckmgr.checkpoints_svc.LoadBrokenMappings(specId)
 	if err != nil {
-		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocs LoadBrokenMappings err: %v", err)
+		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts LoadBrokenMappings err: %v", err)
 		return err
 	}
 
@@ -3294,10 +3251,10 @@ func (ckmgr *CheckpointManager) mergeAndPersistBrokenMappingDocs(specId string, 
 
 	err = curNodeMappingDoc.LoadShaMap(curNodeShaMap)
 	if err != nil {
-		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocs LoadShaMap err: %v", err)
+		ckmgr.logger.Errorf("mergeAndPersistBrokenMappingDocsAndCkpts LoadShaMap err: %v", err)
 		return err
 	}
-	return ckmgr.checkpoints_svc.UpsertBrokenMappingsDoc(specId, curNodeMappingDoc, ckptDocs, specInternalId)
+	return ckmgr.checkpoints_svc.UpsertAndReloadCheckpointCompleteSet(specId, curNodeMappingDoc, ckptDocs, specInternalId)
 }
 
 func (ckmgr *CheckpointManager) mergePeerNodesPeriodicPush(periodicPayload *peerToPeer.ReplicationPayload) error {
@@ -3498,10 +3455,37 @@ func (ckmgr *CheckpointManager) periodicMergerImpl() {
 		case <-ckmgr.finish_ch:
 			return
 		case <-ckmgr.periodicPushRequested:
+			// It is possible that backfill pipeline has checkpoints to be merged
+			// When backfill pipeline checkpoints are being merged, it can throw off the
+			// brokenMap shap ref counter embedded as part of the checkpoint service
+			// If backfill pipeline were stopped, this would not be a problem, but we cannot always
+			// stop backfill pipelines whenever a peer push comes, and main pipeline's ckptMgr has no way to contact
+			// the backfill ckptmgr, and the backfill ckptmgr may be outdated if another new backfill pipeline is
+			// constructed
+			// Since 1) checkpoint service is shared between both main pipeline and backfill pipeline's
+			// checkpoint manager, and 2) only the main pipeline checkpoint manager performs the merges,
+			// the main checkpoint manager is responsible to tell the ckptService to not let the backfill
+			// ckptMgr from decrementing the ref count while the merge is taking place
+			backfillTopic := common.ComposeFullTopic(ckmgr.pipeline.Topic(), common.BackfillPipeline)
+			ckmgr.checkpoints_svc.DisableRefCntDecrement(backfillTopic)
+
+			// Once backfill ckptMgr cannot decrement the ref count, then do the merges, which ensures
+			// that whatever is being merged (incl broken maps) cannot be deleted from underneath since
+			// the decrementing ref-cnt for brokenMaps is disabled
+			// Recall that each broken map can be referred to by many ckpts, and each ref is considered
+			// a count and prevents the broken map entity from being cleaned up, and the ref decrement
+			// call occurs during ckpt operation
 			err := ckmgr.stopTheWorldAndMergeCkpts(ckmgr.periodicBatchGetter)
 			if err != nil {
 				ckmgr.logger.Errorf("%v stopTheWorldAndMerge - %v", ckmgr.Id(), err)
 			}
+
+			// Once the merge has finished, re-enable the decrementer
+			// It is quite possible that the ref count could run high (i.e ref to a brokenmap seems to have
+			// ckpts referring to it even though there is none)
+			// But ckptService should have a global re-count every time a periodic merge occurs, which can then
+			// do the clean up at the re-count time if counts are mismatched
+			ckmgr.checkpoints_svc.EnableRefCntDecrement(backfillTopic)
 		}
 	}
 }

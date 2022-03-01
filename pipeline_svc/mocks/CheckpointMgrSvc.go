@@ -50,7 +50,7 @@ func (_m *CheckpointMgrSvc) CheckpointsExist(topic string) (bool, error) {
 }
 
 // DelSingleVBCheckpoint provides a mock function with given fields: topic, vbno
-func (_m *CheckpointMgrSvc) DelSingleVBCheckpoint(topic string, vbno uint16) error {
+func (_m *CheckpointMgrSvc) DelSingleVBCheckpoint(topic string, vbno uint16, internalId string) error {
 	ret := _m.Called(topic, vbno)
 
 	var r0 error

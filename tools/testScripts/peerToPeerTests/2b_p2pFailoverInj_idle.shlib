@@ -152,7 +152,6 @@ function runTestCase {
 		wait $p
 	done
 
-	# Sleeping 7 minutes mean we should have at least two instances up to 7 max
 	echo "stopping delay for backfill pipeline and waiting one more minute"
 
 	sleep 60

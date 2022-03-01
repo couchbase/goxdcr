@@ -1191,7 +1191,6 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string,
 	// A peer node should only send a push request if the pipeline is running
 	// If there's no source side network partition, this should not fail
 	// so try for a bit before failing
-
 	var mainPipelineCkptMgr pipeline_svc.CheckpointMgrSvc
 	var backfillMgrSvc common.PipelineService
 	var opFuncErr error
@@ -1206,43 +1205,9 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string,
 		return err
 	}
 
-	mainTopic, pipelineType := common.DecomposeFullTopic(fullTopic)
-
-	switch pipelineType {
-	case common.MainPipeline:
-		err = mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
-		if err != nil {
-			return err
-		}
-	case common.BackfillPipeline:
-		// For backfill pipeline, just use the stopped Cb method
-		var stoppedWaitGrp sync.WaitGroup
-		stoppedWaitGrp.Add(1)
-		cbFunc := func() error {
-			defer stoppedWaitGrp.Done()
-			return mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
-		}
-		var cbErr error
-		errCb := func(err error, cbCalled bool) {
-			// errCb can be called when we fail to register cbFunc. So we need to clear WaitGrp in order to avoid goroutine leak.
-			if cbCalled == false {
-				defer stoppedWaitGrp.Done()
-			}
-			cbErr = err
-		}
-		if registerErr := pipelineMgr.HaltBackfillWithCb(mainTopic, cbFunc, errCb, false); registerErr != nil {
-			return fmt.Errorf("Unable to register haltBackfillCb for %v", fullTopic)
-		}
-		stoppedWaitGrp.Wait()
-		// After halting it, we need to restart it
-		if registerErr := pipelineMgr.RequestBackfill(mainTopic); registerErr != nil {
-			return fmt.Errorf("Unable to register starting backfill for %v", fullTopic)
-		}
-		if cbErr != nil {
-			return cbErr
-		}
-	default:
-		return base.ErrorNotSupported
+	err = mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
+	if err != nil {
+		return err
 	}
 
 	mainPipelineTopic, _ := common.DecomposeFullTopic(fullTopic)

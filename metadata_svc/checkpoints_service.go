@@ -98,6 +98,10 @@ func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log
 }
 
 func (ckpt_svc *CheckpointsService) CheckpointsDoc(replicationId string, vbno uint16) (*metadata.CheckpointsDoc, error) {
+	return ckpt_svc.checkpointsDocInternal(replicationId, vbno, true)
+}
+
+func (ckpt_svc *CheckpointsService) checkpointsDocInternal(replicationId string, vbno uint16, rLockStopTheWorld bool) (*metadata.CheckpointsDoc, error) {
 	cache, cacheErr := ckpt_svc.getCache(replicationId)
 	if cacheErr == nil {
 		ckptDoc, cacheGetErr := cache.GetOneVBDoc(vbno)
@@ -106,15 +110,17 @@ func (ckpt_svc *CheckpointsService) CheckpointsDoc(replicationId string, vbno ui
 		}
 	}
 
+	if rLockStopTheWorld {
+		mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+		mtx.RLock()
+		defer mtx.RUnlock()
+	}
+
 	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
 	result, rev, err := ckpt_svc.metadata_svc.Get(key)
 	if err != nil {
 		return nil, err
 	}
-
-	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
-	mtx.RLock()
-	defer mtx.RUnlock()
 
 	// Should exist because checkpoint manager must finish loading before allowing ckpt operations
 	shaMap, _ := ckpt_svc.GetShaNamespaceMap(replicationId)
@@ -209,7 +215,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 }
 
 // Need to have correct accounting after deleting checkpoingsDocs
-func (ckpt_svc *CheckpointsService) PostDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) (modified bool, err error) {
+func (ckpt_svc *CheckpointsService) postDelCheckpointsDoc(replicationId string, doc *metadata.CheckpointsDoc) (modified bool, err error) {
 	if doc == nil {
 		return
 	}
@@ -236,8 +242,17 @@ func (ckpt_svc *CheckpointsService) PostDelCheckpointsDoc(replicationId string, 
 	return
 }
 
-func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16) error {
+// If internalId is provided, will be used to check prior to upsert
+func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16, specInternalId string) error {
 	ckpt_svc.logger.Debugf("DelCheckpointsDoc for replication %v and vbno %v...", replicationId, vbno)
+
+	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+	mtx.RLock()
+
+	ckptDocsPreDel, err := ckpt_svc.checkpointsDocInternal(replicationId, vbno, false)
+	if err != nil && err != service_def.MetadataNotFoundErr {
+		ckpt_svc.logger.Warnf("DelCheckpointsDocs had err retrieving existing cktps: %v", err)
+	}
 
 	cache, cacheErr := ckpt_svc.getCache(replicationId)
 	if cacheErr == nil {
@@ -247,21 +262,56 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
 	_, rev, err := ckpt_svc.metadata_svc.Get(key)
 	if err != nil {
+		if err == service_def.MetadataNotFoundErr {
+			// Nothing to delete
+			err = nil
+			ckpt_svc.logger.Warnf("DelCheckpointDoc called for %v and vbno %v but no prev ckpt was found", replicationId, vbno)
+		}
+		mtx.RUnlock()
 		return err
 	}
-
-	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
-	mtx.RLock()
-	defer mtx.RUnlock()
 
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
 	err = ckpt_svc.metadata_svc.DelWithCatalog(catalogKey, key, rev)
 	if err != nil {
 		ckpt_svc.logger.Errorf("Failed to delete checkpoints doc for replication %v and vbno %v\n", replicationId, vbno)
-	} else {
-		ckpt_svc.logger.Debugf("DelCheckpointsDoc is done for replication %v and vbno %v\n", replicationId, vbno)
+		mtx.RUnlock()
+		return err
 	}
-	return err
+	mtx.RUnlock()
+
+	var needToDoRefCntDecrement bool
+	if ckptDocsPreDel != nil {
+		for _, record := range ckptDocsPreDel.GetCheckpointRecords() {
+			if record == nil {
+				continue
+			}
+			brokenMap := record.BrokenMappings()
+			if brokenMap != nil && len(record.BrokenMappingSha256) > 0 {
+				needToDoRefCntDecrement = true
+			}
+		}
+	}
+
+	if !needToDoRefCntDecrement {
+		return nil
+	}
+
+	// Doing ref cnt requires re-locking
+	modified, err := ckpt_svc.postDelCheckpointsDoc(replicationId, ckptDocsPreDel)
+	if err != nil {
+		ckpt_svc.logger.Warnf("%v - postDelCheckpointsDoc returned %v", err)
+		return err
+	}
+
+	if modified {
+		err = ckpt_svc.UpsertMapping(replicationId, specInternalId)
+		if err != nil {
+			ckpt_svc.logger.Warnf("%v - postDelCheckpointsDoc returned %v", err)
+			return err
+		}
+	}
+	return nil
 }
 
 // in addition to upserting checkpoint record, this method may also update xattr seqno
@@ -271,30 +321,39 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error) {
 	ckpt_svc.logger.Debugf("Persisting checkpoint record=%v for vbno=%v replication=%v\n", ckpt_record, vbno, replicationId)
 	var size int
+	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
 
 	if ckpt_record == nil {
 		return size, errors.New("nil checkpoint record")
 	}
-	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
-	ckpt_doc, err := ckpt_svc.CheckpointsDoc(replicationId, vbno)
-	if err == service_def.MetadataNotFoundErr {
-		ckpt_doc = metadata.NewCheckpointsDoc(specInternalId)
-		err = nil
-	}
-	if err != nil {
-		return size, err
+
+	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
+	mtx.RLock()
+	defer mtx.RUnlock()
+
+	var ckpt_doc *metadata.CheckpointsDoc
+	cache, err := ckpt_svc.getCache(replicationId)
+	if err == nil {
+		ckpt_doc, err = cache.GetOneVBDoc(vbno)
 	}
 
-	cache, cacheErr := ckpt_svc.getCache(replicationId)
+	if err != nil {
+		// Either cache is invalidated (i.e. after a complete upsert)
+		// Or doc is not found in cache... go to metakv to go get it
+		ckpt_doc, err = ckpt_svc.checkpointsDocInternal(replicationId, vbno, false)
+		if err == service_def.MetadataNotFoundErr {
+			ckpt_doc = metadata.NewCheckpointsDoc(specInternalId)
+			err = nil
+		}
+		if err != nil {
+			return size, err
+		}
+	}
 
 	added, removedRecords := ckpt_doc.AddRecord(ckpt_record)
 	if !added {
 		ckpt_svc.logger.Debug("the ckpt record to be added is the same as the current ckpt record in the ckpt doc. no-op.")
 	} else {
-		mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
-		mtx.RLock()
-		defer mtx.RUnlock()
-
 		ckpt_json, err := json.Marshal(ckpt_doc)
 		if err != nil {
 			return size, err
@@ -313,8 +372,8 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 				// Backfill pipeline can be cleaned up
 				ckpt_svc.logger.Errorf("Failed to record broken mapping err=%v\n", err)
 			}
-			if cacheErr == nil {
-				cacheErr = cache.StoreOneVbDoc(vbno, ckpt_doc)
+			if cache != nil {
+				cacheErr := cache.StoreOneVbDoc(vbno, ckpt_doc)
 				if cacheErr != nil {
 					ckpt_svc.logger.Warnf("%v - Unable to store cache for vb %v: %v", replicationId, vbno, cacheErr)
 				}
@@ -324,19 +383,14 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 	return size, err
 }
 
-// Upserting Checkpoint doc requires a "stop-the-world" situation where refcount needs to be re-initialized
-func (ckpt_svc *CheckpointsService) UpsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+// the stopTheWorld write lock must be held
+func (ckpt_svc *CheckpointsService) upsertCheckpointsDoc(replicationId string, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	err := ckpt_svc.validateSpecIsValid(replicationId, internalId)
 	if err != nil {
 		return err
 	}
 
 	cache, cacheErr := ckpt_svc.getCache(replicationId)
-
-	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
-	mtx.Lock()
-	defer mtx.Unlock()
-
 	if cacheErr == nil {
 		invalidateMeasureStop := ckpt_svc.utils.StartDiagStopwatch(fmt.Sprintf("%v_invalidateCache", replicationId), base.DiagInternalThreshold)
 		cache.InvalidateCache()
@@ -408,6 +462,7 @@ func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (me
 
 func (ckpt_svc *CheckpointsService) loadBrokenMappingsInternal(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
 	alreadyExists := ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, "")
+
 	mappingsDoc, err := ckpt_svc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
 	if err != nil {
 		var emptyMap metadata.ShaToCollectionNamespaceMap
@@ -510,10 +565,10 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 		}
 	}
 
-	// This code path's initialization requires doing a level of ref counting
-	// As a result, the init path needs to take place first before the rest can do read-only op
 	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
 	if !ckptSvcCntIsPopulated {
+		// This code path's initialization requires doing a level of ref counting
+		// As a result, the init path needs to take place first before the rest can do read-only op
 		mtx.Lock()
 		defer mtx.Unlock()
 	} else {
@@ -961,17 +1016,54 @@ func (ckpt_svc *CheckpointsService) getStopTheWorldMtx(replId string) *sync.RWMu
 	}
 }
 
-func (ckpt_svc *CheckpointsService) UpsertBrokenMappingsDoc(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+func (ckpt_svc *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	err := ckpt_svc.validateSpecIsValid(replicationId, internalId)
 	if err != nil {
 		return err
 	}
 
 	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
-	mtx.Lock()
-	defer mtx.Unlock()
 
-	return ckpt_svc.ReInitUsingMergedMappingDoc(replicationId, mappingDoc, ckptDoc, internalId)
+	stopFunc := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.Lock", base.DiagCkptMergeThreshold)
+	mtx.Lock()
+	stopFunc()
+
+	// This step will take the set of {ckptDocs, brokenMaps} and use it as the gold standard for ref counting
+	stopFunc2 := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.reInitUsingMergedMappingDoc", base.DiagCkptMergeThreshold)
+	reInitErr := ckpt_svc.reInitUsingMergedMappingDoc(replicationId, mappingDoc, ckptDocs, internalId)
+	stopFunc2()
+	if reInitErr != nil {
+		mtx.Unlock()
+		return fmt.Errorf("%v - reInitUsingMergedMappingDoc error: %v", replicationId, reInitErr)
+	}
+
+	// Once mapping is committed, invalidate the cache and write the ckpts
+	stopFunc3 := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.upsertCheckpointsDoc", base.DiagCkptMergeThreshold)
+	upsertErr := ckpt_svc.upsertCheckpointsDoc(replicationId, ckptDocs, internalId)
+	stopFunc3()
+	if reInitErr != nil {
+		mtx.Unlock()
+		return fmt.Errorf("%v - upsertCheckpointsDoc error: %v", replicationId, upsertErr)
+	}
+	mtx.Unlock()
+
+	// Last step is to reload from metakv which will populate the cache
+	stopFunc4 := ckpt_svc.utils.StartDiagStopwatch("ckpt_svc.UpsertAndReloadCheckpointCompleteSet.ReloadCheckpointsDocs", base.DiagCkptMergeThreshold)
+	_, reloadErr := ckpt_svc.CheckpointsDocs(replicationId, true)
+	stopFunc4()
+	if reloadErr != nil {
+		ckpt_svc.logger.Errorf("upsertCheckpointsDoc reloading for %v had errors %v", replicationId, reloadErr)
+		return reloadErr
+	}
+	return nil
+}
+
+func (ckpt_svc *CheckpointsService) DisableRefCntDecrement(topic string) {
+	ckpt_svc.ShaRefCounterService.DisableRefCntDecrement(topic)
+}
+
+func (ckpt_svc *CheckpointsService) EnableRefCntDecrement(topic string) {
+	ckpt_svc.ShaRefCounterService.EnableRefCntDecrement(topic)
 }
 
 func (ckpt_svc *CheckpointsService) validateSpecIsValid(fullReplId string, internalId string) error {
