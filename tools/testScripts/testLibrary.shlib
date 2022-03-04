@@ -707,7 +707,7 @@ function validateBrokenMapEntryDNE {
 function getRemoteCluster {
 	local source=$1
 	local target=$2
-	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
 	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
 	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters | jq | grep name | grep -c $target)
 	echo $result
@@ -716,7 +716,7 @@ function getRemoteCluster {
 # returns the output from /pools/default/remoteClusters
 function getRemoteClusters {
 	local source=$1
-	local host=${CLUSTER_NAME_HOST_MAP[$source]:-}
+	local host=${CLUSTER_NAME_HOST_MAP[$source]:-"127.0.0.1"}
 	local port=${CLUSTER_NAME_PORT_MAP[$source]:-}
 	result=$(curl -GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://$host:$port/pools/default/remoteClusters)
 	echo $result
