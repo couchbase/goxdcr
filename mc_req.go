@@ -8,8 +8,9 @@ import (
 
 // The maximum reasonable body length to expect.
 // Anything larger than this will result in an error.
-// The current limit, 20MB, is the size limit supported by ep-engine.
-var MaxBodyLen = int(20 * 1024 * 1024)
+// The current limit, 21MB, is the size limit supported by ep-engine.
+// 20MB for document value, 1MB for system extended attributes
+var MaxBodyLen = int(21 * 1024 * 1024)
 
 const _BUFLEN = 256
 
