@@ -409,11 +409,7 @@ func (b *BackfillReplicationService) AddBackfillReplSpec(spec *metadata.Backfill
 	return b.updateCache(spec.Id, spec)
 }
 
-// Each node should only be responsible to update the centralized mapping file
-// to ensure that the mappings that it needs are persisted. This way, it ensure that whichever VB is the most
-// advanced on whatever node will get the chance to update metakv with the needed mappings, and every other node
-// will benefit
-// When consistent metakv is in play, this would lead to less conflicts
+// Each node is responsible for all VBs and all mappings now with P2P
 func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.BackfillReplicationSpec, addOp bool) error {
 	mappingsDoc, err := b.GetMappingsDoc(spec.Id, addOp /*initIfNotFound*/)
 	if err != nil {
@@ -423,29 +419,19 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 	if err != nil {
 		return err
 	}
+	var toDecrementMap metadata.ShaToCollectionNamespaceMap
 	if addOp && len(inflatedMapping) > 0 {
-		err = fmt.Errorf("Adding a new backfill spec %v should not have pre-existing mappings", spec.Id)
-		b.logger.Errorf("%v", err)
-		return err
+		b.logger.Warnf("Adding a new backfill spec %v should not have pre-existing mappings", spec.Id)
+		toDecrementMap = inflatedMapping.Clone()
 	}
 	err = b.InitCounterShaToActualMappings(spec.Id, spec.InternalId, inflatedMapping)
 	if err != nil {
 		return err
 	}
 
-	myVBs, err := b.GetMyVBs(spec.ReplicationSpec())
-	if err != nil {
-		return err
-	}
-	mySortedVBs := base.SortUint16List(myVBs)
-
 	consolidatedMap := make(metadata.ShaToCollectionNamespaceMap)
 	spec.VBTasksMap.GetLock().RLock()
-	for vb, tasks := range spec.VBTasksMap.VBTasksMap {
-		_, isMyVB := base.SearchVBInSortedList(vb, mySortedVBs)
-		if !isMyVB {
-			continue
-		}
+	for _, tasks := range spec.VBTasksMap.VBTasksMap {
 		innerConsolidatedMap := tasks.GetAllCollectionNamespaceMappings()
 		for sha, nsMap := range innerConsolidatedMap {
 			if _, exists := consolidatedMap[sha]; !exists {
@@ -462,6 +448,17 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 
 	for sha, mapping := range consolidatedMap {
 		incrementer(sha, mapping)
+	}
+
+	if len(toDecrementMap) > 0 {
+		decrementer, err := b.GetDecrementerFunc(spec.Id)
+		if err != nil {
+			b.logger.Errorf("Unable to get decrementerFunc for %v", spec.Id)
+			return err
+		}
+		for sha, _ := range toDecrementMap {
+			decrementer(sha)
+		}
 	}
 
 	err = b.UpsertMapping(spec.Id, spec.InternalId)
@@ -519,37 +516,9 @@ func (b *BackfillReplicationService) setBackfillSpecUsingMarshalledData(spec *me
 }
 
 func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec *metadata.BackfillReplicationSpec) error {
-	vbsList, err := b.GetMyVBs(spec.ReplicationSpec())
-	if err != nil {
-		return err
-	}
-	sortedVbs := base.SortUint16List(vbsList)
-
-	subsetBackfillTasks := metadata.NewVBTasksMap()
-	spec.VBTasksMap.GetLock().RLock()
-	for vb, tasks := range spec.VBTasksMap.VBTasksMap {
-		_, isInList := base.SearchVBInSortedList(vb, sortedVbs)
-		if isInList {
-			subsetBackfillTasks.VBTasksMap[vb] = tasks.Clone()
-		}
-	}
-	spec.VBTasksMap.GetLock().RUnlock()
-
-	olderSubsetBackfillTasks := metadata.NewVBTasksMap()
-	oldSpec.VBTasksMap.GetLock().RLock()
-	for vb, tasks := range oldSpec.VBTasksMap.VBTasksMap {
-		_, isInList := base.SearchVBInSortedList(vb, sortedVbs)
-		if isInList {
-			olderSubsetBackfillTasks.VBTasksMap[vb] = tasks.Clone()
-		}
-	}
-	oldSpec.VBTasksMap.GetLock().RUnlock()
-
-	newShaToColMapping := subsetBackfillTasks.GetAllCollectionNamespaceMappings()
-	oldShaToColMapping := olderSubsetBackfillTasks.GetAllCollectionNamespaceMappings()
-
-	added, removed := newShaToColMapping.Diff(oldShaToColMapping)
-
+	currentVBTaskMapShaMappings := spec.VBTasksMap.GetAllCollectionNamespaceMappings()
+	previousVBTaskMapShaMappings := oldSpec.VBTasksMap.GetAllCollectionNamespaceMappings()
+	added, removed := currentVBTaskMapShaMappings.Diff(previousVBTaskMapShaMappings)
 	if len(added) > 0 {
 		increment, err := b.GetIncrementerFunc(spec.Id)
 		if err != nil {
@@ -571,12 +540,11 @@ func (b *BackfillReplicationService) persistVBTasksMapDifferences(spec, oldSpec 
 	}
 
 	if len(added) > 0 || len(removed) > 0 {
-		err = b.UpsertMapping(spec.Id, spec.InternalId)
+		err := b.UpsertMapping(spec.Id, spec.InternalId)
 		if err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
