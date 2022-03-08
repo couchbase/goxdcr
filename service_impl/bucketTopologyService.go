@@ -1228,6 +1228,13 @@ func (bw *BucketTopologySvcWatcher) runGC() {
 	bw.gcMapUndergoingGc = true
 	bw.gcMapMtx.Unlock()
 
+	// Ensure that this variable MUST be set to false when this function is done
+	defer func() {
+		bw.gcMapMtx.Lock()
+		bw.gcMapUndergoingGc = false
+		bw.gcMapMtx.Unlock()
+	}()
+
 	bw.gcMapMtx.RLock()
 	if bw.gcMapGcAbort {
 		bw.gcMapMtx.RUnlock()
@@ -1292,7 +1299,6 @@ func (bw *BucketTopologySvcWatcher) runGC() {
 	bw.gcMapMtx.RUnlock()
 
 	bw.gcMapMtx.Lock()
-	bw.gcMapUndergoingGc = false
 	if !bw.gcMapGcAbort {
 		for _, delFunc := range toBeDeleted {
 			delFunc()

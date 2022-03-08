@@ -1028,10 +1028,13 @@ func (ckmgr *CheckpointManager) EnableRefCntGC(topic string) {
  * 2. Removes any invalid ckpt docs.
  * 3. Figures out all VB opaques from remote cluster, and updates the local checkpoint records (with lock) to reflect that.
  * The timestamps are to be consumed by dcp nozzle to determine the start point of dcp stream/replication via settings map (UpdateSettings).
+ *
+ * Unless the checkpoint manager is stopping, any non-nil returned error MUST raise a corresponding error event
  */
 func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(true)
 	if err != nil {
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 		return err
 	}
 
@@ -1067,6 +1070,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	genSpec := ckmgr.pipeline.Specification()
 	spec := genSpec.GetReplicationSpec()
 	if spec == nil {
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, fmt.Errorf("Unable to get spec - nil pointer")))
 		return base.ErrorNilPtr
 	}
 
@@ -1083,6 +1087,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 			// Keep the checkpoint around in case peer nodes will need it
 			err = ckmgr.registerGCFunction(topic, vbno)
 			if err != nil {
+				ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
 				return err
 			}
 		} else {
