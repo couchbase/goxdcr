@@ -1092,10 +1092,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) addSentSeqnoAndManifestId(vbno uint16, 
 }
 
 func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamBypass(vbno uint16) {
-	if atomic.CompareAndSwapUint32(&tsTracker.vbBackfillHelperActive, 0, 1) {
-		go tsTracker.bgScanForThroughSeqno()
-	}
-
 	tsTracker.vbBackfillHelperDoneMap[vbno].SetSeqno(VBSeqnoBypassed)
 }
 

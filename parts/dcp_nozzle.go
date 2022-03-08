@@ -1025,14 +1025,6 @@ func (dcp *DcpNozzle) processData() (err error) {
 						}
 						dcp.RaiseEvent(common.NewEvent(common.StreamingStart, m, dcp, nil, nil))
 						dcp.vbHandshakeMap[vbno].processSuccessResponse(m.Opaque)
-						// Check for corner case - where streamReq seqno will be the same as seqend Seqno
-						endSeqnoCheck := dcp.endSeqnoForDcp[vbno].GetSeqno()
-						if endSeqnoCheck > 0 && endSeqnoCheck == m.Seqno {
-							err = dcp.handleStreamEnd(vbno)
-							if err != nil {
-								return err
-							}
-						}
 					} else {
 						err = fmt.Errorf("%v Stream for vb=%v is not supposed to be opened\n", dcp.Id(), vbno)
 						dcp.handleGeneralError(err)
@@ -1132,7 +1124,13 @@ func (dcp *DcpNozzle) handleStreamEnd(vbno uint16) error {
 	dcp.Logger().Infof("%v: seqno: %v %v", dcp.Id(), dcp.endSeqnoForDcp[vbno].GetSeqno(), err_streamend)
 	if dcp.vbStreamEndIsOk(vbno) {
 		err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
-		go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
+		startTs, getTsErr := dcp.getTS(vbno, true)
+		if getTsErr == nil && dcp.endSeqnoForDcp[vbno].GetSeqno() == startTs.Seqno {
+			// The streamRequest sent a same start and end and so no data was transferred
+			go dcp.RaiseEvent(common.NewEvent(common.StreamingBypassed, vbno, dcp, nil, nil))
+		} else {
+			go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
+		}
 	} else {
 		stream_status, err := dcp.GetStreamState(vbno)
 		if err != nil || stream_status != Dcp_Stream_Active {
@@ -1461,6 +1459,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 
 		// In a corner case where startSeq == endSeqno, DCP will not send down a streamEnd and instead just
 		// close the connection. Mark the endSeqno here first to check if this is the case
+		// Update: streamEnd will be sent but there will be no data, so still need to set endSeqnoForDcp for bypass check
 		dcp.endSeqnoForDcp[vbno].SetSeqno(seqEnd)
 	}
 
