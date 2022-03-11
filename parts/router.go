@@ -1163,6 +1163,7 @@ func (c *CollectionsRouter) brokenMapIdleDoubleCheck() {
 	}
 }
 
+// When "shouldIgnore" is true, the wrappedMCR is recycled
 func (c *CollectionsRouter) updateBrokenMappingAndRaiseNecessaryEvents(wrappedMcr *base.WrappedMCRequest, unmappedNamespaces metadata.CollectionNamespaceMapping, shouldIgnore bool) {
 	var routingInfo CollectionsRoutingInfo
 	if !c.IsRunning() {
@@ -1713,6 +1714,7 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 				err = nil
 			} else if err == PartStoppedError {
 				// don't recordUnroutable
+				router.recycleDataObj(mcRequest)
 			} else {
 				// Record unroutable request will try to re-raise the synchronous routing update
 				// Only if it succeeds, will the ignoreDataFunc be called

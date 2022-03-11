@@ -2654,6 +2654,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							xmem.Logger().Debugf("Request in the buffer for key %v%s%v has opaque=%v while the response opaque=%v",
 								base.UdTagBegin, bytes.Trim(wrappedReq.Req.Key, "\x00"), base.UdTagEnd, wrappedReq.Req.Opaque, response.Opaque)
 						}
+						xmem.recycleDataObj(wrappedReq)
 					} else {
 						xmem.Logger().Infof("%v Retry conflict resolution for %v%s%v because target Cas has changed (EEXISTS).", xmem.Id(), base.UdTagBegin, bytes.Trim(wrappedReq.Req.Key, "\x00"), base.UdTagEnd)
 						additionalInfo := SentCasChangedEventAdditional{
@@ -2681,7 +2682,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							if base.IsTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
+								// Recycle obj as it won't be used again
+								xmem.recycleDataObj(wrappedReq)
 							} else if base.IsCollectionMappingError(response.Status) {
+								// upstreamErrReporter will recycle wrappedReq once it's done
 								xmem.upstreamErrReporter(wrappedReq)
 								if xmem.buf.evictSlot(pos) != nil {
 									panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
@@ -2774,7 +2778,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					}
 				}
 			}
-
 		}
 	}
 
