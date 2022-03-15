@@ -425,6 +425,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		replacementNotification.SourceReplicaCnt = numOfReplicas
 		replacementNotification.SourceVbReplicasMember = vbReplicaMember
 		replacementNotification.SourceStorageBackend = storageBackend
+		replacementNotification.LocalBucketTopologyUpdateTime = time.Now()
 
 		watcher.latestCached.Recycle()
 		watcher.latestCached = replacementNotification
@@ -1772,18 +1773,19 @@ type Notification struct {
 	NumReaders uint32
 
 	// Source only
-	NumberOfSourceNodes        int
-	SourceVBMap                *base.KvVBMapType
-	KvVbMap                    *base.KvVBMapType
-	DcpStatsMap                *base.DcpStatsMapType
-	DcpStatsMapLegacy          *base.DcpStatsMapType
-	HighSeqnoMap               *base.HighSeqnosMapType
-	HighSeqnoMapLegacy         *base.HighSeqnosMapType
-	SourceReplicaCnt           int
-	SourceReplicasMap          *base.VbHostsMapType  // len() of 0 if no replicas
-	SourceReplicasTranslateMap *base.StringStringMap // nil if not initialized
-	SourceVbReplicasMember     []uint16
-	SourceStorageBackend       string
+	NumberOfSourceNodes           int
+	SourceVBMap                   *base.KvVBMapType
+	KvVbMap                       *base.KvVBMapType
+	DcpStatsMap                   *base.DcpStatsMapType
+	DcpStatsMapLegacy             *base.DcpStatsMapType
+	HighSeqnoMap                  *base.HighSeqnosMapType
+	HighSeqnoMapLegacy            *base.HighSeqnosMapType
+	SourceReplicaCnt              int
+	SourceReplicasMap             *base.VbHostsMapType  // len() of 0 if no replicas
+	SourceReplicasTranslateMap    *base.StringStringMap // nil if not initialized
+	SourceVbReplicasMember        []uint16
+	SourceStorageBackend          string
+	LocalBucketTopologyUpdateTime time.Time
 
 	// Target only
 	TargetBucketUUID           string
@@ -1926,18 +1928,19 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		Source:     n.Source,
 		NumReaders: uint32(numOfReaders),
 
-		NumberOfSourceNodes:        n.NumberOfSourceNodes,
-		SourceVBMap:                n.SourceVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
-		KvVbMap:                    n.KvVbMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
-		DcpStatsMap:                n.DcpStatsMap.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
-		DcpStatsMapLegacy:          n.DcpStatsMapLegacy.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
-		HighSeqnoMap:               n.HighSeqnoMap.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
-		HighSeqnoMapLegacy:         n.HighSeqnoMapLegacy.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
-		SourceReplicaCnt:           n.SourceReplicaCnt,
-		SourceReplicasMap:          n.SourceReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
-		SourceReplicasTranslateMap: n.SourceReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
-		SourceVbReplicasMember:     base.CloneUint16List(n.SourceVbReplicasMember),
-		SourceStorageBackend:       n.SourceStorageBackend,
+		NumberOfSourceNodes:           n.NumberOfSourceNodes,
+		SourceVBMap:                   n.SourceVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
+		KvVbMap:                       n.KvVbMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
+		DcpStatsMap:                   n.DcpStatsMap.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
+		DcpStatsMapLegacy:             n.DcpStatsMapLegacy.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
+		HighSeqnoMap:                  n.HighSeqnoMap.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
+		HighSeqnoMapLegacy:            n.HighSeqnoMapLegacy.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
+		SourceReplicaCnt:              n.SourceReplicaCnt,
+		SourceReplicasMap:             n.SourceReplicasMap.GreenClone(n.ObjPool.VbHostsMapPool.Get, n.ObjPool.StringSlicePool.Get),
+		SourceReplicasTranslateMap:    n.SourceReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
+		SourceVbReplicasMember:        base.CloneUint16List(n.SourceVbReplicasMember),
+		SourceStorageBackend:          n.SourceStorageBackend,
+		LocalBucketTopologyUpdateTime: n.LocalBucketTopologyUpdateTime,
 
 		TargetBucketUUID:           n.TargetBucketUUID,
 		TargetServerVBMap:          n.TargetServerVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
@@ -2003,4 +2006,8 @@ func (n *Notification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.Strin
 	} else {
 		return n.TargetReplicaCnt, n.TargetReplicasMap, n.TargetReplicasTranslateMap, n.TargetVbReplicasMember
 	}
+}
+
+func (n *Notification) GetLocalTopologyUpdatedTime() time.Time {
+	return n.LocalBucketTopologyUpdateTime
 }

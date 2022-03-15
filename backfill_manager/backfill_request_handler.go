@@ -92,6 +92,7 @@ type BackfillRequestHandler struct {
 	latestCachedSourceNotification    service_def.SourceNotification
 	latestCachedSourceNotificationMtx sync.RWMutex
 	latestVBs                         []uint16
+	latestVbsUpdatedTime              int64
 	getCompleteReq                    func() (interface{}, error)
 
 	lastPullMergeMtx  sync.RWMutex
@@ -317,7 +318,7 @@ func (b *BackfillRequestHandler) run() {
 				b.queuedResps = b.queuedResps[:0]
 			}
 		case notification := <-b.sourceBucketTopologyCh:
-			oldVBsList := b.getVBs()
+			oldVBsList := b.getVBs(false)
 			newKvVBMap := notification.GetSourceVBMapRO()
 			newVBList := newKvVBMap.GetSortedVBList()
 			// Don't raise backfill request if this is the first time getting a list of VBs, i.e. starting up
@@ -335,7 +336,9 @@ func (b *BackfillRequestHandler) run() {
 			b.latestCachedSourceNotification = notification.Clone(1).(service_def.SourceNotification)
 			kv_vb_map := b.latestCachedSourceNotification.GetSourceVBMapRO()
 			b.latestVBs = kv_vb_map.GetSortedVBList()
+			timeUpdated := b.latestCachedSourceNotification.GetLocalTopologyUpdatedTime()
 			b.latestCachedSourceNotificationMtx.Unlock()
+			atomic.StoreInt64(&b.latestVbsUpdatedTime, timeUpdated.UnixNano())
 		}
 	}
 }
@@ -433,13 +436,25 @@ func (b *BackfillRequestHandler) HandleVBTaskDone(vbno uint16) error {
 	return nil
 }
 
-func (b *BackfillRequestHandler) getVBs() []uint16 {
+func (b *BackfillRequestHandler) getVBs(getLatest bool) []uint16 {
+	if getLatest {
+		curTime := time.Now().UnixNano()
+		for curTime < atomic.LoadInt64(&b.latestVbsUpdatedTime) {
+			time.Sleep(1 * time.Second)
+		}
+	}
 	b.latestCachedSourceNotificationMtx.RLock()
 	defer b.latestCachedSourceNotificationMtx.RUnlock()
 	return b.latestVBs
 }
 
-func (b *BackfillRequestHandler) getVBsClone() []uint16 {
+func (b *BackfillRequestHandler) getVBsClone(getLatest bool) []uint16 {
+	if getLatest {
+		curTime := time.Now().UnixNano()
+		for curTime < atomic.LoadInt64(&b.latestVbsUpdatedTime) {
+			time.Sleep(1 * time.Second)
+		}
+	}
 	b.latestCachedSourceNotificationMtx.RLock()
 	defer b.latestCachedSourceNotificationMtx.RUnlock()
 	return base.CloneUint16List(b.latestVBs)
@@ -573,7 +588,7 @@ func (b *BackfillRequestHandler) checkIfReqIsOutdated(force bool, srcManifestId 
 
 func (b *BackfillRequestHandler) figureOutIfCkptExists(reqRO metadata.CollectionNamespaceMapping, seqnosMap map[uint16]uint64) bool {
 	var shouldSkipFirst = true
-	if b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(b.getVBsClone()) {
+	if b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTaskForVBs(b.getVBsClone(false)) {
 		b.pipelinesMtx.RLock()
 		pipeline, _ := b.getPipeline(common.BackfillPipeline)
 		if pipeline != nil && (pipeline.State() == common.Pipeline_Initial || pipeline.State() == common.Pipeline_Stopped) {
@@ -1016,7 +1031,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 }
 
 func (b *BackfillRequestHandler) getMaxSeqnosMapToBackfill() (map[uint16]uint64, []uint16, error) {
-	myVBs := b.getVBs()
+	myVBs := b.getVBs(true)
 	// When this is executing, the main pipeline is going to be shutting down and restarting
 	// Since the pipeline is restarting concurrently, and there's no way to get the exact
 	// pipeline shutdown/startup sequence, we need to do the following.
@@ -1166,33 +1181,6 @@ func (b *BackfillRequestHandler) GetRollbackTo0VBSpecificBackfillCb(vbno uint16,
 }
 
 func (b *BackfillRequestHandler) handleVBsDiff(added []uint16, removed []uint16) error {
-	if len(added) > 0 {
-		// TODO - MB-49736
-		backfillReqRaw, err := b.getCompleteReq()
-		if err != nil {
-			if err == base.ErrorNoBackfillNeeded {
-				err = nil
-			}
-			return err
-		}
-
-		if backfillReqRaw == nil {
-			// Should mean that nothing needs to be raised
-			return nil
-		}
-
-		internalDiffReq := internalVBDiffBackfillReq{
-			addedVBsList: added,
-			req:          backfillReqRaw,
-		}
-		go func() {
-			bgErr := b.handleBackfillRequestWithArgs(internalDiffReq, false)
-			if bgErr != nil {
-				b.logger.Errorf("HandleVBDiff for %v resulted in err %v", b.id, err)
-			}
-		}()
-	}
-
 	if len(removed) > 0 {
 		for _, vb := range removed {
 			b.registerVbForGC(vb)
@@ -1366,7 +1354,7 @@ func (b *BackfillRequestHandler) registerNonOwnedVBsForGC(req internalPeerBackfi
 		return
 	}
 
-	sortedVBs := b.getVBs()
+	sortedVBs := b.getVBs(false) // GC run will double-check VB ownership
 	taskVBs := req.backfillSpec.VBTasksMap.GetVBs()
 	for _, vbToCheck := range taskVBs {
 		if _, found := base.SearchVBInSortedList(vbToCheck, sortedVBs); !found {

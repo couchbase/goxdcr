@@ -191,7 +191,7 @@ function runTestCase {
 
 	# Make sure backfill pipeline only starts once for node C1P and a few times only for node C1 and not more than that
 	validateInternalLogWithInstance "C1" "$BACKFILL_START_MSG" $(($currentBackfillStartCntC1 + 3)) $(($currentBackfillStartCntC1 + 5))
-	validateInternalLogWithInstance "C1P" "$BACKFILL_START_MSG" $(($currentBackfillStartCntC1P + 2)) $(($currentBackfillStartCntC1P + 3))
+	validateInternalLogWithInstance "C1P" "$BACKFILL_START_MSG" $(($currentBackfillStartCntC1P + 1)) $(($currentBackfillStartCntC1P + 3))
 
 	grepForPanics
 

@@ -210,16 +210,8 @@ function runReplicationResume {
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")
 
-	# The msg below is displayed whenever a peer node pulls from this node
-	local checkCnt=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -v "backfill" | grep -c .)
-	# The acceptable count should be at least one more than current and less than twice the number of nodes
-	# Twice because it is possible for a node to do two pulls: one for main and one for a backfill pipeline, but
-	# backfill pipeline is not guaranteed
-	local expectedMax=$(((($curCkptsFoundDocsCnt + ${#CLUSTER_DEPENDENCY_MAP[@]})) * 2))
-	if (($checkCnt < $(($curCkptsFoundDocsCnt + 1)))) || (($checkCnt > $expectedMax)); then
-		echo "Found $checkCnt instances of $CKPT_FOUND_DOCS (minus backfill)... expecting > $curCkptsFoundDocsCnt and <= $expectedMax"
-		exit 1
-	fi
+	# Because of topology change, there could be an arbitrary number of pulls until pipeline stablizes
+	# No need to check number of pulls
 
 	foundDocCount=$(echo "$logs" | grep "$CKPT_FOUND_DOCS" | grep -cv " 0 ")
 	if (($foundDocCount == 0)); then
@@ -243,7 +235,7 @@ function runReplicationResume {
 
 	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		local oneNodeCurRetrievedCkptCnt="${curDepsCkptRetrievedCntMap[$dependentClusterName]}"
-		validateInternalLogWithInstance "$dependentNodeName" "$CKPT_RETRIEVED" $(($oneNodeCurRetrievedCkptCnt + 1)) $(($oneNodeCurRetrievedCkptCnt + 2))
+		validateInternalLogWithInstance "$dependentNodeName" "$CKPT_RETRIEVED" $(($oneNodeCurRetrievedCkptCnt + 1)) $(($oneNodeCurRetrievedCkptCnt + 3))
 	done
 
 	# Backfill pipeline from C1 could already be finished but the backfill tasks still exist
