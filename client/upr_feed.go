@@ -112,13 +112,14 @@ const (
 )
 
 type UprFeatures struct {
-	Xattribute          bool
-	CompressionType     int
-	IncludeDeletionTime bool
-	DcpPriority         PriorityType
-	EnableExpiry        bool
-	EnableStreamId      bool
-	EnableOso           bool
+	Xattribute           bool
+	CompressionType      int
+	IncludeDeletionTime  bool
+	DcpPriority          PriorityType
+	EnableExpiry         bool
+	EnableStreamId       bool
+	EnableOso            bool
+	SendStreamEndOnClose bool
 }
 
 /**
@@ -291,6 +292,9 @@ type UprFeed struct {
 	initStreamTypeOnce sync.Once
 
 	transmitCloseOnce sync.Once
+
+	closeStreamRequested map[uint16]bool
+	closeStreamReqMtx    sync.RWMutex
 }
 
 // Exported interface - to allow for mocking
@@ -389,14 +393,15 @@ func (mc *Client) NewUprFeed() (*UprFeed, error) {
 
 func (mc *Client) NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error) {
 	feed := &UprFeed{
-		conn:              mc,
-		closer:            make(chan bool, 1),
-		vbstreams:         make(map[uint16]*UprStream),
-		transmitCh:        make(chan *gomemcached.MCRequest),
-		transmitCl:        make(chan bool),
-		ackByClient:       ackByClient,
-		collectionEnabled: mc.CollectionEnabled(),
-		streamsType:       UninitializedStream,
+		conn:                 mc,
+		closer:               make(chan bool, 1),
+		vbstreams:            make(map[uint16]*UprStream),
+		transmitCh:           make(chan *gomemcached.MCRequest),
+		transmitCl:           make(chan bool),
+		ackByClient:          ackByClient,
+		collectionEnabled:    mc.CollectionEnabled(),
+		streamsType:          UninitializedStream,
+		closeStreamRequested: map[uint16]bool{},
 	}
 
 	feed.negotiator.initialize()
@@ -619,6 +624,20 @@ func (feed *UprFeed) uprOpen(name string, sequence uint32, bufSize uint32, featu
 		activatedFeatures.EnableOso = true
 	}
 
+	if features.SendStreamEndOnClose {
+		rq := &gomemcached.MCRequest{
+			Opcode: gomemcached.UPR_CONTROL,
+			Key:    []byte("send_stream_end_on_client_close_stream"),
+			Body:   []byte("true"),
+			Opaque: getUprOpenCtrlOpaque(),
+		}
+		err = sendMcRequestSync(feed.conn, rq)
+		if err != nil {
+			return
+		}
+		activatedFeatures.SendStreamEndOnClose = true
+	}
+
 	// everything is ok so far, set upr feed to open state
 	feed.activatedFeatures = activatedFeatures
 	feed.setOpen()
@@ -726,6 +745,9 @@ func (feed *UprFeed) CloseStream(vbno, opaqueMSB uint16) error {
 
 	feed.writeToTransmitCh(closeStream)
 
+	feed.closeStreamReqMtx.Lock()
+	feed.closeStreamRequested[vbno] = true
+	feed.closeStreamReqMtx.Unlock()
 	return nil
 }
 
@@ -737,13 +759,15 @@ func (feed *UprFeed) GetError() error {
 	return feed.Error
 }
 
+const StreamNotRequested = "has not been requested"
+
 func (feed *UprFeed) validateCloseStream(vbno uint16) error {
 	feed.muVbstreams.RLock()
 	nilVbStream := feed.vbstreams[vbno] == nil
 	feed.muVbstreams.RUnlock()
 
 	if nilVbStream && (feed.negotiator.getStreamsCntFromMap(vbno) == 0) {
-		return fmt.Errorf("Stream for vb %d has not been requested", vbno)
+		return fmt.Errorf("Stream for vb %d %v", vbno, StreamNotRequested)
 	}
 
 	return nil
@@ -890,7 +914,7 @@ loop:
 					Opcode: pkt.Opcode,
 					Cas:    pkt.Cas,
 					Opaque: pkt.Opaque,
-					Status: gomemcached.Status(pkt.VBucket),
+					Status: gomemcached.Status(pkt.VBucket), // ????? why??
 					Extras: pkt.Extras,
 					Key:    pkt.Key,
 					Body:   pkt.Body,
@@ -922,7 +946,10 @@ loop:
 					uprStats.TotalMutation++
 
 				case gomemcached.UPR_STREAMEND:
-					if stream == nil {
+					feed.closeStreamReqMtx.RLock()
+					closeStreamRequested := feed.closeStreamRequested[vb]
+					feed.closeStreamReqMtx.RUnlock()
+					if stream == nil && (!closeStreamRequested && !feed.activatedFeatures.SendStreamEndOnClose) {
 						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 						break loop
 					}
@@ -951,7 +978,10 @@ loop:
 					event = makeUprEvent(pkt, stream, bytes)
 
 				case gomemcached.UPR_CLOSESTREAM:
-					if stream == nil {
+					feed.closeStreamReqMtx.RLock()
+					closeStreamRequested := feed.closeStreamRequested[vb]
+					feed.closeStreamReqMtx.RUnlock()
+					if stream == nil && (!closeStreamRequested && !feed.activatedFeatures.SendStreamEndOnClose) {
 						logging.Infof("Stream not found for vb %d: %#v", vb, pkt)
 						break loop
 					}

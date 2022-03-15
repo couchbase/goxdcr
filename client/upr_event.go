@@ -96,8 +96,6 @@ type VBSeqnos [][2]uint64
 func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFromDCP int) *UprEvent {
 	event := &UprEvent{
 		Opcode:       rq.Opcode,
-		VBucket:      stream.Vbucket,
-		VBuuid:       stream.Vbuuid,
 		Value:        rq.Body,
 		Cas:          rq.Cas,
 		ExtMeta:      rq.ExtMeta,
@@ -107,7 +105,13 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFrom
 		CollectionId: math.MaxUint32,
 	}
 
-	event.PopulateFieldsBasedOnStreamType(rq, stream.StreamType)
+	if stream != nil {
+		event.VBucket = stream.Vbucket
+		event.VBuuid = stream.Vbuuid
+		event.PopulateFieldsBasedOnStreamType(rq, stream.StreamType)
+	} else {
+		event.VBucket = vbOpaque(rq.Opaque)
+	}
 
 	// set AckSize for events that need to be acked to DCP,
 	// i.e., events with CommandCodes that need to be buffered in DCP
