@@ -350,13 +350,17 @@ type DcpNozzle struct {
 
 	collectionEnabled uint32
 	// If backfill pipeline, then could be passed in a vb task map
-	specificVBTasks *metadata.VBTasksMapType
+	specificVBTasks   *metadata.VBTasksMapType
+	specificVBTaskLen int // cached for quick look up
 
 	// Datapools for reusing memory
 	wrappedUprPool          utilities.WrappedUprPoolIface
 	collectionNamespacePool utilities.CollectionNamespacePoolIface
 
-	endSeqnoForDcp map[uint16]*base.SeqnoWithLock
+	endSeqnoForDcp                map[uint16]*base.SeqnoWithLock // The last seqno that we have received from DCP
+	backfillTaskEndSeqno          map[uint16]*base.SeqnoWithLock // seqno supposed to end for a VB task
+	backfillTaskStreamCloseSent   map[uint16]*uint32
+	backfillTaskStreamEndReceived map[uint16]*uint32
 
 	osoRequested           bool
 	getHighSeqnoOneAtATime chan bool
@@ -407,6 +411,9 @@ func NewDcpNozzle(id string,
 		finch:                          make(chan bool),
 		devInjectionBackfillRollbackVb: -1,
 		devInjectionMainRollbackVb:     -1,
+		backfillTaskEndSeqno:           make(map[uint16]*base.SeqnoWithLock),
+		backfillTaskStreamCloseSent:    make(map[uint16]*uint32),
+		backfillTaskStreamEndReceived:  make(map[uint16]*uint32),
 	}
 
 	// Allow one caller the ability to execute
@@ -417,6 +424,11 @@ func NewDcpNozzle(id string,
 		dcp.vb_stream_status[vbno] = &streamStatusWithLock{lock: &sync.RWMutex{}, state: Dcp_Stream_NonInit}
 		dcp.endSeqnoForDcp[vbno] = base.NewSeqnoWithLock()
 		dcp.vbHighSeqnoMap[vbno] = base.NewSeqnoWithLock()
+		dcp.backfillTaskEndSeqno[vbno] = base.NewSeqnoWithLock()
+		var seqnoEndForVB uint32
+		dcp.backfillTaskStreamCloseSent[vbno] = &seqnoEndForVB
+		var streamEndReceived uint32
+		dcp.backfillTaskStreamEndReceived[vbno] = &streamEndReceived
 	}
 
 	dcp.composeUserAgent()
@@ -552,6 +564,7 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.EnableExpiry = true
 		uprFeatures.EnableOso = dcp.osoRequested
 		uprFeatures.EnableStreamId = false
+		uprFeatures.SendStreamEndOnClose = !dcp.isMainPipeline() && !dcp.osoRequested // nozzle could initiate streamClose
 		feed := dcp.getUprFeed()
 		if feed == nil {
 			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
@@ -644,6 +657,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	vbTasksRaw, exists := settings[DCP_VBTasksMap]
 	if exists {
 		dcp.specificVBTasks = vbTasksRaw.(*metadata.VBTasksMapType)
+		dcp.specificVBTaskLen = dcp.specificVBTasks.Len()
 		var atLeastOneMigrationTask bool
 		var allMigrationTasks bool
 
@@ -1036,7 +1050,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 				// Sent to the consumer to indicate that the producer has no more messages to stream for the specified vbucket.
 				// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/stream-end.md
 				vbno := m.VBucket
-				err = dcp.handleStreamEnd(vbno)
+				seqno := dcp.endSeqnoForDcp[vbno].GetSeqno()
+				err = dcp.handleStreamEnd(vbno, seqno)
 				if err != nil {
 					return err
 				}
@@ -1085,6 +1100,9 @@ func (dcp *DcpNozzle) processData() (err error) {
 						// raise event for statistics collection
 						dispatch_time := time.Since(start_time)
 						dcp.RaiseEvent(common.NewEvent(common.DataProcessed, m, dcp, nil /*derivedItems*/, dispatch_time.Seconds()*1000000 /*otherInfos*/))
+						if !dcp.isMainPipeline() && !dcp.osoRequested && m.Seqno > dcp.backfillTaskEndSeqno[m.VBucket].GetSeqno() {
+							dcp.sendStreamCloseIfNecessary(m.VBucket)
+						}
 					case mc.UPR_SNAPSHOT:
 						dcp.RaiseEvent(common.NewEvent(common.SnapshotMarkerReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 					default:
@@ -1118,18 +1136,20 @@ func (dcp *DcpNozzle) performRollback(vbno uint16, rollbackseq uint64) error {
 	return nil
 }
 
-func (dcp *DcpNozzle) handleStreamEnd(vbno uint16) error {
+func (dcp *DcpNozzle) handleStreamEnd(vbno uint16, seqno uint64) error {
 	var err error
 	err_streamend := fmt.Errorf("%v stream for vb=%v is closed by producer", dcp.Id(), vbno)
-	dcp.Logger().Infof("%v: seqno: %v %v", dcp.Id(), dcp.endSeqnoForDcp[vbno].GetSeqno(), err_streamend)
+	dcp.Logger().Infof("%v: seqno: %v %v", dcp.Id(), seqno, err_streamend)
 	if dcp.vbStreamEndIsOk(vbno) {
 		err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
-		startTs, getTsErr := dcp.getTS(vbno, true)
-		if getTsErr == nil && dcp.endSeqnoForDcp[vbno].GetSeqno() == startTs.Seqno {
-			// The streamRequest sent a same start and end and so no data was transferred
-			go dcp.RaiseEvent(common.NewEvent(common.StreamingBypassed, vbno, dcp, nil, nil))
-		} else {
-			go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
+		if dcp.vbStreamEndShouldRaiseEvt(vbno) {
+			startTs, getTsErr := dcp.getTS(vbno, true)
+			if getTsErr == nil && startTs != nil && seqno == startTs.Seqno {
+				// The streamRequest sent a same start and end and so no data was transferred
+				go dcp.RaiseEvent(common.NewEvent(common.StreamingBypassed, vbno, dcp, nil, nil))
+			} else {
+				go dcp.RaiseEvent(common.NewEvent(common.StreamingEnd, vbno, dcp, nil, nil))
+			}
 		}
 	} else {
 		stream_status, err := dcp.GetStreamState(vbno)
@@ -1461,6 +1481,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 		// close the connection. Mark the endSeqno here first to check if this is the case
 		// Update: streamEnd will be sent but there will be no data, so still need to set endSeqnoForDcp for bypass check
 		dcp.endSeqnoForDcp[vbno].SetSeqno(seqEnd)
+		dcp.backfillTaskEndSeqno[vbno].SetSeqno(seqEnd)
 	}
 
 	dcp.Logger().Debugf("%v starting vb stream for vb=%v, version=%v collectionEnabled=%v endSeqno=%v\n", dcp.Id(), vbno, version, dcp.CollectionEnabled(), seqEnd)
@@ -2009,7 +2030,7 @@ func (dcp *DcpNozzle) GetOSOSeqnoRaiser() func(vbno uint16, seqno uint64) {
 }
 
 func (dcp *DcpNozzle) isMainPipeline() bool {
-	return dcp.specificVBTasks.IsNil() || dcp.specificVBTasks.Len() == 0
+	return dcp.specificVBTasks.IsNil() || dcp.specificVBTaskLen == 0
 }
 
 func (dcp *DcpNozzle) getHighSeqnosIfNecessary(vbnos []uint16) error {
@@ -2117,4 +2138,38 @@ func (dcp *DcpNozzle) initializeDevInjections(settings metadata.ReplicationSetti
 			dcp.devInjectionBackfillRollbackVb = intVal
 		}
 	}
+}
+
+func (dcp *DcpNozzle) sendStreamCloseIfNecessary(vbno uint16) {
+	streamState, _ := dcp.GetStreamState(vbno)
+	uprFeed := dcp.getUprFeed()
+	if uprFeed != nil && streamState == Dcp_Stream_Active &&
+		atomic.CompareAndSwapUint32(dcp.backfillTaskStreamCloseSent[vbno], 0, 1) {
+		// This could be raceful. It is possible that DCP has already ended the stream
+		// and an end event has been passed to the uprFeed's event channel but hasn't gotten to
+		// this DCP yet... and this portion of the code is trying to close it thinking that
+		// streamEnd has not been sent, even though producer already has no active vb stream anymore
+		// In this case, producer will send StreamNotRequested error, which is ignorable
+		err := dcp.uprFeed.CloseStream(vbno, dcp.vbHandshakeMap[vbno].getNewVersion())
+		if err != nil && !strings.Contains(err.Error(), mcc.StreamNotRequested) {
+			msg := fmt.Sprintf("Failed to close upr stream for vb %v, err=%v\n", vbno, err)
+			dcp.Logger().Errorf("%v %v", dcp.Id(), msg)
+			dcp.handleGeneralError(err)
+		}
+	}
+}
+
+func (dcp *DcpNozzle) vbStreamEndShouldRaiseEvt(vbno uint16) bool {
+	if dcp.isMainPipeline() || dcp.osoRequested {
+		return true
+	}
+
+	// Backfill pipeline with OSO disabled, means that DCP could initiate streamClose
+	// if DCP continues to send data past the requested seqnoEnd
+	// UprFeed may send one or more UPR_STREAMEND messages down and only the first
+	// one should be handled (because UprFeed modifies UPR_CLOSESTREAM opcode to be UPR_STREAMEND opcode)
+	if atomic.CompareAndSwapUint32(dcp.backfillTaskStreamEndReceived[vbno], 0, 1) {
+		return true
+	}
+	return false
 }
