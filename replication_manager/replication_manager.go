@@ -492,7 +492,7 @@ func (rm *replicationManager) init(
 		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc,
 		rm.bucketTopologySvc, rm.p2pMgr, rm.getReplStatus)
 
-	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell)
+	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell, rm.getBackfillMgr)
 	rm.pipelineMgr = pipelineMgrObj
 	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
 	rm.p2pMgr.SetPushReqMergerOnce(rm.pipelineMgr.HandlePeerCkptPush)

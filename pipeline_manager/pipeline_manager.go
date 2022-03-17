@@ -55,6 +55,7 @@ type PipelineManager struct {
 	uilog_svc              service_def.UILogSvc
 	collectionsManifestSvc service_def.CollectionsManifestSvc
 	backfillReplSvc        service_def.BackfillReplSvc
+	getBackfillMgr         func() service_def.BackfillMgrIface
 
 	once       sync.Once
 	logger     *log.CommonLogger
@@ -133,7 +134,7 @@ type PipelineMgrBackfillIface interface {
 	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error
 }
 
-func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, eventIdWell *int64) *PipelineManager {
+func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_def.ReplicationSpecSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, checkpoint_svc service_def.CheckpointsService, uilog_svc service_def.UILogSvc, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, collectionsManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, eventIdWell *int64, getBackfillMgr func() service_def.BackfillMgrIface) *PipelineManager {
 	if eventIdWell == nil {
 		// Possible for unit test
 		eventId := int64(-1)
@@ -152,6 +153,7 @@ func NewPipelineManager(factory common.PipelineFactory, repl_spec_svc service_de
 		collectionsManifestSvc: collectionsManifestSvc,
 		backfillReplSvc:        backfillReplSvc,
 		eventIdWell:            eventIdWell,
+		getBackfillMgr:         getBackfillMgr,
 	}
 	pipelineMgrRetVar.logger.Info("Pipeline Manager is constructed")
 
@@ -1199,28 +1201,31 @@ func (pipelineMgr *PipelineManager) HandlePeerCkptPush(fullTopic, sender string,
 		return opFuncErr
 	}
 
-	err := pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("pipelineMgr.HandlePeerCkptPushGetMergeManagers(%v)", fullTopic),
+	ckptErr := pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("pipelineMgr.HandlePeerCkptPushGetMergeManagers(%v)", fullTopic),
 		base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor, opFunc)
-	if err != nil {
-		return err
+	if ckptErr == nil {
+		ckptErr = mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
+		if ckptErr != nil {
+			pipelineMgr.logger.Errorf("%v - Unable to merge peer nodes ckpt %v", fullTopic, ckptErr)
+		}
 	}
 
-	err = mainPipelineCkptMgr.MergePeerNodesCkptInfo(dynamicEvt)
-	if err != nil {
-		return err
-	}
-
+	// Backfill replication can be sent while pipeline is paused, such as when mappings change
 	mainPipelineTopic, _ := common.DecomposeFullTopic(fullTopic)
 	settingsMap := make(metadata.ReplicationSettingsMap)
 	settingsMap[base.NameKey] = mainPipelineTopic
 	settingsMap[peerToPeer.PeriodicPushSenderKey] = sender
 	settingsMap[peerToPeer.MergeBackfillKey] = dynamicEvt
-	err = backfillMgrSvc.UpdateSettings(settingsMap)
-	if err != nil {
-		return err
+	if backfillMgrSvc == nil {
+		backfillMgrSvc = pipelineMgr.getBackfillMgr().GetPipelineSvc()
 	}
+	backfillMergeErr := backfillMgrSvc.UpdateSettings(settingsMap)
 
-	return nil
+	if ckptErr == nil && backfillMergeErr == nil {
+		return nil
+	} else {
+		return fmt.Errorf("%v - ckptMergeErr %v backfillMergeErr %v", fullTopic, ckptErr, backfillMergeErr)
+	}
 }
 
 func (pipelineMgr *PipelineManager) handlePeerCkptGetMergeManagers(fullTopic string) (pipeline_svc.CheckpointMgrSvc, common.PipelineService, error) {

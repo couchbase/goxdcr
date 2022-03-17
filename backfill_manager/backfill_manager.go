@@ -714,7 +714,9 @@ func (b *BackfillMgr) GetExplicitMappingChangeHandler(specId string, internalSpe
 	}
 
 	errCallback := func(err error, cbCalled bool) {
-		// Do nothing, because callback above will retry if needed
+		b.logger.Errorf("%v - backfill raise and push due to explicit mapping change had error %v."+
+			" Do not rebalance the node out of the cluster until the backfill raise and push is successful "+
+			"otherwise it could likely cause data loss because tasks is not pushed successfully in time", specId, err)
 	}
 
 	return callback, errCallback

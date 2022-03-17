@@ -39,6 +39,8 @@ type P2PManager interface {
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 
 	SetPushReqMergerOnce(pm func(fullTopic, sender string, req interface{}) error)
+
+	RequestImmediateCkptBkfillPush(replicationId string) error
 }
 
 type VBMasterCheck interface {
@@ -713,4 +715,8 @@ func (p *P2PManagerImpl) getPushReqMerger() func(string, string, interface{}) er
 
 func (p *P2PManagerImpl) waitForMergerToBeSet() {
 	<-p.mergerSetCh
+}
+
+func (p *P2PManagerImpl) RequestImmediateCkptBkfillPush(replicationId string) error {
+	return p.replicator.RequestImmediatePush(replicationId)
 }

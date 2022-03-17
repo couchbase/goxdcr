@@ -138,9 +138,14 @@ function runTestCase {
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1
-
 	echo "Sleeping 120 seconds for topology change detector to kick in"
 	sleep 120
+
+	# Run resume so at least there's some transfer or ckpts and throughSeqno calculation
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 20 seconds for resume to finish"
+	sleep 20
+	pauseReplication "C1" "B0" "C2" "B1"
 
 	echo "Changing explicit mapping - new target collection should receive backfill"
 	setReplicationSettings "C1" "B0" "C2" "B1" 'colMappingRules={"S1.col1":"S3.col2"}' 'collectionsExplicitMapping=true'

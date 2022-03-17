@@ -89,7 +89,7 @@ func setupBoilerPlate() (*log.CommonLogger,
 
 	pipelineMock.On("SetPipelineStopCallback", mock.Anything).Return(nil)
 
-	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock, nil, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil)
+	pipelineMgr := NewPipelineManager(pipelineMock, replSpecSvcMock, xdcrTopologyMock, remoteClusterMock, nil, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil, nil)
 
 	// Some things needed for pipelinemgr
 	testTopic := "testTopic"

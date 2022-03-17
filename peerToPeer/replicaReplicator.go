@@ -28,6 +28,7 @@ type ReplicaReplicator interface {
 	HandleSpecCreation(spec *metadata.ReplicationSpecification)
 	HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification)
 	HandleSpecChange(oldSpec *metadata.ReplicationSpecification, newSpec *metadata.ReplicationSpecification)
+	RequestImmediatePush(replId string) error
 }
 
 type ReplicaReplicatorImpl struct {
@@ -102,6 +103,17 @@ func (r *ReplicaReplicatorImpl) HandleSpecCreation(newSpec *metadata.Replication
 
 	incomingInterval := newSpec.Settings.GetReplicateCkptInterval()
 	r.checkAndUpdateTicker(incomingInterval, 0)
+}
+
+func (r *ReplicaReplicatorImpl) GetAgent(specId string) (ReplicatorAgent, error) {
+	r.agentMapMtx.RLock()
+	defer r.agentMapMtx.RUnlock()
+
+	agent, found := r.agentMap[specId]
+	if !found {
+		return nil, base.ErrorNotFound
+	}
+	return agent, nil
 }
 
 // oldSpecDuration was the value of a spec changed or deleted... otherwise 0 if this fn is being called as part of spec creation
@@ -258,6 +270,24 @@ func (r *ReplicaReplicatorImpl) pullAndSend() error {
 	return r.sendReqFunc(toSendMap)
 }
 
+func (r *ReplicaReplicatorImpl) pullAndSendSpecific(replId string) error {
+	populateMap, err := r.populateInformationFromOneAgent(replId)
+	if err != nil {
+		return err
+	}
+	if len(populateMap) == 0 {
+		r.logger.Warnf("PullAndSendSpecific(%v) called but nothing is there to send", replId)
+		return nil
+	}
+
+	toSendMap, errMap := r.reOrganizePopulateMap(populateMap)
+	if len(errMap) > 0 {
+		return errors.New(base.FlattenErrorMap(errMap))
+	}
+
+	return r.sendReqFunc(toSendMap)
+}
+
 func (r *ReplicaReplicatorImpl) populateInformationFromAgents() map[*metadata.ReplicationSpecification]*VBPeriodicReplicateReq {
 	populateMap := make(map[*metadata.ReplicationSpecification]*VBPeriodicReplicateReq)
 	r.agentMapMtx.RLock()
@@ -270,6 +300,21 @@ func (r *ReplicaReplicatorImpl) populateInformationFromAgents() map[*metadata.Re
 	}
 	r.agentMapMtx.RUnlock()
 	return populateMap
+}
+
+func (r *ReplicaReplicatorImpl) populateInformationFromOneAgent(replId string) (map[*metadata.ReplicationSpecification]*VBPeriodicReplicateReq, error) {
+	agent, err := r.GetAgent(replId)
+	if err != nil {
+		return nil, err
+	}
+
+	specClone, infoToSerialize, err := agent.GetAndClearInfoToReplicate()
+	if err != nil {
+		return nil, err
+	}
+	populateMap := make(map[*metadata.ReplicationSpecification]*VBPeriodicReplicateReq)
+	populateMap[specClone] = infoToSerialize
+	return populateMap, nil
 }
 
 func (r *ReplicaReplicatorImpl) reOrganizePopulateMap(specToReqMap map[*metadata.ReplicationSpecification]*VBPeriodicReplicateReq) (PeersVBPeriodicReplicateReqs, base.ErrorMap) {
@@ -310,11 +355,25 @@ func (r *ReplicaReplicatorImpl) reOrganizePopulateMap(specToReqMap map[*metadata
 	return peerNodeToRequestListMap, errMap
 }
 
+func (r *ReplicaReplicatorImpl) RequestImmediatePush(replId string) error {
+	agent, err := r.GetAgent(replId)
+	if err != nil {
+		return err
+	}
+	fetchErr := agent.RequestImmediateDataGather()
+	if fetchErr != nil {
+		return fetchErr
+	}
+
+	return r.pullAndSendSpecific(replId)
+}
+
 type ReplicatorAgent interface {
 	Start()
 	Stop()
 	SetUpdatedSpecAsync(spec *metadata.ReplicationSpecification, cbFunc func())
 	GetAndClearInfoToReplicate() (*metadata.ReplicationSpecification, *VBPeriodicReplicateReq, error)
+	RequestImmediateDataGather() error
 }
 
 type ReplicatorAgentImpl struct {
@@ -335,8 +394,9 @@ type ReplicatorAgentImpl struct {
 	internalId    string
 	bucketSvcId   string
 
-	finCh    chan bool
-	reloadCh chan agentReloadPair
+	finCh            chan bool
+	reloadCh         chan agentReloadPair
+	immediateFetchCh chan chan error
 
 	latestInfoMtx sync.Mutex
 	latestInfo    *VBPeriodicReplicateReq
@@ -373,6 +433,7 @@ func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.Com
 		internalId:             internalId,
 		sourceBucketTopologyCh: make(chan service_def.SourceNotification, base.BucketTopologyWatcherChanLen),
 		bucketTopologySvc:      bucketTopologySvc,
+		immediateFetchCh:       make(chan chan error),
 	}
 }
 
@@ -454,19 +515,35 @@ func (a *ReplicatorAgentImpl) run() {
 				a.logger.Infof("Ckpt push for replication %v is paused - skipping...", a.specId)
 				break
 			}
-
-			replicateReq, fetchErr := a.FetchLatestReplicationsInfo()
+			fetchErr := a.fetchAndCacheLatestReplInfo()
 			if fetchErr != nil {
 				a.logger.Errorf("Fetching replication %v for ckpt push had err %v - skipping...", a.specId, fetchErr)
 				// Try again next time
-				continue
 			}
-			a.latestInfoMtx.Lock()
-			a.latestInfo = replicateReq
-			a.latestInfoMtx.Unlock()
+		case respCh := <-a.immediateFetchCh:
+			fetchErr := a.fetchAndCacheLatestReplInfo()
+			if fetchErr != nil {
+				a.logger.Errorf("Immediate Fetching replication %v for ckpt push had err %v", a.specId, fetchErr)
+			}
+			select {
+			case respCh <- fetchErr:
+			case <-a.finCh:
+				break
+			}
 		}
 	}
 
+}
+
+func (a *ReplicatorAgentImpl) fetchAndCacheLatestReplInfo() error {
+	replicateReq, fetchErr := a.FetchLatestReplicationsInfo()
+	if fetchErr != nil {
+		return fetchErr
+	}
+	a.latestInfoMtx.Lock()
+	a.latestInfo = replicateReq
+	a.latestInfoMtx.Unlock()
+	return nil
 }
 
 func (a *ReplicatorAgentImpl) getVBsListClone() []uint16 {
@@ -610,4 +687,19 @@ func (a *ReplicatorAgentImpl) GetAndClearInfoToReplicate() (*metadata.Replicatio
 	}
 	a.latestInfoMtx.Unlock()
 	return specClone, retInfo, nil
+}
+func (a *ReplicatorAgentImpl) RequestImmediateDataGather() error {
+	replicatorStopErr := fmt.Errorf("Cannot requested gather because replicator agent is stopping")
+	respReady := make(chan error)
+	select {
+	case a.immediateFetchCh <- respReady:
+		select {
+		case err := <-respReady:
+			return err
+		case <-a.finCh:
+			return replicatorStopErr
+		}
+	case <-a.finCh:
+		return replicatorStopErr
+	}
 }
