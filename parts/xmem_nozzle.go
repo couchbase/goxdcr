@@ -624,7 +624,7 @@ type XmemNozzle struct {
 	counter_to_setback          uint64
 	counter_from_target         uint64
 	counter_waittime            uint64
-	counter_batches             int64
+	counterNumGetMeta           uint64
 	start_time                  time.Time
 	counter_resend              uint64
 	// counter of times LOCKED status is returned by KV
@@ -715,7 +715,7 @@ func NewXmemNozzle(id string,
 		counter_received:    0,
 		counter_ignored:     0,
 		counter_waittime:    0,
-		counter_batches:     0,
+		counterNumGetMeta:   0,
 		topic:               topic,
 		source_cr_mode:      source_cr_mode,
 		sourceBucketName:    sourceBucketName,
@@ -1582,6 +1582,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 	reqs_bytes := [][]byte{}
 	// Counts the number of requests that will fit into each req_bytes slice
 	numOfReqsInReqBytesBatch := 0
+	totalNumOfReqsForGetMeta := 0
 
 	// establish a opaque based on the current time - and since getting meta doesn't utilize buffer buckets, feed it 0
 	opaque := base.GetOpaque(0, uint16(time.Now().UnixNano()))
@@ -1604,6 +1605,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
 			opaque++
 			numOfReqsInReqBytesBatch++
+			totalNumOfReqsForGetMeta++
 			sent_key_map[docKey] = true
 
 			if numOfReqsInReqBytesBatch > base.XmemMaxBatchSize {
@@ -1633,6 +1635,7 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 		}
 	}
 
+	atomic.AddUint64(&xmem.counterNumGetMeta, uint64(totalNumOfReqsForGetMeta))
 	//wait for receiver to finish
 	<-receiver_return_ch
 
@@ -3181,7 +3184,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v\n",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
@@ -3190,7 +3193,8 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			len(xmem.batches_ready_queue), atomic.LoadUint64(&xmem.counter_resend),
 			atomic.LoadUint64(&xmem.counter_locked),
 			xmem.client_for_getMeta.RepairCount(), xmem.client_for_setMeta.RepairCount(),
-			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve), atomic.LoadUint64(&xmem.counter_to_setback))
+			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve),
+			atomic.LoadUint64(&xmem.counter_to_setback), atomic.LoadUint64(&xmem.counterNumGetMeta))
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}
