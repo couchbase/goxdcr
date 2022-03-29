@@ -112,6 +112,88 @@ type CheckpointManager struct {
 	target_cluster_version int
 	utils                  utilities.UtilsIface
 	statsMgr               StatsMgrIface
+
+	// Before a pipeline starts, prevent checkpoints from being created
+	// If a ckpt is created before old ones are loaded, it could lead to incorrect
+	// resuming and potential data loss
+	checkpointAllowedHelper *checkpointSyncHelper
+}
+
+type checkpointSyncHelper struct {
+	checkpointAllowed bool
+	ongoingOps        []bool // mark false when starting, true once done
+
+	mtx sync.RWMutex
+	cv  sync.Cond
+}
+
+func (h *checkpointSyncHelper) setCheckpointAllowed() {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+
+	h.checkpointAllowed = true
+}
+
+func (h *checkpointSyncHelper) setCheckpointDisallowed() {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+
+	h.checkpointAllowed = false
+}
+
+func (h *checkpointSyncHelper) isCheckpointAllowed() bool {
+	h.mtx.RLock()
+	defer h.mtx.RUnlock()
+	return h.checkpointAllowed
+}
+
+func (h *checkpointSyncHelper) registerCkptOp(setVBTimestamp bool) (int, error) {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+
+	if !setVBTimestamp && !h.checkpointAllowed {
+		return -1, fmt.Errorf("cannot register ckptOp because checkpoint op is not currently allowed")
+	}
+
+	h.ongoingOps = append(h.ongoingOps, false)
+	return len(h.ongoingOps) - 1, nil
+}
+
+func (h *checkpointSyncHelper) markTaskDone(idx int) {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+
+	h.ongoingOps[idx] = true
+	canGC := true
+	for _, taskDone := range h.ongoingOps {
+		if !taskDone {
+			// At least one task is ongoing
+			canGC = false
+			break
+		}
+	}
+	if canGC {
+		// This was the only or last task, can clean up
+		h.ongoingOps = h.ongoingOps[:0]
+	}
+	h.cv.Broadcast()
+}
+
+func (h *checkpointSyncHelper) disableCkptAndWait() {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+
+	h.checkpointAllowed = false
+	for len(h.ongoingOps) > 0 {
+		// There are checkpoint ongoing
+		h.cv.Wait()
+	}
+}
+
+func newCheckpointSyncHelper() *checkpointSyncHelper {
+	helper := &checkpointSyncHelper{}
+	helper.cv.L = &helper.mtx
+	return helper
 }
 
 // Checkpoint Manager keeps track of one checkpointRecord per vbucket
@@ -177,6 +259,7 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		isTargetES:                isTargetES,
 		utils:                     utilsIn,
 		statsMgr:                  statsMgr,
+		checkpointAllowedHelper:   newCheckpointSyncHelper(),
 	}, nil
 }
 
@@ -470,12 +553,25 @@ func (ckmgr *CheckpointManager) Stop() error {
 }
 
 func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
+	if !ckmgr.isCheckpointAllowed() {
+		ckmgr.logger.Errorf("%v has not been started (or has been disabled) - checkpointing is skipped", ckmgr.pipeline.Topic())
+		return
+	}
+
 	spec, _ := ckmgr.rep_spec_svc.ReplicationSpec(ckmgr.pipeline.Topic())
 	if spec == nil {
 		// do not perform checkpoint if spec has been deleted
 		ckmgr.logger.Infof("Skipping checkpointing for pipeline %v before stopping since replication spec has been deleted", ckmgr.pipeline.Topic())
 		return
 	}
+
+	var opDoneIdx int
+	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(false)
+	if err != nil {
+		return
+	}
+	time.Sleep(100 * time.Millisecond)
+	defer ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
 
 	ckmgr.logger.Infof("Starting checkpointing for pipeline %v before stopping", ckmgr.pipeline.Topic())
 
@@ -607,7 +703,21 @@ func getDocsProcessedForReplication(topic string, vb_list []uint16, checkpoints_
  * The timestamps are to be consumed by dcp nozzle to determine the start point of dcp stream/replication via settings map (UpdateSettings).
  */
 func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
-	defer ckmgr.logger.Infof("%v Done with SetVBTimestamps", ckmgr.pipeline.Topic())
+	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(true)
+	if err != nil {
+		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, err))
+		return err
+	}
+
+	defer func() {
+		ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
+		ckmgr.checkpointAllowedHelper.setCheckpointAllowed()
+	}()
+
+	startTime := time.Now()
+	defer func() {
+		ckmgr.logger.Infof("%v Done with SetVBTimestamps (took %v)", ckmgr.pipeline.InstanceId(), time.Since(startTime))
+	}()
 	ckmgr.logger.Infof("Set start seqnos for pipeline %v...", ckmgr.pipeline.Topic())
 
 	listOfVbs := ckmgr.getMyVBs()
@@ -1020,6 +1130,18 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 
 // local API. supports periodical checkpoint operations
 func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.WaitGroup) {
+	if !ckmgr.isCheckpointAllowed() {
+		ckmgr.logger.Errorf("%v has not been started - checkpointing is skipped", ckmgr.pipeline.Topic())
+		return
+	}
+
+	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(false)
+	if err != nil {
+		ckmgr.logger.Errorf("%v (performCkpt) registerCkptOp failed - checkpointing is skipped", ckmgr.pipeline.Topic())
+		return
+	}
+	defer ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
+
 	ckmgr.logger.Infof("Start checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	defer ckmgr.logger.Infof("Done checkpointing for replication %v\n", ckmgr.pipeline.Topic())
 	// vbucketID -> ThroughSeqNumber
@@ -1044,6 +1166,13 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 
 }
 
+func (ckmgr *CheckpointManager) isCheckpointAllowed() bool {
+	ckmgr.checkpointAllowedHelper.mtx.RLock()
+	defer ckmgr.checkpointAllowedHelper.mtx.RUnlock()
+
+	return ckmgr.checkpointAllowedHelper.checkpointAllowed
+}
+
 func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-chan bool, wait_grp *sync.WaitGroup, time_to_wait time.Duration,
 	through_seqno_map map[uint16]uint64, high_seqno_and_vbuuid_map map[uint16][]uint64, xattr_seqno_map map[uint16]uint64, total_committing_time *int64) {
 
@@ -1053,6 +1182,18 @@ func (ckmgr *CheckpointManager) performCkpt_internal(vb_list []uint16, fin_ch <-
 	if time_to_wait != 0 {
 		interval_btwn_vb = time.Duration((time_to_wait.Seconds()/float64(len(vb_list)))*1000) * time.Millisecond
 	}
+
+	if !ckmgr.isCheckpointAllowed() {
+		ckmgr.logger.Errorf("%v checkpointing is disallowed - checkpointing is skipped", ckmgr.pipeline.Topic())
+		return
+	}
+
+	opDoneIdx, err := ckmgr.checkpointAllowedHelper.registerCkptOp(false)
+	if err != nil {
+		ckmgr.logger.Errorf("%v (performCkpt_internal) registerCkptOp failed - checkpointing is skipped", ckmgr.pipeline.Topic())
+		return
+	}
+	defer ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
 
 	ckmgr.logger.Infof("Checkpointing for replication %v, vb_list=%v, time_to_wait=%v, interval_btwn_vb=%v sec\n", ckmgr.pipeline.Topic(), vb_list, time_to_wait, interval_btwn_vb.Seconds())
 	err_map := make(map[uint16]error)
