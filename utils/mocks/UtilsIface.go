@@ -469,6 +469,20 @@ func (_m *UtilsIface) FilterExpressionMatchesDoc(expression string, docId string
 	return r0, r1
 }
 
+// GetAuthMode provides a mock function with given fields: username, clientCertificate, path, authMech
+func (_m *UtilsIface) GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech) base.UserAuthMode {
+	ret := _m.Called(username, clientCertificate, path, authMech)
+
+	var r0 base.UserAuthMode
+	if rf, ok := ret.Get(0).(func(string, []byte, string, base.HttpAuthMech) base.UserAuthMode); ok {
+		r0 = rf(username, clientCertificate, path, authMech)
+	} else {
+		r0 = ret.Get(0).(base.UserAuthMode)
+	}
+
+	return r0
+}
+
 // GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)

@@ -52,7 +52,6 @@ const XDCRPrefix = "xdcr"
 const PoolsPath = "/pools"
 const DefaultPoolPath = "/pools/default"
 const DefaultPoolBucketsPath = "/pools/default/buckets/"
-const NodesPath = "/pools/nodes"
 const NodesSelfPath = "/nodes/self"
 const SSLPortsPath = "/nodes/self/xdcrSSLPorts"
 const NodeServicesPath = "/pools/default/nodeServices"
@@ -62,6 +61,9 @@ const DocsPath = "/docs/"
 const CollectionsManifestPath = "/scopes"
 const ScopesPath = "/scopes/"
 const CollectionsPath = "/collections/"
+
+// Streaming API paths. They are used for source clusters only
+const ObservePoolPath = "/poolsStreaming/default"
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"

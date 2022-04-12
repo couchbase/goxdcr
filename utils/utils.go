@@ -2115,6 +2115,26 @@ func (u *Utilities) queryRestApiWithScramShaAuth(
 
 }
 
+func (u *Utilities) GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech) base.UserAuthMode {
+	userAuthMode := base.UserAuthModeNone
+
+	if len(username) == 0 && len(clientCertificate) == 0 && path != base.SSLPortsPath {
+		// username and clientCertificate can be both empty only when
+		// 1. this is a local http call to the same node
+		// or 2. this is a call to /nodes/self/xdcrSSLPorts on target to retrieve ssl port for subsequent https calls
+		// treat case 1 separately, since we will need to set local user auth in http request
+		userAuthMode = base.UserAuthModeLocal
+	} else {
+		// for http calls to remote target, set username and password in http request header if
+		// 1. username has been provided
+		// and 2. scram sha authentication is not used
+		if len(username) != 0 && authMech != base.HttpAuthMechScramSha {
+			userAuthMode = base.UserAuthModeBasic
+		}
+	}
+	return userAuthMode
+}
+
 func (u *Utilities) prepareForRestCall(baseURL string,
 	path string,
 	preservePathEncoding bool,
@@ -2133,22 +2153,7 @@ func (u *Utilities) prepareForRestCall(baseURL string,
 	var l *log.CommonLogger = u.loggerForFunc(logger)
 	var ret_client *http.Client = client
 
-	userAuthMode := base.UserAuthModeNone
-
-	if len(username) == 0 && len(clientCertificate) == 0 && path != base.SSLPortsPath {
-		// username and clientCertificate can be both empty only when
-		// 1. this is a local http call to the same node
-		// or 2. this is a call to /nodes/self/xdcrSSLPorts on target to retrieve ssl port for subsequent https calls
-		// treat case 1 separately, since we will need to set local user auth in http request
-		userAuthMode = base.UserAuthModeLocal
-	} else {
-		// for http calls to remote target, set username and password in http request header if
-		// 1. username has been provided
-		// and 2. scram sha authentication is not used
-		if len(username) != 0 && authMech != base.HttpAuthMechScramSha {
-			userAuthMode = base.UserAuthModeBasic
-		}
-	}
+	userAuthMode := u.GetAuthMode(username, clientCertificate, path, authMech)
 
 	req, host, err := u.ConstructHttpRequest(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, l)
 	if err != nil {

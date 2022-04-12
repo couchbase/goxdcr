@@ -30,6 +30,7 @@ parts
 metadata
 metadata_svc
 service_impl
+streamApiWatcher
 utils
 )
 

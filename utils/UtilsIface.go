@@ -131,6 +131,7 @@ type UtilsIface interface {
 	StartDiagStopwatch(id string, threshold time.Duration) func()
 	StartDebugExec(id string, threshold time.Duration, debugFunc func()) func()
 	DumpStackTraceAfterThreshold(id string, threshold time.Duration, goroutines base.PprofLookupTypes) func()
+	GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech) base.UserAuthMode
 
 	/**
 	 * ------------------------
