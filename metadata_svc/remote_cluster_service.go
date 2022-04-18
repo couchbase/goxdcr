@@ -2040,7 +2040,7 @@ func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error 
 	manifestGetter, ok := agent.bucketManifestGetters[bucketName]
 	if !ok {
 		// Use TopologyChangeCheckInterval as min interval between pulls, while agent refreshes at a longer interval
-		manifestGetter = NewBucketManifestGetter(bucketName, agent, time.Duration(base.ManifestRefreshTgtInterval)*time.Second)
+		manifestGetter = NewBucketManifestGetter(bucketName, agent, time.Duration(base.ManifestRefreshTgtInterval)*time.Second, nil)
 		agent.bucketManifestGetters[bucketName] = manifestGetter
 	}
 
@@ -2105,7 +2105,7 @@ func (agent *RemoteClusterAgent) UnRegisterBucketRefresh(bucketName string) erro
 }
 
 // Implements CollectionsManifestOps interface
-func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string) (*metadata.CollectionsManifest, error) {
+func (agent *RemoteClusterAgent) CollectionManifestGetter(bucketName string, hasStoredManifest bool, oldManifestUid uint64, spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error) {
 	if atomic.LoadUint32(&agent.initDone) == 0 {
 		return nil, RefreshNotEnabledYet
 	}

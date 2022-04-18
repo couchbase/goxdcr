@@ -63,6 +63,7 @@ type SourceNotification interface {
 	GetHighSeqnosMap() base.HighSeqnosMapType
 	GetHighSeqnosMapLegacy() base.HighSeqnosMapType
 	GetSourceStorageBackend() string
+	GetSourceCollectionManifestUid() uint64
 	GetLocalTopologyUpdatedTime() time.Time
 }
 

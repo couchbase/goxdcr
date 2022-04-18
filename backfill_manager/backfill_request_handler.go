@@ -230,8 +230,11 @@ func (b *BackfillRequestHandler) run() {
 	case notification := <-b.sourceBucketTopologyCh:
 		b.latestCachedSourceNotificationMtx.Lock()
 		b.latestCachedSourceNotification = notification.Clone(1).(service_def.SourceNotification)
-		b.latestCachedSourceNotification = notification
+		kv_vb_map := b.latestCachedSourceNotification.GetKvVbMapRO()
+		b.latestVBs = kv_vb_map.GetSortedVBList()
+		timeUpdated := b.latestCachedSourceNotification.GetLocalTopologyUpdatedTime()
 		b.latestCachedSourceNotificationMtx.Unlock()
+		atomic.StoreInt64(&b.latestVbsUpdatedTime, timeUpdated.UnixNano())
 		notification.Recycle()
 	}
 

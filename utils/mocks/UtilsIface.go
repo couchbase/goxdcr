@@ -826,6 +826,27 @@ func (_m *UtilsIface) GetClusterUUIDFromURI(uri string) (string, error) {
 	return r0, r1
 }
 
+// GetCollectionManifestUidFromBucketInfo provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) GetCollectionManifestUidFromBucketInfo(bucketInfo map[string]interface{}) (uint64, error) {
+	ret := _m.Called(bucketInfo)
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) uint64); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetCollectionsManifest provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetCollectionsManifest(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)

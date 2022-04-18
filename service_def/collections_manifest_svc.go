@@ -80,7 +80,7 @@ type CollectionsManifestSvc interface {
 
 type CollectionsManifestOps interface {
 	// Interface agnostic of source or target to retrieve a manifests given a bucket name
-	CollectionManifestGetter(bucketName string) (*metadata.CollectionsManifest, error)
+	CollectionManifestGetter(bucketName string, hasStoredManifest bool, storedManifestUid uint64, spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error)
 }
 
 type CollectionsManifestAgentIface interface {

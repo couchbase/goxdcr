@@ -38,7 +38,8 @@ func TestClusterWatch(t *testing.T) {
 	assert := assert.New(t)
 	realUtils := realUtils.NewUtilities()
 	topSvc := setupMocksCWS()
-	watcher := NewStreamApiWatcher(base.ObservePoolPath, topSvc, realUtils, log.NewLogger("testStreamApi", log.DefaultLoggerContext))
+
+	watcher := NewStreamApiWatcher(base.ObservePoolPath, topSvc, realUtils, nil, log.NewLogger("testStreamApi", log.DefaultLoggerContext))
 	watcher.Start()
 	nodesInfo := watcher.GetResult()
 	assert.NotNil(nodesInfo)
@@ -61,8 +62,8 @@ func TestBucketWatch(t *testing.T) {
 	assert := assert.New(t)
 	realUtils := realUtils.NewUtilities()
 	topSvc := setupMocksCWS()
-	watcher := NewStreamApiWatcher(base.ObserveBucketPath+"B1", topSvc, realUtils, log.NewLogger("testStreamApi", log.DefaultLoggerContext))
 
+	watcher := NewStreamApiWatcher(base.ObserveBucketPath+"B1", topSvc, realUtils, nil, log.NewLogger("testStreamApi", log.DefaultLoggerContext))
 	watcher.Start()
 	bucketInfo := watcher.GetResult()
 	assert.NotNil(bucketInfo)
@@ -82,6 +83,11 @@ func TestBucketWatch(t *testing.T) {
 	nodesList, ok := nodes.([]interface{})
 	assert.Equal(true, ok)
 	assert.Greater(len(nodesList), 0)
+	watcher.Stop()
+
+	manifestUid, err := realUtils.GetCollectionManifestUidFromBucketInfo(bucketInfo)
+	assert.Nil(err)
+	assert.GreaterOrEqual(manifestUid, uint64(0))
 	watcher.Stop()
 
 	// restart and stop watcher

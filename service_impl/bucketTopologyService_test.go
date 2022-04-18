@@ -65,7 +65,7 @@ func getCapability() metadata.Capability {
 	return metadata.UnitTestGetCollectionsCapability()
 }
 
-func getMockStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utilities.UtilsIface, logger *log.CommonLogger) streamApiWatcher.StreamApiWatcher {
+func getMockStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utilities.UtilsIface, callback func(), logger *log.CommonLogger) streamApiWatcher.StreamApiWatcher {
 	streamApi := &mockStream.StreamApiWatcher{}
 	bucketMap, _ := getBucketMap()
 	streamApi.On("Start").Return()
@@ -101,7 +101,7 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 		utilsFunc := args.Get(4).(utilities.ExponentialOpFunc)
 		utilsFunc()
 	}).Return(nil)
-
+	utils.On("GetCollectionManifestUidFromBucketInfo", mock.Anything).Return(uint64(0), nil)
 	// This way of mocking will allow utils.Mock to actually call the real utilities
 	// to parse the mocked input data, and store the data somewhere
 	// Then, each individual get functions will be called to return the appropriately parsed
@@ -241,6 +241,9 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	watcher2 := bts.getOrCreateLocalWatcher(spec2)
 	assert.NotNil(watcher2.Start())
 	assert.Equal(watcher1, watcher2)
+	// Simulate a streamApi callback to initialize watcher
+	func1 := bts.getStreamApiCallback(spec, watcher1)
+	func1()
 
 	// Register two specs sharing the same source bucket, same instance of watcher
 	specNotifyCh, err := bts.SubscribeToLocalBucketFeed(spec, "")
@@ -287,7 +290,7 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	}
 
 	// The next iteration should be the same
-	time.Sleep(100 * time.Millisecond)
+	func1() // Do another stream API callback so there is another notification
 	notification1New := <-specNotifyCh
 	srcVBMap1New := notification1New.GetSourceVBMapRO()
 	assert.Equal(srcVBMap1New, *watcher.latestCached.SourceVBMap)
@@ -314,8 +317,8 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 }
 
 func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
-	fmt.Println("============== Test case start: TestBucketTopologyServiceRegister =================")
-	defer fmt.Println("============== Test case end: TestBucketTopologyServiceRegister =================")
+	fmt.Println("============== Test case start: TestBucketTopologyServiceWithLodedSpecs =================")
+	defer fmt.Println("============== Test case end: TestBucketTopologyServiceWithLodedSpecs =================")
 	assert := assert.New(t)
 
 	remClusterSvc, utils, xdcrCompTopologySvc, utilsReal, replSpecSvc, mcClient, securitySvc := setupBTSBoilerPlate()
@@ -335,6 +338,8 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	watcherCnt := bts.srcBucketWatchersCnt[spec.SourceBucketName]
 	watcher2Cnt := bts.srcBucketWatchersCnt[spec2.SourceBucketName]
 	watcher := bts.srcBucketWatchers[spec.SourceBucketName]
+	func1 := bts.getStreamApiCallback(spec, watcher)
+	func1()
 	bts.srcBucketWatchersMtx.RUnlock()
 	assert.Equal(2, watcherCnt)
 	assert.Equal(2, watcher2Cnt)
@@ -377,6 +382,9 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	watcher2 := bts.getOrCreateLocalWatcher(spec2)
 	assert.NotNil(watcher2.Start())
 	assert.Equal(watcher1, watcher2)
+	// Simulate a streamApi callback to initialize watcher
+	func1 := bts.getStreamApiCallback(spec, watcher1)
+	func1()
 
 	_, _, err = bts.SubscribeToLocalBucketHighSeqnosFeed(spec, "sub1", 110*time.Millisecond)
 	assert.Nil(err)
@@ -479,6 +487,9 @@ func TestBucketTopologyWatcherGC(t *testing.T) {
 	customPruneWindow := 250 * time.Millisecond
 	watcher1.gcPruneWindow = customPruneWindow
 	assert.Nil(watcher1.Start())
+	// Simulate a streamApi callback to initialize watcher
+	func1 := bts.getStreamApiCallback(spec, watcher1)
+	func1()
 	// Stop the pull routine and manually hack around to see if GC works
 	watcher1.Stop()
 

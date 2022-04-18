@@ -218,20 +218,20 @@ func main() {
 			os.Exit(1)
 		}
 
-		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)
-		collectionsManifestService, err := metadata_svc.NewCollectionsManifestService(remote_cluster_svc,
-			replication_spec_svc, uilog_svc, log.DefaultLoggerContext, utils, checkpointsService,
-			top_svc, manifestsService)
-		if err != nil {
-			fmt.Printf("Error starting collections manifest service. err=%v\n", err)
-			os.Exit(1)
-		}
-
 		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils,
 			base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc,
 			base.HealthCheckInterval, securitySvc, streamApiWatcher.GetStreamApiWatcher)
 		if err != nil {
 			fmt.Printf("Error starting bucket topology service. err=%v\n", err)
+			os.Exit(1)
+		}
+
+		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)
+		collectionsManifestService, err := metadata_svc.NewCollectionsManifestService(remote_cluster_svc,
+			replication_spec_svc, uilog_svc, log.DefaultLoggerContext, utils, checkpointsService,
+			top_svc, bucketTopologyService, manifestsService)
+		if err != nil {
+			fmt.Printf("Error starting collections manifest service. err=%v\n", err)
 			os.Exit(1)
 		}
 

@@ -24,9 +24,9 @@ func TestBucketManifestGetter(t *testing.T) {
 	assert := assert.New(t)
 
 	getterMock := &service_def.CollectionsManifestOps{}
-	getterMock.On("CollectionManifestGetter", mock.Anything).Run(func(args mock.Arguments) { time.Sleep(100 * time.Millisecond) }).Return(nil, fmt.Errorf("dummy"))
+	getterMock.On("CollectionManifestGetter", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) { time.Sleep(100 * time.Millisecond) }).Return(nil, fmt.Errorf("dummy"))
 
-	getter := NewBucketManifestGetter("TestBucketGetter", getterMock, 15*time.Second)
+	getter := NewBucketManifestGetter("TestBucketGetter", getterMock, 15*time.Second, nil)
 	assert.NotNil(getter)
 
 	// Background processes should get the same manifest

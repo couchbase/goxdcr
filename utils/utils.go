@@ -475,6 +475,21 @@ func (u *Utilities) BucketStorageBackend(bucketInfo map[string]interface{}) (str
 	return storageBackend, nil
 }
 
+func (u *Utilities) GetCollectionManifestUidFromBucketInfo(bucketInfo map[string]interface{}) (uint64, error) {
+	manifestUidObj, ok := bucketInfo[base.CollectionsManifestUidKey]
+	if !ok {
+		return 0, fmt.Errorf("Error looking up %v from bucketInfo %v", base.CollectionsManifestUidKey, bucketInfo)
+	}
+	manifestUidStr, ok := manifestUidObj.(string)
+	if !ok {
+		return 0, fmt.Errorf("%v is of wrong type. Expect string but got %v.", base.CollectionsManifestUidKey, reflect.TypeOf(manifestUidObj))
+	}
+	manifestUid, err := strconv.ParseUint(manifestUidStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("Error '%v' while parsing %v as manifest Uid.", err.Error(), manifestUidStr)
+	}
+	return manifestUid, nil
+}
 func (u *Utilities) ReplicationStatusNotFoundError(topic string) error {
 	return fmt.Errorf("Cannot find replication status for topic %v", topic)
 }

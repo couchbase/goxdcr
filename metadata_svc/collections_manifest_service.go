@@ -28,6 +28,7 @@ const sourceRefreshStr = "sourceRefresh"
 const targetRefreshStr = "targetRefresh"
 
 var defaultManifest metadata.CollectionsManifest = metadata.NewDefaultCollectionsManifest()
+var collectionManifestCounter uint32
 
 type CollectionsManifestService struct {
 	remoteClusterSvc        service_def.RemoteClusterSvc
@@ -39,6 +40,8 @@ type CollectionsManifestService struct {
 	loggerCtx               *log.LoggerContext
 	xdcrTopologySvc         service_def.XDCRCompTopologySvc
 	metakvSvc               service_def.ManifestsService
+	bucketTopologySvc       service_def.BucketTopologySvc
+	bucketSvcId             string
 	metadataChangeCallbacks []base.MetadataChangeHandlerCallback
 	metadataChangeCbMtx     sync.RWMutex
 
@@ -63,6 +66,7 @@ func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc
 	utilities utils.UtilsIface,
 	checkpointsSvc service_def.CheckpointsService,
 	xdcrTopologySvc service_def.XDCRCompTopologySvc,
+	bucketTopooSvc service_def.BucketTopologySvc,
 	metakvSvc service_def.ManifestsService) (*CollectionsManifestService, error) {
 	svc := &CollectionsManifestService{
 		remoteClusterSvc:       remoteClusterSvc,
@@ -70,6 +74,8 @@ func NewCollectionsManifestService(remoteClusterSvc service_def.RemoteClusterSvc
 		uiLogSvc:               uiLogSvc,
 		utilities:              utilities,
 		checkpointsSvc:         checkpointsSvc,
+		bucketTopologySvc:      bucketTopooSvc,
+		bucketSvcId:            fmt.Sprintf("colManifestSvc_%v", base.GetIterationId(&collectionManifestCounter)),
 		agentsMap:              make(map[string]*CollectionsManifestAgent),
 		srcBucketGetters:       make(map[string]*BucketManifestGetter),
 		srcBucketGettersRefCnt: make(map[string]uint64),
@@ -123,7 +129,7 @@ func (c *CollectionsManifestService) handleNewReplSpec(spec *metadata.Replicatio
 		// whereas previous instance of the source bucket has uid of > 0
 		// Replication spec service should gc the spec if this is the case, but there is a window
 		// when the manifest service may pull a manifest from a reincarnated bucket
-		getter = NewBucketManifestGetter(spec.SourceBucketName, c, time.Duration(base.ManifestRefreshSrcInterval)*time.Second)
+		getter = NewBucketManifestGetter(spec.SourceBucketName, c, time.Duration(base.ManifestRefreshSrcInterval)*time.Second, spec)
 		c.srcBucketGetters[spec.SourceBucketName] = getter
 	}
 	c.srcBucketGettersRefCnt[spec.SourceBucketName]++
@@ -131,7 +137,7 @@ func (c *CollectionsManifestService) handleNewReplSpec(spec *metadata.Replicatio
 
 	c.agentsMtx.Lock()
 	agent := NewCollectionsManifestAgent(spec.Id,
-		c.remoteClusterSvc, c.checkpointsSvc, c.logger, c.utilities, spec,
+		c.remoteClusterSvc, c.checkpointsSvc, c.bucketTopologySvc, c.logger, c.utilities, spec,
 		c, getter.GetManifest, c.metakvSvc, c.metadataChangeCb)
 	c.agentsMap[spec.Id] = agent
 	c.agentsMtx.Unlock()
@@ -165,8 +171,21 @@ func (c *CollectionsManifestService) handleDelReplSpec(oldSpec *metadata.Replica
 	c.srcBucketGetterMtx.Unlock()
 }
 
-// This implements the source side manifest getter
-func (c *CollectionsManifestService) CollectionManifestGetter(bucketName string) (*metadata.CollectionsManifest, error) {
+// This implements the source side manifest getter. It will not issue REST command if the manifest UID has not changed.
+func (c *CollectionsManifestService) CollectionManifestGetter(bucketName string, hasStoredManifest bool, storedManifestUid uint64, spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error) {
+	if hasStoredManifest {
+		// Check if the stored manifest UID is the same as the current one
+		if notificationCh, err := c.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, c.bucketSvcId); err == nil {
+			notification := <-notificationCh
+			currentManifestUid := notification.GetSourceCollectionManifestUid()
+			notification.Recycle()
+			c.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, c.bucketSvcId)
+			if currentManifestUid == storedManifestUid {
+				return nil, base.ErrorCollectionManifestNotChanged
+			}
+		}
+	}
+
 	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate,
 		clientKey, err := c.xdcrTopologySvc.MyCredentials()
 	if err != nil {
@@ -244,9 +263,9 @@ func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.Replicati
 
 	var agentIsTemporary bool
 	if agent == nil && specMayNotExist {
-		tempBucketManifestGetter := NewBucketManifestGetter(spec.SourceBucketName, c, time.Duration(base.ManifestRefreshSrcInterval)*time.Second)
+		tempBucketManifestGetter := NewBucketManifestGetter(spec.SourceBucketName, c, time.Duration(base.ManifestRefreshSrcInterval)*time.Second, spec)
 		agent = NewCollectionsManifestAgent(spec.Id,
-			c.remoteClusterSvc, c.checkpointsSvc, c.logger, c.utilities, spec,
+			c.remoteClusterSvc, c.checkpointsSvc, c.bucketTopologySvc, c.logger, c.utilities, spec,
 			c, tempBucketManifestGetter.GetManifest, c.metakvSvc, nil)
 		agent.SetTempAgent()
 		agentIsTemporary = true
@@ -396,7 +415,9 @@ type CollectionsManifestAgent struct {
 	metadataChangeCb  base.MetadataChangeHandlerCallback
 
 	// The target side manifest getter
-	remoteClusterSvc service_def.RemoteClusterSvc
+	remoteClusterSvc  service_def.RemoteClusterSvc
+	bucketTopologySvc service_def.BucketTopologySvc
+	bucketSvcId       string
 
 	remoteClusterRefPopulated uint32
 	remoteClusterRef          *metadata.RemoteClusterReference
@@ -434,11 +455,13 @@ type CollectionsManifestAgent struct {
 	tempAgent bool
 }
 
-func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
+func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, bucketTopoSvc service_def.BucketTopologySvc, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
 	manifestAgent := &CollectionsManifestAgent{
 		id:                     name,
 		remoteClusterSvc:       remoteClusterSvc,
 		checkpointsSvc:         checkpointsSvc,
+		bucketTopologySvc:      bucketTopoSvc,
+		bucketSvcId:            fmt.Sprintf("colManifestAgt_%v", base.GetIterationId(&collectionManifestCounter)),
 		logger:                 logger,
 		utilities:              utilities,
 		replicationSpec:        replicationSpec,
@@ -946,6 +969,13 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 	if a.isStopped() {
 		return nil, nil, parts.PartStoppedError
 	}
+	if len(a.sourceCache) > 0 {
+		// If sourceCache has been initialized, we only need to refresh if manifestUid has changed
+		currentManifestUid, err := a.getCurrentCollectionManifestUid()
+		if err == nil && currentManifestUid == a.lastSourcePull {
+			return nil, nil, base.ErrorCollectionManifestNotChanged
+		}
+	}
 
 	var manifest *metadata.CollectionsManifest
 	var ok bool
@@ -1000,6 +1030,17 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 	return
 }
 
+func (a *CollectionsManifestAgent) getCurrentCollectionManifestUid() (uint64, error) {
+	notificationCh, err := a.bucketTopologySvc.SubscribeToLocalBucketFeed(a.replicationSpec, a.bucketSvcId)
+	if err != nil {
+		return 0, err
+	}
+	defer a.bucketTopologySvc.UnSubscribeLocalBucketFeed(a.replicationSpec, a.bucketSvcId)
+	notification := <-notificationCh
+	defer notification.Recycle()
+	manifestUid := notification.GetSourceCollectionManifestUid()
+	return manifestUid, nil
+}
 func (a *CollectionsManifestAgent) GetTargetManifest() (*metadata.CollectionsManifest, error) {
 	if a.isStopped() {
 		return nil, parts.PartStoppedError

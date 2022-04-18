@@ -24,10 +24,11 @@ import (
  */
 type BucketManifestGetter struct {
 	bucketName         string
-	getterFunc         func(string) (*metadata.CollectionsManifest, error)
+	getterFunc         func(string, bool, uint64, *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error)
 	lastQueryTime      time.Time
 	lastStoredManifest *metadata.CollectionsManifest
 	checkInterval      time.Duration
+	spec               *metadata.ReplicationSpecification // Used to subscribe to bucketTopoSvc for bucketInfo
 
 	// Handling of multiple getters
 	callersMtx  sync.Mutex
@@ -42,12 +43,14 @@ const (
 	stateDoneRunning int = iota
 )
 
-func NewBucketManifestGetter(bucketName string, manifestOps service_def.CollectionsManifestOps, checkInterval time.Duration) *BucketManifestGetter {
+func NewBucketManifestGetter(bucketName string, manifestOps service_def.CollectionsManifestOps, checkInterval time.Duration,
+	spec *metadata.ReplicationSpecification) *BucketManifestGetter {
 	getter := &BucketManifestGetter{
 		bucketName:         bucketName,
 		getterFunc:         manifestOps.CollectionManifestGetter,
 		checkInterval:      checkInterval,
 		lastStoredManifest: &defaultManifest,
+		spec:               spec,
 	}
 	getter.callersCv = &sync.Cond{L: &getter.callersMtx}
 
@@ -57,7 +60,15 @@ func NewBucketManifestGetter(bucketName string, manifestOps service_def.Collecti
 func (s *BucketManifestGetter) runGetOp() {
 	if time.Now().Sub(s.lastQueryTime) > (s.checkInterval) {
 		// Prevent overwhelming the ns_server, only query every "checkInterval" seconds
-		manifest, err := s.getterFunc(s.bucketName)
+		var storedManifestUid uint64
+		var hasStoredManifest bool
+		if s.lastStoredManifest != nil {
+			storedManifestUid = s.lastStoredManifest.Uid()
+			hasStoredManifest = true
+		} else {
+			hasStoredManifest = false
+		}
+		manifest, err := s.getterFunc(s.bucketName, hasStoredManifest, storedManifestUid, s.spec)
 		if err == nil {
 			s.lastStoredManifest = manifest
 			s.lastQueryTime = time.Now()

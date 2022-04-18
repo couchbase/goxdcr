@@ -178,10 +178,6 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		b.srcBucketWatchers[spec.SourceBucketName] = watcher
 
 		intervalFuncMap := make(IntervalFuncMap)
-		topologyFunc := b.getLocalBucketTopologyUpdater(spec, watcher)
-		intervalFuncMap[TOPOLOGY] = make(IntervalInnerFuncMap)
-		intervalFuncMap[TOPOLOGY][b.refreshInterval] = topologyFunc
-
 		dcpStatsFunc := b.getDcpStatsUpdater(spec, watcher)
 		intervalFuncMap[DCPSTATSCHECK] = make(IntervalInnerFuncMap)
 		intervalFuncMap[DCPSTATSCHECK][b.healthCheckInterval] = dcpStatsFunc
@@ -200,10 +196,36 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		intervalFuncMap[HIGHSEQNOSLEGACY][defaultPipelineStatsInterval] = highSeqnoFuncLegacy
 
 		watcher.intervalFuncMap = intervalFuncMap
-		watcher.bucketWatcher = b.streamApiGetter(base.ObserveBucketPath+spec.SourceBucketName, b.xdcrCompTopologySvc, b.utils, b.logger)
+
+		callback := b.getStreamApiCallback(spec, watcher)
+		watcher.streamApi = b.streamApiGetter(base.ObserveBucketPath+spec.SourceBucketName, b.xdcrCompTopologySvc, b.utils, callback, b.logger)
 	}
 	b.srcBucketWatchersCnt[spec.SourceBucketName]++
 	return watcher
+}
+
+// This is called to update the watcher when StreamApi received a new result
+func (b *BucketTopologyService) getStreamApiCallback(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() {
+	return func() {
+		updater := b.getLocalBucketTopologyUpdater(spec, watcher)
+		err := updater()
+		if err != nil {
+			b.logger.Errorf("StreamApi update for local BucketTopologySvcWatcher for bucket %v resulted in err '%v'", spec.SourceBucketName, err.Error())
+			return
+		}
+		watcher.latestCacheMtx.RLock()
+		notification := watcher.latestCached.Clone(1).(*Notification) // Set to 1 by default, changed later
+		watcher.latestCacheMtx.RUnlock()
+		mutex := &watcher.topologyNotifyMtx
+		channelsMap := watcher.topologyNotifyChs
+		mutex.RLock()
+		defer mutex.RUnlock()
+		if len(channelsMap) == 0 {
+			notification.Recycle()
+			return
+		}
+		watcher.sendNotificationAfterUpdate(notification, channelsMap, TOPOLOGY)
+	}
 }
 
 func (b *BucketTopologyService) getDcpStatsUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
@@ -353,7 +375,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			watcher.logger.Errorf("%v bucket connStr error %v", spec.SourceBucketName, err)
 			return err
 		}
-		bucketInfo := watcher.bucketWatcher.GetResult()
+		bucketInfo := watcher.streamApi.GetResult()
 
 		serversList, err := b.utils.GetServersListFromBucketInfo(bucketInfo)
 		if err != nil {
@@ -409,6 +431,12 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			// This shouldn't happen.
 			watcher.logger.Errorf("%v Failed to get source storageBackend. Error=%v", spec.SourceBucketName, err.Error())
 		}
+
+		manifestUid, err := b.utils.GetCollectionManifestUidFromBucketInfo(bucketInfo)
+		if err != nil {
+			// This shouldn't happen.
+			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.CollectionsManifestUidKey, err.Error())
+		}
 		watcher.latestCacheMtx.Lock()
 		if !watcher.cachePopulated {
 			watcher.cachePopulated = true
@@ -423,6 +451,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		replacementNotification.SourceReplicaCnt = numOfReplicas
 		replacementNotification.SourceVbReplicasMember = vbReplicaMember
 		replacementNotification.SourceStorageBackend = storageBackend
+		replacementNotification.SourceCollectioManifestUid = manifestUid
 		replacementNotification.LocalBucketTopologyUpdateTime = time.Now()
 
 		watcher.latestCached.Recycle()
@@ -1046,7 +1075,7 @@ type BucketTopologySvcWatcher struct {
 	nonKVNodeLastTimeWarned    time.Time
 	nonKVNodeLastTimeWarnedMtx sync.Mutex
 
-	bucketWatcher streamApiWatcher.StreamApiWatcher
+	streamApi streamApiWatcher.StreamApiWatcher
 }
 
 type GcMapType map[string]VbnoReqMapType
@@ -1125,8 +1154,8 @@ func (bw *BucketTopologySvcWatcher) Start() error {
 	if atomic.CompareAndSwapUint32(&bw.firstToStart, 0, 1) {
 		var initDone sync.WaitGroup
 		initDone.Add(1)
-		if bw.bucketWatcher != nil {
-			bw.bucketWatcher.Start()
+		if bw.streamApi != nil {
+			bw.streamApi.Start()
 		}
 		go bw.run(&initDone)
 		initDone.Wait()
@@ -1378,7 +1407,10 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 		notification.Recycle()
 		return
 	}
+	bw.sendNotificationAfterUpdate(notification, channelsMap, updateType)
+}
 
+func (bw *BucketTopologySvcWatcher) sendNotificationAfterUpdate(notification *Notification, channelsMap map[string]interface{}, updateType string) {
 	var waitGrp sync.WaitGroup
 	notification.SetNumberOfReaders(len(channelsMap))
 	for channelName, chRaw := range channelsMap {
@@ -1418,8 +1450,8 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 func (bw *BucketTopologySvcWatcher) Stop() error {
 	if atomic.CompareAndSwapUint32(&bw.isStopped, 0, 1) {
 		close(bw.finCh)
-		if bw.bucketWatcher != nil {
-			bw.bucketWatcher.Stop()
+		if bw.streamApi != nil {
+			bw.streamApi.Stop()
 		}
 	}
 	return nil
@@ -1791,6 +1823,7 @@ type Notification struct {
 	SourceReplicasTranslateMap    *base.StringStringMap // nil if not initialized
 	SourceVbReplicasMember        []uint16
 	SourceStorageBackend          string
+	SourceCollectioManifestUid    uint64
 	LocalBucketTopologyUpdateTime time.Time
 
 	// Target only
@@ -1946,6 +1979,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		SourceReplicasTranslateMap:    n.SourceReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
 		SourceVbReplicasMember:        base.CloneUint16List(n.SourceVbReplicasMember),
 		SourceStorageBackend:          n.SourceStorageBackend,
+		SourceCollectioManifestUid:    n.SourceCollectioManifestUid,
 		LocalBucketTopologyUpdateTime: n.LocalBucketTopologyUpdateTime,
 
 		TargetBucketUUID:           n.TargetBucketUUID,
@@ -1975,6 +2009,9 @@ func (n *Notification) GetSourceStorageBackend() string {
 	return n.SourceStorageBackend
 }
 
+func (n *Notification) GetSourceCollectionManifestUid() uint64 {
+	return n.SourceCollectioManifestUid
+}
 func (n *Notification) GetTargetServerVBMap() base.KvVBMapType {
 	return *n.TargetServerVBMap
 }

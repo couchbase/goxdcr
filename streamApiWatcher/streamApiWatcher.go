@@ -63,9 +63,10 @@ type StreamApiWatcherImpl struct {
 	logger           *log.CommonLogger
 	lastOutput       *streamOutputCache
 	selfRestartSleep time.Duration
+	resultCb         func()
 }
 
-func NewStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, logger *log.CommonLogger) *StreamApiWatcherImpl {
+func NewStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, resultCb func(), logger *log.CommonLogger) *StreamApiWatcherImpl {
 	watcher := StreamApiWatcherImpl{
 		path:             path,
 		ch:               make(chan base.InterfaceMap, 10),
@@ -77,6 +78,7 @@ func NewStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvide
 		utils:            utils,
 		logger:           logger,
 		lastOutput:       nil,
+		resultCb:         resultCb,
 		selfRestartSleep: defaultSelfRestartSleep,
 	}
 	return &watcher
@@ -95,7 +97,8 @@ func (w *StreamApiWatcherImpl) Start() {
 	w.waitGrp = sync.WaitGroup{}
 	w.waitGrp.Add(1)
 	go w.watchClusterChanges()
-	w.logger.Infof("Start watching %v.", w.path)
+	connStr, _ := w.connInfo.MyConnectionStr()
+	w.logger.Infof("Start watching %v:%v.", connStr, w.path)
 }
 
 func (w *StreamApiWatcherImpl) Stop() {
@@ -133,6 +136,9 @@ func (w *StreamApiWatcherImpl) watchClusterChanges() {
 			w.lastOutput.cacheStreamOutput(output)
 			// Having successfully received a stream result, we can reset restart wait time
 			w.selfRestartSleep = defaultSelfRestartSleep
+			if w.resultCb != nil {
+				go w.resultCb()
+			}
 		case <-w.closeCh:
 			selfRestart()
 			return
@@ -258,8 +264,8 @@ func (w *StreamApiWatcherImpl) handleError(err error) {
 	}
 }
 
-type StreamApiGetterFunc func(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, logger *log.CommonLogger) StreamApiWatcher
+type StreamApiGetterFunc func(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, callback func(), logger *log.CommonLogger) StreamApiWatcher
 
-func GetStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, logger *log.CommonLogger) StreamApiWatcher {
-	return NewStreamApiWatcher(path, connInfo, utils, logger)
+func GetStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, resultCb func(), logger *log.CommonLogger) StreamApiWatcher {
+	return NewStreamApiWatcher(path, connInfo, utils, resultCb, logger)
 }

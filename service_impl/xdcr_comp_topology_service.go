@@ -80,7 +80,7 @@ func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 	} else if ipv6 == base.IpFamilyOffOption {
 		top_svc.ipv6 = base.IpFamilyOff
 	}
-	top_svc.clusterWatcher = streamApiWatcher.NewStreamApiWatcher(base.ObservePoolPath, top_svc, utilsIn, top_svc.logger)
+	top_svc.clusterWatcher = streamApiWatcher.NewStreamApiWatcher(base.ObservePoolPath, top_svc, utilsIn, nil, top_svc.logger)
 	top_svc.clusterWatcher.Start()
 	return top_svc, nil
 }
