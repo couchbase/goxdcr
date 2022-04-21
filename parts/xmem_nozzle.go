@@ -2252,10 +2252,12 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 	}
 
 	docWithoutXattr := base.FindSourceBodyWithoutXattr(req)
-	out := xattrComposer.FinishAndAppendDocValue(docWithoutXattr)
+	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr)
 
 	req.Body = out
-	req.DataType = req.DataType | mcc.XattrDataType
+	if atLeastOneXattr {
+		req.DataType = req.DataType | mcc.XattrDataType
+	}
 	return nil
 }
 

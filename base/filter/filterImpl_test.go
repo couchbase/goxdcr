@@ -273,6 +273,7 @@ func TestTxnClientRecordFiltering(t *testing.T) {
 // The document here seems to have one Xattr KV pair for transaction, and a weird but valid JSON body
 func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	fmt.Println("============== Test case start: TestTransXattrOnlyFilteringWithoutCompression =================")
+	defer fmt.Println("============== Test case end: TestTransXattrOnlyFilteringWithoutCompression =================")
 	assert := assert.New(t)
 
 	transXattrFile := "../../utils/testInternalData/uprTransXattrOnlyNotCompress.json"
@@ -305,15 +306,10 @@ func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	assert.True(result)
 	assert.Nil(err)
 
-	var dummySlice [][]byte
-	result, body, endPos, err, _, _, _ := stripFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
-	assert.True(result)
-	assert.NotNil(body)
-	assert.True(endPos <= len(body))
-	assert.Nil(err)
+	body := uprEvent.DecompressedValue
+	assert.True(uprEvent.Flags.ShouldUseDecompressedValue())
 	assert.True(reflect.DeepEqual(body, strippedData))
 
-	fmt.Println("============== Test case end: TestTransXattrOnlyFilteringWithoutCompression =================")
 }
 
 // test that txn attrs, when mixed with non txn attrs, are filtered out
@@ -341,6 +337,8 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	xattrIter, err = base.NewXattrIterator(uncompressedUprEventVal)
 	assert.Nil(err)
 	assert.NotNil(xattrIter)
+	origXattrSize, err := base.GetXattrSize(uncompressedUprEventVal)
+	assert.Nil(err)
 
 	// Calculate total number of xattributes
 	var originalTotalXattrCnt int
@@ -393,6 +391,9 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	// Xattrs should not have SDK transaction Xattribute
 	xattrIter, err = base.NewXattrIterator(body)
 	assert.Nil(err)
+	newXattrSize, err := base.GetXattrSize(body)
+	assert.Nil(err)
+	assert.True(newXattrSize < origXattrSize)
 	var postStripXattrCnt int
 	for xattrIter.HasNext() {
 		postStripXattrCnt++
@@ -402,6 +403,89 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	}
 	assert.Equal(postStripXattrCnt, originalTotalXattrCnt-1)
 	fmt.Println("============== Test case end: TestMixedXattrFilteringWithCompression =================")
+}
+
+// test that txn attrs and only txn exist by themselves, are filtered out and body + flags updated correctly
+func TestTxnOnlyXattrFilteringWithCompression(t *testing.T) {
+	fmt.Println("============== Test case start: TestTxnOnlyXattrFilteringWithCompression =================")
+	defer fmt.Println("============== Test case end: TestTxnOnlyXattrFilteringWithCompression =================")
+	assert := assert.New(t)
+
+	transXattrCompressedFile := "../../utils/testFilteringData/uprTransXattrOnlyCompressed.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrCompressedFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	assert.True(uprEvent.UprEvent.IsSnappyDataType())
+
+	// Before decompress, xattr should have some error
+	xattrIter, err := base.NewXattrIterator(uprEvent.UprEvent.Value)
+	assert.NotNil(err)
+	assert.Nil(xattrIter)
+
+	// Uncompress should have no problem
+	uncompressedUprEventVal, err := snappy.Decode(nil, uprEvent.UprEvent.Value)
+	assert.Nil(err)
+
+	// After decompress, xattr iterator should have no error
+	xattrIter, err = base.NewXattrIterator(uncompressedUprEventVal)
+	assert.Nil(err)
+	assert.NotNil(xattrIter)
+	assert.Nil(err)
+
+	// Calculate total number of xattributes
+	var originalTotalXattrCnt int
+	var transactionXattrFound bool
+	for xattrIter.HasNext() {
+		originalTotalXattrCnt++
+		key, value, err := xattrIter.Next()
+		assert.Nil(err)
+		if string(key) == base.TransactionXattrKey {
+			transactionXattrFound = true
+			assert.NotNil(value)
+		}
+	}
+	assert.True(transactionXattrFound)
+	// Before filtering out txn xattr, xattr flag must be set
+	assert.True(uprEvent.UprEvent.DataType&mcc.XattrDataType > 0)
+
+	strippedData, err := base.StripXattrAndGetBody(uncompressedUprEventVal)
+	assert.Nil(err)
+
+	// Validate that the body is a valid json
+	type dummyStruct struct{}
+	testStruct := dummyStruct{}
+	assert.Nil(json.Unmarshal(strippedData, &testStruct))
+
+	legacyFilter, err := NewFilter(filterId, "", realUtil, true)
+	assert.Nil(err)
+	assert.NotNil(legacyFilter)
+	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	sdkFilter, err := NewFilter(filterId, "", realUtil, false)
+	assert.Nil(err)
+	assert.NotNil(sdkFilter)
+	result, err, _, _ = sdkFilter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+
+	// Afterwards, no xattr flag
+	assert.True(uprEvent.UprEvent.DataType&mcc.XattrDataType == 0)
+	assert.True(uprEvent.Flags.ShouldUseDecompressedValue())
+	body := uprEvent.DecompressedValue
+
+	_, err = base.StripXattrAndGetBody(body)
+	// This now fails because the body has no more xattribute
+	assert.NotNil(err)
+	assert.True(reflect.DeepEqual(body, strippedData))
+
+	// Xattrs should not have any XAttribute, including SDK transaction Xattribute
+	_, err = base.GetXattrSize(body)
+	assert.NotNil(err)
+	_, err = base.NewXattrIterator(body)
+	assert.NotNil(err)
 }
 
 func TestMixedTransXattrFilteringWithoutCompression(t *testing.T) {

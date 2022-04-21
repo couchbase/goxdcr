@@ -157,6 +157,7 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 // 4. err error
 // 5. errDesc string - If err is not nil, additional description
 // 6. failedDpCnt int64 - Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
+// 7. If body has been modified due to stripping the transactional xattr
 // Note that body in 2 is not nil only in the following scenario:
 // (1). uprEvent is compressed
 // (2). We will need to perform filtering on body later.
@@ -238,10 +239,16 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 			}
 		}
 
-		body = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr)
+		var modifiedBodyHasAtLeastOneXattr bool
+		body, modifiedBodyHasAtLeastOneXattr = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr)
 		endBodyPos = len(body)
 		bodyHasBeenModified = true
+		if uprEvent.DataType&memcached.XattrDataType > 0 && !modifiedBodyHasAtLeastOneXattr {
+			// Since Transactional Xattr was the only xattribute, the new document value should not have any xattribute
+			uprEvent.DataType &^= memcached.XattrDataType
+		}
 	}
+
 	return passedFilter, body, endBodyPos, nil, "", failedDpCnt, bodyHasBeenModified
 }
 
