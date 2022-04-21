@@ -1455,18 +1455,18 @@ func (x *XattrComposer) CommitRawKVPair() (int, error) {
 
 // Once all the Xattributes are finished, calculate the whole xattr section and append doc value
 // Remember to set Xattr flag
-func (x *XattrComposer) FinishAndAppendDocValue(val []byte) []byte {
+func (x *XattrComposer) FinishAndAppendDocValue(val []byte) ([]byte, bool) {
 	if !x.atLeastOneXattr {
 		// No xattr written - do not do anything
 		copy(x.body[0:len(val)], val)
-		return x.body[0:len(val)]
+		return x.body[0:len(val)], x.atLeastOneXattr
 	}
 
 	// Write the entire Xattr size at the beginning of body
 	binary.BigEndian.PutUint32(x.body[0:4], uint32(x.pos-4))
 	copy(x.body[x.pos:], val)
 	x.pos = x.pos + len(val)
-	return x.body[0:x.pos]
+	return x.body[0:x.pos], x.atLeastOneXattr
 }
 
 type XattrIterator struct {

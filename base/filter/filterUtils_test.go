@@ -1,3 +1,4 @@
+//go:build pcre
 // +build pcre
 
 /*
@@ -371,6 +372,134 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 	//	}
 
 	fmt.Println("============== Test case end: TestGenerateXattrUsingGoCB =================")
+}
+
+// If ns_server cluster run is running, generate a Xattr doc
+// And then also retrieve it back via gocb
+// At DCP nozzle, serialize the uprEvent as a json and write it to a file
+func TestGenerateOnlyTxnXattrUsingGoCB(t *testing.T) {
+	cluster, err := gocb.Connect("http://localhost:9000")
+	if err != nil {
+		return
+	}
+	fmt.Println("============== Test case start: TestGenerateOnlyTxnXattrUsingGoCB =================")
+	defer fmt.Println("============== Test case end: TestGenerateOnlyTxnXattrUsingGoCB =================")
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: "Administrator",
+		Password: "wewewe",
+	})
+
+	bucket, err := cluster.OpenBucket("B1", "")
+	if err != nil {
+		return
+	}
+
+	bucket.Remove(docKey, 0)
+
+	_, err = bucket.Insert(docKey, docMap, 0)
+	if err != nil {
+		fmt.Printf("err %v\n", err)
+		return
+	}
+
+	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
+	dummyStagedData := make(map[string]interface{})
+	dummyStagedData["name"] = "neil"
+	txDummyVal := make(map[string]interface{})
+	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
+	txDummyVal["atr_id"] = "atr-690-#18"
+	txDummyVal["staged"] = dummyStagedData
+	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+	if err != nil {
+		fmt.Printf("Error with Insert4: %v\n", err)
+		return
+	}
+
+	var docRetrieveVal interface{}
+	_, err = bucket.Get(docKey, &docRetrieveVal)
+
+	retrievedMap, ok := docRetrieveVal.(map[string]interface{})
+	if !ok {
+		fmt.Printf("Error with retrieving\n")
+	}
+
+	if val, ok := retrievedMap["Key"]; ok && val == docMap["Key"] {
+		fmt.Printf("Set and get working\n")
+	}
+
+	bodySlice, err := json.Marshal(retrievedMap)
+	if err != nil {
+		fmt.Printf("err marshal %v\n", err)
+	}
+
+	fileName := "/tmp/docValueSlice.bin"
+	//	dumpBytes := new(bytes.Buffer)
+	//	json.NewEncoder(dumpBytes).Encode(bodySlice)
+	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+	writeErr := ioutil.WriteFile(fileName, bodySlice, 0644)
+	if writeErr == nil {
+		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
+	} else {
+		fmt.Printf("Unable to write file due to %v\n", writeErr)
+	}
+
+	frag, err := bucket.LookupIn(docKey).GetEx(base.XattributeToc, gocb.SubdocFlagXattr).Execute()
+	if err != nil {
+		fmt.Printf("err1: %v\n", err)
+	}
+
+	var docMap interface{}
+	err = frag.Content(base.XattributeToc, &docMap)
+	if err != nil {
+		fmt.Printf("err frag.Content: %v\n", err)
+	}
+
+	xattrMap := make(map[string]interface{})
+	tocList := docMap.([]interface{})
+	for _, aToc := range tocList {
+		if entry, ok := aToc.(string); ok {
+			frag, err := bucket.LookupIn(docKey).GetEx(entry, gocb.SubdocFlagXattr).Execute()
+			if err != nil {
+				fmt.Printf("err lookupIn: %v\n", err)
+			}
+
+			// TODO - check CAS
+
+			var value interface{}
+			frag.Content(entry, &value)
+			xattrMap[entry] = value
+		}
+	}
+
+	xattrSlice, err := json.Marshal(xattrMap)
+	if err != nil {
+		fmt.Printf("err marshal2 %v\n", err)
+	}
+
+	fileName = "/tmp/xattrSlice.bin"
+	//	dumpBytes = new(bytes.Buffer)
+	//	json.NewEncoder(dumpBytes).Encode(xattrSlice)
+	//	writeErr = ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+	writeErr = ioutil.WriteFile(fileName, xattrSlice, 0644)
+	if writeErr == nil {
+		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
+	} else {
+		fmt.Printf("Unable to write file due to %v\n", writeErr)
+	}
+
+	//Put the following in DCP nozzle to dump uprEvent to a file
+	// Import: bytes, encoding/json, io/ioutil
+
+	//	fileName := "/tmp/uprEventDump.bin"
+	//	dumpBytes := new(bytes.Buffer)
+	//	json.NewEncoder(dumpBytes).Encode(*m)
+	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+	//	if writeErr == nil {
+	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+	//	} else {
+	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+	//	}
 }
 
 func TestMatchDocKeyValueAndXattr(t *testing.T) {
