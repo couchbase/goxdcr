@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/couchbase/goxdcr/peerToPeer"
+	"github.com/couchbase/goxdcr/streamApiWatcher"
 	"os"
 	"runtime"
 	"time"
@@ -228,7 +229,7 @@ func main() {
 
 		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils,
 			base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc,
-			base.HealthCheckInterval, securitySvc)
+			base.HealthCheckInterval, securitySvc, streamApiWatcher.GetStreamApiWatcher)
 		if err != nil {
 			fmt.Printf("Error starting bucket topology service. err=%v\n", err)
 			os.Exit(1)

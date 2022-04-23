@@ -23,7 +23,9 @@ import (
 const defaultSelfRestartSleep = 1 * time.Second
 
 type StreamApiWatcher interface {
-	GetResult() base.InterfaceMap
+	Start()
+	Stop()
+	GetResult() map[string]interface{}
 }
 type streamOutputCache struct {
 	output        base.InterfaceMap
@@ -52,43 +54,61 @@ type StreamApiWatcherImpl struct {
 	path             string
 	ch               chan base.InterfaceMap
 	closeCh          chan bool
+	finCh            chan bool
+	waitGrp          sync.WaitGroup
 	running          bool
 	mutex            sync.Mutex
 	connInfo         base.ClusterConnectionInfoProvider
 	utils            utils.UtilsIface
 	logger           *log.CommonLogger
-	lastOutput       streamOutputCache
+	lastOutput       *streamOutputCache
 	selfRestartSleep time.Duration
 }
 
 func NewStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, logger *log.CommonLogger) *StreamApiWatcherImpl {
 	watcher := StreamApiWatcherImpl{
-		path:     path,
-		ch:       make(chan base.InterfaceMap, 10),
-		closeCh:  nil,
-		running:  false,
-		mutex:    sync.Mutex{},
-		connInfo: connInfo,
-		utils:    utils,
-		logger:   logger,
-		lastOutput: streamOutputCache{
-			output:        make(base.InterfaceMap),
-			mtx:           sync.RWMutex{},
-			initializer:   sync.Once{},
-			initializedCh: make(chan bool),
-		},
+		path:             path,
+		ch:               make(chan base.InterfaceMap, 10),
+		finCh:            nil,
+		closeCh:          nil,
+		running:          false,
+		mutex:            sync.Mutex{},
+		connInfo:         connInfo,
+		utils:            utils,
+		logger:           logger,
+		lastOutput:       nil,
 		selfRestartSleep: defaultSelfRestartSleep,
 	}
-	watcher.start()
 	return &watcher
 }
 
-func (w *StreamApiWatcherImpl) start() {
+func (w *StreamApiWatcherImpl) Start() {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	w.lastOutput = &streamOutputCache{
+		output:        make(base.InterfaceMap),
+		mtx:           sync.RWMutex{},
+		initializer:   sync.Once{},
+		initializedCh: make(chan bool),
+	}
+	w.finCh = make(chan bool)
+	w.waitGrp = sync.WaitGroup{}
+	w.waitGrp.Add(1)
 	go w.watchClusterChanges()
 	w.logger.Infof("Start watching %v.", w.path)
 }
 
-func (w *StreamApiWatcherImpl) GetResult() base.InterfaceMap {
+func (w *StreamApiWatcherImpl) Stop() {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	close(w.finCh)
+	w.running = false
+	w.lastOutput = nil
+	w.waitGrp.Wait()
+	w.logger.Infof("Stop watching %v", w.path)
+}
+
+func (w *StreamApiWatcherImpl) GetResult() map[string]interface{} {
 	return w.lastOutput.getOutput()
 }
 
@@ -103,7 +123,10 @@ func (w *StreamApiWatcherImpl) watchClusterChanges() {
 		w.logger.Infof("Restart watching %v after %v", w.path, w.selfRestartSleep)
 		w.selfRestartSleep = 2 * w.selfRestartSleep
 	}
-	go w.runStreamingQuery()
+	waitGrp := sync.WaitGroup{}
+	waitGrp.Add(1)
+	go w.runStreamingQuery(&waitGrp)
+	defer waitGrp.Wait()
 	for {
 		select {
 		case output := <-w.ch:
@@ -112,6 +135,9 @@ func (w *StreamApiWatcherImpl) watchClusterChanges() {
 			w.selfRestartSleep = defaultSelfRestartSleep
 		case <-w.closeCh:
 			selfRestart()
+			return
+		case <-w.finCh:
+			w.waitGrp.Done()
 			return
 		}
 	}
@@ -126,7 +152,8 @@ func (w *StreamApiWatcherImpl) streamResultCallback(result base.InterfaceMap) er
 	}
 }
 
-func (w *StreamApiWatcherImpl) runStreamingQuery() {
+func (w *StreamApiWatcherImpl) runStreamingQuery(waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
 	err := w.runStreamingEndpoint()
 	if err != nil {
 		w.handleError(err)
@@ -170,17 +197,19 @@ func (w *StreamApiWatcherImpl) runStreamingEndpoint() error {
 			errorToSend = fmt.Errorf("Received error '%v' when '%v'", err.Error(), desc)
 		}
 		select {
+		case <-w.finCh:
+			// Watcher is stopping
 		case <-w.closeCh:
-			// Agent is restarting
-			return
+			// Watcher is restarting
 		case errCh <- errorToSend:
-			return
 		}
 	}
 	// Process the streaming results
 	go func() {
 		for {
 			select {
+			case <-w.finCh:
+				return
 			case <-w.closeCh:
 				return
 			default:
@@ -208,12 +237,12 @@ func (w *StreamApiWatcherImpl) runStreamingEndpoint() error {
 	}()
 
 	select {
+	case <-w.finCh:
 	case <-w.closeCh:
-		w.logger.Infof("runStreamingEndpoint for %v:%v is finished.", connStr, w.path)
-		return nil
 	case err := <-errCh:
 		w.handleError(err)
 	}
+	w.logger.Infof("runStreamingEndpoint for %v:%v is finished.", connStr, w.path)
 	return nil
 }
 
@@ -227,4 +256,10 @@ func (w *StreamApiWatcherImpl) handleError(err error) {
 		close(w.closeCh)
 		w.running = false
 	}
+}
+
+type StreamApiGetterFunc func(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, logger *log.CommonLogger) StreamApiWatcher
+
+func GetStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utils.UtilsIface, logger *log.CommonLogger) StreamApiWatcher {
+	return NewStreamApiWatcher(path, connInfo, utils, logger)
 }

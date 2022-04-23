@@ -17,6 +17,8 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	mocks "github.com/couchbase/goxdcr/service_def/mocks"
+	"github.com/couchbase/goxdcr/streamApiWatcher"
+	mockStream "github.com/couchbase/goxdcr/streamApiWatcher/mocks"
 	utilities "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
@@ -61,6 +63,15 @@ func getTestRemRef() *metadata.RemoteClusterReference {
 
 func getCapability() metadata.Capability {
 	return metadata.UnitTestGetCollectionsCapability()
+}
+
+func getMockStreamApiWatcher(path string, connInfo base.ClusterConnectionInfoProvider, utils utilities.UtilsIface, logger *log.CommonLogger) streamApiWatcher.StreamApiWatcher {
+	streamApi := &mockStream.StreamApiWatcher{}
+	bucketMap, _ := getBucketMap()
+	streamApi.On("Start").Return()
+	streamApi.On("Stop").Return()
+	streamApi.On("GetResult").Return(bucketMap)
+	return streamApi
 }
 
 var replicaMtx sync.RWMutex
@@ -218,7 +229,7 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	bucketMap, kvNames := getBucketMap()
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc, getMockStreamApiWatcher)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -315,7 +326,7 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	specList := []*metadata.ReplicationSpecification{spec, spec2}
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc, 10*time.Second, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc, 10*time.Second, securitySvc, getMockStreamApiWatcher)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -354,7 +365,7 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	bucketMap, kvNames := getBucketMap()
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc, getMockStreamApiWatcher)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -458,7 +469,7 @@ func TestBucketTopologyWatcherGC(t *testing.T) {
 	bucketMap, kvNames := getBucketMap()
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc, getMockStreamApiWatcher)
 	assert.NotNil(bts)
 	assert.Nil(err)
 

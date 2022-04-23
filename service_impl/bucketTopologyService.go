@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/streamApiWatcher"
 	"github.com/couchbase/goxdcr/utils"
 	"sync"
 	"sync/atomic"
@@ -62,9 +63,12 @@ type BucketTopologyService struct {
 	tgtBucketWatchers    map[string]*BucketTopologySvcWatcher
 	tgtBucketWatchersCnt map[string]int
 	tgtBucketWatchersMtx sync.RWMutex
+
+	streamApiGetter streamApiWatcher.StreamApiGetterFunc
 }
 
-func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc, healthCheckInterval time.Duration, securitySvc service_def.SecuritySvc) (*BucketTopologyService, error) {
+func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc, healthCheckInterval time.Duration,
+	securitySvc service_def.SecuritySvc, streamApiGetter streamApiWatcher.StreamApiGetterFunc) (*BucketTopologyService, error) {
 	b := &BucketTopologyService{
 		remClusterSvc:        remClusterSvc,
 		xdcrCompTopologySvc:  xdcrCompTopologySvc,
@@ -77,6 +81,7 @@ func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySv
 		refreshInterval:      refreshInterval,
 		healthCheckInterval:  healthCheckInterval,
 		securitySvc:          securitySvc,
+		streamApiGetter:      streamApiGetter,
 	}
 	return b, b.loadFromReplSpecSvc(replicationSpecService)
 }
@@ -195,6 +200,7 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		intervalFuncMap[HIGHSEQNOSLEGACY][defaultPipelineStatsInterval] = highSeqnoFuncLegacy
 
 		watcher.intervalFuncMap = intervalFuncMap
+		watcher.bucketWatcher = b.streamApiGetter(base.ObserveBucketPath+spec.SourceBucketName, b.xdcrCompTopologySvc, b.utils, b.logger)
 	}
 	b.srcBucketWatchersCnt[spec.SourceBucketName]++
 	return watcher
@@ -347,16 +353,8 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			watcher.logger.Errorf("%v bucket connStr error %v", spec.SourceBucketName, err)
 			return err
 		}
-		userName, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := b.xdcrCompTopologySvc.MyCredentials()
-		if err != nil {
-			watcher.logger.Errorf("%v bucket credentials error %v", spec.SourceBucketName, err)
-			return err
-		}
-		bucketInfo, err := b.utils.GetBucketInfo(connStr, spec.SourceBucketName, userName, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, b.logger)
-		if err != nil {
-			watcher.logger.Errorf("%v bucket bucketInfo error %v", spec.SourceBucketName, err)
-			return err
-		}
+		bucketInfo := watcher.bucketWatcher.GetResult()
+
 		serversList, err := b.utils.GetServersListFromBucketInfo(bucketInfo)
 		if err != nil {
 			watcher.logger.Errorf("%v bucketInfo unable to parse server list %v", spec.SourceBucketName, err)
@@ -1047,6 +1045,8 @@ type BucketTopologySvcWatcher struct {
 
 	nonKVNodeLastTimeWarned    time.Time
 	nonKVNodeLastTimeWarnedMtx sync.Mutex
+
+	bucketWatcher streamApiWatcher.StreamApiWatcher
 }
 
 type GcMapType map[string]VbnoReqMapType
@@ -1125,6 +1125,9 @@ func (bw *BucketTopologySvcWatcher) Start() error {
 	if atomic.CompareAndSwapUint32(&bw.firstToStart, 0, 1) {
 		var initDone sync.WaitGroup
 		initDone.Add(1)
+		if bw.bucketWatcher != nil {
+			bw.bucketWatcher.Start()
+		}
 		go bw.run(&initDone)
 		initDone.Wait()
 		atomic.StoreUint32(&bw.isStarted, 1)
@@ -1415,6 +1418,9 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 func (bw *BucketTopologySvcWatcher) Stop() error {
 	if atomic.CompareAndSwapUint32(&bw.isStopped, 0, 1) {
 		close(bw.finCh)
+		if bw.bucketWatcher != nil {
+			bw.bucketWatcher.Stop()
+		}
 	}
 	return nil
 }

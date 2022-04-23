@@ -14,8 +14,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def/mocks"
 	realUtils "github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
-	gocb "gopkg.in/couchbase/gocb.v1"
-	"net"
 	"testing"
 )
 
@@ -29,8 +27,8 @@ func setupMocksCWS() *mocks.XDCRCompTopologySvc {
 	return xdcrTopologySvc
 }
 func TestClusterWatch(t *testing.T) {
-	fmt.Println("============= Test case start: TestPoolInfo =============")
-	defer fmt.Println("============= Test case end: TestPoolInfo =============")
+	fmt.Println("============= Test case start: TestClusterWatch =============")
+	defer fmt.Println("============= Test case end: TestClusterWatch =============")
 
 	if isClusterRunning() == false {
 		fmt.Println("Skipping because cluster_run setup has not been detected")
@@ -41,6 +39,7 @@ func TestClusterWatch(t *testing.T) {
 	realUtils := realUtils.NewUtilities()
 	topSvc := setupMocksCWS()
 	watcher := NewStreamApiWatcher(base.ObservePoolPath, topSvc, realUtils, log.NewLogger("testStreamApi", log.DefaultLoggerContext))
+	watcher.Start()
 	nodesInfo := watcher.GetResult()
 	assert.NotNil(nodesInfo)
 	assert.NotEqual(0, len(nodesInfo))
@@ -51,22 +50,53 @@ func TestClusterWatch(t *testing.T) {
 	assert.Greater(len(nodesList), 0)
 }
 
+func TestBucketWatch(t *testing.T) {
+	fmt.Println("============= Test case start: TestBucketWatch =============")
+	defer fmt.Println("============= Test case end: TestBucketWatch =============")
+	if isClusterRunning() == false {
+		fmt.Println("Skipping because cluster_run setup has not been detected")
+		return
+	}
+
+	assert := assert.New(t)
+	realUtils := realUtils.NewUtilities()
+	topSvc := setupMocksCWS()
+	watcher := NewStreamApiWatcher(base.ObserveBucketPath+"B1", topSvc, realUtils, log.NewLogger("testStreamApi", log.DefaultLoggerContext))
+
+	watcher.Start()
+	bucketInfo := watcher.GetResult()
+	assert.NotNil(bucketInfo)
+	assert.NotEqual(0, len(bucketInfo))
+	// Make sure we can get vBucketServerMap
+	vbSrvMapObj, ok := bucketInfo[base.VBucketServerMapKey]
+	assert.True(ok)
+	vbSrvMap, ok := vbSrvMapObj.(map[string]interface{})
+	assert.True(ok)
+	// Make sure we can get serverList
+	serverListObj, ok := vbSrvMap[base.ServerListKey]
+	assert.True(ok)
+	_, ok = serverListObj.([]interface{})
+	assert.True(ok)
+	nodes := bucketInfo[base.NodesKey]
+	assert.NotNil(nodes)
+	nodesList, ok := nodes.([]interface{})
+	assert.Equal(true, ok)
+	assert.Greater(len(nodesList), 0)
+	watcher.Stop()
+
+	// restart and stop watcher
+	watcher.Start()
+	bucketInfo = watcher.GetResult()
+	assert.NotNil(bucketInfo)
+	watcher.Stop()
+}
+
 func isClusterRunning() bool {
-	_, err := net.Listen("tcp4", ":9000")
-	if err == nil {
+	utils := realUtils.Utilities{}
+	bucketInfo, err := utils.GetBucketInfo("127.0.0.1:9000", "B1", username, password, base.HttpAuthMechPlain, nil, false, nil, nil, log.NewLogger("test", log.DefaultLoggerContext))
+	if err == nil && bucketInfo != nil {
+		return true
+	} else {
 		return false
 	}
-	cluster, err := gocb.Connect(fmt.Sprintf("http://127.0.0.1:%s", "9000"))
-	if err != nil {
-		return false
-	}
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: "Administrator",
-		Password: "wewewe",
-	})
-	_, err = cluster.OpenBucket("B0", "")
-	if err != nil {
-		return false
-	}
-	return true
 }

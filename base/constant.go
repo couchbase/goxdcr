@@ -64,6 +64,7 @@ const CollectionsPath = "/collections/"
 
 // Streaming API paths. They are used for source clusters only
 const ObservePoolPath = "/poolsStreaming/default"
+const ObserveBucketPath = "/pools/default/bucketsStreaming/" // + bucketName
 
 // constants for CAPI nozzle
 var RevsDiffPath = "/_revs_diff"
