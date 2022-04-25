@@ -127,7 +127,7 @@ function runTestCase {
 	# broken msg shouldn't have increased
 	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
 	# mappingChanged msg should not have occurred
-	validateLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(($currentCkptMappingsChangedCnt))
+	validateInternalLogWithInstance "C1" "$CKPT_MAPPINGS_CHANGED_MSG" $(($currentCkptMappingsChangedCnt))
 
 	echo "Deleting collection on source cluster C1:B1:S1:col1"
 	deleteCollection "C1" "B1" "S1" "col1"
