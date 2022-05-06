@@ -3,7 +3,9 @@ package memcached
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -72,6 +74,11 @@ type ClientIface interface {
 	NewUprFeedIface() (UprFeedIface, error)
 	NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error)
 	NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, error)
+
+	CreateRangeScan(vb uint16, collId uint32, start []byte, includeStart bool, end []byte, includeEnd bool,
+		context ...*ClientContext) (*gomemcached.MCResponse, error)
+	ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, timeout uint32, context ...*ClientContext) error
+	CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (*gomemcached.MCResponse, error)
 }
 
 type ClientContext struct {
@@ -1071,6 +1078,80 @@ func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
 	}
 
 	return
+}
+
+func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, includeStart bool, end []byte, includeEnd bool,
+	context ...*ClientContext) (*gomemcached.MCResponse, error) {
+
+	req := &gomemcached.MCRequest{
+		Opcode:   gomemcached.CREATE_RANGE_SCAN,
+		VBucket:  vb,
+		DataType: JSONDataType,
+		Opaque:   c.opaque,
+	}
+	err := c.setContext(req, context...)
+	if err != nil {
+		return nil, err
+	}
+
+	req.CollIdLen = 0 // has to be 0 else op is rejected
+	r := make(map[string]interface{})
+	if includeStart {
+		r["start"] = base64.StdEncoding.EncodeToString(start)
+	} else {
+		r["excl_start"] = base64.StdEncoding.EncodeToString(start)
+	}
+	if includeEnd {
+		r["end"] = base64.StdEncoding.EncodeToString(end)
+	} else {
+		r["excl_end"] = base64.StdEncoding.EncodeToString(end)
+	}
+	m := make(map[string]interface{})
+	m["collection"] = fmt.Sprintf("%x", collId)
+	m["key_only"] = true
+	m["range"] = r
+	req.Body, _ = json.Marshal(m)
+
+	c.opaque++
+	return c.Send(req)
+}
+
+func (c *Client) ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, timeout uint32,
+	context ...*ClientContext) error {
+
+	req := &gomemcached.MCRequest{
+		Opcode:  gomemcached.CONTINUE_RANGE_SCAN,
+		VBucket: vb,
+		Extras:  make([]byte, 24),
+		Opaque:  opaque,
+	}
+	err := c.setContext(req, context...)
+	if err != nil {
+		return err
+	}
+	req.CollIdLen = 0 // has to be 0 else op is rejected
+	copy(req.Extras, uuid)
+	binary.BigEndian.PutUint32(req.Extras[16:], items)
+	binary.BigEndian.PutUint32(req.Extras[20:], timeout)
+	return c.Transmit(req)
+}
+
+func (c *Client) CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (
+	*gomemcached.MCResponse, error) {
+
+	req := &gomemcached.MCRequest{
+		Opcode:  gomemcached.CANCEL_RANGE_SCAN,
+		VBucket: vb,
+		Extras:  make([]byte, 16),
+		Opaque:  opaque,
+	}
+	err := c.setContext(req, context...)
+	if err != nil {
+		return nil, err
+	}
+	req.CollIdLen = 0 // has to be 0 else op is rejected
+	copy(req.Extras, uuid)
+	return c.Send(req)
 }
 
 // ObservedStatus is the type reported by the Observe method

@@ -89,8 +89,7 @@ func (req *MCRequest) fillRegularHeaderBytes(data []byte) int {
 	pos++
 	data[pos] = byte(req.Opcode)
 	pos++
-	binary.BigEndian.PutUint16(data[pos:pos+2],
-		uint16(req.CollIdLen+len(req.Key)))
+	binary.BigEndian.PutUint16(data[pos:pos+2], uint16(req.CollIdLen+len(req.Key)))
 	pos += 2
 
 	// 4

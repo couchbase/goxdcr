@@ -116,6 +116,10 @@ const (
 	DCP_SYSTEM_EVENT = CommandCode(0x5f) // A system event has occurred
 	DCP_SEQNO_ADV    = CommandCode(0x64) // Sent when the vb seqno has advanced due to an unsubscribed event
 	DCP_OSO_SNAPSHOT = CommandCode(0x65) // Marks the begin and end of out-of-sequence-number stream
+
+	CREATE_RANGE_SCAN   = CommandCode(0xDA) // Range scans
+	CONTINUE_RANGE_SCAN = CommandCode(0xDB) // Range scans
+	CANCEL_RANGE_SCAN   = CommandCode(0xDC) // Range scans
 )
 
 // command codes that are counted toward DCP control buffer
@@ -168,6 +172,9 @@ const (
 	SYNC_WRITE_IN_PROGRESS        = Status(0xa2)
 	SYNC_WRITE_AMBIGUOUS          = Status(0xa3)
 	SYNC_WRITE_RECOMMITINPROGRESS = Status(0xa4)
+
+	RANGE_SCAN_MORE = Status(0xa6)
+	RANGE_SCAN_COMPLETE = Status(0xa7)
 
 	// SUBDOC
 	SUBDOC_PATH_NOT_FOUND             = Status(0xc0)
@@ -322,6 +329,10 @@ func init() {
 	CommandNames[DCP_SYSTEM_EVENT] = "DCP_SYSTEM_EVENT"
 	CommandNames[DCP_SEQNO_ADV] = "DCP_SEQNO_ADV"
 
+	CommandNames[CREATE_RANGE_SCAN] = "CREATE_RANGE_SCAN"
+	CommandNames[CONTINUE_RANGE_SCAN] = "CONTINUE_RANGE_SCAN"
+	CommandNames[CANCEL_RANGE_SCAN] = "CANCEL_RANGE_SCAN"
+
 	StatusNames = make(map[Status]string)
 	StatusNames[SUCCESS] = "SUCCESS"
 	StatusNames[KEY_ENOENT] = "KEY_ENOENT"
@@ -353,6 +364,8 @@ func init() {
 	StatusNames[SYNC_WRITE_IN_PROGRESS] = "SYNC_WRITE_IN_PROGRESS"
 	StatusNames[SYNC_WRITE_AMBIGUOUS] = "SYNC_WRITE_AMBIGUOUS"
 	StatusNames[SYNC_WRITE_RECOMMITINPROGRESS] = "SYNC_WRITE_RECOMMITINPROGRESS"
+	StatusNames[RANGE_SCAN_MORE] = "RANGE_SCAN_MORE"
+	StatusNames[RANGE_SCAN_COMPLETE] = "RANGE_SCAN_COMPLETE"
 
 }
 
