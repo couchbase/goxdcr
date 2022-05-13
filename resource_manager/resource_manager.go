@@ -534,6 +534,9 @@ func (rm *ResourceManager) manageResourcesOnce() error {
 		genSpec := metadata.GenericSpecification(spec)
 		rm.managedResourceOnceSpecMap[spec.GetFullId()] = &genSpec
 	}
+	if rm.needResourceManagement() == false {
+		return nil
+	}
 
 	specReplStatsMap := rm.collectReplStats()
 
@@ -651,6 +654,29 @@ func (rm *ResourceManager) collectReplStats() map[*metadata.GenericSpecification
 	}
 
 	return specReplStatsMap
+}
+
+// There is no need for resource management if all replications are high priority or all replications are low priority
+// Medium priority replications may need resource management based on whether it is in initial replication.
+func (rm *ResourceManager) needResourceManagement() bool {
+	first := true
+	var priority base.PriorityType
+	for _, genericSpecPtr := range rm.managedResourceOnceSpecMap {
+		spec := *genericSpecPtr
+		if first {
+			priority = spec.GetReplicationSpec().Settings.GetPriority()
+			first = false
+			if priority == base.PriorityTypeMedium {
+				return true
+			}
+		} else {
+			if priority != spec.GetReplicationSpec().Settings.GetPriority() {
+				return true
+			}
+		}
+	}
+	// All replications have the same priority, either high or low. No need for resource management
+	return false
 }
 
 func (rm *ResourceManager) computeState(specReplStatsMap map[*metadata.GenericSpecification]*ReplStats, previousState *State) (state *State) {
