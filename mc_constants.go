@@ -64,6 +64,8 @@ const (
 	SASL_AUTH       = CommandCode(0x21)
 	SASL_STEP       = CommandCode(0x22)
 
+	SET_BUCKET_COMPUTE_UNIT_THROTTLE_LIMITS  = CommandCode(0x2a)
+
 	SET_VBUCKET = CommandCode(0x3d)
 
 	TAP_CONNECT          = CommandCode(0x40) // Client-sent request to initiate Tap feed
