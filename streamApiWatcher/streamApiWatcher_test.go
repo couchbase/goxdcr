@@ -88,7 +88,6 @@ func TestBucketWatch(t *testing.T) {
 	manifestUid, err := realUtils.GetCollectionManifestUidFromBucketInfo(bucketInfo)
 	assert.Nil(err)
 	assert.GreaterOrEqual(manifestUid, uint64(0))
-	watcher.Stop()
 
 	// restart and stop watcher
 	watcher.Start()
