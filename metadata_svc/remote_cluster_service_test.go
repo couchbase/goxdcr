@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 // Copyright 2013-Present Couchbase, Inc.
@@ -14,6 +15,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"net"
+	"net/http"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	base2 "github.com/couchbase/goxdcr/base/helpers"
 	baseMock "github.com/couchbase/goxdcr/base/helpers/mocks"
@@ -24,13 +33,6 @@ import (
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"net"
-	"net/http"
-	"strings"
-	"sync"
-	"testing"
-	"time"
 )
 
 var uuidField string = "5220aac3bdc2f7ac663ac288bb85ae27"
@@ -117,7 +119,7 @@ func setupXDCRTopologyMock(topologyMock *service_def.XDCRCompTopologySvc) {
 func setupMetaSvcMockGeneric(metadataSvcMock *service_def.MetadataSvc, remoteClusterRef *metadata.RemoteClusterReference) {
 	// Get json marshal and unmarshal for mocking
 	jsonKey, jsonMarshalBytes := jsonMarshalWrapper(remoteClusterRef)
-	revision := 1
+	revision := []byte{1}
 
 	// metadatasvc mock
 	metadataSvcMock.On("AddSensitiveWithCatalog", mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -456,6 +458,12 @@ func createRemoteClusterReference(id string) *metadata.RemoteClusterReference {
 	return aRef
 }
 
+func createRemoteClusterReferenceWithRev(id string, rev interface{}) *metadata.RemoteClusterReference {
+	aRef := createRemoteClusterReference(id)
+	aRef.SetRevision(rev)
+	return aRef
+}
+
 func createRemoteClusterReferenceExtOnly(id string) *metadata.RemoteClusterReference {
 	aRef, _ := metadata.NewRemoteClusterReference(uuidField, id, hostname, "", "", metadata.HostnameMode_External, false, "", nil, nil, nil, nil)
 	aRef.SetId(id)
@@ -542,7 +550,7 @@ func TestAddSecondaryClusterRef(t *testing.T) {
 	ref := createRemoteClusterReference(idAndName)
 
 	_, jsonMarshalBytes := jsonMarshalWrapper(ref)
-	revision := 1
+	revision := []byte{1}
 
 	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
 
@@ -772,7 +780,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	ref2 := ref.Clone()
 
 	_, jsonMarshalBytes := jsonMarshalWrapper(ref)
-	revision := 1
+	revision := []byte{1}
 
 	// First set the callback before creating agents
 	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
@@ -795,7 +803,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	ref2.SetHostName("newHostName")
 	ref2.SetUserName("newUserName")
 	_, jsonMarshalBytes = jsonMarshalWrapper(ref2)
-	revision = 2
+	revision = []byte{2}
 
 	// Update the remoteClusterSvc and agents with a new mock svc to return the actual reference
 	metadataSvcMock2 := &service_def.MetadataSvc{}
@@ -2679,4 +2687,50 @@ func TestCreateRemoteWithIpFamilyV6Blocked(t *testing.T) {
 		assert.Contains(err.Error(), "is not allowed")
 	}
 	base.NetTCP = base.TCP // This restores to support both IPV4/IPV6
+}
+
+func TestStalledAddClusterRefFromCallback(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestStalledAddClusterRefFromCallback =================")
+	defer fmt.Println("============== Test case End: TestStalledAddClusterRefFromCallback ===============")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	revision := []byte{1}
+	ref := createRemoteClusterReferenceWithRev(idAndName, revision)
+	_, jsonMarshalBytes := jsonMarshalWrapper(ref)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", jsonMarshalBytes, revision))
+	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+
+	ref2 := ref.Clone()
+	// Set op via callback
+	ref2.SetHostName("newHostName")
+	ref2.SetUserName("newUserName")
+	revision = []byte{2}
+	ref2.SetRevision(revision)
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	// The following goroutine represents the stalled goroutine
+	// hence the sleep
+	go func() {
+		defer wg.Done()
+		time.Sleep(2 * time.Second)
+		ret := agent.UpdateReferenceFrom(ref2, false)
+		assert.Error(ret)
+	}()
+
+	wg.Wait()
 }
