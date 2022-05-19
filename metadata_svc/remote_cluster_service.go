@@ -10,16 +10,12 @@
 package metadata_svc
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
-	utilities "github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"reflect"
 	"sort"
@@ -27,6 +23,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/service_def"
+	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 const (
@@ -1699,6 +1701,19 @@ func (agent *RemoteClusterAgent) clearReference() {
 	agent.deletedFromMetakv = true
 }
 
+func (agent *RemoteClusterAgent) fetchFromMetakv(ref *metadata.RemoteClusterReference) (val []byte, rev interface{}, err error) {
+	for i := 0; i < base.MaxRCSMetaKVOpsRetry; i++ {
+		val, rev, err = agent.metakvSvc.Get(ref.Id())
+		if err != nil {
+			time.Sleep(base.TimeBetweenMetaKVGetOps)
+		} else {
+			break
+		}
+	}
+
+	return
+}
+
 // Retrieves the ref from metakv to be able to get the latest revision, stores into pendingRef
 // Write lock must be held
 // Returns non-nil if the reference in metakv is different from locally stored (less revision differences)
@@ -1823,6 +1838,29 @@ func (agent *RemoteClusterAgent) updateReferenceFromInternal(newRef *metadata.Re
 			agent.ReenableRefresh()
 		}
 		return DeleteAlreadyIssued
+	}
+
+	if newRef.Revision() != nil && !updateMetaKv {
+		//We fetch from metakv again to see if the incoming ref has been modified or not
+		//One of the ways this can happen is that the goroutine having new ref got stalled
+		//because of IO delay (e.g. resolving DNS) and by the time it resumes again the new
+		//ref is stale
+		//updateMetaKv = false means we are in a metav callback.
+
+		_, rev, err := agent.fetchFromMetakv(newRef)
+		if err != nil {
+			return err
+		}
+
+		metakvRevBytes := rev.([]byte)
+		newRefRevBytes := newRef.Revision().([]byte)
+		if bytes.Compare(metakvRevBytes, newRefRevBytes) != 0 {
+			err = fmt.Errorf("Revision mismatch for cluster id=%s metakvRev=%v newRefRev=%v",
+				newRef.Id(), metakvRevBytes, newRefRevBytes)
+
+			agent.logger.Errorf("Error in comparing revisions: %s\n", err)
+			return err
+		}
 	}
 
 	err = agent.stageNewReferenceNoLock(newRef, updateMetaKv)
