@@ -38,6 +38,8 @@ var options struct {
 	ipv6                 string // required/optional/off
 	isConvert            bool   // whether xdcr is running in conversion/upgrade mode
 	caFileLocation       string
+	clientCertFile       string
+	clientKeyFile        string
 
 	// logging related parameters
 	logFileDir          string
@@ -74,6 +76,10 @@ func argParse() {
 
 	flag.StringVar(&options.caFileLocation, "caFile", "",
 		"location of the cluster CA file")
+	flag.StringVar(&options.clientCertFile, "clientCertFile", "",
+		"Internal communication certificate file")
+	flag.StringVar(&options.clientKeyFile, "clientKeyFile", "",
+		"Internal communication key file")
 	flag.Parse()
 }
 
