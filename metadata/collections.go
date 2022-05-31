@@ -2217,6 +2217,14 @@ func (c CollectionsMappingRulesType) CheckForExplicitMigrationRuleViolation() er
 				// in admist of other types of rules. Print out a nice message
 				return ErrorMigrationExplicitOnlyOneAllowed
 			}
+		} else if checkSourceNs.IsSystemScope() {
+			return base.ErrorSystemScopeMapped
+		}
+		if vStr, ok := v.(string); ok {
+			checkTargetNs, err := base.NewCollectionNamespaceFromString(vStr)
+			if err == nil && checkTargetNs.IsSystemScope() {
+				return base.ErrorSystemScopeMapped
+			}
 		}
 	}
 	return nil

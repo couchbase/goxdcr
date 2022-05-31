@@ -123,13 +123,19 @@ const ManualBackfillKey = "manualBackfill"
 const CollectionsDelAllBackfillKey = "delAllBackfills"
 const CollectionsDelSingleVBBackfillKey = "delSpecificBackfillForVb"
 const CollectionsManifestUidKey = "collectionsManifestUid"
+const SystemScopeName = "_system"
+const SystemCollectionMobile = "_mobile"
+
+// This is for when FilterSystemScope == true
+var FilterSystemScopePassthruCollections = []string{SystemCollectionMobile}
 
 // From KV design doc:
 // A user’s collection can only contain characters A-Z, a-z, 0-9 and the following symbols _ - %
 // The prefix character of a user’s collection name however is restricted. It cannot be _ or %
+// System scope/collections always start with _
 // Note that XDCR doesn't care if it is system vs user. It just replicates
 const CollectionValidNameCharClass = "[0-9A-Za-z-_%]"
-const CollectionValidPrefixNameClass = "[0-9A-Za-z-]"
+const CollectionValidPrefixNameClass = "[0-9A-Za-z-_]"
 
 var CollectionNamespaceRegexExpr = fmt.Sprintf("^(?P<scope>%v+)[%v](?P<collection>%v+)$", CollectionValidNameCharClass, ScopeCollectionDelimiter, CollectionValidNameCharClass)
 var CollectionNamespaceRegex, _ = regexp.Compile(CollectionNamespaceRegexExpr)
@@ -338,6 +344,7 @@ var ErrorNilCertificateStrictMode = errors.New("cluster encryption is set to str
 var ErrorOpInterrupted = errors.New("Operation interrupted")
 var ErrorNoVbSpecified = errors.New("No vb being specified")
 var ErrorCollectionManifestNotChanged = errors.New("Collection manifest has not changed")
+var ErrorSystemScopeMapped = errors.New("System scope is mapped")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -1442,3 +1449,5 @@ var CkptCacheReqChLen = 1000
 const CkptSvcCacheEnabled = "ckptSvcCacheEnabled"
 
 var HumanRecoveryThreshold = 5 * time.Minute
+
+const FilterSystemScope = "filterSystemScope"

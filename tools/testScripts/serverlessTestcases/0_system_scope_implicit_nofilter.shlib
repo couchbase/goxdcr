@@ -1,0 +1,90 @@
+# Copyright 2022-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A ReplPropertiesNoFilterSystemScope=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["filterSystemScope"]="false" ["statsInterval"]=500 ["filterExpression"]="NOT REGEXP_CONTAINS(META().id, \"EXTRA\")")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+CBWORKLOAD_COLLECTION_NUM_ITEMS=100
+CBWORKLOAD_C1_BUCKET_NUM_ITEMS=500
+CBWORKLOAD_C2_BUCKET_NUM_ITEMS=400
+
+function validateDataLoad {
+	echo "VALIDATING Data... Expect $CBWORKLOAD_BUCKET_NUM_ITEMS items"
+	checkBidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $CBWORKLOAD_BUCKET_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_BUCKET_NUM_ITEMS
+}
+
+function runTestCase {
+	echo "================================================================================="
+	echo "Test case: Replicate system scope (filterSystemScope=false) with implicit mapping"
+	echo "================================================================================="
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ReplPropertiesNoFilterSystemScope
+	printGlobalScopeAndCollectionInfo
+	# This will all be replicated
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	# This will be filtered
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "EXTRA"
+	# No advanced filtering for system scope
+	runCbWorkloadGenCollection "C1" "B1" "_system" "_eventing" "EXTRA"
+	runCbWorkloadGenCollection "C1" "B1" "_system" "_mobile" "EXTRA"
+	runCbWorkloadGenCollection "C1" "B1" "_system" "_query" "EXTRA"
+
+	echo "Waiting 5 seconds before checking item count"
+	sleep 5
+	checkUnidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $CBWORKLOAD_C1_BUCKET_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_C2_BUCKET_NUM_ITEMS
+
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

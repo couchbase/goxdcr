@@ -557,12 +557,8 @@ func NewCollectionNamespaceFromString(specificStr string) (CollectionNamespace, 
 		if len(names) != 3 {
 			return CollectionNamespace{}, fmt.Errorf("Invalid capture for CollectionNameSpaces")
 		}
-
 		for i := 1; i <= 2; i++ {
-			valid := names[i] == DefaultScopeCollectionName
-			if !valid {
-				valid = CollectionNameValidationRegex.MatchString(names[i])
-			}
+			valid := CollectionNameValidationRegex.MatchString(names[i])
 			if !valid {
 				return CollectionNamespace{}, ErrorInvalidColNamespaceFormat
 			}
@@ -590,6 +586,10 @@ func (c CollectionNamespace) ToIndexString() string {
 
 func (c *CollectionNamespace) IsDefault() bool {
 	return c.ScopeName == DefaultScopeCollectionName && c.CollectionName == DefaultScopeCollectionName
+}
+
+func (c *CollectionNamespace) IsSystemScope() bool {
+	return c.ScopeName == SystemScopeName
 }
 
 func (c *CollectionNamespace) IsEmpty() bool {
@@ -1680,6 +1680,7 @@ const (
 	explicitRuleEmptyString      explicitValidatingType = iota
 	explicitRuleStringTooLong    explicitValidatingType = iota
 	explicitRuleTargetDuplicate  explicitValidatingType = iota
+	explicitRuleSystemScope      explicitValidatingType = iota
 )
 
 func NewExplicitMappingValidator() *ExplicitMappingValidator {
@@ -1696,23 +1697,28 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 	}
 	vStr, vIsString := v.(string)
 
-	_, err := NewCollectionNamespaceFromString(k)
+	kNameSpace, err := NewCollectionNamespaceFromString(k)
 	if err == nil {
 		// value must be the same or nil
 		if v == nil {
 			return explicitRuleOneToOne
 		}
+		if kNameSpace.IsSystemScope() {
+			return explicitRuleSystemScope
+		}
 		if !vIsString {
 			return explicitRuleInvalidType
 		}
-		_, err = NewCollectionNamespaceFromString(vStr)
+		vNameSpace, err := NewCollectionNamespaceFromString(vStr)
 		if err != nil {
 			if err == ErrorLengthExceeded {
 				return explicitRuleStringTooLong
 			}
 			return explicitRuleInvalid
 		}
-
+		if vNameSpace.IsSystemScope() {
+			return explicitRuleSystemScope
+		}
 		if vIsString {
 			_, exists := e.valueDuplicatorCheckMap[vStr]
 			if exists {
@@ -1732,6 +1738,9 @@ func (e *ExplicitMappingValidator) parseRule(k string, v interface{}) explicitVa
 		return explicitRuleStringTooLong
 	}
 
+	if k == SystemScopeName || vIsString && vStr == SystemScopeName {
+		return explicitRuleSystemScope
+	}
 	matched := k == DefaultScopeCollectionName
 	if !matched {
 		matched = CollectionNameValidationRegex.MatchString(k)
@@ -1868,6 +1877,8 @@ func (e *ExplicitMappingValidator) ValidateKV(k string, v interface{}) error {
 		return fmt.Errorf("%v - maximum length for scope or collection names is %v", ErrorLengthExceeded, MaxCollectionNameBytes)
 	case explicitRuleTargetDuplicate:
 		return fmt.Errorf("%v is reused as a target namespace", v.(string))
+	case explicitRuleSystemScope:
+		return ErrorSystemScopeMapped
 	default:
 		panic(fmt.Sprintf("Unhandled rule type: %v", ruleType))
 	}

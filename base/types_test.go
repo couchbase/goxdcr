@@ -104,10 +104,10 @@ func TestExplicitMappingValidatorRules(t *testing.T) {
 	assert := assert.New(t)
 
 	validator := NewExplicitMappingValidator()
-	// First do negative test case
+	// We only disallow _system scope
 	key := "_invalidScopeName"
 	value := "validTargetScopeName"
-	assert.NotNil(validator.ValidateKV(key, value))
+	assert.Nil(validator.ValidateKV(key, value))
 
 	key = "validScopeName"
 	value = "%invalidScopeName"
@@ -191,6 +191,26 @@ func TestExplicitMappingValidatorRules(t *testing.T) {
 	key = "ScopeRedundant2"
 	value = "ScopeTRedundant2"
 	assert.Nil(validator.ValidateKV(key, value))
+
+	// System scope cannot be mapped
+	key = "_system"
+	value = "scope"
+	assert.Equal(ErrorSystemScopeMapped, validator.ValidateKV(key, value))
+
+	// Cannot map to system scope
+	key = "scope"
+	value = "_system"
+	assert.Equal(ErrorSystemScopeMapped, validator.ValidateKV(key, value))
+
+	// System collection cannot be mapped
+	key = "_system._mobile"
+	value = "scope.collection"
+	assert.Equal(ErrorSystemScopeMapped, validator.ValidateKV(key, value))
+
+	// Cannot map to a system collection
+	key = "scope.collection"
+	value = "_system._mobile"
+	assert.Equal(ErrorSystemScopeMapped, validator.ValidateKV(key, value))
 }
 
 func TestWrappedFlags(t *testing.T) {
@@ -798,7 +818,6 @@ func TestDefaultNs(t *testing.T) {
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("_default.testCol", "_default._default"))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope.testCol", nil))
 	assert.Equal(explicitRuleOneToOne, validator.parseRule("testScope.testCol", "_default.nonDefCol"))
-	assert.Equal(explicitRuleInvalid, validator.parseRule("testScope.testCol", "_nonDefault.nonDefCol"))
 
 }
 

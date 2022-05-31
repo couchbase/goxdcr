@@ -1219,6 +1219,22 @@ func TestIsMigrationExplicitRule(t *testing.T) {
 	ruleNeg4["scopeName"] = nil
 	validateErr = ruleNeg4.ValidateMigrateRules()
 	assert.Equal(ErrorDenyRuleMigrationModeNotAllowed, ruleNeg4.ValidateMigrateRules())
+
+	ruleSys1 := make(CollectionsMappingRulesType)
+	ruleSys1["_system"] = "S1"
+	assert.NotNil(ruleSys1.ValidateMigrateRules())
+
+	ruleSys2 := make(CollectionsMappingRulesType)
+	ruleSys2["_system._mobile"] = "S1.col1"
+	assert.Equal(base.ErrorSystemScopeMapped, ruleSys2.ValidateMigrateRules())
+
+	ruleSys3 := make(CollectionsMappingRulesType)
+	ruleSys3["_default"] = "_system"
+	assert.NotNil(ruleSys3.ValidateMigrateRules())
+
+	ruleSys4 := make(CollectionsMappingRulesType)
+	ruleSys4["_system._mobile"] = "S1.col1"
+	assert.Equal(base.ErrorSystemScopeMapped, ruleSys4.ValidateMigrateRules())
 }
 
 func TestSpecialMigrationNamespaceFromRules(t *testing.T) {

@@ -374,6 +374,22 @@ func (c *CollectionsRouter) initializeInternalsForExplicitOrMigration(pair metad
 	return err
 }
 
+func (c *CollectionsRouter) IsFilteredSystemCollection(namespace *base.CollectionNamespace) bool {
+	if namespace.ScopeName != base.SystemScopeName {
+		return false
+	}
+	if c.spec.Settings.GetFilterSystemScope() == false {
+		// Nothing is filtered when filterSystemScope is false
+		return false
+	}
+	for _, col := range base.FilterSystemScopePassthruCollections {
+		if namespace.CollectionName == col {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *CollectionsRouter) Stop() error {
 	if atomic.CompareAndSwapUint32(&c.started, 1, 0) {
 		c.logger.Infof("CollectionsRouter %v is now stopping", c.parentRouterId)
@@ -485,6 +501,10 @@ func (c *CollectionsRouter) RouteReqToLatestTargetManifest(wrappedMCReq *base.Wr
 
 	namespace := wrappedMCReq.GetSourceCollectionNamespace()
 
+	if isImplicitMapping && c.IsFilteredSystemCollection(namespace) {
+		err = base.ErrorIgnoreRequest
+		return
+	}
 	var latestSourceManifest *metadata.CollectionsManifest
 	var latestTargetManifest *metadata.CollectionsManifest
 
@@ -1610,10 +1630,13 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return nil, ErrorInvalidRoutingMapForRouter
 	}
 
-	shouldContinue := router.ProcessExpDelTTL(uprEvent)
-	if !shouldContinue {
-		router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
-		return result, nil
+	// Deletion/Expiration filter doesn't apply to system scope
+	if wrappedUpr.ColNamespace == nil || wrappedUpr.ColNamespace.ScopeName != base.SystemScopeName {
+		shouldContinue := router.ProcessExpDelTTL(uprEvent)
+		if !shouldContinue {
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
+			return result, nil
+		}
 	}
 
 	needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(wrappedUpr)

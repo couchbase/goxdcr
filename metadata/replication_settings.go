@@ -93,6 +93,8 @@ const (
 	ReplicateCkptIntervalKey     = base.ReplicateCkptIntervalKey
 
 	CkptSvcCacheEnabledKey = base.CkptSvcCacheEnabled
+
+	FilterSystemScopeKey = base.FilterSystemScope
 )
 
 // keys to facilitate redaction of replication settings map
@@ -109,14 +111,14 @@ var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey,
 	CollectionsDelVbBackfillKey, DismissEventKey}
 
 // settings whose values cannot be changed after replication is created
-var ImmutableSettings = []string{}
+var ImmutableSettings = []string{FilterSystemScopeKey}
 
 // settings that are internal and should be hidden from outside
 var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExpDelKey, CollectionsMgtMultiKey,
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
-	DevNsServerPortSpecifier}
+	DevNsServerPortSpecifier, FilterSystemScopeKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -202,6 +204,8 @@ var ReplicateCkptIntervalConfig = &SettingsConfig{int(base.ReplicateCkptInterval
 
 var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 
+var FilterSystemScopeConfig = &SettingsConfig{true, nil}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
@@ -244,6 +248,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckConfig,
 	ReplicateCkptIntervalKey:          ReplicateCkptIntervalConfig,
 	CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledConfig,
+	FilterSystemScopeKey:              FilterSystemScopeConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -942,6 +947,15 @@ func (s *ReplicationSettings) GetMergeFunctionMapping() base.MergeFunctionMappin
 	return base.MergeFunctionMappingType{}
 }
 
+func (s *ReplicationSettings) GetFilterSystemScope() bool {
+	if value, ok := s.Values[FilterSystemScopeKey]; ok {
+		if res, ok := value.(bool); ok {
+			return res
+		}
+	}
+	return FilterSystemScopeConfig.defaultValue.(bool)
+}
+
 func (s *ReplicationSettings) NeedToRestartPipelineDueToCollectionModeChanges(other *ReplicationSettings) bool {
 	return s.GetCollectionModes() != other.GetCollectionModes()
 }
@@ -963,7 +977,26 @@ func (s *ReplicationSettings) GetCollectionsRoutingRules() CollectionsMappingRul
 	if val == nil {
 		return make(CollectionsMappingRulesType)
 	} else {
-		return val.(CollectionsMappingRulesType)
+		mappingRules := val.(CollectionsMappingRulesType)
+		modes := s.GetCollectionModes()
+		if modes.IsExplicitMapping() && len(mappingRules) > 0 {
+			// Clone the rules so the system scope mapping does not pollute the setting that users will see.
+			rulesClone := mappingRules.Clone()
+			if s.GetFilterSystemScope() {
+				// Only pass through collections are replicated when filterSystemScope is true
+				for _, col := range base.FilterSystemScopePassthruCollections {
+					colObj := base.CollectionNamespace{base.SystemScopeName, col}
+					colStr := colObj.ToIndexString()
+					rulesClone[colStr] = colStr
+				}
+			} else {
+				// When filterSystemScope is false, the whole scope is sent
+				rulesClone[base.SystemScopeName] = base.SystemScopeName
+			}
+			return rulesClone
+		} else {
+			return mappingRules
+		}
 	}
 }
 

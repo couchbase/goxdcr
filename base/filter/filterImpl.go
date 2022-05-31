@@ -106,6 +106,10 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 	if wrappedUprEvent == nil || wrappedUprEvent.UprEvent == nil {
 		return false, base.ErrorInvalidInput, "UprEvent or wrappedUprEvent is nil", 0
 	}
+	// User defined filter doesn't apply to system scope
+	if wrappedUprEvent.ColNamespace != nil && wrappedUprEvent.ColNamespace.ScopeName == base.SystemScopeName {
+		return true, nil, "", 0
+	}
 
 	// filter.slicesToBeReleasedBuf may be used to store temporary objects created in this method
 	// make sure that these temporary objects are released before the method returns
