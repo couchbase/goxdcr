@@ -1220,25 +1220,6 @@ func (xdcrf *XDCRFactory) constructSharedSettingsForDcpNozzle(settings metadata.
 		if len(shaToCollectionsMap) == 1 && vbTasksMap.AllStartsWithSeqno0() {
 			dcpNozzleSettings[parts.DCP_EnableOSO] = true
 		}
-		// OSO is disabled for magma
-		if dcpNozzleSettings[parts.DCP_EnableOSO] == true {
-			spec := pipeline.Specification().GetReplicationSpec()
-			notificationCh, err := xdcrf.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, xdcrf.bucketSvcId)
-			if err != nil {
-				return err
-			}
-			defer xdcrf.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, xdcrf.bucketSvcId)
-
-			latestNotification := <-notificationCh
-			defer latestNotification.Recycle()
-			storageBackend := latestNotification.GetSourceStorageBackend()
-
-			if storageBackend == base.Magma {
-				xdcrf.logger.Infof("%v: Disable OSO because source %v is %v",
-					pipeline.FullTopic(), base.StorageBackendKey, base.Magma)
-				dcpNozzleSettings[parts.DCP_EnableOSO] = false
-			}
-		}
 	}
 	return nil
 }
