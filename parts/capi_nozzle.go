@@ -17,12 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	mc "github.com/couchbase/gomemcached"
-	base "github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	utilities "github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -32,6 +26,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	mc "github.com/couchbase/gomemcached"
+	base "github.com/couchbase/goxdcr/base"
+	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 const (
@@ -1341,4 +1342,9 @@ func (capi *CapiNozzle) RecycleDataObj(incomingReq interface{}) {
 	if ok {
 		capi.recycleDataObj(req)
 	}
+}
+
+//Note: the empty implementation is mainly to satisfy the interface OutNozzle.
+//The recycling happens in RecycleDataObj()
+func (capi *CapiNozzle) SetUpstreamObjRecycler(func(interface{})) {
 }
