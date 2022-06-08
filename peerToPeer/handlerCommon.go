@@ -66,13 +66,11 @@ func NewHandlerCommon(id string, logger *log.CommonLogger, lifeCycleId string, f
 }
 
 func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
-	h.opaqueMapMtx.RLock()
-	_, found := h.opaqueMap[request.GetOpaque()]
-	if found {
-		h.opaqueMapMtx.RUnlock()
-		return service_def.ErrorKeyAlreadyExist
+	// The undoReservation is needed if RegisterOpaque call fails
+	err, undoReservation := h.registerOpaqueKey(request)
+	if err != nil {
+		return err
 	}
-	h.opaqueMapMtx.RUnlock()
 
 	var ch chan ReqRespPair
 	if opts.synchronous {
@@ -90,6 +88,7 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 					// Likely spec got deleted underneath
 					getErr = fmt.Errorf("Unable to getSpecDelNotificationInternal with key %v - %v", finChKey, getErr)
 					h.logger.Errorf(getErr.Error())
+					undoReservation()
 					return getErr
 				}
 				opts.finCh = finCh
@@ -109,6 +108,34 @@ func (h *HandlerCommon) RegisterOpaque(request Request, opts *SendOpts) error {
 	})
 	h.opaqueReqMap[request.GetOpaque()] = &request
 	return nil
+}
+
+func (h *HandlerCommon) registerOpaqueKey(request Request) (error, func()) {
+	h.opaqueMapMtx.RLock()
+	_, found := h.opaqueMap[request.GetOpaque()]
+	if found {
+		h.opaqueMapMtx.RUnlock()
+		return service_def.ErrorKeyAlreadyExist, nil
+	}
+	h.opaqueMapMtx.RUnlock()
+
+	// Register the opaque now with double check
+	h.opaqueMapMtx.Lock()
+	_, found = h.opaqueMap[request.GetOpaque()]
+	if found {
+		h.opaqueMapMtx.Unlock()
+		return service_def.ErrorKeyAlreadyExist, nil
+	}
+	h.opaqueMap[request.GetOpaque()] = nil // set a nil timer to reserve the opaque key
+	h.opaqueMapMtx.Unlock()
+
+	undoRegistration := func() {
+		h.opaqueMapMtx.Lock()
+		defer h.opaqueMapMtx.Unlock()
+		delete(h.opaqueMap, request.GetOpaque())
+	}
+
+	return nil, undoRegistration
 }
 
 func (h *HandlerCommon) Start() {
