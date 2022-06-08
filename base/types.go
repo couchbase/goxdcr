@@ -25,6 +25,7 @@ import (
 
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/google/uuid"
 )
 
 type SettingDef struct {
@@ -2864,4 +2865,8 @@ func (s *StringStringMap) Clear() *StringStringMap {
 		delete(*s, k)
 	}
 	return s
+}
+
+func NewUuid() string {
+	return uuid.New().String()
 }
