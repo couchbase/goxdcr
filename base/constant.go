@@ -12,10 +12,11 @@ package base
 import (
 	"errors"
 	"fmt"
-	mc "github.com/couchbase/gomemcached"
 	"regexp"
 	"sync"
 	"time"
+
+	mc "github.com/couchbase/gomemcached"
 )
 
 //constants
@@ -307,7 +308,17 @@ const (
 	DefaultContentType = "application/x-www-form-urlencoded"
 	JsonContentType    = "application/json"
 	ContentLength      = "Content-Length"
+	ServerHeader       = "Server"
+	ConnectionHeader   = "Connection"
 	UserAgent          = "User-Agent"
+
+	// Values of the header
+	HeaderConnectionCloseVal = "close"
+)
+
+// HTTP Server make
+const (
+	HTTPServerJetty = "Jetty"
 )
 
 //constant for replication tasklist status

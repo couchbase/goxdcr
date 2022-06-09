@@ -8,17 +8,6 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"github.com/couchbase/cbauth"
-	"github.com/couchbase/go-couchbase"
-	"github.com/couchbase/gojsonsm"
-	mc "github.com/couchbase/gomemcached"
-	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goutils/scramsha"
-	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/golang/snappy"
-	gocb "gopkg.in/couchbase/gocb.v1"
 	"io"
 	"io/ioutil"
 	"net"
@@ -30,6 +19,18 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/couchbase/cbauth"
+	"github.com/couchbase/go-couchbase"
+	"github.com/couchbase/gojsonsm"
+	mc "github.com/couchbase/gomemcached"
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goutils/scramsha"
+	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/golang/snappy"
+	gocb "gopkg.in/couchbase/gocb.v1"
 )
 
 var NonExistentBucketError error = errors.New("Bucket doesn't exist")
@@ -2222,7 +2223,21 @@ func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logge
 			err = base.ErrorResourceDoesNotExist
 			return
 		}
-		bod, err = ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
+
+		//Get canonicalizes the header string and returns empty string if header not present
+		serverHeaderVal := res.Header.Get(base.ServerHeader)
+		connHeaderVal := res.Header.Get(base.ConnectionHeader)
+		contentLenHeaderVal := res.Header.Get(base.ContentLength)
+
+		//The following check is to handle response from ES plugin which typically employs Jetty server
+		if strings.HasPrefix(serverHeaderVal, base.HTTPServerJetty) && connHeaderVal == base.HeaderConnectionCloseVal && len(contentLenHeaderVal) == 0 {
+			//Connection header == close and no content length implies that there will not
+			//be any bytes after this. So we read till the end
+			bod, err = ioutil.ReadAll(res.Body)
+		} else {
+			bod, err = ioutil.ReadAll(io.LimitReader(res.Body, res.ContentLength))
+		}
+
 		if err != nil {
 			l.Errorf("Failed to read response body, err=%v\n res=%v\n", err, res)
 			return
