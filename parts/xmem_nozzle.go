@@ -2738,7 +2738,12 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							if base.IsTopologyChangeMCError(response.Status) {
 								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, req.VBucket)
 								xmem.handleVBError(req.VBucket, vb_err)
-								// Recycle obj as it won't be used again
+								// Do not resend if it is topology error, since the error has already been handled the line above
+								// as resending would be a waste of resources
+								if xmem.buf.evictSlot(pos) != nil {
+									panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
+								}
+								// Once evicted, it won't be resent and needs to be recycled
 								xmem.recycleDataObj(wrappedReq)
 							} else if base.IsCollectionMappingError(response.Status) {
 								// upstreamErrReporter will recycle wrappedReq once it's done
