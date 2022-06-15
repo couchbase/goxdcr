@@ -246,8 +246,7 @@ func authClient(client *mcc.Client, userName, password, bucketName string, plain
 		}
 	}
 
-	// if bucketName is different from userName, need to do selectBucket
-	if bucketName != "" && bucketName != userName {
+	if bucketName != "" {
 		_, err = client.SelectBucket(bucketName)
 		if err != nil {
 			logger.Errorf("err from select bucket for %v = %v\n", bucketName, err)
