@@ -341,8 +341,6 @@ func IsTemporaryMCError(resp_status gomemcached.Status) bool {
 // in which case we defer pipeline restart to topology change detector
 func IsTopologyChangeMCError(resp_status gomemcached.Status) bool {
 	switch resp_status {
-	case gomemcached.NO_BUCKET:
-		fallthrough
 	case gomemcached.NOT_MY_VBUCKET:
 		return true
 	default:
