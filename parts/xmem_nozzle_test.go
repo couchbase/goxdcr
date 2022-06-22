@@ -1,4 +1,3 @@
-//go:build !pcre
 // +build !pcre
 
 /*
@@ -16,12 +15,7 @@ package parts
 import (
 	"encoding/binary"
 	"fmt"
-	mc "github.com/couchbase/gomemcached"
-	"github.com/couchbase/goxdcr/base/generator"
-	"github.com/golang/snappy"
-	"math/rand"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -492,125 +486,4 @@ func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
 	assert.Greater(len, 0, fmt.Sprintf("Test %d failed", testId))
 	doc := body[i : i+len]
 	fmt.Printf("status=%v, Document=%s\n", status, doc)
-}
-
-var totalSamples = 100
-var docBodySizeMaxBytes = 500
-
-func generateTestDataForSnappyDecode(numDocs int) []*base.WrappedMCRequest {
-	dataSet, _, err := generator.GenerateRandomData(10)
-	if err != nil {
-		panic(err)
-	}
-	totalRows := len(dataSet)
-	var generatedWrappedMCR []*base.WrappedMCRequest
-
-	testKeyStr := "testDoc_"
-	for i := 0; i < numDocs; i++ {
-		key := fmt.Sprintf("%v%v", testKeyStr, i)
-		newReq := &mc.MCRequest{
-			Opcode:        0,
-			Cas:           rand.Uint64(),
-			Opaque:        rand.Uint32(),
-			VBucket:       uint16(rand.Uint32() % 1024),
-			Extras:        nil,
-			Key:           []byte(key),
-			Body:          snappy.Encode(nil, dataSet[i%totalRows]),
-			ExtMeta:       nil,
-			DataType:      base.SnappyDataType & base.JSONDataType,
-			Keylen:        len(key),
-			CollId:        [5]byte{},
-			CollIdLen:     0,
-			Username:      [128]byte{},
-			UserLen:       0,
-			FramingExtras: nil,
-			FramingElen:   0,
-		}
-		newWrappedMCR := &base.WrappedMCRequest{
-			Seqno:                      0,
-			Req:                        newReq,
-			Start_time:                 time.Time{},
-			UniqueKey:                  string(newReq.Key),
-			SrcColNamespace:            nil,
-			SrcColNamespaceMtx:         sync.RWMutex{},
-			ColInfo:                    nil,
-			ColInfoMtx:                 sync.RWMutex{},
-			SlicesToBeReleasedByXmem:   nil,
-			SlicesToBeReleasedByRouter: nil,
-			SlicesToBeReleasedMtx:      sync.Mutex{},
-			SiblingReqs:                nil,
-			SiblingReqsMtx:             sync.RWMutex{},
-			RetryCRCount:               0,
-		}
-		generatedWrappedMCR = append(generatedWrappedMCR, newWrappedMCR)
-	}
-	return generatedWrappedMCR
-}
-
-// To run benchmark test between snappy.Decode and non-snappy.Decode, we should really use the same data set
-var generateSharedSampleOnce sync.Once
-var generatedDataSet []*base.WrappedMCRequest
-
-func generateDataOnce() []*base.WrappedMCRequest {
-	generateSharedSampleOnce.Do(func() {
-		generatedDataSet = generateTestDataForSnappyDecode(totalSamples)
-	})
-	return generatedDataSet
-}
-
-// Run the following two benchmarks in sequence via a single command to ensure valid test data generation and
-// performance comparison like so:
-// $ go test -run=BenchmarkSnappyDecodeLenImpact -bench=.
-func BenchmarkSnappyDecodeLenImpact(b *testing.B) {
-	dataSet := generateDataOnce()
-
-	generateDataSetAdditional := func(idx int) {
-		dataIdx := idx % len(dataSet)
-		wrappedReq := dataSet[dataIdx]
-		req := wrappedReq.Req
-		additionalInfo := DataSentEventAdditional{Seqno: dataSet[dataIdx].Seqno,
-			IsOptRepd:           false,
-			Opcode:              req.Opcode,
-			VBucket:             req.VBucket,
-			Req_size:            req.Size(),
-			UncompressedReqSize: req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
-		}
-		// Satisfy golang
-		_ = additionalInfo
-	}
-
-	// Do the loop where golang benchmark tester will run b.N times
-	for n := 0; n < b.N; n++ {
-		for i := 0; i < totalSamples; i++ {
-			generateDataSetAdditional(i)
-		}
-	}
-}
-
-// Original, no snappy decode
-func BenchmarkSnappyDecodeLenImpactOriginal(b *testing.B) {
-	dataSet := generateDataOnce()
-
-	generateDataSetAdditional := func(idx int) {
-		dataIdx := idx % len(dataSet)
-		wrappedReq := dataSet[dataIdx]
-		req := wrappedReq.Req
-		additionalInfo := DataSentEventAdditional{Seqno: dataSet[dataIdx].Seqno,
-			IsOptRepd: false,
-			Opcode:    req.Opcode,
-			VBucket:   req.VBucket,
-			Req_size:  req.Size(),
-			// For this test, do not run Uncompressed calculation
-			// UncompressedReqSize: req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
-		}
-		// Satisfy golang
-		_ = additionalInfo
-	}
-
-	// Do the loop where golang benchmark tester will run b.N times
-	for n := 0; n < b.N; n++ {
-		for i := 0; i < totalSamples; i++ {
-			generateDataSetAdditional(i)
-		}
-	}
 }

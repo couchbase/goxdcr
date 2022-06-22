@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/golang/snappy"
 	"math"
 	mrand "math/rand"
 	"reflect"
@@ -727,30 +726,6 @@ func (req *WrappedMCRequest) GetSourceCollectionNamespace() *CollectionNamespace
 	req.SrcColNamespaceMtx.RLock()
 	defer req.SrcColNamespaceMtx.RUnlock()
 	return req.SrcColNamespace
-}
-
-func (req *WrappedMCRequest) GetBodySize() int {
-	if req == nil || req.Req == nil {
-		return 0
-	}
-
-	return len(req.Req.Body)
-}
-
-func (req *WrappedMCRequest) GetUncompressedBodySize() int {
-	if req == nil || req.Req == nil {
-		return 0
-	}
-
-	if req.Req.DataType&mcc.SnappyDataType > 0 {
-		decodedLen, err := snappy.DecodedLen(req.Req.Body)
-		if err != nil {
-			return req.GetBodySize()
-		}
-		return decodedLen
-	} else {
-		return req.GetBodySize()
-	}
 }
 
 type McRequestMap map[string]*WrappedMCRequest
