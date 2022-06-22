@@ -52,10 +52,11 @@ const (
 	EXPIRY_DOCS_MERGE_FAILED_METRIC = "expiry_docs_merge_failed"
 
 	// the number of docs processed by pipeline
-	DOCS_PROCESSED_METRIC  = "docs_processed"
-	DATA_REPLICATED_METRIC = "data_replicated"
-	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
-	DOCS_REP_QUEUE_METRIC  = base.DocsRepQueueStats
+	DOCS_PROCESSED_METRIC               = "docs_processed"
+	DATA_REPLICATED_METRIC              = "data_replicated"
+	SIZE_REP_QUEUE_METRIC               = "size_rep_queue"
+	DOCS_REP_QUEUE_METRIC               = base.DocsRepQueueStats
+	DATA_REPLICATED_UNCOMPRESSED_METRIC = "data_replicated_uncompress"
 
 	DOCS_FILTERED_METRIC         = "docs_filtered"
 	DOCS_UNABLE_TO_FILTER_METRIC = "docs_unable_to_filter"
@@ -258,10 +259,11 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	EXPIRY_DOCS_MERGE_FAILED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of conflicting expiry docs failed to merge"},
 	DATA_MERGE_FAILED_METRIC:        StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data failed to merge"},
 
-	DOCS_PROCESSED_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of docs processed for a replication"},
-	DATA_REPLICATED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data replicated for a replication"},
-	SIZE_REP_QUEUE_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrBytes}, LowCardinality, "Amount of data being queued to be sent in an out nozzle"},
-	DOCS_REP_QUEUE_METRIC:  StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of documents being queued to be sent in an out nozzle"},
+	DOCS_PROCESSED_METRIC:               StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of docs processed for a replication"},
+	DATA_REPLICATED_METRIC:              StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Amount of data replicated for a replication"},
+	SIZE_REP_QUEUE_METRIC:               StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrBytes}, LowCardinality, "Amount of data being queued to be sent in an out nozzle"},
+	DOCS_REP_QUEUE_METRIC:               StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of documents being queued to be sent in an out nozzle"},
+	DATA_REPLICATED_UNCOMPRESSED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrBytes}, LowCardinality, "Theoretical amount of data replicated for a replication if compression were not used"},
 
 	DOCS_FILTERED_METRIC:         StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Total number of documents filtered and not replicated due to any type of filtering"},
 	DOCS_UNABLE_TO_FILTER_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrNoUnit}, LowCardinality, "Number of documents that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated"},
