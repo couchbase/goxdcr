@@ -818,25 +818,37 @@ func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string) (
 
 func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification, finCh chan bool) error {
 	var err error
-	var src *metadata.CollectionsManifest
-	var tgt *metadata.CollectionsManifest
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	src := &defaultManifest
+	tgt := &defaultManifest
 
-	retryOp := func(interface{}) (interface{}, error) {
-		src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec, false)
-		if err != nil {
-			if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
-				defaultManifest := metadata.NewDefaultCollectionsManifest()
-				tgt = &defaultManifest
-				err = nil
-			} else {
-				b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
-			}
-		}
-		return nil, err
-	}
-	_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("BackfillInit", base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp, nil, finCh)
+	isKvNode, err := b.xdcrTopologySvc.IsKVNode()
 	if err != nil {
 		return err
+	}
+
+	// For non-KV node, there will not be any VB ownership on this node. So, it is safe to just start
+	// with default collections all around
+	// Moreover, when replicating to Capella, it is possible that a non-KV node will not be able
+	// to contact the target ns_server. In which case, do not even try the following since it'll lead
+	// to a panic down the line
+	if isKvNode {
+		retryOp := func(interface{}) (interface{}, error) {
+			src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec, false)
+			if err != nil {
+				if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
+					tgt = &defaultManifest
+					err = nil
+				} else {
+					b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
+				}
+			}
+			return nil, err
+		}
+		_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("BackfillInit", base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp, nil, finCh)
+		if err != nil {
+			return err
+		}
 	}
 
 	b.cacheMtx.Lock()
