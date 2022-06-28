@@ -103,6 +103,7 @@ const (
 	SET_WITH_META            = CommandCode(0xa2)
 	ADD_WITH_META            = CommandCode(0xa4)
 	DELETE_WITH_META         = CommandCode(0xa8)
+	GET_RANDOM_KEY           = CommandCode(0xb6)
 	GET_COLLECTIONS_MANIFEST = CommandCode(0xba) // Get entire collections manifest.
 	COLLECTIONS_GET_CID      = CommandCode(0xbb) // Get collection id.
 	SET_TIME_SYNC            = CommandCode(0xc1)
@@ -117,9 +118,9 @@ const (
 	DCP_SEQNO_ADV    = CommandCode(0x64) // Sent when the vb seqno has advanced due to an unsubscribed event
 	DCP_OSO_SNAPSHOT = CommandCode(0x65) // Marks the begin and end of out-of-sequence-number stream
 
-	CREATE_RANGE_SCAN   = CommandCode(0xDA) // Range scans
-	CONTINUE_RANGE_SCAN = CommandCode(0xDB) // Range scans
-	CANCEL_RANGE_SCAN   = CommandCode(0xDC) // Range scans
+	CREATE_RANGE_SCAN   = CommandCode(0xda) // Range scans
+	CONTINUE_RANGE_SCAN = CommandCode(0xdb) // Range scans
+	CANCEL_RANGE_SCAN   = CommandCode(0xdc) // Range scans
 )
 
 // command codes that are counted toward DCP control buffer

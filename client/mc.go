@@ -656,7 +656,7 @@ func (c *Client) Del(vb uint16, key string, context ...*ClientContext) (*gomemca
 // Get a random document
 func (c *Client) GetRandomDoc(context ...*ClientContext) (*gomemcached.MCResponse, error) {
 	req := &gomemcached.MCRequest{
-		Opcode: 0xB6,
+		Opcode: gomemcached.GET_RANDOM_KEY,
 		Opaque: c.getOpaque(),
 	}
 	err := c.setExtrasContext(req, context...)
@@ -715,7 +715,7 @@ func (c *Client) AuthScramSha(user, pass string) (*gomemcached.MCResponse, error
 	}
 
 	startRequest := &gomemcached.MCRequest{
-		Opcode: 0x21,
+		Opcode: gomemcached.SASL_AUTH,
 		Key:    []byte(method),
 		Body:   []byte(message)}
 
@@ -733,7 +733,7 @@ func (c *Client) AuthScramSha(user, pass string) (*gomemcached.MCResponse, error
 
 	// send step request
 	finalRequest := &gomemcached.MCRequest{
-		Opcode: 0x22,
+		Opcode: gomemcached.SASL_STEP,
 		Key:    []byte(method),
 		Body:   []byte(message)}
 	finalResponse, err := c.Send(finalRequest)
