@@ -289,7 +289,7 @@ func (pipelineSupervisor *PipelineSupervisor) checkAndLogFilterErrors() {
 				break
 			}
 			if len(errMsgs) > 0 {
-				pipelineSupervisor.Logger().Warnf("Last %v filtering errors: %v", msgsPrinted, strings.Join(errMsgs, ", "))
+				pipelineSupervisor.Logger().Warnf("%v - Last %v filtering errors: %v", pipelineSupervisor.pipeline.Topic(), msgsPrinted, strings.Join(errMsgs, ", "))
 			}
 		}
 	}
