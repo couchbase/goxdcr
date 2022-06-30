@@ -2703,7 +2703,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								atomic.AddUint64(&xmem.counter_ignored, 1)
 							} else {
 								// for other non-temporary errors, repair connections
-								if response.Status == mc.XATTR_EINVAL {
+								if response.Status == mc.XATTR_EINVAL && xmem.source_cr_mode == base.CRMode_Custom {
 									// There is something wrong with XATTR. This should never happen in released version.
 									// Print the CCR XATTR for debugging
 									if req.DataType&mcc.SnappyDataType == mcc.SnappyDataType {
