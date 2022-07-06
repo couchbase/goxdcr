@@ -2196,9 +2196,9 @@ func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
 	if r.humanRecoverableTransitionalErrors(errs) {
 		r.humanRecoveryThresholdMtx.Lock()
 		if r.humanRecoveryThresholdTimer == nil {
-			r.humanRecoveryThresholdTimer = time.AfterFunc(humanRecoveryThreshold, func() {
+			r.humanRecoveryThresholdTimer = time.AfterFunc(base.HumanRecoveryThreshold, func() {
 				errMsg := fmt.Sprintf("Replication %v cannot continue after %v because of the errors that require manual recovery (%v). Please fix them and then restart the replication",
-					r.pipeline_name, humanRecoveryThreshold, base.FlattenErrorMap(errs))
+					r.pipeline_name, base.HumanRecoveryThreshold, base.FlattenErrorMap(errs))
 				r.logger.Warnf(errMsg)
 				r.pipelineMgr.GetLogSvc().Write(errMsg)
 				r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
@@ -2304,8 +2304,6 @@ func (r *PipelineUpdater) executeQueuedBackfillCallbacks() {
 		}
 	}
 }
-
-var humanRecoveryThreshold = 5 * time.Minute
 
 // Only if errors are recoverable by humans, and that these errors could be part of management transitions
 // For example, users could turn explicit mapping on without rules, and then take some time to actually get
