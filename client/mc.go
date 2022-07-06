@@ -75,7 +75,7 @@ type ClientIface interface {
 	NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error)
 	NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, error)
 
-	CreateRangeScan(vb uint16, collId uint32, start []byte, includeStart bool, end []byte, includeEnd bool,
+	CreateRangeScan(vb uint16, collId uint32, start []byte, excludeStart bool, end []byte, excludeEnd bool,
 		context ...*ClientContext) (*gomemcached.MCResponse, error)
 	ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, timeout uint32, context ...*ClientContext) error
 	CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (*gomemcached.MCResponse, error)
@@ -1080,7 +1080,7 @@ func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
 	return
 }
 
-func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, includeStart bool, end []byte, includeEnd bool,
+func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, excludeStart bool, end []byte, excludeEnd bool,
 	context ...*ClientContext) (*gomemcached.MCResponse, error) {
 
 	req := &gomemcached.MCRequest{
@@ -1096,15 +1096,15 @@ func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, include
 
 	req.CollIdLen = 0 // has to be 0 else op is rejected
 	r := make(map[string]interface{})
-	if includeStart {
-		r["start"] = base64.StdEncoding.EncodeToString(start)
-	} else {
+	if excludeStart {
 		r["excl_start"] = base64.StdEncoding.EncodeToString(start)
-	}
-	if includeEnd {
-		r["end"] = base64.StdEncoding.EncodeToString(end)
 	} else {
+		r["start"] = base64.StdEncoding.EncodeToString(start)
+	}
+	if excludeEnd {
 		r["excl_end"] = base64.StdEncoding.EncodeToString(end)
+	} else {
+		r["end"] = base64.StdEncoding.EncodeToString(end)
 	}
 	m := make(map[string]interface{})
 	m["collection"] = fmt.Sprintf("%x", collId)

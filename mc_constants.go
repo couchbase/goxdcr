@@ -64,7 +64,7 @@ const (
 	SASL_AUTH       = CommandCode(0x21)
 	SASL_STEP       = CommandCode(0x22)
 
-	SET_BUCKET_COMPUTE_UNIT_THROTTLE_LIMITS  = CommandCode(0x2a)
+	SET_BUCKET_COMPUTE_UNIT_THROTTLE_LIMITS = CommandCode(0x2a)
 
 	SET_VBUCKET = CommandCode(0x3d)
 
@@ -174,7 +174,7 @@ const (
 	SYNC_WRITE_AMBIGUOUS          = Status(0xa3)
 	SYNC_WRITE_RECOMMITINPROGRESS = Status(0xa4)
 
-	RANGE_SCAN_MORE = Status(0xa6)
+	RANGE_SCAN_MORE     = Status(0xa6)
 	RANGE_SCAN_COMPLETE = Status(0xa7)
 
 	// SUBDOC
