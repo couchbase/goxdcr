@@ -18,7 +18,7 @@ type MCResponse struct {
 	// The CAS identifier (if applicable)
 	Cas uint64
 	// Extras, key, and body for this response
-	Extras, Key, Body []byte
+	Extras, FlexibleExtras, Key, Body []byte
 	// If true, this represents a fatal condition and we should hang up
 	Fatal bool
 	// Datatype identifier
@@ -171,11 +171,18 @@ func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int,
 		return n, err
 	}
 
-	if hdrBytes[0] != RES_MAGIC && hdrBytes[0] != REQ_MAGIC {
+	var klen, flen int
+	switch hdrBytes[0] {
+	case RES_MAGIC:
+		fallthrough
+	case REQ_MAGIC:
+		klen = int(binary.BigEndian.Uint16(hdrBytes[2:4]))
+	case FLEX_RES_MAGIC:
+		flen = int(hdrBytes[2])
+		klen = int(hdrBytes[3])
+	default:
 		return n, fmt.Errorf("bad magic: 0x%02x", hdrBytes[0])
 	}
-
-	klen := int(binary.BigEndian.Uint16(hdrBytes[2:4]))
 	elen := int(hdrBytes[4])
 
 	res.Opcode = CommandCode(hdrBytes[1])
@@ -184,7 +191,7 @@ func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int,
 	res.Opaque = binary.BigEndian.Uint32(hdrBytes[12:16])
 	res.Cas = binary.BigEndian.Uint64(hdrBytes[16:24])
 
-	bodyLen := int(binary.BigEndian.Uint32(hdrBytes[8:12])) - (klen + elen)
+	bodyLen := int(binary.BigEndian.Uint32(hdrBytes[8:12])) - (klen + elen + flen)
 
 	//defer function to debug the panic seen with MB-15557
 	defer func() {
@@ -194,7 +201,7 @@ func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int,
 		}
 	}()
 
-	bufNeed := klen + elen + bodyLen
+	bufNeed := klen + elen + flen + bodyLen
 	if buf != nil && cap(buf) >= bufNeed {
 		buf = buf[0:bufNeed]
 	} else {
@@ -203,12 +210,45 @@ func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int,
 
 	m, err := io.ReadFull(r, buf)
 	if err == nil {
-		res.Extras = buf[0:elen]
+		if flen > 0 {
+			res.FlexibleExtras = buf[0:flen]
+		}
+		res.Extras = buf[flen:elen]
 		res.Key = buf[elen : klen+elen]
 		res.Body = buf[klen+elen:]
 	}
 
 	return n + m, err
+}
+
+func (res *MCResponse) ComputeUnits() (ru uint64, wu uint64) {
+	if res.FlexibleExtras == nil || len(res.FlexibleExtras) == 0 {
+		return
+	}
+	for i := 0; i < len(res.FlexibleExtras); {
+		l := res.FlexibleExtras[i] << 4
+		switch res.FlexibleExtras[i] & 0xf {
+		case ComputeUnitsRead:
+			ru = uint64(binary.BigEndian.Uint16(res.FlexibleExtras[i+1 : i+3]))
+		case ComputeUnitsWrite:
+			wu = uint64(binary.BigEndian.Uint16(res.FlexibleExtras[i+1 : i+3]))
+
+		// ID escape: we need to skip the next byte
+		case 15:
+			i++
+		}
+
+		// data len is either 1..14, or 15 + next byte
+		switch l {
+		case 0:
+			panic(fmt.Sprintf("Invalid Flexible Extras length received! %v", l))
+		case 15:
+			i = int(l + 1 + res.FlexibleExtras[i])
+		default:
+			i = int(l + 1)
+		}
+	}
+	return
 }
 
 type MCResponsePool struct {

@@ -247,6 +247,11 @@ type MCItem struct {
 // Number of bytes in a binary protocol header.
 const HDR_LEN = 24
 
+const (
+	ComputeUnitsRead  = 1
+	ComputeUnitsWrite = 2
+)
+
 // Mapping of CommandCode -> name of command (not exhaustive)
 var CommandNames map[CommandCode]string
 
