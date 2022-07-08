@@ -1117,13 +1117,13 @@ func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, exclude
 	return c.Send(req)
 }
 
-func (c *Client) ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, timeout uint32,
+func (c *Client) ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, timeout uint32, maxSize uint32,
 	context ...*ClientContext) error {
 
 	req := &gomemcached.MCRequest{
 		Opcode:  gomemcached.CONTINUE_RANGE_SCAN,
 		VBucket: vb,
-		Extras:  make([]byte, 24),
+		Extras:  make([]byte, 28),
 		Opaque:  opaque,
 	}
 	err := c.setContext(req, context...)
@@ -1134,6 +1134,7 @@ func (c *Client) ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items 
 	copy(req.Extras, uuid)
 	binary.BigEndian.PutUint32(req.Extras[16:], items)
 	binary.BigEndian.PutUint32(req.Extras[20:], timeout)
+	binary.BigEndian.PutUint32(req.Extras[24:], maxSize)
 	return c.Transmit(req)
 }
 
