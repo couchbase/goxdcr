@@ -77,7 +77,8 @@ type ClientIface interface {
 
 	CreateRangeScan(vb uint16, collId uint32, start []byte, excludeStart bool, end []byte, excludeEnd bool,
 		context ...*ClientContext) (*gomemcached.MCResponse, error)
-	ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, timeout uint32, context ...*ClientContext) error
+	ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, maxSize uint32, timeout uint32,
+		context ...*ClientContext) error
 	CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (*gomemcached.MCResponse, error)
 }
 
