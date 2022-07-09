@@ -27,8 +27,8 @@ type MCResponse struct {
 
 // A debugging string representation of this response
 func (res MCResponse) String() string {
-	return fmt.Sprintf("{MCResponse status=%v keylen=%d, extralen=%d, bodylen=%d}",
-		res.Status, len(res.Key), len(res.Extras), len(res.Body))
+	return fmt.Sprintf("{MCResponse status=%v keylen=%d, extralen=%d, bodylen=%d, flexible=%v}",
+		res.Status, len(res.Key), len(res.Extras), len(res.Body), res.FlexibleExtras)
 }
 
 // Response as an error.
@@ -212,8 +212,9 @@ func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int,
 	if err == nil {
 		if flen > 0 {
 			res.FlexibleExtras = buf[0:flen]
+			buf = buf[flen:]
 		}
-		res.Extras = buf[flen:elen]
+		res.Extras = buf[0:elen]
 		res.Key = buf[elen : klen+elen]
 		res.Body = buf[klen+elen:]
 	}
@@ -226,8 +227,9 @@ func (res *MCResponse) ComputeUnits() (ru uint64, wu uint64) {
 		return
 	}
 	for i := 0; i < len(res.FlexibleExtras); {
-		l := res.FlexibleExtras[i] << 4
-		switch res.FlexibleExtras[i] & 0xf {
+		// TODO check: this seems to be the opposite of the documentation?
+		l := res.FlexibleExtras[i] & 0x0f
+		switch res.FlexibleExtras[i] >> 4 {
 		case ComputeUnitsRead:
 			ru = uint64(binary.BigEndian.Uint16(res.FlexibleExtras[i+1 : i+3]))
 		case ComputeUnitsWrite:
