@@ -80,6 +80,8 @@ type ClientIface interface {
 	ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, maxSize uint32, timeout uint32,
 		context ...*ClientContext) error
 	CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (*gomemcached.MCResponse, error)
+
+	ValidateKey(vb uint16, key string, context ...*ClientContext) (bool, error)
 }
 
 type ClientContext struct {
@@ -340,7 +342,7 @@ func (c *Client) TransmitResponse(res *gomemcached.MCResponse) error {
 // Receive a response
 func (c *Client) Receive() (*gomemcached.MCResponse, error) {
 	resp, _, err := getResponse(c.conn, c.hdrBuf)
-	if err != nil && resp.Status != gomemcached.KEY_ENOENT && resp.Status != gomemcached.EBUSY {
+	if err != nil && !isNonFatalStatus(resp.Status) {
 		c.setHealthy(false)
 	}
 	return resp, err
@@ -354,10 +356,18 @@ func (c *Client) ReceiveWithDeadline(deadline time.Time) (*gomemcached.MCRespons
 	// Clear read deadline to avoid interference with future read operations.
 	c.conn.(net.Conn).SetReadDeadline(time.Time{})
 
-	if err != nil && resp.Status != gomemcached.KEY_ENOENT && resp.Status != gomemcached.EBUSY {
+	if err != nil && !isNonFatalStatus(resp.Status) {
 		c.setHealthy(false)
 	}
 	return resp, err
+}
+
+func isNonFatalStatus(status gomemcached.Status) bool {
+	return status == gomemcached.KEY_ENOENT ||
+		status == gomemcached.EBUSY ||
+		status == gomemcached.RANGE_SCAN_COMPLETE ||
+		status == gomemcached.RANGE_SCAN_MORE ||
+		status == gomemcached.KEY_EEXISTS
 }
 
 func appendMutationToken(bytes []byte) []byte {
@@ -1155,6 +1165,28 @@ func (c *Client) CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context 
 	req.CollIdLen = 0 // has to be 0 else op is rejected
 	copy(req.Extras, uuid)
 	return c.Send(req)
+}
+
+func (c *Client) ValidateKey(vb uint16, key string, context ...*ClientContext) (bool, error) {
+	req := &gomemcached.MCRequest{
+		Opcode:  gomemcached.REPLACE,
+		VBucket: vb,
+		Opaque:  c.opaque,
+		Extras:  make([]byte, 8),
+		Key:     []byte(key),
+		Cas:     0xffffffffffffffff,
+	}
+	err := c.setContext(req, context...)
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.Send(req)
+	if resp.Status == gomemcached.KEY_EEXISTS {
+		return true, nil
+	} else if resp.Status == gomemcached.KEY_ENOENT {
+		return false, nil
+	}
+	return false, err
 }
 
 // ObservedStatus is the type reported by the Observe method
