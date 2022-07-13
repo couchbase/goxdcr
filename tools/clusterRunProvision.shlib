@@ -220,6 +220,11 @@ function cleanupBucketNamePropertyMap {
 	BUCKET_NAME_PROPERTIES_MAP=()
 }
 
+function cleanupClientCertMaps {
+  CLIENT_CERT_MAP=()
+  CLIENT_KEY_MAP=()
+}
+
 # Input:
 # 1. Bucket name
 # Outputs associative array as a exported global of BUCKET_PROPERTIES_OUTPUT_MAP

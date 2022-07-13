@@ -72,20 +72,13 @@ function runTestCase {
 	createSecureRemoteClusterReference "C2" "C1" "${CLUSTER_ROOT_CERTIFICATE_MAP["C1"]}"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	#createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
-	#printGlobalScopeAndCollectionInfo
 	runDataLoad
 
 	echo "Waiting 5 seconds before checking item count"
 	sleep 5
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	#checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	checkUnidirectionalChangesLeft
-
-	#validateDataLoad
-	#validateXDCRCheckpoints "C1"
-	#validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"
@@ -96,4 +89,5 @@ function runTestCase {
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		setDisableClientCert "$clusterName"
 	done
+	cleanupClientCertMaps
 }
