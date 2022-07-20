@@ -405,6 +405,14 @@ func (req *MCRequest) Bytes() []byte {
 	return data
 }
 
+// BytesPreallocated will fill the data in the preallocated slice
+func (req *MCRequest) BytesPreallocated(out []byte) {
+	for i := 0; i < len(out); i++ {
+		out[i] = 0
+	}
+	req.bytes(out)
+}
+
 func (req *MCRequest) bytes(data []byte) {
 	pos, halfByteMode := req.FillHeaderBytes(data)
 	// TODO - the halfByteMode should be revisited for a more efficient
