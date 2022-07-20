@@ -375,7 +375,7 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest, isCustomCR bool) 
 	req.reservation = reservation_num
 	req.req = mcreq
 	buf.adjustRequest(mcreq, index, isCustomCR)
-	item_bytes := mcreq.Req.Bytes()
+	item_bytes := mcreq.GetReqBytes()
 	now := time.Now()
 	req.sent_time = &now
 	buf.token_ch <- 1
@@ -395,6 +395,7 @@ func (buf *requestBuffer) adjustRequest(req *base.WrappedMCRequest, index uint16
 		mc_req.Cas = 0
 	}
 	mc_req.Opaque = base.GetOpaque(index, buf.sequences[int(index)])
+	req.UpdateReqBytes()
 }
 
 func (buf *requestBuffer) bufferSize() uint16 {
@@ -1184,7 +1185,6 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 
 				//blocking
 				index, reserv_num, item_bytes := xmem.buf.enSlot(item, xmem.source_cr_mode == base.CRMode_Custom)
-
 				reqs_bytes = append(reqs_bytes, item_bytes)
 
 				reserv_num_pair := make([]uint16, 2)
@@ -1325,6 +1325,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 			}
 		}
 	}
+	req.UpdateReqBytes()
 	return nil
 }
 
@@ -2291,6 +2292,7 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 		}
 		req.Req.Body = body
 		req.Req.DataType = req.Req.DataType &^ mcc.SnappyDataType
+		req.UpdateReqBytes()
 	}
 	if req.RetryCRCount == 0 {
 		ccrMeta, err := base.FindSourceCustomCRXattr(req.Req, xmem.sourceClusterId)
@@ -3059,7 +3061,7 @@ func getBytesListFromReq(req *bufferedMCRequest) [][]byte {
 		return nil
 	}
 	bytesList := make([][]byte, 1)
-	bytesList[0] = req.req.Req.Bytes()
+	bytesList[0] = req.req.GetReqBytes()
 	return bytesList
 }
 
