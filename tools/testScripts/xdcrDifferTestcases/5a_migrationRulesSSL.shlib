@@ -108,6 +108,12 @@ function runTestCase {
 		return $retVal
 	fi
 
+	checkDifferLogItemCount "Target" 2824 0
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
 	echo "Pausing replication and deleting one target collection to create some mismatches"
 	pauseReplication "C1" "B1" "C2" "B2"
 	deleteCollection "C2" "B2" "S3" "col1"
@@ -132,6 +138,8 @@ function runTestCase {
 		echo "Failed"
 		return $retVal
 	fi
+
+	checkDifferLogItemCount "Target" 1905 0
 
 	echo "============================================================================"
 	echo "PASSED"

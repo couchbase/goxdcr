@@ -221,8 +221,8 @@ function cleanupBucketNamePropertyMap {
 }
 
 function cleanupClientCertMaps {
-  CLIENT_CERT_MAP=()
-  CLIENT_KEY_MAP=()
+	CLIENT_CERT_MAP=()
+	CLIENT_KEY_MAP=()
 }
 
 # Input:

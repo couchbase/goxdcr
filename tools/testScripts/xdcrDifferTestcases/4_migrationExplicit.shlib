@@ -82,6 +82,9 @@ function runTestCase {
 		return $retVal
 	fi
 
+	checkDifferLogItemCount "Source" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+	checkDifferLogItemCount "Target" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
@@ -113,6 +116,9 @@ function runTestCase {
 		echo "Failed"
 		return $retVal
 	fi
+
+	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS + 1)) 0
+	checkDifferLogItemCount "Target" 2 0
 
 	echo "============================================================================"
 	echo "PASSED"

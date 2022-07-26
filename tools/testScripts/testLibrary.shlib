@@ -622,6 +622,21 @@ function validateDifferResults {
 	return $retVal
 }
 
+function checkDifferLogItemCount {
+	local srcOrTgt=$1
+	local itemCnt=$2
+	local filteredCnt=$3
+	local logFile="${xdcrDifferDir}/xdcrDiffer.log"
+	local expected="$srcOrTgt bucket item count is $itemCnt (excluding $filteredCnt filtered mutations)"
+
+	found=$(grep -c "$expected" $logFile)
+	if (($found == 0)); then
+		echo "Did not find the line: \"$expected\" from the file $logFile"
+		exit 1
+	fi
+	echo "Found the line: $expected"
+}
+
 function checkInternalSetting {
 	local clusterName=$1
 	local settingKey=$2

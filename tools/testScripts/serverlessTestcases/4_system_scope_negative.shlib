@@ -25,7 +25,6 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
@@ -36,7 +35,6 @@ BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
 SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
-
 
 function runTestCase {
 	echo "================================================"
@@ -51,20 +49,20 @@ function runTestCase {
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
-    echo "Check _system:_system is not an accepted mapping"
-    output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/controller/createReplication -d fromBucket=B1 -d toCluster=C2 -d toBucket=B2 -d filterSystemScope=false -d colMappingRules='{"S1.col1":"S1.col1", "_system":"_system"}' -d collectionsExplicitMapping=true -d replicationType=continuous)
-    expected='System scope is mapped'
-    if [[ $output != *"$expected"* ]]; then
-      echo "Expect $expected but got $output"
-      exit 1
-    fi
+	echo "Check _system:_system is not an accepted mapping"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/controller/createReplication -d fromBucket=B1 -d toCluster=C2 -d toBucket=B2 -d filterSystemScope=false -d colMappingRules='{"S1.col1":"S1.col1", "_system":"_system"}' -d collectionsExplicitMapping=true -d replicationType=continuous)
+	expected='System scope is mapped'
+	if [[ $output != *"$expected"* ]]; then
+		echo "Expect $expected but got $output"
+		exit 1
+	fi
 
-    echo "Check _system._mobile:_system._mobile is not an accepted mapping"
-    output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/controller/createReplication -d fromBucket=B1 -d toCluster=C2 -d toBucket=B2 -d filterSystemScope=false -d colMappingRules='{"S1.col1":"S1.col1", "_system._mobile":"_system._mobile"}' -d collectionsExplicitMapping=true -d replicationType=continuous)
-    if [[ $output != *"$expected"* ]]; then
-      echo "Expect $expected but got $output"
-      exit 1
-    fi
+	echo "Check _system._mobile:_system._mobile is not an accepted mapping"
+	output=$(curl -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:9000/controller/createReplication -d fromBucket=B1 -d toCluster=C2 -d toBucket=B2 -d filterSystemScope=false -d colMappingRules='{"S1.col1":"S1.col1", "_system._mobile":"_system._mobile"}' -d collectionsExplicitMapping=true -d replicationType=continuous)
+	if [[ $output != *"$expected"* ]]; then
+		echo "Expect $expected but got $output"
+		exit 1
+	fi
 
 	echo "============================================================================"
 	echo "PASSED"
