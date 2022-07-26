@@ -321,8 +321,15 @@ func (buf *requestBuffer) cancelReservation(index uint16, reservation_num int) e
 	return buf.clearSlot(index, reservation_num)
 }
 
-func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []byte) {
-	index := <-buf.empty_slots_pos
+func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []byte, error) {
+	var index uint16
+
+	select {
+	case index = <-buf.empty_slots_pos:
+		break
+	case <-buf.fin_ch:
+		return 0, 0, nil, PartStoppedError
+	}
 
 	//non blocking
 	//generate a random number
@@ -347,7 +354,7 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest) (uint16, int, []b
 	//increase the occupied_count
 	atomic.AddInt32(&buf.occupied_count, 1)
 
-	return index, reservation_num, item_bytes
+	return index, reservation_num, item_bytes, nil
 }
 
 // always called with lock on buf.slots[index]. no need for separate lock on buf.sequences[index]
@@ -1266,7 +1273,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 
 				//blocking
-				index, reserv_num, item_bytes := xmem.buf.enSlot(item)
+				index, reserv_num, item_bytes, err := xmem.buf.enSlot(item)
+				if err != nil {
+					return err
+				}
 
 				reqs_bytes = append(reqs_bytes, item_bytes)
 
