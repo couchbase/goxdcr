@@ -1147,7 +1147,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pOpaqueCleanupInterval, p2pVBRelatedGCInterval,
 	throughSeqnoBgScannerFreq, throughSeqnoBgScannerLogFreq,
 	timeoutP2PProtocol time.Duration,
-	ckptCacheCtrlLen, ckptCacheReqLen int) {
+	ckptCacheCtrlLen, ckptCacheReqLen int,
+	dnsSrvReBootstrap bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1292,6 +1293,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	TimeoutP2PProtocol = timeoutP2PProtocol
 	CkptCacheCtrlChLen = ckptCacheReqLen
 	CkptCacheReqChLen = ckptCacheReqLen
+	DNSSrvReBootstrap = dnsSrvReBootstrap
 }
 
 // XDCR Dev hidden replication settings
@@ -1436,3 +1438,5 @@ var CkptCacheCtrlChLen = 10
 var CkptCacheReqChLen = 1000
 
 const CkptSvcCacheEnabled = "ckptSvcCacheEnabled"
+
+var DNSSrvReBootstrap bool

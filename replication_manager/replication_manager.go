@@ -345,6 +345,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.PipelineTimeoutP2PProtocolKey].(int))*time.Second,
 		internal_settings.Values[metadata.CkptCacheCtrlChLenKey].(int),
 		internal_settings.Values[metadata.CkptCacheReqChLenKey].(int),
+		internal_settings.Values[metadata.DnsSrvReBootstrapKey].(bool),
 	)
 }
 
