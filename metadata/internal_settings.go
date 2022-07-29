@@ -266,7 +266,10 @@ const (
 	CkptCacheCtrlChLenKey = "CkptCacheCtrlChLen"
 	CkptCacheReqChLenKey  = "CkptCacheReqChLen"
 
-	GlobalOSOConfigKey = "OSOModeOverride"
+	GlobalOSOConfigKey        = "OSOModeOverride"
+	HumanRecoveryThresholdKey = "humanRecoverySec"
+
+	DnsSrvReBootstrapKey = "dnsSrvReBootstrap"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -384,6 +387,8 @@ var PipelineTimeoutP2PProtocolConfig = &SettingsConfig{int(base.TimeoutP2PProtoc
 var CkptCacheCtrlChLenConfig = &SettingsConfig{int(base.CkptCacheCtrlChLen), &Range{1, 5000}}
 var CkptCacheReqChLenConfig = &SettingsConfig{int(base.CkptCacheReqChLen), &Range{1, 5000}}
 var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), Range: &Range{int(base.GlobalOSONoOp), int(base.GlobalOSOMax) - 1}}
+var HumanRecoveryThresholdConfig = &SettingsConfig{int(base.HumanRecoveryThreshold.Seconds()), &Range{10, 600}}
+var DnsSrvReBootstrapConfig = &SettingsConfig{base.DNSSrvReBootstrap, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -501,6 +506,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CkptCacheCtrlChLenKey:                         CkptCacheCtrlChLenConfig,
 	CkptCacheReqChLenKey:                          CkptCacheReqChLenConfig,
 	GlobalOSOConfigKey:                            GlobalOSOConfig,
+	HumanRecoveryThresholdKey:                     HumanRecoveryThresholdConfig,
+	DnsSrvReBootstrapKey:                          DnsSrvReBootstrapConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

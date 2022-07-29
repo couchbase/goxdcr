@@ -50,6 +50,7 @@ var WriteToMetakvErrString = "Error writing to metakv"
 var NoSuchHostRecommendationString = " Check to see if firewall config is incorrect, or if Couchbase Cloud, check to see if source IP is allowed"
 var ErrorRemoteClusterNoCollectionsCapability = errors.New("remote cluster has no collections capability")
 var ErrorAdminTimeout = errors.New("The requested operation is being executed but is taking longer than expected. Please wait for the operation to complete, and the result will be posted in the UI Log section")
+var ErrorRefreshUnreachable = errors.New("Refresh operation could not contact any node in the node list")
 
 var AdminTimeout = 25 * time.Second // ns_server has a timeout of 30 seconds... should not keep user waiting past 25
 
@@ -952,7 +953,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	if !rctx.atLeastOneValid {
 		errMsg := fmt.Sprintf("Failed to refresh remote cluster reference %v since none of the nodes in target node list is accessible. node list = %v\n", rctx.refCache.Id(), rctx.cachedRefNodesList)
 		agent.logger.Error(errMsg)
-		return errors.New(errMsg)
+		return ErrorRefreshUnreachable
 	}
 
 	// If there's anything that needs to be persisted to agent, update it
@@ -1619,6 +1620,21 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 					agent.connectivityHelper.MarkIpFamilyError(true)
 				} else {
 					agent.connectivityHelper.MarkIpFamilyError(false)
+				}
+				agent.refMtx.RLock()
+				isDnsSrv := agent.reference.IsDnsSRV()
+				agent.refMtx.RUnlock()
+				if err == ErrorRefreshUnreachable && isDnsSrv && base.DNSSrvReBootstrap {
+					// If rebootstrap is enabled, clear any previously stored nodes in the nodes list so it refresh ops
+					// will start fresh
+					// And then re-execute populateDnsSrv to force a re-lookup using the SRV records and populate
+					// the A records
+					agent.refMtx.Lock()
+					agent.refNodesList = base.StringPairList{}
+					agent.reference.SetActiveHostName("")
+					agent.reference.SetActiveHttpsHostName("")
+					agent.reference.PopulateDnsSrvIfNeeded()
+					agent.refMtx.Unlock()
 				}
 			}
 		}

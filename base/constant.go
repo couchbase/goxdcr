@@ -1203,7 +1203,9 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	throughSeqnoBgScannerFreq, throughSeqnoBgScannerLogFreq,
 	timeoutP2PProtocol time.Duration,
 	ckptCacheCtrlLen, ckptCacheReqLen int,
-	globalOSOMode int) {
+	globalOSOMode int,
+	humanRecoveryThreshold time.Duration,
+	dnsSrvReBootstrap bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1349,6 +1351,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CkptCacheCtrlChLen = ckptCacheReqLen
 	CkptCacheReqChLen = ckptCacheReqLen
 	GlobalOSOSetting = GlobalOSOMode(globalOSOMode)
+	HumanRecoveryThreshold = humanRecoveryThreshold
+	DNSSrvReBootstrap = dnsSrvReBootstrap
 }
 
 // XDCR Dev hidden replication settings
@@ -1501,3 +1505,7 @@ const (
 )
 
 var GlobalOSOSetting = GlobalOSONoOp
+
+var HumanRecoveryThreshold = 5 * time.Minute
+
+var DNSSrvReBootstrap bool
