@@ -78,7 +78,7 @@ GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   GOTAGS "${xdcrGoTags}"
   LDFLAGS "${LDFLAGS}"
   INSTALL_PATH bin OUTPUT goxdcr
-  GOVERSION 1.18.1)
+  GOVERSION 1.18)
 
 ADD_DEPENDENCIES(goxdcr sigar n1ql-yacc)
 IF (BUILD_ENTERPRISE)
