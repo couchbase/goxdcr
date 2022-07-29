@@ -2738,3 +2738,129 @@ func TestStalledAddClusterRefFromCallback(t *testing.T) {
 
 	wg.Wait()
 }
+
+// When an SRV entry is used and none of the A records are accessible
+// and the setting to re-bootstrap is used, then the the agent should re-query
+// the SRV record again for new A-records
+func TestRefreshSRVRebootstrap(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestCreateRemoteWithIpFamilyV6Blocked ===============")
+	defer fmt.Println("============== Test case End: TestCreateRemoteWithIpFamilyV6Blocked ===============")
+
+	var unitTestRefreshInterval = 1 * time.Second
+
+	// Let refresh temporarily be a shorter period
+	oldRefreshInt := base.RefreshRemoteClusterRefInterval
+	base.RefreshRemoteClusterRefInterval = unitTestRefreshInterval
+	// force bootstrap to be true
+	oldBootstrap := base.DNSSrvReBootstrap
+	base.DNSSrvReBootstrap = true
+	defer func() {
+		base.RefreshRemoteClusterRefInterval = oldRefreshInt
+		base.DNSSrvReBootstrap = oldBootstrap
+	}()
+
+	// First use a valid bootstrap for DNS SRV
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	// Force rebootStrap to be true
+	//remoteClusterSvc.dnsSrvReBootstrap = true
+
+	utilsMockFunc := func() {
+		setupUtilsMockSpecific(utilitiesMock, 0*time.Second, nil, "", 0, nil, true, false,
+			false, clusterMadHatter, dnsValidHostNameList)
+	}
+
+	srvHelper := &baseMock.DnsSrvHelperIface{}
+	srvEntry := &net.SRV{
+		Target: "192.168.0.1.",
+		Port:   9001,
+	}
+	var srvList []*net.SRV
+	srvList = append(srvList, srvEntry)
+
+	srvHelper.On("DnsSrvLookup", dnsSrvHostname).Return(srvList, base2.SrvRecordsNonSecure, nil)
+
+	idAndName := "test"
+	ref := createRemoteClusterReferenceDNSSRV(idAndName, srvHelper)
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	agent, alreadyExists, err := remoteClusterSvc.getOrStartNewAgent(ref, false /*userInitiated*/, true /*updateFromRef*/)
+	assert.Nil(err)
+	assert.False(alreadyExists)
+	agent.unitTestBypassMetaKV = true
+
+	agent.waitForRefreshEnabled()
+	agent.refMtx.RLock()
+	assert.True(agent.reference.IsDnsSRV())
+	srvHostNames := agent.reference.GetSRVHostNames()
+	// GetSrvHostName will always use standard port for now. See GetTargetConnectionString()
+	dnsRemotenodeHostname = "192.168.0.1:8091"
+	agent.refMtx.RUnlock()
+	var found bool
+	for _, host := range srvHostNames {
+		if host == dnsRemotenodeHostname {
+			found = true
+			break
+		}
+	}
+	assert.True(found)
+	assert.Equal(dnsSrvHostname, ref.HostName())
+	agent.waitForRefreshEnabled()
+	agent.refMtx.RLock()
+	assert.Equal(dnsSrvHostname, agent.reference.HostName())
+	assert.True(agent.reference.IsDnsSRV())
+	agent.refMtx.RUnlock()
+
+	// Now let's pretend the SRV record points to a completely different set of A records
+	srvHelper2 := &baseMock.DnsSrvHelperIface{}
+	srvEntry2 := &net.SRV{
+		Target: "192.168.0.2.",
+		Port:   9002,
+	}
+	var srvList2 []*net.SRV
+	srvList2 = append(srvList2, srvEntry2)
+	srvHelper2.On("DnsSrvLookup", dnsSrvHostname).Return(srvList2, base2.SrvRecordsNonSecure, nil)
+
+	agent.refMtx.Lock()
+	agent.reference.UnitTestSetSRVHelper(srvHelper2)
+	agent.pendingRef.UnitTestSetSRVHelper(srvHelper2)
+	agent.refMtx.Unlock()
+
+	_, _, _, utilitiesMockErr, _ := setupBoilerPlateRCS()
+	forcedErr := fmt.Errorf("Unit test force error when refreshing")
+	setupUtilsMockSpecific(utilitiesMockErr, 0*time.Second, forcedErr, "", 0, nil, true, false,
+		false, clusterMadHatter, dnsValidHostNameList)
+	remoteClusterSvc.updateUtilities(utilitiesMockErr)
+
+	// Wait until the periodic refresh hits and utils returns an error
+	// Then it should trigger a re-bootstrap of SRV entries
+	time.Sleep(unitTestRefreshInterval + 100*time.Millisecond)
+
+	agent.refMtx.RLock()
+	assert.True(agent.reference.IsDnsSRV())
+	srvHostNames = agent.reference.GetSRVHostNames()
+	// GetSrvHostName will always use standard port for now. See GetTargetConnectionString()
+	dnsRemotenodeHostname = "192.168.0.2:8091"
+	agent.refMtx.RUnlock()
+	found = false
+	for _, host := range srvHostNames {
+		if host == dnsRemotenodeHostname {
+			found = true
+			break
+		}
+	}
+	assert.True(found)
+	assert.Equal(dnsSrvHostname, ref.HostName())
+	assert.Equal(dnsSrvHostname, agent.reference.HostName())
+	assert.Equal("", agent.reference.ActiveHostName())
+
+	// Restore a valid utils
+	remoteClusterSvc.updateUtilities(utilitiesMock)
+	// Wait for a valid refresh
+	time.Sleep(unitTestRefreshInterval + 100*time.Millisecond)
+	// Ensure activeHostname is repopulated
+	assert.NotEqual("", agent.reference.ActiveHostName())
+}
