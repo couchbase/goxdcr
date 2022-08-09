@@ -113,6 +113,15 @@ func getBucketInfoWithReplicasAfterRebalance() map[string]interface{} {
 	return retMap
 }
 
+func getBucketInfoWithManifestHexId() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v", testInternalDataDir, "bucketInfoForCollection.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
 type localNodeList []string
 
 func (list localNodeList) check() bool {
@@ -857,4 +866,15 @@ func TestVBucketMapWithReplicasEarlyInit(t *testing.T) {
 	assert.NotEqual(len(*replicaMap), 0)
 	assert.Len(*translateMap, 2)
 	assert.NotEqual(0, len(memberOfReplica))
+}
+
+func TestGetCollectionManifestUidFromBucketInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestVBucketMapWithReplicasEarlyInit =================")
+	defer fmt.Println("============== Test case end: TestVBucketMapWithReplicasEarlyInit =================")
+	assert := assert.New(t)
+
+	bucketInfoWithManifest := getBucketInfoWithManifestHexId()
+	id, err := testUtils.GetCollectionManifestUidFromBucketInfo(bucketInfoWithManifest)
+	assert.Nil(err)
+	assert.Equal(uint64(10), id)
 }

@@ -92,8 +92,8 @@ type BucketBasicStats struct {
 	ItemCount int `json:"itemCount"`
 }
 
-//Only used by unit test
-//TODO: replace with go-couchbase bucket stats API
+// Only used by unit test
+// TODO: replace with go-couchbase bucket stats API
 type CouchBucket struct {
 	Name string           `json:"name"`
 	Stat BucketBasicStats `json:"basicStats"`
@@ -218,7 +218,7 @@ func (u *Utilities) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interf
 	return regMap
 }
 
-//convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
+// convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
 // Returns a list of vbnos that was not able to parsed. If all vbnos were not parsed, then return an error instead
 func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error) {
 	var unableToParseVBs []uint16
@@ -251,7 +251,7 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 	return unableToParseVBs, nil
 }
 
-//convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
+// convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
 func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) {
 	for _, vbno := range vbnos {
 		high_seqno_stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
@@ -484,7 +484,7 @@ func (u *Utilities) GetCollectionManifestUidFromBucketInfo(bucketInfo map[string
 	if !ok {
 		return 0, fmt.Errorf("%v is of wrong type. Expect string but got %v.", base.CollectionsManifestUidKey, reflect.TypeOf(manifestUidObj))
 	}
-	manifestUid, err := strconv.ParseUint(manifestUidStr, 10, 64)
+	manifestUid, err := strconv.ParseUint(manifestUidStr, 16, 64)
 	if err != nil {
 		return 0, fmt.Errorf("Error '%v' while parsing %v as manifest Uid.", err.Error(), manifestUidStr)
 	}
@@ -2016,7 +2016,7 @@ func (u *Utilities) getHostNameWithoutPortFromNodeInfo(adminHostAddr string, nod
 	return hostName, err
 }
 
-//convenient api for rest calls to local cluster
+// convenient api for rest calls to local cluster
 func (u *Utilities) QueryRestApi(baseURL string,
 	path string,
 	preservePathEncoding bool,
@@ -2042,7 +2042,7 @@ func (u *Utilities) RemovePrefix(prefix string, str string) string {
 	return ret_str
 }
 
-//this expect the baseURL doesn't contain username and password
+// this expect the baseURL doesn't contain username and password
 func (u *Utilities) QueryRestApiWithAuth(
 	baseURL string,
 	path string,
@@ -2256,7 +2256,7 @@ func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logge
 	return
 }
 
-//convenient api for rest calls to local cluster
+// convenient api for rest calls to local cluster
 func (u *Utilities) InvokeRestWithRetry(baseURL string,
 	path string,
 	preservePathEncoding bool,
@@ -2347,7 +2347,7 @@ func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, c
 	return client, nil
 }
 
-//this expect the baseURL doesn't contain username and password
+// this expect the baseURL doesn't contain username and password
 func (u *Utilities) ConstructHttpRequest(
 	baseURL string,
 	path string,

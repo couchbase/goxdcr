@@ -338,7 +338,7 @@ func (c *CollectionsManifestService) metadataChangeCb(specId string, oldManifest
 	return lastErr
 }
 
-//  When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
+// When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
 func (c *CollectionsManifestService) GetSpecificSourceManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	c.agentsMtx.RLock()
 	agent, ok := c.agentsMap[spec.Id]
@@ -349,7 +349,7 @@ func (c *CollectionsManifestService) GetSpecificSourceManifest(spec *metadata.Re
 	return agent.GetSpecificSourceManifest(manifestVersion)
 }
 
-//  When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
+// When replication starts, it needs to request specific manifest by version, such as resuming from checkpoint
 func (c *CollectionsManifestService) GetSpecificTargetManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	c.agentsMtx.RLock()
 	agent, ok := c.agentsMap[spec.Id]
@@ -913,7 +913,8 @@ func (a *CollectionsManifestAgent) GetSpecificSourceManifest(manifestVersion uin
 			a.srcMtx.RLock()
 			if a.lastSourcePull < manifestVersion {
 				// Even after emergency pull, we still cannot provide the caller a >= version of what they asked for
-				err = fmt.Errorf("Unable to provide requested version %v even after emergency pull", manifestVersion)
+				err = fmt.Errorf("Unable to provide requested version %v even after emergency pull. Last pulled version: %v",
+					manifestVersion, a.lastSourcePull)
 			} else {
 				manifest = a.sourceCache[a.lastSourcePull]
 				if manifest == nil {
@@ -969,10 +970,18 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 	if a.isStopped() {
 		return nil, nil, parts.PartStoppedError
 	}
-	if len(a.sourceCache) > 0 {
+	if lock {
+		a.srcMtx.RLock()
+	}
+	srcCacheLen := len(a.sourceCache)
+	lastSrcPullChk := a.lastSourcePull
+	if lock {
+		a.srcMtx.RUnlock()
+	}
+	if srcCacheLen > 0 {
 		// If sourceCache has been initialized, we only need to refresh if manifestUid has changed
 		currentManifestUid, err := a.getCurrentCollectionManifestUid()
-		if err == nil && currentManifestUid == a.lastSourcePull {
+		if err == nil && currentManifestUid == lastSrcPullChk {
 			return nil, nil, base.ErrorCollectionManifestNotChanged
 		}
 	}
