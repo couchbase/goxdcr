@@ -314,11 +314,19 @@ func needSpecialCallbackUpdate(topic, internalSpecId string, oldSettings, newSet
 			// For the sake of safety for this scenario, this callback will not only
 			// raise backfill tasks, but also force a push to replicas so that the
 			// work done here is not lost
-			changeErr := handlerCb()
-			if changeErr != nil {
-				return changeErr
+			err := replication_mgr.utils.ExponentialBackoffExecutor("ExplicitMapChangeRetry",
+				base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor,
+				utilities.ExponentialOpFunc(handlerCb))
+			if err != nil {
+				return err
 			}
-			return replication_mgr.p2pMgr.RequestImmediateCkptBkfillPush(topic)
+
+			immediatePushRetry := func() error {
+				return replication_mgr.p2pMgr.RequestImmediateCkptBkfillPush(topic)
+			}
+			return replication_mgr.utils.ExponentialBackoffExecutor("ExplicitMapChangePushRetry",
+				base.BucketInfoOpWaitTime, base.BucketInfoOpMaxRetry, base.BucketInfoOpRetryFactor,
+				immediatePushRetry)
 		}
 		errCb = handlerErrCb
 	} else {

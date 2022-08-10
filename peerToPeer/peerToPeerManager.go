@@ -505,11 +505,11 @@ type ReqRespPair struct {
 }
 
 // VB Master check involves:
-// 1. Look at all the VBs request incoming
-// 2. For VBs that this node hasn't ensured that nobody else has the same VB, send check request to those nodes
-// 3. Peer nodes respond with:
-//    a. Happy path - NOT_MY_VBUCKET status code with optional payload (if exists checkpoint and backfill information)
-//    b. Error path - "I'm VB Owner too" - which means something is wrong and recovery action may be needed (TODO)
+//  1. Look at all the VBs request incoming
+//  2. For VBs that this node hasn't ensured that nobody else has the same VB, send check request to those nodes
+//  3. Peer nodes respond with:
+//     a. Happy path - NOT_MY_VBUCKET status code with optional payload (if exists checkpoint and backfill information)
+//     b. Error path - "I'm VB Owner too" - which means something is wrong and recovery action may be needed (TODO)
 func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline common.Pipeline) (map[string]*VBMasterCheckResp, error) {
 	// Only need to check the non-verified VBs
 	filteredSubsets, err := p.vbMasterCheckHelper.GetUnverifiedSubset(bucketAndVBs)

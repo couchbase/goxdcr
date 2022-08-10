@@ -150,13 +150,16 @@ function runTestCase {
 	echo "Changing explicit mapping - new target collection should receive backfill"
 	setReplicationSettings "C1" "B0" "C2" "B1" 'colMappingRules={"S1.col1":"S3.col2"}' 'collectionsExplicitMapping=true'
 
+	# Wait 10 seconds before rebalancing to ensure p2p has a chance to push before XDCR is restarted
+	sleep 10
+
 	echo "Rebalancing node 1 out of the cluster so node 0 owns all VBs"
 	restoreClusterBack "C1"
 
 	echo "Resuming pipeline where Backfills should take place for the other collection"
 	resumeReplication "C1" "B0" "C2" "B1"
-	echo "Waiting 20 seconds for resume to finish"
-	sleep 20
+	echo "Waiting 30 seconds for resume to finish"
+	sleep 30
 
 	newCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
 	checkItemCnt "C2" "B1" $newCount

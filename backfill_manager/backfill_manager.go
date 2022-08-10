@@ -29,11 +29,11 @@ import (
 // raised and cause backfills to occur.
 // The backfill's manager's secondary job is to cover backfill situations that the broken map couldn't detect.
 // This includes:
-// 1. Collection on the target side gets deleted and recreated quickly and did not cause any broken-ness.
-//    Backfill Manger can detect this if the manifest diff shows different collection IDs for the same collectionName.
-//    This means that Backfill Manager should backfill from 0 to throughSeqno.
-// 2. When a new target side collection is recreated and no new I/O was created (similar to 1). Backfill needs to be created.
-// 3. If a backfill is currently under way and (1) occurs again, the backfill manager needs to restart backfill from 0 to throughSeqno
+//  1. Collection on the target side gets deleted and recreated quickly and did not cause any broken-ness.
+//     Backfill Manger can detect this if the manifest diff shows different collection IDs for the same collectionName.
+//     This means that Backfill Manager should backfill from 0 to throughSeqno.
+//  2. When a new target side collection is recreated and no new I/O was created (similar to 1). Backfill needs to be created.
+//  3. If a backfill is currently under way and (1) occurs again, the backfill manager needs to restart backfill from 0 to throughSeqno
 //
 // Otherwise, if a backfill has already been requested by the router, and the collection ID hasn't changed since the requested
 // target manifest ID, then it's a no-op.
