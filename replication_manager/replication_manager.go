@@ -370,6 +370,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.CLogResourceManagerBoostKey].(int),
 		time.Duration(internal_settings.Values[metadata.CLogStatsLoggingMaxFreqKey].(int))*time.Second,
 		internal_settings.Values[metadata.TempMCErrorDisplayDelayFactorKey].(int),
+		internal_settings.Values[metadata.VariableVBSupportKey].(bool),
 	)
 }
 

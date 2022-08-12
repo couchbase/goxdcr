@@ -562,7 +562,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		return "", "", nil, nil, validateNonIdenticalErr, nil, nil
 	}
 
-	if performRemoteValidation && sourceBucketNumberOfVbs != targetBucketNumberOfVbs {
+	if performRemoteValidation && sourceBucketNumberOfVbs != targetBucketNumberOfVbs && !base.VariableVBSupport {
 		errMsg := fmt.Sprintf("The number of vbuckets in source cluster, %v, and target cluster, %v, does not match. This configuration is not supported.", sourceBucketNumberOfVbs, targetBucketNumberOfVbs)
 		service.logger.Error(errMsg)
 		errMap[base.ToBucket] = errors.New(errMsg)

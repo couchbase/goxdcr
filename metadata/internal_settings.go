@@ -303,6 +303,8 @@ const (
 	CLogStatsLoggingMaxFreqKey  = "CLogStatsLoggingMaxFreq"
 
 	TempMCErrorDisplayDelayFactorKey = "TempMCErrorDisplayDelayFactor"
+
+	VariableVBSupportKey = "VariableVBSupport"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -443,6 +445,7 @@ var CLogSkipTlsVerifyConfig = &SettingsConfig{base.CLogSkipTlsVerify, nil}
 var CLogResourceManagerBoostConfig = &SettingsConfig{base.CLogResourceManagerBoost, &Range{0, 10000}}
 var CLogStatsLoggingMaxFreqConfig = &SettingsConfig{int(base.CLogStatsLoggingMaxFreqInterval / time.Second), &Range{30, 24 * 60 * 60 /* 1 day */}}
 var TempMCErrorDisplayDelayFactorConfig = &SettingsConfig{base.TempMCErrorDisplayDelayFactor, &Range{1, 100}}
+var VariableVBSupportConfig = &SettingsConfig{base.VariableVBSupport, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -583,6 +586,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CLogResourceManagerBoostKey:                   CLogResourceManagerBoostConfig,
 	CLogStatsLoggingMaxFreqKey:                    CLogStatsLoggingMaxFreqConfig,
 	TempMCErrorDisplayDelayFactorKey:              TempMCErrorDisplayDelayFactorConfig,
+	VariableVBSupportKey:                          VariableVBSupportConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
