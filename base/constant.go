@@ -1309,7 +1309,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	srcHeartbeatSkipIntraCluster bool, srcHeartbeatSkipCapellaTarget bool,
 	srcHeartbeatMinInterval time.Duration, srcHeartbeatMaxIntervalFactor int,
 	rmTokenDistribution string, cLogSkipTlsVerify bool, cLogRMBoost int, cLogStatsMaxFreq time.Duration,
-	tempMCErrorDisplayDelayFactor int) {
+	tempMCErrorDisplayDelayFactor int,
+	variableVBSupport bool) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1485,6 +1486,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CLogStatsLoggingMaxFreqInterval = cLogStatsMaxFreq
 
 	TempMCErrorDisplayDelayFactor = tempMCErrorDisplayDelayFactor
+
+	VariableVBSupport = variableVBSupport
 }
 
 // XDCR Dev hidden replication settings
@@ -1978,3 +1981,5 @@ var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second
 const SkipReplSpecAutoGcKey = "skipReplSpecAutoGc"
 
 const ROUTER_NAME_PREFIX = "Router"
+
+var VariableVBSupport = false
