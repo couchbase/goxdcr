@@ -37,7 +37,7 @@ import (
 	"github.com/golang/snappy"
 )
 
-//configuration settings for XmemNozzle
+// configuration settings for XmemNozzle
 const (
 	SETTING_RESP_TIMEOUT             = "resp_timeout"
 	XMEM_SETTING_DEMAND_ENCRYPTION   = "demandEncryption"
@@ -145,10 +145,12 @@ func resetBufferedMCRequest(request *bufferedMCRequest) {
 	request.reservation = UninitializedReseverationNumber
 }
 
-/***********************************************************
+/*
+**********************************************************
 /* struct requestBuffer
 /* This is used to buffer the sent but yet confirmed data
-************************************************************/
+***********************************************************
+*/
 type requestBuffer struct {
 	slots           []*bufferedMCRequest /*slots to store the data*/
 	sequences       []uint16
@@ -192,7 +194,7 @@ func (buf *requestBuffer) close() {
 	buf.logger.Info("Request buffer has been closed. No blocking on flow control")
 }
 
-//not concurrent safe. Caller need to be aware
+// not concurrent safe. Caller need to be aware
 func (buf *requestBuffer) setNotifyThreshold(threshold uint16) {
 	buf.notify_threshold = threshold
 }
@@ -223,7 +225,7 @@ func (buf *requestBuffer) unsetNotifyCh() {
 	buf.notifych = nil
 }
 
-//blocking until the occupied slots are below threshold
+// blocking until the occupied slots are below threshold
 func (buf *requestBuffer) flowControl() {
 	notifych := buf.setNotifyCh()
 
@@ -251,8 +253,8 @@ func (buf *requestBuffer) validatePos(pos uint16) (err error) {
 	return
 }
 
-//slot allow caller to get hold of the content in the slot without locking the slot
-//@pos - the position of the slot
+// slot allow caller to get hold of the content in the slot without locking the slot
+// @pos - the position of the slot
 func (buf *requestBuffer) slot(pos uint16) (*base.WrappedMCRequest, error) {
 	err := buf.validatePos(pos)
 	if err != nil {
@@ -281,9 +283,9 @@ func (buf *requestBuffer) slotWithSentTime(pos uint16) (*base.WrappedMCRequest, 
 	return req.req, req.sent_time, nil
 }
 
-//modSlot allow caller to do book-keeping on the slot, like updating num_of_retry
-//@pos - the position of the slot
-//@modFunc - the callback function which is going to update the slot
+// modSlot allow caller to do book-keeping on the slot, like updating num_of_retry
+// @pos - the position of the slot
+// @modFunc - the callback function which is going to update the slot
 func (buf *requestBuffer) modSlot(pos uint16, modFunc func(req *bufferedMCRequest, p uint16) (bool, error)) (bool, error) {
 	err := buf.validatePos(pos)
 	if err != nil {
@@ -294,8 +296,8 @@ func (buf *requestBuffer) modSlot(pos uint16, modFunc func(req *bufferedMCReques
 	return modFunc(req, pos)
 }
 
-//evictSlot allow caller to empty the slot
-//@pos - the position of the slot
+// evictSlot allow caller to empty the slot
+// @pos - the position of the slot
 func (buf *requestBuffer) evictSlot(pos uint16) error {
 	// set reservation_num to -1 to skip reservation number check
 	return buf.clearSlot(pos, -1 /*reservation_num*/)
@@ -417,9 +419,11 @@ func (buf *requestBuffer) itemCountInBuffer() uint16 {
 	}
 }
 
-/************************************
+/*
+***********************************
 /* struct xmemConfig
-*************************************/
+************************************
+*/
 type xmemConfig struct {
 	baseConfig
 	bucketName string
@@ -517,9 +521,11 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 	return err
 }
 
-/************************************
+/*
+***********************************
 /* struct opaque_KeySeqnoMap
-*************************************/
+************************************
+*/
 type opaqueKeySeqnoMap map[uint32][]interface{}
 
 /**
@@ -566,9 +572,11 @@ func (omap opaqueKeySeqnoMap) CloneAndRedact() opaqueKeySeqnoMap {
 	return clonedMap
 }
 
-/************************************
+/*
+***********************************
 /* struct XmemNozzle
-*************************************/
+************************************
+*/
 type XmemNozzle struct {
 	AbstractPart
 
@@ -999,12 +1007,12 @@ func (xmem *XmemNozzle) getBatch() *dataBatch {
 
 // note that this method is specifically designed so that it never blocks
 // if this method blocks when batch_lock is locked, dead lock could happen in the following scenario:
-// 1. accumuBatch acquires batch_lock and tries to move xmem.batch into batches_ready_queue,
-//    which gets blocked because batches_ready_queue is full
-// 2. getBatchNonEmptyCh() is called within processData_sendbatch, which gets blocked since it
-//    cannot acquire batch_lock
-// 3. Once getBatchNonEmptyCh() is blocked, processData_sendbatch can never move to the next iteration and
-//    take batches off batches_ready_queue so as to unblock accumuBatch.
+//  1. accumuBatch acquires batch_lock and tries to move xmem.batch into batches_ready_queue,
+//     which gets blocked because batches_ready_queue is full
+//  2. getBatchNonEmptyCh() is called within processData_sendbatch, which gets blocked since it
+//     cannot acquire batch_lock
+//  3. Once getBatchNonEmptyCh() is blocked, processData_sendbatch can never move to the next iteration and
+//     take batches off batches_ready_queue so as to unblock accumuBatch.
 //
 // if it failes to acquire batch_lock, it still proceeds and returns a closed chan
 // the caller, processData_sendbatch, will be able to proceed since reading from a closed channel does not block
@@ -1340,7 +1348,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 	return nil
 }
 
-//return true if doc_meta_source win; false otherwise
+// return true if doc_meta_source win; false otherwise
 func resolveConflict(doc_meta_source documentMetadata, doc_meta_target documentMetadata,
 	source_cr_mode base.ConflictResolutionMode, xattrEnabled bool, logger *log.CommonLogger) bool {
 	if source_cr_mode == base.CRMode_LWW {
@@ -3566,7 +3574,9 @@ func (xmem *XmemNozzle) repairConn(client *base.XmemClient, reason string, rev i
 			}
 
 			xmem.xattrEnabled = features.Xattribute
-			go xmem.onSetMetaConnRepaired()
+			if resetErr := xmem.onSetMetaConnRepaired(); resetErr != nil {
+				xmem.Logger().Warnf("%v - onSetMetaConnReparied for %v err %v", xmem.Id(), client.Name(), resetErr)
+			}
 		} else {
 			// No need to check features for bare-bone getMeta client
 			_, err = xmem.sendHELO(false /*setMeta*/)
