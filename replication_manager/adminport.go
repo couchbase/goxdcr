@@ -15,6 +15,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/couchbase/cbauth"
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
@@ -23,14 +29,7 @@ import (
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"net/http"
-	"runtime"
-	"strconv"
-	"strings"
-	"time"
 )
-
-import _ "net/http/pprof"
 
 var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
@@ -383,7 +382,7 @@ func (adminport *Adminport) doGetAllReplicationsRequest(request *http.Request) (
 func (adminport *Adminport) doGetAllReplicationInfosRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetAllReplicationInfosRequest\n")
 
-	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -604,7 +603,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doGetStatisticsRequest\n")
 
-	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -629,7 +628,7 @@ func (adminport *Adminport) doGetStatisticsRequest(request *http.Request) (*ap.R
 func (adminport *Adminport) doMemStatsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Debugf("doMemStatsRequest\n")
 
-	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalRead)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -825,7 +824,7 @@ func (adminport *Adminport) doRegexpValidationRequest(request *http.Request) (*a
 }
 
 func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Response, error) {
-	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalWrite)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -854,7 +853,7 @@ func (adminport *Adminport) doStartBlockProfile(request *http.Request) (*ap.Resp
 }
 
 func (adminport *Adminport) doStopBlockProfile(request *http.Request) (*ap.Response, error) {
-	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	response, err := authWebCreds(request, base.PermissionXDCRAdminInternalWrite)
 	if response != nil || err != nil {
 		return response, err
 	}
@@ -921,6 +920,11 @@ func (adminport *Adminport) doBucketSettingsChangeRequest(request *http.Request)
 func (adminport *Adminport) doViewXDCRInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doViewXDCRInternalSettingsRequest\n")
 
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
 	internalSettings := InternalSettingsService().GetInternalSettings()
 
 	return NewXDCRInternalSettingsResponse(internalSettings)
@@ -928,6 +932,11 @@ func (adminport *Adminport) doViewXDCRInternalSettingsRequest(request *http.Requ
 
 func (adminport *Adminport) doChangeXDCRInternalSettingsRequest(request *http.Request) (*ap.Response, error) {
 	logger_ap.Infof("doChangeXDCRInternalSettingsRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionXDCRInternalWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
 
 	settingsMap, errorsMap := DecodeSettingsFromXDCRInternalSettingsRequest(request)
 	if len(errorsMap) > 0 {
