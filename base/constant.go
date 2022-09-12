@@ -67,7 +67,7 @@ const CollectionsPath = "/collections/"
 var RevsDiffPath = "/_revs_diff"
 var BulkDocsPath = "/_bulk_docs"
 
-//keys in the map which /nodes/self returns
+// keys in the map which /nodes/self returns
 var CouchApiBase = "couchApiBase"
 var CouchApiBaseHttps = "couchApiBaseHTTPS"
 
@@ -146,7 +146,7 @@ const UrlDelimiter = "/"
 var UrlPortNumberDelimiter = ":"
 
 // Custom conflict resolution related constants
-var JSEngineWorkers = DefaultGoMaxProcs
+var JSEngineWorkers = 0
 var JSWorkerQuota = 1572864 // 1.5MB
 
 // constants for ipv6 addresses
@@ -166,7 +166,7 @@ const (
 // delimiter for multiple parts in a key
 var KeyPartsDelimiter = "/"
 
-//constants for adminport
+// constants for adminport
 var AdminportUrlPrefix = UrlDelimiter
 
 // used as default value for tests
@@ -179,7 +179,7 @@ var AdminportReadTimeout = 60 * time.Second
 // write timeout for golib's http server.
 var AdminportWriteTimeout = 180 * time.Second
 
-//outgoing nozzle type
+// outgoing nozzle type
 type XDCROutgoingNozzleType int
 
 const (
@@ -403,7 +403,7 @@ const (
 	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
-//const used by block profile
+// const used by block profile
 const (
 	BlockProfileRate = "block_profile_rate"
 )
@@ -422,7 +422,7 @@ const (
 	UserAgent                 = "User-Agent"
 )
 
-//constant for replication tasklist status
+// constant for replication tasklist status
 const (
 	Pending     = "Pending"
 	Replicating = "Replicating"
@@ -462,7 +462,7 @@ const ChangesLeftStats = "changes_left"
 const DocsFromDcpStats = "docs_received_from_dcp"
 const DocsRepQueueStats = "docs_rep_queue"
 
-//constants for replication docs
+// constants for replication docs
 const (
 	RemoteClustersForReplicationDoc = "remoteClusters"
 	BucketsPath                     = "buckets"
@@ -856,7 +856,7 @@ var XmemReadTimeout = 120 * time.Second
 // continuous network error responses from read or write) exceeds max down time (seconds)
 var XmemMaxReadDownTime = 60 * time.Second
 
-//wait time between writes is backoff_factor*XmemBackoffWaitTime
+// wait time between writes is backoff_factor*XmemBackoffWaitTime
 var XmemBackoffWaitTime = 10 * time.Millisecond
 
 // max backoff factor
@@ -919,13 +919,13 @@ var MaxRetryCapiService = 5
 // max number of async listeners [for an event type]
 var MaxNumberOfAsyncListeners = 4
 
-//max interval between retries when resending docs  (seconds)
+// max interval between retries when resending docs  (seconds)
 var XmemMaxRetryInterval = 300 * time.Second
 
 // max retry for xmem resend operation on mutation locked error
 var XmemMaxRetryMutationLocked = 20
 
-//max interval between retries when resending docs on mutation locked errors  (seconds)
+// max interval between retries when resending docs on mutation locked errors  (seconds)
 // the upper limit on lock period is as of now 30 seconds
 var XmemMaxRetryIntervalMutationLocked = 30 * time.Second
 
