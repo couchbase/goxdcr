@@ -34,8 +34,8 @@ const (
 var ReplicationSpecAlreadyExistErrorMessage = "Replication to the same remote cluster and bucket already exists"
 var InvalidReplicationSpecError = errors.New("Invalid Replication spec")
 
-//replication spec and its derived object
-//This is what is put into the cache
+// replication spec and its derived object
+// This is what is put into the cache
 type ReplicationSpecVal struct {
 	spec       metadata.GenericSpecification
 	derivedObj interface{}
@@ -231,7 +231,7 @@ func (service *ReplicationSpecService) replicationSpec(replicationId string) (*m
 	return replSpec, nil
 }
 
-//validate the existence of source bucket
+// validate the existence of source bucket
 func (service *ReplicationSpecService) validateSourceBucket(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string) (string, int, string, error) {
 	var err_source error
 	start_time := time.Now()
@@ -523,6 +523,12 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			errMap[base.PlaceHolderFieldKey] = errors.New(errMsg)
 			return "", "", nil, errMap, nil, nil
 		}
+		if base.JSEngineWorkers == 0 {
+			errMsg := fmt.Sprintf("Custom conflict resolution is currently disabled as %v is set to %v", metadata.JSEngineWorkersKey, base.JSEngineWorkers)
+			service.logger.Errorf(errMsg)
+			errMap[base.PlaceHolderFieldKey] = errors.New(errMsg)
+			return "", "", nil, errMap, nil, nil
+		}
 	}
 
 	if warnings != nil {
@@ -687,7 +693,7 @@ func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.E
 	return err
 }
 
-//validate target bucket
+// validate target bucket
 func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
 	sourceBucket string, targetCluster string, useExternal bool) (targetBucketInfo map[string]interface{}, targetBucketUUID string, targetBucketNumberOfVBs int, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
 	start_time := time.Now()
