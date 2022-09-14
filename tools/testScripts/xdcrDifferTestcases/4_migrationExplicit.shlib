@@ -75,6 +75,25 @@ function runTestCase {
 		return $retVal
 	fi
 
+	validateDifferResults 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+	checkDifferLogItemCount "Target" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+
+	echo "Repeating XdcrDiffer explicit migration singleLoad test case with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
 	validateDifferResults 0 0 0
 	retVal=$?
 	if (($retVal != 0)); then
@@ -104,6 +123,25 @@ function runTestCase {
 	sleep 5
 
 	runXdcrDiffer "C1" "B1" "C2" "B2"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 1 1 $CBWORKLOAD_COLLECTION_NUM_ITEMS 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS + 1)) 0
+	checkDifferLogItemCount "Target" 2 0
+
+	echo "Repeating with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Differ returned non-0 exit code"

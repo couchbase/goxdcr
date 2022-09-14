@@ -543,11 +543,16 @@ function runXdcrDiffer {
 	local srcBucket=$2
 	local tgtCluster=$3
 	local tgtBucket=$4
+	local compareBody=${5:-}
 
 	pushd $(pwd)
 
 	cd $xdcrDifferDir
-	$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c
+	if [ "$compareBody" = "compareBody" ]; then
+		$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c -b
+	else
+		$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c
+	fi
 	retVal=$?
 
 	popd
@@ -576,14 +581,20 @@ function validateDifferResults {
 	local expectedMismatchCnt=$1
 	local expectedMissingSrcCnt=$2
 	local expectedMissingTgtCnt=$3
+	local expectedDeletedSrcCnt=${4:-}
+	local expectedDeletedTgtCnt=${5:-}
 	local numOfMismatch
 	local numOfMissingSrc
 	local numOfMissingTgt
+	local numOfDeletedSrc
+	local numOfDeletedTgt
 	local resultOutput
 	local retVal=0
 	local mismatchOutput
 	local missingFromSourceOutput
 	local missingFromTargetOutput
+	local deletedFromSourceOutput
+	local deletedFromTargetOutput
 
 	if [[ ! -f "$mutationDiffResults" ]]; then
 		echo "Error: Unable to find mutation results file: $mutationDiffResults"
@@ -614,6 +625,24 @@ function validateDifferResults {
 		retVal=1
 	fi
 
+	if [ ! -z "$expectedDeletedSrcCnt" ]; then
+		deletedFromSourceOutput=$(echo "$resultOutput" | jq '.DeletedFromSource')
+		numOfDeletedSrc=$(differGetTotalNumber "$deletedFromSourceOutput")
+		if (($numOfDeletedSrc != $expectedDeletedSrcCnt)); then
+			echo "Expected $expectedDeletedSrcCnt deleted from source, but found $numOfDeletedSrc"
+			retVal=1
+		fi
+	fi
+
+	if [ ! -z "$expectedDeletedTgtCnt" ]; then
+		deletedFromTargetOutput=$(echo "$resultOutput" | jq '.DeletedFromTarget')
+		numOfDeletedTgt=$(differGetTotalNumber "$deletedFromTargetOutput")
+		if (($numOfDeletedTgt != $expectedDeletedTgtCnt)); then
+			echo "Expected $expectedDeletedTgtCnt deleted from target, but found $numOfDeletedTgt"
+			retVal=1
+		fi
+	fi
+
 	if (($retVal == 1)); then
 		echo "$resultOutput" | jq
 		echo ""
@@ -627,7 +656,7 @@ function checkDifferLogItemCount {
 	local itemCnt=$2
 	local filteredCnt=$3
 	local logFile="${xdcrDifferDir}/xdcrDiffer.log"
-	local expected="$srcOrTgt bucket item count is $itemCnt (excluding $filteredCnt filtered mutations)"
+	local expected="$srcOrTgt bucket item count including tombstones is $itemCnt (excluding $filteredCnt filtered mutations)"
 
 	found=$(grep -c "$expected" $logFile)
 	if (($found == 0)); then

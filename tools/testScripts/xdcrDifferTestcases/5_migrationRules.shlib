@@ -101,6 +101,24 @@ function runTestCase {
 		return $retVal
 	fi
 
+	validateDifferResults 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Target" 2824 0
+
+	echo "Repeating collections migration multi-targets test case with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
 	validateDifferResults 0 0 0
 	retVal=$?
 	if (($retVal != 0)); then
@@ -132,7 +150,7 @@ function runTestCase {
 		return $retVal
 	fi
 
-	validateDifferResults 0 0 920
+	validateDifferResults 0 0 920 0 0
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed"
@@ -141,6 +159,23 @@ function runTestCase {
 
 	checkDifferLogItemCount "Target" 1905 0
 
+	echo "Repeating with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 0 0 920
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Target" 1905 0
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
