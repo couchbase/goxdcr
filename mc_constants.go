@@ -152,6 +152,8 @@ const (
 	NOT_MY_VBUCKET     = Status(0x07)
 	NO_BUCKET          = Status(0x08)
 	LOCKED             = Status(0x09)
+	WOULD_THROTTLE     = Status(0x0c)
+	CONFIG_ONLY        = Status(0x0d)
 	AUTH_STALE         = Status(0x1f)
 	AUTH_ERROR         = Status(0x20)
 	AUTH_CONTINUE      = Status(0x21)
@@ -349,6 +351,8 @@ func init() {
 	StatusNames[DELTA_BADVAL] = "DELTA_BADVAL"
 	StatusNames[NOT_MY_VBUCKET] = "NOT_MY_VBUCKET"
 	StatusNames[NO_BUCKET] = "NO_BUCKET"
+	StatusNames[WOULD_THROTTLE] = "WOULD_THROTTLE"
+	StatusNames[CONFIG_ONLY] = "CONFIG_ONLY"
 	StatusNames[AUTH_STALE] = "AUTH_STALE"
 	StatusNames[AUTH_ERROR] = "AUTH_ERROR"
 	StatusNames[AUTH_CONTINUE] = "AUTH_CONTINUE"
