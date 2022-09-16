@@ -166,6 +166,7 @@ const (
 	FeatureOpenTracing       = Feature(0x13)
 	FeaturePreserveExpiry    = Feature(0x14)
 	FeatureComputeUnits      = Feature(0x1a)
+	FeatureHandleThrottle    = Feature(0x1b)
 )
 
 type memcachedConnection interface {
