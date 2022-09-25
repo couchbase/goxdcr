@@ -368,7 +368,8 @@ func isNonFatalStatus(status gomemcached.Status) bool {
 		status == gomemcached.EBUSY ||
 		status == gomemcached.RANGE_SCAN_COMPLETE ||
 		status == gomemcached.RANGE_SCAN_MORE ||
-		status == gomemcached.KEY_EEXISTS
+		status == gomemcached.KEY_EEXISTS ||
+		status == gomemcached.WOULD_THROTTLE
 }
 
 func appendMutationToken(bytes []byte) []byte {
@@ -961,6 +962,7 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 		}()
 
 		ok := true
+		var savedErr error
 		for ok {
 
 			select {
@@ -970,11 +972,20 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 				res, err := c.Receive()
 
 				if err != nil && IfResStatusError(res) {
-					if res == nil || res.Status != gomemcached.KEY_ENOENT {
+
+					// continue receiving in case of KEY_ENOENT and WOULD_THROTTLE
+					if res != nil && res.Status == gomemcached.KEY_ENOENT {
+						continue
+					} else if res != nil && res.Status == gomemcached.WOULD_THROTTLE {
+
+						// if we have bee throttled, flag that there are keys still to fetch
+						// the last throttle wins
+						savedErr = err
+						continue
+					} else {
 						errch <- err
 						return
 					}
-					// continue receiving in case of KEY_ENOENT
 				} else if res.Opcode == gomemcached.GET ||
 					res.Opcode == gomemcached.GET_REPLICA ||
 					res.Opcode == gomemcached.SUBDOC_GET ||
@@ -994,6 +1005,11 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 
 				if res.Opcode == gomemcached.NOOP {
 					ok = false
+
+					// notify of the throttle
+					if savedErr != nil {
+						errch <- savedErr
+					}
 				}
 			}
 		}
