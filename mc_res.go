@@ -247,7 +247,7 @@ func (res *MCResponse) ComputeUnits() (ru uint64, wu uint64) {
 		case 15:
 			i = int(l + 1 + res.FlexibleExtras[i])
 		default:
-			i = int(l + 1)
+			i += int(l + 1)
 		}
 	}
 	return
