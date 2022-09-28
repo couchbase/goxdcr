@@ -235,7 +235,7 @@ func (res *MCResponse) ComputeUnits() (ru uint64, wu uint64) {
 		case ComputeUnitsWrite:
 			wu = uint64(binary.BigEndian.Uint16(res.FlexibleExtras[i+1 : i+3]))
 
-		// ID escape: we need to skip the next byte
+		// ID escape: we need to skip the next byte, and ignore
 		case 15:
 			i++
 		}
@@ -245,7 +245,10 @@ func (res *MCResponse) ComputeUnits() (ru uint64, wu uint64) {
 		case 0:
 			panic(fmt.Sprintf("Invalid Flexible Extras length received! %v", l))
 		case 15:
-			i = int(l + 1 + res.FlexibleExtras[i])
+
+			// rest of length in next byte, which needs to be skipped too
+			i++
+			i += int(l + 1 + res.FlexibleExtras[i])
 		default:
 			i += int(l + 1)
 		}
