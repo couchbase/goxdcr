@@ -77,6 +77,7 @@ type ClientIface interface {
 
 	CreateRangeScan(vb uint16, collId uint32, start []byte, excludeStart bool, end []byte, excludeEnd bool,
 		context ...*ClientContext) (*gomemcached.MCResponse, error)
+	CreateRandomScan(vb uint16, collId uint32, sampleSize int, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, maxSize uint32, timeout uint32,
 		context ...*ClientContext) error
 	CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (*gomemcached.MCResponse, error)
@@ -114,6 +115,8 @@ const (
 	VbPending VbStateType = 0x03
 	VbDead    VbStateType = 0x04
 )
+
+const RandomScanSeed = 0xdeadbeef
 
 var (
 	ErrUnSuccessfulHello          = errors.New("Unsuccessful HELLO exchange")
@@ -1139,6 +1142,34 @@ func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, exclude
 	m["collection"] = fmt.Sprintf("%x", collId)
 	m["key_only"] = true
 	m["range"] = r
+	req.Body, _ = json.Marshal(m)
+
+	c.opaque++
+	return c.Send(req)
+}
+
+func (c *Client) CreateRandomScan(vb uint16, collId uint32, sampleSize int, context ...*ClientContext) (
+	*gomemcached.MCResponse, error) {
+
+	req := &gomemcached.MCRequest{
+		Opcode:   gomemcached.CREATE_RANGE_SCAN,
+		VBucket:  vb,
+		DataType: JSONDataType,
+		Opaque:   c.opaque,
+	}
+	err := c.setContext(req, context...)
+	if err != nil {
+		return nil, err
+	}
+
+	req.CollIdLen = 0 // has to be 0 else op is rejected
+	s := make(map[string]interface{})
+	s["seed"] = RandomScanSeed
+	s["samples"] = sampleSize
+	m := make(map[string]interface{})
+	m["collection"] = fmt.Sprintf("%x", collId)
+	m["key_only"] = true
+	m["sampling"] = s
 	req.Body, _ = json.Marshal(m)
 
 	c.opaque++
