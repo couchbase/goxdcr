@@ -65,6 +65,7 @@ const (
 	SASL_STEP       = CommandCode(0x22)
 
 	SET_BUCKET_COMPUTE_UNIT_THROTTLE_LIMITS = CommandCode(0x2a)
+	SET_BUCKET_DATA_LIMIT_EXCEEDED          = CommandCode(0x2b)
 
 	SET_VBUCKET = CommandCode(0x3d)
 
