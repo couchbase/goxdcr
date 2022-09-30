@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -u
+
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# BASH VERSION CHECK - since hash maps are implemented >= bash version 4
+bash_major_version=$(echo ${BASH_VERSION} | cut -d. -f1)
+if (($bash_major_version < 4)); then
+	echo "===================================================================="
+	echo "Bash version >= 4 is required. Current bash version: ${BASH_VERSION}. Script may fail"
+	echo "How to upgrade bash on MacOS:"
+	echo "1. Run \"brew update && brew install bash\" to install the latest version of bash for macOS"
+	echo "2. Run \"sudo vim /etc/shells\" and add \"/usr/local/bin/bash\" to the list"
+	echo "3. Run \"chsh -s /usr/local/bin/bash\" to set default shell to the new one"
+	echo "4. Exit and restart the current session"
+	echo "===================================================================="
+	return 1
+fi
+
+. ./importExporter.shlib
+. ./clusterRunProvision.shlib
+. ./testLibrary.shlib
+
+# Shortcuts for executing commands on a node... currently 4 nodes
+declare -a VSSH
+
+VSSH[0]="vagrant ssh node1 -c "
+VSSH[1]="vagrant ssh node2 -c "
+VSSH[2]="vagrant ssh node3 -c "
+VSSH[3]="vagrant ssh node4 -c "
+
+declare -A CBServerLink=(
+	["7.0.4"]="http://latestbuilds.service.couchbase.com/builds/releases/7.0.4/couchbase-server-enterprise_7.0.4-ubuntu20.04_amd64.deb"
+	["6.6.5"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.5/couchbase-server-enterprise_6.6.5-ubuntu18.04_amd64.deb"
+	["toy"]="http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
+)
+
+function vagrantUp {
+	vagrant up
+}
+
+function vagrantHalt {
+	vagrant halt
+}
+
+function vagrantRemoveCbServer {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo dpkg --purge couchbase-server\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+
+	cmd="${VSSH[$i]} \"sudo rm -rf /opt/couchbase\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRemoveCbServerAll {
+	local i
+	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		vagrantRemoveCbServer $i
+	done
+}
+
+# If VPN is not set up, this should catch it
+function checkBuildServerAccessibility {
+	wget -q latestbuilds.service.couchbase.com/builds/ -O "/tmp/index.html" &
+	sleep 3
+	local jobsCnt=$(jobs -l | grep -c "Running")
+	if (($jobsCnt > 0)); then
+		killAllBgJobs
+		echo "VPN to Couchbase is not set up"
+		exit 1
+	fi
+}
+
+function vagrantGetLocalDebFileName {
+	local version="$1"
+
+	echo "cbServer_$version.deb"
+}
+
+function downloadCBServerDeb {
+	local version="$1"
+	local localFileName=$(vagrantGetLocalDebFileName "$version")
+	if [[ -z "${CBServerLink[$version]:-}" ]]; then
+		echo "Version $version is not linked"
+	fi
+
+	if [[ -f "$localFileName" ]]; then
+		echo "Found pre-downloaded file $localFileName"
+		return 0
+	fi
+
+	checkBuildServerAccessibility
+	echo "=== Need to download ${CBServerLink[$version]}... ==="
+	wget --show-progress "${CBServerLink[$version]}" -O "$localFileName"
+}
+
+function vagrantInstallCBServerAll {
+	local i
+	local version="$1"
+	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		vagrantInstallCBServer $i "$version"
+	done
+}
+
+function vagrantInstallCBServer {
+	local i=$1
+	local version="$2"
+	local cmd
+	local debFile=$(vagrantGetLocalDebFileName "$version")
+
+	vagrantInstallNtp "$i"
+	downloadCBServerDeb "$version"
+
+	cmd="${VSSH[$i]} \"sudo dpkg -i /vagrant/$debFile\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallNtp {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install ntp\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
