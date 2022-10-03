@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 package metadata_svc
@@ -454,6 +455,7 @@ func TestAddSecondaryClusterRef(t *testing.T) {
 	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
 	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("", jsonMarshalBytes, revision))
 	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
+	remoteClusterSvc.waitForRefreshEnabled(ref)
 	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
 
@@ -686,6 +688,7 @@ func TestAddThenSetThenDelClusterViaCallback(t *testing.T) {
 	assert.Nil(remoteClusterSvc.RemoteClusterServiceCallback("/test", jsonMarshalBytes, revision))
 	assert.Equal(1, remoteClusterSvc.getNumberOfAgents())
 	assert.NotNil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	remoteClusterSvc.waitForRefreshEnabled(ref)
 	assert.True(remoteClusterSvc.agentCacheMapsAreSynced())
 
 	// Adding a cluster via metakv callback should call the metakv update
@@ -926,8 +929,20 @@ func TestRefresh4Nodes3GoesBad(t *testing.T) {
 	remoteClusterSvc.updateUtilities(utilitiesMock2)
 	remoteClusterSvc.updateMetaSvc(metadataSvc2)
 
-	// Second refresh
+	// Launch two refresh's in a row - both should soak up to one single call
+	var refreshErr1 error
+	var refreshErr2 error
+	var refreshTime1 time.Duration
+	var refreshTime2 time.Duration
+	var waitGrp sync.WaitGroup
+	waitGrp.Add(2)
+	go runFuncGetTimeElapsed(func() { refreshErr1 = agent.Refresh() }, &waitGrp, &refreshTime1)
+	go runFuncGetTimeElapsed(func() { refreshErr2 = agent.Refresh() }, &waitGrp, &refreshTime2)
 	agent.Refresh()
+	waitGrp.Wait()
+
+	assert.Nil(refreshErr1)
+	assert.Nil(refreshErr2)
 	assert.NotEqual(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, newNodeList))
 
@@ -953,20 +968,17 @@ func TestRefreshFirstNodeIsBad(t *testing.T) {
 
 	// First make sure positive case is good - we have "dummyHostName" as the beginning
 	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agent.waitForRefreshEnabled()
 	agent.Refresh()
 	assert.Equal(hostname, agent.reference.HostName())
 	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
 
 	// hostName 1 and 2 and 3 have been moved
 	// set things up for second refresh
-	//	metadataSvc2 := &service_def.MetadataSvc{}
-	//	setupMetaSvcMockGeneric(metadataSvc2, ref2)
-
 	utilitiesMock2 := &utilsMock.UtilsIface{}
 	setupUtilsMockFirstNodeBad(utilitiesMock2)
 
 	remoteClusterSvc.updateUtilities(utilitiesMock2)
-	//	remoteClusterSvc.updateMetaSvc(metadataSvc2)
 
 	// Second refresh - we should fail
 	assert.NotNil(agent.Refresh())
@@ -989,7 +1001,7 @@ func TestPositiveRefreshWDelay(t *testing.T) {
 	idAndName := "test"
 	ref := createRemoteClusterReference(idAndName)
 
-	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 2*time.Second /*networkDelay*/) }
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
 
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
 		remoteClusterSvc, ref, utilsMockFunc)
@@ -1022,6 +1034,186 @@ func TestPositiveRefreshWDelay(t *testing.T) {
 	fmt.Println("============== Test case end: TestPositiveRefreshWDelay =================")
 }
 
+func TestPositiveRefreshWDelayAndAbort(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPositiveRefreshWDelayAndAbort =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, callBackCount)
+
+	agent, exists, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	assert.True(exists)
+	agent.waitForRefreshEnabled()
+
+	// Try agent refresh delay
+	var waitGrp sync.WaitGroup
+	var refreshTimeTaken time.Duration
+	var refreshErr error
+	waitGrp.Add(1)
+	go runFuncGetTimeElapsed(func() { refreshErr = agent.Refresh() }, &waitGrp, &refreshTimeTaken)
+	time.Sleep(100 * time.Nanosecond)
+	agent.waitForRefreshOngoing()
+	agent.AbortAnyOngoingRefresh()
+	waitGrp.Wait()
+
+	assert.Equal(RefreshAborted, refreshErr)
+	fmt.Println("============== Test case end: TestPositiveRefreshWDelayAndAbort =================")
+}
+
+func TestAddThenSetConcurrent(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestAddThenSetConcurrent =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+	// Add op can modify the ref above
+	setRef := ref.Clone()
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0*time.Second /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	var waitGrp sync.WaitGroup
+	var addTimeTaken time.Duration
+	var addErr error
+	var setTimeTaken time.Duration
+	var setErr error
+	waitGrp.Add(2)
+	go runFuncGetTimeElapsed(func() { addErr = remoteClusterSvc.AddRemoteCluster(ref, true) }, &waitGrp, &addTimeTaken)
+	time.Sleep(200 * time.Nanosecond)
+	go runFuncGetTimeElapsed(func() { setErr = remoteClusterSvc.SetRemoteCluster(idAndName, setRef) }, &waitGrp, &setTimeTaken)
+	waitGrp.Wait()
+
+	assert.Nil(addErr)
+	assert.Equal(SetDisabledUntilInit, setErr)
+	assert.True(setTimeTaken < addTimeTaken)
+
+	fmt.Println("============== Test case end: TestAddThenSetConcurrent =================")
+}
+
+func TestRefreshAndOverride(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestRefreshAndOverride =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+	setRef := ref.Clone()
+	var testcaseUserName string = "RefreshFailUserName"
+	setRef.UserName_ = testcaseUserName
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	agent, exists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*UserInitiated*/, false /*updateFromRef*/)
+	assert.Nil(err)
+	assert.NotNil(agent)
+	assert.False(exists)
+	agent.unitTestBypassMetaKV = true
+	agent.waitForRefreshEnabled()
+
+	var waitGrp sync.WaitGroup
+	var refreshTimeTaken time.Duration
+	var refreshErr error
+	waitGrp.Add(1)
+	go runFuncGetTimeElapsed(func() { refreshErr = agent.Refresh() }, &waitGrp, &refreshTimeTaken)
+	time.Sleep(200 * time.Nanosecond)
+	agent.waitForRefreshOngoing()
+
+	// Once refresh is underway, do a set that overrides the reset
+	setErr := agent.UpdateReferenceFrom(setRef, true /*updateMetakv*/)
+	assert.Nil(setErr)
+
+	waitGrp.Wait()
+	assert.Equal(RefreshAborted, refreshErr)
+
+	assert.Equal(testcaseUserName, agent.reference.UserName())
+
+	fmt.Println("============== Test case end: TestRefreshAndOverride =================")
+}
+
+func TestSetDisablesRefresh(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestSetDisablesRefresh =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+	setRef := ref.Clone()
+	var testcaseUserName string = "RefreshFailUserName"
+	setRef.UserName_ = testcaseUserName
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	agent, exists, err := remoteClusterSvc.getOrStartNewAgent(ref, true /*UserInitiated*/, false /*updateFromRef*/)
+	assert.Nil(err)
+	assert.NotNil(agent)
+	assert.False(exists)
+	agent.unitTestBypassMetaKV = true
+	agent.waitForRefreshEnabled()
+
+	var waitGrp sync.WaitGroup
+	var setTimeTaken time.Duration
+	var setErr error
+	waitGrp.Add(1)
+	go runFuncGetTimeElapsed(func() { setErr = remoteClusterSvc.SetRemoteCluster(ref.Name(), setRef) }, &waitGrp, &setTimeTaken)
+	// Watch for set to start, which is when pendingRef is not empty
+	var pendingRefIsEmpty bool = true
+	for pendingRefIsEmpty {
+		time.Sleep(100 * time.Nanosecond)
+		agent.refMtx.RLock()
+		pendingRefIsEmpty = agent.pendingRef.IsEmpty()
+		agent.refMtx.RUnlock()
+	}
+
+	// Once set is occurring, Refresh should be disabled
+	refreshErr := agent.Refresh()
+	assert.Equal(refreshErr, SetInProgress)
+
+	waitGrp.Wait()
+	assert.Equal(nil, setErr)
+	assert.Equal(testcaseUserName, agent.reference.UserName())
+
+	// Once set finished, refresh should be re-enabled
+	refreshErr = agent.Refresh()
+	assert.Equal(refreshErr, nil)
+
+	fmt.Println("============== Test case end: TestSetDisablesRefresh =================")
+}
+
 func TestNoWriteAfterDeletes(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNoWriteAfterDeletes =================")
@@ -1031,7 +1223,7 @@ func TestNoWriteAfterDeletes(t *testing.T) {
 	idAndName := "test"
 	ref := createRemoteClusterReference(idAndName)
 
-	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 2*time.Second /*networkDelay*/) }
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 1*time.Second /*networkDelay*/) }
 
 	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
 		remoteClusterSvc, ref, utilsMockFunc)
@@ -1348,7 +1540,26 @@ func TestAddressPreferenceChange(t *testing.T) {
 	assert.False(alreadyExists)
 	agent.unitTestBypassMetaKV = true
 
+	// Due to the async nature, alternate address should have error
+	_, err = agent.UsesAlternateAddress()
+	assert.NotNil(err)
+
+	// This is because the getOrStart will launch updateReferenceFrom asynchronously
+	// Ensure refresh returns an error
+	err = agent.Refresh()
+	assert.Equal(RefreshNotEnabledYet, err)
+
 	useAlternate, err := agent.UsesAlternateAddress()
+	if err == base.ErrorRemoteClusterUninit {
+		for i := 0; i < 5; i++ {
+			useAlternate, err = agent.UsesAlternateAddress()
+			if err == nil {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
 	assert.Nil(err)
 	assert.True(useAlternate)
 	assert.Equal(0, agent.pendingAddressPrefCnt)
