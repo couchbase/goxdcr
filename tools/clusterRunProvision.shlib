@@ -416,6 +416,12 @@ function testForClusterRun {
 	done
 }
 
+function setupVagrantAltAddress {
+	local clusterName="$1"
+
+	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=127.0.0.1&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+}
+
 function setupCluster {
 	local initPort
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
@@ -449,7 +455,7 @@ function setupCluster {
 
 		# Vagrant, set up alternate address so cbworkloadgen can run from dev machine onto vagrants
 		if [[ ! -z "${VAGRANT_KV_EXTERNAL_MAP[$clusterName]:-}" ]]; then
-			$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=127.0.0.1&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+			setupVagrantAltAddress "$clusterName"
 		fi
 
 		echo ""
@@ -605,6 +611,11 @@ function startRebalancing {
 	knownNodesString=$(populateKnownNodesString $nodeName)
 
 	startRebalancingWithKnownNodes "$nodeName" "$knownNodesString"
+
+	# Vagrant nodes need alt addresses added
+	if [[ ! -z "${VAGRANT_KV_EXTERNAL_MAP[$nodeName]:-}" ]]; then
+		setupVagrantAltAddress "$nodeName"
+	fi
 }
 
 function startEjectNode {
@@ -614,8 +625,14 @@ function startEjectNode {
 	local localhostIp="127.0.0.1"
 	local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
 	local motherPort=${CLUSTER_NAME_PORT_MAP[$motherNode]:-}
-	local hostNameToLookFor="${localhostIp}:${port}"
 	local otpNodeName
+	local hostNameToLookFor
+
+	if [[ ! -z "${VAGRANT_VM_IP_MAP[$nodeName]:-}" ]]; then
+		hostNameToLookFor="${VAGRANT_VM_IP_MAP[$nodeName]}:8091"
+	else
+		hostNameToLookFor="${localhostIp}:${port}"
+	fi
 
 	local nodesList=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq -cr '.[]')
 	#{"clusterMembership":"active","recoveryType":"none","status":"healthy","otpNode":"n_0@192.168.1.113","thisNode":true,"hostname":"192.168.1.113:9000","nodeUUID":"cbef3c8c28031971e9e61234560c8f0d","clusterCompatibility":458752,"version":"0.0.0-0000-enterprise","os":"x86_64-apple-darwin18.7.0","cpuCount":12,"ports":{"direct":12000,"httpsCAPI":19500,"httpsMgmt":19000,"distTCP":21400,"distTLS":21450},"services":["kv"],"nodeEncryption":false,"configuredHostname":"192.168.1.113:9000","addressFamily":"inet","externalListeners":[{"afamily":"inet","nodeEncryption":false},{"afamily":"inet6","nodeEncryption":false}],"couchApiBase":"http://192.168.1.113:9500/","couchApiBaseHTTPS":"https://192.168.1.113:19500/","systemStats":{"cpu_utilization_rate":16.81045313677862,"cpu_stolen_rate":0,"swap_total":2147483648,"swap_used":951320576,"mem_total":34359738368,"mem_free":17357692928,"mem_limit":34359738368,"cpu_cores_available":12,"allocstall":18446744073709552000},"interestingStats":{"couch_docs_actual_disk_size":39218356,"couch_views_actual_disk_size":0,"curr_items":0,"curr_items_tot":0,"ep_bg_fetched":0,"couch_docs_data_size":1997575,"mem_used":69419072,"vb_active_num_non_resident":0,"vb_replica_curr_items":0,"cmd_get":0,"get_hits":0,"ops":0},"uptime":"401","memoryTotal":34359738368,"memoryFree":17357692928,"mcdMemoryReserved":26214,"mcdMemoryAllocated":26214}
@@ -730,7 +747,7 @@ function restoreClusterBack {
 	done
 
 	if (($totalFoundNode > 0)); then
-		startRebalancing "C1" "$otpNodeNameStripped"
+		startRebalancing "$nodeName" "$otpNodeNameStripped"
 		echo "Sleeping 20 seconds before checking"
 		sleep 20
 		local postEjectCnt=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq length)
@@ -787,7 +804,7 @@ function failoverNode {
 				fi
 				echo "Wait 20 sec after issuing failover command before rebalancing command..."
 				sleep 20
-				startRebalancing "C1" "$otpNodeNameStripped"
+				startRebalancing "$motherNode" "$otpNodeNameStripped"
 				local postEjectCnt=$(getNsServerPoolsDefault $motherNode | jq '.nodes' | jq length)
 				if (($postEjectCnt != $(($preEjectCnt - 1)))); then
 					echo "Error - failover a node resulted going from $preEjectCnt to $postEjectCnt"
@@ -1691,6 +1708,12 @@ function parseStatsOutput {
 	keys=$(echo "$results" | jq keys | jq .[] | sed 's/"//g')
 	# 192.168.1.113:9000
 	# [::1]:9001
+
+	if ((${#VAGRANT_KV_EXTERNAL_MAP[@]} > 0)); then
+		# checkPort will be 8091 and hostPort should also be 8091
+		hostPort="8091"
+	fi
+
 	for key in $(echo "$keys"); do
 		checkPort=$(echo "$key" | rev | cut -d: -f1 | rev)
 		if (($checkPort == $hostPort)); then

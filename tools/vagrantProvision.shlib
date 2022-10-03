@@ -134,3 +134,49 @@ function vagrantInstallNtp {
 	echo "==== Running $cmd ===="
 	eval $cmd
 }
+
+function vagrantRebalanceAndUpgrade {
+	local nodeToUpgrade="$1"
+	local nodeIndex="$2"
+	local peerNode="$3"
+	local versionToInstall="$4"
+
+	# remove node1 and validate XDCR traffic
+	echo "Removing node $nodeToUpgrade leaving $peerNode"
+	startEjectNode "$nodeToUpgrade" "$peerNode"
+
+	# upgrade node add back in and validate XDCR Traffic
+	vagrantInstallCBServer "$nodeIndex" "$versionToInstall"
+
+	echo "Waiting 10 seconds after install for couchbase server processes to launch"
+	sleep 10
+
+	echo "Re-adding upgraded node $nodeToUpgrade to $peerNode"
+	addOneNodeIn "$nodeToUpgrade" "$peerNode"
+	startRebalancing "$peerNode"
+
+	sleep 10
+
+	# As last part, need to set alternate address again
+	setupVagrantAltAddress "$nodeToUpgrade"
+}
+
+function vagrantGrepForPanic {
+	local i=$1
+	local cmd
+	local output
+
+	output=$(${VSSH[$i]} "sudo grep -c panic /opt/couchbase/var/lib/couchbase/logs/goxdcr.log" 2>/dev/null)
+	output=$(echo "$output" | tr -d '\r')
+	if (($output > 0)); then
+		echo "Found panic on node $i"
+		exit 1
+	fi
+}
+
+function vagrantGrepForPanicAll {
+	local i
+	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		vagrantGrepForPanic $i
+	done
+}
