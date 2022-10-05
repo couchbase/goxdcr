@@ -35,6 +35,16 @@ VSSH[1]="vagrant ssh node2 -c "
 VSSH[2]="vagrant ssh node3 -c "
 VSSH[3]="vagrant ssh node4 -c "
 
+# vscp from local to a node
+function vscp {
+	local index="$1"
+	local localFile="$2"
+	local targetDir="$3"
+
+	#machine index is +1
+	vagrant scp "$localFile" "node$(($index + 1)):${targetDir}"
+}
+
 declare -A CBServerLink=(
 	["7.0.4"]="http://latestbuilds.service.couchbase.com/builds/releases/7.0.4/couchbase-server-enterprise_7.0.4-ubuntu20.04_amd64.deb"
 	["6.6.5"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.5/couchbase-server-enterprise_6.6.5-ubuntu18.04_amd64.deb"
@@ -178,5 +188,44 @@ function vagrantGrepForPanicAll {
 	local i
 	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
 		vagrantGrepForPanic $i
+	done
+}
+
+function vagrantLoadCerts {
+	local idx
+	local caKey
+
+	# Vagrant loading
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+			# Not a vagrant node
+			continue
+		fi
+		idx="$(getClusterIdx "$clusterName")"
+
+		# First tell the Ubuntu to trust the certificate authority
+		for caKey in $(echo ${!NODE_CA_MAP[@]}); do
+			echo "${CLUSTER_ROOT_CERTIFICATE_MAP["$caKey"]}" >/tmp/selfSignedCA.pem
+			vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/"
+			${VSSH[$idx]} "sudo mv /tmp/selfSignedCA.pem /usr/local/share/ca-certificates/${caKey}_root.crt"
+			vscp "$idx" "${NODE_CA_MAP[$caKey]}" "/tmp/ca.pem"
+			${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/${caKey}_node.crt"
+		done
+		#vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/ca.pem"
+		#${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/selfSignedCA.crt"
+
+		${VSSH[$idx]} "sudo update-ca-certificates"
+
+		# Copy chain file
+		${VSSH[$idx]} "sudo mkdir -p /opt/couchbase/var/lib/couchbase/inbox"
+		# Vagrant scp does not have root priviledge
+		vscp "$idx" "${NODE_CA_MAP[$clusterName]}" "/tmp/ca.pem"
+		${VSSH[$idx]} "curl -X POST --data-binary '@/tmp/ca.pem' http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:8091/controller/uploadClusterCA"
+
+		vscp "$idx" "${NODE_CERT_MAP[$clusterName]}" "/tmp/chain.pem"
+		${VSSH[$idx]} "sudo mv /tmp/chain.pem /opt/couchbase/var/lib/couchbase/inbox/chain.pem"
+		vscp "$idx" "${NODE_KEY_MAP[$clusterName]}" "/tmp/pkey.key"
+		${VSSH[$idx]} "sudo mv /tmp/pkey.key /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
+
 	done
 }

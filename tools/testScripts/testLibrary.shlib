@@ -958,11 +958,31 @@ function checkOpenSSL {
 	fi
 }
 
+function findNsServerDir {
+	local i=0
+	local outStr
+	pushd "$PWD"
+
+	while [[ "$PWD" != / ]] && [[ ! -d "ns_server" ]]; do
+		i=$(($i + 1))
+		cd ..
+	done
+
+	local j
+	for ((j = 0; $j < $i; j = $(($j + 1)))); do
+		outStr="${outStr}../"
+	done
+	outStr="${outStr}ns_server"
+	popd
+
+	echo "$outStr"
+}
+
 function setupCertsForTesting {
 	checkOpenSSL
 	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
 	# before below, store the ns_server absolute path
-	local nsServerDir="../../../../../../../ns_server/"
+	local nsServerDir="$(findNsServerDir)"
 	pushd $(pwd)
 	cd $nsServerDir
 	local nsServerDirAbsolute=$(pwd)
@@ -971,6 +991,7 @@ function setupCertsForTesting {
 
 	pushd $(pwd)
 	local clusterName
+	local sanIP
 	cd /tmp/ || exit
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		# On the server to be certificate-protected, create working directories:
@@ -1032,7 +1053,12 @@ EOF
 		# Create a customized certificate extensions file, which adds per node constraints to the generic constraints already specified.
 		cp ./server.ext ./server.ext.tmp
 
-		echo "subjectAltName = IP:127.0.0.1" \
+		sanIP="127.0.0.1"
+		if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+			sanIP="${VAGRANT_VM_IP_MAP["$clusterName"]}"
+			echo "NEIL DEBUG IP using $sanIP"
+		fi
+		echo "subjectAltName = IP:${sanIP}" \
 			>>./server.ext.tmp
 
 		# Create the node certificate, applying the certificate and digital signature of the appropriate authority, and the
@@ -1054,18 +1080,25 @@ EOF
 		# Deploy the node certificate and node private key.
 		local couchbaseDir="$nsServerDirAbsolute/data/n_${nodeDirIdx}/"
 		mkdir -p $couchbaseDir/inbox/ || exit
-		cp ./public/$chainFileName $couchbaseDir/inbox/chain.pem
-		cp ./private/$pKeyFileName $couchbaseDir/inbox/pkey.key
+
 		NODE_CERT_MAP["$clusterName"]="$PWD/public/$chainFileName"
 		NODE_KEY_MAP["$clusterName"]="$PWD/private/$pKeyFileName"
+		NODE_CA_MAP["$clusterName"]="$PWD/ca.pem"
 
-		# Upload the root certificate for the cluster. Use the following REST command:
-		curl -X POST --data-binary "@./ca.pem" \
-			http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/controller/uploadClusterCA
+		if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+			cp ./public/$chainFileName $couchbaseDir/inbox/chain.pem
+			cp ./private/$pKeyFileName $couchbaseDir/inbox/pkey.key
 
-		# Reload the node certificate from disk, for the current node:
-		curl -X POST \
-			http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/node/controller/reloadCertificate
+			# Upload the root certificate for the cluster. Use the following REST command:
+			curl -X POST --data-binary "@./ca.pem" \
+				http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/controller/uploadClusterCA
+
+			# Reload the node certificate from disk, for the current node:
+			curl -X POST \
+				http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/node/controller/reloadCertificate
+		else
+			echo "Running vagrant, skipping copy for now"
+		fi
 
 		# currently still in the servercertfiles_CX
 		rm -rf clientcertfiles
@@ -1117,9 +1150,11 @@ EOF
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 		echo "NODE CERT for $clusterName: ${NODE_CERT_MAP[$clusterName]}"
 		echo "NODE KEY for $clusterName: ${NODE_KEY_MAP[$clusterName]}"
+		echo "NODE CA for $clusterName: ${NODE_CA_MAP[$clusterName]}"
 		echo "NODE CLIENT CERT for $clusterName: ${CLIENT_CERT_MAP[$clusterName]}"
 		echo "NODE CLIENT KEY for $clusterName: ${CLIENT_KEY_MAP[$clusterName]}"
 	done
+
 }
 
 # Usage: pass the node log to this function

@@ -57,6 +57,7 @@ declare -A CLUSTER_DEPENDENCY_MAP
 declare -A CLUSTER_ENCRYPTION_LEVEL_MAP
 declare -A NODE_CERT_MAP
 declare -A NODE_KEY_MAP
+declare -A NODE_CA_MAP
 declare -A CLIENT_CERT_MAP
 declare -A CLIENT_KEY_MAP
 declare -A VAGRANT_KV_EXTERNAL_MAP
@@ -418,8 +419,17 @@ function testForClusterRun {
 
 function setupVagrantAltAddress {
 	local clusterName="$1"
+	local hostname=${VAGRANT_VM_IP_MAP[$clusterName]}
 
-	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=127.0.0.1&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=$hostname&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+}
+
+function getClusterIdx {
+	local clusterName="$1"
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local nodeDirIdx=$(echo "$port % 10" | bc)
+
+	echo "$nodeDirIdx"
 }
 
 function setupCluster {
@@ -438,16 +448,21 @@ function setupCluster {
 			continue
 		fi
 
-		echo "SETTING up cluster name $clusterName on port $port"
 		if [[ -z "${VAGRANT_KV_EXTERNAL_MAP[$clusterName]:-}" ]]; then
 			initPort="$port"
 		else
 			initPort=8091
 		fi
 
+		local hostIP="127.0.0.1"
+		if [[ ! -z "${VAGRANT_VM_IP_MAP[$clusterName]:-}" ]]; then
+			hostIP=${VAGRANT_VM_IP_MAP[$clusterName]}
+		fi
+		echo "SETTING up cluster name $clusterName on port $port with hostIP $hostIP"
+
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/nodes/self/controller/settings >/dev/null 2>&1
-		$CURL -X POST http://localhost:$port/nodeInfo/controller/rename -d hostname=127.0.0.1 >/dev/null 2>&1
-		$CURL -X POST http://localhost:$port/nodeInfo/controller/setupServices -d services=kv >/dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/rename -d hostname="$hostIP" >/dev/null 2>&1
+		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv >/dev/null 2>&1
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort >/dev/null 2>&1
 		if (($? != 0)); then
 			return $?
@@ -2372,6 +2387,14 @@ function createSecureRemoteClusterReference {
 	local sourcePort=${CLUSTER_NAME_PORT_MAP[$source]:-}
 	local targetPort=${CLUSTER_NAME_PORT_MAP[$target]:-}
 	local targetSecurePort=${CLUSTER_NAME_SECURE_PORT_MAP[$target]:-$targetPort}
+	local targetHost="127.0.0.1"
+
+	# special case handling for Vagrant
+	if [[ ! -z "${VAGRANT_VM_IP_MAP[$target]:-}" ]]; then
+		targetHost="${VAGRANT_VM_IP_MAP[$target]}"
+		#targetPort="8091"
+		targetSecurePort="18091"
+	fi
 
 	# See if client cert and keys exist
 	local clientCertFile=${CLIENT_CERT_MAP[$target]:-}
@@ -2384,13 +2407,13 @@ function createSecureRemoteClusterReference {
 
 	if [[ -z "${clientCertFile:-}" ]]; then
 		echo "Creating SECURE remote cluster reference from $source to $target"
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=127.0.0.1:$targetSecurePort -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
+		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=${targetHost}:${targetSecurePort} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
 			-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
 	else
 		echo "Creating SECURE remote cluster reference from $source to $target using client key $clientKeyFile and cert $clientCertFile"
 		local clientKeyData="$(cat $clientKeyFile)"
 		local clientCertData="$(cat $clientCertFile)"
-		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=127.0.0.1:$targetSecurePort \
+		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=${targetHost}:${targetSecurePort} \
 			-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}" \
 			--data-urlencode "clientKey=${clientKeyData}" --data-urlencode "clientCertificate=${clientCertData}"
 	fi

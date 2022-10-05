@@ -38,4 +38,5 @@ tools/testScripts/vagrant/testLibrary.shlib
 tools/testScripts/vagrant/importExporter.shlib
 tools/testScripts/vagrant/*.deb
 tools/testScripts/vagrant/.vagrant
+tools/testScripts/vagrant/data
 
