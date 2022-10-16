@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"fmt"
 	evaluatorApi "github.com/couchbase/eventing-ee/evaluator/api"
-	evaluatorClient "github.com/couchbase/eventing-ee/evaluator/client"
 	"net/http"
 	"time"
 
@@ -184,11 +183,16 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 }
 
 func (rs *ResolverSvc) initEvaluator(sourceKVHost string, xdcrRestPort uint16) error {
-	rs.engine = evaluatorClient.Singleton
+	rs.engine = evaluatorApi.Singleton
 
-	config := make(map[evaluatorApi.Config]interface{})
+	globalCfg := evaluatorApi.GlobalConfig{}
+	if fault := evaluatorApi.ConfigureGlobalConfig(globalCfg); fault != nil {
+		return fmt.Errorf("Encountered error while configuring globalCfg. err: %v", fault.Error())
+	}
+	engConfig := evaluatorApi.StaticEngineConfig{}
+	dynamicConfig := evaluatorApi.DynamicEngineConfig{}
 
-	if fault := rs.engine.Initialize(config); fault != nil {
+	if fault := rs.engine.Initialize(engConfig, dynamicConfig); fault != nil {
 		return fmt.Errorf("Unable to configure engine. err: %v", fault.Error())
 	}
 	rs.adminService = rs.engine.AdminService()
@@ -218,7 +222,7 @@ func (rs *ResolverSvc) execute(libraryName string, functionName string, params [
 	if rs.started == false {
 		return nil, fmt.Errorf("ResolverSvc is not started.")
 	}
-	options := map[evaluatorApi.Option]interface{}{evaluatorApi.Timeout: int(timeoutMs)}
+	options := evaluatorApi.Options{Timeout: timeoutMs}
 	worker := <-rs.workerPool
 	defer func() {
 		rs.workerPool <- worker
