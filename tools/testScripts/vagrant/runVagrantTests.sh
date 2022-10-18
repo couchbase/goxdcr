@@ -40,16 +40,21 @@ if [[ ! -f "./Vagrantfile" ]]; then
 	exit 1
 fi
 
-testCaseNumber="${1:-}"
-testCasesDirectory="collectionTestcases"
+testCasesDirectory="${1:-}"
+testCaseNumber="${2:-}"
+
+if [[ -z "$testCasesDirectory" ]];then
+	echo "Need to specify a type of test"
+	exit 1
+fi
 
 # Find out which ubuntu version we are running
 version=$(cat Vagrantfile | grep config.vm.box | grep -v \# | awk '{print $NF}' | sed 's/"//g' | cut -d/ -f2)
 
 if [[ "$version" == "focal64" ]]; then
-	testCasesDirectory="upgradeTests_2004"
+	testCasesDirectory="${testCasesDirectory}_2004"
 elif [[ "$version" == "bionic64" ]]; then
-	testCasesDirectory="upgradeTests_1804"
+	testCasesDirectory="${testCasesDirectory}_1804"
 else
 	echo "Unable to find ubuntu version"
 	exit 1

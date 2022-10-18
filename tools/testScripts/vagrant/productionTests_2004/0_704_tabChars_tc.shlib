@@ -1,0 +1,99 @@
+# Copyright 2022-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=15000 ["C1P"]=15001 ["C2"]=15002 ["C2P"]=15003)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=15996 ["C1P"]=15997 ["C2"]=15998 ["C2P"]=15999)
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1" ["C2P"]="C2")
+VAGRANT_KV_EXTERNAL_MAP=(["C1"]=15100 ["C1P"]=15101 ["C2"]=15102 ["C2P"]=15103)
+VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
+VAGRANT_VM_IP_MAP=(["C1"]="10.10.0.1" ["C1P"]="10.10.0.2" ["C2"]="10.10.0.3" ["C2P"]="10.10.0.4")
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"_default._default":"test.test"}')
+
+BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
+SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
+
+# Test cases assume vagrant up has already been called
+
+function runDataLoad {
+	#runCbWorkloadGenBucket "C1" "B1"
+	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\tbk_ouvidoria_total(hw)::174" '{"foo":"bar"}'
+  writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u0000bk_ouvidoria_total(hw)::1700" '{"foo":"bar"}'
+  writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u0009bk_ouvidoria_total(hw)::1709" '{"foo":"bar"}'
+  writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u000bk_ouvidoria_total(hw)::170" '{"foo":"bar"}'
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running 7.0.4 tab character OSO test"
+	echo "============================================================================"
+
+	vagrantRemoveCbServerAll
+
+	vagrantInstallCBServerAll "7.0.4"
+
+	setupTopologies
+
+	# Shorten the amount of time pipeline restarts
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+
+
+	addNodesIn
+	sleep 5
+	echo "Rebalancing nodes to become a 2-node source cluster"
+	startRebalancing "C1"
+	echo "Rebalancing nodes to become a 2-node target cluster"
+	startRebalancing "C2"
+
+
+  local loopCounter=0
+
+  while (( 1 ))
+  do
+    setupBuckets
+    runDataLoad
+	  createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+    checkChangesLeftInternal "C1" "B1" "C2" "B2"
+    vagrantGrepForPanicAll
+
+    echo "============================================================================"
+    echo "PASSED $loopCounter"
+    echo "============================================================================"
+    loopCounter=$(( $loopCounter+1 ))
+
+    cleanupBucketReplications
+    cleanupBuckets
+  done
+
+}
