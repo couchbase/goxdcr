@@ -22,6 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
+	"time"
 )
 
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
@@ -40,6 +41,7 @@ type TopologyChangeDetectorSvc struct {
 	logger             *log.CommonLogger
 	finish_ch          chan bool
 	wait_grp           *sync.WaitGroup
+
 	// the number of source topology changes seen so far
 	source_topology_change_count int
 	// the number of consecutive stable source topology seen so far
@@ -63,6 +65,10 @@ type TopologyChangeDetectorSvc struct {
 	target_vb_server_map_last map[uint16]string
 	// number of nodes in source cluster
 	number_of_source_nodes int
+
+	// Timer to restart due to source side topology change
+	sourceTopologyMaxWait       *time.Timer
+	sourceTopologyMaxStableWait *time.Timer
 
 	// key = hostname; value = https address of hostname
 	httpsAddrMap map[string]string
@@ -246,30 +252,46 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 		}
 	}
 
+	// The concept of "stable_count" was introduced (and still applicable for target side) pre-streaming API
+	// Prior to streaming API, XDCR would periodically pull VB topology changes on a periodic basis
+	// If each time it pulls, the VBs remain the same, that would be considered a "count"
+	// Ideally, the "count" was technically translated into a "period of time" because each pull would take place
+	// on a regular interval
+	// To keep things are regular as possible, we would need to translate the original settings that apply for
+	// counting periods into a steady timer duration
+	secsForMaxTopologyChange := int32(base.TopologyChangeCheckInterval.Seconds()) * int32(base.MaxTopologyChangeCountBeforeRestart)
+	secsForMaxStableTopologyChange := int32(base.TopologyChangeCheckInterval.Seconds()) * int32(base.MaxTopologyStableCountBeforeRestart)
+
 	if err_in == source_topology_changedErr || top_detect_svc.source_topology_change_count > 0 {
 		top_detect_svc.source_topology_change_count++
 		top_detect_svc.logger.Infof("Number of source topology changes seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.source_topology_change_count)
-		// restart pipeline if consecutive topology changes reaches limit -- cannot wait any longer
-		if top_detect_svc.source_topology_change_count >= base.MaxTopologyChangeCountBeforeRestart {
-			sourceTopoChangeRestartString := "Restarting pipeline due to source topology change..."
-			top_detect_svc.logger.Warnf("Pipeline %v: %v", top_detect_svc.mainPipelineTopic, sourceTopoChangeRestartString)
-			err = errors.New(sourceTopoChangeRestartString)
-			top_detect_svc.restartPipeline(err)
-			return err
+		if top_detect_svc.source_topology_change_count == 1 {
+			// First instance of topology change, start timer
+			top_detect_svc.sourceTopologyMaxWait = time.AfterFunc(time.Duration(secsForMaxTopologyChange)*time.Second, func() {
+				sourceTopoChangeRestartString := "Restarting pipeline due to source topology change..."
+				top_detect_svc.logger.Warnf("Pipeline %v: %v", top_detect_svc.mainPipelineTopic, sourceTopoChangeRestartString)
+				err = errors.New(sourceTopoChangeRestartString)
+				top_detect_svc.restartPipeline(err)
+			})
 		}
 
 		if vblist_supposed != nil {
 			if base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_last, vblist_supposed) {
 				top_detect_svc.source_topology_stable_count++
 				top_detect_svc.logger.Infof("Number of consecutive stable source topology seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.source_topology_stable_count)
-				if top_detect_svc.source_topology_stable_count >= base.MaxTopologyStableCountBeforeRestart {
-					// restart pipeline if source topology change has stopped for a while and is assumbly completed
-					err = fmt.Errorf("Source topology change for pipeline %v seems to have completed.", top_detect_svc.mainPipelineTopic)
-					top_detect_svc.restartPipeline(err)
-					return err
+				if top_detect_svc.source_topology_stable_count == 1 {
+					// First instance of stable count, start timer
+					top_detect_svc.sourceTopologyMaxStableWait = time.AfterFunc(time.Duration(secsForMaxStableTopologyChange)*time.Second, func() {
+						// restart pipeline if source topology change has stopped for a while and is assumbly completed
+						err = fmt.Errorf("Source topology change for pipeline %v seems to have completed.", top_detect_svc.mainPipelineTopic)
+						top_detect_svc.restartPipeline(err)
+					})
 				}
 			} else {
 				top_detect_svc.source_topology_stable_count = 0
+				if top_detect_svc.sourceTopologyMaxStableWait != nil {
+					top_detect_svc.sourceTopologyMaxStableWait.Stop()
+				}
 			}
 
 			// otherwise, keep pipeline running for now.
