@@ -62,6 +62,11 @@ func IsFatal(e error) bool {
 	return false
 }
 
+func IsTenantLimit(e error) bool {
+	s := errStatus(e)
+	return s >= RATE_LIMITED_NETWORK_INGRESS && s <= BUCKET_SIZE_LIMIT_EXCEEDED
+}
+
 // Size is number of bytes this response consumes on the wire.
 func (res *MCResponse) Size() int {
 	return HDR_LEN + len(res.Extras) + len(res.Key) + len(res.Body)

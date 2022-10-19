@@ -141,7 +141,7 @@ var BufferedCommandCodeMap = map[CommandCode]bool{
 // Status field for memcached response.
 type Status uint16
 
-// Matches with protocol_binary.h as source of truth
+// Matches with protocol/status.h as source of truth
 const (
 	SUCCESS            = Status(0x00)
 	KEY_ENOENT         = Status(0x01)
@@ -162,6 +162,14 @@ const (
 	ROLLBACK           = Status(0x23)
 	EACCESS            = Status(0x24)
 	NOT_INITIALIZED    = Status(0x25)
+
+	RATE_LIMITED_NETWORK_INGRESS = Status(0x30)
+	RATE_LIMITED_NETWORK_EGRESS  = Status(0x31)
+	RATE_LIMITED_MAX_CONNECTIONS = Status(0x32)
+	RATE_LIMITED_MAX_COMMANDS    = Status(0x33)
+	SCOPE_SIZE_LIMIT_EXCEEDED    = Status(0x34)
+	BUCKET_SIZE_LIMIT_EXCEEDED   = Status(0x35)
+
 	UNKNOWN_COMMAND    = Status(0x81)
 	ENOMEM             = Status(0x82)
 	NOT_SUPPORTED      = Status(0x83)
@@ -260,6 +268,7 @@ var CommandNames map[CommandCode]string
 
 // StatusNames human readable names for memcached response.
 var StatusNames map[Status]string
+var StatusDesc map[Status]string
 
 func init() {
 	CommandNames = make(map[CommandCode]string)
@@ -361,6 +370,12 @@ func init() {
 	StatusNames[ROLLBACK] = "ROLLBACK"
 	StatusNames[EACCESS] = "EACCESS"
 	StatusNames[NOT_INITIALIZED] = "NOT_INITIALIZED"
+	StatusNames[RATE_LIMITED_NETWORK_INGRESS] = "RATE_LIMITED_NETWORK_INGRESS"
+	StatusNames[RATE_LIMITED_NETWORK_EGRESS] = "RATE_LIMITED_NETWORK_EGRESS"
+	StatusNames[RATE_LIMITED_MAX_CONNECTIONS] = "RATE_LIMITED_MAX_CONNECTIONS"
+	StatusNames[RATE_LIMITED_MAX_COMMANDS] = "RATE_LIMITED_MAX_COMMANDS"
+	StatusNames[SCOPE_SIZE_LIMIT_EXCEEDED] = "SCOPE_SIZE_LIMIT_EXCEEDED"
+	StatusNames[BUCKET_SIZE_LIMIT_EXCEEDED]  = "BUCKET_SIZE_LIMIT_EXCEEDED"
 	StatusNames[UNKNOWN_COMMAND] = "UNKNOWN_COMMAND"
 	StatusNames[ENOMEM] = "ENOMEM"
 	StatusNames[NOT_SUPPORTED] = "NOT_SUPPORTED"
@@ -378,6 +393,13 @@ func init() {
 	StatusNames[RANGE_SCAN_MORE] = "RANGE_SCAN_MORE"
 	StatusNames[RANGE_SCAN_COMPLETE] = "RANGE_SCAN_COMPLETE"
 
+	StatusDesc = make(map[Status]string)
+	StatusDesc[RATE_LIMITED_NETWORK_INGRESS] = "Network input rate limit exceeded"
+	StatusDesc[RATE_LIMITED_NETWORK_EGRESS] = "Network output rate limit exceeded"
+	StatusDesc[RATE_LIMITED_MAX_CONNECTIONS] = "Connections limit exceeded"
+	StatusDesc[RATE_LIMITED_MAX_COMMANDS] = "Request rate limit exceeded"
+	StatusDesc[SCOPE_SIZE_LIMIT_EXCEEDED] = "Scope size limit exceeded"
+	StatusDesc[BUCKET_SIZE_LIMIT_EXCEEDED]  = "Bucket size limit exceeded"
 }
 
 // String an op code.
