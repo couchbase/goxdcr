@@ -442,11 +442,14 @@ func (c *Client) setContext(req *gomemcached.MCRequest, context ...*ClientContex
 	req.CollIdLen = 0
 	req.UserLen = 0
 	collectionId := uint32(0)
+	collectionsEnabled := atomic.LoadUint32(&c.collectionsEnabled)
 	if len(context) > 0 {
 		collectionId = context[0].CollId
 		uLen := len(context[0].User)
 
-		if uLen > 0 && uLen <= gomemcached.MAX_USER_LEN {
+		// we take collections enabled as an indicator that the node understands impersonation
+		// since we don't have a specific feature for it.
+		if collectionsEnabled > 0 && uLen > 0 && uLen <= gomemcached.MAX_USER_LEN {
 			req.UserLen = uLen
 			copy(req.Username[:uLen], context[0].User)
 		}
@@ -480,7 +483,7 @@ func (c *Client) setContext(req *gomemcached.MCRequest, context ...*ClientContex
 	}
 
 	// if the optional collection is specified, it must be default for clients that haven't turned on collections
-	if atomic.LoadUint32(&c.collectionsEnabled) == 0 {
+	if c.collectionsEnabled == 0 {
 		if collectionId != 0 {
 			return fmt.Errorf("Client does not use collections but a collection was specified")
 		}
