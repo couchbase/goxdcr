@@ -143,25 +143,25 @@ type Status uint16
 
 // Matches with protocol/status.h as source of truth
 const (
-	SUCCESS            = Status(0x00)
-	KEY_ENOENT         = Status(0x01)
-	KEY_EEXISTS        = Status(0x02)
-	E2BIG              = Status(0x03)
-	EINVAL             = Status(0x04)
-	NOT_STORED         = Status(0x05)
-	DELTA_BADVAL       = Status(0x06)
-	NOT_MY_VBUCKET     = Status(0x07)
-	NO_BUCKET          = Status(0x08)
-	LOCKED             = Status(0x09)
-	WOULD_THROTTLE     = Status(0x0c)
-	CONFIG_ONLY        = Status(0x0d)
-	AUTH_STALE         = Status(0x1f)
-	AUTH_ERROR         = Status(0x20)
-	AUTH_CONTINUE      = Status(0x21)
-	ERANGE             = Status(0x22)
-	ROLLBACK           = Status(0x23)
-	EACCESS            = Status(0x24)
-	NOT_INITIALIZED    = Status(0x25)
+	SUCCESS         = Status(0x00)
+	KEY_ENOENT      = Status(0x01)
+	KEY_EEXISTS     = Status(0x02)
+	E2BIG           = Status(0x03)
+	EINVAL          = Status(0x04)
+	NOT_STORED      = Status(0x05)
+	DELTA_BADVAL    = Status(0x06)
+	NOT_MY_VBUCKET  = Status(0x07)
+	NO_BUCKET       = Status(0x08)
+	LOCKED          = Status(0x09)
+	WOULD_THROTTLE  = Status(0x0c)
+	CONFIG_ONLY     = Status(0x0d)
+	AUTH_STALE      = Status(0x1f)
+	AUTH_ERROR      = Status(0x20)
+	AUTH_CONTINUE   = Status(0x21)
+	ERANGE          = Status(0x22)
+	ROLLBACK        = Status(0x23)
+	EACCESS         = Status(0x24)
+	NOT_INITIALIZED = Status(0x25)
 
 	RATE_LIMITED_NETWORK_INGRESS = Status(0x30)
 	RATE_LIMITED_NETWORK_EGRESS  = Status(0x31)
@@ -375,7 +375,7 @@ func init() {
 	StatusNames[RATE_LIMITED_MAX_CONNECTIONS] = "RATE_LIMITED_MAX_CONNECTIONS"
 	StatusNames[RATE_LIMITED_MAX_COMMANDS] = "RATE_LIMITED_MAX_COMMANDS"
 	StatusNames[SCOPE_SIZE_LIMIT_EXCEEDED] = "SCOPE_SIZE_LIMIT_EXCEEDED"
-	StatusNames[BUCKET_SIZE_LIMIT_EXCEEDED]  = "BUCKET_SIZE_LIMIT_EXCEEDED"
+	StatusNames[BUCKET_SIZE_LIMIT_EXCEEDED] = "BUCKET_SIZE_LIMIT_EXCEEDED"
 	StatusNames[UNKNOWN_COMMAND] = "UNKNOWN_COMMAND"
 	StatusNames[ENOMEM] = "ENOMEM"
 	StatusNames[NOT_SUPPORTED] = "NOT_SUPPORTED"
@@ -399,7 +399,7 @@ func init() {
 	StatusDesc[RATE_LIMITED_MAX_CONNECTIONS] = "Connections limit exceeded"
 	StatusDesc[RATE_LIMITED_MAX_COMMANDS] = "Request rate limit exceeded"
 	StatusDesc[SCOPE_SIZE_LIMIT_EXCEEDED] = "Scope size limit exceeded"
-	StatusDesc[BUCKET_SIZE_LIMIT_EXCEEDED]  = "Bucket size limit exceeded"
+	StatusDesc[BUCKET_SIZE_LIMIT_EXCEEDED] = "Bucket size limit exceeded"
 }
 
 // String an op code.

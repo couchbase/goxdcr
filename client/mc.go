@@ -116,7 +116,7 @@ const (
 	VbDead    VbStateType = 0x04
 )
 
-const RandomScanSeed = 0xdeadbeef
+const RandomScanSeed = 0x5eedbead
 
 var (
 	ErrUnSuccessfulHello          = errors.New("Unsuccessful HELLO exchange")
@@ -1167,7 +1167,11 @@ func (c *Client) CreateRandomScan(vb uint16, collId uint32, sampleSize int, cont
 
 	req.CollIdLen = 0 // has to be 0 else op is rejected
 	s := make(map[string]interface{})
-	s["seed"] = RandomScanSeed
+	seed := time.Now().UnixMilli()
+	if seed == 0 {
+		seed = RandomScanSeed
+	}
+	s["seed"] = seed
 	s["samples"] = sampleSize
 	m := make(map[string]interface{})
 	m["collection"] = fmt.Sprintf("%x", collId)
