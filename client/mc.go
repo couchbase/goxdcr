@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -1167,7 +1168,7 @@ func (c *Client) CreateRandomScan(vb uint16, collId uint32, sampleSize int, cont
 
 	req.CollIdLen = 0 // has to be 0 else op is rejected
 	s := make(map[string]interface{})
-	seed := time.Now().UnixMilli()
+	seed := uint32(rand.Int())
 	if seed == 0 {
 		seed = RandomScanSeed
 	}
