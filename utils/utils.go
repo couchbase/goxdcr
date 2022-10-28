@@ -1904,7 +1904,7 @@ func (u *Utilities) getHostAddrFromNodeInfoInternal(adminHostAddr string, nodeIn
 			return "", fmt.Errorf("Error getting host address from target cluster %v. host name, %v, is of wrong type\n", adminHostAddr, hostAddrObj)
 		}
 	}
-	_, err := base.MapToSupportedIpFamily(hostAddr)
+	_, err := base.MapToSupportedIpFamily(hostAddr, false)
 	if err != nil {
 		// The hostAddr cannot be mapped to the supported IP Address
 		return "", err

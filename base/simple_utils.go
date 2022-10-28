@@ -531,8 +531,10 @@ func AreVBServerMapsTheSame(vbServerMap1, vbServerMap2 map[uint16]string) bool {
 // evenly distribute load across workers
 // assumes that num_of_worker <= num_of_load
 // returns load_distribution [][]int, where
-//     load_distribution[i][0] is the start index, inclusive, of load for ith worker
-//     load_distribution[i][1] is the end index, exclusive, of load for ith worker
+//
+//	load_distribution[i][0] is the start index, inclusive, of load for ith worker
+//	load_distribution[i][1] is the end index, exclusive, of load for ith worker
+//
 // note that load is zero indexed, i.e., indexed as 0, 1, .. N-1 for N loads
 func BalanceLoad(num_of_worker int, num_of_load int) [][]int {
 	load_distribution := make([][]int, 0)
@@ -713,8 +715,13 @@ func IsIpV4Blocked() bool {
 	return NetTCP == TCP6
 }
 
-func IsIpV6BLocked() bool {
+func IsIpV6Blocked() bool {
 	return NetTCP == TCP4
+}
+
+// Wrapper func to be unit-testable
+var NetParseIP = func(input string) net.IP {
+	return net.ParseIP(input)
 }
 
 // If both IP families are supported, this routine will return connStr, nil
@@ -723,15 +730,15 @@ func IsIpV6BLocked() bool {
 // and use it in return value
 //
 // It will only return error if the address cannot be mapped to the supported IP family
-func MapToSupportedIpFamily(connStr string) (string, error) {
-	if !IsIpV4Blocked() && !IsIpV6BLocked() { // Both address family are supported
+func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
+	if !IsIpV4Blocked() && !IsIpV6Blocked() { // Both address family are supported
 		return connStr, nil
 	}
 
 	hostname := GetHostName(connStr)
 	// If it is in bracket, it is ipv6 address
 	if IsIpAddressEnclosedInBrackets(hostname) {
-		if IsIpV6BLocked() == true {
+		if IsIpV6Blocked() == true {
 			return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
 		} else {
 			return connStr, nil
@@ -739,15 +746,15 @@ func MapToSupportedIpFamily(connStr string) (string, error) {
 	}
 
 	// Check if it is already an ip address
-	if addr := net.ParseIP(hostname); addr != nil {
+	if addr := NetParseIP(hostname); addr != nil {
 		if addr.To4() != nil {
-			if IsIpV4Blocked() == false {
+			if !IsIpV4Blocked() {
 				return connStr, nil
 			} else {
 				return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
 			}
 		} else { // IPV6
-			if IsIpV6BLocked() == false {
+			if !IsIpV6Blocked() {
 				return connStr, nil
 			} else {
 				return "", fmt.Errorf(IpFamilyOnlyErrorMessage + fmt.Sprintf(AddressNotAllowedErrorMessageFmt, hostname))
@@ -759,18 +766,37 @@ func MapToSupportedIpFamily(connStr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Lookup failed for %v", hostname)
 	}
-	for _, addr := range addrs {
-		if addr.To4() != nil { // IPV4 address
-			if IsIpV4Blocked() == false {
+	switch isTLS {
+	case true:
+		// If using TLS, then the connection string should be returned as is because the server's TLS certificate
+		// most likely has a SAN section with DNS name, but not IP specific. If returned IP, it'll cause a TLS handshake
+		// failure
+		// Nevertheless, we should still check to ensure that the IP lookups correspond with the desired mode
+		var ipv4FoundExample string
+		var ipv6FoundExample string
+		for _, addr := range addrs {
+			if addr.To4() != nil { // IPV4 address
+				ipv4FoundExample = addr.To4().String()
+			} else {
+				ipv6FoundExample = addr.String()
+			}
+			if IsIpV4Blocked() && ipv4FoundExample != "" {
+				return "", fmt.Errorf("IPv6 only mode specified but given hostname %v found IPv4 address %v", hostname, ipv4FoundExample)
+			} else if IsIpV6Blocked() && ipv6FoundExample != "" {
+				return "", fmt.Errorf("IPv4 only mode specified but given hostname %v found IPv6 address %v", hostname, ipv6FoundExample)
+			}
+		}
+		return connStr, nil
+	case false:
+		for _, addr := range addrs {
+			if addr.To4() != nil && !IsIpV4Blocked() { // IPV4 address
 				port, portErr := GetPortNumber(connStr)
 				if portErr == nil {
 					return GetHostAddr(fmt.Sprintf("%v", addr), port), nil
 				} else {
 					return fmt.Sprintf("%v", addr), nil
 				}
-			}
-		} else { // IPV6 address
-			if IsIpV6BLocked() == false {
+			} else if !IsIpV6Blocked() { // IPV6 address
 				port, portErr := GetPortNumber(connStr)
 				if portErr == nil {
 					return GetHostAddr(fmt.Sprintf("%v", addr), port), nil
@@ -1478,16 +1504,19 @@ const (
 // Given a correctly allocatedBytes slice that can contain the whole rawJSON message, write the given information without
 // the use of any data structures on the heap
 // Input:
-// 	 allocatedBytes - finalized byte slice that will contain the specific marshalled JSON
-//   bytesToWrite - This can be either key or value in []byte form
-//   mode - mode above
-//   pos - current position to continue the write
-//   size - In cases where bytesToWrite originated from dataPool, the length may not reflect the actual
-//			length of the data (i.e. string). Use this field to avoid calling len and avoid out of bounds error
-//   isFirstKey - if the key is the first one, then add an open bracket. Otherwise, convert prev } to a comma for appending a new key
+//
+//		 allocatedBytes - finalized byte slice that will contain the specific marshalled JSON
+//	  bytesToWrite - This can be either key or value in []byte form
+//	  mode - mode above
+//	  pos - current position to continue the write
+//	  size - In cases where bytesToWrite originated from dataPool, the length may not reflect the actual
+//				length of the data (i.e. string). Use this field to avoid calling len and avoid out of bounds error
+//	  isFirstKey - if the key is the first one, then add an open bracket. Otherwise, convert prev } to a comma for appending a new key
+//
 // Returns:
-// 	 original byte slice reference
-// 	 updated position
+//
+//	original byte slice reference
+//	updated position
 func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, mode WriteJsonRawMsgType, size int, isFirstKey bool) ([]byte, int) {
 	if mode == WriteJsonKey {
 		if isFirstKey {
