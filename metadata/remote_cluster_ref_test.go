@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -26,15 +27,15 @@ import (
 var dnsSrvHostname string = "xdcr.couchbase.target.local"
 var invalidHostName = fmt.Sprintf("%v:%v", dnsSrvHostname, 12345)
 
-const localhostIP = "192.168.0.1"
-const localhostIP2 = "192.168.0.2"
+const localhostARecord = "localhostFqdn"
+const localhostArecord2 = "localhostFqdn2"
 
 func setupDNSMocks() *baseH.DnsSrvHelperIface {
 	helper := &baseH.DnsSrvHelperIface{}
 	oneEntry := &net.SRV{
 		// NOTE - SRV entries for "name" will end with a .
 		// See actual output in DnsSrvHelper in base package
-		Target: localhostIP,
+		Target: localhostARecord,
 		Port:   9001,
 	}
 	var entryList []*net.SRV
@@ -50,11 +51,11 @@ func setupDNS2Nodes() *baseH.DnsSrvHelperIface {
 	oneEntry := &net.SRV{
 		// NOTE - SRV entries for "name" will end with a .
 		// See actual output in DnsSrvHelper in base package
-		Target: localhostIP,
+		Target: localhostARecord,
 		Port:   9001,
 	}
 	secondEntry := &net.SRV{
-		Target: localhostIP,
+		Target: localhostARecord,
 		Port:   9002,
 	}
 	var entryList []*net.SRV
@@ -83,7 +84,7 @@ func setupDNSSecureMocks() *baseH.DnsSrvHelperIface {
 	oneEntry := &net.SRV{
 		// NOTE - SRV entries for "name" will end with a .
 		// See actual output in DnsSrvHelper in base package
-		Target: localhostIP,
+		Target: localhostARecord,
 		Port:   19001,
 	}
 	var entryList []*net.SRV
@@ -127,7 +128,7 @@ func TestNewRefWithDNSSrv(t *testing.T) {
 	hostnameList := ref.GetSRVHostNames()
 	//assert.Equal("192.168.0.1:9001", hostnameList[0])
 	// Ensure that 8091 is returned because Couchbase DNS SRV record ports are KV ports (MB-41083)
-	assert.Equal(fmt.Sprintf("%v:%v", localhostIP, base.DefaultAdminPort), hostnameList[0])
+	assert.Equal(fmt.Sprintf("%v:%v", localhostARecord, base.DefaultAdminPort), hostnameList[0])
 
 	// test GetTargetConnectionString() to return the correct one
 	for _, entry := range ref.srvEntries {
@@ -138,7 +139,7 @@ func TestNewRefWithDNSSrv(t *testing.T) {
 		assert.Nil(err)
 		assert.Equal(base.DefaultAdminPort, portNo)
 		targetHostname := base.GetHostName(targetConnStr)
-		assert.Equal(localhostIP, targetHostname)
+		assert.Equal(localhostARecord, targetHostname)
 		targetConnStr, err = entry.GetTargetConnectionString(HostNameSecureSRV, false)
 		assert.Nil(err)
 		portNo, err = base.GetPortNumber(targetConnStr)
@@ -229,7 +230,7 @@ func TestNewRefWithDNSSrvSecure(t *testing.T) {
 	assert.NotEqual(0, len(ref.srvEntries))
 
 	hostnameList := ref.GetSRVHostNames()
-	assert.Equal(fmt.Sprintf("%v:%v", localhostIP, base.DefaultAdminPortSSL), hostnameList[0])
+	assert.Equal(fmt.Sprintf("%v:%v", localhostARecord, base.DefaultAdminPortSSL), hostnameList[0])
 	assert.Equal(HostNameSecureSRV, ref.hostnameSRVType)
 
 }
@@ -239,13 +240,13 @@ func setupDNSBothMocks() *baseH.DnsSrvHelperIface {
 	oneEntry := &net.SRV{
 		// NOTE - SRV entries for "name" will end with a .
 		// See actual output in DnsSrvHelper in base package
-		Target: localhostIP,
+		Target: localhostARecord,
 		Port:   19001,
 	}
 	var entryList []*net.SRV
 	entryList = append(entryList, oneEntry)
 
-	oneEntry.Target = localhostIP2
+	oneEntry.Target = localhostArecord2
 	entryList = append(entryList, oneEntry)
 
 	helper.On("DnsSrvLookup", dnsSrvHostname).Return(entryList, base2.SrvRecordsBoth, nil)
@@ -295,4 +296,92 @@ func TestDNSSRVBoth(t *testing.T) {
 		assert.Nil(err)
 		assert.Equal(base.DefaultAdminPortSSL, portNo)
 	}
+}
+
+func TestEnforceIP(t *testing.T) {
+	fmt.Println("============== Test case start: TestEnforceIP =================")
+	defer fmt.Println("============== Test case done: TestEnforceIP =================")
+
+	assert := assert.New(t)
+
+	hostname := "localhost"
+	// Non-Full encryption reference
+	nonSecureRef, _ := NewRemoteClusterReference("testsUuid", "testName", hostname, "testUserName", "testPassword",
+		"", false, "", nil, nil, nil, nil)
+
+	// Set IPv6 to be blocked
+	base.NetTCP = base.TCP4
+	assert.True(base.IsIpV6Blocked())
+	// Set it back after test
+	defer func() {
+		base.NetTCP = base.TCP
+	}()
+
+	connStr, connErr := nonSecureRef.MyConnectionStr()
+	assert.Nil(connErr)
+	assert.Equal("127.0.0.1", connStr)
+
+	// Set IPv4 to be blocked
+	base.NetTCP = base.TCP6
+	assert.True(base.IsIpV4Blocked())
+
+	connStr, connErr = nonSecureRef.MyConnectionStr()
+	assert.Nil(connErr)
+	assert.Equal("[::1]", connStr)
+
+	// Set none blocked - should return original "hostname"
+	base.NetTCP = base.TCP
+	assert.False(base.IsIpV4Blocked())
+	assert.False(base.IsIpV6Blocked())
+	connStr, connErr = nonSecureRef.MyConnectionStr()
+	assert.Nil(connErr)
+	assert.Equal(hostname, connStr)
+}
+
+func TestEnforceIP_TLS(t *testing.T) {
+	fmt.Println("============== Test case start: TestEnforceIP_TLS =================")
+	defer fmt.Println("============== Test case done: TestEnforceIP_TLS =================")
+
+	assert := assert.New(t)
+
+	// Non-Full encryption reference - use mock DNS SRV to populate the lookup to a strict IPV4
+	helper := setupDNSBothMocks()
+	fullEncryptionRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
+		"", true, EncryptionType_Full, nil, nil, nil, helper)
+	fullEncryptionRef.PopulateDnsSrvIfNeeded()
+
+	// Mock the NetParseIP function
+	base.NetParseIP = func(input string) net.IP {
+		return net.ParseIP("127.0.0.1")
+	}
+	defer func() {
+		base.NetParseIP = func(input string) net.IP {
+			return net.ParseIP(input)
+		}
+	}()
+
+	// Set IPv4 to be blocked fake SRV lookup translates to IPv4
+	base.NetTCP = base.TCP6
+	assert.True(base.IsIpV4Blocked())
+	// Set it back after test
+	defer func() {
+		base.NetTCP = base.TCP
+	}()
+	connStr, connErr := fullEncryptionRef.MyConnectionStr()
+	assert.NotNil(connErr)
+
+	// Set IPv6 to be blocked... SRV IP lookup is IPv4 ... so should return FQDN after SRV lookup
+	base.NetTCP = base.TCP4
+	assert.True(base.IsIpV6Blocked())
+	connStr, connErr = fullEncryptionRef.MyConnectionStr()
+	assert.Nil(connErr)
+	assert.True(connStr == base.GetHostAddr(localhostARecord, 18091) || connStr == base.GetHostAddr(localhostArecord2, 18091))
+
+	// Set none blocked - should return FQDN after SRV lookup
+	base.NetTCP = base.TCP
+	assert.False(base.IsIpV4Blocked())
+	assert.False(base.IsIpV6Blocked())
+	connStr, connErr = fullEncryptionRef.MyConnectionStr()
+	assert.Nil(connErr)
+	assert.True(connStr == base.GetHostAddr(localhostARecord, 18091) || connStr == base.GetHostAddr(localhostArecord2, 18091))
 }

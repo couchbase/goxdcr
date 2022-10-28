@@ -45,10 +45,13 @@ const (
 	HostnameMode_Internal string = "default"  // To be consistent as goCBv2
 )
 
-/************************************
+/*
+***********************************
 /* struct RemoteClusterReference
- * NOTE - if adding/removing new members, need to also modify LoadFrom(), etc.
-*************************************/
+  - NOTE - if adding/removing new members, need to also modify LoadFrom(), etc.
+
+************************************
+*/
 type RemoteClusterReference struct {
 	Id_       string `json:"Id"`
 	Uuid_     string `json:"Uuid"`
@@ -263,7 +266,7 @@ func (ref *RemoteClusterReference) MyConnectionStr() (connStr string, err error)
 			connStr = ref.HostName()
 		}
 	}
-	connStr, err = base.MapToSupportedIpFamily(connStr)
+	connStr, err = base.MapToSupportedIpFamily(connStr, ref.IsFullEncryption())
 	return
 }
 

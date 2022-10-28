@@ -642,7 +642,7 @@ func (rctx *refreshContext) setHostNamesAndConnStr(pair base.StringPair) error {
 		rctx.connStr = rctx.hostName
 	}
 	// Make sure the connStr is supported
-	_, err := base.MapToSupportedIpFamily(rctx.connStr)
+	_, err := base.MapToSupportedIpFamily(rctx.connStr, rctx.refCache.IsFullEncryption())
 	if err != nil {
 		rctx.connStr = ""
 	}
@@ -3360,7 +3360,7 @@ func constructRemoteClusterReference(value []byte, rev interface{}, skipPopulate
 	return ref, err
 }
 
-//get remote cluster name from remote cluster uuid. Return unknown if remote cluster cannot be found
+// get remote cluster name from remote cluster uuid. Return unknown if remote cluster cannot be found
 func (service *RemoteClusterService) GetRemoteClusterNameFromClusterUuid(uuid string) string {
 	remoteClusterRef, err := service.RemoteClusterByUuid(uuid, false)
 	if err != nil || remoteClusterRef == nil {
