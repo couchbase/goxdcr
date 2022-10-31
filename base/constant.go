@@ -140,7 +140,7 @@ var UrlPortNumberDelimiter = ":"
 
 // Custom conflict resolution related constants
 var JSEngineWorkers = 0
-var JSWorkerQuota = 1572864 // 1.5MB
+var JSWorkerQuota = 15728640 // 15MB
 
 // constants for ipv6 addresses
 const Ipv6AddressSeparator = ":"
