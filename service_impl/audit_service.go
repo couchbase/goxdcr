@@ -13,15 +13,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"sync"
+	"time"
+
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"net"
-	"sync"
-	"time"
 )
 
 var ErrorInitializingAuditService = "Error initializing audit service."
@@ -84,12 +86,14 @@ func (service *AuditSvc) Write(eventId uint32, event service_def.AuditEventIface
 
 	err := service.initIfNeeded()
 	if err != nil {
+		service.logger.Errorf("Init failed with %v", err)
 		return err
 	}
 
 	client, err := service.getClient()
 	if err != nil {
-		return nil
+		service.logger.Errorf("getClient failed with %v", err)
+		return err
 	}
 	defer service.releaseClient(client)
 
@@ -105,6 +109,7 @@ func (service *AuditSvc) Write(eventId uint32, event service_def.AuditEventIface
 func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, event service_def.AuditEventIface) error {
 	req, err := composeAuditRequest(eventId, event)
 	if err != nil {
+		service.logger.Errorf("composeAuditRequest failed with error %v", err)
 		return err
 	}
 	if service.logger.GetLogLevel() >= log.LogLevelDebug {
@@ -115,6 +120,7 @@ func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, 
 	conn.(*net.TCPConn).SetWriteDeadline(time.Now().Add(base.AuditWriteTimeout))
 
 	if err := client.Transmit(req); err != nil {
+		service.logger.Errorf("client.Transmit received error %v", err)
 		return err
 	}
 
@@ -131,6 +137,7 @@ func (service *AuditSvc) write_internal(client mcc.ClientIface, eventId uint32, 
 	}
 
 	if err != nil {
+		service.logger.Errorf("client.Receive received error=%v", err)
 		return err
 	} else if res.Opcode != AuditPutCommandCode {
 		return errors.New(fmt.Sprintf("audit unexpected #opcode %v", res.Opcode))

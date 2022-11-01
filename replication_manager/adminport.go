@@ -1085,7 +1085,7 @@ func getRealUserIdFromRequest(request *http.Request) *service_def.RealUserId {
 	if err != nil {
 		logger_rm.Errorf("Error getting real user id from http request. err=%v\n", err)
 		// put unknown user in the audit log.
-		return &service_def.RealUserId{"internal", "unknown"}
+		return &service_def.RealUserId{"local", "unknown"}
 	}
 
 	return &service_def.RealUserId{creds.Domain(), creds.Name()}
