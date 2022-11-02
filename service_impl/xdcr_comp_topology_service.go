@@ -398,7 +398,7 @@ func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {
 	return uuid, nil
 }
 
-func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
+func (top_svc *XDCRTopologySvc) MyNodeVersion() (string, error) {
 	var poolsInfo map[string]interface{}
 	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
@@ -407,21 +407,37 @@ func (top_svc *XDCRTopologySvc) MyClusterVersion() (string, error) {
 
 	implVersionObj, ok := poolsInfo[base.ImplementationVersionKey]
 	if !ok {
-		return "", errors.New("Could not get implementation version of local cluster.")
+		return "", errors.New("Could not get implementation version of local node.")
 	}
 	implVersion, ok := implVersionObj.(string)
 	if !ok {
-		return "", errors.New(fmt.Sprintf("implementation version of local cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(implVersion)))
+		return "", errors.New(fmt.Sprintf("implementation version of local node is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(implVersion)))
 	}
 
 	// implVersion is of format [version]-[buildNumber]-xxx, e.g., 2.5.1-1114-rel-enterprise
 	// we need only the version portion
 	implVersionParts := strings.Split(implVersion, "-")
 	if len(implVersionParts) < 2 {
-		return "", fmt.Errorf("implementation version of local cluster, %v, is of wrong format.", implVersion)
+		return "", fmt.Errorf("implementation version of local node, %v, is of wrong format.", implVersion)
 	}
 
 	return implVersionParts[0], nil
+}
+
+func (top_svc *XDCRTopologySvc) MyClusterCompatibility() (int, error) {
+	var defaultPoolsInfo map[string]interface{}
+	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.DefaultPoolPath, false, base.MethodGet, "", nil, 0, &defaultPoolsInfo, top_svc.logger)
+	if err != nil || statusCode != 200 {
+		return -1, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.DefaultPoolPath, err, statusCode))
+	}
+
+	nodeList, err := top_svc.utils.GetNodeListFromInfoMap(defaultPoolsInfo, top_svc.logger)
+	if err != nil || len(nodeList) == 0 {
+		err = fmt.Errorf("Can't get nodes information, err=%v", err)
+		return -1, err
+	}
+
+	return top_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
 }
 
 func (top_svc *XDCRTopologySvc) IsMyClusterDeveloperPreview() bool {
