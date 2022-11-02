@@ -1614,19 +1614,23 @@ func (r *PipelineUpdater) run() {
 					r.scheduleFutureBackfillStart()
 				}
 			case <-r.updateRCStatusTicker.C:
-				// Check if connectivity has issues - and if so, raise an error if it's not there already
-				spec := r.rep_status.Spec()
-				// Spec may be nil when pipeline is stopping
-				if spec != nil {
-					ref, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
-					if err != nil {
-						r.logger.Errorf("Pipeline updater received err %v when retrieving its remote cluster")
-					} else {
-						connectivityStatus, err := r.pipelineMgr.GetRemoteClusterSvc().GetConnectivityStatus(ref)
+				// Only check connectivity status for KV nodes
+				isMyNodeKVNode, err := r.pipelineMgr.GetXDCRTopologySvc().IsKVNode()
+				if err == nil && isMyNodeKVNode {
+					// Check if connectivity has issues - and if so, raise an error if it's not there already
+					spec := r.rep_status.Spec()
+					// Spec may be nil when pipeline is stopping
+					if spec != nil {
+						ref, err := r.pipelineMgr.GetRemoteClusterSvc().RemoteClusterByUuid(spec.TargetClusterUUID, false)
 						if err != nil {
-							r.logger.Errorf("Pipeline updater received err %v when retrieving its remote cluster's connectivity status")
+							r.logger.Errorf("Pipeline updater received err %v when retrieving its remote cluster")
 						} else {
-							r.checkAndPublishRCError(connectivityStatus, ref)
+							connectivityStatus, err := r.pipelineMgr.GetRemoteClusterSvc().GetConnectivityStatus(ref)
+							if err != nil {
+								r.logger.Errorf("Pipeline updater received err %v when retrieving its remote cluster's connectivity status")
+							} else {
+								r.checkAndPublishRCError(connectivityStatus, ref)
+							}
 						}
 					}
 				}
