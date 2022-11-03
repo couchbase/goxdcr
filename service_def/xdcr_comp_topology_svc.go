@@ -13,16 +13,16 @@ import (
 	"github.com/couchbase/goxdcr/base"
 )
 
-//XDCRCompTopologySvc abstracts the service interface that has the knowledge
-//of xdcr component topology - xdcr components in a cluster running on which nodes;
-//what are the port numbers for the admin port of xdcr component; which kv node that
-//a xdcr component is responsible for.
+// XDCRCompTopologySvc abstracts the service interface that has the knowledge
+// of xdcr component topology - xdcr components in a cluster running on which nodes;
+// what are the port numbers for the admin port of xdcr component; which kv node that
+// a xdcr component is responsible for.
 //
-//This interface is trying to be deployment agnostic. It doesn't assume if xdcr component
-//and kv node are coexist on the same physical host or not.
+// This interface is trying to be deployment agnostic. It doesn't assume if xdcr component
+// and kv node are coexist on the same physical host or not.
 //
-//An implementation of this interface is likely to be deployment dependent. Base on the
-//deployment mode, xdcr solution can choose to use the proper implementation class
+// An implementation of this interface is likely to be deployment dependent. Base on the
+// deployment mode, xdcr solution can choose to use the proper implementation class
 type XDCRCompTopologySvc interface {
 	//the host name that this xdcr comp is running on
 	MyHost() (string, error)
@@ -48,7 +48,10 @@ type XDCRCompTopologySvc interface {
 	MyClusterUuid() (string, error)
 
 	// the version of the cluster that this xdcr comp is running on
-	MyClusterVersion() (string, error)
+	MyNodeVersion() (string, error)
+
+	// Cluster Compatibility number for local cluster
+	MyClusterCompatibility() (int, error)
 
 	//is the cluster XDCR is serving of enterprise edition
 	IsMyClusterEnterprise() (bool, error)
