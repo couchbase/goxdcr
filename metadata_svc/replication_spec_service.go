@@ -34,8 +34,8 @@ const (
 var ReplicationSpecAlreadyExistErrorMessage = "Replication to the same remote cluster and bucket already exists"
 var InvalidReplicationSpecError = errors.New("Invalid Replication spec")
 
-//replication spec and its derived object
-//This is what is put into the cache
+// replication spec and its derived object
+// This is what is put into the cache
 type ReplicationSpecVal struct {
 	spec       metadata.GenericSpecification
 	derivedObj interface{}
@@ -231,7 +231,7 @@ func (service *ReplicationSpecService) replicationSpec(replicationId string) (*m
 	return replSpec, nil
 }
 
-//validate the existence of source bucket
+// validate the existence of source bucket
 func (service *ReplicationSpecService) validateSourceBucket(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string) (string, int, string, error) {
 	var err_source error
 	start_time := time.Now()
@@ -581,6 +581,16 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 	if filter, ok := settings[metadata.FilterExpressionKey].(string); ok {
 		// Validate filter if it's a new setting OR it's an existing adv filter
 		if version, ok := settings[metadata.FilterVersionKey]; newSettings || (ok && (version.(base.FilterVersionType) == base.FilterVersionAdvanced)) {
+			// Ensure that all nodes in the source cluster can handle the advanced filter
+			clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
+			if err != nil {
+				service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation: %v", err)
+				return err, nil
+			}
+			if !base.IsClusterCompatible(clusterCompat, base.VersionForAdvFilteringSupport) {
+				return base.ErrorAdvFilterMixedModeUnsupported, nil
+			}
+
 			err = base.ValidateAdvFilter(filter)
 			if err != nil {
 				return err, nil
@@ -687,7 +697,7 @@ func (service *ReplicationSpecService) validateCompressionPreReq(errorMap base.E
 	return err
 }
 
-//validate target bucket
+// validate target bucket
 func (service *ReplicationSpecService) validateTargetBucket(errorMap base.ErrorMap, remote_connStr, targetBucket, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
 	sourceBucket string, targetCluster string, useExternal bool) (targetBucketInfo map[string]interface{}, targetBucketUUID string, targetBucketNumberOfVBs int, targetConflictResolutionType string, targetKVVBMap map[string][]uint16) {
 	start_time := time.Now()
@@ -1047,14 +1057,8 @@ func (service *ReplicationSpecService) constructReplicationSpec(value []byte, re
 // If there are, it populates these values using default values, and writes updated settings/spec to metakv.
 func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.ReplicationSpecification, lock bool) {
 	updatedKeys := spec.Settings.PopulateDefault()
-	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
-	if !isEnterprise && spec.Settings.Values[metadata.CompressionTypeKey] == base.CompressionTypeAuto {
-		spec.Settings.Values[metadata.CompressionTypeKey] = base.CompressionTypeNone
-		updatedKeys = append(updatedKeys, metadata.CompressionTypeKey)
-	} else if spec.Settings.Values[metadata.CompressionTypeKey] == base.CompressionTypeSnappy {
-		spec.Settings.Values[metadata.CompressionTypeKey] = base.CompressionTypeAuto
-		updatedKeys = append(updatedKeys, metadata.CompressionTypeKey)
-	}
+	updatedKeys = service.handleCompressionUpgrade(spec, updatedKeys)
+	updatedKeys = service.handleAdvFilteringUpgrade(spec, updatedKeys)
 	if len(updatedKeys) == 0 {
 		return
 	}
@@ -1071,6 +1075,36 @@ func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.Repl
 		// may get skipped
 		service.logger.Warnf("Error upgrading replication settings in spec %v in metakv. err = %v\n", spec.Id, err)
 	}
+}
+
+func (service *ReplicationSpecService) handleCompressionUpgrade(spec *metadata.ReplicationSpecification, updatedKeys []string) []string {
+	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
+	if !isEnterprise && spec.Settings.Values[metadata.CompressionTypeKey] == base.CompressionTypeAuto {
+		spec.Settings.Values[metadata.CompressionTypeKey] = base.CompressionTypeNone
+		updatedKeys = append(updatedKeys, metadata.CompressionTypeKey)
+	} else if spec.Settings.Values[metadata.CompressionTypeKey] == base.CompressionTypeSnappy {
+		spec.Settings.Values[metadata.CompressionTypeKey] = base.CompressionTypeAuto
+		updatedKeys = append(updatedKeys, metadata.CompressionTypeKey)
+	}
+	return updatedKeys
+}
+
+func (service *ReplicationSpecService) handleAdvFilteringUpgrade(spec *metadata.ReplicationSpecification, keys []string) []string {
+	if spec.Settings.FilterExpression == "" {
+		// No filtering, nothing to upgrade
+		return keys
+	}
+
+	clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
+	if err != nil {
+		service.logger.Warnf("Unable to get local cluster compatibility: %v - ignoring adv filtering upgrade", err)
+		return keys
+	}
+
+	if base.IsClusterCompatible(clusterCompat, base.VersionForAdvFilteringSupport) {
+		keys = spec.Settings.UpgradeFilterIfNeeded(keys)
+	}
+	return keys
 }
 
 // Implement callback function for metakv
