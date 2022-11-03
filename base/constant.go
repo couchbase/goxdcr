@@ -333,6 +333,9 @@ var ErrorNilCertificate = errors.New("Nil certificate")
 var ErrorNilCertificateStrictMode = errors.New("cluster encryption is set to strict mode and unable to retrieve a valid certificate")
 var ErrorOpInterrupted = errors.New("Operation interrupted")
 var ErrorNoVbSpecified = errors.New("No vb being specified")
+var ErrorCollectionManifestNotChanged = errors.New("Collection manifest has not changed")
+var ErrorSystemScopeMapped = errors.New("System scope is mapped")
+var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -633,6 +636,7 @@ var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
 var VersionForCollectionSupport = []int{7, 0}
+var VersionForAdvFilteringSupport = []int{6, 5}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
