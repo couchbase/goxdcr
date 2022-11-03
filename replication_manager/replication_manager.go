@@ -57,16 +57,20 @@ var GoXDCROptions struct {
 	MaxNumberOfLogFiles uint64
 }
 
-/************************************
+/*
+***********************************
 /* ReplicationManager Interface
-*************************************/
+************************************
+*/
 type ReplicationManagerIf interface {
 	OnError(s common.Supervisor, errMap base.ErrorMap)
 }
 
-/************************************
+/*
+***********************************
 /* struct ReplicationManager
-*************************************/
+************************************
+*/
 type replicationManager struct {
 	// supervises the livesness of adminport
 	supervisor.GenericSupervisor
@@ -126,7 +130,7 @@ type replicationManager struct {
 	eventIdAtomicWell int64
 }
 
-//singleton
+// singleton
 var replication_mgr replicationManager
 
 func StartReplicationManager(sourceKVHost string,
@@ -205,8 +209,8 @@ func StartReplicationManager(sourceKVHost string,
 }
 
 func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_settings_svc service_def.InternalSettingsSvc) {
-	// get cluster version
-	version, err := xdcr_topology_svc.MyClusterVersion()
+	// get node version
+	version, err := xdcr_topology_svc.MyNodeVersion()
 	if err != nil {
 		logger_rm.Errorf("Failed to get local cluster version. err=%v", err)
 		// in the unlikely event of error, an empty version will be used
@@ -536,8 +540,8 @@ func BackfillManager() service_def.BackfillMgrIface {
 	return replication_mgr.backfillMgr
 }
 
-//CreateReplication create the replication specification in metadata store
-//and start the replication pipeline
+// CreateReplication create the replication specification in metadata store
+// and start the replication pipeline
 func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (string, map[string]error, error, []string) {
 	logger_rm.Infof("Creating replication - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
@@ -562,8 +566,8 @@ func CreateReplication(justValidate bool, sourceBucket, targetCluster, targetBuc
 	return spec.Id, nil, nil, warnings
 }
 
-//DeleteReplication stops the running replication of given replicationId and
-//delete the replication specification from the metadata store
+// DeleteReplication stops the running replication of given replicationId and
+// delete the replication specification from the metadata store
 func DeleteReplication(topic string, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) error {
 	logger_rm.Infof("Deleting replication %s\n", topic)
 
@@ -583,7 +587,7 @@ func DeleteReplication(topic string, realUserId *service_def.RealUserId, ips *se
 	return nil
 }
 
-//update the  replication settings and XDCR process setting
+// update the  replication settings and XDCR process setting
 func UpdateDefaultSettings(settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (map[string]error, error) {
 	logger_rm.Infof("UpdateDefaultSettings called with settings=%v\n", settings)
 
@@ -636,7 +640,7 @@ func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, o
 	return false
 }
 
-//update the per-replication settings
+// update the per-replication settings
 func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (map[string]error, error) {
 	logger_rm.Infof("Update replication settings for %v, settings=%v\n", topic, settings.CloneAndRedact())
 
@@ -728,15 +732,15 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 }
 
 // get statistics for all running replications
-//% returns a list of replication stats for the bucket. the format for each
-//% item in the list is:
-//% {ReplicationDocId,           & the settings doc id for this replication
-//%    [{changes_left, Integer}, % amount of work remaining
-//%     {docs_checked, Integer}, % total number of docs checked on target, survives restarts
-//%     {docs_written, Integer}, % total number of docs written to target, survives restarts
-//%     ...
-//%    ]
-//% }
+// % returns a list of replication stats for the bucket. the format for each
+// % item in the list is:
+// % {ReplicationDocId,           & the settings doc id for this replication
+// %    [{changes_left, Integer}, % amount of work remaining
+// %     {docs_checked, Integer}, % total number of docs checked on target, survives restarts
+// %     {docs_written, Integer}, % total number of docs written to target, survives restarts
+// %     ...
+// %    ]
+// % }
 func GetStatistics(bucket string) (*expvar.Map, error) {
 	repIds := replication_mgr.pipelineMgr.AllReplicationsForBucket(bucket)
 	logger_rm.Debugf("repIds=%v\n", repIds)
@@ -774,7 +778,7 @@ func GetAllStatistics() (*expvar.Map, error) {
 	return stats, nil
 }
 
-//create and persist the replication specification
+// create and persist the replication specification
 func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap) (*metadata.ReplicationSpecification, map[string]error, error, []string) {
 	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
@@ -940,7 +944,7 @@ func validateStatsMap(statsMap map[string]interface{}) {
 	}
 }
 
-//error handler
+// error handler
 func (rm *replicationManager) OnError(s common.Supervisor, errMap map[string]error) {
 	logger_rm.Infof("Supervisor %v of type %v reported errors %v\n", s.Id(), reflect.TypeOf(s), errMap)
 
@@ -1051,7 +1055,7 @@ func logMemStats(fin_chan chan bool) {
 	}
 }
 
-//gracefull stop
+// gracefull stop
 func cleanup() {
 	if replication_mgr.running {
 
@@ -1099,7 +1103,7 @@ func checkAndSetRunningState() bool {
 	}
 }
 
-//crash
+// crash
 func exitProcess(byForce bool) {
 	wasRunning := checkAndSetRunningState()
 	if wasRunning {
@@ -1254,7 +1258,7 @@ func logAuditErrors(err error) {
 	}
 }
 
-//pull GoMaxProc from environment
+// pull GoMaxProc from environment
 func GoMaxProcs_env() int {
 	max_procs_str := os.Getenv("GOXDCR_GOMAXPROCS")
 	var max_procs int
