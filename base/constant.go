@@ -53,7 +53,7 @@ var DocsPath = "/docs/"
 var RevsDiffPath = "/_revs_diff"
 var BulkDocsPath = "/_bulk_docs"
 
-//keys in the map which /nodes/self returns
+// keys in the map which /nodes/self returns
 var CouchApiBase = "couchApiBase"
 var CouchApiBaseHttps = "couchApiBaseHTTPS"
 
@@ -111,7 +111,7 @@ const (
 // delimiter for multiple parts in a key
 var KeyPartsDelimiter = "/"
 
-//constants for adminport
+// constants for adminport
 var AdminportUrlPrefix = UrlDelimiter
 
 // used as default value for tests
@@ -124,7 +124,7 @@ var AdminportReadTimeout = 60 * time.Second
 // write timeout for golib's http server.
 var AdminportWriteTimeout = 180 * time.Second
 
-//outgoing nozzle type
+// outgoing nozzle type
 type XDCROutgoingNozzleType int
 
 const (
@@ -238,6 +238,7 @@ var ErrorTargetNoAltHostName = errors.New("Alternate hostname is not set up on a
 var ErrorPipelineRestartDueToClusterConfigChange = errors.New("Pipeline needs to update due to remote cluster configuration change")
 var ErrorPipelineRestartDueToEncryptionChange = errors.New("Pipeline needs to update due to cluster encryption level change")
 var ErrorRemoteClusterFullEncryptionRequired = errors.New("Cluster encryption level is strict. Remote cluster reference must use full encryption.")
+var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
 
 // Various non-error internal msgs
 var FilterForcePassThrough = errors.New("No data is to be filtered, should allow passthrough")
@@ -294,7 +295,7 @@ const (
 	JustValidatePostfix = "?" + JustValidate + "=1"
 )
 
-//const used by block profile
+// const used by block profile
 const (
 	BlockProfileRate = "block_profile_rate"
 )
@@ -321,7 +322,7 @@ const (
 	HTTPServerJetty = "Jetty"
 )
 
-//constant for replication tasklist status
+// constant for replication tasklist status
 const (
 	Pending     = "Pending"
 	Replicating = "Replicating"
@@ -359,7 +360,7 @@ const ChangesLeftStats = "changes_left"
 const DocsFromDcpStats = "docs_received_from_dcp"
 const DocsRepQueueStats = "docs_rep_queue"
 
-//constants for replication docs
+// constants for replication docs
 const (
 	RemoteClustersForReplicationDoc = "remoteClusters"
 	BucketsPath                     = "buckets"
@@ -487,6 +488,8 @@ var PipelineSerializerRetryFactor = 2
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
+var VersionForCollectionSupport = []int{7, 0}
+var VersionForAdvFilteringSupport = []int{6, 5}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
@@ -690,7 +693,7 @@ var XmemReadTimeout = 120 * time.Second
 // continuous network error responses from read or write) exceeds max down time (seconds)
 var XmemMaxReadDownTime = 60 * time.Second
 
-//wait time between writes is backoff_factor*XmemBackoffWaitTime
+// wait time between writes is backoff_factor*XmemBackoffWaitTime
 var XmemBackoffWaitTime = 10 * time.Millisecond
 
 // max backoff factor
@@ -753,13 +756,13 @@ var MaxRetryCapiService = 5
 // max number of async listeners [for an event type]
 var MaxNumberOfAsyncListeners = 4
 
-//max interval between retries when resending docs  (seconds)
+// max interval between retries when resending docs  (seconds)
 var XmemMaxRetryInterval = 300 * time.Second
 
 // max retry for xmem resend operation on mutation locked error
 var XmemMaxRetryMutationLocked = 20
 
-//max interval between retries when resending docs on mutation locked errors  (seconds)
+// max interval between retries when resending docs on mutation locked errors  (seconds)
 // the upper limit on lock period is as of now 30 seconds
 var XmemMaxRetryIntervalMutationLocked = 30 * time.Second
 

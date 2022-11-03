@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 package metadata_svc
@@ -23,6 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 )
+
+var colAndAdvSupportCompat int = 458754
+var preAdvFilterCompat int = 393216
 
 func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	*service_def.MetadataSvc,
@@ -181,6 +185,8 @@ func setupMocks(srcResolutionType string,
 	xdcrTopologyMock.On("MyConnectionStr").Return(myConnectionStr, nil)
 	xdcrTopologyMock.On("MyMemcachedAddr").Return(myConnectionStr, nil)
 	xdcrTopologyMock.On("IsMyClusterEnterprise").Return(isEnterprise, nil)
+	xdcrTopologyMock.On("NumberOfKVNodes").Return(1, nil)
+	xdcrTopologyMock.On("MyClusterCompatibility").Return(clusterCompatVersion, nil)
 
 	// LOCAL mock
 	utilitiesMock.On("BucketValidationInfo", hostAddr,
@@ -463,6 +469,43 @@ func TestOriginalRegexUpgradedFilter(t *testing.T) {
 	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestOriginalRegexUpgradedFilter =================")
+}
+
+func TestPreventFilterCreateMixedMode(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPreventFilterCreateMixedMode =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, preAdvFilterCompat)
+
+	// Xmem using elas
+	settings[metadata.FilterExpressionKey] = base.UpgradeFilter("^abc")
+
+	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	assert.Equal(base.ErrorAdvFilterMixedModeUnsupported, err)
+	fmt.Println("============== Test case end: TestPreventFilterCreateMixedMode =================")
+}
+
+func TestPreventFilterEditMixedMode(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPreventFilterEditMixedMode =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, preAdvFilterCompat)
+
+	// Xmem using elas
+	settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
+	settings[metadata.FilterExpressionKey] = base.UpgradeFilter("^abc")
+
+	_, err, _ := replSpecSvc.ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket, settings, false)
+	assert.Equal(base.ErrorAdvFilterMixedModeUnsupported, err)
+	fmt.Println("============== Test case end: TestPreventFilterEditMixedMode =================")
 }
 
 func TestStripExpiry(t *testing.T) {
