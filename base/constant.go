@@ -317,6 +317,7 @@ var ReplNotFoundErr = errors.New(ReplicationSpecNotFoundErrorMessage)
 var ErrorExplicitMappingEnterpriseOnly = errors.New("Explicit Mapping is supported in Enterprise Edition only")
 var ErrorChunkedEncodingNotSupported = errors.New("Chunked encoding is not supported")
 var BrokenMappingUIString = "Found following destination collection(s) missing (and will not get replicated to):\n"
+var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -608,6 +609,7 @@ var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
 var VersionForCollectionSupport = []int{7, 0}
+var VersionForAdvFilteringSupport = []int{6, 5}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""

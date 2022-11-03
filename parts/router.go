@@ -1326,10 +1326,22 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMapsRO *metadata.C
 func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) (*Router, error) {
 
 	topic := spec.Id
-	filterExpression, ok := spec.Settings.Values[metadata.FilterExpressionKey].(string)
-	if !ok {
-		// No filterExpression
-		filterExpression = ""
+	filterExpression, exprFound := spec.Settings.Values[metadata.FilterExpressionKey].(string)
+	_, versionFound := spec.Settings.Values[metadata.FilterVersionKey]
+	var filterVersion base.FilterVersionType
+	if versionFound {
+		filterVersion = spec.Settings.Values[metadata.FilterVersionKey].(base.FilterVersionType)
+	}
+
+	// These conditions may require in-memory of filter upgrade
+	if exprFound && filterExpression != "" {
+		if !versionFound || (versionFound && filterVersion == base.FilterVersionKeyOnly) {
+			clonedSetting := spec.Settings.Clone()
+			var dummyList []string
+			clonedSetting.UpgradeFilterIfNeeded(dummyList)
+			fmt.Printf("NEIL DEBUG upgraded in-memory of filter\n")
+			filterExpression = clonedSetting.FilterExpression
+		}
 	}
 
 	var filter *baseFilter.FilterImpl
