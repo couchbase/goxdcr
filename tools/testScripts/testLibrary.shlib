@@ -1056,7 +1056,6 @@ EOF
 		sanIP="127.0.0.1"
 		if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
 			sanIP="${VAGRANT_VM_IP_MAP["$clusterName"]}"
-			echo "NEIL DEBUG IP using $sanIP"
 		fi
 		echo "subjectAltName = IP:${sanIP}" \
 			>>./server.ext.tmp

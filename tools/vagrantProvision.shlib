@@ -47,6 +47,7 @@ function vscp {
 
 declare -A CBServerLink=(
 	["7.0.4"]="http://latestbuilds.service.couchbase.com/builds/releases/7.0.4/couchbase-server-enterprise_7.0.4-ubuntu20.04_amd64.deb"
+	["6.6.3"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.3/couchbase-server-enterprise_6.6.3-ubuntu18.04_amd64.deb"
 	["6.6.5"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.5/couchbase-server-enterprise_6.6.5-ubuntu18.04_amd64.deb"
 	["toy"]="http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
@@ -127,11 +128,23 @@ function vagrantInstallCBServer {
 	local version="$2"
 	local cmd
 	local debFile=$(vagrantGetLocalDebFileName "$version")
+	local nodeName=${VAGRANT_VM_IDX_MAP["$i"]}
 
 	vagrantInstallNtp "$i"
+	vagrantInstallPythonHttpLib "$i"
 	downloadCBServerDeb "$version"
+	VAGRANT_VERSION_MAP[$nodeName]="$version"
 
 	cmd="${VSSH[$i]} \"sudo dpkg -i /vagrant/$debFile\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallPythonHttpLib {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install python-httplib2\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 }
@@ -228,4 +241,10 @@ function vagrantLoadCerts {
 		${VSSH[$idx]} "sudo mv /tmp/pkey.key /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
 
 	done
+}
+
+function vagrantDelAlternateAddress {
+	local index="$1"
+
+	${VSSH[$index]} "curl -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/node/controller/setupAlternateAddresses/external"
 }

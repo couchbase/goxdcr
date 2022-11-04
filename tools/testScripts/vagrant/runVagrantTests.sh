@@ -43,7 +43,7 @@ fi
 testCasesDirectory="${1:-}"
 testCaseNumber="${2:-}"
 
-if [[ -z "$testCasesDirectory" ]];then
+if [[ -z "$testCasesDirectory" ]]; then
 	echo "Need to specify a type of test"
 	exit 1
 fi

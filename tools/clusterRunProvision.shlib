@@ -63,6 +63,8 @@ declare -A CLIENT_KEY_MAP
 declare -A VAGRANT_KV_EXTERNAL_MAP
 declare -A VAGRANT_CAPI_EXTERNAL_MAP
 declare -A VAGRANT_VM_IP_MAP
+declare -A VAGRANT_VM_IDX_MAP
+declare -A VAGRANT_VERSION_MAP
 
 # optional globals
 # -----------------
@@ -469,10 +471,21 @@ function setupCluster {
 		fi
 
 		# Vagrant, set up alternate address so cbworkloadgen can run from dev machine onto vagrants
-		if [[ ! -z "${VAGRANT_KV_EXTERNAL_MAP[$clusterName]:-}" ]]; then
-			setupVagrantAltAddress "$clusterName"
+		if [[ ! -z "${VAGRANT_KV_EXTERNAL_MAP["$clusterName"]:-}" ]]; then
+			# If any node is running 6.0.x then don't set up alternate addresses
+			local key
+			local found60=0
+			for key in $(echo ${!VAGRANT_VERSION_MAP[@]}); do
+				if [[ "$key" =~ 6\.0\. ]]; then
+					found60=1
+				fi
+			done
+			if (($found60 == 1)); then
+				setupVagrantAltAddress "$clusterName"
+			else
+				echo "At least one node is running 6.0.x so no alternate address will be set up"
+			fi
 		fi
-
 		echo ""
 	done
 }
@@ -546,23 +559,29 @@ function addOneNodeIn {
 	local port=${CLUSTER_NAME_PORT_MAP[$nodeName]:-}
 	local retryCnt=0
 	local dependentNodeHostname
-	local dependentNodePortSecure
+	local dependentNodePortToUse
+	local httpStr
 
 	for ((retryCnt = 0; $retryCnt < 5; retryCnt = $(($retryCnt + 1)))); do
 		echo "Adding $dependentClusterName:$dependentNodePort ($nodeName) to $port"
 		local preAddNumNodes=$(getNsServerPoolsDefault "$nodeName" | jq '.nodes' | jq length)
 
+		httpStr="https://"
 		# Special case for vagrant
 		if [[ ! -z "${VAGRANT_VM_IP_MAP[$dependentClusterName]:-}" ]]; then
 			dependentNodeHostname="${VAGRANT_VM_IP_MAP[$dependentClusterName]}"
-			dependentNodePortSecure="18091"
+			dependentNodePortToUse="18091"
+			# special case for 6.0.x
+			if [[ ! -z "${VAGRANT_VERSION_MAP[$nodeName]:-}" ]] && [[ "${VAGRANT_VERSION_MAP[$nodeName]}" =~ 6\.0\. ]]; then
+				httpStr="http://"
+				dependentNodePortToUse="8091"
+			fi
 		else
 			dependentNodeHostname="127.0.0.1"
-			dependentNodePortSecure="1${dependentNodePort}"
+			dependentNodePortToUse="1${dependentNodePort}"
 		fi
 
-		echo $CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="https://${dependentNodeHostname}:${dependentNodePortSecure}"
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="https://${dependentNodeHostname}:${dependentNodePortSecure}"
+		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="${httpStr}${dependentNodeHostname}:${dependentNodePortToUse}"
 
 		echo "Waiting for membership update"
 		sleep 10
@@ -1233,7 +1252,7 @@ function createBucketReplication {
 
 	for ((i = 0; $i < 3; i = $(($i + 1)))); do
 		repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
-		if (((($? == 0)) && (($(echo "$repId" | grep -c error) == 0)) && (($(echo "$repId" | grep -c "kv vb map is empty") == 0)) )); then
+		if (((($? == 0)) && (($(echo "$repId" | grep -c error) == 0)) && (($(echo "$repId" | grep -c "kv vb map is empty") == 0)))); then
 			if (($(checkJQ) == 0)); then
 				repIdReal=$(getKeyUsingJQ "$repId" '.id')
 				if [[ "$repIdReal" == "" ]]; then
@@ -1724,7 +1743,7 @@ function parseStatsOutput {
 	# 192.168.1.113:9000
 	# [::1]:9001
 
-	if [[ ! -z ${VAGRANT_KV_EXTERNAL_MAP[@]:-} ]];then
+	if [[ ! -z ${VAGRANT_KV_EXTERNAL_MAP[@]:-} ]]; then
 		# checkPort will be 8091 and hostPort should also be 8091
 		hostPort="8091"
 	fi

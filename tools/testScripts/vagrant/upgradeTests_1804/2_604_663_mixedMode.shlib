@@ -30,48 +30,47 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+# various specific test case variables
+declare -i docCounter=0
+filterExpr='^(KU_| MH_)'
 
-# This MP specific link
+declare -A DefaultBucketReplProperties=(["filterExpression"]="$filterExpr" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 # Test cases assume vagrant up has already been called
 
+# Each call will put in a KU document
 function runDataLoad {
-	runCbWorkloadGenBucket "C1" "B1"
+	writeJSONDocument "C1" "B1" "KU_${docCounter}" '{"foo":"bar"}'
+	docCounter=$(($docCounter + 1))
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running 6.6.5 to 6.6.5-MP upgrade test case SSL"
+	echo "Running 6.0.4 to 6.6.3 mixedMode test case"
 	echo "============================================================================"
 
-	#vagrantRemoveCbServerAll
-	#vagrantInstallCBServerAll "6.6.5"
+	vagrantRemoveCbServerAll
 
-	#vagrantRemoveCbServer 0
-	#vagrantInstallCBServer 0 "6.6.5"
+	vagrantInstallCBServer 0 "6.0.4"
+	vagrantInstallCBServer 1 "6.0.4"
+	vagrantInstallCBServer 2 "6.6.3"
+	vagrantInstallCBServer 3 "6.6.3"
 
 	setupTopologies
 
-	setupCertsForTesting
-	vagrantLoadCerts
-
 	# Shorten the amount of time pipeline restarts
-	#local checkInterval=10
-	#local maxChangeCnt=3
-	#local maxStableCnt=3
-	#local coolDownPeriod=1
-	#setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
 
-	#sleep 5
-	createSecureRemoteClusterReference "C1" "C2"
-	createSecureRemoteClusterReference "C2" "C1"
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
 	sleep 1
 
 	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
-
-	runDataLoad
 
 	addNodesIn
 	sleep 5
@@ -81,47 +80,41 @@ function runTestCase {
 	startRebalancing "C2"
 
 	exportProvisionedConfig
+
+	vagrantDelAlternateAddress 2
+	vagrantDelAlternateAddress 3
+
+	runDataLoad
 	sleep 10
-	checkBidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $docCounter
+	checkItemCnt "C2" "B2" $docCounter
 
 	# Upgrade source nodes
 	vagrantRebalanceAndUpgrade "C1" "0" "C1P" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
+	vagrantDelAlternateAddress 2
+	vagrantDelAlternateAddress 3
+
 	vagrantGrepForPanic "0"
-	sleep 40
+	# Write 3 docs
+	local i
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		runDataLoad
+	done
+	sleep 20
+	checkItemCnt "C1" "B1" $docCounter
+	checkItemCnt "C2" "B2" $docCounter
 
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 5
-	checkBidirectionalChangesLeft
-
+	# Upgrade other source node
 	vagrantRebalanceAndUpgrade "C1P" "1" "C1" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
+
 	vagrantGrepForPanic "1"
-
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 5
-	checkBidirectionalChangesLeft
-
-	# Upgrade target nodes
-	vagrantRebalanceAndUpgrade "C2" "2" "C2P" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
-	vagrantGrepForPanic "2"
-
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 5
-	checkBidirectionalChangesLeft
-
-	vagrantRebalanceAndUpgrade "C2P" "3" "C2" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
-	vagrantGrepForPanic "3"
-
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 5
-	checkBidirectionalChangesLeft
-	vagrantGrepForPanicAll
+	# Write 3 docs
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		runDataLoad
+	done
+	sleep 20
+	checkItemCnt "C1" "B1" $docCounter
+	checkItemCnt "C2" "B2" $docCounter
 
 	echo "============================================================================"
 	echo "PASSED"

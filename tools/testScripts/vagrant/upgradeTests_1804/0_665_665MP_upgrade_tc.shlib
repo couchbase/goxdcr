@@ -17,6 +17,7 @@ CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1" ["C2P"]="C2")
 VAGRANT_KV_EXTERNAL_MAP=(["C1"]=15100 ["C1P"]=15101 ["C2"]=15102 ["C2P"]=15103)
 VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
 VAGRANT_VM_IP_MAP=(["C1"]="10.10.0.1" ["C1P"]="10.10.0.2" ["C2"]="10.10.0.3" ["C2P"]="10.10.0.4")
+VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")

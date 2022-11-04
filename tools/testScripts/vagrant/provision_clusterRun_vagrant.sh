@@ -76,7 +76,7 @@ fi
 
 vagrantRemoveCbServerAll
 
-vagrantInstallCBServerAll "7.0.4"
+vagrantInstallCBServerAll "7.1.2"
 
 # Some other options...
 #vagrantInstallCBServerAll "toy"
