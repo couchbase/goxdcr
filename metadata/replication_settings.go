@@ -691,7 +691,6 @@ func (s *ReplicationSettings) PostProcessAfterUnmarshalling() {
 		}
 		// no need for populateFieldsUsingMap() since fields and map in metakv should already be consistent
 	}
-	//s.UpgradeFilterIfNeeded()
 }
 
 func (s *ReplicationSettings) exportFlagTypeValues() {

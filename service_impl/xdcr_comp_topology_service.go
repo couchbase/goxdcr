@@ -52,6 +52,11 @@ type XDCRTopologySvc struct {
 	cachedMemcachedAddrMtx      sync.RWMutex
 
 	strictSecurityErrLogged uint32
+
+	cachedClusterCompatMtx   sync.RWMutex
+	cachedClusterCompat      int
+	cachedClusterCompatErr   error
+	cachedClusterCompatTimer *time.Timer
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
@@ -426,18 +431,66 @@ func (top_svc *XDCRTopologySvc) MyNodeVersion() (string, error) {
 
 func (top_svc *XDCRTopologySvc) MyClusterCompatibility() (int, error) {
 	var defaultPoolsInfo map[string]interface{}
+
+	top_svc.cachedClusterCompatMtx.RLock()
+	defer top_svc.cachedClusterCompatMtx.RUnlock()
+
+	// Timer's existence determines whether or not we're in cool down period
+	if top_svc.cachedClusterCompatTimer != nil {
+		// still within cooldown period - return cached information
+		return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
+	}
+
+	// Upgrade lock
+	top_svc.cachedClusterCompatMtx.RUnlock()
+	top_svc.cachedClusterCompatMtx.Lock()
+	defer func() {
+		defer top_svc.cachedClusterCompatMtx.Unlock()
+		defer top_svc.cachedClusterCompatMtx.RLock()
+	}()
+
+	if top_svc.cachedClusterCompatTimer != nil {
+		// someone sneaked in
+		return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
+	}
+	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.MyClusterCompat()", base.DiagInternalThreshold)
+	defer stopFunc()
+
+	var cooldownPeriod = base.TopologySvcCoolDownPeriod
 	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.DefaultPoolPath, false, base.MethodGet, "", nil, 0, &defaultPoolsInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
-		return -1, errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.DefaultPoolPath, err, statusCode))
+		cooldownPeriod = base.TopologySvcErrCoolDownPeriod
+		retErr := errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.DefaultPoolPath, err, statusCode))
+		top_svc.cachedClusterCompatErr = retErr
+		top_svc.cachedClusterCompat = -1
 	}
 
-	nodeList, err := top_svc.utils.GetNodeListFromInfoMap(defaultPoolsInfo, top_svc.logger)
-	if err != nil || len(nodeList) == 0 {
-		err = fmt.Errorf("Can't get nodes information, err=%v", err)
-		return -1, err
+	if err == nil {
+		var nodeList []interface{}
+		nodeList, err = top_svc.utils.GetNodeListFromInfoMap(defaultPoolsInfo, top_svc.logger)
+		if err != nil || len(nodeList) == 0 {
+			cooldownPeriod = base.TopologySvcErrCoolDownPeriod
+			err = fmt.Errorf("Can't get nodes information, err=%v", err)
+			top_svc.cachedClusterCompatErr = err
+			top_svc.cachedClusterCompat = -1
+		} else {
+			top_svc.cachedClusterCompat, err = top_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
+			if err != nil {
+				cooldownPeriod = base.TopologySvcErrCoolDownPeriod
+			}
+			top_svc.cachedClusterCompatErr = err
+		}
 	}
 
-	return top_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
+	top_svc.cachedClusterCompatTimer = time.AfterFunc(cooldownPeriod, func() {
+		top_svc.cachedClusterCompatMtx.Lock()
+		defer top_svc.cachedClusterCompatMtx.Unlock()
+		top_svc.cachedClusterCompatTimer = nil
+		top_svc.cachedClusterCompatErr = nil
+		top_svc.cachedClusterCompat = 0
+	})
+
+	return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
 }
 
 func (top_svc *XDCRTopologySvc) IsMyClusterDeveloperPreview() bool {
