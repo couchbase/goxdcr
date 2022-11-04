@@ -333,8 +333,6 @@ var ErrorNilCertificate = errors.New("Nil certificate")
 var ErrorNilCertificateStrictMode = errors.New("cluster encryption is set to strict mode and unable to retrieve a valid certificate")
 var ErrorOpInterrupted = errors.New("Operation interrupted")
 var ErrorNoVbSpecified = errors.New("No vb being specified")
-var ErrorCollectionManifestNotChanged = errors.New("Collection manifest has not changed")
-var ErrorSystemScopeMapped = errors.New("System scope is mapped")
 var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
 
 func GetBackfillFatalDataLossError(specId string) error {
