@@ -2732,5 +2732,13 @@ func TestStalledAddClusterRefFromCallback(t *testing.T) {
 		assert.Error(ret)
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(2 * time.Second)
+		ret := agent.UpdateReferenceFrom(ref2, false)
+		assert.Error(ret)
+	}()
+
 	wg.Wait()
 }

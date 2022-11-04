@@ -1848,12 +1848,14 @@ func (agent *RemoteClusterAgent) updateReferenceFromInternal(newRef *metadata.Re
 
 		_, rev, err := agent.fetchFromMetakv(newRef)
 		if err != nil {
+			agent.refMtx.Unlock()
 			return err
 		}
 
 		metakvRevBytes := rev.([]byte)
 		newRefRevBytes := newRef.Revision().([]byte)
 		if bytes.Compare(metakvRevBytes, newRefRevBytes) != 0 {
+			agent.refMtx.Unlock()
 			err = fmt.Errorf("Revision mismatch for cluster id=%s metakvRev=%v newRefRev=%v",
 				newRef.Id(), metakvRevBytes, newRefRevBytes)
 
