@@ -1361,7 +1361,6 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 			clonedSetting := spec.Settings.Clone()
 			var dummyList []string
 			clonedSetting.UpgradeFilterIfNeeded(dummyList)
-			fmt.Printf("NEIL DEBUG upgraded in-memory of filter\n")
 			filterExpression = clonedSetting.FilterExpression
 		}
 	}
