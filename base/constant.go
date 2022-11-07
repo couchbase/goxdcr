@@ -488,7 +488,6 @@ var PipelineSerializerRetryFactor = 2
 var VersionForCompressionSupport = []int{5, 5}
 var VersionForClientCertSupport = []int{5, 5}
 var VersionForHttpScramShaSupport = []int{5, 5}
-var VersionForCollectionSupport = []int{7, 0}
 var VersionForAdvFilteringSupport = []int{6, 5}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
