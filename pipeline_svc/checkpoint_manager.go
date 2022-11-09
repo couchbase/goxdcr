@@ -48,6 +48,7 @@ var ckptRecordMismatch error = errors.New("Checkpoint Records internal version m
 var targetVbuuidChangedError error = errors.New("target vbuuid has changed")
 var ckptMgrStopped = errors.New("Ckptmgr has stopped")
 var ckptSplitInternalSpecIds = fmt.Errorf("There is split decision on internalSpecIDs")
+var errorPrevCheckpointInProgress = errors.New("Previous checkpointing operation is still in progress")
 
 type CheckpointMgrSvc interface {
 	common.PipelineService
@@ -723,14 +724,30 @@ func (ckmgr *CheckpointManager) closeConnections() {
 	ckmgr.kv_mem_clients = make(map[string]mcc.ClientIface)
 }
 
-func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool) map[uint16][]uint64 {
+// If periodicMode is false, there should not be any error returned
+func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool, periodicMode bool) (map[uint16][]uint64, error) {
 	ckmgr.waitForInitConnDone()
 
 	// get singular access to run to prevent concurrent calls into this function
-	<-ckmgr.getHighSeqnoAndVBUuidFromTargetCh
-	defer func() {
-		ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
-	}()
+	switch periodicMode {
+	case true:
+		// Periodic mode means that if a previous ckpt wasn't completed yet, don't queue up as this could be a case
+		// where targets are slow... and a bunch of go-routines can build up into a long unordered queue
+		select {
+		case <-ckmgr.getHighSeqnoAndVBUuidFromTargetCh:
+			defer func() {
+				ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
+			}()
+		default:
+			return nil, errorPrevCheckpointInProgress
+		}
+	case false:
+		// Non-Periodic mode means that this ckpt operation must be completed at all costs. Wait for access
+		<-ckmgr.getHighSeqnoAndVBUuidFromTargetCh
+		defer func() {
+			ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
+		}()
+	}
 
 	serverClientStatsMap := make(map[string]base.StringStringMap)
 	var serverClientStatsMapMtx sync.RWMutex
@@ -750,7 +767,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool
 		ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], high_seqno_and_vbuuid_map)
 	}
 	ckmgr.logger.Infof("high_seqno_and_vbuuid_map=%v\n", high_seqno_and_vbuuid_map)
-	return high_seqno_and_vbuuid_map
+	return high_seqno_and_vbuuid_map, nil
 }
 
 // checkpointing cannot be done without high seqno and vbuuid from target
@@ -896,9 +913,9 @@ func (ckmgr *CheckpointManager) CheckpointBeforeStop() {
 	}
 }
 
-//get the lis of source vbuckets that this pipleline instance responsible.
-//In current deployment - ReplicationManager coexist with source node, it means
-//the list of buckets on that source node
+// get the lis of source vbuckets that this pipleline instance responsible.
+// In current deployment - ReplicationManager coexist with source node, it means
+// the list of buckets on that source node
 func (ckmgr *CheckpointManager) getMyVBs() []uint16 {
 	vbList := []uint16{}
 	for _, vbs := range ckmgr.active_vbs {
@@ -1699,20 +1716,32 @@ func (ckmgr *CheckpointManager) CommitBrokenMappingUpdates() {
 
 // public API. performs one checkpoint operation on request
 func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
-	ckmgr.logger.Infof("Start one time checkpointing for replication %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
-	defer ckmgr.logger.Infof("Done one time checkpointing for replication %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+	ckmgr.logger.Infof("Start one time checkpointing for replication %v %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
 
 	var through_seqno_map map[uint16]uint64
 	var high_seqno_and_vbuuid_map map[uint16][]uint64
 	var srcManifestIds map[uint16]uint64
 	var tgtManifestIds map[uint16]uint64
+	var err error
+
+	defer func() {
+		if err == nil {
+			ckmgr.logger.Infof("Done one time checkpointing for replication %v %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+		} else {
+			ckmgr.logger.Errorf("Skipped one time checkpointing for replication %v %v failed with error %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), err)
+		}
+	}()
 
 	// get through seqnos for all vbuckets in the pipeline
 	through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
 	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
 	ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
 	// get high seqno and vbuuid for all vbuckets in the pipeline
-	high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
+	high_seqno_and_vbuuid_map, err = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch, false)
+	if err != nil {
+		// Note that per design this call should try not to fail so if err returned above, something is wrong
+		return
+	}
 
 	//divide the workload to several getter and run the getter parallelly
 	vb_list := ckmgr.getMyVBs()
@@ -1765,8 +1794,14 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	}
 	defer ckmgr.checkpointAllowedHelper.markTaskDone(opDoneIdx)
 
-	ckmgr.logger.Infof("Start checkpointing for replication %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
-	defer ckmgr.logger.Infof("Done checkpointing for replication %v %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+	ckmgr.logger.Infof("Start checkpointing for replication %v %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+	defer func() {
+		if err == nil {
+			ckmgr.logger.Infof("Done checkpointing for replication %v %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic())
+		} else {
+			ckmgr.logger.Errorf("Skipped checkpointing for replication %v %v due to %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), err)
+		}
+	}()
 	// vbucketID -> ThroughSeqNumber
 	var through_seqno_map map[uint16]uint64
 	// vBucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid
@@ -1775,16 +1810,10 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	var srcManifestIds map[uint16]uint64
 	var tgtManifestIds map[uint16]uint64
 
-	// get through seqnos for all vbuckets in the pipeline
-	if ckmgr.collectionEnabled() {
-		through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
-	} else {
-		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
+	through_seqno_map, srcManifestIds, tgtManifestIds, high_seqno_and_vbuuid_map, err = ckmgr.gatherCkptData(fin_ch, through_seqno_map, srcManifestIds, tgtManifestIds, high_seqno_and_vbuuid_map)
+	if err != nil {
+		return
 	}
-	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
-	ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
-	// get high seqno and vbuuid for all vbuckets in the pipeline
-	high_seqno_and_vbuuid_map = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch)
 
 	var total_committing_time int64
 
@@ -1805,6 +1834,20 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	ckmgr.RaiseEvent(common.NewEvent(common.CheckpointDone, nil, ckmgr, nil, time.Duration(total_committing_time)*time.Nanosecond))
 	ckmgr.checkpoints_svc.UpsertCheckpointsDone(ckmgr.pipeline.FullTopic())
 
+}
+
+func (ckmgr *CheckpointManager) gatherCkptData(fin_ch chan bool, through_seqno_map map[uint16]uint64, srcManifestIds map[uint16]uint64, tgtManifestIds map[uint16]uint64, high_seqno_and_vbuuid_map map[uint16][]uint64) (map[uint16]uint64, map[uint16]uint64, map[uint16]uint64, map[uint16][]uint64, error) {
+	// get through seqnos for all vbuckets in the pipeline
+	if ckmgr.collectionEnabled() {
+		through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
+	} else {
+		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
+	}
+	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
+	ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
+	// get high seqno and vbuuid for all vbuckets in the pipeline
+	high_seqno_and_vbuuid_map, err := ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch, true)
+	return through_seqno_map, srcManifestIds, tgtManifestIds, high_seqno_and_vbuuid_map, err
 }
 
 func (ckmgr *CheckpointManager) isCheckpointAllowed() bool {
@@ -2541,10 +2584,10 @@ func (ckmgr *CheckpointManager) MergePeerNodesCkptInfo(genericResponse interface
 type nodeVbCkptMap map[string]metadata.VBsCkptsDocMap
 
 // Merging pre-requisites:
-// 1. For each checkpoint, the VBUUID must exist in the src and target failover log. If not, ckpt is not valid
-//    and is not worth saving
-// 2. Once invalid ckpts are filtered out, they need to be sorted
-// 3. Sort first by source side
+//  1. For each checkpoint, the VBUUID must exist in the src and target failover log. If not, ckpt is not valid
+//     and is not worth saving
+//  2. Once invalid ckpts are filtered out, they need to be sorted
+//  3. Sort first by source side
 func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer.PeersVBMasterCheckRespMap) error {
 	if len(respMap) == 0 {
 		// nothing to merge
