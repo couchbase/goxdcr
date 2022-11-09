@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
+	mocks3 "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/common/mocks"
@@ -243,9 +244,30 @@ const kvKey = "serverName"
 const srcBucketName = "srcBucket"
 const tgtBucketName = "tgtBucket"
 
+var vbList = []uint16{0, 1}
+
 var utilsReal = utils.NewUtilities()
 
-func setupCkptMgrBoilerPlate() (*service_def.CheckpointsService, *service_def.CAPIService, *service_def.RemoteClusterSvc, *service_def.ReplicationSpecSvc, *service_def.XDCRCompTopologySvc, *service_def.ThroughSeqnoTrackerSvc, *utilities.UtilsIface, *service_def.StatsMgrIface, *service_def.UILogSvc, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc, *service_def.BackfillMgrIface, func() service_def_real.BackfillMgrIface, *service_def.BucketTopologySvc, *metadata.ReplicationSpecification, *PipelineSupervisor) {
+// Implements ComponentEventListner
+type ckptDoneListener struct {
+	ckptDoneCount uint64
+}
+
+func (cl *ckptDoneListener) OnEvent(event *common.Event) {
+	if event == nil {
+		return
+	}
+	if event.EventType == common.CheckpointDone {
+		atomic.AddUint64(&cl.ckptDoneCount, 1)
+	}
+}
+
+type statsMapResult struct {
+	statsMap map[string]string
+	err      error
+}
+
+func setupCkptMgrBoilerPlate() (*service_def.CheckpointsService, *service_def.CAPIService, *service_def.RemoteClusterSvc, *service_def.ReplicationSpecSvc, *service_def.XDCRCompTopologySvc, *service_def.ThroughSeqnoTrackerSvc, *utilities.UtilsIface, *service_def.StatsMgrIface, *service_def.UILogSvc, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc, *service_def.BackfillMgrIface, func() service_def_real.BackfillMgrIface, *service_def.BucketTopologySvc, *metadata.ReplicationSpecification, *PipelineSupervisor, *ckptDoneListener, map[string][]uint16, map[string]*mocks3.ClientIface, map[string]int, map[string]statsMapResult) {
 	ckptSvc := &service_def.CheckpointsService{}
 	capiSvc := &service_def.CAPIService{}
 	remoteClusterSvc := &service_def.RemoteClusterSvc{}
@@ -267,9 +289,22 @@ func setupCkptMgrBoilerPlate() (*service_def.CheckpointsService, *service_def.CA
 
 	pipelineSupervisor := &PipelineSupervisor{}
 
+	ckptDoneListener := &ckptDoneListener{}
+
+	targetKvVbMap := make(map[string][]uint16)
+	targetKvVbMap[kvKey] = vbList
+	targetMCMap := make(map[string]*mocks3.ClientIface)
+	targetMCMap[kvKey] = &mocks3.ClientIface{}
+
+	targetMCDelayMap := make(map[string]int)
+	targetMCDelayMap[kvKey] = 0
+
+	targetMCStatMapReturn := make(map[string]statsMapResult)
+
 	return ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
 		utilsMock, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr,
-		bucketTopologySvc, spec, pipelineSupervisor
+		bucketTopologySvc, spec, pipelineSupervisor, ckptDoneListener, targetKvVbMap, targetMCMap, targetMCDelayMap,
+		targetMCStatMapReturn
 }
 
 func setupBackfillPipelineMock(spec *metadata.ReplicationSpecification, supervisor *PipelineSupervisor, task *metadata.BackfillTask) *mocks.Pipeline {
@@ -302,6 +337,27 @@ func setupBackfillPipelineMock(spec *metadata.ReplicationSpecification, supervis
 	return pipeline
 }
 
+func setupMainPipelineMock(spec *metadata.ReplicationSpecification, supervisor *PipelineSupervisor) *mocks.Pipeline {
+	runtimeCtx := &mocks.PipelineRuntimeContext{}
+	runtimeCtx.On("Service", base.PIPELINE_SUPERVISOR_SVC).Return(supervisor)
+
+	genericSpec := &mocks2.GenericSpecification{}
+	genericSpec.On("GetReplicationSpec").Return(spec)
+
+	pipeline := &mocks.Pipeline{}
+	pipeline.On("Type").Return(common.MainPipeline)
+	pipeline.On("Sources").Return(nil)
+	pipeline.On("Specification").Return(genericSpec)
+	pipeline.On("Topic").Return("pipelineTopic")
+	pipeline.On("FullTopic").Return("pipelineTopic")
+	pipeline.On("RuntimeContext").Return(runtimeCtx)
+	pipeline.On("InstanceId").Return("randomInstance")
+
+	pipeline.On("UpdateSettings", mock.Anything).Return(nil)
+
+	return pipeline
+}
+
 func getBackfillTask() *metadata.BackfillTask {
 	namespaceMapping := make(metadata.CollectionNamespaceMapping)
 	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
@@ -319,13 +375,7 @@ func getBackfillTask() *metadata.BackfillTask {
 
 	return vb0Task0
 }
-func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAPIService,
-	remClusterSvc *service_def.RemoteClusterSvc, replSpecSvc *service_def.ReplicationSpecSvc,
-	xdcrCompTopologySvc *service_def.XDCRCompTopologySvc, throughSeqnoSvc *service_def.ThroughSeqnoTrackerSvc,
-	utils *utilities.UtilsIface, statsMgr *service_def.StatsMgrIface, uilogSvc *service_def.UILogSvc,
-	colManSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc,
-	backfillMgr *service_def.BackfillMgrIface, bucketTopologySvc *service_def.BucketTopologySvc,
-	spec *metadata.ReplicationSpecification, supervisor *PipelineSupervisor) {
+func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAPIService, remClusterSvc *service_def.RemoteClusterSvc, replSpecSvc *service_def.ReplicationSpecSvc, xdcrCompTopologySvc *service_def.XDCRCompTopologySvc, throughSeqnoSvc *service_def.ThroughSeqnoTrackerSvc, utilsMock *utilities.UtilsIface, statsMgr *service_def.StatsMgrIface, uilogSvc *service_def.UILogSvc, colManSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, backfillMgr *service_def.BackfillMgrIface, bucketTopologySvc *service_def.BucketTopologySvc, spec *metadata.ReplicationSpecification, supervisor *PipelineSupervisor, throughSeqnoMap map[uint16]uint64, upsertCkptsDoneErr error, mcMap map[string]*mocks3.ClientIface, delayMap map[string]int, result map[string]statsMapResult) {
 
 	bucketInfoFile := "../utils/testInternalData/pools_default_buckets_b2.json"
 	bucketInfoData, err := ioutil.ReadFile(bucketInfoFile)
@@ -355,15 +405,25 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	}
 
 	remClusterSvc.On("ShouldUseAlternateAddress", mock.Anything).Return(false, nil)
-	utils.On("GetBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketMap, nil)
-	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(getRemoteServerVBMapFunc, getNilFunc)
-	utils.On("GetClusterCompatibilityFromBucketInfo", mock.Anything, mock.Anything).Return(getCompatibilityFunc, getNilFunc2)
-	utils.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(base.GetNodeListFromInfoMap(bucketMap, nil))
-	utils.On("GetHostAddrFromNodeInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("localhost", nil)
+	utilsMock.On("GetBucketInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bucketMap, nil)
+	utilsMock.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(getRemoteServerVBMapFunc, getNilFunc)
+	utilsMock.On("GetClusterCompatibilityFromBucketInfo", mock.Anything, mock.Anything).Return(getCompatibilityFunc, getNilFunc2)
+	utilsMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(base.GetNodeListFromInfoMap(bucketMap, nil))
+	utilsMock.On("GetHostAddrFromNodeInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("localhost", nil)
+	utilsMock.On("ParseHighSeqnoAndVBUuidFromStats", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	utilsMock.On("ExponentialBackoffExecutorWithFinishSignal", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		utilsReal.ExponentialBackoffExecutorWithFinishSignal(args.Get(0).(string), args.Get(1).(time.Duration), args.Get(2).(int), args.Get(3).(int), args.Get(4).(utils.ExponentialOpFunc2), args.Get(5), args.Get(6).(chan bool))
+	}).Return(nil, nil)
+
+	for kvName, client := range mcMap {
+		utilsMock.On("GetRemoteMemcachedConnection", kvName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(client, nil)
+	}
 
 	capiSvc.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Return(true, nil, nil)
 
 	statsMgr.On("SetVBCountMetrics", mock.Anything, mock.Anything).Return(nil)
+	statsMgr.On("HandleLatestThroughSeqnos", mock.Anything).Return(nil)
 
 	throughSeqnoSvc.On("SetStartSeqno", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		timeStampMtx.Lock()
@@ -371,6 +431,19 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 		timeStampSetCnt++
 		timeStampMtx.Unlock()
 	}).Return(nil)
+
+	throughSeqnoSvc.On("GetThroughSeqnos").Return(throughSeqnoMap, nil)
+	throughSeqnoSvc.On("GetThroughSeqnosAndManifestIds").Return(nil, nil, nil)
+
+	ckptSvc.On("UpsertCheckpointsDone", mock.Anything).Return(upsertCkptsDoneErr)
+	ckptSvc.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	ckptSvc.On("UpsertBrokenMapping", mock.Anything, mock.Anything).Return(nil)
+
+	for k, client := range mcMap {
+		client.On("StatsMap", base.VBUCKET_SEQNO_STAT_NAME).Run(func(args mock.Arguments) { time.Sleep(time.Duration(delayMap[k]) * time.Second) }).Return(result[k].statsMap, result[k].err)
+	}
+
+	colManSvc.On("PersistNeededManifests", mock.Anything).Return(nil)
 }
 
 var timeStampSetSeqno uint64
@@ -382,19 +455,17 @@ func TestBackfillVBTaskResume(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestBackfillVBTaskResume =================")
 	assert := assert.New(t)
 
-	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor := setupCkptMgrBoilerPlate()
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMcDelayMap, targetMCStatsResult := setupCkptMgrBoilerPlate()
 
 	activeVBs := make(map[string][]uint16)
 	activeVBs[kvKey] = []uint16{0}
 	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
 		"", false, "", nil, nil, nil, nil)
 
-	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
-		utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface,
-		bucketTopologySvc, spec, pipelineSupervisor)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, nil, nil, targetMCMap, targetMcDelayMap, targetMCStatsResult)
 
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
-		throughSeqnoTrackerSvc, activeVBs, "", "", "", nil,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
 		getBackfillMgr, bucketTopologySvc)
 
@@ -456,19 +527,17 @@ func TestCkptMgrPeriodicMerger(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCkptMgrPeriodicMerger =================")
 	assert := assert.New(t)
 
-	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor := setupCkptMgrBoilerPlate()
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMcDelayMap, targetMCStatsResult := setupCkptMgrBoilerPlate()
 
 	activeVBs := make(map[string][]uint16)
 	activeVBs[kvKey] = []uint16{0}
 	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
 		"", false, "", nil, nil, nil, nil)
 
-	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
-		utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface,
-		bucketTopologySvc, spec, pipelineSupervisor)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, nil, nil, targetMCMap, targetMcDelayMap, targetMCStatsResult)
 
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
-		throughSeqnoTrackerSvc, activeVBs, "", "", "", nil,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
 		getBackfillMgr, bucketTopologySvc)
 
@@ -540,19 +609,17 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCkptMgrPeriodicMerger2 =================")
 	assert := assert.New(t)
 
-	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor := setupCkptMgrBoilerPlate()
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMcDelayMap, targetMCStatsResult := setupCkptMgrBoilerPlate()
 
 	activeVBs := make(map[string][]uint16)
 	activeVBs[kvKey] = []uint16{0}
 	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
 		"", false, "", nil, nil, nil, nil)
 
-	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
-		utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface,
-		bucketTopologySvc, spec, pipelineSupervisor)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, nil, nil, targetMCMap, targetMcDelayMap, targetMCStatsResult)
 
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
-		throughSeqnoTrackerSvc, activeVBs, "", "", "", nil,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
 		getBackfillMgr, bucketTopologySvc)
 
@@ -613,4 +680,142 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	assert.Nil(retErr)
 
 	close(ckptMgr.finish_ch)
+}
+
+func TestCkptMgrPerformCkpt(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptMgrPerformCkpt =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrPerformCkpt =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, ckptDoneCounter, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	var upsertCkptDoneErr error
+
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult)
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc)
+
+	assert.Nil(ckptMgr.RegisterComponentEventListener(common.CheckpointDone, ckptDoneCounter))
+
+	assert.Nil(err)
+	assert.NotNil(ckptMgr)
+	ckptMgr.unitTest = true
+	ckptMgr.checkpointAllowedHelper.setCheckpointAllowed()
+	ckptMgr.initConnections()
+
+	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
+	assert.Nil(ckptMgr.Attach(mainPipeline))
+
+	dummyFinCh := make(chan bool, 1)
+	dummyWG := sync.WaitGroup{}
+	dummyWG.Add(1)
+	go ckptMgr.performCkpt(dummyFinCh, &dummyWG)
+	dummyWG.Wait()
+
+	assert.Equal(uint64(1), atomic.LoadUint64(&ckptDoneCounter.ckptDoneCount))
+}
+
+func TestCkptMgrPerformCkptWithDelay(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptMgrPerformCkptWithDelay =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrPerformCkptWithDelay =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, ckptDoneCounter, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	var upsertCkptDoneErr error
+
+	targetMCDelayMap[kvKey] = 2
+
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult)
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc)
+
+	assert.Nil(ckptMgr.RegisterComponentEventListener(common.CheckpointDone, ckptDoneCounter))
+
+	assert.Nil(err)
+	assert.NotNil(ckptMgr)
+	ckptMgr.unitTest = true
+	ckptMgr.checkpointAllowedHelper.setCheckpointAllowed()
+	ckptMgr.initConnections()
+
+	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
+	assert.Nil(ckptMgr.Attach(mainPipeline))
+
+	// This test will launch 2 periodic ckpt go-routines but one should fail because it is still ongoing
+	dummyFinCh := make(chan bool, 1)
+	dummyWG := sync.WaitGroup{}
+	dummyWG.Add(1)
+	go ckptMgr.performCkpt(dummyFinCh, &dummyWG)
+
+	time.Sleep(500 * time.Millisecond)
+
+	dummyWG.Add(1)
+	go ckptMgr.performCkpt(dummyFinCh, &dummyWG)
+	dummyWG.Wait()
+
+	assert.Equal(uint64(1), atomic.LoadUint64(&ckptDoneCounter.ckptDoneCount))
+}
+
+func TestCkptMgrPerformCkptWithDelayAndOneTime(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptMgrPerformCkptWithDelayAndOneTime =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrPerformCkptWithDelayAndOneTime =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, ckptDoneCounter, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	var upsertCkptDoneErr error
+
+	targetMCDelayMap[kvKey] = 2
+
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult)
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc)
+
+	assert.Nil(ckptMgr.RegisterComponentEventListener(common.CheckpointDone, ckptDoneCounter))
+
+	assert.Nil(err)
+	assert.NotNil(ckptMgr)
+	ckptMgr.unitTest = true
+	ckptMgr.checkpointAllowedHelper.setCheckpointAllowed()
+	ckptMgr.initConnections()
+
+	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
+	assert.Nil(ckptMgr.Attach(mainPipeline))
+
+	// This test will launch 2 periodic ckpt go-routines but one should fail because it is still ongoing
+	dummyFinCh := make(chan bool, 1)
+	dummyWG := sync.WaitGroup{}
+	dummyWG.Add(1)
+	go ckptMgr.performCkpt(dummyFinCh, &dummyWG)
+
+	time.Sleep(500 * time.Millisecond)
+
+	ckptMgr.PerformCkpt(dummyFinCh)
+	dummyWG.Wait()
+
+	assert.Equal(uint64(2), atomic.LoadUint64(&ckptDoneCounter.ckptDoneCount))
 }
