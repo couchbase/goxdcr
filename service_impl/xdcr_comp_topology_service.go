@@ -433,24 +433,20 @@ func (top_svc *XDCRTopologySvc) MyClusterCompatibility() (int, error) {
 	var defaultPoolsInfo map[string]interface{}
 
 	top_svc.cachedClusterCompatMtx.RLock()
-	defer top_svc.cachedClusterCompatMtx.RUnlock()
-
 	// Timer's existence determines whether or not we're in cool down period
 	if top_svc.cachedClusterCompatTimer != nil {
 		// still within cooldown period - return cached information
+		top_svc.cachedClusterCompatMtx.RUnlock()
 		return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
 	}
 
 	// Upgrade lock
 	top_svc.cachedClusterCompatMtx.RUnlock()
 	top_svc.cachedClusterCompatMtx.Lock()
-	defer func() {
-		defer top_svc.cachedClusterCompatMtx.Unlock()
-		defer top_svc.cachedClusterCompatMtx.RLock()
-	}()
 
 	if top_svc.cachedClusterCompatTimer != nil {
 		// someone sneaked in
+		top_svc.cachedClusterCompatMtx.Unlock()
 		return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
 	}
 	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.MyClusterCompat()", base.DiagInternalThreshold)
@@ -484,12 +480,13 @@ func (top_svc *XDCRTopologySvc) MyClusterCompatibility() (int, error) {
 
 	top_svc.cachedClusterCompatTimer = time.AfterFunc(cooldownPeriod, func() {
 		top_svc.cachedClusterCompatMtx.Lock()
-		defer top_svc.cachedClusterCompatMtx.Unlock()
 		top_svc.cachedClusterCompatTimer = nil
 		top_svc.cachedClusterCompatErr = nil
 		top_svc.cachedClusterCompat = 0
+		top_svc.cachedClusterCompatMtx.Unlock()
 	})
 
+	top_svc.cachedClusterCompatMtx.Unlock()
 	return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
 }
 
