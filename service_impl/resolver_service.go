@@ -6,6 +6,7 @@
 // will be governed by the Apache License, Version 2.0, included in the file
 // licenses/APL2.txt.
 
+//go:build enterprise
 // +build enterprise
 
 package service_impl
@@ -14,11 +15,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	evaluatorApi "github.com/couchbase/eventing-ee/evaluator/api"
 	"net/http"
 	"time"
 
 	"github.com/couchbase/cbauth"
+	evaluatorApi "github.com/couchbase/eventing-ee/evaluator/api"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
@@ -227,20 +228,21 @@ func (rs *ResolverSvc) execute(libraryName string, functionName string, params [
 	defer func() {
 		rs.workerPool <- worker
 	}()
-	if stale := rs.engine.CheckStaleWorker(worker); stale == true {
-		tmpworker, fault := rs.engine.Create(uint64(base.JSWorkerQuota))
-		if fault == nil {
-			go func(oldworker evaluatorApi.Worker) {
-				if disposeFault := rs.engine.Dispose(oldworker); disposeFault != nil {
-					rs.logger.Warnf("Failed to dispose an older workerr. Error: %v", disposeFault.Error())
-				}
-			}(worker)
-			worker = tmpworker
-			tmpworker = nil
-		} else {
-			rs.logger.Warnf("Failed to create a new worker to replace a stale worker. Error: %v", fault.Error())
+	var loctr evaluatorApi.Locator
+	loctr.FromString(libraryName)
+
+	onlyInWorker, onlyInStore, isVersionMismatch := worker.IsStale(loctr)
+	if isVersionMismatch || onlyInWorker {
+		if fault := worker.Unload(loctr); fault != nil {
+			return nil, fault.Error()
 		}
 	}
+	if isVersionMismatch || onlyInStore {
+		if fault := worker.Load(loctr); fault != nil {
+			return nil, fault.Error()
+		}
+	}
+
 	res, fault := worker.Run(nil, libraryName, functionName, options, params...)
 	if fault != nil && fault.Error() != nil {
 		return nil, fmt.Errorf("Javascript Evaluate() returned error: %v", fault.Error())
