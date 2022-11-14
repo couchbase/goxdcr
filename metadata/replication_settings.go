@@ -28,6 +28,7 @@ const (
 	DevCkptMgrForceGCWaitSec          = base.DevCkptMgrForceGCWaitSec
 	DevColManifestSvcDelaySec         = base.DevColManifestSvcDelaySec
 	DevNsServerPortSpecifier          = base.DevNsServerPortSpecifier
+	DevBucketTopologyLegacyDelay      = base.DevBucketTopologyLegacyDelay
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
 	ActiveKey                         = "active"
@@ -118,7 +119,7 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
-	DevNsServerPortSpecifier, FilterSystemScopeKey}
+	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBucketTopologyLegacyDelay}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -206,6 +207,9 @@ var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 
 var FilterSystemScopeConfig = &SettingsConfig{true, nil}
 
+// In seconds
+var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
@@ -214,6 +218,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevCkptMgrForceGCWaitSec:          XDCRDevCkptGcWaitConfig,
 	DevColManifestSvcDelaySec:         XDCRDevColManifestSvcDelayConfig,
 	DevNsServerPortSpecifier:          XDCRDevNsServerPortSpecifierConfig,
+	DevBucketTopologyLegacyDelay:      XDCRDevBucketTopologyLevacyDelayConfig,
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
 	ActiveKey:                         ActiveConfig,

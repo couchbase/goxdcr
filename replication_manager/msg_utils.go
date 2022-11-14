@@ -166,6 +166,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	base.DevCkptMgrForceGCWaitSec:     metadata.DevCkptMgrForceGCWaitSec,
 	base.DevColManifestSvcDelaySec:    metadata.DevColManifestSvcDelaySec,
 	base.DevNsServerPortSpecifier:     metadata.DevNsServerPortSpecifier,
+	base.DevBucketTopologyLegacyDelay: metadata.DevBucketTopologyLegacyDelay,
 	base.Type:                         metadata.ReplicationTypeKey,
 	FilterExpression:                  metadata.FilterExpressionKey,
 	PauseRequested:                    metadata.ActiveKey,
@@ -219,6 +220,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevCkptMgrForceGCWaitSec:          base.DevCkptMgrForceGCWaitSec,
 	metadata.DevColManifestSvcDelaySec:         base.DevColManifestSvcDelaySec,
 	metadata.DevNsServerPortSpecifier:          base.DevNsServerPortSpecifier,
+	metadata.DevBucketTopologyLegacyDelay:      base.DevBucketTopologyLegacyDelay,
 	metadata.ReplicationTypeKey:                base.Type,
 	metadata.FilterExpressionKey:               FilterExpression,
 	metadata.ActiveKey:                         PauseRequested,
@@ -747,7 +749,7 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 	return nil
 }
 
-//Validate source mapping - which means we need to get manifests
+// Validate source mapping - which means we need to get manifests
 func validateSrcNamespacesExist(targetClusterName string, srcBucket string, targetBucketName string, rulesToCheck base.CollectionsMgtType, mappingRules metadata.CollectionsMappingRulesType) error {
 	if targetBucketName == "" || srcBucket == "" || targetClusterName == "" {
 		return fmt.Errorf("One of the following is empty: tgtBucketName: %v srcBucket %v targetClusterName %v",
