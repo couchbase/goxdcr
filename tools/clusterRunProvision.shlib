@@ -70,6 +70,7 @@ declare -A VAGRANT_VERSION_MAP
 # -----------------
 # if not defined, will look for it using locate
 declare CBWORKLOADGEN=""
+declare DATALOAD_CONT_DELAY="10"
 # Key is in the format of "BucketName,ParameterName"
 # Value is in the format of actual value to send
 declare -A BUCKET_NAME_PROPERTIES_MAP
@@ -1361,8 +1362,12 @@ function runDocLoader {
 		return 1
 	fi
 
-	Echo "Executing cbdocloader on bucket $bucketName for file $fileName..."
-	$docLoader -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucketName -m $ramQuota -d $fileName
+	local retCode=1
+	while (($retCode > 0)); do
+		Echo "Executing cbdocloader on bucket $bucketName for file $fileName..."
+		$docLoader -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucketName -m $ramQuota -d $fileName
+		retCode=$?
+	done
 }
 
 function findCbWorkloadGen {
@@ -1956,7 +1961,13 @@ function setInternalSettings {
 		curlMultiArr+=("$kv")
 	done
 
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH ${curlMultiArr[@]} >/dev/null 2>&1
+	local i=0
+	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH ${curlMultiArr[@]} >/dev/null 2>&1
+		if (($? == 0)); then
+			break
+		fi
+	done
 }
 
 # Gets one setting
@@ -1974,7 +1985,7 @@ function getInternalSetting {
 	local output
 	while (($result != 0)); do
 		output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$INTERNAL_SETTINGS_REST_PATH | jq ".$settingKey")
-		if (($? == 0)); then
+		if (($? == 0)) && [[ ! -z "${output:-}" ]]; then
 			result=0
 			echo "$output"
 		fi

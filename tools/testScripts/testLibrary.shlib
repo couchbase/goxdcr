@@ -60,6 +60,7 @@ function checkItemCnt {
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+	read -p "NEIL DEBUG"
 	dumpDebugInfoBeforeExit
 	exit 1
 }
@@ -139,19 +140,26 @@ function waitForChangesLeft0 {
 	local srcBucket=$2
 	local targetCluster=$3
 	local targetBucket=$4
+	local changesLeft
 	local i
 
-	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+	for ((i = 0; $i < 5; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if (($? != 0)); then
 			echo "Failed to get changes_left"
 			dumpDebugInfoBeforeExit
 			exit 1
 		fi
-		if (($changesLeft > 0)); then
-			echo "Changes left $changesLeft is not 0 yet..."
+		if [[ ! -z "${changesLeft:-}" ]]; then
+			if [[ "$changesLeft" == "null" ]]; then
+				continue
+			elif (($changesLeft > 0)); then
+				echo "Changes left $changesLeft is not 0 yet..."
+			else
+				break
+			fi
 		else
-			break
+			echo "Unable to get changes left, got a null value"
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10

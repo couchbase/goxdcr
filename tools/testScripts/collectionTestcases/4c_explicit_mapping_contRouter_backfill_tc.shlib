@@ -53,8 +53,11 @@ function runDataLoad {
 function runDataLoadContinuous {
 	local scopeName="$1"
 	local collectionName="$2"
+	local totalJobs="$3" # the more jobs, the more sleep to give system a break
 	while ((1)); do
-		runCbWorkloadGenCollectionCont "C1" "B1" "$scopeName" "$collectionName" >/dev/null 2>&1
+		#runCbWorkloadGenCollectionCont "C1" "B1" "$scopeName" "$collectionName" >/dev/null 2>&1
+		runCbWorkloadGenCollection "C1" "B1" "$scopeName" "$collectionName" >/dev/null 2>&1
+		sleep $(($DATALOAD_CONT_DELAY * $totalJobs * 60))
 	done
 }
 
@@ -62,6 +65,9 @@ declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
+}
+
+function killIO {
 	if [[ ! -z "$BG_PIDS" ]]; then
 		for pid in $(echo "${BG_PIDS[@]}"); do
 			kill $pid
@@ -117,11 +123,12 @@ function runTestCase {
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
 
-	runDataLoadContinuous "S1" "col1" &
+	local totalJobs=3
+	runDataLoadContinuous "S1" "col1" $totalJobs &
 	BG_PIDS[0]=$!
-	runDataLoadContinuous "S1" "col2" &
+	runDataLoadContinuous "S1" "col2" $totalJobs &
 	BG_PIDS[${#BG_PIDS[@]}]=$!
-	runDataLoadContinuous "S1" "col3" &
+	runDataLoadContinuous "S1" "col3" $totalJobs &
 	BG_PIDS[${#BG_PIDS[@]}]=$!
 
 	echo "Waiting 5 seconds before checking item count first pass"
@@ -142,6 +149,10 @@ function runTestCase {
 
 	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	killIO
+	echo "After killing IO, waiting for backfill to complete"
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 
 	# Due to collections router being able to catch xmem race conditions, there may be multiple backfill requests
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 3))
