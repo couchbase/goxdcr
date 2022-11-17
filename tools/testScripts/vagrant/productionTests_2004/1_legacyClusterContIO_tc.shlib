@@ -40,7 +40,6 @@ declare -A DelayedBucketReplProperties=(["replicationType"]="continuous" ["check
 # Test cases assume vagrant up has already been called
 
 function runDataLoad {
-<<<<<<< HEAD
 	vagrantRunCBWorkloadGenBucketCont "C1" "B0"
 	vagrantRunCBWorkloadGenBucketCont "C1" "B1"
 	vagrantRunCBWorkloadGenBucketCont "C1" "B2"
@@ -50,16 +49,6 @@ function runDataLoad {
 
 function runTestCase {
 	local maxRuns=30
-=======
-	runCbWorkloadGenBucket "C1" "B0"
-	runCbWorkloadGenBucket "C1" "B1"
-	runCbWorkloadGenBucket "C1" "B2"
-	runCbWorkloadGenBucket "C1" "B3"
-	runCbWorkloadGenBucket "C1" "B4"
-}
-
-function runTestCase {
->>>>>>> 600704e9 (MB-54473: vagrant test case)
 	echo "============================================================================"
 	echo "Running legacy replication with injection delays"
 	echo "============================================================================"
@@ -100,35 +89,19 @@ function runTestCase {
 
 	local loopCounter=0
 
-<<<<<<< HEAD
 	runDataLoad
 	while ((1)); do
-=======
-
-	while ((1)); do
-	  runDataLoad
-		waitForChangesLeft0 "C1" "B0" "C2" "B0"
-		waitForChangesLeft0 "C1" "B1" "C2" "B1"
-		waitForChangesLeft0 "C1" "B2" "C2" "B2"
-		waitForChangesLeft0 "C1" "B3" "C2" "B3"
-		waitForChangesLeft0 "C1" "B4" "C2" "B4"
->>>>>>> 600704e9 (MB-54473: vagrant test case)
 		vagrantGrepForPanicAll
 		echo "============================================================================"
 		echo "PASSED $loopCounter"
 		echo "============================================================================"
 		loopCounter=$(($loopCounter + 1))
-<<<<<<< HEAD
 		if (($loopCounter == $maxRuns)); then
 			break
 		fi
 	done
 
 	vagrantKillAllIO "C1"
-=======
-	done
-
->>>>>>> 600704e9 (MB-54473: vagrant test case)
 	cleanupBucketReplications
 	cleanupBuckets
 }
