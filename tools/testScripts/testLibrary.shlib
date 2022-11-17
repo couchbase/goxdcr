@@ -150,16 +150,20 @@ function waitForChangesLeft0 {
 			dumpDebugInfoBeforeExit
 			exit 1
 		fi
-		if [[ ! -z "${changesLeft:-}" ]]; then
-			if [[ "$changesLeft" == "null" ]]; then
-				continue
-			elif (($changesLeft > 0)); then
-				echo "Changes left $changesLeft is not 0 yet..."
-			else
-				break
-			fi
+		if [[ -z "${changesLeft:-}" ]]; then
+			echo "Changes left is empty. Trying again..."
+			sleep 10
+			continue
+		elif [[ "$changesLeft" == "null" ]]; then
+			echo "Changes left is null. Trying again..."
+			sleep 10
+			continue
+		elif (($changesLeft > 0)); then
+			echo "Changes left $changesLeft is not 0 yet..."
+		elif (($changesLeft == 0 ));then
+		  break
 		else
-			echo "Unable to get changes left, got a null value"
+		  echo "Changes left unknown value: $changesLeft"
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10

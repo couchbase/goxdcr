@@ -20,8 +20,8 @@ VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.1" ["C1P"]="192.168.56.2" ["C2"]="192.168.
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
-cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -29,25 +29,35 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DelayedBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevBucketTopologyLegacyDelay"]=3)
 
-# This MP specific link
+#BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
+#SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
 
 # Test cases assume vagrant up has already been called
 
 function runDataLoad {
+	runCbWorkloadGenBucket "C1" "B0"
 	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C1" "B2"
+	runCbWorkloadGenBucket "C1" "B3"
+	runCbWorkloadGenBucket "C1" "B4"
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running 6.6.5 to 6.6.5-MP upgrade test case"
+	echo "Running legacy replication with injection delays"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServerAll "6.6.5"
+	vagrantInstallCBServer 0 "toy" # To be updated
+	vagrantInstallCBServer 1 "toy"
+	vagrantInstallCBServer 2 "6.6.5"
+	vagrantInstallCBServer 3 "6.6.5"
 
 	setupTopologies
 
@@ -63,11 +73,6 @@ function runTestCase {
 	createRemoteClusterReference "C2" "C1"
 	sleep 1
 
-	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
-	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
-
-	runDataLoad
-
 	addNodesIn
 	sleep 5
 	echo "Rebalancing nodes to become a 2-node source cluster"
@@ -75,51 +80,29 @@ function runTestCase {
 	echo "Rebalancing nodes to become a 2-node target cluster"
 	startRebalancing "C2"
 
-	exportProvisionedConfig
-	sleep 10
-	checkBidirectionalChangesLeft
+	createBucketReplication "C1" "B0" "C2" "B0" DelayedBucketReplProperties
+	createBucketReplication "C1" "B1" "C2" "B1" DelayedBucketReplProperties
+	createBucketReplication "C1" "B2" "C2" "B2" DelayedBucketReplProperties
+	createBucketReplication "C1" "B3" "C2" "B3" DelayedBucketReplProperties
+	createBucketReplication "C1" "B4" "C2" "B4" DelayedBucketReplProperties
 
-	# Upgrade source nodes
-	vagrantRebalanceAndUpgrade "C1" "0" "C1P" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
-	vagrantGrepForPanic "0"
-	sleep 40
+	local loopCounter=0
 
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 5
-	checkBidirectionalChangesLeft
 
-	vagrantRebalanceAndUpgrade "C1P" "1" "C1" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
-	vagrantGrepForPanic "1"
+	while ((1)); do
+	  runDataLoad
+		waitForChangesLeft0 "C1" "B0" "C2" "B0"
+		waitForChangesLeft0 "C1" "B1" "C2" "B1"
+		waitForChangesLeft0 "C1" "B2" "C2" "B2"
+		waitForChangesLeft0 "C1" "B3" "C2" "B3"
+		waitForChangesLeft0 "C1" "B4" "C2" "B4"
+		vagrantGrepForPanicAll
+		echo "============================================================================"
+		echo "PASSED $loopCounter"
+		echo "============================================================================"
+		loopCounter=$(($loopCounter + 1))
+	done
 
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 5
-	checkBidirectionalChangesLeft
-
-	# Upgrade target nodes
-	vagrantRebalanceAndUpgrade "C2" "2" "C2P" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
-	vagrantGrepForPanic "2"
-
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 5
-	checkBidirectionalChangesLeft
-
-	vagrantRebalanceAndUpgrade "C2P" "3" "C2" "toy"
-	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
-	vagrantGrepForPanic "3"
-
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 5
-	checkBidirectionalChangesLeft
-	vagrantGrepForPanicAll
-
-	echo "============================================================================"
-	echo "PASSED"
-	echo "============================================================================"
-
+	cleanupBucketReplications
+	cleanupBuckets
 }
