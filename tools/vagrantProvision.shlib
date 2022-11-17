@@ -29,11 +29,17 @@ fi
 
 # Shortcuts for executing commands on a node... currently 4 nodes
 declare -a VSSH
+declare -a VSSH_NOHUP
 
 VSSH[0]="vagrant ssh node1 -c "
 VSSH[1]="vagrant ssh node2 -c "
 VSSH[2]="vagrant ssh node3 -c "
 VSSH[3]="vagrant ssh node4 -c "
+
+VSSH_NOHUP[0]="vagrant ssh node1 -- "
+VSSH_NOHUP[1]="vagrant ssh node2 -- "
+VSSH_NOHUP[2]="vagrant ssh node3 -- "
+VSSH_NOHUP[3]="vagrant ssh node4 -- "
 
 # vscp from local to a node
 function vscp {
@@ -49,7 +55,7 @@ declare -A CBServerLink=(
 	["7.0.4"]="http://latestbuilds.service.couchbase.com/builds/releases/7.0.4/couchbase-server-enterprise_7.0.4-ubuntu20.04_amd64.deb"
 	["6.6.3"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.3/couchbase-server-enterprise_6.6.3-ubuntu18.04_amd64.deb"
 	["6.6.5"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.5/couchbase-server-enterprise_6.6.5-ubuntu18.04_amd64.deb"
-	["toy"]="http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/15929/couchbase-server-enterprise_7.5.0-15929-ubuntu20.04_amd64.deb" # to be filled out
+	["toy"]="http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
 function vagrantUp {
@@ -270,6 +276,38 @@ function vagrantRunCBWorkloadGenBucket {
 
 	echo "Running cbworkloadGen on $clusterName bucket $bucketName"
 	cmd="${VSSH[$idx]} \"$workloadGenLoc -i $numItems -j -r 1 -n 127.0.0.1:8091 -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRunCBWorkloadGenBucketCont {
+	local clusterName=$1
+	local bucketName=$2
+	local numItems=${3:-10000}
+	local prefix="${4:-xdcrProv_$clusterName}"
+	local idx="$(getClusterIdx "$clusterName")"
+	local workloadGenLoc="/opt/couchbase/bin/cbworkloadgen"
+	local cmd
+
+	echo "Running continouous cbworkloadGen on $clusterName bucket $bucketName"
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$($workloadGenLoc -i $numItems -j -r 1 -n 127.0.0.1:8091 -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -l)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+}
+
+function vagrantKillAllIO {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	echo "Killing all cbworkloadGen instances on $clusterName"
+	#hacky - kill all nohups first
+	cmd="${VSSH[$idx]} 'killall -9 bash'"
+	echo "==== Running $cmd ===="
+	eval $cmd
+
+	# kill cbworkloadgen based on python3
+	cmd="${VSSH[$idx]} 'killall -9 python3'"
 	echo "==== Running $cmd ===="
 	eval $cmd
 }
