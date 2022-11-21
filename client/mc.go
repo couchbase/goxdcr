@@ -165,6 +165,7 @@ const (
 	FeatureXerror            = Feature(0x07)
 	FeatureSnappyCompression = Feature(0x0a)
 	FeatureDataType          = Feature(0x0b)
+	FeatureTracing           = Feature(0x0f)
 	FeatureSyncReplication   = Feature(0x11)
 	FeatureCollections       = Feature(0x12)
 	FeatureOpenTracing       = Feature(0x13)
