@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -u
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100 ["flushEnabled"]=1)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active" ["flushEnabled"]=1)
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+function runDataLoad {
+	runCbWorkloadGenBucket "C1" "B1"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running XdcrDiffer mutation differ retries test case"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+
+	runDataLoad
+	writeJSONDocument "C1" "B1" "regDoc" '{"foo":"bar"}'
+
+	local expectedItemCnt=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS + 1))
+
+	checkItemCnt "C1" "B1" $expectedItemCnt
+	checkItemCnt "C2" "B2" $expectedItemCnt
+
+	pauseReplication "C1" "B1" "C2" "B2"
+	pauseReplication "C2" "B2" "C1" "B1"
+	sleep 20
+
+	writeJSONDocument "C1" "B1" "regDoc" '{"foo":"bar2"}'
+
+	local retVal
+	runXdcrDiffer "C1" "B1" "C2" "B2" "retry"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	# Expect one mismatch
+	validateDifferResults 1 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	# Now to test the differ, launch it in the background - resolve it halfway through
+	runXdcrDiffer "C1" "B1" "C2" "B2" "retry" &
+
+	sleep 80
+	resumeReplication "C1" "B1" "C2" "B2"
+	resumeReplication "C2" "B2" "C1" "B1"
+	waitForBgJobs
+
+	# should not have any diff
+	validateDifferResults 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	killAllBgJobs
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

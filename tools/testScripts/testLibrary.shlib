@@ -549,22 +549,42 @@ function killAllBgJobs {
 	jobs -l | awk '{print $2}' | xargs kill
 }
 
+function xdcrDifferParseOpts {
+	local optsIn=$1
+
+	if [[ "$optsIn" == "compareBody" ]]; then
+		echo "-c"
+	fi
+
+	if [[ "$optsIn" == "retry" ]]; then
+		echo "-e 2"
+	fi
+}
+
 function runXdcrDiffer {
 	local srcCluster=$1
 	local srcPort=${CLUSTER_NAME_PORT_MAP[$srcCluster]:-}
 	local srcBucket=$2
 	local tgtCluster=$3
 	local tgtBucket=$4
-	local compareBody=${5:-}
+	local extraOpts1=${5:-}
+	local extraOpts2=${6:-}
+	local opts1Flag=""
+	local opts2Flag=""
+
+	local compareBody
+
+	if [[ ! -z "${extraOpts1:-}" ]]; then
+		opts1Flag="$(xdcrDifferParseOpts "$extraOpts1")"
+	fi
+	if [[ ! -z "${extraOpts2:-}" ]]; then
+		opts2Flag="$(xdcrDifferParseOpts "$extraOpts2")"
+	fi
 
 	pushd $(pwd)
 
 	cd $xdcrDifferDir
-	if [ "$compareBody" = "compareBody" ]; then
-		$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c -b
-	else
-		$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c
-	fi
+	$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket $opts1Flag $opts2Flag
 	retVal=$?
 
 	popd
