@@ -584,7 +584,7 @@ function runXdcrDiffer {
 	pushd $(pwd)
 
 	cd $xdcrDifferDir
-	$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket $opts1Flag $opts2Flag
+	$differSh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h "127.0.0.1:$srcPort" -r $tgtCluster -s $srcBucket -t $tgtBucket -c $opts1Flag $opts2Flag
 	retVal=$?
 
 	popd
