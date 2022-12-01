@@ -553,7 +553,7 @@ function xdcrDifferParseOpts {
 	local optsIn=$1
 
 	if [[ "$optsIn" == "compareBody" ]]; then
-		echo "-c"
+		echo "-b"
 	fi
 
 	if [[ "$optsIn" == "retry" ]]; then
