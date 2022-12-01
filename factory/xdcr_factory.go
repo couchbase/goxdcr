@@ -65,7 +65,6 @@ type XDCRFactory struct {
 	checkpoint_svc           service_def.CheckpointsService
 	capi_svc                 service_def.CAPIService
 	uilog_svc                service_def.UILogSvc
-	bucket_settings_svc      service_def.BucketSettingsSvc
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc
 	collectionsManifestSvc   service_def.CollectionsManifestSvc
 	backfillReplSvc          service_def.BackfillReplSvc
@@ -92,7 +91,7 @@ type BackfillMgrGetter func() service_def.BackfillMgrIface
 func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster_svc service_def.RemoteClusterSvc,
 	xdcr_topology_svc service_def.XDCRCompTopologySvc,
 	checkpoint_svc service_def.CheckpointsService, capi_svc service_def.CAPIService, uilog_svc service_def.UILogSvc,
-	bucket_settings_svc service_def.BucketSettingsSvc, throughput_throttler_svc service_def.ThroughputThrottlerSvc,
+	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	pipeline_default_logger_ctx *log.LoggerContext, factory_logger_ctx *log.LoggerContext,
 	pipeline_failure_handler common.SupervisorFailureHandler, utilsIn utilities.UtilsIface,
 	resolver_svc service_def.ResolverSvcIface, collectionsManifestSvc service_def.CollectionsManifestSvc,
@@ -105,7 +104,6 @@ func NewXDCRFactory(repl_spec_svc service_def.ReplicationSpecSvc, remote_cluster
 		checkpoint_svc:           checkpoint_svc,
 		capi_svc:                 capi_svc,
 		uilog_svc:                uilog_svc,
-		bucket_settings_svc:      bucket_settings_svc,
 		throughput_throttler_svc: throughput_throttler_svc,
 		default_logger_ctx:       pipeline_default_logger_ctx,
 		pipeline_failure_handler: pipeline_failure_handler,

@@ -38,13 +38,15 @@ import (
 )
 
 var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath}
-var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
+var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
-/************************************
+/*
+***********************************
 /* struct Adminport
-*************************************/
+************************************
+*/
 type Adminport struct {
 	sourceKVHost string
 	xdcrRestPort uint16
@@ -223,10 +225,6 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doStartBlockProfile(request)
 	case BlockProfileStopPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doStopBlockProfile(request)
-	case BucketSettingsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodGet:
-		response, err = adminport.doGetBucketSettingsRequest(request)
-	case BucketSettingsPrefix + DynamicSuffix + base.UrlDelimiter + base.MethodPost:
-		response, err = adminport.doBucketSettingsChangeRequest(request)
 	case XDCRInternalSettingsPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doViewXDCRInternalSettingsRequest(request)
 	case XDCRInternalSettingsPath + base.UrlDelimiter + base.MethodPost:
@@ -1243,60 +1241,6 @@ func (adminport *Adminport) doStopBlockProfile(request *http.Request) (*ap.Respo
 	runtime.SetBlockProfileRate(-1)
 	logger_ap.Info("doStopBlockProfile")
 	return NewEmptyArrayResponse()
-}
-
-func (adminport *Adminport) doGetBucketSettingsRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doGetBucketSettingsRequest\n")
-	defer logger_ap.Infof("doGetBucketSettingsRequest completed\n")
-
-	bucketName, err := DecodeDynamicParamInURL(request, BucketSettingsPrefix, BucketName)
-	if err != nil {
-		return EncodeReplicationValidationErrorIntoResponse(err)
-	}
-
-	logger_ap.Infof("Request params: bucketName=%v\n", bucketName)
-
-	bucketSettingsMap, err := getBucketSettings(bucketName)
-	if err != nil {
-		// if bucket does not exist, it is a validation error and not an internal error
-		if err == adminport.utils.GetNonExistentBucketError() {
-			err = fmt.Errorf("Bucket %v does not exist", bucketName)
-			return EncodeReplicationValidationErrorIntoResponse(err)
-		}
-		return nil, err
-	}
-
-	return EncodeObjectIntoResponse(bucketSettingsMap)
-}
-
-func (adminport *Adminport) doBucketSettingsChangeRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doBucketSettingsChangeRequest\n")
-	defer logger_ap.Infof("doBucketSettingsChangeRequest completed\n")
-
-	bucketName, err := DecodeDynamicParamInURL(request, BucketSettingsPrefix, BucketName)
-	if err != nil {
-		return EncodeReplicationValidationErrorIntoResponse(err)
-	}
-
-	lwwEnabled, err := DecodeBucketSettingsChangeRequest(request)
-	if err != nil {
-		return EncodeErrorMessageIntoResponse(err, http.StatusBadRequest)
-	}
-
-	logger_ap.Infof("Request params: bucketName=%v, lwwEnabled=%v\n",
-		bucketName, lwwEnabled)
-
-	bucketSettingsMap, err := setBucketSettings(bucketName, lwwEnabled, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request))
-	if err != nil {
-		if err == adminport.utils.GetNonExistentBucketError() {
-			// if bucket does not exist, it is a validation error and not an internal error
-			err = fmt.Errorf("Bucket %v does not exist", bucketName)
-			return EncodeReplicationValidationErrorIntoResponse(err)
-		}
-		return nil, err
-	}
-
-	return EncodeObjectIntoResponse(bucketSettingsMap)
 }
 
 func (adminport *Adminport) doViewXDCRInternalSettingsRequest(request *http.Request) (*ap.Response, error) {

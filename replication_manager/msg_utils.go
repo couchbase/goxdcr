@@ -42,7 +42,6 @@ const (
 	MemStatsPath                = "stats/mem"
 	BlockProfileStartPath       = "profile/block/start"
 	BlockProfileStopPath        = "profile/block/stop"
-	BucketSettingsPrefix        = "controller/bucketSettings"
 	XDCRInternalSettingsPath    = base.XDCRPrefix + "/internalSettings"
 	XDCRPrometheusStatsPath     = "_prometheusMetrics"
 	XDCRPrometheusStatsHighPath = "_prometheusMetricsHigh"
@@ -120,12 +119,6 @@ const (
 	// Output
 	MatchResult = "result"
 	MatchError  = "error"
-)
-
-// constants used for parsing bucket setting changes
-const (
-	BucketName = "bucketName"
-	LWWEnabled = "lwwEnabled"
 )
 
 // constants for stats names
@@ -1365,33 +1358,4 @@ func getDemandEncryptionFromValArr(valArr []string) bool {
 		// any other value, e.g., "", 1, "on", "true", "false", etc., indicates that encryption is enabled
 		return true
 	}
-}
-
-func DecodeBucketSettingsChangeRequest(request *http.Request) (bool, error) {
-	var lwwEnabled bool
-	var err error
-
-	if err = request.ParseForm(); err != nil {
-		return false, err
-	}
-
-	lwwEnabledFound := false
-
-	for key, valArr := range request.Form {
-		switch key {
-		case LWWEnabled:
-			lwwEnabled, err = getBoolFromValArr(valArr, false)
-			if err != nil {
-				return false, err
-			}
-			lwwEnabledFound = true
-		default:
-			// ignore other parameters
-		}
-	}
-
-	if !lwwEnabledFound {
-		return false, base.MissingParameterError(LWWEnabled)
-	}
-	return lwwEnabled, nil
 }

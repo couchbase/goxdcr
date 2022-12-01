@@ -169,7 +169,6 @@ func main() {
 	}
 
 	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(metakv_svc, nil)
-	bucketSettings_svc := metadata_svc.NewBucketSettingsService(metakv_svc, top_svc, nil, utils)
 
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
@@ -267,7 +266,6 @@ func main() {
 			uilog_svc,
 			eventlog_svc,
 			processSetting_svc,
-			bucketSettings_svc,
 			internalSettings_svc,
 			service_impl.NewThroughputThrottlerSvc(nil),
 			resolver_svc,

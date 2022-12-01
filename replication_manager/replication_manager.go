@@ -97,8 +97,6 @@ type replicationManager struct {
 	eventlog_svc service_def.EventLogSvc
 	//global setting service
 	global_setting_svc service_def.GlobalSettingsSvc
-	//bucket settings service
-	bucket_settings_svc service_def.BucketSettingsSvc
 	//internal settings service
 	internal_settings_svc service_def.InternalSettingsSvc
 	// Mockable utils object
@@ -149,7 +147,6 @@ func StartReplicationManager(sourceKVHost string,
 	uilog_svc service_def.UILogSvc,
 	eventlog_svc service_def.EventLogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
-	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	resolver_svc service_def.ResolverSvcIface,
@@ -176,7 +173,7 @@ func StartReplicationManager(sourceKVHost string,
 		// initializes replication manager
 		replication_mgr.init(repl_spec_svc, remote_cluster_svc,
 			xdcr_topology_svc, replication_settings_svc, checkpoint_svc, capi_svc,
-			audit_svc, uilog_svc, eventlog_svc, global_setting_svc, bucket_settings_svc, internal_settings_svc,
+			audit_svc, uilog_svc, eventlog_svc, global_setting_svc, internal_settings_svc,
 			throughput_throttler_svc, resolver_svc, collectionsManifestSvc, backfillReplSvc, bucketTopologySvc,
 			securitySvc, p2pMgr)
 
@@ -463,7 +460,6 @@ func (rm *replicationManager) init(
 	uilog_svc service_def.UILogSvc,
 	eventlog_svc service_def.EventLogSvc,
 	global_setting_svc service_def.GlobalSettingsSvc,
-	bucket_settings_svc service_def.BucketSettingsSvc,
 	internal_settings_svc service_def.InternalSettingsSvc,
 	throughput_throttler_svc service_def.ThroughputThrottlerSvc,
 	resolverSvc service_def.ResolverSvcIface,
@@ -485,7 +481,6 @@ func (rm *replicationManager) init(
 	rm.adminport_finch = make(chan bool, 1)
 	rm.children_waitgrp = &sync.WaitGroup{}
 	rm.global_setting_svc = global_setting_svc
-	rm.bucket_settings_svc = bucket_settings_svc
 	rm.internal_settings_svc = internal_settings_svc
 	rm.collectionsManifestSvc = collectionsManifestSvc
 	rm.backfillReplSvc = backfillReplSvc
@@ -493,7 +488,7 @@ func (rm *replicationManager) init(
 	rm.p2pMgr = p2pMgr
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc,
-		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc, bucket_settings_svc,
+		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc,
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
 		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc,
 		rm.bucketTopologySvc, rm.p2pMgr, rm.getReplStatus)
@@ -543,10 +538,6 @@ func EventlogService() service_def.EventLogSvc {
 
 func GlobalSettingsService() service_def.GlobalSettingsSvc {
 	return replication_mgr.global_setting_svc
-}
-
-func BucketSettingsService() service_def.BucketSettingsSvc {
-	return replication_mgr.bucket_settings_svc
 }
 
 func InternalSettingsService() service_def.InternalSettingsSvc {
@@ -1237,12 +1228,6 @@ func writeUpdateReplicationSettingsEvent(spec *metadata.ReplicationSpecification
 	logAuditErrors(err)
 }
 
-func writeUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *service_def.RealUserId, localRemoteIPs *service_def.LocalRemoteIPs) {
-	updateBucketSettingsEvent := constructUpdateBucketSettingsEvent(bucketName, lwwEnabled, realUserId, localRemoteIPs)
-	err := AuditService().Write(service_def.UpdateBucketSettingsEventId, updateBucketSettingsEvent)
-	logAuditErrors(err)
-}
-
 func constructGenericReplicationFields(realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (*service_def.GenericReplicationFields, error) {
 	localClusterName, err := XDCRCompTopologyService().MyHostAddr()
 	if err != nil {
@@ -1306,19 +1291,6 @@ func constructUpdateDefaultReplicationSettingsEvent(changedSettingsMap *metadata
 		UpdatedSettings:          convertedSettingsMap}, nil
 }
 
-func constructUpdateBucketSettingsEvent(bucketName string, lwwEnabled bool, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) *service_def.UpdateBucketSettingsEvent {
-	logger_rm.Info("Start constructUpdateBucketSettingsEvent....")
-
-	settingsMap := make(map[string]interface{})
-	settingsMap[LWWEnabled] = lwwEnabled
-	logger_rm.Info("Done constructUpdateBucketSettingsEvent....")
-
-	return &service_def.UpdateBucketSettingsEvent{
-		GenericFields:   service_def.GenericFields{Timestamp: log.FormatTimeWithMilliSecondPrecision(time.Now()), RealUserid: *realUserId, LocalRemoteIPs: *ips},
-		UpdatedSettings: settingsMap}
-
-}
-
 func logAuditErrors(err error) {
 	if err != nil {
 		err = replication_mgr.utils.NewEnhancedError(service_def.ErrorWritingAudit, err)
@@ -1340,27 +1312,6 @@ func GoMaxProcs_env() int {
 	logger_rm.Infof("GOMAXPROCS=%v\n", max_procs)
 	return max_procs
 
-}
-
-func getBucketSettings(bucketName string) (map[string]interface{}, error) {
-	bucketSettings, err := BucketSettingsService().BucketSettings(bucketName)
-	if err != nil {
-		return nil, err
-	}
-	return bucketSettings.ToMap(), nil
-}
-
-func setBucketSettings(bucketName string, lwwEnabled bool, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs) (map[string]interface{}, error) {
-	bucketSettings := &metadata.BucketSettings{BucketName: bucketName, LWWEnabled: lwwEnabled}
-	err := BucketSettingsService().SetBucketSettings(bucketName, bucketSettings)
-	if err != nil {
-		return nil, err
-	}
-
-	writeUpdateBucketSettingsEvent(bucketName, lwwEnabled, realUserId, ips)
-
-	// return new settings after set op
-	return getBucketSettings(bucketName)
 }
 
 // when cluster is upgrade to 5.0, existing remote cluster refs do not have encryptionType field populated
