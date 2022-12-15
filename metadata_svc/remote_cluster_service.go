@@ -274,7 +274,10 @@ func (agent *RemoteClusterAgent) cleanupRefreshContext(rctx *refreshContext, res
 
 	for _, ch := range agent.refreshResult {
 		ch <- result
+		close(ch)
 	}
+
+	agent.refreshResult = agent.refreshResult[:0]
 	agent.refreshActive = 0
 	agent.refreshRPCState = refreshRPCNotInit
 	agent.refreshMtx.Unlock()
