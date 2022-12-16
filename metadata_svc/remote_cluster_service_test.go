@@ -197,6 +197,7 @@ func setupUtilsMockSpecific(utilitiesMock *utilsMock.UtilsIface, simulatedNetwor
 	utilitiesMock.On("GetClusterInfoWStatusCode", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Run(func(args mock.Arguments) { time.Sleep(simulatedNetworkDelay) }).Return(clusterInfo, nil, http.StatusOK)
+	utilitiesMock.On("GetNodeListFromInfoMap", mock.Anything, mock.Anything).Return(nil, nil)
 }
 
 func setupUtilsSSL(utilitiesMock *utilsMock.UtilsIface) {
@@ -1594,4 +1595,47 @@ func TestAddressPreferenceChange(t *testing.T) {
 	assert.Equal(0, len(refList2))
 
 	fmt.Println("============== Test case end: TestAddressPreferenceChange =================")
+}
+
+func TestPositiveRefreshMultiples(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestPositiveRefreshMultiples =================")
+	uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		utilitiesMock, remoteClusterSvc := setupBoilerPlateRCS()
+
+	idAndName := "test"
+	ref := createRemoteClusterReference(idAndName)
+
+	utilsMockFunc := func() { setupUtilsMockGeneric(utilitiesMock, 0 /*networkDelay*/) }
+
+	setupMocksRCS(uiLogSvcMock, metadataSvcMock, xdcrTopologyMock, clusterInfoSvcMock,
+		remoteClusterSvc, ref, utilsMockFunc)
+
+	// First set the callback before creating agents
+	remoteClusterSvc.SetMetadataChangeHandlerCallback(testCallbackIncrementCount)
+
+	assert.Equal(0, remoteClusterSvc.getNumberOfAgents())
+	assert.Nil(remoteClusterSvc.AddRemoteCluster(ref, true))
+	assert.Equal(1, callBackCount)
+
+	agent, _, _ := remoteClusterSvc.getOrStartNewAgent(ref, false, false)
+	agent.Refresh()
+	assert.Equal(1, callBackCount) // refresh positive does not call callback
+	assert.Equal(hostname, agent.reference.HostName())
+	assert.True(refreshCheckActiveHostNameHelper(agent, dummyHostNameList))
+
+	fmt.Println("Executing multiple parallel refreshes for 10 times. If it is stuck here, something is wrong...")
+	for i := 0; i < 10; i++ {
+		var spawnWaitGrp sync.WaitGroup
+		spawnWaitGrp.Add(3)
+		for j := 0; j < 3; j++ {
+			go func() {
+				defer spawnWaitGrp.Done()
+				agent.Refresh()
+			}()
+		}
+		spawnWaitGrp.Wait()
+	}
+
+	fmt.Println("============== Test case end: TestPositiveRefreshMultiples =================")
 }
