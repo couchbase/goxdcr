@@ -808,3 +808,23 @@ func TestTransactionMB36043(t *testing.T) {
 	needToReplicate, _, _, _, _, _, _ = legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
 	assert.False(needToReplicate)
 }
+
+func TestTransactionXattrAndKeyOnlyFiltering(t *testing.T) {
+	fmt.Println("============== Test case start: TestTransactionXattrAndKeyOnlyFiltering =================")
+	assert := assert.New(t)
+
+	uprFile := "./testInternalData/uprTransXattrNotCompress.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(uprFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	var testExpression string = fmt.Sprintf("META().id = \"%v\"", "test1")
+	filter, err := NewFilter(filterId, testExpression, realUtil, false)
+	assert.Nil(err)
+
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+
+	fmt.Println("============== Test case end: TestTransactionXattrAndKeyOnlyFiltering =================")
+}
