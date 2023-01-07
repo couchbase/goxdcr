@@ -87,7 +87,7 @@ func (f *FilterUtilsImpl) ProcessUprEventForFiltering(uprEvent *memcached.UprEve
 		var failedCnt int64
 		if !needToProcessBody {
 			// Only thing passing to filter is the document key
-			body, failedCnt = processKeyOnlyForFiltering(uprEvent.Key, dp, slicesToBeReleased)
+			body, failedCnt, endBodyPos = processKeyOnlyForFiltering(uprEvent.Key, dp, slicesToBeReleased)
 			if failedCnt > 0 {
 				totalFailedCnt += failedCnt
 			}
@@ -209,7 +209,7 @@ func addKeyToBeFilteredWithoutDP(currentValue, key []byte) ([]byte, error, int) 
 	return dataSlice, err, lastBracketPos
 }
 
-func processKeyOnlyForFiltering(key []byte, dp base.DataPool, slicesToBeReleased *[][]byte) ([]byte, int64) {
+func processKeyOnlyForFiltering(key []byte, dp base.DataPool, slicesToBeReleased *[][]byte) ([]byte, int64, int) {
 	var body []byte
 	var err error
 	keyLen := len(key)
@@ -218,14 +218,14 @@ func processKeyOnlyForFiltering(key []byte, dp base.DataPool, slicesToBeReleased
 	if err != nil {
 		// If there is any problem using datapool, just use json.RawMessage directly to allocate new byte slice
 		body = json.RawMessage(fmt.Sprintf("{\"%v\":\"%v\"}", base.ReservedWordsMap[base.ExternalKeyKey], string(key)))
-		return body, int64(len(body))
+		return body, int64(len(body)), len(body) - 1
 	} else {
 		*slicesToBeReleased = append(*slicesToBeReleased, body)
 	}
 	var bodyPos int
 	body, bodyPos = base.WriteJsonRawMsg(body, base.CachedInternalKeyKeyByteSlice, bodyPos, base.WriteJsonKey, base.CachedInternalKeyKeyByteSize, bodyPos == 0)
 	body, bodyPos = base.WriteJsonRawMsg(body, key, bodyPos, base.WriteJsonValue /*uprEvent key as value*/, keyLen, false /*firstKey*/)
-	return body, 0
+	return body, 0, bodyPos
 }
 
 func decompressSnappyBody(incomingBody, key []byte, dp base.DataPool, slicesToBeReleased *[][]byte, needExtraBytesInBody, isJson bool) ([]byte, error, string, int64, int) {
