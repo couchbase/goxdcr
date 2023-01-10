@@ -251,11 +251,12 @@ const (
 	BucketTopologyGCScanTimeKey  = "BucketTopologyGCScanTimeMin"
 	BucketTopologyGCPruneTimeKey = "BucketTopologyGCPruneTimeHour"
 
-	P2PCommTimeoutKey           = "P2PCommTimeoutSec"
-	P2PMaxReceiveChLenKey       = "P2PMaxReceiveChLen"
-	P2POpaqueTimeoutKey         = "P2POpaqueTimeoutMin"
-	P2POpaqueCleanupIntervalKey = "P2POpaqueCleanupIntervalSec"
-	P2PVBRelatedGCIntervalKey   = "P2PVBRelatedGCIntervalHour"
+	P2PCommTimeoutKey                 = "P2PCommTimeoutSec"
+	P2PMaxReceiveChLenKey             = "P2PMaxReceiveChLen"
+	P2POpaqueTimeoutKey               = "P2POpaqueTimeoutMin"
+	P2POpaqueCleanupIntervalKey       = "P2POpaqueCleanupIntervalSec"
+	P2PVBRelatedGCIntervalKey         = "P2PVBRelatedGCIntervalHour"
+	P2PReplicaReplicatorReloadSizeKey = "P2PReplicaReplicatorReloadSize"
 
 	ThroughSeqnoBgScannerFreqKey    = "ThroughSeqnoBgScannerFreqSec"
 	ThroughSeqnoBgScannerLogFreqKey = "ThroughSeqnoBgScannerLogFreqSec"
@@ -374,6 +375,7 @@ var P2PCommTimeoutConfig = &SettingsConfig{int(base.P2PCommTimeout / time.Second
 var P2PMaxReceiveChLenConfig = &SettingsConfig{base.MaxP2PReceiveChLen, &Range{500, 50000}}
 var P2POpaqueCleanupIntervalConfig = &SettingsConfig{int(base.P2POpaqueCleanupInterval / time.Second), &Range{1, 600}}
 var P2PVBRelatedGCIntervalConfig = &SettingsConfig{int(base.P2PVBRelatedGCInterval / time.Hour), &Range{1, 336 /*2 weeks*/}}
+var P2PReplicaReplicatorReloadConfig = &SettingsConfig{int(base.P2PReplicaReplicatorReloadChSize), &Range{1, 1000}}
 var ThroughSeqnoBgScannerFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerFreq / time.Second), &Range{1, 300}}
 var ThroughSeqnoBgScannerLogFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerLogFreq / time.Second), &Range{1, 300}}
 var PipelineTimeoutP2PProtocolConfig = &SettingsConfig{int(base.TimeoutP2PProtocol / time.Second), &Range{10, 300}}
@@ -489,6 +491,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	P2PMaxReceiveChLenKey:                         P2PMaxReceiveChLenConfig,
 	P2POpaqueCleanupIntervalKey:                   P2POpaqueCleanupIntervalConfig,
 	P2PVBRelatedGCIntervalKey:                     P2PVBRelatedGCIntervalConfig,
+	P2PReplicaReplicatorReloadSizeKey:             P2PReplicaReplicatorReloadConfig,
 	ThroughSeqnoBgScannerFreqKey:                  ThroughSeqnoBgScannerFreqConfig,
 	ThroughSeqnoBgScannerLogFreqKey:               ThroughSeqnoBgScannerLogFreqConfig,
 	PipelineTimeoutP2PProtocolKey:                 PipelineTimeoutP2PProtocolConfig,

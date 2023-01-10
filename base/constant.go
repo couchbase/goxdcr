@@ -1083,6 +1083,7 @@ var P2PCommTimeout = 15 * time.Second
 var MaxP2PReceiveChLen = 10000
 var P2POpaqueCleanupInterval = 5 * time.Second
 var P2PVBRelatedGCInterval = 24 * time.Hour
+var P2PReplicaReplicatorReloadChSize = 10
 
 var ThroughSeqnoBgScannerFreq = 5 * time.Second
 var ThroughSeqnoBgScannerLogFreq = 60 * time.Second
