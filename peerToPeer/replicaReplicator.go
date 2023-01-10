@@ -19,6 +19,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -381,6 +382,7 @@ type ReplicatorAgentImpl struct {
 	startOnce sync.Once
 	initDelay time.Duration
 	utils     utilities.UtilsIface
+	isRunning uint32
 
 	ckptSvc           service_def.CheckpointsService
 	backfillReplSvc   service_def.BackfillReplSvc
@@ -422,7 +424,7 @@ func NewReplicatorAgent(spec *metadata.ReplicationSpecification, logger *log.Com
 		specId:                 spec.Id,
 		srcBucketName:          spec.SourceBucketName,
 		bucketSvcId:            spec.Id + "_replAgent_" + base.GetIterationId(&agentSubscriberCounter),
-		reloadCh:               make(chan agentReloadPair, 10),
+		reloadCh:               make(chan agentReloadPair, base.P2PReplicaReplicatorReloadChSize),
 		finCh:                  make(chan bool),
 		initDelay:              time.Duration(randSecInt) * time.Second,
 		utils:                  utils,
@@ -446,6 +448,10 @@ func (a *ReplicatorAgentImpl) Stop() {
 }
 
 func (a *ReplicatorAgentImpl) SetUpdatedSpecAsync(spec *metadata.ReplicationSpecification, cbFunc func()) {
+	if atomic.LoadUint32(&a.isRunning) == 0 {
+		return
+	}
+
 	specClone := spec.Clone()
 	newInterval := specClone.Settings.GetReplicateCkptInterval()
 
@@ -453,7 +459,12 @@ func (a *ReplicatorAgentImpl) SetUpdatedSpecAsync(spec *metadata.ReplicationSpec
 		newTimeInterval: newInterval,
 		callbackFunc:    cbFunc,
 	}
-	a.reloadCh <- pair
+	select {
+	case a.reloadCh <- pair:
+		// Done
+	default:
+		a.logger.Warnf("%v reloadCh is full: SetUpdatedSpecAsync is ignored", a.specId)
+	}
 }
 
 func (a *ReplicatorAgentImpl) GetReplicationInterval() (time.Duration, error) {
@@ -477,6 +488,10 @@ func (a *ReplicatorAgentImpl) run() {
 	if a.initDelay.Seconds() > 0 {
 		base.WaitForTimeoutOrFinishSignal(a.initDelay, a.finCh)
 	}
+
+	atomic.StoreUint32(&a.isRunning, 1)
+	defer atomic.StoreUint32(&a.isRunning, 0)
+
 	interval, err := a.GetReplicationInterval()
 	if err != nil {
 		a.logger.Errorf("Unable to get replication interval %v - %v", a.specId, err)
@@ -494,7 +509,7 @@ func (a *ReplicatorAgentImpl) run() {
 		case <-a.finCh:
 			err := a.bucketTopologySvc.UnSubscribeLocalBucketFeed(a.spec, a.bucketSvcId)
 			if err != nil {
-				a.logger.Errorf("%v - Unable to subscribe to local bucket feed %v", a.specId, err)
+				a.logger.Errorf("%v - Unable to unsubscribe to local bucket feed %v", a.specId, err)
 			}
 			return
 		case notification := <-a.sourceBucketTopologyCh:
