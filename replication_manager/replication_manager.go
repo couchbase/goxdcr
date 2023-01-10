@@ -344,6 +344,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.CkptCacheReqChLenKey].(int),
 		time.Duration(internal_settings.Values[metadata.HumanRecoveryThresholdKey].(int))*time.Second,
 		internal_settings.Values[metadata.DnsSrvReBootstrapKey].(bool),
+		internal_settings.Values[metadata.P2PReplicaReplicatorReloadSizeKey].(int),
 	)
 }
 

@@ -12,6 +12,7 @@ package peerToPeer
 
 import (
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -32,7 +33,7 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 	specList := []*metadata.ReplicationSpecification{spec, spec2}
 
 	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
 
 	dummyFunc := func(reqs PeersVBPeriodicReplicateReqs) error {
 		return nil
@@ -51,7 +52,7 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 	newSpec.Settings.Values[metadata.ReplicateCkptIntervalKey] = 30 // 30 min
 	_, _, _, replSvc2, _, _, _, _, _, _, _, _, _, _ := setupBoilerPlate()
 	specList2 := []*metadata.ReplicationSpecification{newSpec, spec2}
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList2, replSvc2, queryResultErrs, queryResultsStatusCode, srcCh, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList2, replSvc2, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
 	replicator.replicationSpecSvc = replSvc2
 	replicator.agentMapMtx.Lock()
 	for _, agent := range replicator.agentMap {
@@ -74,4 +75,43 @@ func TestReplicatorWithSpecAndIntervalChange(t *testing.T) {
 	replicator.minIntervalMtx.Lock()
 	assert.Equal(float64(30), replicator.minInterval.Minutes())
 	replicator.minIntervalMtx.Unlock()
+}
+
+func TestReplicatorWithSpecAndIntervalChangeNonKVNode(t *testing.T) {
+	fmt.Println("============== Test case start: TestReplicatorWithSpecAndIntervalChangeNonKVNode =================")
+	defer fmt.Println("============== Test case end: TestReplicatorWithSpecAndIntervalChangeNonKVNode =================")
+	assert := assert.New(t)
+
+	bucketName := "bucketName"
+	bucketName2 := "bucketName2"
+	spec, _ := metadata.NewReplicationSpecification(bucketName, "", "", "", "")
+	spec.Settings.Values[metadata.ReplicateCkptIntervalKey] = 1 // 1 minute
+	spec2, _ := metadata.NewReplicationSpecification(bucketName2, "", "", "", "")
+	spec2.Settings.Values[metadata.ReplicateCkptIntervalKey] = 5 // 5 minute
+	specList := []*metadata.ReplicationSpecification{spec, spec2}
+
+	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, _, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc := setupBoilerPlate()
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, nil, base.ErrorNoSourceNozzle, bucketSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
+
+	dummyFunc := func(reqs PeersVBPeriodicReplicateReqs) error {
+		return nil
+	}
+	replicator := NewReplicaReplicator(bucketSvc, nil, ckptSvc, backfillSpecSvc, utilsMock, nil, replSvc, dummyFunc)
+	replicator.unitTest = true
+	assert.NotNil(replicator)
+	replicator.Start()
+
+	replicator.HandleSpecCreation(spec)
+	replicator.minIntervalMtx.Lock()
+	assert.Equal(float64(1), replicator.minInterval.Minutes())
+	replicator.minIntervalMtx.Unlock()
+
+	// Do multiple spec changes to ensure that things don't lock up
+	newSpec := spec.Clone()
+	newSpec.Settings.Values[metadata.ReplicateCkptIntervalKey] = 30 // 30 min
+
+	// Without the fixes, the following will lock up
+	for i := 0; i < base.P2PReplicaReplicatorReloadChSize+2; i++ {
+		replicator.HandleSpecChange(spec, newSpec)
+	}
 }

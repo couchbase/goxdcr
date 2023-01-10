@@ -1096,6 +1096,7 @@ var P2PCommTimeout = 15 * time.Second
 var MaxP2PReceiveChLen = 10000
 var P2POpaqueCleanupInterval = 5 * time.Second
 var P2PVBRelatedGCInterval = 24 * time.Hour
+var P2PReplicaReplicatorReloadChSize = 10
 
 var ThroughSeqnoBgScannerFreq = 5 * time.Second
 var ThroughSeqnoBgScannerLogFreq = 60 * time.Second
@@ -1162,7 +1163,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	timeoutP2PProtocol time.Duration,
 	ckptCacheCtrlLen, ckptCacheReqLen int,
 	humanRecoveryThreshold time.Duration,
-	dnsSrvReBootstrap bool) {
+	dnsSrvReBootstrap bool,
+	p2pReplicaReplicatorReloadSize int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1309,6 +1311,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CkptCacheReqChLen = ckptCacheReqLen
 	HumanRecoveryThreshold = humanRecoveryThreshold
 	DNSSrvReBootstrap = dnsSrvReBootstrap
+	P2PReplicaReplicatorReloadChSize = p2pReplicaReplicatorReloadSize
 }
 
 // XDCR Dev hidden replication settings
