@@ -2719,7 +2719,7 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGe
 	err := ckmgr.mergeFinalCkpts(pipelinesCkptDocs, srcFailoverLogs, tgtFailoverLogs, brokenMappingShaMap, brokenMapSpecInternalId)
 	if err != nil {
 		ckmgr.logger.Errorf("megeFinalCkpts error %v", err)
-		respToGcCh(respChs, err)
+		respToGcCh(respChs, err, ckmgr.finish_ch)
 		return err
 	}
 
@@ -2737,7 +2737,7 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGe
 		manifestMeasureStopFunc()
 		if err != nil {
 			ckmgr.logger.Errorf("PersistReceivedManifests Error: %v", err)
-			respToGcCh(respChs, err)
+			respToGcCh(respChs, err, ckmgr.finish_ch)
 			return err
 		}
 	}
@@ -2759,14 +2759,24 @@ func (ckmgr *CheckpointManager) stopTheWorldAndMergeCkpts(getter MergeCkptArgsGe
 		}
 	}
 
-	respToGcCh(respChs, nil)
+	respToGcCh(respChs, nil, ckmgr.finish_ch)
 	return nil
 }
 
-func respToGcCh(respCh []chan error, err error) {
-	if len(respCh) > 0 {
-		for _, ch := range respCh {
-			ch <- err
+func respToGcCh(respCh []chan error, err error, finCh chan bool) {
+	select {
+	case <-finCh:
+		return
+	default:
+		if len(respCh) > 0 {
+			for _, ch := range respCh {
+				select {
+				case <-finCh:
+					return
+				case ch <- err:
+					// Done
+				}
+			}
 		}
 	}
 }

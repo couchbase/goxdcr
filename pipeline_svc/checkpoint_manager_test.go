@@ -560,8 +560,11 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	assert.NotNil(ckptMgr)
 	ckptMgr.unitTest = true
 
+	var simpleMergerWaiter sync.WaitGroup
+	simpleMergerWaiter.Add(1)
 	// Test simple merger
 	simpleMerger := func() {
+		defer simpleMergerWaiter.Done()
 		for {
 			select {
 			case <-ckptMgr.periodicPushRequested:
@@ -577,9 +580,7 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 				assert.NotNil(args.PipelinesCkptDocs[common.BackfillPipeline])
 				assert.NotNil(args.PipelinesCkptDocs[common.BackfillPipeline][11])
 				assert.Nil(args.PipelinesCkptDocs[common.BackfillPipeline][12])
-				for _, ch := range args.PushRespChs {
-					ch <- nil
-				}
+				respToGcCh(args.PushRespChs, nil, ckptMgr.finish_ch)
 			case <-ckptMgr.finish_ch:
 				return
 			}
@@ -613,4 +614,84 @@ func TestCkptMgrPeriodicMerger2(t *testing.T) {
 	assert.Nil(retErr)
 
 	close(ckptMgr.finish_ch)
+	simpleMergerWaiter.Wait()
+}
+
+func TestCkptMgrPeriodicMergerCloseBeforeRespRead(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptMgrPeriodicMergerCloseBeforeRespRead =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrPeriodicMergerCloseBeforeRespRead =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor := setupCkptMgrBoilerPlate()
+
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
+		utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface,
+		bucketTopologySvc, spec, pipelineSupervisor)
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", nil,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc)
+
+	assert.Nil(err)
+	assert.NotNil(ckptMgr)
+	ckptMgr.unitTest = true
+
+	simpleMergerStartedCh := make(chan bool)
+
+	// Test simple merger with delay before responding to response channels
+	var simpleMergerWaiter sync.WaitGroup
+	simpleMergerWaiter.Add(1)
+	simpleMerger := func() {
+		defer simpleMergerWaiter.Done()
+		close(simpleMergerStartedCh)
+		for {
+			select {
+			case <-ckptMgr.periodicPushRequested:
+				// Sleep here to simulate processing time while another is queued up
+				args := ckptMgr.periodicBatchGetter()
+				if args == nil {
+					return
+				}
+
+				// Insert delay
+				time.Sleep(500 * time.Millisecond)
+				respToGcCh(args.PushRespChs, nil, ckptMgr.finish_ch)
+			case <-ckptMgr.finish_ch:
+				return
+			}
+		}
+
+	}
+	ckptMgr.periodicMerger = simpleMerger
+	// simulate Start
+	go ckptMgr.periodicMerger()
+	<-simpleMergerStartedCh
+
+	// Lazy way of creating a ckptDoc with 2 VBs
+	ckptDoc := mockVBCkptDoc(spec, 12)
+	pipelinCkptDocs := VBsCkptsDocMaps{ckptDoc, nil}
+	ckptDoc2 := mockVBCkptDoc(spec, 11)
+	pipelineCkptDocs2 := VBsCkptsDocMaps{ckptDoc2, ckptDoc2}
+
+	var shaMap metadata.ShaToCollectionNamespaceMap
+	brokenMapppingInternalId := "testInternalId"
+	var manifestCache *metadata.ManifestsCache
+
+	respCh := make(chan error)
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelinCkptDocs, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh))
+	// Try to queue one again while periodic merge is busy
+	respCh2 := make(chan error)
+	assert.Nil(ckptMgr.requestPeriodicMerge(pipelineCkptDocs2, shaMap, brokenMapppingInternalId, manifestCache, manifestCache, respCh2))
+
+	// Don't read respCh and just exit
+	close(ckptMgr.finish_ch)
+
+	// respToGoCh() should not hang
+	simpleMergerWaiter.Wait()
 }
