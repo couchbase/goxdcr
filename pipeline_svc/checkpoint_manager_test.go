@@ -720,6 +720,9 @@ func TestCkptMgrPeriodicMergerCloseBeforeRespRead(t *testing.T) {
 			case <-ckptMgr.periodicPushRequested:
 				// Sleep here to simulate processing time while another is queued up
 				args := ckptMgr.periodicBatchGetter()
+				if args == nil {
+					return
+				}
 
 				// Insert delay
 				time.Sleep(500 * time.Millisecond)
