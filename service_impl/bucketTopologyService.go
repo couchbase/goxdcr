@@ -275,11 +275,7 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 				return err
 			}
 
-			stats_map := (*dcp_stats)[serverAddr]
-			if stats_map == nil {
-				newStatsMap := make(base.StringStringMap)
-				stats_map = &newStatsMap
-			}
+			stats_map := watcher.objsPool.StringStringPool.Get([]string{base.DCP_STAT_NAME})
 
 			err = client.StatsMapForSpecifiedStats(base.DCP_STAT_NAME, *stats_map)
 			if err != nil {
@@ -290,6 +286,8 @@ func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.Replicat
 				}
 				delete(watcher.kvMemClientsLegacy, serverAddr)
 				watcher.kvMemClientsLegacyMtx.Unlock()
+				watcher.objsPool.StringStringPool.Put(stats_map)
+				watcher.objsPool.DcpStatsMapPool.Put(dcp_stats)
 				return err
 			} else {
 				(*dcp_stats)[serverAddr] = stats_map
