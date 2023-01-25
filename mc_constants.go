@@ -263,6 +263,12 @@ const (
 	ComputeUnitsWrite = 2
 )
 
+const (
+	DatatypeFlagJSON       = uint8(0x01)
+	DatatypeFlagCompressed = uint8(0x02)
+	DatatypeFlagXattrs     = uint8(0x04)
+)
+
 // Mapping of CommandCode -> name of command (not exhaustive)
 var CommandNames map[CommandCode]string
 
