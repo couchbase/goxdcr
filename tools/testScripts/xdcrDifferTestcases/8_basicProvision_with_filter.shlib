@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -u
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100 ["flushEnabled"]=1)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active" ["flushEnabled"]=1)
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A ReplPropertiesFilter=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["filterExpression"]="REGEXP_CONTAINS(META().id, \"xdcrProv_\")")
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenBucket "C1" "B1"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running XdcrDiffer filtered non-collection unidirectional singleLoad test case"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ReplPropertiesFilter
+
+	runDataLoad
+
+	checkUnidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	local retVal
+	runXdcrDiffer "C1" "B1" "C2" "B2"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+	checkDifferLogItemCount "Target" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+
+	echo "Repeating XdcrDiffer simple non-collection unidirectional singleLoad test case with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+	checkDifferLogItemCount "Target" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
