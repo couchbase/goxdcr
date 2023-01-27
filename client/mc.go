@@ -76,9 +76,10 @@ type ClientIface interface {
 	NewUprFeedWithConfig(ackByClient bool) (*UprFeed, error)
 	NewUprFeedWithConfigIface(ackByClient bool) (UprFeedIface, error)
 
-	CreateRangeScan(vb uint16, collId uint32, start []byte, excludeStart bool, end []byte, excludeEnd bool,
+	CreateRangeScan(vb uint16, collId uint32, start []byte, excludeStart bool, end []byte, excludeEnd bool, withDocs bool,
 		context ...*ClientContext) (*gomemcached.MCResponse, error)
-	CreateRandomScan(vb uint16, collId uint32, sampleSize int, context ...*ClientContext) (*gomemcached.MCResponse, error)
+	CreateRandomScan(vb uint16, collId uint32, sampleSize int, withDocs bool, context ...*ClientContext) (
+		*gomemcached.MCResponse, error)
 	ContinueRangeScan(vb uint16, uuid []byte, opaque uint32, items uint32, maxSize uint32, timeout uint32,
 		context ...*ClientContext) error
 	CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (*gomemcached.MCResponse, error)
@@ -105,6 +106,9 @@ type ClientContext struct {
 
 	// Durability Timeout
 	DurabilityTimeout time.Duration
+
+	// Data is JSON in snappy compressed format
+	Compressed bool
 }
 
 type VbStateType uint8
@@ -481,6 +485,13 @@ func (c *Client) setContext(req *gomemcached.MCRequest, context ...*ClientContex
 			}
 			req.FramingExtras = append(req.FramingExtras,
 				gomemcached.FrameInfo{gomemcached.FrameDurability, len, data})
+		}
+	}
+	// any context with compressed set
+	for _, c := range context {
+		if c.Compressed {
+			req.DataType = gomemcached.DatatypeFlagJSON | gomemcached.DatatypeFlagCompressed
+			break
 		}
 	}
 
@@ -1118,7 +1129,7 @@ func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
 }
 
 func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, excludeStart bool, end []byte, excludeEnd bool,
-	context ...*ClientContext) (*gomemcached.MCResponse, error) {
+	withDocs bool, context ...*ClientContext) (*gomemcached.MCResponse, error) {
 
 	req := &gomemcached.MCRequest{
 		Opcode:   gomemcached.CREATE_RANGE_SCAN,
@@ -1144,8 +1155,13 @@ func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, exclude
 		r["end"] = base64.StdEncoding.EncodeToString(end)
 	}
 	m := make(map[string]interface{})
+	if collId == 0 && len(context) > 0 {
+		collId = context[0].CollId
+	}
 	m["collection"] = fmt.Sprintf("%x", collId)
-	m["key_only"] = true
+	if !withDocs {
+		m["key_only"] = true
+	}
 	m["range"] = r
 	req.Body, _ = json.Marshal(m)
 
@@ -1153,7 +1169,7 @@ func (c *Client) CreateRangeScan(vb uint16, collId uint32, start []byte, exclude
 	return c.Send(req)
 }
 
-func (c *Client) CreateRandomScan(vb uint16, collId uint32, sampleSize int, context ...*ClientContext) (
+func (c *Client) CreateRandomScan(vb uint16, collId uint32, sampleSize int, withDocs bool, context ...*ClientContext) (
 	*gomemcached.MCResponse, error) {
 
 	req := &gomemcached.MCRequest{
@@ -1176,8 +1192,13 @@ func (c *Client) CreateRandomScan(vb uint16, collId uint32, sampleSize int, cont
 	s["seed"] = seed
 	s["samples"] = sampleSize
 	m := make(map[string]interface{})
+	if collId == 0 && len(context) > 0 {
+		collId = context[0].CollId
+	}
 	m["collection"] = fmt.Sprintf("%x", collId)
-	m["key_only"] = true
+	if !withDocs {
+		m["key_only"] = true
+	}
 	m["sampling"] = s
 	req.Body, _ = json.Marshal(m)
 
