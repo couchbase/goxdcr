@@ -786,8 +786,12 @@ func (c *CollectionsRouter) regularExplicitMap(namespace *base.CollectionNamespa
 		if exists {
 			err = base.ErrorIgnoreRequest
 		} else {
-			err = fmt.Errorf("current explicit mapping does not include target destination given source scope %v collection %v - this mapping may need to be backfilled", namespace.ScopeName, namespace.CollectionName)
-			c.logger.Warnf(err.Error())
+			// Returns non-nil error if namespace is never meant to be replicated
+			_, checkErr := c.cachedRules.GetPotentialTargetNamespaces(namespace)
+			if checkErr == nil {
+				err = fmt.Errorf("current explicit mapping does not include target destination given source scope %v collection %v - this mapping may need to be backfilled", namespace.ScopeName, namespace.CollectionName)
+				c.logger.Warnf(err.Error())
+			}
 		}
 		return nil, err
 	}
