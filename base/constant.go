@@ -1323,6 +1323,7 @@ const DevCkptMgrForceGCWaitSec = "xdcrDevCkptMgrForceGCWaitSec"
 const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
 const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
 const DevBucketTopologyLegacyDelay = "xdcrDevBucketTopologyLegacyDelay"
+const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
