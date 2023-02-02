@@ -545,16 +545,29 @@ func (b *BackfillMgr) backfillReplSpecChangeHandlerCallback(changedSpecId string
 			if !oldNamespaceMappings.SameAs(newNamespaceMappings) && newSpec.ReplicationSpec().Settings.Active {
 				removedScopesMap := b.populateRemovedScopesMap(newNamespaceMappings, oldNamespaceMappings)
 				cb, errCb := b.checkpointsSvc.GetCkptsMappingsCleanupCallback(base.CompileBackfillPipelineSpecId(newSpec.Id), newSpec.InternalId, removedScopesMap)
-				err := b.pipelineMgr.HaltBackfillWithCb(changedSpecId, cb, errCb, false)
-				if err != nil {
-					b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - backfill pipeline may be executing out of date backfills", changedSpecId, err)
-					return err
-				}
-				err = b.pipelineMgr.RequestBackfill(changedSpecId)
-				if err != nil {
-					b.logger.Errorf("Unable to request backfill pipeline to start for %v : %v - may require manual restart of pipeline", changedSpecId, err)
-					return err
-				}
+
+				// The HaltBackfillWithCb() is a blocking call. However, this function is a handler callback
+				// The handler callback is invoked in a long call chain, where backfill replication spec
+				// cache has been updated (by a single go-routine of backfill_request_handler's run(), which will
+				// be blocking as it comes here)
+				// The HaltBackfillWithCb() depends on pipelineMgr not being busy servicing any other request
+				// However, because:
+				// 1. Pipeline is going from paused to resume
+				// 2. Explicit Mode is on and Explicit Mapping has changed
+				// PipelineMgr will force a "raise backfill" for the newly added mappings. This raise backfill request
+				// will come back to the backfill_request_handler's run()
+				// And thus, if this callback is done in a blocking manner, we will deadlock
+				// To preven that from happening, the following needs to be done in a bg go-routine
+				go func() {
+					err := b.pipelineMgr.HaltBackfillWithCb(changedSpecId, cb, errCb, false)
+					if err != nil {
+						b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - backfill pipeline may be executing out of date backfills", changedSpecId, err)
+					}
+					err = b.pipelineMgr.RequestBackfill(changedSpecId)
+					if err != nil {
+						b.logger.Errorf("Unable to request backfill pipeline to start for %v : %v - may require manual restart of pipeline", changedSpecId, err)
+					}
+				}()
 			}
 		}
 

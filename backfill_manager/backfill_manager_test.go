@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
+	"sync"
 	"testing"
 	"time"
 )
@@ -69,9 +70,7 @@ var vbsGetter = func(customList []uint16) *base.KvVBMapType {
 	return &retMap
 }
 
-func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *service_def.ReplicationSpecSvc, pipelineMgr *pipeline_mgr.PipelineMgrBackfillIface,
-	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
-	checkpointSvcMock *service_def.CheckpointsService, seqnoGetter func() map[uint16]uint64, localVBMapGetter func([]uint16) *base.KvVBMapType, backfillReplSvc *service_def.BackfillReplSvc, additionalSpecIds []string, bucketTopologySvc *service_def.BucketTopologySvc) {
+func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *service_def.ReplicationSpecSvc, pipelineMgr *pipeline_mgr.PipelineMgrBackfillIface, xdcrTopologyMock *service_def.XDCRCompTopologySvc, checkpointSvcMock *service_def.CheckpointsService, seqnoGetter func() map[uint16]uint64, localVBMapGetter func([]uint16) *base.KvVBMapType, backfillReplSvc *service_def.BackfillReplSvc, additionalSpecIds []string, bucketTopologySvc *service_def.BucketTopologySvc, pipelineStopCb base.StoppedPipelineCallback, pipelineStopErrCb base.StoppedPipelineErrCallback) *metadata.ReplicationSpecification {
 
 	returnedSpec, _ := metadata.NewReplicationSpecification(sourceBucketName, sourceBucketUUID, targetClusterUUID, targetBucketName, targetBucketUUID)
 	var specList = []string{returnedSpec.Id}
@@ -79,12 +78,16 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 		specList = append(specList, extraId)
 	}
 
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+
 	manifestSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
+	manifestSvc.On("GetLatestManifests", mock.Anything, mock.Anything).Return(&defaultManifest, &defaultManifest, nil)
 	replSpecSvc.On("SetMetadataChangeHandlerCallback", mock.Anything).Return(nil)
 	replSpecSvc.On("ReplicationSpec", mock.Anything).Return(returnedSpec, nil)
 	replSpecSvc.On("AllReplicationSpecIds").Return(specList, nil)
 	pipelineMgr.On("GetMainPipelineThroughSeqnos", mock.Anything).Return(seqnoGetter(), nil)
 	pipelineMgr.On("BackfillMappingStatusUpdate", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	pipelineMgr.On("RequestBackfill", mock.Anything).Return(nil)
 	xdcrTopologyMock.On("MyKVNodes").Return([]string{"localhost:9000"}, nil)
 	checkpointSvcMock.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(nil, base.ErrorNotFound)
 
@@ -105,7 +108,14 @@ func setupMock(manifestSvc *service_def.CollectionsManifestSvc, replSpecSvc *ser
 	bucketTopologySvc.On("RegisterGarbageCollect", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	checkpointSvcMock.On("CheckpointsDocs", mock.Anything, mock.Anything).Return(nil, base.ErrorNotFound)
+	if pipelineStopCb != nil && pipelineStopErrCb != nil {
+		checkpointSvcMock.On("GetCkptsMappingsCleanupCallback", mock.Anything, mock.Anything, mock.Anything).Return(pipelineStopCb, pipelineStopErrCb)
+		pipelineMgr.On("HaltBackfillWithCb", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			pipelineStopCb()
+		}).Return(nil)
+	}
 	setupBackfillReplSvcMock(backfillReplSvc)
+	return returnedSpec
 }
 
 var topologyObjPool = service_impl.NewBucketTopologyObjsPool()
@@ -170,7 +180,7 @@ func TestBackfillMgrLaunchNoSpecs(t *testing.T) {
 	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc := setupBoilerPlate()
 	setupReplStartupSpecs(replSpecSvc, nil)
 	setupBackfillSpecs(backfillReplSvc, nil)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
 	assert.NotNil(backfillMgr)
@@ -250,7 +260,7 @@ func TestBackfillMgrLaunchSpecs(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
 	assert.NotNil(backfillMgr)
@@ -272,7 +282,7 @@ func TestBackfillMgrLaunchSpecsWithErr(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
 	assert.NotNil(backfillMgr)
@@ -310,7 +320,7 @@ func TestBackfillMgrSourceCollectionCleanedUp(t *testing.T) {
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
 	specId := "RandId_0"
 	var additionalSpecIDs []string = []string{specId}
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
 	assert.NotNil(backfillMgr)
@@ -394,7 +404,7 @@ func TestBackfillMgrRetry(t *testing.T) {
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
 	specId := "RandId_0"
 	var additionalSpecIDs []string = []string{specId}
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
 	assert.NotNil(backfillMgr)
@@ -458,7 +468,7 @@ func TestBackfillMgrRetry(t *testing.T) {
 	//setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvcBad, specs)
 	setupBackfillReplSvcNegMock(backfillReplSvcBad)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, additionalSpecIDs, bucketTopologySvc, nil, nil)
 
 	backfillMgr = NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvcBad, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
 	assert.NotNil(backfillMgr)
@@ -491,7 +501,7 @@ func TestBackfillMgrLaunchSpecsThenPeers(t *testing.T) {
 	setupReplStartupSpecs(replSpecSvc, specs)
 	setupBackfillSpecs(backfillReplSvc, specs)
 	setupStartupManifests(manifestSvc, specs, manifestPairs)
-	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc)
+	setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, nil, nil)
 
 	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
 	assert.NotNil(backfillMgr)
@@ -564,4 +574,136 @@ func getTaskForVB0(srcBucketName string) (*metadata.ReplicationSpecification, *m
 	task0 := metadata.NewBackfillTask(ts0, []metadata.CollectionNamespaceMapping{collectionNs})
 	taskList := metadata.NewBackfillTasksWithTask(task0)
 	return emptySpec, &taskList
+}
+
+// This test isn't identical to the MB it is trying to reproduce (MB-55354)
+// but it is close enough. The idea here is that we have all the following happening concurrently
+//  1. A replication spec that is going from paused to active
+//  2. A collection mapping rules change that has to occur
+//  3. Collection backfill tasks have more namespace (i.e. originally contained S1.col1 but now need to backfill S1.col2)
+//     which means the backfill replication needs to be updated
+//
+// What happens now is that the two things happen in parallel:
+//
+// First,  1 + 2 causes replication spec change callback to occur. This will cause
+// https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/replication_manager/metakv_change_listener.go#L258-L259
+// to hit.
+// Which eventually means https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/replication_manager/metakv_change_listener.go#L292-L293
+// gets hit as well, leading to https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/backfill_manager/backfill_manager.go#L1377
+//
+// Secondly, 1 + 3 causes this https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/backfill_manager/backfill_manager.go#L534-L548
+// to occur. And this block will require a pipeline stop and callback mechanism to fire
+//
+// The first path will require backfill_request_handler to be free to handle the necessary work
+// But, the second path is unable to execute because it's waiting for the pipeline updater to execute it. While
+// this is happening, this means that backfill_request_handler is busy and unable to handle the first path
+func TestBackfillMgrSpecChangeWithNamespaceChange(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestBackfillMgrSpecChangeWithNamespaceChange =================")
+	defer fmt.Println("============== Test case end: TestBackfillMgrSpecChangeWithNamespaceChange =================")
+	manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc := setupBoilerPlate()
+	specs, manifestPairs := setupStartupSpecs(5)
+	setupReplStartupSpecs(replSpecSvc, specs)
+	setupBackfillSpecs(backfillReplSvc, specs)
+	setupStartupManifests(manifestSvc, specs, manifestPairs)
+
+	var ckptMappingsCleanupCallback base.StoppedPipelineCallback = func() error {
+		// Sleeping 10 seconds here to simulate pipelineMgr busy trying to raise a backfill while backfill
+		// request handler is currently calling backfillReplSpecChangeHandlerCallback
+		time.Sleep(10 * time.Second)
+		return nil
+	}
+	var ckptMappingErrCallback base.StoppedPipelineErrCallback = func(err error, cbCalled bool) {
+
+	}
+
+	generatedSpec := setupMock(manifestSvc, replSpecSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, defaultSeqnoGetter, vbsGetter, backfillReplSvc, nil, bucketTopologySvc, ckptMappingsCleanupCallback, ckptMappingErrCallback)
+
+	backfillMgr := NewBackfillManager(manifestSvc, replSpecSvc, backfillReplSvc, pipelineMgr, xdcrCompTopologySvc, checkpointSvcMock, bucketTopologySvc)
+	assert.NotNil(backfillMgr)
+
+	assert.Nil(backfillMgr.Start())
+
+	id1 := getSpecId(0)
+	spec1 := specs[id1]
+	vbtaskMap := metadata.NewVBTasksMap()
+	vbtasks := metadata.NewBackfillTasks()
+	src1 := metadata.NewSourceCollectionNamespace(&base.CollectionNamespace{
+		ScopeName:      "s1",
+		CollectionName: "col1",
+	})
+	tgt1 := &base.CollectionNamespace{
+		ScopeName:      "s1",
+		CollectionName: "col1",
+	}
+	task := metadata.NewBackfillTask(
+		&metadata.BackfillVBTimestamps{
+			StartingTimestamp: &base.VBTimestamp{Vbno: 0, Seqno: 1},
+			EndingTimestamp:   &base.VBTimestamp{Vbno: 0, Seqno: 10},
+		},
+		[]metadata.CollectionNamespaceMapping{
+			map[*metadata.SourceNamespace]metadata.CollectionNamespaceList{
+				src1: metadata.CollectionNamespaceList{tgt1},
+			},
+		},
+	)
+	vbtasks.List = append(vbtasks.List, task)
+	vbtaskMap.VBTasksMap[0] = &vbtasks
+
+	src2 := metadata.NewSourceCollectionNamespace(&base.CollectionNamespace{
+		ScopeName:      "s1",
+		CollectionName: "col2",
+	})
+	tgt2 := &base.CollectionNamespace{
+		ScopeName:      "s1",
+		CollectionName: "col2",
+	}
+	task2 := metadata.NewBackfillTask(
+		&metadata.BackfillVBTimestamps{
+			StartingTimestamp: &base.VBTimestamp{Vbno: 0, Seqno: 1},
+			EndingTimestamp:   &base.VBTimestamp{Vbno: 0, Seqno: 10},
+		},
+		[]metadata.CollectionNamespaceMapping{
+			map[*metadata.SourceNamespace]metadata.CollectionNamespaceList{
+				src2: metadata.CollectionNamespaceList{tgt2},
+			},
+		},
+	)
+
+	vbTaskMapModified := vbtaskMap.Clone()
+	vbTaskMapModified.VBTasksMap[0].List[0] = task2
+	spec1.Settings.Active = true
+	oldBackfillSpec := metadata.NewBackfillReplicationSpec(spec1.Id, spec1.InternalId, vbtaskMap, spec1, 0)
+	newBackfillSpec := metadata.NewBackfillReplicationSpec(spec1.Id, spec1.InternalId, vbTaskMapModified, spec1, 0)
+
+	var mode base.CollectionsMgtType
+	mode.SetExplicitMapping(true)
+
+	oldSetting := spec1.Settings.Clone()
+	oldSetting.Values[metadata.CollectionsMgtMultiKey] = mode
+	routingRules := make(metadata.CollectionsMappingRulesType)
+	routingRules[src1.ToIndexString()] = tgt1.ToIndexString()
+	oldSetting.Values[metadata.CollectionsMappingRulesKey] = routingRules
+	oldSetting.Active = false
+
+	newSetting := oldSetting.Clone()
+	newRoutingRules := make(metadata.CollectionsMappingRulesType)
+	newRoutingRules[src2.ToIndexString()] = tgt2.ToIndexString()
+	newSetting.Values[metadata.CollectionsMappingRulesKey] = newRoutingRules
+	newSetting.Active = true
+
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(1)
+	startTime := time.Now()
+	go func() {
+		backfillMgr.backfillReplSpecChangeHandlerCallback(id1, oldBackfillSpec, newBackfillSpec)
+		waitGroup.Done()
+	}()
+	waitGroup.Wait()
+
+	handlerCb, _ := backfillMgr.GetExplicitMappingChangeHandler(spec1.Id, generatedSpec.InternalId, oldSetting, newSetting)
+	handlerCb()
+
+	elapsed := time.Since(startTime)
+	assert.True(int(elapsed.Seconds()) < 3)
 }
