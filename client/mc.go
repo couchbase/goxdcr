@@ -112,6 +112,25 @@ type ClientContext struct {
 	Compressed bool
 }
 
+func (this *ClientContext) Copy() *ClientContext {
+	rv := &ClientContext{
+		CollId:            this.CollId,
+		User:              this.User,
+		PreserveExpiry:    this.PreserveExpiry,
+		DurabilityLevel:   this.DurabilityLevel,
+		DurabilityTimeout: this.DurabilityTimeout,
+		Compressed:        this.Compressed,
+	}
+
+	rv.VbState = new(VbStateType)
+
+	if this.VbState != nil {
+		*rv.VbState = *this.VbState
+	}
+
+	return rv
+}
+
 type VbStateType uint8
 
 const (
@@ -388,7 +407,7 @@ func appendMutationToken(bytes []byte) []byte {
 	return bytes
 }
 
-//Send a hello command to enable MutationTokens
+// Send a hello command to enable MutationTokens
 func (c *Client) EnableMutationToken() (*gomemcached.MCResponse, error) {
 	var payload []byte
 	payload = appendMutationToken(payload)
@@ -401,7 +420,7 @@ func (c *Client) EnableMutationToken() (*gomemcached.MCResponse, error) {
 
 }
 
-//Send a hello command to enable specific features
+// Send a hello command to enable specific features
 func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, error) {
 	var payload []byte
 	collectionsEnabled := 0
@@ -1438,12 +1457,14 @@ type CASState struct {
 
 // CASNext is a non-callback, loop-based version of CAS method.
 //
-//  Usage is like this:
+//	Usage is like this:
 //
 // var state memcached.CASState
-// for client.CASNext(vb, key, exp, &state) {
-//     state.Value = some_mutation(state.Value)
-// }
+//
+//	for client.CASNext(vb, key, exp, &state) {
+//	    state.Value = some_mutation(state.Value)
+//	}
+//
 // if state.Err != nil { ... }
 func (c *Client) CASNext(vb uint16, k string, exp int, state *CASState) bool {
 	if state.initialized {
