@@ -165,6 +165,11 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	base.DevCkptMgrForceGCWaitSec:     metadata.DevCkptMgrForceGCWaitSec,
 	base.DevColManifestSvcDelaySec:    metadata.DevColManifestSvcDelaySec,
 	base.DevNsServerPortSpecifier:     metadata.DevNsServerPortSpecifier,
+<<<<<<< HEAD
+=======
+	base.DevBucketTopologyLegacyDelay: metadata.DevBucketTopologyLegacyDelay,
+	base.DevBackfillReplUpdateDelay:   metadata.DevBackfillReplUpdateDelay,
+>>>>>>> 8c273d5f (MB-55354: reproduction test case and injection needed to hit)
 	base.Type:                         metadata.ReplicationTypeKey,
 	FilterExpression:                  metadata.FilterExpressionKey,
 	PauseRequested:                    metadata.ActiveKey,
@@ -217,6 +222,11 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevCkptMgrForceGCWaitSec:          base.DevCkptMgrForceGCWaitSec,
 	metadata.DevColManifestSvcDelaySec:         base.DevColManifestSvcDelaySec,
 	metadata.DevNsServerPortSpecifier:          base.DevNsServerPortSpecifier,
+<<<<<<< HEAD
+=======
+	metadata.DevBucketTopologyLegacyDelay:      base.DevBucketTopologyLegacyDelay,
+	metadata.DevBackfillReplUpdateDelay:        base.DevBackfillReplUpdateDelay,
+>>>>>>> 8c273d5f (MB-55354: reproduction test case and injection needed to hit)
 	metadata.ReplicationTypeKey:                base.Type,
 	metadata.FilterExpressionKey:               FilterExpression,
 	metadata.ActiveKey:                         PauseRequested,

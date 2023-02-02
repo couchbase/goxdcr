@@ -243,6 +243,11 @@ func (b *BackfillReplicationService) updateCacheInternalNoLock(specId string, ne
 		}
 	} else {
 		// replication spec has been created or updated
+		parentSpec := newSpec.GetReplicationSpec()
+		if parentSpec != nil && parentSpec.Settings != nil && parentSpec.Settings.GetIntSettingValue(metadata.DevBackfillReplUpdateDelay) > 0 {
+			msToSleep := parentSpec.Settings.GetIntSettingValue(metadata.DevBackfillReplUpdateDelay)
+			time.Sleep(time.Duration(msToSleep) * time.Millisecond)
+		}
 
 		// no need to update cache if newSpec is the same as the one already in cache
 		if oldSpec == nil || !newSpec.SameAs(oldSpec) {

@@ -28,6 +28,8 @@ const (
 	DevCkptMgrForceGCWaitSec          = base.DevCkptMgrForceGCWaitSec
 	DevColManifestSvcDelaySec         = base.DevColManifestSvcDelaySec
 	DevNsServerPortSpecifier          = base.DevNsServerPortSpecifier
+	DevBucketTopologyLegacyDelay      = base.DevBucketTopologyLegacyDelay
+	DevBackfillReplUpdateDelay        = base.DevBackfillReplUpdateDelay
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
 	ActiveKey                         = "active"
@@ -116,7 +118,7 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
-	DevNsServerPortSpecifier}
+	DevNsServerPortSpecifier, DevBucketTopologyLegacyDelay, DevBackfillReplUpdateDelay}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -150,6 +152,7 @@ var XDCRDevBackfillPipelineRollbackConfig = &SettingsConfig{-1 /*vbno*/, &Range{
 var XDCRDevCkptGcWaitConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
 var XDCRDevColManifestSvcDelayConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
 var XDCRDevNsServerPortSpecifierConfig = &SettingsConfig{0 /*not specified*/, &Range{0, 65535}}
+var XDCRDevBackfillReplUpdateDelayConfig = &SettingsConfig{0 /*not specified*/, &Range{0, 100000}}
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
 var ActiveConfig = &SettingsConfig{true, nil}
@@ -202,6 +205,9 @@ var ReplicateCkptIntervalConfig = &SettingsConfig{int(base.ReplicateCkptInterval
 
 var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 
+// In seconds
+var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
+
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
@@ -210,6 +216,8 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevCkptMgrForceGCWaitSec:          XDCRDevCkptGcWaitConfig,
 	DevColManifestSvcDelaySec:         XDCRDevColManifestSvcDelayConfig,
 	DevNsServerPortSpecifier:          XDCRDevNsServerPortSpecifierConfig,
+	DevBucketTopologyLegacyDelay:      XDCRDevBucketTopologyLevacyDelayConfig,
+	DevBackfillReplUpdateDelay:        XDCRDevBackfillReplUpdateDelayConfig,
 	ReplicationTypeKey:                ReplicationTypeConfig,
 	FilterExpressionKey:               FilterExpressionConfig,
 	ActiveKey:                         ActiveConfig,
