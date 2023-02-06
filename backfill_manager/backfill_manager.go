@@ -10,6 +10,12 @@ package backfill_manager
 
 import (
 	"fmt"
+	"math"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -18,11 +24,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
-	"math"
-	"reflect"
-	"strings"
-	"sync"
-	"time"
 )
 
 // Checkpoint manager can only persist a manifest if and only if any broken maps have already been
@@ -2021,7 +2022,11 @@ func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.Bu
 	}
 	err = handler.HandleBackfillRequest(mergeReq)
 	if err != nil {
-		b.logger.Errorf(fmt.Sprintf("node %v backfill merge request was unable to be merged - %v", nodeName, err))
+		if err == errorPeerVBTasksAlreadyContained {
+			b.logger.Warnf(fmt.Sprintf("node %v backfill merge request was unable to be merged - %v", nodeName, err))
+		} else {
+			b.logger.Errorf(fmt.Sprintf("node %v backfill merge request was unable to be merged - %v", nodeName, err))
+		}
 		return err
 	}
 	return nil
