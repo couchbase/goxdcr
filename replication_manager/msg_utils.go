@@ -452,7 +452,6 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 			// cannot proceed if encryptionType is invalid
 			return
 		}
-
 	}
 
 	validateRemoteClusterParameters(name, hostName, secureType, userName, password, hostnameMode, certificate, clientCertificate, clientKey, errorsMap)
@@ -464,6 +463,12 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 
 	if len(errorsMap) == 0 {
 		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, hostnameMode, demandEncryption, encryptionType, certificate, clientCertificate, clientKey, &base2.DnsSrvHelper{})
+	}
+
+	if remoteClusterRef.IsCapellaHostname() && !remoteClusterRef.IsFullEncryption() {
+		// Don't even try non-TLS as Capella won't allow any non-TLS ports opened to the outside world
+		// Even with VPC peering, Capella control-plane will always create fully secure replication
+		errorsMap[base.RemoteClusterHostName] = metadata.ErrorCapellaNeedsTLS
 	}
 
 	return
@@ -483,7 +488,7 @@ func validateRemoteClusterParameters(name, hostName, secureType, userName, passw
 	if secureType != base.SecureTypeFull && len(password) == 0 {
 		errorsMap[base.RemoteClusterPassword] = errors.New("password must be given when secure type is not full")
 	}
-	if secureType == base.SecureTypeFull && len(certificate) == 0 {
+	if secureType == base.SecureTypeFull && len(certificate) == 0 && !metadata.IsCapellaHostname(hostName) {
 		errorsMap[base.RemoteClusterCertificate] = errors.New("certificate must be given when secure type is full")
 	}
 

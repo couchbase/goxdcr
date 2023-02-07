@@ -385,3 +385,34 @@ func TestEnforceIP_TLS(t *testing.T) {
 	assert.Nil(connErr)
 	assert.True(connStr == base.GetHostAddr(localhostARecord, 18091) || connStr == base.GetHostAddr(localhostArecord2, 18091))
 }
+
+func TestCapellaNoTLS(t *testing.T) {
+	fmt.Println("============== Test case start: TestCapellaNoTLS =================")
+	defer fmt.Println("============== Test case done: TestCapellaNoTLS =================")
+	assert := assert.New(t)
+
+	// Dummy cloud name
+	hostname := "abc.xyz.cloud.couchbase.com"
+	// Non-Full encryption reference
+	nonSecureRef, _ := NewRemoteClusterReference("testsUuid", "testName", hostname, "testUserName", "testPassword",
+		"", false, "", nil, nil, nil, nil)
+
+	assert.Equal(ErrorCapellaNeedsTLS, nonSecureRef.ValidateCertificates())
+}
+
+func TestCapellaTLS(t *testing.T) {
+	fmt.Println("============== Test case start: TestCapellaTLS =================")
+	defer fmt.Println("============== Test case done: TestCapellaTLS =================")
+	assert := assert.New(t)
+
+	// Dummy cloud name
+	hostname := "abc.xyz.cloud.couchbase.com"
+	// Full encryption reference
+	secureRef, _ := NewRemoteClusterReference("testsUuid", "testName", hostname, "testUserName", "testPassword",
+		"", true, EncryptionType_Full, nil, nil, nil, nil)
+
+	assert.Equal([]byte(CapellaCert), secureRef.Certificates())
+	assert.Nil(secureRef.ValidateCertificates())
+	_, _, _, validateCert, _, _, _, _ := secureRef.MyCredentials()
+	assert.NotNil(validateCert)
+}
