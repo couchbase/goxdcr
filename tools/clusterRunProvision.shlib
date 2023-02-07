@@ -1377,7 +1377,7 @@ function findCbWorkloadGen {
 function runCbWorkloadGenBucket {
 	local clusterName=$1
 	local bucketName=$2
-	local numItems=${3:-10000}
+	local numItems="${3:-10000}"
 	local prefix="${4:-xdcrProv_$clusterName}"
 	local i
 	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]]; then

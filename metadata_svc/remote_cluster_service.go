@@ -11,9 +11,6 @@ package metadata_svc
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -2685,6 +2682,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
 	}
+
 	if service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict() {
 		if ref.IsEncryptionEnabled() == false || ref.EncryptionType() != metadata.EncryptionType_Full {
 			return wrapAsInvalidRemoteClusterError(base.ErrorRemoteClusterFullEncryptionRequired.Error())
@@ -3107,46 +3105,8 @@ func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (st
 func (service *RemoteClusterService) validateCertificates(ref *metadata.RemoteClusterReference) error {
 	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("validateCertificates(%v)", ref.Name()), base.DiagInternalThreshold)
 	defer stopFunc()
-	refCertificates := ref.Certificates()
-	if len(refCertificates) == 0 {
-		return nil
-	}
 
-	// check validity of server root certificates
-	var rootCerts []*x509.Certificate
-	for {
-		var block *pem.Block
-		block, refCertificates = pem.Decode(refCertificates)
-		if block == nil {
-			break
-		}
-		certificate, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return fmt.Errorf("Failed to parse certificate. err=%v", err)
-		}
-
-		// check the signature of certificate
-		err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
-		if err != nil {
-			return fmt.Errorf("Error validating the signature of certificate. err=%v", err)
-		}
-		rootCerts = append(rootCerts, certificate)
-	}
-	// We should have at least one root certificate
-	if len(rootCerts) == 0 {
-		return base.InvalidCerfiticateError
-	}
-	// check validity of client certificate if it has been provided
-	refClientCertificate := ref.ClientCertificate()
-	if len(refClientCertificate) == 0 {
-		return nil
-	}
-
-	_, err := tls.X509KeyPair(refClientCertificate, ref.ClientKey())
-	if err != nil {
-		return fmt.Errorf("Error parsing client certificate. err=%v", err)
-	}
-	return nil
+	return ref.ValidateCertificates()
 }
 
 func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *metadata.RemoteClusterReference, hostName string, port uint16, err error) error {

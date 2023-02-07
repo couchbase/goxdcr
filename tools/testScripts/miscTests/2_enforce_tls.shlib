@@ -444,6 +444,7 @@ function runTestCase {
 		exit $?
 	fi
 
+	sleep 10
 	runCbWorkloadGenBucket "C1" "B1" 10000
 
 	grepForPanics

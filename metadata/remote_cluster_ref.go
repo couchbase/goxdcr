@@ -10,7 +10,10 @@ package metadata
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
 	baseH "github.com/couchbase/goxdcr/base/helpers"
@@ -45,6 +48,36 @@ const (
 	HostnameMode_Internal string = "default"  // To be consistent as goCBv2
 )
 
+// As a way to provide user a seemless experience to migrate data from on-prem
+// to Capella, this trusted root CA for signing capella clusters is provided here
+// The certificate expires in 2029
+const CapellaCert = `
+-----BEGIN CERTIFICATE-----
+MIIDFTCCAf2gAwIBAgIRANLVkgOvtaXiQJi0V6qeNtswDQYJKoZIhvcNAQELBQAw
+JDESMBAGA1UECgwJQ291Y2hiYXNlMQ4wDAYDVQQLDAVDbG91ZDAeFw0xOTEyMDYy
+MjEyNTlaFw0yOTEyMDYyMzEyNTlaMCQxEjAQBgNVBAoMCUNvdWNoYmFzZTEOMAwG
+A1UECwwFQ2xvdWQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCfvOIi
+enG4Dp+hJu9asdxEMRmH70hDyMXv5ZjBhbo39a42QwR59y/rC/sahLLQuNwqif85
+Fod1DkqgO6Ng3vecSAwyYVkj5NKdycQu5tzsZkghlpSDAyI0xlIPSQjoORA/pCOU
+WOpymA9dOjC1bo6rDyw0yWP2nFAI/KA4Z806XeqLREuB7292UnSsgFs4/5lqeil6
+rL3ooAw/i0uxr/TQSaxi1l8t4iMt4/gU+W52+8Yol0JbXBTFX6itg62ppb/Eugmn
+mQRMgL67ccZs7cJ9/A0wlXencX2ohZQOR3mtknfol3FH4+glQFn27Q4xBCzVkY9j
+KQ20T1LgmGSngBInAgMBAAGjQjBAMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYE
+FJQOBPvrkU2In1Sjoxt97Xy8+cKNMA4GA1UdDwEB/wQEAwIBhjANBgkqhkiG9w0B
+AQsFAAOCAQEARgM6XwcXPLSpFdSf0w8PtpNGehmdWijPM3wHb7WZiS47iNen3oq8
+m2mm6V3Z57wbboPpfI+VEzbhiDcFfVnK1CXMC0tkF3fnOG1BDDvwt4jU95vBiNjY
+xdzlTP/Z+qr0cnVbGBSZ+fbXstSiRaaAVcqQyv3BRvBadKBkCyPwo+7svQnScQ5P
+Js7HEHKVms5tZTgKIw1fbmgR2XHleah1AcANB+MAPBCcTgqurqr5G7W2aPSBLLGA
+fRIiVzm7VFLc7kWbp7ENH39HVG6TZzKnfl9zJYeiklo5vQQhGSMhzBsO70z4RRzi
+DPFAN/4qZAgD5q3AFNIq2WWADFQGSwVJhg==
+-----END CERTIFICATE-----`
+
+const CapellaHostnameSuffix = ".cloud.couchbase.com"
+
+func IsCapellaHostname(hostname string) bool {
+	return strings.Contains(hostname, CapellaHostnameSuffix)
+}
+
 /*
 ***********************************
 /* struct RemoteClusterReference
@@ -62,7 +95,10 @@ type RemoteClusterReference struct {
 
 	DemandEncryption_ bool   `json:"DemandEncryption"`
 	EncryptionType_   string `json:"EncryptionType"`
-	Certificate_      []byte `json:"Certificate"`
+	// Certificate_ contains user entered data only. Readers should call Certificates() or certificatesNoLock() to
+	// ensure that access to Capella will not be interrupted. This way, if the Capella default's cert is updated, this
+	// field shall continue to remain empty and no metadata upgrade needs to take place
+	Certificate_ []byte `json:"Certificate"`
 	// hostname to use when making https connection
 	HttpsHostName_    string            `json:"HttpsHostName"`
 	SANInCertificate_ bool              `json:"SANInCertificate"`
@@ -301,7 +337,7 @@ func (ref *RemoteClusterReference) CloneAndRedact() *RemoteClusterReference {
 func (ref *RemoteClusterReference) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error) {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
-	return ref.UserName_, ref.Password_, ref.HttpAuthMech_, ref.Certificate_, ref.SANInCertificate_, ref.ClientCertificate_, ref.ClientKey_, nil
+	return ref.UserName_, ref.Password_, ref.HttpAuthMech_, ref.certificatesNoLock(), ref.SANInCertificate_, ref.ClientCertificate_, ref.ClientKey_, nil
 }
 
 // convert to a map for output
@@ -658,6 +694,18 @@ func (ref *RemoteClusterReference) HostName() string {
 	return ref.HostName_
 }
 
+func (ref *RemoteClusterReference) IsCapellaHostname() bool {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return ref.isCapellaHostnameNoLock()
+}
+
+func (ref *RemoteClusterReference) isCapellaHostnameNoLock() bool {
+	return strings.Contains(ref.HostName_, CapellaHostnameSuffix) ||
+		strings.Contains(ref.ActiveHostName_, CapellaHostnameSuffix) ||
+		strings.Contains(ref.ActiveHttpsHostName_, CapellaHostnameSuffix)
+}
+
 func (ref *RemoteClusterReference) SetHostName(name string) {
 	ref.mutex.Lock()
 	defer ref.mutex.Unlock()
@@ -763,6 +811,17 @@ func (ref *RemoteClusterReference) SetHttpAuthMech(authMech base.HttpAuthMech) {
 func (ref *RemoteClusterReference) Certificates() []byte {
 	ref.mutex.RLock()
 	defer ref.mutex.RUnlock()
+	return ref.certificatesNoLock()
+}
+
+func (ref *RemoteClusterReference) certificatesNoLock() []byte {
+	// As part of making transition to Capella simple, CBServer is now going to
+	// allow remote cluster to be created to a Capella Cluster even if the user did not provide
+	// a specific root cert
+	if len(ref.Certificate_) == 0 && ref.isCapellaHostnameNoLock() {
+		return []byte(CapellaCert)
+	}
+
 	return ref.Certificate_
 }
 
@@ -910,6 +969,7 @@ func (ref *RemoteClusterReference) getSRVLookupHostnameNoLock() (string, error) 
 
 var ErrorNonSRV error = fmt.Errorf("Cannot call RefreshSRVEntries on a non-SRV entry")
 var ErrorNoLongerSRV error = fmt.Errorf("Hostname was an SRV entry, but now is no longer an SRV entry")
+var ErrorCapellaNeedsTLS error = fmt.Errorf("References to Capella requires Full Encryption to be enabled")
 
 // When entries are refreshed, the remote cluster's reference, which should be a SRV
 // is re-pulled. All the cached DNS SRV entries targets status's are cleared
@@ -1131,6 +1191,56 @@ func (ref *RemoteClusterReference) getHostNameForOutputNoLock() interface{} {
 	} else {
 		return ref.HostName_
 	}
+}
+
+func (ref *RemoteClusterReference) ValidateCertificates() error {
+	refCertificates := ref.Certificates()
+	if len(refCertificates) == 0 {
+		return nil
+	}
+
+	// If the certs being returned are all part of the Capella trusted CA, and they do not enable TLS
+	// We should not let this through to prevent unsecure data leakage
+	if ref.IsCapellaHostname() && !ref.IsFullEncryption() {
+		return ErrorCapellaNeedsTLS
+	}
+
+	// check validity of server root certificates
+	var rootCerts []*x509.Certificate
+	for {
+		var block *pem.Block
+		block, refCertificates = pem.Decode(refCertificates)
+		if block == nil {
+			break
+		}
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("Failed to parse certificate. err=%v", err)
+		}
+
+		// check the signature of certificate
+		err = certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature)
+		if err != nil {
+			return fmt.Errorf("Error validating the signature of certificate. err=%v", err)
+		}
+		rootCerts = append(rootCerts, certificate)
+	}
+	// We should have at least one root certificate
+	if len(rootCerts) == 0 {
+		return base.InvalidCerfiticateError
+	}
+	// check validity of client certificate if it has been provided
+	refClientCertificate := ref.ClientCertificate()
+	if len(refClientCertificate) == 0 {
+		return nil
+	}
+
+	_, err := tls.X509KeyPair(refClientCertificate, ref.ClientKey())
+	if err != nil {
+		return fmt.Errorf("Error parsing client certificate. err=%v", err)
+	}
+
+	return nil
 }
 
 type ConnectivityStatus int
