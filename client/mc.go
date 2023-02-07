@@ -53,6 +53,7 @@ type ClientIface interface {
 	ObserveSeq(vb uint16, vbuuid uint64) (result *ObserveSeqResult, err error)
 	Receive() (*gomemcached.MCResponse, error)
 	ReceiveWithDeadline(deadline time.Time) (*gomemcached.MCResponse, error)
+	Replica() bool
 	Send(req *gomemcached.MCRequest) (rv *gomemcached.MCResponse, err error)
 	Set(vb uint16, key string, flags int, exp int, body []byte, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	SetKeepAliveOptions(interval time.Duration)
@@ -810,6 +811,10 @@ func (c *Client) LastBucket() string {
 // Read from replica setting
 func (c *Client) SetReplica(r bool) {
 	c.replica = r
+}
+
+func (c *Client) Replica() bool {
+	return c.replica
 }
 
 func (c *Client) store(opcode gomemcached.CommandCode, vb uint16,
