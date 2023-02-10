@@ -60,7 +60,7 @@ function checkItemCnt {
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
-	read -p "NEIL DEBUG"
+	read -p "Press any key once done investigating"
 	dumpDebugInfoBeforeExit
 	exit 1
 }

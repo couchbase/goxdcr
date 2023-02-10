@@ -90,20 +90,20 @@ function runTestCase {
 	sleep 1
 	resumeReplication "C1" "B1" "C2" "B2"
 
-  echo "Waiting 30 seconds and then pausing and changing back to collection to collection mapping"
+	echo "Waiting 30 seconds and then pausing and changing back to collection to collection mapping"
 	sleep 30
 	# When resume happens, backfill should start, but it'll be slow because of the injection
 	# Pause and then change
 	pauseReplication "C1" "B1" "C2" "B2"
 	sleep 15
 
-  # Change setting, then resume
+	# Change setting, then resume
 	echo "Changing explicit mapping - target collection S1.col3 should now receive backfill"
 	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2","S1.col3":"S1.col3"}'
 	sleep 1
 	resumeReplication "C1" "B1" "C2" "B2"
 
-  echo "Waiting 30 seconds and then pausing and changing back to scope-to-scope mapping"
+	echo "Waiting 30 seconds and then pausing and changing back to scope-to-scope mapping"
 	sleep 30
 	pauseReplication "C1" "B1" "C2" "B2"
 	sleep 15
@@ -111,7 +111,7 @@ function runTestCase {
 	sleep 1
 	resumeReplication "C1" "B1" "C2" "B2"
 
-  echo "Waiting 30 seconds and then pausing and changing back to scope-to-scope mapping"
+	echo "Waiting 30 seconds and then pausing and changing back to scope-to-scope mapping"
 	sleep 30
 	pauseReplication "C1" "B1" "C2" "B2"
 	sleep 15

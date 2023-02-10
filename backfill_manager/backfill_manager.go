@@ -254,8 +254,7 @@ type BackfillRetryRequest struct {
 	handler                    *BackfillRequestHandler
 }
 
-func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc, replSpecSvc service_def.ReplicationSpecSvc, backfillReplSvc service_def.BackfillReplSvc, pipelineMgr pipeline_manager.PipelineMgrBackfillIface, xdcrTopologySvc service_def.XDCRCompTopologySvc, checkpointsSvc service_def.CheckpointsService, bucketTopologySvc service_def.BucketTopologySvc) *BackfillMgr {
-
+func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSvc, replSpecSvc service_def.ReplicationSpecSvc, backfillReplSvc service_def.BackfillReplSvc, pipelineMgr pipeline_manager.PipelineMgrBackfillIface, xdcrTopologySvc service_def.XDCRCompTopologySvc, checkpointsSvc service_def.CheckpointsService, bucketTopologySvc service_def.BucketTopologySvc, utils utils.UtilsIface) *BackfillMgr {
 	backfillMgr := &BackfillMgr{
 		collectionsManifestSvc:            collectionsManifestSvc,
 		replSpecSvc:                       replSpecSvc,
@@ -269,7 +268,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		xdcrTopologySvc:                   xdcrTopologySvc,
 		pipelineSvc:                       &pipelineSvcWrapper{},
 		checkpointsSvc:                    checkpointsSvc,
-		utils:                             utils.NewUtilities(),
+		utils:                             utils,
 		replSpecHandlerMap:                make(map[string]*replSpecHandler),
 		finCh:                             make(chan bool),
 		retrySpecRemovalCh:                make(chan string, 5),
@@ -288,7 +287,6 @@ func (b *BackfillMgr) Start() error {
 
 	b.pipelineSvc.backfillMgr = b
 
-	// TODO - once consistent metakv is in, these should all be moved into a metadata_change_monitor
 	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.collectionsManifestChangeCb)
 	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.backfillReplSpecChangeHandlerCallback)
 	b.backfillReplSvc.SetMetadataChangeHandlerCallback(b.checkpointsSvc.BackfillReplicationSpecChangeCallback)
@@ -372,15 +370,6 @@ func (b *BackfillMgr) initCache() error {
 		err := b.retrieveLastPersistedManifest(spec)
 		if err != nil {
 			b.logger.Errorf("Retrieving manifest for spec %v returned %v", replId, err)
-			// Fill it up with default manifest
-			b.cacheMtx.Lock()
-			defaultManifest := metadata.NewDefaultCollectionsManifest()
-			b.cacheSpecSourceMap[replId] = &defaultManifest
-			// Create a map entry - setting this value depends on when pipeline starts
-			b.cacheSpecLastSuccessfulManifestId[replId] = defaultManifest.Uid()
-			b.cacheSpecTargetMap[replId] = &defaultManifest
-			b.cacheMtx.Unlock()
-			// Default with default manifest in case of error
 		}
 		err = b.createBackfillRequestHandler(spec)
 		if err != nil {
@@ -489,12 +478,25 @@ func (b *BackfillMgr) deleteBackfillRequestHandler(replId, internalId string) er
 }
 
 func (b *BackfillMgr) retrieveLastPersistedManifest(spec *metadata.ReplicationSpecification) error {
+	// Returns non-nil err if neither source nor target were retrieved
 	manifestPair, err := b.collectionsManifestSvc.GetLastPersistedManifests(spec)
-	if err != nil {
-		return err
+
+	// If neither or at least one is not retrieved, default to default manifest
+	if err != nil || manifestPair.Source == nil || manifestPair.Target == nil {
+		if err != nil {
+			b.logger.Warnf("GetLastPersistedManifests(%v) returned %v", spec.Id, err)
+			manifestPair = &metadata.CollectionsManifestPair{}
+		}
+		defaultManifest := metadata.NewDefaultCollectionsManifest()
+		if manifestPair.Source == nil {
+			manifestPair.Source = &defaultManifest
+		}
+		if manifestPair.Target == nil {
+			manifestPair.Target = &defaultManifest
+		}
 	}
 	b.cacheMtx.Lock()
-	b.logger.Infof("Backfill Manager for replication %v received last persisted manifests of %v and %v",
+	b.logger.Infof("Backfill Manager for replication %v initialized last persisted manifests of %v and %v",
 		spec.Id, manifestPair.Source, manifestPair.Target)
 	b.cacheSpecSourceMap[spec.Id] = manifestPair.Source
 	b.cacheSpecLastSuccessfulManifestId[spec.Id] = manifestPair.Source.Uid()
@@ -1589,16 +1591,43 @@ func (b *BackfillMgr) SetLastSuccessfulSourceManifestId(specId string, manifestI
 	// This method is called by checkpoint mgr when resuming a pipeline... and if somehow the pipeline checkpoint resumes
 	// before the init process has been completed, then this needs to wait to ensure a proper diff
 	setFunc := func(interface{}) (interface{}, error) {
-		b.cacheMtx.Lock()
+		var rollForwardSrcManifestId uint64
+		var rollForwardSrcManifest *metadata.CollectionsManifest
+		var err error
 
-		_, found := b.cacheSpecLastSuccessfulManifestId[specId]
+		b.cacheMtx.RLock()
+		lastSuccesfulSrcManifestId, found := b.cacheSpecLastSuccessfulManifestId[specId]
 		if !found {
 			// Means this spec hasn't been initialized yet
-			b.cacheMtx.Unlock()
+			b.cacheMtx.RUnlock()
 			return nil, base.ErrorNotFound
 		}
 
+		if lastSuccesfulSrcManifestId == 0 && manifestId > 0 {
+			// This is called when main pipeline starts up and a checkpoint is loaded
+			// When backfill manager's internal state is 0 , yet when a checkpoint is loaded to be non-0
+			// then it probably means that this node is starting this replication for the first time since
+			// inception and p2p has pulled a peer node's checkpoint
+			// To prevent "shows default source manifest, and not under explicit nor migration mode, thus no backfill would be created"
+			// situations, bump this up
+			rollForwardSrcManifestId = manifestId
+		}
+		b.cacheMtx.RUnlock()
+
+		// Do the following without locking
+		if rollForwardSrcManifestId > 0 {
+			// Need only the Id
+			skeletonSpec := &metadata.ReplicationSpecification{Id: specId}
+			rollForwardSrcManifest, err = b.collectionsManifestSvc.GetSpecificSourceManifest(skeletonSpec, rollForwardSrcManifestId)
+			if err != nil {
+				b.logger.Errorf("When trying to fast-forward %v source manifest to %v got %v when retrieving manifest",
+					specId, rollForwardSrcManifestId, err)
+			}
+		}
+
+		b.cacheMtx.Lock()
 		var updated bool
+
 		if dcpRollbackScenario {
 			// rollback scenario set only if lower
 			if manifestId < b.cacheSpecLastSuccessfulManifestId[specId] {
@@ -1609,6 +1638,11 @@ func (b *BackfillMgr) SetLastSuccessfulSourceManifestId(specId string, manifestI
 			// non rollback scenario set only if non-0
 			updated = true
 			b.cacheSpecLastSuccessfulManifestId[specId] = manifestId
+			if rollForwardSrcManifestId > 0 && rollForwardSrcManifest != nil {
+				b.logger.Infof("Spec %v source manifest roll forwarded to %v due to checkpoint resume",
+					specId, rollForwardSrcManifestId)
+				b.cacheSpecSourceMap[specId] = rollForwardSrcManifest
+			}
 		}
 		currentSourceManifest := b.cacheSpecSourceMap[specId].Clone()
 		currentTargetManifest := b.cacheSpecTargetMap[specId].Clone()

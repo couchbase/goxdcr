@@ -57,6 +57,8 @@ function runOneReplicationCycleAndPause {
 	local checkInt
 	setupCluster
 	setupTopologies
+	sleep 10
+
 	# Shorten the amount of time pipeline restarts
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
 	sleep 5
@@ -94,8 +96,8 @@ function runOneReplicationCycleAndPause {
 	createScope "C2" "B1" "S1"
 	createCollection "C2" "B1" "S1" "col1"
 
-	echo "Sleeping 30 secs for backfill to start"
-	sleep 30
+	echo "Sleeping 60 secs for backfill to start"
+	sleep 60
 
 	# Once all is done, pause to create checkpoints
 	pauseReplication "C1" "B0" "C2" "B1"
@@ -133,6 +135,7 @@ function runTestCase {
 	# Run a resume and pause immediately to get the VB
 	runReplicationResume
 	pauseReplication "C1" "B0" "C2" "B1"
+	sleep 15
 	local VBToRollback
 	VBToRollback=$(getNon0StartingBackfillVB "C1" "C2" "B0" "B1")
 	if ((!$? == 0)); then

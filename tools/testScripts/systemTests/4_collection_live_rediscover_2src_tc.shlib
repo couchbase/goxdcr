@@ -11,8 +11,10 @@
 # =============================
 # cluster -> Bucket(s)
 # -----------------
-CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
@@ -25,13 +27,12 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-#pcre_filter='REGEXP_CONTAINS(click, "q(?!uit)")'
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]=${scope1Arr[@]})
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
 
 # Scopes -> Collections
 # ----------------------
@@ -42,19 +43,90 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
 	waitForBgJobs
 }
 
-OLD_CBWORKLOAD_COLLECTION_NUM_ITEMS="$CBWORKLOAD_COLLECTION_NUM_ITEMS"
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+function dismissLevel0 {
+	local eventId
+	getBrokenMapEntryId "C1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function dismissLevel1 {
+	local eventId
+	getBrokenMapEntryId "C1" "S1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function dismissLevel2 {
+	local eventId
+	getBrokenMapEntryId "C1" "S1" "col1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+	getBrokenMapEntryId "C1" "S1" "col2"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function dismissLevel3 {
+	local eventId
+	getBrokenMapEntryId "C1" "S1" "col1" "S1" "col1"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+	getBrokenMapEntryId "C1" "S1" "col2" "S1" "col2"
+	eventId=$?
+	if (($eventId == $GET_BROKEN_MAP_NOT_FOUND)); then
+		exit 1
+	fi
+	setReplicationSettings "C1" "B1" "C2" "B2" "dismissEvent=$eventId"
+}
+
+function pickARandomLevelToDismissBrokenMap {
+	randomCase=$(echo $(($RANDOM % 4)))
+	echo "Randomly picking to dismiss broken map with level $randomCase..."
+	case $randomCase in
+	0)
+		dismissLevel0
+		;;
+	1)
+		dismissLevel1
+		;;
+	2)
+		dismissLevel2
+		;;
+	3)
+		dismissLevel3
+		;;
+	esac
+}
 
 function cleanupTestCaseInternalSettings {
 	resetCustomManifestRefreshInterval "C1"
-	CBWORKLOAD_COLLECTION_NUM_ITEMS="$OLD_CBWORKLOAD_COLLECTION_NUM_ITEMS"
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running live rediscover test case with one mutation"
+	echo "Running live rediscover test case"
 	echo "============================================================================"
 	testForClusterRun
 	if (($? != 0)); then
@@ -69,9 +141,16 @@ function runTestCase {
 	# Before doing provisioning, get old internal settings
 	setCustomManifestRefreshInterval "C1"
 
-	# For this test case, only execute 1 item
-	deleteCollection "C2" "B2" "S1" "col1"
-	CBWORKLOAD_COLLECTION_NUM_ITEMS=1
+	local checkInterval=10
+	local maxChangeCnt=3
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap cleanupTestCaseInternalSettings EXIT
@@ -83,7 +162,6 @@ function runTestCase {
 	local -i currentVBTasksDoneInstanceCnt
 	local -i currentBackfillAppendInstanceCnt
 	local -i currentBackfillOsoDocCnt
-	local -i currentBackfillPipelineDoneCnt
 
 	local currentClusterLog
 	currentClusterLog=$(getClusterLogs "C1")
@@ -96,12 +174,6 @@ function runTestCase {
 	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
 	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
 	currentBackfillOsoDocCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_BACKFILL_COUNT")
-	currentBackfillPipelineDoneCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_PIPELINE_TORNDOWN_MSG")
-
-	runDataLoad
-	echo "Waiting 5 seconds before checking item count first pass"
-	sleep 5
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
@@ -112,18 +184,34 @@ function runTestCase {
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
 
+	addNodesIn
+	sleep 5
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	runDataLoad
+	echo "Waiting 5 seconds before checking item count first pass"
+	sleep 5
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" 0
+
 	# Then re-setup the implicit matching that matches
+	createScope "C2" "B2" "S1"
 	createCollection "C2" "B2" "S1" "col1"
-	echo "Sleeping 30 seconds for discovery and automatic backfill"
-	sleep 30
+	createCollection "C2" "B2" "S1" "col2"
+
+	echo "Sleeping 60 seconds for discovery and automatic backfill"
+	sleep 60
+
 	printGlobalScopeAndCollectionInfo
 
 	# After sleeping, the backfill manager should have triggered the backfill
-	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
-	# Backfill pipeline should have been torn down
-	validateInternalLogWithInstance "C1" "$BACKFILL_PIPELINE_TORNDOWN_MSG" $(($currentBackfillPipelineDoneCnt + 1)) $(($currentBackfillPipelineDoneCnt + 2))
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
 
 	echo "============================================================================"
 	echo "PASSED"

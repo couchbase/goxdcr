@@ -661,15 +661,20 @@ func TestNoIntersectionDiff(t *testing.T) {
 	assert.Equal(1, len(removed))
 }
 
-//      "name": "S2",
-//          "name": "col3",
-//          "name": "col2",
-//          "name": "col1",
-//      "name": "S1",
-//          "name": "col2",
-//          "name": "col1",
-//      "name": "_default",
-//          "name": "_default",
+// "name": "S2",
+//
+//	"name": "col3",
+//	"name": "col2",
+//	"name": "col1",
+//
+// "name": "S1",
+//
+//	"name": "col2",
+//	"name": "col1",
+//
+// "name": "_default",
+//
+//	"name": "_default",
 func TestExplicitMapping(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestExplicitMapping =================")
@@ -844,15 +849,20 @@ func TestListIsSubset(t *testing.T) {
 	assert.False(list1.IsSame(list2))
 }
 
-//      "name": "S2",
-//          "name": "col3",
-//          "name": "col2",
-//          "name": "col1",
-//      "name": "S1",
-//          "name": "col2",
-//          "name": "col1",
-//      "name": "_default",
-//          "name": "_default",
+// "name": "S2",
+//
+//	"name": "col3",
+//	"name": "col2",
+//	"name": "col1",
+//
+// "name": "S1",
+//
+//	"name": "col2",
+//	"name": "col1",
+//
+// "name": "_default",
+//
+//	"name": "_default",
 func TestMigrationMapping(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestMigrationMapping =================")
