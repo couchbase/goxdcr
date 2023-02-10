@@ -96,6 +96,10 @@ function runTestCase {
 
 	runDataLoad
 
+	# Account for no-op backfill
+	currentBackfillInstanceCnt=$(($currentBackfillInstanceCnt + 1))
+	currentVBTasksDoneInstanceCnt=$(($currentVBTasksDoneInstanceCnt + 1))
+
 	echo "VALIDATING Data..."
 	validateCbWorkloadGenCollection "C2" "B2" "S3" "col3" "C1" "B1" "S1" "col1"
 
@@ -122,8 +126,8 @@ function runTestCase {
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
 	# 2 oso mode because one for each DCP nozzle
-	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(($currentOsoModeCnt + 2))
-	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1)) $(($currentBackfillOsoDocCnt + 3))
+	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(($currentOsoModeCnt + 1)) $(($currentOsoModeCnt + 4))
+	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1)) $(($currentBackfillOsoDocCnt + 4))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

@@ -85,6 +85,10 @@ function runTestCase {
 
 	runDataLoad
 
+	# Account for no-op backfill
+	currentBackfillInstanceCnt=$(($currentBackfillInstanceCnt + 1))
+	currentVBTasksDoneInstanceCnt=$(($currentVBTasksDoneInstanceCnt + 1))
+
 	echo "VALIDATING Data..."
 	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
 

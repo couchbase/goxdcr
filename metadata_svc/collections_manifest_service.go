@@ -271,11 +271,19 @@ func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.Replicati
 
 // This is used during startup so that Backfill Manager knows what was the last persisted was and figure out differences from here on out
 func (c *CollectionsManifestService) GetLastPersistedManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error) {
-	agent, err := c.getAgent(spec)
-	if err != nil {
-		defaultPair := &metadata.CollectionsManifestPair{&defaultManifest, &defaultManifest}
-		return defaultPair, err
+	var agent *CollectionsManifestAgent
+	var err error
+	getAgentOp := func() error {
+		var innerErr error
+		agent, innerErr = c.getAgent(spec)
+		return innerErr
 	}
+	err = c.utilities.ExponentialBackoffExecutor(fmt.Sprintf("GetLastPersistedManifests.getAgent(%v)", spec.Id),
+		base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, getAgentOp)
+	if err != nil {
+		return nil, err
+	}
+
 	return agent.GetLastPersistedManifests()
 }
 
@@ -424,7 +432,10 @@ type CollectionsManifestAgent struct {
 
 	// atomics to prevent races
 	started                uint32
-	loadedFromMetakv       uint32
+	srcLoadedFromMetakv    bool
+	tgtLoadedFromMetaKv    bool
+	metakvInitDone         chan bool
+	refreshAndNotifyIsRdy  chan bool
 	persistHandlerStarted  uint32
 	singlePersistReq       chan bool
 	singlePersistResultReq chan bool
@@ -453,6 +464,8 @@ func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.Remot
 		singlePersistReq:       make(chan bool, 1),
 		singlePersistResultReq: make(chan bool, 10),
 		singlePersistResp:      make(chan AgentPersistResult, 11),
+		metakvInitDone:         make(chan bool),
+		refreshAndNotifyIsRdy:  make(chan bool),
 	}
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
 	manifestAgent.sourceCache[0] = &defaultManifest
@@ -492,11 +505,7 @@ func (a *CollectionsManifestAgent) notifyManifestsChange(oldSrc, newSrc, oldTgt,
 	}
 }
 
-func (a *CollectionsManifestAgent) runPeriodicRefresh(refreshImmediately bool) {
-	if refreshImmediately {
-		a.refreshAndNotify(true /*refreshImmediately*/)
-	}
-
+func (a *CollectionsManifestAgent) runPeriodicRefresh() {
 	ticker := time.NewTicker(base.TopologyChangeCheckInterval)
 	defer ticker.Stop()
 
@@ -655,6 +664,9 @@ func (a *CollectionsManifestAgent) DeleteManifests() error {
 }
 
 func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr error) {
+	defer func() {
+		close(a.metakvInitDone)
+	}()
 	srcGet, srcErr := a.metakvSvc.GetSourceManifests(a.replicationSpec)
 	tgtGet, tgtErr := a.metakvSvc.GetTargetManifests(a.replicationSpec)
 
@@ -725,9 +737,25 @@ func (a *CollectionsManifestAgent) loadManifestsFromMetakv() (srcErr, tgtErr err
 		a.tgtMtx.Unlock()
 	}
 
-	if srcErr == nil && tgtErr == nil {
-		atomic.StoreUint32(&a.loadedFromMetakv, 1)
+	if srcErr == nil {
+		a.srcLoadedFromMetakv = true
 	}
+	if tgtErr == nil {
+		a.tgtLoadedFromMetaKv = true
+	}
+
+	a.srcMtx.Lock()
+	if a.sourceCache[0] == nil {
+		a.sourceCache[0] = &defaultManifest
+	}
+	a.srcMtx.Unlock()
+
+	a.tgtMtx.Lock()
+	if a.targetCache[0] == nil {
+		a.targetCache[0] = &defaultManifest
+	}
+	a.tgtMtx.Unlock()
+
 	return
 }
 
@@ -756,14 +784,14 @@ func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() error {
 // These should not block
 func (a *CollectionsManifestAgent) Start() error {
 	if atomic.CompareAndSwapUint32(&a.started, 0, 1) {
+		var refreshImmediately bool
 		if a.tempAgent {
 			err := a.populateRemoteClusterRefOnce()
 			if err != nil {
 				return fmt.Errorf("Temp agent %v unable to populate remote cluster reference %v", a.id, err)
 			}
-			a.refreshAndNotify(true)
+			refreshImmediately = true
 		} else {
-			var refreshImmediately bool
 			srcErr, tgtErr := a.loadManifestsFromMetakv()
 			if srcErr == service_def.MetadataNotFoundErr {
 				refreshImmediately = true
@@ -773,17 +801,16 @@ func (a *CollectionsManifestAgent) Start() error {
 				refreshImmediately = true
 				tgtErr = nil
 			}
-
 			if srcErr != nil || tgtErr != nil {
 				a.logger.Warnf("%v - starting sourceErr: %v tgtErr: %v", a.replicationSpec.Id, srcErr, tgtErr)
-				// For now - since collections isn't officially supported, just log the warning and return nil
-				return nil
+				// Do not return error here as colletions must continue to work
 			}
-
 			go a.populateRemoteClusterRefOnce()
-			go a.runPeriodicRefresh(refreshImmediately)
+			go a.runPeriodicRefresh()
 			go a.runPersistRequestHandler()
 		}
+		a.refreshAndNotify(refreshImmediately)
+		close(a.refreshAndNotifyIsRdy)
 		return nil
 	}
 	return parts.PartAlreadyStartedError
@@ -805,6 +832,8 @@ func (a *CollectionsManifestAgent) GetSourceManifest() (*metadata.CollectionsMan
 	if a.isStopped() {
 		return nil, parts.PartStoppedError
 	}
+
+	<-a.refreshAndNotifyIsRdy
 
 	var err error
 	var oldSrc *metadata.CollectionsManifest
@@ -1004,6 +1033,8 @@ func (a *CollectionsManifestAgent) GetTargetManifest() (*metadata.CollectionsMan
 	if a.isStopped() {
 		return nil, parts.PartStoppedError
 	}
+
+	<-a.refreshAndNotifyIsRdy
 
 	var err error
 	var oldTgt *metadata.CollectionsManifest
@@ -1310,38 +1341,50 @@ func (a *CollectionsManifestAgent) cleanupUnreferredManifests(srcList, tgtList [
 	return err
 }
 
+// Returns error if neither source nor target were persisted
+// Otherwise, return a pair of which if it was persisted, the member would be non-nil
 func (a *CollectionsManifestAgent) GetLastPersistedManifests() (*metadata.CollectionsManifestPair, error) {
-	if atomic.LoadUint32(&a.loadedFromMetakv) == 0 {
-		return nil, fmt.Errorf("metakv manifests Has not been loaded yet")
+	<-a.metakvInitDone
+	if !a.srcLoadedFromMetakv && !a.tgtLoadedFromMetaKv {
+		return nil, fmt.Errorf("no manifests exist in metakv")
 	} else if a.isStopped() {
 		return nil, parts.PartStoppedError
 	}
 
-	a.srcMtx.RLock()
-	srcManifest, ok := a.sourceCache[a.lastSourceStoredManifest]
-	localLastStored := a.lastSourceStoredManifest
-	a.srcMtx.RUnlock()
-	if !ok {
-		if localLastStored > 0 {
-			return nil, fmt.Errorf("Cannot find source manifest version %v", localLastStored)
-		} else {
-			srcManifest = &defaultManifest
+	retVal := &metadata.CollectionsManifestPair{}
+	if a.srcLoadedFromMetakv {
+		a.srcMtx.RLock()
+		srcManifest, ok := a.sourceCache[a.lastSourceStoredManifest]
+		localLastStored := a.lastSourceStoredManifest
+		a.srcMtx.RUnlock()
+		if !ok {
+			if localLastStored > 0 {
+				// Shouldn't be the case
+				return nil, fmt.Errorf("Cannot find source manifest version %v", localLastStored)
+			} else {
+				srcManifest = &defaultManifest
+			}
 		}
+		retVal.Source = srcManifest
 	}
 
-	a.tgtMtx.RLock()
-	tgtManifest, ok := a.targetCache[a.lastTargetStoredManifest]
-	localLastStored = a.lastTargetStoredManifest
-	a.tgtMtx.RUnlock()
-	if !ok {
-		if localLastStored > 0 {
-			return nil, fmt.Errorf("Cannot find manifest version %v", localLastStored)
-		} else {
-			tgtManifest = &defaultManifest
+	if a.tgtLoadedFromMetaKv {
+		a.tgtMtx.RLock()
+		tgtManifest, ok := a.targetCache[a.lastTargetStoredManifest]
+		localLastStored := a.lastTargetStoredManifest
+		a.tgtMtx.RUnlock()
+		if !ok {
+			if localLastStored > 0 {
+				// Shouldn't be the case
+				return nil, fmt.Errorf("Cannot find manifest version %v", localLastStored)
+			} else {
+				tgtManifest = &defaultManifest
+			}
 		}
+		retVal.Target = tgtManifest
 	}
 
-	return &metadata.CollectionsManifestPair{srcManifest, tgtManifest}, nil
+	return retVal, nil
 }
 
 func (a *CollectionsManifestAgent) ForceTargetManifestRefresh() error {

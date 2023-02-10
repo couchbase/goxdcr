@@ -1,0 +1,133 @@
+# Copyright 2021-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A ExplicitReplSlowBackfillProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S1.col1"}' ["collectionsOSOMode"]="false" ["xdcrDevBackfillSendDelayMs"]=1000 ["xdcrDevBackfillReplUpdateDelayMs"]=3000)
+
+# Bucket -> Scopes
+# -----------------
+BUCKET_NAME_SCOPE_MAP=(["B1"]="S1" ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2" "col3" "col4")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
+
+function runDataLoad {
+	# Run CBWorkloadgen in parallel
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col3" &
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col4" &
+	waitForBgJobs
+}
+
+declare -i ORIG_TARGET_MAN_PULL_INTERVAL
+
+function runTestCase {
+	echo "==============================================================================="
+	echo "Running explicit mapping test case - add new mapping when pipeline is suspended"
+	echo "==============================================================================="
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# First setup mis-matching mapping meaning all the data reside in C1
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	local -i checkCount1col
+	checkCount1col=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 1))
+	local -i checkCount2col
+	checkCount2col=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	local -i checkCount3col
+	checkCount3col=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	local -i checkCount4col
+	checkCount4col=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 4))
+
+	runDataLoad
+	checkItemCnt "C1" "B1" $checkCount4col
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplSlowBackfillProperties
+	printGlobalScopeAndCollectionInfo
+
+	# Only col1 is replicated at this point
+	checkItemCnt "C2" "B2" $checkCount1col
+
+	# Add a col2 to the replication mapping
+	# The backfill should kick in and fill in all the data to the new collection
+	echo "Changing explicit mapping while replication is paused - target collection S1.col2 should now receive backfill"
+	pauseReplication "C1" "B1" "C2" "B2"
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2"}'
+	sleep 1
+	resumeReplication "C1" "B1" "C2" "B2"
+
+	echo "Waiting 30 seconds and then pausing and changing back to collection to collection mapping"
+	sleep 30
+	# When resume happens, backfill should start, but it'll be slow because of the injection
+	# Pause and then change
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 15
+
+	# Change setting, then resume
+	echo "Changing explicit mapping - target collection S1.col3 should now receive backfill"
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2","S1.col3":"S1.col3"}'
+	sleep 1
+	resumeReplication "C1" "B1" "C2" "B2"
+
+	echo "Waiting 30 seconds and then pausing and changing back to scope-to-scope mapping"
+	sleep 30
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 15
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1":"S1"}'
+	sleep 1
+	resumeReplication "C1" "B1" "C2" "B2"
+
+	echo "Waiting 30 seconds and then pausing and changing back to scope-to-scope mapping"
+	sleep 30
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 15
+	setReplicationSettings "C1" "B1" "C2" "B2" 'colMappingRules={"S1.col1":"S1.col1","S1.col2":"S1.col2","S1.col3":"S1.col3","S1.col4":"S1.col4"}'
+	sleep 1
+	resumeReplication "C1" "B1" "C2" "B2"
+
+	grepForPanics
+	validateXDCRCheckpoints "C1"
+	validateXDCRCheckpoints "C2"
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	exportProvisionedConfig
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}
