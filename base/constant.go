@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -643,11 +645,62 @@ var PeerToPeerRetryFactor = 2
 var PeerToPeerNonExponentialWaitTime = 51 * time.Second
 
 // minimum versions where various features are supported
-var VersionForCompressionSupport = []int{5, 5}
-var VersionForClientCertSupport = []int{5, 5}
-var VersionForHttpScramShaSupport = []int{5, 5}
-var VersionForCollectionSupport = []int{7, 0}
-var VersionForAdvFilteringSupport = []int{6, 5}
+type ServerVersion []int
+
+const ServerVersionSeparator = "."
+
+var VersionForCompressionSupport = ServerVersion{5, 5}
+var VersionForClientCertSupport = ServerVersion{5, 5}
+var VersionForHttpScramShaSupport = ServerVersion{5, 5}
+var VersionForCollectionSupport = ServerVersion{7, 0}
+
+// ns_server and support would like to start seeing 3 digits for versions
+var VersionForAdvFilteringSupport = ServerVersion{6, 5, 0}
+var VersionForPrometheusSupport = ServerVersion{7, 0, 0}
+var VersionForCcrDpSupport = ServerVersion{7, 0, 0}
+var VersionForPeerToPeerSupport = ServerVersion{7, 1, 0}
+
+func (s ServerVersion) String() string {
+	builder := strings.Builder{}
+	for i := 0; i < len(s); i++ {
+		builder.WriteString(strconv.Itoa(s[i]))
+		if i != len(s)-1 {
+			builder.WriteString(ServerVersionSeparator)
+		}
+	}
+	return builder.String()
+}
+
+func (s ServerVersion) SameAs(other ServerVersion) bool {
+	if len(s) != len(other) {
+		return false
+	}
+	for i, c := range s {
+		if other[i] != c {
+			return false
+		}
+	}
+	return true
+}
+
+func NewServerVersionFromString(str string) (ServerVersion, error) {
+	if str == "" {
+		return ServerVersion{}, nil
+	}
+
+	versions := strings.Split(str, ServerVersionSeparator)
+	versionsInt := ServerVersion{}
+
+	for i := 0; i < len(versions); i++ {
+		parsedInt, err := strconv.ParseInt(versions[i], 10, 0)
+		if err != nil {
+			return nil, err
+		}
+		versionsInt = append(versionsInt, int(parsedInt))
+	}
+
+	return versionsInt, nil
+}
 
 var GoxdcrUserAgentPrefix = "couchbase-goxdcr"
 var GoxdcrUserAgent = ""
