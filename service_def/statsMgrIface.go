@@ -714,14 +714,6 @@ var GlobalStatsTable = StatisticsPropertyMap{
 			"If too much memory is being used, consider decreasing the number of nozzles or tune such that less data " +
 			"will be buffered",
 	},
-	DATA_REPLICATED_UNCOMPRESSED_METRIC: StatsProperty{
-		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
-		Cardinality:  LowCardinality,
-		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Theoretical amount of data replicated for a replication if compression were not used",
-		Stability:    Committed,
-		Notes:        "This stat is used in conjunction with data_replicated such that compression ratios can be calculated",
-	},
 	DOCS_FILTERED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,

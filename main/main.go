@@ -8,6 +8,8 @@
 
 package main
 
+//go:generate go run ../generate.go GlobalStatsTable
+
 import (
 	"flag"
 	"fmt"
