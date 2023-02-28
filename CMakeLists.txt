@@ -84,3 +84,6 @@ ADD_DEPENDENCIES(goxdcr sigar n1ql-yacc)
 IF (BUILD_ENTERPRISE)
   ADD_DEPENDENCIES (goxdcr jseval)
 ENDIF ()
+
+INSTALL (FILES etc/metrics_metadata.json DESTINATION "etc/couchbase/goxdcr")
+
