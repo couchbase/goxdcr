@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	GlobalStatsTableFile = "../metrics_metadata.json"
+	GlobalStatsTableFile = "../etc/metrics_metadata.json"
 )
 
 func GenerateStatsTable() {
