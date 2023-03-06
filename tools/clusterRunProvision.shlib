@@ -85,6 +85,9 @@ declare -A SCOPE_NAME_COLLECTION_DONE_MAP
 REST_MAX_RETRY=5
 GET_BROKEN_MAP_NOT_FOUND=255
 
+# With python 3.9 to bypass "OpenSSL 3.0's legacy provider failed to load" message when running cbworkloadgen
+export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
+
 # Input
 # 0: ClusterName
 # 1: Bucket Name
