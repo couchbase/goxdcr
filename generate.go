@@ -23,8 +23,16 @@ const (
 )
 
 func GenerateStatsTable() {
-	tableToGenerate := service_def.GlobalStatsTable
-	out, err := json.Marshal(tableToGenerate)
+	origTable := service_def.GlobalStatsTable
+
+	// ns_server would like us to prepend "xdcr_" in front of each key
+	tableToGenerate := make(service_def.StatisticsPropertyMap)
+	// Shallow copy the values
+	for key, value := range origTable {
+		tableToGenerate[fmt.Sprintf("xdcr_%s", key)] = value
+	}
+
+	out, err := json.MarshalIndent(tableToGenerate, "", "    ")
 	if err != nil {
 		fmt.Printf("Error generating stats table: %v", err)
 		os.Exit(1)
