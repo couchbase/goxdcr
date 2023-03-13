@@ -1,1 +1,666 @@
-{"add_docs_cas_changed":{"type":"counter","help":"Number of add failed because target cas changed","added":"7.0.0","stability":"internal"},"add_docs_written":{"type":"counter","help":"Number of adds successfully written to target","added":"7.0.0","notes":"This means that the target did not have the source document by name prior to this operation","stability":"internal"},"add_failed_cr_target":{"type":"counter","help":"Number of ADD failed conflict resolution at target cluster","added":"7.1.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"internal"},"changes_left":{"type":"gauge","help":"Given the VBs of this node, the number of seqnos that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the VBs","added":"7.0.0","uiName":"xdcr_changes_left_total","notes":"This metric is calculated as (totalChanges - docsProcessed).TotalChanges is calculated as: SumForEachVB(HighSeqno) that this node owns.The term 'changes' is more of a misnomer as it is still defined as each mutation or event that gets stamped with a sequence number. Since 7.0, system events also get stamped as a seqno per VB and thus the changes_left term no longer accurately represents actual mutations that needs to be replicated.Regardless, this number represents the concept of how much work is to be done before a replication is considered caught up.","stability":"committed"},"data_merge_failed":{"type":"counter","help":"Amount of data failed to merge","added":"7.0.0","unit":"bytes","labels":[{"name":"internalError","help":"Related to potential error conditions in the XDCR processing","added":"7.0.0"}],"stability":"internal"},"data_merged":{"type":"counter","help":"Amount of data merged for a replication","added":"7.0.0","unit":"bytes","stability":"internal"},"data_replicated":{"type":"counter","help":"Amount of data replicated for a replication","added":"7.0.0","uiName":"xdcr_data_replicated_bytes","unit":"bytes","notes":"The number is kept for as long as a pipeline instance is active, and resets to 0 when a pipeline is restarted. This applies to other types of \"accumulative\" counters.","stability":"committed"},"data_replicated_uncompress":{"type":"counter","help":"Theoretical amount of data replicated for a replication if compression were not used","added":"7.0.0","unit":"bytes","notes":"This stat is used in conjunction with data_replicated such that compression ratios can be calculated","stability":"committed"},"datapool_failed_gets":{"type":"counter","help":"The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation","added":"6.5.0","labels":[{"name":"internalError","help":"Related to potential error conditions in the XDCR processing","added":"7.0.0"}],"notes":"This stats usually should be 0. If it is non-0, it could represent that the memory is under pressure.","stability":"committed"},"dcp_datach_length":{"type":"gauge","help":"The number of items sent by KV DCP waiting for XDCR DCP nozzle to ingest and process","added":"7.0.0","labels":[{"name":"processLatency","help":"Latency due to how busy XDCR process is, or due to induced latency like throttler","added":"7.0.0"},{"name":"latency","help":"Related to replication latency","added":"7.0.0"}],"stability":"committed"},"dcp_dispatch_time":{"type":"gauge","help":"The rolling average amount of time it takes for a document to be received by XDCR from DCP, to the time it is queued up in the out nozzle ready to be sent","added":"7.0.0","unit":"seconds","labels":[{"name":"processLatency","help":"Latency due to how busy XDCR process is, or due to induced latency like throttler","added":"7.0.0"}],"stability":"committed"},"deletion_docs_cas_changed":{"type":"counter","help":"Number of deletion failed because target cas changed","added":"7.0.0","stability":"internal"},"deletion_docs_written":{"type":"counter","help":"Number of deletion written to target","added":"7.0.0","stability":"committed"},"deletion_failed_cr_source":{"type":"counter","help":"Subset of the number of documents that failed source-side conflict resolution that were delete operations","added":"7.0.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"committed"},"deletion_failed_cr_target":{"type":"counter","help":"Number of DELETE failed conflict resolution at target cluster","added":"7.1.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"volatile"},"deletion_filtered":{"type":"counter","help":"Number of documents filtered that was of a DCP deletion","added":"6.5.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"committed"},"deletion_received_from_dcp":{"type":"counter","help":"The subset of documents received from DCP that is a Delete action","added":"7.0.0","stability":"committed"},"deletion_target_docs_skipped":{"type":"counter","help":"Subset of the number of documents that originated from the target that were delete operations","added":"7.0.0","stability":"internal"},"docs_checked":{"type":"gauge","help":"Across VBs for this node, the sum of all seqnos that have been considered to be checkpointed","added":"7.0.0","uiName":"xdcr_docs_checked_total","notes":"This metric is often used in conjunction with docs_processed. The wider the difference means the more duplicate replication would take place if a replication pipeline were to restart, as it means less information is checkpointed","stability":"committed"},"docs_cloned":{"type":"counter","help":"The number of times a source mutation is cloned to be written to different target namespace","added":"7.0.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"notes":"This usually means that one source mutation is now going to exist in two or more target collections, leading to mismatching doc counts between buckets. This can happen when migration mode is turned on, and the migration filtering expression is not specific enough, leading to a single doc matching multiple migration filtering expressions. To prevent this, ensure that the filtering expr are more specific such that each doc is migrated to only one target collection.","stability":"committed"},"docs_failed_cr_source":{"type":"counter","help":"Number of documents (or tombstones) that was not replicated to the target due to conflict resolution evaluated on the source cluster","added":"7.0.0","uiName":"xdcr_docs_failed_cr_source_total","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"notes":"This metric contains all types of docs that were not successfully sent to target due to failed CR, including deletions and expiries. It is also possible that a source document could fail CR due to a tombstone that exists in the target bucket. In that case, it may look like that a document is not replicated to the target, but in fact it is because target contains a tombstone that causes source CR to lose. Vice versa, it is possible that a deletion on the source could lose, and the target document continues to exist even though the source counterpart does not.","stability":"committed"},"docs_failed_cr_target":{"type":"counter","help":"Number of documents failed conflict resolution at target cluster","added":"7.1.0","uiName":"xdcr_docs_failed_cr_target_total","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"notes":"This metric contains all types of docs that were replicated to the target but were ultimately rejected due to target side conflict-resolution. This can happen either due to optimistic replication or due to other actors that are mutating the same document on the target bucket even if source CR succeeded.","stability":"volatile"},"docs_filtered":{"type":"gauge","help":"Total number of documents filtered and not replicated due to any type of filtering","added":"6.5.0","uiName":"xdcr_docs_filtered_total","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"committed"},"docs_merge_cas_changed":{"type":"counter","help":"Number of merges failed because source cas changed","added":"7.0.0","stability":"internal"},"docs_merge_failed":{"type":"counter","help":"Number of conflicting docs failed to merge","added":"7.0.0","labels":[{"name":"internalError","help":"Related to potential error conditions in the XDCR processing","added":"7.0.0"}],"stability":"internal"},"docs_merged":{"type":"counter","help":"Number of conflicting docs successfully merged","added":"7.0.0","stability":"internal"},"docs_opt_repd":{"type":"counter","help":"Number of documents optimistically replicated to the target","added":"7.0.0","uiName":"xdcr_docs_opt_repd_total","notes":"Optimistic replication takes one less RTT, but could potential cause more network usage if the documents are decent sized","stability":"committed"},"docs_processed":{"type":"gauge","help":"Number of docs processed for a replication","added":"7.0.0","notes":"Each document is considered to be a single mutation or event tagged with a sequence number. It is considered processed when a mutation is either replicated to the target, or not replicated due to a decision made, such as a document being filtered, or if it loses source conflict resolution. Another example can be a system event such as a collection creation that gets its own sequence number, but is not actually something that can be replicated. These are also counted as a doc being processed.","stability":"committed"},"docs_received_from_dcp":{"type":"counter","help":"The number of set operations received from DCP","added":"7.0.0","uiName":"xdcr_docs_received_from_dcp_total","stability":"committed"},"docs_unable_to_filter":{"type":"gauge","help":"Number of documents that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated","added":"6.5.0","labels":[{"name":"internalError","help":"Related to potential error conditions in the XDCR processing","added":"7.0.0"},{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"committed"},"docs_written":{"type":"counter","help":"Number of docs written/sent to target cluster","added":"7.0.0","notes":"This metric counts any type of mutations that are sent to the target cluster, and includes mutations that had failed target side Conflict Resolution","stability":"committed"},"expiry_docs_merge_failed":{"type":"counter","help":"Number of conflicting expiry docs failed to merge","added":"7.0.0","labels":[{"name":"internalError","help":"Related to potential error conditions in the XDCR processing","added":"7.0.0"}],"stability":"internal"},"expiry_docs_merged":{"type":"counter","help":"Number of expiry merged and written to source","added":"7.0.0","stability":"internal"},"expiry_docs_written":{"type":"counter","help":"Number of expiry written to target","added":"7.0.0","stability":"committed"},"expiry_failed_cr_source":{"type":"counter","help":"Subset of the number of documents that failed source-side conflict resolution that specifically had expiry flag set","added":"7.0.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"committed"},"expiry_failed_cr_target":{"type":"counter","help":"Number of EXPIRE failed conflict resolution at target cluster","added":"7.1.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"volatile"},"expiry_filtered":{"type":"counter","help":"Number of documents filtered that had expiry flag set","added":"6.5.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"committed"},"expiry_merge_cas_changed":{"type":"counter","help":"Number of expiry merges failed because source cas changed","added":"7.0.0","stability":"internal"},"expiry_received_from_dcp":{"type":"counter","help":"The subset of documents received from DCP that either 1.) Is a DCP expiration or 2) Is a document that contains an expiration time","added":"7.0.0","stability":"committed"},"expiry_stripped":{"type":"counter","help":"Number of documents replicated that had its TTL changed to 0 before writing to target (source is unmodified)","added":"6.5.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"notes":"The source has an expiry set and the target does not. When the source document expires, it will trigger a expiry event that should be replicated to the target. If that expiry event is not replicated for any reason and is purged (i.e. tombstone purge interval), then the target doucment will contiue to live for perpetuity. If the purpose is for archival such that the target should live for perpetuity, then it is adv filter for expiry should also be set, but will cause document count divergence","stability":"committed"},"expiry_target_docs_skipped":{"type":"counter","help":"Subset of the number of documents that originated from the target that specifically had expiry flag set","added":"7.0.0","stability":"internal"},"num_checkpoints":{"type":"counter","help":"The number of times checkpoint operation has completed successfully since this XDCR process instance is made aware of this replication","added":"7.0.0","stability":"committed"},"num_failedckpts":{"type":"counter","help":"The number of times checkpoint operation has encountered an error since this XDCR process instance is made aware of this replication","added":"7.0.0","labels":[{"name":"internalError","help":"Related to potential error conditions in the XDCR processing","added":"7.0.0"}],"stability":"committed"},"resp_wait_time":{"type":"gauge","help":"The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write","added":"7.0.0","unit":"seconds","labels":[{"name":"kvOp","help":"Involves KV operation","added":"7.0.0"},{"name":"latency","help":"Related to replication latency","added":"7.0.0"}],"notes":"This metric indicates just the amount of wait time it takes for KV to send a respond back to XDCR as part of the complete docs_latency metrics. This can be used to give more granularity into how the overall latency situation looks like.","stability":"committed"},"set_docs_cas_changed":{"type":"counter","help":"Number of set failed because target cas changed","added":"7.0.0","stability":"internal"},"set_docs_written":{"type":"counter","help":"Number of SET_WITH_META written to target","added":"7.0.0","stability":"committed"},"set_failed_cr_source":{"type":"counter","help":"Subset of the number of documents that failed source-side conflict resolution that were set operations","added":"7.0.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"internal"},"set_failed_cr_target":{"type":"counter","help":"Number of SET_WITH_META failed conflict resolution at target cluster","added":"7.1.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"volatile"},"set_filtered":{"type":"counter","help":"Number of documents filtered that was of a DCP mutation","added":"6.5.0","labels":[{"name":"docCountDiverge","help":"Could cause document count between source and target bucket to be different per design","added":"7.0.0"}],"stability":"committed"},"set_received_from_dcp":{"type":"counter","help":"The subset of documents received from DCP that is a mutation (set action)","added":"7.0.0","stability":"committed"},"set_target_docs_skipped":{"type":"counter","help":"Subset of the number of documents that originated from the target that were set operations","added":"7.0.0","stability":"internal"},"size_rep_queue":{"type":"gauge","help":"Amount of data being queued to be sent in an out nozzle","added":"7.0.0","unit":"bytes","notes":"The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.If too much memory is being used, consider decreasing the number of nozzles or tune such that less data will be buffered","stability":"committed"},"target_docs_skipped":{"type":"counter","help":"Number of documents that was not replicated to the target because they originated from the target","added":"7.0.0","stability":"internal"},"throttle_latency":{"type":"gauge","help":"The rolling average of the latency time introduced due to bandwith throttler","added":"7.0.0","unit":"seconds","labels":[{"name":"throughput","help":"Related to replication throughput","added":"7.0.0"}],"stability":"committed"},"throughput_throttle_latency":{"type":"gauge","help":"The rolling average of the latency time introduced due to throughput throttler","added":"7.0.0","unit":"seconds","labels":[{"name":"latency","help":"Related to replication latency","added":"7.0.0"},{"name":"processLatency","help":"Latency due to how busy XDCR process is, or due to induced latency like throttler","added":"7.0.0"}],"stability":"committed"},"time_committing":{"type":"gauge","help":"The rolling average amount of time it takes for a checkpoint operation to complete","added":"7.0.0","unit":"seconds","labels":[{"name":"diskLatency","help":"Latency due to disk operation","added":"7.0.0"},{"name":"processLatency","help":"Latency due to how busy XDCR process is, or due to induced latency like throttler","added":"7.0.0"}],"notes":"The higher the number, the more burdened XDCR is or the slower the performance of simple_store (metakv)","stability":"committed"},"wtavg_docs_latency":{"type":"gauge","help":"The rolling average amount of time it takes for the source cluster to receive the acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be processed by the XDCR outnozzle","added":"7.0.0","uiName":"xdcr_wtavg_docs_latency_seconds","unit":"seconds","labels":[{"name":"kvOp","help":"Involves KV operation","added":"7.0.0"},{"name":"latency","help":"Related to replication latency","added":"7.0.0"}],"notes":"This metric indicates the lag time of both the network as well as the target KV set latency. The latency tracks the followings: 1. The time it takes to issue a SET_WITH_META from the source to the target. 2. The time it takes for KV to handle the SET_WITH_META request. 3. The time it takes for KV to send a response back to XDCR indicating that a SET_WITH_META has been handled. When combined with traditional network diagnostic tools, one can use this number to differentiate between the network latency as well as target KV latency.","stability":"committed"},"wtavg_get_doc_latency":{"type":"gauge","help":"The rolling average amount of time it takes once a get document command is composed to be sent to the time the request is handled once the target node has responded","added":"7.0.0","unit":"seconds","labels":[{"name":"kvOp","help":"Involves KV operation","added":"7.0.0"},{"name":"latency","help":"Related to replication latency","added":"7.0.0"}],"stability":"internal"},"wtavg_merge_latency":{"type":"gauge","help":"The rolling average amount of time it takes from routing, conflict detection and resolution, to receive the acknowledgement of merge","added":"7.0.0","unit":"seconds","labels":[{"name":"kvOp","help":"Involves KV operation","added":"7.0.0"},{"name":"latency","help":"Related to replication latency","added":"7.0.0"}],"stability":"internal"},"wtavg_meta_latency":{"type":"gauge","help":"The rolling average amount of time it takes once a getMeta command is composed to be sent to the time the request is handled once the target node has responded","added":"7.0.0","uiName":"xdcr_wtavg_meta_latency_seconds","unit":"seconds","labels":[{"name":"kvOp","help":"Involves KV operation","added":"7.0.0"},{"name":"latency","help":"Related to replication latency","added":"7.0.0"}],"notes":"This is similar to docs_latency but specifically for the GET_META command that is used for source side conflict resolution","stability":"committed"}}
+{
+    "xdcr_add_docs_cas_changed": {
+        "type": "counter",
+        "help": "Number of add failed because target cas changed",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_add_docs_written": {
+        "type": "counter",
+        "help": "Number of adds successfully written to target",
+        "added": "7.0.0",
+        "notes": "This means that the target did not have the source document by name prior to this operation",
+        "stability": "internal"
+    },
+    "xdcr_add_failed_cr_target": {
+        "type": "counter",
+        "help": "Number of ADD failed conflict resolution at target cluster",
+        "added": "7.1.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "internal"
+    },
+    "xdcr_changes_left": {
+        "type": "gauge",
+        "help": "Given the VBs of this node, the number of seqnos that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the VBs",
+        "added": "7.0.0",
+        "uiName": "xdcr_changes_left_total",
+        "notes": "This metric is calculated as (totalChanges - docsProcessed).TotalChanges is calculated as: SumForEachVB(HighSeqno) that this node owns.The term 'changes' is more of a misnomer as it is still defined as each mutation or event that gets stamped with a sequence number. Since 7.0, system events also get stamped as a seqno per VB and thus the changes_left term no longer accurately represents actual mutations that needs to be replicated.Regardless, this number represents the concept of how much work is to be done before a replication is considered caught up.",
+        "stability": "committed"
+    },
+    "xdcr_data_merge_failed": {
+        "type": "counter",
+        "help": "Amount of data failed to merge",
+        "added": "7.0.0",
+        "unit": "bytes",
+        "labels": [
+            {
+                "name": "internalError",
+                "help": "Related to potential error conditions in the XDCR processing",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "internal"
+    },
+    "xdcr_data_merged": {
+        "type": "counter",
+        "help": "Amount of data merged for a replication",
+        "added": "7.0.0",
+        "unit": "bytes",
+        "stability": "internal"
+    },
+    "xdcr_data_replicated": {
+        "type": "counter",
+        "help": "Amount of data replicated for a replication",
+        "added": "7.0.0",
+        "uiName": "xdcr_data_replicated_bytes",
+        "unit": "bytes",
+        "notes": "The number is kept for as long as a pipeline instance is active, and resets to 0 when a pipeline is restarted. This applies to other types of \"accumulative\" counters.",
+        "stability": "committed"
+    },
+    "xdcr_data_replicated_uncompress": {
+        "type": "counter",
+        "help": "Theoretical amount of data replicated for a replication if compression were not used",
+        "added": "7.0.0",
+        "unit": "bytes",
+        "notes": "This stat is used in conjunction with data_replicated such that compression ratios can be calculated",
+        "stability": "committed"
+    },
+    "xdcr_datapool_failed_gets": {
+        "type": "counter",
+        "help": "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation",
+        "added": "6.5.0",
+        "labels": [
+            {
+                "name": "internalError",
+                "help": "Related to potential error conditions in the XDCR processing",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "This stats usually should be 0. If it is non-0, it could represent that the memory is under pressure.",
+        "stability": "committed"
+    },
+    "xdcr_dcp_datach_length": {
+        "type": "gauge",
+        "help": "The number of items sent by KV DCP waiting for XDCR DCP nozzle to ingest and process",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "processLatency",
+                "help": "Latency due to how busy XDCR process is, or due to induced latency like throttler",
+                "added": "7.0.0"
+            },
+            {
+                "name": "latency",
+                "help": "Related to replication latency",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_dcp_dispatch_time": {
+        "type": "gauge",
+        "help": "The rolling average amount of time it takes for a document to be received by XDCR from DCP, to the time it is queued up in the out nozzle ready to be sent",
+        "added": "7.0.0",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "processLatency",
+                "help": "Latency due to how busy XDCR process is, or due to induced latency like throttler",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_deletion_docs_cas_changed": {
+        "type": "counter",
+        "help": "Number of deletion failed because target cas changed",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_deletion_docs_written": {
+        "type": "counter",
+        "help": "Number of deletion written to target",
+        "added": "7.0.0",
+        "stability": "committed"
+    },
+    "xdcr_deletion_failed_cr_source": {
+        "type": "counter",
+        "help": "Subset of the number of documents that failed source-side conflict resolution that were delete operations",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_deletion_failed_cr_target": {
+        "type": "counter",
+        "help": "Number of DELETE failed conflict resolution at target cluster",
+        "added": "7.1.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "volatile"
+    },
+    "xdcr_deletion_filtered": {
+        "type": "counter",
+        "help": "Number of documents filtered that was of a DCP deletion",
+        "added": "6.5.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_deletion_received_from_dcp": {
+        "type": "counter",
+        "help": "The subset of documents received from DCP that is a Delete action",
+        "added": "7.0.0",
+        "stability": "committed"
+    },
+    "xdcr_deletion_target_docs_skipped": {
+        "type": "counter",
+        "help": "Subset of the number of documents that originated from the target that were delete operations",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_docs_checked": {
+        "type": "gauge",
+        "help": "Across VBs for this node, the sum of all seqnos that have been considered to be checkpointed",
+        "added": "7.0.0",
+        "uiName": "xdcr_docs_checked_total",
+        "notes": "This metric is often used in conjunction with docs_processed. The wider the difference means the more duplicate replication would take place if a replication pipeline were to restart, as it means less information is checkpointed",
+        "stability": "committed"
+    },
+    "xdcr_docs_cloned": {
+        "type": "counter",
+        "help": "The number of times a source mutation is cloned to be written to different target namespace",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "This usually means that one source mutation is now going to exist in two or more target collections, leading to mismatching doc counts between buckets. This can happen when migration mode is turned on, and the migration filtering expression is not specific enough, leading to a single doc matching multiple migration filtering expressions. To prevent this, ensure that the filtering expr are more specific such that each doc is migrated to only one target collection.",
+        "stability": "committed"
+    },
+    "xdcr_docs_failed_cr_source": {
+        "type": "counter",
+        "help": "Number of documents (or tombstones) that was not replicated to the target due to conflict resolution evaluated on the source cluster",
+        "added": "7.0.0",
+        "uiName": "xdcr_docs_failed_cr_source_total",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "This metric contains all types of docs that were not successfully sent to target due to failed CR, including deletions and expiries. It is also possible that a source document could fail CR due to a tombstone that exists in the target bucket. In that case, it may look like that a document is not replicated to the target, but in fact it is because target contains a tombstone that causes source CR to lose. Vice versa, it is possible that a deletion on the source could lose, and the target document continues to exist even though the source counterpart does not.",
+        "stability": "committed"
+    },
+    "xdcr_docs_failed_cr_target": {
+        "type": "counter",
+        "help": "Number of documents failed conflict resolution at target cluster",
+        "added": "7.1.0",
+        "uiName": "xdcr_docs_failed_cr_target_total",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "This metric contains all types of docs that were replicated to the target but were ultimately rejected due to target side conflict-resolution. This can happen either due to optimistic replication or due to other actors that are mutating the same document on the target bucket even if source CR succeeded.",
+        "stability": "volatile"
+    },
+    "xdcr_docs_filtered": {
+        "type": "gauge",
+        "help": "Total number of documents filtered and not replicated due to any type of filtering",
+        "added": "6.5.0",
+        "uiName": "xdcr_docs_filtered_total",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_docs_merge_cas_changed": {
+        "type": "counter",
+        "help": "Number of merges failed because source cas changed",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_docs_merge_failed": {
+        "type": "counter",
+        "help": "Number of conflicting docs failed to merge",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "internalError",
+                "help": "Related to potential error conditions in the XDCR processing",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "internal"
+    },
+    "xdcr_docs_merged": {
+        "type": "counter",
+        "help": "Number of conflicting docs successfully merged",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_docs_opt_repd": {
+        "type": "counter",
+        "help": "Number of documents optimistically replicated to the target",
+        "added": "7.0.0",
+        "uiName": "xdcr_docs_opt_repd_total",
+        "notes": "Optimistic replication takes one less RTT, but could potential cause more network usage if the documents are decent sized",
+        "stability": "committed"
+    },
+    "xdcr_docs_processed": {
+        "type": "gauge",
+        "help": "Number of docs processed for a replication",
+        "added": "7.0.0",
+        "notes": "Each document is considered to be a single mutation or event tagged with a sequence number. It is considered processed when a mutation is either replicated to the target, or not replicated due to a decision made, such as a document being filtered, or if it loses source conflict resolution. Another example can be a system event such as a collection creation that gets its own sequence number, but is not actually something that can be replicated. These are also counted as a doc being processed.",
+        "stability": "committed"
+    },
+    "xdcr_docs_received_from_dcp": {
+        "type": "counter",
+        "help": "The number of set operations received from DCP",
+        "added": "7.0.0",
+        "uiName": "xdcr_docs_received_from_dcp_total",
+        "stability": "committed"
+    },
+    "xdcr_docs_unable_to_filter": {
+        "type": "gauge",
+        "help": "Number of documents that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated",
+        "added": "6.5.0",
+        "labels": [
+            {
+                "name": "internalError",
+                "help": "Related to potential error conditions in the XDCR processing",
+                "added": "7.0.0"
+            },
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_docs_written": {
+        "type": "counter",
+        "help": "Number of docs written/sent to target cluster",
+        "added": "7.0.0",
+        "notes": "This metric counts any type of mutations that are sent to the target cluster, and includes mutations that had failed target side Conflict Resolution",
+        "stability": "committed"
+    },
+    "xdcr_expiry_docs_merge_failed": {
+        "type": "counter",
+        "help": "Number of conflicting expiry docs failed to merge",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "internalError",
+                "help": "Related to potential error conditions in the XDCR processing",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "internal"
+    },
+    "xdcr_expiry_docs_merged": {
+        "type": "counter",
+        "help": "Number of expiry merged and written to source",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_expiry_docs_written": {
+        "type": "counter",
+        "help": "Number of expiry written to target",
+        "added": "7.0.0",
+        "stability": "committed"
+    },
+    "xdcr_expiry_failed_cr_source": {
+        "type": "counter",
+        "help": "Subset of the number of documents that failed source-side conflict resolution that specifically had expiry flag set",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_expiry_failed_cr_target": {
+        "type": "counter",
+        "help": "Number of EXPIRE failed conflict resolution at target cluster",
+        "added": "7.1.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "volatile"
+    },
+    "xdcr_expiry_filtered": {
+        "type": "counter",
+        "help": "Number of documents filtered that had expiry flag set",
+        "added": "6.5.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_expiry_merge_cas_changed": {
+        "type": "counter",
+        "help": "Number of expiry merges failed because source cas changed",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_expiry_received_from_dcp": {
+        "type": "counter",
+        "help": "The subset of documents received from DCP that either 1.) Is a DCP expiration or 2) Is a document that contains an expiration time",
+        "added": "7.0.0",
+        "stability": "committed"
+    },
+    "xdcr_expiry_stripped": {
+        "type": "counter",
+        "help": "Number of documents replicated that had its TTL changed to 0 before writing to target (source is unmodified)",
+        "added": "6.5.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "The source has an expiry set and the target does not. When the source document expires, it will trigger a expiry event that should be replicated to the target. If that expiry event is not replicated for any reason and is purged (i.e. tombstone purge interval), then the target doucment will contiue to live for perpetuity. If the purpose is for archival such that the target should live for perpetuity, then it is adv filter for expiry should also be set, but will cause document count divergence",
+        "stability": "committed"
+    },
+    "xdcr_expiry_target_docs_skipped": {
+        "type": "counter",
+        "help": "Subset of the number of documents that originated from the target that specifically had expiry flag set",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_num_checkpoints": {
+        "type": "counter",
+        "help": "The number of times checkpoint operation has completed successfully since this XDCR process instance is made aware of this replication",
+        "added": "7.0.0",
+        "stability": "committed"
+    },
+    "xdcr_num_failedckpts": {
+        "type": "counter",
+        "help": "The number of times checkpoint operation has encountered an error since this XDCR process instance is made aware of this replication",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "internalError",
+                "help": "Related to potential error conditions in the XDCR processing",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_resp_wait_time": {
+        "type": "gauge",
+        "help": "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write",
+        "added": "7.0.0",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "kvOp",
+                "help": "Involves KV operation",
+                "added": "7.0.0"
+            },
+            {
+                "name": "latency",
+                "help": "Related to replication latency",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "This metric indicates just the amount of wait time it takes for KV to send a respond back to XDCR as part of the complete docs_latency metrics. This can be used to give more granularity into how the overall latency situation looks like.",
+        "stability": "committed"
+    },
+    "xdcr_set_docs_cas_changed": {
+        "type": "counter",
+        "help": "Number of set failed because target cas changed",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_set_docs_written": {
+        "type": "counter",
+        "help": "Number of SET_WITH_META written to target",
+        "added": "7.0.0",
+        "stability": "committed"
+    },
+    "xdcr_set_failed_cr_source": {
+        "type": "counter",
+        "help": "Subset of the number of documents that failed source-side conflict resolution that were set operations",
+        "added": "7.0.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "internal"
+    },
+    "xdcr_set_failed_cr_target": {
+        "type": "counter",
+        "help": "Number of SET_WITH_META failed conflict resolution at target cluster",
+        "added": "7.1.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "volatile"
+    },
+    "xdcr_set_filtered": {
+        "type": "counter",
+        "help": "Number of documents filtered that was of a DCP mutation",
+        "added": "6.5.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_set_received_from_dcp": {
+        "type": "counter",
+        "help": "The subset of documents received from DCP that is a mutation (set action)",
+        "added": "7.0.0",
+        "stability": "committed"
+    },
+    "xdcr_set_target_docs_skipped": {
+        "type": "counter",
+        "help": "Subset of the number of documents that originated from the target that were set operations",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_size_rep_queue": {
+        "type": "gauge",
+        "help": "Amount of data being queued to be sent in an out nozzle",
+        "added": "7.0.0",
+        "unit": "bytes",
+        "notes": "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.If too much memory is being used, consider decreasing the number of nozzles or tune such that less data will be buffered",
+        "stability": "committed"
+    },
+    "xdcr_target_docs_skipped": {
+        "type": "counter",
+        "help": "Number of documents that was not replicated to the target because they originated from the target",
+        "added": "7.0.0",
+        "stability": "internal"
+    },
+    "xdcr_throttle_latency": {
+        "type": "gauge",
+        "help": "The rolling average of the latency time introduced due to bandwith throttler",
+        "added": "7.0.0",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "throughput",
+                "help": "Related to replication throughput",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_throughput_throttle_latency": {
+        "type": "gauge",
+        "help": "The rolling average of the latency time introduced due to throughput throttler",
+        "added": "7.0.0",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "latency",
+                "help": "Related to replication latency",
+                "added": "7.0.0"
+            },
+            {
+                "name": "processLatency",
+                "help": "Latency due to how busy XDCR process is, or due to induced latency like throttler",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
+    "xdcr_time_committing": {
+        "type": "gauge",
+        "help": "The rolling average amount of time it takes for a checkpoint operation to complete",
+        "added": "7.0.0",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "diskLatency",
+                "help": "Latency due to disk operation",
+                "added": "7.0.0"
+            },
+            {
+                "name": "processLatency",
+                "help": "Latency due to how busy XDCR process is, or due to induced latency like throttler",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "The higher the number, the more burdened XDCR is or the slower the performance of simple_store (metakv)",
+        "stability": "committed"
+    },
+    "xdcr_wtavg_docs_latency": {
+        "type": "gauge",
+        "help": "The rolling average amount of time it takes for the source cluster to receive the acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be processed by the XDCR outnozzle",
+        "added": "7.0.0",
+        "uiName": "xdcr_wtavg_docs_latency_seconds",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "kvOp",
+                "help": "Involves KV operation",
+                "added": "7.0.0"
+            },
+            {
+                "name": "latency",
+                "help": "Related to replication latency",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "This metric indicates the lag time of both the network as well as the target KV set latency. The latency tracks the followings: 1. The time it takes to issue a SET_WITH_META from the source to the target. 2. The time it takes for KV to handle the SET_WITH_META request. 3. The time it takes for KV to send a response back to XDCR indicating that a SET_WITH_META has been handled. When combined with traditional network diagnostic tools, one can use this number to differentiate between the network latency as well as target KV latency.",
+        "stability": "committed"
+    },
+    "xdcr_wtavg_get_doc_latency": {
+        "type": "gauge",
+        "help": "The rolling average amount of time it takes once a get document command is composed to be sent to the time the request is handled once the target node has responded",
+        "added": "7.0.0",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "kvOp",
+                "help": "Involves KV operation",
+                "added": "7.0.0"
+            },
+            {
+                "name": "latency",
+                "help": "Related to replication latency",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "internal"
+    },
+    "xdcr_wtavg_merge_latency": {
+        "type": "gauge",
+        "help": "The rolling average amount of time it takes from routing, conflict detection and resolution, to receive the acknowledgement of merge",
+        "added": "7.0.0",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "kvOp",
+                "help": "Involves KV operation",
+                "added": "7.0.0"
+            },
+            {
+                "name": "latency",
+                "help": "Related to replication latency",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "internal"
+    },
+    "xdcr_wtavg_meta_latency": {
+        "type": "gauge",
+        "help": "The rolling average amount of time it takes once a getMeta command is composed to be sent to the time the request is handled once the target node has responded",
+        "added": "7.0.0",
+        "uiName": "xdcr_wtavg_meta_latency_seconds",
+        "unit": "seconds",
+        "labels": [
+            {
+                "name": "kvOp",
+                "help": "Involves KV operation",
+                "added": "7.0.0"
+            },
+            {
+                "name": "latency",
+                "help": "Related to replication latency",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "This is similar to docs_latency but specifically for the GET_META command that is used for source side conflict resolution",
+        "stability": "committed"
+    }
+}
