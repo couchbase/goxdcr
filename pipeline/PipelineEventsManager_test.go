@@ -70,7 +70,7 @@ func TestPipelineEventsMgr_AddEvent(t *testing.T) {
 
 	assert.NotNil(eventsMgr)
 
-	eventsMgr.AddEvent(base.HighPriorityMsg, "dummyHigh", base.NewEventsMap())
+	eventsMgr.AddEvent(base.HighPriorityMsg, "dummyHigh", base.NewEventsMap(), nil)
 	assert.NotEqual(0, len(eventsMgr.events.EventInfos))
 }
 
@@ -160,7 +160,7 @@ func TestPipelineEventsMgr_DismissEvent_LowPriority(t *testing.T) {
 
 	assert.NotNil(eventsMgr)
 
-	eventsMgr.AddEvent(base.LowPriorityMsg, "testLowPriority", base.NewEventsMap())
+	eventsMgr.AddEvent(base.LowPriorityMsg, "testLowPriority", base.NewEventsMap(), nil)
 	assert.Len(eventsMgr.events.EventInfos, 1)
 
 	events := eventsMgr.GetCurrentEvents()
@@ -359,4 +359,37 @@ func TestPipelineEventsMgr_LargeBrokenMap(t *testing.T) {
 	// Fail the test if querying is getting close to half as long as setting a time
 	// Then this means lock contention is an issue
 	assert.True(comparison >= 3)
+}
+
+func TestPipelineEventsMgr_UpdateEvent(t *testing.T) {
+	fmt.Println("============== Test case start: TestPipelineEventsMgr_UpdateEvent =================")
+	defer fmt.Println("============== Test case end: TestPipelineEventsMgr_UpdateEvent =================")
+	assert := assert.New(t)
+
+	idWell, specName, specGetter, logger, utils := setupPemBoilerPlate()
+	eventsMgr := NewPipelineEventsMgr(idWell, specName, specGetter, logger, utils)
+
+	assert.NotNil(eventsMgr)
+
+	oldMsg := "old test priority event"
+	newMsg := "new test priority event"
+
+	eventsMgr.AddEvent(base.LowPriorityMsg, oldMsg, base.NewEventsMap(), nil)
+	assert.Len(eventsMgr.events.EventInfos, 1)
+
+	events := eventsMgr.GetCurrentEvents()
+	events.Mutex.RLock()
+	eventId := events.EventInfos[0].EventId
+	assert.Equal(base.LowPriorityMsg, events.EventInfos[0].EventType)
+	events.Mutex.RUnlock()
+
+	assert.Nil(eventsMgr.UpdateEvent(eventId, newMsg, nil))
+	checkEvent, err := eventsMgr.getEvent(int(eventId))
+	assert.Nil(err)
+	assert.Equal(newMsg, checkEvent.EventDesc)
+
+	invalidEventId := eventId + 1
+
+	err = eventsMgr.UpdateEvent(invalidEventId, "", nil)
+	assert.Equal(base.ErrorNotFound, err)
 }

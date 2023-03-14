@@ -85,7 +85,10 @@ const (
 	RetryOnRemoteAuthErrKey           = base.RetryOnRemoteAuthErrKey
 	RetryOnRemoteAuthErrMaxWaitSecKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
 
-	DismissEventKey = "dismissEvent"
+	// Event based
+	DismissEventKey               = "dismissEvent"
+	SourceTopologyChangeStatusKey = "sourceTopologyChangeStatus"
+	TargetTopologyChangeStatusKey = "targetTopologyChangeStatus"
 
 	CkptMgrBrokenmapIdleUpdateDiffPair    = "ckmgrBrokenMapIdleUpdateDiffPair"
 	CkptMgrBrokenmapIdleUpdateSrcManDelta = "ckmgrBrokenMapIdleUpdateSrcManDelta"
@@ -120,7 +123,8 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
-	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBucketTopologyLegacyDelay, DevBackfillReplUpdateDelay}
+	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBucketTopologyLegacyDelay, DevBackfillReplUpdateDelay,
+	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,

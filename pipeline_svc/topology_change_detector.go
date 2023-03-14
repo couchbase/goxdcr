@@ -23,7 +23,6 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
-
 )
 
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
@@ -68,8 +67,16 @@ type TopologyChangeDetectorSvc struct {
 	number_of_source_nodes int
 
 	// Timer to restart due to source side topology change
-	sourceTopologyMaxWait       *time.Timer
-	sourceTopologyMaxStableWait *time.Timer
+	sourceTopologyMaxWait           *time.Timer
+	sourceTopologyMaxWaitTime       time.Time
+	sourceTopologyMaxStableWait     *time.Timer
+	sourceTopologyMaxStableWaitTime time.Time
+	needToPostSourceTopologyEvent   bool
+
+	// target side
+	needToPostTargetTopologyEvent   bool
+	targetTopologyMaxWaitTime       time.Time
+	targetTopologyMaxStableWaitTime time.Time
 
 	// key = hostname; value = https address of hostname
 	httpsAddrMap map[string]string
@@ -233,9 +240,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) pipelineHasStopped() bool {
 	return false
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) validate() {
-}
-
 func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vblist_supposed []uint16, number_of_source_nodes int, err_in error) error {
 	defer top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v handleSourceTopologyChange completed", top_detect_svc.mainPipelineTopic)
 
@@ -268,12 +272,14 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 		top_detect_svc.logger.Infof("Number of source topology changes seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.source_topology_change_count)
 		if top_detect_svc.source_topology_change_count == 1 {
 			// First instance of topology change, start timer
+			top_detect_svc.sourceTopologyMaxWaitTime = time.Now().Add(time.Duration(secsForMaxTopologyChange) * time.Second)
 			top_detect_svc.sourceTopologyMaxWait = time.AfterFunc(time.Duration(secsForMaxTopologyChange)*time.Second, func() {
 				sourceTopoChangeRestartString := "Restarting pipeline due to source topology change..."
 				top_detect_svc.logger.Warnf("Pipeline %v: %v", top_detect_svc.mainPipelineTopic, sourceTopoChangeRestartString)
 				err = errors.New(sourceTopoChangeRestartString)
 				top_detect_svc.restartPipeline(err)
 			})
+			top_detect_svc.needToPostSourceTopologyEvent = true
 		}
 
 		if vblist_supposed != nil {
@@ -282,6 +288,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 				top_detect_svc.logger.Infof("Number of consecutive stable source topology seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.source_topology_stable_count)
 				if top_detect_svc.source_topology_stable_count == 1 {
 					// First instance of stable count, start timer
+					top_detect_svc.sourceTopologyMaxStableWaitTime = time.Now().Add(time.Duration(secsForMaxStableTopologyChange) * time.Second)
 					top_detect_svc.sourceTopologyMaxStableWait = time.AfterFunc(time.Duration(secsForMaxStableTopologyChange)*time.Second, func() {
 						// restart pipeline if source topology change has stopped for a while and is assumbly completed
 						err = fmt.Errorf("Source topology change for pipeline %v seems to have completed.", top_detect_svc.mainPipelineTopic)
@@ -292,6 +299,9 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 				top_detect_svc.source_topology_stable_count = 0
 				if top_detect_svc.sourceTopologyMaxStableWait != nil {
 					top_detect_svc.sourceTopologyMaxStableWait.Stop()
+					top_detect_svc.sourceTopologyMaxStableWait = nil
+					// If we disabled a timer, we should double check the event information
+					top_detect_svc.needToPostSourceTopologyEvent = true
 				}
 			}
 
@@ -322,8 +332,69 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 		}
 	}
 
+	if top_detect_svc.needToPostSourceTopologyEvent {
+		var times []time.Time
+		if top_detect_svc.sourceTopologyMaxWait != nil {
+			times = append(times, top_detect_svc.sourceTopologyMaxWaitTime)
+		}
+		if top_detect_svc.sourceTopologyMaxStableWait != nil {
+			times = append(times, top_detect_svc.sourceTopologyMaxStableWaitTime)
+		}
+		err = top_detect_svc.postTopologyEstTime(true, times)
+		if err != nil {
+			top_detect_svc.logger.Warnf("Unable to post estimated times for source: %v", err)
+		} else {
+			top_detect_svc.needToPostSourceTopologyEvent = false
+		}
+	}
+
 	return nil
 
+}
+
+func (top_detect_svc *TopologyChangeDetectorSvc) postTopologyEstTime(source bool, times []time.Time) error {
+	var timeToUse *time.Time
+	// We have a list of timers. The timer that happens first will fire and we'll use that time for reporting
+	for _, timeToCheck := range times {
+		if timeToUse == nil {
+			timeToUse = &timeToCheck
+		}
+
+		if timeToCheck.Before(*timeToUse) {
+			timeToUse = &timeToCheck
+		}
+	}
+
+	if timeToUse == nil {
+		return fmt.Errorf("No time to use but called to post a time")
+	}
+
+	outputMap := make(metadata.ReplicationSettingsMap)
+	key := metadata.SourceTopologyChangeStatusKey
+	var srcOrTgtStr = "Source"
+	if !source {
+		key = metadata.TargetTopologyChangeStatusKey
+		srcOrTgtStr = "Target"
+	}
+
+	myHostName, err := top_detect_svc.xdcr_topology_svc.MyHostAddr()
+	if err != nil {
+		myHostName = "UnknownHostName"
+	}
+
+	msg := fmt.Sprintf("%s %s %s: Topology change detected. Estimated time of pipeline restart: %s",
+		myHostName, top_detect_svc.mainPipelineTopic, srcOrTgtStr, timeToUse.String())
+
+	outputMap[key] = msg
+
+	top_detect_svc.pipelinesMtx.Lock()
+	defer top_detect_svc.pipelinesMtx.Unlock()
+	if len(top_detect_svc.pipelines) > 0 {
+		return top_detect_svc.pipelines[0].UpdateSettings(outputMap)
+	}
+
+	// It is possible for this to be called during pipeline restart/shutdown already and things are detached
+	return nil
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff_vb_list []uint16, target_vb_server_map map[uint16]string, err_in error) error {
@@ -340,6 +411,11 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 
 	if err_in == target_topology_changedErr || top_detect_svc.target_topology_change_count > 0 {
 		top_detect_svc.target_topology_change_count++
+		if top_detect_svc.target_topology_change_count == 1 {
+			secsForMaxTopologyChange := int32(base.TopologyChangeCheckInterval.Seconds()) * int32(base.MaxTopologyChangeCountBeforeRestart)
+			top_detect_svc.targetTopologyMaxWaitTime = time.Now().Add(time.Duration(secsForMaxTopologyChange) * time.Second)
+			top_detect_svc.needToPostTargetTopologyEvent = true
+		}
 		top_detect_svc.logger.Infof("Number of target topology changes seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.target_topology_change_count)
 		// restart pipeline if consecutive topology changes reaches limit -- cannot wait any longer
 		if top_detect_svc.target_topology_change_count >= base.MaxTopologyChangeCountBeforeRestart {
@@ -353,6 +429,11 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 		if target_vb_server_map != nil {
 			if base.AreVBServerMapsTheSame(top_detect_svc.target_vb_server_map_last, target_vb_server_map) {
 				top_detect_svc.target_topology_stable_count++
+				if top_detect_svc.target_topology_stable_count == 1 {
+					secsForMaxStableTopologyChange := int32(base.TopologyChangeCheckInterval.Seconds()) * int32(base.MaxTopologyStableCountBeforeRestart)
+					top_detect_svc.targetTopologyMaxStableWaitTime = time.Now().Add(time.Duration(secsForMaxStableTopologyChange) * time.Second)
+					top_detect_svc.needToPostTargetTopologyEvent = true
+				}
 				top_detect_svc.logger.Infof("Number of stable target topology seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.target_topology_stable_count)
 				if top_detect_svc.target_topology_stable_count >= base.MaxTopologyStableCountBeforeRestart {
 					// restart pipeline if target topology change has stopped for a while and is assumbly completed
@@ -369,9 +450,24 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 		}
 	}
 
+	if top_detect_svc.needToPostTargetTopologyEvent {
+		var times []time.Time
+		if top_detect_svc.targetTopologyMaxWaitTime.After(time.Now()) {
+			times = append(times, top_detect_svc.targetTopologyMaxWaitTime)
+		}
+		if top_detect_svc.targetTopologyMaxStableWaitTime.After(time.Now()) {
+			times = append(times, top_detect_svc.targetTopologyMaxStableWaitTime)
+		}
+		err = top_detect_svc.postTopologyEstTime(false, times)
+		if err != nil {
+			top_detect_svc.logger.Errorf("Unable to post estimated times for target: %v", err)
+		} else {
+			top_detect_svc.needToPostTargetTopologyEvent = false
+		}
+	}
+
 	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v handleTargetTopologyChange completed", top_detect_svc.mainPipelineTopic)
 	return nil
-
 }
 
 // check if problematic vbs seen have been caused by source or target topology changes described by diff_vb_list

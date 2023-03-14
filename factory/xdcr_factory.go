@@ -980,7 +980,7 @@ func (xdcrf *XDCRFactory) notifyUIOfP2P(pipeline common.Pipeline, vbs []uint16) 
 	hostName, _ := xdcrf.xdcr_topology_svc.MyHost()
 	eventsMgr := replStatus.GetEventsManager()
 	progressMsg := fmt.Sprintf("%v: %v for the following VBs: %v", hostName, common.ProgressP2PComm, vbs)
-	eventId = eventsMgr.AddEvent(base.LowPriorityMsg, progressMsg, base.EventsMap{})
+	eventId = eventsMgr.AddEvent(base.LowPriorityMsg, progressMsg, base.EventsMap{}, nil)
 	return eventId, replStatus, nil
 }
 

@@ -1,0 +1,113 @@
+# Copyright 2023-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
+# For uni directional, just have one node rebalancing in
+CLUSTER_DEPENDENCY_MAP=(["C2P"]="C2" ["C1P"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" >/dev/null 2>&1
+	echo "RUNNING dataload DONE"
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running rebalancing and check event test case"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	local timeIntervalSecs=5
+	local checkInterval=60
+	local maxChangeCnt=2
+	local maxStableCnt=2
+	local coolDownPeriod=1
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	addNodesIn
+	startRebalancing "C1"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+	runDataLoad
+
+	echo "Waiting 20 seconds before checking item count"
+	sleep 20
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkUnidirectionalChangesLeft
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+
+	startRebalancing "C2"
+
+	# Source node 0 owns VB 0-511
+	# source node 1 owns VB 511-1023
+	# When target rebalances, only node 1 should be affected
+	# Thus, watch for node 1 to raise an event for 3 minutes
+	waitForNumberOfEvents "C1P" 1 3
+
+	# Once found an event, wait for pipeline to restart and ensure event goes away
+	echo "Waiting for pipeline to restart and event to go away"
+	sleep 60
+
+	validateNumberOfEvents "C1" 0
+	validateNumberOfEvents "C1P" 0
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	restoreClusterBack "C2P"
+	restoreClusterBack "C1P"
+}

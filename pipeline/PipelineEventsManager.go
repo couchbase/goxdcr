@@ -36,6 +36,10 @@ func (p *PipelineEventList) Len() int {
 	return len(p.EventInfos)
 }
 
+func (p *PipelineEventList) LenNoLock() int {
+	return len(p.EventInfos)
+}
+
 // Each pipeline can only have a single grand-daddy of broken map event
 // This will create a broken map event if none is found
 // Also will update the timestamp
@@ -105,7 +109,7 @@ func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *in
 
 type PipelineEventsManager interface {
 	GetCurrentEvents() *PipelineEventList
-	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) (eventId int64)
+	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) (eventId int64)
 	ClearNonBrokenMapEvents()
 	ClearNonBrokenMapEventsWithString(substr string)
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
@@ -113,6 +117,11 @@ type PipelineEventsManager interface {
 	DismissEvent(eventId int) error
 	ResetDismissedHistory()
 	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
+
+	// UpdateEvent should not modify the event type. If needed in the future, need to analyze the reason why it needs to be changed
+	// Updating an event will update the time to the time this method is being called
+	// eventExtras can be nil, and the existing information won't be changed
+	UpdateEvent(eventId int64, eventDesc string, eventExtras *base.EventsMap) error
 }
 
 // The pipeline events mgr's job is to handle the exporting of events and also remember the user's preference
@@ -175,7 +184,7 @@ func (p *PipelineEventsMgr) getEvent(eventId int) (*base.EventInfo, error) {
 	return nil, base.ErrorNotFound
 }
 
-func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap) int64 {
+func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) int64 {
 	if eventExtras.IsNil() {
 		eventExtras.Init()
 	}
@@ -185,12 +194,34 @@ func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc str
 	newEvent.EventType = eventType
 	newEvent.EventDesc = eventDesc
 	newEvent.EventExtras = eventExtras
+	newEvent.SetHint(hint)
 
 	p.events.Mutex.Lock()
 	defer p.events.Mutex.Unlock()
 	p.events.TimeInfos = append(p.events.TimeInfos, time.Now().UnixNano())
 	p.events.EventInfos = append(p.events.EventInfos, newEvent)
 	return newEvent.EventId
+}
+
+func (p *PipelineEventsMgr) UpdateEvent(eventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
+	var err = base.ErrorNotFound
+
+	p.events.Mutex.Lock()
+	defer p.events.Mutex.Unlock()
+	for i, eventInfo := range p.events.EventInfos {
+		if eventInfo != nil && eventInfo.EventId == eventId {
+			eventInfo.EventDesc = newEventDesc
+			if newEventExtras != nil {
+				eventInfo.EventExtras = *newEventExtras
+			}
+			p.events.TimeInfos[i] = time.Now().UnixNano()
+
+			err = nil
+			break
+		}
+	}
+
+	return err
 }
 
 // When pipeline is paused, brokenMap events need to stay once pipeline resumes because no further mutations will

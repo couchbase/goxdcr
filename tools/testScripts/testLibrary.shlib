@@ -31,6 +31,7 @@ P2P_BACKFILL_PUSH_RECEIVED_MSG="received peer node push backfill replication"
 UNABLE_TO_GET_HIGH_SEQNO_MSG="Unable to find any collection ID for getHighSeqno"
 P2P_PULL_ERR_MSG="Unable to respond to caller given type"
 BACKFILL_START_MSG="Starting BackfillPipeline"
+TOPOLOGY_RESTART_MSG="Topology change detected. Estimated time of pipeline restart"
 
 # These should be imported after clusterRunProvision script
 
@@ -305,12 +306,14 @@ function validateLogWithInstance {
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
 			echo "Error - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, but found $count"
 			dumpDebugInfoBeforeExit
+			echo "Logs: $logs"
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]]; then
 			echo "Warning - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, found $count"
 		else
 			echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
 			dumpDebugInfoBeforeExit
+			echo "Logs: $logs"
 			exit 1
 		fi
 	else
@@ -729,8 +732,25 @@ function validateBrokenMapExists {
 }
 
 function checkNoErrorInErrorList {
+	validateNumberOfEvents "$cluster" 0
+}
+
+function validateNumberOfEvents {
 	local errList
 	local cluster=$1
+	local count=$2
+
+	waitForNumberOfEvents "$cluster" "$count" 0
+	if (($? > 0)); then
+		exit 1
+	fi
+}
+
+function waitForNumberOfEvents {
+	local errList
+	local cluster=$1
+	local count=$2
+	local minToWaitFor=$3
 
 	errList=$(getErrorListForMainPipeline $cluster)
 	if ((!$? == 0)); then
@@ -738,9 +758,17 @@ function checkNoErrorInErrorList {
 		exit 1
 	fi
 
-	if (($(echo "$errList" | jq 'length') > 0)); then
-		echo "Error list exists when it should not"
-		exit 1
+	local curMin=0
+	local actualCount=$(echo "$errList" | jq 'length')
+	if (($actualCount != $count)); then
+		echo "Expecting $count in errorsList but found $actualCount"
+		if (($minToWaitFor == 0)) || (($curMin > $minToWaitFor)); then
+			return 1
+		else
+			curMin=$(($curMin + 1))
+			echo "Waiting one minute and trying again"
+			sleep 60
+		fi
 	fi
 }
 

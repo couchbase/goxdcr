@@ -86,7 +86,7 @@ const (
 	ProgressPipelineStopped   = "Pipeline has been stopped"
 )
 
-//interface for Pipeline
+// interface for Pipeline
 type Pipeline interface {
 	//Name of the Pipeline
 	Topic() string
@@ -125,4 +125,6 @@ type Pipeline interface {
 
 	GetBrokenMapRO() (brokenMapReadOnly metadata.CollectionNamespaceMapping, callOnceDone func())
 	SetBrokenMap(brokenMap metadata.CollectionNamespaceMapping)
+
+	GetRebalanceProgress() (string, string)
 }
