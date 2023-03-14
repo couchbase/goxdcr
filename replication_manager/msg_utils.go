@@ -461,8 +461,13 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 		errorsMap[base.RemoteClusterHostName] = err1
 	}
 
-	if len(errorsMap) == 0 {
-		remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, hostnameMode, demandEncryption, encryptionType, certificate, clientCertificate, clientKey, &base2.DnsSrvHelper{})
+	if len(errorsMap) > 0 {
+		return
+	}
+
+	remoteClusterRef, err = metadata.NewRemoteClusterReference("", name, hostAddr, userName, password, hostnameMode, demandEncryption, encryptionType, certificate, clientCertificate, clientKey, &base2.DnsSrvHelper{})
+	if err != nil {
+		return
 	}
 
 	if remoteClusterRef.IsCapellaHostname() && !remoteClusterRef.IsFullEncryption() {
