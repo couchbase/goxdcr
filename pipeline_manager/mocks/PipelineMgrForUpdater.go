@@ -150,6 +150,11 @@ func (_m *PipelineMgrForUpdater) GetXDCRTopologySvc() service_def.XDCRCompTopolo
 	return r0
 }
 
+// PostTopologyStatus provides a mock function with given fields:
+func (_m *PipelineMgrForUpdater) PostTopologyStatus() {
+	_m.Called()
+}
+
 // RemoveReplicationStatus provides a mock function with given fields: topic
 func (_m *PipelineMgrForUpdater) RemoveReplicationStatus(topic string) error {
 	ret := _m.Called(topic)

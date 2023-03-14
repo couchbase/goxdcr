@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -90,7 +91,7 @@ func TestReplicationStatusErrorMapFull(t *testing.T) {
 
 func setupEventMgrMock(m PipelineEventsManager, numOfLowMsg int) {
 	for i := 0; i < numOfLowMsg; i++ {
-		m.AddEvent(base.LowPriorityMsg, fmt.Sprintf("testEvent message %v", numOfLowMsg), base.EventsMap{})
+		m.AddEvent(base.LowPriorityMsg, fmt.Sprintf("testEvent message %v", numOfLowMsg), base.EventsMap{}, nil)
 	}
 }
 

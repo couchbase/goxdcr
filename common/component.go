@@ -8,8 +8,8 @@
 
 package common
 
-//ComponentEventType is the common event type that Component can raise during its lifecycle
-//It is not required for Component to raise all those event
+// ComponentEventType is the common event type that Component can raise during its lifecycle
+// It is not required for Component to raise all those event
 type ComponentEventType int
 
 const (
@@ -118,13 +118,13 @@ func NewEvent(eventType ComponentEventType, data interface{}, component Componen
 	return &Event{eventType, data, component, derivedData, otherInfos}
 }
 
-//ComponentEventListener abstracts anybody who is interested in an event of a component
+// ComponentEventListener abstracts anybody who is interested in an event of a component
 type ComponentEventListener interface {
 	//OnEvent is the callback function that component would notify listener on an event
 	OnEvent(event *Event)
 }
 
-//AsyncComponentEventListener is a subtype of ComponentEventListener which processes events asynchonously
+// AsyncComponentEventListener is a subtype of ComponentEventListener which processes events asynchonously
 type AsyncComponentEventListener interface {
 	ComponentEventListener
 	// id of event listener

@@ -220,6 +220,11 @@ func (_m *PipelineMgrForSerializer) PauseReplication(topic string) error {
 	return r0
 }
 
+// PostTopologyStatus provides a mock function with given fields:
+func (_m *PipelineMgrForSerializer) PostTopologyStatus() {
+	_m.Called()
+}
+
 // RemoveReplicationStatus provides a mock function with given fields: topic
 func (_m *PipelineMgrForSerializer) RemoveReplicationStatus(topic string) error {
 	ret := _m.Called(topic)

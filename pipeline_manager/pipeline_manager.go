@@ -99,6 +99,7 @@ type PipelineMgrInternalIface interface {
 	GetXDCRTopologySvc() service_def.XDCRCompTopologySvc
 	AutoPauseReplication(topic string) error
 	ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error
+	PostTopologyStatus()
 }
 
 type PipelineMgrForUpdater interface {
@@ -301,6 +302,7 @@ func (pipelineMgr *PipelineManager) CheckPipelines() {
 	pipelineMgr.checkRemoteClusterSvcForChangedConfigs()
 	pipelineMgr.checkAndHandleRemoteClusterAuthErrs()
 	pipelineMgr.LogStatusSummary()
+	pipelineMgr.PostTopologyStatus()
 }
 
 func (pipelineMgr *PipelineManager) HandleClusterEncryptionLevelChange(old, new service_def.EncryptionSettingIface) {
@@ -1323,6 +1325,87 @@ func (pipelineMgr *PipelineManager) handlePeerCkptGetMergeManagers(fullTopic str
 	return checkpointMgr, backfillMgrPipelineSvc, nil
 }
 
+// When topology changes occur on either source or target, this will update the event framework with
+// a message that topology change has been detected, alongside an estimated time of pipeline restart
+// This is useful because end users often do not see replication moving, but in reality we're just waiting
+// for pipeline to restart. This is *particularly* useful for target side, as console UI won't know target status
+func (pipelineMgr *PipelineManager) PostTopologyStatus() {
+	var sourceHint = fmt.Sprintf("Hint for sourceTopology")
+	var targetHint = fmt.Sprintf("Hint for targetTopology")
+
+	replStatusMap := pipelineMgr.ReplicationStatusMap()
+	for _, replStatus := range replStatusMap {
+		// Main pipeline's GetRebalanceProgress is the source of truth
+		// Check the replStatus event to ensure that it is lined up with the source
+		// of truth. And if not, ensure that the right message is put forth
+		// Once the pipeline restarts, the events will be reinitialized and so
+		// there is no need to remove events, but rather just either
+		// insert a new event when the first rebalance progress is shown
+		// or update an existing event if the rebalance progress has been updated
+		mainPipeline := replStatus.Pipeline()
+		srcProgress, tgtProgress := mainPipeline.GetRebalanceProgress()
+		if srcProgress == "" && tgtProgress == "" {
+			// nothing to report
+			continue
+		}
+
+		needToUpdateSrc := srcProgress != ""
+		needToUpdateTgt := tgtProgress != ""
+		var srcEventFound bool
+		var srcEventId int64
+		var tgtEventFound bool
+		var tgtEventId int64
+
+		eventMgr := replStatus.GetEventsManager()
+		allEvents := eventMgr.GetCurrentEvents()
+		allEvents.Mutex.RLock()
+		for i := 0; i < allEvents.LenNoLock(); i++ {
+			eventToCheck := allEvents.EventInfos[i]
+			if hintStr, ok := eventToCheck.GetHint().(string); ok && hintStr == sourceHint {
+				srcEventFound = true
+				srcEventId = eventToCheck.EventId
+				// Found source topology progress
+				if srcProgress == eventToCheck.EventDesc {
+					// Nothing has been updated since last posted
+					needToUpdateSrc = false
+				}
+			}
+			if hintStr, ok := eventToCheck.GetHint().(string); ok && hintStr == targetHint {
+				tgtEventFound = true
+				tgtEventId = eventToCheck.EventId
+				// Found target topology progress
+				if tgtProgress == eventToCheck.EventDesc {
+					// Nothing has been updated since last posted
+					needToUpdateTgt = false
+				}
+			}
+		}
+		allEvents.Mutex.RUnlock()
+
+		if needToUpdateSrc {
+			if srcEventFound {
+				err := eventMgr.UpdateEvent(srcEventId, srcProgress, nil)
+				if err != nil {
+					pipelineMgr.logger.Errorf("Unable to update source topology rebalance progress: %v - %v", srcProgress, err)
+				}
+			} else {
+				eventMgr.AddEvent(base.PersistentMsg, srcProgress, base.NewEventsMap(), sourceHint)
+			}
+		}
+		if needToUpdateTgt {
+			// Update existing event
+			if tgtEventFound {
+				err := eventMgr.UpdateEvent(tgtEventId, tgtProgress, nil)
+				if err != nil {
+					pipelineMgr.logger.Errorf("Unable to update target topology rebalance progress: %v - %v", tgtProgress, err)
+				}
+			} else {
+				eventMgr.AddEvent(base.PersistentMsg, tgtProgress, base.NewEventsMap(), targetHint)
+			}
+		}
+	}
+}
+
 var updaterStateErrorStr = "Can't move update state from %v to %v"
 
 // unit test injection flags
@@ -1394,8 +1477,8 @@ type backfillStopChOpts struct {
 	waitGrp           *sync.WaitGroup
 }
 
-//pipelineRepairer is responsible to repair a failing pipeline
-//it will retry after the retry_interval
+// pipelineRepairer is responsible to repair a failing pipeline
+// it will retry after the retry_interval
 type PipelineUpdater struct {
 	//the name of the pipeline to be repaired
 	pipeline_name string
@@ -1583,7 +1666,7 @@ func (r *PipelineUpdater) getLastResult() bool {
 	return r.lastSuccessful
 }
 
-//start the repairer
+// start the repairer
 func (r *PipelineUpdater) run() {
 	r.runOnce.Do(func() {
 		defer close(r.done_ch)
@@ -1841,7 +1924,7 @@ func (r *PipelineUpdater) resetDisabledFeatures() {
 	}
 }
 
-//update the pipeline
+// update the pipeline
 func (r *PipelineUpdater) update() base.ErrorMap {
 	var err error
 	var errMap base.ErrorMap
@@ -2036,7 +2119,7 @@ func (r *PipelineUpdater) raiseNonCollectionTargetIfNeeded() {
 	errMsg := fmt.Sprintf("Only default collection from source bucket '%v' to target bucket '%v' on cluster '%v' is being replicated because '%v' does not have collections capability\n", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name(), targetClusterRef.Name())
 	r.logger.Warnf(errMsg)
 	r.pipelineMgr.GetLogSvc().Write(errMsg)
-	r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap())
+	r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap(), nil)
 }
 
 func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {

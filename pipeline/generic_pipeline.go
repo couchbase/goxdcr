@@ -34,19 +34,19 @@ const MergeCkptFuncKey = "genericPipeline.mergeCkptFunc"
 // to avoid overly long log entries
 var MaxNumberOfErrorsToTrack = 15
 
-//the function constructs start settings for parts of the pipeline
+// the function constructs start settings for parts of the pipeline
 type PartsSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings metadata.ReplicationSettingsMap,
 	targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (metadata.ReplicationSettingsMap, error)
 
 type ConnectorSettingsConstructor func(pipeline common.Pipeline, connector common.Connector, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 
-//the function constructs start settings for parts of the pipeline
+// the function constructs start settings for parts of the pipeline
 type SSLPortMapConstructor func(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, error)
 
-//the function constructs update settings for parts of the pipeline
+// the function constructs update settings for parts of the pipeline
 type PartsUpdateSettingsConstructor func(pipeline common.Pipeline, part common.Part, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 
-//the function constructs update settings for connectors of the pipeline
+// the function constructs update settings for connectors of the pipeline
 type ConnectorsUpdateSettingsConstructor func(pipeline common.Pipeline, connector common.Connector, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)
 
 type StartingSeqnoConstructor func(pipeline common.Pipeline) error
@@ -58,11 +58,11 @@ type VBMasterCheckFunc func(common.Pipeline) (map[string]*peerToPeer.VBMasterChe
 
 type MergeVBMasterRespCkptsFunc func(common.Pipeline, peerToPeer.PeersVBMasterCheckRespMap) error
 
-//GenericPipeline is the generic implementation of a data processing pipeline
+// GenericPipeline is the generic implementation of a data processing pipeline
 //
-//The assumption here is all the processing steps are self-connected, so
-//once incoming nozzle is open, it will propel the data through all
-//processing steps.
+// The assumption here is all the processing steps are self-connected, so
+// once incoming nozzle is open, it will propel the data through all
+// processing steps.
 type GenericPipeline struct {
 	//name of the pipeline
 	topic     string
@@ -131,9 +131,13 @@ type GenericPipeline struct {
 
 	utils                   utilities.UtilsIface
 	p2pVbMasterCheckTimeout time.Duration
+
+	topologyMtx               sync.Mutex
+	sourceTopologyProgressMsg string
+	targetTopologyProgressMsg string
 }
 
-//Get the runtime context of this pipeline
+// Get the runtime context of this pipeline
 func (genericPipeline *GenericPipeline) RuntimeContext() common.PipelineRuntimeContext {
 	return genericPipeline.context
 }
@@ -236,10 +240,11 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	}
 }
 
-//Start starts the pipeline
+// Start starts the pipeline
 //
-//settings - a map of parameter to start the pipeline. it can contain initialization paramters
-//			 for each processing steps and for runtime context of the pipeline.
+// settings - a map of parameter to start the pipeline. it can contain initialization paramters
+//
+//	for each processing steps and for runtime context of the pipeline.
 func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSettingsMap) base.ErrorMap {
 	genericPipeline.logger.Infof("Starting %v %s\n%s \n%s \nsettings = %v\n", genericPipeline.Type().String(), genericPipeline.InstanceId(), genericPipeline.Layout(), genericPipeline.Summary(), settings.CloneAndRedact())
 	var errMap base.ErrorMap = make(base.ErrorMap)
@@ -527,8 +532,8 @@ func (genericPipeline *GenericPipeline) isUpstreamTo(target_part common.Part, pa
 	return false
 }
 
-//Stop stops the pipeline
-//it can result the pipeline in either "Stopped" if the operation is successful or "Pending" otherwise
+// Stop stops the pipeline
+// it can result the pipeline in either "Stopped" if the operation is successful or "Pending" otherwise
 func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 	var errMap base.ErrorMap = make(base.ErrorMap)
 
@@ -948,6 +953,7 @@ func (genericPipeline *GenericPipeline) updatePipelineSettings(settings metadata
 	defer genericPipeline.settings_lock.RUnlock()
 	genericPipeline.updateTimestampsSetting(settings)
 	genericPipeline.updateProblematicVBSettings(settings)
+	genericPipeline.updateTopologyProgress(settings)
 }
 
 func (genericPipeline *GenericPipeline) updateTimestampsSetting(settings metadata.ReplicationSettingsMap) {
@@ -1039,5 +1045,28 @@ func (genericPipeline *GenericPipeline) SetBrokenMap(brokenMap metadata.Collecti
 	genericPipeline.brokenMap = brokenMap
 }
 
-//enforcer for GenericPipeline to implement Pipeline
+func (genericPipeline *GenericPipeline) updateTopologyProgress(settings metadata.ReplicationSettingsMap) {
+	srcMsg, srcOK := settings[metadata.SourceTopologyChangeStatusKey].(string)
+	if srcOK {
+		genericPipeline.topologyMtx.Lock()
+		genericPipeline.sourceTopologyProgressMsg = srcMsg
+		genericPipeline.topologyMtx.Unlock()
+	}
+
+	tgtMsg, tgtOK := settings[metadata.TargetTopologyChangeStatusKey].(string)
+	if tgtOK {
+		genericPipeline.topologyMtx.Lock()
+		genericPipeline.targetTopologyProgressMsg = tgtMsg
+		genericPipeline.topologyMtx.Unlock()
+	}
+}
+
+func (genericPipeline *GenericPipeline) GetRebalanceProgress() (string, string) {
+	genericPipeline.topologyMtx.Lock()
+	defer genericPipeline.topologyMtx.Unlock()
+
+	return genericPipeline.sourceTopologyProgressMsg, genericPipeline.targetTopologyProgressMsg
+}
+
+// enforcer for GenericPipeline to implement Pipeline
 var _ common.Pipeline = (*GenericPipeline)(nil)

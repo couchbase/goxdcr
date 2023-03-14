@@ -150,6 +150,11 @@ func (_m *PipelineMgrInternalIface) GetXDCRTopologySvc() service_def.XDCRCompTop
 	return r0
 }
 
+// PostTopologyStatus provides a mock function with given fields:
+func (_m *PipelineMgrInternalIface) PostTopologyStatus() {
+	_m.Called()
+}
+
 // RemoveReplicationStatus provides a mock function with given fields: topic
 func (_m *PipelineMgrInternalIface) RemoveReplicationStatus(topic string) error {
 	ret := _m.Called(topic)
