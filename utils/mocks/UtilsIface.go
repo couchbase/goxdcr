@@ -1611,6 +1611,32 @@ func (_m *UtilsIface) GetNodeListWithMinInfo(hostAddr string, username string, p
 	return r0, r1
 }
 
+// GetNodeServicesInfo provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
+func (_m *UtilsIface) GetNodeServicesInfo(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	var r0 map[string]interface{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)); ok {
+		return rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) map[string]interface{}); ok {
+		r0 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) error); ok {
+		r1 = rf(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNonExistentBucketError provides a mock function with given fields:
 func (_m *UtilsIface) GetNonExistentBucketError() error {
 	ret := _m.Called()
@@ -1623,6 +1649,41 @@ func (_m *UtilsIface) GetNonExistentBucketError() error {
 	}
 
 	return r0
+}
+
+// GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodeServicesInfo, defaultConnStr, logger
+func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+	ret := _m.Called(nodeServicesInfo, defaultConnStr, logger)
+
+	var r0 base.HostPortMapType
+	var r1 []string
+	var r2 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
+		return rf(nodeServicesInfo, defaultConnStr, logger)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, *log.CommonLogger) base.HostPortMapType); ok {
+		r0 = rf(nodeServicesInfo, defaultConnStr, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.HostPortMapType)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}, string, *log.CommonLogger) []string); ok {
+		r1 = rf(nodeServicesInfo, defaultConnStr, logger)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(map[string]interface{}, string, *log.CommonLogger) error); ok {
+		r2 = rf(nodeServicesInfo, defaultConnStr, logger)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // GetRemoteMemcachedConnection provides a mock function with given fields: serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, logger

@@ -2993,3 +2993,14 @@ func (p PipelineStatusGauge) String() string {
 		return ""
 	}
 }
+
+// hostname -> list of connection errors mapping
+type HostToErrorsMapType map[string][]string
+
+// hostAddr -> <portKey -> port> mapping
+type HostPortMapType map[string]map[string]uint16
+
+// sourceNode -> <targetNode -> list of connection errors> mapping
+type ConnectionErrMapType map[string]map[string][]string
+
+type PortType int

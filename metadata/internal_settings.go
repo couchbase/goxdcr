@@ -270,6 +270,9 @@ const (
 
 	DnsSrvReBootstrapKey = "dnsSrvReBootstrap"
 
+	ConnectionPreCheckGCTimeoutKey  = "ConnectionPreCheckGCTimeoutSec"
+	ConnectionPreCheckRPCTimeoutKey = "ConnectionPreCheckRPCTimeoutSec"
+
 	GlobalOSOConfigKey = "OSOModeOverride"
 )
 
@@ -389,6 +392,8 @@ var CkptCacheCtrlChLenConfig = &SettingsConfig{int(base.CkptCacheCtrlChLen), &Ra
 var CkptCacheReqChLenConfig = &SettingsConfig{int(base.CkptCacheReqChLen), &Range{1, 5000}}
 var HumanRecoveryThresholdConfig = &SettingsConfig{int(base.HumanRecoveryThreshold.Seconds()), &Range{10, 600}}
 var DnsSrvReBootstrapConfig = &SettingsConfig{base.DNSSrvReBootstrap, nil}
+var ConnectionPreCheckGCTimeoutConfig = &SettingsConfig{int(base.ConnectionPreCheckGCTimeout / time.Second), &Range{120, 600}}
+var ConnectionPreCheckRPCTimeoutConfig = &SettingsConfig{int(base.ConnectionPreCheckRPCTimeout / time.Second), &Range{1, 30}}
 var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), Range: &Range{int(base.GlobalOSONoOp), int(base.GlobalOSOMax) - 1}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
@@ -508,6 +513,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CkptCacheReqChLenKey:                          CkptCacheReqChLenConfig,
 	HumanRecoveryThresholdKey:                     HumanRecoveryThresholdConfig,
 	DnsSrvReBootstrapKey:                          DnsSrvReBootstrapConfig,
+	ConnectionPreCheckGCTimeoutKey:                ConnectionPreCheckGCTimeoutConfig,
+	ConnectionPreCheckRPCTimeoutKey:               ConnectionPreCheckRPCTimeoutConfig,
 	GlobalOSOConfigKey:                            GlobalOSOConfig,
 }
 

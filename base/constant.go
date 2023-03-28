@@ -76,6 +76,12 @@ var BulkDocsPath = "/_bulk_docs"
 var CouchApiBase = "couchApiBase"
 var CouchApiBaseHttps = "couchApiBaseHTTPS"
 
+// REST endpoint for connection pre-check
+const XDCRConnectionPreCheckPath = XDCRPrefix + "/connectionPreCheck"
+
+// ns_server REST endpoint to perform quick user authentication check (user can check their id (or username), domain, roles, and other details)
+const WhoAmIPath = "/whoami"
+
 // keys used in parsing cluster info
 var NodesKey = "nodes"
 var HostNameKey = "hostname"
@@ -660,6 +666,7 @@ var VersionForPrometheusSupport = ServerVersion{7, 0, 0}
 var VersionForCcrDpSupport = ServerVersion{7, 0, 0}
 var VersionForPeerToPeerSupport = ServerVersion{7, 1, 0}
 var Version7_2_1 = ServerVersion{7, 2, 1}
+var VersionForConnectionPreCheckSupport = ServerVersion{7, 6, 0}
 var VersionForSupportability = ServerVersion{7, 6, 0}
 
 func (s ServerVersion) String() string {
@@ -1219,7 +1226,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ckptCacheCtrlLen, ckptCacheReqLen int,
 	humanRecoveryThreshold time.Duration,
 	dnsSrvReBootstrap bool,
-	p2pReplicaReplicatorReloadSize int, globalOSOMode int) {
+	p2pReplicaReplicatorReloadSize int, globalOSOMode int,
+	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1368,6 +1376,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	DNSSrvReBootstrap = dnsSrvReBootstrap
 	P2PReplicaReplicatorReloadChSize = p2pReplicaReplicatorReloadSize
 	GlobalOSOSetting = GlobalOSOMode(globalOSOMode)
+	ConnectionPreCheckGCTimeout = connectionPreCheckGCTimeout
+	ConnectionPreCheckRPCTimeout = connectionPreCheckRPCTimeout
 }
 
 // XDCR Dev hidden replication settings
@@ -1530,3 +1540,43 @@ const (
 var GlobalOSOSetting = GlobalOSONoOp
 
 const FilterBinaryDocs = "filterBinary"
+
+/* Connection Pre-Check */
+type ConnPreChkMsgType int
+
+const (
+	ConnPreChkIsCompatibleVersion       ConnPreChkMsgType = iota
+	ConnPreChkIsIntraClusterReplication ConnPreChkMsgType = iota
+	ConnPreChkSendingRequest            ConnPreChkMsgType = iota
+	ConnPreChkResponseWait              ConnPreChkMsgType = iota
+	ConnPreChkResponseObtained          ConnPreChkMsgType = iota
+	ConnPreChkP2PSuccessful             ConnPreChkMsgType = iota
+	ConnPreChkSuccessful                ConnPreChkMsgType = iota
+)
+
+var ConnectionPreCheckMsgs = map[ConnPreChkMsgType]string{
+	ConnPreChkIsCompatibleVersion:       "This version of some or all the nodes doesn't support the connection pre-check",
+	ConnPreChkIsIntraClusterReplication: "Intra-cluster replication detected, skipping connection pre-check",
+	ConnPreChkSendingRequest:            "Sending requests to the peer",
+	ConnPreChkResponseWait:              "P2PSend was successful, waiting for the node's response",
+	ConnPreChkResponseObtained:          "Response obtained from the node, storing the results",
+	ConnPreChkP2PSuccessful:             "P2P protocol successfully executed, no errors",
+	ConnPreChkSuccessful:                "Connection check was successful, no errors",
+}
+
+const (
+	KVIdxForConnPreChk      = iota
+	KVSSLIdxForConnPreChk   = iota
+	MgmtIdxForConnPreChk    = iota
+	MgmtSSLIdxForConnPreChk = iota
+)
+
+var PortsKeysForConnectionPreCheck = map[PortType]string{
+	KVIdxForConnPreChk:      KVPortKey,
+	KVSSLIdxForConnPreChk:   KVSSLPortKey,
+	MgmtIdxForConnPreChk:    MgtPortKey,
+	MgmtSSLIdxForConnPreChk: SSLMgtPortKey,
+}
+
+var ConnectionPreCheckGCTimeout = 120 * time.Second
+var ConnectionPreCheckRPCTimeout = 15 * time.Second

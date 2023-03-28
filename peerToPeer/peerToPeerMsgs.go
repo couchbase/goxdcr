@@ -11,6 +11,12 @@ package peerToPeer
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"reflect"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/common"
@@ -19,19 +25,15 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/golang/snappy"
-	"io/ioutil"
-	"net/http"
-	"reflect"
-	"sync"
-	"time"
 )
 
 // Each type below will need a handler
 const (
-	ReqDiscovery    OpCode = iota
-	ReqVBMasterChk  OpCode = iota
-	ReqPeriodicPush OpCode = iota
-	ReqMaxInvalid   OpCode = iota
+	ReqDiscovery          OpCode = iota
+	ReqVBMasterChk        OpCode = iota
+	ReqPeriodicPush       OpCode = iota
+	ReqConnectionPreCheck OpCode = iota
+	ReqMaxInvalid         OpCode = iota
 )
 
 func (o OpCode) String() string {
@@ -42,6 +44,8 @@ func (o OpCode) String() string {
 		return "VBMasterCheck"
 	case ReqPeriodicPush:
 		return "PeriodicPush"
+	case ReqConnectionPreCheck:
+		return "ConnectionPreCheck"
 	default:
 		return "?? (InvalidRequest)"
 	}
@@ -54,6 +58,8 @@ func (o OpCode) IsInterruptable() bool {
 	case ReqVBMasterChk:
 		return true
 	case ReqPeriodicPush:
+		return false
+	case ReqConnectionPreCheck:
 		return false
 	default:
 		return false
@@ -352,6 +358,13 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 			return nil, fmt.Errorf("respPeriodicPushResp deSerialize err: %v", err)
 		}
 		return resp, nil
+	case ReqConnectionPreCheck:
+		resp := &ConnectionPreCheckRes{}
+		err = resp.DeSerialize(body)
+		if err != nil {
+			return nil, fmt.Errorf("ConnectionPreCheckRes deSerialize err: %v", err)
+		}
+		return resp, nil
 	default:
 		return nil, fmt.Errorf("Unknown response %v", respCommon.RespType)
 	}
@@ -420,6 +433,14 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		}
 		pushReq.RequestCommon = reqCommon
 		return pushReq, err
+	case ReqConnectionPreCheck:
+		reqConPreCheck := &ConnectionPreCheckReq{}
+		err = reqConPreCheck.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("reqConPreCheck deSerialize err: %v", err)
+		}
+		reqConPreCheck.RequestCommon = reqCommon
+		return reqConPreCheck, err
 	default:
 		return nil, fmt.Errorf("Unknown request %v", reqCommon.ReqType)
 	}
@@ -1732,4 +1753,61 @@ func (p *PeerVBPeriodicPushResp) Serialize() ([]byte, error) {
 
 func (p *PeerVBPeriodicPushResp) DeSerialize(stream []byte) error {
 	return json.Unmarshal(stream, p)
+}
+
+/* Connection Pre-check */
+type ConnectionPreCheckReq struct {
+	RequestCommon
+	TargetRef          *metadata.RemoteClusterReference
+	TargetClusterNodes []string
+	TaskId             string
+	PortsMap           base.HostPortMapType
+
+	// For req.GenerateResponse()
+	ConnectionErrs base.HostToErrorsMapType
+}
+
+type ConnectionPreCheckRes struct {
+	ResponseCommon
+	connectionErrs     base.HostToErrorsMapType
+	TaskId             string
+	Target             string
+	TargetClusterNodes []string
+	PortsMap           base.HostPortMapType
+}
+
+func NewP2PConnectionPreCheckReq(common RequestCommon, targetRef *metadata.RemoteClusterReference, targetNodes []string, portsMap base.HostPortMapType, taskId string) *ConnectionPreCheckReq {
+	p2pReq := &ConnectionPreCheckReq{RequestCommon: common, TargetRef: targetRef, TargetClusterNodes: targetNodes, TaskId: taskId, PortsMap: portsMap, ConnectionErrs: nil}
+	p2pReq.ReqType = ReqConnectionPreCheck
+	return p2pReq
+}
+
+func (c *ConnectionPreCheckReq) Serialize() ([]byte, error) {
+	return json.Marshal(c)
+}
+
+func (c *ConnectionPreCheckReq) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, c)
+}
+
+func (c *ConnectionPreCheckRes) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, c)
+}
+
+func (c *ConnectionPreCheckRes) Serialize() ([]byte, error) {
+	return json.Marshal(c)
+}
+
+func (c *ConnectionPreCheckReq) GenerateResponse() interface{} {
+	common := NewResponseCommon(c.ReqType, c.RemoteLifeCycleId, c.LocalLifeCycleId, c.Opaque, c.TargetAddr)
+	common.RespType = c.ReqType
+	resp := &ConnectionPreCheckRes{
+		ResponseCommon:     common,
+		connectionErrs:     c.ConnectionErrs,
+		TaskId:             c.TaskId,
+		Target:             c.Sender,
+		TargetClusterNodes: c.TargetClusterNodes,
+		PortsMap:           c.PortsMap,
+	}
+	return resp
 }
