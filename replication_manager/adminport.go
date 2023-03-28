@@ -37,14 +37,16 @@ import (
 	_ "net/http/pprof"
 )
 
-var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
 
 var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
 
-/************************************
+/*
+***********************************
 /* struct Adminport
-*************************************/
+************************************
+*/
 type Adminport struct {
 	sourceKVHost string
 	xdcrRestPort uint16
@@ -152,8 +154,8 @@ func (adminport *Adminport) processRequest(msg []interface{}) error {
 	if len(msg) != 1 {
 		return errors.New("Failed to decode message")
 	}
-
 	req := msg[0].(ap.Request)
+
 	httpReq := req.GetHttpRequest()
 	if response, err := adminport.handleRequest(httpReq); err == nil {
 		req.Send(response)
@@ -237,6 +239,10 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doGetPrometheusStatsRequest(request, true)
 	case base.XDCRPeerToPeerPath + base.UrlDelimiter + base.MethodPost:
 		response, err = adminport.doPostPeerToPeerRequest(request)
+	case base.XDCRConnectionPreCheckPath + base.UrlDelimiter + base.MethodPost:
+		response, err = adminport.doPostConnectionPreCheckRequest(request)
+	case base.XDCRConnectionPreCheckPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doGetConnectionPreCheckResultRequest(request)
 	default:
 		errOutput := base.InvalidPathInHttpRequestError(key)
 		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
@@ -1404,4 +1410,52 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)
 	}
 	return EncodeObjectIntoResponseWithStatusCode(handlerResult.GetError(), handlerResult.GetHttpStatusCode())
+}
+
+/* Connection Pre-check */
+
+func (adminport *Adminport) doPostConnectionPreCheckRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doPostConnectionPreCheckRequest req=%v\n", request)
+	defer logger_ap.Infof("Finished doPostConnectionPreCheckRequest\n")
+
+	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
+	if response != nil || err != nil {
+		return response, err
+	}
+
+	remoteClusterRef, errorsMap, err := DecodePostConnectionPreCheckRequest(request)
+	if err != nil {
+		return nil, err
+	} else if len(errorsMap) > 0 {
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+		return EncodeRemoteClusterErrorsMapIntoResponse(errorsMap)
+	} else if remoteClusterRef == nil {
+		logger_ap.Errorf("Invalid Remote Cluster Ref=%v\n", remoteClusterRef)
+		return nil, fmt.Errorf("Remote cluster Ref is null")
+	}
+
+	taskId := generateTaskId(adminport.sourceKVHost)
+
+	logger_ap.Infof("Request params: remoteClusterRef=%v; Task ID generated: %v\n", remoteClusterRef.CloneAndRedact(), taskId)
+
+	response, err = NewConnectionPreCheckPostResponse(remoteClusterRef.HostName(), remoteClusterRef.UserName(), taskId)
+	if err != nil {
+		return nil, err
+	}
+
+	go adminport.p2pMgr.SendConnectionPreCheckRequest(remoteClusterRef, taskId)
+
+	return response, err
+}
+
+func (adminport *Adminport) doGetConnectionPreCheckResultRequest(request *http.Request) (*ap.Response, error) {
+	logger_ap.Infof("doGetConnectionPreCheckResultRequest req=%v\n", request)
+	defer logger_ap.Infof("Finished doGetConnectionPreCheckResultRequest\n")
+	taskId, err := DecodeGetConnectionPreCheckResultRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	res, done, err := adminport.p2pMgr.RetrieveConnectionPreCheckResult(taskId)
+
+	return NewConnectionPreCheckGetResponse(taskId, res, done)
 }

@@ -10,17 +10,19 @@ package peerToPeer
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
-	"github.com/couchbase/goxdcr/utils"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/peerToPeer/peerToPeerResults"
+	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/utils"
 )
 
 const ModuleName = "P2PManager"
@@ -31,6 +33,7 @@ var ErrorNoActiveMergerSet error = fmt.Errorf("No active pipeline is executing t
 
 type P2PManager interface {
 	VBMasterCheck
+	ConnectionPreCheck
 
 	Start() (PeerToPeerCommAPI, error)
 	Stop() error
@@ -45,6 +48,11 @@ type P2PManager interface {
 
 type VBMasterCheck interface {
 	CheckVBMaster(BucketVBMapType, common.Pipeline) (map[string]*VBMasterCheckResp, error)
+}
+
+type ConnectionPreCheck interface {
+	SendConnectionPreCheckRequest(*metadata.RemoteClusterReference, string)
+	RetrieveConnectionPreCheckResult(string) (base.ConnectionErrMapType, bool, error)
 }
 
 type Handler interface {
@@ -179,6 +187,11 @@ func (p *P2PManagerImpl) runHandlers() error {
 			}
 			p.receiveHandlers[i] = NewPeriodicPushHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval,
 				p.ckptSvc, p.colManifestSvc, p.backfillReplSvc, p.utils, p.getPushReqMerger(), p.replSpecSvc)
+		case ReqConnectionPreCheck:
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
+			p.receiveHandlers[i] = NewConnectionPreCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.utils, p.replSpecSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -262,12 +275,54 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 	return nil, peersFailedToSend
 }
 
+func (p *P2PManagerImpl) getMaxRetry(op OpCode) int {
+	maxRetry := base.PeerToPeerMaxRetry
+	if op == ReqConnectionPreCheck {
+		maxRetry = 0
+	}
+
+	return maxRetry
+}
+
+func (p *P2PManagerImpl) setConnectionPreCheckP2PMsgToStore(taskId string, src string, tgt string, msg string) {
+	store := peerToPeerResults.GetConnectionPreCheckStore(p.logger)
+
+	err := store.SetToConnectionPreCheckStoreSpecificTarget(taskId, "P2P/"+src, tgt, []string{msg})
+	if err != nil {
+		p.logger.Errorf("SetToConnectionPreCheckStore resulted in %v", err)
+	}
+}
+
+func (p *P2PManagerImpl) checkAndHandlePreCheckErr(req Request, err error) {
+	if req.GetOpcode() == ReqConnectionPreCheck {
+		creq, ok := req.(*ConnectionPreCheckReq)
+		taskId := ""
+		if ok {
+			taskId = creq.TaskId
+		}
+		p.setConnectionPreCheckP2PMsgToStore(taskId, req.GetSender(), req.GetTarget(), fmt.Sprintf("P2PSend was unsuccessful: resulted in %v", err))
+	}
+}
+
+func (p *P2PManagerImpl) checkAndHandlePreCheckSuccess(req Request) {
+	if req.GetOpcode() == ReqConnectionPreCheck {
+		creq, ok := req.(*ConnectionPreCheckReq)
+		taskId := ""
+		if ok {
+			taskId = creq.TaskId
+		}
+		p.setConnectionPreCheckP2PMsgToStore(taskId, req.GetSender(), req.GetTarget(), base.ConnectionPreCheckMsgs[base.ConnPreChkResponseWait])
+	}
+}
+
 func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetryOrig map[string]bool, myHost string) (error, map[string]bool) {
 	successOpaqueMap := make(map[string]*uint32)
 	peersToRetry := make(map[string]bool)
 	for k, v := range peersToRetryOrig {
 		peersToRetry[k] = v
 	}
+
+	maxRetry := p.getMaxRetry(getReqFunc(myHost, myHost).GetOpcode())
 
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
@@ -307,8 +362,12 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 				}
 
 				handlerResult, p2pSendErr := p.commAPI.P2PSend(compiledReq, p.logger)
+
 				if p2pSendErr != nil {
 					p.logger.Errorf("P2PSend resulted in %v", p2pSendErr)
+
+					p.checkAndHandlePreCheckErr(compiledReq, p2pSendErr)
+
 					errMapMtx.Lock()
 					errMap[peerAddr] = p2pSendErr
 					errMapMtx.Unlock()
@@ -338,6 +397,8 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					cbOpts.sentTimesMap[peerAddr] = time.Now()
 					cbOpts.sentTimesMtx.Unlock()
 					atomic.StoreUint32(successOpaqueMap[peerAddr], compiledReq.GetOpaque())
+
+					p.checkAndHandlePreCheckSuccess(compiledReq)
 				}
 			}()
 		}
@@ -354,7 +415,8 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 	}
 
 	err := p.utils.ExponentialBackoffExecutor(fmt.Sprintf("sendPeerToPeerReq(%v)", opCode.String()),
-		base.PeerToPeerRetryWaitTime, base.PeerToPeerMaxRetry, base.PeerToPeerRetryFactor, retryOp)
+		base.PeerToPeerRetryWaitTime, maxRetry, base.PeerToPeerRetryFactor, retryOp)
+
 	if err != nil && len(peersToRetry) == len(peersToRetryOrig) {
 		p.logger.Errorf("Unable to send %v to all the nodes... %v", opCode.String(), err)
 		return err, peersToRetry
@@ -505,11 +567,11 @@ type ReqRespPair struct {
 }
 
 // VB Master check involves:
-// 1. Look at all the VBs request incoming
-// 2. For VBs that this node hasn't ensured that nobody else has the same VB, send check request to those nodes
-// 3. Peer nodes respond with:
-//    a. Happy path - NOT_MY_VBUCKET status code with optional payload (if exists checkpoint and backfill information)
-//    b. Error path - "I'm VB Owner too" - which means something is wrong and recovery action may be needed (TODO)
+//  1. Look at all the VBs request incoming
+//  2. For VBs that this node hasn't ensured that nobody else has the same VB, send check request to those nodes
+//  3. Peer nodes respond with:
+//     a. Happy path - NOT_MY_VBUCKET status code with optional payload (if exists checkpoint and backfill information)
+//     b. Error path - "I'm VB Owner too" - which means something is wrong and recovery action may be needed (TODO)
 func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline common.Pipeline) (map[string]*VBMasterCheckResp, error) {
 	// Only need to check the non-verified VBs
 	filteredSubsets, err := p.vbMasterCheckHelper.GetUnverifiedSubset(bucketAndVBs)
@@ -719,4 +781,179 @@ func (p *P2PManagerImpl) waitForMergerToBeSet() {
 
 func (p *P2PManagerImpl) RequestImmediateCkptBkfillPush(replicationId string) error {
 	return p.replicator.RequestImmediatePush(replicationId)
+}
+
+/* Connection Pre-Check */
+func sendConnectionPreCheckRequestErrHelper(errMsg string, taskId string, myHostAddr string, info bool, logger *log.CommonLogger) {
+	if info {
+		logger.Infof(errMsg)
+	} else {
+		logger.Errorf(errMsg)
+	}
+	store := peerToPeerResults.GetConnectionPreCheckStore(logger)
+	connErr := make(base.HostToErrorsMapType)
+	connErr[myHostAddr] = []string{errMsg}
+	err := store.InitConnectionPreCheckResults(taskId, myHostAddr, []string{}, connErr)
+	if err != nil {
+		logger.Errorf("Error in InitConnectionPreCheckResults(taskId=%v, myHosrAddr=%v), err=%v", taskId, myHostAddr, err)
+	}
+}
+
+func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.RemoteClusterReference, taskId string) {
+	httpAuthMech := base.HttpAuthMechPlain
+	if remoteRef.IsEncryptionEnabled() {
+		if remoteRef.IsHalfEncryption() {
+			httpAuthMech = base.HttpAuthMechScramSha
+		} else {
+			httpAuthMech = base.HttpAuthMechHttps
+		}
+	}
+	remoteRef.SetHttpAuthMech(httpAuthMech)
+
+	myHostAddr, err := p.xdcrCompSvc.MyHostAddr()
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting myHostAddr, taskId=%v, err=%v", taskId, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	username, password, authMech, cert, SANInCert, clientCert, clientKey, err := remoteRef.MyCredentials()
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error getting credentials from remoteClusterReference=%v, taskId=%v, err=%v", remoteRef, taskId, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	remoteClusterRefMap := remoteRef.ToMap()
+
+	hostname, ok := remoteClusterRefMap[base.RemoteClusterHostName].(string)
+	if !ok {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of getting hostname from remoteClusterReference=%v, taskId=%v", remoteRef, taskId)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	targetUUID, err := p.utils.GetClusterUUID(
+		hostname,
+		username,
+		password,
+		authMech,
+		cert,
+		SANInCert,
+		clientCert,
+		clientKey,
+		p.logger,
+	)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because the cluster credentials are wrong or cluster doesn't exist with the specified IP for remoteRef=%v, taskId=%v, err=%v", remoteRef, taskId, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	// check version compatility for pre-check support
+	srcClusterCompatibility, err := p.xdcrCompSvc.MyClusterCompatibility()
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting source cluster compatibilty, taskId=%v, err=%v", taskId, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	if !base.IsClusterCompatible(srcClusterCompatibility, base.VersionForConnectionPreCheckSupport) {
+		p.logger.Infof(fmt.Sprintf("Connection Pre-Check exited because: taskID=%v; srcClusterCompatibility=%v and VersionForConnectionPreCheckRequest=%v", taskId, srcClusterCompatibility, base.VersionForConnectionPreCheckSupport))
+		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkIsCompatibleVersion], taskId, myHostAddr, true, p.logger)
+		return
+	}
+
+	srcUUID, err := p.xdcrCompSvc.MyClusterUuid()
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting srcUUID, taskId=%v, err=%v", taskId, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	// check for intra-cluster replication
+	if srcUUID == targetUUID {
+		p.logger.Infof(fmt.Sprintf("Connection Pre-Check exited because: taskID=%v; srcUUID=%v and tgtUUID=%v", taskId, srcUUID, targetUUID))
+		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkIsIntraClusterReplication], taskId, myHostAddr, true, p.logger)
+		return
+	}
+
+	nodeServicesInfo, err := p.utils.GetNodeServicesInfo(
+		hostname,
+		username,
+		password,
+		authMech,
+		cert,
+		SANInCert,
+		clientCert,
+		clientKey,
+		p.logger,
+	)
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited while getting nodeServicesInfo, taskId=%v, err=%v", taskId, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+	portsMap, targetNodes, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo, hostname, p.logger)
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited while getting ports and hostAddrs from nodeServicesInfo, taskId=%v, err=%v", taskId, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	if len(targetNodes) == 0 {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because, no valid nodes found in the target cluser for remoteRef=%v with targetNodes=%v, taskId=%v", remoteRef, targetNodes, taskId)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, p.logger)
+		return
+	}
+
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		connectionPreCheckReq := NewP2PConnectionPreCheckReq(common, remoteRef, targetNodes, portsMap, taskId)
+		return connectionPreCheckReq
+	}
+
+	// perform pre-check
+	connectionErrs := executePreCheck(remoteRef, targetNodes, portsMap, p.utils, p.logger)
+	for _, node := range targetNodes {
+		if connectionErrs == nil {
+			connectionErrs = make(base.HostToErrorsMapType)
+		}
+		_, ok := connectionErrs[node]
+		if !ok || len(connectionErrs[node]) == 0 {
+			connectionErrs[node] = []string{base.ConnectionPreCheckMsgs[base.ConnPreChkSuccessful]}
+		}
+	}
+
+	peers, err := p.xdcrCompSvc.PeerNodesAdminAddrs()
+	if err != nil && strings.Contains(err.Error(), service_def.UnknownPoolStr) {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because, %v is not sending connection pre-check requests since no other nodes have been detected, taskId=%v", p.GetLifecycleId(), taskId)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, true, p.logger)
+		return
+	}
+
+	store := peerToPeerResults.GetConnectionPreCheckStore(p.logger)
+
+	err = store.InitConnectionPreCheckResults(taskId, myHostAddr, peers, connectionErrs)
+	if err != nil {
+		p.logger.Errorf("Connection Pre-Check exited because of the error in InitConnectionPreCheckResults(taskId=%v, myHostAddr=%v)=%v", taskId, myHostAddr, err)
+		return
+	}
+
+	// perform pre-check on all the other source nodes except self
+	err, _ = p.sendToEachPeerOnce(ReqConnectionPreCheck, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
+	if err != nil {
+		p.logger.Errorf("Connection Pre-Check exited because of the error in sendToEachPeerOnce, taskId=%v, err=%v", taskId, err)
+	}
+}
+
+func (p *P2PManagerImpl) RetrieveConnectionPreCheckResult(taskId string) (base.ConnectionErrMapType, bool, error) {
+	store := peerToPeerResults.GetConnectionPreCheckStore(p.logger)
+	result, done, err := store.GetFromConnectionPreCheckStore(taskId)
+	if err != nil {
+		return nil, false, err
+	}
+	p.logger.Infof("Connection Pre-Check results obtained for taskId=%v are: %v\n", taskId, result)
+	return result, done, nil
 }

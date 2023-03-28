@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/couchbase/goxdcr/service_def"
 
@@ -151,6 +152,14 @@ const (
 	WaitingVbreps        = "waiting_vbreps"
 	TimeWorking          = "time_working"
 	TimeoutPercentageMap = "timeout_percentage_map"
+)
+
+const (
+	TASKID   string = "taskId"
+	RESULT   string = "result"
+	DONE     string = "done"
+	HOSTNAME string = "hostname"
+	USERNAME string = "username"
 )
 
 // errors
@@ -1405,4 +1414,66 @@ func DecodeBucketSettingsChangeRequest(request *http.Request) (bool, error) {
 		return false, base.MissingParameterError(LWWEnabled)
 	}
 	return lwwEnabled, nil
+}
+
+/* Connection Pre-Check feature */
+
+// Generate taskId for the connection pre-check feature
+var taskIdCounter uint64 = 0
+
+const maxTaskIdCounter uint64 = ^uint64(0)
+
+func generateTaskId(host string) string {
+	atomic.AddUint64(&taskIdCounter, 1)
+	if taskIdCounter == maxTaskIdCounter {
+		taskIdCounter = 0
+	}
+	taskId := fmt.Sprintf("task/%s/%v", host, taskIdCounter)
+	return taskId
+}
+
+func DecodeGetConnectionPreCheckResultRequest(request *http.Request) (taskId string, err error) {
+	if request == nil {
+		err = errors.New("Nil request found")
+		return
+	}
+	taskId = ""
+	query := request.URL.Query()
+	if query == nil || len(query) == 0 {
+		err = errors.New("1 query parameter, taskId expected, got 0")
+		return
+	}
+
+	for key, valArr := range query {
+		if key == TASKID && len(valArr) == 1 {
+			taskId = getStringFromValArr(valArr)
+		} else {
+			err = errors.New("No taskID provided to get the pre-check results")
+		}
+	}
+	return
+}
+
+// similiar to DecodeRemoteClusterRequest but without justValidate
+func DecodePostConnectionPreCheckRequest(request *http.Request) (remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
+	_, ref, errMap, err := DecodeRemoteClusterRequest(request)
+	return ref, errMap, err
+}
+
+func NewConnectionPreCheckPostResponse(hostname string, username string, taskId string) (*ap.Response, error) {
+	resMap := make(map[string]interface{})
+	resMap[TASKID] = taskId
+	resMap[HOSTNAME] = hostname
+	resMap[USERNAME] = username
+	res, err := EncodeObjectIntoResponseSensitive(resMap)
+	return res, err
+}
+
+func NewConnectionPreCheckGetResponse(taskId string, res base.ConnectionErrMapType, done bool) (*ap.Response, error) {
+	resMap := make(map[string]interface{})
+	resMap[TASKID] = taskId
+	resMap[RESULT] = res
+	resMap[DONE] = done
+	response, err := EncodeObjectIntoResponseSensitive(resMap)
+	return response, err
 }

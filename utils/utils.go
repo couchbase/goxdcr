@@ -1058,6 +1058,105 @@ func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo ma
 	return portMap, nil
 }
 
+func nodeServicesInfoParseError(nodeServicesInfo map[string]interface{}, logger *log.CommonLogger) error {
+	errMsg := "Error parsing Node Services information of remote cluster."
+	detailedErrMsg := errMsg + fmt.Sprintf("nodeServicesInfo=%v", nodeServicesInfo)
+	if logger != nil {
+		logger.Errorf(detailedErrMsg)
+	}
+	return fmt.Errorf(errMsg)
+}
+
+// Input is the result for pools/default/nodeServices, port keys and a default hostAddr
+// returns hostAddr -> <portKey -> port> mapping and list of hostAddrs (only for KV nodes)
+func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+	nodesExt, ok := nodeServicesInfo[base.NodeExtKey]
+	portsMap := make(base.HostPortMapType)
+	hostAddrs := make([]string, 0)
+
+	if !ok {
+		return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+	}
+
+	nodesExtArray, ok := nodesExt.([]interface{})
+	if !ok {
+		return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+	}
+
+	var hostName string
+	var err error
+	for _, nodeExt := range nodesExtArray {
+		nodeExtMap, ok := nodeExt.(map[string]interface{})
+		if !ok {
+			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+		}
+
+		// note that this is the only place where nodeExtMap contains a hostname without port
+		// instead of a host address with port
+		hostName, err = u.getHostNameWithoutPortFromNodeInfo(defaultConnStr, nodeExtMap, logger)
+
+		if err != nil {
+			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+		}
+
+		// Internal key
+		service, ok := nodeExtMap[base.ServicesKey]
+		if !ok {
+			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+		}
+
+		services_map, ok := service.(map[string]interface{})
+		if !ok {
+			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+		}
+
+		_, hasKV := services_map[base.KVPortKey]
+		_, hasKVSSL := services_map[base.KVSSLPortKey]
+
+		// consider the nodes if it has KV service only
+		if !hasKV && !hasKVSSL {
+			continue
+		}
+
+		hostAddr := hostName
+		port, ok := services_map[base.MgtPortKey]
+		if ok {
+			portFloat, ok := port.(float64)
+			if !ok {
+				return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+			}
+			mgmtPort := uint16(portFloat)
+			hostAddr = base.GetHostAddr(hostName, mgmtPort)
+		}
+
+		for _, portKey := range base.PortsKeysForConnectionPreCheck {
+			var portInt uint16
+			port, ok := services_map[portKey]
+			if !ok {
+				// the node may not have the service. skip the node
+				continue
+			}
+
+			portFloat, ok := port.(float64)
+			if !ok {
+				return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+			}
+
+			portInt = uint16(portFloat)
+
+			_, ok = portsMap[hostAddr]
+			if !ok {
+				portsMap[hostAddr] = make(map[string]uint16)
+			}
+			portsMap[hostAddr][portKey] = portInt
+		}
+
+		hostAddrs = append(hostAddrs, hostAddr)
+	}
+	logger.Debugf("Ports=%v; HostAddrs=%v in GetPortsAndHostAddrsFromNodeServices()", portsMap, hostAddrs)
+	return portsMap, hostAddrs, nil
+}
+
 func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonLogger) error {
 	errMsg := "Error parsing memcached ssl port of remote cluster."
 	detailedErrMsg := errMsg + fmt.Sprintf("bucketInfo=%v", bucketInfo)
@@ -1177,6 +1276,17 @@ func (u *Utilities) GetNodeListWithMinInfo(hostAddr, username, password string, 
 
 	return u.GetNodeListFromInfoMap(clusterInfo, logger)
 
+}
+
+func (u *Utilities) GetNodeServicesInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
+	nodeServicesInfo := make(map[string]interface{})
+	err, statusCode := u.QueryRestApiWithAuth(hostAddr, base.NodeServicesPath, false, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, base.MethodGet, "", nil, 0, &nodeServicesInfo, nil, false, logger)
+
+	if err != nil || statusCode != http.StatusOK {
+		return nil, fmt.Errorf("Failed on calling host=%v, path=%v, err=%v, statusCode=%v", hostAddr, base.NodeServicesPath, err, statusCode)
+	}
+
+	return nodeServicesInfo, nil
 }
 
 func (u *Utilities) GetClusterUUIDAndNodeListWithMinInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, []interface{}, error) {

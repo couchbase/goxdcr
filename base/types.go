@@ -2322,9 +2322,10 @@ func (meta *CustomCRMeta) UpdateMetaForSetBack() (pcas, mv []byte, err error) {
 }
 
 // This routine combines source and target meta and puts the new MV/PCAS in the mergedMvSlice/mergedPcasSlice
-//   It finds the current versions (MV) of the two documents, combine them into new MV.
-//   It finds the previous versions (PCAS) of the two documents, combine them into new PCAS
-//   It then remove any duplicates and format them in the provided slices
+//
+//	It finds the current versions (MV) of the two documents, combine them into new MV.
+//	It finds the previous versions (PCAS) of the two documents, combine them into new PCAS
+//	It then remove any duplicates and format them in the provided slices
 func (meta *CustomCRMeta) MergeMeta(targetMeta *CustomCRMeta, mergedMvSlice, mergedPcasSlice []byte, pruningWindow time.Duration) (mvlen int, pcaslen int, err error) {
 	currentVersions, err := meta.currentVersions()
 	if err != nil {
@@ -2486,12 +2487,17 @@ type MergeResultNotifier interface {
 
 // So on pool details and bucket details "status":
 // "healthy" currently means node recently sent heartbeat. It indicates that distributed erlang facility works between current
-//     node and node which status is shown. And that erlang functions reasonably well there.
-//     If there are buckets defined it also implies that all buckets are ready state. I.e. available for data ops.
+//
+//	node and node which status is shown. And that erlang functions reasonably well there.
+//	If there are buckets defined it also implies that all buckets are ready state. I.e. available for data ops.
+//
 // "status": "unhealthy" means that we haven't seen heartbeats from this node. Either node is down or it's sufficiently
-//     unhealthy to be unable to send heartbeats. Or network is down.
+//
+//	unhealthy to be unable to send heartbeats. Or network is down.
+//
 // "status": "warmup" means that there are bucket(s) on this node that are either being warmed up or otherwise unavailable.
-//     Internally we're doing gen_server call with timeout of 5 seconds to find out if per-bucket memcached can respond and if it thinks that bucket is warmed up. If call either times out or ns_memcached is dead (not created yet or recently crashed) or if ns_memcached is fine but bucket is warming up, then we'll mark entire node as "warmup".
+//
+//	Internally we're doing gen_server call with timeout of 5 seconds to find out if per-bucket memcached can respond and if it thinks that bucket is warmed up. If call either times out or ns_memcached is dead (not created yet or recently crashed) or if ns_memcached is fine but bucket is warming up, then we'll mark entire node as "warmup".
 type HeartbeatStatus int
 
 const (
@@ -2928,3 +2934,36 @@ func (s *StringStringMap) Clear() *StringStringMap {
 func NewUuid() string {
 	return uuid.New().String()
 }
+
+type PipelineStatusGauge int
+
+const (
+	PipelineStatusPaused  PipelineStatusGauge = iota
+	PipelineStatusRunning PipelineStatusGauge = iota
+	PipelineStatusError   PipelineStatusGauge = iota
+	PipelineStatusMax     PipelineStatusGauge = iota // Boundary
+)
+
+func (p PipelineStatusGauge) String() string {
+	switch p {
+	case PipelineStatusPaused:
+		return "paused"
+	case PipelineStatusRunning:
+		return "running"
+	case PipelineStatusError:
+		return "error"
+	default:
+		return ""
+	}
+}
+
+// hostname -> list of connection errors mapping
+type HostToErrorsMapType map[string][]string
+
+// hostAddr -> <portKey -> port> mapping
+type HostPortMapType map[string]map[string]uint16
+
+// sourceNode -> <targetNode -> list of connection errors> mapping
+type ConnectionErrMapType map[string]map[string][]string
+
+type PortType int
