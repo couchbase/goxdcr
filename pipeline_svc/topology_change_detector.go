@@ -23,6 +23,7 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils"
 	"sync"
 	"time"
+
 )
 
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
@@ -326,7 +327,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff_vb_list []uint16, target_vb_server_map map[uint16]string, err_in error) error {
-	defer top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v handleTargetTopologyChange completed", top_detect_svc.mainPipelineTopic)
 
 	var err error
 	// first check if relevant problematic vbs in pipeline are due to target topology changes.
@@ -369,6 +369,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 		}
 	}
 
+	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v handleTargetTopologyChange completed", top_detect_svc.mainPipelineTopic)
 	return nil
 
 }
