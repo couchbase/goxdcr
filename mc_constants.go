@@ -64,8 +64,9 @@ const (
 	SASL_AUTH       = CommandCode(0x21)
 	SASL_STEP       = CommandCode(0x22)
 
-	SET_BUCKET_COMPUTE_UNIT_THROTTLE_LIMITS = CommandCode(0x2a)
-	SET_BUCKET_DATA_LIMIT_EXCEEDED          = CommandCode(0x2b)
+	SET_BUCKET_THROTTLE_PROPERTIES = CommandCode(0x2a)
+	SET_BUCKET_DATA_LIMIT_EXCEEDED = CommandCode(0x2b)
+	SET_NODE_THROTTLE_PROPERTIES   = CommandCode(0x2c)
 
 	SET_VBUCKET = CommandCode(0x3d)
 
