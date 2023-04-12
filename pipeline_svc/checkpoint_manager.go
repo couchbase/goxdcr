@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/peerToPeer"
 	"math"
 	"math/rand"
 	"reflect"
@@ -21,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/peerToPeer"
 
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -760,13 +761,19 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool
 
 	// A map of vbucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid in that order
 	high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
+	invalidVbNos := make([]uint16, 0)
+	serverWarningsMap := make(map[string]map[uint16]string)
 	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
 		if _, found := serverClientStatsMap[serverAddr]; !found {
 			continue
 		}
-		ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], high_seqno_and_vbuuid_map)
+		invalidVbnosSubset, warnings := ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], high_seqno_and_vbuuid_map)
+		invalidVbNos = append(invalidVbNos, invalidVbnosSubset...)
+		serverWarningsMap[serverAddr] = warnings
 	}
-	ckmgr.logger.Infof("high_seqno_and_vbuuid_map=%v\n", high_seqno_and_vbuuid_map)
+	ckmgr.logger.Warnf("Can't find high seqno or vbuuid for vbnos=%v in stats map or are in invalid format. Target topology may have changed.\n", invalidVbNos)
+	ckmgr.logger.Debugf("Warnings encountered during getHighSeqnoAndVBUuidFromTarget are: %v", serverWarningsMap)
+
 	return high_seqno_and_vbuuid_map, nil
 }
 
