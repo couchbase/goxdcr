@@ -10,13 +10,14 @@ package peerToPeer
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type OpaqueMap map[uint32]*time.Timer
@@ -204,7 +205,10 @@ func (h *HandlerCommon) GetReqAndClearOpaque(opaque uint32) (*Request, chan ReqR
 }
 
 func (h *HandlerCommon) sendBackSynchronously(retCh chan ReqRespPair, retPair ReqRespPair) {
-	timer := time.NewTimer(base.PeerToPeerNonExponentialWaitTime + 1*time.Second)
+	RPCTotalWaitTimeInt := (base.PeerToPeerMaxRetry + 1) * (int(base.P2PCommTimeout.Seconds()) + 2)
+	RPCTotalWaitTimeSec := time.Duration(RPCTotalWaitTimeInt) * time.Second
+	totalTimeOutPeriod := base.PeerToPeerNonExponentialWaitTime + RPCTotalWaitTimeSec + 1*time.Second
+	timer := time.NewTimer(totalTimeOutPeriod)
 	select {
 	case retCh <- retPair:
 	// Done
