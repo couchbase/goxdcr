@@ -105,7 +105,7 @@ const (
 // settings whose default values cannot be viewed or changed through rest apis
 var ImmutableDefaultSettings = []string{ReplicationTypeKey, FilterExpressionKey, ActiveKey, FilterVersionKey,
 	CollectionsMgtMultiKey, CollectionsSkipSourceCheckKey, CollectionsMappingRulesKey, CollectionsMgtMirrorKey,
-	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsMgtOsoKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
+	CollectionsMgtMappingKey, CollectionsMgtMigrateKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey}
 
 // settings whose values cannot be changed after replication is created

@@ -270,9 +270,11 @@ type DcpNozzleIface interface {
 	Logger() *log.CommonLogger
 }
 
-/************************************
+/*
+***********************************
 /* struct DcpNozzle
-*************************************/
+************************************
+*/
 type DcpNozzle struct {
 	AbstractPart
 
@@ -720,12 +722,18 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 		}
 	}
 
-	osoMode, exists := settings[DCP_EnableOSO]
-	if exists {
-		dcp.osoRequested = osoMode.(bool)
-		if dcp.osoRequested {
-			dcp.Logger().Infof("%v with OSO mode requested", dcp.Id())
+	switch base.GlobalOSOSetting {
+	case base.GlobalOSOOff:
+		dcp.osoRequested = false
+	default:
+		osoMode, osoExists := settings[DCP_EnableOSO]
+		if osoExists {
+			dcp.osoRequested = osoMode.(bool)
 		}
+	}
+
+	if dcp.osoRequested {
+		dcp.Logger().Infof("%v with OSO mode requested", dcp.Id())
 	}
 
 	err = dcp.initializeUprFeed()
@@ -1726,7 +1734,7 @@ func (dcp *DcpNozzle) getTS(vbno uint16, need_lock bool) (*base.VBTimestamp, err
 	}
 }
 
-//if the vbno is not belongs to this DcpNozzle, return true
+// if the vbno is not belongs to this DcpNozzle, return true
 func (dcp *DcpNozzle) isTSSet(vbno uint16, need_lock bool) bool {
 	ts, err := dcp.getTS(vbno, need_lock)
 	if err != nil {

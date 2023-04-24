@@ -265,6 +265,8 @@ const (
 
 	CkptCacheCtrlChLenKey = "CkptCacheCtrlChLen"
 	CkptCacheReqChLenKey  = "CkptCacheReqChLen"
+
+	GlobalOSOConfigKey = "OSOModeOverride"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -381,6 +383,7 @@ var ThroughSeqnoBgScannerLogFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBg
 var PipelineTimeoutP2PProtocolConfig = &SettingsConfig{int(base.TimeoutP2PProtocol / time.Second), &Range{10, 300}}
 var CkptCacheCtrlChLenConfig = &SettingsConfig{int(base.CkptCacheCtrlChLen), &Range{1, 5000}}
 var CkptCacheReqChLenConfig = &SettingsConfig{int(base.CkptCacheReqChLen), &Range{1, 5000}}
+var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), Range: &Range{int(base.GlobalOSONoOp), int(base.GlobalOSOMax) - 1}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -497,6 +500,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	PipelineTimeoutP2PProtocolKey:                 PipelineTimeoutP2PProtocolConfig,
 	CkptCacheCtrlChLenKey:                         CkptCacheCtrlChLenConfig,
 	CkptCacheReqChLenKey:                          CkptCacheReqChLenConfig,
+	GlobalOSOConfigKey:                            GlobalOSOConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
