@@ -269,6 +269,8 @@ const (
 	HumanRecoveryThresholdKey = "humanRecoverySec"
 
 	DnsSrvReBootstrapKey = "dnsSrvReBootstrap"
+
+	GlobalOSOConfigKey = "OSOModeOverride"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -387,6 +389,7 @@ var CkptCacheCtrlChLenConfig = &SettingsConfig{int(base.CkptCacheCtrlChLen), &Ra
 var CkptCacheReqChLenConfig = &SettingsConfig{int(base.CkptCacheReqChLen), &Range{1, 5000}}
 var HumanRecoveryThresholdConfig = &SettingsConfig{int(base.HumanRecoveryThreshold.Seconds()), &Range{10, 600}}
 var DnsSrvReBootstrapConfig = &SettingsConfig{base.DNSSrvReBootstrap, nil}
+var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), Range: &Range{int(base.GlobalOSONoOp), int(base.GlobalOSOMax) - 1}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -505,6 +508,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	CkptCacheReqChLenKey:                          CkptCacheReqChLenConfig,
 	HumanRecoveryThresholdKey:                     HumanRecoveryThresholdConfig,
 	DnsSrvReBootstrapKey:                          DnsSrvReBootstrapConfig,
+	GlobalOSOConfigKey:                            GlobalOSOConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {
