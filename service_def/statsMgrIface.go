@@ -132,7 +132,8 @@ const (
 	// Memory related statistics
 	DP_GET_FAIL_METRIC = "datapool_failed_gets"
 
-	DOCS_CLONED_METRIC = "docs_cloned"
+	DOCS_CLONED_METRIC     = "docs_cloned"
+	DELETION_CLONED_METRIC = "deletion_cloned"
 )
 
 const (
@@ -1091,5 +1092,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 			"are more specific such that each doc is migrated to only one target collection.",
 		Stability: Committed,
 		Labels:    []StatsLabel{DocCountDiverge},
+	},
+
+	DELETION_CLONED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.Version7_2_1,
+		Description:  "The number of times a source deletion or expiration is cloned to be written to multiple target namespaces",
+		Notes:        "This usually happens in collection migration using explicit rule-based mapping where deletions and expirations will pass all rules.",
+		Stability:    Committed,
 	},
 }

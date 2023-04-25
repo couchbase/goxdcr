@@ -50,7 +50,7 @@ var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_M
 var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC,
 	service_def.TIME_COMMITING_METRIC, service_def.NUM_FAILEDCKPTS_METRIC, service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC,
 	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC,
-	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC}
+	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DELETION_CLONED_METRIC}
 
 // keys for metrics in overview
 var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.DOCS_CHECKED_METRIC, service_def.DOCS_WRITTEN_METRIC, service_def.EXPIRY_DOCS_WRITTEN_METRIC, service_def.DELETION_DOCS_WRITTEN_METRIC,
@@ -61,7 +61,7 @@ var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.D
 	service_def.DELETION_RECEIVED_DCP_METRIC, service_def.SET_RECEIVED_DCP_METRIC, service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC,
 	service_def.RESP_WAIT_METRIC, service_def.META_LATENCY_METRIC, service_def.DCP_DISPATCH_TIME_METRIC, service_def.DCP_DATACH_LEN, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC,
 	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC, service_def.GET_DOC_LATENCY_METRIC,
-	service_def.DOCS_MERGED_METRIC, service_def.DATA_MERGED_METRIC, service_def.EXPIRY_DOCS_MERGED_METRIC, service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC,
+	service_def.DOCS_MERGED_METRIC, service_def.DATA_MERGED_METRIC, service_def.EXPIRY_DOCS_MERGED_METRIC, service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DELETION_CLONED_METRIC,
 	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC,
 }
 
@@ -110,10 +110,10 @@ type notificationReqOpt struct {
 	sendBack chan service_def.SourceNotification
 }
 
-//StatisticsManager mount the statics collector on the pipeline to collect raw stats
-//It does stats correlation and processing on raw stats periodically (controlled by publish_interval)
-//, then stores the result in expvar
-//The result in expvar can be exposed to outside via different channels - log or to ns_server.
+// StatisticsManager mount the statics collector on the pipeline to collect raw stats
+// It does stats correlation and processing on raw stats periodically (controlled by publish_interval)
+// , then stores the result in expvar
+// The result in expvar can be exposed to outside via different channels - log or to ns_server.
 type StatisticsManager struct {
 	*component.AbstractComponent
 	//a map of registry with the part id as key
@@ -211,8 +211,8 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 	return stats_mgr
 }
 
-//Statistics of a pipeline which may or may not be running
-//Returns a list of expVar.Map where the idx corresponds to the pipeline Type, so it's possible for one elem to be nil
+// Statistics of a pipeline which may or may not be running
+// Returns a list of expVar.Map where the idx corresponds to the pipeline Type, so it's possible for one elem to be nil
 func GetStatisticsForPipeline(topic string, repStatusGetter func(topic string) (pipeline_pkg.ReplicationStatusIface, error)) []*expvar.Map {
 	var allPipelinesStats []*expvar.Map
 	repl_status, _ := repStatusGetter(topic)
@@ -274,8 +274,8 @@ func (stats_mgr *StatisticsManager) setUpdateInterval(update_interval int) {
 	stats_mgr.highSeqnosIntervalUpdaterMtx.RUnlock()
 }
 
-//updateStats runs until it get finish signal
-//It processes the raw stats and publish the overview stats along with the raw stats to expvar
+// updateStats runs until it get finish signal
+// It processes the raw stats and publish the overview stats along with the raw stats to expvar
 func (stats_mgr *StatisticsManager) updateStats() error {
 	stats_mgr.logger.Infof("%v updateStats started", stats_mgr.pipeline.InstanceId())
 	defer stats_mgr.logger.Infof("%v updateStats exited", stats_mgr.pipeline.InstanceId())
@@ -318,7 +318,7 @@ done:
 	return nil
 }
 
-//periodically prints stats to log
+// periodically prints stats to log
 func (stats_mgr *StatisticsManager) logStats() error {
 	stats_mgr.logger.Infof("%v logStats started", stats_mgr.pipeline.InstanceId())
 	defer stats_mgr.logger.Infof("%v logStats exited", stats_mgr.pipeline.InstanceId())
@@ -415,9 +415,9 @@ func (stats_mgr *StatisticsManager) formatStatsForLog() (string, error) {
 	return fmt.Sprintf("Stats for pipeline %v %v\n", stats_mgr.pipeline.InstanceId(), expvar_stats_map.String()), nil
 }
 
-//process the raw stats, aggregate them into overview registry
-//expose the raw stats and overview stats to expvar
-//Locking is done by caller
+// process the raw stats, aggregate them into overview registry
+// expose the raw stats and overview stats to expvar
+// Locking is done by caller
 func (stats_mgr *StatisticsManager) processRawStats() error {
 	rs, err := stats_mgr.getReplicationStatus()
 	if err != nil {
@@ -1091,7 +1091,7 @@ type MetricsCollector interface {
 	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 }
 
-//metrics collector for custom conflict manager
+// metrics collector for custom conflict manager
 type conflictMgrCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1204,7 +1204,7 @@ func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Ev
 	return nil
 }
 
-//metrics collector for XMem/CapiNozzle
+// metrics collector for XMem/CapiNozzle
 type outNozzleCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1462,7 +1462,7 @@ func getStatsKeyFromDocKeyAndSeqno(key string, seqno uint64) string {
 	return fmt.Sprintf("%v-%v", key, seqno)
 }
 
-//metrics collector for DcpNozzle
+// metrics collector for DcpNozzle
 type dcpCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1593,7 +1593,7 @@ func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]int
 	}
 }
 
-//metrics collector for Router
+// metrics collector for Router
 type routerCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1643,6 +1643,8 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(service_def.EXPIRY_STRIPPED_METRIC, expiry_stripped)
 		docs_cloned := metrics.NewCounter()
 		registry_router.Register(service_def.DOCS_CLONED_METRIC, docs_cloned)
+		deletion_cloned := metrics.NewCounter()
+		registry_router.Register(service_def.DELETION_CLONED_METRIC, deletion_cloned)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.DOCS_FILTERED_METRIC] = docs_filtered
@@ -1654,6 +1656,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
 		metric_map[service_def.EXPIRY_STRIPPED_METRIC] = expiry_stripped
 		metric_map[service_def.DOCS_CLONED_METRIC] = docs_cloned
+		metric_map[service_def.DELETION_CLONED_METRIC] = deletion_cloned
 
 		// VB specific stats
 		listOfVbs := dcp_part.ResponsibleVBs()
@@ -1770,12 +1773,15 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		totalCount := data[2].(int)
 		// TotalCount includes the original request + cloned count
 		metric_map[service_def.DOCS_CLONED_METRIC].(metrics.Counter).Inc(int64(totalCount - 1))
+		if isDelete := data[3].(bool); isDelete {
+			metric_map[service_def.DELETION_CLONED_METRIC].(metrics.Counter).Inc(int64(totalCount - 1))
+		}
 	}
 
 	return err
 }
 
-//metrics collector for checkpointmanager
+// metrics collector for checkpointmanager
 type checkpointMgrCollector struct {
 	stats_mgr *StatisticsManager
 }

@@ -63,14 +63,6 @@
         "notes": "The number is kept for as long as a pipeline instance is active, and resets to 0 when a pipeline is restarted. This applies to other types of \"accumulative\" counters.",
         "stability": "committed"
     },
-    "xdcr_data_replicated_uncompress": {
-        "type": "counter",
-        "help": "Theoretical amount of data replicated for a replication if compression were not used",
-        "added": "7.0.0",
-        "unit": "bytes",
-        "notes": "This stat is used in conjunction with data_replicated such that compression ratios can be calculated",
-        "stability": "committed"
-    },
     "xdcr_datapool_failed_gets": {
         "type": "counter",
         "help": "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation",
@@ -115,6 +107,13 @@
                 "added": "7.0.0"
             }
         ],
+        "stability": "committed"
+    },
+    "xdcr_deletion_cloned": {
+        "type": "counter",
+        "help": "The number of times a source deletion or expiration is cloned to be written to multiple target namespaces",
+        "added": "7.2.1",
+        "notes": "This usually happens in collection migration using explicit rule-based mapping where deletions and expirations will pass all rules.",
         "stability": "committed"
     },
     "xdcr_deletion_docs_cas_changed": {
