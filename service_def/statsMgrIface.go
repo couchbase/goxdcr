@@ -10,9 +10,10 @@ package service_def
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
-	"strings"
 )
 
 // Stats per vbucket
@@ -129,7 +130,8 @@ const (
 	// Memory related statistics
 	DP_GET_FAIL_METRIC = "datapool_failed_gets"
 
-	DOCS_CLONED_METRIC = "docs_cloned"
+	DOCS_CLONED_METRIC     = "docs_cloned"
+	DELETION_CLONED_METRIC = "deletion_cloned"
 )
 
 const (
@@ -322,4 +324,6 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	DP_GET_FAIL_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation"},
 
 	DOCS_CLONED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The number of times a source mutation is cloned to be written to different target namespace"},
+
+	DELETION_CLONED_METRIC: StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "The number of times a source deletion or expiration is cloned to be written to multiple target namespaces"},
 }

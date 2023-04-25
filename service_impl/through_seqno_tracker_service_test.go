@@ -12,6 +12,9 @@ package service_impl
 
 import (
 	"fmt"
+	"sync/atomic"
+	"testing"
+
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -22,9 +25,7 @@ import (
 	pipelineSvc "github.com/couchbase/goxdcr/pipeline_svc/mocks"
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
-	"sync/atomic"
-	"testing"
+	"github.com/stretchr/testify/mock"
 )
 
 func makeCommonEvent(eventType common.ComponentEventType, uprEvent *mcc.UprEvent) *common.Event {
@@ -363,7 +364,8 @@ func TestClonedData(t *testing.T) {
 	var data []interface{}
 	data = append(data, uint16(1)) // vbno
 	data = append(data, mutationEvent.Seqno)
-	data = append(data, 2) // total (1 main + 1 sibling)
+	data = append(data, 2)     // total (1 main + 1 sibling)
+	data = append(data, false) // not tombstone
 	clonedEvent := common.NewEvent(common.DataCloned, data, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(clonedEvent))
 
