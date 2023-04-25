@@ -117,6 +117,13 @@
         ],
         "stability": "committed"
     },
+    "xdcr_deletion_cloned": {
+        "type": "counter",
+        "help": "The number of times a source deletion or expiration is cloned to be written to multiple target namespaces",
+        "added": "7.2.1",
+        "notes": "This usually happens in collection migration using explicit rule-based mapping where deletions and expirations will pass all rules.",
+        "stability": "committed"
+    },
     "xdcr_deletion_docs_cas_changed": {
         "type": "counter",
         "help": "Number of deletion failed because target cas changed",

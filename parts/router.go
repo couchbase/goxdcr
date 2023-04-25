@@ -12,7 +12,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/golang/snappy"
 	"math"
 	"reflect"
 	"strings"
@@ -20,12 +19,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/golang/snappy"
+
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	baseFilter "github.com/couchbase/goxdcr/base/filter"
-	common "github.com/couchbase/goxdcr/common"
-	connector "github.com/couchbase/goxdcr/connector"
+	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/connector"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -735,10 +736,12 @@ func (c *CollectionsRouter) explicitMap(wrappedMCReq *base.WrappedMCRequest, lat
 		}
 	}
 
-	if c.collectionMode.IsMigrationOn() && len(matchedNamespaces) > 1 && c.migrationUIRaiser != nil {
+	if c.collectionMode.IsMigrationOn() && len(matchedNamespaces) > 1 && c.migrationUIRaiser != nil &&
+		wrappedMCReq.Req.Opcode != mc.UPR_DELETION && wrappedMCReq.Req.Opcode != mc.UPR_EXPIRATION {
+		// Only raise UI message if it is not tombstone. Tombstones will pass all filters.
 		msg := fmt.Sprintf("This collection migration pipeline instance for spec %v has experienced a situation where "+
-			"a single source mutation is replicated to multiple target collections due to at least one document matching multiple "+
-			" migration mapping rules. Please check the migration logic if this was not intended.", c.spec.Id)
+			"a single source mutation with document ID %q is replicated to multiple target collections because it matches multiple "+
+			" migration mapping rules. Please check the migration logic if this was not intended.", c.spec.Id, wrappedMCReq.Req.Key)
 		c.migrationUIRaiser(msg)
 	}
 
@@ -1828,10 +1831,12 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 		vbno := firstReq.Req.VBucket
 		seqno := firstReq.Seqno
 		totalInstances := len(colIds)
+		isDelete := firstReq.Req.Opcode == mc.UPR_DELETION || firstReq.Req.Opcode == mc.UPR_EXPIRATION
 		var data []interface{}
 		data = append(data, vbno)
 		data = append(data, seqno)
 		data = append(data, totalInstances)
+		data = append(data, isDelete)
 
 		router.RaiseEvent(common.NewEvent(common.DataCloned, data, router, nil, nil))
 	}
