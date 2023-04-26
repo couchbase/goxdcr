@@ -1499,10 +1499,28 @@ func (c *CollectionNamespaceMapping) String() string {
 }
 
 func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
+	var sharedDP base.DataPool
+	var getDPOnce sync.Once
+	getDP := func() base.DataPool {
+		getDPOnce.Do(func() {
+			sharedDP = base.NewDataPool()
+		})
+		return sharedDP
+	}
+
 	clone = make(CollectionNamespaceMapping)
 	for k, v := range c {
 		srcClone := &SourceNamespace{}
 		*srcClone = *k
+		if srcClone.nsType == SourceDefaultCollectionFilter {
+			// Need to clone filter because each filter is not supposed to be run by multiple go-routines
+			// Similar to NewSourceMigrationNamespace
+			filterPtr, err := filter.NewFilterWithSharedDP("", k.GetFilterString(), utils, getDP(), false)
+			if err != nil {
+				continue
+			}
+			srcClone.ReplaceFilter(filterPtr)
+		}
 		clone[srcClone] = v.Clone()
 	}
 	return

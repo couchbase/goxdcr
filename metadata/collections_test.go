@@ -1735,3 +1735,33 @@ func TestUnmarshal1kCollectionManifest(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(checkManifest)
 }
+
+func TestSourceMigrationClone(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestSourceMigrationClone =================")
+	defer fmt.Println("============== Test case end: TestSourceMigrationClone =================")
+	// Test out of order list will have the same sha
+	nsMap := make(CollectionNamespaceMapping)
+
+	expr := "REGEXP_CONTAINS(META().id, \"^S1_\")"
+	defaultSrcNamespace, err := NewSourceMigrationNamespace(expr, nil)
+	assert.Nil(err)
+
+	targetNamespace, err := base.NewCollectionNamespaceFromString("S1.col1")
+	assert.Nil(err)
+
+	nsMap.AddSingleSourceNsMapping(defaultSrcNamespace, &targetNamespace)
+	assert.Len(nsMap, 1)
+
+	nsMapClone := nsMap.Clone()
+	assert.Len(nsMapClone, 1)
+
+	for k, _ := range nsMap {
+		for k2, _ := range nsMapClone {
+			assert.False(reflect.DeepEqual(k.filter, k2.filter))
+			assert.Equal(k.GetFilterString(), k2.GetFilterString())
+			assert.Equal(k.GetType(), k2.GetType())
+		}
+	}
+
+}
