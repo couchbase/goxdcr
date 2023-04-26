@@ -470,7 +470,7 @@ func (c *CollectionsManifest) Scopes() ScopesMap {
 	return c.scopes
 }
 
-//type CollectionsMap map[string]Collection
+// type CollectionsMap map[string]Collection
 // Diff by name between two manifests
 func (sourceManifest *CollectionsManifest) ImplicitMap(targetManifest *CollectionsManifest) (successfulMapping CollectionNamespaceMapping, unmappedSources CollectionsMap, unmappedTargets CollectionsMap) {
 	if sourceManifest == nil || targetManifest == nil {
@@ -1258,6 +1258,16 @@ func (s *SourceNamespace) String() string {
 	default:
 		return "?? (SourceNamespace)"
 	}
+}
+
+// When used as a library, other users may need to replace the filter with a separate interface
+// No locking provided. Use at your own risk
+func (s *SourceNamespace) ReplaceFilter(newFilter filter.Filter) {
+	s.filter = newFilter
+}
+
+func (s *SourceNamespace) GetFilterString() string {
+	return s.filterString
 }
 
 // This is used for namespace mapping that transcends over manifest lifecycles
