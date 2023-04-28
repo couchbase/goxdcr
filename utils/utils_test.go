@@ -20,7 +20,9 @@ import (
 	"testing"
 
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -917,4 +919,45 @@ func TestGetHostAddrFromNodeInfo(t *testing.T) {
 	// We should return error
 	assert.NotNil(err)
 
+}
+
+func TestTransactionFilterWithPureArray(t *testing.T) {
+	fmt.Println("============== Test case start: TestTransactionFilterWithPureArray =================")
+	assert := assert.New(t)
+
+	uprFile := "./testFilteringData/uprArrayOnly.bin"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(uprFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	fakedp := base.NewFakeDataPool()
+	slicesToBeReleasedBuf := make([][]byte, 0, 2)
+	_, _, _, err, errDesc, _, _ := testUtils.CheckForTransactionXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
+	assert.Nil(err)
+	assert.Equal("", errDesc)
+	fmt.Println("============== Test case end: TestTransactionFilterWithPureArray =================")
+}
+
+func TestTransactionFilterWithInvalidJSON(t *testing.T) {
+	fmt.Println("============== Test case start: TestTransactionFilterWithInvalidJSON =================")
+	defer fmt.Println("============== Test case end: TestTransactionFilterWithInvalidJSON =================")
+	assert := assert.New(t)
+
+	uprFile := "./testFilteringData/uprArrayOnly.bin"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(uprFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	fakedp := base.NewFakeDataPool()
+	slicesToBeReleasedBuf := make([][]byte, 0, 2)
+
+	// Append a random char into uprevent's body
+	out, err := snappy.Decode(nil, uprEvent.UprEvent.Value)
+	assert.Nil(err)
+	out = append(out, '-')
+	uprEvent.UprEvent.Value = snappy.Encode(nil, out)
+
+	_, _, _, err, errDesc, _, _ := testUtils.CheckForTransactionXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
+	assert.NotNil(err)
+	assert.True(strings.Contains(errDesc, filter.InvalidJSONMsg))
 }

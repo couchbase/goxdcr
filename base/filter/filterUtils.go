@@ -19,6 +19,8 @@ import (
 	"github.com/golang/snappy"
 )
 
+const InvalidJSONMsg = "seems to be an invalid JSON"
+
 type FilterUtilsImpl struct {
 }
 
@@ -254,8 +256,8 @@ func decompressSnappyBody(incomingBody, key []byte, dp base.DataPool, slicesToBe
 	}
 
 	// Check to make sure the last bracket position is correct
-	if isJson && body[lastBodyPos] != '}' {
-		return nil, base.ErrorInvalidInput, fmt.Sprintf("XDCR for key %v%v%v after decompression seems to be an invalid JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt, lastBodyPos
+	if isJson && body[lastBodyPos] != '}' && body[lastBodyPos] != ']' {
+		return nil, base.ErrorInvalidInput, fmt.Sprintf("XDCR for key %v%v%v after decompression %s", base.UdTagBegin, string(key), base.UdTagEnd, InvalidJSONMsg), dpFailedCnt, lastBodyPos
 	}
 
 	return body, nil, "", dpFailedCnt, lastBodyPos
