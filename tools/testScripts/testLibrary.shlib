@@ -1021,7 +1021,7 @@ function checkOpenSSL {
 function findNsServerDir {
 	local i=0
 	local outStr=""
-	pushd "$PWD" > /dev/null
+	pushd "$PWD" >/dev/null
 
 	while [[ "$PWD" != / ]] && [[ ! -d "ns_server" ]]; do
 		i=$(($i + 1))
@@ -1033,9 +1033,43 @@ function findNsServerDir {
 		outStr="${outStr}../"
 	done
 	outStr="${outStr}ns_server"
-	popd > /dev/null
+	popd >/dev/null
 
 	echo "$outStr"
+}
+
+function setupCertificateAuthority {
+	local clusterName="$1"
+	local dependentNodeName
+
+	# Create a private key for the cluster.
+	openssl genrsa -out ca.key 2048
+
+	# Create the certificate (that is, the file that will contain the public key) for the cluster. The certificate is
+	# intended to be self-signed, meaning that it will not be vouched for by any other authority. This means that it can
+	# be created directly, based on the existing private key ca.key, without assistance from a third party.
+	openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
+		-subj "/CN=Couchbase Root CA"
+	#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
+	# -subj "/CN=Couchbase Server"
+
+	# The lines below here will at least get some verification failure
+	#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
+	#  -subj "/C=UA/O=MyCompany/CN=MyCompanyRootCA"
+
+	CLUSTER_ROOT_CERTIFICATE_MAP["$clusterName"]=$(cat "ca.pem")
+	CLUSTER_ROOT_CERTIFICATE_LOCATION["$clusterName"]="$(PWD)/ca.pem"
+	CLUSTER_ROOT_KEY_LOCATION["$clusterName"]="$(PWD)/ca.key"
+
+	# For dependent nodes, they should use the same CA
+	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+		if [[ "${CLUSTER_DEPENDENCY_MAP["$dependentNodeName"]}" == "$clusterName" ]]; then
+			# This dependentNode will be using this CA setup
+			CLUSTER_ROOT_CERTIFICATE_MAP["$dependentNodeName"]=$(cat "ca.pem")
+			CLUSTER_ROOT_CERTIFICATE_LOCATION["$dependentNodeName"]="$(PWD)/ca.pem"
+			CLUSTER_ROOT_KEY_LOCATION["$dependentNodeName"]="$(PWD)/ca.key"
+		fi
+	done
 }
 
 function setupCertsForTesting {
@@ -1050,31 +1084,41 @@ function setupCertsForTesting {
 	popd
 
 	pushd $(pwd)
+
 	local clusterName
+	local depedentCheck
 	local sanIP
-	cd /tmp/ || exit
+
+	# First do cleanup + setup
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
-		# On the server to be certificate-protected, create working directories:
+		cd /tmp/ || exit
 		rm -rf servercertfiles_$clusterName
 		mkdir servercertfiles_$clusterName || exit
-		cd servercertfiles_$clusterName
+		cd servercertfiles_$clusterName || exit
 		mkdir -p {public,private,requests} || exit
-		# Create a private key for the cluster.
-		openssl genrsa -out ca.key 2048
+	done
 
-		# Create the certificate (that is, the file that will contain the public key) for the cluster. The certificate is
-		# intended to be self-signed, meaning that it will not be vouched for by any other authority. This means that it can
-		# be created directly, based on the existing private key ca.key, without assistance from a third party.
-		openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
-			-subj "/CN=Couchbase Root CA"
-		#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
-		# -subj "/CN=Couchbase Server"
+	cd /tmp/ || exit
 
-		# The lines below here will at least get some verification failure
-		#openssl req -new -x509 -days 3650 -sha256 -key ca.key -out ca.pem \
-		#  -subj "/C=UA/O=MyCompany/CN=MyCompanyRootCA"
+	# First set up CA
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		# For now, skip if it is considered a dependent node. A dependent node will be using the CA created by the mother node
+		if [[ -n "${CLUSTER_DEPENDENCY_MAP[$clusterName]:-}" ]]; then
+			continue
+		fi
+		cd servercertfiles_$clusterName || exit
+		setupCertificateAuthority "$clusterName"
+		cd ..
+	done
 
-		CLUSTER_ROOT_CERTIFICATE_MAP["$clusterName"]=$(cat "ca.pem")
+	cd /tmp/ || exit
+
+	# Then perform actual node-based certs
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		cd /tmp/ || exit
+		cd servercertfiles_$clusterName || exit
+
+		# On the server to be certificate-protected, create working directories:
 
 		local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		local nodeDirIdx=$(echo "$port % 10" | bc)
@@ -1113,16 +1157,33 @@ EOF
 		# Create a customized certificate extensions file, which adds per node constraints to the generic constraints already specified.
 		cp ./server.ext ./server.ext.tmp
 
-		sanIP="127.0.0.1"
+		unset sanIPs
+		local -a sanIPs
+		sanIPs[0]="127.0.0.1"
 		if [[ ! -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
-			sanIP="${VAGRANT_VM_IP_MAP["$clusterName"]}"
+			sanIPs[${#sanIPs[@]}]="${VAGRANT_VM_IP_MAP["$clusterName"]}"
+			if [[ -n "${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]:-}" ]]; then
+				sanIPs[${#sanIPs[@]}]="${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]}"
+			fi
+		else
+			sanIPs[${#sanIPs[@]}]="$(ipconfig getifaddr en0)"
 		fi
-		echo "subjectAltName = IP:${sanIP}" \
-			>>./server.ext.tmp
+
+		local counter=0
+		for sanIP in $(echo ${sanIPs[@]}); do
+			if (($counter == 0)); then
+				echo -n "subjectAltName = IP:${sanIP}" \
+					>>./server.ext.tmp
+			else
+				echo -n ", IP:${sanIP}" >>./server.ext.tmp
+			fi
+			counter=$(($counter + 1))
+		done
+		echo "" >>./server.ext.tmp
 
 		# Create the node certificate, applying the certificate and digital signature of the appropriate authority, and the
 		# customized extensions file for the node, to the materials in the signing request.
-		openssl x509 -CA ca.pem -CAkey ca.key -CAcreateserial -days 365 -req \
+		openssl x509 -CA ${CLUSTER_ROOT_CERTIFICATE_LOCATION["$clusterName"]} -CAkey ${CLUSTER_ROOT_KEY_LOCATION["$clusterName"]} -CAcreateserial -days 365 -req \
 			-in requests/couchbase.default.svc.csr \
 			-out public/couchbase.default.svc.pem \
 			-extfile server.ext.tmp
@@ -1130,9 +1191,9 @@ EOF
 		# Rename the node certificate and node private key.
 		local chainFileName="node${nodeDirIdx}_chain.pem"
 		local pKeyFileName="node${nodeDirIdx}_pkey.key"
-		cd ./public
+		cd ./public || exit
 		mv couchbase.default.svc.pem $chainFileName
-		cd ../private
+		cd ../private || exit
 		mv couchbase.default.svc.key $pKeyFileName
 		cd ..
 
@@ -1142,6 +1203,7 @@ EOF
 
 		NODE_CERT_MAP["$clusterName"]="$PWD/public/$chainFileName"
 		NODE_KEY_MAP["$clusterName"]="$PWD/private/$pKeyFileName"
+		# TODO: figure out nodeCA map and see what's happening for vagrant
 		NODE_CA_MAP["$clusterName"]="$PWD/ca.pem"
 
 		if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
@@ -1149,7 +1211,9 @@ EOF
 			cp ./private/$pKeyFileName $couchbaseDir/inbox/pkey.key
 
 			# Upload the root certificate for the cluster. Use the following REST command:
-			curl -X POST --data-binary "@./ca.pem" \
+			#curl -X POST --data-binary "@./ca.pem" \
+			#	http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/controller/uploadClusterCA
+			curl -X POST --data-binary "@${CLUSTER_ROOT_CERTIFICATE_LOCATION["$clusterName"]}" \
 				http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/controller/uploadClusterCA
 
 			# Reload the node certificate from disk, for the current node:
@@ -1162,7 +1226,7 @@ EOF
 		# currently still in the servercertfiles_CX
 		rm -rf clientcertfiles
 		mkdir clientcertfiles
-		cd clientcertfiles
+		cd clientcertfiles || exit
 
 		# Create an extensions file for the use of all clients
 		cat >client.ext <<EOF
@@ -1185,7 +1249,11 @@ EOF
 		openssl req -new -key ./travel-sample.key -out ./travel-sample.csr -subj "/CN=Administrator"
 
 		# Create the client certificate. In this example, the customized extensions file, client.ext.tmp, is used.
-		openssl x509 -CA ../ca.pem -CAkey ../ca.key \
+		#openssl x509 -CA ../ca.pem -CAkey ../ca.key \
+		#	-CAcreateserial -days 365 -req -in ./travel-sample.csr \
+		#	-out ./travel-sample.pem -extfile ./client.ext.tmp
+		openssl x509 -CA ${CLUSTER_ROOT_CERTIFICATE_LOCATION[$clusterName]} \
+			-CAkey ${CLUSTER_ROOT_KEY_LOCATION[$clusterName]} \
 			-CAcreateserial -days 365 -req -in ./travel-sample.csr \
 			-out ./travel-sample.pem -extfile ./client.ext.tmp
 
@@ -1199,9 +1267,9 @@ EOF
 		CLIENT_KEY_MAP["$clusterName"]="$PWD/$clientKeyName"
 
 		# Back to clientcertfiles
-		cd ..
+		#cd ..
 		# Back to "root" directory before the server_certfiles...
-		cd ..
+		#cd ..
 	done
 
 	popd

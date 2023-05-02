@@ -34,6 +34,7 @@ var externalAddresses = []string{"10.10.10.10", "11.11.11.11", "12.12.12.12",
 const testExternalDataDir = "testExternalData/"
 const testInternalDataDir = "testInternalData/"
 const testK8DataDir = "testK8ExternalData/"
+const kvSSLDir = "alternateAddrKVSSL/"
 
 var logger = log.NewLogger("testLogger", log.DefaultLoggerContext)
 var testUtils = NewUtilities()
@@ -117,6 +118,15 @@ func getBucketInfoWithReplicasAfterRebalance() map[string]interface{} {
 
 func getBucketInfoWithManifestHexId() map[string]interface{} {
 	fileName := fmt.Sprintf("%v%v", testInternalDataDir, "bucketInfoForCollection.json")
+	retMap, _, err := readJsonHelper(fileName)
+	if err != nil {
+		panic(err)
+	}
+	return retMap
+}
+
+func getKvSSLFromBPath() map[string]interface{} {
+	fileName := fmt.Sprintf("%v%v%v", testExternalDataDir, kvSSLDir, "pools_default_b_ssl.json")
 	retMap, _, err := readJsonHelper(fileName)
 	if err != nil {
 		panic(err)
@@ -920,4 +930,18 @@ func TestTransactionFilterWithInvalidJSON(t *testing.T) {
 	_, _, _, err, errDesc, _, _ := testUtils.CheckForTransactionXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
 	assert.NotNil(err)
 	assert.True(strings.Contains(errDesc, filter.InvalidJSONMsg))
+}
+
+func TestKvSSLPortAlternateAddr(t *testing.T) {
+	fmt.Println("============== Test case start: TestKvSSLPortAlternateAddr =================")
+	defer fmt.Println("============== Test case end: TestKvSSLPortAlternateAddr =================")
+	assert := assert.New(t)
+
+	bucketInfo := getKvSSLFromBPath()
+	assert.NotNil(bucketInfo)
+	_, err := testUtils.getMemcachedSSLPortMapInternal("", bucketInfo, nil, false)
+	assert.Nil(err)
+
+	_, err = testUtils.getMemcachedSSLPortMapInternal("", bucketInfo, nil, true)
+	assert.Nil(err)
 }

@@ -30,9 +30,11 @@ DEFAULT_PW="wewewe"
 # cluster -> Bucket(s)
 # -----------------
 CLUSTER_NAME_PORT_MAP=(["C1"]=15000 ["C1P"]=15001 ["C2"]=15002 ["C2P"]=15003)
+CLUSTER_NAME_SSLPORT_MAP=(["C1"]=15020 ["C1P"]=15021 ["C2"]=15022 ["C2P"]=15023)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=15996 ["C1P"]=15997 ["C2"]=15998 ["C2P"]=15999)
 CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1" ["C2P"]="C2")
 VAGRANT_KV_EXTERNAL_MAP=(["C1"]=15100 ["C1P"]=15101 ["C2"]=15102 ["C2P"]=15103)
+VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C1P"]=15201 ["C2"]=15202 ["C2P"]=15203)
 VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
 VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.1" ["C1P"]="192.168.56.2" ["C2"]="192.168.56.3" ["C2P"]="192.168.56.4")
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
@@ -85,20 +87,29 @@ vagrantInstallCBServerAll "7.1.3"
 
 setupTopologies
 
+addNodesIn
 sleep 5
-createRemoteClusterReference "C1" "C2"
-createRemoteClusterReference "C2" "C1"
+startRebalancing "C1"
+startRebalancing "C2"
+
+sleep 5
+setupCertsForTesting
+vagrantLoadCerts
+for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+	setEnableClientCert "$clusterName"
+done
+
+sleep 5
+#createRemoteClusterReference "C1" "C2"
+#createRemoteClusterReference "C2" "C1"
+createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
+createSecureRemoteClusterReference "C2" "C1" "${CLUSTER_ROOT_CERTIFICATE_MAP["C1"]}"
 sleep 1
 
 createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 runDataLoad
-
-addNodesIn
-sleep 5
-startRebalancing "C1"
-startRebalancing "C2"
 
 read -p "Press enter to tear-down..."
 vagrantHalt

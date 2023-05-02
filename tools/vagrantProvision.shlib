@@ -141,6 +141,7 @@ function vagrantInstallCBServer {
 	vagrantInstallNtp "$i"
 	vagrantInstallPythonHttpLib "$i"
 	vagrantInstallLibInfo "$i"
+	vagrantInstallJq "$i"
 	downloadCBServerDeb "$version"
 	VAGRANT_VERSION_MAP[$nodeName]="$version"
 
@@ -154,6 +155,15 @@ function vagrantInstallPythonHttpLib {
 	local cmd
 
 	cmd="${VSSH[$i]} \"sudo apt-get -y install python-httplib2\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallJq {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install jq\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 }
@@ -172,6 +182,15 @@ function vagrantInstallLibInfo {
 	local cmd
 
 	cmd="${VSSH[$i]} \"sudo apt-get -y install libtinfo5\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallSocat {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install socat\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 }
@@ -250,13 +269,18 @@ function vagrantLoadCerts {
 		# Copy chain file
 		${VSSH[$idx]} "sudo mkdir -p /opt/couchbase/var/lib/couchbase/inbox"
 		# Vagrant scp does not have root priviledge
-		vscp "$idx" "${NODE_CA_MAP[$clusterName]}" "/tmp/ca.pem"
+		# TODO - see if this helps
+		vscp "$idx" "${CLUSTER_ROOT_CERTIFICATE_LOCATION[$clusterName]}" "/tmp/ca.pem"
+		#CLUSTER_ROOT_KEY_LOCATION["$dependentNodeName"]="$(PWD)/ca.key"
 		${VSSH[$idx]} "curl -X POST --data-binary '@/tmp/ca.pem' http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:8091/controller/uploadClusterCA"
 
+		# Copy the node certs and then reload it
 		vscp "$idx" "${NODE_CERT_MAP[$clusterName]}" "/tmp/chain.pem"
 		${VSSH[$idx]} "sudo mv /tmp/chain.pem /opt/couchbase/var/lib/couchbase/inbox/chain.pem"
 		vscp "$idx" "${NODE_KEY_MAP[$clusterName]}" "/tmp/pkey.key"
 		${VSSH[$idx]} "sudo mv /tmp/pkey.key /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
+		${VSSH[$idx]} "sudo chmod a+r /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
+		${VSSH[$idx]} "curl -X POST http://127.0.0.1:8091/node/controller/reloadCertificate -u $DEFAULT_ADMIN:$DEFAULT_PW"
 
 	done
 }
@@ -327,4 +351,38 @@ function vagrantRunCBWorkloadGenCollection {
 	cmd="${VSSH[$idx]} \"$workloadGenLoc -i $CBWORKLOAD_COLLECTION_NUM_ITEMS -j -r 1 -n 127.0.0.1:8091 -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+}
+
+function setupVagrantAltPortForwarding {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	# First install needed software
+	vagrantInstallSocat "$idx"
+
+	# For each port, need to launch a bg task to port forward
+	echo "Setting up port forwarding for $clusterName"
+	# mgmtPort
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${CLUSTER_NAME_PORT_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:8091)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+
+	# mgmtSSLPort
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${CLUSTER_NAME_SSLPORT_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:18091)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+
+	# kv
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${VAGRANT_KV_EXTERNAL_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:11210)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+
+	# kvSSL
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$(socat tcp-listen:${VAGRANT_KVSSL_EXTERNAL_MAP["$clusterName"]},reuseaddr,fork tcp:localhost:11207)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
 }

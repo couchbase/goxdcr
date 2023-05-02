@@ -20,10 +20,11 @@ VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C1P"]=15201 ["C2"]=15202 ["C2P"]=1520
 VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
 VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.1" ["C1P"]="192.168.56.2" ["C2"]="192.168.56.3" ["C2P"]="192.168.56.4")
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
+VAGRANT_IP_EXTERNAL_MAP=(["C1"]="192.168.56.5" ["C1P"]="192.168.56.6" ["C2"]="192.168.56.7" ["C2P"]="192.168.56.8")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
-cluster1BucketsArr=("B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -33,67 +34,56 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"_default._default":"test.test"}')
 
-BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
-SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
+#BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
+#SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
 
 # Test cases assume vagrant up has already been called
 
 function runDataLoad {
-	#runCbWorkloadGenBucket "C1" "B1"
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\tbk_ouvidoria_total(hw)::174" '{"foo":"bar"}'
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u0000bk_ouvidoria_total(hw)::1700" '{"foo":"bar"}'
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u0009bk_ouvidoria_total(hw)::1709" '{"foo":"bar"}'
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u000bk_ouvidoria_total(hw)::170" '{"foo":"bar"}'
+	runCbWorkloadGenBucket "C1" "B1" &
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running 7.0.4 tab character OSO test"
+	echo "Running Full secure with client cert replication"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
-
-	vagrantInstallCBServerAll "7.0.4"
+	vagrantInstallCBServerAll "7.1.3"
 
 	setupTopologies
 
-	# Shorten the amount of time pipeline restarts
-	local checkInterval=10
-	local maxChangeCnt=3
-	local maxStableCnt=3
-	local coolDownPeriod=1
-	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
-
-	sleep 5
-	createRemoteClusterReference "C1" "C2"
-	createRemoteClusterReference "C2" "C1"
-	sleep 1
-
 	addNodesIn
 	sleep 5
-	echo "Rebalancing nodes to become a 2-node source cluster"
 	startRebalancing "C1"
-	echo "Rebalancing nodes to become a 2-node target cluster"
 	startRebalancing "C2"
 
-	local loopCounter=0
-
-	while ((1)); do
-		setupBuckets
-		runDataLoad
-		createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
-		checkChangesLeftInternal "C1" "B1" "C2" "B2"
-		vagrantGrepForPanicAll
-
-		echo "============================================================================"
-		echo "PASSED $loopCounter"
-		echo "============================================================================"
-		loopCounter=$(($loopCounter + 1))
-
-		cleanupBucketReplications
-		cleanupBuckets
+	sleep 5
+	setupCertsForTesting
+	vagrantLoadCerts
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		setEnableClientCert "$clusterName"
 	done
+
+	sleep 5
+	createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
+	createSecureRemoteClusterReference "C2" "C1" "${CLUSTER_ROOT_CERTIFICATE_MAP["C1"]}"
+	sleep 1
+
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+
+	runDataLoad
+	sleep 10
+
+	checkUnidirectionalChangesLeft
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBucketReplications
+	cleanupBuckets
 
 }

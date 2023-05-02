@@ -42,6 +42,7 @@ CB_CLI_BIN="../../../../../../../install/bin/couchbase-cli"
 # Scopes -> Collections
 declare -A CLUSTER_NAME_HOST_MAP
 declare -A CLUSTER_NAME_PORT_MAP
+declare -A CLUSTER_NAME_SSLPORT_MAP
 declare -A CLUSTER_SETUP_DONE_MAP
 declare -A CLUSTER_NAME_SECURE_PORT_MAP
 declare -A CLUSTER_NAME_XDCR_PORT_MAP
@@ -61,7 +62,9 @@ declare -A NODE_CA_MAP
 declare -A CLIENT_CERT_MAP
 declare -A CLIENT_KEY_MAP
 declare -A VAGRANT_KV_EXTERNAL_MAP
+declare -A VAGRANT_KVSSL_EXTERNAL_MAP
 declare -A VAGRANT_CAPI_EXTERNAL_MAP
+declare -A VAGRANT_IP_EXTERNAL_MAP
 declare -A VAGRANT_VM_IP_MAP
 declare -A VAGRANT_VM_IDX_MAP
 declare -A VAGRANT_VERSION_MAP
@@ -75,6 +78,8 @@ declare DATALOAD_CONT_DELAY="10"
 # Value is in the format of actual value to send
 declare -A BUCKET_NAME_PROPERTIES_MAP
 declare -A CLUSTER_ROOT_CERTIFICATE_MAP
+declare -A CLUSTER_ROOT_CERTIFICATE_LOCATION
+declare -A CLUSTER_ROOT_KEY_LOCATION
 
 # These are to record which containers have been created already
 # to prevent duplicated creates
@@ -426,8 +431,14 @@ function testForClusterRun {
 function setupVagrantAltAddress {
 	local clusterName="$1"
 	local hostname=${VAGRANT_VM_IP_MAP[$clusterName]}
+	local altHostName=${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]:-}
 
-	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=$hostname&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
+	if [[ -n "${altHostName:-}" ]]; then
+		hostname="$altHostName"
+		setupVagrantAltPortForwarding "$clusterName"
+	fi
+
+	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=$hostname&mgmtSSL=${CLUSTER_NAME_SSLPORT_MAP[$clusterName]}&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&kvSSL=${VAGRANT_KVSSL_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
 }
 
 function getClusterIdx {
@@ -471,26 +482,21 @@ function setupCluster {
 		$CURL -X POST http://localhost:$port/node/controller/setupServices -d services=kv >/dev/null 2>&1
 		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -v -X POST http://localhost:$port/settings/web -d password=$DEFAULT_PW -d username=$DEFAULT_ADMIN -d port=$initPort >/dev/null 2>&1
 		if (($? != 0)); then
+			echo "non-0 error when setting up cluster"
 			return $?
 		fi
 
 		# Vagrant, set up alternate address so cbworkloadgen can run from dev machine onto vagrants
 		if [[ ! -z "${VAGRANT_KV_EXTERNAL_MAP["$clusterName"]:-}" ]]; then
-			# If any node is running 6.0.x then don't set up alternate addresses
-			local key
-			local found60=0
-			for key in $(echo ${!VAGRANT_VERSION_MAP[@]}); do
-				if [[ "$key" =~ 6\.0\. ]]; then
-					found60=1
-				fi
-			done
-			if (($found60 == 1)); then
-				setupVagrantAltAddress "$clusterName"
-			else
-				echo "At least one node is running 6.0.x so no alternate address will be set up"
-			fi
+			setupVagrantAltAddress "$clusterName"
 		fi
 		echo ""
+	done
+}
+
+function setupVagrantAltAddresses {
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		setupVagrantAltAddress "$clusterName"
 	done
 }
 
@@ -644,6 +650,7 @@ function startRebalancingWithKnownNodes {
 function startRebalancing {
 	local nodeName=$1
 	local knownNodesString
+	local depNodeName
 
 	echo "Starting rebalance process..."
 	knownNodesString=$(populateKnownNodesString $nodeName)
@@ -652,7 +659,16 @@ function startRebalancing {
 
 	# Vagrant nodes need alt addresses added
 	if [[ ! -z "${VAGRANT_KV_EXTERNAL_MAP[$nodeName]:-}" ]]; then
+		echo "Setting up alternate address for $nodeName"
 		setupVagrantAltAddress "$nodeName"
+		# Need to find dependent node and setup alternate address for that node too
+		for depNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
+			if [[ "${CLUSTER_DEPENDENCY_MAP[$depNodeName]:-}" == "$nodeName" ]]; then
+				echo "Found $depNodeName as a depdency node. Setting up alternate addressing"
+				setupVagrantAltAddress "$depNodeName"
+				break
+			fi
+		done
 	fi
 }
 
@@ -2433,8 +2449,12 @@ function createSecureRemoteClusterReference {
 	# special case handling for Vagrant
 	if [[ ! -z "${VAGRANT_VM_IP_MAP[$target]:-}" ]]; then
 		targetHost="${VAGRANT_VM_IP_MAP[$target]}"
-		#targetPort="8091"
 		targetSecurePort="18091"
+		# If external is specified, use it
+		if [[ -n "${VAGRANT_IP_EXTERNAL_MAP["$target"]:-}" ]]; then
+			targetHost="${VAGRANT_IP_EXTERNAL_MAP["$target"]}"
+			targetSecurePort="${CLUSTER_NAME_SSLPORT_MAP["$target"]}"
+		fi
 	fi
 
 	# See if client cert and keys exist
@@ -2451,7 +2471,7 @@ function createSecureRemoteClusterReference {
 		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=${targetHost}:${targetSecurePort} -d username=$DEFAULT_ADMIN -d password=$DEFAULT_PW \
 			-d encryptionType=full -d demandEncryption=1 --data-urlencode "certificate=${remoteClusterCert}"
 	else
-		echo "Creating SECURE remote cluster reference from $source to $target using client key $clientKeyFile and cert $clientCertFile"
+		echo "Creating SECURE remote cluster reference from $source to $target ($targetHost) using client key $clientKeyFile and cert $clientCertFile"
 		local clientKeyData="$(cat $clientKeyFile)"
 		local clientCertData="$(cat $clientCertFile)"
 		$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/pools/default/remoteClusters -d name=$target -d hostname=${targetHost}:${targetSecurePort} \
@@ -2526,7 +2546,8 @@ function writeMandatoryClientCertJSON {
 }
 
 function writeDisableClientCertJSON {
-	local tempFile=$(mktemp)
+	local tempFile
+	tempFile=$(mktemp)
 	echo '{
     "state": "disable",
     "prefixes": [
@@ -2547,27 +2568,40 @@ function writeDisableClientCertJSON {
 
 function setMandatoryClientCert {
 	local cluster=$1
-	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+	local tempFile
 
-	local tempFile=$(writeMandatoryClientCertJSON)
-
-	$CURL -X POST http://127.0.0.1:${port}/settings/clientCertAuth --data-binary @${tempFile} -u Administrator:wewewe
+	tempFile=$(writeMandatoryClientCertJSON)
+	executeClientCertAuth "$cluster" "$tempFile"
 }
 
 function setEnableClientCert {
 	local cluster=$1
-	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+	local tempFile
 
-	local tempFile=$(writeEnabledClientCertJSON)
-
-	$CURL -X POST http://127.0.0.1:${port}/settings/clientCertAuth --data-binary @${tempFile} -u Administrator:wewewe
+	tempFile=$(writeEnabledClientCertJSON)
+	executeClientCertAuth "$cluster" "$tempFile"
 }
 
 function setDisableClientCert {
 	local cluster=$1
-	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
-
 	local tempFile=$(writeDisableClientCertJSON)
 
-	$CURL -X POST http://127.0.0.1:${port}/settings/clientCertAuth --data-binary @${tempFile} -u Administrator:wewewe
+	executeClientCertAuth "$cluster" "$tempFile"
+}
+
+function executeClientCertAuth {
+	local clusterName=$1
+	local tempFile=$2
+	local vagrantTempFile="/tmp/clientCertAuthTmp"
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
+	local idx
+
+	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+		$CURL -X POST http://127.0.0.1:${port}/settings/clientCertAuth --data-binary @${tempFile} -u $DEFAULT_ADMIN:$DEFAULT_PW
+	else
+		# First load tempfile to the cluster
+		idx="$(getClusterIdx "$clusterName")"
+		vscp "$idx" "$tempFile" "$vagrantTempFile"
+		${VSSH[$idx]} "curl -X POST http://127.0.0.1:8091/settings/clientCertAuth --data-binary @${vagrantTempFile} -u $DEFAULT_ADMIN:$DEFAULT_PW"
+	fi
 }
