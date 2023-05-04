@@ -35,11 +35,13 @@ VSSH[0]="vagrant ssh node1 -c "
 VSSH[1]="vagrant ssh node2 -c "
 VSSH[2]="vagrant ssh node3 -c "
 VSSH[3]="vagrant ssh node4 -c "
+VSSH[4]="vagrant ssh node5 -c "
 
 VSSH_NOHUP[0]="vagrant ssh node1 -- "
 VSSH_NOHUP[1]="vagrant ssh node2 -- "
 VSSH_NOHUP[2]="vagrant ssh node3 -- "
 VSSH_NOHUP[3]="vagrant ssh node4 -- "
+VSSH_NOHUP[4]="vagrant ssh node5 -- "
 
 # vscp from local to a node
 function vscp {
@@ -136,14 +138,20 @@ function vagrantInstallCBServer {
 	local version="$2"
 	local cmd
 	local debFile=$(vagrantGetLocalDebFileName "$version")
-	local nodeName=${VAGRANT_VM_IDX_MAP["$i"]}
+	local nodeName=${VAGRANT_VM_IDX_MAP["$i"]:-}
 
 	vagrantInstallNtp "$i"
 	vagrantInstallPythonHttpLib "$i"
 	vagrantInstallLibInfo "$i"
 	vagrantInstallJq "$i"
 	downloadCBServerDeb "$version"
-	VAGRANT_VERSION_MAP[$nodeName]="$version"
+	if [[ -n "${nodeName:-}" ]]; then
+		VAGRANT_VERSION_MAP[$nodeName]="$version"
+	fi
+
+	cmd="${VSSH[$i]} \"sudo mount -t vboxsf vagrant /vagrant\""
+	echo "==== Running $cmd ===="
+	eval $cmd
 
 	cmd="${VSSH[$i]} \"sudo dpkg -i /vagrant/$debFile\""
 	echo "==== Running $cmd ===="
@@ -193,6 +201,108 @@ function vagrantInstallSocat {
 	cmd="${VSSH[$i]} \"sudo apt-get -y install socat\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+}
+
+function vagrantInstallHaproxy {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install haproxy\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRemoveHaproxy {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo dpkg --purge haproxy\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRestartHaproxy {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo systemctl restart haproxy\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantCompileHaproxyCfg {
+	local outFile=$1
+	local nodeName
+	local labelName
+	local deployedPort
+
+	# First create sections for ns_server non-SSL port
+	labelName="ns_server"
+	deployedPort="8091"
+	for nodeName in $(echo ${!VAGRANT_VM_IP_MAP[@]}); do
+		cat <<EOF >>$outFile
+frontend ${nodeName}_${labelName}_front
+    bind *:${CLUSTER_NAME_PORT_MAP[$nodeName]}
+    default_backend ${nodeName}_${labelName}_back
+
+backend ${nodeName}_${labelName}_back
+    balance roundrobin
+    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
+
+EOF
+	done
+
+	# ns_server SSL
+	labelName="ns_serverTLS"
+	deployedPort="18091"
+	for nodeName in $(echo ${!VAGRANT_VM_IP_MAP[@]}); do
+		cat <<EOF >>$outFile
+frontend ${nodeName}_${labelName}_front
+    bind *:${CLUSTER_NAME_SSLPORT_MAP[$nodeName]}
+    mode tcp
+    default_backend ${nodeName}_${labelName}_back
+
+backend ${nodeName}_${labelName}_back
+    balance roundrobin
+    mode tcp
+    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
+
+EOF
+	done
+
+	# KV
+	labelName="kv"
+	deployedPort="11210"
+	for nodeName in $(echo ${!VAGRANT_KV_EXTERNAL_MAP[@]}); do
+		cat <<EOF >>$outFile
+frontend ${nodeName}_${labelName}_front
+   bind *:${VAGRANT_KV_EXTERNAL_MAP[$nodeName]}
+   default_backend ${nodeName}_${labelName}_back
+
+backend ${nodeName}_${labelName}_back
+   balance roundrobin
+   server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
+
+EOF
+	done
+
+	# KVSSL
+	labelName="kvSSL"
+	deployedPort="11207"
+	for nodeName in $(echo ${!VAGRANT_KV_EXTERNAL_MAP[@]}); do
+		cat <<EOF >>$outFile
+ frontend ${nodeName}_${labelName}_front
+    bind *:${VAGRANT_KVSSL_EXTERNAL_MAP[$nodeName]}
+    mode tcp
+    default_backend ${nodeName}_${labelName}_back
+
+ backend ${nodeName}_${labelName}_back
+    balance roundrobin
+    mode tcp
+    server ${nodeName} ${VAGRANT_VM_IP_MAP[$nodeName]}:${deployedPort} check
+
+EOF
+	done
 }
 
 function vagrantRebalanceAndUpgrade {
@@ -252,37 +362,51 @@ function vagrantLoadCerts {
 			continue
 		fi
 		idx="$(getClusterIdx "$clusterName")"
-
-		# First tell the Ubuntu to trust the certificate authority
-		for caKey in $(echo ${!NODE_CA_MAP[@]}); do
-			echo "${CLUSTER_ROOT_CERTIFICATE_MAP["$caKey"]}" >/tmp/selfSignedCA.pem
-			vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/"
-			${VSSH[$idx]} "sudo mv /tmp/selfSignedCA.pem /usr/local/share/ca-certificates/${caKey}_root.crt"
-			vscp "$idx" "${NODE_CA_MAP[$caKey]}" "/tmp/ca.pem"
-			${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/${caKey}_node.crt"
-		done
-		#vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/ca.pem"
-		#${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/selfSignedCA.crt"
-
-		${VSSH[$idx]} "sudo update-ca-certificates"
-
-		# Copy chain file
-		${VSSH[$idx]} "sudo mkdir -p /opt/couchbase/var/lib/couchbase/inbox"
-		# Vagrant scp does not have root priviledge
-		# TODO - see if this helps
-		vscp "$idx" "${CLUSTER_ROOT_CERTIFICATE_LOCATION[$clusterName]}" "/tmp/ca.pem"
-		#CLUSTER_ROOT_KEY_LOCATION["$dependentNodeName"]="$(PWD)/ca.key"
-		${VSSH[$idx]} "curl -X POST --data-binary '@/tmp/ca.pem' http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:8091/controller/uploadClusterCA"
-
-		# Copy the node certs and then reload it
-		vscp "$idx" "${NODE_CERT_MAP[$clusterName]}" "/tmp/chain.pem"
-		${VSSH[$idx]} "sudo mv /tmp/chain.pem /opt/couchbase/var/lib/couchbase/inbox/chain.pem"
-		vscp "$idx" "${NODE_KEY_MAP[$clusterName]}" "/tmp/pkey.key"
-		${VSSH[$idx]} "sudo mv /tmp/pkey.key /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
-		${VSSH[$idx]} "sudo chmod a+r /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
-		${VSSH[$idx]} "curl -X POST http://127.0.0.1:8091/node/controller/reloadCertificate -u $DEFAULT_ADMIN:$DEFAULT_PW"
-
+		vagrantLoadCertToNode "$idx" "$clusterName"
 	done
+
+	# For load balancer, ensure the load balancer itself has all the CAs too
+	if [[ -n "${VAGRANT_LB_IP:-}" ]]; then
+		idx="4" # TODO make this a variable
+		for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+			vagrantLoadCertToNode "$idx" "$clusterName"
+		done
+	fi
+}
+
+function vagrantLoadCertToNode {
+	local idx="$1"
+	local clusterName="$2"
+	local caKey
+
+	# First tell the Ubuntu to trust the certificate authority
+	for caKey in $(echo ${!NODE_CA_MAP[@]}); do
+		echo "${CLUSTER_ROOT_CERTIFICATE_MAP["$caKey"]}" >/tmp/selfSignedCA.pem
+		vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/"
+		${VSSH[$idx]} "sudo mv /tmp/selfSignedCA.pem /usr/local/share/ca-certificates/${caKey}_root.crt"
+		vscp "$idx" "${NODE_CA_MAP[$caKey]}" "/tmp/ca.pem"
+		${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/${caKey}_node.crt"
+	done
+	#vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/ca.pem"
+	#${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/selfSignedCA.crt"
+
+	${VSSH[$idx]} "sudo update-ca-certificates"
+
+	# Copy chain file
+	${VSSH[$idx]} "sudo mkdir -p /opt/couchbase/var/lib/couchbase/inbox"
+	# Vagrant scp does not have root priviledge
+	# TODO - see if this helps
+	vscp "$idx" "${CLUSTER_ROOT_CERTIFICATE_LOCATION[$clusterName]}" "/tmp/ca.pem"
+	#CLUSTER_ROOT_KEY_LOCATION["$dependentNodeName"]="$(PWD)/ca.key"
+	${VSSH[$idx]} "curl -X POST --data-binary '@/tmp/ca.pem' http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:8091/controller/uploadClusterCA"
+
+	# Copy the node certs and then reload it
+	vscp "$idx" "${NODE_CERT_MAP[$clusterName]}" "/tmp/chain.pem"
+	${VSSH[$idx]} "sudo mv /tmp/chain.pem /opt/couchbase/var/lib/couchbase/inbox/chain.pem"
+	vscp "$idx" "${NODE_KEY_MAP[$clusterName]}" "/tmp/pkey.key"
+	${VSSH[$idx]} "sudo mv /tmp/pkey.key /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
+	${VSSH[$idx]} "sudo chmod a+r /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
+	${VSSH[$idx]} "curl -X POST http://127.0.0.1:8091/node/controller/reloadCertificate -u $DEFAULT_ADMIN:$DEFAULT_PW"
 }
 
 function vagrantDelAlternateAddress {

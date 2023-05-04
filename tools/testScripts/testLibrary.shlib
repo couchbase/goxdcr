@@ -1165,6 +1165,9 @@ EOF
 			if [[ -n "${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]:-}" ]]; then
 				sanIPs[${#sanIPs[@]}]="${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]}"
 			fi
+			if [[ -n "${VAGRANT_LB_IP:-}" ]]; then
+				sanIPs[${#sanIPs[@]}]="$VAGRANT_LB_IP"
+			fi
 		else
 			sanIPs[${#sanIPs[@]}]="$(ipconfig getifaddr en0)"
 		fi

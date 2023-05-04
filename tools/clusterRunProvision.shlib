@@ -80,6 +80,7 @@ declare -A BUCKET_NAME_PROPERTIES_MAP
 declare -A CLUSTER_ROOT_CERTIFICATE_MAP
 declare -A CLUSTER_ROOT_CERTIFICATE_LOCATION
 declare -A CLUSTER_ROOT_KEY_LOCATION
+declare VAGRANT_LB_IP
 
 # These are to record which containers have been created already
 # to prevent duplicated creates
@@ -431,11 +432,17 @@ function testForClusterRun {
 function setupVagrantAltAddress {
 	local clusterName="$1"
 	local hostname=${VAGRANT_VM_IP_MAP[$clusterName]}
-	local altHostName=${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]:-}
+	local altHostName
+
+	if [[ -n "${VAGRANT_LB_IP:-}" ]]; then
+		altHostName="$VAGRANT_LB_IP"
+	elif [[ -n "${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]:-}" ]]; then
+		altHostName=${VAGRANT_IP_EXTERNAL_MAP["$clusterName"]:-}
+		setupVagrantAltPortForwarding "$clusterName"
+	fi
 
 	if [[ -n "${altHostName:-}" ]]; then
 		hostname="$altHostName"
-		setupVagrantAltPortForwarding "$clusterName"
 	fi
 
 	$CURL -X PUT -u $DEFAULT_ADMIN:$DEFAULT_PW -d "hostname=$hostname&mgmtSSL=${CLUSTER_NAME_SSLPORT_MAP[$clusterName]}&mgmt=${CLUSTER_NAME_PORT_MAP[$clusterName]}&kv=${VAGRANT_KV_EXTERNAL_MAP[$clusterName]}&kvSSL=${VAGRANT_KVSSL_EXTERNAL_MAP[$clusterName]}&capi=${VAGRANT_CAPI_EXTERNAL_MAP[$clusterName]}" http://127.0.0.1:${CLUSTER_NAME_PORT_MAP[$clusterName]}/node/controller/setupAlternateAddresses/external
@@ -2448,12 +2455,18 @@ function createSecureRemoteClusterReference {
 
 	# special case handling for Vagrant
 	if [[ ! -z "${VAGRANT_VM_IP_MAP[$target]:-}" ]]; then
-		targetHost="${VAGRANT_VM_IP_MAP[$target]}"
-		targetSecurePort="18091"
-		# If external is specified, use it
-		if [[ -n "${VAGRANT_IP_EXTERNAL_MAP["$target"]:-}" ]]; then
-			targetHost="${VAGRANT_IP_EXTERNAL_MAP["$target"]}"
-			targetSecurePort="${CLUSTER_NAME_SSLPORT_MAP["$target"]}"
+		if [[ -n "${VAGRANT_LB_IP:-}" ]]; then
+			# Load balance rin play, use the load balancer IP and custom port
+			targetHost=$VAGRANT_LB_IP
+			targetSecurePort=${CLUSTER_NAME_SSLPORT_MAP[$target]}
+		else
+			targetHost="${VAGRANT_VM_IP_MAP[$target]}"
+			targetSecurePort="18091"
+			# If external is specified, use it
+			if [[ -n "${VAGRANT_IP_EXTERNAL_MAP["$target"]:-}" ]]; then
+				targetHost="${VAGRANT_IP_EXTERNAL_MAP["$target"]}"
+				targetSecurePort="${CLUSTER_NAME_SSLPORT_MAP["$target"]}"
+			fi
 		fi
 	fi
 
