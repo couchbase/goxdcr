@@ -11,8 +11,6 @@ package pipeline_manager
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/peerToPeer"
-	"github.com/couchbase/goxdcr/pipeline_svc"
 	"reflect"
 	"strings"
 	"sync"
@@ -20,11 +18,13 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/pipeline"
+	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 )
@@ -1278,6 +1278,9 @@ func (pipelineMgr *PipelineManager) PostTopologyStatus() {
 		// insert a new event when the first rebalance progress is shown
 		// or update an existing event if the rebalance progress has been updated
 		mainPipeline := replStatus.Pipeline()
+		if mainPipeline == nil {
+			continue
+		}
 		srcProgress, tgtProgress := mainPipeline.GetRebalanceProgress()
 		if srcProgress == "" && tgtProgress == "" {
 			// nothing to report
