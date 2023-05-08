@@ -33,9 +33,6 @@ tools/testScripts/testsLibrary.sh
 
 # vagrant log files
 tools/testScripts/vagrant/ubuntu-bionic-18.04-cloudimg-console.log
-tools/testScripts/vagrant/clusterRunProvision.shlib
-tools/testScripts/vagrant/testLibrary.shlib
-tools/testScripts/vagrant/importExporter.shlib
 tools/testScripts/vagrant/*.deb
 tools/testScripts/vagrant/.vagrant
 tools/testScripts/vagrant/data
