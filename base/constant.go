@@ -1439,4 +1439,4 @@ var CkptCacheReqChLen = 1000
 
 const CkptSvcCacheEnabled = "ckptSvcCacheEnabled"
 
-var DNSSrvReBootstrap bool
+var DNSSrvReBootstrap = true
