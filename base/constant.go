@@ -1516,7 +1516,7 @@ var HumanRecoveryThreshold = 5 * time.Minute
 
 const FilterSystemScope = "filterSystemScope"
 
-var DNSSrvReBootstrap bool
+var DNSSrvReBootstrap = true
 
 type GlobalOSOMode int
 
