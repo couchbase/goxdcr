@@ -1508,4 +1508,4 @@ var GlobalOSOSetting = GlobalOSONoOp
 
 var HumanRecoveryThreshold = 5 * time.Minute
 
-var DNSSrvReBootstrap bool
+var DNSSrvReBootstrap = true
