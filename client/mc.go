@@ -19,6 +19,7 @@ import (
 	"github.com/couchbase/gomemcached"
 	"github.com/couchbase/goutils/logging"
 	"github.com/couchbase/goutils/scramsha"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -222,6 +223,7 @@ type Client struct {
 }
 
 var (
+	ConnName           = "GoMemcached"
 	DefaultDialTimeout = time.Duration(0) // No timeout
 
 	DefaultWriteTimeout = time.Duration(0) // No timeout
@@ -230,6 +232,10 @@ var (
 		return net.DialTimeout(prot, dest, DefaultDialTimeout)
 	}
 )
+
+func SetConnectionName(name string) {
+	ConnName = name
+}
 
 // Connect to a memcached server.
 func Connect(prot, dest string) (rv *Client, err error) {
@@ -414,7 +420,7 @@ func (c *Client) EnableMutationToken() (*gomemcached.MCResponse, error) {
 
 	return c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.HELLO,
-		Key:    []byte("GoMemcached"),
+		Key:    []byte(ConnName + ":" + uuid.New().String()),
 		Body:   payload,
 	})
 
@@ -435,7 +441,7 @@ func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, err
 
 	rv, err := c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.HELLO,
-		Key:    []byte("GoMemcached"),
+		Key:    []byte(ConnName + ":" + uuid.New().String()),
 		Body:   payload,
 	})
 
