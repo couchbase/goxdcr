@@ -404,7 +404,8 @@ func isNonFatalStatus(status gomemcached.Status) bool {
 		status == gomemcached.RANGE_SCAN_COMPLETE ||
 		status == gomemcached.RANGE_SCAN_MORE ||
 		status == gomemcached.KEY_EEXISTS ||
-		status == gomemcached.WOULD_THROTTLE
+		status == gomemcached.WOULD_THROTTLE ||
+		status == gomemcached.NOT_MY_VBUCKET
 }
 
 func appendMutationToken(bytes []byte) []byte {
