@@ -53,16 +53,57 @@ var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METR
 	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC, service_def.DELETION_CLONED_METRIC}
 
 // keys for metrics in overview
-var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.DOCS_CHECKED_METRIC, service_def.DOCS_WRITTEN_METRIC, service_def.EXPIRY_DOCS_WRITTEN_METRIC, service_def.DELETION_DOCS_WRITTEN_METRIC,
-	service_def.SET_DOCS_WRITTEN_METRIC, service_def.DOCS_PROCESSED_METRIC, service_def.DOCS_FAILED_CR_SOURCE_METRIC, service_def.EXPIRY_FAILED_CR_SOURCE_METRIC,
-	service_def.DELETION_FAILED_CR_SOURCE_METRIC, service_def.SET_FAILED_CR_SOURCE_METRIC, service_def.DATA_REPLICATED_METRIC, service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC,
-	service_def.EXPIRY_FILTERED_METRIC, service_def.DELETION_FILTERED_METRIC, service_def.SET_FILTERED_METRIC, service_def.NUM_CHECKPOINTS_METRIC, service_def.NUM_FAILEDCKPTS_METRIC,
-	service_def.TIME_COMMITING_METRIC, service_def.DOCS_OPT_REPD_METRIC, service_def.DOCS_RECEIVED_DCP_METRIC, service_def.EXPIRY_RECEIVED_DCP_METRIC,
-	service_def.DELETION_RECEIVED_DCP_METRIC, service_def.SET_RECEIVED_DCP_METRIC, service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC,
-	service_def.RESP_WAIT_METRIC, service_def.META_LATENCY_METRIC, service_def.DCP_DISPATCH_TIME_METRIC, service_def.DCP_DATACH_LEN, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC,
-	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC, service_def.GET_DOC_LATENCY_METRIC,
-	service_def.DOCS_MERGED_METRIC, service_def.DATA_MERGED_METRIC, service_def.EXPIRY_DOCS_MERGED_METRIC, service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DELETION_CLONED_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC,
+// Note the values used here does not correspond to the service_def GlobalStatsTable, since these are used internally
+// and not for exporting purposes
+var OverviewMetricKeys = map[string]service_def.MetricType{
+	service_def.CHANGES_LEFT_METRIC:                 service_def.MetricTypeCounter,
+	service_def.DOCS_CHECKED_METRIC:                 service_def.MetricTypeCounter,
+	service_def.DOCS_WRITTEN_METRIC:                 service_def.MetricTypeCounter,
+	service_def.EXPIRY_DOCS_WRITTEN_METRIC:          service_def.MetricTypeCounter,
+	service_def.DELETION_DOCS_WRITTEN_METRIC:        service_def.MetricTypeCounter,
+	service_def.SET_DOCS_WRITTEN_METRIC:             service_def.MetricTypeCounter,
+	service_def.DOCS_PROCESSED_METRIC:               service_def.MetricTypeCounter,
+	service_def.DOCS_FAILED_CR_SOURCE_METRIC:        service_def.MetricTypeCounter,
+	service_def.EXPIRY_FAILED_CR_SOURCE_METRIC:      service_def.MetricTypeCounter,
+	service_def.DELETION_FAILED_CR_SOURCE_METRIC:    service_def.MetricTypeCounter,
+	service_def.SET_FAILED_CR_SOURCE_METRIC:         service_def.MetricTypeCounter,
+	service_def.DATA_REPLICATED_METRIC:              service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_METRIC:                service_def.MetricTypeCounter,
+	service_def.DOCS_UNABLE_TO_FILTER_METRIC:        service_def.MetricTypeCounter,
+	service_def.EXPIRY_FILTERED_METRIC:              service_def.MetricTypeCounter,
+	service_def.DELETION_FILTERED_METRIC:            service_def.MetricTypeCounter,
+	service_def.SET_FILTERED_METRIC:                 service_def.MetricTypeCounter,
+	service_def.NUM_CHECKPOINTS_METRIC:              service_def.MetricTypeCounter,
+	service_def.NUM_FAILEDCKPTS_METRIC:              service_def.MetricTypeCounter,
+	service_def.TIME_COMMITING_METRIC:               service_def.MetricTypeCounter,
+	service_def.DOCS_OPT_REPD_METRIC:                service_def.MetricTypeCounter,
+	service_def.DOCS_RECEIVED_DCP_METRIC:            service_def.MetricTypeCounter,
+	service_def.EXPIRY_RECEIVED_DCP_METRIC:          service_def.MetricTypeCounter,
+	service_def.DELETION_RECEIVED_DCP_METRIC:        service_def.MetricTypeCounter,
+	service_def.SET_RECEIVED_DCP_METRIC:             service_def.MetricTypeCounter,
+	service_def.SIZE_REP_QUEUE_METRIC:               service_def.MetricTypeCounter,
+	service_def.DOCS_REP_QUEUE_METRIC:               service_def.MetricTypeCounter,
+	service_def.DOCS_LATENCY_METRIC:                 service_def.MetricTypeCounter,
+	service_def.RESP_WAIT_METRIC:                    service_def.MetricTypeCounter,
+	service_def.META_LATENCY_METRIC:                 service_def.MetricTypeCounter,
+	service_def.DCP_DISPATCH_TIME_METRIC:            service_def.MetricTypeCounter,
+	service_def.DCP_DATACH_LEN:                      service_def.MetricTypeCounter,
+	service_def.THROTTLE_LATENCY_METRIC:             service_def.MetricTypeCounter,
+	service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC:  service_def.MetricTypeCounter,
+	service_def.DP_GET_FAIL_METRIC:                  service_def.MetricTypeCounter,
+	service_def.EXPIRY_STRIPPED_METRIC:              service_def.MetricTypeCounter,
+	service_def.ADD_DOCS_WRITTEN_METRIC:             service_def.MetricTypeCounter,
+	service_def.GET_DOC_LATENCY_METRIC:              service_def.MetricTypeCounter,
+	service_def.DOCS_MERGED_METRIC:                  service_def.MetricTypeCounter,
+	service_def.DATA_MERGED_METRIC:                  service_def.MetricTypeCounter,
+	service_def.EXPIRY_DOCS_MERGED_METRIC:           service_def.MetricTypeCounter,
+	service_def.MERGE_LATENCY_METRIC:                service_def.MetricTypeCounter,
+	service_def.DOCS_CLONED_METRIC:                  service_def.MetricTypeCounter,
+	service_def.DELETION_CLONED_METRIC:              service_def.MetricTypeCounter,
+	service_def.TARGET_DOCS_SKIPPED_METRIC:          service_def.MetricTypeCounter,
+	service_def.DOCS_FAILED_CR_TARGET_METRIC:        service_def.MetricTypeCounter,
+	service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC: service_def.MetricTypeCounter,
+	service_def.PIPELINE_STATUS:                     service_def.MetricTypeGauge,
 }
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
@@ -96,11 +137,6 @@ var NonIncreasingMetricKeyMap = map[string]bool{
 	service_def.DOCS_REP_QUEUE_METRIC: true,
 	service_def.DCP_DATACH_LEN:        true}
 
-// the fixed user agent string for connections to collect stats for paused replications
-// it is possible to construct the user agent string dynamically by adding source and target bucket info to it
-// it would cause many string re-allocations, though
-var UserAgentPausedReplication = "Goxdcr client for paused replication"
-
 type SampleStats struct {
 	Count int64
 	Mean  float64
@@ -110,10 +146,10 @@ type notificationReqOpt struct {
 	sendBack chan service_def.SourceNotification
 }
 
-//StatisticsManager mount the statics collector on the pipeline to collect raw stats
-//It does stats correlation and processing on raw stats periodically (controlled by publish_interval)
-//, then stores the result in expvar
-//The result in expvar can be exposed to outside via different channels - log or to ns_server.
+// StatisticsManager mount the statics collector on the pipeline to collect raw stats
+// It does stats correlation and processing on raw stats periodically (controlled by publish_interval)
+// , then stores the result in expvar
+// The result in expvar can be exposed to outside via different channels - log or to ns_server.
 type StatisticsManager struct {
 	*component.AbstractComponent
 	//a map of registry with the part id as key
@@ -178,6 +214,9 @@ type StatisticsManager struct {
 	updateStatsOnceCachedVBList []uint16
 
 	replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error)
+
+	// PipelineStatus is an int type underneath
+	pipelineStatus int32
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error)) *StatisticsManager {
@@ -211,8 +250,8 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 	return stats_mgr
 }
 
-//Statistics of a pipeline which may or may not be running
-//Returns a list of expVar.Map where the idx corresponds to the pipeline Type, so it's possible for one elem to be nil
+// Statistics of a pipeline which may or may not be running
+// Returns a list of expVar.Map where the idx corresponds to the pipeline Type, so it's possible for one elem to be nil
 func GetStatisticsForPipeline(topic string, repStatusGetter func(topic string) (pipeline_pkg.ReplicationStatusIface, error)) []*expvar.Map {
 	var allPipelinesStats []*expvar.Map
 	repl_status, _ := repStatusGetter(topic)
@@ -274,8 +313,8 @@ func (stats_mgr *StatisticsManager) setUpdateInterval(update_interval int) {
 	stats_mgr.highSeqnosIntervalUpdaterMtx.RUnlock()
 }
 
-//updateStats runs until it get finish signal
-//It processes the raw stats and publish the overview stats along with the raw stats to expvar
+// updateStats runs until it get finish signal
+// It processes the raw stats and publish the overview stats along with the raw stats to expvar
 func (stats_mgr *StatisticsManager) updateStats() error {
 	stats_mgr.logger.Infof("%v updateStats started", stats_mgr.pipeline.InstanceId())
 	defer stats_mgr.logger.Infof("%v updateStats exited", stats_mgr.pipeline.InstanceId())
@@ -318,7 +357,7 @@ done:
 	return nil
 }
 
-//periodically prints stats to log
+// periodically prints stats to log
 func (stats_mgr *StatisticsManager) logStats() error {
 	stats_mgr.logger.Infof("%v logStats started", stats_mgr.pipeline.InstanceId())
 	defer stats_mgr.logger.Infof("%v logStats exited", stats_mgr.pipeline.InstanceId())
@@ -415,9 +454,9 @@ func (stats_mgr *StatisticsManager) formatStatsForLog() (string, error) {
 	return fmt.Sprintf("Stats for pipeline %v %v\n", stats_mgr.pipeline.InstanceId(), expvar_stats_map.String()), nil
 }
 
-//process the raw stats, aggregate them into overview registry
-//expose the raw stats and overview stats to expvar
-//Locking is done by caller
+// process the raw stats, aggregate them into overview registry
+// expose the raw stats and overview stats to expvar
+// Locking is done by caller
 func (stats_mgr *StatisticsManager) processRawStats() error {
 	rs, err := stats_mgr.getReplicationStatus()
 	if err != nil {
@@ -623,6 +662,10 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	rate_doc_checks_var := new(expvar.Float)
 	rate_doc_checks_var.Set(rate_doc_checks)
 	overview_expvar_map.Set(service_def.RATE_DOC_CHECKS_METRIC, rate_doc_checks_var)
+
+	// Set pipeline status
+	curStatus := int64(atomic.LoadInt32(&stats_mgr.pipelineStatus))
+	stats_mgr.getOverviewRegistry().Get(service_def.PIPELINE_STATUS).(metrics.Gauge).Update(curStatus)
 	return nil
 }
 
@@ -750,7 +793,10 @@ func (stats_mgr *StatisticsManager) publishMetricToMap(expvar_map *expvar.Map, n
 			mean.Set(m.Mean())
 			expvar_map.Set(name, mean)
 		}
-
+	case metrics.Gauge:
+		expvar_val := new(expvar.Int)
+		expvar_val.Set(m.Value())
+		expvar_map.Set(name, expvar_val)
 	}
 }
 
@@ -808,21 +854,28 @@ func (stats_mgr *StatisticsManager) composeUserAgent() {
 func (stats_mgr *StatisticsManager) initOverviewRegistry() {
 	if overview_registry, ok := stats_mgr.registries[service_def.OVERVIEW_METRICS_KEY]; ok {
 		// reset all counters to 0
-		for _, overview_metric_key := range OverviewMetricKeys {
-			overview_registry.Get(overview_metric_key).(metrics.Counter).Clear()
+		for overview_metric_key, metricType := range OverviewMetricKeys {
+			if metricType == service_def.MetricTypeCounter {
+				overview_registry.Get(overview_metric_key).(metrics.Counter).Clear()
+			}
 		}
 	} else {
 		// create new overview_registry and initialize all counters to 0 except for DOCS_CHECKED_METRIC
 		overview_registry = metrics.NewRegistry()
 		stats_mgr.registries[service_def.OVERVIEW_METRICS_KEY] = overview_registry
-		for _, overview_metric_key := range OverviewMetricKeys {
-			if overview_metric_key == service_def.DOCS_CHECKED_METRIC {
-				// use a negative value to indicate that an old value of docs_checked does not exist
-				docs_checked_counter := metrics.NewCounter()
-				setCounter(docs_checked_counter, -1)
-				overview_registry.Register(service_def.DOCS_CHECKED_METRIC, docs_checked_counter)
-			} else {
-				overview_registry.Register(overview_metric_key, metrics.NewCounter())
+		for overview_metric_key, metricType := range OverviewMetricKeys {
+			switch metricType {
+			case service_def.MetricTypeGauge:
+				overview_registry.Register(overview_metric_key, metrics.NewGauge())
+			case service_def.MetricTypeCounter:
+				if overview_metric_key == service_def.DOCS_CHECKED_METRIC {
+					// use a negative value to indicate that an old value of docs_checked does not exist
+					docs_checked_counter := metrics.NewCounter()
+					setCounter(docs_checked_counter, -1)
+					overview_registry.Register(service_def.DOCS_CHECKED_METRIC, docs_checked_counter)
+				} else {
+					overview_registry.Register(overview_metric_key, metrics.NewCounter())
+				}
 			}
 		}
 	}
@@ -857,6 +910,11 @@ func (stats_mgr *StatisticsManager) initializeConfig(settings metadata.Replicati
 		redactOnce.Do(func() {
 			redactedSettings = settings.CloneAndRedact()
 		})
+	}
+
+	err := stats_mgr.updatePipelineStatus(settings)
+	if err != nil {
+		stats_mgr.logger.Warnf("Unable to understand pipelineStatus %v", err)
 	}
 
 	var update_interval int
@@ -1068,6 +1126,40 @@ func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.Replication
 		stats_mgr.logger.Debugf("%v Updating settings on stats manager. settings=%v\n", stats_mgr.pipeline.InstanceId(), settings.CloneAndRedact())
 	}
 
+	errMap := make(base.ErrorMap)
+	err := stats_mgr.updatePublishInterval(settings)
+	if err != nil {
+		errMap[service_def.PUBLISH_INTERVAL] = err
+	}
+
+	err = stats_mgr.updatePipelineStatus(settings)
+	if err != nil {
+		errMap[service_def.PIPELINE_STATUS] = err
+	}
+
+	if len(errMap) > 0 {
+		return errors.New(base.FlattenErrorMap(errMap))
+	} else {
+		return nil
+	}
+}
+
+func (stats_mgr *StatisticsManager) updatePipelineStatus(settings metadata.ReplicationSettingsMap) error {
+	pipelineStatus, err := stats_mgr.utils.GetIntSettingFromSettings(settings, service_def.PIPELINE_STATUS)
+	if err != nil {
+		return err
+	}
+
+	if pipelineStatus < 0 {
+		// Not specified
+		return nil
+	}
+
+	atomic.StoreInt32(&stats_mgr.pipelineStatus, int32(pipelineStatus))
+	return nil
+}
+
+func (stats_mgr *StatisticsManager) updatePublishInterval(settings metadata.ReplicationSettingsMap) error {
 	update_interval, err := stats_mgr.utils.GetIntSettingFromSettings(settings, service_def.PUBLISH_INTERVAL)
 	if err != nil {
 		return err
@@ -1086,7 +1178,6 @@ func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.Replication
 
 	stats_mgr.setUpdateInterval(update_interval)
 	stats_mgr.update_ticker_ch <- time.NewTicker(stats_mgr.getUpdateInterval())
-
 	return nil
 }
 
@@ -1096,7 +1187,7 @@ type MetricsCollector interface {
 	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 }
 
-//metrics collector for custom conflict manager
+// metrics collector for custom conflict manager
 type conflictMgrCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1209,7 +1300,7 @@ func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Ev
 	return nil
 }
 
-//metrics collector for XMem/CapiNozzle
+// metrics collector for XMem/CapiNozzle
 type outNozzleCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1472,7 +1563,7 @@ func getStatsKeyFromDocKeyAndSeqno(key string, seqno uint64) string {
 	return fmt.Sprintf("%v-%v", key, seqno)
 }
 
-//metrics collector for DcpNozzle
+// metrics collector for DcpNozzle
 type dcpCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1603,7 +1694,7 @@ func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]int
 	}
 }
 
-//metrics collector for Router
+// metrics collector for Router
 type routerCollector struct {
 	id        string
 	stats_mgr *StatisticsManager
@@ -1791,7 +1882,7 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 	return err
 }
 
-//metrics collector for checkpointmanager
+// metrics collector for checkpointmanager
 type checkpointMgrCollector struct {
 	stats_mgr *StatisticsManager
 }
@@ -1976,6 +2067,16 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 					notification.Recycle()
 					continue
 				}
+			}
+			// At this point, the pipeline is either paused, or have errors
+			if len(repl_status.Errors()) > 0 {
+				errorStateVar := new(expvar.Int)
+				errorStateVar.Set(int64(base.PipelineStatusError))
+				overview_stats.Set(service_def.PIPELINE_STATUS, errorStateVar)
+			} else if repl_status.RuntimeStatus(true) == pipeline_pkg.Paused {
+				pausedVar := new(expvar.Int)
+				pausedVar.Set(int64(base.PipelineStatusPaused))
+				overview_stats.Set(service_def.PIPELINE_STATUS, pausedVar)
 			}
 		}
 		notification.Recycle()
@@ -2248,7 +2349,11 @@ func (stats_mgr *StatisticsManager) GetCountMetrics(key string) (int64, error) {
 	if registry == nil {
 		return 0, base.ErrorInvalidInput
 	}
-	return registry.(metrics.Counter).Count(), nil
+	registryCounter, isCounter := registry.(metrics.Counter)
+	if !isCounter {
+		return 0, fmt.Errorf("%v is not of type counter", key)
+	}
+	return registryCounter.Count(), nil
 }
 
 func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (service_def.VBCountMetricMap, error) {
@@ -2343,21 +2448,28 @@ var readOnlyInitOnce sync.Once
 func GetReadOnlyOverviewStats() *expvar.Map {
 	readOnlyInitOnce.Do(func() {
 		readOnlyInitOverview = metrics.NewRegistry()
-		for _, overviewKey := range OverviewMetricKeys {
-			if overviewKey == service_def.DOCS_CHECKED_METRIC {
-				docsCheckedCounter := metrics.NewCounter()
-				docsCheckedCounter.Clear()
-				docsCheckedCounter.Inc(int64(-1))
-				readOnlyInitOverview.Register(overviewKey, docsCheckedCounter)
-			} else {
-				readOnlyInitOverview.Register(overviewKey, metrics.NewCounter())
+		for overviewKey, metricType := range OverviewMetricKeys {
+			switch metricType {
+			case service_def.MetricTypeCounter:
+				if overviewKey == service_def.DOCS_CHECKED_METRIC {
+					docsCheckedCounter := metrics.NewCounter()
+					docsCheckedCounter.Clear()
+					docsCheckedCounter.Inc(int64(-1))
+					readOnlyInitOverview.Register(overviewKey, docsCheckedCounter)
+				} else {
+					readOnlyInitOverview.Register(overviewKey, metrics.NewCounter())
+				}
+			case service_def.MetricTypeGauge:
+				readOnlyInitOverview.Register(overviewKey, metrics.NewGauge())
 			}
 		}
 	})
 
 	initOverviewMap := new(expvar.Map).Init()
 	readOnlyInitOverview.Each(func(name string, i interface{}) {
-		if _, okForCounter := i.(metrics.Counter); okForCounter {
+		_, okForCounter := i.(metrics.Counter)
+		_, okForGauge := i.(metrics.Gauge)
+		if okForGauge || okForCounter {
 			expvarVal := new(expvar.Int)
 			initOverviewMap.Set(name, expvarVal)
 		}

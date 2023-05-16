@@ -47,21 +47,45 @@ function runDataLoad {
 function pauseAndResumeMultiples {
 	local total=$1
 	local i
+	local pauseResumeStatus
 
 	for ((i = 0; $i < $total; i = $(($i + 1)))); do
-		echo "Sleeping 10 seconds before running another pass"
-		sleep 10
+		echo "Sleeping 30 seconds before running another pass"
+		sleep 30
 		echo "Running multiple pause and resumes $(($i + 1)) out of $total"
 		oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
 		oldDocsProcessed=$(getDocsProcessed "C1" "B1" "C2" "B2")
 
+		# Verify prometheus stats for running is correct
+		pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | awk '{print $NF}')
+		if ((!$pauseResumeStatus == 1)); then
+			# try again
+			sleep 30
+			pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | awk '{print $NF}')
+			if ((!$pauseResumeStatus == 0)); then
+				echo "Pipeline running should have status 1. Got $pauseResumeStatus"
+				exit 1
+			fi
+		fi
+
 		echo "Pausing replication - current data replicated: $oldDataReplicated docs_processed: $oldDocsProcessed"
 		pauseReplication "C1" "B1" "C2" "B2"
-		echo "Waiting 10 seconds for pipeline to really pause"
-		sleep 10
+		echo "Waiting 30 seconds for pipeline to really pause"
+		sleep 30
 		grepForPanics
 		validateXDCRCheckpoints "C1"
 		validateXDCRCheckpoints "C2"
+
+		pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | awk '{print $NF}')
+		if ((!$pauseResumeStatus == 0)); then
+			# try again
+			sleep 30
+			pauseResumeStatus=$(getPrometheusStats "C1" | grep status | grep Main | awk '{print $NF}')
+			if ((!$pauseResumeStatus == 0)); then
+				echo "Pipeline paused should have status 0. Got $pauseResumeStatus"
+				exit 1
+			fi
+		fi
 
 		resumeReplication "C1" "B1" "C2" "B2"
 		echo "Waiting 10 seconds for resume to finish"

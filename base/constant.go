@@ -660,6 +660,7 @@ var VersionForPrometheusSupport = ServerVersion{7, 0, 0}
 var VersionForCcrDpSupport = ServerVersion{7, 0, 0}
 var VersionForPeerToPeerSupport = ServerVersion{7, 1, 0}
 var Version7_2_1 = ServerVersion{7, 2, 1}
+var VersionForSupportability = ServerVersion{7, 6, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}

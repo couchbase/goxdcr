@@ -2618,3 +2618,12 @@ function executeClientCertAuth {
 		${VSSH[$idx]} "curl -X POST http://127.0.0.1:8091/settings/clientCertAuth --data-binary @${vagrantTempFile} -u $DEFAULT_ADMIN:$DEFAULT_PW"
 	fi
 }
+
+function getPrometheusStats {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	local output
+
+	output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/_prometheusMetrics | grep -v \#)
+	echo "$output"
+}
