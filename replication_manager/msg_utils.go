@@ -13,12 +13,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/service_def"
 	"io/ioutil"
 	"net/http"
 	"reflect"
 	"sort"
 	"strconv"
+
+	"github.com/couchbase/goxdcr/service_def"
 
 	ap "github.com/couchbase/goxdcr/adminport"
 	"github.com/couchbase/goxdcr/base"
@@ -98,6 +99,7 @@ const (
 	PreReplicateVBMasterCheckKey   = base.PreReplicateVBMasterCheckKey
 	ReplicateCkptIntervalKey       = base.ReplicateCkptIntervalKey
 	CkptSvcCacheEnabledKey         = metadata.CkptSvcCacheEnabledKey
+	FilterBinaryDocsKey            = metadata.FilterBinaryDocsKey
 )
 
 // constants for parsing create/change/view replication response
@@ -206,6 +208,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	PreReplicateVBMasterCheckKey:      metadata.PreReplicateVBMasterCheckKey,
 	ReplicateCkptIntervalKey:          metadata.ReplicateCkptIntervalKey,
 	CkptSvcCacheEnabledKey:            metadata.CkptSvcCacheEnabledKey,
+	FilterBinaryDocsKey:               metadata.FilterBinaryDocsKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -258,6 +261,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckKey,
 	metadata.ReplicateCkptIntervalKey:          ReplicateCkptIntervalKey,
 	metadata.CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledKey,
+	metadata.FilterBinaryDocsKey:               FilterBinaryDocsKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
@@ -754,7 +758,7 @@ func validateCollectionsMappingRule(settings metadata.ReplicationSettingsMap, cu
 	return nil
 }
 
-//Validate source mapping - which means we need to get manifests
+// Validate source mapping - which means we need to get manifests
 func validateSrcNamespacesExist(targetClusterName string, srcBucket string, targetBucketName string, rulesToCheck base.CollectionsMgtType, mappingRules metadata.CollectionsMappingRulesType) error {
 	if targetBucketName == "" || srcBucket == "" || targetClusterName == "" {
 		return fmt.Errorf("One of the following is empty: tgtBucketName: %v srcBucket %v targetClusterName %v",

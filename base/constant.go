@@ -1509,3 +1509,5 @@ var GlobalOSOSetting = GlobalOSONoOp
 var HumanRecoveryThreshold = 5 * time.Minute
 
 var DNSSrvReBootstrap = true
+
+const FilterBinaryDocs = "filterBinary"
