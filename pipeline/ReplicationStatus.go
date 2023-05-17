@@ -323,7 +323,7 @@ func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
 	}
 }
 
-// return the corresponding expvar map as its storage
+//return the corresponding expvar map as its storage
 func (rs *ReplicationStatus) Storage(pipelineType common.PipelineType) *expvar.Map {
 	var rep_map *expvar.Map
 	root_map := RootStorage()
@@ -504,8 +504,7 @@ func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 
 	// if replicationStatus has errors, note them so prometheus can read the stats
 	if len(rs.err_list) > 0 {
-		// For now, set the same as PipelineStatusPaused because we will add a new error counter soon TODO MB-50974
-		settingsMap[service_def.PIPELINE_STATUS] = base.PipelineStatusPaused
+		settingsMap[service_def.PIPELINE_STATUS] = base.PipelineStatusError
 	}
 	return settingsMap
 }
