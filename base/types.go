@@ -1169,6 +1169,7 @@ const (
 	filterExpDelSkipDelN            = 1
 	filterExpDelSkipExpN            = 2
 	filterExpDelSkipUncommittedTxnN = 3
+	filterExpDelSkipBinaryN         = 4
 )
 
 var FilterExpDelNone FilterExpDelType = 0x0
@@ -1176,6 +1177,7 @@ var FilterExpDelStripExpiration FilterExpDelType = 1 << filterExpDelStripN      
 var FilterExpDelSkipDeletes FilterExpDelType = 1 << filterExpDelSkipDelN                 // 0x2
 var FilterExpDelSkipExpiration FilterExpDelType = 1 << filterExpDelSkipExpN              // 0x4
 var FilterSkipReplUncommittedTxn FilterExpDelType = 1 << filterExpDelSkipUncommittedTxnN // 0x8
+var FilterSkipBinary FilterExpDelType = 1 << filterExpDelSkipBinaryN                     // 0x16
 var FilterExpDelAllFiltered = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration
 var FilterExpDelMax = FilterExpDelStripExpiration | FilterExpDelSkipDeletes | FilterExpDelSkipExpiration | FilterSkipReplUncommittedTxn
 
@@ -1193,6 +1195,10 @@ func (a *FilterExpDelType) IsSkipExpirationSet() bool {
 
 func (a *FilterExpDelType) IsSkipReplicateUncommittedTxnSet() bool {
 	return *a&FilterSkipReplUncommittedTxn > 0
+}
+
+func (a *FilterExpDelType) IsSkipBinarySet() bool {
+	return *a&FilterSkipBinary > 0
 }
 
 func (a *FilterExpDelType) SetStripExpiration(setVal bool) {
@@ -1220,6 +1226,13 @@ func (a *FilterExpDelType) SetSkipReplicateUncommittedTxn(setVal bool) {
 	curValue := *a&FilterSkipReplUncommittedTxn > 0
 	if curValue != setVal {
 		*a ^= 1 << filterExpDelSkipUncommittedTxnN
+	}
+}
+
+func (a *FilterExpDelType) SetSkipBinary(setVal bool) {
+	curValue := *a&FilterSkipBinary > 0
+	if curValue != setVal {
+		*a ^= 1 << filterExpDelSkipBinaryN
 	}
 }
 

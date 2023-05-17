@@ -60,6 +60,7 @@ const (
 	FilterDelKey            = base.FilterDelKey
 	BypassExpiryKey         = base.BypassExpiryKey
 	BypassUncommittedTxnKey = base.BypassUncommittedTxnKey
+	FilterBinaryDocsKey     = base.FilterBinaryDocs
 
 	BrokenMappingsUpdateKey = "BrokenMappingsUpdate"
 
@@ -136,6 +137,7 @@ var MultiValueMap map[string]string = map[string]string{
 	FilterDelKey:             FilterExpDelKey,
 	BypassExpiryKey:          FilterExpDelKey,
 	BypassUncommittedTxnKey:  FilterExpDelKey,
+	FilterBinaryDocsKey:      FilterExpDelKey,
 	CollectionsMgtMappingKey: CollectionsMgtMultiKey,
 	CollectionsMgtMirrorKey:  CollectionsMgtMultiKey,
 	CollectionsMgtMigrateKey: CollectionsMgtMultiKey,
@@ -213,6 +215,8 @@ var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 
 var FilterSystemScopeConfig = &SettingsConfig{true, nil}
 
+var FilterBinaryDocsConfig = &SettingsConfig{false, nil}
+
 // In seconds
 var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
 
@@ -261,6 +265,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicateCkptIntervalKey:          ReplicateCkptIntervalConfig,
 	CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledConfig,
 	FilterSystemScopeKey:              FilterSystemScopeConfig,
+	FilterBinaryDocsKey:               FilterBinaryDocsConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -445,6 +450,8 @@ func (r *ReplicationMultiValueHelper) handleFilterExpDelKey(curConfig base.Filte
 		curConfig.SetStripExpiration(boolVal)
 	case BypassUncommittedTxnKey:
 		curConfig.SetSkipReplicateUncommittedTxn(boolVal)
+	case FilterBinaryDocsKey:
+		curConfig.SetSkipBinary(boolVal)
 	}
 	retVal = curConfig
 	return
@@ -483,6 +490,9 @@ func (r *ReplicationMultiValueHelper) handleFilterExpDelKeyImport(s *Replication
 	}
 	if val, ok := r.flagKeyIssued[BypassUncommittedTxnKey]; ok {
 		curVal.SetSkipReplicateUncommittedTxn(val)
+	}
+	if val, ok := r.flagKeyIssued[FilterBinaryDocsKey]; ok {
+		curVal.SetSkipBinary(val)
 	}
 
 	sm[FilterExpDelKey] = curVal
@@ -716,6 +726,7 @@ func (s *ReplicationSettings) exportFlagTypeValues() {
 	s.Values[BypassUncommittedTxnKey] = expDelMode.IsSkipReplicateUncommittedTxnSet()
 	s.Values[FilterExpKey] = expDelMode.IsSkipExpirationSet()
 	s.Values[FilterDelKey] = expDelMode.IsSkipDeletesSet()
+	s.Values[FilterBinaryDocsKey] = expDelMode.IsSkipBinarySet()
 	collectionModes := s.GetCollectionModes()
 	s.Values[CollectionsMgtMappingKey] = collectionModes.IsExplicitMapping()
 	s.Values[CollectionsMgtMirrorKey] = collectionModes.IsMirroringOn()

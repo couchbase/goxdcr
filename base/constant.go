@@ -1528,3 +1528,5 @@ const (
 )
 
 var GlobalOSOSetting = GlobalOSONoOp
+
+const FilterBinaryDocs = "filterBinary"
