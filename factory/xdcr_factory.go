@@ -1743,7 +1743,8 @@ func (xdcrf *XDCRFactory) GeneratePrometheusStatusCb(pipeline common.Pipeline) p
 		case int(base.PipelineStatusError):
 			cb = func() {
 				pipeline.RuntimeContext().Service(base.STATISTICS_MGR_SVC).(*pipeline_svc.StatisticsManager).UpdateSettings(metadata.ReplicationSettingsMap{
-					service_def.PIPELINE_STATUS: int(base.PipelineStatusError),
+					// For now, set the same as PipelineStatusPaused because we will add a new error counter soon TODO MB-50974
+					service_def.PIPELINE_STATUS: int(base.PipelineStatusPaused),
 				})
 			}
 		}

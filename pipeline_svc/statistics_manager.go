@@ -2071,7 +2071,8 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			// At this point, the pipeline is either paused, or have errors
 			if len(repl_status.Errors()) > 0 {
 				errorStateVar := new(expvar.Int)
-				errorStateVar.Set(int64(base.PipelineStatusError))
+				// For now, set the same as PipelineStatusPaused because we will add a new error counter soon TODO MB-50974
+				errorStateVar.Set(int64(base.PipelineStatusPaused))
 				overview_stats.Set(service_def.PIPELINE_STATUS, errorStateVar)
 			} else if repl_status.RuntimeStatus(true) == pipeline_pkg.Paused {
 				pausedVar := new(expvar.Int)
