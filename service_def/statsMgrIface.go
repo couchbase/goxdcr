@@ -144,13 +144,13 @@ const (
 	PrometheusXDCRPrefix = "xdcr"
 	PrometheusDelimiter  = "_"
 
-	PrometheusBaseNoUnit       = "total"
+	PrometheusBaseNoUnit       = ""
 	PrometheusBaseUnitTime     = "seconds"
 	PrometheusBaseUnitSize     = "bytes"
 	PrometheusBaseUnitDataRate = "bytes_per_second"
 	PrometheusBaseUnitReplRate = "docs_per_second"
 
-	PrometheusAccumulateUnit = PrometheusBaseNoUnit
+	PrometheusAccumulateUnit = "total"
 
 	PrometheusMetricTypeCounter = "counter"
 	PrometheusMetricTypeGauge   = "gauge"
@@ -207,17 +207,18 @@ func (m MetricType) String() string {
 type StatsMgrUnitType int
 
 const (
-	StatsMgrNoUnit             StatsMgrUnitType = iota
-	StatsMgrSeconds            StatsMgrUnitType = iota
-	StatsMgrMilliSecond        StatsMgrUnitType = iota
-	StatsMgrGolangTimeDuration StatsMgrUnitType = iota
-	StatsMgrBytes              StatsMgrUnitType = iota
-	StatsMgrMegaBytesPerSecond StatsMgrUnitType = iota // MB/second, where 1 MB = 1024*1024 bytes instead of 1000*1000 bytes
-	StatsMgrDocsPerSecond      StatsMgrUnitType = iota
+	StatsMgrNoUnit              StatsMgrUnitType = iota
+	StatsMgrNonCumulativeNoUnit StatsMgrUnitType = iota
+	StatsMgrSeconds             StatsMgrUnitType = iota
+	StatsMgrMilliSecond         StatsMgrUnitType = iota
+	StatsMgrGolangTimeDuration  StatsMgrUnitType = iota
+	StatsMgrBytes               StatsMgrUnitType = iota
+	StatsMgrMegaBytesPerSecond  StatsMgrUnitType = iota // MB/second, where 1 MB = 1024*1024 bytes instead of 1000*1000 bytes
+	StatsMgrDocsPerSecond       StatsMgrUnitType = iota
 )
 
 func (s StatsMgrUnitType) String() string {
-	if s == StatsMgrNoUnit {
+	if s == StatsMgrNoUnit || s == StatsMgrNonCumulativeNoUnit {
 		return ""
 	}
 
@@ -225,17 +226,19 @@ func (s StatsMgrUnitType) String() string {
 }
 
 var GlobalBaseUnitTable = map[StatsMgrUnitType]string{
-	StatsMgrNoUnit:             PrometheusBaseNoUnit,
-	StatsMgrSeconds:            PrometheusBaseUnitTime,
-	StatsMgrMilliSecond:        PrometheusBaseUnitTime,
-	StatsMgrGolangTimeDuration: PrometheusBaseUnitTime,
-	StatsMgrBytes:              PrometheusBaseUnitSize,
-	StatsMgrMegaBytesPerSecond: PrometheusBaseUnitDataRate,
-	StatsMgrDocsPerSecond:      PrometheusBaseUnitReplRate,
+	StatsMgrNoUnit:              PrometheusAccumulateUnit,
+	StatsMgrNonCumulativeNoUnit: PrometheusBaseNoUnit,
+	StatsMgrSeconds:             PrometheusBaseUnitTime,
+	StatsMgrMilliSecond:         PrometheusBaseUnitTime,
+	StatsMgrGolangTimeDuration:  PrometheusBaseUnitTime,
+	StatsMgrBytes:               PrometheusBaseUnitSize,
+	StatsMgrMegaBytesPerSecond:  PrometheusBaseUnitDataRate,
+	StatsMgrDocsPerSecond:       PrometheusBaseUnitReplRate,
 }
 
 var GlobalBaseReverseUnitTable = map[string]StatsMgrUnitType{
-	PrometheusBaseNoUnit:       StatsMgrNoUnit,
+	PrometheusAccumulateUnit:   StatsMgrNoUnit,
+	PrometheusBaseNoUnit:       StatsMgrNonCumulativeNoUnit,
 	PrometheusBaseUnitTime:     StatsMgrSeconds,
 	PrometheusBaseUnitSize:     StatsMgrBytes,
 	PrometheusBaseUnitDataRate: StatsMgrMegaBytesPerSecond,
@@ -490,7 +493,6 @@ func (s *StatsProperty) SameAs(other StatsProperty) bool {
 		s.Stability == other.Stability &&
 		s.UiName == other.UiName &&
 		s.Labels.SameAs(other.Labels)
-
 }
 
 func (s *StatsProperty) toMetaObj() *statsPropertyMetaObj {
@@ -521,7 +523,9 @@ func (sm StatisticsPropertyMap) GetPrometheusMetricName(internalConst string) (s
 	if !ok {
 		return "", fmt.Errorf("%v is not a proper stats for prometheus", internalConst)
 	}
-	output = append(output, GlobalBaseUnitTable[statsProperty.MetricType.Unit])
+	if GlobalBaseUnitTable[statsProperty.MetricType.Unit] != "" {
+		output = append(output, GlobalBaseUnitTable[statsProperty.MetricType.Unit])
+	}
 
 	return strings.Join(output, PrometheusDelimiter), nil
 }
@@ -1121,11 +1125,11 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	},
 
 	PIPELINE_STATUS: StatsProperty{
-		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNonCumulativeNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForSupportability,
-		Description:  "The pipeline status for a specific pipeline, where 0=Paused, 1=Running, 2=Error",
-		Notes:        "A single integer that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
+		Description:  "The pipeline status for a specific pipeline, where it could be paused, running or, error",
+		Notes:        "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
 		Stability:    Committed,
 		Labels:       []StatsLabel{Operation},
 	},

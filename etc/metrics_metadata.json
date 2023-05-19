@@ -447,7 +447,7 @@
     },
     "xdcr_pipeline_status": {
         "type": "gauge",
-        "help": "The pipeline status for a specific pipeline, where 0=Paused, 1=Running, 2=Error",
+        "help": "The pipeline status for a specific pipeline, where it could be paused, running or, error",
         "added": "7.2.1",
         "labels": [
             {
@@ -456,7 +456,7 @@
                 "added": "7.2.1"
             }
         ],
-        "notes": "A single integer that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
+        "notes": "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
         "stability": "committed"
     },
     "xdcr_resp_wait_time": {

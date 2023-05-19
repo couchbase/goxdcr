@@ -9,8 +9,10 @@
 package pipeline_utils
 
 import (
+	"bytes"
 	"expvar"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -62,18 +64,21 @@ type PrometheusExporter struct {
 	outputBufferMtx sync.Mutex
 
 	utils utilities.UtilsIface
+
+	labelsTableConstructor PrometheusLabelsConstructorType
 }
 
-func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap) *PrometheusExporter {
+func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap, labelsTableConstructor PrometheusLabelsConstructorType) *PrometheusExporter {
 	prom := &PrometheusExporter{
-		globalLookupMap:     translationMap,
-		globalMetricHelpMap: make(map[string][]byte),
-		globalMetricKeyMap:  make(map[string][]byte),
-		globalMetricTypeMap: make(map[string][]byte),
-		metricsMap:          make(MetricsMapType),
-		expVarParseMap:      make(ExpVarParseMapType),
-		outputBuffer:        make([]byte, 0),
-		utils:               utilities.NewUtilities(),
+		globalLookupMap:        translationMap,
+		globalMetricHelpMap:    make(map[string][]byte),
+		globalMetricKeyMap:     make(map[string][]byte),
+		globalMetricTypeMap:    make(map[string][]byte),
+		metricsMap:             make(MetricsMapType),
+		expVarParseMap:         make(ExpVarParseMapType),
+		outputBuffer:           make([]byte, 0),
+		utils:                  utilities.NewUtilities(),
+		labelsTableConstructor: labelsTableConstructor,
 	}
 
 	for k, statsProperty := range prom.globalLookupMap {
@@ -95,7 +100,7 @@ func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap) *Pr
 
 type MetricsMapType map[string]ReplicationStatsMap
 
-func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value interface{}, lookupMap service_def.StatisticsPropertyMap) {
+func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value interface{}, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
 	// If the statsConst is not part of the initialization, then it is not meant to be exported
 	replicationStatsMap, constExists := (*m)[statsConst]
 	if !constExists {
@@ -105,11 +110,20 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 	_, replExists := replicationStatsMap[replicationId]
 	if !replExists {
 		statsProperty := lookupMap[statsConst]
-		replicationStatsMap[replicationId] = NewPerReplicationStatType(statsProperty)
+		labelsTable := constructStatsTable(statsConst) // could be nil, depending on statsConst
+		replicationStatsMap[replicationId] = NewPerReplicationStatType(statsProperty, labelsTable)
 	}
 
 	// Update the value
 	replicationStatsMap[replicationId].Value = value
+
+	// If Prometheus labels exist, let them load the value
+	labelsTable := replicationStatsMap[replicationId].LabelsTable
+	if labelsTable != nil {
+		for _, extractor := range labelsTable {
+			extractor.LoadValue(value)
+		}
+	}
 }
 
 type ExpVarParseMapType map[string]interface{}
@@ -156,56 +170,105 @@ type PerReplicationStatType struct {
 	Properties                service_def.StatsProperty
 	Value                     interface{}
 	OutputBuffer              []byte
-	outputValueBuffer         []byte
 	ReplIdDecompositionStruct *metadata.ReplIdComposition
+
+	LabelsTable           PrometheusLabels
+	IndividualLabelBuffer map[string]*[]byte // Shares key as above
 }
 
 func (t *PerReplicationStatType) UpdateOutputBuffer(metricName []byte, replId string) {
 	// Output looks like:
 	// metric_name {label_name=\"<labelVal>\", ...} <value>
 	// Ends with a newline, but won't output it here
-	t.OutputBuffer = t.OutputBuffer[:0]
-	t.OutputBuffer = append(t.OutputBuffer, metricName...)
-	t.appendLabels(replId)
-	t.appendOutputBufferWithValue()
+	t.resetBuffers()
+
+	if t.LabelsTable != nil {
+		// If this stats contains multiple labels, then go through each label and compose a single line for each label
+		// The stat name would then be composed of multiple lines, each with the same label NAME but diff labels
+		// For example:
+		// xdcr_pipeline_status {targetClusterUUID="...", sourceBucketName="B1", targetBucketName="B2", pipelineType="Backfill", status="Paused"} 1
+		// xdcr_pipeline_status {targetClusterUUID="...", sourceBucketName="B1", targetBucketName="B2", pipelineType="Backfill", status="Running"} 0
+		for customLabelName, extractor := range t.LabelsTable {
+			t.appendMetricName(metricName, t.IndividualLabelBuffer[customLabelName])
+			t.appendStandardLabels(replId, t.IndividualLabelBuffer[customLabelName])
+			t.appendCustomLabels(replId, t.IndividualLabelBuffer[customLabelName], extractor)
+			t.appendBufferWithValue(t.IndividualLabelBuffer[customLabelName], extractor.GetValueBaseUnit)
+		}
+		t.composeFinalOutputBufferFromLabelBuffers()
+	} else {
+		t.appendMetricName(metricName, &t.OutputBuffer)
+		t.appendStandardLabels(replId, &t.OutputBuffer)
+		t.appendBufferWithValue(&t.OutputBuffer, t.GetValueBaseUnit)
+	}
 }
 
-func (t *PerReplicationStatType) appendLabels(replId string) {
+func (t *PerReplicationStatType) resetBuffers() {
+	t.OutputBuffer = t.OutputBuffer[:0]
+	for _, oneLabelBuffer := range t.IndividualLabelBuffer {
+		*oneLabelBuffer = (*oneLabelBuffer)[:0]
+	}
+}
+
+func (t *PerReplicationStatType) appendMetricName(metricName []byte, buffer *[]byte) {
+	*buffer = append(*buffer, metricName...)
+}
+
+var endBracketWithSpace = []byte("} ")
+var endBracketWithSpaceStr = string(endBracketWithSpace)
+
+func (t *PerReplicationStatType) appendStandardLabels(replId string, buffer *[]byte) {
 	// {
-	t.OutputBuffer = append(t.OutputBuffer, []byte(" {")...)
+	*buffer = append(*buffer, []byte(" {")...)
 
 	t.ReplIdDecompositionStruct = metadata.DecomposeReplicationId(replId, t.ReplIdDecompositionStruct)
 
 	// { targetClusterUUID="abcdef",
-	t.OutputBuffer = append(t.OutputBuffer, PrometheusTargetClusterUuidBytes...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.TargetClusterUUID)...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("\", ")...)
+	*buffer = append(*buffer, PrometheusTargetClusterUuidBytes...)
+	*buffer = append(*buffer, []byte("=\"")...)
+	*buffer = append(*buffer, []byte(t.ReplIdDecompositionStruct.TargetClusterUUID)...)
+	*buffer = append(*buffer, []byte("\", ")...)
 
 	// { targetClusterUUID="abcdef", sourceBucketName="b1",
-	t.OutputBuffer = append(t.OutputBuffer, PrometheusSourceBucketBytes...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.SourceBucketName)...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("\", ")...)
+	*buffer = append(*buffer, PrometheusSourceBucketBytes...)
+	*buffer = append(*buffer, []byte("=\"")...)
+	*buffer = append(*buffer, []byte(t.ReplIdDecompositionStruct.SourceBucketName)...)
+	*buffer = append(*buffer, []byte("\", ")...)
 
 	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2",
-	t.OutputBuffer = append(t.OutputBuffer, PrometheusTargetBucketBytes...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.TargetBucketName)...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("\", ")...)
+	*buffer = append(*buffer, PrometheusTargetBucketBytes...)
+	*buffer = append(*buffer, []byte("=\"")...)
+	*buffer = append(*buffer, []byte(t.ReplIdDecompositionStruct.TargetBucketName)...)
+	*buffer = append(*buffer, []byte("\", ")...)
 
 	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main"
-	t.OutputBuffer = append(t.OutputBuffer, PrometheusPipelineTypeBytes...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("=\"")...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte(t.ReplIdDecompositionStruct.PipelineType)...)
-	t.OutputBuffer = append(t.OutputBuffer, []byte("\"")...)
+	*buffer = append(*buffer, PrometheusPipelineTypeBytes...)
+	*buffer = append(*buffer, []byte("=\"")...)
+	*buffer = append(*buffer, []byte(t.ReplIdDecompositionStruct.PipelineType)...)
+	*buffer = append(*buffer, []byte("\"")...)
 
 	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main"}
-	t.OutputBuffer = append(t.OutputBuffer, []byte("} ")...)
+	*buffer = append(*buffer, endBracketWithSpace...)
+}
+
+func (t *PerReplicationStatType) appendCustomLabels(replId string, buffer *[]byte, extractor LabelsValuesExtractor) {
+	// Incoming from previous:
+	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main"}
+	*buffer = bytes.Trim(*buffer, endBracketWithSpaceStr)
+
+	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main"
+	*buffer = append(*buffer, []byte(", ")...)
+
+	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main",
+	*buffer = append(*buffer, extractor.GetLabelName()...)
+
+	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main", status="running"
+	*buffer = append(*buffer, endBracketWithSpace...)
 }
 
 func (t *PerReplicationStatType) GetValueBaseUnit() interface{} {
 	switch t.Properties.MetricType.Unit {
+	case service_def.StatsMgrNonCumulativeNoUnit:
+		fallthrough
 	case service_def.StatsMgrNoUnit:
 		return t.Value
 	case service_def.StatsMgrSeconds:
@@ -245,32 +308,55 @@ func (t *PerReplicationStatType) GetValueBaseUnit() interface{} {
 }
 
 // For specific stats that may require precision, print with precision
-func (t *PerReplicationStatType) appendOutputBufferWithValue() {
+func (t *PerReplicationStatType) appendBufferWithValue(buffer *[]byte, getValueBaseUnit func() interface{}) {
 	switch t.Properties.MetricType.Unit {
+	case service_def.StatsMgrNonCumulativeNoUnit:
+		fallthrough
 	case service_def.StatsMgrNoUnit:
-		t.OutputBuffer = append(t.OutputBuffer, []byte(fmt.Sprintf("%v", t.GetValueBaseUnit()))...)
+		*buffer = append(*buffer, []byte(fmt.Sprintf("%v", getValueBaseUnit()))...)
 	case service_def.StatsMgrSeconds:
-		t.OutputBuffer = append(t.OutputBuffer, []byte(fmt.Sprintf("%v", t.GetValueBaseUnit()))...)
+		*buffer = append(*buffer, []byte(fmt.Sprintf("%v", getValueBaseUnit()))...)
 	case service_def.StatsMgrMilliSecond:
-		t.OutputBuffer = append(t.OutputBuffer, []byte(fmt.Sprintf("%g", t.GetValueBaseUnit()))...)
+		*buffer = append(*buffer, []byte(fmt.Sprintf("%g", getValueBaseUnit()))...)
 	case service_def.StatsMgrGolangTimeDuration:
-		t.OutputBuffer = append(t.OutputBuffer, []byte(fmt.Sprintf("%g", t.GetValueBaseUnit()))...)
+		*buffer = append(*buffer, []byte(fmt.Sprintf("%g", getValueBaseUnit()))...)
 	case service_def.StatsMgrBytes:
-		t.OutputBuffer = append(t.OutputBuffer, []byte(fmt.Sprintf("%v", t.GetValueBaseUnit()))...)
+		*buffer = append(*buffer, []byte(fmt.Sprintf("%v", getValueBaseUnit()))...)
 	case service_def.StatsMgrMegaBytesPerSecond:
-		t.OutputBuffer = append(t.OutputBuffer, []byte(fmt.Sprintf("%g", t.GetValueBaseUnit()))...)
+		*buffer = append(*buffer, []byte(fmt.Sprintf("%g", getValueBaseUnit()))...)
 	case service_def.StatsMgrDocsPerSecond:
-		t.OutputBuffer = append(t.OutputBuffer, []byte(fmt.Sprintf("%v", t.GetValueBaseUnit()))...)
+		*buffer = append(*buffer, []byte(fmt.Sprintf("%v", getValueBaseUnit()))...)
 	default:
 		panic("Need to implement")
 	}
 }
 
-func NewPerReplicationStatType(properties service_def.StatsProperty) *PerReplicationStatType {
-	return &PerReplicationStatType{
-		Properties: properties,
-		Value:      nil,
+func (t *PerReplicationStatType) composeFinalOutputBufferFromLabelBuffers() {
+	totalLen := len(t.IndividualLabelBuffer)
+	i := 0
+
+	for _, oneLabelBuffer := range t.IndividualLabelBuffer {
+		t.OutputBuffer = append(t.OutputBuffer, *oneLabelBuffer...)
+		if i < totalLen-1 {
+			t.OutputBuffer = append(t.OutputBuffer, fmt.Sprintf("\n")...)
+		}
+		i++
 	}
+}
+
+func NewPerReplicationStatType(properties service_def.StatsProperty, labelsTable PrometheusLabels) *PerReplicationStatType {
+	obj := &PerReplicationStatType{
+		Properties:            properties,
+		Value:                 nil,
+		LabelsTable:           labelsTable,
+		IndividualLabelBuffer: map[string]*[]byte{},
+	}
+
+	for k, _ := range labelsTable {
+		oneSlice := make([]byte, 0)
+		obj.IndividualLabelBuffer[k] = &oneSlice
+	}
+	return obj
 }
 
 // # HELP http_requests_total The total number of HTTP requests.
@@ -348,7 +434,7 @@ func (p *PrometheusExporter) LoadMetricsMap(needToReallocate bool) error {
 		}
 		// Now everything else is in the context of this replication
 		for statConst, value := range statsMap.(ExpVarParseMapType) {
-			p.metricsMap.RecordStat(replId, statConst, value, p.globalLookupMap)
+			p.metricsMap.RecordStat(replId, statConst, value, p.globalLookupMap, p.labelsTableConstructor)
 		}
 	}
 
@@ -462,4 +548,97 @@ func (p *PrometheusExporter) prepareStatsBuffer() (atLeastOneStatsActive bool) {
 func (p *PrometheusExporter) outputOneReplStat(buffer []byte) {
 	p.outputBuffer = append(p.outputBuffer, buffer...)
 	p.outputBufferNewLine()
+}
+
+type LabelsValuesExtractor interface {
+	LoadValue(value interface{})
+	GetLabelName() []byte
+	GetValueBaseUnit() interface{}
+}
+
+type PrometheusLabels = map[string]LabelsValuesExtractor
+type PrometheusLabelsConstructorType func(string) PrometheusLabels
+
+// The following are not part of the automatic metrics json file generation
+// XDCR originally was not built with prometheus in mind. As such, it needs the
+// LabelsValuesExtractor to perform the task of converting one or multiple stats into
+// labels and specific values
+func NewPrometheusLabelsTable(labelName string) PrometheusLabels {
+	switch labelName {
+	case service_def.PIPELINE_STATUS:
+		return PrometheusLabels{
+			base.PipelineStatusPaused.String(): &PipelineStatusPausedExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Paused\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+			base.PipelineStatusRunning.String(): &PipelineStatusRunningExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Running\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+			base.PipelineStatusError.String(): &PipelineStatusErrorExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Error\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+type extractorCommon struct {
+	LabelBytes []byte
+}
+
+func (e *extractorCommon) GetLabelName() []byte {
+	return e.LabelBytes
+}
+
+type valueInt64Common struct {
+	Value int64
+}
+
+func (v *valueInt64Common) GetValueBaseUnit() interface{} {
+	return v.Value
+}
+
+type PipelineStatusPausedExtractor struct {
+	*extractorCommon
+	*valueInt64Common
+}
+
+func (p *PipelineStatusPausedExtractor) LoadValue(value interface{}) {
+	incomingVal := value.(int64)
+	if incomingVal == int64(base.PipelineStatusPaused) {
+		p.Value = 1
+	} else {
+		p.Value = 0
+	}
+}
+
+type PipelineStatusRunningExtractor struct {
+	*extractorCommon
+	*valueInt64Common
+}
+
+func (p *PipelineStatusRunningExtractor) LoadValue(value interface{}) {
+	incomingVal := value.(int64)
+	if incomingVal == int64(base.PipelineStatusRunning) {
+		p.Value = 1
+	} else {
+		p.Value = 0
+	}
+}
+
+type PipelineStatusErrorExtractor struct {
+	*extractorCommon
+	*valueInt64Common
+}
+
+func (p *PipelineStatusErrorExtractor) LoadValue(value interface{}) {
+	incomingVal := value.(int64)
+	if incomingVal == int64(base.PipelineStatusError) {
+		p.Value = 1
+	} else {
+		p.Value = 0
+	}
 }
