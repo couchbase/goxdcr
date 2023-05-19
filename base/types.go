@@ -2964,3 +2964,16 @@ const (
 	PipelineStatusError   PipelineStatusGauge = iota
 	PipelineStatusMax     PipelineStatusGauge = iota // Boundary
 )
+
+func (p PipelineStatusGauge) String() string {
+	switch p {
+	case PipelineStatusPaused:
+		return "paused"
+	case PipelineStatusRunning:
+		return "running"
+	case PipelineStatusError:
+		return "error"
+	default:
+		return ""
+	}
+}

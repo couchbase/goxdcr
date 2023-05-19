@@ -15,7 +15,6 @@ import (
 	"expvar"
 	"fmt"
 	"github.com/couchbase/goxdcr/service_def"
-	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"testing"
@@ -29,8 +28,6 @@ func TestPrometheusExpVarParseMap(t *testing.T) {
 	expVarMap := &expvar.Map{}
 	expVarMap.Add("testInt", 12)
 	expVarMap.AddFloat("testFloat", 13.3)
-
-	utils := utilities.NewUtilities()
 
 	parseMap := make(ExpVarParseMapType)
 	assert.False(parseMap.CheckNoKeyChanges(expVarMap))
@@ -56,7 +53,7 @@ func TestPrometheusExpVarParseMap(t *testing.T) {
 	parseMap["subMap"] = subMap
 	assert.True(parseMap.CheckNoKeyChanges(expVarMap))
 
-	exporter := NewPrometheusExporter(nil)
+	exporter := NewPrometheusExporter(nil, nil)
 	exporter.LoadExpVarMap(expVarMap)
 	assert.Equal(int64(12), exporter.expVarParseMap["testInt"].(int64))
 	assert.Equal(float64(13.3), exporter.expVarParseMap["testFloat"].(float64))
@@ -89,7 +86,7 @@ func TestPrometheusParseMapToMetricMap(t *testing.T) {
 		convertedMap[k] = ExpVarParseMapType(v.(map[string]interface{}))
 	}
 
-	exporter := NewPrometheusExporter(service_def.GlobalStatsTable)
+	exporter := NewPrometheusExporter(service_def.GlobalStatsTable, StatsTableLabels)
 	exporter.expVarParseMap = convertedMap
 
 	exporter.LoadMetricsMap(true)
@@ -116,5 +113,4 @@ func TestPrometheusParseMapToMetricMap(t *testing.T) {
 
 	_, err = exporter.Export()
 	assert.Nil(err)
-
 }

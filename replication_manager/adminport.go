@@ -77,7 +77,7 @@ func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan boo
 		GenServer:          server, /*gen_server.GenServer*/
 		finch:              finch,
 		utils:              utilsIn,
-		prometheusExporter: pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable),
+		prometheusExporter: pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable, pipeline_utils.NewPrometheusLabelsTable),
 		p2pMgr:             p2pMgr,
 		securitySvc:        securitySvc,
 	}
@@ -1307,7 +1307,6 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 	if err != nil {
 		return nil, err
 	}
-
 	adminport.prometheusExporter.LoadExpVarMap(expVarMap)
 	outputBytes, err := adminport.prometheusExporter.Export()
 	if err != nil {
