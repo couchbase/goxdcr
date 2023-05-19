@@ -337,6 +337,10 @@ function vagrantGrepForPanic {
 	local output
 
 	output=$(${VSSH[$i]} "sudo grep -c panic /opt/couchbase/var/lib/couchbase/logs/goxdcr.log" 2>/dev/null)
+	if (( $? == 2 ));then
+	  # Vagrant node return code 2: Potentially not a CBServer node. Skip grepping for panic
+	  return 0
+	fi
 	output=$(echo "$output" | tr -d '\r')
 	if (($output > 0)); then
 		echo "Found panic on node $i"
