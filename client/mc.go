@@ -1091,7 +1091,7 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 
 		err := c.Transmit(memcachedReqPkt)
 		if err != nil {
-			logging.Errorf(" Transmit failed in GetBulkAll %v", err)
+			logging.Errorf("Transmit failed in GetBulkAll for key <ud>'%v'</ud>: %v", k, err)
 			return err
 		}
 		c.opaque++
