@@ -1543,21 +1543,23 @@ function validateVBTasksProgress {
 	fi
 
 	local vbTasksMsgs
-	vbTasksMsgs=$(getInternalNodeXdcrLog "$logNodeName" | grep "Applying custom settings for ${clusterUuid}/${srcBucketName}/${tgtBucketName}")
+	vbTasksMsgs=$(getInternalNodeXdcrLog "$logNodeName" | grep "backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}_ThroughSeqnoTracker bg scanner" | grep -v "running" )
+
+	local totalCount
 
 	local OLDIFS="$IFS"
 	IFS=$'\n'
 
 	local prevLineCnt=0
-	local curLineCnt
+	local curVBDoneCount
 	local staticCounter=0
 	local maxStaticCount=3
 	for oneVBTasks in $(echo "$vbTasksMsgs"); do
 		# This many number of VBs being supplied for tasks
-		curLineCnt=$(echo "$oneVBTasks" | tr ' ' $'\n' | grep -c "[[:alnum:]]:0x")
+		curVBDoneCount=$(echo "$oneVBTasks" | awk '{print $10}')
 		if (($prevLineCnt == 0)); then
-			prevLineCnt=$curLineCnt
-		elif (($curLineCnt >= $prevLineCnt)); then
+			prevLineCnt=$curVBDoneCount
+		elif (($curVBDoneCount == $prevLineCnt)); then
 			staticCounter=$(($staticCounter + 1))
 			if (($staticCounter == $maxStaticCount)); then
 				echo "VB task has remained the same for $maxStaticCount times"
