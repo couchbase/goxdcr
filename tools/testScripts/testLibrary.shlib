@@ -732,6 +732,7 @@ function validateBrokenMapExists {
 }
 
 function checkNoErrorInErrorList {
+	local cluster="$1"
 	validateNumberOfEvents "$cluster" 0
 }
 
