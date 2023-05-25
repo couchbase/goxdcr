@@ -200,18 +200,8 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	componentErr := make(chan base.ComponentError, 1)
-	var waitGrp sync.WaitGroup
-
 	// Stopping
-	waitGrp.Add(1)
-	rh.Stop(&waitGrp, componentErr)
-
-	retVal := <-componentErr
-	assert.NotNil(retVal)
-	assert.Equal(specId, retVal.ComponentId)
-	assert.Nil(retVal.Err)
-
+	rh.Stop()
 	fmt.Println("============== Test case end: TestBackfillReqHandlerStartStop =================")
 }
 

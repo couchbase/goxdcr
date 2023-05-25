@@ -408,7 +408,7 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("BackfillReplSvc", rm.backfillReplSvc.ReplicationSpecChangeCallback,
 		base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("BackfillMgr", rm.backfillMgr.ReplicationSpecChangeCallback,
-		base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+		base.MetadataChangeMedPrioriy, base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("CheckpointSvc", rm.checkpoint_svc.ReplicationSpecChangeCallback,
 		base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
 	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("BucketTopologySvc", rm.bucketTopologySvc.ReplicationSpecChangeCallback,

@@ -342,7 +342,11 @@ func (b *BackfillMgr) stopHandlers() base.ErrorMap {
 
 		for _, handler := range handlers {
 			stopChildWait.Add(1)
-			go handler.Stop(&stopChildWait, errCh)
+			handlerCpy := handler
+			go func() {
+				defer stopChildWait.Done()
+				handlerCpy.Stop()
+			}()
 		}
 		stopChildWait.Wait()
 
@@ -457,24 +461,11 @@ func (b *BackfillMgr) deleteBackfillRequestHandler(replId, internalId string) er
 		return base.ErrorNotFound
 	}
 
-	bgTask := func() {
-		errCh := make(chan base.ComponentError, 1)
-		var waitGrp sync.WaitGroup
-		b.logger.Infof("Stopping backfill request handler for spec %v internalId %v in the background", replId, internalId)
-		waitGrp.Add(1)
-		go reqHandler.Stop(&waitGrp, errCh)
-		waitGrp.Wait()
-		if len(errCh) > 0 {
-			err := <-errCh
-			b.logger.Infof("Stopped backfill request handler for spec %v internalId %v with err %v", replId, internalId, err.Err)
-		} else {
-			b.logger.Infof("Stopped backfill request handler for spec %v internalId %v", replId, internalId)
-		}
-	}
-
-	// Don't care about waiting - a new replacement handler can be started in the meantime
-	go bgTask()
-
+	stopFunc := b.utils.StartDiagStopwatch(fmt.Sprintf("deleteBackfillRequestHandler(%v,%v)", replId, internalId),
+		base.DiagInternalThreshold)
+	b.logger.Infof("Stopping backfill request handler for spec %v internalId %v", replId, internalId)
+	reqHandler.Stop()
+	stopFunc()
 	delete(b.specToReqHandlerMap, replId)
 	return nil
 }
