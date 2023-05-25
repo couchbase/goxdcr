@@ -100,6 +100,8 @@ type BackfillRequestHandler struct {
 
 	lastPushMergeMtx  sync.RWMutex
 	lastPushMergedMap map[string]*metadata.VBTasksMapType
+
+	runWaitGrp sync.WaitGroup
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -168,19 +170,16 @@ func (b *BackfillRequestHandler) Start() error {
 			return
 		}
 
+		b.runWaitGrp.Add(1)
 		go b.run()
 	})
 	return err
 }
 
-func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.ComponentError) {
-	defer waitGrp.Done()
+func (b *BackfillRequestHandler) Stop() {
 	atomic.StoreUint32(&b.stopRequested, 1)
 	close(b.finCh)
-
-	var componentErr base.ComponentError
-	componentErr.ComponentId = b.id
-	errCh <- componentErr
+	b.runWaitGrp.Wait()
 }
 
 // The backfill request handler's purpose is to handle burst traffic as quickly as possible, and then
@@ -207,6 +206,8 @@ func (b *BackfillRequestHandler) Stop(waitGrp *sync.WaitGroup, errCh chan base.C
 // Because handling VB done and handling incoming requests are serialized here, it is safe to delete the spec
 // (synchronously) and then re-create a new spec once the incomingReqCh is read next
 func (b *BackfillRequestHandler) run() {
+	defer b.runWaitGrp.Done()
+
 	batchPersistCh := make(chan bool, 1)
 
 	requestPersistFunc := func() {

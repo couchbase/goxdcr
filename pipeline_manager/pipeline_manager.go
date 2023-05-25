@@ -30,7 +30,7 @@ import (
 )
 
 var ReplicationSpecNotActive error = errors.New("Replication specification not found or no longer active")
-var ReplicationStatusNotFound error = errors.New("Replication Status not found")
+var ReplicationStatusNotFound error = errors.New("Error: Replication Status is missing when starting pipeline.")
 var UpdaterStoppedError error = errors.New("Updater already stopped")
 var MainPipelineNotRunning error = errors.New("Main pipeline is not running")
 var ErrorExplicitMappingWoRules = errors.New("specified explicit mapping but no rule is found")
@@ -195,7 +195,10 @@ func (pipelineMgr *PipelineManager) RemoveReplicationStatus(topic string) error 
 			pipelineMgr.logger.Errorf("Updater object is nil for pipeline %v, may be leaking an updater somewhere\n", topic)
 		} else {
 			updater := updaterObj.(*PipelineUpdater)
-			updater.stop()
+			err = updater.stop()
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -428,7 +431,7 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	if rep_status == nil {
 		// This should not be nil as updater should be the only one calling this and
 		// it would have created a rep_status way before here
-		errMap[fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)] = errors.New("Error: Replication Status is missing when starting pipeline.")
+		errMap[fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)] = ReplicationStatusNotFound
 		return errMap
 	}
 
@@ -810,6 +813,9 @@ func (pipelineMgr *PipelineManager) GetOrCreateReplicationStatus(topic string, c
 	repStatusIface, _ := pipelineMgr.ReplicationStatus(topic)
 	if repStatusIface != nil {
 		return repStatusIface.(*pipeline.ReplicationStatus), nil
+	} else if _, err := pipelineMgr.repl_spec_svc.ReplicationSpec(topic); err == base.ReplNotFoundErr {
+		pipelineMgr.logger.Warnf("ReplicationStatus %v is not there and spec is not present\n", topic)
+		return nil, err
 	} else {
 		var retErr error
 		repStatus = pipeline.NewReplicationStatus(topic, pipelineMgr.repl_spec_svc.ReplicationSpec, pipelineMgr.logger, pipelineMgr.eventIdWell, pipelineMgr.utils)
@@ -957,10 +963,11 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	pipelineMgr.logger.Infof("Starting the backfill pipeline %s\n", topic)
 	repStatusKey := fmt.Sprintf("pipelineMgr.ReplicationStatus(%v)", topic)
 	rep_status, _ := pipelineMgr.ReplicationStatus(topic)
+
 	if rep_status == nil {
 		// This should not be nil as updater should be the only one calling this and
 		// it would have created a rep_status way before here
-		errMap[repStatusKey] = errors.New("Error: Replication Status is missing when starting pipeline.")
+		errMap[repStatusKey] = ReplicationStatusNotFound
 		return errMap
 	}
 
@@ -1745,6 +1752,8 @@ func backfillStartSuccessful(retErrMap base.ErrorMap, logger *log.CommonLogger, 
 			logger.Infof("Replication %v's backfill spec does has no tasks to run", pipelineName)
 		} else if len(retErrMap) == 1 && retErrMap.HasError(base.ErrorNoBackfillNeeded) {
 			logger.Infof("Replication %v backfill pipeline is not starting because backfill tasks have all been done", pipelineName)
+		} else if len(retErrMap) == 1 && retErrMap.HasError(ReplicationStatusNotFound) {
+			logger.Infof("Replication %v backfill pipeline is not starting spec is deleted", pipelineName)
 		} else {
 			successful = false
 		}
@@ -2091,16 +2100,17 @@ func (r *PipelineUpdater) checkReplicationActiveness() (err error) {
 	return
 }
 
-func (r *PipelineUpdater) stop() {
+func (r *PipelineUpdater) stop() error {
 	err := r.setStopped()
 	if err != nil {
-		return
+		return err
 	}
 
 	close(r.fin_ch)
 
 	// wait for updater to really stop
 	<-r.done_ch
+	return nil
 }
 
 func (r *PipelineUpdater) setStopped() error {

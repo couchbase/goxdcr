@@ -228,7 +228,6 @@ func (rs *ReplicationStatus) Spec() *metadata.ReplicationSpecification {
 	spec, err := rs.spec_getter(rs.specId)
 	if err != nil {
 		rs.logger.Errorf("Invalid replication status %v, failed to retrieve spec. err=%v", rs.specId, err)
-
 	} else if spec == nil {
 		//it is possible that spec is nil. When replication specification is deleted,
 		//ReplicationSpecVal.spec is set to nil, but it is not removed from cached to keep
@@ -323,7 +322,7 @@ func (rs *ReplicationStatus) RuntimeStatus(lock bool) ReplicationState {
 	}
 }
 
-//return the corresponding expvar map as its storage
+// return the corresponding expvar map as its storage
 func (rs *ReplicationStatus) Storage(pipelineType common.PipelineType) *expvar.Map {
 	var rep_map *expvar.Map
 	root_map := RootStorage()
