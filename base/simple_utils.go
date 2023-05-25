@@ -994,6 +994,16 @@ func CompressionStringToCompressionTypeConverter(userInput string) (int, error) 
 	return (int)(CompressionTypeNone), ErrorCompressionUnableToConvert
 }
 
+func MobileCompatibilityStringToTypeConverter(userInput string) (int, error) {
+	//  disallow "Active" for now
+	for i := MobileCompatibilityOff; i <= MobileCompatibilityOff; i++ {
+		if strings.ToLower(MobileCompatibilityStrings[i]) == strings.ToLower(userInput) {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("The only allowed values for setting %v are %v", MobileCompatibleKey, MobileCompatibilityStrings[MobileCompatibilityOff:MobileCompatibilityOff+1])
+}
+
 func ConcatenateErrors(errorMap ErrorMap, incomingErrorMap ErrorMap, maxNumberOfErrors int, logger *log.CommonLogger) {
 	overflowErrorMap := make(ErrorMap)
 	for errorKey, err := range incomingErrorMap {

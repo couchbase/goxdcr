@@ -11,12 +11,14 @@ licenses/APL2.txt.
 package filter
 
 import (
+	"bytes"
 	"fmt"
+	"sync/atomic"
+
 	"github.com/couchbase/gomemcached"
 	"github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbaselabs/gojsonsm"
-	"sync/atomic"
 )
 
 const collateErrDesc = " Collate was used to determine outcome"
@@ -32,15 +34,17 @@ type FilterImpl struct {
 	slicesToBeReleasedBuf    [][]byte
 	skipUncommittedTxn       uint32
 	skipBinaryDocs           uint32
+	mobileCompatible         uint32
 }
 
-func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool, filterModes base.FilterExpDelType) (*FilterImpl, error) {
+func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool, filterModes base.FilterExpDelType, mobileCompatible int) (*FilterImpl, error) {
 	filter := &FilterImpl{
 		id:                    id,
 		utils:                 utils,
 		dp:                    dp,
 		slicesToBeReleasedBuf: make([][]byte, 0, 2),
 	}
+	filter.mobileCompatible = uint32(mobileCompatible)
 
 	if filterModes.IsSkipReplicateUncommittedTxnSet() {
 		filter.skipUncommittedTxn = 1
@@ -82,13 +86,13 @@ func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils
 	return filter, nil
 }
 
-func NewFilter(id string, filterExpression string, utils FilterUtils, filterModes base.FilterExpDelType) (*FilterImpl, error) {
+func NewFilter(id string, filterExpression string, utils FilterUtils, filterModes base.FilterExpDelType, mobileCompatible int) (*FilterImpl, error) {
 	dpPtr := utils.NewDataPool()
 	if dpPtr == nil {
 		return nil, base.ErrorNoDataPool
 	}
 
-	return NewFilterWithSharedDP(id, filterExpression, utils, dpPtr, filterModes)
+	return NewFilterWithSharedDP(id, filterExpression, utils, dpPtr, filterModes, mobileCompatible)
 }
 
 func (filter *FilterImpl) GetInternalExpr() string {
@@ -119,9 +123,21 @@ func (filter *FilterImpl) SetShouldSkipBinaryDocs(val bool) {
 	}
 }
 
+func (filter *FilterImpl) SetMobileCompatibility(val uint32) {
+	atomic.StoreUint32(&filter.mobileCompatible, val)
+}
+
+func (filter *FilterImpl) getMobileCompatibility() uint32 {
+	return atomic.LoadUint32(&filter.mobileCompatible)
+}
+
 func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64) {
 	if wrappedUprEvent == nil || wrappedUprEvent.UprEvent == nil {
 		return false, base.ErrorInvalidInput, "UprEvent or wrappedUprEvent is nil", 0
+	}
+	// Mobile filter applies to all scopes/collections so let's do that first
+	if filter.filterMobileRelatedUprEvent(wrappedUprEvent.UprEvent) == false {
+		return false, nil, "", 0
 	}
 	// User defined filter doesn't apply to system scope
 	if wrappedUprEvent.ColNamespace != nil && wrappedUprEvent.ColNamespace.ScopeName == base.SystemScopeName {
@@ -175,6 +191,18 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		wrappedUprEvent.DecompressedValue = valueBod
 	}
 	return needToReplicate, err, errDesc, totalFailedDpCnt
+}
+
+func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *memcached.UprEvent) (needToReplicate bool) {
+	switch filter.getMobileCompatibility() {
+	case base.MobileCompatibilityActive:
+		if bytes.HasPrefix(uprEvent.Key, base.MobileDocPrefixSync) && !bytes.HasPrefix(uprEvent.Key, base.MobileDocPrefixSyncAtt) {
+			return false
+		} else {
+			return true
+		}
+	}
+	return true
 }
 
 // Returns:

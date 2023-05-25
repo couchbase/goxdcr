@@ -101,6 +101,7 @@ const (
 	CkptSvcCacheEnabledKey            = metadata.CkptSvcCacheEnabledKey
 	FilterSystemScopeKey              = base.FilterSystemScope
 	FilterBinaryDocsKey               = metadata.FilterBinaryDocsKey
+	MobileCompatibleKey               = base.MobileCompatibleKey
 )
 
 // constants for parsing create/change/view replication response
@@ -216,6 +217,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CkptSvcCacheEnabledKey:            metadata.CkptSvcCacheEnabledKey,
 	FilterSystemScopeKey:              metadata.FilterSystemScopeKey,
 	FilterBinaryDocsKey:               metadata.FilterBinaryDocsKey,
+	MobileCompatibleKey:               metadata.MobileCompatibleKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -273,6 +275,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.CkptSvcCacheEnabledKey:               CkptSvcCacheEnabledKey,
 	metadata.FilterSystemScopeKey:                 FilterSystemScopeKey,
 	metadata.FilterBinaryDocsKey:                  FilterBinaryDocsKey,
+	metadata.MobileCompatibleKey:                  MobileCompatibleKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
@@ -291,6 +294,11 @@ var CompressionTypeRESTValuesMap = map[interface{}]interface{}{
 	base.CompressionTypeAuto:   base.CompressionTypeStrings[base.CompressionTypeAuto],
 }
 
+var MobileCompatibilityTypeToRESTValueMap = map[interface{}]interface{}{
+	base.MobileCompatibilityOff:    base.MobileCompatibilityStrings[base.MobileCompatibilityOff],
+	base.MobileCompatibilityActive: base.MobileCompatibilityStrings[base.MobileCompatibilityActive],
+}
+
 /**
  * In cases where internally we store values differently from what the REST API requires, this
  * map performs the translation. The key is the Rest Key
@@ -298,6 +306,7 @@ var CompressionTypeRESTValuesMap = map[interface{}]interface{}{
 var SettingsValueToRestValueMap = map[string]map[interface{}]interface{}{
 	base.CompressionTypeREST: CompressionTypeRESTValuesMap,
 	PauseRequested:           ReplicationPauseRequestsedValuesMap,
+	MobileCompatibleKey:      MobileCompatibilityTypeToRESTValueMap,
 }
 
 var logger_msgutil *log.CommonLogger = log.NewLogger("MsgUtils", log.DefaultLoggerContext)
@@ -1154,7 +1163,6 @@ func convertGlobalSettingsToRestSettingsMap(settings *metadata.GlobalSettings) m
 func convertSettingsToRestSettingsMap(settings *metadata.ReplicationSettings, isDefaultSettings bool) map[string]interface{} {
 	restSettingsMap := make(map[string]interface{})
 	settingsMap := settings.ToRESTMap(isDefaultSettings)
-
 	for key, value := range settingsMap {
 		restKey := SettingsKeyToRestKeyMap[key]
 		convertedValue := convertSettingsInternalValuesToRESTValues(restKey, value)

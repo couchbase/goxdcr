@@ -1,0 +1,118 @@
+# Copyright 2023-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active")
+
+function testReplicationSettings {
+	echo "Creating replication with mobile=Active"
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
+
+	echo "Checking replication setting mobileCompatible=Active"
+	mobile=$(getReplicationSettings "C1" "B1" "C2" "B2" | jq .mobile)
+	if [[ "$mobile" != \"Active\" ]]; then
+		echo "mobile should be \"Active\" but got $mobile"
+		exit 1
+	fi
+	local expected=0
+
+	writeJSONDocument "C1" "B1" "_sync:doc1" '{"foo":"bar"}'
+	writeJSONDocument "C1" "B1" "_sync:att:doc1" '{"foo":"bar"}'
+	sleep 20
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# Should filter 1 doc
+	expected=$(($expected + 1))
+	local filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
+	if ! (($filtered == $expected)); then
+		echo "Expect docs_filtered to be $expected but got $filtered"
+		exit 1
+	fi
+
+	echo "Changing replication setting to mobile=Off"
+	setReplicationSettings "C1" "B1" "C2" "B2" "mobile=Off"
+	echo "Checking replication setting mobile=Off"
+	mobile=$(getReplicationSettings "C1" "B1" "C2" "B2" | jq .mobile)
+	if [[ "$mobile" != \"Off\" ]]; then
+		echo "mobile should be \"Off\" but got $mobile"
+		exit 1
+	fi
+
+	writeJSONDocument "C1" "B1" "_sync:doc2" '{"foo":"bar"}'
+	writeJSONDocument "C1" "B1" "_sync:att:doc2" '{"foo":"bar"}'
+	sleep 20
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	local filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
+	# Both should be replicated since mobile=off
+	if ! (($filtered == $expected)); then
+		echo "Expect docs_filtered to be $expected but got $filtered"
+		exit 1
+	fi
+
+	echo "Changing replication setting to mobile=Active"
+	setReplicationSettings "C1" "B1" "C2" "B2" "mobile=Active"
+	echo "Checking replication setting mobile=Active"
+	mobile=$(getReplicationSettings "C1" "B1" "C2" "B2" | jq .mobile)
+	if [[ "$mobile" != \"Active\" ]]; then
+		echo "mobile should be \"Active\" but got $mobile"
+		exit 1
+	fi
+
+	writeJSONDocument "C1" "B1" "_sync:doc3" '{"foo":"bar"}'
+	writeJSONDocument "C1" "B1" "_sync:att:doc3" '{"foo":"bar"}'
+	sleep 15
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	# Should filter 1 doc
+	expected=$(($expected + 1))
+	local filtered=$(getStats "C1" "B1" "C2" "B2" "docs_filtered")
+	# Both should be replicated since mobile=off
+	if ! (($filtered == $expected)); then
+		echo "Expect docs_filtered to be $expected but got $filtered"
+		exit 1
+	fi
+}
+
+function runTestCase {
+	echo "Mobile coexistence test is skipped"
+	return
+
+	echo "============================================================================"
+	echo "Running mobile coexistence test case"
+	echo "============================================================================"
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	testReplicationSettings
+
+	echo "============================================================================"
+	echo "Mobile coexistence test case passed"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

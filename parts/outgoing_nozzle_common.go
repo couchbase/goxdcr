@@ -54,6 +54,7 @@ const (
 	EVENT_ADDI_REQ_SIZE       = "req_size"
 
 	HLV_PRUNING_WINDOW = base.HlvPruningWindowKey
+	MOBILE_COMPATBILE  = base.MobileCompatibleKey
 )
 
 type NeedSendStatus int
@@ -96,6 +97,7 @@ type baseConfig struct {
 	password            string
 	hlvPruningWindowSec uint32 // Interval for pruning PV in seconds
 	logger              *log.CommonLogger
+	mobileCompatible    uint32
 
 	devMainSendDelay     uint32
 	devBackfillSendDelay uint32
@@ -225,6 +227,9 @@ func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettings
 	}
 	if val, ok := settings[HLV_PRUNING_WINDOW]; ok {
 		config.hlvPruningWindowSec = uint32(val.(int))
+	}
+	if val, ok := settings[MOBILE_COMPATBILE]; ok {
+		config.mobileCompatible = uint32(val.(int))
 	}
 }
 

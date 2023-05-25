@@ -13,15 +13,16 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/base/filter"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/golang/snappy"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base/filter"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/golang/snappy"
 )
 
 type ManifestsDoc struct {
@@ -1213,7 +1214,7 @@ func NewSourceMigrationNamespaceFromColNs(namespace *base.CollectionNamespace) *
 }
 
 func NewSourceMigrationNamespace(expr string, dp base.DataPool) (*SourceNamespace, error) {
-	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp, 0)
+	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp, 0, base.MobileCompatibilityOff)
 	if err != nil {
 		return nil, err
 	}
@@ -1515,7 +1516,7 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 		if srcClone.nsType == SourceDefaultCollectionFilter {
 			// Need to clone filter because each filter is not supposed to be run by multiple go-routines
 			// Similar to NewSourceMigrationNamespace
-			filterPtr, err := filter.NewFilterWithSharedDP("", k.GetFilterString(), utils, getDP(), 0)
+			filterPtr, err := filter.NewFilterWithSharedDP("", k.GetFilterString(), utils, getDP(), 0, base.MobileCompatibilityOff)
 			if err != nil {
 				continue
 			}

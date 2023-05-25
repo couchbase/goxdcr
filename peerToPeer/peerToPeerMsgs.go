@@ -293,8 +293,8 @@ func (r *HandlerResultImpl) GetHttpStatusCode() int {
 }
 
 var filterUtils = utilities.NewUtilities()
-var reqMagicCheckFilter, _ = filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), filterUtils, 0)
-var respMagicCheckFilter, _ = filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), filterUtils, 0)
+var reqMagicCheckFilter, _ = filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), filterUtils, 0, base.MobileCompatibilityOff)
+var respMagicCheckFilter, _ = filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), filterUtils, 0, base.MobileCompatibilityOff)
 
 func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, securitySvc service_def.SecuritySvc, logger *log.CommonLogger) (ReqRespCommon, error) {
 	body, err := ioutil.ReadAll(httpReq.Body)

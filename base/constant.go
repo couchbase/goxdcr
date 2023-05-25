@@ -1435,6 +1435,25 @@ const TransactionXattrKey = "txn"
 
 const BackfillPipelineTopicPrefix = "backfill_"
 
+const MobileCompatibleKey = "mobile"
+
+// Last element is invalid and is there to keep consistency with the EndMarker
+var MobileCompatibilityStrings = [...]string{"Invalid", "Off", "Active", "Invalid"}
+
+const (
+	MobileCompatibilityStartMarker = iota
+	// Off means no mobile running or mobile is on the source only
+	MobileCompatibilityOff
+	// Active means we have mobile on the source as well as target in active/active mode
+	MobileCompatibilityActive
+	MobileCompatibilityEndMarker
+)
+
+var (
+	MobileDocPrefixSync    = []byte("_sync:")
+	MobileDocPrefixSyncAtt = []byte("_sync:att")
+)
+
 // Custom CR related constants
 const (
 	CAS_MACRO_EXPANSION = "\"${Mutation.CAS}\"" // The value for the cv field when setting back to source

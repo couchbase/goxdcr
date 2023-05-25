@@ -47,6 +47,7 @@ var FilterExpDelKey = base.FilterExpDelKey
 var ForceCollectionDisableKey = "ForceCollectionDisable"
 var BackfillPersistErrKey = "Backfill Persist Callback Error"
 var CkptMgrBrokenMappingErrKey = "Checkpoint Manager routing update Callback Error"
+var MobileCompatible = base.MobileCompatibleKey
 
 // A function used by the router to raise routing updates to other services that need to know
 type CollectionsRoutingUpdater func(CollectionsRoutingInfo) error
@@ -1377,7 +1378,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	var filterPrintMsg string = "<nil>"
 
 	expDelMode := spec.Settings.GetExpDelMode()
-	filter, err = baseFilter.NewFilter(id, filterExpression, utilsIn, expDelMode)
+	mobileCompatible := spec.Settings.GetMobileCompatible()
+	filter, err = baseFilter.NewFilter(id, filterExpression, utilsIn, expDelMode, mobileCompatible)
 	if err != nil {
 		return nil, err
 	}
@@ -1922,6 +1924,10 @@ func (router *Router) updateHighRepl(isHighReplicationObj interface{}) error {
 	return nil
 }
 
+func (router *Router) setMobileCompatibility(val uint32) {
+	router.filter.SetMobileCompatibility(val)
+}
+
 func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	errMap := make(base.ErrorMap)
 
@@ -1983,6 +1989,11 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 	collectionsMgtMode, ok := settings[metadata.CollectionsMgtMultiKey].(base.CollectionsMgtType)
 	if ok {
 		router.collectionModes.Set(collectionsMgtMode)
+	}
+
+	mobileCompatibleMode, ok := settings[metadata.MobileCompatibleKey].(int)
+	if ok {
+		router.setMobileCompatibility(uint32(mobileCompatibleMode))
 	}
 
 	if len(errMap) > 0 {

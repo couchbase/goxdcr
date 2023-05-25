@@ -499,6 +499,7 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		isOldReplHighPriority != isNewReplHighPriority ||
 		oldSettings.GetExpDelMode() != newSettings.GetExpDelMode() ||
 		oldSettings.GetDevMainPipelineDelay() != newSettings.GetDevMainPipelineDelay() ||
+		oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible() ||
 		oldSettings.GetJsFunctionTimeoutMs() != newSettings.GetJsFunctionTimeoutMs() ||
 		oldSettings.GetHlvPruningWindowSec() != newSettings.GetHlvPruningWindowSec() ||
 		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() ||

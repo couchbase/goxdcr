@@ -25,7 +25,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
-	peerToPeer "github.com/couchbase/goxdcr/peerToPeer"
+	"github.com/couchbase/goxdcr/peerToPeer"
 	pp "github.com/couchbase/goxdcr/pipeline"
 	pctx "github.com/couchbase/goxdcr/pipeline_ctx"
 	"github.com/couchbase/goxdcr/pipeline_svc"
@@ -830,6 +830,10 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 	if ok {
 		xmemSettings[parts.HLV_PRUNING_WINDOW] = hlvPruningWindowSec
 	}
+	mobile, ok := settings[metadata.MobileCompatibleKey]
+	if ok {
+		xmemSettings[parts.MobileCompatible] = mobile
+	}
 	return xmemSettings
 
 }
@@ -1065,6 +1069,7 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 
 		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings.CloneAndRedact())
 	}
+	xmemSettings[parts.MobileCompatible] = metadata.GetSettingFromSettingsMap(settings, metadata.MobileCompatibleKey, base.MobileCompatibilityOff)
 
 	return xmemSettings, nil
 
@@ -1260,6 +1265,11 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 	filterExpDelMode, ok := settings[parts.FilterExpDelKey]
 	if ok {
 		routerSettings[parts.FilterExpDelKey] = filterExpDelMode
+	}
+
+	mobileCompatible, ok := settings[parts.MobileCompatible]
+	if ok {
+		routerSettings[parts.MobileCompatible] = mobileCompatible
 	}
 
 	xdcrf.disableCollectionIfNeeded(settings, routerSettings, pipeline.Specification().GetReplicationSpec())

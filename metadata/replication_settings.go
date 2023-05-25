@@ -62,6 +62,9 @@ const (
 	BypassUncommittedTxnKey = base.BypassUncommittedTxnKey
 	FilterBinaryDocsKey     = base.FilterBinaryDocs
 
+	// Allow mobile at both source and target. Don't overwrite target mobile metadata docs and XATTRs
+	MobileCompatibleKey = base.MobileCompatibleKey
+
 	BrokenMappingsUpdateKey = "BrokenMappingsUpdate"
 
 	// Have a single key for replication settings struct, multiple keys for REST endpoints
@@ -218,6 +221,8 @@ var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 
 var FilterSystemScopeConfig = &SettingsConfig{true, nil}
 
+var MobileCompatibilityConfig = &SettingsConfig{base.MobileCompatibilityOff, &Range{base.MobileCompatibilityStartMarker, base.MobileCompatibilityEndMarker}}
+
 // In seconds
 var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
 
@@ -269,6 +274,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicateCkptIntervalKey:             ReplicateCkptIntervalConfig,
 	CkptSvcCacheEnabledKey:               CkptSvcCacheEnabledConfig,
 	FilterSystemScopeKey:                 FilterSystemScopeConfig,
+	MobileCompatibleKey:                  MobileCompatibilityConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -1055,6 +1061,11 @@ func (s *ReplicationSettings) GetReplicateCkptInterval() time.Duration {
 	return time.Duration(minInt) * time.Minute
 }
 
+func (s *ReplicationSettings) GetMobileCompatible() int {
+	val, _ := s.GetSettingValueOrDefaultValue(MobileCompatibleKey)
+	return val.(int)
+}
+
 type ReplicationSettingsMap map[string]interface{}
 
 type redactDictType int
@@ -1247,6 +1258,10 @@ func ValidateAndConvertReplicationSettingsValue(key, value, errorKey string, isE
 	case DismissEventKey:
 		convertedValue, err = ValidateAndConvertSettingsValue(key, value, ReplicationSettingsConfigMap)
 		if err != nil {
+			return
+		}
+	case MobileCompatibleKey:
+		if convertedValue, err = base.MobileCompatibilityStringToTypeConverter(value); err != nil {
 			return
 		}
 	default:

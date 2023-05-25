@@ -13,10 +13,12 @@ package peerToPeer
 import (
 	"encoding/json"
 	"fmt"
+	"testing"
+
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	utils2 "github.com/couchbase/goxdcr/utils"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestDiscoveryReqMarsh(t *testing.T) {
@@ -57,7 +59,7 @@ func TestMagic(t *testing.T) {
 	assert.Nil(err)
 
 	utils := utils2.NewUtilities()
-	reqFilter, err := filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), utils, 0)
+	reqFilter, err := filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), utils, 0, base.MobileCompatibilityOff)
 	matched, _, err := reqFilter.FilterByteSlice(bytes)
 	assert.Nil(err)
 	assert.True(matched)
@@ -66,7 +68,7 @@ func TestMagic(t *testing.T) {
 	bytes, err = resp.Serialize()
 	assert.Nil(err)
 
-	respFilter, err := filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), utils, 0)
+	respFilter, err := filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), utils, 0, base.MobileCompatibilityOff)
 	matched, _, err = respFilter.FilterByteSlice(bytes)
 	assert.Nil(err)
 	assert.True(matched)
