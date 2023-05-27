@@ -564,3 +564,49 @@ func TestRollbackTo0(t *testing.T) {
 	unlockFunc()
 	assert.Len(totalTasks.GetAllCollectionNamespaceMappings(), 2)
 }
+
+func TestBackfillVBTimestamps_IsValidForStart(t *testing.T) {
+	type fields struct {
+		StartingTimestamp *base.VBTimestamp
+		EndingTimestamp   *base.VBTimestamp
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   bool
+	}{
+		{
+			name: "Valid start",
+			fields: fields{
+				StartingTimestamp: &base.VBTimestamp{Seqno: 0},
+				EndingTimestamp:   &base.VBTimestamp{Seqno: 6},
+			},
+			want: true,
+		},
+		{
+			name: "Invalid for ckptmgr start",
+			fields: fields{
+				StartingTimestamp: nil,
+				EndingTimestamp:   &base.VBTimestamp{Seqno: 5},
+			},
+			want: false,
+		},
+		{
+			name: "Invalid for ckptmgr start2",
+			fields: fields{
+				StartingTimestamp: &base.VBTimestamp{Seqno: 5},
+				EndingTimestamp:   nil,
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := BackfillVBTimestamps{
+				StartingTimestamp: tt.fields.StartingTimestamp,
+				EndingTimestamp:   tt.fields.EndingTimestamp,
+			}
+			assert.Equalf(t, tt.want, b.IsValidForStart(), "IsValidForStart()")
+		})
+	}
+}
