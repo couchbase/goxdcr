@@ -449,13 +449,15 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 	rep_status.RecordProgress(common.ProgressStartConstruction)
 
 	p, err := pipelineMgr.pipeline_factory.NewPipeline(topic, rep_status.RecordProgress)
+	if p != nil {
+		// Regardless of error, remember the pipeline so that if there's an error condition, the retry will stop it
+		rep_status.SetPipeline(p)
+	}
 	if err != nil {
 		errMap[fmt.Sprintf("pipelineMgr.pipeline_factory.NewPipeline(%v)", topic)] = err
 		return errMap
 	}
-
 	rep_status.RecordProgress(common.ProgressConstructionDone)
-	rep_status.SetPipeline(p)
 
 	pipelineMgr.logger.Infof("Pipeline %v is constructed. Starting it.", p.InstanceId())
 	p.SetProgressRecorder(rep_status.RecordProgress)
@@ -587,7 +589,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 	p := rep_status.Pipeline()
 	if p != nil {
 		state := p.State()
-		if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
+		if state != common.Pipeline_Stopping && state != common.Pipeline_Stopped {
 			bp := rep_status.BackfillPipeline()
 			var bgWaitGrp *sync.WaitGroup
 			var bgErrMap base.ErrorMap
@@ -1005,6 +1007,10 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 
 	bp, err := pipelineMgr.pipeline_factory.NewSecondaryPipeline(topic, mainPipeline,
 		rep_status.RecordBackfillProgress, common.BackfillPipeline)
+	if bp != nil {
+		// Regardless of error, remember the pipeline so that if there's an error condition, the retry will stop it
+		rep_status.SetPipeline(bp)
+	}
 	if err != nil {
 		if errMap == nil {
 			errMap = make(base.ErrorMap)
@@ -1012,9 +1018,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 		errMap[fmt.Sprintf("pipelineMgr.pipeline_factory.NewSecondaryPipeline(%v)", topic)] = err
 		return errMap
 	}
-
 	rep_status.RecordBackfillProgress("Backfill Pipeline is constructed")
-	rep_status.SetPipeline(bp)
 
 	// Requesting a backfill pipeline means that a pipeline will start and for the top task in each VB
 	// of the VBTasksMap will be sent to DCP to be run and backfilled
@@ -1064,7 +1068,7 @@ func (pipelineMgr *PipelineManager) StopBackfillPipeline(topic string, skipCkpt 
 
 	pipelineMgr.logger.Infof("Stopping the backfill pipeline %s (skipCkpt? %v)", topic, skipCkpt)
 	state := bp.State()
-	if state == common.Pipeline_Running || state == common.Pipeline_Starting || state == common.Pipeline_Error {
+	if state != common.Pipeline_Stopping && state != common.Pipeline_Stopped {
 		if skipCkpt {
 			settingsMap := make(metadata.ReplicationSettingsMap)
 			settingsMap[metadata.CkptMgrBypassCkpt] = true

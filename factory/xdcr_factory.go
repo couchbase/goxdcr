@@ -140,7 +140,7 @@ func (xdcrf *XDCRFactory) NewPipeline(topic string, progress_recorder common.Pip
 
 	err = registerCb(nil /*main pipeline*/)
 	if err != nil {
-		return nil, err
+		return pipeline, err
 	}
 
 	progress_recorder(common.ProgressConstructionDone)
@@ -167,7 +167,7 @@ func (xdcrf *XDCRFactory) NewSecondaryPipeline(topic string, primaryPipeline com
 	// For secondary pipeline, use existing pipeline's context
 	err = registerCb(&primaryPipeline)
 	if err != nil {
-		return nil, err
+		return pipeline, err
 	}
 
 	progress_recorder("Secondary Pipeline has been constructed")
