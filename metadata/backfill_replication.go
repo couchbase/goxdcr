@@ -1371,11 +1371,11 @@ func (b *BackfillTask) MergeIncomingTask(task *BackfillTask) (canFullyMerge, una
 	}
 
 	// Otherwise, need to pop back out subset of tasks, one before and one after, that wasn't able to be merged
-	if !tsSmallerBound.IsEmpty() {
+	if tsSmallerBound.IsValidForStart() {
 		subtask1 = NewBackfillTask(&tsSmallerBound, task.requestedCollections_)
 	}
 
-	if !tsLargerBound.IsEmpty() {
+	if tsLargerBound.IsValidForStart() {
 		subtask2 = NewBackfillTask(&tsLargerBound, task.requestedCollections_)
 	}
 
@@ -1653,8 +1653,8 @@ type BackfillVBTimestamps struct {
 	EndingTimestamp   *base.VBTimestamp
 }
 
-func (b BackfillVBTimestamps) IsEmpty() bool {
-	return b.StartingTimestamp == nil && b.EndingTimestamp == nil
+func (b BackfillVBTimestamps) IsValidForStart() bool {
+	return b.StartingTimestamp != nil && b.EndingTimestamp != nil
 }
 
 func (b BackfillVBTimestamps) Clone() BackfillVBTimestamps {
@@ -1682,8 +1682,10 @@ func (b *BackfillVBTimestamps) SameAs(other *BackfillVBTimestamps) bool {
 // Try its best to see if the incoming timestamps can be accomodated by the current range
 // If the incoming timestamps spans more than the current coverage, then
 // return 2 ranges:
-//    range 1 - range smaller than this b could handle
-//    range 2 - range larger than this b could handle
+//
+//	range 1 - range smaller than this b could handle
+//	range 2 - range larger than this b could handle
+//
 // This call modifies the existing timestamps
 func (b *BackfillVBTimestamps) Accomodate(incoming *BackfillVBTimestamps) (fullyAccomodated, unableToMerge bool, smallerOutOfBounds, largerOutOfBounds BackfillVBTimestamps) {
 	// Sanity check
