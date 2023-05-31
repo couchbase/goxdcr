@@ -290,6 +290,15 @@ func SearchUint64List(seqno_list []uint64, seqno uint64) (int, bool) {
 	}
 }
 
+func SearchUint64ListUnsorted(seqno_list []uint64, seqno uint64) (int, bool) {
+	for index, val := range seqno_list {
+		if val == seqno {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
 type Uint32List []uint32
 
 func (u Uint32List) Len() int           { return len(u) }

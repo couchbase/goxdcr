@@ -1759,6 +1759,11 @@ func (router *Router) RouteCollection(data interface{}, partId string, origUprEv
 // and notify throughSeqnoTracker svc that there are sibling requests coming for this given source seqno
 func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMCRequest, origUprEvent *base.WrappedUprEvent, migrationNamespaceMap map[uint32]*base.CollectionNamespace) error {
 	var err error
+	var syncCh chan bool = nil
+	numCols := len(colIds)
+	if numCols > 1 {
+		syncCh = make(chan bool)
+	}
 	for i, colId := range colIds {
 		var reqToProcess *base.WrappedMCRequest
 		if i == 0 {
@@ -1771,6 +1776,8 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 			firstReq.SiblingReqsMtx.Lock()
 			firstReq.SiblingReqs = append(firstReq.SiblingReqs, reqToProcess)
 			firstReq.SiblingReqsMtx.Unlock()
+			reqToProcess.Cloned = true
+			reqToProcess.ClonedSyncCh = syncCh
 		}
 
 		reqToProcess.ColInfoMtx.Lock()
@@ -1804,7 +1811,9 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 		}
 		reqToProcess.ColInfoMtx.Unlock()
 	}
-	if len(colIds) > 1 {
+	if numCols > 1 {
+		firstReq.Cloned = true
+		firstReq.ClonedSyncCh = syncCh
 		vbno := firstReq.Req.VBucket
 		seqno := firstReq.Seqno
 		totalInstances := len(colIds)
@@ -1814,6 +1823,7 @@ func (router *Router) prepareMcRequest(colIds []uint32, firstReq *base.WrappedMC
 		data = append(data, seqno)
 		data = append(data, totalInstances)
 		data = append(data, isDelete)
+		data = append(data, syncCh)
 
 		router.RaiseEvent(common.NewEvent(common.DataCloned, data, router, nil, nil))
 	}
@@ -1967,6 +1977,7 @@ func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 	newReq.SrcColNamespaceMtx.Lock()
 	newReq.SrcColNamespace = nil
 	newReq.SrcColNamespaceMtx.Unlock()
+	newReq.Cloned = false
 	return newReq, nil
 }
 
@@ -2031,6 +2042,8 @@ func (router *Router) recycleDataObj(obj interface{}) {
 			}
 			req.SlicesToBeReleasedByRouter = nil
 			req.SlicesToBeReleasedMtx.Unlock()
+			req.Cloned = false
+			req.ClonedSyncCh = nil
 			router.mcRequestPool.Put(obj.(*base.WrappedMCRequest))
 		}
 	default:

@@ -694,6 +694,8 @@ type WrappedMCRequest struct {
 	SiblingReqs    []*WrappedMCRequest
 	SiblingReqsMtx sync.RWMutex
 	RetryCRCount   int
+	Cloned         bool
+	ClonedSyncCh   chan bool
 }
 
 func (req *WrappedMCRequest) GetReqBytes() []byte {

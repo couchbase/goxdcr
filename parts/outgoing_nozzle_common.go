@@ -17,7 +17,7 @@ import (
 	"time"
 
 	mc "github.com/couchbase/gomemcached"
-	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 )
@@ -67,9 +67,11 @@ const (
 	Not_Send_Other     NeedSendStatus = iota
 )
 
-/************************************
+/*
+***********************************
 /* struct baseConfig
-*************************************/
+************************************
+*/
 type baseConfig struct {
 	maxCount         int
 	maxSize          int
@@ -156,6 +158,8 @@ type DataFailedCRSourceEventAdditional struct {
 	IsExpirySet bool
 	VBucket     uint16
 	ManifestId  uint64
+	Cloned      bool
+	CloneSyncCh chan bool
 }
 
 type TargetDataSkippedEventAdditional DataFailedCRSourceEventAdditional
@@ -171,6 +175,8 @@ type DataSentEventAdditional struct {
 	Req_size       int
 	ManifestId     uint64
 	FailedTargetCR bool
+	Cloned         bool
+	CloneSyncCh    chan bool
 }
 
 type DataFilteredAdditional struct {
