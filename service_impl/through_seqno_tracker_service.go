@@ -1068,7 +1068,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		vbno := data[0].(uint16)
 		seqno := data[1].(uint64)
 		totalCount := data[2].(int)
-		tsTracker.handleDataClonedEvent(vbno, seqno, totalCount)
+		syncCh := data[4].(chan bool)
+		tsTracker.handleDataClonedEvent(vbno, seqno, totalCount, syncCh)
 	case common.OsoSnapshotReceived:
 		mode := event.Data.(bool)
 		helper := event.DerivedData
@@ -1081,7 +1082,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 		}
 	default:
 		tsTracker.logger.Warnf("Incorrect event type, %v, received by %v", event.EventType, tsTracker.id)
-
 	}
 	return nil
 }
@@ -1359,7 +1359,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	for {
 		iter_seqno++
 		if iter_seqno <= max_sent_seqno {
-			sent_index, sent_found := base.SearchUint64List(sent_seqno_list, iter_seqno)
+			var sent_index int
+			var sent_found bool
+			if osoModeActive {
+				sent_index, sent_found = base.SearchUint64ListUnsorted(sent_seqno_list, iter_seqno)
+			} else {
+				sent_index, sent_found = base.SearchUint64List(sent_seqno_list, iter_seqno)
+			}
 			if sent_found {
 				last_sent_index = sent_index
 				found_seqno_type = SeqnoTypeSent
@@ -1369,7 +1375,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		}
 
 		if iter_seqno <= max_filtered_seqno {
-			filtered_index, filtered_found := base.SearchUint64List(filtered_seqno_list, iter_seqno)
+			var filtered_index int
+			var filtered_found bool
+			if osoModeActive {
+				filtered_index, filtered_found = base.SearchUint64ListUnsorted(filtered_seqno_list, iter_seqno)
+			} else {
+				filtered_index, filtered_found = base.SearchUint64List(filtered_seqno_list, iter_seqno)
+			}
 			if filtered_found {
 				last_filtered_index = filtered_index
 				found_seqno_type = SeqnoTypeFiltered
@@ -1379,7 +1391,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		}
 
 		if iter_seqno <= max_failed_cr_seqno {
-			failed_cr_index, failed_cr_found := base.SearchUint64List(failed_cr_seqno_list, iter_seqno)
+			var failed_cr_index int
+			var failed_cr_found bool
+			if osoModeActive {
+				failed_cr_index, failed_cr_found = base.SearchUint64ListUnsorted(failed_cr_seqno_list, iter_seqno)
+			} else {
+				failed_cr_index, failed_cr_found = base.SearchUint64List(failed_cr_seqno_list, iter_seqno)
+			}
 			if failed_cr_found {
 				last_failed_cr_index = failed_cr_index
 				found_seqno_type = SeqnoTypeFailedCR
@@ -1398,7 +1416,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		}
 
 		if iter_seqno <= maxSystemEventSeqno {
-			systemEventIdx, systemEventFound := base.SearchUint64List(systemEventSeqnoList, iter_seqno)
+			var systemEventIdx int
+			var systemEventFound bool
+			if osoModeActive {
+				systemEventIdx, systemEventFound = base.SearchUint64ListUnsorted(systemEventSeqnoList, iter_seqno)
+			} else {
+				systemEventIdx, systemEventFound = base.SearchUint64List(systemEventSeqnoList, iter_seqno)
+			}
 			if systemEventFound {
 				lastSysEventIndex = systemEventIdx
 				found_seqno_type = SeqnoTypeSysEvent
@@ -1407,7 +1431,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 		}
 
 		if iter_seqno <= maxIgnoredSeqno {
-			ignoredIdx, ignoredFound := base.SearchUint64List(ignoredSeqnoList, iter_seqno)
+			var ignoredIdx int
+			var ignoredFound bool
+			if osoModeActive {
+				ignoredIdx, ignoredFound = base.SearchUint64ListUnsorted(ignoredSeqnoList, iter_seqno)
+			} else {
+				ignoredIdx, ignoredFound = base.SearchUint64List(ignoredSeqnoList, iter_seqno)
+			}
 			if ignoredFound {
 				lastIgnoredIndex = ignoredIdx
 				found_seqno_type = SeqnoTypeIgnored
@@ -1649,7 +1679,8 @@ func (tsTracker *ThroughSeqnoTrackerSvc) PrintStatusSummary() {
 		max_gap, sum_gap/count, atomic.LoadUint64(&tsTracker.osoCntReceivedFromDCP))
 }
 
-func (tsTracker *ThroughSeqnoTrackerSvc) handleDataClonedEvent(vbno uint16, reqSeqno uint64, totalInstances int) {
+func (tsTracker *ThroughSeqnoTrackerSvc) handleDataClonedEvent(vbno uint16, reqSeqno uint64, totalInstances int, syncCh chan bool) {
+	defer close(syncCh)
 	if totalInstances < 2 {
 		return
 	}
@@ -1659,12 +1690,16 @@ func (tsTracker *ThroughSeqnoTrackerSvc) handleDataClonedEvent(vbno uint16, reqS
 		return
 	}
 	tracker.lock.Lock()
-	_, found := base.SearchUint64List(tracker.seqno_list_1, reqSeqno)
+	var found bool
+	if atomic.LoadUint32(&tsTracker.osoModeActive) == 1 {
+		_, found = base.SearchUint64ListUnsorted(tracker.seqno_list_1, reqSeqno)
+	} else {
+		_, found = base.SearchUint64List(tracker.seqno_list_1, reqSeqno)
+	}
 	if found {
 		panic(fmt.Sprintf("tsTracker received same seqno %v of %v total cloned events", reqSeqno, totalInstances))
 	}
 	tracker.lock.Unlock()
-
 	tracker.appendSeqnos(reqSeqno, uint64(totalInstances))
 }
 
@@ -1673,28 +1708,55 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 	if !event.EventType.IsOutNozzleThroughSeqnoRelated() {
 		return true
 	}
-
+	var syncCh chan bool
+	cloned := false
 	var seqno uint64
 	var vbno uint16
 
 	switch event.EventType {
 	case common.TargetDataSkipped:
+		if event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Cloned == true {
+			cloned = true
+			syncCh = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).CloneSyncCh
+		}
 		seqno = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).Seqno
 		vbno = event.OtherInfos.(parts.TargetDataSkippedEventAdditional).VBucket
 	case common.DataFailedCRSource:
+		if event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Cloned == true {
+			cloned = true
+			syncCh = event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).CloneSyncCh
+		}
 		seqno = event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).Seqno
 		vbno = event.OtherInfos.(parts.DataFailedCRSourceEventAdditional).VBucket
 	case common.DataSent:
+		if event.OtherInfos.(parts.DataSentEventAdditional).Cloned == true {
+			cloned = true
+			syncCh = event.OtherInfos.(parts.DataSentEventAdditional).CloneSyncCh
+		}
 		vbno = event.OtherInfos.(parts.DataSentEventAdditional).VBucket
 		seqno = event.OtherInfos.(parts.DataSentEventAdditional).Seqno
 	case common.DataNotReplicated:
 		wrappedMcr := event.Data.(*base.WrappedMCRequest)
+		if wrappedMcr.Cloned == true {
+			cloned = true
+			syncCh = wrappedMcr.ClonedSyncCh
+		}
 		vbno = wrappedMcr.Req.VBucket
 		seqno = wrappedMcr.Seqno
 	default:
 		panic("Implement me")
 	}
 
+	if !cloned {
+		return true
+	}
+
+	if syncCh != nil {
+		select {
+		case <-syncCh:
+			break
+		}
+	}
 	tracker, exists := tsTracker.vbClonedTracker[vbno]
 	if !exists {
 		// not my vb
@@ -1703,8 +1765,13 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 
 	tracker.lock.Lock()
 	defer tracker.lock.Unlock()
-
-	index, found := base.SearchUint64List(tracker.seqno_list_1, seqno)
+	var index int
+	var found bool
+	if atomic.LoadUint32(&tsTracker.osoModeActive) == 1 {
+		index, found = base.SearchUint64ListUnsorted(tracker.seqno_list_1, seqno)
+	} else {
+		index, found = base.SearchUint64List(tracker.seqno_list_1, seqno)
+	}
 	if !found {
 		return true
 	}
@@ -1718,7 +1785,6 @@ func (tsTracker *ThroughSeqnoTrackerSvc) preProcessOutgoingClonedEvent(event *co
 	if tracker.seqno_list_2[index] == 0 {
 		return true
 	}
-
 	return false
 }
 

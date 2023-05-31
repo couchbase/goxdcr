@@ -47,12 +47,19 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 function runDataLoad {
 	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
+	if [[ -z "${beerSample:-}" ]]; then
+		beerSample=$(mdfind beer-sample.zip | grep install | grep samples | head -n 1)
+	fi
+	if [[ -z "${beerSample:-}" ]]; then
+		echo "Error: cannot locate beerSample"
+		exit 1
+	fi
 	runDocLoader "C1" "B1" "$beerSample"
 }
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
-MULTITARGET_MSG="a single source mutation is replicated to multiple target collections"
+MULTITARGET_MSG="a single source mutation with document ID .* is replicated to multiple target collections"
 
 function runTestCase {
 	echo "============================================================================"
@@ -88,10 +95,12 @@ function runTestCase {
 	createBucketReplication "C1" "B1" "C2" "B2" MigrationReplProperties
 	printGlobalScopeAndCollectionInfo
 
-	echo "Waiting 15 seconds before checking item count first pass"
-	sleep 15
+	echo "Waiting for changes_left to go down to 0..."
+	sleep 10
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 	checkItemCnt "C2" "B2" 2824
-	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1))
+	# We should have at least one new instance of the message
+	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1)) $(($currMultiTargetMsgCnt + 10))
 
 	echo "============================================================================"
 	echo "PASSED"

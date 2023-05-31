@@ -351,8 +351,11 @@ func TestClonedData(t *testing.T) {
 		Opcode:  gomemcached.UPR_MUTATION,
 	}
 
+	cloneSyncCh := make(chan bool)
 	var dataSentAdditional parts.DataSentEventAdditional
 	dataSentAdditional.VBucket = 1
+	dataSentAdditional.Cloned = true
+	dataSentAdditional.CloneSyncCh = cloneSyncCh
 
 	mutationEvent.Seqno = 1
 	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
@@ -366,6 +369,7 @@ func TestClonedData(t *testing.T) {
 	data = append(data, mutationEvent.Seqno)
 	data = append(data, 2)     // total (1 main + 1 sibling)
 	data = append(data, false) // not tombstone
+	data = append(data, cloneSyncCh)
 	clonedEvent := common.NewEvent(common.DataCloned, data, nil, nil, nil)
 	assert.Nil(svc.ProcessEvent(clonedEvent))
 

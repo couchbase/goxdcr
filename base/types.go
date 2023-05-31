@@ -22,7 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
+	
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/google/uuid"
@@ -694,6 +694,8 @@ type WrappedMCRequest struct {
 	SiblingReqs    []*WrappedMCRequest
 	SiblingReqsMtx sync.RWMutex
 	RetryCRCount   int
+	Cloned         bool
+	ClonedSyncCh   chan bool
 }
 
 func (req *WrappedMCRequest) GetReqBytes() []byte {
