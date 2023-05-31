@@ -17,7 +17,7 @@ import (
 	"time"
 
 	mc "github.com/couchbase/gomemcached"
-	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 )
@@ -156,6 +156,8 @@ type DataFailedCRSourceEventAdditional struct {
 	IsExpirySet bool
 	VBucket     uint16
 	ManifestId  uint64
+	Cloned      bool
+	CloneSyncCh chan bool
 }
 
 type TargetDataSkippedEventAdditional DataFailedCRSourceEventAdditional
@@ -172,6 +174,8 @@ type DataSentEventAdditional struct {
 	ManifestId          uint64
 	FailedTargetCR      bool
 	UncompressedReqSize int
+	Cloned              bool
+	CloneSyncCh         chan bool
 }
 
 type DataFilteredAdditional struct {

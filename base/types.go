@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/golang/snappy"
 	"math"
 	mrand "math/rand"
 	"reflect"
@@ -23,6 +22,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/golang/snappy"
 
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -695,6 +696,8 @@ type WrappedMCRequest struct {
 	SiblingReqs    []*WrappedMCRequest
 	SiblingReqsMtx sync.RWMutex
 	RetryCRCount   int
+	Cloned         bool
+	ClonedSyncCh   chan bool
 }
 
 func (req *WrappedMCRequest) GetReqBytes() []byte {

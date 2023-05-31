@@ -1543,7 +1543,7 @@ function validateVBTasksProgress {
 	fi
 
 	local vbTasksMsgs
-	vbTasksMsgs=$(getInternalNodeXdcrLog "$logNodeName" | grep "backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}_ThroughSeqnoTracker bg scanner" | grep -v "running" )
+	vbTasksMsgs=$(getInternalNodeXdcrLog "$logNodeName" | grep "backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}_ThroughSeqnoTracker bg scanner" | grep -v "running")
 
 	local totalCount
 
