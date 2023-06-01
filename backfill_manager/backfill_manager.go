@@ -296,11 +296,13 @@ func (b *BackfillMgr) Start() error {
 
 	err := b.initCache()
 	if err != nil {
+		b.logger.Errorf("Unable to initCache: %v", err.Error())
 		return err
 	}
 
 	err = b.backfillReplSvc.SetCompleteBackfillRaiser(b.RequestCompleteBackfill)
 	if err != nil {
+		b.logger.Errorf("Unable to set backfill raiser: %v", err.Error())
 		return err
 	}
 
@@ -594,6 +596,11 @@ func (b *BackfillMgr) ReplicationSpecChangeCallback(changedSpecId string, oldSpe
 	}
 
 	b.logger.Infof("BackfillMgr detected specId %v old %v new %v", changedSpecId, oldSpec, newSpec)
+
+	isKVNode, isKvNodeErr := b.xdcrTopologySvc.IsKVNode()
+	if isKvNodeErr == nil && !isKVNode {
+		return nil
+	}
 
 	var err error
 	if oldSpecObj.(*metadata.ReplicationSpecification) == nil &&
