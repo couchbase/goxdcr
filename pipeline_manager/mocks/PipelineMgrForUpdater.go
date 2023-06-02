@@ -150,7 +150,7 @@ func (_m *PipelineMgrForUpdater) GetXDCRTopologySvc() service_def.XDCRCompTopolo
 	return r0
 }
 
-// LogTopologyStatus provides a mock function with given fields:
+// PostTopologyStatus provides a mock function with given fields:
 func (_m *PipelineMgrForUpdater) PostTopologyStatus() {
 	_m.Called()
 }

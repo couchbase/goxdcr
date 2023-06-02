@@ -124,6 +124,11 @@ func (_m *PipelineMgrBackfillIface) RequestBackfill(topic string) error {
 	return r0
 }
 
+// WaitForMainPipelineCkptMgrToStop provides a mock function with given fields: topic, internalID
+func (_m *PipelineMgrBackfillIface) WaitForMainPipelineCkptMgrToStop(topic string, internalID string) {
+	_m.Called(topic, internalID)
+}
+
 type mockConstructorTestingTNewPipelineMgrBackfillIface interface {
 	mock.TestingT
 	Cleanup(func())

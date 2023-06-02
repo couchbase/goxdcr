@@ -150,7 +150,7 @@ func (_m *PipelineMgrInternalIface) GetXDCRTopologySvc() service_def.XDCRCompTop
 	return r0
 }
 
-// LogTopologyStatus provides a mock function with given fields:
+// PostTopologyStatus provides a mock function with given fields:
 func (_m *PipelineMgrInternalIface) PostTopologyStatus() {
 	_m.Called()
 }

@@ -55,6 +55,19 @@ func createSeqnoGetterFunc(topSeqno uint64) SeqnosGetter {
 	return getterFunc
 }
 
+func createSeqno2GetterFunc(topSeqno uint64) SeqnosGetter2 {
+	highMap := make(map[uint16]uint64)
+	var vb uint16
+	for vb = 0; vb < 1024; vb++ {
+		highMap[vb] = topSeqno
+	}
+
+	getterFunc := func(error) (map[uint16]uint64, error) {
+		return highMap, nil
+	}
+	return getterFunc
+}
+
 func completeGetter(dataToRet interface{}) func() (interface{}, error) {
 	retFunc := func() (interface{}, error) {
 		return dataToRet, nil
@@ -178,7 +191,7 @@ func TestBackfillReqHandlerStartStop(t *testing.T) {
 	fmt.Println("============== Test case start: TestBackfillReqHandlerStartStop =================")
 	logger, backfillReplSvc, bucketTopologySvc, replSpecSvc, srcManIdGetter := setupBRHBoilerPlate()
 	setupBucketTopology(bucketTopologySvc, nil)
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), time.Second, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, createTestSpec(), createSeqnoGetterFunc(100), time.Second, createVBDoneFunc(), createSeqno2GetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 	backfillReplSvc.On("BackfillReplSpec", mock.Anything).Return(nil, base.ErrorNotFound)
 	brhMockBackfillReplSvcCommon(backfillReplSvc)
 
@@ -227,7 +240,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	backfillReplSvc.On("AddBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (addCount)++ }).Return(nil)
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqno2GetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -316,7 +329,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDoneThenDel(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqnoGetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), createSeqno2GetterFunc(500), nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
@@ -412,7 +425,7 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
-	mainPipelineSeqnoGetter := createSeqnoGetterFunc(500)
+	mainPipelineSeqnoGetter := createSeqno2GetterFunc(500)
 	var addCount int
 	var setCount int
 	var delCount int
@@ -479,7 +492,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
-	mainPipelineSeqnoGetter := createSeqnoGetterFunc(500)
+	mainPipelineSeqnoGetter := createSeqno2GetterFunc(500)
 	var addCount int
 	var setCount int
 	var delCount int
@@ -543,6 +556,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	setupBucketTopology(bucketTopologySvc, nil)
 	spec := createTestSpec()
 	seqnoGetter := createSeqnoGetterFunc(100)
+	seqnoGetter2 := createSeqno2GetterFunc(100)
 	var addCount int
 	var setCount int
 	var delCount int
@@ -557,7 +571,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	backfillReplSvc.On("SetBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (setCount)++ }).Return(nil)
 	backfillReplSvc.On("DelBackfillReplSpec", mock.Anything).Run(func(args mock.Arguments) { (delCount)++ }).Return(nil, nil)
 
-	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), seqnoGetter, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
+	rh := NewCollectionBackfillRequestHandler(logger, specId, backfillReplSvc, spec, seqnoGetter, 500*time.Millisecond, createVBDoneFunc(), seqnoGetter2, nil, nil, bucketTopologySvc, completeGetter(nil), replSpecSvc, srcManIdGetter)
 
 	assert.NotNil(rh)
 	assert.Nil(rh.Start())
