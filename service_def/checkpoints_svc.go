@@ -19,7 +19,7 @@ type CheckpointsService interface {
 	DelCheckpointsDoc(replicationId string, vbno uint16, specInternalId string) error
 	DelCheckpointsDocs(replicationId string) error
 	UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error)
-	UpsertCheckpointsDone(replicationId string) error // Used by ckmgr to notify that it is done with individual VBs
+	UpsertCheckpointsDone(replicationId string, internalId string) error // Used by ckmgr to notify that it is done with individual VBs
 	CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error)
 	GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error)
 	PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error

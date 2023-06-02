@@ -9,16 +9,20 @@
 package metadata_svc
 
 import (
+	"fmt"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/stretchr/testify/assert"
 	"testing"
+	"time"
 )
 
 func TestCheckpointsServiceCacheImpl_Run(t *testing.T) {
+	fmt.Println("============== Test case start: TestCheckpointsServiceCacheImpl_Run =================")
+	defer fmt.Println("============== Test case end: TestCheckpointsServiceCacheImpl_Run =================")
 	assert := assert.New(t)
 
-	ckptCache := NewCheckpointsServiceCache(nil)
+	ckptCache := NewCheckpointsServiceCache(nil, "")
 	go ckptCache.Run()
 
 	testSpec, _ := metadata.NewReplicationSpecification("srcBucket", "bucketUUID", "targetCluster", "targetBucket", "tgtBucketUuid")
@@ -33,11 +37,18 @@ func TestCheckpointsServiceCacheImpl_Run(t *testing.T) {
 }
 
 func TestCheckpointsServiceCacheImplGetAndSet(t *testing.T) {
+	fmt.Println("============== Test case start: TestCheckpointsServiceCacheImplGetAndSet =================")
+	defer fmt.Println("============== Test case end: TestCheckpointsServiceCacheImplGetAndSet =================")
 	assert := assert.New(t)
 
-	ckptCache := NewCheckpointsServiceCache(nil)
+	ckptCache := NewCheckpointsServiceCache(nil, "")
 	ckptCache.cacheEnabled = true
 	go ckptCache.Run()
+
+	// spec
+	spec, _ := metadata.NewReplicationSpecification("sourceBucket", "sourceBucketUuid",
+		"targetClusterUuid", "targetBucketName", "targetBucketUuid")
+	ckptCache.SpecChangeCb(nil, spec)
 
 	docs, err := ckptCache.GetLatestDocs()
 	assert.Nil(docs)
@@ -52,18 +63,36 @@ func TestCheckpointsServiceCacheImplGetAndSet(t *testing.T) {
 	recordsList = append(recordsList, record)
 	setDoc := &metadata.CheckpointsDoc{
 		Checkpoint_records: recordsList,
-		SpecInternalId:     "testId",
+		SpecInternalId:     spec.InternalId,
 		Revision:           nil,
 	}
 	docs = make(map[uint16]*metadata.CheckpointsDoc)
 	docs[0] = setDoc
 	assert.Nil(ckptCache.StoreLatestDocs(docs))
 
+	// Let Run have some time to validate cache
+	time.Sleep(100 * time.Millisecond)
+
 	getDoc, err := ckptCache.GetLatestDocs()
 	assert.Nil(err)
 	assert.True(getDoc.SameAs(docs))
 
-	assert.Nil(ckptCache.StoreOneVbDoc(1, setDoc))
+	time.Sleep(100 * time.Millisecond)
+	assert.Nil(ckptCache.StoreOneVbDoc(1, setDoc, spec.InternalId))
+
+	time.Sleep(100 * time.Millisecond)
+	// The storeOneVbDoc will start a session so getting latest docs should trigger error
+	_, err = ckptCache.GetLatestDocs()
+	assert.Equal(service_def.MetadataNotFoundErr, err)
+
+	ckptCache.ValidateCache("fakeInternalId") // should not work
+	time.Sleep(100 * time.Millisecond)
+	_, err = ckptCache.GetLatestDocs()
+	assert.Equal(service_def.MetadataNotFoundErr, err)
+
+	// Once all ckpts have been uploaded, cache is valid again
+	ckptCache.ValidateCache(spec.InternalId)
+	time.Sleep(100 * time.Millisecond)
 	getDoc, _ = ckptCache.GetLatestDocs()
 	assert.NotNil(getDoc[1])
 }

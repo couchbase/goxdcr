@@ -436,7 +436,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	throughSeqnoSvc.On("GetThroughSeqnos").Return(throughSeqnoMap, nil)
 	throughSeqnoSvc.On("GetThroughSeqnosAndManifestIds").Return(nil, nil, nil)
 
-	ckptSvc.On("UpsertCheckpointsDone", mock.Anything).Return(upsertCkptsDoneErr)
+	ckptSvc.On("UpsertCheckpointsDone", mock.Anything, mock.Anything).Return(upsertCkptsDoneErr)
 	ckptSvc.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	ckptSvc.On("UpsertBrokenMapping", mock.Anything, mock.Anything).Return(nil)
 
