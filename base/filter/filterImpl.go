@@ -146,6 +146,12 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		return false, nil, "", totalFailedDpCnt
 	}
 
+	dataTypeIsJson := wrappedUprEvent.UprEvent.DataType&memcached.JSONDataType > 0
+	if filter.ShouldSkipBinaryDocs() && !dataTypeIsJson {
+		// Skip binary document
+		return false, nil, "", totalFailedDpCnt
+	}
+
 	var failedDpCnt int64
 	if filter.hasFilterExpression {
 		needToReplicate, err, errDesc, failedDpCnt = filter.filterUprEvent(wrappedUprEvent.UprEvent, body, endBodyPos, &filter.slicesToBeReleasedBuf)
@@ -285,12 +291,6 @@ func (filter *FilterImpl) filterUprEvent(uprEvent *memcached.UprEvent, body []by
 	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
 		// For now, pass through
 		return true, nil, "", 0
-	}
-
-	dataTypeIsJson := uprEvent.DataType&memcached.JSONDataType > 0
-	if filter.ShouldSkipBinaryDocs() && !dataTypeIsJson {
-		// Skip binary document
-		return false, nil, "", 0
 	}
 
 	sliceToBeFiltered, err, errDesc, failedDpCnt := filter.utils.ProcessUprEventForFiltering(uprEvent, body, endBodyPos, filter.dp, filter.flags, slicesToBeReleased)
