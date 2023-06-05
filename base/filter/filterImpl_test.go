@@ -31,7 +31,7 @@ func TestFilter(t *testing.T) {
 	fmt.Println("============== Test case start: TestFilterCreation =================")
 	assert := assert.New(t)
 
-	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \"^abc\")", realUtil, false)
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \"^abc\")", realUtil, 0)
 
 	assert.Nil(err)
 	assert.NotNil(filter)
@@ -49,7 +49,7 @@ func TestFilterBool(t *testing.T) {
 	udMarsh, err := ioutil.ReadFile("./testdata/MB-33010.json")
 	assert.Nil(err)
 
-	filter, err := NewFilter(filterId, "bool=false", realUtil, false)
+	filter, err := NewFilter(filterId, "bool=false", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 
@@ -91,7 +91,7 @@ func TestFilterBool2(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "bool=false AND NOT int > dfdfk", realUtil, false)
+	filter, err := NewFilter(filterId, "bool=false AND NOT int > dfdfk", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 
@@ -114,7 +114,7 @@ func TestFilterPerf(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "EXISTS(city)", realUtil, false)
+	filter, err := NewFilter(filterId, "EXISTS(city)", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	assert.Equal(base.FilterFlagType(3), filter.flags)
@@ -138,7 +138,7 @@ func TestFilterPerfKeyOnly(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "META().id = \"26dcc0-000000001586\"", realUtil, false)
+	filter, err := NewFilter(filterId, "META().id = \"26dcc0-000000001586\"", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
@@ -162,7 +162,7 @@ func TestKeyPanic(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, 'C1-key-1')", realUtil, false)
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, 'C1-key-1')", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	assert.True(filter.flags&base.FilterFlagKeyOnly > 0)
@@ -189,7 +189,7 @@ func TestFilterUtilsMethods(t *testing.T) {
 	uprEvent, err := base.RetrieveUprJsonAndConvert(unCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil, false)
+	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	match, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -199,7 +199,7 @@ func TestFilterUtilsMethods(t *testing.T) {
 	uprEvent, err = base.RetrieveUprJsonAndConvert(compressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	filter, err = NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil, false)
+	filter, err = NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	match, err, _, _ = filter.FilterUprEvent(uprEvent)
@@ -209,7 +209,7 @@ func TestFilterUtilsMethods(t *testing.T) {
 	uprEvent, err = base.RetrieveUprJsonAndConvert(xAttrUncompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"TestDocKey\"", realUtil, false)
+	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"TestDocKey\"", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	match, err, _, _ = filter.FilterUprEvent(uprEvent)
@@ -219,7 +219,7 @@ func TestFilterUtilsMethods(t *testing.T) {
 	uprEvent, err = base.RetrieveUprJsonAndConvert(xAttrCompressedFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30", realUtil, false)
+	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	match, err, _, _ = filter.FilterUprEvent(uprEvent)
@@ -238,7 +238,9 @@ func TestActiveTxnRecordFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	filter, err := NewFilter(filterId, "", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(filter)
 
@@ -259,7 +261,9 @@ func TestTxnClientRecordFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	filter, err := NewFilter(filterId, "", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(filter)
 
@@ -291,7 +295,9 @@ func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	assert.Nil(json.Unmarshal(strippedData, &testStruct))
 
 	// Make sure filter can detect the transaction xattribute
-	legacyFilter, err := NewFilter(filterId, "", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	legacyFilter, err := NewFilter(filterId, "", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(legacyFilter)
 	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
@@ -299,7 +305,7 @@ func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	assert.Nil(err)
 
 	// Without skip, make sure it replicates and that it can strip the xattribute
-	stripFilter, err := NewFilter(filterId, "", realUtil, false)
+	stripFilter, err := NewFilter(filterId, "", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(stripFilter)
 	result, err, _, _ = stripFilter.FilterUprEvent(uprEvent)
@@ -362,14 +368,16 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	testStruct := dummyStruct{}
 	assert.Nil(json.Unmarshal(strippedData, &testStruct))
 
-	legacyFilter, err := NewFilter(filterId, "", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	legacyFilter, err := NewFilter(filterId, "", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(legacyFilter)
 	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
 
-	sdkFilter, err := NewFilter(filterId, "", realUtil, false)
+	sdkFilter, err := NewFilter(filterId, "", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(sdkFilter)
 	result, err, _, _ = sdkFilter.FilterUprEvent(uprEvent)
@@ -457,14 +465,16 @@ func TestTxnOnlyXattrFilteringWithCompression(t *testing.T) {
 	testStruct := dummyStruct{}
 	assert.Nil(json.Unmarshal(strippedData, &testStruct))
 
-	legacyFilter, err := NewFilter(filterId, "", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	legacyFilter, err := NewFilter(filterId, "", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(legacyFilter)
 	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
 
-	sdkFilter, err := NewFilter(filterId, "", realUtil, false)
+	sdkFilter, err := NewFilter(filterId, "", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(sdkFilter)
 	result, err, _, _ = sdkFilter.FilterUprEvent(uprEvent)
@@ -497,7 +507,9 @@ func TestMixedTransXattrFilteringWithoutCompression(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	filter, err := NewFilter(filterId, "", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -518,7 +530,9 @@ func TestNonTransXattrFilteringWithoutCompression(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -539,7 +553,9 @@ func TestNonTransXattrFilteringWithoutCompressionNegative(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -560,7 +576,9 @@ func TestNonTransXattrFilteringWithCompression(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -581,7 +599,9 @@ func TestNonTransXattrFilteringWithCompressionNegative(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(filter)
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -595,7 +615,7 @@ func TestKeyAdd(t *testing.T) {
 	fmt.Println("============== Test case start: TestKeyAdd =================")
 	assert := assert.New(t)
 
-	filter, err := NewFilter(filterId, "Testdoc = true AND REGEXP_CONTAINS(META().id, \"^abc\")", realUtil, false)
+	filter, err := NewFilter(filterId, "Testdoc = true AND REGEXP_CONTAINS(META().id, \"^abc\")", realUtil, 0)
 
 	assert.NotEqual(0, len(base.ReservedWordsReplaceMap))
 	assert.Nil(err)
@@ -627,7 +647,7 @@ func TestXattrAdd(t *testing.T) {
 	fmt.Println("============== Test case start: TestXattrAdd =================")
 	assert := assert.New(t)
 
-	filter, err := NewFilter(filterId, "META().xattrs.VersionSupported > 1.0", realUtil, false)
+	filter, err := NewFilter(filterId, "META().xattrs.VersionSupported > 1.0", realUtil, 0)
 
 	assert.Nil(err)
 	assert.NotNil(filter)
@@ -664,7 +684,7 @@ func TestKeyAddXattrPretest(t *testing.T) {
 	fmt.Println("============== Test case start: TestKeyAddXattrPretest =================")
 	assert := assert.New(t)
 
-	filter, err := NewFilter(filterId, "Testdoc = true AND REGEXP_CONTAINS(META().id, \"^abc\") AND META().xattrs.VersionSupported > 1.0", realUtil, false)
+	filter, err := NewFilter(filterId, "Testdoc = true AND REGEXP_CONTAINS(META().id, \"^abc\") AND META().xattrs.VersionSupported > 1.0", realUtil, 0)
 
 	assert.Nil(err)
 	assert.NotNil(filter)
@@ -693,7 +713,7 @@ func TestKeyAddXattr(t *testing.T) {
 	fmt.Println("============== Test case start: TestKeyAddXattr =================")
 	assert := assert.New(t)
 
-	filter, err := NewFilter(filterId, "Testdoc = true AND REGEXP_CONTAINS(META().id, \"^abc\") AND META().xattrs.VersionSupported > 1.0", realUtil, false)
+	filter, err := NewFilter(filterId, "Testdoc = true AND REGEXP_CONTAINS(META().id, \"^abc\") AND META().xattrs.VersionSupported > 1.0", realUtil, 0)
 
 	assert.Nil(err)
 	assert.NotNil(filter)
@@ -741,7 +761,7 @@ func TestCompressionXattrKeyFiltering(t *testing.T) {
 	assert.NotNil(uprEvent)
 
 	var testExpression string = fmt.Sprintf("META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"%v\" AND REGEXP_CONTAINS(Key, \"^AA\")", "TestDocKey")
-	filter, err := NewFilter(filterId, testExpression, realUtil, false)
+	filter, err := NewFilter(filterId, testExpression, realUtil, 0)
 	assert.Nil(err)
 
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -760,7 +780,7 @@ func TestCompressionKeyFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
 
-	filter, err := NewFilter(filterId, "META().id = \"TestDocKey\" AND REGEXP_CONTAINS(`Key`, \"^A+$\")", realUtil, false)
+	filter, err := NewFilter(filterId, "META().id = \"TestDocKey\" AND REGEXP_CONTAINS(`Key`, \"^A+$\")", realUtil, 0)
 	assert.Nil(err)
 
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -774,11 +794,11 @@ func TestReservedWords(t *testing.T) {
 	fmt.Println("============== Test case start: TestCompressionXattrKeyFiltering =================")
 	assert := assert.New(t)
 
-	filter, err := NewFilter(filterId, "META().id = \"something\"", realUtil, false)
+	filter, err := NewFilter(filterId, "META().id = \"something\"", realUtil, 0)
 	assert.Nil(err)
 	assert.False(strings.Contains(filter.filterExpressionInternal, "META"))
 
-	filter, err = NewFilter(filterId, "`KEY` = \"something\"", realUtil, false)
+	filter, err = NewFilter(filterId, "`KEY` = \"something\"", realUtil, 0)
 	assert.Nil(err)
 	assert.True(strings.Contains(filter.filterExpressionInternal, "KEY"))
 	fmt.Println("============== Test case start: TestCompressionXattrKeyFiltering =================")
@@ -788,7 +808,9 @@ func TestReservedWords(t *testing.T) {
 func TestTransactionMB36043(t *testing.T) {
 	assert := assert.New(t)
 
-	legacyFilter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, true)
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	legacyFilter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, filterType)
 	assert.Nil(err)
 	assert.NotNil(legacyFilter)
 
@@ -801,7 +823,7 @@ func TestTransactionMB36043(t *testing.T) {
 	assert.False(needToReplicate)
 
 	// Even with a new, non-legacy filter, it should still prevent ATR related doc keys from being replicated
-	txFilter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, false)
+	txFilter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, 0)
 	assert.Nil(err)
 	assert.NotNil(txFilter)
 
@@ -819,7 +841,7 @@ func TestTransactionXattrAndKeyOnlyFiltering(t *testing.T) {
 	assert.NotNil(uprEvent)
 
 	var testExpression string = fmt.Sprintf("META().id = \"%v\"", "test1")
-	filter, err := NewFilter(filterId, testExpression, realUtil, false)
+	filter, err := NewFilter(filterId, testExpression, realUtil, 0)
 	assert.Nil(err)
 
 	result, err, _, _ := filter.FilterUprEvent(uprEvent)
@@ -827,4 +849,40 @@ func TestTransactionXattrAndKeyOnlyFiltering(t *testing.T) {
 	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestTransactionXattrAndKeyOnlyFiltering =================")
+}
+
+func TestBinaryFilter(t *testing.T) {
+	fmt.Println("============== Test case start: TestBinaryFilter =================")
+	defer fmt.Println("============== Test case end: TestBinaryFilter =================")
+	assert := assert.New(t)
+	binaryFile := "./testInternalData/uprBinary.json"
+
+	uprEvent, err := base.RetrieveUprJsonAndConvert(binaryFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+	assert.False(uprEvent.UprEvent.DataType&mcc.JSONDataType > 0)
+
+	// Default mode - binary goes through if not key-specific
+	var testExpression string = fmt.Sprintf("key=val")
+	filter, err := NewFilter(filterId, testExpression, realUtil, 0)
+	assert.Nil(err)
+	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+
+	// Should not pass through in either key only filter nor any other filter
+	var filterType base.FilterExpDelType
+	filterType.SetSkipBinary(true)
+	filter, err = NewFilter(filterId, testExpression, realUtil, filterType)
+	assert.Nil(err)
+	result, err, _, _ = filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+
+	testExpression = fmt.Sprintf("META().id = \"%v\"", "test1")
+	filter, err = NewFilter(filterId, testExpression, realUtil, filterType)
+	assert.Nil(err)
+	result, err, _, _ = filter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
 }

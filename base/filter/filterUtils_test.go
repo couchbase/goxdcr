@@ -17,13 +17,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"testing"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbaselabs/gojsonsm"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/couchbase/gocb.v1"
-	"io/ioutil"
-	"testing"
 )
 
 // Don't change these - these are already dumped in the testData files
@@ -560,4 +561,43 @@ func TestMatchPcreNegLookahead(t *testing.T) {
 	assert.True(match)
 
 	fmt.Println("============== Test case end: TestMatchPcreNegLookahead =================")
+}
+
+func TestGenerateBinaryDoc(t *testing.T) {
+	cluster, err := gocb.Connect("http://localhost:9000")
+	if err != nil {
+		return
+	}
+	fmt.Println("============== Test case start: TestGenerateBinaryDoc =================")
+	defer fmt.Println("============== Test case end: TestGenerateBinaryDoc =================")
+
+	cluster.Authenticate(gocb.PasswordAuthenticator{
+		Username: "Administrator",
+		Password: "wewewe",
+	})
+
+	bucket, err := cluster.OpenBucket("B1", "")
+	if err != nil {
+		return
+	}
+
+	bucket.Remove(docKey, 0)
+
+	slice := []byte("abcde")
+
+	_, err = bucket.Insert(docKey, slice, 0)
+	if err != nil {
+		fmt.Printf("err %v\n", err)
+		return
+	}
+
+	//	fileName := "/tmp/uprEventDump.bin"
+	//	dumpBytes := new(bytes.Buffer)
+	//	json.NewEncoder(dumpBytes).Encode(*m)
+	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+	//	if writeErr == nil {
+	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+	//	} else {
+	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+	//	}
 }

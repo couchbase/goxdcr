@@ -13,15 +13,16 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/base/filter"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/golang/snappy"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base/filter"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/golang/snappy"
 )
 
 type ManifestsDoc struct {
@@ -470,7 +471,7 @@ func (c *CollectionsManifest) Scopes() ScopesMap {
 	return c.scopes
 }
 
-//type CollectionsMap map[string]Collection
+// type CollectionsMap map[string]Collection
 // Diff by name between two manifests
 func (sourceManifest *CollectionsManifest) ImplicitMap(targetManifest *CollectionsManifest) (successfulMapping CollectionNamespaceMapping, unmappedSources CollectionsMap, unmappedTargets CollectionsMap) {
 	if sourceManifest == nil || targetManifest == nil {
@@ -1213,7 +1214,7 @@ func NewSourceMigrationNamespaceFromColNs(namespace *base.CollectionNamespace) *
 }
 
 func NewSourceMigrationNamespace(expr string, dp base.DataPool) (*SourceNamespace, error) {
-	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp, false)
+	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp, 0)
 	if err != nil {
 		return nil, err
 	}

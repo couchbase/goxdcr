@@ -57,7 +57,7 @@ func TestMagic(t *testing.T) {
 	assert.Nil(err)
 
 	utils := utils2.NewUtilities()
-	reqFilter, err := filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), utils, false)
+	reqFilter, err := filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), utils, 0)
 	matched, _, err := reqFilter.FilterByteSlice(bytes)
 	assert.Nil(err)
 	assert.True(matched)
@@ -66,7 +66,7 @@ func TestMagic(t *testing.T) {
 	bytes, err = resp.Serialize()
 	assert.Nil(err)
 
-	respFilter, err := filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), utils, false)
+	respFilter, err := filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), utils, 0)
 	matched, _, err = respFilter.FilterByteSlice(bytes)
 	assert.Nil(err)
 	assert.True(matched)
