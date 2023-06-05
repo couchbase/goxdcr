@@ -63,6 +63,7 @@ const (
 	EXPIRY_FILTERED_METRIC       = "expiry_filtered"
 	DELETION_FILTERED_METRIC     = "deletion_filtered"
 	SET_FILTERED_METRIC          = "set_filtered"
+	BINARY_FILTERED_METRIC       = "binary_filtered"
 	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
@@ -270,6 +271,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 	EXPIRY_FILTERED_METRIC:       StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents filtered that had expiry flag set"},
 	DELETION_FILTERED_METRIC:     StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents filtered that was of a DCP deletion"},
 	SET_FILTERED_METRIC:          StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents filtered that was of a DCP mutation"},
+	BINARY_FILTERED_METRIC:       StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents filtered that were binary documents"},
 	EXPIRY_STRIPPED_METRIC:       StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents replicated that had its TTL changed to 0 before writing to target (source is unmodified)"},
 
 	DOCS_FAILED_CR_SOURCE_METRIC:     StatsProperty{StatsUnit{MetricTypeCounter, StatsMgrNoUnit}, LowCardinality, "Number of documents that was not replicated to the target due to conflict resolution evaluated on the source cluster"},

@@ -31,9 +31,10 @@ type FilterImpl struct {
 	flags                    base.FilterFlagType
 	slicesToBeReleasedBuf    [][]byte
 	skipUncommittedTxn       uint32
+	skipBinaryDocs           uint32
 }
 
-func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool, skipUncommittedTxn bool) (*FilterImpl, error) {
+func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool, filterModes base.FilterExpDelType) (*FilterImpl, error) {
 	filter := &FilterImpl{
 		id:                    id,
 		utils:                 utils,
@@ -41,8 +42,12 @@ func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils
 		slicesToBeReleasedBuf: make([][]byte, 0, 2),
 	}
 
-	if skipUncommittedTxn {
+	if filterModes.IsSkipReplicateUncommittedTxnSet() {
 		filter.skipUncommittedTxn = 1
+	}
+
+	if filterModes.IsSkipBinarySet() {
+		filter.skipBinaryDocs = 1
 	}
 
 	if len(filterExpression) == 0 {
@@ -77,13 +82,13 @@ func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils
 	return filter, nil
 }
 
-func NewFilter(id string, filterExpression string, utils FilterUtils, skipUncommittedTxn bool) (*FilterImpl, error) {
+func NewFilter(id string, filterExpression string, utils FilterUtils, filterModes base.FilterExpDelType) (*FilterImpl, error) {
 	dpPtr := utils.NewDataPool()
 	if dpPtr == nil {
 		return nil, base.ErrorNoDataPool
 	}
 
-	return NewFilterWithSharedDP(id, filterExpression, utils, dpPtr, skipUncommittedTxn)
+	return NewFilterWithSharedDP(id, filterExpression, utils, dpPtr, filterModes)
 }
 
 func (filter *FilterImpl) GetInternalExpr() string {
@@ -94,11 +99,23 @@ func (filter *FilterImpl) ShouldSkipUncommittedTxn() bool {
 	return atomic.LoadUint32(&filter.skipUncommittedTxn) > 0
 }
 
+func (filter *FilterImpl) ShouldSkipBinaryDocs() bool {
+	return atomic.LoadUint32(&filter.skipBinaryDocs) > 0
+}
+
 func (filter *FilterImpl) SetShouldSkipUncommittedTxn(val bool) {
 	if val {
 		atomic.StoreUint32(&filter.skipUncommittedTxn, 1)
 	} else {
 		atomic.StoreUint32(&filter.skipUncommittedTxn, 0)
+	}
+}
+
+func (filter *FilterImpl) SetShouldSkipBinaryDocs(val bool) {
+	if val {
+		atomic.StoreUint32(&filter.skipBinaryDocs, 1)
+	} else {
+		atomic.StoreUint32(&filter.skipBinaryDocs, 0)
 	}
 }
 
@@ -264,6 +281,12 @@ func (filter *FilterImpl) filterUprEvent(uprEvent *memcached.UprEvent, body []by
 	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
 		// For now, pass through
 		return true, nil, "", 0
+	}
+
+	dataTypeIsJson := uprEvent.DataType&memcached.JSONDataType > 0
+	if filter.ShouldSkipBinaryDocs() && !dataTypeIsJson {
+		// Skip binary document
+		return false, nil, "", 0
 	}
 
 	sliceToBeFiltered, err, errDesc, failedDpCnt := filter.utils.ProcessUprEventForFiltering(uprEvent, body, endBodyPos, filter.dp, filter.flags, slicesToBeReleased)

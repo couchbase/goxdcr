@@ -62,7 +62,7 @@ var OverviewMetricKeys = []string{service_def.CHANGES_LEFT_METRIC, service_def.D
 	service_def.RESP_WAIT_METRIC, service_def.META_LATENCY_METRIC, service_def.DCP_DISPATCH_TIME_METRIC, service_def.DCP_DATACH_LEN, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC,
 	service_def.DP_GET_FAIL_METRIC, service_def.EXPIRY_STRIPPED_METRIC, service_def.ADD_DOCS_WRITTEN_METRIC, service_def.GET_DOC_LATENCY_METRIC,
 	service_def.DOCS_MERGED_METRIC, service_def.DATA_MERGED_METRIC, service_def.EXPIRY_DOCS_MERGED_METRIC, service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DELETION_CLONED_METRIC,
-	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC,
+	service_def.TARGET_DOCS_SKIPPED_METRIC, service_def.DOCS_FAILED_CR_TARGET_METRIC, service_def.BINARY_FILTERED_METRIC,
 }
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
@@ -1635,6 +1635,8 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(service_def.DELETION_FILTERED_METRIC, deletion_filtered)
 		set_filtered := metrics.NewCounter()
 		registry_router.Register(service_def.SET_FILTERED_METRIC, set_filtered)
+		binaryFiltered := metrics.NewCounter()
+		registry_router.Register(service_def.BINARY_FILTERED_METRIC, binaryFiltered)
 		dp_failed := metrics.NewCounter()
 		registry_router.Register(service_def.DP_GET_FAIL_METRIC, dp_failed)
 		throughput_throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
@@ -1652,6 +1654,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.EXPIRY_FILTERED_METRIC] = expiry_filtered
 		metric_map[service_def.DELETION_FILTERED_METRIC] = deletion_filtered
 		metric_map[service_def.SET_FILTERED_METRIC] = set_filtered
+		metric_map[service_def.BINARY_FILTERED_METRIC] = binaryFiltered
 		metric_map[service_def.DP_GET_FAIL_METRIC] = dp_failed
 		metric_map[service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
 		metric_map[service_def.EXPIRY_STRIPPED_METRIC] = expiry_stripped
@@ -1744,6 +1747,11 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 
 		if uprEvent.Expiry != 0 {
 			metric_map[service_def.EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
+		}
+
+		dataTypeIsJson := uprEvent.DataType&mcc.JSONDataType > 0
+		if !dataTypeIsJson {
+			metric_map[service_def.BINARY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {
 			metric_map[service_def.DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)
