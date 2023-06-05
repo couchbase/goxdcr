@@ -18,7 +18,7 @@ import (
 func BenchmarkFilterUprEvent(b *testing.B) {
 	fmt.Println("============== Test case start: BenchmarkFilterUprEvent =================")
 	perfDataUprEvent, _ := RetrieveUprFile("../utils/testFilteringData/xattrSlice.bin")
-	benchFilter, _ := NewFilter(filterId, "META().xattrs.stringType EXISTS", realUtil, false)
+	benchFilter, _ := NewFilter(filterId, "META().xattrs.stringType EXISTS", realUtil, 0)
 
 	for n := 0; n < b.N; n++ {
 		benchFilter.FilterUprEvent(perfDataUprEvent)

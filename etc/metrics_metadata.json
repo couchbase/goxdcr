@@ -25,6 +25,19 @@
         ],
         "stability": "internal"
     },
+    "xdcr_binary_filtered": {
+        "type": "counter",
+        "help": "Number of documents filtered that were binary documents",
+        "added": "7.6.0",
+        "labels": [
+            {
+                "name": "docCountDiverge",
+                "help": "Could cause document count between source and target bucket to be different per design",
+                "added": "7.0.0"
+            }
+        ],
+        "stability": "committed"
+    },
     "xdcr_changes_left": {
         "type": "gauge",
         "help": "Given the VBs of this node, the number of seqnos that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the VBs",

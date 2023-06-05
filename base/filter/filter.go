@@ -25,6 +25,7 @@ type Filter interface {
 	FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64)
 
 	SetShouldSkipUncommittedTxn(val bool)
+	SetShouldSkipBinaryDocs(val bool)
 }
 
 type FilterUtils interface {

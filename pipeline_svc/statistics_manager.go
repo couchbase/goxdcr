@@ -73,6 +73,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.EXPIRY_FILTERED_METRIC:              service_def.MetricTypeCounter,
 	service_def.DELETION_FILTERED_METRIC:            service_def.MetricTypeCounter,
 	service_def.SET_FILTERED_METRIC:                 service_def.MetricTypeCounter,
+	service_def.BINARY_FILTERED_METRIC:              service_def.MetricTypeCounter,
 	service_def.NUM_CHECKPOINTS_METRIC:              service_def.MetricTypeCounter,
 	service_def.NUM_FAILEDCKPTS_METRIC:              service_def.MetricTypeCounter,
 	service_def.TIME_COMMITING_METRIC:               service_def.MetricTypeCounter,
@@ -1736,6 +1737,8 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(service_def.DELETION_FILTERED_METRIC, deletion_filtered)
 		set_filtered := metrics.NewCounter()
 		registry_router.Register(service_def.SET_FILTERED_METRIC, set_filtered)
+		binaryFiltered := metrics.NewCounter()
+		registry_router.Register(service_def.BINARY_FILTERED_METRIC, binaryFiltered)
 		dp_failed := metrics.NewCounter()
 		registry_router.Register(service_def.DP_GET_FAIL_METRIC, dp_failed)
 		throughput_throttle_latency := metrics.NewHistogram(metrics.NewUniformSample(stats_mgr.sample_size))
@@ -1753,6 +1756,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.EXPIRY_FILTERED_METRIC] = expiry_filtered
 		metric_map[service_def.DELETION_FILTERED_METRIC] = deletion_filtered
 		metric_map[service_def.SET_FILTERED_METRIC] = set_filtered
+		metric_map[service_def.BINARY_FILTERED_METRIC] = binaryFiltered
 		metric_map[service_def.DP_GET_FAIL_METRIC] = dp_failed
 		metric_map[service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC] = throughput_throttle_latency
 		metric_map[service_def.EXPIRY_STRIPPED_METRIC] = expiry_stripped
@@ -1845,6 +1849,11 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 
 		if uprEvent.Expiry != 0 {
 			metric_map[service_def.EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
+		}
+
+		dataTypeIsJson := uprEvent.DataType&mcc.JSONDataType > 0
+		if !dataTypeIsJson {
+			metric_map[service_def.BINARY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {
 			metric_map[service_def.DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)

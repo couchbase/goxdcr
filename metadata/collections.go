@@ -1213,7 +1213,7 @@ func NewSourceMigrationNamespaceFromColNs(namespace *base.CollectionNamespace) *
 }
 
 func NewSourceMigrationNamespace(expr string, dp base.DataPool) (*SourceNamespace, error) {
-	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp, false)
+	filterPtr, err := filter.NewFilterWithSharedDP("", expr, utils, dp, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1515,7 +1515,7 @@ func (c CollectionNamespaceMapping) Clone() (clone CollectionNamespaceMapping) {
 		if srcClone.nsType == SourceDefaultCollectionFilter {
 			// Need to clone filter because each filter is not supposed to be run by multiple go-routines
 			// Similar to NewSourceMigrationNamespace
-			filterPtr, err := filter.NewFilterWithSharedDP("", k.GetFilterString(), utils, getDP(), false)
+			filterPtr, err := filter.NewFilterWithSharedDP("", k.GetFilterString(), utils, getDP(), 0)
 			if err != nil {
 				continue
 			}

@@ -66,6 +66,7 @@ const (
 	EXPIRY_FILTERED_METRIC       = "expiry_filtered"
 	DELETION_FILTERED_METRIC     = "deletion_filtered"
 	SET_FILTERED_METRIC          = "set_filtered"
+	BINARY_FILTERED_METRIC       = "binary_filtered"
 	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
@@ -777,6 +778,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForAdvFilteringSupport,
 		Description:  "Number of documents filtered that was of a DCP mutation",
+		Stability:    Committed,
+		Labels:       []StatsLabel{DocCountDiverge},
+	},
+	BINARY_FILTERED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "Number of documents filtered that were binary documents",
 		Stability:    Committed,
 		Labels:       []StatsLabel{DocCountDiverge},
 	},
