@@ -125,10 +125,11 @@ type PipelineMgrBackfillIface interface {
 	GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error)
 	RequestBackfill(topic string) error
 
-	// The following 3 calls will be blocking
+	// The following calls will be blocking
 	HaltBackfill(topic string) error
 	HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error
 	CleanupBackfillCkpts(topic string) error
+	WaitForMainPipelineCkptMgrToStop(topic, internalID string)
 
 	ReInitStreams(pipelineName string) error
 	BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error
@@ -1144,6 +1145,66 @@ func (pipelineMgr *PipelineManager) GetMainPipelineThroughSeqnos(topic string) (
 		return nil, fmt.Errorf("Unable to cast stats mgr to StatsMgrIface")
 	}
 	return statsMgr.GetThroughSeqnosFromTsService(), nil
+}
+
+// In certain situations where ckpt mgr is stopping, and other routines need to read
+// the checkpoint documents, call this method to make sure ckptMgr is stopped before reading
+// checkpoints to prevent races
+func (pipelineMgr *PipelineManager) WaitForMainPipelineCkptMgrToStop(topic, internalID string) {
+	// Give it a safety timeout
+	var safetTimerOnce sync.Once
+	var timeoutFired uint32
+
+	for {
+		if atomic.LoadUint32(&timeoutFired) == 1 {
+			return
+		}
+
+		replStatus, err := pipelineMgr.ReplicationStatus(topic)
+		if err != nil {
+			return
+		}
+
+		checkPipeline := replStatus.Pipeline()
+		backfillPipeline := replStatus.BackfillPipeline()
+
+		if (checkPipeline == nil || checkPipeline.Specification() == nil) &&
+			(backfillPipeline == nil || backfillPipeline.Specification() == nil) {
+			// No pipeline, means ckptMgr is stopped as of now
+			return
+		}
+
+		var replSpec *metadata.ReplicationSpecification
+		if checkPipeline != nil {
+			replSpec = checkPipeline.Specification().GetReplicationSpec()
+		} else {
+			replSpec = backfillPipeline.Specification().GetReplicationSpec()
+		}
+
+		safetTimerOnce.Do(func() {
+			// Get the current sample of how long it takes to commit to get a safety timer
+			var milliSecondsToWait = int64(base.TimeoutPartsStop.Milliseconds()) // Default if we can't find any
+			statsMgr := checkPipeline.RuntimeContext().Service(base.STATISTICS_MGR_SVC).(*pipeline_svc.StatisticsManager)
+			committingTimeMs, err := statsMgr.GetCountMetrics(service_def.TIME_COMMITING_METRIC)
+			if err == nil && committingTimeMs > milliSecondsToWait {
+				milliSecondsToWait = committingTimeMs
+			}
+			// double the time for safety buffer
+			milliSecondsToWait = 2 * milliSecondsToWait
+			go func() {
+				time.Sleep(time.Duration(milliSecondsToWait) * time.Millisecond)
+				atomic.StoreUint32(&timeoutFired, 1)
+			}()
+		})
+
+		if replSpec.InternalId != internalID {
+			// Different instance of pipeline than requested, most likely a newer pipeline has started
+			return
+		}
+
+		// Pipeline still present means ckptmgr still is running - check quickly again
+		time.Sleep(base.PipelineSerializerRetryWaitTime)
+	}
 }
 
 func (pipelineMgr *PipelineManager) UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {

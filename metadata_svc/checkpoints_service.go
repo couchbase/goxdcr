@@ -256,7 +256,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 
 	cache, cacheErr := ckpt_svc.getCache(replicationId)
 	if cacheErr == nil {
-		cache.StoreOneVbDoc(vbno, nil)
+		cache.StoreOneVbDoc(vbno, nil, specInternalId)
 	}
 
 	key := ckpt_svc.getCheckpointDocKey(replicationId, vbno)
@@ -373,7 +373,7 @@ func (ckpt_svc *CheckpointsService) UpsertCheckpoints(replicationId string, spec
 				ckpt_svc.logger.Errorf("Failed to record broken mapping err=%v\n", err)
 			}
 			if cache != nil {
-				cacheErr := cache.StoreOneVbDoc(vbno, ckpt_doc)
+				cacheErr := cache.StoreOneVbDoc(vbno, ckpt_doc, specInternalId)
 				if cacheErr != nil {
 					ckpt_svc.logger.Warnf("%v - Unable to store cache for vb %v: %v", replicationId, vbno, cacheErr)
 				}
@@ -626,7 +626,10 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 		}
 
 		// BrokenMappingsNeeded means the checkpoints themselves have brokenMaps inside them and is valid for caching
-		if cacheErr == nil {
+		if cacheErr != base.ErrorNotFound {
+			// Cache exists - and need to (re)-initialize this cache with the latest info
+			// StoreLatestDocs cannot be called concurrently. And because brokenMappingsNeeded == true means
+			// that only one caller at a time, this is safe
 			cacheErr = cache.StoreLatestDocs(checkpointsDocs)
 			if cacheErr != nil {
 				ckpt_svc.logger.Warnf("Unable to store latest cache for %v - %v", replicationId, cacheErr)
@@ -634,6 +637,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 		}
 	}
 	return checkpointsDocs, nil
+
 }
 
 func (ckpt_svc *CheckpointsService) registerCkptDocBrokenMappings(ckpt_doc *metadata.CheckpointsDoc, recorder service_def.IncrementerFunc) {
@@ -775,8 +779,8 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 		ckpt_svc.cachedSpecs[newSpec.Id] = newSpec
 		ckpt_svc.stopTheWorldMtx[newSpec.Id] = &sync.RWMutex{}
 		if ckpt_svc.ckptCaches[newSpec.Id] == nil {
-			ckpt_svc.ckptCaches[newSpec.Id] = NewCheckpointsServiceCache(ckpt_svc.logger)
-			ckpt_svc.ckptCaches[common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)] = NewCheckpointsServiceCache(ckpt_svc.logger)
+			ckpt_svc.ckptCaches[newSpec.Id] = NewCheckpointsServiceCache(ckpt_svc.logger, common.ComposeFullTopic(newSpec.Id, common.MainPipeline))
+			ckpt_svc.ckptCaches[common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)] = NewCheckpointsServiceCache(ckpt_svc.logger, common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline))
 		}
 		ckpt_svc.ckptCaches[newSpec.Id].SpecChangeCb(oldSpec, newSpec)
 		ckpt_svc.ckptCaches[common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)].SpecChangeCb(oldSpec, newSpec)
@@ -1080,12 +1084,12 @@ func (ckpt_svc *CheckpointsService) validateSpecIsValid(fullReplId string, inter
 	return nil
 }
 
-func (ckpt_svc *CheckpointsService) UpsertCheckpointsDone(replicationId string) error {
+func (ckpt_svc *CheckpointsService) UpsertCheckpointsDone(replicationId string, internalId string) error {
 	cache, cacheErr := ckpt_svc.getCache(replicationId)
 	if cacheErr != nil {
 		return cacheErr
 	}
-	cache.ValidateCache()
+	cache.ValidateCache(internalId)
 	return nil
 }
 

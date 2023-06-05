@@ -82,7 +82,7 @@ type BackfillRequestHandler struct {
 
 	lastHandledBackfillSrcManifestId uint64 // This is in use even for if after cachedBackfillSpec is set to nil
 	cachedBackfillSpec               *metadata.BackfillReplicationSpec
-	mainpipelineCkptSeqnosGetter     SeqnosGetter
+	mainpipelineCkptSeqnosGetter     SeqnosGetter2
 	restreamPipelineFatalFunc        func()
 
 	bucketTopologySvc      service_def.BucketTopologySvc
@@ -103,6 +103,7 @@ type BackfillRequestHandler struct {
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
+type SeqnosGetter2 func(throughSeqnoErr error) (map[uint16]uint64, error)
 
 type MyVBsGetter func() ([]uint16, error)
 
@@ -117,7 +118,7 @@ type ReqAndResp struct {
 
 var backfillReqHandlerCounter uint32
 
-func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter SeqnosGetter, restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc, getLatestSrcManifestId func() (uint64, error)) *BackfillRequestHandler {
+func NewCollectionBackfillRequestHandler(logger *log.CommonLogger, replId string, backfillReplSvc service_def.BackfillReplSvc, spec *metadata.ReplicationSpecification, seqnoGetter SeqnosGetter, persistInterval time.Duration, vbsTasksDoneNotifier MyVBsTasksDoneNotifier, mainPipelineCkptSeqnosGetter func(throughSeqnoErr error) (map[uint16]uint64, error), restreamPipelineFatalFunc func(), specCheckFunc func() bool, bucketTopologySvc service_def.BucketTopologySvc, getCompleteReq func() (interface{}, error), replicationSpecSvc service_def.ReplicationSpecSvc, getLatestSrcManifestId func() (uint64, error)) *BackfillRequestHandler {
 	return &BackfillRequestHandler{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, logger),
 		logger:                       logger,
@@ -1043,7 +1044,7 @@ func (b *BackfillRequestHandler) getMaxSeqnosMapToBackfill() (map[uint16]uint64,
 	// 2. Get the latest checkpoint to be the end point of the backfill
 	// 3. Compare 1 vs 2, use the max() of each to be the end point of the backfill
 	tSeqnos, tSeqnoErr := b.getThroughSeqno()
-	ckptSeqnos, ckptSeqnosErr := b.mainpipelineCkptSeqnosGetter()
+	ckptSeqnos, ckptSeqnosErr := b.mainpipelineCkptSeqnosGetter(tSeqnoErr)
 
 	// Only mark VB as "found" if it is greater than anything we have seen
 	// Because of peer-to-peer backfill pull every pipeline start, if we create a task for a VB that's not needed

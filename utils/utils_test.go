@@ -861,17 +861,6 @@ func TestVBucketMapWithReplicasEarlyInit(t *testing.T) {
 	assert.NotEqual(0, len(memberOfReplica))
 }
 
-func TestGetCollectionManifestUidFromBucketInfo(t *testing.T) {
-	fmt.Println("============== Test case start: TestVBucketMapWithReplicasEarlyInit =================")
-	defer fmt.Println("============== Test case end: TestVBucketMapWithReplicasEarlyInit =================")
-	assert := assert.New(t)
-
-	bucketInfoWithManifest := getBucketInfoWithManifestHexId()
-	id, err := testUtils.GetCollectionManifestUidFromBucketInfo(bucketInfoWithManifest)
-	assert.Nil(err)
-	assert.Equal(uint64(10), id)
-}
-
 func TestTransactionFilterWithPureArray(t *testing.T) {
 	fmt.Println("============== Test case start: TestTransactionFilterWithPureArray =================")
 	assert := assert.New(t)

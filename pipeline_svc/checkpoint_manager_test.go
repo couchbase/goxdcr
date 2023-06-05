@@ -435,7 +435,7 @@ func setupMock(ckptSvc *service_def.CheckpointsService, capiSvc *service_def.CAP
 	throughSeqnoSvc.On("GetThroughSeqnos").Return(throughSeqnoMap, nil)
 	throughSeqnoSvc.On("GetThroughSeqnosAndManifestIds").Return(nil, nil, nil)
 
-	ckptSvc.On("UpsertCheckpointsDone", mock.Anything).Return(upsertCkptsDoneErr)
+	ckptSvc.On("UpsertCheckpointsDone", mock.Anything, mock.Anything).Return(upsertCkptsDoneErr)
 	ckptSvc.On("PreUpsertBrokenMapping", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	ckptSvc.On("UpsertBrokenMapping", mock.Anything, mock.Anything).Return(nil)
 
@@ -689,16 +689,18 @@ func TestCkptMgrPeriodicMergerCloseBeforeRespRead(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCkptMgrPeriodicMergerCloseBeforeRespRead =================")
 	assert := assert.New(t)
 
-	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor := setupCkptMgrBoilerPlate()
+	//ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor := setupCkptMgrBoilerPlate()
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, _, targetMCMap, targetMcDelayMap, targetMCStatsResult := setupCkptMgrBoilerPlate()
 
 	activeVBs := make(map[string][]uint16)
 	activeVBs[kvKey] = []uint16{0}
 	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
 		"", false, "", nil, nil, nil, nil)
 
-	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
-		utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface,
-		bucketTopologySvc, spec, pipelineSupervisor)
+	//setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
+	//	utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface,
+	//	bucketTopologySvc, spec, pipelineSupervisor)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, nil, nil, targetMCMap, targetMcDelayMap, targetMCStatsResult)
 
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", nil,

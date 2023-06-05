@@ -14,6 +14,7 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/pipeline_manager"
 	"github.com/couchbase/goxdcr/service_def"
@@ -419,8 +420,8 @@ func (b *BackfillMgr) createBackfillRequestHandler(spec *metadata.ReplicationSpe
 		}
 	}
 
-	mainPipelineCkptSeqnosGetter := func() (map[uint16]uint64, error) {
-		return b.getThroughSeqnosFromMainCkpts(replId, internalId)
+	mainPipelineCkptSeqnosGetter := func(throughSeqnoErr error) (map[uint16]uint64, error) {
+		return b.getThroughSeqnosFromMainCkpts(replId, internalId, throughSeqnoErr)
 	}
 
 	restreamPipelineFatalFunc := func() {
@@ -804,7 +805,18 @@ func (b *BackfillMgr) postDeleteBackfillRepl(specId, internalId string) error {
 	return err
 }
 
-func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string) (map[uint16]uint64, error) {
+func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string, throughSeqnoErr error) (map[uint16]uint64, error) {
+	// When throughSeqno getter had an error and wasn't able to retrieve sequence numbers because it was stopping
+	// checkpoints that are stored become the only source of truth in terms of VB ownership
+	// However, reading checkpoints via checkpointsSvc.CheckpointsDocs() has no locking. This means that
+	// the coordination between reading the checkpoints via CheckpointsDocs() below and the fact that
+	// a stopping pipeline performs checkpointing during stop needs to be coordinated
+	// Otherwise, the logic for maxSeqnomap will be messed up as VBs being checkpointed will be missed and
+	// backfill will end up not being raised correctly
+	if throughSeqnoErr != nil && strings.Contains(throughSeqnoErr.Error(), parts.PartStoppedError.Error()) {
+		b.pipelineMgr.WaitForMainPipelineCkptMgrToStop(specId, internalId)
+	}
+
 	ckptDocs, err := b.checkpointsSvc.CheckpointsDocs(specId, false)
 	if err != nil {
 		return nil, err
@@ -1782,7 +1794,7 @@ func (b *BackfillMgr) HandleRollbackTo0ForVB(topic string, vbno uint16) error {
 	// When rolling back to 0, we should delete checkpoints otherwise a non-0 resume leading to DCP rollback
 	// means that it'll come back to this path yet again
 	deleteCkptsWrapper := func() error {
-		return b.checkpointsSvc.DelCheckpointsDoc(common.ComposeFullTopic(topic, common.BackfillPipeline), vbno, "")
+		return b.checkpointsSvc.DelCheckpointsDoc(common.ComposeFullTopic(topic, common.BackfillPipeline), vbno, handler.spec.InternalId)
 	}
 
 	cb, errCb := handler.GetRollbackTo0VBSpecificBackfillCb(vbno, deleteCkptsWrapper)
