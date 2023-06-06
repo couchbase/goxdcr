@@ -11,6 +11,12 @@ package pipeline_svc
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	mocks3 "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/base"
@@ -25,11 +31,6 @@ import (
 	utilities "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 func TestCombineFailoverlogs(t *testing.T) {
@@ -689,16 +690,14 @@ func TestCkptMgrPeriodicMergerCloseBeforeRespRead(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestCkptMgrPeriodicMergerCloseBeforeRespRead =================")
 	assert := assert.New(t)
 
-	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor := setupCkptMgrBoilerPlate()
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, _, targetMCMap, targetMcDelayMap, targetMCStatsResult := setupCkptMgrBoilerPlate()
 
 	activeVBs := make(map[string][]uint16)
 	activeVBs[kvKey] = []uint16{0}
 	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
 		"", false, "", nil, nil, nil, nil)
 
-	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc,
-		utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface,
-		bucketTopologySvc, spec, pipelineSupervisor)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, nil, nil, targetMCMap, targetMcDelayMap, targetMCStatsResult)
 
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", nil,
