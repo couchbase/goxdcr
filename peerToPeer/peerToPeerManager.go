@@ -275,13 +275,14 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 	return nil, peersFailedToSend
 }
 
-func (p *P2PManagerImpl) getMaxRetry(op OpCode) int {
-	maxRetry := base.PeerToPeerMaxRetry
-	if op == ReqConnectionPreCheck {
-		maxRetry = 0
+func (p *P2PManagerImpl) getMaxRetry(getReqFunc GetReqFunc, myHost string, peersToRetry map[string]bool) int {
+	for peer, _ := range peersToRetry {
+		opcode := getReqFunc(myHost, peer).GetOpcode()
+		if opcode == ReqConnectionPreCheck {
+			return 0
+		}
 	}
-
-	return maxRetry
+	return base.PeerToPeerMaxRetry
 }
 
 func (p *P2PManagerImpl) setConnectionPreCheckP2PMsgToStore(taskId string, src string, tgt string, msg string) {
@@ -322,7 +323,7 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 		peersToRetry[k] = v
 	}
 
-	maxRetry := p.getMaxRetry(getReqFunc(myHost, myHost).GetOpcode())
+	maxRetry := p.getMaxRetry(getReqFunc, myHost, peersToRetry)
 
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
