@@ -38,7 +38,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goutils/scramsha"
-	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -1532,41 +1532,63 @@ func (u *Utilities) GetHttpsMgtPortFromNodeInfo(nodeInfo map[string]interface{})
 	return int(sslPortFloat), nil
 }
 
+func (u *Utilities) replacePortWithHttpsMgtPort(hostAddr string, nodeInfo map[string]interface{}) (string, error) {
+	sslPort, err := u.GetHttpsMgtPortFromNodeInfo(nodeInfo)
+	if err != nil {
+		return "", err
+	}
+	hostName := base.GetHostName(hostAddr)
+	hostAddr = base.GetHostAddr(hostName, uint16(sslPort))
+	return hostAddr, nil
+}
+
 func (u *Utilities) GetHostAddrFromNodeInfo(connStr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger, useExternal bool) (string, error) {
-	// Internal node information
+	var hostAddr string
+	if useExternal {
+		found := false
+		// If external info exists, use it
+		if externalAddr, externalMgtPort, externalErr := u.GetExternalMgtHostAndPort(nodeInfo, isHttps); externalErr == nil {
+			hostAddr = base.GetHostAddr(externalAddr, (uint16)(externalMgtPort))
+			found = true
+		} else if externalErr == base.ErrorNoPortNumber {
+			// Extract original internal node management port
+			if hostname, exists := nodeInfo[base.HostNameKey].(string); exists {
+				hostPort, portErr := base.GetPortNumber(hostname)
+				if portErr == nil {
+					// Combine externalHost:internalPort
+					hostAddr = base.GetHostAddr(externalAddr, (uint16)(hostPort))
+				} else {
+					// Original internal address did not have port number, so continue to just have externalAddr[:noPort]
+					hostAddr = externalAddr
+				}
+				found = true
+			}
+		}
+		if found {
+			// Verify that the hostAddr can be mapped if necessary
+			if _, err := base.MapToSupportedIpFamily(hostAddr, false); err != nil {
+				return "", err
+			}
+			// We found the info from the external address
+			if isHttps {
+				return u.replacePortWithHttpsMgtPort(hostAddr, nodeInfo)
+			} else {
+				return hostAddr, nil
+			}
+		}
+	}
+
+	// Get internal node information. If found, it already validated that the hostAddr can be mapped to IP if required
 	hostAddr, err := u.getAdminHostAddrFromNodeInfo(connStr, nodeInfo, logger)
 	if err != nil {
-		errMsg := fmt.Sprintf("cannot get hostname from node info %v", nodeInfo)
+		errMsg := fmt.Sprintf("cannot get hostname from node info %v. err=%v", nodeInfo, err)
 		logger.Error(errMsg)
 		return "", errors.New(errMsg)
 	}
 
 	if isHttps {
-		sslPort, err := u.GetHttpsMgtPortFromNodeInfo(nodeInfo)
-		if err != nil {
-			return "", err
-		}
-		hostName := base.GetHostName(hostAddr)
-		hostAddr = base.GetHostAddr(hostName, uint16(sslPort))
+		return u.replacePortWithHttpsMgtPort(hostAddr, nodeInfo)
 	}
-
-	if useExternal {
-		// If external info exists, replace accordingly - hostAddr is currently pointing to internalNode's info
-		if externalAddr, externalMgtPort, externalErr := u.GetExternalMgtHostAndPort(nodeInfo, isHttps); externalErr == nil {
-			hostAddr = base.GetHostAddr(externalAddr, (uint16)(externalMgtPort))
-		} else if externalErr == base.ErrorNoPortNumber {
-			// Extract original internal node management port from above
-			hostPort, portErr := base.GetPortNumber(hostAddr)
-			if portErr == nil {
-				// Combine externalHost:internalPort
-				hostAddr = base.GetHostAddr(externalAddr, (uint16)(hostPort))
-			} else {
-				// Original internal address did not have port number, so continue to just have externalAddr[:noPort]
-				hostAddr = externalAddr
-			}
-		}
-	}
-
 	return hostAddr, nil
 }
 

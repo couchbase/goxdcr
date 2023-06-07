@@ -14,15 +14,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/base/filter"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/golang/snappy"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base/filter"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/golang/snappy"
+	"github.com/stretchr/testify/assert"
 )
 
 // The test data's external node name is 10.10.10.10 instead of the regular 127.0.0.1
@@ -900,4 +901,63 @@ func TestTransactionFilterWithInvalidJSON(t *testing.T) {
 	_, _, _, err, errDesc, _, _ := testUtils.CheckForTransactionXattrsInUprEvent(uprEvent.UprEvent, fakedp, &slicesToBeReleasedBuf, false)
 	assert.NotNil(err)
 	assert.True(strings.Contains(errDesc, filter.InvalidJSONMsg))
+}
+
+func TestGetHostAddrFromNodeInfo(t *testing.T) {
+	fmt.Println("============== Test case start: TestGetHostAddrFromNodeInfo =================")
+	defer fmt.Println("============== Test case end: TestGetHostAddrFromNodeInfo =================")
+	assert := assert.New(t)
+
+	// Test that we will get hostname from alternateAddresses when
+	// - target internal hostname is unresolvable and
+	// - source cluster is ip family only
+
+	// Pretend source is IPV4 only
+	base.NetTCP = base.TCP4
+	// Hostname in the alternateAddresses
+	resolvableHostname := "couchbase.com"
+	// hostname in the nodeInfo
+	unresolvableHostname := "host1.clevy.local:8091" // This is unresolvable
+	connStr := "test.com"
+
+	// Test 1: nodeInfo with resolvable external hostname and unresolvable internal hostname
+	portMap := map[string]interface{}{base.DirectPortKey: float64(11210), base.SSLPortKey: float64(18091)}
+	external := map[string]interface{}{base.HostNameKey: resolvableHostname, // external hostname
+		base.MgtPortKey: 8091, base.SSLMgtPortKey: 18091, base.KVPortKey: 11210,
+		base.CapiPortKey: 8092, base.CapiSSLPortKey: 18092}
+	altAddr := map[string]interface{}{base.ExternalKey: external}
+	nodeInfoMap := map[string]interface{}{base.HostNameKey: unresolvableHostname, // internal hostname
+		base.PortsKey: portMap, base.AlternateKey: altAddr}
+	hostAddr, err := testUtils.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, true, logger, true)
+	// It should return external address
+	assert.Nil(err)
+	assert.Equal(resolvableHostname+":18091", hostAddr)
+
+	// Test 2: nodeInfo with unresolvable external hostname and resolvable internal hostname
+	portMap = map[string]interface{}{base.DirectPortKey: float64(11210), base.SSLPortKey: float64(18091)}
+	external = map[string]interface{}{base.HostNameKey: unresolvableHostname, // external hostname
+		base.MgtPortKey: 8091, base.SSLMgtPortKey: 18091, base.KVPortKey: 11210,
+		base.CapiPortKey: 8092, base.CapiSSLPortKey: 18092}
+	altAddr = map[string]interface{}{base.ExternalKey: external}
+	nodeInfoMap = map[string]interface{}{base.HostNameKey: resolvableHostname, // internal hostname
+		base.PortsKey: portMap, base.AlternateKey: altAddr}
+	hostAddr, err = testUtils.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, true, logger, true)
+	// We will use external name if it is there. Since it is unresolvable, we get error
+	assert.NotNil(err)
+
+	// Test 3: nodeInfo with no external hostname and resolvable internal hostname
+	nodeInfoMap = map[string]interface{}{base.HostNameKey: resolvableHostname, // internal hostname
+		base.PortsKey: portMap}
+	hostAddr, err = testUtils.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, true, logger, true)
+	// We should return internal hostname
+	assert.Nil(err)
+	assert.Equal(resolvableHostname+":18091", hostAddr)
+
+	// Test 4: nodeInfo with no external hostname and unresolvable internal hostname
+	nodeInfoMap = map[string]interface{}{base.HostNameKey: unresolvableHostname,
+		base.PortsKey: portMap}
+	hostAddr, err = testUtils.GetHostAddrFromNodeInfo(connStr, nodeInfoMap, true, logger, true)
+	// We should return error
+	assert.NotNil(err)
+
 }
