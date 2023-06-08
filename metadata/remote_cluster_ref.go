@@ -15,15 +15,16 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	baseH "github.com/couchbase/goxdcr/base/helpers"
-	"github.com/couchbase/goxdcr/log"
 	"math/rand"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	baseH "github.com/couchbase/goxdcr/base/helpers"
+	"github.com/couchbase/goxdcr/log"
 )
 
 const (
@@ -356,6 +357,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	outputMap[base.RemoteClusterUserName] = ref.UserName_
 	outputMap[base.RemoteClusterDeleted] = false
 	outputMap[base.RemoteClusterSecureType] = ref.SecureTypeString()
+	outputMap[base.RemoteClusterHostnameMode] = ref.HostnameMode()
 	// To be deprecated
 	if ref.IsEncryptionEnabled() {
 		outputMap[base.RemoteClusterDemandEncryption] = ref.DemandEncryption_
