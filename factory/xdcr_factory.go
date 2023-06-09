@@ -1464,6 +1464,10 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 	if ok {
 		s[service_def.PIPELINE_STATUS] = pipelineStatus
 	}
+	pipelineErrors, ok := settings[service_def.PIPELINE_ERRORS]
+	if ok {
+		s[service_def.PIPELINE_ERRORS] = pipelineErrors
+	}
 	return s, nil
 }
 
@@ -1502,6 +1506,10 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForStatsManager(pipeline common
 	pipelineStatus, ok := settings[service_def.PIPELINE_STATUS]
 	if ok {
 		s[service_def.PIPELINE_STATUS] = pipelineStatus
+	}
+	pipelineErrors, ok := settings[service_def.PIPELINE_ERRORS]
+	if ok {
+		s[service_def.PIPELINE_ERRORS] = pipelineErrors
 	}
 	return s, nil
 }

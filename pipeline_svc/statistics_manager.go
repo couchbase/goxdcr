@@ -104,6 +104,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_FAILED_CR_TARGET_METRIC:       service_def.MetricTypeCounter,
 	service_def.BINARY_FILTERED_METRIC:             service_def.MetricTypeCounter,
 	service_def.PIPELINE_STATUS:                    service_def.MetricTypeGauge,
+	service_def.PIPELINE_ERRORS:                    service_def.MetricTypeGauge,
 }
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
@@ -217,6 +218,7 @@ type StatisticsManager struct {
 
 	// PipelineStatus is an int type underneath
 	pipelineStatus int32
+	pipelineErrors int32
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string, utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error)) *StatisticsManager {
@@ -661,6 +663,13 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	// Set pipeline status
 	curStatus := int64(atomic.LoadInt32(&stats_mgr.pipelineStatus))
 	stats_mgr.getOverviewRegistry().Get(service_def.PIPELINE_STATUS).(metrics.Gauge).Update(curStatus)
+
+	// set number of errors
+	repl, err := stats_mgr.getReplicationStatus()
+	if err != nil {
+		return err
+	}
+	stats_mgr.getOverviewRegistry().Get(service_def.PIPELINE_ERRORS).(metrics.Gauge).Update(int64(len(repl.Errors())))
 	return nil
 }
 
@@ -912,6 +921,11 @@ func (stats_mgr *StatisticsManager) initializeConfig(settings metadata.Replicati
 		stats_mgr.logger.Warnf("Unable to understand pipelineStatus %v", err)
 	}
 
+	err = stats_mgr.updatePipelineErrors(settings)
+	if err != nil {
+		stats_mgr.logger.Warnf("Unable to understand pipelineErrors %v", err)
+	}
+
 	var update_interval int
 	var update_interval_duration time.Duration
 	if update_interval_obj, ok := settings[service_def.PUBLISH_INTERVAL]; ok {
@@ -1138,6 +1152,11 @@ func (stats_mgr *StatisticsManager) UpdateSettings(settings metadata.Replication
 		errMap[service_def.PIPELINE_STATUS] = err
 	}
 
+	err = stats_mgr.updatePipelineErrors(settings)
+	if err != nil {
+		errMap[service_def.PIPELINE_ERRORS] = err
+	}
+
 	if len(errMap) > 0 {
 		return errors.New(base.FlattenErrorMap(errMap))
 	} else {
@@ -1157,6 +1176,16 @@ func (stats_mgr *StatisticsManager) updatePipelineStatus(settings metadata.Repli
 	}
 
 	atomic.StoreInt32(&stats_mgr.pipelineStatus, int32(pipelineStatus))
+	return nil
+}
+
+func (stats_mgr *StatisticsManager) updatePipelineErrors(settings metadata.ReplicationSettingsMap) error {
+	pipelineErrs, err := stats_mgr.utils.GetIntSettingFromSettings(settings, service_def.PIPELINE_ERRORS)
+	if err != nil {
+		return err
+	}
+
+	atomic.StoreInt32(&stats_mgr.pipelineErrors, int32(pipelineErrs))
 	return nil
 }
 
