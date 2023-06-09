@@ -139,6 +139,7 @@ const (
 
 	// Pipeline Status to be exported as a guage
 	PIPELINE_STATUS = "pipeline_status"
+	PIPELINE_ERRORS = "pipeline_errors"
 )
 
 const (
@@ -1147,5 +1148,16 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Notes:        "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
 		Stability:    Committed,
 		Labels:       []StatsLabel{Operation},
+	},
+
+	PIPELINE_ERRORS: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNonCumulativeNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The number of currently present errors for a specific pipeline",
+		Notes: "If the number is non zero, it could indicate potential replication errors that requires some " +
+			"human intervention to look into the UI console or logs to decipher what errors could currently exist.",
+		Stability: Committed,
+		Labels:    []StatsLabel{Operation, InternalError},
 	},
 }

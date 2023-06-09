@@ -453,6 +453,25 @@
         ],
         "stability": "committed"
     },
+    "xdcr_pipeline_errors": {
+        "type": "gauge",
+        "help": "The number of currently present errors for a specific pipeline",
+        "added": "7.6.0",
+        "labels": [
+            {
+                "name": "pipelineOperation",
+                "help": "Stats related to operation mode or status updates",
+                "added": "7.6.0"
+            },
+            {
+                "name": "internalError",
+                "help": "Related to potential error conditions in the XDCR processing",
+                "added": "7.0.0"
+            }
+        ],
+        "notes": "If the number is non zero, it could indicate potential replication errors that requires some human intervention to look into the UI console or logs to decipher what errors could currently exist.",
+        "stability": "committed"
+    },
     "xdcr_pipeline_status": {
         "type": "gauge",
         "help": "The pipeline status for a specific pipeline, where it could be paused, running or, error",
