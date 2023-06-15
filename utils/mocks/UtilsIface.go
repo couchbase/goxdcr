@@ -72,13 +72,13 @@ func (_m *UtilsIface) AddKeyToBeFiltered(currentValue []byte, key []byte, dpGett
 	return r0, r1, r2, r3
 }
 
-// BucketInfoParseError provides a mock function with given fields: bucketInfo, logger
-func (_m *UtilsIface) BucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonLogger) error {
-	ret := _m.Called(bucketInfo, logger)
+// BucketInfoParseError provides a mock function with given fields: bucketInfo, errMsg, logger
+func (_m *UtilsIface) BucketInfoParseError(bucketInfo map[string]interface{}, errMsg string, logger *log.CommonLogger) error {
+	ret := _m.Called(bucketInfo, errMsg, logger)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, *log.CommonLogger) error); ok {
-		r0 = rf(bucketInfo, logger)
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, *log.CommonLogger) error); ok {
+		r0 = rf(bucketInfo, errMsg, logger)
 	} else {
 		r0 = ret.Error(0)
 	}
