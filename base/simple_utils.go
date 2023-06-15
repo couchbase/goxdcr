@@ -805,7 +805,7 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 				} else {
 					return fmt.Sprintf("%v", addr), nil
 				}
-			} else if !IsIpV6Blocked() { // IPV6 address
+			} else if addr.To4() == nil && !IsIpV6Blocked() { // IPV6 address
 				port, portErr := GetPortNumber(connStr)
 				if portErr == nil {
 					return GetHostAddr(fmt.Sprintf("%v", addr), port), nil
