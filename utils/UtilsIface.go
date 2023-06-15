@@ -67,7 +67,7 @@ type UtilsIface interface {
 	 * ------------------------
 	 */
 	// Buckets related utilities
-	BucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonLogger) error
+	BucketInfoParseError(bucketInfo map[string]interface{}, errMsg string, logger *log.CommonLogger) error
 	BucketValidationInfo(hostAddr, bucketName, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte,
 		logger *log.CommonLogger) (bucketInfo map[string]interface{}, bucketType string, bucketUUID string, bucketConflictResolutionType string,
 		bucketEvictionPolicy string, bucketKVVBMap map[string][]uint16, err error)

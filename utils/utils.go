@@ -975,81 +975,98 @@ func (u *Utilities) GetMemcachedSSLPortMap(connStr, username, password string, a
 func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo map[string]interface{}, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
 	nodesExt, ok := bucketInfo[base.NodeExtKey]
 	if !ok {
-		return nil, u.BucketInfoParseError(bucketInfo, logger)
+		errMsg := fmt.Sprintf("%v not found in bucketInfo=%v", base.NodeExtKey, bucketInfo)
+		return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
 	}
 
 	nodesExtArray, ok := nodesExt.([]interface{})
 	if !ok {
-		return nil, u.BucketInfoParseError(bucketInfo, logger)
+		errMsg := fmt.Sprintf("nodesExt=%v cannot be parsed as []interface{}, as it is of incompatible type, its type=%v", nodesExt, reflect.TypeOf(nodesExt))
+		return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
 	}
 
-	var hostName string
+	var hostName, hostAddr string
 	var err error
 	portMap := make(base.SSLPortMap)
 	for _, nodeExt := range nodesExtArray {
 		var portNumberToUse uint16
 		nodeExtMap, ok := nodeExt.(map[string]interface{})
 		if !ok {
-			return nil, u.BucketInfoParseError(bucketInfo, logger)
-		}
-
-		// note that this is the only place where nodeExtMap contains a hostname without port
-		// instead of a host address with port
-		hostName, err = u.getHostNameWithoutPortFromNodeInfo(connStr, nodeExtMap, logger)
-		if err != nil {
-			return nil, u.BucketInfoParseError(bucketInfo, logger)
+			errMsg := fmt.Sprintf("nodeExt=%v cannot be parsed as map[string]interface{}, as it is of incompatible type, its type=%v", nodeExtMap, reflect.TypeOf(nodeExtMap))
+			return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
 		}
 
 		// Internal key
 		service, ok := nodeExtMap[base.ServicesKey]
 		if !ok {
-			return nil, u.BucketInfoParseError(bucketInfo, logger)
+			errMsg := fmt.Sprintf("%v not found in nodeExtMap=%v", base.ServicesKey, nodeExtMap)
+			return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
 		}
 
 		services_map, ok := service.(map[string]interface{})
 		if !ok {
-			return nil, u.BucketInfoParseError(bucketInfo, logger)
+			errMsg := fmt.Sprintf("service=%v cannot be parsed as map[string]interface{}, as it is of incompatible type, its type=%v", service, reflect.TypeOf(service))
+			return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
 		}
 
 		kv_port, ok := services_map[base.KVPortKey]
 		if !ok {
 			// the node may not have kv services. skip the node
+			logger.Debugf("Skipping the node as it may not have the KV service, nodeExtMap=%v", nodeExtMap)
 			continue
 		}
+
 		kvPortFloat, ok := kv_port.(float64)
 		if !ok {
-			return nil, u.BucketInfoParseError(bucketInfo, logger)
+			errMsg := fmt.Sprintf("kv_port=%v cannot be parsed as float64, as it is of incompatible type, its type=%v", kv_port, reflect.TypeOf(kv_port))
+			return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
 		}
 
-		hostAddr := base.GetHostAddr(hostName, uint16(kvPortFloat))
-
-		kv_ssl_port, ok := services_map[base.KVSSLPortKey]
-		if !ok {
-			return nil, u.BucketInfoParseError(bucketInfo, logger)
-		}
-
-		kvSSLPortFloat, ok := kv_ssl_port.(float64)
-		if !ok {
-			return nil, u.BucketInfoParseError(bucketInfo, logger)
-		}
-		portNumberToUse = uint16(kvSSLPortFloat)
-
+		hostAddr = ""
+		portNumberToUse = 0
 		// Since this is a call intended for targets, get the external info if requested
 		if useExternal {
 			externalHostAddr, externalKVPort, externalKVPortErr, externalSSLPort, externalSSLPortErr := u.GetExternalAddressAndKvPortsFromNodeInfo(nodeExtMap)
 			if len(externalHostAddr) == 0 {
-				return nil, base.ErrorTargetNoAltHostName
+				msg := fmt.Sprintf("%v, bucketInfo=%v", base.ErrorTargetNoAltHostName, bucketInfo)
+				logger.Infof(msg)
+			} else {
+				if externalKVPortErr == nil {
+					// External address and port both exist
+					hostAddr = base.GetHostAddr(externalHostAddr, uint16(externalKVPort))
+				} else if externalKVPortErr == base.ErrorNoPortNumber {
+					// External address exists, but port does not. Use internal host's port number
+					hostAddr = base.GetHostAddr(externalHostAddr, uint16(kvPortFloat))
+				}
+
+				if externalSSLPortErr == nil {
+					portNumberToUse = uint16(externalSSLPort)
+				}
 			}
-			if externalKVPortErr == nil {
-				// External address and port both exist
-				hostAddr = base.GetHostAddr(externalHostAddr, uint16(externalKVPort))
-			} else if externalKVPortErr == base.ErrorNoPortNumber {
-				// External address exists, but port does not. Use internal host's port number
-				hostAddr = base.GetHostAddr(externalHostAddr, uint16(kvPortFloat))
+		}
+
+		if hostAddr == "" {
+			// note that this is the only place where nodeExtMap contains a hostname without port
+			// instead of a host address with port. This represents the internal IP.
+			hostName, err = u.getHostNameWithoutPortFromNodeInfo(connStr, nodeExtMap, logger)
+			if err != nil {
+				return nil, u.BucketInfoParseError(bucketInfo, fmt.Sprintf("%v", err), logger)
 			}
-			if externalSSLPortErr == nil {
-				portNumberToUse = uint16(externalSSLPort)
+			hostAddr = base.GetHostAddr(hostName, uint16(kvPortFloat))
+		}
+
+		if portNumberToUse == 0 {
+			kv_ssl_port, ok := services_map[base.KVSSLPortKey]
+			if !ok {
+				errMsg := fmt.Sprintf("%v not found in services_map=%v", base.KVSSLPortKey, services_map)
+				return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
 			}
+			kvSSLPortFloat, ok := kv_ssl_port.(float64)
+			if !ok {
+				errMsg := fmt.Sprintf("kv_ssl_port=%v cannot be parsed as float64, as it is of incompatible type, its type=%v", kv_ssl_port, reflect.TypeOf(kv_ssl_port))
+				return nil, u.BucketInfoParseError(bucketInfo, errMsg, logger)
+			}
+			portNumberToUse = uint16(kvSSLPortFloat)
 		}
 
 		portMap[hostAddr] = portNumberToUse
@@ -1157,8 +1174,8 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[st
 	return portsMap, hostAddrs, nil
 }
 
-func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, logger *log.CommonLogger) error {
-	errMsg := "Error parsing memcached ssl port of remote cluster."
+func (u *Utilities) BucketInfoParseError(bucketInfo map[string]interface{}, err string, logger *log.CommonLogger) error {
+	errMsg := fmt.Sprintf("Error parsing memcached ssl port of remote cluster, err=%v. ", err)
 	detailedErrMsg := errMsg + fmt.Sprintf("bucketInfo=%v", bucketInfo)
 	logger.Errorf(detailedErrMsg)
 	return fmt.Errorf(errMsg)
