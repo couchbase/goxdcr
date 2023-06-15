@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+set -u
+
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# BASH VERSION CHECK - since hash maps are implemented >= bash version 4
+bash_major_version=$(echo ${BASH_VERSION} | cut -d. -f1)
+if (($bash_major_version < 4)); then
+	echo "===================================================================="
+	echo "Bash version >= 4 is required. Current bash version: ${BASH_VERSION}. Script may fail"
+	echo "How to upgrade bash on MacOS:"
+	echo "1. Run \"brew update && brew install bash\" to install the latest version of bash for macOS"
+	echo "2. Run \"sudo vim /etc/shells\" and add \"/usr/local/bin/bash\" to the list"
+	echo "3. Run \"chsh -s /usr/local/bin/bash\" to set default shell to the new one"
+	echo "4. Exit and restart the current session"
+	echo "===================================================================="
+	return 1
+fi
+
+. ./importExporter.shlib
+. ./clusterRunProvision.shlib
+. ./testLibrary.shlib
+
+# Shortcuts for executing commands on a node... currently 4 nodes
+declare -a VSSH
+declare -a VSSH_NOHUP
+
+VSSH[0]="vagrant ssh node1 -c "
+VSSH[1]="vagrant ssh node2 -c "
+VSSH[2]="vagrant ssh node3 -c "
+VSSH[3]="vagrant ssh node4 -c "
+
+VSSH_NOHUP[0]="vagrant ssh node1 -- "
+VSSH_NOHUP[1]="vagrant ssh node2 -- "
+VSSH_NOHUP[2]="vagrant ssh node3 -- "
+VSSH_NOHUP[3]="vagrant ssh node4 -- "
+
+# vscp from local to a node
+function vscp {
+	local index="$1"
+	local localFile="$2"
+	local targetDir="$3"
+
+	#machine index is +1
+	vagrant scp "$localFile" "node$(($index + 1)):${targetDir}"
+}
+
+declare -A CBServerLink=(
+	["7.0.4"]="http://latestbuilds.service.couchbase.com/builds/releases/7.0.4/couchbase-server-enterprise_7.0.4-ubuntu20.04_amd64.deb"
+	["6.6.3"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.3/couchbase-server-enterprise_6.6.3-ubuntu18.04_amd64.deb"
+	["6.6.5"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.5/couchbase-server-enterprise_6.6.5-ubuntu18.04_amd64.deb"
+	["toy"]="http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/..." # to be filled out
+)
+
+function vagrantUp {
+	vagrant up
+}
+
+function vagrantHalt {
+	vagrant halt
+}
+
+function vagrantRemoveCbServer {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo dpkg --purge couchbase-server\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+
+	cmd="${VSSH[$i]} \"sudo rm -rf /opt/couchbase\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRemoveCbServerAll {
+	local i
+	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		vagrantRemoveCbServer $i
+	done
+}
+
+# If VPN is not set up, this should catch it
+function checkBuildServerAccessibility {
+	wget -q latestbuilds.service.couchbase.com/builds/ -O "/tmp/index.html" &
+	sleep 3
+	local jobsCnt=$(jobs -l | grep -c "Running")
+	if (($jobsCnt > 0)); then
+		killAllBgJobs
+		echo "VPN to Couchbase is not set up"
+		exit 1
+	fi
+}
+
+function vagrantGetLocalDebFileName {
+	local version="$1"
+
+	echo "cbServer_$version.deb"
+}
+
+function downloadCBServerDeb {
+	local version="$1"
+	local localFileName=$(vagrantGetLocalDebFileName "$version")
+	if [[ -z "${CBServerLink[$version]:-}" ]]; then
+		echo "Version $version is not linked"
+	fi
+
+	if [[ -f "$localFileName" ]]; then
+		echo "Found pre-downloaded file $localFileName"
+		return 0
+	fi
+
+	checkBuildServerAccessibility
+	echo "=== Need to download ${CBServerLink[$version]}... ==="
+	wget --show-progress "${CBServerLink[$version]}" -O "$localFileName"
+}
+
+function vagrantInstallCBServerAll {
+	local i
+	local version="$1"
+	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		vagrantInstallCBServer $i "$version"
+	done
+}
+
+function vagrantInstallCBServer {
+	local i=$1
+	local version="$2"
+	local cmd
+	local debFile=$(vagrantGetLocalDebFileName "$version")
+	local nodeName=${VAGRANT_VM_IDX_MAP["$i"]}
+
+	vagrantInstallNtp "$i"
+	vagrantInstallPythonHttpLib "$i"
+	vagrantInstallLibInfo "$i"
+	downloadCBServerDeb "$version"
+	VAGRANT_VERSION_MAP[$nodeName]="$version"
+
+	cmd="${VSSH[$i]} \"sudo dpkg -i /vagrant/$debFile\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallPythonHttpLib {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install python-httplib2\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallNtp {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install ntp\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallLibInfo {
+	local i=$1
+	local cmd
+
+	cmd="${VSSH[$i]} \"sudo apt-get -y install libtinfo5\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRebalanceAndUpgrade {
+	local nodeToUpgrade="$1"
+	local nodeIndex="$2"
+	local peerNode="$3"
+	local versionToInstall="$4"
+
+	# remove node1 and validate XDCR traffic
+	echo "Removing node $nodeToUpgrade leaving $peerNode"
+	startEjectNode "$nodeToUpgrade" "$peerNode"
+
+	# upgrade node add back in and validate XDCR Traffic
+	vagrantInstallCBServer "$nodeIndex" "$versionToInstall"
+
+	echo "Waiting 10 seconds after install for couchbase server processes to launch"
+	sleep 10
+
+	echo "Re-adding upgraded node $nodeToUpgrade to $peerNode"
+	addOneNodeIn "$nodeToUpgrade" "$peerNode"
+	startRebalancing "$peerNode"
+
+	sleep 10
+
+	# As last part, need to set alternate address again
+	setupVagrantAltAddress "$nodeToUpgrade"
+}
+
+function vagrantGrepForPanic {
+	local i=$1
+	local cmd
+	local output
+
+	output=$(${VSSH[$i]} "sudo grep -c panic /opt/couchbase/var/lib/couchbase/logs/goxdcr.log" 2>/dev/null)
+	output=$(echo "$output" | tr -d '\r')
+	if (($output > 0)); then
+		echo "Found panic on node $i"
+		exit 1
+	fi
+}
+
+function vagrantGrepForPanicAll {
+	local i
+	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		vagrantGrepForPanic $i
+	done
+}
+
+function vagrantLoadCerts {
+	local idx
+	local caKey
+
+	# Vagrant loading
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
+			# Not a vagrant node
+			continue
+		fi
+		idx="$(getClusterIdx "$clusterName")"
+
+		# First tell the Ubuntu to trust the certificate authority
+		for caKey in $(echo ${!NODE_CA_MAP[@]}); do
+			echo "${CLUSTER_ROOT_CERTIFICATE_MAP["$caKey"]}" >/tmp/selfSignedCA.pem
+			vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/"
+			${VSSH[$idx]} "sudo mv /tmp/selfSignedCA.pem /usr/local/share/ca-certificates/${caKey}_root.crt"
+			vscp "$idx" "${NODE_CA_MAP[$caKey]}" "/tmp/ca.pem"
+			${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/${caKey}_node.crt"
+		done
+		#vscp "$idx" "/tmp/selfSignedCA.pem" "/tmp/ca.pem"
+		#${VSSH[$idx]} "sudo mv /tmp/ca.pem /usr/local/share/ca-certificates/selfSignedCA.crt"
+
+		${VSSH[$idx]} "sudo update-ca-certificates"
+
+		# Copy chain file
+		${VSSH[$idx]} "sudo mkdir -p /opt/couchbase/var/lib/couchbase/inbox"
+		# Vagrant scp does not have root priviledge
+		vscp "$idx" "${NODE_CA_MAP[$clusterName]}" "/tmp/ca.pem"
+		${VSSH[$idx]} "curl -X POST --data-binary '@/tmp/ca.pem' http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:8091/controller/uploadClusterCA"
+
+		vscp "$idx" "${NODE_CERT_MAP[$clusterName]}" "/tmp/chain.pem"
+		${VSSH[$idx]} "sudo mv /tmp/chain.pem /opt/couchbase/var/lib/couchbase/inbox/chain.pem"
+		vscp "$idx" "${NODE_KEY_MAP[$clusterName]}" "/tmp/pkey.key"
+		${VSSH[$idx]} "sudo mv /tmp/pkey.key /opt/couchbase/var/lib/couchbase/inbox/pkey.key"
+
+	done
+}
+
+function vagrantDelAlternateAddress {
+	local index="$1"
+
+	${VSSH[$index]} "curl -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:8091/node/controller/setupAlternateAddresses/external"
+}
+
+function vagrantRunCBWorkloadGenBucket {
+	local clusterName=$1
+	local bucketName=$2
+	local numItems=${3:-10000}
+	local prefix="${4:-xdcrProv_$clusterName}"
+	local idx="$(getClusterIdx "$clusterName")"
+	local workloadGenLoc="/opt/couchbase/bin/cbworkloadgen"
+	local cmd
+
+	echo "Running cbworkloadGen on $clusterName bucket $bucketName"
+	cmd="${VSSH[$idx]} \"$workloadGenLoc -i $numItems -j -r 1 -n 127.0.0.1:8091 -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRunCBWorkloadGenBucketCont {
+	local clusterName=$1
+	local bucketName=$2
+	local numItems=${3:-10000}
+	local prefix="${4:-xdcrProv_$clusterName}"
+	local idx="$(getClusterIdx "$clusterName")"
+	local workloadGenLoc="/opt/couchbase/bin/cbworkloadgen"
+	local cmd
+
+	echo "Running continouous cbworkloadGen on $clusterName bucket $bucketName"
+	cmd="${VSSH_NOHUP[$idx]} 'nohup \$($workloadGenLoc -i $numItems -j -r 1 -n 127.0.0.1:8091 -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -l)'"
+	echo "==== Running $cmd ===="
+	eval $cmd &
+	sleep 3
+}
+
+function vagrantKillAllIO {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	echo "Killing all cbworkloadGen instances on $clusterName"
+	#hacky - kill all nohups first
+	cmd="${VSSH[$idx]} 'killall -9 bash'"
+	echo "==== Running $cmd ===="
+	eval $cmd
+
+	# kill cbworkloadgen based on python3
+	cmd="${VSSH[$idx]} 'killall -9 python3'"
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantRunCBWorkloadGenCollection {
+	local clusterName=$1
+	local bucketName=$2
+	local prefix=$3
+	local colIdHex=$4
+	local workloadGenLoc="/opt/couchbase/bin/cbworkloadgen"
+	local cmd
+	local idx="$(getClusterIdx "$clusterName")"
+
+	echo "Running cbworkloadGen on $clusterName bucket $bucketName collection $colIdHex"
+	cmd="${VSSH[$idx]} \"$workloadGenLoc -i $CBWORKLOAD_COLLECTION_NUM_ITEMS -j -r 1 -n 127.0.0.1:8091 -b $bucketName -u $DEFAULT_ADMIN -p $DEFAULT_PW --prefix=$prefix -c $colIdHex\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
