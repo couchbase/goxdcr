@@ -10,15 +10,16 @@ package service_impl
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type BucketTopologyObjsPool struct {
@@ -507,8 +508,8 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 
 			storageBackend, err := b.utils.BucketStorageBackend(targetBucketInfo)
 			if err != nil {
-				// This shouldn't happen.
-				watcher.logger.Errorf("%v Failed to get target storageBackend. Error=%v", spec.TargetBucketName, err.Error())
+				// This can happen if target is older version
+				storageBackend = ""
 			}
 
 			watcher.latestCacheMtx.Lock()
