@@ -1126,7 +1126,13 @@ func (stats_mgr *StatisticsManager) watchNotificationCh() {
 				case oneRequestor := <-stats_mgr.latestNotificationReqCh:
 					// Because the channel can length can vary, just do a green clone to be safe
 					notificationForRequestor := notification.Clone(1).(service_def.SourceNotification)
-					oneRequestor.sendBack <- notificationForRequestor
+					select {
+					case oneRequestor.sendBack <- notificationForRequestor:
+						break
+					case <-stats_mgr.finish_ch:
+						notification.Recycle()
+						return
+					}
 				default:
 					break FORLOOP
 				}
