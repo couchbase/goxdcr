@@ -1414,7 +1414,8 @@ const HlvPruningDefault = 259200 // seconds, 3 days
 const JSFunctionTimeoutKey = "jsFunctionTimeoutMs"
 const JSFunctionTimeoutDefault = 20000 // 20s. 10s is not enough in evaluator unit tests
 
-const RetryOnRemoteAuthErrMaxWaitDefault = 3600 // seconds, 1 hour
+const RetryOnRemoteAuthErrMaxWaitDefault = 3600   // seconds, 1 hour
+const RetryOnErrExceptAuthErrMaxWaitDefault = 360 // seconds, 6 minutes
 
 // UI+ns_server returned document content, keyed by special keys
 const (
@@ -1465,6 +1466,7 @@ const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)
 
 const RetryOnRemoteAuthErrKey = "retryOnRemoteAuthErr"
 const RetryOnRemoteAuthErrMaxWaitSecKey = "retryOnRemoteAuthErrMaxWaitSec"
+const RetryOnErrExceptAuthErrMaxWaitSecKey = "retryOnErrExceptAuthErrMaxWaitSec"
 
 // DCP inactive stream monitor will sleep every "dcp_inactive_stream_check_interval" (30sec)
 // Once this max is hit, it'll retry streamReq with DCP

@@ -55,51 +55,52 @@ const (
 
 // constants used for parsing replication settings
 const (
-	ReplicationType                = "replicationType"
-	FilterExpression               = "filterExpression"
-	PauseRequested                 = "pauseRequested"
-	CheckpointInterval             = "checkpointInterval"
-	BatchCount                     = "workerBatchSize"
-	BatchSize                      = "docBatchSizeKb"
-	FailureRestartInterval         = "failureRestartInterval"
-	OptimisticReplicationThreshold = "optimisticReplicationThreshold"
-	SourceNozzlePerNode            = base.SourceNozzlePerNode
-	TargetNozzlePerNode            = base.TargetNozzlePerNode
-	MaxExpectedReplicationLag      = "maxExpectedReplicationLag"
-	TimeoutPercentageCap           = "timeoutPercentageCap"
-	LogLevel                       = "logLevel"
-	StatsInterval                  = "statsInterval"
-	BandwidthLimit                 = "networkUsageLimit"
-	ReplicationTypeValue           = "continuous"
-	GoMaxProcs                     = "goMaxProcs"
-	GoGC                           = "goGC"
-	FilterVersionKey               = "filterVersion"
-	FilterSkipRestreamKey          = "filterSkipRestream"
-	Priority                       = "priority"
-	BacklogThreshold               = "desiredLatency" // desired latency is the parameter exposed to UI and CLI
-	FilterExpKey                   = "filterExpiration"
-	FilterDelKey                   = "filterDeletion"
-	BypassExpiryKey                = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
-	BypassUncommittedTxnKey        = base.BypassUncommittedTxnKey
-	CollectionsMappingKey          = base.CollectionsMappingKey
-	CollectionsMirrorKey           = base.CollectionsMirrorKey
-	CollectionsMigrateKey          = base.CollectionsMigrateKey
-	CollectionsOsoKey              = base.CollectionsOsoKey
-	CollectionsMappingRulesKey     = base.CollectionsMappingRulesKey
-	ManualBackfillRequested        = base.ManualBackfillKey
-	CollectionsDelAllBackfillKey   = base.CollectionsDelAllBackfillKey
-	CollectionsDelVbBackfillKey    = base.CollectionsDelSingleVBBackfillKey
-	RetryOnRemoteAuthErrKey        = base.RetryOnRemoteAuthErrKey
-	RetryOnRemoteAuthErrMaxWaitKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
-	MergeFunctionMappingKey        = base.MergeFunctionMappingKey
-	HlvPruningWindowLKey           = base.HlvPruningWindowKey
-	JSFunctionTimeoutKey           = base.JSFunctionTimeoutKey
-	DismissEventKey                = metadata.DismissEventKey
-	PreReplicateVBMasterCheckKey   = base.PreReplicateVBMasterCheckKey
-	ReplicateCkptIntervalKey       = base.ReplicateCkptIntervalKey
-	CkptSvcCacheEnabledKey         = metadata.CkptSvcCacheEnabledKey
-	FilterSystemScopeKey           = base.FilterSystemScope
-	FilterBinaryDocsKey            = metadata.FilterBinaryDocsKey
+	ReplicationType                   = "replicationType"
+	FilterExpression                  = "filterExpression"
+	PauseRequested                    = "pauseRequested"
+	CheckpointInterval                = "checkpointInterval"
+	BatchCount                        = "workerBatchSize"
+	BatchSize                         = "docBatchSizeKb"
+	FailureRestartInterval            = "failureRestartInterval"
+	OptimisticReplicationThreshold    = "optimisticReplicationThreshold"
+	SourceNozzlePerNode               = base.SourceNozzlePerNode
+	TargetNozzlePerNode               = base.TargetNozzlePerNode
+	MaxExpectedReplicationLag         = "maxExpectedReplicationLag"
+	TimeoutPercentageCap              = "timeoutPercentageCap"
+	LogLevel                          = "logLevel"
+	StatsInterval                     = "statsInterval"
+	BandwidthLimit                    = "networkUsageLimit"
+	ReplicationTypeValue              = "continuous"
+	GoMaxProcs                        = "goMaxProcs"
+	GoGC                              = "goGC"
+	FilterVersionKey                  = "filterVersion"
+	FilterSkipRestreamKey             = "filterSkipRestream"
+	Priority                          = "priority"
+	BacklogThreshold                  = "desiredLatency" // desired latency is the parameter exposed to UI and CLI
+	FilterExpKey                      = "filterExpiration"
+	FilterDelKey                      = "filterDeletion"
+	BypassExpiryKey                   = "filterBypassExpiry" // bypass sounds better to external, translates into strip internally
+	BypassUncommittedTxnKey           = base.BypassUncommittedTxnKey
+	CollectionsMappingKey             = base.CollectionsMappingKey
+	CollectionsMirrorKey              = base.CollectionsMirrorKey
+	CollectionsMigrateKey             = base.CollectionsMigrateKey
+	CollectionsOsoKey                 = base.CollectionsOsoKey
+	CollectionsMappingRulesKey        = base.CollectionsMappingRulesKey
+	ManualBackfillRequested           = base.ManualBackfillKey
+	CollectionsDelAllBackfillKey      = base.CollectionsDelAllBackfillKey
+	CollectionsDelVbBackfillKey       = base.CollectionsDelSingleVBBackfillKey
+	RetryOnRemoteAuthErrKey           = base.RetryOnRemoteAuthErrKey
+	RetryOnRemoteAuthErrMaxWaitKey    = base.RetryOnRemoteAuthErrMaxWaitSecKey
+	RetryOnErrExceptAuthErrMaxWaitKey = base.RetryOnErrExceptAuthErrMaxWaitSecKey
+	MergeFunctionMappingKey           = base.MergeFunctionMappingKey
+	HlvPruningWindowLKey              = base.HlvPruningWindowKey
+	JSFunctionTimeoutKey              = base.JSFunctionTimeoutKey
+	DismissEventKey                   = metadata.DismissEventKey
+	PreReplicateVBMasterCheckKey      = base.PreReplicateVBMasterCheckKey
+	ReplicateCkptIntervalKey          = base.ReplicateCkptIntervalKey
+	CkptSvcCacheEnabledKey            = metadata.CkptSvcCacheEnabledKey
+	FilterSystemScopeKey              = base.FilterSystemScope
+	FilterBinaryDocsKey               = metadata.FilterBinaryDocsKey
 )
 
 // constants for parsing create/change/view replication response
@@ -205,6 +206,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	CollectionsDelVbBackfillKey:       metadata.CollectionsDelVbBackfillKey,
 	RetryOnRemoteAuthErrKey:           metadata.RetryOnRemoteAuthErrKey,
 	RetryOnRemoteAuthErrMaxWaitKey:    metadata.RetryOnRemoteAuthErrMaxWaitSecKey,
+	RetryOnErrExceptAuthErrMaxWaitKey: metadata.RetryOnErrExceptAuthErrMaxWaitSecKey,
 	MergeFunctionMappingKey:           metadata.MergeFunctionMappingKey,
 	HlvPruningWindowLKey:              metadata.HlvPruningWindowKey,
 	JSFunctionTimeoutKey:              metadata.JSFunctionTimeoutKey,
@@ -218,58 +220,59 @@ var RestKeyToSettingsKeyMap = map[string]string{
 
 // internal replication settings key -> replication settings key in rest api
 var SettingsKeyToRestKeyMap = map[string]string{
-	metadata.DevMainPipelineSendDelay:          base.DevMainPipelineSendDelay,
-	metadata.DevBackfillPipelineSendDelay:      base.DevBackfillPipelineSendDelay,
-	metadata.DevMainPipelineRollbackTo0VB:      base.DevMainPipelineRollbackTo0VB,
-	metadata.DevBackfillRollbackTo0VB:          base.DevBackfillRollbackTo0VB,
-	metadata.DevCkptMgrForceGCWaitSec:          base.DevCkptMgrForceGCWaitSec,
-	metadata.DevColManifestSvcDelaySec:         base.DevColManifestSvcDelaySec,
-	metadata.DevNsServerPortSpecifier:          base.DevNsServerPortSpecifier,
-	metadata.DevBucketTopologyLegacyDelay:      base.DevBucketTopologyLegacyDelay,
-	metadata.DevBackfillReplUpdateDelay:        base.DevBackfillReplUpdateDelay,
-	metadata.ReplicationTypeKey:                base.Type,
-	metadata.FilterExpressionKey:               FilterExpression,
-	metadata.ActiveKey:                         PauseRequested,
-	metadata.CheckpointIntervalKey:             CheckpointInterval,
-	metadata.BatchCountKey:                     BatchCount,
-	metadata.BatchSizeKey:                      BatchSize,
-	metadata.FailureRestartIntervalKey:         FailureRestartInterval,
-	metadata.OptimisticReplicationThresholdKey: OptimisticReplicationThreshold,
-	metadata.SourceNozzlePerNodeKey:            SourceNozzlePerNode,
-	metadata.TargetNozzlePerNodeKey:            TargetNozzlePerNode,
-	metadata.PipelineLogLevelKey:               LogLevel,
-	metadata.PipelineStatsIntervalKey:          StatsInterval,
-	metadata.BandwidthLimitKey:                 BandwidthLimit,
-	metadata.GoMaxProcsKey:                     GoMaxProcs,
-	metadata.GoGCKey:                           GoGC,
-	metadata.CompressionTypeKey:                base.CompressionTypeREST,
-	metadata.FilterVersionKey:                  FilterVersionKey,
-	metadata.FilterSkipRestreamKey:             FilterSkipRestreamKey,
-	metadata.PriorityKey:                       Priority,
-	metadata.BacklogThresholdKey:               BacklogThreshold,
-	metadata.FilterExpKey:                      FilterExpKey,
-	metadata.FilterDelKey:                      FilterDelKey,
-	metadata.BypassExpiryKey:                   BypassExpiryKey,
-	metadata.BypassUncommittedTxnKey:           BypassUncommittedTxnKey,
-	metadata.CollectionsMgtMappingKey:          CollectionsMappingKey,
-	metadata.CollectionsMgtMigrateKey:          CollectionsMigrateKey,
-	metadata.CollectionsMgtMirrorKey:           CollectionsMirrorKey,
-	metadata.CollectionsMgtOsoKey:              CollectionsOsoKey,
-	metadata.CollectionsMappingRulesKey:        CollectionsMappingRulesKey,
-	metadata.CollectionsManualBackfillKey:      ManualBackfillRequested,
-	metadata.CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillKey,
-	metadata.CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillKey,
-	metadata.RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrKey,
-	metadata.RetryOnRemoteAuthErrMaxWaitSecKey: RetryOnRemoteAuthErrMaxWaitKey,
-	metadata.MergeFunctionMappingKey:           MergeFunctionMappingKey,
-	metadata.HlvPruningWindowKey:               HlvPruningWindowLKey,
-	metadata.JSFunctionTimeoutKey:              JSFunctionTimeoutKey,
-	metadata.DismissEventKey:                   DismissEventKey,
-	metadata.PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckKey,
-	metadata.ReplicateCkptIntervalKey:          ReplicateCkptIntervalKey,
-	metadata.CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledKey,
-	metadata.FilterSystemScopeKey:              FilterSystemScopeKey,
-	metadata.FilterBinaryDocsKey:               FilterBinaryDocsKey,
+	metadata.DevMainPipelineSendDelay:             base.DevMainPipelineSendDelay,
+	metadata.DevBackfillPipelineSendDelay:         base.DevBackfillPipelineSendDelay,
+	metadata.DevMainPipelineRollbackTo0VB:         base.DevMainPipelineRollbackTo0VB,
+	metadata.DevBackfillRollbackTo0VB:             base.DevBackfillRollbackTo0VB,
+	metadata.DevCkptMgrForceGCWaitSec:             base.DevCkptMgrForceGCWaitSec,
+	metadata.DevColManifestSvcDelaySec:            base.DevColManifestSvcDelaySec,
+	metadata.DevNsServerPortSpecifier:             base.DevNsServerPortSpecifier,
+	metadata.DevBucketTopologyLegacyDelay:         base.DevBucketTopologyLegacyDelay,
+	metadata.DevBackfillReplUpdateDelay:           base.DevBackfillReplUpdateDelay,
+	metadata.ReplicationTypeKey:                   base.Type,
+	metadata.FilterExpressionKey:                  FilterExpression,
+	metadata.ActiveKey:                            PauseRequested,
+	metadata.CheckpointIntervalKey:                CheckpointInterval,
+	metadata.BatchCountKey:                        BatchCount,
+	metadata.BatchSizeKey:                         BatchSize,
+	metadata.FailureRestartIntervalKey:            FailureRestartInterval,
+	metadata.OptimisticReplicationThresholdKey:    OptimisticReplicationThreshold,
+	metadata.SourceNozzlePerNodeKey:               SourceNozzlePerNode,
+	metadata.TargetNozzlePerNodeKey:               TargetNozzlePerNode,
+	metadata.PipelineLogLevelKey:                  LogLevel,
+	metadata.PipelineStatsIntervalKey:             StatsInterval,
+	metadata.BandwidthLimitKey:                    BandwidthLimit,
+	metadata.GoMaxProcsKey:                        GoMaxProcs,
+	metadata.GoGCKey:                              GoGC,
+	metadata.CompressionTypeKey:                   base.CompressionTypeREST,
+	metadata.FilterVersionKey:                     FilterVersionKey,
+	metadata.FilterSkipRestreamKey:                FilterSkipRestreamKey,
+	metadata.PriorityKey:                          Priority,
+	metadata.BacklogThresholdKey:                  BacklogThreshold,
+	metadata.FilterExpKey:                         FilterExpKey,
+	metadata.FilterDelKey:                         FilterDelKey,
+	metadata.BypassExpiryKey:                      BypassExpiryKey,
+	metadata.BypassUncommittedTxnKey:              BypassUncommittedTxnKey,
+	metadata.CollectionsMgtMappingKey:             CollectionsMappingKey,
+	metadata.CollectionsMgtMigrateKey:             CollectionsMigrateKey,
+	metadata.CollectionsMgtMirrorKey:              CollectionsMirrorKey,
+	metadata.CollectionsMgtOsoKey:                 CollectionsOsoKey,
+	metadata.CollectionsMappingRulesKey:           CollectionsMappingRulesKey,
+	metadata.CollectionsManualBackfillKey:         ManualBackfillRequested,
+	metadata.CollectionsDelAllBackfillKey:         CollectionsDelAllBackfillKey,
+	metadata.CollectionsDelVbBackfillKey:          CollectionsDelVbBackfillKey,
+	metadata.RetryOnRemoteAuthErrKey:              RetryOnRemoteAuthErrKey,
+	metadata.RetryOnRemoteAuthErrMaxWaitSecKey:    RetryOnRemoteAuthErrMaxWaitKey,
+	metadata.RetryOnErrExceptAuthErrMaxWaitSecKey: RetryOnErrExceptAuthErrMaxWaitKey,
+	metadata.MergeFunctionMappingKey:              MergeFunctionMappingKey,
+	metadata.HlvPruningWindowKey:                  HlvPruningWindowLKey,
+	metadata.JSFunctionTimeoutKey:                 JSFunctionTimeoutKey,
+	metadata.DismissEventKey:                      DismissEventKey,
+	metadata.PreReplicateVBMasterCheckKey:         PreReplicateVBMasterCheckKey,
+	metadata.ReplicateCkptIntervalKey:             ReplicateCkptIntervalKey,
+	metadata.CkptSvcCacheEnabledKey:               CkptSvcCacheEnabledKey,
+	metadata.FilterSystemScopeKey:                 FilterSystemScopeKey,
+	metadata.FilterBinaryDocsKey:                  FilterBinaryDocsKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
