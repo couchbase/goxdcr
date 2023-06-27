@@ -1554,6 +1554,8 @@ type PipelineUpdater struct {
 
 	// The number of times that pipeline fails to start due to remote cluster auth error
 	rcAuthErrCnt int
+	// The number of times that the pipeline fails to start due to all the errors except the remote cluster auth error
+	errCntExceptAuthErr int
 }
 
 type pmErrMapType struct {
@@ -1653,6 +1655,7 @@ func newPipelineUpdater(pipeline_name string, retry_interval int, cur_err error,
 		replSpecSettingsHelper: &replSettingsRevContext{rep_status: rep_status_in},
 		updateRCStatusInterval: base.RefreshRemoteClusterRefInterval,
 		rcAuthErrCnt:           -1, // start with -1 as the first authErr does not require exp backoff
+		errCntExceptAuthErr:    -1,
 	}
 
 	if cur_err != nil {
@@ -2020,6 +2023,7 @@ RE:
 			r.rcAuthErrCnt++
 		}
 	} else {
+		r.errCntExceptAuthErr++
 		r.logger.Errorf("Failed to update pipeline %v, err=%v\n", r.pipeline_name, base.FlattenErrorMap(errMap))
 	}
 
@@ -2261,23 +2265,42 @@ func (r *PipelineUpdater) isScheduledTimerNil() bool {
 	return r.scheduledTimer == nil
 }
 
-func (r *PipelineUpdater) getFutureRefreshDuration() time.Duration {
-	if r.rcAuthErrCnt <= 0 {
-		return r.retry_interval
+func getErrCntAndMaxWait(rcAuthErrCnt int, errCntExceptAuthErr int, spec *metadata.ReplicationSpecification) (int, time.Duration) {
+	maxWaitForAuthErr := spec.Settings.GetRetryOnRemoteAuthErrMaxWait()
+	maxWaitForErrExceptAuthErr := spec.Settings.GetRetryOnErrExceptAuthErrMaxWait()
+	if rcAuthErrCnt >= 0 && errCntExceptAuthErr >= 0 {
+		// returns the maximum wait time out of both
+		if maxWaitForAuthErr > maxWaitForErrExceptAuthErr {
+			return rcAuthErrCnt, maxWaitForAuthErr
+		}
+		return errCntExceptAuthErr, maxWaitForErrExceptAuthErr
+	} else if rcAuthErrCnt >= 0 {
+		return rcAuthErrCnt, maxWaitForAuthErr
+	} else if errCntExceptAuthErr >= 0 {
+		return errCntExceptAuthErr, maxWaitForErrExceptAuthErr
 	}
+	return -1, maxWaitForAuthErr
+}
 
-	// Do exponential backoff of 2 until a largest retry constant
+func (r *PipelineUpdater) getFutureRefreshDuration() time.Duration {
 	spec := r.rep_status.Spec()
 	if spec == nil {
 		// Doesn't really matter as spec is deleted
 		return r.retry_interval
 	}
 
-	maxWait := spec.Settings.GetRetryOnRemoteAuthErrMaxWait()
+	errCnt, maxWaitTime := getErrCntAndMaxWait(r.rcAuthErrCnt, r.errCntExceptAuthErr, spec)
+	if errCnt <= 0 {
+		return r.retry_interval
+	}
+
+	// Do exponential backoff of 2 until a largest retry constant
 	backoffRetryInterval := r.retry_interval
-	for i := 0; i < r.rcAuthErrCnt; i++ {
-		if backoffRetryInterval*2 < maxWait {
+	for i := 0; i < errCnt; i++ {
+		if backoffRetryInterval*2 < maxWaitTime {
 			backoffRetryInterval = backoffRetryInterval * 2
+		} else {
+			break
 		}
 	}
 	return backoffRetryInterval
@@ -2326,6 +2349,7 @@ func (r *PipelineUpdater) setLastUpdateSuccess() {
 	defer r.pipelineUpdaterLock.Unlock()
 	r.lastSuccessful = true
 	r.rcAuthErrCnt = -1
+	r.errCntExceptAuthErr = -1
 	r.clearHumanRecoveryTimer()
 }
 

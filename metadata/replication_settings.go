@@ -82,8 +82,9 @@ const (
 	HlvPruningWindowKey     = base.HlvPruningWindowKey
 	JSFunctionTimeoutKey    = base.JSFunctionTimeoutKey
 
-	RetryOnRemoteAuthErrKey           = base.RetryOnRemoteAuthErrKey
-	RetryOnRemoteAuthErrMaxWaitSecKey = base.RetryOnRemoteAuthErrMaxWaitSecKey
+	RetryOnRemoteAuthErrKey              = base.RetryOnRemoteAuthErrKey
+	RetryOnRemoteAuthErrMaxWaitSecKey    = base.RetryOnRemoteAuthErrMaxWaitSecKey
+	RetryOnErrExceptAuthErrMaxWaitSecKey = base.RetryOnErrExceptAuthErrMaxWaitSecKey
 
 	// Event based
 	DismissEventKey               = "dismissEvent"
@@ -199,7 +200,9 @@ var JSFunctionTimeoutConfig = &SettingsConfig{base.JSFunctionTimeoutDefault, &Ra
 
 var RetryOnRemoteAuthErrConfig = &SettingsConfig{true, nil}
 
-var RetryOnRemoteAuthErrMaxWaitConfig = &SettingsConfig{base.RetryOnRemoteAuthErrMaxWaitDefault, &Range{1, 86400 /* secs -> 1 day */}}
+var RetryOnRemoteAuthErrMaxWaitConfig = &SettingsConfig{base.RetryOnErrExceptAuthErrMaxWaitDefault, &Range{1, 86400 /* secs -> 1 day */}}
+
+var RetryOnErrExceptAuthErrMaxWaitConfig = &SettingsConfig{base.RetryOnErrExceptAuthErrMaxWaitDefault, &Range{1, 86400 /* secs -> 1 day */}}
 
 var DismissEventConfig = &SettingsConfig{-1, &Range{0, math.MaxInt32}}
 
@@ -215,48 +218,49 @@ var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
-	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
-	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
-	DevMainPipelineRollbackTo0VB:      XDCRDevMainPipelineRollbackConfig,
-	DevBackfillRollbackTo0VB:          XDCRDevBackfillPipelineRollbackConfig,
-	DevCkptMgrForceGCWaitSec:          XDCRDevCkptGcWaitConfig,
-	DevColManifestSvcDelaySec:         XDCRDevColManifestSvcDelayConfig,
-	DevNsServerPortSpecifier:          XDCRDevNsServerPortSpecifierConfig,
-	DevBucketTopologyLegacyDelay:      XDCRDevBucketTopologyLevacyDelayConfig,
-	ReplicationTypeKey:                ReplicationTypeConfig,
-	FilterExpressionKey:               FilterExpressionConfig,
-	ActiveKey:                         ActiveConfig,
-	CheckpointIntervalKey:             CheckpointIntervalConfig,
-	BatchCountKey:                     BatchCountConfig,
-	BatchSizeKey:                      BatchSizeConfig,
-	FailureRestartIntervalKey:         FailureRestartIntervalConfig,
-	OptimisticReplicationThresholdKey: OptimisticReplicationThresholdConfig,
-	SourceNozzlePerNodeKey:            SourceNozzlePerNodeConfig,
-	TargetNozzlePerNodeKey:            TargetNozzlePerNodeConfig,
-	PipelineLogLevelKey:               PipelineLogLevelConfig,
-	PipelineStatsIntervalKey:          PipelineStatsIntervalConfig,
-	BandwidthLimitKey:                 BandwidthLimitConfig,
-	CompressionTypeKey:                CompressionTypeConfig,
-	FilterVersionKey:                  FilterVersionConfig,
-	FilterSkipRestreamKey:             FilterSkipRestreamConfig,
-	PriorityKey:                       PriorityConfig,
-	BacklogThresholdKey:               BacklogThresholdConfig,
-	FilterExpDelKey:                   FilterExpDelConfig,
-	CollectionsMgtMultiKey:            CollectionsMgtConfig,
-	CollectionsMappingRulesKey:        CollectionsMappingRulesConfig,
-	CollectionsSkipSourceCheckKey:     CollectionsSkipSrcCheckConfig,
-	CollectionsManualBackfillKey:      CollectionsManualBackfillConfig,
-	CollectionsDelAllBackfillKey:      CollectionsDelAllBackfillConfig,
-	CollectionsDelVbBackfillKey:       CollectionsDelVbBackfillConfig,
-	RetryOnRemoteAuthErrKey:           RetryOnRemoteAuthErrConfig,
-	RetryOnRemoteAuthErrMaxWaitSecKey: RetryOnRemoteAuthErrMaxWaitConfig,
-	MergeFunctionMappingKey:           MergeFunctionMappingConfig,
-	HlvPruningWindowKey:               PruningWindowConfig,
-	JSFunctionTimeoutKey:              JSFunctionTimeoutConfig,
-	DismissEventKey:                   DismissEventConfig,
-	PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckConfig,
-	ReplicateCkptIntervalKey:          ReplicateCkptIntervalConfig,
-	CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledConfig,
+	DevMainPipelineSendDelay:             XDCRDevMainPipelineSendDelayConfig,
+	DevBackfillPipelineSendDelay:         XDCRDevBackfillPipelineSendDelayConfig,
+	DevMainPipelineRollbackTo0VB:         XDCRDevMainPipelineRollbackConfig,
+	DevBackfillRollbackTo0VB:             XDCRDevBackfillPipelineRollbackConfig,
+	DevCkptMgrForceGCWaitSec:             XDCRDevCkptGcWaitConfig,
+	DevColManifestSvcDelaySec:            XDCRDevColManifestSvcDelayConfig,
+	DevNsServerPortSpecifier:             XDCRDevNsServerPortSpecifierConfig,
+	DevBucketTopologyLegacyDelay:         XDCRDevBucketTopologyLevacyDelayConfig,
+	ReplicationTypeKey:                   ReplicationTypeConfig,
+	FilterExpressionKey:                  FilterExpressionConfig,
+	ActiveKey:                            ActiveConfig,
+	CheckpointIntervalKey:                CheckpointIntervalConfig,
+	BatchCountKey:                        BatchCountConfig,
+	BatchSizeKey:                         BatchSizeConfig,
+	FailureRestartIntervalKey:            FailureRestartIntervalConfig,
+	OptimisticReplicationThresholdKey:    OptimisticReplicationThresholdConfig,
+	SourceNozzlePerNodeKey:               SourceNozzlePerNodeConfig,
+	TargetNozzlePerNodeKey:               TargetNozzlePerNodeConfig,
+	PipelineLogLevelKey:                  PipelineLogLevelConfig,
+	PipelineStatsIntervalKey:             PipelineStatsIntervalConfig,
+	BandwidthLimitKey:                    BandwidthLimitConfig,
+	CompressionTypeKey:                   CompressionTypeConfig,
+	FilterVersionKey:                     FilterVersionConfig,
+	FilterSkipRestreamKey:                FilterSkipRestreamConfig,
+	PriorityKey:                          PriorityConfig,
+	BacklogThresholdKey:                  BacklogThresholdConfig,
+	FilterExpDelKey:                      FilterExpDelConfig,
+	CollectionsMgtMultiKey:               CollectionsMgtConfig,
+	CollectionsMappingRulesKey:           CollectionsMappingRulesConfig,
+	CollectionsSkipSourceCheckKey:        CollectionsSkipSrcCheckConfig,
+	CollectionsManualBackfillKey:         CollectionsManualBackfillConfig,
+	CollectionsDelAllBackfillKey:         CollectionsDelAllBackfillConfig,
+	CollectionsDelVbBackfillKey:          CollectionsDelVbBackfillConfig,
+	RetryOnRemoteAuthErrKey:              RetryOnRemoteAuthErrConfig,
+	RetryOnRemoteAuthErrMaxWaitSecKey:    RetryOnRemoteAuthErrMaxWaitConfig,
+	RetryOnErrExceptAuthErrMaxWaitSecKey: RetryOnErrExceptAuthErrMaxWaitConfig,
+	MergeFunctionMappingKey:              MergeFunctionMappingConfig,
+	HlvPruningWindowKey:                  PruningWindowConfig,
+	JSFunctionTimeoutKey:                 JSFunctionTimeoutConfig,
+	DismissEventKey:                      DismissEventConfig,
+	PreReplicateVBMasterCheckKey:         PreReplicateVBMasterCheckConfig,
+	ReplicateCkptIntervalKey:             ReplicateCkptIntervalConfig,
+	CkptSvcCacheEnabledKey:               CkptSvcCacheEnabledConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -915,6 +919,12 @@ func (s *ReplicationSettings) GetRetryOnRemoteAuthErr() bool {
 
 func (s *ReplicationSettings) GetRetryOnRemoteAuthErrMaxWait() time.Duration {
 	value, _ := s.GetSettingValueOrDefaultValue(RetryOnRemoteAuthErrMaxWaitSecKey)
+	intVal := value.(int)
+	return time.Duration(intVal) * time.Second
+}
+
+func (s *ReplicationSettings) GetRetryOnErrExceptAuthErrMaxWait() time.Duration {
+	value, _ := s.GetSettingValueOrDefaultValue(RetryOnErrExceptAuthErrMaxWaitSecKey)
 	intVal := value.(int)
 	return time.Duration(intVal) * time.Second
 }
