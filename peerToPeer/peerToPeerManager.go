@@ -30,6 +30,7 @@ const randIdLen = 32
 
 var ErrorNoPeerDiscovered error = fmt.Errorf("no peer has been discovered")
 var ErrorNoActiveMergerSet error = fmt.Errorf("No active pipeline is executing to get merger")
+var ErrorPreCheckP2PSendFailure error = fmt.Errorf("Could not send request to peer: P2PSend was unsuccessful")
 
 type P2PManager interface {
 	VBMasterCheck
@@ -294,26 +295,12 @@ func (p *P2PManagerImpl) setConnectionPreCheckP2PMsgToStore(taskId string, src s
 	}
 }
 
-func (p *P2PManagerImpl) checkAndHandlePreCheckErr(req Request, err error) {
-	if req.GetOpcode() == ReqConnectionPreCheck {
-		creq, ok := req.(*ConnectionPreCheckReq)
-		taskId := ""
-		if ok {
-			taskId = creq.TaskId
-		}
-		p.setConnectionPreCheckP2PMsgToStore(taskId, req.GetSender(), req.GetTarget(), fmt.Sprintf("P2PSend was unsuccessful: resulted in %v", err))
-	}
+func (p *P2PManagerImpl) handlePreCheckP2PSendErr(taskId string, src string, tgt string, err error) {
+	p.setConnectionPreCheckP2PMsgToStore(taskId, src, tgt, fmt.Sprintf("%v", err))
 }
 
-func (p *P2PManagerImpl) checkAndHandlePreCheckSuccess(req Request) {
-	if req.GetOpcode() == ReqConnectionPreCheck {
-		creq, ok := req.(*ConnectionPreCheckReq)
-		taskId := ""
-		if ok {
-			taskId = creq.TaskId
-		}
-		p.setConnectionPreCheckP2PMsgToStore(taskId, req.GetSender(), req.GetTarget(), base.ConnectionPreCheckMsgs[base.ConnPreChkResponseWait])
-	}
+func (p *P2PManagerImpl) handlePreCheckP2PSendSuccess(taskId string, src string, tgt string) {
+	p.setConnectionPreCheckP2PMsgToStore(taskId, src, tgt, base.ConnectionPreCheckMsgs[base.ConnPreChkResponseWait])
 }
 
 func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetryOrig map[string]bool, myHost string) (error, map[string]bool) {
@@ -367,8 +354,6 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 				if p2pSendErr != nil {
 					p.logger.Errorf("P2PSend resulted in %v", p2pSendErr)
 
-					p.checkAndHandlePreCheckErr(compiledReq, p2pSendErr)
-
 					errMapMtx.Lock()
 					errMap[peerAddr] = p2pSendErr
 					errMapMtx.Unlock()
@@ -398,8 +383,6 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					cbOpts.sentTimesMap[peerAddr] = time.Now()
 					cbOpts.sentTimesMtx.Unlock()
 					atomic.StoreUint32(successOpaqueMap[peerAddr], compiledReq.GetOpaque())
-
-					p.checkAndHandlePreCheckSuccess(compiledReq)
 				}
 			}()
 		}
@@ -943,9 +926,16 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 	}
 
 	// perform pre-check on all the other source nodes except self
-	err, _ = p.sendToEachPeerOnce(ReqConnectionPreCheck, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
+	err, peersFailedToSend := p.sendToEachPeerOnce(ReqConnectionPreCheck, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
 	if err != nil {
-		p.logger.Errorf("Connection Pre-Check exited because of the error in sendToEachPeerOnce, taskId=%v, err=%v", taskId, err)
+		p.logger.Errorf("Connection Pre-Check exited because P2PSend failed for all peers, taskId=%v, err=%v", taskId, err)
+	}
+	for _, peer := range peers {
+		if failed, ok := peersFailedToSend[peer]; ok && failed {
+			p.handlePreCheckP2PSendErr(taskId, myHostAddr, peer, ErrorPreCheckP2PSendFailure)
+		} else {
+			p.handlePreCheckP2PSendSuccess(taskId, myHostAddr, peer)
+		}
 	}
 }
 
