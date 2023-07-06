@@ -29,7 +29,7 @@ import (
 	"time"
 )
 
-//configuration settings
+// configuration settings
 const (
 	PIPELINE_LOG_LEVEL         = "pipeline_loglevel"
 	default_pipeline_log_level = log.LogLevelInfo

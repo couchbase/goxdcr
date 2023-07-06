@@ -58,6 +58,8 @@ type VBMasterCheckFunc func(common.Pipeline) (map[string]*peerToPeer.VBMasterChe
 
 type MergeVBMasterRespCkptsFunc func(common.Pipeline, peerToPeer.PeersVBMasterCheckRespMap) error
 
+type PrometheusPipelineStatusCb []func()
+
 // GenericPipeline is the generic implementation of a data processing pipeline
 //
 // The assumption here is all the processing steps are self-connected, so
@@ -135,6 +137,8 @@ type GenericPipeline struct {
 	topologyMtx               sync.Mutex
 	sourceTopologyProgressMsg string
 	targetTopologyProgressMsg string
+
+	statusCallbacks PrometheusPipelineStatusCb
 }
 
 // Get the runtime context of this pipeline
@@ -254,6 +258,10 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		if len(errMap) > 0 {
 			genericPipeline.logger.Errorf("%v failed to start, err=%v", genericPipeline.InstanceId(), errMap)
 			genericPipeline.ReportProgress(fmt.Sprintf("Pipeline failed to start, err=%v", errMap))
+			genericPipeline.statusCallbacks[base.PipelineStatusError]()
+		} else {
+			// Only set to running if there is no error starting the pipeline
+			genericPipeline.statusCallbacks[base.PipelineStatusRunning]()
 		}
 	}(genericPipeline, errMap)
 
@@ -546,6 +554,15 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 		return errMap
 	}
 
+	if genericPipeline.spec != nil && genericPipeline.spec.GetReplicationSpec() != nil {
+		if !genericPipeline.spec.GetReplicationSpec().Settings.Active {
+			// Only mark the pipeline paused if the user requested it (or auto paused)
+			// Otherwise, any stop() could be called during error phase and we want to keep
+			// the pipeline in error phase
+			genericPipeline.statusCallbacks[base.PipelineStatusPaused]()
+		}
+	}
+
 	// perform checkpoint first before stopping
 	genericPipeline.checkpoint_func(genericPipeline)
 
@@ -623,7 +640,7 @@ func NewGenericPipeline(t string,
 	return pipeline
 }
 
-func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, utils utilities.UtilsIface) *GenericPipeline {
+func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, utils utilities.UtilsIface, prometheusStatusCbConstructor func(pipeline common.Pipeline) PrometheusPipelineStatusCb) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
 		targets:                            targets,
@@ -646,6 +663,7 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 		utils:                              utils,
 	}
 	// NOTE: Calling initialize here as part of constructor
+	pipeline.statusCallbacks = prometheusStatusCbConstructor(pipeline)
 	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
 

@@ -18,6 +18,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
+	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
 	"strings"
 	"sync"
@@ -494,7 +495,6 @@ func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 	defer rs.lock.RUnlock()
 
 	// add custom settings on top of repl spec settings
-
 	if len(rs.customSettings) > 0 {
 		rs.logger.Infof("Applying custom settings for %v. settings = %v\n", rs.specId, rs.customSettings)
 		for key, value := range rs.customSettings {
@@ -502,6 +502,10 @@ func (rs *ReplicationStatus) SettingsMap() map[string]interface{} {
 		}
 	}
 
+	// if replicationStatus has errors, note them so prometheus can read the stats
+	if len(rs.err_list) > 0 {
+		settingsMap[service_def.PIPELINE_STATUS] = base.PipelineStatusError
+	}
 	return settingsMap
 }
 

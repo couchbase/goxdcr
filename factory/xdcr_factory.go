@@ -325,7 +325,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
 		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck,
-		xdcrf.MergePeerNodesCkptsResponse, xdcrf.utils)
+		xdcrf.MergePeerNodesCkptsResponse, xdcrf.utils, xdcrf.GeneratePrometheusStatusCb)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -1460,6 +1460,10 @@ func (xdcrf *XDCRFactory) constructSettingsForStatsManager(pipeline common.Pipel
 	if ok {
 		s[parts.DCP_VBTasksMap] = vbTasksMap.(*metadata.VBTasksMapType)
 	}
+	pipelineStatus, ok := settings[service_def.PIPELINE_STATUS]
+	if ok {
+		s[service_def.PIPELINE_STATUS] = pipelineStatus
+	}
 	return s, nil
 }
 
@@ -1494,6 +1498,10 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForStatsManager(pipeline common
 	publish_interval := metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, nil)
 	if publish_interval != nil {
 		s[service_def.PUBLISH_INTERVAL] = publish_interval
+	}
+	pipelineStatus, ok := settings[service_def.PIPELINE_STATUS]
+	if ok {
+		s[service_def.PIPELINE_STATUS] = pipelineStatus
 	}
 	return s, nil
 }
@@ -1714,4 +1722,35 @@ func (xdcrf *XDCRFactory) fetchCkptsAndFilterBasedOnExpiration(pipelineTopic str
 		}
 	}
 	return
+}
+
+func (xdcrf *XDCRFactory) GeneratePrometheusStatusCb(pipeline common.Pipeline) pp.PrometheusPipelineStatusCb {
+	callbacks := make(pp.PrometheusPipelineStatusCb, base.PipelineStatusMax)
+
+	for i := 0; i < int(base.PipelineStatusMax); i++ {
+		var cb func()
+		switch i {
+		case int(base.PipelineStatusRunning):
+			cb = func() {
+				pipeline.RuntimeContext().Service(base.STATISTICS_MGR_SVC).(*pipeline_svc.StatisticsManager).UpdateSettings(metadata.ReplicationSettingsMap{
+					service_def.PIPELINE_STATUS: int(base.PipelineStatusRunning),
+				})
+			}
+		case int(base.PipelineStatusPaused):
+			cb = func() {
+				pipeline.RuntimeContext().Service(base.STATISTICS_MGR_SVC).(*pipeline_svc.StatisticsManager).UpdateSettings(metadata.ReplicationSettingsMap{
+					service_def.PIPELINE_STATUS: int(base.PipelineStatusPaused),
+				})
+			}
+		case int(base.PipelineStatusError):
+			cb = func() {
+				pipeline.RuntimeContext().Service(base.STATISTICS_MGR_SVC).(*pipeline_svc.StatisticsManager).UpdateSettings(metadata.ReplicationSettingsMap{
+					service_def.PIPELINE_STATUS: int(base.PipelineStatusError),
+				})
+			}
+		}
+		callbacks[i] = cb
+	}
+
+	return callbacks
 }

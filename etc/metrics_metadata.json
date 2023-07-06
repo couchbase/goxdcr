@@ -445,6 +445,20 @@
         ],
         "stability": "committed"
     },
+    "xdcr_pipeline_status": {
+        "type": "gauge",
+        "help": "The pipeline status for a specific pipeline, where 0=Paused, 1=Running, 2=Error",
+        "added": "7.2.1",
+        "labels": [
+            {
+                "name": "pipelineOperation",
+                "help": "Stats related to operation mode or status updates",
+                "added": "7.2.1"
+            }
+        ],
+        "notes": "A single integer that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
+        "stability": "committed"
+    },
     "xdcr_resp_wait_time": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write",

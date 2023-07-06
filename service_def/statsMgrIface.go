@@ -135,6 +135,9 @@ const (
 
 	DOCS_CLONED_METRIC     = "docs_cloned"
 	DELETION_CLONED_METRIC = "deletion_cloned"
+
+	// Pipeline Status to be exported as a guage
+	PIPELINE_STATUS = "pipeline_status"
 )
 
 const (
@@ -399,6 +402,11 @@ var (
 		Name:  "docCountDiverge",
 		Help:  "Could cause document count between source and target bucket to be different per design",
 		Added: base.VersionForPrometheusSupport,
+	}
+	Operation = StatsLabel{
+		Name:  "pipelineOperation",
+		Help:  "Stats related to operation mode or status updates",
+		Added: base.VersionForSupportability,
 	}
 )
 
@@ -1110,5 +1118,15 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The number of times a source deletion or expiration is cloned to be written to multiple target namespaces",
 		Notes:        "This usually happens in collection migration using explicit rule-based mapping where deletions and expirations will pass all rules.",
 		Stability:    Committed,
+	},
+
+	PIPELINE_STATUS: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The pipeline status for a specific pipeline, where 0=Paused, 1=Running, 2=Error",
+		Notes:        "A single integer that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
+		Stability:    Committed,
+		Labels:       []StatsLabel{Operation},
 	},
 }
