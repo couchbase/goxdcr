@@ -306,14 +306,16 @@ function validateLogWithInstance {
 		if [[ ! -z "$maxInstanceCnt" ]] && (($count > $maxInstanceCnt)); then
 			echo "Error - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, but found $count"
 			dumpDebugInfoBeforeExit
-			echo "Logs: $logs"
+			echo "Logs: $logs" >/tmp/testOutput.log
+			echo "Console logs saved as /tmp/testOutput.log"
 			exit 1
 		elif [[ ! -z "$maxInstanceCnt" ]]; then
 			echo "Warning - requested count for $grepStr is $instanceCnt or < $maxInstanceCnt, found $count"
 		else
 			echo "Error - requested count for $grepStr is $instanceCnt, but found $count"
 			dumpDebugInfoBeforeExit
-			echo "Logs: $logs"
+			echo "Logs: $logs" >/tmp/testOutput.log
+			echo "Console logs saved as /tmp/testOutput.log"
 			exit 1
 		fi
 	else

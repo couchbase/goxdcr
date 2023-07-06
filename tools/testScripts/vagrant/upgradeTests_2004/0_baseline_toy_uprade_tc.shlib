@@ -42,6 +42,38 @@ function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B1"
 }
 
+function runDataLoadBothSidesAndCheck {
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 20
+	checkBidirectionalChangesLeft
+}
+
+function pauseAndResumeBothSidesAndCheck {
+	pauseReplication "C1" "B1" "C2" "B2"
+	pauseReplication "C2" "B2" "C1" "B1"
+	sleep 30
+	resumeReplication "C1" "B1" "C2" "B2"
+	resumeReplication "C2" "B2" "C1" "B1"
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 30
+	checkBidirectionalChangesLeft
+}
+
+function deleteRecreateReplicationsAndCheck {
+	deleteBucketReplication "C1" "B1" "C2" "B2"
+	deleteBucketReplication "C2" "B2" "C1" "B1"
+	sleep 5
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	sleep 5
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 30
+	checkBidirectionalChangesLeft
+}
+
 function runTestCase {
 	echo "============================================================================"
 	echo "Running baseline to toy upgrade test case"
@@ -89,28 +121,18 @@ function runTestCase {
 	vagrantGrepForPanic "0"
 	sleep 60
 
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 20
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
 	vagrantRebalanceAndUpgrade "C1P" "1" "C1" "toy"
 	echo "Waiting for topology detector to kick in and restart pipeline"
 	sleep 60
 	vagrantGrepForPanic "1"
 
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 20
-	checkBidirectionalChangesLeft
-
-	# Try pause and resume to ensure no pipeline stuckness
-	pauseReplication "C1" "B1" "C2" "B2"
-	pauseReplication "C2" "B2" "C1" "B1"
-	sleep 30
-	resumeReplication "C1" "B1" "C2" "B2"
-	resumeReplication "C2" "B2" "C1" "B1"
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 30
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
 	# Upgrade target nodes
 	vagrantRebalanceAndUpgrade "C2" "2" "C2P" "toy"
@@ -118,28 +140,18 @@ function runTestCase {
 	sleep 60
 	vagrantGrepForPanic "2"
 
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 20
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
 	vagrantRebalanceAndUpgrade "C2P" "3" "C2" "toy"
 	echo "Waiting for topology detector to kick in and restart pipeline"
 	sleep 60
 	vagrantGrepForPanic "3"
 
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 20
-	checkBidirectionalChangesLeft
-
-	# Try pause and resume to ensure no pipeline stuckness
-	pauseReplication "C1" "B1" "C2" "B2"
-	pauseReplication "C2" "B2" "C1" "B1"
-	sleep 30
-	resumeReplication "C1" "B1" "C2" "B2"
-	resumeReplication "C2" "B2" "C1" "B1"
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 30
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
 	vagrantGrepForPanicAll
 
