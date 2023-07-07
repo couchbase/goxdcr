@@ -740,6 +740,7 @@ func (adminport *Adminport) doChangeReplicationSettingsRequest(request *http.Req
 
 	errorsMap, err, warnings := UpdateReplicationSettings(replicationId, settingsMap, getRealUserIdFromRequest(request), getLocalAndRemoteIps(request), justValidate)
 	if err != nil {
+		logger_ap.Errorf("UpdateReplicationSettings error=%v", err)
 		return nil, err
 	} else if len(errorsMap) > 0 {
 		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)

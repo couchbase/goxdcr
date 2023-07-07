@@ -1044,7 +1044,11 @@ func (service *ReplicationSpecService) constructReplicationSpec(value []byte, re
 
 	spec.Settings.PostProcessAfterUnmarshalling()
 
-	service.handleSettingsUpgrade(spec, lock)
+	// We should only really handle settings upgrade during node boot up time as part of rolling upgrade
+	// Otherwise we will be racing against actual set commands
+	if !lock {
+		service.handleSettingsUpgrade(spec)
+	}
 
 	return spec, nil
 }
@@ -1055,7 +1059,7 @@ func (service *ReplicationSpecService) constructReplicationSpec(value []byte, re
 // The only scenario where values may be missing from spec.Settings is when new setting keys are added after upgrade.
 // This method checks whether there are values missing from spec.Settings.
 // If there are, it populates these values using default values, and writes updated settings/spec to metakv.
-func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.ReplicationSpecification, lock bool) {
+func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.ReplicationSpecification) {
 	updatedKeys := spec.Settings.PopulateDefault()
 	updatedKeys = service.handleCompressionUpgrade(spec, updatedKeys)
 	updatedKeys = service.handleAdvFilteringUpgrade(spec, updatedKeys)
@@ -1064,7 +1068,7 @@ func (service *ReplicationSpecService) handleSettingsUpgrade(spec *metadata.Repl
 	}
 
 	service.logger.Infof("Updating spec %v in metakv since its settings has been upgraded. upgraded settings keys = %v", spec.Id, updatedKeys)
-	err := service.setReplicationSpecInternal(spec, lock)
+	err := service.setReplicationSpecInternal(spec, false)
 	if err != nil {
 		// ignore this error since it is not fatal.
 		// 1. updated settings will be saved to metakv if there are further updates to spec
