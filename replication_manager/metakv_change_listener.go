@@ -31,6 +31,7 @@ import (
 
 var SetTimeSyncRetryInterval = 10 * time.Second
 var BucketSettingsChanSize = 100
+var CallbackChanSize = 100
 
 // generic listener for metadata stored in metakv
 type MetakvChangeListener struct {
@@ -42,6 +43,93 @@ type MetakvChangeListener struct {
 	metadata_service_call_back base.MetadataServiceCallback
 	logger                     *log.CommonLogger
 	utils                      utilities.UtilsIface
+	cbSerializer               *callbackSerializer
+}
+
+type callbackSerializer struct {
+	jobTopicMap map[string]chan metakv.KVEntry
+	mapMtx      sync.RWMutex
+	logger      *log.CommonLogger
+	asyncCb     func(string, []byte, interface{})
+}
+
+func newCallbackSerializer(logger *log.CommonLogger, asyncCb func(path string, value []byte, rev interface{})) *callbackSerializer {
+	return &callbackSerializer{
+		jobTopicMap: map[string]chan metakv.KVEntry{},
+		mapMtx:      sync.RWMutex{},
+		logger:      logger,
+		asyncCb:     asyncCb,
+	}
+}
+
+func (c *callbackSerializer) distributeJob(kve metakv.KVEntry) {
+	c.mapMtx.RLock()
+	defer c.mapMtx.RUnlock()
+	jobCh, ok := c.jobTopicMap[kve.Path]
+	if ok {
+		select {
+		case jobCh <- kve:
+		}
+	} else {
+		// job channel doesn't exist yet
+		c.mapMtx.RUnlock()
+		c.mapMtx.Lock()
+		jobCh, ok = c.jobTopicMap[kve.Path]
+		if ok {
+			// jumped ahead
+			select {
+			case jobCh <- kve:
+			}
+		} else {
+			c.jobTopicMap[kve.Path] = make(chan metakv.KVEntry, CallbackChanSize)
+			c.jobTopicMap[kve.Path] <- kve
+			go c.handleJobs(kve.Path)
+		}
+		c.mapMtx.Unlock()
+		c.mapMtx.RLock()
+	}
+
+}
+
+// One go instance of this method is running per path
+// Once no more can be done, it'll exit
+func (c *callbackSerializer) handleJobs(path string) {
+	c.mapMtx.RLock()
+	jobCh, ok := c.jobTopicMap[path]
+	if !ok {
+		c.logger.Errorf("Error: job multiplex channel for %v does not exist", path)
+		c.mapMtx.RUnlock()
+		return
+	}
+	c.mapMtx.RUnlock()
+
+forloop:
+	for {
+		select {
+		case job := <-jobCh:
+			c.asyncCb(job.Path, job.Value, job.Rev)
+		default:
+			// no more jobs at this moment
+			go c.cleanupJob(path)
+			break forloop
+		}
+	}
+}
+
+func (c *callbackSerializer) cleanupJob(path string) {
+	c.mapMtx.Lock()
+	defer c.mapMtx.Unlock()
+
+	_, ok := c.jobTopicMap[path]
+	if ok {
+		if len(c.jobTopicMap[path]) == 0 {
+			delete(c.jobTopicMap, path)
+		} else {
+			// Someone else snuck in a job while we're supposed to clean up. Re-launch handler, which will finish
+			// the job(s) and relaunch another cleanupJob() while this one returns
+			go c.handleJobs(path)
+		}
+	}
 }
 
 func NewMetakvChangeListener(id, dirpath string, cancel_chan chan struct{},
@@ -50,15 +138,19 @@ func NewMetakvChangeListener(id, dirpath string, cancel_chan chan struct{},
 	logger_ctx *log.LoggerContext,
 	logger_name string,
 	utilsIn utilities.UtilsIface) *MetakvChangeListener {
-	return &MetakvChangeListener{
+	logger := log.NewLogger(logger_name, logger_ctx)
+	mcl := &MetakvChangeListener{
 		id:                         id,
 		dirpath:                    dirpath,
 		cancel_chan:                cancel_chan,
 		children_waitgrp:           children_waitgrp,
 		metadata_service_call_back: metadata_service_call_back,
-		logger:                     log.NewLogger(logger_name, logger_ctx),
+		logger:                     logger,
 		utils:                      utilsIn,
 	}
+	mcl.cbSerializer = newCallbackSerializer(logger, mcl.metakvCallback_async)
+
+	return mcl
 }
 
 func (mcl *MetakvChangeListener) Id() string {
@@ -87,8 +179,7 @@ func (mcl *MetakvChangeListener) observeChildren() {
 func (mcl *MetakvChangeListener) metakvCallback(kve metakv.KVEntry) error {
 	mcl.logger.Infof("metakvCallback called on listener %v with path = %v\n", mcl.Id(), kve.Path)
 
-	go mcl.metakvCallback_async(kve.Path, kve.Value, kve.Rev)
-
+	mcl.cbSerializer.distributeJob(kve)
 	return nil
 }
 
