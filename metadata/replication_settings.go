@@ -215,11 +215,11 @@ var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 
 var FilterSystemScopeConfig = &SettingsConfig{true, nil}
 
-var FilterBinaryDocsConfig = &SettingsConfig{false, nil}
-
 // In seconds
 var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
 
+// Note that any keys that are in the MultiValueMap should not belong here
+// Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevMainPipelineSendDelay:          XDCRDevMainPipelineSendDelayConfig,
 	DevBackfillPipelineSendDelay:      XDCRDevBackfillPipelineSendDelayConfig,
@@ -265,7 +265,6 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicateCkptIntervalKey:          ReplicateCkptIntervalConfig,
 	CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledConfig,
 	FilterSystemScopeKey:              FilterSystemScopeConfig,
-	FilterBinaryDocsKey:               FilterBinaryDocsConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
