@@ -826,6 +826,27 @@ function writeJSONDocument {
 		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData >/dev/null
 }
 
+function writeBinaryDocument {
+	local clusterName=$1
+	local bucketName=$2
+	local docName=$3
+	local binaryData=$4
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/docs/$docName \
+		--data-urlencode value=$binaryData
+}
+
+function deleteJSONDocument {
+	local clusterName=$1
+	local bucketName=$2
+	local docName=$3
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL --location --request DELETE http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/docs/$docName \
+		-u $DEFAULT_ADMIN:$DEFAULT_PW
+}
+
 function writeCollectionJSONDoc {
 	local clusterName=$1
 	local bucketName=$2
