@@ -46,7 +46,7 @@ function runDataLoad {
 	echo "RUNNING dataload DONE"
 }
 
-TOPOLOGY_RESTART_MSG="Restarting pipeline due to source topology change"
+TOPOLOGY_RESTART_MSG="Try to fix .* Restarting pipeline due to source topology change"
 
 function runOneReplicationCycle {
 	local cycleCnt=$1
