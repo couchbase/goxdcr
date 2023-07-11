@@ -122,7 +122,7 @@ function runTestCase {
 	# After sleeping, the backfill manager should have triggered the backfill
 	# 1412 items total for the above filters
 	checkItemCnt "C2" "B2" 1412
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 3))
 
 	grepForPanics
 	validateXDCRCheckpoints "C1"
