@@ -1,0 +1,15 @@
+packages:
+  github.com/couchbase/gomemcached:
+    config:
+      recursive: True
+      all: True
+      dir: "mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
+  github.com/couchbase/gomemcached/client:
+    config:
+      recursive: True
+      all: True
+      dir: "client/mocks"
+      outpkg: "mocks"
+      mockname: "{{.InterfaceName}}"
