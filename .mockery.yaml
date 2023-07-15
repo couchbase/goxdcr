@@ -1,3 +1,4 @@
+disable-version-string: True
 packages:
   github.com/couchbase/goxdcr/service_def:
     config:
