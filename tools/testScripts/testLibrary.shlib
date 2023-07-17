@@ -1560,7 +1560,7 @@ function validateVBTasksProgress {
 	local maxStaticCount=3
 	for oneVBTasks in $(echo "$vbTasksMsgs"); do
 		# This many number of VBs being supplied for tasks
-		curVBDoneCount=$(echo "$oneVBTasks" | awk '{print $10}')
+		curVBDoneCount=$(echo "$oneVBTasks" | awk '{print $11}')
 		if (($prevLineCnt == 0)); then
 			prevLineCnt=$curVBDoneCount
 		elif (($curVBDoneCount == $prevLineCnt)); then

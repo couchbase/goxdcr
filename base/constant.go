@@ -1618,3 +1618,5 @@ var ConnectionPreCheckRPCTimeout = 15 * time.Second
 var ConnErrorsListMaxEntries = 20
 var ManifestsGetterSleepTimeSecs = 1
 var ManifestsGetterMaxRetry = 8
+
+const PipelineFullTopic string = "pipelineFullTopic"

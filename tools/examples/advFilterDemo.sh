@@ -45,9 +45,15 @@ declare -A USRepl=(["filterExpression"]="$US_filter" ["replicationType"]="contin
 declare -A NonUSRepl=(["filterExpression"]="$NonUS_filter" ["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 function runDataLoad {
-	#export CBDOCLOADER="/Users/neil.huang/source/couchbase/install/bin/cbdocloader"
 	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
-	runDocLoader "HQ" "B1" "$beerSample"
+	if [[ -z "${beerSample:-}" ]]; then
+		beerSample=$(mdfind beer-sample.zip | grep install | grep samples | head -n 1)
+	fi
+	if [[ -z "${beerSample:-}" ]]; then
+		echo "Error: cannot locate beerSample"
+		exit 1
+	fi
+	runCbimport "HQ" "B1" "$beerSample"
 }
 
 function demoEcho {

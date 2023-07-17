@@ -224,7 +224,7 @@ function runReplicationResume {
 	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
 
-		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
+		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 		if (($resumeFrom0Cnt > 0)); then
 			echo "$dependentNodeName has at least one VB that resumed from seqno 0"
 			exit 1

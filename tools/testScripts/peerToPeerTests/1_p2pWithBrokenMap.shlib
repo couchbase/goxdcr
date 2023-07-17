@@ -193,7 +193,7 @@ function runReplicationResume {
 	# and there is no ckpt for the backfill tasks... so the backfill tasks would have been
 	# pulled by C1P, but no ckpt pulled
 	# That's ok... so skip checking those
-	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
+	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 	if (($resumeFrom0Cnt > 0)); then
 		echo "C1P has at least one VB that resumed from seqno 0"
 		exit 1

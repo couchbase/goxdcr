@@ -149,7 +149,7 @@ function runReplicationResume {
 	local curCkptsFoundDocsCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_FOUND_DOCS")
 	local curCkptRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$CKPT_RETRIEVED")
 	local curBackfillRetrievedCntC1P=$(echo "$logsC1P" | grep -c "$BACKFILL_CKPT_RETRIEVED")
-	local curBackfillResumeNon0CntC1P=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "BackfillPipeline" | grep -cv "${TS_PREFIX}=0")
+	local curBackfillResumeNon0CntC1P=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "backfill" | grep -cv "${TS_PREFIX}=0")
 
 	resumeReplication "C1" "B0" "C2" "B1"
 	echo "Waiting 20 seconds for resume to finish"
@@ -181,12 +181,12 @@ function runReplicationResume {
 
 	local resumeFrom0Cnt
 	local bpResumeFromNon0Cnt
-	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
+	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 	if (($resumeFrom0Cnt > 0)); then
 		echo "C1P main pipeline has at least one VB that resumed from seqno 0"
 		exit 1
 	fi
-	bpResumeFromNon0Cnt=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "BackfillPipeline" | grep -cv "${TS_PREFIX}=0")
+	bpResumeFromNon0Cnt=$(echo "$logsC1P" | grep "${TS_PREFIX}=" | grep "backfill" | grep -cv "${TS_PREFIX}=0")
 
 	if (($curBackfillResumeNon0CntC1P == $bpResumeFromNon0Cnt)); then
 		# Resume from non-0 stayed constant

@@ -12,6 +12,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
@@ -23,10 +28,6 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"reflect"
-	"strings"
-	"sync"
-	"time"
 )
 
 // configuration settings
@@ -289,7 +290,7 @@ func (pipelineSupervisor *PipelineSupervisor) checkAndLogFilterErrors() {
 				break
 			}
 			if len(errMsgs) > 0 {
-				pipelineSupervisor.Logger().Warnf("%v - Last %v filtering errors: %v", pipelineSupervisor.pipeline.Topic(), msgsPrinted, strings.Join(errMsgs, ", "))
+				pipelineSupervisor.Logger().Warnf("Last %v filtering errors: %v", msgsPrinted, strings.Join(errMsgs, ", "))
 			}
 		}
 	}
@@ -306,7 +307,7 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 		} else {
 			// should not get here
 			err = errors.New("Unknown")
-			pipelineSupervisor.Logger().Warnf("%v Received nil error from part %v\n", pipelineSupervisor.pipeline.Topic(), partId)
+			pipelineSupervisor.Logger().Warnf("Received nil error from part %v\n", partId)
 		}
 		pipelineSupervisor.setError(partId, err)
 	case common.VBErrorEncountered:
@@ -314,7 +315,7 @@ func (pipelineSupervisor *PipelineSupervisor) OnEvent(event *common.Event) {
 		vbno := additionalInfo.Vbno
 		err = additionalInfo.Error
 		errType := additionalInfo.ErrorType
-		pipelineSupervisor.Logger().Debugf("%v Received error report on vb %v. err=%v, err type=%v\n", pipelineSupervisor.pipeline.Topic(), vbno, err, errType)
+		pipelineSupervisor.Logger().Debugf("Received error report on vb %v. err=%v, err type=%v\n", vbno, err, errType)
 		settings := make(map[string]interface{})
 		if errType == base.VBErrorType_Source {
 			settings[base.ProblematicVBSource] = map[uint16]error{vbno: err}

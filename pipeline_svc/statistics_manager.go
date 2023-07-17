@@ -576,7 +576,7 @@ func (stats_mgr *StatisticsManager) processRawStats() error {
 		return err
 	}
 
-	stats_mgr.logger.Debugf("Overview=%v for pipeline %v\n", map_for_overview, stats_mgr.pipeline.Topic())
+	stats_mgr.logger.Debugf("Overview=%v for pipeline\n", map_for_overview)
 
 	// set current time to map_for_interview
 	current_time_var := new(expvar.Int)
@@ -757,7 +757,7 @@ func (stats_mgr *StatisticsManager) getDocsProcessed(vbsList []uint16, throughSe
 	return docs_processed
 }
 func (stats_mgr *StatisticsManager) logChangesLeft(total_changes, docs_processed, changes_left int64) {
-	stats_mgr.logger.Infof("%v total_docs=%v, docs_processed=%v, changes_left=%v\n", stats_mgr.pipeline.FullTopic(), total_changes, docs_processed, changes_left)
+	stats_mgr.logger.Infof("total_docs=%v, docs_processed=%v, changes_left=%v\n", total_changes, docs_processed, changes_left)
 }
 
 func (stats_mgr *StatisticsManager) calculateChangesLeftAndDocsProcessedBackfillPipeline() (int64, int64, []uint16, error) {
@@ -852,7 +852,7 @@ func (stats_mgr *StatisticsManager) Attach(pipeline common.Pipeline) error {
 
 	//register the aggregation metrics for the pipeline
 	stats_mgr.initOverviewRegistry()
-	stats_mgr.logger.Infof("StatisticsManager is started for %v %v", stats_mgr.pipeline.Type(), stats_mgr.pipeline.FullTopic())
+	stats_mgr.logger.Infof("StatisticsManager is started")
 
 	return nil
 }
@@ -2218,7 +2218,7 @@ func constructStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIfac
 				backfillTopic := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
 				backfillDocsProcessed, err = getDocsProcessedForReplication(backfillTopic, curVbListRo, checkpoints_svc, logger)
 				if err != nil {
-					logger.Warnf("Unable to get backfill docs processed for %v", backfillTopic)
+					logger.Warnf("Unable to get backfill docs processed")
 				} else {
 					docs_processed += backfillDocsProcessed
 				}

@@ -12,6 +12,9 @@ package pipeline_svc
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	comp "github.com/couchbase/goxdcr/component"
@@ -20,8 +23,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"sync"
-	"time"
 )
 
 var source_topology_changedErr = errors.New("Topology has changed on source cluster")
@@ -126,7 +127,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline
 		top_detect_svc.bucketTopSubscriberId = fmt.Sprintf("%v_%v_%v", "topologySvc", pipeline.InstanceId(), base.GetIterationId(&topologyDetectorIterationId))
 	}
 
-	top_detect_svc.logger.Infof("Attaching %v pipeline %v", pipelineType, pipeline.Topic())
+	top_detect_svc.logger.Infof("Attaching %v pipeline", pipelineType)
 	top_detect_svc.pipelines = append(top_detect_svc.pipelines, pipeline)
 	top_detect_svc.detachCbs = append(top_detect_svc.detachCbs, nil)
 
@@ -154,7 +155,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 					startErr = err
 					return
 				}
-				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v Starting...", pipeline.Topic())
+				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline Starting...")
 
 				go top_detect_svc.initializeMonitors()
 
@@ -163,7 +164,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 					startErr = err
 					return
 				}
-				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v has started", pipeline.Topic())
+				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline has started")
 			})
 			if startErr != nil {
 				return startErr
@@ -174,10 +175,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSetti
 			if err != nil {
 				return err
 			}
-			top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for secondary pipeline %v Starting...", pipeline.Topic())
+			top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for secondary pipeline Starting...")
 			top_detect_svc.detachCbs[i] = func() {
 				err := top_detect_svc.UnRegisterComponentEventListener(common.ErrorEncountered, supervisor.(*PipelineSupervisor))
-				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for %v %v stopping by deregistering listener with err %v", pipeline.Type(), pipeline.Topic(), err)
+				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc stopping by deregistering listener with err %v", err)
 			}
 		}
 	}
@@ -217,7 +218,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) initializeMonitors() {
 func (top_detect_svc *TopologyChangeDetectorSvc) Stop() error {
 	close(top_detect_svc.finish_ch)
 	top_detect_svc.wait_grp.Wait()
-	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v has stopped", top_detect_svc.mainPipelineTopic)
+	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline has stopped")
 	return nil
 
 }
@@ -233,20 +234,20 @@ func (top_detect_svc *TopologyChangeDetectorSvc) pipelineHasStopped() bool {
 	top_detect_svc.pipelinesMtx.RUnlock()
 	if !mainPipelineExists || !pipeline_utils.IsPipelineRunning(mainPipelineState) {
 		//pipeline is no longer running, kill itself
-		top_detect_svc.logger.Infof("Pipeline %v is no longer running. TopologyChangeDetectorSvc is exitting.", top_detect_svc.mainPipelineTopic)
+		top_detect_svc.logger.Infof("Pipeline is no longer running. TopologyChangeDetectorSvc is exitting.")
 		return true
 	}
 	return false
 }
 
 func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vblist_supposed []uint16, number_of_source_nodes int, err_in error) error {
-	defer top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v handleSourceTopologyChange completed", top_detect_svc.mainPipelineTopic)
+	defer top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline handleSourceTopologyChange completed")
 
 	var err error
 	if vblist_supposed != nil {
 		vblist_removed, vblist_new, _ := base.ComputeDeltaOfUint16Lists(top_detect_svc.vblist_original, vblist_supposed, false)
 		if len(vblist_removed) > 0 || len(vblist_new) > 0 {
-			top_detect_svc.logger.Infof("Source topology changed for pipeline %v: vblist_removed=%v, vblist_new=%v\n", top_detect_svc.mainPipelineTopic, vblist_removed, vblist_new)
+			top_detect_svc.logger.Infof("Source topology changed for pipeline: vblist_removed=%v, vblist_new=%v\n", vblist_removed, vblist_new)
 		}
 
 		// first check if relevant problematic vbs in pipeline are due to source topology changes.
@@ -268,13 +269,13 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 
 	if err_in == source_topology_changedErr || top_detect_svc.source_topology_change_count > 0 {
 		top_detect_svc.source_topology_change_count++
-		top_detect_svc.logger.Infof("Number of source topology changes seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.source_topology_change_count)
+		top_detect_svc.logger.Infof("Number of source topology changes seen by pipeline is %v\n", top_detect_svc.source_topology_change_count)
 		if top_detect_svc.source_topology_change_count == 1 {
 			// First instance of topology change, start timer
 			top_detect_svc.sourceTopologyMaxWaitTime = time.Now().Add(time.Duration(secsForMaxTopologyChange) * time.Second)
 			top_detect_svc.sourceTopologyMaxWait = time.AfterFunc(time.Duration(secsForMaxTopologyChange)*time.Second, func() {
 				sourceTopoChangeRestartString := "Restarting pipeline due to source topology change..."
-				top_detect_svc.logger.Warnf("Pipeline %v: %v", top_detect_svc.mainPipelineTopic, sourceTopoChangeRestartString)
+				top_detect_svc.logger.Warnf("%v", sourceTopoChangeRestartString)
 				err = errors.New(sourceTopoChangeRestartString)
 				top_detect_svc.restartPipeline(err)
 			})
@@ -284,7 +285,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 		if vblist_supposed != nil {
 			if base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_last, vblist_supposed) {
 				top_detect_svc.source_topology_stable_count++
-				top_detect_svc.logger.Infof("Number of consecutive stable source topology seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.source_topology_stable_count)
+				top_detect_svc.logger.Infof("Number of consecutive stable source topology seen by pipeline is %v\n", top_detect_svc.source_topology_stable_count)
 				if top_detect_svc.source_topology_stable_count == 1 {
 					// First instance of stable count, start timer
 					top_detect_svc.sourceTopologyMaxStableWaitTime = time.Now().Add(time.Duration(secsForMaxStableTopologyChange) * time.Second)
@@ -311,8 +312,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 			// the bandwith limit assigned to the current node needs to be changed as well
 			// update pipeline settings to get bandwith throttler updated
 			if number_of_source_nodes != top_detect_svc.number_of_source_nodes {
-				top_detect_svc.logger.Infof("Number of source nodes for pipeline %v has changed from %v to %v. Updating bandwidth throttler setting.",
-					top_detect_svc.mainPipelineTopic, top_detect_svc.number_of_source_nodes, number_of_source_nodes)
+				top_detect_svc.logger.Infof("Number of source nodes has changed from %v to %v. Updating bandwidth throttler setting.",
+					top_detect_svc.number_of_source_nodes, number_of_source_nodes)
 				settings := make(map[string]interface{})
 				settings[NUMBER_OF_SOURCE_NODES] = number_of_source_nodes
 				top_detect_svc.pipelinesMtx.RLock()
@@ -320,7 +321,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleSourceTopologyChange(vbli
 					for _, pipeline := range top_detect_svc.pipelines {
 						updateErr := pipeline.UpdateSettings(settings)
 						if updateErr != nil {
-							top_detect_svc.logger.Errorf("updating %v to %v: %v", settings, pipeline.FullTopic(), updateErr)
+							top_detect_svc.logger.Errorf("updating %v: %v", settings, updateErr)
 						}
 					}
 				}
@@ -415,11 +416,11 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 			top_detect_svc.targetTopologyMaxWaitTime = time.Now().Add(time.Duration(secsForMaxTopologyChange) * time.Second)
 			top_detect_svc.needToPostTargetTopologyEvent = true
 		}
-		top_detect_svc.logger.Infof("Number of target topology changes seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.target_topology_change_count)
+		top_detect_svc.logger.Infof("Number of target topology changes seen by pipeline is %v\n", top_detect_svc.target_topology_change_count)
 		// restart pipeline if consecutive topology changes reaches limit -- cannot wait any longer
 		if top_detect_svc.target_topology_change_count >= base.MaxTopologyChangeCountBeforeRestart {
 			var targetTopoChangeRestartString = "Restarting pipeline due to target topology change..."
-			top_detect_svc.logger.Warnf("Pipeline %v: %v", top_detect_svc.mainPipelineTopic, targetTopoChangeRestartString)
+			top_detect_svc.logger.Warnf("%v", targetTopoChangeRestartString)
 			err = errors.New(targetTopoChangeRestartString)
 			top_detect_svc.restartPipeline(err)
 			return err
@@ -433,7 +434,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 					top_detect_svc.targetTopologyMaxStableWaitTime = time.Now().Add(time.Duration(secsForMaxStableTopologyChange) * time.Second)
 					top_detect_svc.needToPostTargetTopologyEvent = true
 				}
-				top_detect_svc.logger.Infof("Number of stable target topology seen by pipeline %v is %v\n", top_detect_svc.mainPipelineTopic, top_detect_svc.target_topology_stable_count)
+				top_detect_svc.logger.Infof("Number of stable target topology seen by pipeline is %v\n", top_detect_svc.target_topology_stable_count)
 				if top_detect_svc.target_topology_stable_count >= base.MaxTopologyStableCountBeforeRestart {
 					// restart pipeline if target topology change has stopped for a while and is assumbly completed
 					err = fmt.Errorf("Target topology change for pipeline %v seems to have completed.", top_detect_svc.mainPipelineTopic)
@@ -465,7 +466,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 		}
 	}
 
-	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v handleTargetTopologyChange completed", top_detect_svc.mainPipelineTopic)
+	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline handleTargetTopologyChange completed")
 	return nil
 }
 
@@ -498,7 +499,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) validateVbErrors(diff_vb_list [
 	for vbno, vb_err := range vb_err_map {
 		_, found := base.SearchVBInSortedList(vbno, diff_vb_list)
 		if !found {
-			top_detect_svc.logger.Errorf("Vbucket %v for pipeline %v saw an error, %v, that had not been caused by topology changes. diff_vb_list=%v", vbno, top_detect_svc.mainPipelineTopic, vb_err, diff_vb_list)
+			top_detect_svc.logger.Errorf("Vbucket %v for pipeline saw an error, %v, that had not been caused by topology changes. diff_vb_list=%v", vbno, vb_err, diff_vb_list)
 			top_detect_svc.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, top_detect_svc, nil, vb_err))
 			return vb_err
 		}
@@ -551,7 +552,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Detach(pipeline common.Pipeline
 
 	for i, attachedP := range top_detect_svc.pipelines {
 		if pipeline.FullTopic() == attachedP.FullTopic() {
-			top_detect_svc.logger.Infof("Detaching %v %v", attachedP.Type(), attachedP.Topic())
+			top_detect_svc.logger.Infof("Detaching")
 			idxToDel = i
 			break
 		}
@@ -604,7 +605,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 				if err != nil {
 					top_detect_svc.logger.Warnf("Unsubscribing local bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
 				}
-				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v received finish signal and is exiting", top_detect_svc.mainPipelineTopic)
+				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline received finish signal and is exiting")
 				return
 			case notification := <-sourceVbUpdateCh:
 				var updateOnceErr error
@@ -636,8 +637,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 				base.SortUint16List(vblist_supposed)
 
 				if !base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_original, vblist_supposed) {
-					top_detect_svc.logger.Infof("Source topology has changed for pipeline %v\n", top_detect_svc.mainPipelineTopic)
-					top_detect_svc.logger.Infof("Pipeline %v - vblist_supposed=%v, vblist_now=%v\n", top_detect_svc.mainPipelineTopic, vblist_supposed, top_detect_svc.vblist_original)
+					top_detect_svc.logger.Infof("Source topology has changed for pipeline\n")
+					top_detect_svc.logger.Infof("vblist_supposed=%v, vblist_now=%v\n", vblist_supposed, top_detect_svc.vblist_original)
 					updateOnceErr = source_topology_changedErr
 				}
 
@@ -647,7 +648,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 					if err == errPipelinesDetached {
 						return
 					}
-					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when handling source topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
+					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when handling source topology change. err=%v", err)
 				}
 			}
 		}
@@ -693,7 +694,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				if err != nil {
 					top_detect_svc.logger.Warnf("Unsubscribing remote bucket feed for %v resulted in %v", mainPipeline.InstanceId(), err)
 				}
-				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline %v validateTargetTopology completed", top_detect_svc.mainPipelineTopic)
+				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc validateTargetTopology completed")
 				return
 			case notification := <-targetVbUpdateCh:
 				if top_detect_svc.pipelineHasStopped() {
@@ -723,7 +724,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				var errToHandleTargetChange error
 				if len(diff_vb_list) > 0 {
 					errToHandleTargetChange = target_topology_changedErr
-					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when validating target topology change. err=%v", top_detect_svc.mainPipelineTopic, errToHandleTargetChange)
+					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when validating target topology change. err=%v", errToHandleTargetChange)
 				}
 				err := top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
 				notification.Recycle()
@@ -731,7 +732,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 					if err == errPipelinesDetached {
 						return
 					}
-					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc for pipeline %v received error when handling target topology change. err=%v", top_detect_svc.mainPipelineTopic, err)
+					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when handling target topology change. err=%v", err)
 				}
 			}
 		}

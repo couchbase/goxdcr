@@ -11,6 +11,9 @@ package pipeline
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	log "github.com/couchbase/goxdcr/log"
@@ -19,8 +22,6 @@ import (
 	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"sync"
-	"time"
 )
 
 var ErrorKey = "Error"
@@ -287,7 +288,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		genericPipeline.runP2PProtocol(&p2pErrMap)
 		if len(p2pErrMap) > 0 {
 			// Any P2P pull error should be ignored for now and continue
-			genericPipeline.logger.Warnf("P2P PreReplicate for %v Ckpt Pull and merge had errors but will continue to replicate: %v", genericPipeline.FullTopic(), p2pErrMap)
+			genericPipeline.logger.Warnf("P2P PreReplicate Ckpt Pull and merge had errors but will continue to replicate: %v", p2pErrMap)
 		}
 		genericPipeline.ReportProgress(common.ProgressP2PDoneMerge)
 	}
@@ -341,7 +342,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		return errMap
 	}
 
-	genericPipeline.logger.Infof("%v %v %v", genericPipeline.Type(), genericPipeline.Topic(), common.ProgressPartsStarted)
+	genericPipeline.logger.Infof("%v", common.ProgressPartsStarted)
 	genericPipeline.ReportProgress(common.ProgressPartsStarted)
 
 	//open targets
@@ -353,7 +354,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 			return errMap
 		}
 	}
-	genericPipeline.logger.Debugf("%v %v", genericPipeline.Topic(), common.ProgressOutNozzleOpened)
+	genericPipeline.logger.Debugf("%v", common.ProgressOutNozzleOpened)
 	genericPipeline.ReportProgress(common.ProgressOutNozzleOpened)
 
 	//open source
@@ -366,7 +367,7 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 			return errMap
 		}
 	}
-	genericPipeline.logger.Debugf("%v %v", genericPipeline.FullTopic(), common.ProgressInNozzleOpened)
+	genericPipeline.logger.Debugf("%v", common.ProgressInNozzleOpened)
 	genericPipeline.ReportProgress(common.ProgressInNozzleOpened)
 
 	err = genericPipeline.SetState(common.Pipeline_Running)

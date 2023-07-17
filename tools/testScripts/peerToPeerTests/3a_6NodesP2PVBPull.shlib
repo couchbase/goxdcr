@@ -248,7 +248,7 @@ function runReplicationResume {
 	for dependentNodeName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
 
-		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "BackfillPipeline" | grep -c "${TS_PREFIX}=0")
+		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 		if (($resumeFrom0Cnt > $vbsPerNode)); then
 			# If each main pipeline has more its share of VBs that it owns and started from seqno 0, most likely
 			# it means that its responsible share of the VBs did not resume correctly

@@ -16,6 +16,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -75,6 +77,30 @@ type CommonLogger struct {
 type LoggerContext struct {
 	Log_writers map[LogLevel]*LogWriter
 	Log_level   LogLevel
+
+	additionalInfo      map[string]string
+	additionalInfoCache string
+	additionalInfoLock  sync.RWMutex
+}
+
+func (lc *LoggerContext) AddMoreContext(info map[string]string) {
+	lc.additionalInfoLock.Lock()
+	defer lc.additionalInfoLock.Unlock()
+
+	if info == nil {
+		return
+	}
+
+	for key, val := range info {
+		lc.additionalInfo[key] = val
+	}
+
+	// cache the concatenated result to be logged
+	var additionalLogMsg strings.Builder
+	for key, val := range lc.additionalInfo {
+		additionalLogMsg.WriteString(fmt.Sprintf("%v=%v, ", key, val))
+	}
+	lc.additionalInfoCache = additionalLogMsg.String()
 }
 
 func (lc *LoggerContext) SetLogLevel(logLevel LogLevel) {
@@ -94,9 +120,22 @@ func (lw *LogWriter) Write(p []byte) (n int, err error) {
 	return lw.writer.Write(p)
 }
 
+func cloneStringToStringMap(mp map[string]string) map[string]string {
+	copy := make(map[string]string)
+	for key, val := range mp {
+		copy[key] = val
+	}
+	return copy
+}
+
 func CopyCtx(ctx_to_copy *LoggerContext) *LoggerContext {
+	ctx_to_copy.additionalInfoLock.RLock()
+	defer ctx_to_copy.additionalInfoLock.RUnlock()
 	return &LoggerContext{Log_writers: ctx_to_copy.Log_writers,
-		Log_level: ctx_to_copy.Log_level}
+		Log_level:           ctx_to_copy.Log_level,
+		additionalInfo:      cloneStringToStringMap(ctx_to_copy.additionalInfo),
+		additionalInfoCache: ctx_to_copy.additionalInfoCache,
+	}
 }
 
 var DefaultLoggerContext *LoggerContext
@@ -113,8 +152,10 @@ func init() {
 	logWriters[LogLevelTrace] = logWriter
 
 	DefaultLoggerContext = &LoggerContext{
-		Log_writers: logWriters,
-		Log_level:   LogLevelInfo,
+		Log_writers:         logWriters,
+		Log_level:           LogLevelInfo,
+		additionalInfo:      make(map[string]string),
+		additionalInfoCache: "",
 	}
 }
 
@@ -167,13 +208,25 @@ func NewLogger(module string, logger_context *LoggerContext) *CommonLogger {
 
 func (l *CommonLogger) logMsgf(level LogLevel, format string, v ...interface{}) {
 	if l != nil && l.context.Log_level >= level {
-		l.loggers[level].logger.Printf(l.processCommonFields(level)+format, v...)
+		var logFormat strings.Builder
+		logFormat.WriteString(l.processCommonFields(level))
+		l.context.additionalInfoLock.RLock()
+		logFormat.WriteString(l.context.additionalInfoCache)
+		l.context.additionalInfoLock.RUnlock()
+		logFormat.WriteString(format)
+		l.loggers[level].logger.Printf(logFormat.String(), v...)
 	}
 }
 
 func (l *CommonLogger) logMsg(level LogLevel, msg string) {
 	if l != nil && l.context.Log_level >= level {
-		l.loggers[level].logger.Println(l.processCommonFields(level) + msg)
+		var logFormat strings.Builder
+		logFormat.WriteString(l.processCommonFields(level))
+		l.context.additionalInfoLock.RLock()
+		logFormat.WriteString(l.context.additionalInfoCache)
+		l.context.additionalInfoLock.RUnlock()
+		logFormat.WriteString(msg)
+		l.loggers[level].logger.Println(logFormat.String())
 	}
 }
 

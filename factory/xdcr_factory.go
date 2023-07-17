@@ -179,6 +179,8 @@ var factoryIterationId uint32
 func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.PipelineType, spec *metadata.ReplicationSpecification, progress_recorder common.PipelineProgressRecorder) (common.Pipeline, func(*common.Pipeline) error, error) {
 	logger_ctx := log.CopyCtx(xdcrf.default_logger_ctx)
 	logger_ctx.SetLogLevel(spec.Settings.LogLevel)
+	replicationLogCtx := map[string]string{base.PipelineFullTopic: common.ComposeFullTopic(topic, pipelineType)}
+	logger_ctx.AddMoreContext(replicationLogCtx)
 
 	sourcebucketFeed, err := xdcrf.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, xdcrf.bucketSvcId)
 	if err != nil {

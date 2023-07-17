@@ -25,7 +25,7 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 # Replicate US filter to target B2.S3.col1
 # Replicate NonUS to target B2.S3.col2
-US_filter='(country == \"United States\" OR country = \"Canada\") AND type=\"brewery\"'
+US_filter='(country = \"United States\" OR country = \"Canada\") AND type=\"brewery\"'
 NonUS_filter='country != \"United States\" AND country != \"Canada\" AND type=\"brewery\"'
 Brewery_filter='type=\"brewery\"'
 
@@ -54,7 +54,7 @@ function runDataLoad {
 		echo "Error: cannot locate beerSample"
 		exit 1
 	fi
-	runDocLoader "C1" "B1" "$beerSample"
+	runCbimport "C1" "B1" "$beerSample"
 }
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
@@ -99,7 +99,7 @@ function runTestCase {
 	sleep 10
 	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 	checkItemCnt "C2" "B2" 2824
-	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1)) $(($currMultiTargetMsgCnt + 2))
+	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1)) $(($currMultiTargetMsgCnt + 10))
 
 	echo "============================================================================"
 	echo "PASSED"

@@ -83,7 +83,7 @@ func (ctx *PipelineRuntimeCtx) Start(params metadata.ReplicationSettingsMap) err
 				ctx.logger.Errorf("%v", err1)
 				return err1
 			}
-			ctx.logger.Infof("Service %v has been started for %v", name, topic)
+			ctx.logger.Infof("Service %v has been started", name)
 		}
 		return nil
 	}
@@ -91,9 +91,9 @@ func (ctx *PipelineRuntimeCtx) Start(params metadata.ReplicationSettingsMap) err
 	// put a timeout around service starting to avoid being stuck
 	err := base.ExecWithTimeout(startServicesFunc, base.TimeoutRuntimeContextStart, ctx.logger)
 	if err != nil {
-		ctx.logger.Errorf("%v error starting pipeline context. err=%v", topic, err)
+		ctx.logger.Errorf("error starting pipeline context. err=%v", err)
 	} else {
-		ctx.logger.Infof("%v pipeline context has started successfully", topic)
+		ctx.logger.Infof("pipeline context has started successfully")
 	}
 
 	if err == nil {
@@ -139,13 +139,13 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 	if err != nil {
 		// if err is not nill, it is possible that stopServicesFunc is still running and may still access errMap
 		// return errMap1 instead of errMap to avoid race conditions
-		ctx.logger.Warnf("%v Error detaching pipeline context. err=%v", topic, err)
+		ctx.logger.Warnf("Error detaching pipeline context. err=%v", err)
 		errMap1 := make(base.ErrorMap)
 		errMap1[RuntimeContext] = err
 		return errMap1
 	}
 
-	ctx.logger.Infof("%v Pipeline context is stopping...", topic)
+	ctx.logger.Infof("Pipeline context is stopping...")
 
 	stopServicesFunc := func() error {
 		ctx.runtime_svcs_lock.RLock()
@@ -180,40 +180,30 @@ func (ctx *PipelineRuntimeCtx) Stop() base.ErrorMap {
 	if err != nil {
 		// if err is not nill, it is possible that stopServicesFunc is still running and may still access errMap
 		// return errMap1 instead of errMap to avoid race conditions
-		ctx.logger.Warnf("%v Error stopping pipeline context. err=%v", topic, err)
+		ctx.logger.Warnf("Error stopping pipeline context. err=%v", err)
 		errMap1 := make(base.ErrorMap)
 		errMap1[RuntimeContext] = err
 		return errMap1
 	}
 
-	ctx.logger.Infof("%v pipeline context has stopped successfully", topic)
+	ctx.logger.Infof("pipeline context has stopped successfully")
 	return errMap
 }
 
 func (ctx *PipelineRuntimeCtx) stopService(name string, service common.PipelineService, waitGrp *sync.WaitGroup, errCh chan base.ComponentError) {
 	defer waitGrp.Done()
 
-	topic := ""
-	if ctx.pipeline != nil {
-		topic = ctx.pipeline.FullTopic()
-	}
-
 	err := service.Stop()
 	if err != nil {
-		ctx.logger.Warnf("%v failed to stop service %s. err=%v", topic, name, err)
+		ctx.logger.Warnf("failed to stop service %s. err=%v", name, err)
 		errCh <- base.ComponentError{name, err}
 	} else {
-		ctx.logger.Infof("%v successfully stopped service %s.", topic, name)
+		ctx.logger.Infof("successfully stopped service %s.", name)
 	}
 }
 
 func (ctx *PipelineRuntimeCtx) detachService(name string, service common.PipelineService, waitGrp *sync.WaitGroup, errCh chan base.ComponentError) {
 	defer waitGrp.Done()
-
-	topic := ""
-	if ctx.pipeline != nil {
-		topic = ctx.pipeline.FullTopic()
-	}
 
 	if !service.IsSharable() {
 		return
@@ -221,10 +211,10 @@ func (ctx *PipelineRuntimeCtx) detachService(name string, service common.Pipelin
 
 	err := service.Detach(ctx.pipeline)
 	if err != nil && err != base.ErrorNotSupported {
-		ctx.logger.Warnf("%v failed to detach service %s. err=%v", topic, name, err)
+		ctx.logger.Warnf("failed to detach service %s. err=%v", name, err)
 		errCh <- base.ComponentError{name, err}
 	} else {
-		ctx.logger.Infof("%v successfully detached service %s.", topic, name)
+		ctx.logger.Infof("successfully detached service %s.", name)
 	}
 }
 
@@ -302,5 +292,5 @@ func (ctx *PipelineRuntimeCtx) UpdateSettings(settings metadata.ReplicationSetti
 	return nil
 }
 
-//enforcer for PipelineRuntimeCtx to implement PipelineRuntimeContext
+// enforcer for PipelineRuntimeCtx to implement PipelineRuntimeContext
 var _ common.PipelineRuntimeContext = (*PipelineRuntimeCtx)(nil)

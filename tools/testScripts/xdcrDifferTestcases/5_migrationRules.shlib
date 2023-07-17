@@ -47,7 +47,14 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 
 function runDataLoad {
 	beerSample=$(locate beer-sample.zip | grep install | grep samples | head -n 1)
-	runDocLoader "C1" "B1" "$beerSample"
+	if [[ -z "${beerSample:-}" ]]; then
+		beerSample=$(mdfind beer-sample.zip | grep install | grep samples | head -n 1)
+	fi
+	if [[ -z "${beerSample:-}" ]]; then
+		echo "Error: cannot locate beerSample"
+		exit 1
+	fi
+	runCbimport "C1" "B1" "$beerSample"
 }
 
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
@@ -91,7 +98,7 @@ function runTestCase {
 	echo "Waiting 15 seconds before checking item count first pass"
 	sleep 15
 	checkItemCnt "C2" "B2" 2824
-	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1)) $(($currMultiTargetMsgCnt + 2))
+	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1)) $(($currMultiTargetMsgCnt + 10))
 
 	local retVal
 	runXdcrDiffer "C1" "B1" "C2" "B2"

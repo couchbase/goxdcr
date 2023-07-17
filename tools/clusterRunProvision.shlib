@@ -1380,10 +1380,58 @@ function findCbDocLoader {
 
 }
 
+function findCbimport {
+	if [[ ! -z "${CBIMPORT:-}" ]]; then
+		echo "$CBIMPORT"
+		return 0
+	fi
+
+	local cbimport
+	local command=locate
+
+	# need to have locate or mdfind
+	which locate >/dev/null 2>&1
+	if (($? != 0)); then
+		# locate is not present, use mdfind
+		which mdfind >/dev/null 2>&1
+		if (($? != 0)); then
+			# mdfind also not present
+			echo "locate or mdfind not found"
+			return $?
+		fi
+
+		# use mdfind instead of locate
+		command=mdfind
+	fi
+
+	cbimport=$($command cbimport | grep install | grep bin | head -n 1)
+	if (($? != 0)); then
+		echo ""
+		return 1
+	fi
+
+	# there may be cases where locate database isn't updated yet, try using mdfind
+	if [[ -z "${cbimport:-}" && "$command" == "locate" ]]; then
+		cbimport=$(mdfind cbimport | grep install | grep bin | head -n 1)
+		if (($? != 0)); then
+			echo ""
+			return 1
+		fi
+	fi
+	echo "$cbimport"
+
+	if [[ -z "${CBIMPORT:-}" ]]; then
+		# set it in case needed it in future
+		export CBIMPORT=$cbimport
+	fi
+	return 0
+}
+
 #Input
 # 1 - cluster name
 # 2 - bucket name
 # 3 - file name
+# cbdocloader is deprecated. Use runCbimport instead
 function runDocLoader {
 	local clusterName=$1
 	local bucketName=$2
@@ -1411,6 +1459,34 @@ function runDocLoader {
 	while (($retCode > 0)); do
 		Echo "Executing cbdocloader on bucket $bucketName for file $fileName..."
 		$docLoader -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucketName -m $ramQuota -d $fileName
+		retCode=$?
+	done
+}
+
+#Input
+# 1 - cluster name
+# 2 - bucket name
+# 3 - file name
+function runCbimport {
+	local clusterName=$1
+	local bucketName=$2
+	local fileName=$3
+	if [[ -z "${clusterName:-}" ]] || [[ -z "${bucketName:-}" ]] || [[ -z "${fileName:-}" ]]; then
+		echo "Invalid input"
+		return 1
+	fi
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	cbimport=$(findCbimport)
+	if (($? != 0)); then
+		echo "Could not find cbimport"
+		return 1
+	fi
+
+	local retCode=1
+	while (($retCode > 0)); do
+		Echo "Executing cbimport on bucket $bucketName for file $fileName..."
+		$cbimport json -f sample -b $bucketName -c localhost:${port} -u $DEFAULT_ADMIN -p $DEFAULT_PW -d $fileName
 		retCode=$?
 	done
 }
@@ -2132,9 +2208,9 @@ function getSetVBTimestampMsgsFromLogs {
 	fi
 
 	if [[ -z "${backfillPipeline:-}" ]]; then
-		getInternalNodeXdcrLog "$logNodeName" | grep "MainPipeline ${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
+		getInternalNodeXdcrLog "$logNodeName" | grep "${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep -v "backfill" | grep "Set VBTimestamp"
 	else
-		getInternalNodeXdcrLog "$logNodeName" | grep "BackfillPipeline backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
+		getInternalNodeXdcrLog "$logNodeName" | grep "backfill_${clusterUuid}/${srcBucketName}/${tgtBucketName}" | grep "Set VBTimestamp"
 	fi
 }
 
@@ -2146,8 +2222,8 @@ function parseSetVBTimestamps {
 	input=$(cat)
 	IFS=$'\n'
 	for oneLine in $(echo "$input"); do
-		local vb=$(echo "$oneLine" | awk '{print $8}' | sed 's/,//g' | sed 's/vb=//g')
-		local startingSeqno=$(echo "$oneLine" | awk '{print $9}' | sed 's/,//g' | sed 's/ts.Seqno=//g')
+		local vb=$(echo "$oneLine" | awk '{print $7}' | sed 's/,//g' | sed 's/vb=//g')
+		local startingSeqno=$(echo "$oneLine" | awk '{print $8}' | sed 's/,//g' | sed 's/ts.Seqno=//g')
 		if [[ -z "$vb" ]] || [[ -z "$startingSeqno" ]]; then
 			echo "Unable to parse"
 			IFS="$OLDIFS"
@@ -2182,8 +2258,8 @@ function getFirstNon0VB {
 	input=$(cat)
 	IFS=$'\n'
 	for oneLine in $(echo "$input"); do
-		local vb=$(echo "$oneLine" | awk '{print $8}' | sed 's/,//g' | sed 's/vb=//g')
-		local startingSeqno=$(echo "$oneLine" | awk '{print $9}' | sed 's/,//g' | sed 's/ts.Seqno=//g')
+		local vb=$(echo "$oneLine" | awk '{print $7}' | sed 's/,//g' | sed 's/vb=//g')
+		local startingSeqno=$(echo "$oneLine" | awk '{print $8}' | sed 's/,//g' | sed 's/ts.Seqno=//g')
 		if [[ -z "$vb" ]] || [[ -z "$startingSeqno" ]]; then
 			echo "Unable to parse"
 			IFS="$OLDIFS"
