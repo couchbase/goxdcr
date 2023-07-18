@@ -316,18 +316,24 @@ func (s StatsLabels) SameAs(other StatsLabels) bool {
 func (s StatsLabels) ToGenerics() []interface{} {
 	var generics []interface{}
 	for _, label := range s {
-		generics = append(generics, label)
+		if label.HasNameOnly() {
+			generics = append(generics, label.Name)
+		} else {
+			generics = append(generics, label)
+		}
 	}
 	return generics
 }
 
 type statsLabelMetaObj struct {
 	Name       string `json:"name"`
-	Help       string `json:"help"`
+	Help       string `json:"help,omitempty"`
 	Added      string `json:"added,omitempty"`
 	Deprecated string `json:"deprecated,omitempty"`
 }
 
+// Name is mandatory
+// the other fields are not
 type StatsLabel struct {
 	Name       string
 	Help       string
@@ -336,10 +342,12 @@ type StatsLabel struct {
 }
 
 func (s StatsLabel) SameAs(other StatsLabel) bool {
-	return s.Name == other.Name &&
-		s.Help == other.Help &&
-		s.Added.SameAs(other.Added) &&
-		s.Deprecated.SameAs(other.Deprecated)
+	return s.Name == other.Name && s.Help == other.Help &&
+		s.Added.SameAs(other.Added) && s.Deprecated.SameAs(other.Deprecated)
+}
+
+func (s StatsLabel) HasNameOnly() bool {
+	return s.Help == "" && len(s.Added) == 0 && len(s.Deprecated) == 0
 }
 
 func (s StatsLabel) MarshalJSON() ([]byte, error) {
@@ -372,47 +380,13 @@ func (s StatsLabel) UnmarshalJSON(b []byte) error {
 }
 
 var (
-	NetworkThroughput = StatsLabel{
-		Name:  "throughput",
-		Help:  "Related to replication throughput",
-		Added: base.VersionForPrometheusSupport,
-	}
-	NetworkLatency = StatsLabel{
-		Name:  "latency",
-		Help:  "Related to replication latency",
-		Added: base.VersionForPrometheusSupport,
-	}
-	KvOp = StatsLabel{
-		Name:  "kvOp",
-		Help:  "Involves KV operation",
-		Added: base.VersionForPrometheusSupport,
-	}
-	DiskLatency = StatsLabel{
-		Name:  "diskLatency",
-		Help:  "Latency due to disk operation",
-		Added: base.VersionForPrometheusSupport,
-	}
-	ProcessLatency = StatsLabel{
-		Name:  "processLatency",
-		Help:  "Latency due to how busy XDCR process is, or due to induced latency like throttler",
-		Added: base.VersionForPrometheusSupport,
-	}
-	InternalError = StatsLabel{
-		Name:  "internalError",
-		Help:  "Related to potential error conditions in the XDCR processing",
-		Added: base.VersionForPrometheusSupport,
-	}
-	DocCountDiverge = StatsLabel{
-		Name:  "docCountDiverge",
-		Help:  "Could cause document count between source and target bucket to be different per design",
-		Added: base.VersionForPrometheusSupport,
-	}
-	Operation = StatsLabel{
-		Name:  "pipelineOperation",
-		Help:  "Stats related to operation mode or status updates",
-		Added: base.VersionForSupportability,
-	}
+	SourceBucketNameLabel  = StatsLabel{Name: PrometheusSourceBucketLabel}
+	TargetBucketNameLabel  = StatsLabel{Name: PrometheusTargetBucketLabel}
+	TargetClusterUUIDLabel = StatsLabel{Name: PrometheusTargetClusterUuidLabel}
+	PipelineTypeLabel      = StatsLabel{Name: PrometheusPipelineTypeLabel}
 )
+
+var StandardLabels = StatsLabels{SourceBucketNameLabel, TargetClusterUUIDLabel, TargetBucketNameLabel, PipelineTypeLabel}
 
 // See: https://docs.google.com/document/d/183VfS6fi-Tn0lHc6oEHPFQgOmYOgnwbM28zWtGbyTUg/edit#
 type statsPropertyMetaObj struct {
@@ -448,9 +422,15 @@ func (s *statsPropertyMetaObj) ToStatsProperty() (*StatsProperty, error) {
 
 	var labels []StatsLabel
 	for _, labelRaw := range s.Labels {
-		label, ok := labelRaw.(StatsLabel)
-		if !ok {
-			return nil, fmt.Errorf("Type is not StatsLabel but %v", reflect.TypeOf(labelRaw))
+		var label StatsLabel
+		labelName, ok := labelRaw.(string)
+		if ok {
+			label = StatsLabel{Name: labelName}
+		} else {
+			label, ok = labelRaw.(StatsLabel)
+			if !ok {
+				return nil, fmt.Errorf("Type is not StatsLabel but %v", reflect.TypeOf(labelRaw))
+			}
 		}
 		labels = append(labels, label)
 	}
@@ -585,6 +565,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "Number of docs written/sent to target cluster",
 		Notes:        "This metric counts any type of mutations that are sent to the target cluster, and includes mutations that had failed target side Conflict Resolution",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	EXPIRY_DOCS_WRITTEN_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -592,50 +573,57 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "Number of expiry written to target",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	DELETION_DOCS_WRITTEN_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Number of deletion written to target",
+		Description:  "Number of Deletions written to Target",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	SET_DOCS_WRITTEN_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Number of SET_WITH_META written to target",
+		Description:  "Number of Set operations successfully written to the Target",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	ADD_DOCS_WRITTEN_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Number of adds successfully written to target",
-		Notes:        "This means that the target did not have the source document by name prior to this operation",
+		Description:  "Number of Add operations successfully written to the Target",
+		Notes:        "This means that the Target did not have the Source Document by name prior to this operation",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 
 	DELETION_DOCS_CAS_CHANGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Number of deletion failed because target cas changed",
+		Description:  "Number of Deletions failed because Target CAS changed",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	SET_DOCS_CAS_CHANGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Number of set failed because target cas changed",
+		Description:  "Number of Set operations that failed because the CAS on the Target changed",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	ADD_DOCS_CAS_CHANGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Number of add failed because target cas changed",
+		Description:  "Number of Add operations that failed because the CAS on the Target changed",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	DOCS_MERGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -643,6 +631,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Number of conflicting docs successfully merged",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	EXPIRY_DOCS_MERGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -650,6 +639,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Number of expiry merged and written to source",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	DATA_MERGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
@@ -657,20 +647,23 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Amount of data merged for a replication",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	DOCS_MERGE_CAS_CHANGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Number of merges failed because source cas changed",
+		Description:  "Number of merges failed because source CAS changed",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	EXPIRY_MERGE_CAS_CHANGED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Number of expiry merges failed because source cas changed",
+		Description:  "Number of expiry merges failed because source CAS changed",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 
 	DOCS_MERGE_FAILED_METRIC: StatsProperty{
@@ -679,7 +672,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Number of conflicting docs failed to merge",
 		Stability:    Internal,
-		Labels:       []StatsLabel{InternalError},
+		Labels:       StandardLabels,
 	},
 	EXPIRY_DOCS_MERGE_FAILED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -687,7 +680,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Number of conflicting expiry docs failed to merge",
 		Stability:    Internal,
-		Labels:       []StatsLabel{InternalError},
+		Labels:       StandardLabels,
 	},
 	DATA_MERGE_FAILED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
@@ -695,19 +688,21 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Amount of data failed to merge",
 		Stability:    Internal,
-		Labels:       []StatsLabel{InternalError},
+		Labels:       StandardLabels,
 	},
 	DOCS_PROCESSED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Number of docs processed for a replication",
+		Description:  "Number of Documents processed for a Replication",
 		Stability:    Committed,
-		Notes: "Each document is considered to be a single mutation or event tagged with a sequence number. " +
-			"It is considered processed when a mutation is either replicated to the target, or not replicated due to " +
-			"a decision made, such as a document being filtered, or if it loses source conflict resolution. Another " +
-			"example can be a system event such as a collection creation that gets its own sequence number, but is " +
-			"not actually something that can be replicated. These are also counted as a doc being processed.",
+		Labels:       StandardLabels,
+		Notes: "Each Document is considered to be a single Mutation or event tagged with a Sequence Number. " +
+			"It is considered processed when a Mutation is either Replicated to the Target Cluster, " +
+			"or not replicated due to a decision made, such as a document being filtered, or if it loses Source " +
+			"Conflict Resolution. Another example can be a system event such as a Collection creation that gets its " +
+			"own Sequence Number, but is not actually something that can be replicated. " +
+			"These are also counted as a doc being processed.",
 	},
 	DATA_REPLICATED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrBytes},
@@ -716,6 +711,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "Amount of data replicated for a replication",
 		Stability:    Committed,
 		UiName:       UIDataReplicated,
+		Labels:       StandardLabels,
 		Notes: "The number is kept for as long as a pipeline instance is active, " +
 			"and resets to 0 when a pipeline is restarted. This applies to other types of \"accumulative\" counters.",
 	},
@@ -723,9 +719,10 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrBytes},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Amount of data being queued to be sent in an out nozzle",
+		Description:  "Amount of data being queued to be sent in a Target Nozzle",
 		Stability:    Committed,
-		Notes: "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory." +
+		Labels:       StandardLabels,
+		Notes: "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.  " +
 			"If too much memory is being used, consider decreasing the number of nozzles or tune such that less data " +
 			"will be buffered",
 	},
@@ -735,7 +732,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForAdvFilteringSupport,
 		Description:  "Total number of documents filtered and not replicated due to any type of filtering",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 		UiName:       UIDocsFiltered,
 	},
 	DOCS_UNABLE_TO_FILTER_METRIC: StatsProperty{
@@ -744,23 +741,23 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForAdvFilteringSupport,
 		Description:  "Number of documents that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated",
 		Stability:    Committed,
-		Labels:       []StatsLabel{InternalError, DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	EXPIRY_FILTERED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForAdvFilteringSupport,
-		Description:  "Number of documents filtered that had expiry flag set",
+		Description:  "Number of Expirations filtered Source-side",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	DELETION_FILTERED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForAdvFilteringSupport,
-		Description:  "Number of documents filtered that was of a DCP deletion",
+		Description:  "Number of Deletions that were filtered Source-side",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	SET_FILTERED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -768,7 +765,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForAdvFilteringSupport,
 		Description:  "Number of documents filtered that was of a DCP mutation",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	BINARY_FILTERED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -776,7 +773,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.Version7_2_1,
 		Description:  "Number of documents filtered that were binary documents",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	EXPIRY_STRIPPED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -784,7 +781,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForAdvFilteringSupport,
 		Description:  "Number of documents replicated that had its TTL changed to 0 before writing to target (source is unmodified)",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 		Notes: "The source has an expiry set and the target does not. When the source document expires, it will " +
 			"trigger a expiry event that should be replicated to the target. If that expiry event is not replicated " +
 			"for any reason and is purged (i.e. tombstone purge interval), then the target doucment will contiue to " +
@@ -797,7 +794,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "Number of documents (or tombstones) that was not replicated to the target due to conflict resolution evaluated on the source cluster",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 		UiName:       UIFailedCRSrc,
 		Notes: "This metric contains all types of docs that were not successfully sent to target due to failed CR, " +
 			"including deletions and expiries. It is also possible that a source document could fail CR due to a " +
@@ -810,25 +807,25 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Subset of the number of documents that failed source-side conflict resolution that specifically had expiry flag set",
+		Description:  "Number of Expirations that failed Source-side Conflict Resolution",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	DELETION_FAILED_CR_SOURCE_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Subset of the number of documents that failed source-side conflict resolution that were delete operations",
+		Description:  "Number of Deletions that failed Source-side Conflict Resolution",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	SET_FAILED_CR_SOURCE_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
-		Description:  "Subset of the number of documents that failed source-side conflict resolution that were set operations",
+		Description:  "Number of Set operations that failed Source-side Conflict Resolution",
 		Stability:    Internal,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	DOCS_FAILED_CR_TARGET_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -836,7 +833,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPeerToPeerSupport,
 		Description:  "Number of documents failed conflict resolution at target cluster",
 		Stability:    Volatile,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 		UiName:       UIFailedCRTgt,
 		Notes: "This metric contains all types of docs that were replicated to the target but were ultimately " +
 			"rejected due to target side conflict-resolution. This can happen either due to optimistic replication " +
@@ -847,33 +844,33 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPeerToPeerSupport,
-		Description:  "Number of ADD failed conflict resolution at target cluster",
+		Description:  "Number of Add operations failed Conflict Resolution at Target Cluster",
 		Stability:    Internal,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	DELETION_FAILED_CR_TARGET_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPeerToPeerSupport,
-		Description:  "Number of DELETE failed conflict resolution at target cluster",
+		Description:  "Number of Deletions that failed Conflict Resolution at the Target",
 		Stability:    Volatile,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	EXPIRY_FAILED_CR_TARGET_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPeerToPeerSupport,
-		Description:  "Number of EXPIRE failed conflict resolution at target cluster",
+		Description:  "Number of Expirations that failed Conflict Resolution at the Target",
 		Stability:    Volatile,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	SET_FAILED_CR_TARGET_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPeerToPeerSupport,
-		Description:  "Number of SET_WITH_META failed conflict resolution at target cluster",
+		Description:  "Number of Set operations that failed Conflict Resolution at the Target",
 		Stability:    Volatile,
-		Labels:       []StatsLabel{DocCountDiverge},
+		Labels:       StandardLabels,
 	},
 	TARGET_DOCS_SKIPPED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -881,6 +878,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Number of documents that was not replicated to the target because they originated from the target",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	EXPIRY_TARGET_DOCS_SKIPPED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -888,6 +886,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Subset of the number of documents that originated from the target that specifically had expiry flag set",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	DELETION_TARGET_DOCS_SKIPPED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -895,6 +894,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Subset of the number of documents that originated from the target that were delete operations",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 	SET_TARGET_DOCS_SKIPPED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -902,32 +902,35 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Subset of the number of documents that originated from the target that were set operations",
 		Stability:    Internal,
+		Labels:       StandardLabels,
 	},
 
 	CHANGES_LEFT_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Given the VBs of this node, the number of seqnos that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the VBs",
+		Description:  "Given the vBuckets of this node, the number of sequence numbers that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the vBuckets",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 		UiName:       UIChangesLeft,
-		Notes: "This metric is calculated as (totalChanges - docsProcessed)." +
-			"TotalChanges is calculated as: SumForEachVB(HighSeqno) that this node owns." +
-			"The term 'changes' is more of a misnomer as it is still defined as each mutation or event that gets " +
-			"stamped with a sequence number. Since 7.0, system events also get stamped as a seqno per VB and thus " +
-			"the changes_left term no longer accurately represents actual mutations that needs to be replicated." +
-			"Regardless, this number represents the concept of how much work is to be done before a replication is " +
-			"considered caught up.",
+		Notes: "This metric is calculated as (totalChanges - docsProcessed).  TotalChanges is calculated as: " +
+			"SumForEachVB(HighSeqno) that this node owns.The term 'changes' is more of a misnomer as it is still " +
+			"defined as each mutation or event that gets stamped with a sequence number. Since 7.0, system events " +
+			"also get stamped as a seqno per VB and thus the changes_left term no longer accurately represents " +
+			"actual mutations that needs to be replicated. Regardless, this number represents the concept of how much " +
+			"work is to be done before a replication is considered caught up.",
 	},
 	DOCS_LATENCY_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The rolling average amount of time it takes for the source cluster to receive the acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be processed by the XDCR outnozzle",
-		Stability:    Committed,
-		Labels:       []StatsLabel{KvOp, NetworkLatency},
-		UiName:       UIDocsLatency,
-		Notes: "This metric indicates the lag time of both the network as well as the target KV set latency. The " +
+		Description: "The rolling average amount of time it takes for the source cluster to receive the " +
+			"acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be " +
+			"processed by the XDCR Target Nozzle",
+		Stability: Committed,
+		Labels:    StandardLabels,
+		UiName:    UIDocsLatency,
+		Notes: "This metric indicates the lag time of both the network as well as the target Key-Value set latency. The " +
 			"latency tracks the followings: " +
 			"1. The time it takes to issue a SET_WITH_META from the source to the target. " +
 			"2. The time it takes for KV to handle the SET_WITH_META request. " +
@@ -942,7 +945,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "The rolling average amount of time it takes once a getMeta command is composed to be sent to the time the request is handled once the target node has responded",
 		Stability:    Committed,
-		Labels:       []StatsLabel{KvOp, NetworkLatency},
+		Labels:       StandardLabels,
 		UiName:       UIMetaLatency,
 		Notes: "This is similar to docs_latency but specifically for the GET_META command that is used for " +
 			"source side conflict resolution",
@@ -953,7 +956,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "The rolling average amount of time it takes once a get document command is composed to be sent to the time the request is handled once the target node has responded",
 		Stability:    Internal,
-		Labels:       []StatsLabel{KvOp, NetworkLatency},
+		Labels:       StandardLabels,
 	},
 	RESP_WAIT_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},
@@ -961,7 +964,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write",
 		Stability:    Committed,
-		Labels:       []StatsLabel{KvOp, NetworkLatency},
+		Labels:       StandardLabels,
 		Notes: "This metric indicates just the amount of wait time it takes for KV to send a respond back to XDCR as " +
 			"part of the complete docs_latency metrics. This can be used to give more granularity into how " +
 			"the overall latency situation looks like.",
@@ -972,16 +975,17 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "The rolling average amount of time it takes from routing, conflict detection and resolution, to receive the acknowledgement of merge",
 		Stability:    Internal,
-		Labels:       []StatsLabel{KvOp, NetworkLatency},
+		Labels:       StandardLabels,
 	},
 
 	DOCS_CHECKED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Across VBs for this node, the sum of all seqnos that have been considered to be checkpointed",
+		Description:  "Across vBuckets for this node, the sum of all sequence numbers that have been considered to be checkpointed",
 		Notes:        "This metric is often used in conjunction with docs_processed. The wider the difference means the more duplicate replication would take place if a replication pipeline were to restart, as it means less information is checkpointed",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 		UiName:       UIDocsChecked,
 	},
 	NUM_CHECKPOINTS_METRIC: StatsProperty{
@@ -990,6 +994,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "The number of times checkpoint operation has completed successfully since this XDCR process instance is made aware of this replication",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	TIME_COMMITING_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},
@@ -998,7 +1003,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The rolling average amount of time it takes for a checkpoint operation to complete",
 		Notes:        "The higher the number, the more burdened XDCR is or the slower the performance of simple_store (metakv)",
 		Stability:    Committed,
-		Labels:       []StatsLabel{DiskLatency, ProcessLatency},
+		Labels:       StandardLabels,
 	},
 	NUM_FAILEDCKPTS_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
@@ -1006,7 +1011,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "The number of times checkpoint operation has encountered an error since this XDCR process instance is made aware of this replication",
 		Stability:    Committed,
-		Labels:       []StatsLabel{InternalError},
+		Labels:       StandardLabels,
 	},
 	//RATE_DOC_CHECKS_METRIC: StatsProperty{MetricType: StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, Cardinality: LowCardinality, VersionAdded: base.VersionForPrometheusSupport, VersionAdded: base.VersionInvalid, "The rate at which documents are being checkpointed"},
 
@@ -1014,11 +1019,12 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "Number of documents optimistically replicated to the target",
+		Description:  "Number of Documents Optimistically Replicated to the Target Cluster",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 		UiName:       UIOptReplicated,
-		Notes: "Optimistic replication takes one less RTT, but could potential cause more network usage if the " +
-			"documents are decent sized",
+		Notes: "Optimistic Replication takes one less round trip on the network, " +
+			"but could potentially cause more network usage if the documents are reasonably sized",
 	},
 	//RATE_OPT_REPD_METRIC: StatsProperty{MetricType: StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, Cardinality: LowCardinality, VersionAdded: base.VersionForPrometheusSupport, VersionAdded: base.VersionInvalid, "The rate at which documents are being replicated optimistically"},
 
@@ -1026,8 +1032,9 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The number of set operations received from DCP",
+		Description:  "Number of Document Mutations received from the Data Service",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 		UiName:       UIDocsFromDCP,
 	},
 	//RATE_RECEIVED_DCP_METRIC: StatsProperty{StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, Cardinality: LowCardinality, VersionAdded: base.VersionForPrometheusSupport, VersionAdded: base.VersionInvalid, "The rate at which XDCR is receiving documents from DCP for this replication"},
@@ -1036,39 +1043,43 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The subset of documents received from DCP that either 1.) Is a DCP expiration or 2) Is a document that contains an expiration time",
+		Description:  "Number of Expirations or documents with TTL received from the Data Service",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	DELETION_RECEIVED_DCP_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The subset of documents received from DCP that is a Delete action",
+		Description:  "Number of Deletions received from the Data Service",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	SET_RECEIVED_DCP_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The subset of documents received from DCP that is a mutation (set action)",
+		Description:  "Number of Sets received from the Data Service",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 
 	DCP_DISPATCH_TIME_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrGolangTimeDuration},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The rolling average amount of time it takes for a document to be received by XDCR from DCP, to the time it is queued up in the out nozzle ready to be sent",
-		Stability:    Committed,
-		Labels:       []StatsLabel{ProcessLatency},
+		Description: "The rolling average amount of time it takes for a document to be received by XDCR from the " +
+			"Data Service, to the time it is queued up in the Target Nozzle ready to be sent",
+		Stability: Committed,
+		Labels:    StandardLabels,
 	},
 	DCP_DATACH_LEN: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The number of items sent by KV DCP waiting for XDCR DCP nozzle to ingest and process",
+		Description:  "The number of items sent by the Data Service waiting for the XDCR Source Nozzle to ingest and process",
 		Stability:    Committed,
-		Labels:       []StatsLabel{ProcessLatency, NetworkLatency},
+		Labels:       StandardLabels,
 	},
 
 	THROTTLE_LATENCY_METRIC: StatsProperty{
@@ -1077,7 +1088,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "The rolling average of the latency time introduced due to bandwith throttler",
 		Stability:    Committed,
-		Labels:       []StatsLabel{NetworkThroughput},
+		Labels:       StandardLabels,
 	},
 
 	THROUGHPUT_THROTTLE_LATENCY_METRIC: StatsProperty{
@@ -1086,7 +1097,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForPrometheusSupport,
 		Description:  "The rolling average of the latency time introduced due to throughput throttler",
 		Stability:    Committed,
-		Labels:       []StatsLabel{NetworkLatency, ProcessLatency},
+		Labels:       StandardLabels,
 	},
 
 	//RATE_REPLICATED_METRIC: StatsProperty{MetricType: StatsUnit{MetricTypeGauge, StatsMgrDocsPerSecond}, Cardinality: LowCardinality, VersionAdded: base.VersionForPrometheusSupport, base.VersionInvalid, "The rate at which documents from this node are being replicated to target nodes"},
@@ -1098,7 +1109,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForAdvFilteringSupport,
 		Description:  "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation",
 		Stability:    Committed,
-		Labels:       []StatsLabel{InternalError},
+		Labels:       StandardLabels,
 		Notes:        "This stats usually should be 0. If it is non-0, it could represent that the memory is under pressure.",
 	},
 
@@ -1106,23 +1117,24 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForPrometheusSupport,
-		Description:  "The number of times a source mutation is cloned to be written to different target namespace",
+		Description:  "Number of Source Document Mutation cloned to be written to different Target Namespaces",
 		Notes: "This usually means that one source mutation is now going to exist in two or more target " +
 			"collections, leading to mismatching doc counts between buckets. This can happen when migration mode " +
 			"is turned on, and the migration filtering expression is not specific enough, leading to a single doc " +
 			"matching multiple migration filtering expressions. To prevent this, ensure that the filtering expr " +
 			"are more specific such that each doc is migrated to only one target collection.",
 		Stability: Committed,
-		Labels:    []StatsLabel{DocCountDiverge},
+		Labels:    StandardLabels,
 	},
 
 	DELETION_CLONED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.Version7_2_1,
-		Description:  "The number of times a source deletion or expiration is cloned to be written to multiple target namespaces",
-		Notes:        "This usually happens in collection migration using explicit rule-based mapping where deletions and expirations will pass all rules.",
+		Description:  "The number of times a Source Deletion or Expiration is cloned to be written to multiple Target Namespaces",
+		Notes:        "This usually happens in collection migration using explicit rule-based mapping where Deletions and Expirations will pass all rules.",
 		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 
 	PIPELINE_STATUS: StatsProperty{
@@ -1132,7 +1144,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The pipeline status for a specific pipeline, where it could be paused, running or, error",
 		Notes:        "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
 		Stability:    Committed,
-		Labels:       []StatsLabel{Operation},
+		Labels:       StandardLabels,
 	},
 
 	PIPELINE_ERRORS: StatsProperty{
@@ -1143,6 +1155,13 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Notes: "If the number is non zero, it could indicate potential replication errors that requires some " +
 			"human intervention to look into the UI console or logs to decipher what errors could currently exist.",
 		Stability: Committed,
-		Labels:    []StatsLabel{Operation, InternalError},
+		Labels:    StandardLabels,
 	},
 }
+
+const (
+	PrometheusTargetClusterUuidLabel = "targetClusterUUID"
+	PrometheusSourceBucketLabel      = "sourceBucketName"
+	PrometheusTargetBucketLabel      = "targetBucketName"
+	PrometheusPipelineTypeLabel      = "pipelineType"
+)
