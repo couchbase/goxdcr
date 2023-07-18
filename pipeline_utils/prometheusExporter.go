@@ -25,17 +25,10 @@ type ExpVarExporter interface {
 	Export() ([]byte, error)
 }
 
-const (
-	PrometheusTargetClusterUuidLabel = "targetClusterUUID"
-	PrometheusSourceBucketLabel      = "sourceBucketName"
-	PrometheusTargetBucketLabel      = "targetBucketName"
-	PrometheusPipelineTypeLabel      = "pipelineType"
-)
-
-var PrometheusTargetClusterUuidBytes = []byte(PrometheusTargetClusterUuidLabel)
-var PrometheusSourceBucketBytes = []byte(PrometheusSourceBucketLabel)
-var PrometheusTargetBucketBytes = []byte(PrometheusTargetBucketLabel)
-var PrometheusPipelineTypeBytes = []byte(PrometheusPipelineTypeLabel)
+var PrometheusTargetClusterUuidBytes = []byte(service_def.PrometheusTargetClusterUuidLabel)
+var PrometheusSourceBucketBytes = []byte(service_def.PrometheusSourceBucketLabel)
+var PrometheusTargetBucketBytes = []byte(service_def.PrometheusTargetBucketLabel)
+var PrometheusPipelineTypeBytes = []byte(service_def.PrometheusPipelineTypeLabel)
 
 type PrometheusExporter struct {
 	// Read only
