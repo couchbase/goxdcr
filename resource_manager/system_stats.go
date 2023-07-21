@@ -28,6 +28,9 @@ type SystemStats struct {
 	handle  *C.sigar_t
 	pid     C.sigar_pid_t
 	cgState cgroupState
+
+	lastCPU     float64
+	lastCPUTime time.Time
 }
 
 type cgroupState struct {
@@ -58,9 +61,7 @@ type SigarControlGroupInfo struct {
 	UsageUsec uint64
 }
 
-//
 // Open a new handle
-//
 func NewSystemStats() (*SystemStats, error) {
 
 	var handle *C.sigar_t
@@ -75,6 +76,14 @@ func NewSystemStats() (*SystemStats, error) {
 	cgInfo := h.GetControlGroupInfo()
 	h.cgState.cgroupSupported = cgInfo.Supported == SIGAR_CGROUP_SUPPORTED
 
+	var cpu C.sigar_proc_cpu_t
+	if err := C.sigar_proc_cpu_get(h.handle, h.pid, &cpu); err != C.SIGAR_OK {
+		return nil, fmt.Errorf("failed to get CPU, err: %w",
+			C.sigar_strerror(h.handle, err))
+	}
+	h.lastCPU = float64(cpu.user + cpu.sys)
+	h.lastCPUTime = time.Now()
+
 	return h, nil
 }
 
@@ -82,16 +91,12 @@ func (h *SystemStats) IsCGroupSupported() bool {
 	return h.cgState.cgroupSupported
 }
 
-//
 // Close handle
-//
 func (h *SystemStats) Close() {
 	C.sigar_close(h.handle)
 }
 
-//
 // Get CPU percentage
-//
 func (h *SystemStats) ProcessCpuPercent() (C.sigar_pid_t, int64, error) {
 
 	// Sigar returns a ratio of (system_time + user_time) / elapsed time
@@ -100,7 +105,19 @@ func (h *SystemStats) ProcessCpuPercent() (C.sigar_pid_t, int64, error) {
 		return C.sigar_pid_t(0), 0, errors.New(fmt.Sprintf("Fail to get process CPU.  Err=%v", C.sigar_strerror(h.handle, err)))
 	}
 
-	return h.pid, int64(cpu.percent * 100), nil
+	totalCPU := float64(cpu.user + cpu.sys)
+	currentTime := time.Now()
+	timeDiffInMilliseconds := float64(currentTime.Sub(h.lastCPUTime).Milliseconds())
+	if timeDiffInMilliseconds <= 0 {
+		// Avoid divide by zero.
+		timeDiffInMilliseconds = 1
+	}
+
+	cpuPercent := (totalCPU - h.lastCPU) / timeDiffInMilliseconds
+	h.lastCPU = totalCPU
+	h.lastCPUTime = currentTime
+
+	return h.pid, int64(cpuPercent * 100), nil
 }
 
 // returns total cpu and idle cpu
