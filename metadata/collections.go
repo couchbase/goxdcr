@@ -1611,7 +1611,7 @@ func (c *CollectionNamespaceMapping) GetTargetUsingMigrationFilter(wrappedUprEve
 		if k.GetType() != SourceDefaultCollectionFilter {
 			continue
 		}
-		match, matchErr, errDesc, _ := k.filter.FilterUprEvent(wrappedUprEvent)
+		match, matchErr, errDesc, _, _ := k.filter.FilterUprEvent(wrappedUprEvent)
 		if matchErr != nil {
 			if logger != nil && logger.GetLogLevel() >= log.LogLevelDebug {
 				logger.Errorf("Document %v%v%v failed filtering with err: %v - %v", base.UdTagBegin, string(wrappedUprEvent.UprEvent.Key),

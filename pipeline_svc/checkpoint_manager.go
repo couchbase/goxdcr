@@ -2057,14 +2057,29 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		ckmgr.logger.Warnf("%v unable to get %v metric from stats manager\n", service_def.DOCS_FILTERED_METRIC)
 		return
 	}
+
 	filteredItems := vbCountMetrics[service_def.DOCS_FILTERED_METRIC]
 	filterFailed := vbCountMetrics[service_def.DOCS_UNABLE_TO_FILTER_METRIC]
+	filteredExpiredItems := vbCountMetrics[service_def.EXPIRY_FILTERED_METRIC]
+	filteredDelItems := vbCountMetrics[service_def.DELETION_FILTERED_METRIC]
+	filteredSetItems := vbCountMetrics[service_def.SET_FILTERED_METRIC]
+	filteredBinaryDocItems := vbCountMetrics[service_def.BINARY_FILTERED_METRIC]
+	filteredExpiryStripItems := vbCountMetrics[service_def.EXPIRY_STRIPPED_METRIC]
+	filteredATRDocItems := vbCountMetrics[service_def.DOCS_FILTERED_TXN_ATR_METRIC]
+	filteredClientTxnDocItems := vbCountMetrics[service_def.DOCS_FILTERED_CLIENT_TXN_METRIC]
+	filteredTxnXattrsItems := vbCountMetrics[service_def.DOCS_FILTERED_TXN_XATTR_METRIC]
+	filteredMobileDocItems := vbCountMetrics[service_def.DOCS_FILTERED_MOBILE_METRIC]
+	filteredDocsOnUserDefinedFilters := vbCountMetrics[service_def.DOCS_FILTERED_USER_DEFINED_METRIC]
 
 	// Collection-Related items
 	srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping := ckmgr.getCollectionItemsIfEnabled(vbno, ok, srcManifestIds, tgtManifestIds)
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
-	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno, uint64(filteredItems), uint64(filterFailed), srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping, uint64(time.Now().Unix()))
+	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno,
+		ckptRecordTargetSeqno, uint64(filteredItems), uint64(filterFailed), uint64(filteredExpiredItems), uint64(filteredDelItems),
+		uint64(filteredSetItems), uint64(filteredBinaryDocItems), uint64(filteredExpiryStripItems), uint64(filteredATRDocItems),
+		uint64(filteredClientTxnDocItems), uint64(filteredTxnXattrsItems), uint64(filteredMobileDocItems), uint64(filteredDocsOnUserDefinedFilters),
+		srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping, uint64(time.Now().Unix()))
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
 		err = nil

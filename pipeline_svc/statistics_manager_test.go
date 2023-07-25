@@ -13,9 +13,11 @@ package pipeline_svc
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/goxdcr/utils"
 	"io/ioutil"
 	"testing"
+
+	"github.com/couchbase/goxdcr/base/filter"
+	"github.com/couchbase/goxdcr/utils"
 
 	mcc "github.com/couchbase/gomemcached/client"
 	commonReal "github.com/couchbase/goxdcr/common"
@@ -218,6 +220,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	fakeComponent.On("Id").Return(testRouter)
 	passedEvent.Component = fakeComponent
 	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{}
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 
@@ -354,6 +357,7 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	fakeComponent.On("Id").Return(testRouter).Once()
 	passedEvent.Component = fakeComponent
 	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{}
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.EXPIRY_FILTERED_METRIC]).(metrics.Counter).Count())
@@ -390,4 +394,96 @@ func TestFilterVBSeqnoMap(t *testing.T) {
 	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestFilterVBSeqnoMap =================")
+}
+
+func TestStatsMgrWithFilteringStats(t *testing.T) {
+	fmt.Println("============== Test case start: TestStatsMgrWithFilteringStats =================")
+	assert := assert.New(t)
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
+		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc := setupBoilerPlate()
+
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
+		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc)
+
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil)
+	assert.NotNil(statsMgr)
+
+	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
+		collectionsManifestSvc, backfillReplSvc)
+	setupInnerMock(runtimeCtx, ckptManager)
+
+	statsMgr.Attach(pipeline)
+	statsMgr.initOverviewRegistry()
+
+	routerCollector := statsMgr.getRouterCollector()
+	assert.Equal(4, len(routerCollector.vbBasedMetric))
+
+	dcpCollector := statsMgr.getdcpCollector()
+	assert.NotNil(dcpCollector)
+
+	uprEvent, err := RetrieveUprFile(uprEventFileWithExpiration)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	passedEvent := &commonReal.Event{}
+
+	passedEvent.EventType = commonReal.DataFiltered
+	fakeComponent := &common.Component{}
+
+	// Filtering ATR TXN documents
+	fakeComponent.On("Id").Return(testRouter).Once()
+	passedEvent.Component = fakeComponent
+	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnATRDocument}
+
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_TXN_ATR_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	// Filtering client TXN documents
+	fakeComponent.On("Id").Return(testRouter).Once()
+	passedEvent.Component = fakeComponent
+	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnTxnClientRecord}
+
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_CLIENT_TXN_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(2), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	// Filtering documents with txn xattrs
+	fakeComponent.On("Id").Return(testRouter).Once()
+	passedEvent.Component = fakeComponent
+	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnTxnsXattr}
+
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_TXN_XATTR_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(3), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	// Filtering mobile records
+	fakeComponent.On("Id").Return(testRouter).Once()
+	passedEvent.Component = fakeComponent
+	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnMobileRecord}
+
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_MOBILE_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(4), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	// Filtered on User defined filter
+	fakeComponent.On("Id").Return(testRouter).Once()
+	passedEvent.Component = fakeComponent
+	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{FilteringStatus: filter.FilteredOnUserDefinedFilter}
+
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+	assert.Equal(int64(1), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_USER_DEFINED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(5), (routerCollector.component_map[testRouter][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	fmt.Println("============== Test case end: TestStatsMgrWithFilteringStats =================")
 }

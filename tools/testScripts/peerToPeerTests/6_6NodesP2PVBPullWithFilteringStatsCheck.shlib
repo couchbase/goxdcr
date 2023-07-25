@@ -1,0 +1,293 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P0"]=9001 ["C2"]=9006 ["C1P1"]=9002 ["C1P2"]=9003 ["C1P3"]=9004 ["C1P4"]=9005)
+CLUSTER_DEPENDENCY_MAP=(["C1P0"]="C1" ["C1P1"]="C1" ["C1P2"]="C1" ["C1P3"]="C1" ["C1P4"]="C1")
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P0"]=13001 ["C1P1"]=13002 ["C1P2"]=13003 ["C1P3"]=13004 ["C1P4"]=13005 ["C2"]=13006)
+declare -A SOURCE_CLUSTER_BEFORE=(["C1"]=9000)
+declare -A SOURCE_CLUSTER_AFTER=(["C1"]=9000 ["C1P0"]=9001 ["C1P1"]=9002 ["C1P2"]=9003 ["C1P3"]=9004 ["C1P4"]=9005)
+declare -A CLUSTER_NAME_N1QL_PORT_MAP=(["C1"]=9499 ["C1P0"]=9498 ["C1P1"]=9497 ["C1P2"]=9496 ["C1P3"]=9495 ["C1P4"]=9494 ["C2"]=9493)
+
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+
+declare -A DefaultBucketReplPropertiesWithFilterExp=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["filterExpression"]="REGEXP_CONTAINS(META().id, '10')")
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B0"]=${scope1Arr[@]} ["B1"]="S2")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B0" "S1" "col1" &
+	runCbWorkloadGenCollection "C1" "B0" "S2" "col1" &
+	waitForBgJobs
+	echo "RUNNING dataload DONE"
+}
+
+TC_CHECK_INTERVAL=10
+TC_MAX_CHANGE_CNT=3
+
+function runOneReplicationCycle {
+	local timeIntervalSecs=5
+	local checkInterval=$TC_CHECK_INTERVAL
+	local maxChangeCnt=$TC_MAX_CHANGE_CNT
+	local maxStableCnt=3
+	local coolDownPeriod=1
+	local checkInt
+	setupClusterWithN1QL
+	setupTopologies
+	# Shorten the amount of time pipeline restarts
+	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 5
+	checkInternalSetting "C1" "TopologyChangeCheckInterval" "$checkInterval"
+	checkInternalSetting "C1" "MaxTopologyChangeCountBeforeRestart" "$maxChangeCnt"
+	checkInternalSetting "C1" "MaxTopologyStableCountBeforeRestart" "$maxStableCnt"
+	checkInternalSetting "C1" "TopologySvcCooldownPeriodSec" "$coolDownPeriod"
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setCustomManifestRefreshInterval "C1"
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplPropertiesWithFilterExp
+
+	runDataLoad
+
+	executeTxn "C1"
+
+	echo "Sleeping 30 seconds before changes left check"
+	sleep 30
+
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	validateXDCRCheckpoints "C1"
+	grepForPanics
+}
+
+function runOneRebalanceCycleIn {
+	local cycleCnt=$1
+	local totalCycleCnt=$2
+	local timeIntervalSecs=30
+
+	echo "Sleeping 15 secs before rebalancing node in"
+	sleep 15
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
+	echo "============================================================================"
+	addNodesIn
+	sleep 5
+	startRebalancing "C1"
+	echo "Rebalancing node in is completed"
+
+	echo "============================================================================"
+	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
+	echo "============================================================================"
+	grepForPanics
+}
+
+function pauseAndResumeReplication {
+	pauseReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 15 seconds for pipeline to really pause"
+	sleep 15
+	grepForPanics
+
+	resumeReplication "C1" "B0" "C2" "B1"
+	echo "Waiting 15 seconds for pipeline to really resume"
+	sleep 15
+	grepForPanics
+}
+
+declare -A filteringStatsBefore=(["xdcr_atr_txn_docs_filtered_total"]=0 ["xdcr_binary_filtered_total"]=0 ["xdcr_client_txn_docs_filtered_total"]=0 ["xdcr_deletion_filtered_total"]=0
+	["xdcr_docs_filtered_on_txn_xattr_total"]=0 ["xdcr_docs_filtered_on_user_defined_filter_total"]=0 ["xdcr_docs_filtered_total"]=0
+	["xdcr_expiry_filtered_total"]=0 ["xdcr_mobile_docs_filtered_total"]=0 ["xdcr_set_filtered_total"]=0 ["xdcr_expiry_stripped_total"]=0)
+declare -A filteringStatsAfter=(["xdcr_atr_txn_docs_filtered_total"]=0 ["xdcr_binary_filtered_total"]=0 ["xdcr_client_txn_docs_filtered_total"]=0 ["xdcr_deletion_filtered_total"]=0
+	["xdcr_docs_filtered_on_txn_xattr_total"]=0 ["xdcr_docs_filtered_on_user_defined_filter_total"]=0 ["xdcr_docs_filtered_total"]=0
+	["xdcr_expiry_filtered_total"]=0 ["xdcr_mobile_docs_filtered_total"]=0 ["xdcr_set_filtered_total"]=0 ["xdcr_expiry_stripped_total"]=0)
+declare -a increasingStats=("xdcr_binary_filtered_total" "xdcr_client_txn_docs_filtered_total" "xdcr_docs_filtered_total" "xdcr_set_filtered_total")
+
+function executeTxn {
+	local clusterName=$1
+
+	local port=${CLUSTER_NAME_N1QL_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName, not exexuting txn"
+		return 1
+	fi
+
+	echo "Executing transaction on port $port"
+	txnId=$($CURL http://localhost:$port/query/service -u $DEFAULT_ADMIN:$DEFAULT_PW -H 'Content-Type: application/json' \
+		-d '{
+		"statement": "BEGIN WORK;",
+		"scan_consistency": "request_plus",
+		"durability_level": "none"
+		}' | jq -r ".results[].txid")
+
+	if [[ -z "$txnId" ]]; then
+		echo "Empty txnId, not executing txn"
+		return 1
+	fi
+
+	echo "Transaction ID = ${txnId}"
+
+	$CURL http://localhost:$port/query/service \
+		-H 'Content-Type: application/x-www-form-urlencoded' \
+		-u $DEFAULT_ADMIN:$DEFAULT_PW \
+		--data-urlencode 'statement=UPSERT INTO `B0` VALUES("MYDOC", {"MYKEY": "MYVAL"});' \
+		--data-urlencode "txid=${txnId}"
+
+	$CURL http://localhost:$port/query/service \
+		-H 'Content-Type: application/x-www-form-urlencoded' \
+		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode 'statement=COMMIT TRANSACTION;' \
+		--data-urlencode "txid=${txnId}"
+
+	echo "Done executing transaction."
+}
+
+function getFilteringStatFromPrometheus {
+	local clusterName=$1
+	local statName=$2
+	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
+	if [[ -z "$port" ]]; then
+		echo "Invalid clustername $clusterName"
+		return 1
+	fi
+
+	# get the next word after regex match
+	statVal=$($CURL -X GET http://localhost:$port/_prometheusMetrics -u $DEFAULT_ADMIN:$DEFAULT_PW | awk -v regex=$statName+".*Main.*} " 'BEGIN{FS=regex}{if ($2!="") print $2}')
+	echo $statVal
+}
+
+function getFilteringStatsBefore {
+	local clusterName=$1
+	echo "Getting filtering stats for $clusterName"
+	for statKey in $(echo ${!filteringStatsBefore[@]}); do
+		newVal=$(getFilteringStatFromPrometheus $clusterName $statKey)
+		oldVal=${filteringStatsBefore[${statKey}]}
+		sum=$(($oldVal + $newVal))
+		filteringStatsBefore[${statKey}]=$sum
+	done
+}
+
+function getFilteringStatsAfter {
+	local clusterName=$1
+	echo "Getting filtering stats for $clusterName"
+	for statKey in $(echo ${!filteringStatsAfter[@]}); do
+		newVal=$(getFilteringStatFromPrometheus $clusterName $statKey)
+		oldVal=${filteringStatsAfter[${statKey}]}
+		sum=$(($oldVal + $newVal))
+		filteringStatsAfter[${statKey}]=$sum
+	done
+}
+
+function checkFilteringStatsAreEqual {
+	for statKey in $(echo ${!filteringStatsAfter[@]}); do
+		if [[ $(echo ${increasingStats[@]} | fgrep -w "$statKey") ]]; then
+			# there will be mutations related to client txn docs at a very low rate even after the txn is complete. Hence these stats need to be compared based on inequality (i.e after rebalance >= before rebalance)
+			if [ ${filteringStatsBefore[${statKey}]} -gt ${filteringStatsAfter[${statKey}]} ]; then
+				echo "Filtering stats are not the same. StatKey=${statKey}, StatValBefore=${filteringStatsBefore[${statKey}]}, StatValAfter=${filteringStatsAfter[${statKey}]}"
+				echo "============================================================================"
+				echo "FAILED"
+				echo "============================================================================"
+				cleanupBucketReplications
+				cleanupBuckets
+				cleanupRemoteClusterRefs
+
+				echo "Cleaning up topology..."
+				restoreClusterBack "C1"
+				exit 1
+			fi
+		else
+			# these stats throughout the cluster should be equal before and after rebalance
+			if [ ${filteringStatsBefore[${statKey}]} -ne ${filteringStatsAfter[${statKey}]} ]; then
+				echo "Filtering stats are not the same. StatKey=${statKey}, StatValBefore=${filteringStatsBefore[${statKey}]}, StatValAfter=${filteringStatsAfter[${statKey}]}"
+				echo "============================================================================"
+				echo "FAILED"
+				echo "============================================================================"
+				cleanupBucketReplications
+				cleanupBuckets
+				cleanupRemoteClusterRefs
+
+				echo "Cleaning up topology..."
+				restoreClusterBack "C1"
+				exit 1
+			fi
+		fi
+	done
+	echo "All the filtering stats are equal."
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Verifying filtering stats are equal: Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes"
+	echo "============================================================================"
+
+	# At this point, settings need to be restored IF the script was forced exited
+	trap killAllBgJobs EXIT
+
+	# These tests require a clean log
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
+
+	runOneReplicationCycle
+
+	echo "Sleeping 60 seconds before gathering stats"
+	sleep 60
+
+	for clusterName in $(echo ${!SOURCE_CLUSTER_BEFORE[@]}); do
+		getFilteringStatsBefore $clusterName
+	done
+
+	pauseAndResumeReplication
+
+	runOneRebalanceCycleIn 1 1
+
+	echo "Sleeping 60 seconds before gathering stats"
+	sleep 60
+
+	for clusterName in $(echo ${!SOURCE_CLUSTER_AFTER[@]}); do
+		getFilteringStatsAfter $clusterName
+	done
+
+	checkFilteringStatsAreEqual
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+
+	echo "Cleaning up topology..."
+	restoreClusterBack "C1"
+}

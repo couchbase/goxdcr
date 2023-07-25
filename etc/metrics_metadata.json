@@ -36,6 +36,18 @@
         ],
         "stability": "internal"
     },
+    "xdcr_atr_txn_docs_filtered": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated because the documents were ATR documents",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_binary_filtered": {
         "type": "counter",
         "help": "Number of documents filtered that were binary documents",
@@ -60,6 +72,18 @@
             "pipelineType"
         ],
         "notes": "This metric is calculated as (totalChanges - docsProcessed).  TotalChanges is calculated as: SumForEachVB(HighSeqno) that this node owns.The term 'changes' is more of a misnomer as it is still defined as each mutation or event that gets stamped with a sequence number. Since 7.0, system events also get stamped as a seqno per VB and thus the changes_left term no longer accurately represents actual mutations that needs to be replicated. Regardless, this number represents the concept of how much work is to be done before a replication is considered caught up.",
+        "stability": "committed"
+    },
+    "xdcr_client_txn_docs_filtered": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated because the documents were transaction client records",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
         "stability": "committed"
     },
     "xdcr_data_merge_failed": {
@@ -319,6 +343,30 @@
         ],
         "stability": "committed"
     },
+    "xdcr_docs_filtered_on_txn_xattr": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated due to the presence of transaction related xattrs in it",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_docs_filtered_on_user_defined_filter": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated because of user defined filter expressions",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_docs_merge_cas_changed": {
         "type": "counter",
         "help": "Number of documents from Source custom conflict-resolution that failed to merge back to Source because the Source CAS changed",
@@ -540,6 +588,18 @@
             "pipelineType"
         ],
         "stability": "internal"
+    },
+    "xdcr_mobile_docs_filtered": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated because the documents were mobile records",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
     },
     "xdcr_num_checkpoints": {
         "type": "counter",

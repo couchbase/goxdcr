@@ -21,6 +21,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
@@ -109,9 +110,17 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.PIPELINE_ERRORS:                     service_def.MetricTypeGauge,
 	service_def.TARGET_TMPFAIL_METRIC:               service_def.MetricTypeCounter,
 	service_def.TARGET_EACCESS_METRIC:               service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_TXN_ATR_METRIC:        service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_TXN_XATTR_METRIC:      service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_CLIENT_TXN_METRIC:     service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_USER_DEFINED_METRIC:   service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_MOBILE_METRIC:         service_def.MetricTypeCounter,
 }
 
-var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
+var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
+	service_def.DELETION_FILTERED_METRIC, service_def.SET_FILTERED_METRIC, service_def.BINARY_FILTERED_METRIC, service_def.EXPIRY_STRIPPED_METRIC,
+	service_def.DOCS_FILTERED_TXN_ATR_METRIC, service_def.DOCS_FILTERED_CLIENT_TXN_METRIC, service_def.DOCS_FILTERED_TXN_XATTR_METRIC,
+	service_def.DOCS_FILTERED_MOBILE_METRIC, service_def.DOCS_FILTERED_USER_DEFINED_METRIC}
 
 func MakeVBCountMetricMap() service_def.VBCountMetricMap {
 	newMap := make(service_def.VBCountMetricMap)
@@ -133,6 +142,16 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) se
 	vbStatMap := make(service_def.VBCountMetricMap)
 	vbStatMap[service_def.DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
 	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
+	vbStatMap[service_def.EXPIRY_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnExpirationsCnt)
+	vbStatMap[service_def.DELETION_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnDeletionsCnt)
+	vbStatMap[service_def.SET_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnSetCnt)
+	vbStatMap[service_def.BINARY_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnBinaryDocsCnt)
+	vbStatMap[service_def.EXPIRY_STRIPPED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnExpiryStrippedCnt)
+	vbStatMap[service_def.DOCS_FILTERED_TXN_ATR_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnATRDocsCnt)
+	vbStatMap[service_def.DOCS_FILTERED_CLIENT_TXN_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnClientTxnRecordsCnt)
+	vbStatMap[service_def.DOCS_FILTERED_TXN_XATTR_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnTxnXattrsDocsCnt)
+	vbStatMap[service_def.DOCS_FILTERED_MOBILE_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnMobileRecords)
+	vbStatMap[service_def.DOCS_FILTERED_USER_DEFINED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnUserDefinedFilters)
 	return vbStatMap
 }
 
@@ -1743,6 +1762,7 @@ func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]int
 		// Clear incremented count from staging areas
 		vbh.sortedSeqnoListMap[key].TruncateSeqnos(latestSeqno)
 	}
+
 }
 
 // metrics collector for Router
@@ -1799,6 +1819,16 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(service_def.DOCS_CLONED_METRIC, docs_cloned)
 		deletion_cloned := metrics.NewCounter()
 		registry_router.Register(service_def.DELETION_CLONED_METRIC, deletion_cloned)
+		atr_docs_filtered := metrics.NewCounter()
+		registry_router.Register(service_def.DOCS_FILTERED_TXN_ATR_METRIC, atr_docs_filtered)
+		client_txn_docs_filtered := metrics.NewCounter()
+		registry_router.Register(service_def.DOCS_FILTERED_CLIENT_TXN_METRIC, client_txn_docs_filtered)
+		docs_filtered_on_txn_xattr := metrics.NewCounter()
+		registry_router.Register(service_def.DOCS_FILTERED_TXN_XATTR_METRIC, docs_filtered_on_txn_xattr)
+		docs_filtered_on_user_defined_filter := metrics.NewCounter()
+		registry_router.Register(service_def.DOCS_FILTERED_USER_DEFINED_METRIC, docs_filtered_on_user_defined_filter)
+		mobile_docs_filtered := metrics.NewCounter()
+		registry_router.Register(service_def.DOCS_FILTERED_MOBILE_METRIC, mobile_docs_filtered)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.DOCS_FILTERED_METRIC] = docs_filtered
@@ -1812,6 +1842,11 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.EXPIRY_STRIPPED_METRIC] = expiry_stripped
 		metric_map[service_def.DOCS_CLONED_METRIC] = docs_cloned
 		metric_map[service_def.DELETION_CLONED_METRIC] = deletion_cloned
+		metric_map[service_def.DOCS_FILTERED_TXN_ATR_METRIC] = atr_docs_filtered
+		metric_map[service_def.DOCS_FILTERED_CLIENT_TXN_METRIC] = client_txn_docs_filtered
+		metric_map[service_def.DOCS_FILTERED_TXN_XATTR_METRIC] = docs_filtered_on_txn_xattr
+		metric_map[service_def.DOCS_FILTERED_USER_DEFINED_METRIC] = docs_filtered_on_user_defined_filter
+		metric_map[service_def.DOCS_FILTERED_MOBILE_METRIC] = mobile_docs_filtered
 
 		// VB specific stats
 		listOfVbs := dcp_part.ResponsibleVBs()
@@ -1844,6 +1879,26 @@ func (r_collector *routerCollector) Id() string {
 func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey string) error {
 	switch metricKey {
 	case service_def.DOCS_FILTERED_METRIC:
+		fallthrough
+	case service_def.EXPIRY_FILTERED_METRIC:
+		fallthrough
+	case service_def.DELETION_FILTERED_METRIC:
+		fallthrough
+	case service_def.SET_FILTERED_METRIC:
+		fallthrough
+	case service_def.EXPIRY_STRIPPED_METRIC:
+		fallthrough
+	case service_def.BINARY_FILTERED_METRIC:
+		fallthrough
+	case service_def.DOCS_FILTERED_TXN_ATR_METRIC:
+		fallthrough
+	case service_def.DOCS_FILTERED_CLIENT_TXN_METRIC:
+		fallthrough
+	case service_def.DOCS_FILTERED_TXN_XATTR_METRIC:
+		fallthrough
+	case service_def.DOCS_FILTERED_USER_DEFINED_METRIC:
+		fallthrough
+	case service_def.DOCS_FILTERED_MOBILE_METRIC:
 		fallthrough
 	case service_def.DOCS_UNABLE_TO_FILTER_METRIC:
 		uprEvent := event.Data.(*mcc.UprEvent)
@@ -1904,19 +1959,66 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		dataTypeIsJson := uprEvent.DataType&mcc.JSONDataType > 0
 		if !dataTypeIsJson {
 			metric_map[service_def.BINARY_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			err = r_collector.handleVBEvent(event, service_def.BINARY_FILTERED_METRIC)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {
 			metric_map[service_def.DELETION_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			err = r_collector.handleVBEvent(event, service_def.DELETION_FILTERED_METRIC)
 		} else if uprEvent.Opcode == mc.UPR_MUTATION {
 			metric_map[service_def.SET_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			err = r_collector.handleVBEvent(event, service_def.SET_FILTERED_METRIC)
 		} else if uprEvent.Opcode == mc.UPR_EXPIRATION {
 			metric_map[service_def.EXPIRY_FILTERED_METRIC].(metrics.Counter).Inc(1)
+			err = r_collector.handleVBEvent(event, service_def.EXPIRY_FILTERED_METRIC)
 		} else {
 			r_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFiltered event from %v.", uprEvent.Opcode, event.Component.Id())
 		}
 
+		if err != nil {
+			return err
+		}
+
 		// Handle VB specific tasks
 		err = r_collector.handleVBEvent(event, service_def.DOCS_FILTERED_METRIC)
+		if err != nil {
+			return err
+		}
+
+		additionalEventInfoIfc := event.OtherInfos
+		if additionalEventInfoIfc == nil {
+			r_collector.stats_mgr.logger.Warnf("OtherInfos is nil for the DataFiltered event from %v.", event.Component.Id())
+			return err
+		}
+		additionalEventInfo, ok := additionalEventInfoIfc.(parts.DataFilteredAdditional)
+		if !ok {
+			r_collector.stats_mgr.logger.Warnf("OtherInfos is not of type DataFilteredAdditional for the DataFiltered event from %v.", event.Component.Id())
+			return err
+		}
+		filteringStatus := additionalEventInfo.FilteringStatus
+		var filteredMetricKey string
+
+		switch filteringStatus {
+		case filter.FilteredOnATRDocument:
+			metric_map[service_def.DOCS_FILTERED_TXN_ATR_METRIC].(metrics.Counter).Inc(1)
+			filteredMetricKey = service_def.DOCS_FILTERED_TXN_ATR_METRIC
+		case filter.FilteredOnTxnClientRecord:
+			metric_map[service_def.DOCS_FILTERED_CLIENT_TXN_METRIC].(metrics.Counter).Inc(1)
+			filteredMetricKey = service_def.DOCS_FILTERED_CLIENT_TXN_METRIC
+		case filter.FilteredOnTxnsXattr:
+			metric_map[service_def.DOCS_FILTERED_TXN_XATTR_METRIC].(metrics.Counter).Inc(1)
+			filteredMetricKey = service_def.DOCS_FILTERED_TXN_XATTR_METRIC
+		case filter.FilteredOnUserDefinedFilter:
+			metric_map[service_def.DOCS_FILTERED_USER_DEFINED_METRIC].(metrics.Counter).Inc(1)
+			filteredMetricKey = service_def.DOCS_FILTERED_USER_DEFINED_METRIC
+		case filter.FilteredOnMobileRecord:
+			metric_map[service_def.DOCS_FILTERED_MOBILE_METRIC].(metrics.Counter).Inc(1)
+			filteredMetricKey = service_def.DOCS_FILTERED_MOBILE_METRIC
+		default:
+			return err
+		}
+
+		err = r_collector.handleVBEvent(event, filteredMetricKey)
+
 	case common.DataUnableToFilter:
 		metric_map[service_def.DOCS_UNABLE_TO_FILTER_METRIC].(metrics.Counter).Inc(1)
 		// Handle VB specific tasks
@@ -1928,6 +2030,7 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		metric_map[service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throughput_throttle_latency.Nanoseconds() / 1000000)
 	case common.ExpiryFieldStripped:
 		metric_map[service_def.EXPIRY_STRIPPED_METRIC].(metrics.Counter).Inc(1)
+		err = r_collector.handleVBEvent(event, service_def.EXPIRY_STRIPPED_METRIC)
 	case common.DataCloned:
 		data := event.Data.([]interface{})
 		totalCount := data[2].(int)

@@ -61,13 +61,18 @@ const (
 	DOCS_REP_QUEUE_METRIC               = base.DocsRepQueueStats
 	DATA_REPLICATED_UNCOMPRESSED_METRIC = "data_replicated_uncompress"
 
-	DOCS_FILTERED_METRIC         = "docs_filtered"
-	DOCS_UNABLE_TO_FILTER_METRIC = "docs_unable_to_filter"
-	EXPIRY_FILTERED_METRIC       = "expiry_filtered"
-	DELETION_FILTERED_METRIC     = "deletion_filtered"
-	SET_FILTERED_METRIC          = "set_filtered"
-	BINARY_FILTERED_METRIC       = "binary_filtered"
-	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
+	DOCS_FILTERED_METRIC              = "docs_filtered"
+	DOCS_UNABLE_TO_FILTER_METRIC      = "docs_unable_to_filter"
+	EXPIRY_FILTERED_METRIC            = "expiry_filtered"
+	DELETION_FILTERED_METRIC          = "deletion_filtered"
+	SET_FILTERED_METRIC               = "set_filtered"
+	BINARY_FILTERED_METRIC            = "binary_filtered"
+	EXPIRY_STRIPPED_METRIC            = "expiry_stripped"
+	DOCS_FILTERED_TXN_ATR_METRIC      = "atr_txn_docs_filtered"
+	DOCS_FILTERED_CLIENT_TXN_METRIC   = "client_txn_docs_filtered"
+	DOCS_FILTERED_TXN_XATTR_METRIC    = "docs_filtered_on_txn_xattr"
+	DOCS_FILTERED_USER_DEFINED_METRIC = "docs_filtered_on_user_defined_filter"
+	DOCS_FILTERED_MOBILE_METRIC       = "mobile_docs_filtered"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
 	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
@@ -1202,6 +1207,51 @@ var GlobalStatsTable = StatisticsPropertyMap{
 			"human intervention to look into the UI console or logs to decipher what errors could currently exist.",
 		Stability: Committed,
 		Labels:    StandardLabels,
+	},
+
+	DOCS_FILTERED_TXN_ATR_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "Total number of documents filtered and not replicated because the documents were ATR documents",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+
+	DOCS_FILTERED_TXN_XATTR_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "Total number of documents filtered and not replicated due to the presence of transaction related xattrs in it",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+
+	DOCS_FILTERED_CLIENT_TXN_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "Total number of documents filtered and not replicated because the documents were transaction client records",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+
+	DOCS_FILTERED_USER_DEFINED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "Total number of documents filtered and not replicated because of user defined filter expressions",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+
+	DOCS_FILTERED_MOBILE_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "Total number of documents filtered and not replicated because the documents were mobile records",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 }
 

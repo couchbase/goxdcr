@@ -11,29 +11,40 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
+	"unsafe"
+
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/golang/snappy"
-	"sync"
-	"unsafe"
 )
 
 const (
-	FailOverUUID                 string = "failover_uuid"
-	Seqno                        string = "seqno"
-	DcpSnapshotSeqno             string = "dcp_snapshot_seqno"
-	DcpSnapshotEndSeqno          string = "dcp_snapshot_end_seqno"
-	TargetVbOpaque               string = "target_vb_opaque"
-	TargetSeqno                  string = "target_seqno"
-	TargetVbUuid                 string = "target_vb_uuid"
-	StartUpTime                  string = "startup_time"
-	FilteredCnt                  string = "filtered_items_cnt"
-	FilteredFailedCnt            string = "filtered_failed_cnt"
-	SourceManifestForDCP         string = "source_manifest_dcp"
-	SourceManifestForBackfillMgr string = "source_manifest_backfill_mgr"
-	TargetManifest               string = "target_manifest"
-	BrokenCollectionsMapSha      string = "brokenCollectionsMapSha256"
-	CreationTime                 string = "creationTime"
+	FailOverUUID                       string = "failover_uuid"
+	Seqno                              string = "seqno"
+	DcpSnapshotSeqno                   string = "dcp_snapshot_seqno"
+	DcpSnapshotEndSeqno                string = "dcp_snapshot_end_seqno"
+	TargetVbOpaque                     string = "target_vb_opaque"
+	TargetSeqno                        string = "target_seqno"
+	TargetVbUuid                       string = "target_vb_uuid"
+	StartUpTime                        string = "startup_time"
+	FilteredCnt                        string = "filtered_items_cnt"
+	FilteredFailedCnt                  string = "filtered_failed_cnt"
+	FilteredItemsOnExpirationsCnt      string = "expirations_filtered_cnt"
+	FilteredItemsOnDeletionsCnt        string = "deletions_filtered_cnt"
+	FilteredItemsOnSetCnt              string = "set_filtered_cnt"
+	FilteredItemsOnExpiryStrippedCnt   string = "expiry_stripped_cnt"
+	FilteredItemsOnBinaryDocsCnt       string = "binary_docs_filtered_cnt"
+	FilteredItemsOnATRDocsCnt          string = "ATR_docs_filtered_cnt"
+	FilteredItemsOnClientTxnRecordsCnt string = "client_txn_records_filtered_cnt"
+	FilteredItemsOnTxnXattrsDocsCnt    string = "docs_with_txn_xattrs_filtered_cnt"
+	FilteredItemsOnMobileRecords       string = "mobile_records_filtered_cnt"
+	FilteredItemsOnUserDefinedFilters  string = "docs_filtered_on_user_defined_filters_cnt"
+	SourceManifestForDCP               string = "source_manifest_dcp"
+	SourceManifestForBackfillMgr       string = "source_manifest_backfill_mgr"
+	TargetManifest                     string = "target_manifest"
+	BrokenCollectionsMapSha            string = "brokenCollectionsMapSha256"
+	CreationTime                       string = "creationTime"
 )
 
 type CheckpointRecord struct {
@@ -53,6 +64,26 @@ type CheckpointRecord struct {
 	Filtered_Items_Cnt uint64 `json:"filtered_items_cnt"`
 	// Number of items failed filter
 	Filtered_Failed_Cnt uint64 `json:"filtered_failed_cnt"`
+	// Number of Expirations filtered
+	FilteredItemsOnExpirationsCnt uint64 `json:"expirations_filtered_cnt"`
+	// Number of Deletions that were filtered
+	FilteredItemsOnDeletionsCnt uint64 `json:"deletions_filtered_cnt"`
+	// Number of documents filtered that was of a DCP mutation
+	FilteredItemsOnSetCnt uint64 `json:"set_filtered_cnt"`
+	// Number of Document Mutations replicated that had the TTL changed to 0 before writing to Targe
+	FilteredItemsOnExpiryStrippedCnt uint64 `json:"expiry_stripped_cnt"`
+	// Number of binary documents filtered
+	FilteredItemsOnBinaryDocsCnt uint64 `json:"binary_docs_filtered_cnt"`
+	// Number of ATR transaction documents filtered
+	FilteredItemsOnATRDocsCnt uint64 `json:"ATR_docs_filtered_cnt"`
+	// Number of client transaction records filtered
+	FilteredItemsOnClientTxnRecordsCnt uint64 `json:"client_txn_records_filtered_cnt"`
+	// Number of documents filtered because of the presence of transaction xattrs
+	FilteredItemsOnTxnXattrsDocsCnt uint64 `json:"docs_with_txn_xattrs_filtered_cnt"`
+	// Number of mobile records filtered
+	FilteredItemsOnMobileRecords uint64 `json:"mobile_records_filtered_cnt"`
+	// Number of mobile records filtered
+	FilteredItemsOnUserDefinedFilters uint64 `json:"docs_filtered_on_user_defined_filters_cnt"`
 	// Manifests uid corresponding to this checkpoint
 	SourceManifestForDCP         uint64 `json:"source_manifest_dcp"`
 	SourceManifestForBackfillMgr uint64 `json:"source_manifest_backfill_mgr"`
@@ -88,20 +119,34 @@ func (c *CheckpointRecord) Size() int {
 	return totalSize
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed, srcManifestForDCP, srcManifestForBackfill, tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems,
+	filterFailed, filteredExpiredItem, filteredDelItems, filteredSetItems, filteredBinaryDocItems,
+	filteredExpiryStrippedItems, filteredATRDocItems, filteredClientTxnDocItems, filteredTxnXattrsItems,
+	filteredMobileDocItems, filteredDocsOnUserDefinedFilters, srcManifestForDCP, srcManifestForBackfill, tgtManifest uint64,
+	brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
 	record := &CheckpointRecord{
-		Failover_uuid:                failoverUuid,
-		Seqno:                        seqno,
-		Dcp_snapshot_seqno:           dcpSnapSeqno,
-		Dcp_snapshot_end_seqno:       dcpSnapEnd,
-		Target_Seqno:                 targetSeqno,
-		Filtered_Items_Cnt:           filteredItems,
-		Filtered_Failed_Cnt:          filterFailed,
-		SourceManifestForDCP:         srcManifestForDCP,
-		SourceManifestForBackfillMgr: srcManifestForBackfill,
-		TargetManifest:               tgtManifest,
-		brokenMappings:               brokenMappings,
-		CreationTime:                 creationTime,
+		Failover_uuid:                      failoverUuid,
+		Seqno:                              seqno,
+		Dcp_snapshot_seqno:                 dcpSnapSeqno,
+		Dcp_snapshot_end_seqno:             dcpSnapEnd,
+		Target_Seqno:                       targetSeqno,
+		Filtered_Items_Cnt:                 filteredItems,
+		Filtered_Failed_Cnt:                filterFailed,
+		FilteredItemsOnExpirationsCnt:      filteredExpiredItem,
+		FilteredItemsOnDeletionsCnt:        filteredDelItems,
+		FilteredItemsOnSetCnt:              filteredSetItems,
+		FilteredItemsOnExpiryStrippedCnt:   filteredExpiryStrippedItems,
+		FilteredItemsOnBinaryDocsCnt:       filteredBinaryDocItems,
+		FilteredItemsOnATRDocsCnt:          filteredATRDocItems,
+		FilteredItemsOnClientTxnRecordsCnt: filteredClientTxnDocItems,
+		FilteredItemsOnTxnXattrsDocsCnt:    filteredTxnXattrsItems,
+		FilteredItemsOnMobileRecords:       filteredMobileDocItems,
+		FilteredItemsOnUserDefinedFilters:  filteredDocsOnUserDefinedFilters,
+		SourceManifestForDCP:               srcManifestForDCP,
+		SourceManifestForBackfillMgr:       srcManifestForBackfill,
+		TargetManifest:                     tgtManifest,
+		brokenMappings:                     brokenMappings,
+		CreationTime:                       creationTime,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -141,6 +186,16 @@ func (ckptRecord *CheckpointRecord) SameAs(new_record *CheckpointRecord) bool {
 		ckptRecord.Target_Seqno == new_record.Target_Seqno &&
 		ckptRecord.Filtered_Failed_Cnt == new_record.Filtered_Failed_Cnt &&
 		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt &&
+		ckptRecord.FilteredItemsOnExpirationsCnt == new_record.FilteredItemsOnExpirationsCnt &&
+		ckptRecord.FilteredItemsOnDeletionsCnt == new_record.FilteredItemsOnDeletionsCnt &&
+		ckptRecord.FilteredItemsOnSetCnt == new_record.FilteredItemsOnSetCnt &&
+		ckptRecord.FilteredItemsOnExpiryStrippedCnt == new_record.FilteredItemsOnExpiryStrippedCnt &&
+		ckptRecord.FilteredItemsOnBinaryDocsCnt == new_record.FilteredItemsOnBinaryDocsCnt &&
+		ckptRecord.FilteredItemsOnATRDocsCnt == new_record.FilteredItemsOnATRDocsCnt &&
+		ckptRecord.FilteredItemsOnClientTxnRecordsCnt == new_record.FilteredItemsOnClientTxnRecordsCnt &&
+		ckptRecord.FilteredItemsOnTxnXattrsDocsCnt == new_record.FilteredItemsOnTxnXattrsDocsCnt &&
+		ckptRecord.FilteredItemsOnMobileRecords == new_record.FilteredItemsOnMobileRecords &&
+		ckptRecord.FilteredItemsOnUserDefinedFilters == new_record.FilteredItemsOnUserDefinedFilters &&
 		ckptRecord.SourceManifestForDCP == new_record.SourceManifestForDCP &&
 		ckptRecord.SourceManifestForBackfillMgr == new_record.SourceManifestForBackfillMgr &&
 		ckptRecord.TargetManifest == new_record.TargetManifest &&
@@ -164,6 +219,16 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.Target_Seqno = other.Target_Seqno
 	ckptRecord.Filtered_Items_Cnt = other.Filtered_Items_Cnt
 	ckptRecord.Filtered_Failed_Cnt = other.Filtered_Failed_Cnt
+	ckptRecord.FilteredItemsOnExpirationsCnt = other.FilteredItemsOnExpirationsCnt
+	ckptRecord.FilteredItemsOnDeletionsCnt = other.FilteredItemsOnDeletionsCnt
+	ckptRecord.FilteredItemsOnSetCnt = other.FilteredItemsOnSetCnt
+	ckptRecord.FilteredItemsOnExpiryStrippedCnt = other.FilteredItemsOnExpiryStrippedCnt
+	ckptRecord.FilteredItemsOnBinaryDocsCnt = other.FilteredItemsOnBinaryDocsCnt
+	ckptRecord.FilteredItemsOnATRDocsCnt = other.FilteredItemsOnATRDocsCnt
+	ckptRecord.FilteredItemsOnClientTxnRecordsCnt = other.FilteredItemsOnClientTxnRecordsCnt
+	ckptRecord.FilteredItemsOnTxnXattrsDocsCnt = other.FilteredItemsOnTxnXattrsDocsCnt
+	ckptRecord.FilteredItemsOnMobileRecords = other.FilteredItemsOnMobileRecords
+	ckptRecord.FilteredItemsOnUserDefinedFilters = other.FilteredItemsOnUserDefinedFilters
 	ckptRecord.SourceManifestForDCP = other.SourceManifestForDCP
 	ckptRecord.SourceManifestForBackfillMgr = other.SourceManifestForBackfillMgr
 	ckptRecord.TargetManifest = other.TargetManifest
@@ -231,6 +296,56 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	filteredFailedCnt, ok := fieldMap[FilteredFailedCnt]
 	if ok {
 		ckptRecord.Filtered_Failed_Cnt = uint64(filteredFailedCnt.(float64))
+	}
+
+	filteredItemsOnExpirationsCnt, ok := fieldMap[FilteredItemsOnExpirationsCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnExpirationsCnt = uint64(filteredItemsOnExpirationsCnt.(float64))
+	}
+
+	filteredItemsOnDeletionsCnt, ok := fieldMap[FilteredItemsOnDeletionsCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnDeletionsCnt = uint64(filteredItemsOnDeletionsCnt.(float64))
+	}
+
+	filteredItemsOnSetCnt, ok := fieldMap[FilteredItemsOnSetCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnSetCnt = uint64(filteredItemsOnSetCnt.(float64))
+	}
+
+	filteredItemsOnExpiryStripCnt, ok := fieldMap[FilteredItemsOnExpiryStrippedCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnExpiryStrippedCnt = uint64(filteredItemsOnExpiryStripCnt.(float64))
+	}
+
+	filteredItemsOnBinaryDocsCnt, ok := fieldMap[FilteredItemsOnBinaryDocsCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnBinaryDocsCnt = uint64(filteredItemsOnBinaryDocsCnt.(float64))
+	}
+
+	filteredItemsOnATRDocsCnt, ok := fieldMap[FilteredItemsOnATRDocsCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnATRDocsCnt = uint64(filteredItemsOnATRDocsCnt.(float64))
+	}
+
+	filteredItemsOnClientTxnRecordsCnt, ok := fieldMap[FilteredItemsOnClientTxnRecordsCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnClientTxnRecordsCnt = uint64(filteredItemsOnClientTxnRecordsCnt.(float64))
+	}
+
+	filteredItemsOnTxnXattrsDocsCnt, ok := fieldMap[FilteredItemsOnTxnXattrsDocsCnt]
+	if ok {
+		ckptRecord.FilteredItemsOnTxnXattrsDocsCnt = uint64(filteredItemsOnTxnXattrsDocsCnt.(float64))
+	}
+
+	filteredItemsOnMobileRecords, ok := fieldMap[FilteredItemsOnMobileRecords]
+	if ok {
+		ckptRecord.FilteredItemsOnMobileRecords = uint64(filteredItemsOnMobileRecords.(float64))
+	}
+
+	filteredDocsOnUserDefinedFilters, ok := fieldMap[FilteredItemsOnUserDefinedFilters]
+	if ok {
+		ckptRecord.FilteredItemsOnUserDefinedFilters = uint64(filteredDocsOnUserDefinedFilters.(float64))
 	}
 
 	srcManifest, ok := fieldMap[SourceManifestForDCP]
@@ -849,20 +964,30 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 	}
 
 	retVal := &CheckpointRecord{
-		Failover_uuid:                c.Failover_uuid,
-		Seqno:                        c.Seqno,
-		Dcp_snapshot_seqno:           c.Dcp_snapshot_seqno,
-		Dcp_snapshot_end_seqno:       c.Dcp_snapshot_end_seqno,
-		Target_vb_opaque:             c.Target_vb_opaque,
-		Target_Seqno:                 c.Target_Seqno,
-		Filtered_Items_Cnt:           c.Filtered_Items_Cnt,
-		Filtered_Failed_Cnt:          c.Filtered_Failed_Cnt,
-		SourceManifestForDCP:         c.SourceManifestForDCP,
-		SourceManifestForBackfillMgr: c.SourceManifestForBackfillMgr,
-		TargetManifest:               c.TargetManifest,
-		BrokenMappingSha256:          c.BrokenMappingSha256,
-		brokenMappings:               c.brokenMappings.Clone(),
-		brokenMappingsMtx:            sync.RWMutex{},
+		Failover_uuid:                      c.Failover_uuid,
+		Seqno:                              c.Seqno,
+		Dcp_snapshot_seqno:                 c.Dcp_snapshot_seqno,
+		Dcp_snapshot_end_seqno:             c.Dcp_snapshot_end_seqno,
+		Target_vb_opaque:                   c.Target_vb_opaque,
+		Target_Seqno:                       c.Target_Seqno,
+		Filtered_Items_Cnt:                 c.Filtered_Items_Cnt,
+		Filtered_Failed_Cnt:                c.Filtered_Failed_Cnt,
+		FilteredItemsOnExpirationsCnt:      c.FilteredItemsOnExpirationsCnt,
+		FilteredItemsOnDeletionsCnt:        c.FilteredItemsOnDeletionsCnt,
+		FilteredItemsOnSetCnt:              c.FilteredItemsOnSetCnt,
+		FilteredItemsOnExpiryStrippedCnt:   c.FilteredItemsOnExpiryStrippedCnt,
+		FilteredItemsOnBinaryDocsCnt:       c.FilteredItemsOnBinaryDocsCnt,
+		FilteredItemsOnATRDocsCnt:          c.FilteredItemsOnATRDocsCnt,
+		FilteredItemsOnClientTxnRecordsCnt: c.FilteredItemsOnClientTxnRecordsCnt,
+		FilteredItemsOnTxnXattrsDocsCnt:    c.FilteredItemsOnTxnXattrsDocsCnt,
+		FilteredItemsOnMobileRecords:       c.FilteredItemsOnMobileRecords,
+		FilteredItemsOnUserDefinedFilters:  c.FilteredItemsOnUserDefinedFilters,
+		SourceManifestForDCP:               c.SourceManifestForDCP,
+		SourceManifestForBackfillMgr:       c.SourceManifestForBackfillMgr,
+		TargetManifest:                     c.TargetManifest,
+		BrokenMappingSha256:                c.BrokenMappingSha256,
+		brokenMappings:                     c.brokenMappings.Clone(),
+		brokenMappingsMtx:                  sync.RWMutex{},
 	}
 	return retVal
 }
@@ -890,7 +1015,7 @@ func NewCheckpointsDocFromSnappy(snappyBytes []byte, compressedMap ShaMappingCom
 	return ckptDoc, nil
 }
 
-//Not concurrency safe. It should be used by one goroutine only
+// Not concurrency safe. It should be used by one goroutine only
 func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) (added bool, removedRecords []*CheckpointRecord) {
 	length := len(ckptsDoc.Checkpoint_records)
 	if length > 0 {

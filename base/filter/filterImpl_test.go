@@ -193,9 +193,10 @@ func TestFilterUtilsMethods(t *testing.T) {
 	filter, err := NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	match, err, _, _ := filter.FilterUprEvent(uprEvent)
+	match, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.Nil(err)
 	assert.True(match)
+	assert.Equal(status, NotFiltered)
 
 	uprEvent, err = base.RetrieveUprJsonAndConvert(compressedFile)
 	assert.Nil(err)
@@ -203,9 +204,10 @@ func TestFilterUtilsMethods(t *testing.T) {
 	filter, err = NewFilter(filterId, "REGEXP_CONTAINS(Key, \"^A+\")", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	match, err, _, _ = filter.FilterUprEvent(uprEvent)
+	match, err, _, _, status = filter.FilterUprEvent(uprEvent)
 	assert.Nil(err)
 	assert.True(match)
+	assert.Equal(status, NotFiltered)
 
 	uprEvent, err = base.RetrieveUprJsonAndConvert(xAttrUncompressedFile)
 	assert.Nil(err)
@@ -213,9 +215,10 @@ func TestFilterUtilsMethods(t *testing.T) {
 	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30 AND META().id = \"TestDocKey\"", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	match, err, _, _ = filter.FilterUprEvent(uprEvent)
+	match, err, _, _, status = filter.FilterUprEvent(uprEvent)
 	assert.Nil(err)
 	assert.True(match)
+	assert.Equal(status, NotFiltered)
 
 	uprEvent, err = base.RetrieveUprJsonAndConvert(xAttrCompressedFile)
 	assert.Nil(err)
@@ -223,9 +226,10 @@ func TestFilterUtilsMethods(t *testing.T) {
 	filter, err = NewFilter(filterId, "META().xattrs.AnotherXattr = \"TestValueString\" AND META().xattrs.TestXattr = 30", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	match, err, _, _ = filter.FilterUprEvent(uprEvent)
+	match, err, _, _, status = filter.FilterUprEvent(uprEvent)
 	assert.Nil(err)
 	assert.True(match)
+	assert.Equal(status, NotFiltered)
 	fmt.Println("============== Test case end: TestFilterUtilsMethod =================")
 }
 
@@ -245,9 +249,10 @@ func TestActiveTxnRecordFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(filter)
 
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnATRDocument)
 
 	fmt.Println("============== Test case end: TestActiveTxnRecordFiltering =================")
 }
@@ -268,9 +273,10 @@ func TestTxnClientRecordFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(filter)
 
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnTxnClientRecord)
 
 	fmt.Println("============== Test case end: TestTxnClientRecordFiltering =================")
 }
@@ -301,17 +307,19 @@ func TestTransXattrOnlyFilteringWithoutCompression(t *testing.T) {
 	legacyFilter, err := NewFilter(filterId, "", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(legacyFilter)
-	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := legacyFilter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnTxnsXattr)
 
 	// Without skip, make sure it replicates and that it can strip the xattribute
 	stripFilter, err := NewFilter(filterId, "", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(stripFilter)
-	result, err, _, _ = stripFilter.FilterUprEvent(uprEvent)
+	result, err, _, _, status = stripFilter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	body := uprEvent.DecompressedValue
 	assert.True(uprEvent.Flags.ShouldUseDecompressedValue())
@@ -374,23 +382,26 @@ func TestMixedXattrFilteringWithCompression(t *testing.T) {
 	legacyFilter, err := NewFilter(filterId, "", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(legacyFilter)
-	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := legacyFilter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnTxnsXattr)
 
 	sdkFilter, err := NewFilter(filterId, "", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(sdkFilter)
-	result, err, _, _ = sdkFilter.FilterUprEvent(uprEvent)
+	result, err, _, _, status = sdkFilter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	var dummySlice [][]byte
-	result, body, endPos, err, _, _, _ := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	result, body, endPos, err, _, _, _, status := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
 	assert.True(result)
 	assert.NotNil(body)
 	assert.True(endPos <= len(body))
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	// The body returned is xattributes + body
 	bodyWoXattr, err := base.StripXattrAndGetBody(body)
@@ -471,16 +482,18 @@ func TestTxnOnlyXattrFilteringWithCompression(t *testing.T) {
 	legacyFilter, err := NewFilter(filterId, "", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(legacyFilter)
-	result, err, _, _ := legacyFilter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := legacyFilter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnTxnsXattr)
 
 	sdkFilter, err := NewFilter(filterId, "", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(sdkFilter)
-	result, err, _, _ = sdkFilter.FilterUprEvent(uprEvent)
+	result, err, _, _, status = sdkFilter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	// Afterwards, no xattr flag
 	assert.True(uprEvent.UprEvent.DataType&mcc.XattrDataType == 0)
@@ -513,9 +526,10 @@ func TestMixedTransXattrFilteringWithoutCompression(t *testing.T) {
 	filter, err := NewFilter(filterId, "", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnTxnsXattr)
 
 	fmt.Println("============== Test case end: TestMixedTransXattrFilteringWithoutCompression =================")
 }
@@ -536,9 +550,10 @@ func TestNonTransXattrFilteringWithoutCompression(t *testing.T) {
 	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithoutCompression =================")
 }
@@ -559,9 +574,10 @@ func TestNonTransXattrFilteringWithoutCompressionNegative(t *testing.T) {
 	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnUserDefinedFilter)
 
 	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithoutCompressionNegative =================")
 }
@@ -582,9 +598,10 @@ func TestNonTransXattrFilteringWithCompression(t *testing.T) {
 	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 30", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithCompression =================")
 }
@@ -605,9 +622,10 @@ func TestNonTransXattrFilteringWithCompressionNegative(t *testing.T) {
 	filter, err := NewFilter(filterId, "META().xattrs.TestXattr = 31", realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(filter)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnUserDefinedFilter)
 
 	fmt.Println("============== Test case end: TestNonTransXattrFilteringWithCompressionNegative =================")
 }
@@ -764,9 +782,10 @@ func TestCompressionXattrKeyFiltering(t *testing.T) {
 	filter, err := NewFilter(filterId, testExpression, realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	fmt.Println("============== Test case end: TestCompressionXattrKeyFiltering =================")
 }
@@ -783,9 +802,10 @@ func TestCompressionKeyFiltering(t *testing.T) {
 	filter, err := NewFilter(filterId, "META().id = \"TestDocKey\" AND REGEXP_CONTAINS(`Key`, \"^A+$\")", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	fmt.Println("============== Test case end: TestCompressionXattrKeyFiltering =================")
 }
@@ -819,15 +839,17 @@ func TestTransactionMB36043(t *testing.T) {
 	assert.Nil(err)
 	assert.NotNil(txnUprEvent)
 
-	needToReplicate, _, _, _, _, _, _ := legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	needToReplicate, _, _, _, _, _, _, status := legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
 	assert.False(needToReplicate)
+	assert.Equal(status, FilteredOnATRDocument)
 
 	// Even with a new, non-legacy filter, it should still prevent ATR related doc keys from being replicated
 	txFilter, err := NewFilter(filterId, "REGEXP_CONTAINS(META().id, \".*\")", realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 	assert.NotNil(txFilter)
 
-	needToReplicate, _, _, _, _, _, _ = legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	needToReplicate, _, _, _, _, _, _, status = legacyFilter.filterTransactionRelatedUprEvent(txnUprEvent.UprEvent, nil)
+	assert.Equal(status, FilteredOnATRDocument)
 	assert.False(needToReplicate)
 }
 
@@ -844,9 +866,10 @@ func TestTransactionXattrAndKeyOnlyFiltering(t *testing.T) {
 	filter, err := NewFilter(filterId, testExpression, realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
 
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	fmt.Println("============== Test case end: TestTransactionXattrAndKeyOnlyFiltering =================")
 }
@@ -866,28 +889,31 @@ func TestBinaryFilter(t *testing.T) {
 	var testExpression string = fmt.Sprintf("key=val")
 	filter, err := NewFilter(filterId, testExpression, realUtil, 0, base.MobileCompatibilityOff)
 	assert.Nil(err)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	// Should not pass through in either key only filter nor any other filter
 	var filterType base.FilterExpDelType
 	filterType.SetSkipBinary(true)
 	filter, err = NewFilter(filterId, testExpression, realUtil, filterType, base.MobileCompatibilityOff)
 	assert.Nil(err)
-	result, err, _, _ = filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status = filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnOthers)
 
 	testExpression = fmt.Sprintf("META().id = \"%v\"", "test1")
 	filter, err = NewFilter(filterId, testExpression, realUtil, filterType, base.MobileCompatibilityOff)
 	fmt.Printf("expression: %v\n", testExpression)
 	fmt.Printf("filter: %v\n", filter)
-
 	assert.Nil(err)
-	result, err, _, _ = filter.FilterUprEvent(uprEvent)
+
+	result, err, _, _, _ = filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnOthers)
 }
 
 func TestMobileFiltering(t *testing.T) {
@@ -902,25 +928,28 @@ func TestMobileFiltering(t *testing.T) {
 	uprEvent, err := base.RetrieveUprJsonAndConvert(uprFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	result, err, _, _ := filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status := filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	// Document key with prefix _sync:att should be replicated
 	uprFile = "./testInternalData/syncAttTest.json"
 	uprEvent, err = base.RetrieveUprJsonAndConvert(uprFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	result, err, _, _ = filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status = filter.FilterUprEvent(uprEvent)
 	assert.True(result)
 	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
 
 	// Document key with prefix _sync: but not _sync:att should be skipped
 	uprFile = "./testInternalData/syncTest.json"
 	uprEvent, err = base.RetrieveUprJsonAndConvert(uprFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
-	result, err, _, _ = filter.FilterUprEvent(uprEvent)
+	result, err, _, _, status = filter.FilterUprEvent(uprEvent)
 	assert.False(result)
 	assert.Nil(err)
+	assert.Equal(status, FilteredOnMobileRecord)
 }

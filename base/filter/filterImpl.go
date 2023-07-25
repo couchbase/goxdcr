@@ -16,12 +16,22 @@ import (
 	"sync/atomic"
 
 	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/gomemcached/client"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbaselabs/gojsonsm"
 )
 
 const collateErrDesc = " Collate was used to determine outcome"
+
+const (
+	NotFiltered                 base.FilteringStatusType = iota
+	FilteredOnATRDocument       base.FilteringStatusType = iota
+	FilteredOnTxnClientRecord   base.FilteringStatusType = iota
+	FilteredOnTxnsXattr         base.FilteringStatusType = iota
+	FilteredOnUserDefinedFilter base.FilteringStatusType = iota
+	FilteredOnMobileRecord      base.FilteringStatusType = iota
+	FilteredOnOthers            base.FilteringStatusType = iota // could be filtered because of error, binary doc, expiry, deletion etc which do not need to be explicitly distinguished
+)
 
 type FilterImpl struct {
 	id                       string
@@ -131,17 +141,17 @@ func (filter *FilterImpl) getMobileCompatibility() uint32 {
 	return atomic.LoadUint32(&filter.mobileCompatible)
 }
 
-func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64) {
+func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64, base.FilteringStatusType) {
 	if wrappedUprEvent == nil || wrappedUprEvent.UprEvent == nil {
-		return false, base.ErrorInvalidInput, "UprEvent or wrappedUprEvent is nil", 0
+		return false, base.ErrorInvalidInput, "UprEvent or wrappedUprEvent is nil", 0, FilteredOnOthers
 	}
 	// Mobile filter applies to all scopes/collections so let's do that first
 	if filter.filterMobileRelatedUprEvent(wrappedUprEvent.UprEvent) == false {
-		return false, nil, "", 0
+		return false, nil, "", 0, FilteredOnMobileRecord
 	}
 	// User defined filter doesn't apply to system scope
 	if wrappedUprEvent.ColNamespace != nil && wrappedUprEvent.ColNamespace.ScopeName == base.SystemScopeName {
-		return true, nil, "", 0
+		return true, nil, "", 0, NotFiltered
 	}
 
 	// filter.slicesToBeReleasedBuf may be used to store temporary objects created in this method
@@ -153,19 +163,20 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		filter.slicesToBeReleasedBuf = filter.slicesToBeReleasedBuf[:0]
 	}()
 
-	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt, bodyHasBeenModified := filter.filterTransactionRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
+	filterStatus := NotFiltered
+	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt, bodyHasBeenModified, filterStatus := filter.filterTransactionRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
 	if err != nil {
-		return false, err, errDesc, totalFailedDpCnt
+		return false, err, errDesc, totalFailedDpCnt, FilteredOnOthers
 	}
 
 	if !needToReplicate {
-		return false, nil, "", totalFailedDpCnt
+		return false, nil, "", totalFailedDpCnt, filterStatus
 	}
 
-	dataTypeIsJson := wrappedUprEvent.UprEvent.DataType&memcached.JSONDataType > 0
+	dataTypeIsJson := wrappedUprEvent.UprEvent.DataType&mcc.JSONDataType > 0
 	if filter.ShouldSkipBinaryDocs() && !dataTypeIsJson {
 		// Skip binary document
-		return false, nil, "", totalFailedDpCnt
+		return false, nil, "", totalFailedDpCnt, FilteredOnOthers
 	}
 
 	var failedDpCnt int64
@@ -173,6 +184,10 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		needToReplicate, err, errDesc, failedDpCnt = filter.filterUprEvent(wrappedUprEvent.UprEvent, body, endBodyPos, &filter.slicesToBeReleasedBuf)
 		if failedDpCnt > 0 {
 			totalFailedDpCnt += failedDpCnt
+		}
+
+		if !needToReplicate {
+			filterStatus = FilteredOnUserDefinedFilter
 		}
 	}
 
@@ -183,17 +198,17 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 	if needToReplicate && body != nil && bodyHasBeenModified && !wrappedUprEvent.Flags.ShouldUseDecompressedValue() {
 		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos))
 		if err != nil {
-			return needToReplicate, err, "wrappedUprEvent.ByteSliceGetter", totalFailedDpCnt
+			return needToReplicate, err, "wrappedUprEvent.ByteSliceGetter", totalFailedDpCnt, filterStatus
 		}
 		wrappedUprEvent.Flags.SetShouldUseDecompressedValue()
 		copy(valueBod, body[0:endBodyPos])
 		valueBod = valueBod[0:endBodyPos] // Ensure trailing garbage are removed and len() calls are accurate
 		wrappedUprEvent.DecompressedValue = valueBod
 	}
-	return needToReplicate, err, errDesc, totalFailedDpCnt
+	return needToReplicate, err, errDesc, totalFailedDpCnt, filterStatus
 }
 
-func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *memcached.UprEvent) (needToReplicate bool) {
+func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *mcc.UprEvent) (needToReplicate bool) {
 	switch filter.getMobileCompatibility() {
 	case base.MobileCompatibilityActive:
 		if bytes.HasPrefix(uprEvent.Key, base.MobileDocPrefixSync) && !bytes.HasPrefix(uprEvent.Key, base.MobileDocPrefixSyncAtt) {
@@ -206,13 +221,16 @@ func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *memcached.UprEve
 }
 
 // Returns:
-// 1. needToReplicate bool - Whether or not the mutation should be allowed to continue through the pipeline
-// 2. body []byte - body slice (will be stripped of SDK transaction metadata if non-legacy mode)
-// 3. endBodyPos int - position of last valid byte in body
-// 4. err error
-// 5. errDesc string - If err is not nil, additional description
-// 6. failedDpCnt int64 - Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
-// 7. If body has been modified due to stripping the transactional xattr
+//  1. needToReplicate bool - Whether or not the mutation should be allowed to continue through the pipeline
+//  2. body []byte - body slice (will be stripped of SDK transaction metadata if non-legacy mode)
+//  3. endBodyPos int - position of last valid byte in body
+//  4. err error
+//  5. errDesc string - If err is not nil, additional description
+//  6. failedDpCnt int64 - Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
+//  7. If body has been modified due to stripping the transactional xattr
+//  8. Status of txn based filtering - not filtered based on txns, not filtered because of error, not filtered because it is an ATR document,
+//     not filtered because of txt xattrs, not filtered because of client txn records
+//
 // Note that body in 2 is not nil only in the following scenario:
 // (1). uprEvent is compressed
 // (2). We will need to perform filtering on body later.
@@ -221,26 +239,26 @@ func (filter *FilterImpl) filterMobileRelatedUprEvent(uprEvent *memcached.UprEve
 // In this scenario body is a newly allocated byte slice, which holds the decompressed document body,
 // and also contains extra bytes to accommodate key, so that it can be reused by advanced filtering later.
 // In other scenarios body is nil and endBodyPos is -1
-func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64, bool) {
+func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEvent, slicesToBeReleased *[][]byte) (bool, []byte, int, error, string, int64, bool, base.FilteringStatusType) {
 	if base.Equals(uprEvent.Key, base.TransactionClientRecordKey) {
 		// filter out transaction client records
-		return false, nil, 0, nil, "", 0, false
+		return false, nil, 0, nil, "", 0, false, FilteredOnTxnClientRecord
 	}
 
 	// active transaction records look like "_txn:atr-[VbucketId]-#[a-f1-9]+"
 	if base.ActiveTxnRecordRegexp.Match(uprEvent.Key) {
 		// filter out active transaction record
-		return false, nil, 0, nil, "", 0, false
+		return false, nil, 0, nil, "", 0, false, FilteredOnATRDocument
 	}
 
 	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
 		// these mutations do not have xattrs and do not need xattr processing
-		return true, nil, 0, nil, "", 0, false
+		return true, nil, 0, nil, "", 0, false, NotFiltered
 	}
 
-	if uprEvent.DataType&memcached.XattrDataType == 0 {
+	if uprEvent.DataType&mcc.XattrDataType == 0 {
 		// no xattrs, no op
-		return true, nil, 0, nil, "", 0, false
+		return true, nil, 0, nil, "", 0, false, NotFiltered
 	}
 
 	// Whether we will need to filter on body later
@@ -249,29 +267,33 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 	// For UPR_MUTATION with xattrs, continue to filter based on whether transaction xattrs are present
 	hasTransXattrs, body, endBodyPos, err, errDesc, failedDpCnt, uncompressedUprValue := filter.utils.CheckForTransactionXattrsInUprEvent(uprEvent, filter.dp, slicesToBeReleased, needToFilterBody)
 	if err != nil {
-		return false, nil, 0, err, errDesc, failedDpCnt, false
+		return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 	}
 
 	var bodyHasBeenModified bool
+	filterStatus := NotFiltered
 	passedFilter := true
 	if filter.ShouldSkipUncommittedTxn() {
 		// if mutation has transaction xattrs, do not replicate it
 		passedFilter = !hasTransXattrs
+		if !passedFilter {
+			filterStatus = FilteredOnTxnsXattr
+		}
 	} else if hasTransXattrs {
 		// Strip out transaction xattributes
 		newBodySlice, err := filter.dp.GetByteSlice(uint64(len(uncompressedUprValue)))
 		if err != nil {
-			return false, nil, 0, err, errDesc, failedDpCnt, false
+			return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 		}
 		*slicesToBeReleased = append(*slicesToBeReleased, newBodySlice)
 
 		xattrIterator, err := base.NewXattrIterator(uncompressedUprValue)
 		if err != nil {
-			return false, nil, 0, err, errDesc, failedDpCnt, false
+			return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 		}
 		bodyWithoutXttr, err := base.StripXattrAndGetBody(uncompressedUprValue)
 		if err != nil {
-			return false, nil, 0, err, errDesc, failedDpCnt, false
+			return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 		}
 
 		xattrComposer := base.NewXattrComposer(newBodySlice)
@@ -281,7 +303,7 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 			if err != nil {
 				errDesc = fmt.Sprintf("error during xattribute walk")
 				if err != nil {
-					return false, nil, 0, err, errDesc, failedDpCnt, false
+					return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 				}
 			}
 			if base.Equals(key, base.TransactionXattrKey) {
@@ -290,7 +312,7 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {
 				errDesc = fmt.Sprintf("error during xattribute composition")
-				return false, nil, 0, err, errDesc, failedDpCnt, false
+				return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 			}
 		}
 
@@ -298,13 +320,13 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 		body, modifiedBodyHasAtLeastOneXattr = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr)
 		endBodyPos = len(body)
 		bodyHasBeenModified = true
-		if uprEvent.DataType&memcached.XattrDataType > 0 && !modifiedBodyHasAtLeastOneXattr {
+		if uprEvent.DataType&mcc.XattrDataType > 0 && !modifiedBodyHasAtLeastOneXattr {
 			// Since Transactional Xattr was the only xattribute, the new document value should not have any xattribute
-			uprEvent.DataType &^= memcached.XattrDataType
+			uprEvent.DataType &^= mcc.XattrDataType
 		}
 	}
 
-	return passedFilter, body, endBodyPos, nil, "", failedDpCnt, bodyHasBeenModified
+	return passedFilter, body, endBodyPos, nil, "", failedDpCnt, bodyHasBeenModified, filterStatus
 }
 
 // Passed in body, if not nil, is a decompressed byte slice produced by earlier processing steps
@@ -315,7 +337,7 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 // 2. err code
 // 3. If err is not nil, additional description
 // 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
-func (filter *FilterImpl) filterUprEvent(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, slicesToBeReleased *[][]byte) (bool, error, string, int64) {
+func (filter *FilterImpl) filterUprEvent(uprEvent *mcc.UprEvent, body []byte, endBodyPos int, slicesToBeReleased *[][]byte) (bool, error, string, int64) {
 	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
 		// For now, pass through
 		return true, nil, "", 0

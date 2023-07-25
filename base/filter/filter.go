@@ -11,7 +11,7 @@ licenses/APL2.txt.
 package filter
 
 import (
-	"github.com/couchbase/gomemcached/client"
+	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 )
 
@@ -21,8 +21,9 @@ type Filter interface {
 	// 2. err code
 	// 3. If err is not nil, additional description
 	// 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
+	// 5. Status of filtering
 	// Note - may modify the wrappedUprEvent as it passes through the filter, if txnFilter is on
-	FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64)
+	FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64, base.FilteringStatusType)
 
 	SetShouldSkipUncommittedTxn(val bool)
 	SetShouldSkipBinaryDocs(val bool)
@@ -32,7 +33,7 @@ type Filter interface {
 type FilterUtils interface {
 	// uncompressedUprValue is either the original uprValue OR if snappy compressed, the uncompressed value
 	// The data slice will be recycled automatically later
-	CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte)
-	ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, dp base.DataPool, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64)
+	CheckForTransactionXattrsInUprEvent(uprEvent *mcc.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (hasTxnXattrs bool, body []byte, endBodyPos int, err error, additionalErrDesc string, totalFailedCnt int64, uncompressedUprValue []byte)
+	ProcessUprEventForFiltering(uprEvent *mcc.UprEvent, body []byte, endBodyPos int, dp base.DataPool, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64)
 	NewDataPool() base.DataPool
 }

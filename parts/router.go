@@ -1616,12 +1616,13 @@ func (router *Router) Stop() error {
 	}
 }
 
-func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent) interface{} {
+func (router *Router) getDataFilteredAdditional(uprEvent *mcc.UprEvent, filteringStatus base.FilteringStatusType) interface{} {
 	return DataFilteredAdditional{Seqno: uprEvent.Seqno,
 		// For filtered document, send the latestSuccessfulManifestId
 		// so that the throughSeqno service can get the most updated manifestId
 		// for checkpointing if there is an overwhelming number of filtered docs
-		ManifestId: atomic.LoadUint64(&router.lastSuccessfulManifestId),
+		ManifestId:      atomic.LoadUint64(&router.lastSuccessfulManifestId),
+		FilteringStatus: filteringStatus,
 	}
 }
 
@@ -1654,12 +1655,12 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 	if wrappedUpr.ColNamespace == nil || wrappedUpr.ColNamespace.ScopeName != base.SystemScopeName {
 		shouldContinue := router.ProcessExpDelTTL(uprEvent)
 		if !shouldContinue {
-			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent, baseFilter.FilteredOnOthers)))
 			return result, nil
 		}
 	}
 
-	needToReplicate, err, errDesc, failedDpCnt := router.filter.FilterUprEvent(wrappedUpr)
+	needToReplicate, err, errDesc, failedDpCnt, filteringStatus := router.filter.FilterUprEvent(wrappedUpr)
 	if failedDpCnt > 0 {
 		router.RaiseEvent(common.NewEvent(common.DataPoolGetFail, failedDpCnt, router, nil, nil))
 	}
@@ -1667,13 +1668,14 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		router.Logger().Debugf("Matcher doc %v%v%v matched: %v with error: %v and additional info: %v",
 			base.UdTagBegin, string(uprEvent.Key), base.UdTagEnd, needToReplicate, err, errDesc)
 	}
+
 	if !needToReplicate || err != nil {
 		if err != nil {
 			// Let pipeline supervisor do the logging
 			router.RaiseEvent(common.NewEvent(common.DataUnableToFilter, uprEvent, router, []interface{}{err, errDesc}, nil))
 		} else {
 			// if data does not need to be replicated, drop it. return empty result
-			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent)))
+			router.RaiseEvent(common.NewEvent(common.DataFiltered, uprEvent, router, nil, router.getDataFilteredAdditional(uprEvent, filteringStatus)))
 		}
 		// Let supervisor set the err instead of the router, to minimize pipeline interruption
 		return result, nil

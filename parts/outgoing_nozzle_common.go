@@ -68,9 +68,11 @@ const (
 	Not_Send_Other     NeedSendStatus = iota
 )
 
-/************************************
+/*
+***********************************
 /* struct baseConfig
-*************************************/
+************************************
+*/
 type baseConfig struct {
 	maxCount         int
 	maxSize          int
@@ -181,9 +183,10 @@ type DataSentEventAdditional struct {
 }
 
 type DataFilteredAdditional struct {
-	Key        string
-	Seqno      uint64
-	ManifestId uint64
+	Key             string
+	Seqno           uint64
+	ManifestId      uint64
+	FilteringStatus base.FilteringStatusType
 }
 
 type SentCasChangedEventAdditional struct {
