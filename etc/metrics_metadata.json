@@ -26,7 +26,7 @@
     },
     "xdcr_add_failed_cr_target": {
         "type": "counter",
-        "help": "Number of Add operations failed Conflict Resolution at Target Cluster",
+        "help": "Number of Add operations failed Conflict Resolution at the Target",
         "added": "7.1.0",
         "labels": [
             "sourceBucketName",
@@ -64,7 +64,7 @@
     },
     "xdcr_data_merge_failed": {
         "type": "counter",
-        "help": "Amount of data failed to merge",
+        "help": "Amount of data failed to merge as part of Source custom conflict-resolution",
         "added": "7.0.0",
         "unit": "bytes",
         "labels": [
@@ -77,7 +77,7 @@
     },
     "xdcr_data_merged": {
         "type": "counter",
-        "help": "Amount of data merged for a replication",
+        "help": "Amount of data merged for a Replication when performing Source custom conflict-resolution",
         "added": "7.0.0",
         "unit": "bytes",
         "labels": [
@@ -90,7 +90,7 @@
     },
     "xdcr_data_replicated": {
         "type": "counter",
-        "help": "Amount of data replicated for a replication",
+        "help": "Amount of data replicated for a Replication",
         "added": "7.0.0",
         "uiName": "xdcr_data_replicated_bytes",
         "unit": "bytes",
@@ -100,12 +100,11 @@
             "targetBucketName",
             "pipelineType"
         ],
-        "notes": "The number is kept for as long as a pipeline instance is active, and resets to 0 when a pipeline is restarted. This applies to other types of \"accumulative\" counters.",
         "stability": "committed"
     },
     "xdcr_data_replicated_uncompress": {
         "type": "counter",
-        "help": "Theoretical amount of data replicated for a replication if compression were not used",
+        "help": "Theoretical amount of data replicated for a Replication if compression were not used",
         "added": "7.0.0",
         "unit": "bytes",
         "labels": [
@@ -120,7 +119,7 @@
     "xdcr_datapool_failed_gets": {
         "type": "counter",
         "help": "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation",
-        "added": "6.5.0",
+        "added": "7.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -214,12 +213,12 @@
             "targetBucketName",
             "pipelineType"
         ],
-        "stability": "volatile"
+        "stability": "committed"
     },
     "xdcr_deletion_filtered": {
         "type": "counter",
         "help": "Number of Deletions that were filtered Source-side",
-        "added": "6.5.0",
+        "added": "7.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -281,7 +280,7 @@
     },
     "xdcr_docs_failed_cr_source": {
         "type": "counter",
-        "help": "Number of documents (or tombstones) that was not replicated to the target due to conflict resolution evaluated on the source cluster",
+        "help": "Number of documents (or tombstones) that were not replicated to the Target due to Conflict Resolution evaluated on the Source",
         "added": "7.0.0",
         "uiName": "xdcr_docs_failed_cr_source_total",
         "labels": [
@@ -295,7 +294,7 @@
     },
     "xdcr_docs_failed_cr_target": {
         "type": "counter",
-        "help": "Number of documents failed conflict resolution at target cluster",
+        "help": "Number of documents failed Conflict Resolution at the Target",
         "added": "7.1.0",
         "uiName": "xdcr_docs_failed_cr_target_total",
         "labels": [
@@ -305,12 +304,12 @@
             "pipelineType"
         ],
         "notes": "This metric contains all types of docs that were replicated to the target but were ultimately rejected due to target side conflict-resolution. This can happen either due to optimistic replication or due to other actors that are mutating the same document on the target bucket even if source CR succeeded.",
-        "stability": "volatile"
+        "stability": "committed"
     },
     "xdcr_docs_filtered": {
         "type": "gauge",
         "help": "Total number of documents filtered and not replicated due to any type of filtering",
-        "added": "6.5.0",
+        "added": "7.0.0",
         "uiName": "xdcr_docs_filtered_total",
         "labels": [
             "sourceBucketName",
@@ -322,7 +321,7 @@
     },
     "xdcr_docs_merge_cas_changed": {
         "type": "counter",
-        "help": "Number of merges failed because source CAS changed",
+        "help": "Number of documents from Source custom conflict-resolution that failed to merge back to Source because the Source CAS changed",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -334,7 +333,7 @@
     },
     "xdcr_docs_merge_failed": {
         "type": "counter",
-        "help": "Number of conflicting docs failed to merge",
+        "help": "Number of conflicting docs failed to merge as part of Source custom conflict-resolution",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -346,7 +345,7 @@
     },
     "xdcr_docs_merged": {
         "type": "counter",
-        "help": "Number of conflicting docs successfully merged",
+        "help": "Number of conflicting docs successfully merged and written to the Source after performing Source custom conflict-resolution",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -398,8 +397,8 @@
     },
     "xdcr_docs_unable_to_filter": {
         "type": "gauge",
-        "help": "Number of documents that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated",
-        "added": "6.5.0",
+        "help": "Number of Document Mutations that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated",
+        "added": "7.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -410,7 +409,7 @@
     },
     "xdcr_docs_written": {
         "type": "counter",
-        "help": "Number of docs written/sent to target cluster",
+        "help": "Number of docs Document Mutations written/sent to the Target",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -423,7 +422,7 @@
     },
     "xdcr_expiry_docs_merge_failed": {
         "type": "counter",
-        "help": "Number of conflicting expiry docs failed to merge",
+        "help": "Number of conflicting expiry docs failed to merge as part of Source custom conflict-resolution",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -435,7 +434,7 @@
     },
     "xdcr_expiry_docs_merged": {
         "type": "counter",
-        "help": "Number of expiry merged and written to source",
+        "help": "Number of Expirations merged and written to the Source",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -447,7 +446,7 @@
     },
     "xdcr_expiry_docs_written": {
         "type": "counter",
-        "help": "Number of expiry written to target",
+        "help": "Number of Expirations written to the Target",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -484,7 +483,7 @@
     "xdcr_expiry_filtered": {
         "type": "counter",
         "help": "Number of Expirations filtered Source-side",
-        "added": "6.5.0",
+        "added": "7.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -495,7 +494,7 @@
     },
     "xdcr_expiry_merge_cas_changed": {
         "type": "counter",
-        "help": "Number of expiry merges failed because source CAS changed",
+        "help": "Number of expiry from Source custom conflict-resolution that failed to merge back to Source because the Source CAS changed",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -519,8 +518,8 @@
     },
     "xdcr_expiry_stripped": {
         "type": "counter",
-        "help": "Number of documents replicated that had its TTL changed to 0 before writing to target (source is unmodified)",
-        "added": "6.5.0",
+        "help": "Number of Document Mutations replicated that had the TTL changed to 0 before writing to Target (Source is unmodified)",
+        "added": "7.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -532,7 +531,7 @@
     },
     "xdcr_expiry_target_docs_skipped": {
         "type": "counter",
-        "help": "Subset of the number of documents that originated from the target that specifically had expiry flag set",
+        "help": "Subset of the number of Document Mutations that originated from the Target that specifically had Expiry flag set",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
@@ -568,7 +567,7 @@
     },
     "xdcr_pipeline_errors": {
         "type": "gauge",
-        "help": "The number of currently present errors for a specific pipeline",
+        "help": "The number of currently present errors for a specific Replication Pipeline",
         "added": "7.6.0",
         "labels": [
             "sourceBucketName",
@@ -657,7 +656,7 @@
     "xdcr_set_filtered": {
         "type": "counter",
         "help": "Number of documents filtered that was of a DCP mutation",
-        "added": "6.5.0",
+        "added": "7.0.0",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
@@ -706,7 +705,7 @@
     },
     "xdcr_target_docs_skipped": {
         "type": "counter",
-        "help": "Number of documents that was not replicated to the target because they originated from the target",
+        "help": "Number of Document Mutations that were not replicated to the Target because they originated from the Target",
         "added": "7.0.0",
         "labels": [
             "sourceBucketName",
