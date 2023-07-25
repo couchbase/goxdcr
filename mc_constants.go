@@ -113,6 +113,7 @@ const (
 	SUBDOC_GET            = CommandCode(0xc5) // Get subdoc. Returns with xattrs
 	SUBDOC_DICT_UPSERT    = CommandCode(0xc8)
 	SUBDOC_DELETE         = CommandCode(0xc9) // Delete a path
+	SUBDOC_COUNTER        = CommandCode(0xcf)
 	SUBDOC_MULTI_LOOKUP   = CommandCode(0xd0) // Multi lookup. Doc xattrs and meta.
 	SUBDOC_MULTI_MUTATION = CommandCode(0xd1) // Multi mutation. Doc and xattr
 

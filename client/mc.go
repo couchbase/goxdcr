@@ -47,6 +47,7 @@ type ClientIface interface {
 	GetMeta(vb uint16, key string, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	GetRandomDoc(context ...*ClientContext) (*gomemcached.MCResponse, error)
 	GetSubdoc(vb uint16, key string, subPaths []string, context ...*ClientContext) (*gomemcached.MCResponse, error)
+	SetSubdoc(vb uint16, key string, ops []SubDocOp, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	Hijack() io.ReadWriteCloser
 	Incr(vb uint16, key string, amt, def uint64, exp int, context ...*ClientContext) (uint64, error)
 	LastBucket() string
@@ -173,6 +174,40 @@ func (context *ClientContext) InitExtras(req *gomemcached.MCRequest, client *Cli
 	if bytesToAllocate > 0 {
 		req.Extras = make([]byte, bytesToAllocate)
 	}
+}
+
+type SubDocOp struct {
+	Xattr   bool
+	Path    string
+	Value   []byte
+	Counter bool
+}
+
+func (this *SubDocOp) encodedLength() int {
+	return 8 + len([]byte(this.Path)) + len(this.Value)
+}
+
+func (this *SubDocOp) encode(buf []byte) []byte {
+	if this.Counter {
+		buf = append(buf, byte(gomemcached.SUBDOC_COUNTER))
+	} else {
+		buf = append(buf, byte(gomemcached.SUBDOC_DICT_UPSERT))
+	}
+	if this.Xattr {
+		buf = append(buf, byte(gomemcached.SUBDOC_FLAG_XATTR))
+	} else {
+		buf = append(buf, byte(0))
+	}
+
+	pathBytes := []byte(this.Path)
+
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(pathBytes)))
+	buf = binary.BigEndian.AppendUint32(buf, uint32(len(this.Value)))
+
+	buf = append(buf, pathBytes...)
+	buf = append(buf, this.Value...)
+
+	return buf
 }
 
 const bufsize = 1024
@@ -623,6 +658,44 @@ func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string, context ...
 
 	if err != nil && IfResStatusError(res) {
 		return res, err
+	}
+	return res, nil
+}
+
+func (c *Client) SetSubdoc(vb uint16, key string, ops []SubDocOp, context ...*ClientContext) (
+	*gomemcached.MCResponse, error) {
+
+	if len(ops) == 0 {
+		return nil, fmt.Errorf("Invalid input - no operations")
+	}
+
+	totalBytesLen := 0
+	for i := range ops {
+		totalBytesLen += ops[i].encodedLength()
+	}
+	valueBuf := make([]byte, 0, totalBytesLen)
+	for i := range ops {
+		valueBuf = ops[i].encode(valueBuf)
+	}
+
+	req := &gomemcached.MCRequest{
+		Opcode:  gomemcached.SUBDOC_MULTI_MUTATION,
+		VBucket: vb,
+		Key:     []byte(key),
+		Extras:  nil,
+		Body:    valueBuf,
+		Opaque:  c.getOpaque(),
+	}
+	err := c.setContext(req, context...)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := c.Send(req)
+	if err != nil {
+		return nil, err
+	} else if !IfResStatusError(res) {
+		return nil, fmt.Errorf("operation failed: %v (len=%v)", res.Status, len(res.Body))
 	}
 	return res, nil
 }

@@ -2699,6 +2699,77 @@ func (_c *ClientIface_SetReplica_Call) RunAndReturn(run func(bool)) *ClientIface
 	return _c
 }
 
+// SetSubdoc provides a mock function with given fields: vb, key, ops, context
+func (_m *ClientIface) SetSubdoc(vb uint16, key string, ops []memcached.SubDocOp, context ...*memcached.ClientContext) (*gomemcached.MCResponse, error) {
+	_va := make([]interface{}, len(context))
+	for _i := range context {
+		_va[_i] = context[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, vb, key, ops)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *gomemcached.MCResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(uint16, string, []memcached.SubDocOp, ...*memcached.ClientContext) (*gomemcached.MCResponse, error)); ok {
+		return rf(vb, key, ops, context...)
+	}
+	if rf, ok := ret.Get(0).(func(uint16, string, []memcached.SubDocOp, ...*memcached.ClientContext) *gomemcached.MCResponse); ok {
+		r0 = rf(vb, key, ops, context...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gomemcached.MCResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(uint16, string, []memcached.SubDocOp, ...*memcached.ClientContext) error); ok {
+		r1 = rf(vb, key, ops, context...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ClientIface_SetSubdoc_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetSubdoc'
+type ClientIface_SetSubdoc_Call struct {
+	*mock.Call
+}
+
+// SetSubdoc is a helper method to define mock.On call
+//   - vb uint16
+//   - key string
+//   - ops []memcached.SubDocOp
+//   - context ...*memcached.ClientContext
+func (_e *ClientIface_Expecter) SetSubdoc(vb interface{}, key interface{}, ops interface{}, context ...interface{}) *ClientIface_SetSubdoc_Call {
+	return &ClientIface_SetSubdoc_Call{Call: _e.mock.On("SetSubdoc",
+		append([]interface{}{vb, key, ops}, context...)...)}
+}
+
+func (_c *ClientIface_SetSubdoc_Call) Run(run func(vb uint16, key string, ops []memcached.SubDocOp, context ...*memcached.ClientContext)) *ClientIface_SetSubdoc_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]*memcached.ClientContext, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(*memcached.ClientContext)
+			}
+		}
+		run(args[0].(uint16), args[1].(string), args[2].([]memcached.SubDocOp), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *ClientIface_SetSubdoc_Call) Return(_a0 *gomemcached.MCResponse, _a1 error) *ClientIface_SetSubdoc_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *ClientIface_SetSubdoc_Call) RunAndReturn(run func(uint16, string, []memcached.SubDocOp, ...*memcached.ClientContext) (*gomemcached.MCResponse, error)) *ClientIface_SetSubdoc_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Stats provides a mock function with given fields: key
 func (_m *ClientIface) Stats(key string) ([]memcached.StatValue, error) {
 	ret := _m.Called(key)
