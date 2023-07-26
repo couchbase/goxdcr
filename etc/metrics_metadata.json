@@ -586,7 +586,8 @@
             "sourceBucketName",
             "targetClusterUUID",
             "targetBucketName",
-            "pipelineType"
+            "pipelineType",
+            "status"
         ],
         "notes": "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
         "stability": "committed"
