@@ -384,9 +384,23 @@ var (
 	TargetBucketNameLabel  = StatsLabel{Name: PrometheusTargetBucketLabel}
 	TargetClusterUUIDLabel = StatsLabel{Name: PrometheusTargetClusterUuidLabel}
 	PipelineTypeLabel      = StatsLabel{Name: PrometheusPipelineTypeLabel}
+	PipelineStatusLabel    = StatsLabel{Name: PrometheusPipelineStatusLabel}
 )
 
-var StandardLabels = StatsLabels{SourceBucketNameLabel, TargetClusterUUIDLabel, TargetBucketNameLabel, PipelineTypeLabel}
+var StandardLabels = StatsLabels{
+	SourceBucketNameLabel,
+	TargetClusterUUIDLabel,
+	TargetBucketNameLabel,
+	PipelineTypeLabel,
+}
+
+var PipelineStatusLabels = StatsLabels{
+	SourceBucketNameLabel,
+	TargetClusterUUIDLabel,
+	TargetBucketNameLabel,
+	PipelineTypeLabel,
+	PipelineStatusLabel,
+}
 
 // See: https://docs.google.com/document/d/183VfS6fi-Tn0lHc6oEHPFQgOmYOgnwbM28zWtGbyTUg/edit#
 type statsPropertyMetaObj struct {
@@ -1142,7 +1156,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The pipeline status for a specific pipeline, where it could be paused, running or, error",
 		Notes:        "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
 		Stability:    Committed,
-		Labels:       StandardLabels,
+		Labels:       PipelineStatusLabels,
 	},
 
 	PIPELINE_ERRORS: StatsProperty{
@@ -1162,4 +1176,5 @@ const (
 	PrometheusSourceBucketLabel      = "sourceBucketName"
 	PrometheusTargetBucketLabel      = "targetBucketName"
 	PrometheusPipelineTypeLabel      = "pipelineType"
+	PrometheusPipelineStatusLabel    = "status"
 )
