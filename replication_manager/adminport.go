@@ -52,7 +52,6 @@ type Adminport struct {
 	xdcrRestPort uint16
 	kvAdminPort  uint16
 	gen_server.GenServer
-	finch              chan bool
 	utils              utilities.UtilsIface
 	prometheusExporter pipeline_utils.ExpVarExporter
 
@@ -75,7 +74,6 @@ func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan boo
 		xdcrRestPort:       xdcrRestPort,
 		kvAdminPort:        kvAdminPort,
 		GenServer:          server, /*gen_server.GenServer*/
-		finch:              finch,
 		utils:              utilsIn,
 		prometheusExporter: pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable, pipeline_utils.NewPrometheusLabelsTable),
 		p2pMgr:             p2pMgr,
@@ -106,24 +104,25 @@ func (adminport *Adminport) Start() {
 	reqch := make(chan ap.Request)
 	hostAddr := base.GetHostAddr(adminport.sourceKVHost, adminport.xdcrRestPort)
 	server := ap.NewHTTPServer("xdcr", hostAddr, base.AdminportUrlPrefix, reqch, new(ap.Handler))
-	finch := adminport.finch
 
 	startErrCh := server.Start()
 
 	logger_ap.Infof("http server started %v !\n", hostAddr)
 
 	// Start P2pHelper
-	adminport.p2pAPI, err = adminport.p2pMgr.Start()
-	if err != nil {
-		logger_ap.Errorf("Starting peerToPeerManager resulted in err %v", err)
-		startErrCh <- err
+	var p2pErr error
+	p2pErrCh := make(chan error, 1)
+	adminport.p2pAPI, p2pErr = adminport.p2pMgr.Start()
+	if p2pErr != nil {
+		logger_ap.Errorf("Starting peerToPeerManager resulted in err %v", p2pErr)
+		p2pErrCh <- p2pErr
 	}
 
 	for {
 		select {
-		case err = <-startErrCh:
+		case err = <-p2pErrCh:
 			goto done
-		case <-finch:
+		case err = <-startErrCh:
 			goto done
 		case req, ok := <-reqch: // admin requests are serialized here
 			if ok == false {
@@ -134,6 +133,7 @@ func (adminport *Adminport) Start() {
 		}
 	}
 done:
+	// adminport must never stop
 	adminport.p2pMgr.Stop()
 	server.Stop()
 	adminport.Stop_server()
@@ -142,6 +142,7 @@ done:
 	} else {
 		logger_ap.Info("adminport exited !\n")
 	}
+	panic("adminport must be running, forcing panic to restart goxdcr")
 }
 
 // needed by Supervisor interface
