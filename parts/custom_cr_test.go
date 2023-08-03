@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/couchbase/gocb/v2"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
-	// gocb "gopkg.in/couchbase/gocb.v1"
 )
 
 /**
@@ -32,74 +32,50 @@ import (
  *  - and remote cluster reference already created
  * It will create buckets/replication before starting each test
  */
-const sourceConnStr = "http://127.0.0.1:9000"
-const targetConnStr = "http://127.0.0.1:9001"
+const sourceConnStr = "couchbase://127.0.0.1:12000"
+const targetConnStr = "couchbase://127.0.0.1:12002"
 const targetCluster = "C2"
 const urlCreateReplicationFmt = "http://127.0.0.1:%s/controller/createReplication"
 const urlFunctionsFmt = "http://127.0.0.1:13000/evaluator/v1/libraries/%v"
 const bucketPath = "/pools/default/buckets"
 
-// func createBucket(connStr, bucketName string) (bucket *gocb.Bucket, err error) {
-// 	cluster, err := gocb.Connect(connStr)
-// 	if err != nil {
-// 		return
-// 	}
-// 	cluster.Authenticate(gocb.PasswordAuthenticator{
-// 		Username: username,
-// 		Password: password,
-// 	})
-// 	// Create a bucket if it doesn't exist. Custom CR bucket can only be created using rest API
-// 	// curl -X POST http://localhost:9000/pools/default/buckets -u Administrator:asdasd -d 'name=CCRBucket&bucketType=membase&conflictResolutionType=custom&ramQuotaMB=100'
-// 	client := &http.Client{}
-// 	data := url.Values{}
-// 	data.Set("name", bucketName)
-// 	data.Add("bucketType", "membase")
-// 	data.Add("conflictResolutionType", "custom")
-// 	data.Add("ramQuotaMB", "100")
-// 	req, err := http.NewRequest(base.MethodPost, connStr+bucketPath, bytes.NewBufferString(data.Encode()))
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	req.Header.Set(base.ContentType, base.DefaultContentType)
-// 	req.SetBasicAuth(username, password)
-// 	_, err = client.Do(req)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	// Don't check the response here since it may fail because it was created before
-// 	//if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-// 	//	return nil, fmt.Errorf("create bucket returned status %v", resp.Status)
-// 	//}
-// 	for i := 0; i < 6; i++ {
-// 		bucket, err = cluster.OpenBucket(bucketName, "")
-// 		if err == nil {
-// 			fmt.Printf("Created bucket %v\n", bucketName)
-// 			return
-// 		}
-// 		time.Sleep(1 * time.Second)
-// 	}
-// 	return
-// }
+type SubdocInternal struct {
+	DocFlags gocb.SubdocDocFlag
+	User     []byte
+}
 
-//	func waitForBucketReady(t *testing.T, bucket *gocb.Bucket) {
-//		var err error
-//		key := "waitForBucket"
-//		for i := 0; i < 60; i++ {
-//			_, err := bucket.Upsert(key,
-//				User{Id: "kingarthur",
-//					Email:     "kingarthur@couchbase.com",
-//					Interests: []string{"Holy Grail", "African Swallows"}}, 0)
-//			if err != gocb.ErrTmpFail && err != gocb.ErrTimeout {
-//				break
-//			}
-//			time.Sleep(1 * time.Second)
-//		}
-//		bucket.Remove(key, 0)
-//		if err != nil {
-//			t.FailNow()
-//		}
-//		fmt.Println("Buckets are ready")
-//	}
+func createBucket(connStr, bucketName string) (cluster *gocb.Cluster, bucket *gocb.Bucket, err error) {
+	cluster, err = gocb.Connect(connStr, gocb.ClusterOptions{Authenticator: gocb.PasswordAuthenticator{
+		Username: username,
+		Password: password,
+	}})
+	if err != nil {
+		return
+	}
+	err = cluster.WaitUntilReady(15*time.Second, nil)
+	if err != nil {
+		return
+	}
+	setting := gocb.BucketSettings{
+		Name:                 bucketName,
+		RAMQuotaMB:           100,
+		BucketType:           "membase",
+		NumReplicas:          0,
+		FlushEnabled:         true,
+		ReplicaIndexDisabled: true,
+	}
+	mgr := cluster.Buckets()
+	// Don't check error since the bucket may already exist
+	mgr.CreateBucket(gocb.CreateBucketSettings{
+		BucketSettings:         setting,
+		ConflictResolutionType: "custom"},
+		&gocb.CreateBucketOptions{Timeout: 10 * time.Second})
+	// Wait for bucket ready
+	bucket = cluster.Bucket(bucketName)
+	err = bucket.WaitUntilReady(20*time.Second, &gocb.WaitUntilReadyOptions{DesiredState: gocb.ClusterStateOnline})
+	return
+}
+
 func createReplication(t *testing.T, bucketName string, mergeFunction string, timeout int, sourceToTarget bool) {
 	assert := assert.New(t)
 	client := &http.Client{}
@@ -129,7 +105,10 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, ti
 	for ; i <= 5; i++ {
 		req.SetBasicAuth(username, password)
 		resp, err := client.Do(req)
-		assert.Nil(err)
+		if err != nil {
+			fmt.Printf("client.Do failed for req: %v, err: %v\n", req, err)
+			t.FailNow()
+		}
 		assert.NotNil(resp)
 		bodyBytes, err := ioutil.ReadAll(resp.Body)
 		assert.Nil(err)
@@ -145,96 +124,78 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, ti
 	t.FailNow()
 }
 
-// This routine will wait for replication and verify source/target CAS are the same
-// This routine will wait for replication and verify source/target CAS are the same
-// func waitForReplication(key string, source, target *gocb.Bucket) (err error) {
-// 	sourceDoc, err := source.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
-// 	if sourceDoc == nil {
-// 		fmt.Printf("source lookup failed for key")
-// 		return
-// 	}
-// 	targetDoc, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
-
-// 	var i int
-// 	for i = 0; i < 120; i++ {
-// 		if targetDoc != nil {
-// 			if sourceDoc.Cas() == targetDoc.Cas() {
-// 				return nil
-// 			}
-// 		}
-// 		time.Sleep(1 * time.Second)
-// 		targetDoc, err = target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr", gocb.SubdocFlagXattr).Execute()
-// 	}
-// 	if targetDoc != nil && sourceDoc.Cas() == targetDoc.Cas() {
-// 		return nil
-// 	} else {
-// 		return fmt.Errorf("Document '%s' with source cas %v has not replicated to target after %v seconds. Target cas %v\n", key, sourceDoc.Cas(), i, targetDoc.Cas())
-// 	}
-// }
+//This routine will wait for replication and verify source/target CAS are the same
+func waitForReplication(key string, cas gocb.Cas, target *gocb.Bucket) (err error) {
+	var i int
+	for i = 0; i < 120; i++ {
+		value, err := getPathValue(key, "_xdcr", target)
+		if err == nil && value.Cas() == cas {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("Document '%s' with source cas %v has not replicated to target after %v seconds.\n", key, cas, i)
+}
 
 // Verify that document cas has changed from the cas passed in.
-// func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucket) {
-// 	var value interface{}
-// 	var err error
-// 	newCas := cas
-// 	start := time.Now()
-// 	for i := 0; i < 120 && (err != nil || cas == newCas); i++ {
-// 		newCas, err = bucket.Get(key, value)
-// 		time.Sleep(1 * time.Second)
-// 	}
-// 	if newCas == cas {
-// 		t.Errorf("Document '%s' with cas %v has not changed in %v\n", key, cas, time.Since(start))
-// 		t.FailNow()
-// 	}
-// }
+func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucket) {
+	var err error
+	var doc *gocb.GetResult
+	newCas := cas
+	start := time.Now()
+	for i := 0; i < 120 && (err != nil || cas == newCas); i++ {
+		doc, err = bucket.DefaultCollection().Get(key, nil)
+		newCas = doc.Cas()
+		time.Sleep(1 * time.Second)
+	}
+	if newCas == cas {
+		t.Errorf("Document '%s' with cas %v has not changed in %v, err=%v\n", key, cas, time.Since(start), err)
+		t.FailNow()
+	}
+}
 
-// func waitForMV(key string, expectedMV []byte, bucket *gocb.Bucket) (err error) {
-// 	mv := make([]byte, 2*len(expectedMV))
-// 	for i := 0; i < 120; i++ {
-// 		frag, err := bucket.LookupIn(key).GetEx("_xdcr.mv", gocb.SubdocFlagXattr).Execute()
-// 		if err != nil {
-// 			return err
-// 		}
-// 		if err = frag.Content("_xdcr.mv", &mv); err != nil {
-// 			return err
-// 		}
-// 		if bytes.Equal(mv, expectedMV) {
-// 			return nil
-// 		}
-// 		time.Sleep(1 * time.Second)
-// 	}
-// 	return fmt.Errorf("MV %s is not expected %s\n", mv, expectedMV)
-// }
+func waitForMV(key string, expectedMV []byte, bucket *gocb.Bucket) (cas gocb.Cas, err error) {
+	var mv []byte
+	for i := 0; i < 120; i++ {
+		value, err := bucket.DefaultCollection().LookupIn(key,
+			[]gocb.LookupInSpec{gocb.GetSpec("_xdcr.mv", &gocb.GetSpecOptions{IsXattr: true})}, nil)
+		if err != nil {
+			return 0, err
+		}
+		value.ContentAt(0, &mv)
+		if bytes.Equal(mv, expectedMV) {
+			return value.Cas(), nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return 0, fmt.Errorf("MV %v is not expected %s\n", mv, expectedMV)
+}
 
 // Verify _xdcr.cv == CAS
-//
-//	func verifyCv(key string, target *gocb.Bucket) (err error) {
-//		var cvHex string
-//		frag, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx("_xdcr.cv", gocb.SubdocFlagXattr).Execute()
-//		if err != nil && err != gocb.ErrSubDocSuccessDeleted {
-//			return
-//		}
-//		if err = frag.Content("_xdcr.cv", &cvHex); err != nil {
-//			return
-//		}
-//		cv, err := base.HexLittleEndianToUint64([]byte(cvHex))
-//		if err != nil {
-//			return
-//		}
-//		if frag.Cas() != gocb.Cas(cv) {
-//			return fmt.Errorf("_xdcr.cv %v does not equal to CAS value %v", cv, frag.Cas())
-//		}
-//		return nil
-//	}
-//
-//	func getPathValue(key string, path string, target *gocb.Bucket) (value interface{}, err error) {
-//		frag, err := target.LookupInEx(key, gocb.SubdocDocFlagAccessDeleted).GetEx(path, gocb.SubdocFlagXattr).Execute()
-//		if err != nil && !strings.Contains(err.Error(), "document is soft-deleted") {
-//			return
-//		}
-//		err = frag.Content(path, &value)
-//		return value, err
-//	}
+func verifyCv(key string, target *gocb.Bucket) (err error) {
+	var cvHex string
+	value, err := getPathValue(key, "_xdcr.cv", target)
+	if err != nil {
+		return
+	}
+	value.ContentAt(0, &cvHex)
+	cv, err := base.HexLittleEndianToUint64([]byte(cvHex))
+	if err != nil {
+		return
+	}
+	if value.Cas() != gocb.Cas(cv) {
+		return fmt.Errorf("_xdcr.cv %v does not equal to CAS value %v", cv, value.Cas())
+	}
+	return nil
+}
+
+func getPathValue(key string, path string, target *gocb.Bucket) (value *gocb.LookupInResult, err error) {
+	value, err = target.DefaultCollection().LookupIn(key,
+		[]gocb.LookupInSpec{gocb.GetSpec(path, &gocb.GetSpecOptions{IsXattr: true})},
+		&gocb.LookupInOptions{Internal: SubdocInternal{DocFlags: gocb.SubdocDocFlagAccessDeleted}})
+	return
+}
+
 func createMergeFunction(t *testing.T, mergeFunction string) {
 	assert := assert.New(t)
 	urlFunctions := fmt.Sprintf(urlFunctionsFmt, mergeFunction)
@@ -257,478 +218,544 @@ func createMergeFunction(t *testing.T, mergeFunction string) {
 	}
 }
 
-// func TestCcrXattrAfterRep(t *testing.T) {
-// 	fmt.Println("============== Test case start: TestCcrXattrAfterRep =================")
-// 	defer fmt.Println("============== Test case end: TestCcrXattrAfterRep =================")
-// 	bucketName := "TestCcrXattrAfterRep"
-// 	assert := assert.New(t)
-// 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCcrXattrAfterRep skipped because source cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	targetBucket, err := createBucket(targetConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCcrXattrAfterRep skipped because target cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	assert.NotNil(sourceBucket)
-// 	assert.NotNil(targetBucket)
-// 	waitForBucketReady(t, targetBucket)
-// 	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
-// 	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, false) // reverse direction to test pruning
+func TestCustomCrXattrAfterRep(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCrXattrAfterRep =================")
+	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterRep =================")
+	bucketName := "TestCustomCrXattrAfterRep"
+	assert := assert.New(t)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCrXattrAfterRep skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer srcCluster.Close(nil)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCrXattrAfterRep skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer trgCluster.Close(nil)
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, false) // reverse direction to test pruning
+	expire := 1 * time.Hour
+	/*
+	 * Test 1: New doc at source. Expect to format _xdcr at target with cv and id.
+	 */
+	key := time.Now().Format(time.RFC3339)
+	fmt.Printf("Test 1: Insert %v and expect target to have _xdcr.cv and _xdcr.id\n", key)
+	upsOut, err := sourceBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows"}}, &gocb.UpsertOptions{Expiry: expire})
+	if err != nil {
+		assert.FailNow("Upsert failed with errror %v", err)
+	}
+	err = waitForReplication(key, upsOut.Cas(), targetBucket)
+	assert.Nil(err)
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+	_, err = getPathValue(key, "_xdcr.id", targetBucket)
+	assert.Nil(err)
 
-// 	/*
-// 	 * Test 1: New doc at source. Expect to format _xdcr at target with cv and id.
-// 	 */
-// 	key := time.Now().Format(time.RFC3339)
-// 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
-// 	_, err = sourceBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows"}}, expire)
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	err = verifyCv(key, targetBucket)
-// 	assert.Nil(err)
-// 	_, err = getPathValue(key, "_xdcr.id", targetBucket)
-// 	assert.Nil(err)
+	/*
+	* Test 2: Update the previous document to add two XATTRs. Make sure we don't mess it up
+	 */
+	fmt.Println("Test 2: Update to add two XATTRs")
+	mutOut, err := sourceBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec("list", [2]uint32{11, 12}, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, mutOut.Cas(), targetBucket)
+	assert.Nil(err)
+	mutOut, err = sourceBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec("aKey", "some values", &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, mutOut.Cas(), targetBucket)
+	assert.Nil(err)
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+	_, err = getPathValue(key, "list", targetBucket)
+	assert.Nil(err)
+	_, err = getPathValue(key, "aKey", targetBucket)
+	assert.Nil(err)
+	var id string
+	value, err := getPathValue(key, "_xdcr.id", targetBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &id)
 
-// 	/*
-// 	 * Test 2: Update the previous document to add two XATTRs. Make sure we don't mess it up
-// 	 */
-// 	_, err = sourceBucket.MutateIn(key, 0, expire).
-// 		UpsertEx("list", [2]uint32{11, 12}, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		Execute()
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	_, err = sourceBucket.MutateIn(key, 0, expire).
-// 		UpsertEx("aKey", "some values.", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		Execute()
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	err = verifyCv(key, targetBucket)
-// 	assert.Nil(err)
-// 	_, err = getPathValue(key, "list", targetBucket)
-// 	assert.Nil(err)
-// 	_, err = getPathValue(key, "aKey", targetBucket)
-// 	assert.Nil(err)
-// 	id, err := getPathValue(key, "_xdcr.id", targetBucket)
-// 	assert.Nil(err)
+	/*
+	* Test 3: Simulate a merged document at source that dominates the previous version
+	* Verify that the document is replicated without change
+	 */
+	fmt.Println("Test 3: Simulate a merged document at source that dominates the previous version")
+	// First get the cv so we can use it to build the MV
+	var cv string
+	value, err = getPathValue(key, "_xdcr.cv", targetBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &cv)
+	cas, err := base.HexLittleEndianToUint64([]byte(cv))
+	assert.Nil(err)
+	mvMap := make(map[string]string)
+	mvMap["Cluster1"] = "FhSITdr4AAA"
+	mvMap["Cluster2"] = "FhSITdr4AAA"
+	mvMap[id] = string(base.Uint64ToBase64(cas))
+	mutOut, err = sourceBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec("_xdcr.cv", gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
+			gocb.InsertSpec("_xdcr.id", id, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
+			gocb.InsertSpec("_xdcr.mv", mvMap, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, mutOut.Cas(), targetBucket)
+	assert.Nil(err)
 
-// 	/*
-// 	 * Test 3: Simulate a merged document at source that dominates the the the previous version
-// 	 * Verify that the document is replicated without change
-// 	 */
-// 	// First get the cv so we can use it to build the MV
-// 	cv, err := getPathValue(key, "_xdcr.cv", targetBucket)
-// 	assert.Nil(err)
-// 	cas, err := base.HexLittleEndianToUint64([]byte(cv.(string)))
-// 	assert.Nil(err)
-// 	mvMap := make(map[string]string)
-// 	mvMap["Cluster1"] = "FhSITdr4AAA"
-// 	mvMap["Cluster2"] = "FhSITdr4AAA"
-// 	mvMap[id.(string)] = string(base.Uint64ToBase64(cas))
-// 	_, err = sourceBucket.MutateIn(key, 0, expire).
-// 		UpsertEx("_xdcr.cv", "${Mutation.CAS}", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath|0x10).
-// 		UpsertEx("_xdcr.id", id.(string), gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		UpsertEx("_xdcr.mv", mvMap, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		Execute()
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	// CV should not change.
-// 	cv, err = getPathValue(key, "_xdcr.cv", targetBucket)
-// 	sourceCv, err := getPathValue(key, "_xdcr.cv", sourceBucket)
-// 	assert.Nil(err)
-// 	assert.Equal(cv, sourceCv)
-// 	// ID should not change
-// 	sourceId, err := getPathValue(key, "_xdcr.id", sourceBucket)
-// 	assert.Nil(err)
-// 	assert.Equal(id, sourceId)
-// 	// MV should not change
-// 	mv, err := getPathValue(key, "_xdcr.mv", targetBucket)
-// 	assert.Nil(err)
-// 	sourceMv, err := getPathValue(key, "_xdcr.mv", sourceBucket)
-// 	assert.Nil(err)
-// 	assert.Equal(mv, sourceMv)
+	// CV should not change.
+	var sourceCv, targetCv string
+	value, err = getPathValue(key, "_xdcr.cv", targetBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &targetCv)
+	value, err = getPathValue(key, "_xdcr.cv", sourceBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &sourceCv)
+	assert.Equal(targetCv, sourceCv)
 
-// 	/*
-// 	 * Test 4: Update the previous merged doc and mv should be fold into pcas
-// 	 */
-// 	_, err = sourceBucket.MutateIn(key, 0, expire).
-// 		UpsertEx("new", "doc field", gocb.SubdocFlagCreatePath).
-// 		Execute()
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	err = verifyCv(key, targetBucket)
-// 	assert.Nil(err)
-// 	id, err = getPathValue(key, "_xdcr.id", targetBucket)
-// 	assert.Nil(err)
-// 	pc, err := getPathValue(key, "_xdcr.pc", targetBucket)
-// 	assert.Nil(err)
-// 	// There are 3 items in MV and they all move to PV
-// 	assert.Equal(3, len(pc.(map[string]interface{})), fmt.Sprintf("Document %s, Unexpected pc: %v\n", key, pc))
-// 	mv, err = getPathValue(key, "_xdcr.mv", targetBucket)
-// 	assert.NotNil(err)
-// 	assert.Nil(mv)
+	// ID should not change
+	var sourceId string
+	value, err = getPathValue(key, "_xdcr.id", sourceBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &sourceId)
+	assert.Equal(id, sourceId)
 
-// 	/*
-// 	 * Test 5: Update at target, PV should be pruned.
-// 	 */
-// 	_, err = targetBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Target item"}}, expire)
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, targetBucket, sourceBucket) // replicate from C2 to C1
-// 	assert.Nil(err)
-// 	err = verifyCv(key, sourceBucket)
-// 	assert.Nil(err)
-// 	_, err = getPathValue(key, base.XATTR_ID_PATH, sourceBucket)
-// 	assert.Nil(err)
-// 	pv, err := getPathValue(key, base.XATTR_PCAS_PATH, sourceBucket)
-// 	assert.Nil(err)
-// 	// PV had 3 items, now 1
-// 	assert.Equal(1, len(pv.(map[string]interface{})), fmt.Sprintf("Unexpected pv=%v\n", pv))
+	// MV should not change
+	var mv, sourceMv map[string]interface{}
+	value, err = getPathValue(key, "_xdcr.mv", targetBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &mv)
+	value, err = getPathValue(key, "_xdcr.mv", sourceBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &sourceMv)
+	assert.Equal(mv, sourceMv)
 
-// 	/*
-// 	 * Test 6: Do an upsert without subdoc flags and check that xattrs are preserved
-// 	 */
-// 	_, err = sourceBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "New item"}}, expire)
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	err = verifyCv(key, targetBucket)
-// 	assert.Nil(err)
-// 	_, err = getPathValue(key, "_xdcr.id", targetBucket)
-// 	assert.Nil(err)
-// 	pv, err = getPathValue(key, base.XATTR_PCAS_PATH, sourceBucket)
-// 	assert.Nil(err)
-// 	assert.Equal(1, len(pv.(map[string]interface{})))
+	/*
+	* Test 4: Update the previous merged doc and mv should be fold into pcas
+	 */
+	fmt.Println("Test 4: Update a merged doc")
+	mutOut, err = sourceBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec("new", "doc field", &gocb.InsertSpecOptions{CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, mutOut.Cas(), targetBucket)
+	assert.Nil(err)
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+	value, err = getPathValue(key, "_xdcr.id", targetBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &id)
+	value, err = getPathValue(key, "_xdcr.pc", targetBucket)
+	assert.Nil(err)
+	var pc map[string]interface{}
+	value.ContentAt(0, &pc)
+	// There are 3 items in MV and they all move to PV
+	assert.Equal(3, len(pc), fmt.Sprintf("Document %s, Unexpected pc: %v\n", key, pc))
+	mv = nil
+	value, err = getPathValue(key, "_xdcr.mv", targetBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &mv)
+	assert.Nil(mv)
 
-// 	/*
-// 	 * Test 7. Delete the document and _xdcr is intact
-// 	 */
-// 	_, err = sourceBucket.Remove(key, 0)
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	xdcr, err := getPathValue(key, "_xdcr", targetBucket)
-// 	assert.Nil(err)
-// 	assert.Equal(3, len(xdcr.(map[string]interface{})))
+	/*
+	* Test 5: Update at target, PV should be pruned.
+	 */
+	fmt.Println("Test 5: Update at target, PV should be pruned")
+	upsOut, err = targetBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target item"}},
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, upsOut.Cas(), sourceBucket) // replicate from C2 to C1
+	assert.Nil(err)
+	err = verifyCv(key, sourceBucket)
+	assert.Nil(err)
+	_, err = getPathValue(key, base.XATTR_ID_PATH, sourceBucket)
+	assert.Nil(err)
+	value, err = getPathValue(key, base.XATTR_PCAS_PATH, sourceBucket)
+	assert.Nil(err)
+	var pv map[string]interface{}
+	value.ContentAt(0, &pv)
+	// PV had 3 items, now 1
+	assert.Equal(1, len(pv), fmt.Sprintf("Unexpected pv=%v\n", pv))
 
-// 	/*
-// 	* Test 7. Recreate the document and old _xdcr is lost, unfortunately
-// 	 */
-// 	_, err = sourceBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail"}}, expire)
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	xdcr, err = getPathValue(key, "_xdcr", targetBucket)
-// 	assert.Nil(err)
-// 	assert.Equal(2, len(xdcr.(map[string]interface{})))
-// }
+	/*
+	* Test 6: Do an upsert without subdoc flags and check that xattrs are preserved
+	 */
+	fmt.Println("Test 6: Upsert without subdoc flags and check that xattrs are preserved")
+	upsOut, err = sourceBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "New item"}},
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, upsOut.Cas(), targetBucket)
+	assert.Nil(err)
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+	_, err = getPathValue(key, "_xdcr.id", targetBucket)
+	assert.Nil(err)
+	pv = nil
+	value, err = getPathValue(key, base.XATTR_PCAS_PATH, sourceBucket)
+	assert.Nil(err)
+	value.ContentAt(0, &pv)
+	assert.Equal(1, len(pv))
 
-// func TestCustomCRDeletedDocs(t *testing.T) {
-// 	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
-// 	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
-// 	bucketName := "TestCustomCRDeletedDocs"
-// 	assert := assert.New(t)
-// 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCustomCRDeletedDocs skipped because source cluster is not ready. Error: %v\n", err)
-// 	}
-// 	targetBucket, err := createBucket(targetConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCustomCRDeletedDocs skipped because target cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	assert.NotNil(sourceBucket)
-// 	assert.NotNil(targetBucket)
-// 	waitForBucketReady(t, targetBucket)
-// 	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
+	/*
+	* Test 7. Delete the document and _xdcr is intact
+	 */
+	fmt.Println("Test 7: Delete the document and _xdcr is intact")
+	rmOut, err := sourceBucket.DefaultCollection().Remove(key, nil)
+	assert.Nil(err)
+	err = waitForReplication(key, rmOut.Cas(), targetBucket)
+	assert.Nil(err)
+	value, err = getPathValue(key, "_xdcr", targetBucket)
+	assert.Nil(err)
+	var xdcr map[string]interface{}
+	value.ContentAt(0, &xdcr)
+	assert.Equal(3, len(xdcr))
 
-// 	key := time.Now().Format(time.RFC3339)
-// 	var expire uint32 = 24 * 60 * 60
-// 	srcInsCas, err := sourceBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
-// 	assert.Nil(err)
-// 	// Target dominate. Nothing should happen when replicating from source to target
-// 	_, err = targetBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
-// 	assert.Nil(err)
-// 	_, err = sourceBucket.Remove(key, srcInsCas)
-// 	// The deleted document should be replicated
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	// verify deleted document has the expected XATTR
-// 	xdcr, err := getPathValue(key, "_xdcr", targetBucket)
-// 	assert.Nil(err)
-// 	xdcrMap := xdcr.(map[string]interface{})
-// 	if _, ok := xdcrMap["id"]; !ok {
-// 		fmt.Printf("XATTRS %s does not contain the expected id field", xdcrMap)
-// 		t.FailNow()
-// 	}
-// 	if _, ok := xdcrMap["cv"]; !ok {
-// 		fmt.Printf("XATTRS %s does not contain the expected cv field", xdcrMap)
-// 		t.FailNow()
-// 	}
-// 	err = verifyCv(key, targetBucket)
-// 	assert.Nil(err)
-// }
+	/*
+	* Test 8. Recreate the document and old _xdcr is lost, unfortunately
+	 */
+	fmt.Println("Test 8: Recreate the document and old _xdcr is lost")
+	upsOut, err = sourceBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail"}},
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, upsOut.Cas(), targetBucket)
+	assert.Nil(err)
+	value, err = getPathValue(key, "_xdcr", targetBucket)
+	assert.Nil(err)
+	xdcr = nil
+	value.ContentAt(0, &xdcr)
+	assert.Equal(2, len(xdcr))
+}
 
-// func TestCustomCRBinaryDocs(t *testing.T) {
-// 	fmt.Println("============== Test case start: TestCustomCRBinaryDocs =================")
-// 	defer fmt.Println("============== Test case end: TestCustomCRBinaryDocs =================")
-// 	bucketName := "TestCustomCRBinaryDocs"
-// 	assert := assert.New(t)
-// 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCustomCRBinaryDocs skipped because source cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	targetBucket, err := createBucket(targetConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCustomCRBinaryDocs skipped because target cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	assert.NotNil(sourceBucket)
-// 	assert.NotNil(targetBucket)
-// 	waitForBucketReady(t, targetBucket)
-// 	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
+func TestCustomCRDeletedDocs(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
+	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
+	bucketName := "TestCustomCRDeletedDocs"
+	assert := assert.New(t)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRDeletedDocs skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer srcCluster.Close(nil)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRDeletedDocs skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer trgCluster.Close(nil)
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
 
-// 	fmt.Println("Test 1. Create target binary doc, create source binary doc. Source wins.")
-// 	key := "sourceAndTargetBinary"
-// 	var expire uint32 = 24 * 60 * 60
-// 	_, err = targetBucket.Upsert(key, "Target document", expire)
-// 	assert.Nil(err)
-// 	_, err = sourceBucket.Upsert(key, fmt.Sprintf("Source document for key %v", key), expire)
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
+	key := time.Now().Format(time.RFC3339)
+	expire := 1 * time.Hour
+	_, err = sourceBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Source"}},
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	// Target dominate. Nothing should happen when replicating from source to target
+	_, err = targetBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target"}},
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	rmOut, err := sourceBucket.DefaultCollection().Remove(key, nil)
+	// The deleted document should be replicated
+	err = waitForReplication(key, rmOut.Cas(), targetBucket)
+	assert.Nil(err)
+	// verify deleted document has the expected XATTR
+	value, err := getPathValue(key, "_xdcr", targetBucket)
+	assert.Nil(err)
+	var xdcr map[string]interface{}
+	value.ContentAt(0, &xdcr)
+	if _, ok := xdcr["id"]; !ok {
+		fmt.Printf("XATTRS %s does not contain the expected id field", xdcr)
+		t.FailNow()
+	}
+	if _, ok := xdcr["cv"]; !ok {
+		fmt.Printf("XATTRS %s does not contain the expected cv field", xdcr)
+		t.FailNow()
+	}
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+}
 
-// 	fmt.Println("Test 2. Create target json doc, create source binary doc. Source wins.")
-// 	key = "sourceBinaryTargetJson"
-// 	_, err = targetBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "target"}}, expire)
-// 	assert.Nil(err)
-// 	_, err = sourceBucket.Upsert(key, fmt.Sprintf("Source document for key %v", key), expire)
-// 	assert.Nil(err)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
+func TestCustomCRBinaryDocs(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCRBinaryDocs =================")
+	defer fmt.Println("============== Test case end: TestCustomCRBinaryDocs =================")
+	bucketName := "TestCustomCRBinaryDocs"
+	assert := assert.New(t)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRBinaryDocs skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer srcCluster.Close(nil)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCRBinaryDocs skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer trgCluster.Close(nil)
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
 
-// 	fmt.Println("Test 3. Create target binary doc, create source json doc. Source wins.")
-// 	key = "sourceJsonTargetBinary"
-// 	_, err = targetBucket.Upsert(key, "target document", expire)
-// 	assert.Nil(err)
-// 	_, err = sourceBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// }
+	fmt.Println("Test 1. Create target binary doc, create source binary doc. Source wins.")
+	key := "sourceAndTargetBinary"
+	expire := 1 * time.Hour
+	upsOut, err := targetBucket.DefaultCollection().Upsert(key, "Target document",
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	_, err = sourceBucket.DefaultCollection().Upsert(key, fmt.Sprintf("Source document for key %v", key),
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, upsOut.Cas(), targetBucket)
+	assert.Nil(err)
+	// TODO: Failing!
+	//fmt.Println("Test 2. Create target json doc, create source binary doc. Source wins.")
+	//key = "sourceBinaryTargetJson"
+	//_, err = targetBucket.DefaultCollection().Upsert(key,
+	//	User{Id: "kingarthur",
+	//		Email:     "kingarthur@couchbase.com",
+	//		Interests: []string{"Holy Grail", "African Swallows", "target"}},
+	//	&gocb.UpsertOptions{Expiry: expire})
+	//assert.Nil(err)
+	//upsOut, err = sourceBucket.DefaultCollection().Upsert(key, fmt.Sprintf("Source document for key %v", key),
+	//	&gocb.UpsertOptions{Expiry: expire})
+	//assert.Nil(err)
+	//err = waitForReplication(key, upsOut.Cas(), targetBucket)
+	//assert.Nil(err)
 
-// func TestCcrXattrAfterMerge(t *testing.T) {
-// 	fmt.Println("============== Test case start: TestCcrXattrAfterMerge =================")
-// 	defer fmt.Println("============== Test case end: TestCcrXattrAfterMerge =================")
-// 	bucketName := "TestCcrXattrAfterMerge"
-// 	assert := assert.New(t)
-// 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCcrXattrAfterMerge skipped because source cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	targetBucket, err := createBucket(targetConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCcrXattrAfterMerge skipped because target cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	assert.NotNil(sourceBucket)
-// 	assert.NotNil(targetBucket)
-// 	waitForBucketReady(t, targetBucket)
-// 	mergeFunc := "simpleMerge"
-// 	createMergeFunction(t, mergeFunc)
-// 	createReplication(t, bucketName, mergeFunc, base.JSFunctionTimeoutDefault, true)
+	// TODO: Failing!
+	//fmt.Println("Test 3. Create target binary doc, create source json doc. Source wins.")
+	//key = "sourceJsonTargetBinary"
+	//trgOut, err := targetBucket.DefaultCollection().Upsert(key, "target document",
+	//	&gocb.UpsertOptions{Expiry: expire})
+	//assert.Nil(err)
+	//srcOut, err := sourceBucket.DefaultCollection().Upsert(key,
+	//	User{Id: "kingarthur",
+	//		Email:     "kingarthur@couchbase.com",
+	//		Interests: []string{"Holy Grail", "African Swallows", "Source"}},
+	//	&gocb.UpsertOptions{Expiry: expire})
+	//assert.True(srcOut.Cas() > trgOut.Cas())
+	//err = waitForReplication(key, upsOut.Cas(), targetBucket)
+	//assert.Nil(err)
+}
 
-// 	// Create documents at target and then at source to get conflicts
-// 	key := time.Now().Format(time.RFC3339)
-// 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
-// 	numDoc := 100
-// 	var cas1 uint64
-// 	var cas100 uint64
-// 	for i := 0; i < numDoc; i++ {
-// 		cas, err := targetBucket.Upsert(fmt.Sprintf("%v_%v", key, i),
-// 			User{Id: "kingarthur",
-// 				Email:     "kingarthur@couchbase.com",
-// 				Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
-// 		assert.Nil(err)
-// 		if i == 0 {
-// 			cas1 = uint64(cas)
-// 		} else if i == 99 {
-// 			cas100 = uint64(cas)
-// 		}
-// 	}
+func TestCustomCrXattrAfterMerge(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCrXattrAfterMerge =================")
+	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterMerge =================")
+	bucketName := "TestCustomCrXattrAfterMerge"
+	assert := assert.New(t)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCrXattrAfterMerge skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer srcCluster.Close(nil)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCrXattrAfterMerge skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer trgCluster.Close(nil)
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	mergeFunc := "simpleMerge"
+	createMergeFunction(t, mergeFunc)
+	createReplication(t, bucketName, mergeFunc, base.JSFunctionTimeoutDefault, true)
 
-// 	fmt.Printf("cas1=%v,cas100=%v,diff=%v, diff2=%v\n", base.CasToTime(cas1), base.CasToTime(cas100), base.CasDuration(cas1, cas100), base.CasDuration(cas100, cas1))
-// 	fmt.Printf("Created %v target documents\n", numDoc)
-// 	cas := make([]gocb.Cas, numDoc)
-// 	for i := 0; i < numDoc; i++ {
-// 		cas[i], err = sourceBucket.Upsert(fmt.Sprintf("%v_%v", key, i),
-// 			User{Id: "kingarthur",
-// 				Email:     "kingarthur@couchbase.com",
-// 				Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
-// 		assert.Nil(err)
-// 	}
-// 	fmt.Printf("Created %v source documents\n", numDoc)
-// 	fmt.Println("Wait for merge to finish")
-// 	lastKey := fmt.Sprintf("%v_%v", key, numDoc-1)
-// 	waitForCasChange(t, lastKey, cas[numDoc-1], sourceBucket)
-// 	fmt.Printf("Verifying merge and replication of merged doc for %v documents\n", numDoc)
-// 	for i := 0; i < numDoc; i++ {
-// 		key_i := fmt.Sprintf("%v_%v", key, i)
-// 		_, err = sourceBucket.LookupIn(key_i).GetEx("_xdcr.mv", gocb.SubdocFlagXattr).Execute()
-// 		assert.Nil(err, "_xdcr.mv lookup failed for key %v", key_i)
-// 		err = verifyCv(key_i, sourceBucket)
-// 		assert.Nil(err)
+	// Create documents at target and then at source to get conflicts
+	keyTime := time.Now().Format(time.RFC3339)
+	numDoc := 100
+	cas := make([]gocb.Cas, numDoc)
+	key := make([]string, numDoc)
+	expire := 1 * time.Hour
+	for i := 0; i < numDoc; i++ {
+		key[i] = fmt.Sprintf("%v_%v", keyTime, i)
+	}
+	for i := 0; i < numDoc; i++ {
+		_, err := targetBucket.DefaultCollection().Upsert(key[i],
+			User{Id: "kingarthur",
+				Email:     "kingarthur@couchbase.com",
+				Interests: []string{"Holy Grail", "African Swallows", "Target"}},
+			&gocb.UpsertOptions{Expiry: expire})
+		assert.Nil(err)
+	}
+	fmt.Printf("Created %v target documents\n", numDoc)
+	for i := 0; i < numDoc; i++ {
+		value, err := sourceBucket.DefaultCollection().Upsert(key[i],
+			User{Id: "kingarthur",
+				Email:     "kingarthur@couchbase.com",
+				Interests: []string{"Holy Grail", "African Swallows", "Source"}},
+			&gocb.UpsertOptions{Expiry: expire})
+		assert.Nil(err)
+		cas[i] = value.Result.Cas()
+	}
+	fmt.Printf("Created %v source documents\n", numDoc)
+	fmt.Println("Wait for merge to finish")
+	waitForCasChange(t, key[numDoc-1], cas[numDoc-1], sourceBucket)
+	fmt.Printf("Verifying merge and replication of merged doc for %v documents\n", numDoc)
+	for i := 0; i < numDoc; i++ {
+		value, err := getPathValue(key[i], "_xdcr.mv", sourceBucket)
+		assert.Nil(err, "_xdcr.mv lookup failed for key %v", key[i])
+		err = verifyCv(key[i], sourceBucket)
+		assert.Nil(err)
+		cas[i] = value.Cas()
+		err = waitForReplication(key[i], cas[i], targetBucket)
+		assert.Nil(err)
+		err = verifyCv(key[i], targetBucket)
+		assert.Nil(err)
+	}
+}
 
-// 		err = waitForReplication(key_i, sourceBucket, targetBucket)
-// 		assert.Nil(err)
-// 		err = verifyCv(key_i, targetBucket)
-// 		assert.Nil(err)
-// 	}
-// }
+func TestCustomCrXattrSetBack(t *testing.T) {
+	fmt.Println("============== Test case start: TestCustomCrXattrSetBack =================")
+	defer fmt.Println("============== Test case end: TestCustomCrXattrSetBack =================")
+	assert := assert.New(t)
+	bucketName := "TestCustomCrXattrSetBack"
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCrXattrSetBack skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer srcCluster.Close(nil)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestCustomCrXattrSetBack skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer trgCluster.Close(nil)
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
 
-// func TestCcrXattrSetBack(t *testing.T) {
-// 	fmt.Println("============== Test case start: TestCcrXattrSetBack =================")
-// 	defer fmt.Println("============== Test case end: TestCcrXattrSetBack =================")
-// 	assert := assert.New(t)
-// 	bucketName := "CCRSetBack"
-// 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCcrXattrSetBack skipped because source cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	targetBucket, err := createBucket(targetConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCcrXattrSetBack skipped because target cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	assert.NotNil(sourceBucket)
-// 	assert.NotNil(targetBucket)
-// 	waitForBucketReady(t, targetBucket)
-// 	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
+	key := time.Now().Format(time.RFC3339) + "_setback"
+	expire := 1 * time.Hour
 
-// 	key := time.Now().Format(time.RFC3339) + "_setback"
-// 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
+	// Create documents at target that looks like merge from 3 clusters
+	_, err = targetBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Target"}},
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
 
-// 	// Create documents at target that looks like merge from 3 clusters
-// 	_, err = targetBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
-// 	assert.Nil(err)
+	pcasTarget := make(map[string]string, 3)
+	pcasTarget["Cluster1"] = "FhSITdr4AAA"
+	pcasTarget["Cluster2"] = "FhSITdr4ABU"
+	pcasTarget["Cluster3"] = "FhSITdr4ACA"
+	_, err = targetBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec("_xdcr.cv", gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
+			gocb.InsertSpec("_xdcr.id", "SourceCluster", &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
+			gocb.InsertSpec("_xdcr.mv", pcasTarget, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	fmt.Printf("Created target document\n")
 
-// 	pcasTarget := make(map[string]string, 3)
-// 	pcasTarget["Cluster1"] = "FhSITdr4AAA"
-// 	pcasTarget["Cluster2"] = "FhSITdr4ABU"
-// 	pcasTarget["Cluster3"] = "FhSITdr4ACA"
-// 	_, err = targetBucket.MutateIn(key, 0, 0).
-// 		UpsertEx("_xdcr.cv", "${Mutation.CAS}", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath|0x10).
-// 		UpsertEx("_xdcr.id", "SourceCluster", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		UpsertEx("_xdcr.mv", pcasTarget, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		Execute()
-// 	assert.Nil(err)
-// 	fmt.Printf("Created target document\n")
+	// Create documents at source that looks like merge from 2 clusters
+	_, err = sourceBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows", "Source"}},
+		&gocb.UpsertOptions{Expiry: expire})
+	assert.Nil(err)
+	pcasSource := make(map[string]string, 3)
+	pcasSource["Cluster1"] = "FhSITdr4AAA"
+	pcasSource["Cluster2"] = "FhSITdr4ABU"
+	_, err = sourceBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec("_xdcr.cv", gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
+			gocb.InsertSpec("_xdcr.id", "SourceCluster", &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
+			gocb.InsertSpec("_xdcr.mv", pcasSource, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	fmt.Println("Created source document")
+	fmt.Println("Wait for target document set back to source.")
+	mv := []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}")
+	cas, err := waitForMV(key, mv, sourceBucket)
+	assert.Nil(err)
+	err = verifyCv(key, sourceBucket)
+	assert.Nil(err)
 
-// 	// Create documents at target that looks like merge from 2 clusters
-// 	_, err = sourceBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Source"}}, expire)
-// 	assert.Nil(err)
-// 	pcasSource := make(map[string]string, 3)
-// 	pcasSource["Cluster1"] = "FhSITdr4AAA"
-// 	pcasSource["Cluster2"] = "FhSITdr4ABU"
-// 	_, err = sourceBucket.MutateIn(key, 0, 0).
-// 		UpsertEx("_xdcr.cv", "${Mutation.CAS}", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath|0x10).
-// 		UpsertEx("_xdcr.id", "SourceCluster", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		UpsertEx("_xdcr.mv", pcasSource, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).
-// 		Execute()
-// 	assert.Nil(err)
-// 	fmt.Printf("Created source document\n")
-// 	fmt.Println("Wait for target document set back to source.")
-// 	mv := []byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}")
-// 	err = waitForMV(key, mv, sourceBucket)
-// 	assert.Nil(err)
-// 	err = verifyCv(key, sourceBucket)
-// 	assert.Nil(err)
+	err = waitForReplication(key, cas, targetBucket)
+	assert.Nil(err)
+	err = verifyCv(key, targetBucket)
+	assert.Nil(err)
+}
 
-// 	err = waitForReplication(key, sourceBucket, targetBucket)
-// 	assert.Nil(err)
-// 	err = verifyCv(key, targetBucket)
-// 	assert.Nil(err)
-
-// }
-
-// func TestCustomCRFunctionTimeout(t *testing.T) {
-// 	fmt.Println("============== Test case start: TestCustomCRFunctionTimeout =================")
-// 	defer fmt.Println("============== Test case end: TestCustomCRFunctionTimeout =================")
-// 	bucketName := "TestCustomCRTimeout"
-// 	assert := assert.New(t)
-// 	sourceBucket, err := createBucket(sourceConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCustomCRFunctionTimeout skipped because source cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	targetBucket, err := createBucket(targetConnStr, bucketName)
-// 	if err != nil {
-// 		fmt.Printf("TestCustomCRFunctionTimeout skipped because target cluster is not ready. Error: %v\n", err)
-// 		return
-// 	}
-// 	assert.NotNil(sourceBucket)
-// 	assert.NotNil(targetBucket)
-// 	waitForBucketReady(t, targetBucket)
-// 	funcName := "loopForever"
-// 	createMergeFunction(t, funcName)
-// 	timeout := 4000
-// 	createReplication(t, bucketName, funcName, timeout, true)
-
-// 	// Create a document at target and then at source to get conflicts
-// 	key := time.Now().Format(time.RFC3339) + "timeout"
-// 	var expire uint32 = 60 * 60 * 24 // expires in 1 day
-// 	_, err = targetBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
-// 	assert.Nil(err)
-// 	_, err = sourceBucket.Upsert(key,
-// 		User{Id: "kingarthur",
-// 			Email:     "kingarthur@couchbase.com",
-// 			Interests: []string{"Holy Grail", "African Swallows", "Target"}}, expire)
-// 	assert.Nil(err)
-// 	time.Sleep(40 * time.Second)
-// 	// Expect timeout message
-// 	filename := "../../../../../../ns_server/logs/n_0/goxdcr.log"
-// 	b, err := ioutil.ReadFile(filename)
-// 	assert.Nil(err)
-// 	s := string(b)
-// 	expected := fmt.Sprintf("loopForever stopped after running beyond %v ms", timeout)
-// 	assert.Contains(s, expected, fmt.Sprintf("%v does not contain expected message '%v'", filename, expected))
-// }
+// TODO: Javascript engine timeout not working
+//func TestCustomCRFunctionTimeout(t *testing.T) {
+//	fmt.Println("============== Test case start: TestCustomCRFunctionTimeout =================")
+//	defer fmt.Println("============== Test case end: TestCustomCRFunctionTimeout =================")
+//	bucketName := "TestCustomCRTimeout"
+//	assert := assert.New(t)
+//	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+//	if err != nil {
+//		fmt.Printf("TestCustomCRFunctionTimeout skipped because source cluster is not ready. Error: %v\n", err)
+//		return
+//	}
+//	defer srcCluster.Close(nil)
+//	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+//	if err != nil {
+//		fmt.Printf("TestCustomCRFunctionTimeout skipped because target cluster is not ready. Error: %v\n", err)
+//		return
+//	}
+//	defer trgCluster.Close(nil)
+//	assert.NotNil(sourceBucket)
+//	assert.NotNil(targetBucket)
+//	funcName := "loopForever"
+//	createMergeFunction(t, funcName)
+//	timeout := 4000
+//	createReplication(t, bucketName, funcName, timeout, true)
+//
+//	// Create a document at target and then at source to get conflicts
+//	key := time.Now().Format(time.RFC3339) + "timeout"
+//	expire := 1 * time.Hour
+//	_, err = targetBucket.DefaultCollection().Upsert(key,
+//		User{Id: "kingarthur",
+//			Email:     "kingarthur@couchbase.com",
+//			Interests: []string{"Holy Grail", "African Swallows", "Target"}},
+//		&gocb.UpsertOptions{Expiry: expire})
+//	assert.Nil(err)
+//	_, err = sourceBucket.DefaultCollection().Upsert(key,
+//		User{Id: "kingarthur",
+//			Email:     "kingarthur@couchbase.com",
+//			Interests: []string{"Holy Grail", "African Swallows", "Target"}},
+//		&gocb.UpsertOptions{Expiry: expire})
+//	assert.Nil(err)
+//	time.Sleep(40 * time.Second)
+//	// Expect timeout message
+//	filename := "../../../../../../ns_server/logs/n_0/goxdcr.log"
+//	b, err := ioutil.ReadFile(filename)
+//	assert.Nil(err)
+//	s := string(b)
+//	expected := fmt.Sprintf("loopForever stopped after running beyond %v ms", timeout)
+//	assert.Contains(s, expected, fmt.Sprintf("%v does not contain expected message '%v'", filename, expected))
+//}
