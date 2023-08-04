@@ -88,6 +88,8 @@ type ClientIface interface {
 	CancelRangeScan(vb uint16, uuid []byte, opaque uint32, context ...*ClientContext) (*gomemcached.MCResponse, error)
 
 	ValidateKey(vb uint16, key string, context ...*ClientContext) (bool, error)
+
+	GetErrorMap(errMapVersion gomemcached.ErrorMapVersion) (map[string]interface{}, error)
 }
 
 type ClientContext struct {
@@ -1916,4 +1918,29 @@ func combineMapWithReturnedList(vbSeqnoMap map[uint16]uint64, list *VBSeqnos) {
 		seqno := pair[1]
 		vbSeqnoMap[vbno] = seqno
 	}
+}
+
+func (c *Client) GetErrorMap(errMapVersion gomemcached.ErrorMapVersion) (map[string]interface{}, error) {
+	if errMapVersion == gomemcached.ErrorMapInvalidVersion {
+		return nil, fmt.Errorf("Invalid version used")
+	}
+
+	payload := make([]byte, 2, 2)
+	binary.BigEndian.PutUint16(payload, uint16(errMapVersion))
+
+	rv, err := c.Send(&gomemcached.MCRequest{
+		Opcode: gomemcached.GET_ERROR_MAP,
+		Body:   payload,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	errMap := make(map[string]interface{})
+	err = json.Unmarshal(rv.Body, &errMap)
+	if err != nil {
+		return nil, err
+	}
+	return errMap, nil
 }

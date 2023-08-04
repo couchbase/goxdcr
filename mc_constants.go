@@ -124,6 +124,8 @@ const (
 	CREATE_RANGE_SCAN   = CommandCode(0xda) // Range scans
 	CONTINUE_RANGE_SCAN = CommandCode(0xdb) // Range scans
 	CANCEL_RANGE_SCAN   = CommandCode(0xdc) // Range scans
+
+	GET_ERROR_MAP = CommandCode(0xfe)
 )
 
 // command codes that are counted toward DCP control buffer
@@ -277,6 +279,14 @@ var CommandNames map[CommandCode]string
 // StatusNames human readable names for memcached response.
 var StatusNames map[Status]string
 var StatusDesc map[Status]string
+
+type ErrorMapVersion uint16
+
+const (
+	ErrorMapInvalidVersion = 0 // Unused zero value
+	ErrorMapCB50           = 1 // Used for Couchbase Server 5.0+
+	ErrorMapCB75           = 2 // Used for Couchbase Server 7.5+
+)
 
 func init() {
 	CommandNames = make(map[CommandCode]string)

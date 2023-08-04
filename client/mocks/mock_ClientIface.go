@@ -1479,6 +1479,60 @@ func (_c *ClientIface_GetCollectionsManifest_Call) RunAndReturn(run func() (*gom
 	return _c
 }
 
+// GetErrorMap provides a mock function with given fields: errMapVersion
+func (_m *ClientIface) GetErrorMap(errMapVersion gomemcached.ErrorMapVersion) (map[string]interface{}, error) {
+	ret := _m.Called(errMapVersion)
+
+	var r0 map[string]interface{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(gomemcached.ErrorMapVersion) (map[string]interface{}, error)); ok {
+		return rf(errMapVersion)
+	}
+	if rf, ok := ret.Get(0).(func(gomemcached.ErrorMapVersion) map[string]interface{}); ok {
+		r0 = rf(errMapVersion)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(gomemcached.ErrorMapVersion) error); ok {
+		r1 = rf(errMapVersion)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ClientIface_GetErrorMap_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetErrorMap'
+type ClientIface_GetErrorMap_Call struct {
+	*mock.Call
+}
+
+// GetErrorMap is a helper method to define mock.On call
+//   - errMapVersion gomemcached.ErrorMapVersion
+func (_e *ClientIface_Expecter) GetErrorMap(errMapVersion interface{}) *ClientIface_GetErrorMap_Call {
+	return &ClientIface_GetErrorMap_Call{Call: _e.mock.On("GetErrorMap", errMapVersion)}
+}
+
+func (_c *ClientIface_GetErrorMap_Call) Run(run func(errMapVersion gomemcached.ErrorMapVersion)) *ClientIface_GetErrorMap_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(gomemcached.ErrorMapVersion))
+	})
+	return _c
+}
+
+func (_c *ClientIface_GetErrorMap_Call) Return(_a0 map[string]interface{}, _a1 error) *ClientIface_GetErrorMap_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *ClientIface_GetErrorMap_Call) RunAndReturn(run func(gomemcached.ErrorMapVersion) (map[string]interface{}, error)) *ClientIface_GetErrorMap_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetMeta provides a mock function with given fields: vb, key, context
 func (_m *ClientIface) GetMeta(vb uint16, key string, context ...*memcached.ClientContext) (*gomemcached.MCResponse, error) {
 	_va := make([]interface{}, len(context))
