@@ -326,7 +326,6 @@ var ErrorRequestAlreadyIgnored = errors.New("Request has been marked ignored")
 var ErrorInvalidSRVFormat = errors.New("hostname format is not SRV")
 var ErrorSdkUriNotSupported = fmt.Errorf("XDCR currently does not support %v or %v URI. If using DNS SRV, remove the URI prefix", CouchbaseUri, CouchbaseSecureUri)
 var ErrorColMigrationEnterpriseOnly = errors.New("Collections migration is supported in Enterprise edition only")
-var ErrorEAccess = errors.New("Remote user received EACCESS error")
 var ErrorInvalidColNamespaceFormat = fmt.Errorf("Invalid CollectionNamespace format")
 var ErrorCAPIDeprecated = errors.New("CAPI replication mode is now deprecated")
 var ReplicationSpecNotFoundErrorMessage = "requested resource not found"

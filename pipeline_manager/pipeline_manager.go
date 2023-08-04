@@ -1623,9 +1623,7 @@ func (em *pmErrMapType) ContainsError(checkErr error, exactMatch bool) bool {
 }
 
 func (em *pmErrMapType) ContainsMustStopError(replId string) (bool, string) {
-	if em.ContainsError(base.ErrorEAccess, false) {
-		return true, fmt.Sprintf("Replication %v cannot continue because remote user does not have enough permission.", replId)
-	} else if em.ContainsError(ErrorCAPIReplicationDeprecated, false) {
+	if em.ContainsError(ErrorCAPIReplicationDeprecated, false) {
 		return true, fmt.Sprintf("Replication %v cannot continue - %v", replId, ErrorCAPIReplicationDeprecated.Error())
 	}
 	return false, ""
