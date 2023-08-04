@@ -907,7 +907,7 @@ func TestMobileFiltering(t *testing.T) {
 	assert.Nil(err)
 
 	// Document key with prefix _sync:att should be replicated
-	uprFile = "./testInternalData/sync:att:test.json"
+	uprFile = "./testInternalData/syncAttTest.json"
 	uprEvent, err = base.RetrieveUprJsonAndConvert(uprFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
@@ -916,7 +916,7 @@ func TestMobileFiltering(t *testing.T) {
 	assert.Nil(err)
 
 	// Document key with prefix _sync: but not _sync:att should be skipped
-	uprFile = "./testInternalData/sync:test.json"
+	uprFile = "./testInternalData/syncTest.json"
 	uprEvent, err = base.RetrieveUprJsonAndConvert(uprFile)
 	assert.Nil(err)
 	assert.NotNil(uprEvent)
