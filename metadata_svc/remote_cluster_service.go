@@ -441,7 +441,11 @@ func (agent *RemoteClusterAgent) GetReferenceAndStatusClone() *metadata.RemoteCl
 		agent.connectivityHelper.MarkEncryptionError(false)
 	}
 
-	ref.SetConnectivityStatus(agent.connectivityHelper.GetOverallStatus().String())
+	connectivityStatus := agent.connectivityHelper.GetOverallStatus()
+	ref.SetConnectivityStatus(connectivityStatus.String())
+	if connectivityStatus == metadata.ConnIniting || connectivityStatus == metadata.ConnValid {
+		ref.ClearConnErrs()
+	}
 	return ref
 }
 
@@ -744,14 +748,14 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 		if updateSecuritySettings && rctx.refCache.IsEncryptionEnabled() {
 			// if updateSecuritySettings is true, get up to date security settings from target
 			httpAuthMech, defaultPoolInfo, statusCode, bgErr = rctx.agent.utils.GetSecuritySettingsAndDefaultPoolInfo(rctx.hostName, rctx.httpsHostName, username, password, certificate, clientCertificate, clientKey, rctx.refCache.IsHalfEncryption(), rctx.agent.logger)
-			rctx.markNodeWithStatus(statusCode)
+			rctx.markNodeWithStatus(statusCode, bgErr)
 			if bgErr != nil {
 				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving security settings from target. err=%v\n", rctx.refCache.Id(), connStr, bgErr)
 				return
 			}
 		} else {
 			defaultPoolInfo, bgErr, statusCode = rctx.agent.utils.GetClusterInfoWStatusCode(connStr, base.DefaultPoolPath, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rctx.agent.logger)
-			rctx.markNodeWithStatus(statusCode)
+			rctx.markNodeWithStatus(statusCode, bgErr)
 			if bgErr != nil {
 				rctx.agent.logger.Warnf("When refreshing remote cluster reference %v, skipping node %v because of error retrieving default pool info from target. statusCode=%v err=%v\n", rctx.refCache.Id(), connStr,
 					statusCode, bgErr)
@@ -834,9 +838,8 @@ func (rctx *refreshContext) verifyNodeAndGetList(connStr string, updateSecurityS
 	return nodeList, err
 }
 
-func (rctx *refreshContext) markNodeWithStatus(statusCode int) {
+func (rctx *refreshContext) markNodeWithStatus(statusCode int, err error) {
 	markedHostname := rctx.hostName
-
 	if statusCode == http.StatusUnauthorized {
 		changed, _ := rctx.agent.connectivityHelper.MarkNode(markedHostname, metadata.ConnAuthErr)
 		if changed {
@@ -851,6 +854,12 @@ func (rctx *refreshContext) markNodeWithStatus(statusCode int) {
 	} else {
 		// Any non-OK return code
 		rctx.agent.connectivityHelper.MarkNode(markedHostname, metadata.ConnError)
+		rctx.agent.reference.InsertConnError(metadata.ConnErr{
+			FirstOccurence: time.Now(),
+			TargetNode:     markedHostname,
+			Cause:          fmt.Sprintf("statusCode=%v,err=%v", statusCode, err),
+			Occurences:     1,
+		})
 	}
 }
 
@@ -1136,7 +1145,31 @@ func (rctx *refreshContext) updateHeartbeatMap(nodeList []interface{}) {
 	if err != nil {
 		rctx.agent.logger.Warnf("unable to parse heartbeatMap: %v", err)
 	}
+	unhealthyTargets, unhealthyTargetStatuses := findHeartbeatUnhealthyNodes(heartbeatMap)
+	for i, _ := range unhealthyTargets {
+		rctx.agent.reference.InsertConnError(metadata.ConnErr{
+			FirstOccurence: time.Now(),
+			TargetNode:     unhealthyTargets[i],
+			Cause:          fmt.Sprintf("heartBeatStatus=%v", unhealthyTargetStatuses[i]),
+			Occurences:     1,
+		})
+	}
 	rctx.agent.connectivityHelper.MarkNodeHeartbeatStatus(rctx.hostName, heartbeatMap)
+}
+
+func findHeartbeatUnhealthyNodes(heartbeatMap map[string]base.HeartbeatStatus) ([]string, []base.HeartbeatStatus) {
+	unhealthyTargets := make([]string, 0)
+	unhealthyTargetStatuses := make([]base.HeartbeatStatus, 0)
+	for targetNode, heartbeatStatus := range heartbeatMap {
+		if heartbeatStatus == base.HeartbeatInvalid || heartbeatStatus == base.HeartbeatWarmup {
+			continue
+		}
+		if heartbeatStatus != base.HeartbeatHealthy {
+			unhealthyTargets = append(unhealthyTargets, targetNode)
+			unhealthyTargetStatuses = append(unhealthyTargetStatuses, heartbeatStatus)
+		}
+	}
+	return unhealthyTargets, unhealthyTargetStatuses
 }
 
 /**

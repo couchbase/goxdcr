@@ -1789,6 +1789,10 @@ func (r *PipelineUpdater) run() {
 								r.logger.Errorf("Pipeline updater received err %v when retrieving its remote cluster's connectivity status")
 							} else {
 								r.checkAndPublishRCError(connectivityStatus, ref)
+								if connectivityStatus == metadata.ConnIniting || connectivityStatus == metadata.ConnValid {
+									ref.ClearConnErrs()
+								}
+								ref.PrintConnErrs(r.logger)
 							}
 						}
 					}

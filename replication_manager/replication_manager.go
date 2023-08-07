@@ -348,6 +348,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.GlobalOSOConfigKey].(int),
 		time.Duration(internal_settings.Values[metadata.ConnectionPreCheckGCTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.ConnectionPreCheckRPCTimeoutKey].(int))*time.Second,
+		internal_settings.Values[metadata.ConnErrorsListMaxEntriesKey].(int),
 	)
 }
 

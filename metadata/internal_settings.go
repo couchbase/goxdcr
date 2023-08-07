@@ -274,6 +274,8 @@ const (
 	ConnectionPreCheckRPCTimeoutKey = "ConnectionPreCheckRPCTimeoutSec"
 
 	GlobalOSOConfigKey = "OSOModeOverride"
+
+	ConnErrorsListMaxEntriesKey = "ConnectionErrorsListMaxEntries"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -395,6 +397,7 @@ var DnsSrvReBootstrapConfig = &SettingsConfig{base.DNSSrvReBootstrap, nil}
 var ConnectionPreCheckGCTimeoutConfig = &SettingsConfig{int(base.ConnectionPreCheckGCTimeout / time.Second), &Range{120, 600}}
 var ConnectionPreCheckRPCTimeoutConfig = &SettingsConfig{int(base.ConnectionPreCheckRPCTimeout / time.Second), &Range{1, 30}}
 var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), Range: &Range{int(base.GlobalOSONoOp), int(base.GlobalOSOMax) - 1}}
+var ConnErrsListMaxEntriesConfig = &SettingsConfig{defaultValue: base.ConnErrorsListMaxEntries, Range: &Range{1, 100}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -516,6 +519,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ConnectionPreCheckGCTimeoutKey:                ConnectionPreCheckGCTimeoutConfig,
 	ConnectionPreCheckRPCTimeoutKey:               ConnectionPreCheckRPCTimeoutConfig,
 	GlobalOSOConfigKey:                            GlobalOSOConfig,
+	ConnErrorsListMaxEntriesKey:                   ConnErrsListMaxEntriesConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

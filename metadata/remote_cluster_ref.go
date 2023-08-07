@@ -132,9 +132,87 @@ type RemoteClusterReference struct {
 
 	// If requested by REST, this field will be non-Empty
 	connectivityStatus string
+	// latest unique connectivity error messages until the status is RC_OK
+	connectivityErrors ConnErrs
 
 	// If specifically requested, this will contain fetched remote bucket manifest
 	TargetBucketManifest map[string]*CollectionsManifest
+}
+
+type ConnErr struct {
+	FirstOccurence time.Time `json:"firstOccuredOn"`
+	TargetNode     string    `json:"targetNode"`
+	Cause          string    `json:"causeOfError"`
+	Occurences     uint      `json:"numOccurences"`
+}
+
+type ConnErrs []ConnErr
+
+func (ces ConnErrs) String() string {
+	bytes, err := json.Marshal(ces)
+	if err != nil {
+		return ""
+	}
+
+	return string(bytes)
+}
+
+func (ce *ConnErr) SameAs(cein ConnErr) bool {
+	return ce.Cause == cein.Cause && ce.TargetNode == cein.TargetNode
+}
+
+func (ref *RemoteClusterReference) InsertConnError(ce ConnErr) {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+
+	if ref.connectivityErrors == nil {
+		ref.connectivityErrors = make([]ConnErr, 0)
+	}
+
+	// skip if duplicate
+	for i, conErr := range ref.connectivityErrors {
+		if conErr.SameAs(ce) {
+			ref.connectivityErrors[i].Occurences++
+			return
+		}
+	}
+
+	// insert at the beginning
+	end := len(ref.connectivityErrors)
+	if end > base.ConnErrorsListMaxEntries-1 {
+		end = base.ConnErrorsListMaxEntries - 1
+	}
+	ref.connectivityErrors = append(ref.connectivityErrors[:end], ConnErr{})
+	for i := len(ref.connectivityErrors) - 1; i > 0; i-- {
+		ref.connectivityErrors[i] = ref.connectivityErrors[i-1]
+	}
+	ref.connectivityErrors[0] = ce
+}
+
+func (ref *RemoteClusterReference) ClearConnErrs() {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+	ref.connectivityErrors = nil
+}
+
+func (ref *RemoteClusterReference) PrintConnErrs(logger *log.CommonLogger) {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	if ref.connectivityErrors != nil && len(ref.connectivityErrors) != 0 {
+		logger.Errorf("RC %v Connectivity Errors = %v", ref.Name_, ref.connectivityErrors)
+	}
+}
+
+func (ref *RemoteClusterReference) CloneConnErrsNoLock() []ConnErr {
+	if ref.connectivityErrors == nil {
+		return nil
+	}
+	deepCopy := make([]ConnErr, 0)
+	for _, ce := range ref.connectivityErrors {
+		deepCopy = append(deepCopy, ce)
+	}
+
+	return deepCopy
 }
 
 type HostNameSrvType int
@@ -375,6 +453,7 @@ func (ref *RemoteClusterReference) ToMap() map[string]interface{} {
 	if len(ref.TargetBucketManifest) > 0 {
 		outputMap[base.RemoteBucketManifest] = ref.TargetBucketManifest
 	}
+	outputMap[base.ConnectivityErrors] = ref.CloneConnErrsNoLock()
 
 	return outputMap
 }
@@ -591,10 +670,11 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		HostnameMode_:      ref.HostnameMode_,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
-		revision:        ref.revision,
-		dnsSrvHelper:    ref.dnsSrvHelper,
-		hostnameSRVType: ref.hostnameSRVType,
-		srvEntries:      ref.srvEntries.Clone(),
+		revision:           ref.revision,
+		dnsSrvHelper:       ref.dnsSrvHelper,
+		hostnameSRVType:    ref.hostnameSRVType,
+		srvEntries:         ref.srvEntries.Clone(),
+		connectivityErrors: ref.connectivityErrors, // shallow copy to ensure ClearConnErrs() works
 	}
 }
 

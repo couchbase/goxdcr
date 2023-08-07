@@ -395,6 +395,7 @@ const (
 	Pools                          = "pools"
 	RemoteClusterHostnameMode      = "network_type"
 	ConnectivityStatus             = "connectivityStatus"
+	ConnectivityErrors             = "connectivityErrors"
 	RemoteBucketManifest           = "remoteBucketManifest"
 	RedactRequested                = "redactRequested"
 )
@@ -1226,7 +1227,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	humanRecoveryThreshold time.Duration,
 	dnsSrvReBootstrap bool,
 	p2pReplicaReplicatorReloadSize int, globalOSOMode int,
-	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration) {
+	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
+	connErrsListMaxEntries int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1377,6 +1379,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	GlobalOSOSetting = GlobalOSOMode(globalOSOMode)
 	ConnectionPreCheckGCTimeout = connectionPreCheckGCTimeout
 	ConnectionPreCheckRPCTimeout = connectionPreCheckRPCTimeout
+	ConnErrorsListMaxEntries = connErrsListMaxEntries
 }
 
 // XDCR Dev hidden replication settings
@@ -1600,3 +1603,5 @@ var PortsKeysForConnectionPreCheck = map[PortType]string{
 
 var ConnectionPreCheckGCTimeout = 120 * time.Second
 var ConnectionPreCheckRPCTimeout = 15 * time.Second
+
+var ConnErrorsListMaxEntries = 20
