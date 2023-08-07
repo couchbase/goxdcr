@@ -122,6 +122,9 @@ func setupMocksCommon(utils *utilsMock.UtilsIface) {
 	memcachedMock := &mcMock.ClientIface{}
 	memcachedMock.On("Closed").Return(true)
 
+	emptyMap := make(map[string]interface{})
+	memcachedMock.On("GetErrorMap", mock.Anything).Return(emptyMap, nil)
+
 	utils.On("ExponentialBackoffExecutorWithFinishSignal", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(memcachedMock, nil)
 }
 
@@ -149,14 +152,22 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 
 	xmem.SetBandwidthThrottler(bandwidthThrottler)
 
+	xmem.sourceClusterId = []byte("SourceCluster")
+	xmem.targetClusterId = []byte("TargetCluster")
+
+	setupMocksRC(remoteClusterSvc)
+}
+
+func setupMocksRC(remoteClusterSvc *serviceDefMocks.RemoteClusterSvc) {
 	remoteClusterRef, err := metadata.NewRemoteClusterReference("tempUUID", targetClusterName, "127.0.0.1:9001", username, password, "", /*hostnameMode*/
 		false /*demandEncryption*/, "", nil, nil, nil, nil)
 	if err != nil {
 		fmt.Printf("Error creating RCR: %v\n", err)
 	}
+
+	colCap := metadata.UnitTestGetCollectionsCapability()
 	remoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(remoteClusterRef, nil)
-	xmem.sourceClusterId = []byte("SourceCluster")
-	xmem.targetClusterId = []byte("TargetCluster")
+	remoteClusterSvc.On("GetCapability", mock.Anything).Return(colCap, nil)
 }
 
 func setupMocksConflictMgr(xmem *XmemNozzle) *serviceDefMocks.ConflictManagerIface {
@@ -179,8 +190,9 @@ func TestPositiveXmemNozzle(t *testing.T) {
 func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, _, rc, _ := setupBoilerPlateXmem(xmemBucket)
 	setupMocksCompressNeg(utils)
+	setupMocksRC(rc)
 
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
@@ -189,10 +201,11 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, _, rc, _ := setupBoilerPlateXmem(xmemBucket)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
 	settings[ForceCollectionDisableKey] = true
 	setupMocksCompressNeg(utils)
+	setupMocksRC(rc)
 
 	assert.Equal(nil, xmem.initialize(settings))
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")

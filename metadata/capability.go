@@ -9,9 +9,10 @@
 package metadata
 
 import (
+	"sync/atomic"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
-	"sync/atomic"
 )
 
 /**
@@ -22,6 +23,9 @@ type Capability struct {
 	// We don't anticipate future clusters upgrades having deprecated capabilities
 	// So use atomics to roll-forward and avoid locking
 	collection uint32
+
+	// Advanced Xerror error map support
+	advErrorMapSupport uint32
 }
 
 func (c *Capability) Reset() {
@@ -41,15 +45,23 @@ func (c Capability) HasCollectionSupport() bool {
 	return atomic.LoadUint32(&c.collection) > 0
 }
 
+func (c Capability) HasAdvErrorMapSupport() bool {
+	return atomic.LoadUint32(&c.advErrorMapSupport) > 0
+}
+
 func (c Capability) IsSameAs(otherCap Capability) bool {
 	// No slices or other reference types so simple comparison
-	return c.HasCollectionSupport() == otherCap.HasCollectionSupport()
+	return c.HasCollectionSupport() == otherCap.HasCollectionSupport() &&
+		c.HasAdvErrorMapSupport() == otherCap.HasAdvErrorMapSupport()
 }
 
 func (c *Capability) LoadFromOther(otherCap Capability) {
 	// CollectionEnabled can only roll forward
 	if otherCap.HasCollectionSupport() {
 		atomic.StoreUint32(&c.collection, 1)
+	}
+	if otherCap.HasAdvErrorMapSupport() {
+		atomic.StoreUint32(&c.advErrorMapSupport, 1)
 	}
 	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 }
@@ -65,9 +77,12 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 		return err
 	}
 
-	// Roll forward collection if necessary
+	// Roll forward everything else if necessary
 	if !c.HasCollectionSupport() && base.IsClusterCompatible(clusterCompatibility, base.VersionForCollectionSupport) {
 		atomic.StoreUint32(&c.collection, 1)
+	}
+	if !c.HasAdvErrorMapSupport() && base.IsClusterCompatible(clusterCompatibility, base.VersionForAdvErrorMapSupport) {
+		atomic.StoreUint32(&c.advErrorMapSupport, 1)
 	}
 
 	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
@@ -76,9 +91,9 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 
 // Unit Test Only
 func UnitTestGetDefaultCapability() Capability {
-	return Capability{1, 0}
+	return Capability{1, 0, 0}
 }
 
 func UnitTestGetCollectionsCapability() Capability {
-	return Capability{1, 1}
+	return Capability{1, 1, 0}
 }

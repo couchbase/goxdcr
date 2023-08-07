@@ -659,6 +659,7 @@ var VersionForCompressionSupport = ServerVersion{5, 5}
 var VersionForClientCertSupport = ServerVersion{5, 5}
 var VersionForHttpScramShaSupport = ServerVersion{5, 5}
 var VersionForCollectionSupport = ServerVersion{7, 0}
+var VersionForAdvErrorMapSupport = ServerVersion{7, 5}
 
 // ns_server and support would like to start seeing 3 digits for versions
 var VersionForAdvFilteringSupport = ServerVersion{6, 5, 0}

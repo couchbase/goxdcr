@@ -692,6 +692,11 @@ type XmemNozzle struct {
 	upstreamObjRecycler utilities.RecycleObjFunc
 
 	upstreamErrReporter utilities.ErrReportFunc
+
+	// If XError is enabled, then as part of connection initialization, the target
+	// memcached will return an error map that contains more details about
+	// what errors get returned and what they mean
+	memcachedErrMap map[string]interface{}
 }
 
 func NewXmemNozzle(id string,
@@ -2441,6 +2446,19 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 		return err
 	}
 
+	xerrorMapVersion := mc.ErrorMapCB50
+	ref, err := xmem.remoteClusterSvc.RemoteClusterByUuid(xmem.targetClusterUuid, false)
+	if err == nil {
+		capability, err := xmem.remoteClusterSvc.GetCapability(ref)
+		if err == nil && capability.HasAdvErrorMapSupport() {
+			xerrorMapVersion = mc.ErrorMapCB75
+		}
+	}
+	xmem.memcachedErrMap, err = xmem.client_for_setMeta.GetMemClient().GetErrorMap(mc.ErrorMapVersion(xerrorMapVersion))
+	if err != nil {
+		return err
+	}
+
 	// initialize this only once here
 	xmem.xattrEnabled = features.Xattribute
 
@@ -3279,6 +3297,7 @@ func (xmem *XmemNozzle) sendHELO(setMeta bool) (utilities.HELOFeatures, error) {
 	features.Xattribute = true
 	features.Xerror = true
 	features.Collections = atomic.LoadUint32(&xmem.collectionEnabled) != 0
+
 	if setMeta {
 		// For setMeta, negotiate compression, if it is set
 		features.CompressionType = xmem.compressionSetting
