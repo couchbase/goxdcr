@@ -1966,7 +1966,7 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 					hasTmpErr = true
 				}
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-					xmem.Logger().Debugf("Received response status %v for key %v", resp.Status, key)
+					xmem.Logger().Debugf("Received %v for key %v", xmem.PrintResponseStatusError(resp.Status), key)
 				}
 			}
 		}
@@ -2103,7 +2103,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 					hasTmpErr = true
 				}
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-					xmem.Logger().Debugf("Received response status %v for key %v", resp.Status, key)
+					xmem.Logger().Debugf("Received %v for key %v", xmem.PrintResponseStatusError(resp.Status), key)
 				}
 			}
 		}
@@ -2785,7 +2785,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 											xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, ccrxattrlen, req.Body[8:ccrxattrlen+8])
 									}
 								}
-								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
 						} else if req != nil {
@@ -3876,4 +3876,32 @@ func (xmem *XmemNozzle) checkSendDelayInjection() {
 			time.Sleep(time.Duration(atomic.LoadUint32(&xmem.config.devMainSendDelay)) * time.Millisecond)
 		}
 	}
+}
+
+const (
+	errorMapErrKey  = "errors"
+	errorMapNameKey = "name"
+	errorMapDescKey = "desc"
+)
+
+func (xmem *XmemNozzle) PrintResponseStatusError(status mc.Status) string {
+	if xmem.memcachedErrMap == nil {
+		return fmt.Sprintf("response status=%v", status)
+	}
+
+	errorsLookupTable, ok := xmem.memcachedErrMap[errorMapErrKey].(map[string]interface{})
+	if !ok {
+		xmem.Logger().Errorf("Unable to find %v in errormap %v", errorMapErrKey, xmem.memcachedErrMap)
+		return fmt.Sprintf("response status=%v", status)
+	}
+
+	statusCodeStr := strconv.FormatUint(uint64(status), 10)
+	errDetail, ok := errorsLookupTable[statusCodeStr].(map[string]interface{})
+	if !ok {
+		xmem.Logger().Errorf("%v", errDetail)
+		return fmt.Sprintf("response status=%v", status)
+	}
+
+	return fmt.Sprintf("response errCode: %v errName: %v errDesc: %v ", statusCodeStr,
+		errDetail[errorMapNameKey], errDetail[errorMapDescKey])
 }
