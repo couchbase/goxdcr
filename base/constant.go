@@ -543,7 +543,7 @@ const (
 	DataThroughputThrottledEventListener = "DataThroughputThrottledEventListener"
 	CollectionRoutingEventListener       = "CollectionRoutingEventListener"
 	DataClonedEventListener              = "DataClonedEventListener"
-	DataSentUncompressedListener         = "DataSentUncompressedListener"
+	DataSentFailedListener               = "DataSentFailedListener"
 )
 
 const (

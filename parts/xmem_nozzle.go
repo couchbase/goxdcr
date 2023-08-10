@@ -1559,6 +1559,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 								// For subdoc_get, we will retry so increment backoff factor.
 								xmem.client_for_getMeta.IncrementBackOffFactor()
 								atomic.AddUint64(&xmem.counter_eaccess, 1)
+								xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
 							} else {
 								// log the corresponding request to facilitate debugging
 								xmem.Logger().Warnf("%v received error from getMeta client. key=%v%s%v, seqno=%v, response=%v%v%v\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, seqno,
@@ -1571,6 +1572,7 @@ func (xmem *XmemNozzle) batchGetMetaHandler(count int, finch chan bool, return_c
 						} else if base.IsTemporaryMCError(response.Status) && !isGetMeta {
 							xmem.client_for_getMeta.IncrementBackOffFactor()
 							atomic.AddUint64(&xmem.counter_tmperr, 1)
+							xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
 						}
 					} else {
 						panic("KeySeqno list is not formated as expected [string, uint64, time]")
@@ -2663,6 +2665,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					pos := xmem.getPosFromOpaque(response.Opaque)
 					// Don't spam the log. Keep a counter instead
 					atomic.AddUint64(&xmem.counter_tmperr, 1)
+					xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
 					//resend and reset the retry=0 as retry is an indicator of network status,
 					//here we have received the response, so reset retry=0
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
@@ -2673,6 +2676,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					pos := xmem.getPosFromOpaque(response.Opaque)
 					// Don't spam the log. Keep a counter instead
 					atomic.AddUint64(&xmem.counter_eaccess, 1)
+					xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 				} else if (base.IsEExistsError(response.Status) || base.IsENoEntError(response.Status)) && xmem.source_cr_mode == base.CRMode_Custom {
 					// request failed because target Cas changed. Raise event.

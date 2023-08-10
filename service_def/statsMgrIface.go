@@ -131,8 +131,10 @@ const (
 	//statistics_manager's setting
 	PUBLISH_INTERVAL = "publish_interval"
 
-	// Memory related statistics
-	DP_GET_FAIL_METRIC = "datapool_failed_gets"
+	// error counter metrics
+	DP_GET_FAIL_METRIC    = "datapool_failed_gets"
+	TARGET_EACCESS_METRIC = "target_eaccess"
+	TARGET_TMPFAIL_METRIC = "target_tmpfail"
 
 	DOCS_CLONED_METRIC     = "docs_cloned"
 	DELETION_CLONED_METRIC = "deletion_cloned"
@@ -1139,6 +1141,22 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Committed,
 		Labels:       StandardLabels,
 		Notes:        "This stats usually should be 0. If it is non-0, it could represent that the memory is under pressure.",
+	},
+	TARGET_EACCESS_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The total number of EACCESS errors returned from the target node.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	TARGET_TMPFAIL_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The total number of TMPFAIL errors returned from the target node.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 
 	DOCS_CLONED_METRIC: StatsProperty{
