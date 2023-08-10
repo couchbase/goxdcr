@@ -84,6 +84,8 @@ const (
 	DataCloned ComponentEventType = iota
 	// DCP may send OSO snapshot marker if XDCR requested only one collection
 	OsoSnapshotReceived ComponentEventType = iota
+	// When target rejected writes
+	DataSentFailed ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {

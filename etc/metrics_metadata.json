@@ -702,6 +702,30 @@
         ],
         "stability": "internal"
     },
+    "xdcr_target_eaccess": {
+        "type": "counter",
+        "help": "The total number of EACCESS errors returned from the target node.",
+        "added": "7.2.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_target_tmpfail": {
+        "type": "counter",
+        "help": "The total number of TMPFAIL errors returned from the target node.",
+        "added": "7.2.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_throttle_latency": {
         "type": "gauge",
         "help": "The rolling average of the latency time introduced due to bandwith throttler",

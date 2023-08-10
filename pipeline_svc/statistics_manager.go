@@ -31,6 +31,7 @@ import (
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
 	"github.com/rcrowley/go-metrics"
+
 )
 
 const (
@@ -50,7 +51,8 @@ var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_M
 var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC,
 	service_def.TIME_COMMITING_METRIC, service_def.NUM_FAILEDCKPTS_METRIC, service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC,
 	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC,
-	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DELETION_CLONED_METRIC}
+	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DELETION_CLONED_METRIC, service_def.TARGET_TMPFAIL_METRIC,
+	service_def.TARGET_EACCESS_METRIC}
 
 // keys for metrics in overview
 // Note the values used here does not correspond to the service_def GlobalStatsTable, since these are used internally
@@ -105,6 +107,8 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.BINARY_FILTERED_METRIC:             service_def.MetricTypeCounter,
 	service_def.PIPELINE_STATUS:                    service_def.MetricTypeGauge,
 	service_def.PIPELINE_ERRORS:                    service_def.MetricTypeGauge,
+	service_def.TARGET_TMPFAIL_METRIC:              service_def.MetricTypeCounter,
+	service_def.TARGET_EACCESS_METRIC:              service_def.MetricTypeCounter,
 }
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC}
@@ -1410,6 +1414,10 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.SET_DOCS_CAS_CHANGED_METRIC, set_cas_changed)
 		add_cas_changed := metrics.NewCounter()
 		registry.Register(service_def.ADD_DOCS_CAS_CHANGED_METRIC, add_cas_changed)
+		eaccessReceived := metrics.NewCounter()
+		registry.Register(service_def.TARGET_EACCESS_METRIC, eaccessReceived)
+		tmpfailReceived := metrics.NewCounter()
+		registry.Register(service_def.TARGET_TMPFAIL_METRIC, tmpfailReceived)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1442,6 +1450,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC] = deletion_cas_changed
 		metric_map[service_def.SET_DOCS_CAS_CHANGED_METRIC] = set_cas_changed
 		metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC] = add_cas_changed
+		metric_map[service_def.TARGET_EACCESS_METRIC] = eaccessReceived
+		metric_map[service_def.TARGET_TMPFAIL_METRIC] = tmpfailReceived
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -1456,6 +1466,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.GetReceivedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentCasChangedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentFailedListener, outNozzle_collector)
 
 	return nil
 }
@@ -1579,8 +1590,14 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		} else if opcode == base.ADD_WITH_META {
 			metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
 		}
+	} else if event.EventType == common.DataSentFailed {
+		responseCode, ok := event.Data.(mc.Status)
+		if ok && responseCode == mc.TMPFAIL {
+			metric_map[service_def.TARGET_TMPFAIL_METRIC].(metrics.Counter).Inc(1)
+		} else if ok && responseCode == mc.EACCESS {
+			metric_map[service_def.TARGET_EACCESS_METRIC].(metrics.Counter).Inc(1)
+		}
 	}
-
 	return nil
 }
 
