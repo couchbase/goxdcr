@@ -1229,7 +1229,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	dnsSrvReBootstrap bool,
 	p2pReplicaReplicatorReloadSize int, globalOSOMode int,
 	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
-	connErrsListMaxEntries int) {
+	connErrsListMaxEntries, P2PRetryFactor int,
+	P2PRetryWaitTimeMilliSec time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1381,6 +1382,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ConnectionPreCheckGCTimeout = connectionPreCheckGCTimeout
 	ConnectionPreCheckRPCTimeout = connectionPreCheckRPCTimeout
 	ConnErrorsListMaxEntries = connErrsListMaxEntries
+	PeerToPeerRetryWaitTime = P2PRetryWaitTimeMilliSec
+	PeerToPeerRetryFactor = P2PRetryFactor
 }
 
 // XDCR Dev hidden replication settings

@@ -257,6 +257,8 @@ const (
 	P2POpaqueCleanupIntervalKey       = "P2POpaqueCleanupIntervalSec"
 	P2PVBRelatedGCIntervalKey         = "P2PVBRelatedGCIntervalHour"
 	P2PReplicaReplicatorReloadSizeKey = "P2PReplicaReplicatorReloadSize"
+	P2PRetryWaitTimeMilliSecKey       = "P2PRetryWaitTimeMillisec"
+	P2PRetryFactorKey                 = "P2PRetryFactor"
 
 	ThroughSeqnoBgScannerFreqKey    = "ThroughSeqnoBgScannerFreqSec"
 	ThroughSeqnoBgScannerLogFreqKey = "ThroughSeqnoBgScannerLogFreqSec"
@@ -387,6 +389,8 @@ var P2PMaxReceiveChLenConfig = &SettingsConfig{base.MaxP2PReceiveChLen, &Range{5
 var P2POpaqueCleanupIntervalConfig = &SettingsConfig{int(base.P2POpaqueCleanupInterval / time.Second), &Range{1, 600}}
 var P2PVBRelatedGCIntervalConfig = &SettingsConfig{int(base.P2PVBRelatedGCInterval / time.Hour), &Range{1, 336 /*2 weeks*/}}
 var P2PReplicaReplicatorReloadConfig = &SettingsConfig{int(base.P2PReplicaReplicatorReloadChSize), &Range{1, 1000}}
+var P2PRetryWaitTimeMilliSecConfig = &SettingsConfig{int(base.PeerToPeerRetryWaitTime / time.Millisecond), &Range{1, 1000}}
+var P2PRetryFactorConfig = &SettingsConfig{int(base.PeerToPeerRetryFactor), &Range{1, 5}}
 var ThroughSeqnoBgScannerFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerFreq / time.Second), &Range{1, 300}}
 var ThroughSeqnoBgScannerLogFreqConfig = &SettingsConfig{int(base.ThroughSeqnoBgScannerLogFreq / time.Second), &Range{1, 300}}
 var PipelineTimeoutP2PProtocolConfig = &SettingsConfig{int(base.TimeoutP2PProtocol / time.Second), &Range{10, 300}}
@@ -509,6 +513,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	P2POpaqueCleanupIntervalKey:                   P2POpaqueCleanupIntervalConfig,
 	P2PVBRelatedGCIntervalKey:                     P2PVBRelatedGCIntervalConfig,
 	P2PReplicaReplicatorReloadSizeKey:             P2PReplicaReplicatorReloadConfig,
+	P2PRetryWaitTimeMilliSecKey:                   P2PRetryWaitTimeMilliSecConfig,
+	P2PRetryFactorKey:                             P2PRetryFactorConfig,
 	ThroughSeqnoBgScannerFreqKey:                  ThroughSeqnoBgScannerFreqConfig,
 	ThroughSeqnoBgScannerLogFreqKey:               ThroughSeqnoBgScannerLogFreqConfig,
 	PipelineTimeoutP2PProtocolKey:                 PipelineTimeoutP2PProtocolConfig,
