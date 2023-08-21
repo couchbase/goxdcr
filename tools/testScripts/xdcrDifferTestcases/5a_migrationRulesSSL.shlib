@@ -91,7 +91,7 @@ function runTestCase {
 	echo "Waiting 15 seconds before checking item count first pass"
 	sleep 15
 	checkItemCnt "C2" "B2" 2824
-	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1))
+	validateLogWithInstance "C1" "$MULTITARGET_MSG" $(($currMultiTargetMsgCnt + 1)) $(($currMultiTargetMsgCnt + 2))
 
 	local retVal
 	runXdcrDiffer "C1" "B1" "C2" "B2"

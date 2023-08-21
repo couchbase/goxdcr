@@ -124,8 +124,8 @@ function runTestCase {
 	# After sleeping, the backfill manager should have triggered the backfill
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentBackfillInstanceCnt + 2))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1)) $(($currentVBTasksDoneInstanceCnt + 2))
 
 	# No append should occur
 	validateInternalLogWithInstance "C1" "$BACKFILL_APPEND_MSG" $(($currentBackfillAppendInstanceCnt))
