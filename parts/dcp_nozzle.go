@@ -63,6 +63,11 @@ var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTim
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
+const (
+	dcpFlagNone             uint32 = 0
+	dcpFlagIgnoreTombstones uint32 = 0x80
+)
+
 type vbtsWithLock struct {
 	ts   *base.VBTimestamp
 	lock *sync.RWMutex
@@ -372,6 +377,8 @@ type DcpNozzle struct {
 
 	devInjectionMainRollbackVb     int // -1 means not enabled
 	devInjectionBackfillRollbackVb int // -1 means not enabled
+
+	enablePurgeRollback bool // If user wants DCP to send rollback due to purge moving ahead of ckpt
 }
 
 func NewDcpNozzle(id string,
@@ -626,6 +633,10 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 
 	if val, ok := settings[DCP_Priority]; ok {
 		dcp.setDcpPrioritySetting(val.(mcc.PriorityType))
+	}
+
+	if val, ok := settings[metadata.EnableDcpPurgeRollback].(bool); ok {
+		dcp.enablePurgeRollback = val
 	}
 
 	dcp.initializeDevInjections(settings)
@@ -1418,7 +1429,11 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 
 // Have an internal so we can control the opaque and version being passed in
 func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, version uint16) (err error) {
-	flags := uint32(0)
+	flags := dcpFlagIgnoreTombstones
+	if dcp.enablePurgeRollback {
+		flags = dcpFlagNone
+	}
+
 	seqEnd := base.DcpSeqnoEnd
 	var filter *mcc.CollectionsFilter
 	// filter for main pipeline if resuming from a checkpoint

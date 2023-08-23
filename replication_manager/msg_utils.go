@@ -102,6 +102,7 @@ const (
 	FilterSystemScopeKey              = base.FilterSystemScope
 	FilterBinaryDocsKey               = metadata.FilterBinaryDocsKey
 	MobileCompatibleKey               = base.MobileCompatibleKey
+	EnableDcpPurgeRollback            = base.EnableDcpPurgeRollback
 )
 
 // constants for parsing create/change/view replication response
@@ -218,6 +219,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterSystemScopeKey:              metadata.FilterSystemScopeKey,
 	FilterBinaryDocsKey:               metadata.FilterBinaryDocsKey,
 	MobileCompatibleKey:               metadata.MobileCompatibleKey,
+	EnableDcpPurgeRollback:            metadata.EnableDcpPurgeRollback,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -276,6 +278,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterSystemScopeKey:                 FilterSystemScopeKey,
 	metadata.FilterBinaryDocsKey:                  FilterBinaryDocsKey,
 	metadata.MobileCompatibleKey:                  MobileCompatibleKey,
+	metadata.EnableDcpPurgeRollback:               EnableDcpPurgeRollback,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

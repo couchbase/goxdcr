@@ -32,6 +32,7 @@ UNABLE_TO_GET_HIGH_SEQNO_MSG="Unable to find any collection ID for getHighSeqno"
 P2P_PULL_ERR_MSG="Unable to respond to caller given type"
 BACKFILL_START_MSG="Starting BackfillPipeline"
 TOPOLOGY_RESTART_MSG="Topology change detected. Estimated time of pipeline restart"
+DCP_ROLLBACK_MSG="Received rollback from DCP stream"
 
 # These should be imported after clusterRunProvision script
 

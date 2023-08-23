@@ -1556,6 +1556,8 @@ const FilterSystemScope = "filterSystemScope"
 
 var DNSSrvReBootstrap = true
 
+const EnableDcpPurgeRollback = "dcpEnablePurgeRollback"
+
 type GlobalOSOMode int
 
 const (
