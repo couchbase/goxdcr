@@ -1479,6 +1479,47 @@ func (_c *ClientIface_GetCollectionsManifest_Call) RunAndReturn(run func() (*gom
 	return _c
 }
 
+// GetConnName provides a mock function with given fields:
+func (_m *ClientIface) GetConnName() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// ClientIface_GetConnName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetConnName'
+type ClientIface_GetConnName_Call struct {
+	*mock.Call
+}
+
+// GetConnName is a helper method to define mock.On call
+func (_e *ClientIface_Expecter) GetConnName() *ClientIface_GetConnName_Call {
+	return &ClientIface_GetConnName_Call{Call: _e.mock.On("GetConnName")}
+}
+
+func (_c *ClientIface_GetConnName_Call) Run(run func()) *ClientIface_GetConnName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *ClientIface_GetConnName_Call) Return(_a0 string) *ClientIface_GetConnName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *ClientIface_GetConnName_Call) RunAndReturn(run func() string) *ClientIface_GetConnName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetErrorMap provides a mock function with given fields: errMapVersion
 func (_m *ClientIface) GetErrorMap(errMapVersion gomemcached.ErrorMapVersion) (map[string]interface{}, error) {
 	ret := _m.Called(errMapVersion)
@@ -2617,6 +2658,39 @@ func (_c *ClientIface_SetCas_Call) Return(_a0 *gomemcached.MCResponse, _a1 error
 }
 
 func (_c *ClientIface_SetCas_Call) RunAndReturn(run func(uint16, string, int, int, uint64, []byte, ...*memcached.ClientContext) (*gomemcached.MCResponse, error)) *ClientIface_SetCas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetConnName provides a mock function with given fields: name
+func (_m *ClientIface) SetConnName(name string) {
+	_m.Called(name)
+}
+
+// ClientIface_SetConnName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetConnName'
+type ClientIface_SetConnName_Call struct {
+	*mock.Call
+}
+
+// SetConnName is a helper method to define mock.On call
+//   - name string
+func (_e *ClientIface_Expecter) SetConnName(name interface{}) *ClientIface_SetConnName_Call {
+	return &ClientIface_SetConnName_Call{Call: _e.mock.On("SetConnName", name)}
+}
+
+func (_c *ClientIface_SetConnName_Call) Run(run func(name string)) *ClientIface_SetConnName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *ClientIface_SetConnName_Call) Return() *ClientIface_SetConnName_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *ClientIface_SetConnName_Call) RunAndReturn(run func(string)) *ClientIface_SetConnName_Call {
 	_c.Call.Return(run)
 	return _c
 }

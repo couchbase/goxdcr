@@ -72,6 +72,8 @@ type ClientIface interface {
 	TransmitWithDeadline(req *gomemcached.MCRequest, deadline time.Time) error
 	TransmitResponse(res *gomemcached.MCResponse) error
 	UprGetFailoverLog(vb []uint16) (map[uint16]*FailoverLog, error)
+	GetConnName() string
+	SetConnName(name string)
 
 	// UprFeed Related
 	NewUprFeed() (*UprFeed, error)
@@ -257,9 +259,12 @@ type Client struct {
 	replica            bool
 	deadline           time.Time
 	bucket             string
+	// If set, this takes precedence over the global variable ConnName
+	connName	string
 }
 
 var (
+	// ConnName is used if Client.connName is not set
 	ConnName           = "GoMemcached"
 	DefaultDialTimeout = time.Duration(0) // No timeout
 
@@ -451,23 +456,35 @@ func appendMutationToken(bytes []byte) []byte {
 	return bytes
 }
 
+func (c *Client) GetConnName() string {
+	if len(c.connName) > 0 {
+		return c.connName
+	}
+	return ConnName + ":" + uuid.New().String()
+}
+
+func (c *Client) SetConnName(name string) {
+	c.connName = name
+}
+
 // Send a hello command to enable MutationTokens
 func (c *Client) EnableMutationToken() (*gomemcached.MCResponse, error) {
 	var payload []byte
 	payload = appendMutationToken(payload)
+	connName := c.GetConnName()
 
 	return c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.HELLO,
-		Key:    []byte(ConnName + ":" + uuid.New().String()),
+		Key:    []byte(connName),
 		Body:   payload,
 	})
-
 }
 
 // Send a hello command to enable specific features
 func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, error) {
 	var payload []byte
 	collectionsEnabled := 0
+	connName := c.GetConnName()
 
 	for _, feature := range features {
 		if feature == FeatureCollections {
@@ -479,7 +496,7 @@ func (c *Client) EnableFeatures(features Features) (*gomemcached.MCResponse, err
 
 	rv, err := c.Send(&gomemcached.MCRequest{
 		Opcode: gomemcached.HELLO,
-		Key:    []byte(ConnName + ":" + uuid.New().String()),
+		Key:    []byte(connName),
 		Body:   payload,
 	})
 
