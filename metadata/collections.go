@@ -65,6 +65,12 @@ func (m *ManifestsDoc) ClearCompressedData() {
 	m.CompressedCollectionsManifests = nil
 }
 
+func (m *ManifestsDoc) Clear() {
+	m.ClearCompressedData()
+	m.collectionsManifests = m.collectionsManifests[:0]
+	m.revision = nil
+}
+
 func (m *ManifestsDoc) PostUnmarshal() error {
 	var serializedJson []byte
 	serializedJson, err := snappy.Decode(serializedJson, m.CompressedCollectionsManifests)
@@ -78,6 +84,40 @@ func (m *ManifestsDoc) PostUnmarshal() error {
 	}
 
 	return nil
+}
+
+// This method will clear and then load a manifests pair in
+func (m *ManifestsDoc) LoadManifestPairAndCompress(pair *CollectionsManifestPair) ([]byte, error) {
+	m.Clear()
+	m.collectionsManifests = append(m.collectionsManifests, pair.Source)
+	m.collectionsManifests = append(m.collectionsManifests, pair.Target)
+	err := m.PreMarshal()
+	if err != nil {
+		return nil, err
+	}
+	return m.CompressedCollectionsManifests, nil
+}
+
+// This method will read the compressed data and output a pair
+func (m *ManifestsDoc) DeCompressAndOutputPair(compressedStream []byte) (*CollectionsManifestPair, error) {
+	if compressedStream == nil {
+		return nil, fmt.Errorf("ManifestsDoc input a nil stream")
+	}
+	m.CompressedCollectionsManifests = compressedStream
+	err := m.PostUnmarshal()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(m.collectionsManifests) < 2 {
+		return nil, fmt.Errorf("Unable to output pair as only %v manifests exist", len(m.collectionsManifests))
+	}
+
+	pair := &CollectionsManifestPair{
+		Source: m.collectionsManifests[0],
+		Target: m.collectionsManifests[1],
+	}
+	return pair, nil
 }
 
 type CollectionsManifestPair struct {

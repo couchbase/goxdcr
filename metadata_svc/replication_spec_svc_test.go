@@ -32,6 +32,7 @@ import (
 	mock "github.com/stretchr/testify/mock"
 )
 
+var supportabilityCompat int = 458758
 var colAndAdvSupportCompat int = 458754
 var preAdvFilterCompat int = 393216
 
@@ -72,6 +73,7 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	replSettingSvc.On("GetDefaultReplicationSettings").Return(metadata.DefaultReplicationSettings(), nil)
 
 	replSpecSvc, _ := NewReplicationSpecService(uiLogSvcMock, remoteClusterMock, metadataSvcMock, xdcrTopologyMock, nil, log.DefaultLoggerContext, utilitiesMock, replSettingSvc)
+	replSpecSvc.SetManifestsGetter(defaultManifestGetter)
 
 	sourceBucket := "testSrcBucket"
 	targetBucket := "testTargetBucket"
@@ -85,15 +87,14 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 		clientMock, backfillReplSvc
 }
 
-func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService,
-	xdcrTopologyMock *service_def.XDCRCompTopologySvc,
-	remoteClusterMock *service_def.RemoteClusterSvc,
-	uiLogSvcMock *service_def.UILogSvc,
-	backfillReplSvc *service_def.BackfillReplSvc) (
-	*pipeline_manager.PipelineManager,
-	*common.PipelineFactory,
-	*service_def.CheckpointsService,
-	*common.Pipeline) {
+var defaultManifestGetter = func(spec *metadata.ReplicationSpecification, specMayNotExist bool) (src, tgt *metadata.CollectionsManifest, err error) {
+	return &defaultManifest, &defaultManifest, nil
+}
+var manifestGetterError = func(spec *metadata.ReplicationSpecification, specMayNotExist bool) (src, tgt *metadata.CollectionsManifest, err error) {
+	return nil, nil, fmt.Errorf("Dummy")
+}
+
+func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService, xdcrTopologyMock *service_def.XDCRCompTopologySvc, remoteClusterMock *service_def.RemoteClusterSvc, uiLogSvcMock *service_def.UILogSvc, backfillReplSvc *service_def.BackfillReplSvc, manifestGetter service_def_real.ManifestsGetter) (*pipeline_manager.PipelineManager, *common.PipelineFactory, *service_def.CheckpointsService, *common.Pipeline) {
 
 	pipelineMock := &common.PipelineFactory{}
 	utilsNew := utilities.NewUtilities()
@@ -108,6 +109,8 @@ func setupPipelineBoilerPlate(replSpecSvc *ReplicationSpecService,
 	pipelineMgr := pipeline_manager.NewPipelineManager(pipelineMock, replSpecSvc, xdcrTopologyMock, remoteClusterMock, checkPointsSvc, uiLogSvcMock, log.DefaultLoggerContext, utilsNew, collectionsManifestSvc, backfillReplSvc, nil, nil)
 
 	testPipeline := &common.Pipeline{}
+
+	replSpecSvc.SetManifestsGetter(manifestGetter)
 	return pipelineMgr, pipelineMock, checkPointsSvc, testPipeline
 }
 
@@ -119,7 +122,10 @@ func generateFakeListOfVBs(capacity int) []uint16 {
 	return listOfVBs
 }
 
-func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopologyMock *service_def.XDCRCompTopologySvc, metadataSvcMock *service_def.MetadataSvc, uiLogSvcMock *service_def.UILogSvc, remoteClusterMock *service_def.RemoteClusterSvc, utilitiesMock *utilsMock.UtilsIface, replSpecSvc *ReplicationSpecService, clientMock *mcMock.ClientIface, isEnterprise bool, isElasticSearch bool, compressionPass bool, backfillReplSvc *service_def.BackfillReplSvc, remoteClusterRefreshBusy bool, clusterCompatVersion int) {
+var collectionsCapability = metadata.UnitTestGetCollectionsCapability()
+var emptyCapability = metadata.Capability{}
+
+func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopologyMock *service_def.XDCRCompTopologySvc, metadataSvcMock *service_def.MetadataSvc, uiLogSvcMock *service_def.UILogSvc, remoteClusterMock *service_def.RemoteClusterSvc, utilitiesMock *utilsMock.UtilsIface, replSpecSvc *ReplicationSpecService, clientMock *mcMock.ClientIface, isEnterprise bool, isElasticSearch bool, compressionPass bool, backfillReplSvc *service_def.BackfillReplSvc, remoteClusterRefreshBusy bool, clusterCompatVersion int, rcCapability metadata.Capability) {
 
 	// RemoteClusterMock
 	hostAddr := setupRemoteClusterSvc(remoteClusterMock, remoteClusterRefreshBusy)
@@ -172,6 +178,7 @@ func setupMocks(srcResolutionType string, destResolutionType string, xdcrTopolog
 	// RemoteClusterSvc mock
 	remoteClusterMock.On("GetRemoteClusterNameFromClusterUuid", mock.Anything).Return("TestRemoteCluster")
 	remoteClusterMock.On("RemoteClusterByRefId", mock.Anything, mock.Anything).Return(nil, nil)
+	remoteClusterMock.On("GetCapability", mock.Anything).Return(rcCapability, nil)
 
 	// UI Log mock service
 	uiLogSvcMock.On("Write", mock.Anything).Return(nil)
@@ -265,13 +272,51 @@ func TestValidateNewReplicationSpec(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestValidateNewReplicationSpec =================")
+}
+
+func TestValidateNewReplicationSpecWithManifests(t *testing.T) {
+	assert := assert.New(t)
+
+	fmt.Println("============== Test case start: TestValidateNewReplicationSpecWithManifests =================")
+	defer fmt.Println("============== Test case end: TestValidateNewReplicationSpecWithManifests =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, supportabilityCompat, collectionsCapability)
+
+	// Assume XMEM replication type
+	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	assert.Equal(len(errMap), 0)
+}
+
+func TestValidateNewReplicationSpecWithManifestsWErr(t *testing.T) {
+	assert := assert.New(t)
+
+	fmt.Println("============== Test case start: TestValidateNewReplicationSpecWithManifestsWErr =================")
+	defer fmt.Println("============== Test case end: TestValidateNewReplicationSpecWithManifestsWErr =================")
+	xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock,
+		utilitiesMock, replSpecSvc,
+		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
+
+	// Begin mocks
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, supportabilityCompat, collectionsCapability)
+
+	replSpecSvc.SetManifestsGetter(manifestGetterError)
+
+	// Assume XMEM replication type
+	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	assert.NotEqual(len(errMap), 0)
 }
 
 /**
@@ -286,12 +331,12 @@ func TestNegativeConflictResolutionType(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	// Assume XMEM replication type
 	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeXmem
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	// Should have only one error
 	assert.Equal(len(errMap), 1)
 	fmt.Println("============== Test case end: TestNegativeConflictResolutionType =================")
@@ -309,12 +354,12 @@ func TestDifferentConflictResolutionTypeOnCapi(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, false, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, false, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	// Assume CAPI (elasticsearch) replication type
 	settings[metadata.ReplicationTypeKey] = metadata.ReplicationTypeCapi
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	// Should pass
 	assert.Equal(len(errMap), 0)
 	fmt.Println("============== Test case end: TestDifferentConflictResolutionTypeOnCapi =================")
@@ -329,7 +374,7 @@ func TestAddReplicationSpec(t *testing.T) {
 		_, _, _, _, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	spec := &metadata.ReplicationSpecification{
 		Id:               "test",
@@ -360,16 +405,16 @@ func TestCompressionPositive(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	// Turning off should be allowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeNone
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.Equal(len(errMap), 0)
 
 	// Turning on should be allowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
-	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
+	_, _, _, errMap, _, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.Equal(len(errMap), 0)
 
 	fmt.Println("============== Test case end: TestCompressionPositive =================")
@@ -383,16 +428,16 @@ func TestCompressionNegNotEnterprise(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, false, false, true, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, false, false, true, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	// Turning on should be disallowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeSnappy
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.NotEqual(len(errMap), 0)
 
 	// Setting to auto should be disallowed
 	settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
-	_, _, _, errMap, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
+	_, _, _, errMap, _, _, _ = replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, true)
 	assert.NotEqual(len(errMap), 0)
 
 	fmt.Println("============== Test case end: TestCompressionNegNotEnterprise =================")
@@ -406,12 +451,12 @@ func TestOriginalRegexInvalidateFilter(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	// Xmem using elas
 	settings[metadata.FilterExpressionKey] = "^abc"
 
-	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	_, _, _, _, err, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.NotNil(err)
 
 	// If it's an existing replication with an old filter, it's ok
@@ -430,12 +475,12 @@ func TestOriginalRegexUpgradedFilter(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	// Xmem using elas
 	settings[metadata.FilterExpressionKey] = base.UpgradeFilter("^abc")
 
-	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	_, _, _, _, err, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Nil(err)
 
 	fmt.Println("============== Test case end: TestOriginalRegexUpgradedFilter =================")
@@ -449,12 +494,12 @@ func TestPreventFilterCreateMixedMode(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, preAdvFilterCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, preAdvFilterCompat, collectionsCapability)
 
 	// Xmem using elas
 	settings[metadata.FilterExpressionKey] = base.UpgradeFilter("^abc")
 
-	_, _, _, _, err, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	_, _, _, _, err, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Equal(base.ErrorAdvFilterMixedModeUnsupported, err)
 	fmt.Println("============== Test case end: TestPreventFilterCreateMixedMode =================")
 }
@@ -467,7 +512,7 @@ func TestPreventFilterEditMixedMode(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, preAdvFilterCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, true, false, backfillReplSvc, false, preAdvFilterCompat, collectionsCapability)
 
 	// Xmem using elas
 	settings[metadata.FilterVersionKey] = base.FilterVersionAdvanced
@@ -486,11 +531,11 @@ func TestStripExpiry(t *testing.T) {
 		sourceBucket, targetBucket, targetCluster, settings, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, false, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, false, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	settings[metadata.FilterExpDelKey] = base.FilterExpDelStripExpiration
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, false)
 	assert.Equal(len(errMap), 0)
 
 	fmt.Println("============== Test case start: TestStripExpiry =================")
@@ -508,11 +553,10 @@ func TestSpecMetadataCache(t *testing.T) {
 		utilitiesMock, replSpecSvc,
 		sourceBucket, targetBucket, _, _, clientMock, backfillReplSvc := setupBoilerPlate()
 
-	pipelineMgr, pipelineMock, ckptMock, testPipeline := setupPipelineBoilerPlate(replSpecSvc,
-		xdcrTopologyMock, remoteClusterMock, uiLogSvcMock, backfillReplSvc)
+	pipelineMgr, pipelineMock, ckptMock, testPipeline := setupPipelineBoilerPlate(replSpecSvc, xdcrTopologyMock, remoteClusterMock, uiLogSvcMock, backfillReplSvc, defaultManifestGetter)
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Seqno, base.ConflictResolutionType_Seqno, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, false, colAndAdvSupportCompat, collectionsCapability)
 
 	testTopic := "testTopic"
 
@@ -564,7 +608,7 @@ func TestAddReplicationSpecWhenRefreshNotReady(t *testing.T) {
 		_, _, _, _, clientMock, backfillReplSvc := setupBoilerPlate()
 
 	// Begin mocks
-	setupMocks(base.ConflictResolutionType_Lww, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, true, colAndAdvSupportCompat)
+	setupMocks(base.ConflictResolutionType_Lww, base.ConflictResolutionType_Lww, xdcrTopologyMock, metadataSvcMock, uiLogSvcMock, remoteClusterMock, utilitiesMock, replSpecSvc, clientMock, true, false, true, backfillReplSvc, true, colAndAdvSupportCompat, collectionsCapability)
 
 	spec := &metadata.ReplicationSpecification{
 		Id:               "test",
@@ -574,7 +618,7 @@ func TestAddReplicationSpecWhenRefreshNotReady(t *testing.T) {
 		Settings:         metadata.DefaultReplicationSettings(),
 	}
 
-	_, _, _, errMap, _, _ := replSpecSvc.ValidateNewReplicationSpec(spec.SourceBucketName, spec.TargetClusterUUID, spec.TargetBucketName, spec.Settings.ToMap(false), false)
+	_, _, _, errMap, _, _, _ := replSpecSvc.ValidateNewReplicationSpec(spec.SourceBucketName, spec.TargetClusterUUID, spec.TargetBucketName, spec.Settings.ToMap(false), false)
 	assert.Len(errMap, 0)
 
 	assert.Nil(replSpecSvc.AddReplicationSpec(spec, ""))

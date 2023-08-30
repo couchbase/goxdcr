@@ -9,6 +9,7 @@
 package peerToPeer
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -42,9 +43,10 @@ type P2PManager interface {
 
 	ReplicationSpecChangeCallback(id string, oldVal, newVal interface{}, wg *sync.WaitGroup) error
 
+	// Various P2P operations
 	SetPushReqMergerOnce(pm func(fullTopic, sender string, req interface{}) error)
-
 	RequestImmediateCkptBkfillPush(replicationId string) error
+	SendManifests(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) error
 }
 
 type VBMasterCheck interface {
@@ -193,6 +195,11 @@ func (p *P2PManagerImpl) runHandlers() error {
 				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
 			}
 			p.receiveHandlers[i] = NewConnectionPreCheckHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.utils, p.replSpecSvc)
+		case ReqReplSpecManifests:
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
+			p.receiveHandlers[i] = NewManifestsHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.colManifestSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -225,7 +232,7 @@ func (p *P2PManagerImpl) sendDiscoveryRequest() error {
 			p.GetLifecycleId())
 		return ErrorNoPeerDiscovered
 	}
-	err, _ = p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
+	err, _ = p.sendToEachPeerOnce(ReqDiscovery, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime, base.PeerToPeerMaxRetry))
 	return err
 }
 
@@ -279,7 +286,8 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 func (p *P2PManagerImpl) getMaxRetry(getReqFunc GetReqFunc, myHost string, peersToRetry map[string]bool) int {
 	for peer, _ := range peersToRetry {
 		opcode := getReqFunc(myHost, peer).GetOpcode()
-		if opcode == ReqConnectionPreCheck {
+		// The following operations should not be retried if there is a network partition or connectivity issues
+		if opcode == ReqConnectionPreCheck || opcode == ReqReplSpecManifests {
 			return 0
 		}
 	}
@@ -309,8 +317,6 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 	for k, v := range peersToRetryOrig {
 		peersToRetry[k] = v
 	}
-
-	maxRetry := p.getMaxRetry(getReqFunc, myHost, peersToRetry)
 
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
@@ -399,7 +405,7 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 	}
 
 	err := p.utils.ExponentialBackoffExecutor(fmt.Sprintf("sendPeerToPeerReq(%v)", opCode.String()),
-		base.PeerToPeerRetryWaitTime, maxRetry, base.PeerToPeerRetryFactor, retryOp)
+		base.PeerToPeerRetryWaitTime, cbOpts.maxRetry, base.PeerToPeerRetryFactor, retryOp)
 
 	if err != nil && len(peersToRetry) == len(peersToRetryOrig) {
 		p.logger.Errorf("Unable to send %v to all the nodes... %v", opCode.String(), err)
@@ -438,12 +444,17 @@ type SendOpts struct {
 
 	respMapMtx sync.RWMutex
 	respMap    SendOptsMap // If synchronous, then the sent requests and responses are stored
+
+	maxRetry int
 }
 
 type SendOptsMap map[string]chan ReqRespPair
 
-func NewSendOpts(sync bool, timeout time.Duration) *SendOpts {
-	newOpt := &SendOpts{sentTimesMap: make(PeerNodesTimeMap)}
+func NewSendOpts(sync bool, timeout time.Duration, maxRetry int) *SendOpts {
+	newOpt := &SendOpts{
+		sentTimesMap: make(PeerNodesTimeMap),
+		maxRetry:     maxRetry,
+	}
 	if sync {
 		newOpt.synchronous = true
 		newOpt.respMap = make(SendOptsMap)
@@ -583,7 +594,7 @@ func (p *P2PManagerImpl) CheckVBMaster(bucketAndVBs BucketVBMapType, pipeline co
 		return vbCheckReq
 	}
 
-	opts := NewSendOpts(true, metadata.GetP2PTimeoutFromSettings(pipeline.Settings()))
+	opts := NewSendOpts(true, metadata.GetP2PTimeoutFromSettings(pipeline.Settings()), base.PeerToPeerMaxRetry)
 	err, peersFailedToSend := p.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	if err != nil {
 		// Major error unable to send to all peers, otherwise continue to get the rest that was able to sent
@@ -724,7 +735,7 @@ func (p *P2PManagerImpl) sendPeriodicPushRequest(compiledRequests PeersVBPeriodi
 			peersToRetry := make(map[string]bool)
 			peersToRetry[host] = true
 
-			opts := NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime)
+			opts := NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime, base.PeerToPeerMaxRetry)
 			err, _ = p.sendToSpecifiedPeersOnce(ReqPeriodicPush, getReqFunc, opts, peersToRetry, myHostAddr)
 			if err != nil {
 				errMapMtx.Lock()
@@ -926,7 +937,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 	}
 
 	// perform pre-check on all the other source nodes except self
-	err, peersFailedToSend := p.sendToEachPeerOnce(ReqConnectionPreCheck, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime))
+	err, peersFailedToSend := p.sendToEachPeerOnce(ReqConnectionPreCheck, getReqFunc, NewSendOpts(false, base.PeerToPeerNonExponentialWaitTime, 1))
 	if err != nil {
 		p.logger.Errorf("Connection Pre-Check exited because P2PSend failed for all peers, taskId=%v, err=%v", taskId, err)
 	}
@@ -947,4 +958,57 @@ func (p *P2PManagerImpl) RetrieveConnectionPreCheckResult(taskId string) (base.C
 	}
 	p.logger.Infof("Connection Pre-Check results obtained for taskId=%v are: %v\n", taskId, result)
 	return result, done, nil
+}
+
+func (p *P2PManagerImpl) SendManifests(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) error {
+	if spec == nil || manifests == nil {
+		return base.ErrorInvalidInput
+	}
+
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		manifestShareReq, reqErr := NewManifestsReq(common, spec, manifests)
+		if reqErr != nil {
+			// If it returns an error, unlikely to handle it here. But it is also unlikely to return an error
+			errStr := fmt.Sprintf("NewManifestsReq returned error %v given spec %v ", reqErr, spec.Id)
+			if manifests == nil {
+				errStr += "and manifestsPair is nil"
+			} else {
+				if manifests.Source == nil {
+					errStr += "and source manifest is nil"
+				} else {
+					errStr += fmt.Sprintf("and source manifest is ID %v", manifests.Source.Uid())
+				}
+				if manifests.Target == nil {
+					errStr += "and target manifest is nil"
+				} else {
+					errStr += fmt.Sprintf("and target manifest is ID %v", manifests.Target.Uid())
+				}
+			}
+			p.logger.Errorf(errStr)
+		}
+		return manifestShareReq
+	}
+
+	// This send has to be async because this node's adminport is busy handling a replication creation request
+	// and unable to listen to the response
+	err, peersFailedToSend := p.sendToEachPeerOnce(ReqReplSpecManifests, getReqFunc, NewSendOpts(false, base.ShortHttpTimeout, 0))
+	if err != nil {
+		return err
+	}
+
+	if len(peersFailedToSend) > 0 {
+		errStr := "Unable to send to the following nodes: "
+		for k, _ := range peersFailedToSend {
+			errStr += fmt.Sprintf("%v ", k)
+		}
+		return errors.New(errStr)
+	}
+
+	// Peers have all been sent - save this ourselves for our own lookup
+	p.receiveHandlersMtx.RLock()
+	defer p.receiveHandlersMtx.RUnlock()
+	manifestHandler := p.receiveHandlers[ReqReplSpecManifests].(*ManifestsHandler)
+	manifestHandler.storeManifestsPair(spec.Id, spec.InternalId, manifests)
+	return nil
 }

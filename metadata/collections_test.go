@@ -1765,3 +1765,34 @@ func TestSourceMigrationClone(t *testing.T) {
 	}
 
 }
+
+func TestManifestsDocToFromPair(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestManifestsDocToFromPair =================")
+	defer fmt.Println("============== Test case end: TestManifestsDocToFromPair =================")
+
+	data, err := ioutil.ReadFile(oneThousandFile)
+	assert.Nil(err)
+
+	manifestInfoMap := make(map[string]interface{})
+	assert.Nil(json.Unmarshal(data, &manifestInfoMap))
+
+	sourceManifest, err := NewCollectionsManifestFromMap(manifestInfoMap)
+	assert.Nil(err)
+	assert.NotNil(sourceManifest)
+
+	targetManifest := NewDefaultCollectionsManifest()
+
+	origPair := &CollectionsManifestPair{Source: &sourceManifest, Target: &targetManifest}
+	manifestsDoc := &ManifestsDoc{}
+	stream, err := manifestsDoc.LoadManifestPairAndCompress(origPair)
+	assert.Nil(err)
+	assert.NotNil(stream)
+
+	receiveDoc := &ManifestsDoc{}
+	checkPair, err := receiveDoc.DeCompressAndOutputPair(stream)
+	assert.Nil(err)
+	assert.NotNil(checkPair)
+
+	assert.True(checkPair.IsSameAs(origPair))
+}

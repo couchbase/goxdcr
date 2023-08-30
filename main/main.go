@@ -253,6 +253,10 @@ func main() {
 		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.DefaultLoggerContext, top_svc, utils, bucketTopologyService,
 			replication_spec_svc, base.P2POpaqueCleanupInterval, checkpointsService, collectionsManifestService,
 			backfillReplService, securitySvc)
+		if err != nil {
+			fmt.Printf("Error starting P2P manager. err=%v\n", err)
+			os.Exit(1)
+		}
 
 		// start replication manager in normal mode
 		rm.StartReplicationManager(host,

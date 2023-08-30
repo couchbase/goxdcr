@@ -278,6 +278,7 @@ function runTestCase {
 		validateInternalLogWithInstance "$clusterName" "$P2P_DESERIALIZATION_ERR_MSG" 0
 		validateInternalLogWithInstance "$clusterName" "$P2P_UNABLE_TO_RESPOND_MSG" 0
 		validateInternalLogWithInstance "$clusterName" "$CKPT_MAPPING_NOT_FOUND_MSG" 0
+		validateInternalLogWithInstance "$clusterName" "$P2P_PULL_MANIFEST_ERR" 0
 	done
 
 	#monitorP2PError &

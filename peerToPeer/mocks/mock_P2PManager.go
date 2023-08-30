@@ -306,6 +306,49 @@ func (_c *P2PManager_SendConnectionPreCheckRequest_Call) RunAndReturn(run func(*
 	return _c
 }
 
+// SendManifests provides a mock function with given fields: spec, manifests
+func (_m *P2PManager) SendManifests(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) error {
+	ret := _m.Called(spec, manifests)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, *metadata.CollectionsManifestPair) error); ok {
+		r0 = rf(spec, manifests)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// P2PManager_SendManifests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SendManifests'
+type P2PManager_SendManifests_Call struct {
+	*mock.Call
+}
+
+// SendManifests is a helper method to define mock.On call
+//   - spec *metadata.ReplicationSpecification
+//   - manifests *metadata.CollectionsManifestPair
+func (_e *P2PManager_Expecter) SendManifests(spec interface{}, manifests interface{}) *P2PManager_SendManifests_Call {
+	return &P2PManager_SendManifests_Call{Call: _e.mock.On("SendManifests", spec, manifests)}
+}
+
+func (_c *P2PManager_SendManifests_Call) Run(run func(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair)) *P2PManager_SendManifests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSpecification), args[1].(*metadata.CollectionsManifestPair))
+	})
+	return _c
+}
+
+func (_c *P2PManager_SendManifests_Call) Return(_a0 error) *P2PManager_SendManifests_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *P2PManager_SendManifests_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, *metadata.CollectionsManifestPair) error) *P2PManager_SendManifests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetPushReqMergerOnce provides a mock function with given fields: pm
 func (_m *P2PManager) SetPushReqMergerOnce(pm func(string, string, interface{}) error) {
 	_m.Called(pm)

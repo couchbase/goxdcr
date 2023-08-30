@@ -790,6 +790,39 @@ func (_c *ReplicationSpecSvc_SetDerivedObj_Call) RunAndReturn(run func(string, i
 	return _c
 }
 
+// SetManifestsGetter provides a mock function with given fields: getter
+func (_m *ReplicationSpecSvc) SetManifestsGetter(getter service_def.ManifestsGetter) {
+	_m.Called(getter)
+}
+
+// ReplicationSpecSvc_SetManifestsGetter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetManifestsGetter'
+type ReplicationSpecSvc_SetManifestsGetter_Call struct {
+	*mock.Call
+}
+
+// SetManifestsGetter is a helper method to define mock.On call
+//   - getter service_def.ManifestsGetter
+func (_e *ReplicationSpecSvc_Expecter) SetManifestsGetter(getter interface{}) *ReplicationSpecSvc_SetManifestsGetter_Call {
+	return &ReplicationSpecSvc_SetManifestsGetter_Call{Call: _e.mock.On("SetManifestsGetter", getter)}
+}
+
+func (_c *ReplicationSpecSvc_SetManifestsGetter_Call) Run(run func(getter service_def.ManifestsGetter)) *ReplicationSpecSvc_SetManifestsGetter_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(service_def.ManifestsGetter))
+	})
+	return _c
+}
+
+func (_c *ReplicationSpecSvc_SetManifestsGetter_Call) Return() *ReplicationSpecSvc_SetManifestsGetter_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *ReplicationSpecSvc_SetManifestsGetter_Call) RunAndReturn(run func(service_def.ManifestsGetter)) *ReplicationSpecSvc_SetManifestsGetter_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetMetadataChangeHandlerCallback provides a mock function with given fields: callBack, add, del, mod
 func (_m *ReplicationSpecSvc) SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority) {
 	_m.Called(callBack, add, del, mod)
@@ -902,7 +935,7 @@ func (_c *ReplicationSpecSvc_ValidateAndGC_Call) RunAndReturn(run func(*metadata
 }
 
 // ValidateNewReplicationSpec provides a mock function with given fields: sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation
-func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings) {
+func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings, *metadata.CollectionsManifestPair) {
 	ret := _m.Called(sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation)
 
 	var r0 string
@@ -911,7 +944,8 @@ func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, ta
 	var r3 base.ErrorMap
 	var r4 error
 	var r5 service_def.UIWarnings
-	if rf, ok := ret.Get(0).(func(string, string, string, metadata.ReplicationSettingsMap, bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings)); ok {
+	var r6 *metadata.CollectionsManifestPair
+	if rf, ok := ret.Get(0).(func(string, string, string, metadata.ReplicationSettingsMap, bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings, *metadata.CollectionsManifestPair)); ok {
 		return rf(sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation)
 	}
 	if rf, ok := ret.Get(0).(func(string, string, string, metadata.ReplicationSettingsMap, bool) string); ok {
@@ -956,7 +990,15 @@ func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, ta
 		}
 	}
 
-	return r0, r1, r2, r3, r4, r5
+	if rf, ok := ret.Get(6).(func(string, string, string, metadata.ReplicationSettingsMap, bool) *metadata.CollectionsManifestPair); ok {
+		r6 = rf(sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation)
+	} else {
+		if ret.Get(6) != nil {
+			r6 = ret.Get(6).(*metadata.CollectionsManifestPair)
+		}
+	}
+
+	return r0, r1, r2, r3, r4, r5, r6
 }
 
 // ReplicationSpecSvc_ValidateNewReplicationSpec_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateNewReplicationSpec'
@@ -981,12 +1023,12 @@ func (_c *ReplicationSpecSvc_ValidateNewReplicationSpec_Call) Run(run func(sourc
 	return _c
 }
 
-func (_c *ReplicationSpecSvc_ValidateNewReplicationSpec_Call) Return(_a0 string, _a1 string, _a2 *metadata.RemoteClusterReference, _a3 base.ErrorMap, _a4 error, _a5 service_def.UIWarnings) *ReplicationSpecSvc_ValidateNewReplicationSpec_Call {
-	_c.Call.Return(_a0, _a1, _a2, _a3, _a4, _a5)
+func (_c *ReplicationSpecSvc_ValidateNewReplicationSpec_Call) Return(_a0 string, _a1 string, _a2 *metadata.RemoteClusterReference, _a3 base.ErrorMap, _a4 error, _a5 service_def.UIWarnings, _a6 *metadata.CollectionsManifestPair) *ReplicationSpecSvc_ValidateNewReplicationSpec_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3, _a4, _a5, _a6)
 	return _c
 }
 
-func (_c *ReplicationSpecSvc_ValidateNewReplicationSpec_Call) RunAndReturn(run func(string, string, string, metadata.ReplicationSettingsMap, bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings)) *ReplicationSpecSvc_ValidateNewReplicationSpec_Call {
+func (_c *ReplicationSpecSvc_ValidateNewReplicationSpec_Call) RunAndReturn(run func(string, string, string, metadata.ReplicationSettingsMap, bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings, *metadata.CollectionsManifestPair)) *ReplicationSpecSvc_ValidateNewReplicationSpec_Call {
 	_c.Call.Return(run)
 	return _c
 }

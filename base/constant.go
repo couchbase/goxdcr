@@ -669,6 +669,7 @@ var VersionForPeerToPeerSupport = ServerVersion{7, 1, 0}
 var Version7_2_1 = ServerVersion{7, 2, 1}
 var VersionForConnectionPreCheckSupport = ServerVersion{7, 6, 0}
 var VersionForSupportability = ServerVersion{7, 6, 0}
+var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -1160,6 +1161,7 @@ var MaxP2PReceiveChLen = 10000
 var P2POpaqueCleanupInterval = 5 * time.Second
 var P2PVBRelatedGCInterval = 24 * time.Hour
 var P2PReplicaReplicatorReloadChSize = 10
+var P2PManifestsCacheCleanupInterval = 5 * time.Minute
 
 var ThroughSeqnoBgScannerFreq = 5 * time.Second
 var ThroughSeqnoBgScannerLogFreq = 60 * time.Second
@@ -1230,7 +1232,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	p2pReplicaReplicatorReloadSize int, globalOSOMode int,
 	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
 	connErrsListMaxEntries, P2PRetryFactor int,
-	P2PRetryWaitTimeMilliSec time.Duration) {
+	P2PRetryWaitTimeMilliSec time.Duration,
+	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1384,6 +1387,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ConnErrorsListMaxEntries = connErrsListMaxEntries
 	PeerToPeerRetryWaitTime = P2PRetryWaitTimeMilliSec
 	PeerToPeerRetryFactor = P2PRetryFactor
+	ManifestsGetterSleepTimeSecs = p2pManifestsGetterSleepTimeSecs
+	ManifestsGetterMaxRetry = p2pManifestsGetterMaxRetry
 }
 
 // XDCR Dev hidden replication settings
@@ -1611,3 +1616,5 @@ var ConnectionPreCheckGCTimeout = 120 * time.Second
 var ConnectionPreCheckRPCTimeout = 15 * time.Second
 
 var ConnErrorsListMaxEntries = 20
+var ManifestsGetterSleepTimeSecs = 1
+var ManifestsGetterMaxRetry = 8

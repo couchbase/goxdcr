@@ -8,6 +8,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	service_def "github.com/couchbase/goxdcr/service_def"
+
 	sync "sync"
 )
 
@@ -414,6 +416,69 @@ func (_c *CollectionsManifestSvc_GetSpecificTargetManifest_Call) RunAndReturn(ru
 	return _c
 }
 
+// GetStartingManifests provides a mock function with given fields: spec
+func (_m *CollectionsManifestSvc) GetStartingManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
+	ret := _m.Called(spec)
+
+	var r0 *metadata.CollectionsManifest
+	var r1 *metadata.CollectionsManifest
+	var r2 error
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error)); ok {
+		return rf(spec)
+	}
+	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) *metadata.CollectionsManifest); ok {
+		r0 = rf(spec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metadata.CollectionsManifest)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*metadata.ReplicationSpecification) *metadata.CollectionsManifest); ok {
+		r1 = rf(spec)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*metadata.CollectionsManifest)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(*metadata.ReplicationSpecification) error); ok {
+		r2 = rf(spec)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// CollectionsManifestSvc_GetStartingManifests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStartingManifests'
+type CollectionsManifestSvc_GetStartingManifests_Call struct {
+	*mock.Call
+}
+
+// GetStartingManifests is a helper method to define mock.On call
+//   - spec *metadata.ReplicationSpecification
+func (_e *CollectionsManifestSvc_Expecter) GetStartingManifests(spec interface{}) *CollectionsManifestSvc_GetStartingManifests_Call {
+	return &CollectionsManifestSvc_GetStartingManifests_Call{Call: _e.mock.On("GetStartingManifests", spec)}
+}
+
+func (_c *CollectionsManifestSvc_GetStartingManifests_Call) Run(run func(spec *metadata.ReplicationSpecification)) *CollectionsManifestSvc_GetStartingManifests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.ReplicationSpecification))
+	})
+	return _c
+}
+
+func (_c *CollectionsManifestSvc_GetStartingManifests_Call) Return(src *metadata.CollectionsManifest, tgt *metadata.CollectionsManifest, err error) *CollectionsManifestSvc_GetStartingManifests_Call {
+	_c.Call.Return(src, tgt, err)
+	return _c
+}
+
+func (_c *CollectionsManifestSvc_GetStartingManifests_Call) RunAndReturn(run func(*metadata.ReplicationSpecification) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error)) *CollectionsManifestSvc_GetStartingManifests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PersistNeededManifests provides a mock function with given fields: spec
 func (_m *CollectionsManifestSvc) PersistNeededManifests(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
@@ -574,6 +639,39 @@ func (_c *CollectionsManifestSvc_SetMetadataChangeHandlerCallback_Call) Return()
 }
 
 func (_c *CollectionsManifestSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(base.MetadataChangeHandlerCallback)) *CollectionsManifestSvc_SetMetadataChangeHandlerCallback_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetPeerManifestsGetter provides a mock function with given fields: getter
+func (_m *CollectionsManifestSvc) SetPeerManifestsGetter(getter service_def.PeerManifestsGetter) {
+	_m.Called(getter)
+}
+
+// CollectionsManifestSvc_SetPeerManifestsGetter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetPeerManifestsGetter'
+type CollectionsManifestSvc_SetPeerManifestsGetter_Call struct {
+	*mock.Call
+}
+
+// SetPeerManifestsGetter is a helper method to define mock.On call
+//   - getter service_def.PeerManifestsGetter
+func (_e *CollectionsManifestSvc_Expecter) SetPeerManifestsGetter(getter interface{}) *CollectionsManifestSvc_SetPeerManifestsGetter_Call {
+	return &CollectionsManifestSvc_SetPeerManifestsGetter_Call{Call: _e.mock.On("SetPeerManifestsGetter", getter)}
+}
+
+func (_c *CollectionsManifestSvc_SetPeerManifestsGetter_Call) Run(run func(getter service_def.PeerManifestsGetter)) *CollectionsManifestSvc_SetPeerManifestsGetter_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(service_def.PeerManifestsGetter))
+	})
+	return _c
+}
+
+func (_c *CollectionsManifestSvc_SetPeerManifestsGetter_Call) Return() *CollectionsManifestSvc_SetPeerManifestsGetter_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *CollectionsManifestSvc_SetPeerManifestsGetter_Call) RunAndReturn(run func(service_def.PeerManifestsGetter)) *CollectionsManifestSvc_SetPeerManifestsGetter_Call {
 	_c.Call.Return(run)
 	return _c
 }

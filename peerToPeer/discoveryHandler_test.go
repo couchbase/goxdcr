@@ -58,7 +58,7 @@ func TestDiscoveryHandler(t *testing.T) {
 		return &HandlerResultImpl{Err: nil, HttpStatusCode: http.StatusOK}, nil
 	}
 	discoveryReq := NewP2PDiscoveryReq(reqCommon)
-	handler.RegisterOpaque(discoveryReq, NewSendOpts(false, base2.PeerToPeerNonExponentialWaitTime))
+	handler.RegisterOpaque(discoveryReq, NewSendOpts(false, base2.PeerToPeerNonExponentialWaitTime, base2.PeerToPeerMaxRetry))
 
 	handler.receiveReqCh <- discoveryReq
 

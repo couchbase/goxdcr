@@ -56,6 +56,9 @@ type CollectionsManifestService struct {
 	srcBucketGetters       map[string]*BucketManifestGetter
 	srcBucketGettersRefCnt map[string]uint64
 
+	peerManifestGetterMtx sync.RWMutex
+	peerManifestGetter    service_def.PeerManifestsGetter
+
 	xdcrInjDelaySec uint32
 }
 
@@ -93,6 +96,9 @@ func (c *CollectionsManifestService) start() error {
 	c.logger = log.NewLogger("CollectionsManifestSvc", c.loggerCtx)
 	c.logger.Infof("CollectionsManifestSvc starting...")
 
+	// Do this first as replSvc needs it
+	c.replicationSpecSvc.SetManifestsGetter(c.GetLatestManifests)
+
 	replSpecs, err := c.replicationSpecSvc.AllReplicationSpecs()
 	if err != nil {
 		return err
@@ -110,6 +116,8 @@ func (c *CollectionsManifestService) start() error {
 	c.logger.Infof("CollectionsManifestSvc started")
 	return nil
 }
+
+var startupPathNotSet error = fmt.Errorf("Starting path does not have getter set")
 
 // handle new and del should be called sequencially since replSpecService calls the callback sequentially
 func (c *CollectionsManifestService) handleNewReplSpec(spec *metadata.ReplicationSpecification, starting bool) error {
@@ -135,10 +143,20 @@ func (c *CollectionsManifestService) handleNewReplSpec(spec *metadata.Replicatio
 	c.srcBucketGettersRefCnt[spec.SourceBucketName]++
 	c.srcBucketGetterMtx.Unlock()
 
+	// peerManifestGetter can only be set after main.go has initiated p2p handlers
+	peerManifestGetter := func(specId, specInternalId string) (*metadata.CollectionsManifestPair, error) {
+		c.peerManifestGetterMtx.RLock()
+		defer c.peerManifestGetterMtx.RUnlock()
+		if c.peerManifestGetter == nil {
+			return nil, startupPathNotSet
+		}
+		return c.peerManifestGetter(specId, specInternalId)
+	}
+
 	c.agentsMtx.Lock()
-	agent := NewCollectionsManifestAgent(spec.Id,
+	agent := NewCollectionsManifestAgent(spec.Id, spec.InternalId,
 		c.remoteClusterSvc, c.checkpointsSvc, c.bucketTopologySvc, c.logger, c.utilities, spec,
-		c, getter.GetManifest, c.metakvSvc, c.metadataChangeCb)
+		c, getter.GetManifest, c.metakvSvc, c.metadataChangeCb, peerManifestGetter)
 	c.agentsMap[spec.Id] = agent
 	c.agentsMtx.Unlock()
 	return agent.Start()
@@ -253,6 +271,41 @@ func (c *CollectionsManifestService) getAgent(spec *metadata.ReplicationSpecific
 	return agent, nil
 }
 
+func (c *CollectionsManifestService) GetStartingManifests(spec *metadata.ReplicationSpecification) (src, tgt *metadata.CollectionsManifest, err error) {
+	manifestsPair, err := c.peerManifestGetter(spec.Id, spec.InternalId)
+	if err != nil {
+		// It is potentially possible target doesn't support collections
+		origErr := err
+
+		ref, err := c.remoteClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		rcCapability, err := c.remoteClusterSvc.GetCapability(ref)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if !rcCapability.HasCollectionSupport() {
+			return nil, nil, base.ErrorTargetCollectionsNotSupported
+		} else {
+			return nil, nil, origErr
+		}
+	} else if manifestsPair == nil {
+		return nil, nil, fmt.Errorf("GetStartingManifests with %v-%v has empty manifestsPair",
+			spec.Id, spec.InternalId)
+	} else if manifestsPair.Source == nil {
+		return nil, nil, fmt.Errorf("GetStartingManifests with %v-%v has empty source manifest",
+			spec.Id, spec.InternalId)
+	} else if manifestsPair.Target == nil {
+		return nil, nil, fmt.Errorf("GetStartingManifests with %v-%v has empty target manifest",
+			spec.Id, spec.InternalId)
+	}
+
+	return manifestsPair.Source, manifestsPair.Target, nil
+}
+
 func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.ReplicationSpecification, specMayNotExist bool) (src, tgt *metadata.CollectionsManifest, err error) {
 	var agent *CollectionsManifestAgent
 	agent, err = c.getAgent(spec)
@@ -264,9 +317,15 @@ func (c *CollectionsManifestService) GetLatestManifests(spec *metadata.Replicati
 	var agentIsTemporary bool
 	if agent == nil && specMayNotExist {
 		tempBucketManifestGetter := NewBucketManifestGetter(spec.SourceBucketName, c, time.Duration(base.ManifestRefreshSrcInterval)*time.Second, spec)
-		agent = NewCollectionsManifestAgent(spec.Id,
+
+		c.waitForManifestGetter()
+		c.peerManifestGetterMtx.RLock()
+		peerManifestGetter := c.peerManifestGetter
+		c.peerManifestGetterMtx.RUnlock()
+
+		agent = NewCollectionsManifestAgent(spec.Id, spec.InternalId,
 			c.remoteClusterSvc, c.checkpointsSvc, c.bucketTopologySvc, c.logger, c.utilities, spec,
-			c, tempBucketManifestGetter.GetManifest, c.metakvSvc, nil)
+			c, tempBucketManifestGetter.GetManifest, c.metakvSvc, nil, peerManifestGetter)
 		agent.SetTempAgent()
 		agentIsTemporary = true
 		err = agent.Start()
@@ -398,6 +457,24 @@ func (c *CollectionsManifestService) PersistReceivedManifests(spec *metadata.Rep
 	return agent.PersistReceivedManifests(srcManifests, tgtManifests)
 }
 
+func (c *CollectionsManifestService) SetPeerManifestsGetter(getter service_def.PeerManifestsGetter) {
+	c.peerManifestGetterMtx.Lock()
+	defer c.peerManifestGetterMtx.Unlock()
+	c.peerManifestGetter = getter
+}
+
+func (c *CollectionsManifestService) waitForManifestGetter() {
+	var manifestGetterFound bool
+	for !manifestGetterFound {
+		c.peerManifestGetterMtx.RLock()
+		manifestGetterFound = c.peerManifestGetter != nil
+		c.peerManifestGetterMtx.RUnlock()
+		if !manifestGetterFound {
+			time.Sleep(time.Duration(base.ManifestsGetterSleepTimeSecs) * time.Second)
+		}
+	}
+}
+
 type AgentSrcManifestGetter func() *metadata.CollectionsManifest
 
 type AgentPersistResult struct {
@@ -412,6 +489,7 @@ type AgentPersistResult struct {
 // the agents' information
 type CollectionsManifestAgent struct {
 	id                string
+	internalId        string
 	checkpointsSvc    service_def.CheckpointsService
 	logger            *log.CommonLogger
 	utilities         utils.UtilsIface
@@ -464,11 +542,14 @@ type CollectionsManifestAgent struct {
 
 	// If agent is used as part of spec creation/validation process, then this is considered a tempAgent
 	tempAgent bool
+
+	peerManifestGetter service_def.PeerManifestsGetter
 }
 
-func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, bucketTopoSvc service_def.BucketTopologySvc, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback) *CollectionsManifestAgent {
+func NewCollectionsManifestAgent(name string, internalId string, remoteClusterSvc service_def.RemoteClusterSvc, checkpointsSvc service_def.CheckpointsService, bucketTopoSvc service_def.BucketTopologySvc, logger *log.CommonLogger, utilities utils.UtilsIface, replicationSpec *metadata.ReplicationSpecification, manifestOps service_def.CollectionsManifestOps, srcManifestGetter AgentSrcManifestGetter, metakvSvc service_def.ManifestsService, metadataChangeCb base.MetadataChangeHandlerCallback, peerManifestsGetter service_def.PeerManifestsGetter) *CollectionsManifestAgent {
 	manifestAgent := &CollectionsManifestAgent{
 		id:                     name,
+		internalId:             internalId,
 		remoteClusterSvc:       remoteClusterSvc,
 		checkpointsSvc:         checkpointsSvc,
 		bucketTopologySvc:      bucketTopoSvc,
@@ -489,6 +570,7 @@ func NewCollectionsManifestAgent(name string, remoteClusterSvc service_def.Remot
 		singlePersistResp:      make(chan AgentPersistResult, 11),
 		metakvInitDone:         make(chan bool),
 		refreshAndNotifyIsRdy:  make(chan bool),
+		peerManifestGetter:     peerManifestsGetter,
 	}
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
 	manifestAgent.sourceCache[0] = &defaultManifest
@@ -513,6 +595,14 @@ func (a *CollectionsManifestAgent) refreshAndNotify(refreshImmediately bool) {
 	if srcErr == nil || tgtErr == nil {
 		a.notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt)
 	}
+}
+
+// Similar to refreshAndNotify in nature, but without actual pulling
+func (a *CollectionsManifestAgent) registerPeerSentManifests(pair *metadata.CollectionsManifestPair) {
+	oldSrc, newSrc := a.registerSourcePull(true, pair.Source)
+	oldTgt, newTgt := a.registerTargetPull(true, pair.Target)
+
+	a.notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt)
 }
 
 func (a *CollectionsManifestAgent) notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt *metadata.CollectionsManifest) {
@@ -808,6 +898,10 @@ func (a *CollectionsManifestAgent) populateRemoteClusterRefOnce() error {
 func (a *CollectionsManifestAgent) Start() error {
 	if atomic.CompareAndSwapUint32(&a.started, 0, 1) {
 		var refreshImmediately bool
+		var peerSentManifests bool
+		var manifestsPair *metadata.CollectionsManifestPair
+		var err error
+
 		if a.tempAgent {
 			err := a.populateRemoteClusterRefOnce()
 			if err != nil {
@@ -815,15 +909,32 @@ func (a *CollectionsManifestAgent) Start() error {
 			}
 			refreshImmediately = true
 		} else {
+			var loadPeersManifest bool
+
+			// If manifests are found from metakv, this means that the replication has already been started
+			// and checkpoints already exist
 			srcErr, tgtErr := a.loadManifestsFromMetakv()
 			if srcErr == service_def.MetadataNotFoundErr {
-				refreshImmediately = true
 				srcErr = nil
+				loadPeersManifest = true
 			}
 			if tgtErr == service_def.MetadataNotFoundErr {
-				refreshImmediately = true
 				tgtErr = nil
+				loadPeersManifest = true
 			}
+
+			if loadPeersManifest {
+				// Otherwise, replication could be created at this time
+				// Try loading to see if peer has sent us manifests as part of replication creation
+				// If so, no need to load refresh immediately
+				manifestsPair, err = a.peerManifestGetter(a.id, a.internalId)
+				if err != nil || manifestsPair == nil || manifestsPair.Source == nil || manifestsPair.Target == nil {
+					refreshImmediately = true
+				} else {
+					peerSentManifests = true
+				}
+			}
+
 			if srcErr != nil || tgtErr != nil {
 				a.logger.Warnf("%v - starting sourceErr: %v tgtErr: %v", a.replicationSpec.Id, srcErr, tgtErr)
 				// Do not return error here as colletions must continue to work
@@ -832,7 +943,12 @@ func (a *CollectionsManifestAgent) Start() error {
 			go a.runPeriodicRefresh()
 			go a.runPersistRequestHandler()
 		}
-		a.refreshAndNotify(refreshImmediately)
+
+		if peerSentManifests {
+			a.registerPeerSentManifests(manifestsPair)
+		} else {
+			a.refreshAndNotify(refreshImmediately)
+		}
 		close(a.refreshAndNotifyIsRdy)
 		return nil
 	}
@@ -1016,7 +1132,6 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 	}
 
 	var manifest *metadata.CollectionsManifest
-	var ok bool
 	getRetry := func() error {
 		manifest = a.srcManifestGetter()
 		if manifest == nil {
@@ -1040,6 +1155,15 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 		a.lastSourcePull = maxID
 		return
 	}
+
+	oldManifest, newManifest = a.registerSourcePull(lock, manifest)
+	return
+}
+
+func (a *CollectionsManifestAgent) registerSourcePull(lock bool, manifest *metadata.CollectionsManifest) (*metadata.CollectionsManifest, *metadata.CollectionsManifest) {
+	var ok bool
+	var oldManifest *metadata.CollectionsManifest
+	var newManifest *metadata.CollectionsManifest
 
 	if lock {
 		a.srcMtx.RLock()
@@ -1065,7 +1189,7 @@ func (a *CollectionsManifestAgent) refreshSourceCustom(waitTime time.Duration, m
 			a.srcMtx.RUnlock()
 		}
 	}
-	return
+	return oldManifest, newManifest
 }
 
 func (a *CollectionsManifestAgent) getCurrentCollectionManifestUid() (uint64, error) {
@@ -1135,7 +1259,6 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 	}
 
 	var manifest *metadata.CollectionsManifest
-	var ok bool
 	getRetry := func() error {
 		clusterUuid := a.replicationSpec.TargetClusterUUID
 		bucketName := a.replicationSpec.TargetBucketName
@@ -1147,6 +1270,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 		return nil
 	}
 	err = a.utilities.ExponentialBackoffExecutor(targetRefreshStr, waitTime, maxRetry, base.RemoteMcRetryFactor, getRetry)
+
 	if err != nil || manifest == nil {
 		a.logger.Errorf("%v - refreshTarget returned err: %v\n", a.id, err)
 		if lock {
@@ -1160,6 +1284,15 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 		a.lastTargetPull = maxID
 		return
 	}
+
+	oldManifest, newManifest = a.registerTargetPull(lock, manifest)
+	return
+}
+
+func (a *CollectionsManifestAgent) registerTargetPull(lock bool, manifest *metadata.CollectionsManifest) (*metadata.CollectionsManifest, *metadata.CollectionsManifest) {
+	var oldManifest *metadata.CollectionsManifest
+	var newManifest *metadata.CollectionsManifest
+	var ok bool
 
 	if lock {
 		a.tgtMtx.RLock()
@@ -1185,7 +1318,7 @@ func (a *CollectionsManifestAgent) refreshTargetCustom(force, lock bool, waitTim
 			a.tgtMtx.RUnlock()
 		}
 	}
-	return
+	return oldManifest, newManifest
 }
 
 // Gets a sorted list of manifest UIDs that are referred by the checkpoints

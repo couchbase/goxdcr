@@ -842,6 +842,9 @@ func (b *BackfillMgr) getThroughSeqnosFromMainCkpts(specId, internalId string, t
 	return maxSeqnoMap, nil
 }
 
+// Used for integration tests
+const p2pPullMsg = "Unable to retrieve peer manifests for new spec"
+
 func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpecification, finCh chan bool) error {
 	var err error
 	defaultManifest := metadata.NewDefaultCollectionsManifest()
@@ -859,21 +862,39 @@ func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpe
 	// to contact the target ns_server. In which case, do not even try the following since it'll lead
 	// to a panic down the line
 	if isKvNode {
-		retryOp := func(interface{}) (interface{}, error) {
-			src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec, false)
+		var retryCount = 0
+		for retryCount < base.ManifestsGetterMaxRetry {
+			src, tgt, err = b.collectionsManifestSvc.GetStartingManifests(spec)
 			if err != nil {
 				if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
 					tgt = &defaultManifest
 					err = nil
 				} else {
-					b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
+					b.logger.Errorf("%s %v:%v err %v", p2pPullMsg, spec.Id, err)
 				}
+			} else {
+				break
 			}
-			return nil, err
+			time.Sleep(time.Duration(base.ManifestsGetterSleepTimeSecs) * time.Second)
+			retryCount++
 		}
-		_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("BackfillInit", base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, retryOp, nil, finCh)
 		if err != nil {
-			return err
+			rpcRetryOp := func(interface{}) (interface{}, error) {
+				src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec, false)
+				if err != nil {
+					if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
+						tgt = &defaultManifest
+						err = nil
+					} else {
+						b.logger.Errorf("Unable to retrieve manifests for new spec %v err %v", spec.Id, err)
+					}
+				}
+				return nil, err
+			}
+			_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("BackfillInit(RPC)", base.DefaultHttpTimeoutWaitTime, base.DefaultHttpTimeoutMaxRetry, base.DefaultHttpTimeoutRetryFactor, rpcRetryOp, nil, finCh)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

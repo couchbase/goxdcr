@@ -351,6 +351,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.ConnErrorsListMaxEntriesKey].(int),
 		internal_settings.Values[metadata.P2PRetryFactorKey].(int),
 		time.Duration(internal_settings.Values[metadata.P2PRetryWaitTimeMilliSecKey].(int))*time.Millisecond,
+		internal_settings.Values[metadata.PeerManifestsGetterSleepTimeKey].(int),
+		internal_settings.Values[metadata.PeerManifestsGetterMaxRetryKey].(int),
 	)
 }
 
@@ -817,7 +819,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 	logger_rm.Infof("Creating replication spec - justValidate=%v, sourceBucket=%s, targetCluster=%s, targetBucket=%s, settings=%v\n",
 		justValidate, sourceBucket, targetCluster, targetBucket, settings.CloneAndRedact())
 	// validate that everything is alright with the replication configuration before actually creating it
-	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, !justValidate)
+	sourceBucketUUID, targetBucketUUID, targetClusterRef, errorMap, err, warnings, manifests := replication_mgr.repl_spec_svc.ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket, settings, !justValidate)
 	if err != nil || len(errorMap) > 0 {
 		return nil, errorMap, err, nil
 	}
@@ -854,6 +856,15 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 
 	if justValidate {
 		return spec, nil, nil, warnings
+	}
+
+	// Before persisting, send manifests only if they exist
+	if manifests != nil {
+		err = replication_mgr.p2pMgr.SendManifests(spec, manifests)
+		if err != nil {
+			logger_rm.Errorf("Unable to share retrieved manifests with source peers: %v", err)
+			return nil, nil, err, nil
+		}
 	}
 
 	//persist it

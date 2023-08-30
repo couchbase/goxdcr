@@ -3774,7 +3774,7 @@ func (agent *RemoteClusterAgent) waitForRefreshOngoing() {
 End Unit test functions
 */
 
-var coolDownPeriod = 10 * time.Second
+var coolDownPeriod = 3 * time.Second
 var coolDownError = fmt.Errorf("This remote cluster has recently just serviced manifest retrieval request and is currently in cool down. Please wait %v", coolDownPeriod)
 
 func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(bucketName string) (*metadata.CollectionsManifest, error) {

@@ -47,12 +47,17 @@ import (
 // Directionally agnostic function type to retrieve a manifest given a manifest UID
 type CollectionsManifestReqFunc func(manifestUid uint64) (*metadata.CollectionsManifest, error)
 
+type ManifestsGetter func(spec *metadata.ReplicationSpecification, specMayNotExist bool) (src, tgt *metadata.CollectionsManifest, err error)
+type ManifestsSender func(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) base.ErrorMap
+type PeerManifestsGetter func(specId, specInternalId string) (*metadata.CollectionsManifestPair, error)
+
 type CollectionsManifestSvc interface {
 	// Responsible for the retrieving manifests for source buckets
 	CollectionsManifestOps
 
 	// When pipelines start without resuming from checkpoints, use this to load the latest manifests
 	// Also for validating mapping when creating/changing specs, use specMayNotExist
+	GetStartingManifests(spec *metadata.ReplicationSpecification) (src, tgt *metadata.CollectionsManifest, err error)
 	GetLatestManifests(spec *metadata.ReplicationSpecification, specMayNotExist bool) (src, tgt *metadata.CollectionsManifest, err error)
 
 	// Persist all manifests that are needed by this replication
@@ -76,6 +81,8 @@ type CollectionsManifestSvc interface {
 	PersistReceivedManifests(spec *metadata.ReplicationSpecification, srcManifests, tgtManifests map[uint64]*metadata.CollectionsManifest) error
 
 	GetAllCachedManifests(spec *metadata.ReplicationSpecification) (map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest, error)
+
+	SetPeerManifestsGetter(getter PeerManifestsGetter)
 }
 
 type CollectionsManifestOps interface {

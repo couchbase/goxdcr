@@ -33,6 +33,7 @@ const (
 	ReqVBMasterChk        OpCode = iota
 	ReqPeriodicPush       OpCode = iota
 	ReqConnectionPreCheck OpCode = iota
+	ReqReplSpecManifests  OpCode = iota
 	ReqMaxInvalid         OpCode = iota
 )
 
@@ -46,6 +47,8 @@ func (o OpCode) String() string {
 		return "PeriodicPush"
 	case ReqConnectionPreCheck:
 		return "ConnectionPreCheck"
+	case ReqReplSpecManifests:
+		return "ReplSpecManifests"
 	default:
 		return "?? (InvalidRequest)"
 	}
@@ -60,6 +63,8 @@ func (o OpCode) IsInterruptable() bool {
 	case ReqPeriodicPush:
 		return false
 	case ReqConnectionPreCheck:
+		return false
+	case ReqReplSpecManifests:
 		return false
 	default:
 		return false
@@ -365,6 +370,13 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 			return nil, fmt.Errorf("ConnectionPreCheckRes deSerialize err: %v", err)
 		}
 		return resp, nil
+	case ReqReplSpecManifests:
+		resp := &ManifestsResponse{}
+		err = resp.DeSerialize(body)
+		if err != nil {
+			return nil, fmt.Errorf("ManifestsResponse deSerialize err: %v", err)
+		}
+		return resp, nil
 	default:
 		return nil, fmt.Errorf("Unknown response %v", respCommon.RespType)
 	}
@@ -441,6 +453,14 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		}
 		reqConPreCheck.RequestCommon = reqCommon
 		return reqConPreCheck, err
+	case ReqReplSpecManifests:
+		reqManifests := &ManifestsRequest{}
+		err = reqManifests.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("reqManifests deSerialize err: %v", err)
+		}
+		reqManifests.RequestCommon = reqCommon
+		return reqManifests, err
 	default:
 		return nil, fmt.Errorf("Unknown request %v", reqCommon.ReqType)
 	}
@@ -1810,4 +1830,67 @@ func (c *ConnectionPreCheckReq) GenerateResponse() interface{} {
 		PortsMap:           c.PortsMap,
 	}
 	return resp
+}
+
+type ManifestsRequest struct {
+	RequestCommon
+
+	SpecId              string
+	SpecInternalId      string
+	CompressedManifests []byte // compressed format of metadata.ManifestsDoc
+}
+
+func NewManifestsReq(common RequestCommon, spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) (*ManifestsRequest, error) {
+	req := &ManifestsRequest{RequestCommon: common}
+	req.ReqType = ReqReplSpecManifests
+
+	metaObj := &metadata.ManifestsDoc{}
+	stream, err := metaObj.LoadManifestPairAndCompress(manifests)
+	if err != nil {
+		return nil, err
+	}
+	req.CompressedManifests = stream
+
+	req.SpecId = spec.Id
+	req.SpecInternalId = spec.InternalId
+	return req, nil
+}
+
+func (m *ManifestsRequest) Serialize() ([]byte, error) {
+	return json.Marshal(m)
+}
+
+func (m *ManifestsRequest) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, m)
+}
+
+func (m *ManifestsRequest) SameAs(otherRaw interface{}) (bool, error) {
+	other, ok := otherRaw.(*ManifestsRequest)
+	if !ok {
+		return false, getWrongTypeErr("*ManifestsRequest", otherRaw)
+	}
+	return m.RequestCommon.SameAs(&other.RequestCommon)
+}
+
+// Receipients could call GenerateResponse but there's no need...
+// The sender is most likely holding on to adminport as part of replication creation and unable to read response
+func (m *ManifestsRequest) GenerateResponse() interface{} {
+	common := NewResponseCommon(m.ReqType, m.RemoteLifeCycleId, m.LocalLifeCycleId, m.Opaque, m.TargetAddr)
+	common.RespType = m.ReqType
+	resp := &ManifestsResponse{
+		ResponseCommon: common,
+	}
+	return resp
+}
+
+type ManifestsResponse struct {
+	ResponseCommon
+}
+
+func (m *ManifestsResponse) Serialize() ([]byte, error) {
+	return json.Marshal(m)
+}
+
+func (m *ManifestsResponse) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, m)
 }

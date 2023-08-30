@@ -31,7 +31,7 @@ func TestHandlerCommon_RegisterOpaque(t *testing.T) {
 			}},
 			args: args{
 				request: &VBMasterCheckReq{RequestCommon: NewRequestCommon("", "", "", "", 0)},
-				opts:    NewSendOpts(false, 1*time.Minute),
+				opts:    NewSendOpts(false, 1*time.Minute, base.PeerToPeerMaxRetry),
 			},
 			wantErr: true,
 		},
@@ -39,7 +39,7 @@ func TestHandlerCommon_RegisterOpaque(t *testing.T) {
 			name: "[POSITIVE] register one opaque no one else present",
 			args: args{
 				request: &VBMasterCheckReq{RequestCommon: NewRequestCommon("", "", "", "", 0)},
-				opts:    NewSendOpts(false, 1*time.Minute),
+				opts:    NewSendOpts(false, 1*time.Minute, base.PeerToPeerMaxRetry),
 			},
 		},
 	}

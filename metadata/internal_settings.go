@@ -278,6 +278,9 @@ const (
 	GlobalOSOConfigKey = "OSOModeOverride"
 
 	ConnErrorsListMaxEntriesKey = "ConnectionErrorsListMaxEntries"
+
+	PeerManifestsGetterSleepTimeKey = "PeerManifestsGetterSleepTimeSec"
+	PeerManifestsGetterMaxRetryKey  = "PeersManifestsGetterMaxRetry"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -402,6 +405,8 @@ var ConnectionPreCheckGCTimeoutConfig = &SettingsConfig{int(base.ConnectionPreCh
 var ConnectionPreCheckRPCTimeoutConfig = &SettingsConfig{int(base.ConnectionPreCheckRPCTimeout / time.Second), &Range{1, 30}}
 var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), Range: &Range{int(base.GlobalOSONoOp), int(base.GlobalOSOMax) - 1}}
 var ConnErrsListMaxEntriesConfig = &SettingsConfig{defaultValue: base.ConnErrorsListMaxEntries, Range: &Range{1, 100}}
+var PeerManifestsGetterSleepTimeConfig = &SettingsConfig{base.ManifestsGetterSleepTimeSecs, &Range{1, 60}}
+var PeerManifestsGetterMaxRetryConfig = &SettingsConfig{base.ManifestsGetterMaxRetry, &Range{1, 60}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -526,6 +531,8 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ConnectionPreCheckRPCTimeoutKey:               ConnectionPreCheckRPCTimeoutConfig,
 	GlobalOSOConfigKey:                            GlobalOSOConfig,
 	ConnErrorsListMaxEntriesKey:                   ConnErrsListMaxEntriesConfig,
+	PeerManifestsGetterSleepTimeKey:               PeerManifestsGetterSleepTimeConfig,
+	PeerManifestsGetterMaxRetryKey:                PeerManifestsGetterMaxRetryConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

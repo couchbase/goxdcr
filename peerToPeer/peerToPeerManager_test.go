@@ -69,6 +69,8 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 	bucketSvc.On("UnSubscribeLocalBucketFeed", mock.Anything, mock.Anything).Return(subscribeErr)
 
 	securitySvc.On("IsClusterEncryptionLevelStrict").Return(false)
+
+	collectionsManifestSvc.On("SetPeerManifestsGetter", mock.Anything).Return(nil)
 }
 
 func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
@@ -138,7 +140,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 		responses = append(responses, resp)
 	}
 
-	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
+	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime, base2.PeerToPeerMaxRetry)
 	err, _ = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	assert.Nil(err)
 
@@ -196,7 +198,7 @@ func TestPeerToPeerConcurrentMap(t *testing.T) {
 	assert := assert.New(t)
 
 	for i := 0; i < 50; i++ {
-		opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
+		opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime, base2.PeerToPeerMaxRetry)
 		opts.timeout = 25 * time.Millisecond
 		opts.respMapMtx.Lock()
 		ch1 := make(chan ReqRespPair)
@@ -317,11 +319,11 @@ func TestSendSameHostDualSimultaneousReqs(t *testing.T) {
 		responses = append(responses, resp)
 	}
 
-	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
+	opts := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime, base2.PeerToPeerMaxRetry)
 	err, _ = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc, opts)
 	assert.Nil(err)
 
-	opts2 := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime)
+	opts2 := NewSendOpts(true, base2.PeerToPeerNonExponentialWaitTime, base2.PeerToPeerMaxRetry)
 	err, _ = mgr.sendToEachPeerOnce(ReqVBMasterChk, getReqFunc2, opts2)
 	assert.Nil(err)
 

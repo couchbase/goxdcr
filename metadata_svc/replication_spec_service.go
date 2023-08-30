@@ -153,6 +153,10 @@ type ReplicationSpecService struct {
 	rcBgReqMtx      sync.Mutex
 	rcBgReqFinchMap map[string]chan bool
 	rcBgReqSyncMap  map[string]bool
+
+	manifestsGetterMtx sync.RWMutex
+	manifestsGetter    service_def.ManifestsGetter
+	manifestsGetterSet uint32
 }
 
 func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_svc service_def.RemoteClusterSvc, metadata_svc service_def.MetadataSvc, xdcr_comp_topology_svc service_def.XDCRCompTopologySvc, resolver_svc service_def.ResolverSvcIface, logger_ctx *log.LoggerContext, utilities_in utilities.UtilsIface, replicationSettingsSvc service_def.ReplicationSettingsSvc) (*ReplicationSpecService, error) {
@@ -263,7 +267,7 @@ func (service *ReplicationSpecService) validateSrcTargetNonIdenticalBucket(error
 }
 
 // validate remote cluster ref
-func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap, targetCluster string) (*metadata.RemoteClusterReference, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte) {
+func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap, targetCluster string) (*metadata.RemoteClusterReference, string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, metadata.Capability) {
 	var remote_userName, remote_password string
 	var httpAuthMech base.HttpAuthMech
 	var certificate []byte
@@ -272,6 +276,7 @@ func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap
 	var clientKey []byte
 	var err error
 	var remote_connStr string
+	var emptyCapability metadata.Capability
 	start_time := time.Now()
 	targetClusterRef, err := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
 	if err == RefreshNotEnabledYet {
@@ -280,21 +285,27 @@ func (service *ReplicationSpecService) getRemoteReference(errorMap base.ErrorMap
 	}
 	if err != nil {
 		errorMap[base.ToCluster] = service.utils.NewEnhancedError("cannot find remote cluster", err)
-	} else {
-		service.logger.Infof("Successfully retrieved target cluster reference %v. time taken=%v\n", targetClusterRef.Name, time.Since(start_time))
-		remote_connStr, err = targetClusterRef.MyConnectionStr()
-		if err != nil {
-			errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
-			return nil, "", remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey
-		}
-		remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err = targetClusterRef.MyCredentials()
-		if err != nil {
-			errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
-			return nil, "", remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey
-		}
+		return nil, "", remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, emptyCapability
 	}
 
-	return targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey
+	service.logger.Infof("Successfully retrieved target cluster reference %v. time taken=%v\n", targetClusterRef.Name, time.Since(start_time))
+	remote_connStr, err = targetClusterRef.MyConnectionStr()
+	if err != nil {
+		errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyConnectionStr() failed.", err)
+		return nil, "", remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, emptyCapability
+	}
+	remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err = targetClusterRef.MyCredentials()
+	if err != nil {
+		errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. MyCredentials() failed.", err)
+		return nil, "", remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, emptyCapability
+	}
+	rcCapability, err := service.remote_cluster_svc.GetCapability(targetClusterRef)
+	if err != nil {
+		errorMap[base.ToCluster] = service.utils.NewEnhancedError("Invalid remote cluster. Unable to determine remote cluster capability", err)
+		return nil, "", remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, emptyCapability
+	}
+
+	return targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, rcCapability
 }
 
 func (service *ReplicationSpecService) validateReplicationSpecDoesNotAlreadyExist(errorMap base.ErrorMap, sourceBucket string, targetClusterRef *metadata.RemoteClusterReference, targetBucket string) {
@@ -350,7 +361,7 @@ func (service *ReplicationSpecService) validateXmemSettings(errorMap base.ErrorM
  * Main Validation routine, supplemented by multiple helper sub-routines.
  * Each sub-routine may be daisy chained by variables that would be helpful for further subroutines.
  */
-func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings) {
+func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings, *metadata.CollectionsManifestPair) {
 	errMap := make(base.ErrorMap)
 	service.logger.Infof("Start ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, performRPC=%v settings=%v", sourceBucket, targetCluster, targetBucket, performRemoteValidation, settings.CloneAndRedact())
 	defer service.logger.Infof("Finished ValidateAddReplicationSpec, sourceBucket=%v, targetCluster=%v, targetBucket=%v, errorMap=%v, performRPC=%v settings=%v", sourceBucket, targetCluster, targetBucket, errMap, performRemoteValidation, settings.CloneAndRedact())
@@ -370,6 +381,8 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	validateSourceBucketErrMap := make(base.ErrorMap)
 	var sourceClusterUuid string
 	var sourceClusterUuidErr error
+	var sourceCompat int
+	var sourceCompatErr error
 
 	// Phase 1 concurrent check
 	srcSideWaitGrpPhase1.Add(1)
@@ -392,6 +405,15 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		sourceClusterUuid, sourceClusterUuidErr = service.xdcr_comp_topology_svc.MyClusterUuid()
 	}()
 
+	var myCompatWaitGrp sync.WaitGroup
+	myCompatWaitGrp.Add(1)
+	srcSideWaitGrpPhase1.Add(1)
+	go func() {
+		defer myCompatWaitGrp.Done()
+		defer srcSideWaitGrpPhase1.Done()
+		sourceCompat, sourceCompatErr = service.xdcr_comp_topology_svc.MyClusterCompatibility()
+	}()
+
 	var targetClusterRef *metadata.RemoteClusterReference
 	var remoteConnstr string
 	var remoteUsername string
@@ -410,17 +432,36 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	var targetBucketNumberOfVbs int
 	var targetConflictResolutionType string
 	var targetKVVBMap map[string][]uint16
+	var rcCapability metadata.Capability
+	var manifestsPair *metadata.CollectionsManifestPair
 
 	tgtSideWaitGrpPhase1.Add(1)
 	go func() {
 		defer tgtSideWaitGrpPhase1.Done()
-		targetClusterRef, remoteConnstr, remoteUsername, remotePassword, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey = service.getRemoteReference(getRemoteReferenceErrMap, targetCluster)
+		targetClusterRef, remoteConnstr, remoteUsername, remotePassword, httpAuthMech, certificate, sanInCertificate,
+			clientCertificate, clientKey, rcCapability = service.getRemoteReference(getRemoteReferenceErrMap, targetCluster)
 		if len(getRemoteReferenceErrMap) > 0 {
 			errMapMtx.Lock()
 			base.ConcatenateErrors(errMap, getRemoteReferenceErrMap, math.MaxInt32, nil)
 			errMapMtx.Unlock()
 			return
 		}
+
+		myCompatWaitGrp.Wait()
+		if sourceCompatErr != nil {
+			myCompatErrMap := make(base.ErrorMap)
+			errMapMtx.Lock()
+			myCompatErrMap["MyClusterCompatibility"] = sourceCompatErr
+			base.ConcatenateErrors(errMap, myCompatErrMap, math.MaxInt32, nil)
+			errMapMtx.Unlock()
+			return
+		}
+
+		// If source nodes all have upgraded to p2p + manifest sharing capability, it has collections
+		// and source bucket manifests
+		// If target cluster as a whole has collections support, the target bucket must have manifests to be retrieved
+		getAndShareTgtBucketManifest := rcCapability.HasCollectionSupport() &&
+			base.IsClusterCompatible(sourceCompat, base.VersionForP2PManifestSharing)
 
 		var tgtSideWaitGrpPhase2 sync.WaitGroup
 		tgtSideWaitGrpPhase2.Add(1)
@@ -449,6 +490,10 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			myClusterUUIDWaitGrp.Wait()
 			if sourceClusterUuidErr != nil {
 				// Don't even try the following
+				errMapMtx.Lock()
+				validateNonIdenticalErrMap["MyClusterUUID"] = sourceClusterUuidErr
+				base.ConcatenateErrors(errMap, validateNonIdenticalErrMap, math.MaxInt32, nil)
+				errMapMtx.Unlock()
 				return
 			}
 			validateNonIdenticalErr = service.validateSrcTargetNonIdenticalBucket(validateNonIdenticalErrMap, sourceBucket, targetBucket, targetClusterRef, sourceClusterUuid)
@@ -476,6 +521,30 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 				errMapMtx.Unlock()
 			}
 		}()
+
+		tgtSideWaitGrpPhase3.Add(1)
+		go func() {
+			defer tgtSideWaitGrpPhase3.Done()
+			tgtSideWaitGrpPhase2.Wait()
+			if shouldUseAlternateErr != nil {
+				return
+			}
+			if !getAndShareTgtBucketManifest {
+				// In the future, as more clusters upgrade, this case becomes less likely
+				return
+			}
+			var err error
+			manifestsPair, err = service.getManifests(sourceBucket, targetBucket, targetClusterRef)
+			if err != nil {
+				getManifestsErrMap := make(base.ErrorMap)
+				getManifestsErrMap["getManifests"] = err
+				errMapMtx.Lock()
+				base.ConcatenateErrors(errMap, getManifestsErrMap, math.MaxInt32, nil)
+				errMapMtx.Unlock()
+				return
+			}
+		}()
+
 		tgtSideWaitGrpPhase3.Wait()
 	}()
 
@@ -483,37 +552,37 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	tgtSideWaitGrpPhase1.Wait()
 
 	if len(errMap) > 0 {
-		return "", "", nil, errMap, nil, nil
+		return "", "", nil, errMap, nil, nil, nil
 	}
 	// Return errors in order
 	if validateSourceBucketErr != nil {
-		return "", "", nil, nil, validateSourceBucketErr, nil
+		return "", "", nil, nil, validateSourceBucketErr, nil, nil
 	}
 	if sourceClusterUuidErr != nil {
-		return "", "", nil, nil, sourceClusterUuidErr, nil
+		return "", "", nil, nil, sourceClusterUuidErr, nil, nil
 	}
 	if shouldUseAlternateErr != nil {
-		return "", "", nil, nil, shouldUseAlternateErr, nil
+		return "", "", nil, nil, shouldUseAlternateErr, nil, nil
 	}
 	if validateNonIdenticalErr != nil {
-		return "", "", nil, nil, validateNonIdenticalErr, nil
+		return "", "", nil, nil, validateNonIdenticalErr, nil, nil
 	}
 
 	if performRemoteValidation && sourceBucketNumberOfVbs != targetBucketNumberOfVbs {
 		errMsg := fmt.Sprintf("The number of vbuckets in source cluster, %v, and target cluster, %v, does not match. This configuration is not supported.", sourceBucketNumberOfVbs, targetBucketNumberOfVbs)
 		service.logger.Error(errMsg)
 		errMap[base.ToBucket] = errors.New(errMsg)
-		return "", "", nil, errMap, nil, nil
+		return "", "", nil, errMap, nil, nil, nil
 	}
 
 	err, warnings := service.validateReplicationSettingsInternal(errMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remoteConnstr, remoteUsername, remotePassword, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo, true, performRemoteValidation)
 	if len(errMap) > 0 || err != nil {
-		return "", "", nil, errMap, err, nil
+		return "", "", nil, errMap, err, nil, nil
 	}
 
 	if performRemoteValidation && sourceConflictResolutionType != targetConflictResolutionType {
 		errMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
-		return "", "", nil, errMap, nil, nil
+		return "", "", nil, errMap, nil, nil, nil
 	}
 
 	if sourceConflictResolutionType == base.ConflictResolutionType_Custom {
@@ -521,20 +590,20 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 			errMsg := fmt.Sprintf("Replication setting %v is required for custom conflict resolution.", base.MergeFunctionMappingKey)
 			service.logger.Errorf(errMsg)
 			errMap[base.PlaceHolderFieldKey] = errors.New(errMsg)
-			return "", "", nil, errMap, nil, nil
+			return "", "", nil, errMap, nil, nil, nil
 		}
 	}
 
 	if warnings != nil {
 		service.logger.Warnf("Warnings from ValidateAddReplicationSpec : %v\n", warnings.String())
 	}
-	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errMap, nil, warnings
+	return sourceBucketUUID, targetBucketUUID, targetClusterRef, errMap, nil, warnings, manifestsPair
 }
 
 func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (base.ErrorMap, error, service_def.UIWarnings) {
 	var errorMap base.ErrorMap = make(base.ErrorMap)
 
-	targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey := service.getRemoteReference(errorMap, targetCluster)
+	targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, _ := service.getRemoteReference(errorMap, targetCluster)
 	if len(errorMap) > 0 {
 		return errorMap, nil, nil
 	}
@@ -1281,11 +1350,13 @@ func (service *ReplicationSpecService) callMetadataChangeCb(specId string, newSp
 	var highErr error
 	var medErr error
 	var lowErr error
+
 	service.metadataChangeMtx.RLock()
 	defer service.metadataChangeMtx.RUnlock()
 	if len(service.metadataChangeCallback) == 0 {
 		return nil
 	}
+
 	// Replication spec callbacks are to be executed concurrently only for those of the same priorities
 	// So for each type of operation (add spec, del spec, or mod spec), do the high priority ones first
 	// concurrently, then medium, then low, etc
@@ -1656,4 +1727,45 @@ func (service *ReplicationSpecService) appendGoMaxProcsWarnings(sourceBucketName
 		warnings.AddWarning(base.SourceNozzlePerNode, msg)
 	}
 	return
+}
+
+func (service *ReplicationSpecService) SetManifestsGetter(getter service_def.ManifestsGetter) {
+	service.manifestsGetterMtx.Lock()
+	defer service.manifestsGetterMtx.Unlock()
+	service.manifestsGetter = getter
+}
+
+func (service *ReplicationSpecService) waitForManifestGetter() {
+	var manifestGetterFound bool
+	for !manifestGetterFound {
+		service.manifestsGetterMtx.RLock()
+		manifestGetterFound = service.manifestsGetter != nil
+		service.manifestsGetterMtx.RUnlock()
+		if !manifestGetterFound {
+			time.Sleep(time.Duration(base.ManifestsGetterSleepTimeSecs) * time.Second)
+		}
+	}
+}
+
+func (service *ReplicationSpecService) getManifests(sourceBucket string, targetBucket string,
+	ref *metadata.RemoteClusterReference) (*metadata.CollectionsManifestPair, error) {
+	service.waitForManifestGetter()
+	getterSpec, err := metadata.NewReplicationSpecification(sourceBucket, "", ref.Uuid(), targetBucket, "")
+	if err != nil {
+		return nil, err
+	}
+
+	srcManifest, tgtManifest, err := service.manifestsGetter(getterSpec, true)
+	if err != nil {
+		return nil, err
+	}
+
+	if srcManifest == nil {
+		return nil, fmt.Errorf("Source bucket %v has no manifest", sourceBucket)
+	}
+	if tgtManifest == nil {
+		return nil, fmt.Errorf("Target bucket %v has no manifest", targetBucket)
+	}
+
+	return &metadata.CollectionsManifestPair{Source: srcManifest, Target: tgtManifest}, nil
 }

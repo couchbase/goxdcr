@@ -29,7 +29,7 @@ type ReplicationSpecSvc interface {
 	ReplicationSpecReadOnly(replicationId string) (*metadata.ReplicationSpecification, error)
 	// additionalInfo is an optional parameter, which, if provided, will be written to replication creation ui log
 	AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error
-	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, UIWarnings)
+	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, UIWarnings, *metadata.CollectionsManifestPair)
 	ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (base.ErrorMap, error, UIWarnings)
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
@@ -64,4 +64,6 @@ type ReplicationSpecSvc interface {
 	// when the replication spec service makes changes, it needs to call the call back
 	// explicitly, so that the actions can be taken immediately
 	SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority)
+
+	SetManifestsGetter(getter ManifestsGetter)
 }
