@@ -81,7 +81,7 @@ function runTestCase {
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServerAll "7.1.3"
+	vagrantInstallCBServerAll "7.2.1"
 
 	setupTopologies
 
@@ -93,6 +93,7 @@ function runTestCase {
 	local coolDownPeriod=1
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
 	setInternalSettings "C2" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 10
 
 	sleep 5
 	createRemoteClusterReference "C1" "C2"

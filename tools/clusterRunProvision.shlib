@@ -90,6 +90,7 @@ declare -A SCOPE_NAME_COLLECTION_DONE_MAP
 
 REST_MAX_RETRY=5
 GET_BROKEN_MAP_NOT_FOUND=255
+CHECK_CHANGES_LEFT_MAX=5
 
 # With python 3.9 to bypass "OpenSSL 3.0's legacy provider failed to load" message when running cbworkloadgen
 export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
@@ -2021,12 +2022,8 @@ function setInternalSettings {
 		vagrantVersion="${VAGRANT_VERSION_MAP[$clusterName]}"
 		if [[ "$vagrantVersion" == "toy" ]]; then
 			port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-		elif [[ "$vagrantVersion" =~ (7)\.(1) ]]; then
-			majorVersion=${BASH_REMATCH[1]}
-			minorVersion=${BASH_REMATCH[2]}
-			if (($majorVersion >= 7)) && (($minorVersion >= 1)); then
-				port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
-			fi
+		elif [[ "$vagrantVersion" =~ ([7-9])\.([1-9]) ]]; then
+			port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 		fi
 	fi
 

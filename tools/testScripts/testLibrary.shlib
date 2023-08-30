@@ -187,7 +187,7 @@ function checkChangesLeftInternal {
 
 	local lastChangesLeft=0
 
-	for ((i = 0; $i < 3; i = $(($i + 1)))); do
+	for ((i = 0; $i < $CHECK_CHANGES_LEFT_MAX; i = $(($i + 1)))); do
 		changesLeft=$(getChangesLeft "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if [[ -z "${changesLeft:-}" ]] || [[ "$changesLeft" == "null" ]]; then
 			changesLeft=999999

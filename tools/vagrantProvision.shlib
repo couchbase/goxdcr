@@ -54,11 +54,12 @@ function vscp {
 }
 
 declare -A CBServerLink=(
+	["7.2.1"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-ubuntu20.04_amd64.deb"
 	["7.1.3"]="http://latestbuilds.service.couchbase.com/builds/releases/7.1.3/couchbase-server-enterprise_7.1.3-ubuntu20.04_amd64.deb"
 	["7.0.4"]="http://latestbuilds.service.couchbase.com/builds/releases/7.0.4/couchbase-server-enterprise_7.0.4-ubuntu20.04_amd64.deb"
 	["6.6.3"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.3/couchbase-server-enterprise_6.6.3-ubuntu18.04_amd64.deb"
 	["6.6.5"]="http://latestbuilds.service.couchbase.com/builds/releases/6.6.5/couchbase-server-enterprise_6.6.5-ubuntu18.04_amd64.deb"
-	["toy"]="http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
+	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
 function vagrantUp {
