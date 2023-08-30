@@ -34,6 +34,8 @@ const (
 	ReqPeriodicPush       OpCode = iota
 	ReqConnectionPreCheck OpCode = iota
 	ReqReplSpecManifests  OpCode = iota
+	ReqManualBackfill     OpCode = iota
+	ReqDeleteBackfill     OpCode = iota
 	ReqMaxInvalid         OpCode = iota
 )
 
@@ -49,6 +51,10 @@ func (o OpCode) String() string {
 		return "ConnectionPreCheck"
 	case ReqReplSpecManifests:
 		return "ReplSpecManifests"
+	case ReqManualBackfill:
+		return "ReqManualBackfill"
+	case ReqDeleteBackfill:
+		return "ReqDeleteBackfill"
 	default:
 		return "?? (InvalidRequest)"
 	}
@@ -65,6 +71,10 @@ func (o OpCode) IsInterruptable() bool {
 	case ReqConnectionPreCheck:
 		return false
 	case ReqReplSpecManifests:
+		return false
+	case ReqManualBackfill:
+		return false
+	case ReqDeleteBackfill:
 		return false
 	default:
 		return false
@@ -377,6 +387,13 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 			return nil, fmt.Errorf("ManifestsResponse deSerialize err: %v", err)
 		}
 		return resp, nil
+	case ReqManualBackfill:
+		resp := &BackfillResponse{}
+		err = resp.DeSerialize(body)
+		if err != nil {
+			return nil, fmt.Errorf("ManualBackfillResponse deSerialize err: %v", err)
+		}
+		return resp, nil
 	default:
 		return nil, fmt.Errorf("Unknown response %v", respCommon.RespType)
 	}
@@ -461,6 +478,22 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		}
 		reqManifests.RequestCommon = reqCommon
 		return reqManifests, err
+	case ReqManualBackfill:
+		reqManualBackfill := &BackfillRequest{}
+		err = reqManualBackfill.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("reqManualBackfill deSerialize err: %v", err)
+		}
+		reqManualBackfill.RequestCommon = reqCommon
+		return reqManualBackfill, err
+	case ReqDeleteBackfill:
+		reqDelBackfill := &BackfillDelRequest{}
+		err = reqDelBackfill.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("reqDelBackfill deSerialize err: %v", err)
+		}
+		reqDelBackfill.RequestCommon = reqCommon
+		return reqDelBackfill, err
 	default:
 		return nil, fmt.Errorf("Unknown request %v", reqCommon.ReqType)
 	}
@@ -1893,4 +1926,118 @@ func (m *ManifestsResponse) Serialize() ([]byte, error) {
 
 func (m *ManifestsResponse) DeSerialize(stream []byte) error {
 	return json.Unmarshal(stream, m)
+}
+
+type BackfillRequest struct {
+	RequestCommon
+
+	SpecId    string
+	Namespace base.CollectionNamespace
+}
+
+func NewBackfillReq(common RequestCommon, specId string, colNs base.CollectionNamespace) (*BackfillRequest, error) {
+	req := &BackfillRequest{RequestCommon: common}
+	req.ReqType = ReqManualBackfill
+
+	req.SpecId = specId
+	req.Namespace = colNs
+	return req, nil
+}
+
+func (b *BackfillRequest) Serialize() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+func (b *BackfillRequest) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, b)
+}
+
+func (b *BackfillRequest) SameAs(otherRaw interface{}) (bool, error) {
+	other, ok := otherRaw.(*BackfillRequest)
+	if !ok {
+		return false, getWrongTypeErr("*BackfillRequest", otherRaw)
+	}
+
+	if b.SpecId != other.SpecId || !b.Namespace.IsSameAs(other.Namespace) {
+		return false, nil
+	}
+
+	return b.RequestCommon.SameAs(&other.RequestCommon)
+}
+
+func (b *BackfillRequest) GenerateResponse() interface{} {
+	common := NewResponseCommon(b.ReqType, b.RemoteLifeCycleId, b.LocalLifeCycleId, b.Opaque, b.TargetAddr)
+	common.RespType = b.ReqType
+	resp := &BackfillResponse{
+		ResponseCommon: common,
+	}
+	return resp
+}
+
+type BackfillResponse struct {
+	ResponseCommon
+}
+
+func (b *BackfillResponse) Serialize() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+func (b *BackfillResponse) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, b)
+}
+
+type BackfillDelRequest struct {
+	RequestCommon
+
+	SpecId string
+}
+
+func NewBackfillDelReq(common RequestCommon, specId string) (*BackfillDelRequest, error) {
+	req := &BackfillDelRequest{RequestCommon: common}
+	req.ReqType = ReqDeleteBackfill
+
+	req.SpecId = specId
+	return req, nil
+}
+
+func (b *BackfillDelRequest) Serialize() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+func (b *BackfillDelRequest) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, b)
+}
+
+func (b *BackfillDelRequest) SameAs(otherRaw interface{}) (bool, error) {
+	other, ok := otherRaw.(*BackfillDelRequest)
+	if !ok {
+		return false, getWrongTypeErr("*BackfillDelRequest", otherRaw)
+	}
+
+	if b.SpecId != other.SpecId {
+		return false, nil
+	}
+
+	return b.RequestCommon.SameAs(&other.RequestCommon)
+}
+
+func (b *BackfillDelRequest) GenerateResponse() interface{} {
+	common := NewResponseCommon(b.ReqType, b.RemoteLifeCycleId, b.LocalLifeCycleId, b.Opaque, b.TargetAddr)
+	common.RespType = b.ReqType
+	resp := &BackfillDelResponse{
+		ResponseCommon: common,
+	}
+	return resp
+}
+
+type BackfillDelResponse struct {
+	ResponseCommon
+}
+
+func (b *BackfillDelResponse) Serialize() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+func (b *BackfillDelResponse) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, b)
 }

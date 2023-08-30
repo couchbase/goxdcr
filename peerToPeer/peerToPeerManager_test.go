@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIface, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, *utils.Utilities, []error, []int, []string, string, chan service_def_real.SourceNotification, *service_def.CheckpointsService, *service_def.BackfillReplSvc, *service_def.CollectionsManifestSvc, *service_def.SecuritySvc) {
+func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIface, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, *utils.Utilities, []error, []int, []string, string, chan service_def_real.SourceNotification, *service_def.CheckpointsService, *service_def.BackfillReplSvc, *service_def.CollectionsManifestSvc, *service_def.SecuritySvc, *service_def.BackfillMgrIface) {
 	xdcrComp := &service_def.XDCRCompTopologySvc{}
 	utilsMock := &utilsMock2.UtilsIface{}
 	bucketTopSvc := &service_def.BucketTopologySvc{}
@@ -34,13 +34,14 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIfac
 	backfillReplSvc := &service_def.BackfillReplSvc{}
 	colManifestSvc := &service_def.CollectionsManifestSvc{}
 	securityMock := &service_def.SecuritySvc{}
+	backfillMgr := &service_def.BackfillMgrIface{}
 
 	queryResultErrs := []error{nil, nil}
 	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
 	peerNodes := []string{"10.1.1.1:8091", "10.2.2.2:8091"}
 	myHostAddr := "127.0.0.1:8091"
 	srcCh := make(chan service_def_real.SourceNotification, 50)
-	return xdcrComp, utilsMock, bucketTopSvc, replSpecSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securityMock
+	return xdcrComp, utilsMock, bucketTopSvc, replSpecSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securityMock, backfillMgr
 }
 
 func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xdcrComp *service_def.XDCRCompTopologySvc, peerNodes []string, myAddr string, specList []*metadata.ReplicationSpecification, replSpecSvc *service_def.ReplicationSpecSvc, queryErrs []error, queryStatuses []int, srcCh chan service_def_real.SourceNotification, subscribeErr error, bucketSvc *service_def.BucketTopologySvc, ckptSvc *service_def.CheckpointsService, backfillReplSvc *service_def.BackfillReplSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc, securitySvc *service_def.SecuritySvc) {
@@ -88,11 +89,14 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	queryResultErrs := []error{nil, nil}
 	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
 
-	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc := setupBoilerPlate()
+	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc, backfillMgr := setupBoilerPlate()
 	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc)
 
 	dummyMerger := func(string, string, interface{}) error { return nil }
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc)
+	getBackfillMgr := func() service_def_real.BackfillMgrIface {
+		return backfillMgr
+	}
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc, getBackfillMgr)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	mgr.SetPushReqMergerOnce(dummyMerger)
@@ -228,11 +232,14 @@ func TestSendSameHostDualSimultaneousReqs(t *testing.T) {
 	queryResultErrs := []error{nil, nil}
 	queryResultsStatusCode := []int{http.StatusOK, http.StatusOK}
 
-	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc := setupBoilerPlate()
+	xdcrComp, utilsMock, bucketSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc, backfillMgr := setupBoilerPlate()
 	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketSvc, ckptSvc, backfillReplSvc, colManifestSvc, securitySvc)
 
 	dummyMerger := func(string, string, interface{}) error { return nil }
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc)
+	getBackfillMgr := func() service_def_real.BackfillMgrIface {
+		return backfillMgr
+	}
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc, getBackfillMgr)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	mgr.SetPushReqMergerOnce(dummyMerger)

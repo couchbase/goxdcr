@@ -306,6 +306,48 @@ func (_c *P2PManager_SendConnectionPreCheckRequest_Call) RunAndReturn(run func(*
 	return _c
 }
 
+// SendDelBackfill provides a mock function with given fields: specId
+func (_m *P2PManager) SendDelBackfill(specId string) error {
+	ret := _m.Called(specId)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(specId)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// P2PManager_SendDelBackfill_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SendDelBackfill'
+type P2PManager_SendDelBackfill_Call struct {
+	*mock.Call
+}
+
+// SendDelBackfill is a helper method to define mock.On call
+//   - specId string
+func (_e *P2PManager_Expecter) SendDelBackfill(specId interface{}) *P2PManager_SendDelBackfill_Call {
+	return &P2PManager_SendDelBackfill_Call{Call: _e.mock.On("SendDelBackfill", specId)}
+}
+
+func (_c *P2PManager_SendDelBackfill_Call) Run(run func(specId string)) *P2PManager_SendDelBackfill_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *P2PManager_SendDelBackfill_Call) Return(_a0 error) *P2PManager_SendDelBackfill_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *P2PManager_SendDelBackfill_Call) RunAndReturn(run func(string) error) *P2PManager_SendDelBackfill_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SendManifests provides a mock function with given fields: spec, manifests
 func (_m *P2PManager) SendManifests(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) error {
 	ret := _m.Called(spec, manifests)
@@ -345,6 +387,49 @@ func (_c *P2PManager_SendManifests_Call) Return(_a0 error) *P2PManager_SendManif
 }
 
 func (_c *P2PManager_SendManifests_Call) RunAndReturn(run func(*metadata.ReplicationSpecification, *metadata.CollectionsManifestPair) error) *P2PManager_SendManifests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SendManualBackfill provides a mock function with given fields: specId, request
+func (_m *P2PManager) SendManualBackfill(specId string, request string) error {
+	ret := _m.Called(specId, request)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string) error); ok {
+		r0 = rf(specId, request)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// P2PManager_SendManualBackfill_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SendManualBackfill'
+type P2PManager_SendManualBackfill_Call struct {
+	*mock.Call
+}
+
+// SendManualBackfill is a helper method to define mock.On call
+//   - specId string
+//   - request string
+func (_e *P2PManager_Expecter) SendManualBackfill(specId interface{}, request interface{}) *P2PManager_SendManualBackfill_Call {
+	return &P2PManager_SendManualBackfill_Call{Call: _e.mock.On("SendManualBackfill", specId, request)}
+}
+
+func (_c *P2PManager_SendManualBackfill_Call) Run(run func(specId string, request string)) *P2PManager_SendManualBackfill_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *P2PManager_SendManualBackfill_Call) Return(_a0 error) *P2PManager_SendManualBackfill_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *P2PManager_SendManualBackfill_Call) RunAndReturn(run func(string, string) error) *P2PManager_SendManualBackfill_Call {
 	_c.Call.Return(run)
 	return _c
 }

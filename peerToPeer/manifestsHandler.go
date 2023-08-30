@@ -110,7 +110,7 @@ func (m *ManifestsHandler) storeManifestsPair(specId string, specInternalId stri
 }
 
 func (m *ManifestsHandler) handleResponse(resp *ManifestsResponse) {
-	// No need to handleResponse at this point as the requests is not meant to be replied
+	// No need to handleBackfillResp at this point as the requests is not meant to be replied
 }
 
 func (m *ManifestsHandler) getCachedManifest(specId, specInternalId string) (*metadata.CollectionsManifestPair, error) {

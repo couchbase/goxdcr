@@ -55,12 +55,13 @@ type Adminport struct {
 	utils              utilities.UtilsIface
 	prometheusExporter pipeline_utils.ExpVarExporter
 
-	p2pMgr      peerToPeer.P2PManager
-	p2pAPI      peerToPeer.PeerToPeerCommAPI
-	securitySvc service_def.SecuritySvc
+	p2pMgr              peerToPeer.P2PManager
+	p2pAPI              peerToPeer.PeerToPeerCommAPI
+	securitySvc         service_def.SecuritySvc
+	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
 }
 
-func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface, p2pMgr peerToPeer.P2PManager, securitySvc service_def.SecuritySvc) *Adminport {
+func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan bool, utilsIn utilities.UtilsIface, p2pMgr peerToPeer.P2PManager, securitySvc service_def.SecuritySvc, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) *Adminport {
 	//callback functions from GenServer
 	var msg_callback_func gen_server.Msg_Callback_Func
 	var exit_callback_func gen_server.Exit_Callback_Func
@@ -70,14 +71,15 @@ func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan boo
 		&exit_callback_func, &error_handler_func, log.DefaultLoggerContext, "Adminport", utilsIn)
 
 	adminport := &Adminport{
-		sourceKVHost:       laddr,
-		xdcrRestPort:       xdcrRestPort,
-		kvAdminPort:        kvAdminPort,
-		GenServer:          server, /*gen_server.GenServer*/
-		utils:              utilsIn,
-		prometheusExporter: pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable, pipeline_utils.NewPrometheusLabelsTable),
-		p2pMgr:             p2pMgr,
-		securitySvc:        securitySvc,
+		sourceKVHost:        laddr,
+		xdcrRestPort:        xdcrRestPort,
+		kvAdminPort:         kvAdminPort,
+		GenServer:           server, /*gen_server.GenServer*/
+		utils:               utilsIn,
+		prometheusExporter:  pipeline_utils.NewPrometheusExporter(service_def.GlobalStatsTable, pipeline_utils.NewPrometheusLabelsTable),
+		p2pMgr:              p2pMgr,
+		securitySvc:         securitySvc,
+		xdcrCompTopologySvc: xdcrCompTopologySvc,
 	}
 
 	msg_callback_func = adminport.processRequest
@@ -770,34 +772,11 @@ func ForceManualBackfillRequest(replId string, incomingReq string) error {
 		return err
 	}
 
-	// Validate the incoming request
-	var sourceNamespace *metadata.SourceNamespace
-	collectionMode := replSpec.Settings.GetCollectionModes()
-	checkDefaultNs, defaultNsErr := base.NewCollectionNamespaceFromString(incomingReq)
-	if !collectionMode.IsMigrationOn() || (defaultNsErr == nil && checkDefaultNs.IsDefault()) {
-		// NonMigration means incoming request should be a specific namespace
-		// OR Migration mode is on but specified default source collection, meaning IsExplicitMigrationRule() is true
-		collectionNamespace, err := base.NewCollectionNamespaceFromString(incomingReq)
-		if err != nil {
-			return fmt.Errorf("Unable to validate collection namespace: %v", err)
-		}
-		sourceNamespace = metadata.NewSourceCollectionNamespace(&collectionNamespace)
-	} else {
-		// incomingReq should be a rule
-		var fakeDP base.FakeDataPool
-		sourceNamespace, err = metadata.NewSourceMigrationNamespace(incomingReq, &fakeDP)
-		if err != nil {
-			return fmt.Errorf("Unable to validate migration rule: %v", err)
-		}
+	settingsMap, err := metadata.ParseBackfillIntoSettingMap(incomingReq, replSpec)
+	if err != nil {
+		return err
 	}
 
-	// Translate into a mapping where the manual backfill logic only cares about source namespace
-	backfillMapping := make(metadata.CollectionNamespaceMapping)
-	backfillMapping.AddSingleSourceNsMapping(sourceNamespace, &base.CollectionNamespace{})
-
-	settingsMap := make(map[string]interface{})
-	settingsMap[base.NameKey] = replId
-	settingsMap[metadata.CollectionsManualBackfillKey] = backfillMapping
 	err = BackfillManager().GetPipelineSvc().UpdateSettings(settingsMap)
 	if err != nil {
 		logger_ap.Warnf("force backfill returned %v\n", err)
@@ -807,12 +786,24 @@ func ForceManualBackfillRequest(replId string, incomingReq string) error {
 
 func (adminport *Adminport) performOnetimeUserActions(settingsMap metadata.ReplicationSettingsMap, replicationId string) error {
 	var err error
+	var skipP2P bool
+
+	srcClusterCompat, err := adminport.xdcrCompTopologySvc.MyClusterCompatibility()
+	skipP2P = err != nil || !base.IsClusterCompatible(srcClusterCompat, base.VersionForP2PManifestSharing)
+
 	backfillRequest, manualBackfillRequest := settingsMap[metadata.CollectionsManualBackfillKey]
 	if manualBackfillRequest {
 		logger_ap.Infof("force manual backfill has been requested given %v", backfillRequest.(string))
-		err = ForceManualBackfillRequest(replicationId, backfillRequest.(string))
+		backfillReqStr := backfillRequest.(string)
+		err = ForceManualBackfillRequest(replicationId, backfillReqStr)
 		if err != nil {
 			return err
+		}
+		if !skipP2P {
+			err = adminport.p2pMgr.SendManualBackfill(replicationId, backfillReqStr)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -831,6 +822,12 @@ func (adminport *Adminport) performOnetimeUserActions(settingsMap metadata.Repli
 		err = DelAllBackfillsRequest(replicationId)
 		if err != nil {
 			return err
+		}
+		if !skipP2P {
+			err = adminport.p2pMgr.SendDelBackfill(replicationId)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -855,9 +852,7 @@ func DelSpecificBackfillRequest(replId string, vbno int) error {
 }
 
 func DelAllBackfillsRequest(replId string) error {
-	settingsMap := make(map[string]interface{})
-	settingsMap[base.NameKey] = replId
-	settingsMap[metadata.CollectionsDelAllBackfillKey] = true
+	settingsMap := metadata.ParseDelBackfillIntoSettingMap(replId)
 	err := BackfillManager().GetPipelineSvc().UpdateSettings(settingsMap)
 	if err != nil {
 		logger_ap.Warnf("del backfill returned %v\n", err)

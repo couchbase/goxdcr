@@ -16,9 +16,11 @@ import (
 	"strings"
 )
 
-/************************************
+/*
+***********************************
 /* struct ReplicationSpecification
-*************************************/
+************************************
+*/
 type ReplicationSpecification struct {
 	//id of the replication
 	Id string `json:"id"`
@@ -238,4 +240,45 @@ func GetTargetBucketNameFromReplicationId(replicationId string) (string, error) 
 	} else {
 		return "", fmt.Errorf("Invalid replication id: %v", replicationId)
 	}
+}
+
+func ParseBackfillIntoSettingMap(incomingReq string, replSpec *ReplicationSpecification) (map[string]interface{}, error) {
+	var err error
+
+	// Validate the incoming request
+	var sourceNamespace *SourceNamespace
+	collectionMode := replSpec.Settings.GetCollectionModes()
+	checkDefaultNs, defaultNsErr := base.NewCollectionNamespaceFromString(incomingReq)
+	if !collectionMode.IsMigrationOn() || (defaultNsErr == nil && checkDefaultNs.IsDefault()) {
+		// NonMigration means incoming request should be a specific namespace
+		// OR Migration mode is on but specified default source collection, meaning IsExplicitMigrationRule() is true
+		collectionNamespace, err := base.NewCollectionNamespaceFromString(incomingReq)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to validate collection namespace: %v", err)
+		}
+		sourceNamespace = NewSourceCollectionNamespace(&collectionNamespace)
+	} else {
+		// incomingReq should be a rule
+		var fakeDP base.FakeDataPool
+		sourceNamespace, err = NewSourceMigrationNamespace(incomingReq, &fakeDP)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to validate migration rule: %v", err)
+		}
+	}
+
+	// Translate into a mapping where the manual backfill logic only cares about source namespace
+	backfillMapping := make(CollectionNamespaceMapping)
+	backfillMapping.AddSingleSourceNsMapping(sourceNamespace, &base.CollectionNamespace{})
+
+	settingsMap := make(map[string]interface{})
+	settingsMap[base.NameKey] = replSpec.Id
+	settingsMap[CollectionsManualBackfillKey] = backfillMapping
+	return settingsMap, nil
+}
+
+func ParseDelBackfillIntoSettingMap(replId string) map[string]interface{} {
+	settingsMap := make(map[string]interface{})
+	settingsMap[base.NameKey] = replId
+	settingsMap[CollectionsDelAllBackfillKey] = true
+	return settingsMap
 }

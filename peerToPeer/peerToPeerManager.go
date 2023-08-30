@@ -47,6 +47,8 @@ type P2PManager interface {
 	SetPushReqMergerOnce(pm func(fullTopic, sender string, req interface{}) error)
 	RequestImmediateCkptBkfillPush(replicationId string) error
 	SendManifests(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) error
+	SendManualBackfill(specId string, request string) error
+	SendDelBackfill(specId string) error
 }
 
 type VBMasterCheck interface {
@@ -78,6 +80,7 @@ type P2PManagerImpl struct {
 	colManifestSvc    service_def.CollectionsManifestSvc
 	backfillReplSvc   service_def.BackfillReplSvc
 	securitySvc       service_def.SecuritySvc
+	backfillMgrSvc    func() service_def.BackfillMgrIface
 
 	lifeCycleId string
 	logger      *log.CommonLogger
@@ -103,10 +106,7 @@ type P2PManagerImpl struct {
 	pushReqMerger func(string, string, interface{}) error
 }
 
-func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface,
-	bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc,
-	cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc,
-	backfillReplSvc service_def.BackfillReplSvc, securitySvc service_def.SecuritySvc) (*P2PManagerImpl, error) {
+func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, securitySvc service_def.SecuritySvc, backfillMgr func() service_def.BackfillMgrIface) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
 	if err != nil {
 		return nil, err
@@ -131,6 +131,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		backfillReplSvc:     backfillReplSvc,
 		mergerSetCh:         make(chan bool),
 		securitySvc:         securitySvc,
+		backfillMgrSvc:      backfillMgr,
 	}, nil
 }
 
@@ -200,6 +201,16 @@ func (p *P2PManagerImpl) runHandlers() error {
 				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
 			}
 			p.receiveHandlers[i] = NewManifestsHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.colManifestSvc)
+		case ReqManualBackfill:
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
+			p.receiveHandlers[i] = NewManualBackfillHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.backfillMgrSvc)
+		case ReqDeleteBackfill:
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
+			p.receiveHandlers[i] = NewBackfillDelHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.backfillMgrSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -1010,5 +1021,77 @@ func (p *P2PManagerImpl) SendManifests(spec *metadata.ReplicationSpecification, 
 	defer p.receiveHandlersMtx.RUnlock()
 	manifestHandler := p.receiveHandlers[ReqReplSpecManifests].(*ManifestsHandler)
 	manifestHandler.storeManifestsPair(spec.Id, spec.InternalId, manifests)
+	return nil
+}
+
+func (p *P2PManagerImpl) SendManualBackfill(specId string, request string) error {
+	namespace, err := base.NewCollectionNamespaceFromString(request)
+	if err != nil {
+		return err
+	}
+
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		manualBackfillReq, reqErr := NewBackfillReq(common, specId, namespace)
+		if reqErr != nil {
+			// If it returns an error, unlikely to handle it here. But it is also unlikely to return an error
+			errStr := fmt.Sprintf("NewBackfillReq returned error %v given spec %v ", reqErr, specId)
+			p.logger.Errorf(errStr)
+		}
+		return manualBackfillReq
+	}
+
+	spec, err := p.replSpecSvc.ReplicationSpec(specId)
+	if err != nil {
+		return err
+	}
+	opts := NewSendOpts(false, metadata.GetP2PTimeoutFromSettings(spec.Settings.ToMap(false)),
+		base.PeerToPeerMaxRetry)
+	err, peersFailedToSend := p.sendToEachPeerOnce(ReqManualBackfill, getReqFunc, opts)
+	if err != nil {
+		return err
+	}
+
+	if len(peersFailedToSend) > 0 {
+		errStr := "Unable to send to the following nodes: "
+		for k, _ := range peersFailedToSend {
+			errStr += fmt.Sprintf("%v ", k)
+		}
+		return errors.New(errStr)
+	}
+
+	return nil
+}
+
+func (p *P2PManagerImpl) SendDelBackfill(specId string) error {
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
+		delReq, reqErr := NewBackfillDelReq(common, specId)
+		if reqErr != nil {
+			// If it returns an error, unlikely to handle it here. But it is also unlikely to return an error
+			errStr := fmt.Sprintf("NewBackfillDelReq returned error %v given spec %v ", reqErr, specId)
+			p.logger.Errorf(errStr)
+		}
+		return delReq
+	}
+	spec, err := p.replSpecSvc.ReplicationSpec(specId)
+	if err != nil {
+		return err
+	}
+
+	opts := NewSendOpts(false, metadata.GetP2PTimeoutFromSettings(spec.Settings.ToMap(false)),
+		base.PeerToPeerMaxRetry)
+	err, peersFailedToSend := p.sendToEachPeerOnce(ReqDeleteBackfill, getReqFunc, opts)
+	if err != nil {
+		return err
+	}
+
+	if len(peersFailedToSend) > 0 {
+		errStr := "Unable to send to the following nodes: "
+		for k, _ := range peersFailedToSend {
+			errStr += fmt.Sprintf("%v ", k)
+		}
+		return errors.New(errStr)
+	}
 	return nil
 }

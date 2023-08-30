@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/couchbase/goxdcr/backfill_manager"
@@ -107,7 +108,8 @@ type replicationManager struct {
 	// Backfill replication service
 	backfillReplSvc service_def.BackfillReplSvc
 	// Backfill Manager service
-	backfillMgr service_def.BackfillMgrIface
+	backfillMgr         service_def.BackfillMgrIface
+	backfillMgrInitDone uint32
 	// Bucket Topology Service
 	bucketTopologySvc service_def.BucketTopologySvc
 
@@ -202,7 +204,8 @@ func StartReplicationManager(sourceKVHost string,
 		replication_mgr.initMetadataChangeMonitor()
 
 		// start adminport
-		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch, replication_mgr.utils, replication_mgr.p2pMgr, securitySvc)
+		adminport := NewAdminport(sourceKVHost, xdcrRestPort, sourceKVAdminPort, replication_mgr.adminport_finch,
+			replication_mgr.utils, replication_mgr.p2pMgr, securitySvc, xdcr_topology_svc)
 		go adminport.Start()
 		logger_rm.Info("Admin port has been launched")
 		// add adminport as children of replication manager supervisor
@@ -499,10 +502,10 @@ func (rm *replicationManager) init(
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc,
 		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
-		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.getBackfillMgr, rm.backfillReplSvc,
+		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.GetBackfillMgr, rm.backfillReplSvc,
 		rm.bucketTopologySvc, rm.p2pMgr, rm.getReplStatus)
 
-	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell, rm.getBackfillMgr)
+	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell, rm.GetBackfillMgr)
 	rm.pipelineMgr = pipelineMgrObj
 	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
 	rm.p2pMgr.SetPushReqMergerOnce(rm.pipelineMgr.HandlePeerCkptPush)
@@ -512,6 +515,7 @@ func (rm *replicationManager) init(
 
 	rm.backfillMgr = backfill_manager.NewBackfillManager(collectionsManifestSvc, repl_spec_svc, backfillReplSvc, pipelineMgrObj, xdcr_topology_svc, checkpoint_svc, rm.bucketTopologySvc, rm.utils)
 	rm.backfillMgr.Start()
+	atomic.StoreUint32(&rm.backfillMgrInitDone, 1)
 
 	rm.metadata_change_callback_cancel_ch = make(chan struct{}, 1)
 
@@ -1358,7 +1362,10 @@ func (rm *replicationManager) upgradeRemoteClusterRefs() {
 	}
 }
 
-func (rm *replicationManager) getBackfillMgr() service_def.BackfillMgrIface {
+func (rm *replicationManager) GetBackfillMgr() service_def.BackfillMgrIface {
+	for atomic.LoadUint32(&rm.backfillMgrInitDone) == 0 {
+		time.Sleep(100 * time.Millisecond)
+	}
 	return rm.backfillMgr
 }
 
