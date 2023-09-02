@@ -867,6 +867,8 @@ func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpe
 			src, tgt, err = b.collectionsManifestSvc.GetStartingManifests(spec)
 			if err != nil {
 				if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
+					// Need to restore original manifests to be default to use
+					src = &defaultManifest
 					tgt = &defaultManifest
 					err = nil
 				} else {
@@ -883,6 +885,7 @@ func (b *BackfillMgr) initNewReplStartingManifests(spec *metadata.ReplicationSpe
 				src, tgt, err = b.collectionsManifestSvc.GetLatestManifests(spec, false)
 				if err != nil {
 					if strings.Contains(err.Error(), base.ErrorTargetCollectionsNotSupported.Error()) {
+						src = &defaultManifest
 						tgt = &defaultManifest
 						err = nil
 					} else {

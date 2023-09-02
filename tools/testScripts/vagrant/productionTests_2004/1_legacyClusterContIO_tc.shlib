@@ -57,8 +57,8 @@ function runTestCase {
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServer 0 "toy" # To be updated
-	vagrantInstallCBServer 1 "toy"
+	vagrantInstallCBServer 0 "7.6.1" # To be updated
+	vagrantInstallCBServer 1 "7.6.1"
 	vagrantInstallCBServer 2 "6.6.5"
 	vagrantInstallCBServer 3 "6.6.5"
 

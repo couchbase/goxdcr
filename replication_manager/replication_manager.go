@@ -864,6 +864,7 @@ func (rm *replicationManager) createAndPersistReplicationSpec(justValidate bool,
 
 	// Before persisting, send manifests only if they exist
 	if manifests != nil {
+		logger_rm.Infof("Sharing retrieved manifests %v with source peers", manifests)
 		err = replication_mgr.p2pMgr.SendManifests(spec, manifests)
 		if err != nil {
 			logger_rm.Errorf("Unable to share retrieved manifests with source peers: %v", err)
