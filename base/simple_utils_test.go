@@ -13,12 +13,13 @@ package base
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/couchbaselabs/gojsonsm"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/couchbaselabs/gojsonsm"
+	"github.com/stretchr/testify/assert"
 )
 
 const testFilteringDataDir = "filter/testFilteringData/"
@@ -414,4 +415,42 @@ func TestSanitizeSeqnoMapKey(t *testing.T) {
 	vbno, err := DecomposeVBHighSeqnoStatsKey(key)
 	assert.Nil(err)
 	assert.Equal(uint16(123), vbno)
+}
+
+func TestValidateRemoteClusterName(t *testing.T) {
+	fmt.Println("============== Test case start: TestValidateRemoteClusterName =================")
+	defer fmt.Println("============== Test case end: TestValidateRemoteClusterName =================")
+
+	nonWhiteSpaceErrMsg := "Remote cluster name should only be IPv4, IPv6, or alpha-numeric characters"
+	whiteSpaceErrMsg := "Remote cluster name should only be IPv4, IPv6, or alpha-numeric characters. It contains white-space characters like space, newline, tabspace etc"
+	type args struct {
+		name      string
+		errorsMap map[string]error
+	}
+	tests := []struct {
+		tname string
+		args  args
+		res   string
+	}{
+		{tname: "no_errors1", args: args{name: "dst", errorsMap: map[string]error{}}, res: ""},
+		{tname: "no_errors2", args: args{name: "192.168.2.3", errorsMap: map[string]error{}}, res: ""},
+		{tname: "no_errors3", args: args{name: "svc-qi-node-009.fd0tr99wpja7egdl.cloud.couchbase.com", errorsMap: map[string]error{}}, res: ""},
+		{tname: "with_space", args: args{name: "new dst", errorsMap: map[string]error{}}, res: whiteSpaceErrMsg},
+		{tname: "with_multiple_spaces", args: args{name: "new   dst", errorsMap: map[string]error{}}, res: whiteSpaceErrMsg},
+		{tname: "with_newline", args: args{name: "new\ndst", errorsMap: map[string]error{}}, res: whiteSpaceErrMsg},
+		{tname: "with_tabspace", args: args{name: "new\tdst", errorsMap: map[string]error{}}, res: whiteSpaceErrMsg},
+		{tname: "non_whitespace_error1", args: args{name: "dst^2", errorsMap: map[string]error{}}, res: nonWhiteSpaceErrMsg},
+		{tname: "non_whitespace_error2", args: args{name: "dstnew#", errorsMap: map[string]error{}}, res: nonWhiteSpaceErrMsg},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tname, func(t *testing.T) {
+			ValidateRemoteClusterName(tt.args.name, tt.args.errorsMap)
+			op := ""
+			err, ok := tt.args.errorsMap[RemoteClusterName]
+			if ok {
+				op = fmt.Sprintf("%v", err)
+			}
+			assert.Equal(t, tt.res, op)
+		})
+	}
 }

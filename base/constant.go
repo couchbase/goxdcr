@@ -154,6 +154,8 @@ const BasicFQDNCharClass = "[0-9A-Za-z-_]"
 
 var BasicFQDNRegex, _ = regexp.Compile(fmt.Sprintf("^(%v+\\.)+(%v+)$", BasicFQDNCharClass, BasicFQDNCharClass))
 
+var WhiteSpaceCharsRegex, _ = regexp.Compile(`\s`)
+
 var DefaultCollectionId uint32 = 0
 
 var CollectionsUidBase int = 16

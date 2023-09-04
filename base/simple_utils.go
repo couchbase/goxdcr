@@ -1984,7 +1984,11 @@ func ValidateRemoteClusterName(name string, errorsMap map[string]error) {
 		return
 	}
 
-	errorsMap[RemoteClusterName] = fmt.Errorf("Remote cluster name should only be IPv4, IPv6, or alpha-numeric characters")
+	errMsg := "Remote cluster name should only be IPv4, IPv6, or alpha-numeric characters"
+	if WhiteSpaceCharsRegex.MatchString(name) {
+		errMsg = errMsg + ". It contains white-space characters like space, newline, tabspace etc"
+	}
+	errorsMap[RemoteClusterName] = fmt.Errorf(errMsg)
 	return
 }
 
