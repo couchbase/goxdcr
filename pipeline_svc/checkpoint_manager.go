@@ -638,6 +638,8 @@ func (ckmgr *CheckpointManager) initConnections() error {
 
 func (ckmgr *CheckpointManager) waitForInitConnDone() {
 	select {
+	case <-ckmgr.finish_ch:
+		return
 	case <-ckmgr.initConnDone:
 		return
 	}
