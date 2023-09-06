@@ -50,7 +50,7 @@ function runTestCase {
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
-	vagrantInstallCBServerAll "7.1.3"
+	vagrantInstallCBServerAll "7.6.0"
 
 	setupTopologies
 

@@ -720,8 +720,10 @@ func TestBackfillMgrSpecChangeWithNamespaceChange(t *testing.T) {
 	}()
 	waitGroup.Wait()
 
+	fmt.Printf("1: elapsed %v\n", time.Since(startTime).Seconds())
 	handlerCb, _ := backfillMgr.GetExplicitMappingChangeHandler(spec1.Id, generatedSpec.InternalId, oldSetting, newSetting)
 	handlerCb()
+	fmt.Printf("2: elapsed %v\n", time.Since(startTime).Seconds())
 
 	elapsed := time.Since(startTime)
 	assert.True(int(elapsed.Seconds()) < 3)

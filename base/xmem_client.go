@@ -24,12 +24,15 @@ import (
 	"github.com/couchbase/goxdcr/log"
 )
 
-/************************************
+/*
+***********************************
 /* struct XmemClient
-*************************************/
+************************************
+*/
 var BadConnectionError = errors.New("Connection is bad")
 var ConnectionClosedError = errors.New("Connection is closed")
 var FatalError = errors.New("Fatal")
+var repairTimeThreshold = time.Minute * 1
 
 type XmemClient struct {
 	name      string
@@ -51,6 +54,7 @@ type XmemClient struct {
 	num_of_repairs               int
 	last_failure                 time.Time
 	backoff_factor               int
+	receivedUnknownOpcode        bool
 }
 
 func NewXmemClient(name string, read_timeout, write_timeout time.Duration,
@@ -103,13 +107,37 @@ func (client *XmemClient) ReportOpSuccess() {
 
 	client.downtime_start = time.Time{}
 	client.continuous_write_failure_counter = 0
-	client.success_counter++
-	if client.success_counter > client.max_continuous_write_failure && client.backoff_factor > 0 {
+	if !client.receivedUnknownOpcode {
+		client.success_counter++
+	}
+	if client.success_counter > client.max_continuous_write_failure && client.backoff_factor > 0 && !client.receivedUnknownOpcode {
 		client.backoff_factor--
 		client.success_counter = client.success_counter - client.max_continuous_write_failure
 	}
 	client.healthy = true
+}
 
+func (client *XmemClient) ReportUnknownResponseReceived() {
+	client.lock.RLock()
+	if client.receivedUnknownOpcode {
+		// Already done
+		client.lock.RUnlock()
+		return
+	}
+	client.lock.RUnlock()
+
+	client.lock.Lock()
+	defer client.lock.Unlock()
+	if !client.receivedUnknownOpcode {
+		// First time
+		client.receivedUnknownOpcode = true
+		client.success_counter = 0 // to ensure backoff will happen and override ReportOpSuccess
+		time.AfterFunc(repairTimeThreshold, func() {
+			client.lock.Lock()
+			defer client.lock.Unlock()
+			client.receivedUnknownOpcode = false
+		})
+	}
 }
 
 func (client *XmemClient) isConnHealthy() bool {
@@ -166,7 +194,7 @@ func (client *XmemClient) RepairConn(memClient mcc.ClientIface, repair_count_at_
 	defer client.lock.Unlock()
 
 	if client.num_of_repairs == repair_count_at_error {
-		if time.Since(client.last_failure) < 1*time.Minute {
+		if time.Since(client.last_failure) < repairTimeThreshold {
 			client.backoff_factor++
 		} else {
 			client.backoff_factor = 0
@@ -176,6 +204,7 @@ func (client *XmemClient) RepairConn(memClient mcc.ClientIface, repair_count_at_
 		client.memClient = memClient
 		client.continuous_write_failure_counter = 0
 		client.num_of_repairs++
+		client.last_failure = time.Now()
 		client.healthy = true
 		return true
 	} else {

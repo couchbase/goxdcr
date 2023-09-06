@@ -2763,7 +2763,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								}
 								atomic.AddUint64(&xmem.counter_ignored, 1)
 							} else {
-								// for other non-temporary errors, repair connections
 								if response.Status == mc.XATTR_EINVAL && xmem.source_cr_mode == base.CRMode_Custom {
 									// There is something wrong with XATTR. This should never happen in released version.
 									// Print the CCR XATTR for debugging
@@ -2785,6 +2784,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 											xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, ccrxattrlen, req.Body[8:ccrxattrlen+8])
 									}
 								}
+								// for other non-temporary errors, repair connections
 								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
@@ -3891,14 +3891,12 @@ func (xmem *XmemNozzle) PrintResponseStatusError(status mc.Status) string {
 
 	errorsLookupTable, ok := xmem.memcachedErrMap[errorMapErrKey].(map[string]interface{})
 	if !ok {
-		xmem.Logger().Errorf("Unable to find %v in errormap %v", errorMapErrKey, xmem.memcachedErrMap)
 		return fmt.Sprintf("response status=%v", status)
 	}
 
-	statusCodeStr := strconv.FormatUint(uint64(status), 10)
+	statusCodeStr := strconv.FormatUint(uint64(status), 16)
 	errDetail, ok := errorsLookupTable[statusCodeStr].(map[string]interface{})
 	if !ok {
-		xmem.Logger().Errorf("%v", errDetail)
 		return fmt.Sprintf("response status=%v", status)
 	}
 

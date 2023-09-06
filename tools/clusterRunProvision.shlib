@@ -34,6 +34,7 @@ CURL="curl -s"
 POOLS_DEFAULT_BUCKETS_PATH="pools/default/buckets"
 CBWORKLOAD_COLLECTION_NUM_ITEMS=10000
 CB_CLI_BIN="../../../../../../../install/bin/couchbase-cli"
+RR_REST="settings/resourceManagement/bucket/residentRatio"
 
 # topological globals
 # -----------------
@@ -2800,4 +2801,42 @@ function enableDcpOsoBackfill {
 
 	$CURL -i -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/diag/eval \
 		--data "ns_bucket:update_bucket_props(\"$bucketName\", [{extra_config_string, \"dcp_oso_backfill=enabled\"}])"
+}
+
+function checkResidentRatioGuardrail {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local output
+
+	output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$RR_REST)
+	echo "output is $output"
+	if [[ "$output" =~ Operation\ not\ allowed ]]; then
+		echo "This test needs to be run with 'cluster_run --provisioned'"
+		exit 1
+	fi
+}
+
+# Input Minimum is an integer in percentage, min of 1
+function setResidentRatioGuardRailCouchStoreMin {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local minimum=$2
+
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/$RR_REST -d couchstoreMinimum="$minimum"
+}
+
+function enableInternalResidentRatioGuardrail {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local bucket=$2
+
+	$CURL -v -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag/eval -d "ns_memcached:set_data_ingress(\"${bucket}\", resident_ratio)."
+}
+
+function disableInternalResidentRatioGuardrail {
+	local clusterName=$1
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	local bucket=$2
+
+	$CURL -v -s -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/diag/eval -d "ns_memcached:set_data_ingress(\"${bucket}\", ok)."
 }
