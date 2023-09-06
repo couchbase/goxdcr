@@ -318,13 +318,13 @@ func TestGetXattrForCustomCR(t *testing.T) {
 	assert := assert.New(t)
 
 	targetCluster, _, err := createBucket(targetConnStr, bucketName)
-	targetCluster.Close(nil)
-
-	fmt.Printf("Created bucket %v\n", bucketName)
 	if err != nil {
 		fmt.Printf("createBucket %v returned %v\n", bucketName, err)
-		t.FailNow()
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
 	}
+	targetCluster.Close(nil)
+	fmt.Printf("Created bucket %v\n", bucketName)
 
 	if !targetXmemIsUpAndCorrectSetupExists(bucketName) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
