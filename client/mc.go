@@ -260,7 +260,7 @@ type Client struct {
 	deadline           time.Time
 	bucket             string
 	// If set, this takes precedence over the global variable ConnName
-	connName	string
+	connName string
 }
 
 var (
@@ -367,7 +367,15 @@ func (c *Client) Send(req *gomemcached.MCRequest) (rv *gomemcached.MCResponse, e
 		return
 	}
 	resp, _, err := getResponse(c.conn, c.hdrBuf)
-	c.setHealthy(!gomemcached.IsFatal(err))
+	if err == nil && resp.Opaque != req.Opaque {
+		logging.Errorf("Send: got response for opaque %v instead of response for opaque %v. req: %v -> res: %v",
+			resp.Opaque, req.Opaque, req, resp)
+		err = resp
+		resp.Status = gomemcached.EINVAL
+		c.setHealthy(false)
+	} else {
+		c.setHealthy(!gomemcached.IsFatal(err))
+	}
 	return resp, err
 }
 
@@ -1125,6 +1133,7 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 						savedErr = err
 						continue
 					} else {
+						c.setHealthy(false) // who knows what's left to be received
 						errch <- err
 						return
 					}
@@ -1138,6 +1147,7 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 						// value returned from the server. When this happens log the error
 						// and the calling function will retry the bulkGet. MB-15140
 						logging.Errorf(" Invalid opaque Value. Debug info : Res.opaque : %v(%v), Keys %v, Response received %v \n key list %v this key %v", res.Opaque, opaque, len(keys), res, keys, string(res.Body))
+						c.setHealthy(false) // who knows what's left to be received
 						errch <- fmt.Errorf("Out of Bounds error")
 						return
 					}
