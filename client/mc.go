@@ -116,6 +116,9 @@ type ClientContext struct {
 
 	// Data is JSON in snappy compressed format
 	Compressed bool
+
+	// Sub-doc paths are document fields (not XATTRs)
+	DocumentSubDocPaths bool
 }
 
 func (this *ClientContext) Copy() *ClientContext {
@@ -667,19 +670,17 @@ func (c *Client) Get(vb uint16, key string, context ...*ClientContext) (*gomemca
 
 // Get the xattrs, doc value for the input key
 func (c *Client) GetSubdoc(vb uint16, key string, subPaths []string, context ...*ClientContext) (*gomemcached.MCResponse, error) {
-	extraBuf, valueBuf := GetSubDocVal(subPaths)
 	req := &gomemcached.MCRequest{
 		Opcode:  gomemcached.SUBDOC_MULTI_LOOKUP,
 		VBucket: vb,
 		Key:     []byte(key),
-		Extras:  extraBuf,
-		Body:    valueBuf,
 		Opaque:  c.getOpaque(),
 	}
 	err := c.setContext(req, context...)
 	if err != nil {
 		return nil, err
 	}
+	req.Extras, req.Body = GetSubDocVal(subPaths, context)
 
 	res, err := c.Send(req)
 
@@ -1181,10 +1182,8 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 	}
 
 	if len(subPaths) > 0 {
-		extraBuf, valueBuf := GetSubDocVal(subPaths)
+		memcachedReqPkt.Extras, memcachedReqPkt.Body = GetSubDocVal(subPaths, context)
 		memcachedReqPkt.Opcode = gomemcached.SUBDOC_MULTI_LOOKUP
-		memcachedReqPkt.Extras = extraBuf
-		memcachedReqPkt.Body = valueBuf
 	}
 
 	for _, k := range keys { // Start of Get request
@@ -1215,7 +1214,16 @@ func (c *Client) GetBulk(vb uint16, keys []string, rv map[string]*gomemcached.MC
 	return <-errch
 }
 
-func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
+func GetSubDocVal(subPaths []string, context []*ClientContext) (extraBuf, valueBuf []byte) {
+
+	// SubdocFlagXattrPath indicates that the path refers to an Xattr rather than the document body.
+	flag := uint8(gomemcached.SUBDOC_FLAG_XATTR)
+	for i := range context {
+		if context[i].DocumentSubDocPaths {
+			flag = 0
+			break
+		}
+	}
 
 	var ops []string
 	totalBytesLen := 0
@@ -1227,10 +1235,12 @@ func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
 		num = num + 1
 	}
 
-	// Xattr retrieval - subdoc multi get
-	// Set deleted true only if it is not expiration
-	if len(subPaths) != 1 || subPaths[0] != "$document.exptime" {
-		extraBuf = append(extraBuf, uint8(0x04))
+	if flag != 0 {
+		// Xattr retrieval - subdoc multi get
+		// Set deleted true only if it is not expiration
+		if len(subPaths) != 1 || subPaths[0] != "$document.exptime" {
+			extraBuf = append(extraBuf, uint8(0x04))
+		}
 	}
 
 	valueBuf = make([]byte, num*4+totalBytesLen)
@@ -1245,10 +1255,7 @@ func GetSubDocVal(subPaths []string) (extraBuf, valueBuf []byte) {
 	for _, v := range ops {
 		pathBytes := []byte(v)
 		valueBuf[valIter+0] = uint8(op)
-
-		// SubdocFlagXattrPath indicates that the path refers to
-		// an Xattr rather than the document body.
-		valueBuf[valIter+1] = uint8(gomemcached.SUBDOC_FLAG_XATTR)
+		valueBuf[valIter+1] = flag
 
 		// 2 byte key
 		binary.BigEndian.PutUint16(valueBuf[valIter+2:], uint16(len(pathBytes)))

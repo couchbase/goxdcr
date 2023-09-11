@@ -194,7 +194,7 @@ const (
 
 	// SUBDOC
 	SUBDOC_PATH_NOT_FOUND             = Status(0xc0)
-	SUBDOC_BAD_MULTI                  = Status(0xcc)
+	SUBDOC_BAD_MULTI                  = Status(0xcc) // SubdocMultiPathFailure
 	SUBDOC_SUCCESS_DELETED            = Status(0xcd)
 	SUBDOC_MULTI_PATH_FAILURE_DELETED = Status(0xd3)
 
