@@ -28,41 +28,50 @@ insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"S1.col1":"S2.col3", "S1.col2":"S2.col4"}')
 
 # Bucket -> Scopes
 # -----------------
 declare -a scope1Arr=("S1" "S2")
-BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
 
 # Scopes -> Collections
 # ----------------------
 declare -a collection1Arr=("col1" "col2")
-declare -a collection2Arr=("col3" "col4" "col5")
-SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]})
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]})
 
 function runDataLoad {
 	echo "RUNNING dataload..."
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
-	waitForBgJobs
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+	# Setup some scopes and collections which are not part of the replication at the end of runDataLoad
+	# The aim is to get mutations related to them at the end of the respective streams
+	echo "Creating scopes and collections not part of replication using implicit mapping and adding some data to them..."
+	createScope "C1" "B1" "S3"
+	createScope "C2" "B2" "S4"
+	createCollection "C1" "B1" "S3" "col5"
+	createCollection "C2" "B2" "S4" "col6"
+	runCbWorkloadGenCollection "C1" "B1" "S3" "col5"
+	runCbWorkloadGenCollection "C2" "B2" "S4" "col6"
 }
 
 function runTestCase {
+	# To validate xdcrDiffer github issue #86. Similar to testcase #2 except runDataLoad
+	# Before the fix for this issue, xdcrDiffer used to run indefinetely for this test-case
 	echo "============================================================================"
-	echo "Running XdcrDiffer explicit collection secure singleLoad test case"
+	echo "Running XdcrDiffer implicit collection singleLoad with some collections not part of replication"
 	echo "============================================================================"
+
 	setupTopologies
 	if (($? != 0)); then
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createSecureRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C1" "C2"
 	sleep 1
-	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
 
 	runDataLoad
+	echo "Sleeping 10s after runDataLoad"
 
 	checkUnidirectionalChangesLeft
 	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
@@ -76,6 +85,25 @@ function runTestCase {
 		return $retVal
 	fi
 
+	validateDifferResults 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+	checkDifferLogItemCount "Target" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+
+	echo "Repeating XdcrDiffer implicit collection singleLoad test case with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
 	validateDifferResults 0 0 0
 	retVal=$?
 	if (($retVal != 0)); then
@@ -83,14 +111,14 @@ function runTestCase {
 		return $retVal
 	fi
 
-	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) 0
-	checkDifferLogItemCount "Target" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) 0
+	checkDifferLogItemCount "Source" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
+	checkDifferLogItemCount "Target" $CBWORKLOAD_COLLECTION_NUM_ITEMS 0
 
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
 
-	echo "Pausing replication and flushing target bucket to create $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) mismatches"
+	echo "Pausing replication and flushing target bucket to create $CBWORKLOAD_COLLECTION_NUM_ITEMS mismatches"
 	pauseReplication "C1" "B1" "C2" "B2"
 	flushBucket "C2" "B2"
 	sleep 5
@@ -99,11 +127,9 @@ function runTestCase {
 
 	echo "Writing some mismatching data"
 	writeCollectionJSONDoc "C1" "B1" "S1" "col1" "d1" '{"foo":"bar"}'
-	writeCollectionJSONDoc "C2" "B2" "S2" "col3" "d1" '{"foo2":"bar2"}'
+	writeCollectionJSONDoc "C2" "B2" "S1" "col1" "d1" '{"foo2":"bar2"}'
 	# One missing from source doc
-	writeCollectionJSONDoc "C2" "B2" "S2" "col4" "d2" '{"foo2":"bar2"}'
-	# One that is not mapped and should not show up
-	writeCollectionJSONDoc "C2" "B2" "S2" "col5" "d3" '{"foo":"bar"}'
+	writeCollectionJSONDoc "C2" "B2" "S1" "col2" "d2" '{"foo2":"bar2"}'
 	sleep 5
 
 	runXdcrDiffer "C1" "B1" "C2" "B2"
@@ -113,19 +139,38 @@ function runTestCase {
 		return $retVal
 	fi
 
-	validateDifferResults 1 1 $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	validateDifferResults 1 1 $CBWORKLOAD_COLLECTION_NUM_ITEMS 0 0
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Failed"
 		return $retVal
 	fi
 
-	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 + 1)) 0
+	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS + 1)) 0
+	checkDifferLogItemCount "Target" 2 0
+
+	echo "Repeating with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 1 1 $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS + 1)) 0
 	checkDifferLogItemCount "Target" 2 0
 
 	echo "============================================================================"
 	echo "PASSED"
-	echo "==========================================================================="
+	echo "============================================================================"
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs

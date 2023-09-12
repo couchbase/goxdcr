@@ -140,7 +140,7 @@ function runTestCase {
 	fi
 
 	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 + 1)) 0
-	checkDifferLogItemCount "Target" 3 0
+	checkDifferLogItemCount "Target" 2 0
 
 	echo "Repeating with compareBody option"
 	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
@@ -158,7 +158,7 @@ function runTestCase {
 	fi
 
 	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 + 1)) 0
-	checkDifferLogItemCount "Target" 3 0
+	checkDifferLogItemCount "Target" 2 0
 
 	echo "============================================================================"
 	echo "PASSED"

@@ -46,30 +46,63 @@ function runDataLoad {
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col2" &
 	waitForBgJobs
+	# Setup some scopes and collections which are not part of the replication at the end of runDataLoad
+	# The aim is to get mutations related to them at the end of the respective streams
+	echo "Creating scopes and collections not part of replication using explicit mapping and adding some data to them..."
+	createScope "C1" "B1" "S3"
+	createScope "C2" "B2" "S4"
+	createCollection "C1" "B1" "S3" "col6"
+	createCollection "C2" "B2" "S4" "col7"
+	runCbWorkloadGenCollection "C1" "B1" "S3" "col6"
+	runCbWorkloadGenCollection "C2" "B2" "S4" "col7"
 }
 
 function runTestCase {
+	# To validate xdcrDiffer github issue #86. Similar to testcase #3 except runDataLoad
+	# Before the fix for this issue, xdcrDiffer used to run indefinetely for this test-case
 	echo "============================================================================"
-	echo "Running XdcrDiffer explicit collection secure singleLoad test case"
+	echo "Running XdcrDiffer explicit collection singleLoad with some collections not part of replication"
 	echo "============================================================================"
+
 	setupTopologies
 	if (($? != 0)); then
 		exit $?
 	fi
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createSecureRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
 
 	runDataLoad
+	echo "Sleeping 10s after runDataLoad"
+	sleep 10
 
 	checkUnidirectionalChangesLeft
-	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
-	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	checkItemCnt "C2" "B2" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 
 	local retVal
 	runXdcrDiffer "C1" "B1" "C2" "B2"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 0 0 0 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) 0
+	checkDifferLogItemCount "Target" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) 0
+
+	echo "Repeating XdcrDiffer explicit collection singleLoad test case with compareBody option"
+
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Differ returned non-0 exit code"
@@ -90,11 +123,11 @@ function runTestCase {
 	echo "PASSED"
 	echo "============================================================================"
 
-	echo "Pausing replication and flushing target bucket to create $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) mismatches"
+	echo "Pausing replication and flushing target bucket to create $CBWORKLOAD_COLLECTION_NUM_ITEMS mismatches"
 	pauseReplication "C1" "B1" "C2" "B2"
 	flushBucket "C2" "B2"
 	sleep 5
-	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	checkItemCnt "C1" "B1" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 	checkItemCnt "C2" "B2" 0
 
 	echo "Writing some mismatching data"
@@ -107,6 +140,25 @@ function runTestCase {
 	sleep 5
 
 	runXdcrDiffer "C1" "B1" "C2" "B2"
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Differ returned non-0 exit code"
+		return $retVal
+	fi
+
+	validateDifferResults 1 1 $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2)) 0 0
+	retVal=$?
+	if (($retVal != 0)); then
+		echo "Failed"
+		return $retVal
+	fi
+
+	checkDifferLogItemCount "Source" $(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2 + 1)) 0
+	# 2 and not 3 because documents of S2.col5 is not invloved in the replication mapping and hence xdcrDiffer will not subscribe to S2.col5
+	checkDifferLogItemCount "Target" 2 0
+
+	echo "Repeating with compareBody option"
+	runXdcrDiffer "C1" "B1" "C2" "B2" "compareBody"
 	retVal=$?
 	if (($retVal != 0)); then
 		echo "Differ returned non-0 exit code"
