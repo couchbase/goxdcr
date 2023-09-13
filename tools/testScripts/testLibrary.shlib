@@ -1575,3 +1575,22 @@ function validateVBTasksProgress {
 	done
 	IFS="$OLDIFS"
 }
+
+# Validates that the result is greater than 0
+function validatePrometheusStatsRRNon0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+	local count
+	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep xdcr_guardrail_resident_ratio_total |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	if (($count == 0)); then
+		echo "Guardrail resident ratio shows 0"
+		exit 1
+	fi
+}

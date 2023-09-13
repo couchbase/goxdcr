@@ -386,6 +386,19 @@ func IsCollectionMappingError(resp_status gomemcached.Status) bool {
 	}
 }
 
+func IsGuardRailError(status gomemcached.Status) bool {
+	switch status {
+	case gomemcached.BUCKET_RESIDENT_RATIO_TOO_LOW:
+		return true
+	case gomemcached.BUCKET_DATA_SIZE_TOO_BIG:
+		return true
+	case gomemcached.BUCKET_DISK_SPACE_TOO_LOW:
+		return true
+	default:
+		return false
+	}
+}
+
 func IsEExistsError(resp_status gomemcached.Status) bool {
 	switch resp_status {
 	case gomemcached.KEY_EEXISTS:

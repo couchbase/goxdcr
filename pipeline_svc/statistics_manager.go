@@ -115,6 +115,9 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_FILTERED_CLIENT_TXN_METRIC:     service_def.MetricTypeCounter,
 	service_def.DOCS_FILTERED_USER_DEFINED_METRIC:   service_def.MetricTypeCounter,
 	service_def.DOCS_FILTERED_MOBILE_METRIC:         service_def.MetricTypeCounter,
+	service_def.GUARDRAIL_RESIDENT_RATIO:            service_def.MetricTypeCounter,
+	service_def.GUARDRAIL_DATA_SIZE:                 service_def.MetricTypeCounter,
+	service_def.GUARDRAIL_DISK_SPACE:                service_def.MetricTypeCounter,
 }
 
 var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
@@ -1444,6 +1447,12 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.TARGET_EACCESS_METRIC, eaccessReceived)
 		tmpfailReceived := metrics.NewCounter()
 		registry.Register(service_def.TARGET_TMPFAIL_METRIC, tmpfailReceived)
+		guardRailRR := metrics.NewCounter()
+		registry.Register(service_def.GUARDRAIL_RESIDENT_RATIO, guardRailRR)
+		guardRailDataSz := metrics.NewCounter()
+		registry.Register(service_def.GUARDRAIL_DATA_SIZE, guardRailDataSz)
+		guardRailDiskSpace := metrics.NewCounter()
+		registry.Register(service_def.GUARDRAIL_DISK_SPACE, guardRailDiskSpace)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1479,6 +1488,9 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC] = data_replicated_uncompressed
 		metric_map[service_def.TARGET_EACCESS_METRIC] = eaccessReceived
 		metric_map[service_def.TARGET_TMPFAIL_METRIC] = tmpfailReceived
+		metric_map[service_def.GUARDRAIL_RESIDENT_RATIO] = guardRailRR
+		metric_map[service_def.GUARDRAIL_DATA_SIZE] = guardRailDataSz
+		metric_map[service_def.GUARDRAIL_DISK_SPACE] = guardRailDiskSpace
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -1512,120 +1524,165 @@ func (outNozzleCollector *outNozzleCollector) HandleLatestThroughSeqnos(SeqnoMap
 }
 
 func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event) error {
-	metric_map := outNozzle_collector.component_map[event.Component.Id()]
-	if event.EventType == common.StatsUpdate {
+	metricMap := outNozzle_collector.component_map[event.Component.Id()]
+
+	switch event.EventType {
+	case common.StatsUpdate:
 		queue_size := event.OtherInfos.([]int)[0]
 		queue_size_bytes := event.OtherInfos.([]int)[1]
-		setCounter(metric_map[service_def.DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
-		setCounter(metric_map[service_def.SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
-	} else if event.EventType == common.DataSent {
+		setCounter(metricMap[service_def.DOCS_REP_QUEUE_METRIC].(metrics.Counter), queue_size)
+		setCounter(metricMap[service_def.SIZE_REP_QUEUE_METRIC].(metrics.Counter), queue_size_bytes)
+
+	case common.DataSent:
 		event_otherInfo := event.OtherInfos.(parts.DataSentEventAdditional)
 		req_size := event_otherInfo.Req_size
 		opti_replicated := event_otherInfo.IsOptRepd
 		commit_time := event_otherInfo.Commit_time
 		resp_wait_time := event_otherInfo.Resp_wait_time
-		metric_map[service_def.DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
-		metric_map[service_def.DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
-		metric_map[service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC].(metrics.Counter).Inc(int64(event_otherInfo.UncompressedReqSize))
+		metricMap[service_def.DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+		metricMap[service_def.DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
+		metricMap[service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC].(metrics.Counter).Inc(int64(event_otherInfo.UncompressedReqSize))
 		if opti_replicated {
-			metric_map[service_def.DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
+			metricMap[service_def.DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
 		}
 		if event_otherInfo.FailedTargetCR {
-			metric_map[service_def.DOCS_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+			metricMap[service_def.DOCS_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 		}
 		expiry_set := event_otherInfo.IsExpirySet
 		if expiry_set {
-			metric_map[service_def.EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			metricMap[service_def.EXPIRY_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 			if event_otherInfo.FailedTargetCR {
-				metric_map[service_def.EXPIRY_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+				metricMap[service_def.EXPIRY_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 			}
 		}
 
-		req_opcode := event_otherInfo.Opcode
-		if req_opcode == base.DELETE_WITH_META {
-			metric_map[service_def.DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+		opcode := event_otherInfo.Opcode
+		switch opcode {
+		case base.DELETE_WITH_META:
+			metricMap[service_def.DELETION_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 			if event_otherInfo.FailedTargetCR {
-				metric_map[service_def.DELETION_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+				metricMap[service_def.DELETION_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 			}
-		} else if req_opcode == base.SET_WITH_META {
-			metric_map[service_def.SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
-			if event_otherInfo.FailedTargetCR {
-				metric_map[service_def.SET_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
-			}
-		} else if req_opcode == base.ADD_WITH_META {
-			metric_map[service_def.ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
-			if event_otherInfo.FailedTargetCR {
-				metric_map[service_def.ADD_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
-			}
-		} else {
-			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", req_opcode, event.Component.Id())
-		}
 
-		metric_map[service_def.DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
-		metric_map[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
-	} else if event.EventType == common.DataFailedCRSource {
-		metric_map[service_def.DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+		case base.SET_WITH_META:
+			metricMap[service_def.SET_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			if event_otherInfo.FailedTargetCR {
+				metricMap[service_def.SET_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+			}
+
+		case base.ADD_WITH_META:
+			metricMap[service_def.ADD_DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
+			if event_otherInfo.FailedTargetCR {
+				metricMap[service_def.ADD_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
+			}
+
+		default:
+			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", opcode, event.Component.Id())
+		}
+		metricMap[service_def.DOCS_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+		metricMap[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
+
+	case common.DataFailedCRSource:
+		metricMap[service_def.DOCS_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		event_otherInfos := event.OtherInfos.(parts.DataFailedCRSourceEventAdditional)
 		expiry_set := event_otherInfos.IsExpirySet
 		if expiry_set {
-			metric_map[service_def.EXPIRY_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+			metricMap[service_def.EXPIRY_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
 		}
 
-		req_opcode := event_otherInfos.Opcode
-		if req_opcode == base.DELETE_WITH_META {
-			metric_map[service_def.DELETION_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
-		} else if req_opcode == base.SET_WITH_META {
-			metric_map[service_def.SET_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
-		} else {
-			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id())
+		opcode := event_otherInfos.Opcode
+		switch opcode {
+		case base.DELETE_WITH_META:
+			metricMap[service_def.DELETION_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+
+		case base.SET_WITH_META:
+			metricMap[service_def.SET_FAILED_CR_SOURCE_METRIC].(metrics.Counter).Inc(1)
+
+		default:
+			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", opcode, event.Component.Id())
 		}
-	} else if event.EventType == common.TargetDataSkipped {
-		metric_map[service_def.TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+
+	case common.TargetDataSkipped:
+		metricMap[service_def.TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
 		event_otherInfos := event.OtherInfos.(parts.TargetDataSkippedEventAdditional)
 		expiry_set := event_otherInfos.IsExpirySet
 		if expiry_set {
-			metric_map[service_def.EXPIRY_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+			metricMap[service_def.EXPIRY_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
 		}
 
-		req_opcode := event_otherInfos.Opcode
-		if req_opcode == base.DELETE_WITH_META {
-			metric_map[service_def.DELETION_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
-		} else if req_opcode == base.SET_WITH_META {
-			metric_map[service_def.SET_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
-		} else {
-			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", req_opcode, event.Component.Id())
+		opcode := event_otherInfos.Opcode
+		switch opcode {
+		case base.DELETE_WITH_META:
+			metricMap[service_def.DELETION_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+
+		case base.SET_WITH_META:
+			metricMap[service_def.SET_TARGET_DOCS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+
+		default:
+			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataFailedCRSource event from %v.", opcode, event.Component.Id())
 		}
-	} else if event.EventType == common.GetDocReceived {
+
+	case common.GetDocReceived:
 		event_otherInfos := event.OtherInfos.(parts.GetReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
-		metric_map[service_def.GET_DOC_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
-	} else if event.EventType == common.GetMetaReceived {
+		metricMap[service_def.GET_DOC_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+
+	case common.GetMetaReceived:
 		event_otherInfos := event.OtherInfos.(parts.GetReceivedEventAdditional)
 		commit_time := event_otherInfos.Commit_time
-		metric_map[service_def.META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
-	} else if event.EventType == common.DataThrottled {
+		metricMap[service_def.META_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
+
+	case common.DataThrottled:
 		throttle_latency := event.OtherInfos.(time.Duration)
-		metric_map[service_def.THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
-	} else if event.EventType == common.DataPoolGetFail {
-		metric_map[service_def.DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
-	} else if event.EventType == common.DataSentCasChanged {
+		metricMap[service_def.THROTTLE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(throttle_latency.Nanoseconds() / 1000000)
+
+	case common.DataPoolGetFail:
+		metricMap[service_def.DP_GET_FAIL_METRIC].(metrics.Counter).Inc(event.Data.(int64))
+
+	case common.DataSentCasChanged:
 		event_otherInfos := event.OtherInfos.(parts.SentCasChangedEventAdditional)
 		opcode := event_otherInfos.Opcode
-		if opcode == base.DELETE_WITH_META {
-			metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
-		} else if opcode == base.SET_WITH_META {
-			metric_map[service_def.SET_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
-		} else if opcode == base.ADD_WITH_META {
-			metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		switch opcode {
+		case base.DELETE_WITH_META:
+			metricMap[service_def.DELETION_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		case base.SET_WITH_META:
+			metricMap[service_def.SET_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		case base.ADD_WITH_META:
+			metricMap[service_def.ADD_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
 		}
-	} else if event.EventType == common.DataSentFailed {
+
+	case common.DataSentFailed:
 		responseCode, ok := event.Data.(mc.Status)
-		if ok && responseCode == mc.TMPFAIL {
-			metric_map[service_def.TARGET_TMPFAIL_METRIC].(metrics.Counter).Inc(1)
-		} else if ok && responseCode == mc.EACCESS {
-			metric_map[service_def.TARGET_EACCESS_METRIC].(metrics.Counter).Inc(1)
+		if !ok {
+			return nil
+		}
+		switch responseCode {
+		case mc.TMPFAIL:
+			metricMap[service_def.TARGET_TMPFAIL_METRIC].(metrics.Counter).Inc(1)
+
+		case mc.EACCESS:
+			metricMap[service_def.TARGET_EACCESS_METRIC].(metrics.Counter).Inc(1)
+		}
+
+	case common.DataSentHitGuardrail:
+		responseCode, ok := event.Data.(mc.Status)
+		if !ok {
+			return nil
+		}
+
+		switch responseCode {
+		case mc.BUCKET_RESIDENT_RATIO_TOO_LOW:
+			metricMap[service_def.GUARDRAIL_RESIDENT_RATIO].(metrics.Counter).Inc(1)
+
+		case mc.BUCKET_DATA_SIZE_TOO_BIG:
+			metricMap[service_def.GUARDRAIL_DATA_SIZE].(metrics.Counter).Inc(1)
+
+		case mc.BUCKET_DISK_SPACE_TOO_LOW:
+			metricMap[service_def.GUARDRAIL_DISK_SPACE].(metrics.Counter).Inc(1)
+
 		}
 	}
+
 	return nil
 }
 

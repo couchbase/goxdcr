@@ -86,6 +86,8 @@ const (
 	OsoSnapshotReceived ComponentEventType = iota
 	// When target rejected writes
 	DataSentFailed ComponentEventType = iota
+	// When target guardrail prevents successful writes
+	DataSentHitGuardrail ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {

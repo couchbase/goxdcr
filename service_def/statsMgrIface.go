@@ -147,6 +147,11 @@ const (
 	// Pipeline Status to be exported as a guage
 	PIPELINE_STATUS = "pipeline_status"
 	PIPELINE_ERRORS = "pipeline_errors"
+
+	// Guardrails
+	GUARDRAIL_RESIDENT_RATIO = "guardrail_resident_ratio"
+	GUARDRAIL_DATA_SIZE      = "guardrail_data_size"
+	GUARDRAIL_DISK_SPACE     = "guardrail_disk_space"
 )
 
 const (
@@ -1252,6 +1257,40 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "Total number of documents filtered and not replicated because the documents were mobile records",
 		Stability:    Committed,
 		Labels:       StandardLabels,
+	},
+
+	GUARDRAIL_RESIDENT_RATIO: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The number of writes that target rejected due to the target bucket being under the resident ratio threshold",
+		Notes: "When target bucket has guardrail enabled and a threshold set, it will return this error " +
+			"indicating that the bucket is currently below the resident ratio. Data writes can only continue once " +
+			"the target bucket's resident ratio rises above the threshold",
+		Stability: Committed,
+		Labels:    StandardLabels,
+	},
+	GUARDRAIL_DATA_SIZE: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The number of writes that target rejected because each target data node is holding too much data",
+		Notes: "When target bucket has guardrail enabled and a threshold set, it will return this error " +
+			"indicating that the target data nodes are holding too much data per node, which could lead to " +
+			"rebalance failures or cluster instability. To resume replication, additional data nodes must be added",
+		Stability: Committed,
+		Labels:    StandardLabels,
+	},
+	GUARDRAIL_DISK_SPACE: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The number of writes that target rejected because a data node is running out of disk space",
+		Notes: "When target bucket has guardrail enabled and a threshold set, it will return this error " +
+			"indicating that one or more data nodes is running out of disk space. " +
+			"To resume replication, additional disk storage must be added",
+		Stability: Committed,
+		Labels:    StandardLabels,
 	},
 }
 

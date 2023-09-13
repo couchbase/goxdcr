@@ -643,12 +643,10 @@ type XmemNozzle struct {
 	counterNumGetMeta           uint64
 	start_time                  time.Time
 	counter_resend              uint64
-	// count TMPERR for commands except getMeta. TMPERR for getMeta not counted since it doesn't block replication
-	counter_tmperr uint64
-	// count EACCESS for commands except getMeta. EACCESS for getMeta not counted since it doesn't block replication
-	counter_eaccess uint64
-	// counter of times LOCKED status is returned by KV
-	counter_locked uint64
+	counter_tmperr              uint64 // count TMPERR for commands except getMeta. TMPERR for getMeta not counted since it doesn't block replication
+	counter_eaccess             uint64 // count EACCESS for commands except getMeta. EACCESS for getMeta not counted since it doesn't block replication
+	counter_locked              uint64 // counter of times LOCKED status is returned by KV
+	counterGuardrailHit         uint64
 
 	receive_token_ch chan int
 
@@ -2762,6 +2760,13 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 									panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
 								}
 								atomic.AddUint64(&xmem.counter_ignored, 1)
+							} else if base.IsGuardRailError(response.Status) {
+								xmem.client_for_setMeta.IncrementBackOffFactor()
+								pos := xmem.getPosFromOpaque(response.Opaque)
+								// Don't spam the log. Keep a counter instead
+								atomic.AddUint64(&xmem.counterGuardrailHit, 1)
+								xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, nil, nil))
+								_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 							} else {
 								if response.Status == mc.XATTR_EINVAL && xmem.source_cr_mode == base.CRMode_Custom {
 									// There is something wrong with XATTR. This should never happen in released version.
@@ -3255,7 +3260,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v, temp_err=%v, eaccess_err=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v, temp_err=%v, eaccess_err=%v guardrailHit=%v\n",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
@@ -3266,7 +3271,8 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			xmem.client_for_getMeta.RepairCount(), xmem.client_for_setMeta.RepairCount(),
 			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve),
 			atomic.LoadUint64(&xmem.counter_to_setback), atomic.LoadUint64(&xmem.counterNumGetMeta),
-			atomic.LoadUint64(&xmem.counter_tmperr), atomic.LoadUint64(&xmem.counter_eaccess))
+			atomic.LoadUint64(&xmem.counter_tmperr), atomic.LoadUint64(&xmem.counter_eaccess),
+			atomic.LoadUint64(&xmem.counterGuardrailHit))
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}

@@ -86,10 +86,14 @@ function runTestCase {
 		writeJSONDocument "C1" "B1" "regDocA${i}" '{"foo":"bar"}' >/dev/null 2>&1
 	done
 
-	sleep 5
-	# At this point, repair connections will show up, albeit with backoff
-	# Future work will handle these errors
-	#validateInternalLogWithInstance "C1" "$XMEM_REPAIR_CONNECTION" 0
+	sleep 15
+	validatePrometheusStatsRRNon0 "C1" "B1" "B2"
+
+	local secs=90
+	echo "Disabling guardrail and waiting $secs seconds before checking..."
+	disableInternalResidentRatioGuardrail C2 B2
+	sleep $secs
+	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 
 	echo "============================================================================"
 	echo "PASSED"
