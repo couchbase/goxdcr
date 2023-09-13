@@ -6,12 +6,13 @@
 // will be governed by the Apache License, Version 2.0, included in the file
 // licenses/APL2.txt.
 
+//go:build !enterprise
 // +build !enterprise
 
 package service_impl
 
 import (
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/crMeta"
 	"github.com/couchbase/goxdcr/service_def"
 )
 
@@ -21,7 +22,7 @@ type ResolverSvc struct {
 func NewResolverSvc(service_def.XDCRCompTopologySvc) *ResolverSvc {
 	return &ResolverSvc{}
 }
-func (rs *ResolverSvc) ResolveAsync(params *base.ConflictParams, finish_ch chan bool) {
+func (rs *ResolverSvc) ResolveAsync(params *crMeta.ConflictParams, finish_ch chan bool) {
 	return
 }
 func (rs *ResolverSvc) InitDefaultFunc() {

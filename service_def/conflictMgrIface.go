@@ -12,9 +12,10 @@ package service_def
 
 import (
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/hlv"
 )
 
 type ConflictManagerIface interface {
-	ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte, recycler func(*base.WrappedMCRequest)) error
-	SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId []byte, recycler func(*base.WrappedMCRequest)) error
+	ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, recycler func(*base.WrappedMCRequest)) error
+	SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, recycler func(*base.WrappedMCRequest)) error
 }

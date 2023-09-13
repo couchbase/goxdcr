@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	base "github.com/couchbase/goxdcr/base"
+	crMeta "github.com/couchbase/goxdcr/crMeta"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -95,7 +95,7 @@ func (_c *ResolverSvcIface_InitDefaultFunc_Call) RunAndReturn(run func()) *Resol
 }
 
 // ResolveAsync provides a mock function with given fields: params, finish_ch
-func (_m *ResolverSvcIface) ResolveAsync(params *base.ConflictParams, finish_ch chan bool) {
+func (_m *ResolverSvcIface) ResolveAsync(params *crMeta.ConflictParams, finish_ch chan bool) {
 	_m.Called(params, finish_ch)
 }
 
@@ -105,15 +105,15 @@ type ResolverSvcIface_ResolveAsync_Call struct {
 }
 
 // ResolveAsync is a helper method to define mock.On call
-//   - params *base.ConflictParams
+//   - params *crMeta.ConflictParams
 //   - finish_ch chan bool
 func (_e *ResolverSvcIface_Expecter) ResolveAsync(params interface{}, finish_ch interface{}) *ResolverSvcIface_ResolveAsync_Call {
 	return &ResolverSvcIface_ResolveAsync_Call{Call: _e.mock.On("ResolveAsync", params, finish_ch)}
 }
 
-func (_c *ResolverSvcIface_ResolveAsync_Call) Run(run func(params *base.ConflictParams, finish_ch chan bool)) *ResolverSvcIface_ResolveAsync_Call {
+func (_c *ResolverSvcIface_ResolveAsync_Call) Run(run func(params *crMeta.ConflictParams, finish_ch chan bool)) *ResolverSvcIface_ResolveAsync_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*base.ConflictParams), args[1].(chan bool))
+		run(args[0].(*crMeta.ConflictParams), args[1].(chan bool))
 	})
 	return _c
 }
@@ -123,7 +123,7 @@ func (_c *ResolverSvcIface_ResolveAsync_Call) Return() *ResolverSvcIface_Resolve
 	return _c
 }
 
-func (_c *ResolverSvcIface_ResolveAsync_Call) RunAndReturn(run func(*base.ConflictParams, chan bool)) *ResolverSvcIface_ResolveAsync_Call {
+func (_c *ResolverSvcIface_ResolveAsync_Call) RunAndReturn(run func(*crMeta.ConflictParams, chan bool)) *ResolverSvcIface_ResolveAsync_Call {
 	_c.Call.Return(run)
 	return _c
 }

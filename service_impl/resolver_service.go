@@ -21,6 +21,7 @@ import (
 	"github.com/couchbase/cbauth"
 	evaluatorApi "github.com/couchbase/eventing-ee/evaluator/api"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/crMeta"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
 )
@@ -34,7 +35,7 @@ var (
 
 type ResolverSvc struct {
 	logger       *log.CommonLogger
-	InputCh      chan *base.ConflictParams // This accepts conflicting documents from XMEM
+	InputCh      chan *crMeta.ConflictParams // This accepts conflicting documents from XMEM
 	engine       evaluatorApi.Engine
 	adminService evaluatorApi.AdminService // js-evaluator handler for REST request
 	workerPool   chan evaluatorApi.Worker
@@ -47,7 +48,7 @@ func NewResolverSvc(top_svc service_def.XDCRCompTopologySvc) *ResolverSvc {
 	return &ResolverSvc{top_svc: top_svc, logger: log.NewLogger("ResolverSvc", nil), started: false}
 }
 
-func (rs *ResolverSvc) ResolveAsync(aConflict *base.ConflictParams, finish_ch chan bool) {
+func (rs *ResolverSvc) ResolveAsync(aConflict *crMeta.ConflictParams, finish_ch chan bool) {
 	select {
 	// CCR pipeline cannot start if resolver is not started. So the InputCh always exists at this call
 	case rs.InputCh <- aConflict:
@@ -140,7 +141,7 @@ func (rs *ResolverSvc) Start(sourceKVHost string, xdcrRestPort uint16) {
 		rs.logger.Errorf("Failed to Start resolverSvc. Error %v", err)
 		return
 	}
-	rs.InputCh = make(chan *base.ConflictParams, inputChanelSize)
+	rs.InputCh = make(chan *crMeta.ConflictParams, inputChanelSize)
 	for i := 0; i < numResolverWorkers; i++ {
 		go rs.resolverWorker(i)
 	}

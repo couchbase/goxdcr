@@ -10,10 +10,12 @@ licenses/APL2.txt.
 
 package service_def
 
-import "github.com/couchbase/goxdcr/base"
+import (
+	"github.com/couchbase/goxdcr/crMeta"
+)
 
 type ResolverSvcIface interface {
-	ResolveAsync(params *base.ConflictParams, finish_ch chan bool)
+	ResolveAsync(params *crMeta.ConflictParams, finish_ch chan bool)
 	InitDefaultFunc()
 	Start(sourceKVHost string, xdcrRestPort uint16)
 	Started() bool

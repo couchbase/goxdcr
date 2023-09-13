@@ -27,8 +27,8 @@ import (
 	"time"
 
 	mc "github.com/couchbase/gomemcached"
-	base "github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -612,7 +612,7 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 			capi.Logger().Errorf("%v batchGetMeta failed. err=%v\n", capi.Id(), err)
 		} else {
 			// Attach the map to the batch before actually sending
-			batch.bigDoc_noRep_map = bigDoc_noRep_map
+			batch.noRep_map = bigDoc_noRep_map
 		}
 
 		//batch send
@@ -636,7 +636,7 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 		capi.Logger().Debugf("%v batchGetMeta called for vb %v and bigDoc_map with len %v, map=%v%v%v\n", capi.Id(), vbno, len(bigDoc_map), base.UdTagBegin, bigDoc_map, base.UdTagEnd)
 	}
 
-	bigDoc_noRep_map := make(BigDocNoRepMap)
+	bigDoc_noRep_map := make(NoRepMap)
 
 	if len(bigDoc_map) == 0 {
 		return bigDoc_noRep_map, nil
