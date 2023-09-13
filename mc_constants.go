@@ -174,6 +174,10 @@ const (
 	SCOPE_SIZE_LIMIT_EXCEEDED    = Status(0x34)
 	BUCKET_SIZE_LIMIT_EXCEEDED   = Status(0x35)
 
+	BUCKET_RESIDENT_RATIO_TOO_LOW = Status(0x36)
+	BUCKET_DATA_SIZE_TOO_BIG      = Status(0x37)
+	BUCKET_DISK_SPACE_TOO_LOW     = Status(0x38)
+
 	UNKNOWN_COMMAND    = Status(0x81)
 	ENOMEM             = Status(0x82)
 	NOT_SUPPORTED      = Status(0x83)
