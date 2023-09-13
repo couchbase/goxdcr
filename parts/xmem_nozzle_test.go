@@ -23,8 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/couchbase/goxdcr/common/mocks"
-
 	"github.com/couchbase/gocb/v2"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -32,6 +30,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/generator"
 	"github.com/couchbase/goxdcr/common/mocks"
+	"github.com/couchbase/goxdcr/hlv"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	serviceDefMocks "github.com/couchbase/goxdcr/service_def/mocks"
@@ -54,6 +53,7 @@ const password = "wewewe"
 var kvString = fmt.Sprintf("%s:%s", "127.0.0.1", xmemPort)
 var connString = fmt.Sprintf("%s:%s", "127.0.0.1", targetPort)
 var clusterReady = true // Assume we have live cluster initially
+var clusterChecked = false
 
 var events []string
 var eventID int64
@@ -135,10 +135,10 @@ func setupBoilerPlateXmem(bname string, optional ...int) (*utilsMock.UtilsIface,
 }
 
 func targetXmemIsUpAndCorrectSetupExists(bname string) bool {
-	// If we already checked that cluster is not ready, return
-	if !clusterReady {
-		return false
+	if clusterChecked {
+		return clusterReady
 	}
+	clusterChecked = true
 	_, err := net.Listen("tcp4", fmt.Sprintf(":"+targetPort))
 	if err == nil {
 		clusterReady = false
@@ -158,6 +158,7 @@ func targetXmemIsUpAndCorrectSetupExists(bname string) bool {
 		clusterReady = false
 		return false
 	}
+	clusterReady = true
 	return true
 }
 
@@ -196,9 +197,10 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 
 	xmem.SetBandwidthThrottler(bandwidthThrottler)
 
-	xmem.sourceClusterId = []byte("SourceCluster")
-	xmem.targetClusterId = []byte("TargetCluster")
 	xmem.eventsProducer = evtProducer
+	xmem.sourceClusterId = hlv.DocumentSourceId("SourceCluster")
+	xmem.targetClusterId = hlv.DocumentSourceId("TargetCluster")
+
 	setupMocksRC(remoteClusterSvc)
 }
 

@@ -1663,6 +1663,63 @@ func (xfi *CCRXattrFieldIterator) Next() (key, value []byte, err error) {
 	return
 }
 
+type SubdocSpecOption struct {
+	IncludeHlv        bool
+	IncludeMobileSync bool
+	IncludeBody       bool // Get the target body for merge
+	IncludeVXattr     bool // Get the target document metadata as Virtual so we can perform CR and format target HLV
+}
+
+func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathSpec) {
+	specLen := 0
+	if option.IncludeHlv {
+		specLen++
+	}
+	if option.IncludeMobileSync {
+		specLen++
+	}
+	if option.IncludeBody {
+		specLen++
+	}
+	if option.IncludeVXattr {
+		specLen = specLen + 4
+	}
+	if specLen == 0 {
+		return
+	}
+	specs = make([]SubdocLookupPathSpec, 0, specLen)
+	if option.IncludeVXattr {
+		// $document.revid
+		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_REVID)}
+		specs = append(specs, spec)
+		// $document.flags
+		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_FLAGS)}
+		specs = append(specs, spec)
+		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_EXPIRY)}
+		specs = append(specs, spec)
+		// $document.datatype.
+		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(VXATTR_DATATYPE)}
+		specs = append(specs, spec)
+	}
+
+	if option.IncludeHlv {
+		// HLV XATTR for CCR
+		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_HLV)}
+		specs = append(specs, spec)
+	}
+
+	if option.IncludeMobileSync {
+		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_MOBILE)}
+		specs = append(specs, spec)
+	}
+
+	if option.IncludeBody {
+		spec := SubdocLookupPathSpec{GET, 0, nil}
+		specs = append(specs, spec)
+	}
+	return specs
+}
+
 type SortedSeqnoListWithLock struct {
 	seqno_list []uint64
 	lock       *sync.RWMutex
@@ -1953,17 +2010,6 @@ var MaxBase64CASLength = len(Uint64ToBase64(math.MaxUint64))
 
 type ConflictManagerAction int
 
-type ConflictParams struct {
-	Source         *WrappedMCRequest
-	Target         *SubdocLookupResponse
-	SourceId       []byte
-	TargetId       []byte
-	MergeFunction  string
-	ResultNotifier MergeResultNotifier
-	TimeoutMs      uint32
-	ObjectRecycler func(request *WrappedMCRequest) // for source WrappedMCRequest cleanup
-}
-
 const (
 	SetMergeToSource  ConflictManagerAction = iota
 	SetTargetToSource ConflictManagerAction = iota
@@ -1981,17 +2027,6 @@ func (c ConflictManagerAction) String() string {
 	default:
 		return "Unknown ConflictManagerAction"
 	}
-}
-
-type MergeInputAndResult struct {
-	Action ConflictManagerAction
-	Input  *ConflictParams
-	Result interface{}
-	Err    error
-}
-
-type MergeResultNotifier interface {
-	NotifyMergeResult(input *ConflictParams, mergeResult interface{}, mergeError error)
 }
 
 // So on pool details and bucket details "status":
@@ -2481,3 +2516,47 @@ type FilteringStatusType int
 
 // Stats per vbucket
 type VBCountMetricMap map[string]int64
+
+type DocumentMetadata struct {
+	Key      []byte
+	RevSeq   uint64 //Item revision seqno
+	Cas      uint64 //Item cas
+	Flags    uint32 // Item flags
+	Expiry   uint32 // Item expiration time
+	Deletion bool
+	DataType uint8 // item data type
+}
+
+func (doc_meta DocumentMetadata) String() string {
+	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v:datatype=%v]", doc_meta.Key, doc_meta.RevSeq, doc_meta.Cas, doc_meta.Flags, doc_meta.Expiry, doc_meta.Deletion, doc_meta.DataType)
+}
+
+func (doc_meta *DocumentMetadata) Clone() *DocumentMetadata {
+	var clone *DocumentMetadata
+	if doc_meta != nil {
+		clone = &DocumentMetadata{}
+		*clone = *doc_meta
+		clone.Key = DeepCopyByteArray(doc_meta.Key)
+	}
+	return clone
+}
+
+func (doc_meta *DocumentMetadata) Redact() *DocumentMetadata {
+	if doc_meta != nil {
+		if len(doc_meta.Key) > 0 && !IsByteSliceRedacted(doc_meta.Key) {
+			doc_meta.Key = TagUDBytes(doc_meta.Key)
+		}
+	}
+	return doc_meta
+}
+
+func (doc_meta *DocumentMetadata) CloneAndRedact() *DocumentMetadata {
+	if doc_meta != nil {
+		return doc_meta.Clone().Redact()
+	}
+	return doc_meta
+}
+
+func (docMeta *DocumentMetadata) IsLocked() bool {
+	return docMeta != nil && docMeta.Cas == MaxCas
+}

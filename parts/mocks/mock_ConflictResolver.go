@@ -4,6 +4,8 @@ package mocks
 
 import (
 	base "github.com/couchbase/goxdcr/base"
+	crMeta "github.com/couchbase/goxdcr/crMeta"
+
 	log "github.com/couchbase/goxdcr/log"
 
 	mock "github.com/stretchr/testify/mock"
@@ -22,18 +24,28 @@ func (_m *ConflictResolver) EXPECT() *ConflictResolver_Expecter {
 	return &ConflictResolver_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields: doc_metadata_source, doc_metadata_target, source_cr_mode, xattrEnabled, logger
-func (_m *ConflictResolver) Execute(doc_metadata_source parts.documentMetadata, doc_metadata_target parts.documentMetadata, source_cr_mode base.ConflictResolutionMode, xattrEnabled bool, logger *log.CommonLogger) bool {
-	ret := _m.Called(doc_metadata_source, doc_metadata_target, source_cr_mode, xattrEnabled, logger)
+// Execute provides a mock function with given fields: source, target, logger
+func (_m *ConflictResolver) Execute(source *crMeta.Metadata, target *crMeta.Metadata, logger *log.CommonLogger) (base.ConflictResult, error) {
+	ret := _m.Called(source, target, logger)
 
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(parts.documentMetadata, parts.documentMetadata, base.ConflictResolutionMode, bool, *log.CommonLogger) bool); ok {
-		r0 = rf(doc_metadata_source, doc_metadata_target, source_cr_mode, xattrEnabled, logger)
+	var r0 base.ConflictResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*crMeta.Metadata, *crMeta.Metadata, *log.CommonLogger) (base.ConflictResult, error)); ok {
+		return rf(source, target, logger)
+	}
+	if rf, ok := ret.Get(0).(func(*crMeta.Metadata, *crMeta.Metadata, *log.CommonLogger) base.ConflictResult); ok {
+		r0 = rf(source, target, logger)
 	} else {
-		r0 = ret.Get(0).(bool)
+		r0 = ret.Get(0).(base.ConflictResult)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(*crMeta.Metadata, *crMeta.Metadata, *log.CommonLogger) error); ok {
+		r1 = rf(source, target, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // ConflictResolver_Execute_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Execute'
@@ -42,28 +54,26 @@ type ConflictResolver_Execute_Call struct {
 }
 
 // Execute is a helper method to define mock.On call
-//   - doc_metadata_source parts.documentMetadata
-//   - doc_metadata_target parts.documentMetadata
-//   - source_cr_mode base.ConflictResolutionMode
-//   - xattrEnabled bool
+//   - source *crMeta.Metadata
+//   - target *crMeta.Metadata
 //   - logger *log.CommonLogger
-func (_e *ConflictResolver_Expecter) Execute(doc_metadata_source interface{}, doc_metadata_target interface{}, source_cr_mode interface{}, xattrEnabled interface{}, logger interface{}) *ConflictResolver_Execute_Call {
-	return &ConflictResolver_Execute_Call{Call: _e.mock.On("Execute", doc_metadata_source, doc_metadata_target, source_cr_mode, xattrEnabled, logger)}
+func (_e *ConflictResolver_Expecter) Execute(source interface{}, target interface{}, logger interface{}) *ConflictResolver_Execute_Call {
+	return &ConflictResolver_Execute_Call{Call: _e.mock.On("Execute", source, target, logger)}
 }
 
-func (_c *ConflictResolver_Execute_Call) Run(run func(doc_metadata_source parts.documentMetadata, doc_metadata_target parts.documentMetadata, source_cr_mode base.ConflictResolutionMode, xattrEnabled bool, logger *log.CommonLogger)) *ConflictResolver_Execute_Call {
+func (_c *ConflictResolver_Execute_Call) Run(run func(source *crMeta.Metadata, target *crMeta.Metadata, logger *log.CommonLogger)) *ConflictResolver_Execute_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(parts.documentMetadata), args[1].(parts.documentMetadata), args[2].(base.ConflictResolutionMode), args[3].(bool), args[4].(*log.CommonLogger))
+		run(args[0].(*crMeta.Metadata), args[1].(*crMeta.Metadata), args[2].(*log.CommonLogger))
 	})
 	return _c
 }
 
-func (_c *ConflictResolver_Execute_Call) Return(_a0 bool) *ConflictResolver_Execute_Call {
-	_c.Call.Return(_a0)
+func (_c *ConflictResolver_Execute_Call) Return(_a0 base.ConflictResult, _a1 error) *ConflictResolver_Execute_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *ConflictResolver_Execute_Call) RunAndReturn(run func(parts.documentMetadata, parts.documentMetadata, base.ConflictResolutionMode, bool, *log.CommonLogger) bool) *ConflictResolver_Execute_Call {
+func (_c *ConflictResolver_Execute_Call) RunAndReturn(run func(*crMeta.Metadata, *crMeta.Metadata, *log.CommonLogger) (base.ConflictResult, error)) *ConflictResolver_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }

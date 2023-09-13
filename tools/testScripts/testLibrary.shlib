@@ -58,7 +58,7 @@ function checkItemCnt {
 			if (($itemCount != $previousItemCnt)); then
 				previousItemCnt=$itemCount
 				i=$(($i - 1))
-				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items. Items are increasing..."
+				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items. Expect $expectedCnt. Items are increasing..."
 			else
 				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
 			fi

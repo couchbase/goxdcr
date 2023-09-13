@@ -10,9 +10,7 @@
 package parts
 
 import (
-	"encoding/binary"
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -62,12 +60,16 @@ type NeedSendStatus int
 const (
 	Send              NeedSendStatus = iota
 	NotSendFailedCR   NeedSendStatus = iota
-	NotSendDetecting  NeedSendStatus = iota // Still doing the conflict detection
-	ToResolve         NeedSendStatus = iota
-	ToSetback         NeedSendStatus = iota
+	NotSendMerge      NeedSendStatus = iota
+	NotSendSetback    NeedSendStatus = iota
 	RetryTargetLocked NeedSendStatus = iota
 	NotSendOther      NeedSendStatus = iota
 )
+
+type SetMetaXattrOptions struct {
+	sendHlv      bool
+	preserveSync bool
+}
 
 /*
 ***********************************
@@ -104,50 +106,6 @@ type baseConfig struct {
 
 	devMainSendDelay     uint32
 	devBackfillSendDelay uint32
-}
-
-type documentMetadata struct {
-	key      []byte
-	revSeq   uint64 //Item revision seqno
-	cas      uint64 //Item cas
-	flags    uint32 // Item flags
-	expiry   uint32 // Item expiration time
-	deletion bool
-	dataType uint8 // item data type
-}
-
-func (doc_meta documentMetadata) String() string {
-	return fmt.Sprintf("[key=%s; revSeq=%v;cas=%v;flags=%v;expiry=%v;deletion=%v:datatype=%v]", doc_meta.key, doc_meta.revSeq, doc_meta.cas, doc_meta.flags, doc_meta.expiry, doc_meta.deletion, doc_meta.dataType)
-}
-
-func (doc_meta *documentMetadata) Clone() *documentMetadata {
-	var clone *documentMetadata
-	if doc_meta != nil {
-		clone = &documentMetadata{}
-		*clone = *doc_meta
-		clone.key = base.DeepCopyByteArray(doc_meta.key)
-	}
-	return clone
-}
-
-func (doc_meta *documentMetadata) Redact() *documentMetadata {
-	if doc_meta != nil {
-		if len(doc_meta.key) > 0 && !base.IsByteSliceRedacted(doc_meta.key) {
-			doc_meta.key = base.TagUDBytes(doc_meta.key)
-		}
-	}
-	return doc_meta
-}
-
-func (doc_meta *documentMetadata) CloneAndRedact() *documentMetadata {
-	if doc_meta != nil {
-		return doc_meta.Clone().Redact()
-	}
-	return doc_meta
-}
-
-func (docMeta *documentMetadata) IsLocked() bool {
-	return docMeta != nil && docMeta.cas == base.MaxCas
 }
 
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes
@@ -255,21 +213,29 @@ type dataBatch struct {
 	// documents that needs source side custom conflict resolution.
 	// Key of the map is the document unique key
 	getMeta_map base.McRequestMap
-	// tracks big docs that do not need to be replicated
+	// tracks docs that do not need to be replicated based on source side conflict resolution
 	// key of the map is the document key_revSeqno
-	// value of the map has two possible values:
-	// 1. true - docs failed source side conflict resolution. in this case the docs will be counted in docs_failed_cr_source stats
-	// 2. false - docs that will get rejected by target for other reasons, e.g., since target no longer owns the vbucket involved. in this case the docs will not be counted in docs_failed_cr_source stats
-	bigDoc_noRep_map  map[string]NeedSendStatus
-	cr_resp_map       map[string]*base.SubdocLookupResponse
-	curCount          uint32
-	curSize           uint32
-	capacity_count    uint32
-	capacity_size     uint32
-	start_time        time.Time
-	logger            *log.CommonLogger
-	batch_nonempty_ch chan bool
-	nonempty_set      bool
+	// value of the map can be anything except Send. Anything not in the map will be sent through setWithMeta
+	noRep_map map[string]NeedSendStatus
+	// For CCR, noRep_map value may be Not_Send_Merge or Not_Send_Setback. For these, the target document lookup
+	// response is stored in here.
+	mergeLookup_map map[string]*base.SubdocLookupResponse
+	// If mobile is on, for document winning conflict resolution, we need to preserve target _sync XATTR. The lookup for these are stored in here
+	sendLookup_map map[string]*base.SubdocLookupResponse
+	// XMEM config may change but only affect the next batch
+	// At the beginning of each batch we will check the config to decide the getMetaSpec and setMeta behavior
+	// Note that these are only needed for CCR and mobile currently. The specs will be nil otherwise.
+	getMetaSpec         []base.SubdocLookupPathSpec
+	getBodySpec         []base.SubdocLookupPathSpec // This one will get document body in addition to document metadata
+	setMetaXattrOptions SetMetaXattrOptions
+	curCount            uint32
+	curSize             uint32
+	capacity_count      uint32
+	capacity_size       uint32
+	start_time          time.Time
+	logger              *log.CommonLogger
+	batch_nonempty_ch   chan bool
+	nonempty_set        bool
 }
 
 func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *dataBatch {
@@ -279,10 +245,16 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
 		getMeta_map:       make(base.McRequestMap),
-		bigDoc_noRep_map:  make(map[string]NeedSendStatus),
+		noRep_map:         nil,
+		mergeLookup_map:   nil,
+		sendLookup_map:    nil,
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
-		logger:            logger}
+		setMetaXattrOptions: SetMetaXattrOptions{
+			sendHlv:      false,
+			preserveSync: false,
+		},
+		logger: logger}
 }
 
 func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) (uint32, bool, bool, error) {
@@ -333,14 +305,16 @@ func (b *dataBatch) incrementSize(delta uint32) uint32 {
 // Given a request to be sent and the batch of requests metadata that has been pre-processed
 // returns three possible values
 // Send - doc needs to be sent to target
-// NotSendFailedCR - doc does not need to be sent to target since it failed source side conflict resolution
+// NotSendFailedCR - doc does not need to be sent to target since it failed source side conflict resolution (target wins)
+// NotSendMerge - for CCR only, the documents need to be merged
+// NotSendSetBack - for CCR only, the document needs to be sent back to source cluster
 // NotSendOther - doc does not need to be sent to target for other reasons, e.g., since target no longer owns the vbucket involved
 func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLogger) (NeedSendStatus, error) {
 	if req == nil || req.Req == nil {
 		return Send, errors.New("needSend saw a nil req")
 	}
 
-	failedCR, ok := batch.bigDoc_noRep_map[req.UniqueKey]
+	failedCR, ok := batch.noRep_map[req.UniqueKey]
 	if !ok {
 		return Send, nil
 	} else {
@@ -348,30 +322,17 @@ func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLo
 	}
 }
 
-func decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
-	ret := documentMetadata{}
-	ret.key = req.Key
-	ret.flags = binary.BigEndian.Uint32(req.Extras[0:4])
-	ret.expiry = binary.BigEndian.Uint32(req.Extras[4:8])
-	ret.revSeq = binary.BigEndian.Uint64(req.Extras[8:16])
-	ret.cas = req.Cas
-	ret.deletion = (req.Opcode == base.DELETE_WITH_META)
-	ret.dataType = req.DataType
+type NoRepMap map[string]NeedSendStatus
 
-	return ret
-}
-
-type BigDocNoRepMap map[string]NeedSendStatus
-
-func (norepMap BigDocNoRepMap) Clone() BigDocNoRepMap {
-	var clonedMap BigDocNoRepMap = make(BigDocNoRepMap)
+func (norepMap NoRepMap) Clone() NoRepMap {
+	var clonedMap NoRepMap = make(NoRepMap)
 	for k, v := range norepMap {
 		clonedMap[k] = v
 	}
 	return clonedMap
 }
 
-func (norepMap BigDocNoRepMap) Redact() BigDocNoRepMap {
+func (norepMap NoRepMap) Redact() NoRepMap {
 	for k, v := range norepMap {
 		// Right now, only User Data tag. In the future, need to check others
 		if !base.IsStringRedacted(k) {
@@ -382,8 +343,8 @@ func (norepMap BigDocNoRepMap) Redact() BigDocNoRepMap {
 	return norepMap
 }
 
-func (norepMap BigDocNoRepMap) CloneAndRedact() BigDocNoRepMap {
-	var clonedMap BigDocNoRepMap = make(BigDocNoRepMap)
+func (norepMap NoRepMap) CloneAndRedact() NoRepMap {
+	var clonedMap NoRepMap = make(NoRepMap)
 	for k, v := range norepMap {
 		clonedMap[base.TagUD(k)] = v
 	}
