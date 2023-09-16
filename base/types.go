@@ -3006,3 +3006,6 @@ type ConnectionErrMapType map[string]map[string][]string
 type PortType int
 
 type FilteringStatusType int
+
+// Stats per vbucket
+type VBCountMetricMap map[string]int64

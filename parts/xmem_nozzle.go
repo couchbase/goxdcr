@@ -2765,7 +2765,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								pos := xmem.getPosFromOpaque(response.Opaque)
 								// Don't spam the log. Keep a counter instead
 								atomic.AddUint64(&xmem.counterGuardrailHit, 1)
-								xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, nil, nil))
+								vbno := wrappedReq.Req.VBucket
+								seqno := wrappedReq.Seqno
+								xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, []interface{}{vbno, seqno}, nil))
 								_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 							} else {
 								if response.Status == mc.XATTR_EINVAL && xmem.source_cr_mode == base.CRMode_Custom {

@@ -115,34 +115,41 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DOCS_FILTERED_CLIENT_TXN_METRIC:     service_def.MetricTypeCounter,
 	service_def.DOCS_FILTERED_USER_DEFINED_METRIC:   service_def.MetricTypeCounter,
 	service_def.DOCS_FILTERED_MOBILE_METRIC:         service_def.MetricTypeCounter,
-	service_def.GUARDRAIL_RESIDENT_RATIO:            service_def.MetricTypeCounter,
-	service_def.GUARDRAIL_DATA_SIZE:                 service_def.MetricTypeCounter,
-	service_def.GUARDRAIL_DISK_SPACE:                service_def.MetricTypeCounter,
+	service_def.GUARDRAIL_RESIDENT_RATIO_METRIC:     service_def.MetricTypeCounter,
+	service_def.GUARDRAIL_DATA_SIZE_METRIC:          service_def.MetricTypeCounter,
+	service_def.GUARDRAIL_DISK_SPACE_METRIC:         service_def.MetricTypeCounter,
 }
 
-var VBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
+var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
 	service_def.DELETION_FILTERED_METRIC, service_def.SET_FILTERED_METRIC, service_def.BINARY_FILTERED_METRIC, service_def.EXPIRY_STRIPPED_METRIC,
 	service_def.DOCS_FILTERED_TXN_ATR_METRIC, service_def.DOCS_FILTERED_CLIENT_TXN_METRIC, service_def.DOCS_FILTERED_TXN_XATTR_METRIC,
 	service_def.DOCS_FILTERED_MOBILE_METRIC, service_def.DOCS_FILTERED_USER_DEFINED_METRIC}
 
-func MakeVBCountMetricMap() service_def.VBCountMetricMap {
-	newMap := make(service_def.VBCountMetricMap)
-	for _, key := range VBMetricKeys {
+var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC, service_def.GUARDRAIL_DATA_SIZE_METRIC, service_def.GUARDRAIL_DISK_SPACE_METRIC}
+
+var VBMetricKeys []string
+var compileVBMetricKeyOnce sync.Once
+var vbMetricKeyLock sync.RWMutex
+
+func MakeVBCountMetricMap(metricsKeys []string) base.VBCountMetricMap {
+	newMap := make(base.VBCountMetricMap)
+	for _, key := range metricsKeys {
 		newMap[key] = 0
 	}
 	return newMap
 }
 
-var VBCountMetrics = MakeVBCountMetricMap()
+var RouterVBCountMetrics = MakeVBCountMetricMap(RouterVBMetricKeys)
+var OutNozzleVBCountMetrics = MakeVBCountMetricMap(OutNozzleVBMetricKeys)
 
-func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) service_def.VBCountMetricMap {
+func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) base.VBCountMetricMap {
 	if agreedIndex < 0 || ckptDoc == nil || agreedIndex >= len(ckptDoc.Checkpoint_records) {
 		return nil
 	}
 
 	record := ckptDoc.Checkpoint_records[agreedIndex]
 
-	vbStatMap := make(service_def.VBCountMetricMap)
+	vbStatMap := make(base.VBCountMetricMap)
 	vbStatMap[service_def.DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
 	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
 	vbStatMap[service_def.EXPIRY_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnExpirationsCnt)
@@ -312,6 +319,10 @@ func (statsMgr *StatisticsManager) getRouterCollector() *routerCollector {
 
 func (statsMgr *StatisticsManager) getdcpCollector() *dcpCollector {
 	return (statsMgr.collectors[1]).(*dcpCollector)
+}
+
+func (statsMgr *StatisticsManager) getOutnozzleCollector() *outNozzleCollector {
+	return (statsMgr.collectors[0]).(*outNozzleCollector)
 }
 
 func (stats_mgr *StatisticsManager) cleanupBeforeExit() error {
@@ -1246,6 +1257,9 @@ type MetricsCollector interface {
 	Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error
 	OnEvent(event *common.Event)
 	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
+
+	AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error
+	UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error
 }
 
 // metrics collector for custom conflict manager
@@ -1257,6 +1271,16 @@ type conflictMgrCollector struct {
 	// key of inner map: metric name
 	// value of inner map: metric value
 	component_map map[string]map[string]interface{}
+}
+
+func (conflictMgr_collector *conflictMgrCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	// do nothing
+	return nil
+}
+
+func (conflictMgr_collector *conflictMgrCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	//do nothing
+	return nil
 }
 
 func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
@@ -1370,12 +1394,25 @@ type outNozzleCollector struct {
 	// key of inner map: metric name
 	// value of inner map: metric value
 	component_map map[string]map[string]interface{}
+
+	vbMetricHelper *VbBasedMetricHelper
+}
+
+func (outNozzle_collector *outNozzleCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	// TODO NEIL do this later
+	return nil
+}
+
+func (outNozzle_collector *outNozzleCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	//return outNozzle_collector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
+	return nil
 }
 
 func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
 	outNozzle_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.OutNozzleStatsCollector)
 	outNozzle_collector.stats_mgr = stats_mgr
 	outNozzle_collector.component_map = make(map[string]map[string]interface{})
+	outNozzle_collector.vbMetricHelper = NewVbBasedMetricHelper()
 	outNozzle_parts := pipeline.Targets()
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
@@ -1448,11 +1485,11 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		tmpfailReceived := metrics.NewCounter()
 		registry.Register(service_def.TARGET_TMPFAIL_METRIC, tmpfailReceived)
 		guardRailRR := metrics.NewCounter()
-		registry.Register(service_def.GUARDRAIL_RESIDENT_RATIO, guardRailRR)
+		registry.Register(service_def.GUARDRAIL_RESIDENT_RATIO_METRIC, guardRailRR)
 		guardRailDataSz := metrics.NewCounter()
-		registry.Register(service_def.GUARDRAIL_DATA_SIZE, guardRailDataSz)
+		registry.Register(service_def.GUARDRAIL_DATA_SIZE_METRIC, guardRailDataSz)
 		guardRailDiskSpace := metrics.NewCounter()
-		registry.Register(service_def.GUARDRAIL_DISK_SPACE, guardRailDiskSpace)
+		registry.Register(service_def.GUARDRAIL_DISK_SPACE_METRIC, guardRailDiskSpace)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1488,9 +1525,12 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC] = data_replicated_uncompressed
 		metric_map[service_def.TARGET_EACCESS_METRIC] = eaccessReceived
 		metric_map[service_def.TARGET_TMPFAIL_METRIC] = tmpfailReceived
-		metric_map[service_def.GUARDRAIL_RESIDENT_RATIO] = guardRailRR
-		metric_map[service_def.GUARDRAIL_DATA_SIZE] = guardRailDataSz
-		metric_map[service_def.GUARDRAIL_DISK_SPACE] = guardRailDiskSpace
+		metric_map[service_def.GUARDRAIL_RESIDENT_RATIO_METRIC] = guardRailRR
+		metric_map[service_def.GUARDRAIL_DATA_SIZE_METRIC] = guardRailDataSz
+		metric_map[service_def.GUARDRAIL_DISK_SPACE_METRIC] = guardRailDiskSpace
+
+		listOfVBs := part.ResponsibleVBs()
+		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), OutNozzleVBMetricKeys)
 		outNozzle_collector.component_map[part.Id()] = metric_map
 
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
@@ -1519,8 +1559,7 @@ func (outNozzle_collector *outNozzleCollector) OnEvent(event *common.Event) {
 }
 
 func (outNozzleCollector *outNozzleCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
-	// Nothing
-	return
+	outNozzleCollector.vbMetricHelper.HandleLatestThroughSeqnos(SeqnoMap)
 }
 
 func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event) error {
@@ -1672,18 +1711,51 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 
 		switch responseCode {
 		case mc.BUCKET_RESIDENT_RATIO_TOO_LOW:
-			metricMap[service_def.GUARDRAIL_RESIDENT_RATIO].(metrics.Counter).Inc(1)
+			metricMap[service_def.GUARDRAIL_RESIDENT_RATIO_METRIC].(metrics.Counter).Inc(1)
+			err := outNozzle_collector.handleVBEvent(event, service_def.GUARDRAIL_RESIDENT_RATIO_METRIC)
+			if err != nil {
+				return err
+			}
 
 		case mc.BUCKET_DATA_SIZE_TOO_BIG:
-			metricMap[service_def.GUARDRAIL_DATA_SIZE].(metrics.Counter).Inc(1)
+			metricMap[service_def.GUARDRAIL_DATA_SIZE_METRIC].(metrics.Counter).Inc(1)
+			err := outNozzle_collector.handleVBEvent(event, service_def.GUARDRAIL_DATA_SIZE_METRIC)
+			if err != nil {
+				return err
+			}
 
 		case mc.BUCKET_DISK_SPACE_TOO_LOW:
-			metricMap[service_def.GUARDRAIL_DISK_SPACE].(metrics.Counter).Inc(1)
+			metricMap[service_def.GUARDRAIL_DISK_SPACE_METRIC].(metrics.Counter).Inc(1)
+			err := outNozzle_collector.handleVBEvent(event, service_def.GUARDRAIL_DISK_SPACE_METRIC)
+			if err != nil {
+				return err
+			}
 
 		}
+
 	}
 
 	return nil
+}
+
+func (outNozzle_collector *outNozzleCollector) handleVBEvent(event *common.Event, metricKey string) error {
+	switch metricKey {
+	case service_def.GUARDRAIL_DISK_SPACE_METRIC:
+		fallthrough
+	case service_def.GUARDRAIL_RESIDENT_RATIO_METRIC:
+		fallthrough
+	case service_def.GUARDRAIL_DATA_SIZE_METRIC:
+		vbucket := event.DerivedData[0].(uint16)
+		seqno := event.DerivedData[1].(uint64)
+		helper, ok := outNozzle_collector.vbMetricHelper.vbBasedHelper[vbucket]
+		if !ok {
+			return base.ErrorNotMyVbucket
+		}
+		helper.handleIncomingSeqno(seqno, metricKey)
+		return nil
+	default:
+		return base.ErrorInvalidInput
+	}
 }
 
 func getStatsKeyFromDocKeyAndSeqno(key string, seqno uint64) string {
@@ -1698,6 +1770,16 @@ type dcpCollector struct {
 	// key of inner map: metric name
 	// value of inner map: metric value
 	component_map map[string]map[string]interface{}
+}
+
+func (dcp_collector *dcpCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	// do nothing
+	return nil
+}
+
+func (dcp_collector *dcpCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	// do nothing
+	return nil
 }
 
 func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
@@ -1783,21 +1865,22 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 }
 
 type vbBasedThroughSeqnoHelper struct {
-	id       string
-	statsMgr *StatisticsManager
+	id string
 
 	// These are sorted because DCP streams send seqno in an increasing order
 	sortedSeqnoListMap map[string]*base.SortedSeqnoListWithLock
+
+	responsibleKeys []string
 }
 
-func newVbBasedThroughSeqnoHelper(id string, statsMgr *StatisticsManager) *vbBasedThroughSeqnoHelper {
+func newVbBasedThroughSeqnoHelper(id string, keys []string) *vbBasedThroughSeqnoHelper {
 	helper := &vbBasedThroughSeqnoHelper{
 		id:                 id,
-		statsMgr:           statsMgr,
 		sortedSeqnoListMap: make(map[string]*base.SortedSeqnoListWithLock),
+		responsibleKeys:    keys,
 	}
 
-	for _, key := range VBMetricKeys {
+	for _, key := range keys {
 		helper.sortedSeqnoListMap[key] = base.NewSortedSeqnoListWithLock()
 	}
 	return helper
@@ -1808,7 +1891,7 @@ func (vbh *vbBasedThroughSeqnoHelper) handleIncomingSeqno(seqno uint64, metricKe
 }
 
 func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]interface{}, latestSeqno uint64) {
-	for _, key := range VBMetricKeys {
+	for _, key := range vbh.responsibleKeys {
 		sortedList := vbh.sortedSeqnoListMap[key].GetSortedSeqnoList(false)
 		// Figure out how many count are to be committed to metrics
 		i := sort.Search(len(sortedList), func(i int) bool {
@@ -1822,6 +1905,147 @@ func (vbh *vbBasedThroughSeqnoHelper) mergeWithMetrics(metricsMap map[string]int
 
 }
 
+type VbBasedMetricHelper struct {
+	// For vb-based metric across all DCP nozzles
+	vbBasedMetric map[uint16]map[string]interface{}
+
+	// A map of vb-> partIDs
+	partVbsIdMap map[uint16]string
+
+	// Helpers to ensure that stored filter metrics are correct
+	vbBasedHelper map[uint16]*vbBasedThroughSeqnoHelper
+
+	responsibleKeys []string
+}
+
+func (h *VbBasedMetricHelper) Register(id string, vbs []uint16, partId string, keys []string) {
+	h.responsibleKeys = keys
+	for _, i := range vbs {
+		h.partVbsIdMap[i] = partId
+		metricsMap := make(map[string]interface{})
+		h.vbBasedHelper[i] = newVbBasedThroughSeqnoHelper(id, h.responsibleKeys)
+		for _, k := range keys {
+			metricsMap[k] = metrics.NewCounter()
+			metrics.Register(fmt.Sprintf("%v:%v", partId, i), metricsMap[k])
+		}
+		h.vbBasedMetric[i] = metricsMap
+	}
+}
+
+func (h *VbBasedMetricHelper) HandleLatestThroughSeqnos(seqnoMap map[uint16]uint64) {
+	var waitGrp sync.WaitGroup
+
+	for vb, _ := range h.vbBasedMetric {
+		waitGrp.Add(1)
+		go h.handleLatestThroughSeqnoForVb(vb, seqnoMap[vb], &waitGrp)
+	}
+
+	waitGrp.Wait()
+
+}
+
+func (h *VbBasedMetricHelper) handleLatestThroughSeqnoForVb(vb uint16, latestSeqno uint64, waitGrp *sync.WaitGroup) {
+	defer waitGrp.Done()
+	metricsMap, ok := h.vbBasedMetric[vb]
+	if !ok {
+		return
+	}
+	vbHelper, ok := h.vbBasedHelper[vb]
+	if !ok {
+		return
+	}
+
+	vbHelper.mergeWithMetrics(metricsMap, latestSeqno)
+}
+
+func (h *VbBasedMetricHelper) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	vbBasedMetric, ok := h.vbBasedMetric[vbno]
+	if !ok {
+		return base.ErrorNotMyVbucket
+	}
+
+	if compiledMap == nil {
+		return fmt.Errorf("CompiledMap being passed into AddVbSpecificMetrics is nil")
+	}
+
+	for _, k := range h.responsibleKeys {
+		registry, ok := vbBasedMetric[k]
+		if !ok {
+			continue
+		}
+		counter := registry.(metrics.Counter)
+		compiledMap[k] = counter.Count()
+	}
+	return nil
+}
+
+func (h *VbBasedMetricHelper) UpdateCurrentVbSpecificMetrics(vb uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	vbBasedMetric, ok := h.vbBasedMetric[vb]
+	if !ok {
+		return base.ErrorNotMyVbucket
+	}
+
+	// First find the part responsible for this vb
+	partId, found := h.partVbsIdMap[vb]
+	if !found {
+		return base.ErrorNotMyVbucket
+	}
+
+	registries := currentRegistries[partId]
+	if registries == nil {
+		return fmt.Errorf("Unable to find registry for %v", partId)
+	}
+
+	// Keys is the "keys" being read, i.e. the filtered_cnt, etc from Checkpoint
+	for k, v := range valuesToApply {
+		var isResponsibleForThisKey bool
+		for _, keyToCheck := range h.responsibleKeys {
+			if keyToCheck == k {
+				isResponsibleForThisKey = true
+				break
+			}
+		}
+		if !isResponsibleForThisKey {
+			continue
+		}
+
+		// Increment vb-related counters
+		registry, ok := vbBasedMetric[k]
+		if !ok {
+			return base.ErrorInvalidInput
+		}
+		counter := registry.(metrics.Counter)
+		currentVal := counter.Count()
+		// Difference here is to address scenario when rollback occurs
+		// If rollback happens, then the difference is new - old
+		// Either increment or decrement the current count in both vb specific and stats_mgr.registries
+		difference := v - currentVal
+		counter.Inc(difference)
+
+		// Increment stats independent of VB that need this
+		metricsIface := registries.Get(k)
+		if metricsIface == nil {
+			return fmt.Errorf("%v Unable to get metric\n", partId)
+		}
+		counter, ok = metricsIface.(metrics.Counter)
+		if !ok || counter == nil {
+			return fmt.Errorf("%v Unable to get metric counter\n", partId)
+		}
+		counter.Inc(difference)
+	}
+
+	return nil
+}
+
+func NewVbBasedMetricHelper() *VbBasedMetricHelper {
+	helper := &VbBasedMetricHelper{}
+	helper.vbBasedMetric = make(map[uint16]map[string]interface{})
+	helper.partVbsIdMap = make(map[uint16]string)
+	helper.vbBasedHelper = make(map[uint16]*vbBasedThroughSeqnoHelper)
+
+	return helper
+}
+
 // metrics collector for Router
 type routerCollector struct {
 	id        string
@@ -1832,23 +2056,22 @@ type routerCollector struct {
 	// value of inner map: metric value
 	component_map map[string]map[string]interface{}
 
-	// For vb-based metric across all DCP nozzles
-	vbBasedMetric map[uint16]map[string]interface{}
+	vbMetricHelper *VbBasedMetricHelper
+}
 
-	// A map of vb-> routerIDs
-	routerVbsIdMap map[uint16]string
+func (r_collector *routerCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	return r_collector.vbMetricHelper.UpdateCurrentVbSpecificMetrics(vbno, valuesToApply, currentRegistries)
+}
 
-	// Helpers to ensure that stored filter metrics are correct
-	vbBasedHelper map[uint16]*vbBasedThroughSeqnoHelper
+func (r_collector *routerCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	return r_collector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
 }
 
 func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
 	r_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.RouterStatsCollector)
 	r_collector.stats_mgr = stats_mgr
 	r_collector.component_map = make(map[string]map[string]interface{})
-	r_collector.vbBasedMetric = make(map[uint16]map[string]interface{})
-	r_collector.routerVbsIdMap = make(map[uint16]string)
-	r_collector.vbBasedHelper = make(map[uint16]*vbBasedThroughSeqnoHelper)
+	r_collector.vbMetricHelper = NewVbBasedMetricHelper()
 	dcp_parts := pipeline.Sources()
 	for _, dcp_part := range dcp_parts {
 		//get connector
@@ -1907,17 +2130,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 
 		// VB specific stats
 		listOfVbs := dcp_part.ResponsibleVBs()
-		for _, i := range listOfVbs {
-			r_collector.routerVbsIdMap[i] = conn.Id()
-			metricsMap := make(map[string]interface{})
-			r_collector.vbBasedHelper[i] = newVbBasedThroughSeqnoHelper(fmt.Sprintf("%v:%v", r_collector.Id(), i), r_collector.stats_mgr)
-			for k, _ := range VBCountMetrics {
-				metricsMap[k] = metrics.NewCounter()
-				metrics.Register(fmt.Sprintf("%v:%v", conn.Id(), i), metricsMap[k])
-			}
-			r_collector.vbBasedMetric[i] = metricsMap
-		}
-
+		r_collector.vbMetricHelper.Register(r_collector.Id(), listOfVbs, conn.Id(), RouterVBMetricKeys)
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
@@ -1961,7 +2174,7 @@ func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey
 		uprEvent := event.Data.(*mcc.UprEvent)
 		vbucket := uprEvent.VBucket
 		seqno := uprEvent.Seqno
-		helper, ok := r_collector.vbBasedHelper[vbucket]
+		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
 		if !ok {
 			return base.ErrorNotMyVbucket
 		}
@@ -1977,28 +2190,7 @@ func (r_collector *routerCollector) OnEvent(event *common.Event) {
 }
 
 func (r_collector *routerCollector) HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64) {
-	var waitGrp sync.WaitGroup
-
-	for vb, _ := range r_collector.vbBasedMetric {
-		waitGrp.Add(1)
-		go r_collector.handleLatestThroughSeqnoForVb(vb, SeqnoMap[vb], &waitGrp)
-	}
-
-	waitGrp.Wait()
-}
-
-func (r_collector *routerCollector) handleLatestThroughSeqnoForVb(vb uint16, latestSeqno uint64, waitGrp *sync.WaitGroup) {
-	defer waitGrp.Done()
-	metricsMap, ok := r_collector.vbBasedMetric[vb]
-	if !ok {
-		return
-	}
-	vbHelper, ok := r_collector.vbBasedHelper[vb]
-	if !ok {
-		return
-	}
-
-	vbHelper.mergeWithMetrics(metricsMap, latestSeqno)
+	r_collector.vbMetricHelper.HandleLatestThroughSeqnos(SeqnoMap)
 }
 
 func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
@@ -2104,6 +2296,16 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 // metrics collector for checkpointmanager
 type checkpointMgrCollector struct {
 	stats_mgr *StatisticsManager
+}
+
+func (ckpt_collector *checkpointMgrCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	// do nothing
+	return nil
+}
+
+func (ckpt_collector *checkpointMgrCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	// do nothing
+	return nil
 }
 
 func (ckpt_collector *checkpointMgrCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {
@@ -2575,71 +2777,24 @@ func (stats_mgr *StatisticsManager) GetCountMetrics(key string) (int64, error) {
 	return registryCounter.Count(), nil
 }
 
-func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (service_def.VBCountMetricMap, error) {
-	// Currently only DCP has vb specific stats
-	vbBasedMetric, ok := stats_mgr.getRouterCollector().vbBasedMetric[vb]
-	if !ok {
-		return nil, base.ErrorNotMyVbucket
-	}
-
-	metricsMap := make(map[string]int64)
-	for k, _ := range VBCountMetrics {
-		registry, ok := (vbBasedMetric[k])
-		if !ok {
-			continue
+func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (base.VBCountMetricMap, error) {
+	compiledMap := make(base.VBCountMetricMap)
+	for _, collector := range stats_mgr.collectors {
+		err := collector.AddVbSpecificMetrics(vb, compiledMap)
+		if err != nil {
+			return nil, err
 		}
-		counter := registry.(metrics.Counter)
-		metricsMap[k] = counter.Count()
 	}
-
-	return metricsMap, nil
+	return compiledMap, nil
 }
 
-func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs service_def.VBCountMetricMap) error {
-	// Currently only DCP has vb specific stats
-	vbBasedMetric, ok := stats_mgr.getRouterCollector().vbBasedMetric[vb]
-	if !ok {
-		return base.ErrorNotMyVbucket
-	}
-
-	// First find the router part responsible for this vb
-	routerId, found := stats_mgr.getRouterCollector().routerVbsIdMap[vb]
-	if !found {
-		return base.ErrorNotMyVbucket
-	}
-
-	registry_router := stats_mgr.registries[routerId]
-	if registry_router == nil {
-		return fmt.Errorf("Unable to find registry for router ID %v", routerId)
-	}
-
-	// For keys that are passed in, set the counter appropriately
-	for k, v := range metricKVs {
-		// Increment vb-related counters
-		registry, ok := vbBasedMetric[k]
-		if !ok {
-			return base.ErrorInvalidInput
+func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetricMap) error {
+	for _, collector := range stats_mgr.collectors {
+		err := collector.UpdateCurrentVbSpecificMetrics(vb, metricKVs, stats_mgr.registries)
+		if err != nil {
+			return err
 		}
-		counter := registry.(metrics.Counter)
-		currentVal := counter.Count()
-		// Difference here is to address scenario when rollback occurs
-		// If rollback happens, then the difference is new - old
-		// Either increment or decrement the current count in both vb specific and stats_mgr.registries
-		difference := v - currentVal
-		counter.Inc(difference)
-
-		// Increment stats independent of VB that need this
-		metricsIface := registry_router.Get(k)
-		if metricsIface == nil {
-			return fmt.Errorf("%v Unable to get metric\n", routerId)
-		}
-		counter, ok = metricsIface.(metrics.Counter)
-		if !ok || counter == nil {
-			return fmt.Errorf("%v Unable to get metric counter\n", routerId)
-		}
-		counter.Inc(difference)
 	}
-
 	return nil
 }
 

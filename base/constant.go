@@ -1622,3 +1622,18 @@ var ManifestsGetterSleepTimeSecs = 1
 var ManifestsGetterMaxRetry = 8
 
 const PipelineFullTopic string = "pipelineFullTopic"
+
+const (
+	DocsFiltered                    = "docs_filtered"
+	DocsUnableToFilter              = "docs_unable_to_filter"
+	ExpiryFiltered                  = "expiry_filtered"
+	DeletionFiltered                = "deletion_filtered"
+	SetFiltered                     = "set_filtered"
+	BinaryFiltered                  = "binary_filtered"
+	ExpiryStripped                  = "expiry_stripped"
+	AtrTxnDocsFiltered              = "atr_txn_docs_filtered"
+	ClientTxnDocsFiltered           = "client_txn_docs_filtered"
+	DocsFilteredOnTxnXattr          = "docs_filtered_on_txn_xattr"
+	DocsFilteredOnUserDefinedFilter = "docs_filtered_on_user_defined_filter"
+	MobileDocsFiltered              = "mobile_docs_filtered"
+)

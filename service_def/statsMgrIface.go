@@ -18,16 +18,13 @@ import (
 	"strings"
 )
 
-// Stats per vbucket
-type VBCountMetricMap map[string]int64
-
 type StatsMgrIface interface {
 	Start(settings metadata.ReplicationSettingsMap) error
 	Stop() error
 	GetCountMetrics(key string) (int64, error)
 	GetThroughSeqnosFromTsService() map[uint16]uint64
-	GetVBCountMetrics(vb uint16) (VBCountMetricMap, error)
-	SetVBCountMetrics(vb uint16, metricKVs VBCountMetricMap) error
+	GetVBCountMetrics(vb uint16) (base.VBCountMetricMap, error)
+	SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetricMap) error
 	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 }
 
@@ -61,18 +58,18 @@ const (
 	DOCS_REP_QUEUE_METRIC               = base.DocsRepQueueStats
 	DATA_REPLICATED_UNCOMPRESSED_METRIC = "data_replicated_uncompress"
 
-	DOCS_FILTERED_METRIC              = "docs_filtered"
-	DOCS_UNABLE_TO_FILTER_METRIC      = "docs_unable_to_filter"
-	EXPIRY_FILTERED_METRIC            = "expiry_filtered"
-	DELETION_FILTERED_METRIC          = "deletion_filtered"
-	SET_FILTERED_METRIC               = "set_filtered"
-	BINARY_FILTERED_METRIC            = "binary_filtered"
-	EXPIRY_STRIPPED_METRIC            = "expiry_stripped"
-	DOCS_FILTERED_TXN_ATR_METRIC      = "atr_txn_docs_filtered"
-	DOCS_FILTERED_CLIENT_TXN_METRIC   = "client_txn_docs_filtered"
-	DOCS_FILTERED_TXN_XATTR_METRIC    = "docs_filtered_on_txn_xattr"
-	DOCS_FILTERED_USER_DEFINED_METRIC = "docs_filtered_on_user_defined_filter"
-	DOCS_FILTERED_MOBILE_METRIC       = "mobile_docs_filtered"
+	DOCS_FILTERED_METRIC              = base.DocsFiltered
+	DOCS_UNABLE_TO_FILTER_METRIC      = base.DocsUnableToFilter
+	EXPIRY_FILTERED_METRIC            = base.ExpiryFiltered
+	DELETION_FILTERED_METRIC          = base.DeletionFiltered
+	SET_FILTERED_METRIC               = base.SetFiltered
+	BINARY_FILTERED_METRIC            = base.BinaryFiltered
+	EXPIRY_STRIPPED_METRIC            = base.ExpiryStripped
+	DOCS_FILTERED_TXN_ATR_METRIC      = base.AtrTxnDocsFiltered
+	DOCS_FILTERED_CLIENT_TXN_METRIC   = base.ClientTxnDocsFiltered
+	DOCS_FILTERED_TXN_XATTR_METRIC    = base.DocsFilteredOnTxnXattr
+	DOCS_FILTERED_USER_DEFINED_METRIC = base.DocsFilteredOnUserDefinedFilter
+	DOCS_FILTERED_MOBILE_METRIC       = base.MobileDocsFiltered
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
 	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
@@ -149,9 +146,9 @@ const (
 	PIPELINE_ERRORS = "pipeline_errors"
 
 	// Guardrails
-	GUARDRAIL_RESIDENT_RATIO = "guardrail_resident_ratio"
-	GUARDRAIL_DATA_SIZE      = "guardrail_data_size"
-	GUARDRAIL_DISK_SPACE     = "guardrail_disk_space"
+	GUARDRAIL_RESIDENT_RATIO_METRIC = "guardrail_resident_ratio"
+	GUARDRAIL_DATA_SIZE_METRIC      = "guardrail_data_size"
+	GUARDRAIL_DISK_SPACE_METRIC     = "guardrail_disk_space"
 )
 
 const (
@@ -1259,7 +1256,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Labels:       StandardLabels,
 	},
 
-	GUARDRAIL_RESIDENT_RATIO: StatsProperty{
+	GUARDRAIL_RESIDENT_RATIO_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForSupportability,
@@ -1270,7 +1267,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability: Committed,
 		Labels:    StandardLabels,
 	},
-	GUARDRAIL_DATA_SIZE: StatsProperty{
+	GUARDRAIL_DATA_SIZE_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForSupportability,
@@ -1281,7 +1278,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability: Committed,
 		Labels:    StandardLabels,
 	},
-	GUARDRAIL_DISK_SPACE: StatsProperty{
+	GUARDRAIL_DISK_SPACE_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForSupportability,

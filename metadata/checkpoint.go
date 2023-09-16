@@ -119,11 +119,23 @@ func (c *CheckpointRecord) Size() int {
 	return totalSize
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems,
-	filterFailed, filteredExpiredItem, filteredDelItems, filteredSetItems, filteredBinaryDocItems,
-	filteredExpiryStrippedItems, filteredATRDocItems, filteredClientTxnDocItems, filteredTxnXattrsItems,
-	filteredMobileDocItems, filteredDocsOnUserDefinedFilters, srcManifestForDCP, srcManifestForBackfill, tgtManifest uint64,
-	brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno uint64,
+	vbCountMetrics base.VBCountMetricMap, srcManifestForDCP, srcManifestForBackfill,
+	tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
+
+	filteredItems := uint64(vbCountMetrics[base.DocsFiltered])
+	filterFailed := uint64(vbCountMetrics[base.DocsUnableToFilter])
+	filteredExpiredItems := uint64(vbCountMetrics[base.ExpiryFiltered])
+	filteredDelItems := uint64(vbCountMetrics[base.DeletionFiltered])
+	filteredSetItems := uint64(vbCountMetrics[base.SetFiltered])
+	filteredBinaryDocItems := uint64(vbCountMetrics[base.BinaryFiltered])
+	filteredExpiryStripItems := uint64(vbCountMetrics[base.ExpiryStripped])
+	filteredATRDocItems := uint64(vbCountMetrics[base.AtrTxnDocsFiltered])
+	filteredClientTxnDocItems := uint64(vbCountMetrics[base.ClientTxnDocsFiltered])
+	filteredTxnXattrsItems := uint64(vbCountMetrics[base.DocsFilteredOnTxnXattr])
+	filteredMobileDocItems := uint64(vbCountMetrics[base.MobileDocsFiltered])
+	filteredDocsOnUserDefinedFilters := uint64(vbCountMetrics[base.DocsFilteredOnUserDefinedFilter])
+
 	record := &CheckpointRecord{
 		Failover_uuid:                      failoverUuid,
 		Seqno:                              seqno,
@@ -132,10 +144,10 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		Target_Seqno:                       targetSeqno,
 		Filtered_Items_Cnt:                 filteredItems,
 		Filtered_Failed_Cnt:                filterFailed,
-		FilteredItemsOnExpirationsCnt:      filteredExpiredItem,
+		FilteredItemsOnExpirationsCnt:      filteredExpiredItems,
 		FilteredItemsOnDeletionsCnt:        filteredDelItems,
 		FilteredItemsOnSetCnt:              filteredSetItems,
-		FilteredItemsOnExpiryStrippedCnt:   filteredExpiryStrippedItems,
+		FilteredItemsOnExpiryStrippedCnt:   filteredExpiryStripItems,
 		FilteredItemsOnBinaryDocsCnt:       filteredBinaryDocItems,
 		FilteredItemsOnATRDocsCnt:          filteredATRDocItems,
 		FilteredItemsOnClientTxnRecordsCnt: filteredClientTxnDocItems,
