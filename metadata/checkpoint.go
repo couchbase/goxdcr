@@ -45,6 +45,9 @@ const (
 	TargetManifest                     string = "target_manifest"
 	BrokenCollectionsMapSha            string = "brokenCollectionsMapSha256"
 	CreationTime                       string = "creationTime"
+	GuardrailResidentRatioCnt          string = "guardrail_resident_ratio_cnt"
+	GuardrailDataSizeCnt               string = "guardrail_data_size_cnt"
+	GuardrailDiskSpaceCnt              string = "guardrail_disk_space_cnt"
 )
 
 type CheckpointRecord struct {
@@ -95,6 +98,10 @@ type CheckpointRecord struct {
 	brokenMappingsMtx sync.RWMutex
 	// Epoch timestamp of when this record was created
 	CreationTime uint64 `json:"creationTime"`
+	// Guardrails
+	GuardrailResidentRatioCnt uint64 `json:"guardrail_resident_ratio_cnt"`
+	GuardrailDataSizeCnt      uint64 `json:"guardrail_data_size_cnt"`
+	GuardrailDiskSpaceCnt     uint64 `json:"guardrail_disk_space_cnt"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -135,6 +142,9 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 	filteredTxnXattrsItems := uint64(vbCountMetrics[base.DocsFilteredOnTxnXattr])
 	filteredMobileDocItems := uint64(vbCountMetrics[base.MobileDocsFiltered])
 	filteredDocsOnUserDefinedFilters := uint64(vbCountMetrics[base.DocsFilteredOnUserDefinedFilter])
+	guardrailResidentRatioItems := uint64(vbCountMetrics[base.GuardrailResidentRatio])
+	guardrailDataSizeItems := uint64(vbCountMetrics[base.GuardrailDataSize])
+	guardrailDiskSpaceItems := uint64(vbCountMetrics[base.GuardrailDiskSpace])
 
 	record := &CheckpointRecord{
 		Failover_uuid:                      failoverUuid,
@@ -159,6 +169,9 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		TargetManifest:                     tgtManifest,
 		brokenMappings:                     brokenMappings,
 		CreationTime:                       creationTime,
+		GuardrailResidentRatioCnt:          guardrailResidentRatioItems,
+		GuardrailDataSizeCnt:               guardrailDataSizeItems,
+		GuardrailDiskSpaceCnt:              guardrailDiskSpaceItems,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -183,36 +196,39 @@ func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
 	return nil
 }
 
-func (ckptRecord *CheckpointRecord) SameAs(new_record *CheckpointRecord) bool {
-	if ckptRecord == nil && new_record != nil {
+func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
+	if ckptRecord == nil && newRecord != nil {
 		return false
-	} else if ckptRecord != nil && new_record == nil {
+	} else if ckptRecord != nil && newRecord == nil {
 		return false
-	} else if ckptRecord == nil && new_record == nil {
+	} else if ckptRecord == nil && newRecord == nil {
 		return true
-	} else if ckptRecord.Failover_uuid == new_record.Failover_uuid &&
-		ckptRecord.Seqno == new_record.Seqno &&
-		ckptRecord.Dcp_snapshot_seqno == new_record.Dcp_snapshot_seqno &&
-		ckptRecord.Dcp_snapshot_end_seqno == new_record.Dcp_snapshot_end_seqno &&
-		ckptRecord.Target_vb_opaque.IsSame(new_record.Target_vb_opaque) &&
-		ckptRecord.Target_Seqno == new_record.Target_Seqno &&
-		ckptRecord.Filtered_Failed_Cnt == new_record.Filtered_Failed_Cnt &&
-		ckptRecord.Filtered_Items_Cnt == new_record.Filtered_Items_Cnt &&
-		ckptRecord.FilteredItemsOnExpirationsCnt == new_record.FilteredItemsOnExpirationsCnt &&
-		ckptRecord.FilteredItemsOnDeletionsCnt == new_record.FilteredItemsOnDeletionsCnt &&
-		ckptRecord.FilteredItemsOnSetCnt == new_record.FilteredItemsOnSetCnt &&
-		ckptRecord.FilteredItemsOnExpiryStrippedCnt == new_record.FilteredItemsOnExpiryStrippedCnt &&
-		ckptRecord.FilteredItemsOnBinaryDocsCnt == new_record.FilteredItemsOnBinaryDocsCnt &&
-		ckptRecord.FilteredItemsOnATRDocsCnt == new_record.FilteredItemsOnATRDocsCnt &&
-		ckptRecord.FilteredItemsOnClientTxnRecordsCnt == new_record.FilteredItemsOnClientTxnRecordsCnt &&
-		ckptRecord.FilteredItemsOnTxnXattrsDocsCnt == new_record.FilteredItemsOnTxnXattrsDocsCnt &&
-		ckptRecord.FilteredItemsOnMobileRecords == new_record.FilteredItemsOnMobileRecords &&
-		ckptRecord.FilteredItemsOnUserDefinedFilters == new_record.FilteredItemsOnUserDefinedFilters &&
-		ckptRecord.SourceManifestForDCP == new_record.SourceManifestForDCP &&
-		ckptRecord.SourceManifestForBackfillMgr == new_record.SourceManifestForBackfillMgr &&
-		ckptRecord.TargetManifest == new_record.TargetManifest &&
-		ckptRecord.BrokenMappingSha256 == new_record.BrokenMappingSha256 &&
-		ckptRecord.CreationTime == new_record.CreationTime {
+	} else if ckptRecord.Failover_uuid == newRecord.Failover_uuid &&
+		ckptRecord.Seqno == newRecord.Seqno &&
+		ckptRecord.Dcp_snapshot_seqno == newRecord.Dcp_snapshot_seqno &&
+		ckptRecord.Dcp_snapshot_end_seqno == newRecord.Dcp_snapshot_end_seqno &&
+		ckptRecord.Target_vb_opaque.IsSame(newRecord.Target_vb_opaque) &&
+		ckptRecord.Target_Seqno == newRecord.Target_Seqno &&
+		ckptRecord.Filtered_Failed_Cnt == newRecord.Filtered_Failed_Cnt &&
+		ckptRecord.Filtered_Items_Cnt == newRecord.Filtered_Items_Cnt &&
+		ckptRecord.FilteredItemsOnExpirationsCnt == newRecord.FilteredItemsOnExpirationsCnt &&
+		ckptRecord.FilteredItemsOnDeletionsCnt == newRecord.FilteredItemsOnDeletionsCnt &&
+		ckptRecord.FilteredItemsOnSetCnt == newRecord.FilteredItemsOnSetCnt &&
+		ckptRecord.FilteredItemsOnExpiryStrippedCnt == newRecord.FilteredItemsOnExpiryStrippedCnt &&
+		ckptRecord.FilteredItemsOnBinaryDocsCnt == newRecord.FilteredItemsOnBinaryDocsCnt &&
+		ckptRecord.FilteredItemsOnATRDocsCnt == newRecord.FilteredItemsOnATRDocsCnt &&
+		ckptRecord.FilteredItemsOnClientTxnRecordsCnt == newRecord.FilteredItemsOnClientTxnRecordsCnt &&
+		ckptRecord.FilteredItemsOnTxnXattrsDocsCnt == newRecord.FilteredItemsOnTxnXattrsDocsCnt &&
+		ckptRecord.FilteredItemsOnMobileRecords == newRecord.FilteredItemsOnMobileRecords &&
+		ckptRecord.FilteredItemsOnUserDefinedFilters == newRecord.FilteredItemsOnUserDefinedFilters &&
+		ckptRecord.SourceManifestForDCP == newRecord.SourceManifestForDCP &&
+		ckptRecord.SourceManifestForBackfillMgr == newRecord.SourceManifestForBackfillMgr &&
+		ckptRecord.TargetManifest == newRecord.TargetManifest &&
+		ckptRecord.BrokenMappingSha256 == newRecord.BrokenMappingSha256 &&
+		ckptRecord.CreationTime == newRecord.CreationTime &&
+		ckptRecord.GuardrailDiskSpaceCnt == newRecord.GuardrailDiskSpaceCnt &&
+		ckptRecord.GuardrailDataSizeCnt == newRecord.GuardrailDataSizeCnt &&
+		ckptRecord.GuardrailResidentRatioCnt == newRecord.GuardrailResidentRatioCnt {
 		return true
 	} else {
 		return false
@@ -246,6 +262,9 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.TargetManifest = other.TargetManifest
 	ckptRecord.LoadBrokenMapping(*other.BrokenMappings())
 	ckptRecord.CreationTime = other.CreationTime
+	ckptRecord.GuardrailResidentRatioCnt = other.GuardrailResidentRatioCnt
+	ckptRecord.GuardrailDataSizeCnt = other.GuardrailDataSizeCnt
+	ckptRecord.GuardrailDiskSpaceCnt = other.GuardrailDiskSpaceCnt
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -383,6 +402,21 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	creationTime, ok := fieldMap[CreationTime]
 	if ok {
 		ckptRecord.CreationTime = uint64(creationTime.(float64))
+	}
+
+	guardrailResidentRatio, ok := fieldMap[GuardrailResidentRatioCnt]
+	if ok {
+		ckptRecord.GuardrailResidentRatioCnt = uint64(guardrailResidentRatio.(float64))
+	}
+
+	guardrailDataSize, ok := fieldMap[GuardrailDataSizeCnt]
+	if ok {
+		ckptRecord.GuardrailDataSizeCnt = uint64(guardrailDataSize.(float64))
+	}
+
+	guardrailDiskSpace, ok := fieldMap[GuardrailDiskSpaceCnt]
+	if ok {
+		ckptRecord.GuardrailDiskSpaceCnt = uint64(guardrailDiskSpace.(float64))
 	}
 
 	return nil
@@ -1000,6 +1034,10 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		BrokenMappingSha256:                c.BrokenMappingSha256,
 		brokenMappings:                     c.brokenMappings.Clone(),
 		brokenMappingsMtx:                  sync.RWMutex{},
+		CreationTime:                       c.CreationTime,
+		GuardrailDiskSpaceCnt:              c.GuardrailDiskSpaceCnt,
+		GuardrailDataSizeCnt:               c.GuardrailDataSizeCnt,
+		GuardrailResidentRatioCnt:          c.GuardrailResidentRatioCnt,
 	}
 	return retVal
 }

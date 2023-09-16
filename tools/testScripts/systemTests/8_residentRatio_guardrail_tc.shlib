@@ -95,6 +95,14 @@ function runTestCase {
 	sleep $secs
 	checkChangesLeftInternal "C1" "B1" "C2" "B2"
 
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 30
+	killGoXdcr "C1"
+	sleep 15
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 20
+	validatePrometheusStatsRRNon0 "C1" "B1" "B2"
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"

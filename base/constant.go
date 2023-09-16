@@ -1636,4 +1636,7 @@ const (
 	DocsFilteredOnTxnXattr          = "docs_filtered_on_txn_xattr"
 	DocsFilteredOnUserDefinedFilter = "docs_filtered_on_user_defined_filter"
 	MobileDocsFiltered              = "mobile_docs_filtered"
+	GuardrailResidentRatio          = "guardrail_resident_ratio"
+	GuardrailDataSize               = "guardrail_data_size"
+	GuardrailDiskSpace              = "guardrail_disk_space"
 )

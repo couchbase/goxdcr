@@ -162,6 +162,9 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 	vbStatMap[service_def.DOCS_FILTERED_TXN_XATTR_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnTxnXattrsDocsCnt)
 	vbStatMap[service_def.DOCS_FILTERED_MOBILE_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnMobileRecords)
 	vbStatMap[service_def.DOCS_FILTERED_USER_DEFINED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnUserDefinedFilters)
+	vbStatMap[service_def.GUARDRAIL_RESIDENT_RATIO_METRIC] = base.Uint64ToInt64(record.GuardrailResidentRatioCnt)
+	vbStatMap[service_def.GUARDRAIL_DISK_SPACE_METRIC] = base.Uint64ToInt64(record.GuardrailDiskSpaceCnt)
+	vbStatMap[service_def.GUARDRAIL_DATA_SIZE_METRIC] = base.Uint64ToInt64(record.GuardrailDataSizeCnt)
 	return vbStatMap
 }
 
@@ -1399,13 +1402,11 @@ type outNozzleCollector struct {
 }
 
 func (outNozzle_collector *outNozzleCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
-	// TODO NEIL do this later
-	return nil
+	return outNozzle_collector.vbMetricHelper.UpdateCurrentVbSpecificMetrics(vbno, valuesToApply, currentRegistries)
 }
 
 func (outNozzle_collector *outNozzleCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
-	//return outNozzle_collector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
-	return nil
+	return outNozzle_collector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
 }
 
 func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, stats_mgr *StatisticsManager) error {

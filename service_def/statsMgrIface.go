@@ -146,9 +146,9 @@ const (
 	PIPELINE_ERRORS = "pipeline_errors"
 
 	// Guardrails
-	GUARDRAIL_RESIDENT_RATIO_METRIC = "guardrail_resident_ratio"
-	GUARDRAIL_DATA_SIZE_METRIC      = "guardrail_data_size"
-	GUARDRAIL_DISK_SPACE_METRIC     = "guardrail_disk_space"
+	GUARDRAIL_RESIDENT_RATIO_METRIC = base.GuardrailResidentRatio
+	GUARDRAIL_DATA_SIZE_METRIC      = base.GuardrailDataSize
+	GUARDRAIL_DISK_SPACE_METRIC     = base.GuardrailDiskSpace
 )
 
 const (

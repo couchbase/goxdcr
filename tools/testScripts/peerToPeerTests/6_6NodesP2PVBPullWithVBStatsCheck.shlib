@@ -53,6 +53,27 @@ function runDataLoad {
 TC_CHECK_INTERVAL=10
 TC_MAX_CHANGE_CNT=3
 
+function induceGuardrailFailedWrites {
+	local itemCount=1000
+
+	enableInternalResidentRatioGuardrail C2 B1
+
+	echo "Writing $itemCount documents"
+	local i
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		writeJSONDocument "C1" "B0" "regDocA${i}" '{"foo":"bar"}' >/dev/null 2>&1
+	done
+
+	sleep 15
+	validatePrometheusStatsRRNon0 "C1" "B0" "B1"
+
+	local secs=120
+	echo "Disabling guardrail and waiting $secs seconds before checking..."
+	disableInternalResidentRatioGuardrail C2 B1
+	sleep $secs
+	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+}
+
 function runOneReplicationCycle {
 	local timeIntervalSecs=5
 	local checkInterval=$TC_CHECK_INTERVAL
@@ -90,7 +111,11 @@ function runOneReplicationCycle {
 
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 	validateXDCRCheckpoints "C1"
+
+	induceGuardrailFailedWrites
+
 	grepForPanics
+
 }
 
 function runOneRebalanceCycleIn {
@@ -135,6 +160,9 @@ declare -A filteringStatsAfter=(["xdcr_atr_txn_docs_filtered_total"]=0 ["xdcr_bi
 	["xdcr_expiry_filtered_total"]=0 ["xdcr_mobile_docs_filtered_total"]=0 ["xdcr_set_filtered_total"]=0 ["xdcr_expiry_stripped_total"]=0)
 declare -a increasingStats=("xdcr_binary_filtered_total" "xdcr_client_txn_docs_filtered_total" "xdcr_docs_filtered_total" "xdcr_set_filtered_total")
 
+declare -A guardrailStatsBefore=(["xdcr_guardrail_resident_ratio_total"]=0 ["xdcr_guardrail_data_size_total"]=0 ["xdcr_guardrail_disk_space_total"]=0)
+declare -A guardrailStatsAfter=(["xdcr_guardrail_resident_ratio_total"]=0 ["xdcr_guardrail_data_size_total"]=0 ["xdcr_guardrail_disk_space_total"]=0)
+
 function executeTxn {
 	local clusterName=$1
 
@@ -173,25 +201,11 @@ function executeTxn {
 	echo "Done executing transaction."
 }
 
-function getFilteringStatFromPrometheus {
-	local clusterName=$1
-	local statName=$2
-	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
-	if [[ -z "$port" ]]; then
-		echo "Invalid clustername $clusterName"
-		return 1
-	fi
-
-	# get the next word after regex match
-	statVal=$($CURL -X GET http://localhost:$port/_prometheusMetrics -u $DEFAULT_ADMIN:$DEFAULT_PW | awk -v regex=$statName+".*Main.*} " 'BEGIN{FS=regex}{if ($2!="") print $2}')
-	echo $statVal
-}
-
 function getFilteringStatsBefore {
 	local clusterName=$1
 	echo "Getting filtering stats for $clusterName"
 	for statKey in $(echo ${!filteringStatsBefore[@]}); do
-		newVal=$(getFilteringStatFromPrometheus $clusterName $statKey)
+		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
 		oldVal=${filteringStatsBefore[${statKey}]}
 		sum=$(($oldVal + $newVal))
 		filteringStatsBefore[${statKey}]=$sum
@@ -202,10 +216,32 @@ function getFilteringStatsAfter {
 	local clusterName=$1
 	echo "Getting filtering stats for $clusterName"
 	for statKey in $(echo ${!filteringStatsAfter[@]}); do
-		newVal=$(getFilteringStatFromPrometheus $clusterName $statKey)
+		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
 		oldVal=${filteringStatsAfter[${statKey}]}
 		sum=$(($oldVal + $newVal))
 		filteringStatsAfter[${statKey}]=$sum
+	done
+}
+
+function getGuardrailStatsBefore {
+	local clusterName=$1
+	echo "Getting guardrail stats for $clusterName"
+	for statKey in $(echo ${!guardrailStatsBefore[@]}); do
+		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
+		oldVal=${guardrailStatsBefore[${statKey}]}
+		sum=$(($oldVal + $newVal))
+		guardrailStatsBefore[${statKey}]=$sum
+	done
+}
+
+function getGuardrailStatsAfter {
+	local clusterName=$1
+	echo "Getting guardrail stats for $clusterName"
+	for statKey in $(echo ${!guardrailStatsAfter[@]}); do
+		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
+		oldVal=${guardrailStatsAfter[${statKey}]}
+		sum=$(($oldVal + $newVal))
+		guardrailStatsAfter[${statKey}]=$sum
 	done
 }
 
@@ -229,7 +265,7 @@ function checkFilteringStatsAreEqual {
 		else
 			# these stats throughout the cluster should be equal before and after rebalance
 			if [ ${filteringStatsBefore[${statKey}]} -ne ${filteringStatsAfter[${statKey}]} ]; then
-				echo "Filtering stats are not the same. StatKey=${statKey}, StatValBefore=${filteringStatsBefore[${statKey}]}, StatValAfter=${filteringStatsAfter[${statKey}]}"
+				echo "Guardrail stats are not the same. StatKey=${statKey}, StatValBefore=${guardrailStatsBefore[${statKey}]}, StatValAfter=${guardrailStatsAfter[${statKey}]}"
 				echo "============================================================================"
 				echo "FAILED"
 				echo "============================================================================"
@@ -243,12 +279,31 @@ function checkFilteringStatsAreEqual {
 			fi
 		fi
 	done
-	echo "All the filtering stats are equal."
+	echo "All the guardrail stats are equal."
+}
+
+function checkGuardrailStatsAreEqual {
+	for statKey in $(echo ${!guardrailStatsAfter[@]}); do
+	  # Use greather than to account for leakage
+		if [ ${guardrailStatsBefore[${statKey}]} -gt ${guardrailStatsAfter[${statKey}]} ]; then
+			echo "Guardrail stats are not the same. StatKey=${statKey}, StatValBefore=${guardrailStatsBefore[${statKey}]}, StatValAfter=${guardrailStatsAfter[${statKey}]}"
+			echo "============================================================================"
+			echo "FAILED"
+			echo "============================================================================"
+			cleanupBucketReplications
+			cleanupBuckets
+			cleanupRemoteClusterRefs
+
+			echo "Cleaning up topology..."
+			restoreClusterBack "C1"
+			exit 1
+		fi
+	done
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Verifying filtering stats are equal: Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes"
+	echo "Verifying vb specific stats are equal: Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -266,6 +321,7 @@ function runTestCase {
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_BEFORE[@]}); do
 		getFilteringStatsBefore $clusterName
+		getGuardrailStatsBefore $clusterName
 	done
 
 	pauseAndResumeReplication
@@ -277,9 +333,11 @@ function runTestCase {
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_AFTER[@]}); do
 		getFilteringStatsAfter $clusterName
+		getGuardrailStatsAfter $clusterName
 	done
 
 	checkFilteringStatsAreEqual
+	checkGuardrailStatsAreEqual
 
 	echo "============================================================================"
 	echo "PASSED"
