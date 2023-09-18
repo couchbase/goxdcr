@@ -400,6 +400,7 @@ const (
 	ConnectivityErrors             = "connectivityErrors"
 	RemoteBucketManifest           = "remoteBucketManifest"
 	RedactRequested                = "redactRequested"
+	RestrictHostnameReplace        = "restrictHostnameReplace"
 )
 
 // secure type for remote cluster reference

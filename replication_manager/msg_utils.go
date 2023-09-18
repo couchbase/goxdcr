@@ -408,7 +408,7 @@ func DecodeIncludeWarningsFromRequest(request *http.Request) (bool, error) {
 func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remoteClusterRef *metadata.RemoteClusterReference, errorsMap map[string]error, err error) {
 	errorsMap = make(map[string]error)
 	var err1 error
-	var demandEncryption bool
+	var demandEncryption, restrictHostnameReplace bool
 	var name, hostName, userName, password, secureType, encryptionType, hostnameMode string
 	var certificate, clientCertificate, clientKey []byte
 
@@ -450,6 +450,8 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 			clientKey = []byte(clientKeyStr)
 		case base.RemoteClusterHostnameMode:
 			hostnameMode = getStringFromValArr(valArr)
+		case base.RestrictHostnameReplace:
+			restrictHostnameReplace = getRestrictHostnameReplaceFromValArr(valArr)
 		default:
 			// ignore other parameters
 		}
@@ -502,6 +504,8 @@ func DecodeRemoteClusterRequest(request *http.Request) (justValidate bool, remot
 		// Even with VPC peering, Capella control-plane will always create fully secure replication
 		errorsMap[base.RemoteClusterHostName] = metadata.ErrorCapellaNeedsTLS
 	}
+
+	remoteClusterRef.SetRestrictHostnameReplace(restrictHostnameReplace)
 
 	return
 }
@@ -1394,6 +1398,19 @@ func getDemandEncryptionFromValArr(valArr []string) bool {
 		return false
 	} else {
 		// any other value, e.g., "", 1, "on", "true", "false", etc., indicates that encryption is enabled
+		return true
+	}
+}
+
+// check if RestrictHostnameReplace is enabled from the valArr in http request
+func getRestrictHostnameReplaceFromValArr(valArr []string) bool {
+	restrictHostnameReplaceStr := getStringFromValArr(valArr)
+	restrictHostnameReplaceInt, err := strconv.ParseInt(restrictHostnameReplaceStr, base.ParseIntBase, base.ParseIntBitSize)
+	if err == nil && restrictHostnameReplaceInt == 0 {
+		// int value of 0 indicates that RestrictHostnameReplace is not enabled
+		return false
+	} else {
+		// any other value, e.g., "", 1, "on", "true", "false", etc., indicates that RestrictHostnameReplace is enabled
 		return true
 	}
 }

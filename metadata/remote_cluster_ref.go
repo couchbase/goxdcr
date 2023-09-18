@@ -137,6 +137,9 @@ type RemoteClusterReference struct {
 
 	// If specifically requested, this will contain fetched remote bucket manifest
 	TargetBucketManifest map[string]*CollectionsManifest
+
+	// if specified true and using non-DNSSRV hostname, bootstrap hostname will not be replaced. Eg: For users using a LB
+	RestrictHostnameReplace bool `json:"RestrictHostnameReplace"`
 }
 
 type ConnErr struct {
@@ -213,6 +216,30 @@ func (ref *RemoteClusterReference) CloneConnErrsNoLock() []ConnErr {
 	}
 
 	return deepCopy
+}
+
+func (ref *RemoteClusterReference) SetRestrictHostnameReplaceNoLock(val bool) {
+	ref.RestrictHostnameReplace = val
+}
+
+func (ref *RemoteClusterReference) GetRestrictHostnameReplaceNoLock() bool {
+	return ref.RestrictHostnameReplace
+}
+
+func (ref *RemoteClusterReference) SetRestrictHostnameReplace(val bool) {
+	ref.mutex.Lock()
+	defer ref.mutex.Unlock()
+	ref.SetRestrictHostnameReplaceNoLock(val)
+}
+
+func (ref *RemoteClusterReference) GetRestrictHostnameReplace() bool {
+	ref.mutex.RLock()
+	defer ref.mutex.RUnlock()
+	return ref.GetRestrictHostnameReplaceNoLock()
+}
+
+func (ref *RemoteClusterReference) RestrictHostnameReplaceAtRefresh() bool {
+	return !ref.IsDnsSRV() && ref.GetRestrictHostnameReplace()
 }
 
 type HostNameSrvType int
@@ -607,6 +634,7 @@ func (ref *RemoteClusterReference) loadNonActivesFromNoLock(inRef *RemoteCluster
 	ref.SANInCertificate_ = inRef.SANInCertificate_
 	ref.HttpAuthMech_ = inRef.HttpAuthMech_
 	ref.HostnameMode_ = inRef.HostnameMode_
+	ref.RestrictHostnameReplace = inRef.RestrictHostnameReplace
 	// !!! shallow copy of revision.
 	// ref.Revision should only be passed along and should never be modified
 	ref.revision = inRef.revision
@@ -670,11 +698,12 @@ func (ref *RemoteClusterReference) cloneCommonFieldsNoLock() *RemoteClusterRefer
 		HostnameMode_:      ref.HostnameMode_,
 		// !!! shallow copy of revision.
 		// ref.Revision should only be passed along and should never be modified
-		revision:           ref.revision,
-		dnsSrvHelper:       ref.dnsSrvHelper,
-		hostnameSRVType:    ref.hostnameSRVType,
-		srvEntries:         ref.srvEntries.Clone(),
-		connectivityErrors: ref.connectivityErrors, // shallow copy to ensure ClearConnErrs() works
+		revision:                ref.revision,
+		dnsSrvHelper:            ref.dnsSrvHelper,
+		hostnameSRVType:         ref.hostnameSRVType,
+		srvEntries:              ref.srvEntries.Clone(),
+		connectivityErrors:      ref.connectivityErrors, // shallow copy to ensure ClearConnErrs() works
+		RestrictHostnameReplace: ref.GetRestrictHostnameReplaceNoLock(),
 	}
 }
 
@@ -1028,6 +1057,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded() {
 	for _, entry := range entries {
 		ref.srvEntries = append(ref.srvEntries, SrvEntryType{entry})
 	}
+
 	return
 }
 

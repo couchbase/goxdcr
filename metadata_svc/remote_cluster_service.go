@@ -620,6 +620,7 @@ func (rctx *refreshContext) initialize() {
 
 	rctx.index = 0
 	rctx.atLeastOneValid = false
+
 	if len(rctx.cachedRefNodesList) == 0 {
 		// target node list may be empty if goxdcr process has been restarted. populate it with ActiveHostName or HostName
 		activeHostName := rctx.refOrig.ActiveHostName()
@@ -921,8 +922,16 @@ func (agent *RemoteClusterAgent) Refresh() error {
 
 	var nodeAddressesList base.StringPairList
 	rctx.agent.logger.Infof("%v useExternal: %v cachedRefNodesList in refresh: %v", rctx.agent.Id(), useExternal, rctx.cachedRefNodesList)
+	var hostnamePair base.StringPair
 	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList /*already shuffled*/); rctx.index++ {
-		hostnamePair := rctx.cachedRefNodesList[rctx.index]
+		// do not use the hostnamePair from the list during refresh if restrictReplaceHostname is true and it is of non-DNS SRV type.
+		// Use the original (inital) HostName or the HttpsHostName
+		if rctx.agent.reference.RestrictHostnameReplaceAtRefresh() {
+			hostnamePair = base.StringPair{rctx.agent.reference.HostName(), rctx.agent.reference.HttpsHostName()}
+		} else {
+			hostnamePair = rctx.cachedRefNodesList[rctx.index]
+		}
+
 		err := rctx.setHostNamesAndConnStr(hostnamePair)
 		if err != nil {
 			return err
@@ -1129,7 +1138,7 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.Stri
 		// updateSecuritySettings is set to false since security settings should have been updated shortly before in Refresh()
 		_, err := rctx.verifyNodeAndGetList(rctx.connStr, false /*updateSecuritySettings*/)
 
-		if err == nil {
+		if err == nil && !rctx.agent.reference.RestrictHostnameReplaceAtRefresh() {
 			// this is the node to set
 			oldHostName := rctx.refCache.HostName()
 			if rctx.refCache.IsFullEncryption() {
