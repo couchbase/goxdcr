@@ -589,15 +589,9 @@
         ],
         "stability": "internal"
     },
-<<<<<<< HEAD
-    "xdcr_mobile_docs_filtered": {
-        "type": "counter",
-        "help": "Total number of documents filtered and not replicated because the documents were mobile records",
-=======
     "xdcr_guardrail_data_size": {
         "type": "counter",
         "help": "The number of writes that target rejected because each target data node is holding too much data",
->>>>>>> 429e7260 (MB-57965: implement XDCR guardrail handling and stats)
         "added": "7.6.0",
         "labels": [
             "sourceBucketName",
@@ -605,8 +599,6 @@
             "targetBucketName",
             "pipelineType"
         ],
-<<<<<<< HEAD
-=======
         "notes": "When target bucket has guardrail enabled and a threshold set, it will return this error indicating that the target data nodes are holding too much data per node, which could lead to rebalance failures or cluster instability. To resume replication, additional data nodes must be added",
         "stability": "committed"
     },
@@ -634,7 +626,18 @@
             "pipelineType"
         ],
         "notes": "When target bucket has guardrail enabled and a threshold set, it will return this error indicating that the bucket is currently below the resident ratio. Data writes can only continue once the target bucket's resident ratio rises above the threshold",
->>>>>>> 429e7260 (MB-57965: implement XDCR guardrail handling and stats)
+        "stability": "committed"
+    },
+    "xdcr_mobile_docs_filtered": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated because the documents were mobile records",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
         "stability": "committed"
     },
     "xdcr_num_checkpoints": {
