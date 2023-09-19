@@ -265,7 +265,7 @@ function checkFilteringStatsAreEqual {
 		else
 			# these stats throughout the cluster should be equal before and after rebalance
 			if [ ${filteringStatsBefore[${statKey}]} -ne ${filteringStatsAfter[${statKey}]} ]; then
-				echo "Guardrail stats are not the same. StatKey=${statKey}, StatValBefore=${guardrailStatsBefore[${statKey}]}, StatValAfter=${guardrailStatsAfter[${statKey}]}"
+				echo "Filtering stats are not the same. StatKey=${statKey}, StatValBefore=${filteringStatsBefore[${statKey}]}, StatValAfter=${filteringStatsAfter[${statKey}]}"
 				echo "============================================================================"
 				echo "FAILED"
 				echo "============================================================================"

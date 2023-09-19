@@ -13,6 +13,7 @@ package pipeline_svc
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/couchbase/goxdcr/base"
 	"io/ioutil"
 	"testing"
 
@@ -36,6 +37,7 @@ import (
 var pipelineTopic string = "topic"
 
 var testDCPPart string = "testDCP"
+var testXmemPart string = "testXmem"
 var testRouter string = "testRouter"
 
 func RetrieveUprFile(fileName string) (*mcc.UprEvent, error) {
@@ -55,25 +57,7 @@ func RetrieveUprFile(fileName string) (*mcc.UprEvent, error) {
 
 var uprEventFile string = "../parts/testdata/perfData.bin"
 
-func setupBoilerPlate() (*log.CommonLogger,
-	*service_def.ThroughSeqnoTrackerSvc,
-	*service_def.XDCRCompTopologySvc,
-	*utilities.UtilsIface,
-	map[string][]uint16,
-	*common.Pipeline,
-	*metadata.ReplicationSpecification,
-	*common.PipelineRuntimeContext,
-	*service_def.CheckpointsService,
-	*service_def.CAPIService,
-	*service_def.RemoteClusterSvc,
-	*service_def.ReplicationSpecSvc,
-	map[string][]uint16,
-	*metadata.RemoteClusterReference,
-	*parts.DcpNozzle,
-	*common.Connector,
-	*service_def.UILogSvc,
-	*service_def.CollectionsManifestSvc,
-	*service_def.BackfillReplSvc) {
+func setupBoilerPlate() (*log.CommonLogger, *service_def.ThroughSeqnoTrackerSvc, *service_def.XDCRCompTopologySvc, *utilities.UtilsIface, map[string][]uint16, *common.Pipeline, *metadata.ReplicationSpecification, *common.PipelineRuntimeContext, *service_def.CheckpointsService, *service_def.CAPIService, *service_def.RemoteClusterSvc, *service_def.ReplicationSpecSvc, map[string][]uint16, *metadata.RemoteClusterReference, *parts.DcpNozzle, *common.Connector, *service_def.UILogSvc, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc, *parts.XmemNozzle) {
 
 	testLogger := log.NewLogger("testLogger", log.DefaultLoggerContext)
 	throughSeqSvc := &service_def.ThroughSeqnoTrackerSvc{}
@@ -103,6 +87,10 @@ func setupBoilerPlate() (*log.CommonLogger,
 	dcpNozzle := parts.NewDcpNozzle(testDCPPart, "sourceBucket", "targetBucket", vbs, xdcrTopologySvc,
 		false /*isCapi*/, log.DefaultLoggerContext, utils, nil /*func*/)
 
+	xmemNozzle := parts.NewXmemNozzle(testXmemPart, remoteClusterSvc, "", "", "testTopic",
+		"connPoolPrefix", 0, "connStr", "sourceBucket", "targetBucket",
+		"", "", "", base.CRMode_RevId, nil, utils, vbs)
+
 	connector := &common.Connector{}
 
 	uiLogSvc := &service_def.UILogSvc{}
@@ -114,34 +102,20 @@ func setupBoilerPlate() (*log.CommonLogger,
 	return testLogger, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
-		backfillReplSvc
+		backfillReplSvc, xmemNozzle
 }
 
-func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
-	xdcrTopologySvc *service_def.XDCRCompTopologySvc,
-	utils *utilities.UtilsIface,
-	activeVBs map[string][]uint16,
-	pipeline *common.Pipeline,
-	replicationSpec *metadata.ReplicationSpecification,
-	runtimeCtx *common.PipelineRuntimeContext,
-	ckptService *service_def.CheckpointsService,
-	capiSvc *service_def.CAPIService,
-	remoteClusterSvc *service_def.RemoteClusterSvc,
-	replSpecSvc *service_def.ReplicationSpecSvc,
-	targetKVVbMap map[string][]uint16,
-	remoteClusterRef *metadata.RemoteClusterReference,
-	dcpNozzle *parts.DcpNozzle,
-	connector *common.Connector,
-	uiLogSvc *service_def.UILogSvc,
-	collectionsManifestSvc *service_def.CollectionsManifestSvc,
-	backfillReplSvc *service_def.BackfillReplSvc) {
+func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc, xdcrTopologySvc *service_def.XDCRCompTopologySvc, utils *utilities.UtilsIface, activeVBs map[string][]uint16, pipeline *common.Pipeline, replicationSpec *metadata.ReplicationSpecification, runtimeCtx *common.PipelineRuntimeContext, ckptService *service_def.CheckpointsService, capiSvc *service_def.CAPIService, remoteClusterSvc *service_def.RemoteClusterSvc, replSpecSvc *service_def.ReplicationSpecSvc, targetKVVbMap map[string][]uint16, remoteClusterRef *metadata.RemoteClusterReference, dcpNozzle *parts.DcpNozzle, connector *common.Connector, uiLogSvc *service_def.UILogSvc, collectionsManifestSvc *service_def.CollectionsManifestSvc, backfillReplSvc *service_def.BackfillReplSvc, xmemNozzle *parts.XmemNozzle) {
 
 	pipeline.On("Specification").Return(replicationSpec)
 	pipeline.On("Topic").Return(pipelineTopic)
 	sourceMap := make(map[string]commonReal.Nozzle)
 	sourceMap[testDCPPart] = dcpNozzle
 	pipeline.On("Sources").Return(sourceMap)
-	pipeline.On("Targets").Return(nil)
+	targetMap := map[string]commonReal.Nozzle{
+		xmemNozzle.Id(): xmemNozzle,
+	}
+	pipeline.On("Targets").Return(targetMap)
 	pipeline.On("GetAsyncListenerMap").Return(nil)
 	pipeline.On("SetAsyncListenerMap", mock.Anything).Return(nil)
 	pipeline.On("RuntimeContext").Return(runtimeCtx)
@@ -149,7 +123,9 @@ func setupMocks(throughSeqSvc *service_def.ThroughSeqnoTrackerSvc,
 	pipeline.On("FullTopic").Return(pipelineTopic)
 
 	connector.On("AsyncComponentEventListeners").Return(nil)
-	connector.On("DownStreams").Return(nil)
+	downstreamMap := make(map[string]commonReal.Part)
+	downstreamMap[xmemNozzle.Id()] = xmemNozzle
+	connector.On("DownStreams").Return(downstreamMap)
 	connector.On("Id").Return(testRouter)
 
 	dcpNozzle.SetConnector(connector)
@@ -186,15 +162,12 @@ func setupCheckpointMgr(
 func TestStatsMgrWithDCPCollector(t *testing.T) {
 	fmt.Println("============== Test case start: TestStatsMgrWithDCPCollector =================")
 	assert := assert.New(t)
-	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
-		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
-		backfillReplSvc := setupBoilerPlate()
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
 
 	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
 		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
-		backfillReplSvc)
+		backfillReplSvc, xmemNozzle)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil)
 	assert.NotNil(statsMgr)
@@ -208,7 +181,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(4, len(routerCollector.vbBasedMetric))
+	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
 
 	uprEvent, err := RetrieveUprFile(uprEventFile)
 	assert.Nil(err)
@@ -224,16 +197,16 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 
 	assert.Nil(routerCollector.ProcessEvent(passedEvent))
 
-	assert.Equal(1, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
-	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(1, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 
 	seqnoCommitMap := make(map[uint16]uint64)
 	seqnoCommitMap[uprEvent.VBucket] = uprEvent.Seqno
 
-	assert.Equal(int64(0), (routerCollector.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 	routerCollector.HandleLatestThroughSeqnos(seqnoCommitMap)
-	assert.Equal(int64(1), (routerCollector.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
-	assert.Equal(0, routerCollector.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(1), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
 
 	metricsMap, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
@@ -320,15 +293,9 @@ var uprEventFileWithExpiration string = "../parts/testdata/uprEventExpiration.js
 func TestStatsMgrWithExpiration(t *testing.T) {
 	fmt.Println("============== Test case start: TestStatsMgrWithExpiration =================")
 	assert := assert.New(t)
-	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
-		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
-		backfillReplSvc := setupBoilerPlate()
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
 
-	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
-		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
-		backfillReplSvc)
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil)
 	assert.NotNil(statsMgr)
@@ -342,7 +309,7 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(4, len(routerCollector.vbBasedMetric))
+	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
 
 	dcpCollector := statsMgr.getdcpCollector()
 	assert.NotNil(dcpCollector)
@@ -399,15 +366,9 @@ func TestFilterVBSeqnoMap(t *testing.T) {
 func TestStatsMgrWithFilteringStats(t *testing.T) {
 	fmt.Println("============== Test case start: TestStatsMgrWithFilteringStats =================")
 	assert := assert.New(t)
-	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
-		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
-		backfillReplSvc := setupBoilerPlate()
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
 
-	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
-		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
-		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
-		backfillReplSvc)
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle)
 
 	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil)
 	assert.NotNil(statsMgr)
@@ -421,7 +382,7 @@ func TestStatsMgrWithFilteringStats(t *testing.T) {
 	statsMgr.initOverviewRegistry()
 
 	routerCollector := statsMgr.getRouterCollector()
-	assert.Equal(4, len(routerCollector.vbBasedMetric))
+	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
 
 	dcpCollector := statsMgr.getdcpCollector()
 	assert.NotNil(dcpCollector)

@@ -3,8 +3,9 @@
 package mocks
 
 import (
-	"github.com/couchbase/goxdcr/base"
+	base "github.com/couchbase/goxdcr/base"
 	metadata "github.com/couchbase/goxdcr/metadata"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -224,7 +225,7 @@ type StatsMgrIface_SetVBCountMetrics_Call struct {
 
 // SetVBCountMetrics is a helper method to define mock.On call
 //   - vb uint16
-//   - metricKVs service_def.VBCountMetricMap
+//   - metricKVs base.VBCountMetricMap
 func (_e *StatsMgrIface_Expecter) SetVBCountMetrics(vb interface{}, metricKVs interface{}) *StatsMgrIface_SetVBCountMetrics_Call {
 	return &StatsMgrIface_SetVBCountMetrics_Call{Call: _e.mock.On("SetVBCountMetrics", vb, metricKVs)}
 }

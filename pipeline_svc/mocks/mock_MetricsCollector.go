@@ -3,7 +3,11 @@
 package mocks
 
 import (
+	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
+
+	metrics "github.com/rcrowley/go-metrics"
+
 	mock "github.com/stretchr/testify/mock"
 
 	pipeline_svc "github.com/couchbase/goxdcr/pipeline_svc"
@@ -20,6 +24,49 @@ type MetricsCollector_Expecter struct {
 
 func (_m *MetricsCollector) EXPECT() *MetricsCollector_Expecter {
 	return &MetricsCollector_Expecter{mock: &_m.Mock}
+}
+
+// AddVbSpecificMetrics provides a mock function with given fields: vbno, compiledMap
+func (_m *MetricsCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+	ret := _m.Called(vbno, compiledMap)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uint16, base.VBCountMetricMap) error); ok {
+		r0 = rf(vbno, compiledMap)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MetricsCollector_AddVbSpecificMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddVbSpecificMetrics'
+type MetricsCollector_AddVbSpecificMetrics_Call struct {
+	*mock.Call
+}
+
+// AddVbSpecificMetrics is a helper method to define mock.On call
+//   - vbno uint16
+//   - compiledMap base.VBCountMetricMap
+func (_e *MetricsCollector_Expecter) AddVbSpecificMetrics(vbno interface{}, compiledMap interface{}) *MetricsCollector_AddVbSpecificMetrics_Call {
+	return &MetricsCollector_AddVbSpecificMetrics_Call{Call: _e.mock.On("AddVbSpecificMetrics", vbno, compiledMap)}
+}
+
+func (_c *MetricsCollector_AddVbSpecificMetrics_Call) Run(run func(vbno uint16, compiledMap base.VBCountMetricMap)) *MetricsCollector_AddVbSpecificMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint16), args[1].(base.VBCountMetricMap))
+	})
+	return _c
+}
+
+func (_c *MetricsCollector_AddVbSpecificMetrics_Call) Return(_a0 error) *MetricsCollector_AddVbSpecificMetrics_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MetricsCollector_AddVbSpecificMetrics_Call) RunAndReturn(run func(uint16, base.VBCountMetricMap) error) *MetricsCollector_AddVbSpecificMetrics_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // HandleLatestThroughSeqnos provides a mock function with given fields: SeqnoMap
@@ -127,6 +174,50 @@ func (_c *MetricsCollector_OnEvent_Call) Return() *MetricsCollector_OnEvent_Call
 }
 
 func (_c *MetricsCollector_OnEvent_Call) RunAndReturn(run func(*common.Event)) *MetricsCollector_OnEvent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateCurrentVbSpecificMetrics provides a mock function with given fields: vbno, valuesToApply, currentRegistries
+func (_m *MetricsCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+	ret := _m.Called(vbno, valuesToApply, currentRegistries)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uint16, base.VBCountMetricMap, map[string]metrics.Registry) error); ok {
+		r0 = rf(vbno, valuesToApply, currentRegistries)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MetricsCollector_UpdateCurrentVbSpecificMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateCurrentVbSpecificMetrics'
+type MetricsCollector_UpdateCurrentVbSpecificMetrics_Call struct {
+	*mock.Call
+}
+
+// UpdateCurrentVbSpecificMetrics is a helper method to define mock.On call
+//   - vbno uint16
+//   - valuesToApply base.VBCountMetricMap
+//   - currentRegistries map[string]metrics.Registry
+func (_e *MetricsCollector_Expecter) UpdateCurrentVbSpecificMetrics(vbno interface{}, valuesToApply interface{}, currentRegistries interface{}) *MetricsCollector_UpdateCurrentVbSpecificMetrics_Call {
+	return &MetricsCollector_UpdateCurrentVbSpecificMetrics_Call{Call: _e.mock.On("UpdateCurrentVbSpecificMetrics", vbno, valuesToApply, currentRegistries)}
+}
+
+func (_c *MetricsCollector_UpdateCurrentVbSpecificMetrics_Call) Run(run func(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry)) *MetricsCollector_UpdateCurrentVbSpecificMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint16), args[1].(base.VBCountMetricMap), args[2].(map[string]metrics.Registry))
+	})
+	return _c
+}
+
+func (_c *MetricsCollector_UpdateCurrentVbSpecificMetrics_Call) Return(_a0 error) *MetricsCollector_UpdateCurrentVbSpecificMetrics_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MetricsCollector_UpdateCurrentVbSpecificMetrics_Call) RunAndReturn(run func(uint16, base.VBCountMetricMap, map[string]metrics.Registry) error) *MetricsCollector_UpdateCurrentVbSpecificMetrics_Call {
 	_c.Call.Return(run)
 	return _c
 }

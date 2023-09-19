@@ -22,14 +22,15 @@ func (_m *Filter) EXPECT() *Filter_Expecter {
 }
 
 // FilterUprEvent provides a mock function with given fields: wrappedUprEvent
-func (_m *Filter) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64) {
+func (_m *Filter) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64, base.FilteringStatusType) {
 	ret := _m.Called(wrappedUprEvent)
 
 	var r0 bool
 	var r1 error
 	var r2 string
 	var r3 int64
-	if rf, ok := ret.Get(0).(func(*base.WrappedUprEvent) (bool, error, string, int64)); ok {
+	var r4 base.FilteringStatusType
+	if rf, ok := ret.Get(0).(func(*base.WrappedUprEvent) (bool, error, string, int64, base.FilteringStatusType)); ok {
 		return rf(wrappedUprEvent)
 	}
 	if rf, ok := ret.Get(0).(func(*base.WrappedUprEvent) bool); ok {
@@ -56,7 +57,13 @@ func (_m *Filter) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, e
 		r3 = ret.Get(3).(int64)
 	}
 
-	return r0, r1, r2, r3
+	if rf, ok := ret.Get(4).(func(*base.WrappedUprEvent) base.FilteringStatusType); ok {
+		r4 = rf(wrappedUprEvent)
+	} else {
+		r4 = ret.Get(4).(base.FilteringStatusType)
+	}
+
+	return r0, r1, r2, r3, r4
 }
 
 // Filter_FilterUprEvent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FilterUprEvent'
@@ -77,12 +84,12 @@ func (_c *Filter_FilterUprEvent_Call) Run(run func(wrappedUprEvent *base.Wrapped
 	return _c
 }
 
-func (_c *Filter_FilterUprEvent_Call) Return(_a0 bool, _a1 error, _a2 string, _a3 int64) *Filter_FilterUprEvent_Call {
-	_c.Call.Return(_a0, _a1, _a2, _a3)
+func (_c *Filter_FilterUprEvent_Call) Return(_a0 bool, _a1 error, _a2 string, _a3 int64, _a4 base.FilteringStatusType) *Filter_FilterUprEvent_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3, _a4)
 	return _c
 }
 
-func (_c *Filter_FilterUprEvent_Call) RunAndReturn(run func(*base.WrappedUprEvent) (bool, error, string, int64)) *Filter_FilterUprEvent_Call {
+func (_c *Filter_FilterUprEvent_Call) RunAndReturn(run func(*base.WrappedUprEvent) (bool, error, string, int64, base.FilteringStatusType)) *Filter_FilterUprEvent_Call {
 	_c.Call.Return(run)
 	return _c
 }
