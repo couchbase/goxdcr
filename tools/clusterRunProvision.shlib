@@ -2792,3 +2792,12 @@ function getPrometheusStats {
 	output=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/_prometheusMetrics | grep -v \#)
 	echo "$output"
 }
+
+function enableDcpOsoBackfill {
+	local clusterName=$1
+	local bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -i -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/diag/eval \
+		--data "ns_bucket:update_bucket_props(\"$bucketName\", [{extra_config_string, \"dcp_oso_backfill=enabled\"}])"
+}

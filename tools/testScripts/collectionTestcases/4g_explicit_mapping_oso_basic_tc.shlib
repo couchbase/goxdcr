@@ -31,20 +31,23 @@ declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpoint
 
 # Bucket -> Scopes
 # -----------------
-declare -a scope1Arr=("S1" "S2")
+declare -a scope1Arr=("S1" "S2" "S4" "S5" "S6")
 BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S3")
 
 # Scopes -> Collections
 # ----------------------
 declare -a collection1Arr=("col1" "col2")
 declare -a collection2Arr=("col1" "col2" "col3")
-SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]} ["S4"]=${collection1Arr[@]} ["S5"]=${collection1Arr[@]} ["S6"]=${collection1Arr[@]})
 
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
-	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" &
-	runCbWorkloadGenCollection "C1" "B1" "S2" "col1" &
-	runCbWorkloadGenCollection "C1" "B1" "S2" "col2" &
+	local scope1
+
+	for scope1 in $(echo ${scope1Arr[@]}); do
+		runCbWorkloadGenCollection "C1" "B1" "$scope1" "col1" &
+		runCbWorkloadGenCollection "C1" "B1" "$scope1" "col2" &
+	done
 	waitForBgJobs
 }
 
@@ -64,11 +67,14 @@ function runTestCase {
 	if (($? != 0)); then
 		exit $?
 	fi
+	enableDcpOsoBackfill "C1" "B1"
 
 	local -i checkCount
 	local -i targetCheckCount
-	checkCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
+	local -i targetCheckAgainCount
+	checkCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 10))
 	targetCheckCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
+	targetCheckAgainCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
 
 	# Get current instance
 	local -i currentBackfillInstanceCnt
@@ -120,7 +126,7 @@ function runTestCase {
 
 	echo "Waiting 5 seconds before checking item count for backfill"
 	sleep 5
-	checkItemCnt "C2" "B2" $checkCount
+	checkItemCnt "C2" "B2" $targetCheckAgainCount
 
 	# Backfill should have been raised
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))

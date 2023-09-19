@@ -68,24 +68,6 @@ function runTestCase {
 	setInternalSettings "C1" "humanRecoverySec=20"
 	sleep 10
 
-	local -i checkCount
-	local -i targetCheckCount
-	checkCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 3))
-	targetCheckCount=$(($CBWORKLOAD_COLLECTION_NUM_ITEMS * 2))
-
-	# Get current instance
-	local -i currentBackfillInstanceCnt
-	local -i currentVBTasksDoneInstanceCnt
-	local -i currentBackfillAppendInstanceCnt
-	local -i currentOsoModeCnt
-	local currentXdcrLog
-
-	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
-	currentBackfillInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_MSG")
-	currentBackfillAppendInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$BACKFILL_APPEND_MSG")
-	currentVBTasksDoneInstanceCnt=$(echo "$currentXdcrLog" | grep -c "$VBTASKS_DONE_MSG")
-	currentOsoModeCnt=$(echo "$currentXdcrLog" | grep -c "$OSO_MODE_MSG")
-
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
