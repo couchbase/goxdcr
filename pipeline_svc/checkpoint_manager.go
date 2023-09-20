@@ -532,9 +532,9 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 
 func (ckmgr *CheckpointManager) initConnBg() {
 	initInBg := func() error {
-		defer ckmgr.wait_grp.Done()
 		return ckmgr.initConnections()
 	}
+	defer ckmgr.wait_grp.Done()
 	execErr := base.ExecWithTimeout(initInBg, base.TimeoutRuntimeContextStart, ckmgr.Logger())
 	if execErr != nil {
 		ckmgr.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, ckmgr, nil, fmt.Errorf("Ckmgr %v initConnection error %v", ckmgr.pipeline.FullTopic(), execErr)))
