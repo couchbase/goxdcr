@@ -941,10 +941,11 @@ func (adminport *Adminport) GetMessageKeyFromRequest(r *http.Request) (string, e
 }
 
 func authenticateRequest(request *http.Request) (cbauth.Creds, error) {
+	redactedRequest := base.CloneAndTagHttpRequest(request)
 	var err error
 	creds, err := cbauth.AuthWebCreds(request)
 	if err != nil {
-		logger_ap.Errorf("Error authenticating request. request=%v\n err= %v\n", request, err)
+		logger_ap.Errorf("Error authenticating request. request=%v\n err= %v\n", redactedRequest, err)
 		return nil, err
 	}
 
@@ -1353,7 +1354,8 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 /* Connection Pre-check */
 
 func (adminport *Adminport) doPostConnectionPreCheckRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doPostConnectionPreCheckRequest req=%v\n", request)
+	redactedRequest := base.CloneAndTagHttpRequest(request)
+	logger_ap.Infof("doPostConnectionPreCheckRequest req=%v\n", redactedRequest)
 	defer logger_ap.Infof("Finished doPostConnectionPreCheckRequest\n")
 
 	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
@@ -1387,7 +1389,8 @@ func (adminport *Adminport) doPostConnectionPreCheckRequest(request *http.Reques
 }
 
 func (adminport *Adminport) doGetConnectionPreCheckResultRequest(request *http.Request) (*ap.Response, error) {
-	logger_ap.Infof("doGetConnectionPreCheckResultRequest req=%v\n", request)
+	redactedRequest := base.CloneAndTagHttpRequest(request)
+	logger_ap.Infof("doGetConnectionPreCheckResultRequest req=%v\n", redactedRequest)
 	defer logger_ap.Infof("Finished doGetConnectionPreCheckResultRequest\n")
 	taskId, err := DecodeGetConnectionPreCheckResultRequest(request)
 	if err != nil {
