@@ -458,6 +458,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.DataSentCasChanged, data_sent_cas_changed_event_listener)
 			out_nozzle.RegisterComponentEventListener(common.DataSentFailed, dataSentFailedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.DataSentHitGuardrail, dataSentFailedEventListener)
+			out_nozzle.RegisterComponentEventListener(common.DataSentFailedUnknownStatus, dataSentFailedEventListener)
 		}
 	}
 }

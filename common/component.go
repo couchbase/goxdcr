@@ -88,6 +88,8 @@ const (
 	DataSentFailed ComponentEventType = iota
 	// When target guardrail prevents successful writes
 	DataSentHitGuardrail ComponentEventType = iota
+	// When target KV returned a status code that this XDCR does not understand
+	DataSentFailedUnknownStatus ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {

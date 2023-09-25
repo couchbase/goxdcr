@@ -134,9 +134,10 @@ const (
 	PUBLISH_INTERVAL = "publish_interval"
 
 	// error counter metrics
-	DP_GET_FAIL_METRIC    = "datapool_failed_gets"
-	TARGET_EACCESS_METRIC = "target_eaccess"
-	TARGET_TMPFAIL_METRIC = "target_tmpfail"
+	DP_GET_FAIL_METRIC           = "datapool_failed_gets"
+	TARGET_EACCESS_METRIC        = "target_eaccess"
+	TARGET_TMPFAIL_METRIC        = "target_tmpfail"
+	TARGET_UNKNOWN_STATUS_METRIC = "target_unknown_status"
 
 	DOCS_CLONED_METRIC     = "docs_cloned"
 	DELETION_CLONED_METRIC = "deletion_cloned"
@@ -1162,6 +1163,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForSupportability,
 		Description:  "The total number of TMPFAIL errors returned from the target node.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	TARGET_UNKNOWN_STATUS_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The total number of writes to target KV that returned with a status code that XDCR cannot comprehend",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},

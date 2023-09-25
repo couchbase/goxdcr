@@ -118,6 +118,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.GUARDRAIL_RESIDENT_RATIO_METRIC:     service_def.MetricTypeCounter,
 	service_def.GUARDRAIL_DATA_SIZE_METRIC:          service_def.MetricTypeCounter,
 	service_def.GUARDRAIL_DISK_SPACE_METRIC:         service_def.MetricTypeCounter,
+	service_def.TARGET_UNKNOWN_STATUS_METRIC:        service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
@@ -1491,6 +1492,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.GUARDRAIL_DATA_SIZE_METRIC, guardRailDataSz)
 		guardRailDiskSpace := metrics.NewCounter()
 		registry.Register(service_def.GUARDRAIL_DISK_SPACE_METRIC, guardRailDiskSpace)
+		unknownStatusReceived := metrics.NewCounter()
+		registry.Register(service_def.TARGET_UNKNOWN_STATUS_METRIC, unknownStatusReceived)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1529,6 +1532,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.GUARDRAIL_RESIDENT_RATIO_METRIC] = guardRailRR
 		metric_map[service_def.GUARDRAIL_DATA_SIZE_METRIC] = guardRailDataSz
 		metric_map[service_def.GUARDRAIL_DISK_SPACE_METRIC] = guardRailDiskSpace
+		metric_map[service_def.TARGET_UNKNOWN_STATUS_METRIC] = unknownStatusReceived
 
 		listOfVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), OutNozzleVBMetricKeys)
@@ -1733,6 +1737,9 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			}
 
 		}
+
+	case common.DataSentFailedUnknownStatus:
+		metricMap[service_def.TARGET_UNKNOWN_STATUS_METRIC].(metrics.Counter).Inc(1)
 
 	}
 

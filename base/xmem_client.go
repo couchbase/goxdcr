@@ -54,7 +54,8 @@ type XmemClient struct {
 	num_of_repairs               int
 	last_failure                 time.Time
 	backoff_factor               int
-	receivedUnknownOpcode        bool
+
+	unknownStatusReceived map[gomemcached.Status]*time.Timer
 }
 
 func NewXmemClient(name string, read_timeout, write_timeout time.Duration,
@@ -74,6 +75,7 @@ func NewXmemClient(name string, read_timeout, write_timeout time.Duration,
 		lock:                             sync.RWMutex{},
 		backoff_factor:                   0,
 		downtime_start:                   time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
+		unknownStatusReceived:            map[gomemcached.Status]*time.Timer{},
 	}
 }
 
@@ -107,37 +109,57 @@ func (client *XmemClient) ReportOpSuccess() {
 
 	client.downtime_start = time.Time{}
 	client.continuous_write_failure_counter = 0
-	if !client.receivedUnknownOpcode {
+	if !client.hasReceivedUnknownResponse() {
 		client.success_counter++
 	}
-	if client.success_counter > client.max_continuous_write_failure && client.backoff_factor > 0 && !client.receivedUnknownOpcode {
+	if client.success_counter > client.max_continuous_write_failure && client.backoff_factor > 0 && !client.hasReceivedUnknownResponse() {
 		client.backoff_factor--
 		client.success_counter = client.success_counter - client.max_continuous_write_failure
 	}
 	client.healthy = true
 }
 
-func (client *XmemClient) ReportUnknownResponseReceived() {
+// The goal here is to ensure backoff occurs if XMEM continues to receive the same unknown status code
+// Only if the unknown status code is no longer there after a period of time (determined by backoff period)
+// will the client allow backoff to go away
+func (client *XmemClient) ReportUnknownResponseReceived(unknownStatus gomemcached.Status) {
 	client.lock.RLock()
-	if client.receivedUnknownOpcode {
-		// Already done
-		client.lock.RUnlock()
-		return
-	}
+	timer, ok := client.unknownStatusReceived[unknownStatus]
 	client.lock.RUnlock()
 
+	if !ok {
+		// First time
+		client.markUnknownStatus(unknownStatus)
+	} else {
+		timerHasNotExpired := timer.Reset(client.GetUnknownResponseTime(true))
+		if !timerHasNotExpired {
+			// Timer has already fired but hasn't had a chance to get the lock here yet
+			// Corner case - just try to add another one after some sleep
+			go func() {
+				time.Sleep(1 * time.Second)
+				client.markUnknownStatus(unknownStatus)
+			}()
+		}
+	}
+}
+
+func (client *XmemClient) hasReceivedUnknownResponse() bool {
+	return len(client.unknownStatusReceived) > 0
+}
+
+func (client *XmemClient) markUnknownStatus(unknownStatus gomemcached.Status) {
 	client.lock.Lock()
 	defer client.lock.Unlock()
-	if !client.receivedUnknownOpcode {
-		// First time
-		client.receivedUnknownOpcode = true
-		client.success_counter = 0 // to ensure backoff will happen and override ReportOpSuccess
-		time.AfterFunc(repairTimeThreshold, func() {
-			client.lock.Lock()
-			defer client.lock.Unlock()
-			client.receivedUnknownOpcode = false
-		})
+	if _, ok := client.unknownStatusReceived[unknownStatus]; ok {
+		// Someone jumped ahead already
+		return
 	}
+	client.unknownStatusReceived[unknownStatus] = time.AfterFunc(client.GetUnknownResponseTime(false), func() {
+		client.lock.Lock()
+		defer client.lock.Unlock()
+		delete(client.unknownStatusReceived, unknownStatus)
+	})
+	client.success_counter = 0 // to ensure backoff will happen and override ReportOpSuccess
 }
 
 func (client *XmemClient) isConnHealthy() bool {
@@ -196,7 +218,7 @@ func (client *XmemClient) RepairConn(memClient mcc.ClientIface, repair_count_at_
 	if client.num_of_repairs == repair_count_at_error {
 		if time.Since(client.last_failure) < repairTimeThreshold {
 			client.backoff_factor++
-		} else {
+		} else if !client.hasReceivedUnknownResponse() {
 			client.backoff_factor = 0
 		}
 
@@ -237,6 +259,23 @@ func (client *XmemClient) GetBackOffFactor() int {
 	defer client.lock.RUnlock()
 
 	return client.backoff_factor
+}
+
+func (client *XmemClient) GetBackoffTime(getLock bool) time.Duration {
+	if getLock {
+		client.lock.RLock()
+		defer client.lock.RUnlock()
+	}
+
+	if client.backoff_factor > 0 {
+		return time.Duration(client.backoff_factor) * XmemBackoffWaitTime
+	}
+	return 0
+}
+
+// Adds 5 seconds for threshold
+func (client *XmemClient) GetUnknownResponseTime(getLock bool) time.Duration {
+	return client.GetBackoffTime(getLock) + 5*time.Second
 }
 
 func (client *XmemClient) IncrementBackOffFactor() {

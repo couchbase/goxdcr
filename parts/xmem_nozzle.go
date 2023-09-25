@@ -647,6 +647,7 @@ type XmemNozzle struct {
 	counter_eaccess             uint64 // count EACCESS for commands except getMeta. EACCESS for getMeta not counted since it doesn't block replication
 	counter_locked              uint64 // counter of times LOCKED status is returned by KV
 	counterGuardrailHit         uint64
+	counterUnknownStatus        uint64
 
 	receive_token_ch chan int
 
@@ -2793,6 +2794,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								}
 								// for other non-temporary errors, repair connections
 								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
+								xmem.client_for_setMeta.ReportUnknownResponseReceived(response.Status)
+								vbno := wrappedReq.Req.VBucket
+								xmem.RaiseEvent(common.NewEvent(common.DataSentFailedUnknownStatus, response.Status, xmem, []interface{}{vbno, seqno}, nil))
+								atomic.AddUint64(&xmem.counterUnknownStatus, 1)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
 						} else if req != nil {
@@ -3262,7 +3267,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 		if counter_sent > 0 {
 			avg_wait_time = float64(atomic.LoadUint64(&xmem.counter_waittime)) / float64(counter_sent)
 		}
-		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v, temp_err=%v, eaccess_err=%v guardrailHit=%v\n",
+		xmem.Logger().Infof("%v state =%v connType=%v received %v items (%v compressed), sent %v items (%v compressed), target items skipped %v, ignored %v items, %v items waiting to confirm, %v in queue, %v in current batch, avg wait time is %vms, size of last ten batches processed %v, len(batches_ready_queue)=%v, resend=%v, locked=%v, repair_count_getMeta=%v, repair_count_setMeta=%v, retry_cr=%v, to resolve=%v, to setback=%v, numGetMeta=%v, temp_err=%v, eaccess_err=%v guardrailHit=%v unknownStatusRec=%v\n",
 			xmem.Id(), xmem.State(), connType, atomic.LoadUint64(&xmem.counter_received),
 			atomic.LoadUint64(&xmem.counter_compressed_received), atomic.LoadUint64(&xmem.counter_sent),
 			atomic.LoadUint64(&xmem.counter_compressed_sent), atomic.LoadUint64(&xmem.counter_from_target), atomic.LoadUint64(&xmem.counter_ignored),
@@ -3274,7 +3279,7 @@ func (xmem *XmemNozzle) PrintStatusSummary() {
 			atomic.LoadUint64(&xmem.counter_retry_cr), atomic.LoadUint64(&xmem.counter_to_resolve),
 			atomic.LoadUint64(&xmem.counter_to_setback), atomic.LoadUint64(&xmem.counterNumGetMeta),
 			atomic.LoadUint64(&xmem.counter_tmperr), atomic.LoadUint64(&xmem.counter_eaccess),
-			atomic.LoadUint64(&xmem.counterGuardrailHit))
+			atomic.LoadUint64(&xmem.counterGuardrailHit), atomic.LoadUint64(&xmem.counterUnknownStatus))
 	} else {
 		xmem.Logger().Infof("%v state =%v ", xmem.Id(), xmem.State())
 	}
@@ -3504,10 +3509,7 @@ func computeNumberOfBytesUsingBytesAllowed(bytesList [][]byte, bytesAllowed int6
 }
 
 func (xmem *XmemNozzle) writeToClientWithoutThrottling(client *base.XmemClient, bytes []byte, renewTimeout bool) (error, int) {
-	backoffFactor := client.GetBackOffFactor()
-	if backoffFactor > 0 {
-		time.Sleep(time.Duration(backoffFactor) * base.XmemBackoffWaitTime)
-	}
+	time.Sleep(client.GetBackoffTime(false))
 
 	conn, rev, err := xmem.getConn(client, false, renewTimeout)
 	if err != nil {
