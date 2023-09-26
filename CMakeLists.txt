@@ -85,5 +85,4 @@ IF (BUILD_ENTERPRISE)
   ADD_DEPENDENCIES (goxdcr jseval)
 ENDIF ()
 
-INSTALL (FILES etc/metrics_metadata.json DESTINATION "etc/couchbase/goxdcr")
-
+AddMetricsMetadata (JSON etc/metrics_metadata.json COMPONENT goxdcr)
