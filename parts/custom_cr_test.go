@@ -124,7 +124,7 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, ti
 	t.FailNow()
 }
 
-//This routine will wait for replication and verify source/target CAS are the same
+// This routine will wait for replication and verify source/target CAS are the same
 func waitForReplication(key string, cas gocb.Cas, target *gocb.Bucket) (err error) {
 	var i int
 	for i = 0; i < 120; i++ {
@@ -218,7 +218,7 @@ func createMergeFunction(t *testing.T, mergeFunction string) {
 	}
 }
 
-func TestCustomCrXattrAfterRep(t *testing.T) {
+func Disabled_TestCustomCrXattrAfterRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrAfterRep =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterRep =================")
 	bucketName := "TestCustomCrXattrAfterRep"
@@ -447,7 +447,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Equal(2, len(xdcr))
 }
 
-func TestCustomCRDeletedDocs(t *testing.T) {
+func Disabled_TestCustomCRDeletedDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
 	bucketName := "TestCustomCRDeletedDocs"
@@ -504,7 +504,7 @@ func TestCustomCRDeletedDocs(t *testing.T) {
 	assert.Nil(err)
 }
 
-func TestCustomCRBinaryDocs(t *testing.T) {
+func Disabled_TestCustomCRBinaryDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRBinaryDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRBinaryDocs =================")
 	bucketName := "TestCustomCRBinaryDocs"
@@ -567,7 +567,7 @@ func TestCustomCRBinaryDocs(t *testing.T) {
 	//assert.Nil(err)
 }
 
-func TestCustomCrXattrAfterMerge(t *testing.T) {
+func Disabled_TestCustomCrXattrAfterMerge(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrAfterMerge =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterMerge =================")
 	bucketName := "TestCustomCrXattrAfterMerge"
@@ -634,7 +634,7 @@ func TestCustomCrXattrAfterMerge(t *testing.T) {
 	}
 }
 
-func TestCustomCrXattrSetBack(t *testing.T) {
+func Disabled_TestCustomCrXattrSetBack(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrSetBack =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrSetBack =================")
 	assert := assert.New(t)

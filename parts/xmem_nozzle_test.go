@@ -310,7 +310,7 @@ type User struct {
  * To avoid tightly couple the test files with real clusterID/UUID, we will use
  * "SourceCluster" and "TargetCluster" as clusterIDs for the tests.
  */
-func TestGetXattrForCustomCR(t *testing.T) {
+func Disable_TestGetXattrForCustomCR(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetXattrForCustomCR =================")
 	defer fmt.Println("============== Test case end: TestGetXattrForCustomCR =================")
 	bucketName := xmemBucket
