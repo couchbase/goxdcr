@@ -429,6 +429,49 @@ func (_c *ReplicationStatusIface_GetEventsManager_Call) RunAndReturn(run func() 
 	return _c
 }
 
+// GetEventsProducer provides a mock function with given fields:
+func (_m *ReplicationStatusIface) GetEventsProducer() common.PipelineEventsProducer {
+	ret := _m.Called()
+
+	var r0 common.PipelineEventsProducer
+	if rf, ok := ret.Get(0).(func() common.PipelineEventsProducer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(common.PipelineEventsProducer)
+		}
+	}
+
+	return r0
+}
+
+// ReplicationStatusIface_GetEventsProducer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEventsProducer'
+type ReplicationStatusIface_GetEventsProducer_Call struct {
+	*mock.Call
+}
+
+// GetEventsProducer is a helper method to define mock.On call
+func (_e *ReplicationStatusIface_Expecter) GetEventsProducer() *ReplicationStatusIface_GetEventsProducer_Call {
+	return &ReplicationStatusIface_GetEventsProducer_Call{Call: _e.mock.On("GetEventsProducer")}
+}
+
+func (_c *ReplicationStatusIface_GetEventsProducer_Call) Run(run func()) *ReplicationStatusIface_GetEventsProducer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *ReplicationStatusIface_GetEventsProducer_Call) Return(_a0 common.PipelineEventsProducer) *ReplicationStatusIface_GetEventsProducer_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *ReplicationStatusIface_GetEventsProducer_Call) RunAndReturn(run func() common.PipelineEventsProducer) *ReplicationStatusIface_GetEventsProducer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetOverviewStats provides a mock function with given fields: pipelineType
 func (_m *ReplicationStatusIface) GetOverviewStats(pipelineType common.PipelineType) *expvar.Map {
 	ret := _m.Called(pipelineType)

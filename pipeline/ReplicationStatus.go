@@ -108,6 +108,7 @@ type ReplicationStatusIface interface {
 	ClearCustomSetting(settingsKey string)
 	ClearTemporaryCustomSettings()
 	GetEventsManager() PipelineEventsManager
+	GetEventsProducer() common.PipelineEventsProducer
 	PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string)
 	LoadLatestBrokenMap()
 	RecordBackfillProgress(progress string)
@@ -607,6 +608,13 @@ func (rs *ReplicationStatus) GetSpecInternalId() string {
 }
 
 func (rs *ReplicationStatus) GetEventsManager() PipelineEventsManager {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+
+	return rs.eventsManager
+}
+
+func (rs *ReplicationStatus) GetEventsProducer() common.PipelineEventsProducer {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 

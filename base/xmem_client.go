@@ -438,6 +438,8 @@ func IsGuardRailError(status gomemcached.Status) bool {
 	}
 }
 
+const NumberOfGuardrailTypes = int(gomemcached.BUCKET_DISK_SPACE_TOO_LOW) + 1 - int(gomemcached.BUCKET_RESIDENT_RATIO_TOO_LOW)
+
 func IsEExistsError(resp_status gomemcached.Status) bool {
 	switch resp_status {
 	case gomemcached.KEY_EEXISTS:

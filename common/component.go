@@ -8,6 +8,8 @@
 
 package common
 
+import "github.com/couchbase/goxdcr/base"
+
 // ComponentEventType is the common event type that Component can raise during its lifecycle
 // It is not required for Component to raise all those event
 type ComponentEventType int
@@ -162,4 +164,9 @@ type Component interface {
 
 	// raise event for a component
 	RaiseEvent(event *Event)
+}
+
+type PipelineEventsProducer interface {
+	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) (eventId int64)
+	DismissEvent(eventId int) error
 }

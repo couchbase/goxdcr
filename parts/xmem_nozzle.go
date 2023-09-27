@@ -121,7 +121,17 @@ type bufferedMCRequest struct {
 	mutationLocked bool
 	// If a mutation was not able to be sent because target KV was unable to find the specified collectionId
 	collectionMapErr bool
-	lock             sync.RWMutex
+
+	guardrailsHit [base.NumberOfGuardrailTypes]bool
+
+	lock sync.RWMutex
+}
+
+func (req *bufferedMCRequest) setGuardrail(status mc.Status) {
+	req.lock.Lock()
+	defer req.lock.Unlock()
+	idx := getGuardrailIdx(status)
+	req.guardrailsHit[idx] = true
 }
 
 func newBufferedMCRequest() *bufferedMCRequest {
@@ -283,6 +293,24 @@ func (buf *requestBuffer) slotWithSentTime(pos uint16) (*base.WrappedMCRequest, 
 	return req.req, req.sent_time, nil
 }
 
+func (buf *requestBuffer) slotWithGuardrail(pos uint16) (*base.WrappedMCRequest, [base.NumberOfGuardrailTypes]bool, error) {
+	var retSlice [base.NumberOfGuardrailTypes]bool
+	err := buf.validatePos(pos)
+	if err != nil {
+		return nil, retSlice, err
+	}
+
+	req := buf.slots[pos]
+
+	req.lock.RLock()
+	defer req.lock.RUnlock()
+
+	for i := 0; i < base.NumberOfGuardrailTypes; i++ {
+		retSlice[i] = req.guardrailsHit[i]
+	}
+	return req.req, retSlice, nil
+}
+
 // modSlot allow caller to do book-keeping on the slot, like updating num_of_retry
 // @pos - the position of the slot
 // @modFunc - the callback function which is going to update the slot
@@ -314,6 +342,10 @@ func (buf *requestBuffer) clearSlot(pos uint16, reservation_num int) error {
 	req := buf.slots[pos]
 	req.lock.Lock()
 	defer req.lock.Unlock()
+
+	for i := 0; i < base.NumberOfGuardrailTypes; i++ {
+		req.guardrailsHit[i] = false
+	}
 
 	if req.req == nil {
 		return nil
@@ -417,6 +449,23 @@ func (buf *requestBuffer) itemCountInBuffer() uint16 {
 	} else {
 		return 0
 	}
+}
+
+func (buf *requestBuffer) getGuardRailHit() [base.NumberOfGuardrailTypes]bool {
+	var guardrailHit [base.NumberOfGuardrailTypes]bool
+	for i := uint16(0); i < buf.bufferSize(); i++ {
+		_, guardrailPerBuf, err := buf.slotWithGuardrail(i)
+		if err != nil {
+			continue
+		}
+		for j := 0; j < base.NumberOfGuardrailTypes; j++ {
+			if !guardrailHit[j] && guardrailPerBuf[j] {
+				// Set if not set
+				guardrailHit[j] = true
+			}
+		}
+	}
+	return guardrailHit
 }
 
 /*
@@ -696,25 +745,19 @@ type XmemNozzle struct {
 	// memcached will return an error map that contains more details about
 	// what errors get returned and what they mean
 	memcachedErrMap map[string]interface{}
+
+	eventsProducer common.PipelineEventsProducer
 }
 
-func NewXmemNozzle(id string,
-	remoteClusterSvc service_def.RemoteClusterSvc,
-	sourceClusterUuid string,
-	targetClusterUuid string,
-	topic string,
-	connPoolNamePrefix string,
-	connPoolConnSize int,
-	connectString string,
-	sourceBucketName string,
-	targetBucketName string,
-	targetBucketUuid string,
-	username string,
-	password string,
-	source_cr_mode base.ConflictResolutionMode,
-	logger_context *log.LoggerContext,
-	utilsIn utilities.UtilsIface,
-	vbList []uint16) *XmemNozzle {
+func getGuardrailIdx(status mc.Status) int {
+	return int(status) - int(mc.BUCKET_RESIDENT_RATIO_TOO_LOW)
+}
+
+func getMcStatusFromGuardrailIdx(idx int) mc.Status {
+	return mc.Status(int(mc.BUCKET_RESIDENT_RATIO_TOO_LOW) + idx)
+}
+
+func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sourceClusterUuid string, targetClusterUuid string, topic string, connPoolNamePrefix string, connPoolConnSize int, connectString string, sourceBucketName string, targetBucketName string, targetBucketUuid string, username string, password string, source_cr_mode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer) *XmemNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
@@ -749,6 +792,7 @@ func NewXmemNozzle(id string,
 		utils:               utilsIn,
 		vbList:              vbList,
 		collectionEnabled:   1, /*Default to true unless otherwise disabled*/
+		eventsProducer:      eventsProducer,
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -2769,7 +2813,11 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								vbno := wrappedReq.Req.VBucket
 								seqno := wrappedReq.Seqno
 								xmem.RaiseEvent(common.NewEvent(common.DataSentHitGuardrail, response.Status, xmem, []interface{}{vbno, seqno}, nil))
-								_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
+								markThenResend := func(req *bufferedMCRequest, pos uint16) (bool, error) {
+									req.setGuardrail(response.Status)
+									return xmem.resendWithReset(req, pos)
+								}
+								_, err = xmem.buf.modSlot(pos, markThenResend)
 							} else {
 								if response.Status == mc.XATTR_EINVAL && xmem.source_cr_mode == base.CRMode_Custom {
 									// There is something wrong with XATTR. This should never happen in released version.
@@ -2961,6 +3009,10 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	var resp_waitingConfirm_count int = 0
 	var repairCount_setMeta = 0
 	var repairCount_getMeta = 0
+	var guardrailMsgs [base.NumberOfGuardrailTypes]int64 // if value is >= 0, it represents the eventId to dismiss
+	for i := 0; i < base.NumberOfGuardrailTypes; i++ {
+		guardrailMsgs[i] = -1
+	}
 	var count uint64
 	// freeze_counter is used to count the number of check iterations that data has been stuck
 	var freeze_counter uint32 = 0
@@ -3017,6 +3069,26 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				xmem.client_for_getMeta.MarkConnUnhealthy()
 				xmem.handleGeneralError(ErrorXmemIsStuck)
 				goto done
+			}
+
+			currentGuardrailHit := xmem.buf.getGuardRailHit()
+			for i := 0; i < base.NumberOfGuardrailTypes; i++ {
+				if guardrailMsgs[i] == -1 && currentGuardrailHit[i] {
+					// buffer indicates that this specific guardrail has been hit and we haven't displayed the message yet
+					statusToUse := getMcStatusFromGuardrailIdx(i)
+					eventId := xmem.eventsProducer.AddEvent(base.LowPriorityMsg,
+						fmt.Sprintf("%s: %s", xmem.PrintResponseStatusError(statusToUse), xmem.topic), base.EventsMap{}, nil)
+					guardrailMsgs[i] = eventId
+				} else if guardrailMsgs[i] >= 0 && !currentGuardrailHit[i] {
+					// buffer indicates that this guardrail is no longer an issue and we have a msg being displayed
+					eventToDismiss := guardrailMsgs[i]
+					err := xmem.eventsProducer.DismissEvent(int(eventToDismiss))
+					if err != nil {
+						xmem.Logger().Warnf("Unable to dismiss event %v: %v", eventToDismiss, err)
+					} else {
+						guardrailMsgs[i] = -1
+					}
+				}
 			}
 		case <-statsTicker.C:
 			xmem.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, xmem, nil, []int{len(xmem.dataChan), xmem.bytesInDataChan()}))

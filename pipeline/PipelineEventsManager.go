@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -108,13 +109,13 @@ func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *in
 }
 
 type PipelineEventsManager interface {
+	common.PipelineEventsProducer
+
 	GetCurrentEvents() *PipelineEventList
-	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) (eventId int64)
 	ClearNonBrokenMapEvents()
 	ClearNonBrokenMapEventsWithString(substr string)
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
 	ContainsEvent(eventId int) bool
-	DismissEvent(eventId int) error
 	ResetDismissedHistory()
 	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
 

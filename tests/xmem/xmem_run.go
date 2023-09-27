@@ -314,7 +314,7 @@ func startXmem(batch_count int) {
 	}
 	logger.Infof("target_connectStr=%s\n", target_connectStr)
 
-	xmem = parts.NewXmemNozzle("xmem", "abc", "abc", 10, target_connectStr, options.source_bucket, options.target_bucket, options.target_bucket, options.password, base.CRMode_RevId, logger.LoggerContext())
+	xmem = parts.NewXmemNozzle("xmem", "abc", "abc", 10, target_connectStr, options.source_bucket, options.target_bucket, options.target_bucket, options.password, base.CRMode_RevId, logger.LoggerContext(), nil)
 	var configs map[string]interface{} = map[string]interface{}{parts.SETTING_BATCHCOUNT: batch_count,
 		parts.SETTING_RESP_TIMEOUT: time.Millisecond * 10,
 		parts.SETTING_NUMOFRETRY:   3}

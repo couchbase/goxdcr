@@ -88,12 +88,18 @@ function runTestCase {
 
 	sleep 15
 	validatePrometheusStatsRRNon0 "C1" "B1" "B2"
+	waitForNumberOfEvents "C1" 2 3
 
 	local secs=90
 	echo "Disabling guardrail and waiting $secs seconds before checking..."
+	# do it twice sometimes it doesn't register
+	disableInternalResidentRatioGuardrail C2 B2
+	sleep 5
 	disableInternalResidentRatioGuardrail C2 B2
 	sleep $secs
 	checkChangesLeftInternal "C1" "B1" "C2" "B2"
+
+	waitForNumberOfEvents "C1" 0 1
 
 	pauseReplication "C1" "B1" "C2" "B2"
 	sleep 30
