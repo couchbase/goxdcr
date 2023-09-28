@@ -218,9 +218,13 @@ func createMergeFunction(t *testing.T, mergeFunction string) {
 	}
 }
 
-func Disabled_TestCustomCrXattrAfterRep(t *testing.T) {
+func TestCustomCrXattrAfterRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrAfterRep =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterRep =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
 	bucketName := "TestCustomCrXattrAfterRep"
 	assert := assert.New(t)
 	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -447,9 +451,13 @@ func Disabled_TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Equal(2, len(xdcr))
 }
 
-func Disabled_TestCustomCRDeletedDocs(t *testing.T) {
+func TestCustomCRDeletedDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
 	bucketName := "TestCustomCRDeletedDocs"
 	assert := assert.New(t)
 	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -504,9 +512,13 @@ func Disabled_TestCustomCRDeletedDocs(t *testing.T) {
 	assert.Nil(err)
 }
 
-func Disabled_TestCustomCRBinaryDocs(t *testing.T) {
+func TestCustomCRBinaryDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRBinaryDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRBinaryDocs =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
 	bucketName := "TestCustomCRBinaryDocs"
 	assert := assert.New(t)
 	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -567,9 +579,13 @@ func Disabled_TestCustomCRBinaryDocs(t *testing.T) {
 	//assert.Nil(err)
 }
 
-func Disabled_TestCustomCrXattrAfterMerge(t *testing.T) {
+func TestCustomCrXattrAfterMerge(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrAfterMerge =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterMerge =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
 	bucketName := "TestCustomCrXattrAfterMerge"
 	assert := assert.New(t)
 	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
@@ -634,9 +650,13 @@ func Disabled_TestCustomCrXattrAfterMerge(t *testing.T) {
 	}
 }
 
-func Disabled_TestCustomCrXattrSetBack(t *testing.T) {
+func TestCustomCrXattrSetBack(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrSetBack =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrSetBack =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
 	assert := assert.New(t)
 	bucketName := "TestCustomCrXattrSetBack"
 	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)

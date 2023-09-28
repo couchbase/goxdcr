@@ -51,6 +51,7 @@ const password = "wewewe"
 
 var kvString = fmt.Sprintf("%s:%s", "127.0.0.1", xmemPort)
 var connString = fmt.Sprintf("%s:%s", "127.0.0.1", targetPort)
+var clusterReady = true // Assume we have live cluster initially
 
 func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface, map[string]interface{}, *XmemNozzle, *Router, *serviceDefMocks.BandwidthThrottlerSvc, *serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CollectionsManifestSvc, *mocks.PipelineEventsProducer) {
 
@@ -93,8 +94,13 @@ func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface, map[string]inter
 }
 
 func targetXmemIsUpAndCorrectSetupExists(bname string) bool {
+	// If we already checked that cluster is not ready, return
+	if !clusterReady {
+		return false
+	}
 	_, err := net.Listen("tcp4", fmt.Sprintf(":"+targetPort))
 	if err == nil {
+		clusterReady = false
 		return false
 	}
 	cluster, err := gocb.Connect(targetConnStr, gocb.ClusterOptions{Authenticator: gocb.PasswordAuthenticator{
@@ -102,11 +108,13 @@ func targetXmemIsUpAndCorrectSetupExists(bname string) bool {
 		Password: password,
 	}})
 	if err != nil {
+		clusterReady = false
 		return false
 	}
 	mgr := cluster.Buckets()
 	_, err = mgr.GetBucket(bname, nil)
 	if err != nil {
+		clusterReady = false
 		return false
 	}
 	return true
@@ -304,9 +312,13 @@ type User struct {
  * To avoid tightly couple the test files with real clusterID/UUID, we will use
  * "SourceCluster" and "TargetCluster" as clusterIDs for the tests.
  */
-func Disable_TestGetXattrForCustomCR(t *testing.T) {
+func TestGetXattrForCustomCR(t *testing.T) {
 	fmt.Println("============== Test case start: TestGetXattrForCustomCR =================")
 	defer fmt.Println("============== Test case end: TestGetXattrForCustomCR =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
 	bucketName := xmemBucket
 	//bucketName := "GetXattrForCCR"
 	assert := assert.New(t)
@@ -319,11 +331,6 @@ func Disable_TestGetXattrForCustomCR(t *testing.T) {
 	}
 	targetCluster.Close(nil)
 	fmt.Printf("Created bucket %v\n", bucketName)
-
-	if !targetXmemIsUpAndCorrectSetupExists(bucketName) {
-		fmt.Println("Skipping since live cluster_run setup has not been detected")
-		return
-	}
 
 	// Set up target documents
 	xmemSendPackets(t, []string{"testdata/customCR/kingarthur2_new_cas2.json",
