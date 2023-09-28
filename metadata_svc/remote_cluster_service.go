@@ -51,6 +51,7 @@ var NoSuchHostRecommendationString = " Check to see if firewall config is incorr
 var ErrorRemoteClusterNoCollectionsCapability = errors.New("remote cluster has no collections capability")
 var ErrorAdminTimeout = errors.New("The requested operation is being executed but is taking longer than expected. Please wait for the operation to complete, and the result will be posted in the UI Log section")
 var ErrorRefreshUnreachable = errors.New("Refresh operation could not contact any node in the node list")
+var ErrorRevisionMismatch = errors.New("Revision mismatch error")
 
 var AdminTimeout = 25 * time.Second // ns_server has a timeout of 30 seconds... should not keep user waiting past 25
 
@@ -671,6 +672,10 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 	}
 
 	if !rctx.refOrig.IsSame(rctx.refCache) || rctx.nodeListUpdated || rctx.addressPrefUpdate || rctx.capabilityChanged() {
+		isEssentiallySame := rctx.refOrig.IsEssentiallySame(rctx.refCache)
+		rctx.agent.logger.Infof("%v in checkAndUpdateAgentReference isSame: %#v, nodeListUpdated: %#v, addressPrefUpdate: %#v, capabilityChanged: %#v, isEssentiallySame: %#v",
+			rctx.agent.Id(),
+			rctx.refOrig.IsSame(rctx.refCache), rctx.nodeListUpdated, rctx.addressPrefUpdate, rctx.capabilityChanged(), isEssentiallySame)
 		// 1. when refOrig.SameAs(refCache) is true, i.e., when there have been no changes to refCache,
 		//    updateReferenceFromNoLock is not called
 		// 2. when refOrig.SameAs(refCache) is false, and refOrig.IsEssentiallySame(refCache) is true,
@@ -683,8 +688,8 @@ func (rctx *refreshContext) checkAndUpdateAgentReference() error {
 		// 4. When refresh context has shown that the address preference count needs to be updated
 		//    only if there is not another concurrent refresh context updating at the same time
 		//    and that it isn't waiting for a consumer to poll
+
 		if !rctx.refOrig.IsSame(rctx.refCache) || rctx.addressPrefUpdate || rctx.capabilityChanged() {
-			isEssentiallySame := rctx.refOrig.IsEssentiallySame(rctx.refCache)
 			updateErr := rctx.agent.updateReferenceFromInternal(rctx.refCache, !isEssentiallySame, /*updateMetaKv*/
 				!isEssentiallySame /*shouldCallCb*/, true /*synchronous*/, rctx)
 			if updateErr != nil {
@@ -915,6 +920,7 @@ func (agent *RemoteClusterAgent) Refresh() error {
 	}
 
 	var nodeAddressesList base.StringPairList
+	rctx.agent.logger.Infof("%v useExternal: %v cachedRefNodesList in refresh: %v", rctx.agent.Id(), useExternal, rctx.cachedRefNodesList)
 	for rctx.index = 0; rctx.index < len(rctx.cachedRefNodesList /*already shuffled*/); rctx.index++ {
 		hostnamePair := rctx.cachedRefNodesList[rctx.index]
 		err := rctx.setHostNamesAndConnStr(hostnamePair)
@@ -1670,6 +1676,25 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 					agent.refMtx.Unlock()
 				}
 			}
+			if err == ErrorRevisionMismatch {
+				agent.logger.Infof("%v loading cluster reference from metakv", agent.Id())
+				refBytes, rev, err := agent.fetchFromMetakv(&agent.reference)
+				if err != nil {
+					agent.logger.Warnf("Failed to fetch cluster reference from metakv, err=%v", err)
+					continue
+				}
+
+				ref, err := constructRemoteClusterReference(refBytes, rev, false)
+				if err != nil {
+					agent.logger.Warnf("Failed to construct cluster reference from metakv, err=%v", err)
+					continue
+				}
+
+				agent.refMtx.Lock()
+				agent.reference.LoadFrom(ref)
+				agent.reference.SetRevision(rev)
+				agent.refMtx.Unlock()
+			}
 		}
 	}
 }
@@ -1886,6 +1911,9 @@ func (agent *RemoteClusterAgent) updateReferenceFromInternal(newRef *metadata.Re
 		return DeleteAlreadyIssued
 	}
 
+	agent.logger.Infof("%v in updateReferenceFromInternal updateMetaKv: %#v, ref revision is nil: %#v",
+		agent.reference.Id(),
+		updateMetaKv, newRef.Revision() == nil)
 	if newRef.Revision() != nil && !updateMetaKv {
 		//We fetch from metakv again to see if the incoming ref has been modified or not
 		//One of the ways this can happen is that the goroutine having new ref got stalled
@@ -1903,10 +1931,9 @@ func (agent *RemoteClusterAgent) updateReferenceFromInternal(newRef *metadata.Re
 		newRefRevBytes := newRef.Revision().([]byte)
 		if bytes.Compare(metakvRevBytes, newRefRevBytes) != 0 {
 			agent.refMtx.Unlock()
-			err = fmt.Errorf("Revision mismatch for cluster id=%s metakvRev=%v newRefRev=%v",
+			agent.logger.Errorf("Revision mismatch for cluster id=%s metakvRev=%v newRefRev=%v",
 				newRef.Id(), metakvRevBytes, newRefRevBytes)
-
-			agent.logger.Errorf("Error in comparing revisions: %s\n", err)
+			err = ErrorRevisionMismatch
 			return err
 		}
 	}
