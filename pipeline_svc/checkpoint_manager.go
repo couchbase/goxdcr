@@ -2337,8 +2337,6 @@ func (ckmgr *CheckpointManager) logBrokenMapUpdatesToUI(olderMap, newerMap metad
 
 	if needToRaiseUI {
 		ckmgr.uiLogSvc.Write(buffer.String())
-		// TODO MB-38507 - Once UI portion is done and can parse replicationStatus with broken mapping, remove this log
-		ckmgr.logger.Infof("Current broken mapping for pipeline: %v", newerMap.String())
 	}
 }
 

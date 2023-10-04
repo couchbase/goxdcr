@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -22,7 +23,10 @@ import (
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func setupCkptSvcBoilerPlate() (*service_def.MetadataSvc, *log.LoggerContext, *service_def.ReplicationSpecSvc) {
@@ -35,14 +39,34 @@ func setupCkptSvcBoilerPlate() (*service_def.MetadataSvc, *log.LoggerContext, *s
 	return metadataSvc, loggerCtx, replSpecSvc
 }
 
-func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerContext, metadataEntry []*service_def_real.MetadataEntry, brokenMappingMarshalled []byte, newMapMarshalled []byte, replSpecSvc *service_def.ReplicationSpecSvc) {
-	metadataSvc.On("GetAllMetadataFromCatalog", fmt.Sprintf("%v/%v", CheckpointsCatalogKeyPrefix, replId)).Return(metadataEntry, nil)
-	metadataSvc.On("Get", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey)).Return(brokenMappingMarshalled, nil, nil)
-	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), newMapMarshalled, mock.Anything).Return(nil)
+var timeAfterDelAllFromCatalog int64
+var timeAfterGet int64
+
+func setupCkptSvcMocks(metadataSvc *service_def.MetadataSvc, ctx *log.LoggerContext, metadataEntry []*service_def_real.MetadataEntry, brokenMappingMarshalled []byte, newMapMarshalled []byte, replSpecSvc *service_def.ReplicationSpecSvc, opMap map[string]error, delayMap map[string]time.Duration) {
+
+	metadataSvc.On("GetAllMetadataFromCatalog", fmt.Sprintf("%v/%v", CheckpointsCatalogKeyPrefix, replId)).Return(metadataEntry, opMap["GetAllMetadataFromCatalog"])
+	metadataSvc.On("DelAllFromCatalog", fmt.Sprintf("%v/%v", CheckpointsCatalogKeyPrefix, replId)).Run(func(arg mock.Arguments) {
+		if delayTime, exists := delayMap["DelAllFromCatalog"]; exists {
+			fmt.Printf("Sleeping %v to simulate slow DelAllFromCatalog\n", delayTime)
+			time.Sleep(delayTime)
+		}
+		timeInUint := time.Now().UnixMicro()
+		atomic.StoreInt64(&timeAfterDelAllFromCatalog, timeInUint)
+
+	}).Return(opMap["DelAllFromCatalog"])
+	metadataSvc.On("Get", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey)).Run(func(args mock.Arguments) {
+		timeInUint := time.Now().UnixMicro()
+		atomic.StoreInt64(&timeAfterGet, timeInUint)
+	}).Return(brokenMappingMarshalled, nil, opMap["Get"])
+	metadataSvc.On("Set", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), newMapMarshalled, mock.Anything).Return(opMap["Set"])
+	metadataSvc.On("Del", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Del"])
+	metadataSvc.On("Add", fmt.Sprintf("%v/%v/%v", CheckpointsCatalogKeyPrefix, replId, BrokenMappingKey), mock.Anything).Return(opMap["Add"])
 
 	dummyMap := make(map[string]*metadata.ReplicationSpecification)
-	dummyMap[replId] = nil
+	dummyRepl := &metadata.ReplicationSpecification{Id: replId, InternalId: internalId}
+	dummyMap[replId] = dummyRepl
 	replSpecSvc.On("AllReplicationSpecs").Return(dummyMap, nil)
+	replSpecSvc.On("ReplicationSpec", replId).Return(dummyRepl, nil)
 }
 
 const replId = "testReplId"
@@ -77,7 +101,16 @@ func TestCkptSvcRemoveSourceMapping(t *testing.T) {
 	newMapSha := fmt.Sprintf("%x", newMapShaSlice)
 	assert.Equal("67d24325ed5df4d1f04c425606b4d40575032663de206e49a76033ced5dc15ee", newMapSha)
 
-	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc)
+	metadataSvcOpMap := make(map[string]error)
+	metadataSvcOpMap["Del"] = nil
+	metadataSvcOpMap["Get"] = nil
+	metadataSvcOpMap["Set"] = nil
+	metadataSvcOpMap["DelAllFromCatalog"] = nil
+	metadataSvcOpMap["GetAllMetadataFromCatalog"] = nil
+
+	metadataSvcDelayMap := make(map[string]time.Duration)
+
+	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap)
 
 	ckptSvc, err := NewCheckpointsService(metadataSvc, loggerCtx, nil, replSpecSvc)
 	assert.NotNil(ckptSvc)
@@ -164,6 +197,7 @@ func getbrokenMapUnmarshalledDoc(compressedMap []byte, shaSlice [32]byte, err er
 	var compressedList metadata.CompressedColNamespaceMappingList
 	compressedList = append(compressedList, compressedNamespaceMapping)
 	brokenMappingDoc := &metadata.CollectionNsMappingsDoc{
+		SpecInternalId:   internalId,
 		NsMappingRecords: compressedList,
 	}
 	marshalledDoc, err := json.Marshal(brokenMappingDoc)
@@ -212,4 +246,94 @@ func generateBrokenMap() metadata.CollectionNamespaceMapping {
 	brokenMap.AddSingleMapping(src1, tgt1)
 	brokenMap.AddSingleMapping(src2, tgt2)
 	return brokenMap
+}
+
+func TestCkptSvcConcurrentRemAndCreate(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptSvcConcurrentRemAndCreate =================")
+	defer fmt.Println("============== Test case end: TestCkptSvcConcurrentRemAndCreate =================")
+	assert := assert.New(t)
+
+	metadataSvc, loggerCtx, replSpecSvc := setupCkptSvcBoilerPlate()
+
+	// This test will start with two mappings
+	// S1:C1 -> S1T:C1T
+	// S2:C2 -> S2T:C2T
+	brokenMap := generateBrokenMap()
+	shaSlice, err := brokenMap.Sha256()
+	assert.Nil(err)
+	brokenMapCompressedMap, err := brokenMap.ToSnappyCompressed()
+	assert.Nil(err)
+
+	ckptRecord := metadata.CheckpointRecord{
+		BrokenMappingSha256: fmt.Sprintf("%x", shaSlice[:]),
+	}
+	entries := getEntries(ckptRecord, err, assert)
+
+	marshalledDoc := getbrokenMapUnmarshalledDoc(brokenMapCompressedMap, shaSlice, err, assert)
+
+	// New map should be just: SOURCE ||Scope: S2 Collection: C2|| -> TARGET(s) |Scope: S2T Collection: C2T|
+	newMap, _, _, upsertMappingDocSlice := getUpsertMap()
+	newMapShaSlice, _ := newMap.Sha256()
+	newMapSha := fmt.Sprintf("%x", newMapShaSlice)
+	assert.Equal("67d24325ed5df4d1f04c425606b4d40575032663de206e49a76033ced5dc15ee", newMapSha)
+
+	metadataSvcOpMap := make(map[string]error)
+	metadataSvcOpMap["Del"] = nil
+	metadataSvcOpMap["Get"] = nil
+	metadataSvcOpMap["Set"] = nil
+	metadataSvcOpMap["Add"] = nil
+	metadataSvcOpMap["DelAllFromCatalog"] = nil
+	metadataSvcOpMap["GetAllMetadataFromCatalog"] = nil
+
+	metadataSvcDelayMap := make(map[string]time.Duration)
+	metadataSvcDelayMap["DelAllFromCatalog"] = 3 * time.Second
+
+	setupCkptSvcMocks(metadataSvc, loggerCtx, entries, marshalledDoc, upsertMappingDocSlice, replSpecSvc, metadataSvcOpMap, metadataSvcDelayMap)
+
+	ckptSvc, err := NewCheckpointsService(metadataSvc, loggerCtx, testUtils, replSpecSvc)
+	assert.NotNil(ckptSvc)
+	assert.Nil(err)
+
+	// In CBSE, we see that DelCheckpointsDocs could potentially be delayed
+	// DelCheckpointsDocs launches 2 go-routines, one on metadata_svc.DelAllFromCatalog
+	// and the other is ckpt_svc.CleanupMapping
+	// It is possible that the metadata_svc.DelAll is a very slow process, and that CleanupMapping finishes
+	// and as it finishes, it removes the counter/topic from the shaRefCounterService's topicMaps
+	// But, this call is still executing...
+	// In the meantime, p2p merge is calling and it calls "loadBrokenMappingsInternal"
+	//
+	// vvv
+	//  	alreadyExists := ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, "")
+	//
+	//	mappingsDoc, err := ckpt_svc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
+	//
+	// This call will cause a new counter to be re-established
+	// But, the metakv still hasn't deleted it yet
+	// So, the GetMappingsDoc will *not* create a new mappings doc, and a counter will have been established
+	// This breaks the assumption that "When a counter is first created, it should also create a new mappingdoc"
+
+	// We now do two concurrent things - we have a checkpoint delete that happens with a delay
+	// with a checkpoint push that happens soon after the delete
+	var waitGrp sync.WaitGroup
+	waitGrp.Add(1)
+	go func() {
+		assert.Nil(ckptSvc.DelCheckpointsDocs(replId))
+		waitGrp.Done()
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	waitGrp.Add(1)
+	go func() {
+		// In the meantime, launch a load op to re-create the counter
+		//ckptSvc.loadBrokenMappingsInternal(replId)
+		ckptSvc.CheckpointsDocs(replId, true)
+		waitGrp.Done()
+	}()
+
+	waitGrp.Wait()
+
+	// The Checkpoint Delete should have blocked the loadBrokenMapping from recreating a counter
+	// Very raw way to verify
+	assert.True(timeAfterGet > timeAfterDelAllFromCatalog)
 }

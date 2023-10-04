@@ -141,6 +141,7 @@ type ReplicationSpecService struct {
 	cache_lock             *sync.Mutex // Lock when update status, update spec or delete a pipeline.
 	logger                 *log.CommonLogger
 	metadataChangeCallback []MetadataChangeHandlerCallback
+	cbIDs                  []string
 	metadataChangeMtx      sync.RWMutex
 	utils                  utilities.UtilsIface
 
@@ -181,10 +182,11 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 	return svc, svc.initCacheFromMetaKV()
 }
 
-func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority) {
+func (service *ReplicationSpecService) SetMetadataChangeHandlerCallback(id string, callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority) {
 	service.metadataChangeMtx.Lock()
 	defer service.metadataChangeMtx.Unlock()
 	service.metadataChangeCallback = append(service.metadataChangeCallback, NewMetadataChangeHandlerCallback(callBack, add, del, mod))
+	service.cbIDs = append(service.cbIDs, id)
 }
 
 func (service *ReplicationSpecService) initCache() {
@@ -1394,12 +1396,18 @@ func (service *ReplicationSpecService) executeCallbackWithPriority(specId string
 	var waitGrp sync.WaitGroup
 	var err error
 	var sumErr error
-	for _, callback := range service.metadataChangeCallback {
+	for idx, callback := range service.metadataChangeCallback {
 		if callback.GetPriority(op) != priority {
 			continue
 		}
 		waitGrp.Add(1)
+		stopWatchStop := service.utils.StartDiagStopwatch(fmt.Sprintf("Executing callback for %v", service.cbIDs[idx]), base.DiagInternalThreshold)
+		warnTimer := time.AfterFunc(10*time.Second, func() {
+			service.logger.Warnf("Executing callback %v stuck for more than 10 seconds", service.cbIDs[idx])
+		})
 		err = callback.cb(specId, oldSpec, newSpec, &waitGrp)
+		stopWatchStop()
+		warnTimer.Stop()
 		if err != nil {
 			service.logger.Error(err.Error())
 			if sumErr == nil {

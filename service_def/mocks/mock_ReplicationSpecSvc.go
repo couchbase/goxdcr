@@ -823,9 +823,9 @@ func (_c *ReplicationSpecSvc_SetManifestsGetter_Call) RunAndReturn(run func(serv
 	return _c
 }
 
-// SetMetadataChangeHandlerCallback provides a mock function with given fields: callBack, add, del, mod
-func (_m *ReplicationSpecSvc) SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority) {
-	_m.Called(callBack, add, del, mod)
+// SetMetadataChangeHandlerCallback provides a mock function with given fields: id, callBack, add, del, mod
+func (_m *ReplicationSpecSvc) SetMetadataChangeHandlerCallback(id string, callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority) {
+	_m.Called(id, callBack, add, del, mod)
 }
 
 // ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMetadataChangeHandlerCallback'
@@ -834,17 +834,18 @@ type ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call struct {
 }
 
 // SetMetadataChangeHandlerCallback is a helper method to define mock.On call
+//   - id string
 //   - callBack base.MetadataChangeHandlerCallbackWithWg
 //   - add base.MetadataChangeHandlerPriority
 //   - del base.MetadataChangeHandlerPriority
 //   - mod base.MetadataChangeHandlerPriority
-func (_e *ReplicationSpecSvc_Expecter) SetMetadataChangeHandlerCallback(callBack interface{}, add interface{}, del interface{}, mod interface{}) *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call {
-	return &ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call{Call: _e.mock.On("SetMetadataChangeHandlerCallback", callBack, add, del, mod)}
+func (_e *ReplicationSpecSvc_Expecter) SetMetadataChangeHandlerCallback(id interface{}, callBack interface{}, add interface{}, del interface{}, mod interface{}) *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call {
+	return &ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call{Call: _e.mock.On("SetMetadataChangeHandlerCallback", id, callBack, add, del, mod)}
 }
 
-func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) Run(run func(callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority)) *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call {
+func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) Run(run func(id string, callBack base.MetadataChangeHandlerCallbackWithWg, add base.MetadataChangeHandlerPriority, del base.MetadataChangeHandlerPriority, mod base.MetadataChangeHandlerPriority)) *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(base.MetadataChangeHandlerCallbackWithWg), args[1].(base.MetadataChangeHandlerPriority), args[2].(base.MetadataChangeHandlerPriority), args[3].(base.MetadataChangeHandlerPriority))
+		run(args[0].(string), args[1].(base.MetadataChangeHandlerCallbackWithWg), args[2].(base.MetadataChangeHandlerPriority), args[3].(base.MetadataChangeHandlerPriority), args[4].(base.MetadataChangeHandlerPriority))
 	})
 	return _c
 }
@@ -854,7 +855,7 @@ func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) Return() *Re
 	return _c
 }
 
-func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(base.MetadataChangeHandlerCallbackWithWg, base.MetadataChangeHandlerPriority, base.MetadataChangeHandlerPriority, base.MetadataChangeHandlerPriority)) *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call {
+func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(run func(string, base.MetadataChangeHandlerCallbackWithWg, base.MetadataChangeHandlerPriority, base.MetadataChangeHandlerPriority, base.MetadataChangeHandlerPriority)) *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call {
 	_c.Call.Return(run)
 	return _c
 }

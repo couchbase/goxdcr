@@ -407,13 +407,20 @@ func (rm *replicationManager) initMetadataChangeMonitor() {
 	// ReplSpecSvc allows multiple callbacks in parallel
 	// Execute high priority in parallel first, then med in parallel, then low in parallel
 	// priorities are specified in the order of addOp, delOp, and modOp
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.collectionsManifestSvc.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(replicationSpecChangeListener.replicationSpecChangeHandlerCallback, base.MetadataChangeLowPrioriy, base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillReplSvc.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.backfillMgr.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.checkpoint_svc.ReplicationSpecChangeCallback, base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.bucketTopologySvc.ReplicationSpecChangeCallback, base.MetadataChangeHighPrioriy, base.MetadataChangeLowPrioriy, base.MetadataChangeMedPrioriy)
-	rm.repl_spec_svc.SetMetadataChangeHandlerCallback(rm.p2pMgr.ReplicationSpecChangeCallback, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("CollectionsManifestSvc", rm.collectionsManifestSvc.ReplicationSpecChangeCallback,
+		base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("ReplSpecChangeListener", replicationSpecChangeListener.replicationSpecChangeHandlerCallback,
+		base.MetadataChangeLowPrioriy, base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("BackfillReplSvc", rm.backfillReplSvc.ReplicationSpecChangeCallback,
+		base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("BackfillMgr", rm.backfillMgr.ReplicationSpecChangeCallback,
+		base.MetadataChangeMedPrioriy, base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("CheckpointSvc", rm.checkpoint_svc.ReplicationSpecChangeCallback,
+		base.MetadataChangeHighPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("BucketTopologySvc", rm.bucketTopologySvc.ReplicationSpecChangeCallback,
+		base.MetadataChangeHighPrioriy, base.MetadataChangeLowPrioriy, base.MetadataChangeMedPrioriy)
+	rm.repl_spec_svc.SetMetadataChangeHandlerCallback("P2PMgr", rm.p2pMgr.ReplicationSpecChangeCallback,
+		base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy, base.MetadataChangeMedPrioriy)
 
 	mcm.Start()
 }

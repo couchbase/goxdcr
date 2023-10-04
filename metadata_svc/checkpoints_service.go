@@ -83,9 +83,13 @@ type CheckpointsService struct {
 
 func NewCheckpointsService(metadata_svc service_def.MetadataSvc, logger_ctx *log.LoggerContext, utils utilities.UtilsIface, replicationSpecService service_def.ReplicationSpecSvc) (*CheckpointsService, error) {
 	logger := log.NewLogger("CheckpointSvc", logger_ctx)
+	shaRefSvc, err := NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger, replicationSpecService, utils)
+	if err != nil {
+		return nil, err
+	}
 	ckptSvc := &CheckpointsService{metadata_svc: metadata_svc,
 		logger:                     logger,
-		ShaRefCounterService:       NewShaRefCounterService(getCollectionNsMappingsDocKey, metadata_svc, logger),
+		ShaRefCounterService:       shaRefSvc,
 		cachedSpecs:                make(map[string]*metadata.ReplicationSpecification),
 		ckptCaches:                 map[string]CheckpointsServiceCache{},
 		cachedBackfillSpecs:        make(map[string]*metadata.BackfillReplicationSpec),
@@ -162,11 +166,26 @@ func (ckpt_svc *CheckpointsService) isBrokenMappingDoc(ckptDocKey string) bool {
 }
 
 func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) error {
+	// Deleting checkpoints docs will require removing broken mapping - thus need to prevent
+	// concurrent broken map access
+	accessTokenCh, err := ckpt_svc.getCkptDocsWithBrokenMappingAccess(replicationId)
+	if err != nil {
+		ckpt_svc.logger.Errorf("Unable to get access token for replId %v due to err %v", replicationId, err)
+		return err
+	}
+	// Get the actual go-ahead
+	<-accessTokenCh
+	// Once gotten it, will need to return it once done
+	defer func() {
+		accessTokenCh <- true
+	}()
+
 	ckpt_svc.logger.Infof("DelCheckpointsDocs for replication %v...", replicationId)
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
 
-	// No need for stop the world because replication would be deleted
+	curSpec, _ := ckpt_svc.replicationSpecSvc.ReplicationSpec(replicationId)
 
+	// No need for stop the world because replication would be deleted
 	errMap := make(base.ErrorMap)
 	var errMtx sync.Mutex
 
@@ -193,18 +212,25 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 		}
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cleanMapErr := ckpt_svc.CleanupMapping(replicationId, ckpt_svc.utils)
-		if cleanMapErr != nil {
-			errMsg := fmt.Sprintf("DelCheckpointsDoc for brokenmapping had error: %v - manual clean up may be required", cleanMapErr)
-			ckpt_svc.logger.Errorf(errMsg)
-			errMtx.Lock()
-			errMap["2"] = fmt.Errorf(errMsg)
-			errMtx.Unlock()
-		}
-	}()
+	if curSpec != nil {
+		// DelCheckpointsDocs is being called even though spec still exist
+		// This means that this is called as a part of cleaning up pipeline
+		// and not because a replication spec has been deleted
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cleanupErr := ckpt_svc.CleanupMapping(replicationId, ckpt_svc.utils)
+			if cleanupErr != nil {
+				errMsg := fmt.Sprintf("Failed to clean up internal counter for %v : %v - manual clean up may be required\n", replicationId, cleanupErr)
+				ckpt_svc.logger.Errorf(errMsg)
+				errMtx.Lock()
+				errMap["2"] = fmt.Errorf(errMsg)
+				errMtx.Unlock()
+			}
+
+			ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, curSpec.InternalId)
+		}()
+	}
 
 	wg.Wait()
 	ckpt_svc.logger.Infof("DelCheckpointsDocs is done for %v\n", replicationId)
@@ -247,7 +273,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 	ckpt_svc.logger.Debugf("DelCheckpointsDoc for replication %v and vbno %v...", replicationId, vbno)
 
 	mtx := ckpt_svc.getStopTheWorldMtx(replicationId)
-	mtx.RLock()
+	mtx.Lock()
 
 	ckptDocsPreDel, err := ckpt_svc.checkpointsDocInternal(replicationId, vbno, false)
 	if err != nil && err != service_def.MetadataNotFoundErr {
@@ -267,7 +293,7 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 			err = nil
 			ckpt_svc.logger.Warnf("DelCheckpointDoc called for %v and vbno %v but no prev ckpt was found", replicationId, vbno)
 		}
-		mtx.RUnlock()
+		mtx.Unlock()
 		return err
 	}
 
@@ -275,10 +301,10 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno
 	err = ckpt_svc.metadata_svc.DelWithCatalog(catalogKey, key, rev)
 	if err != nil {
 		ckpt_svc.logger.Errorf("Failed to delete checkpoints doc for replication %v and vbno %v\n", replicationId, vbno)
-		mtx.RUnlock()
+		mtx.Unlock()
 		return err
 	}
-	mtx.RUnlock()
+	mtx.Unlock()
 
 	var needToDoRefCntDecrement bool
 	if ckptDocsPreDel != nil {
@@ -461,7 +487,12 @@ func (ckpt_svc *CheckpointsService) LoadBrokenMappings(replicationId string) (me
 }
 
 func (ckpt_svc *CheckpointsService) loadBrokenMappingsInternal(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
-	alreadyExists := ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, "")
+	shaMap, err := ckpt_svc.ShaRefCounterService.GetShaNamespaceMap(replicationId)
+	if err != nil {
+		var emptyMap metadata.ShaToCollectionNamespaceMap
+		return emptyMap, nil, nil, false, err
+	}
+	alreadyExists := len(shaMap) > 0
 
 	mappingsDoc, err := ckpt_svc.GetMappingsDoc(replicationId, !alreadyExists /*initIfNotFound*/)
 	if err != nil {
@@ -547,6 +578,7 @@ func (ckpt_svc *CheckpointsService) CheckpointsDocs(replicationId string, broken
 	}
 
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
+
 	ckpt_entries, err := ckpt_svc.metadata_svc.GetAllMetadataFromCatalog(catalogKey)
 	if err != nil {
 		ckpt_svc.logger.Errorf("%v had error when getting key %v - %v", replicationId, catalogKey, err)
@@ -767,13 +799,26 @@ func (ckpt_svc *CheckpointsService) ReplicationSpecChangeCallback(metadataId str
 			delete(ckpt_svc.ckptCaches, backfillId)
 		}
 		ckpt_svc.specsMtx.Unlock()
+		cleanupErr := ckpt_svc.ShaRefCounterService.CleanupMapping(oldSpec.Id, ckpt_svc.utils)
+		if cleanupErr != nil {
+			ckpt_svc.logger.Errorf("DelCheckpointsDoc for %v brokenmapping had error: %v - manual clean up may be required", oldSpec.Id, cleanupErr)
+		}
+		cleanupErr = ckpt_svc.ShaRefCounterService.CleanupMapping(backfillId, ckpt_svc.utils)
+		if cleanupErr != nil {
+			ckpt_svc.logger.Errorf("DelCheckpointsDoc for %v brokenmapping had error: %v - manual clean up may be required", backfillId, cleanupErr)
+		}
 	} else {
 		if oldSpec == nil && newSpec != nil {
+			backfillId := common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline)
+
 			waitGrp := sync.WaitGroup{}
 			waitGrp.Add(2)
 			go ckpt_svc.cleanOldLeftoverCkpts(newSpec.Id, newSpec.InternalId, &waitGrp)
-			go ckpt_svc.cleanOldLeftoverCkpts(common.ComposeFullTopic(newSpec.Id, common.BackfillPipeline), newSpec.InternalId, &waitGrp)
+			go ckpt_svc.cleanOldLeftoverCkpts(backfillId, newSpec.InternalId, &waitGrp)
 			waitGrp.Wait()
+
+			ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(newSpec.Id, newSpec.InternalId)
+			ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(backfillId, newSpec.InternalId)
 		}
 		ckpt_svc.specsMtx.Lock()
 		ckpt_svc.cachedSpecs[newSpec.Id] = newSpec
@@ -988,6 +1033,17 @@ func (ckpt_svc *CheckpointsService) initWithSpecs() error {
 		ckpt_svc.cachedSpecs[specId] = spec
 		ckpt_svc.stopTheWorldMtx[specId] = &sync.RWMutex{}
 		ckpt_svc.initCheckpointsDocsSerializeMapNoLock(specId)
+		alreadyExists := ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(specId, spec.InternalId)
+		if alreadyExists {
+			// Odd error - shouldn't happen
+			ckpt_svc.logger.Warnf("CheckpointSvc with spec %v internal %v already exists", specId, spec.InternalId)
+		}
+		backfillSpecId := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
+		alreadyExists = ckpt_svc.ShaRefCounterService.InitTopicShaCounterWithInternalId(backfillSpecId, spec.InternalId)
+		if alreadyExists {
+			// Odd error - shouldn't happen
+			ckpt_svc.logger.Warnf("CheckpointSvc with spec %v internal %v already exists", backfillSpecId, spec.InternalId)
+		}
 	}
 
 	return nil

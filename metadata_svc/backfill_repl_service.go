@@ -70,8 +70,12 @@ type BackfillReplicationService struct {
 
 func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc service_def.MetadataSvc, loggerCtx *log.LoggerContext, utilsIn utilities.UtilsIface, replSpecSvc service_def.ReplicationSpecSvc, xdcrTopologySvc service_def.XDCRCompTopologySvc, bucketTopologySvc service_def.BucketTopologySvc) (*BackfillReplicationService, error) {
 	logger := log.NewLogger("BackfillReplSvc", loggerCtx)
+	shaRefSvc, err := NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger, replSpecSvc, utilsIn)
+	if err != nil {
+		return nil, err
+	}
 	svc := &BackfillReplicationService{
-		ShaRefCounterService: NewShaRefCounterService(getBackfillMappingsDocKeyFunc, metadataSvc, logger),
+		ShaRefCounterService: shaRefSvc,
 		uiLogSvc:             uiLogSvc,
 		metadataSvc:          metadataSvc,
 		logger:               logger,
@@ -80,7 +84,6 @@ func NewBackfillReplicationService(uiLogSvc service_def.UILogSvc, metadataSvc se
 		xdcrTopologySvc:      xdcrTopologySvc,
 		bucketTopologySvc:    bucketTopologySvc,
 	}
-
 	return svc, svc.initCacheFromMetaKV()
 }
 
@@ -422,6 +425,7 @@ func (b *BackfillReplicationService) persistMappingsForThisNode(spec *metadata.B
 	}
 	inflatedMapping, err := b.GetShaToCollectionNsMap(spec.Id, mappingsDoc)
 	if err != nil {
+		b.logger.Errorf("persising backfill mapping for %v has err %v", err)
 		return err
 	}
 	var toDecrementMap metadata.ShaToCollectionNamespaceMap
@@ -569,7 +573,6 @@ func (b *BackfillReplicationService) DelBackfillReplSpec(replicationId string) (
 	}
 
 	// Once backfill spec has been deleted, safe to delete the backfill mappings
-	// TODO - revisit once consistent metakv is in
 	err = b.CleanupMapping(replicationId, b.utils)
 	if err != nil {
 		b.logger.Errorf("Failed to cleanup backfill spec mapping err=%v\n", err)
