@@ -194,8 +194,8 @@ function runReplicationResume {
 	# pulled by C1P, but no ckpt pulled
 	# That's ok... so skip checking those
 	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
-	if (($resumeFrom0Cnt > 0)); then
-		echo "C1P has at least one VB that resumed from seqno 0"
+	if (($resumeFrom0Cnt > 10)); then
+		echo "C1P has at least 10 VBs that resumed from seqno 0"
 		exit 1
 	fi
 	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")

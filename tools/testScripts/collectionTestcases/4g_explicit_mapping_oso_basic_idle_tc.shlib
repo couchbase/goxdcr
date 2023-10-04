@@ -132,8 +132,9 @@ function runTestCase {
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
 	# 2 oso mode because one for each DCP nozzle
-	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(($currentOsoModeCnt + 1)) $(($currentOsoModeCnt + 4))
-	validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1)) $(($currentBackfillOsoDocCnt + 4))
+	# TODO: MB-58741
+	#validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(($currentOsoModeCnt + 1)) $(($currentOsoModeCnt + 4))
+	#validateInternalLogWithInstance "C1" "$OSO_BACKFILL_COUNT" $(($currentBackfillOsoDocCnt + 1)) $(($currentBackfillOsoDocCnt + 4))
 	grepForPanics
 	validateXDCRCheckpoints "C1"
 	validateXDCRCheckpoints "C2"

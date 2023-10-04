@@ -105,6 +105,10 @@ function runTestCase {
 	echo "Loading beer sample on source cluster..."
 	runDataLoad
 
+	# Add sleep because if we start replication right away, KV could show up with a "Bucket deleted"
+	# message and throw off the count below
+	sleep 5
+
 	createRemoteClusterReference "C1" "C2"
 	createRemoteClusterReference "C2" "C1"
 	sleep 1

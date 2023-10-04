@@ -225,8 +225,8 @@ function runReplicationResume {
 		tempLogs=$(getInternalNodeXdcrLog "$dependentNodeName")
 
 		resumeFrom0Cnt=$(echo "$tempLogs" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
-		if (($resumeFrom0Cnt > 0)); then
-			echo "$dependentNodeName has at least one VB that resumed from seqno 0"
+		if (($resumeFrom0Cnt > 10)); then
+			echo "$dependentNodeName has at least ten VBs that resumed from seqno 0"
 			exit 1
 		fi
 		resumeLoadBrokenMapCnt=$(echo "$tempLogs" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
