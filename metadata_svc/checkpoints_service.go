@@ -169,21 +169,25 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 	// Deleting checkpoints docs will require removing broken mapping - thus need to prevent
 	// concurrent broken map access
 	accessTokenCh, err := ckpt_svc.getCkptDocsWithBrokenMappingAccess(replicationId)
-	if err != nil {
-		ckpt_svc.logger.Errorf("Unable to get access token for replId %v due to err %v", replicationId, err)
-		return err
+	// This accessToken is really more necessary in terms of cleaning up pipeline
+	// When this is done as part of the pipeline deletion, it's likely the access token is removed
+	// However, pipeline manager should be synchronous in a way that it shouldn't start a new pipeline until the old
+	// is deleted. So continue regardless
+	if err == nil {
+		// Get the actual go-ahead
+		<-accessTokenCh
+		// Once gotten it, will need to return it once done
+		defer func() {
+			accessTokenCh <- true
+		}()
 	}
-	// Get the actual go-ahead
-	<-accessTokenCh
-	// Once gotten it, will need to return it once done
-	defer func() {
-		accessTokenCh <- true
-	}()
 
 	ckpt_svc.logger.Infof("DelCheckpointsDocs for replication %v...", replicationId)
 	catalogKey := ckpt_svc.getCheckpointCatalogKey(replicationId)
 
-	curSpec, _ := ckpt_svc.replicationSpecSvc.ReplicationSpec(replicationId)
+	// DelCheckpointDocs is called with either main or backfill replication ID
+	mainRepl, _ := common.DecomposeFullTopic(replicationId)
+	curSpec, _ := ckpt_svc.replicationSpecSvc.ReplicationSpec(mainRepl)
 
 	// No need for stop the world because replication would be deleted
 	errMap := make(base.ErrorMap)
@@ -212,25 +216,25 @@ func (ckpt_svc *CheckpointsService) DelCheckpointsDocs(replicationId string) err
 		}
 	}()
 
-	if curSpec != nil {
-		// DelCheckpointsDocs is being called even though spec still exist
-		// This means that this is called as a part of cleaning up pipeline
-		// and not because a replication spec has been deleted
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			cleanupErr := ckpt_svc.CleanupMapping(replicationId, ckpt_svc.utils)
-			if cleanupErr != nil {
-				errMsg := fmt.Sprintf("Failed to clean up internal counter for %v : %v - manual clean up may be required\n", replicationId, cleanupErr)
-				ckpt_svc.logger.Errorf(errMsg)
-				errMtx.Lock()
-				errMap["2"] = fmt.Errorf(errMsg)
-				errMtx.Unlock()
-			}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cleanupErr := ckpt_svc.CleanupMapping(replicationId, ckpt_svc.utils)
+		if cleanupErr != nil {
+			errMsg := fmt.Sprintf("Failed to clean up internal counter for %v : %v - manual clean up may be required\n", replicationId, cleanupErr)
+			ckpt_svc.logger.Errorf(errMsg)
+			errMtx.Lock()
+			errMap["2"] = fmt.Errorf(errMsg)
+			errMtx.Unlock()
+		}
 
+		if curSpec != nil {
+			// DelCheckpointsDocs is being called even though spec still exist
+			// This means that this is called as a part of cleaning up pipeline
+			// and not because a replication spec has been deleted
 			ckpt_svc.InitTopicShaCounterWithInternalId(replicationId, curSpec.InternalId)
-		}()
-	}
+		}
+	}()
 
 	wg.Wait()
 	ckpt_svc.logger.Infof("DelCheckpointsDocs is done for %v\n", replicationId)
@@ -1162,7 +1166,8 @@ func (ckpt_svc *CheckpointsService) getCkptDocsWithBrokenMappingAccess(replicati
 	}
 	ckpt_svc.specsMtx.RUnlock()
 	if !found {
-		return nil, fmt.Errorf("The map does not include %v but does have %v", replicationId, errKeys)
+		ckpt_svc.logger.Errorf("The map does not include %v but does have %v", replicationId, errKeys)
+		return nil, base.ErrorNotFound
 	}
 	return accessCh, nil
 }

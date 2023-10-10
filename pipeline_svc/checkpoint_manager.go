@@ -1094,6 +1094,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 	}
 
 	// Figure out if certain checkpoints need to be removed to force a complete resync due to external factors
+	oldSpecIds := make(map[string]bool)
 	for vbno, ckptDoc := range ckptDocs {
 		if ckmgr.IsStopped() {
 			return ckptMgrStopped
@@ -1111,6 +1112,7 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 			}
 		} else {
 			if ckptDoc.SpecInternalId != specInternalId {
+				oldSpecIds[ckptDoc.SpecInternalId] = true
 				// if specInternalId does not match, replication spec has been deleted and recreated
 				// the checkpoint doc is for the old replication spec and needs to be deleted
 				// unlike the IsVbInList check above, it is critial for the checkpoint doc deletion to succeed here
@@ -1126,6 +1128,8 @@ func (ckmgr *CheckpointManager) SetVBTimestamps(topic string) error {
 		}
 	}
 
+	ckmgr.logger.Infof("Checkpoint docs with internalId(s) %v while current spec has internalID %v - deleting outdated ckptdoc for vbs: %v",
+		oldSpecIds, specInternalId, deleted_vbnos)
 	for _, deleted_vbno := range deleted_vbnos {
 		delete(ckptDocs, deleted_vbno)
 	}
@@ -1427,14 +1431,14 @@ func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.
 		if sourceDCPManifestId > 0 {
 			_, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, sourceDCPManifestId)
 			if err != nil {
-				ckmgr.logger.Errorf("%v unable to find DCP source manifest ID %v, skipping a record...", ckmgr.Id(), sourceDCPManifestId)
+				ckmgr.logger.Debugf("Unable to find DCP source manifest ID %v, skipping a record...", sourceDCPManifestId)
 				continue
 			}
 		}
 		if sourceBackfillManifestId > 0 {
 			_, err := ckmgr.collectionsManifestSvc.GetSpecificSourceManifest(spec, sourceBackfillManifestId)
 			if err != nil {
-				ckmgr.logger.Errorf("%v unable to find BackfillMgr source manifest ID %v, skipping a record...", ckmgr.Id(), sourceBackfillManifestId)
+				ckmgr.logger.Debugf("Unable to find BackfillMgr source manifest ID %v, skipping a record...", sourceBackfillManifestId)
 				continue
 			}
 		}
@@ -2590,6 +2594,7 @@ type nodeVbCkptMap map[string]metadata.VBsCkptsDocMap
 //  3. Sort first by source side
 func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer.PeersVBMasterCheckRespMap) error {
 	if len(respMap) == 0 {
+		ckmgr.logger.Infof("Nothing to merge")
 		// nothing to merge
 		return nil
 	}
@@ -2664,6 +2669,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	// If specIds are different, then something is mid flight
 	brokenMapSpecInternalId, err := ckmgr.checkSpecInternalID(combinedBrokenMappingSpecInternalId)
 	if err != nil {
+		ckmgr.logger.Errorf("InternalID mismatch, combined SpecIDs: %v", combinedBrokenMappingSpecInternalId)
 		return err
 	}
 
