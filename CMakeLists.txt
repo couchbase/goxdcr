@@ -78,7 +78,7 @@ GoInstall (TARGET goxdcr PACKAGE github.com/couchbase/goxdcr/main
   GOTAGS "${xdcrGoTags}"
   LDFLAGS "${LDFLAGS}"
   INSTALL_PATH bin OUTPUT goxdcr
-  GOVERSION 1.20)
+  GOVERSION 1.21)
 
 ADD_DEPENDENCIES(goxdcr sigar n1ql-yacc)
 IF (BUILD_ENTERPRISE)
@@ -86,4 +86,3 @@ IF (BUILD_ENTERPRISE)
 ENDIF ()
 
 INSTALL (FILES etc/metrics_metadata.json DESTINATION "etc/couchbase/goxdcr")
-
