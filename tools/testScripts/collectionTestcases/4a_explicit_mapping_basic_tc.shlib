@@ -101,9 +101,6 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $checkCount
 	checkItemCnt "C2" "B2" $targetCheckCount
 
-	# As of fix for MB-55412, there will be a no-op backfill
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
-
 	# After replicating 10k items from a source collection to target collection
 	# change the replication mapping to point to a new target collection
 	# The backfill should kick in and fill in all the data to the new collection
@@ -116,8 +113,8 @@ function runTestCase {
 	checkItemCnt "C2" "B2" $checkCount
 
 	# Backfill should have been raised
-	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 2))
-	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 2))
+	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $(($currentBackfillInstanceCnt + 1))
+	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt + 1))
 	# oso mode is disabled
 	validateInternalLogWithInstance "C1" "$OSO_MODE_MSG" $(($currentOsoModeCnt + 0))
 	grepForPanics

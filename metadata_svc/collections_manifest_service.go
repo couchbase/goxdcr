@@ -581,7 +581,6 @@ func NewCollectionsManifestAgent(name string, internalId string, remoteClusterSv
 func (a *CollectionsManifestAgent) refreshAndNotify(refreshImmediately bool) {
 	oldSrc, newSrc, srcErr := a.refreshSource()
 	oldTgt, newTgt, tgtErr := a.refreshTarget(refreshImmediately)
-
 	if srcErr != nil {
 		oldSrc = nil
 		newSrc = nil
@@ -599,10 +598,14 @@ func (a *CollectionsManifestAgent) refreshAndNotify(refreshImmediately bool) {
 
 // Similar to refreshAndNotify in nature, but without actual pulling
 func (a *CollectionsManifestAgent) registerPeerSentManifests(pair *metadata.CollectionsManifestPair) {
-	oldSrc, newSrc := a.registerSourcePull(true, pair.Source)
-	oldTgt, newTgt := a.registerTargetPull(true, pair.Target)
 
-	a.notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt)
+	// With peer sent manifests, this case can only happen during replication creation in a limited time window
+	// This means there should not be a pre-existing replication before this call
+	// As such, we want to make sure the "baseline" is the actual baseline manifest that was sent
+	// so that we don't un-necessarily raise backfill which could cause extra un-necessary work to be done
+
+	a.registerSourcePull(true, pair.Source)
+	a.registerTargetPull(true, pair.Target)
 }
 
 func (a *CollectionsManifestAgent) notifyManifestsChange(oldSrc, newSrc, oldTgt, newTgt *metadata.CollectionsManifest) {

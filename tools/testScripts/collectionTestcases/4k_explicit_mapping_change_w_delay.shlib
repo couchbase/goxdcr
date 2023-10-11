@@ -46,9 +46,9 @@ function runDataLoad {
 declare -i ORIG_TARGET_MAN_PULL_INTERVAL
 
 function runTestCase {
-	echo "==============================================================================="
-	echo "Running explicit mapping test case - add new mapping when pipeline is suspended"
-	echo "==============================================================================="
+	echo "==========================================================================================="
+	echo "Running explicit mapping test case - add new mapping when pipeline is suspended with delay"
+	echo "==========================================================================================="
 	testForClusterRun
 	if (($? != 0)); then
 		exit $?

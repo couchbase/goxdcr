@@ -35,6 +35,7 @@ TOPOLOGY_RESTART_MSG="Topology change detected. Estimated time of pipeline resta
 DCP_ROLLBACK_MSG="Received rollback from DCP stream"
 P2P_PULL_MANIFEST_ERR="Unable to retrieve peer manifests for new spec"
 XMEM_REPAIR_CONNECTION="Repairing connection"
+BACKFILL_PIPELINE_START="Starting BackfillPipeline"
 
 # These should be imported after clusterRunProvision script
 

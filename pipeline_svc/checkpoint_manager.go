@@ -2707,6 +2707,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 
 	err, done := ckmgr.preStopGcCheck(filteredMaps)
 	if done {
+		ckmgr.logger.Errorf("Unable to continue merge checkpoint due to err %v", err)
 		return err
 	}
 
@@ -2724,6 +2725,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 
 	err = ckmgr.stopTheWorldAndMergeCkpts(getterFunc)
 	if err != nil {
+		ckmgr.logger.Errorf("Unable to stop the world and merge checkpoint due to err %v", err)
 		return err
 	}
 	return nil

@@ -14,6 +14,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -994,6 +996,44 @@ func (v *ReplicationPayload) SameAs(other *ReplicationPayload) bool {
 }
 
 type PeersVBMasterCheckRespMap map[string]*VBMasterCheckResp
+
+// For debugging
+func (p *PeersVBMasterCheckRespMap) String() string {
+	if p == nil {
+		return ""
+	}
+
+	var output []string
+
+	for k, v := range *p {
+		output = append(output, fmt.Sprintf("Node: %v", k))
+		resp, unlockFunc := v.GetReponse()
+		if resp == nil {
+			continue
+		}
+		for k2, v2 := range *resp {
+			output = append(output, fmt.Sprintf("Bucket %v", k2))
+			if v2 == nil || v2.NotMyVBs == nil {
+				continue
+			}
+			for vb, payload := range *v2.NotMyVBs {
+				output = append(output, fmt.Sprintf("VB: %v", strconv.Itoa(int(vb))))
+				if payload == nil || payload.CheckpointsDoc == nil || payload.CheckpointsDoc.Checkpoint_records == nil {
+					continue
+				}
+				for _, ckptRecords := range payload.CheckpointsDoc.Checkpoint_records {
+					if ckptRecords == nil {
+						continue
+					}
+					output = append(output, fmt.Sprintf("Seqno %v srcMan %v tgtMan %v", ckptRecords.Seqno, ckptRecords.SourceManifestForDCP, ckptRecords.TargetManifest))
+				}
+			}
+		}
+		unlockFunc()
+	}
+
+	return strings.Join(output, "\n")
+}
 
 type VBMasterCheckResp struct {
 	ResponseCommon

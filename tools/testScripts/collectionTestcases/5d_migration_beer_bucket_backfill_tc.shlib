@@ -121,7 +121,7 @@ function runTestCase {
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 	checkItemCnt "C2" "B2" 920
 
-	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1))
+	validateLogWithInstance "C1" "$BROKEN_MSG" $(($currentBrokenInstanceCnt + 1)) $(($currentBrokenInstanceCnt + 2))
 
 	# Then re-setup the implicit matching that matches
 	SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})

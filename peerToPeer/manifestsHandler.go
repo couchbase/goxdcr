@@ -19,6 +19,7 @@ type ManifestsHandler struct {
 
 	storageMtx sync.RWMutex
 	storage    map[string]*metadata.CollectionsManifestPair
+	delTimers  map[string]*time.Timer
 }
 
 func NewManifestsHandler(reqCh []chan interface{}, logger *log.CommonLogger, lifecycleId string,
@@ -30,6 +31,7 @@ func NewManifestsHandler(reqCh []chan interface{}, logger *log.CommonLogger, lif
 		finCh:          finCh,
 		colManifestSvc: colManifestSvc,
 		storage:        map[string]*metadata.CollectionsManifestPair{},
+		delTimers:      map[string]*time.Timer{},
 	}
 	return handler
 }
@@ -50,6 +52,11 @@ func (m *ManifestsHandler) Stop() error {
 	return nil
 }
 
+func (m *ManifestsHandler) HandleSpecDeletion(oldSpec *metadata.ReplicationSpecification) {
+	m.deleteManifests(oldSpec.Id, oldSpec.InternalId)
+	m.HandlerCommon.HandleSpecDeletion(oldSpec)
+}
+
 func (m *ManifestsHandler) handler() {
 	for {
 		select {
@@ -67,7 +74,6 @@ func (m *ManifestsHandler) handler() {
 			}
 		}
 	}
-
 }
 
 func (m *ManifestsHandler) deleteManifests(specId, specInternalId string) {
@@ -76,6 +82,11 @@ func (m *ManifestsHandler) deleteManifests(specId, specInternalId string) {
 	m.storageMtx.Lock()
 	defer m.storageMtx.Unlock()
 	delete(m.storage, key)
+	timer := m.delTimers[key]
+	if timer != nil {
+		timer.Stop()
+	}
+	delete(m.delTimers, key)
 
 	m.logger.Debugf("ManifestsHandler deleted cached manifests for spec %v internalID %v", specId, specInternalId)
 }
@@ -104,7 +115,7 @@ func (m *ManifestsHandler) storeManifestsPair(specId string, specInternalId stri
 	m.storageMtx.Lock()
 	defer m.storageMtx.Unlock()
 	m.storage[key] = manifestsPair
-	time.AfterFunc(base.P2PManifestsCacheCleanupInterval, func() {
+	m.delTimers[key] = time.AfterFunc(base.P2PManifestsCacheCleanupInterval, func() {
 		m.deleteManifests(specId, specInternalId)
 	})
 }
