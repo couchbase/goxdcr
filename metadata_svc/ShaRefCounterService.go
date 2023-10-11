@@ -21,6 +21,9 @@ import (
 
 type ShaRefCounterService struct {
 	metadataSvc service_def.MetadataSvc
+	replSpecSvc service_def.ReplicationSpecSvc
+	utils       utilities.UtilsIface
+
 	// Map of replicationId -> map of sha's -> refCnts
 	topicMapMtx        sync.RWMutex
 	topicMaps          map[string]*MapShaRefCounter
@@ -32,16 +35,18 @@ type ShaRefCounterService struct {
 	logger *log.CommonLogger
 }
 
-func NewShaRefCounterService(metakvDocKeyGetter func(string) string,
-	metadataSvc service_def.MetadataSvc,
-	logger *log.CommonLogger) *ShaRefCounterService {
-	return &ShaRefCounterService{
+func NewShaRefCounterService(metakvDocKeyGetter func(string) string, metadataSvc service_def.MetadataSvc, logger *log.CommonLogger, replicationSpecSvc service_def.ReplicationSpecSvc, utils utilities.UtilsIface) (*ShaRefCounterService, error) {
+	refSvc := &ShaRefCounterService{
 		topicMaps:          make(map[string]*MapShaRefCounter),
 		topicGcDisabledSet: make(map[string]bool),
 		metakvDocKeyGetter: metakvDocKeyGetter,
 		metadataSvc:        metadataSvc,
 		logger:             logger,
+		replSpecSvc:        replicationSpecSvc,
+		utils:              utils,
 	}
+
+	return refSvc, nil
 }
 
 var emptyS2CNsMap = make(metadata.ShaToCollectionNamespaceMap)
@@ -68,17 +73,15 @@ func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internal
 	}
 
 	s.topicMapMtx.Lock()
+	defer s.topicMapMtx.Unlock()
 	// check again
 	_, alreadyExists = s.topicMaps[topic]
 	if alreadyExists {
-		s.topicMapMtx.Unlock()
 		return
 	}
 
 	counter := NewMapShaRefCounterWithInternalId(topic, internalId, s.metadataSvc, s.metakvDocKeyGetter(topic), s.logger)
 	s.topicMaps[topic] = counter
-	s.topicMapMtx.Unlock()
-
 	counter.Init()
 	return
 }
@@ -86,8 +89,8 @@ func (s *ShaRefCounterService) InitTopicShaCounterWithInternalId(topic, internal
 // Caller who calls initIfNotFound should ensure there is not a concurrent upsert operation somewhere else
 func (s *ShaRefCounterService) GetMappingsDoc(topic string, initIfNotFound bool) (*metadata.CollectionNsMappingsDoc, error) {
 	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
-	s.topicMapMtx.RUnlock()
 
 	if !ok {
 		return nil, base.ErrorInvalidInput
@@ -100,8 +103,8 @@ func (s *ShaRefCounterService) GetMappingsDoc(topic string, initIfNotFound bool)
 func (s *ShaRefCounterService) GetShaToCollectionNsMap(topic string, doc *metadata.CollectionNsMappingsDoc) (metadata.ShaToCollectionNamespaceMap, error) {
 	var emptyS2CNsMap metadata.ShaToCollectionNamespaceMap
 	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
 	refCounter, ok := s.topicMaps[topic]
-	s.topicMapMtx.RUnlock()
 
 	if !ok {
 		return emptyS2CNsMap, base.ErrorInvalidInput
@@ -168,8 +171,8 @@ func (s *ShaRefCounterService) GCDocUsingLatestCounterInfo(topic string, doc *me
 	}
 
 	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
-	s.topicMapMtx.RUnlock()
 	if !ok {
 		return base.ErrorInvalidInput
 	}
@@ -181,8 +184,8 @@ func (s *ShaRefCounterService) GCDocUsingLatestCounterInfo(topic string, doc *me
 // This should be called at the start of loading from metakv, before any record/unrecord is used
 func (s *ShaRefCounterService) InitCounterShaToActualMappings(topic, internalSpecId string, mapping metadata.ShaToCollectionNamespaceMap) error {
 	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
-	s.topicMapMtx.RUnlock()
 
 	if !ok {
 		return base.ErrorInvalidInput
@@ -200,8 +203,8 @@ func (s *ShaRefCounterService) RegisterMapping(topic, internalSpecId string, map
 	}
 
 	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
-	s.topicMapMtx.RUnlock()
 
 	if !ok {
 		return base.ErrorInvalidInput
@@ -212,8 +215,8 @@ func (s *ShaRefCounterService) RegisterMapping(topic, internalSpecId string, map
 
 func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error {
 	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
-	s.topicMapMtx.RUnlock()
 
 	if !ok {
 		return base.ErrorInvalidInput
@@ -224,8 +227,8 @@ func (s *ShaRefCounterService) UpsertMapping(topic, specInternalId string) error
 
 func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.UtilsIface) error {
 	s.topicMapMtx.Lock()
+	defer s.topicMapMtx.Unlock()
 	counter, ok := s.topicMaps[topic]
-	s.topicMapMtx.Unlock()
 
 	doneFunc := utils.StartDiagStopwatch(fmt.Sprintf("CleanupMapping(%v) found? %v", topic, ok), base.DiagInternalThreshold)
 	defer doneFunc()
@@ -237,10 +240,8 @@ func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.Util
 		return temporaryCounter.DelAndCleanup()
 	}
 
-	s.topicMapMtx.Lock()
 	delete(s.topicMaps, topic)
 	delete(s.topicGcDisabledSet, topic)
-	s.topicMapMtx.Unlock()
 
 	return counter.DelAndCleanup()
 }
@@ -248,8 +249,8 @@ func (s *ShaRefCounterService) CleanupMapping(topic string, utils utilities.Util
 // After this call, the ref count should be synchronized
 func (s *ShaRefCounterService) reInitUsingMergedMappingDoc(topic string, brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	s.topicMapMtx.RLock()
+	defer s.topicMapMtx.RUnlock()
 	counter, ok := s.topicMaps[topic]
-	s.topicMapMtx.RUnlock()
 
 	if !ok {
 		return base.ErrorInvalidInput
@@ -316,10 +317,6 @@ func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc ser
 		internalSpecId: internalId,
 		logger:         logger,
 	}
-}
-
-func NewMapShaRefCounter(topic string, metadataSvc service_def.MetadataSvc, metakvOpKey string, logger *log.CommonLogger) *MapShaRefCounter {
-	return NewMapShaRefCounterWithInternalId(topic, "", metadataSvc, metakvOpKey, logger)
 }
 
 func (c *MapShaRefCounter) Init() {
@@ -476,7 +473,8 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 
 	if err != nil && err == service_def.MetadataNotFoundErr {
 		if initIfNotFound {
-			c.logger.Infof("GetMappingsDoc %v initialized a new mappingsDoc", c.id)
+			c.logger.Infof("GetMappingsDoc %v initialized a new mappingsDoc with internalID %v", c.id, c.internalSpecId)
+			docReturn.SpecInternalId = c.internalSpecId
 			err = c.upsertCollectionNsMappingsDoc(docReturn, true /*addOp*/)
 			return docReturn, err
 		} else {
@@ -492,6 +490,18 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 	err = json.Unmarshal(docData, docReturn)
 	if err != nil {
 		return nil, err
+	}
+
+	if docReturn.SpecInternalId != c.internalSpecId {
+		c.logger.Warnf("Retrieved an out of date mapping doc with internal ID %v with current known ID %v",
+			docReturn.SpecInternalId, c.internalSpecId)
+		if initIfNotFound {
+			emptyDoc := &metadata.CollectionNsMappingsDoc{}
+			emptyDoc.SpecInternalId = c.internalSpecId
+			c.logger.Infof("GetMappingsDoc %v re-initialized a new mappingsDoc with internalId %v", c.id, c.internalSpecId)
+			err = c.upsertCollectionNsMappingsDoc(emptyDoc, true /*addOp*/)
+		}
+		return nil, service_def.MetadataNotFoundErr
 	}
 
 	c.logger.Infof("GetMappingsDoc %v retrieved an existing mappingsDoc", c.id)

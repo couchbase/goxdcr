@@ -254,7 +254,9 @@ func setupMetakvInitialAddSetDel(metadataSvc *service_def.MetadataSvc, specId, i
 	specGetKey := getBackfillReplicationDocKeyFunc(specId)
 
 	// sharefcounting service should persist an empty doc
-	emptyMappingsDoc := &metadata.CollectionNsMappingsDoc{}
+	emptyMappingsDoc := &metadata.CollectionNsMappingsDoc{
+		SpecInternalId: internalId,
+	}
 	emptyMappingDocBytes, err := json.Marshal(emptyMappingsDoc)
 	if err != nil {
 		panic("Coding marshaller error")
