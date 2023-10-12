@@ -7,7 +7,6 @@
 // licenses/APL2.txt.
 
 //go:build !enterprise
-// +build !enterprise
 
 package service_impl
 

@@ -129,7 +129,7 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, ti
 func waitForReplication(key string, cas gocb.Cas, target *gocb.Bucket) (err error) {
 	var i int
 	for i = 0; i < 120; i++ {
-		value, err := getPathValue(key, base.XATTR_HLV, target)
+		value, err := getPathValue(key, []string{base.XATTR_HLV}, target)
 		if err == nil && value.Cas() == cas {
 			return nil
 		}
@@ -186,28 +186,42 @@ func waitForMV(key string, expectedMV map[string]string, bucket *gocb.Bucket) (c
 	return 0, fmt.Errorf("MV %s is not expected %s\n", mv, expectedMV)
 }
 
-// Verify _vv.cv == CAS
+// Verify _vv.cv == CAS and _vv.cvCas == CAS
 func verifyCv(key string, target *gocb.Bucket) (err error) {
-	var cvHex string
-	value, err := getPathValue(key, crMeta.XATTR_VER_PATH, target)
+	var cvCasHex, cvHex string
+	paths := []string{crMeta.XATTR_CVCAS_PATH, crMeta.XATTR_VER_PATH}
+	value, err := getPathValue(key, paths, target)
 	if err != nil {
 		return
 	}
-	value.ContentAt(0, &cvHex)
+	value.ContentAt(0, &cvCasHex)
+	value.ContentAt(1, &cvHex)
+	cvCas, err := base.HexLittleEndianToUint64([]byte(cvCasHex))
+	if err != nil {
+		fmt.Printf("verifyCv for Key: %v, retrieving cvCas: error: %v\n", key, err)
+		return
+	}
 	cv, err := base.HexLittleEndianToUint64([]byte(cvHex))
 	if err != nil {
-		fmt.Printf("Key: %v, error: %v\n", key, err)
+		fmt.Printf("verifyCv for Key: %v, retrieving ver: error: %v\n", key, err)
 		return
 	}
 	if value.Cas() != gocb.Cas(cv) {
 		return fmt.Errorf("%v %v does not equal to CAS value %v", crMeta.XATTR_VER_PATH, cv, value.Cas())
 	}
+	if value.Cas() != gocb.Cas(cvCas) {
+		return fmt.Errorf("%v %v does not equal to CAS value %v", crMeta.XATTR_CVCAS_PATH, cvCas, value.Cas())
+	}
 	return nil
 }
 
-func getPathValue(key string, path string, target *gocb.Bucket) (value *gocb.LookupInResult, err error) {
-	value, err = target.DefaultCollection().LookupIn(key,
-		[]gocb.LookupInSpec{gocb.GetSpec(path, &gocb.GetSpecOptions{IsXattr: true})},
+func getPathValue(key string, paths []string, target *gocb.Bucket) (value *gocb.LookupInResult, err error) {
+	specs := make([]gocb.LookupInSpec, len(paths))
+	for i, path := range paths {
+		spec := gocb.GetSpec(path, &gocb.GetSpecOptions{IsXattr: true})
+		specs[i] = spec
+	}
+	value, err = target.DefaultCollection().LookupIn(key, specs,
 		&gocb.LookupInOptions{Internal: SubdocInternal{DocFlags: gocb.SubdocDocFlagAccessDeleted}})
 	return
 }
@@ -276,7 +290,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	err = verifyCv(key, targetBucket)
 	assert.Nil(err)
-	_, err = getPathValue(key, crMeta.XATTR_SRC_PATH, targetBucket)
+	_, err = getPathValue(key, []string{crMeta.XATTR_SRC_PATH}, targetBucket)
 	assert.Nil(err)
 
 	/*
@@ -299,20 +313,20 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	err = verifyCv(key, targetBucket)
 	assert.Nil(err)
-	value, err := getPathValue(key, "list", targetBucket)
+	value, err := getPathValue(key, []string{"list"}, targetBucket)
 	assert.Nil(err)
 	var l interface{}
 	value.ContentAt(0, &l)
 	fmt.Printf("list value: %v\n", l)
 	assert.NotNil(value)
-	value, err = getPathValue(key, "aKey", targetBucket)
+	value, err = getPathValue(key, []string{"aKey"}, targetBucket)
 	assert.Nil(err)
 	var k interface{}
 	value.ContentAt(0, &k)
 	fmt.Printf("akey value: %v\n", k)
 	assert.NotNil(value)
 	var id string
-	value, err = getPathValue(key, crMeta.XATTR_SRC_PATH, targetBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_SRC_PATH}, targetBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &id)
 
@@ -323,7 +337,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	fmt.Println("Test 3: Simulate a merged document at source that dominates the previous version")
 	// First get the cv so we can use it to build the MV
 	var cv string
-	value, err = getPathValue(key, crMeta.XATTR_VER_PATH, targetBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_VER_PATH}, targetBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &cv)
 	cas, err := base.HexLittleEndianToUint64([]byte(cv))
@@ -334,6 +348,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	mvMap[id] = string(base.Uint64ToBase64(cas))
 	mutOut, err = sourceBucket.DefaultCollection().MutateIn(key,
 		[]gocb.MutateInSpec{
+			gocb.InsertSpec(crMeta.XATTR_CVCAS_PATH, gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_VER_PATH, gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_SRC_PATH, id, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_MV_PATH, mvMap, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
@@ -344,27 +359,27 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 
 	// CV should not change.
 	var sourceCv, targetCv string
-	value, err = getPathValue(key, crMeta.XATTR_VER_PATH, targetBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_VER_PATH}, targetBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &targetCv)
-	value, err = getPathValue(key, crMeta.XATTR_VER_PATH, sourceBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_VER_PATH}, sourceBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &sourceCv)
 	assert.Equal(targetCv, sourceCv)
 
-	// ID should not change
+	// SRC should not change
 	var sourceId string
-	value, err = getPathValue(key, crMeta.XATTR_SRC_PATH, sourceBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_SRC_PATH}, sourceBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &sourceId)
 	assert.Equal(id, sourceId)
 
 	// MV should not change
 	var mv, sourceMv map[string]interface{}
-	value, err = getPathValue(key, crMeta.XATTR_MV_PATH, targetBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_MV_PATH}, targetBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &mv)
-	value, err = getPathValue(key, crMeta.XATTR_MV_PATH, sourceBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_MV_PATH}, sourceBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &sourceMv)
 	assert.Equal(mv, sourceMv)
@@ -382,10 +397,10 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	err = verifyCv(key, targetBucket)
 	assert.Nil(err)
-	value, err = getPathValue(key, crMeta.XATTR_SRC_PATH, targetBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_SRC_PATH}, targetBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &id)
-	value, err = getPathValue(key, crMeta.XATTR_PV_PATH, targetBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_PV_PATH}, targetBucket)
 	assert.Nil(err)
 	var pv4 map[string]interface{}
 	value.ContentAt(0, &pv4)
@@ -395,7 +410,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	// There are 3 items in MV, 2 moved to PV, 1 is dedupped since its ID is in the cv
 	assert.Equal(2, len(pv4), fmt.Sprintf("Document %s, Unexpected pv: %v\n", key, pv4))
 	mv = nil
-	value, err = getPathValue(key, crMeta.XATTR_MV_PATH, targetBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_MV_PATH}, targetBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &mv)
 	assert.Nil(mv)
@@ -414,9 +429,9 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	err = verifyCv(key, sourceBucket)
 	assert.Nil(err)
-	_, err = getPathValue(key, crMeta.XATTR_SRC_PATH, sourceBucket)
+	_, err = getPathValue(key, []string{crMeta.XATTR_SRC_PATH}, sourceBucket)
 	assert.Nil(err)
-	value, err = getPathValue(key, crMeta.XATTR_PV_PATH, sourceBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_PV_PATH}, sourceBucket)
 	assert.Nil(err)
 	var pv map[string]interface{}
 	value.ContentAt(0, &pv)
@@ -436,10 +451,10 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	err = verifyCv(key, targetBucket)
 	assert.Nil(err)
-	_, err = getPathValue(key, crMeta.XATTR_SRC_PATH, targetBucket)
+	_, err = getPathValue(key, []string{crMeta.XATTR_SRC_PATH}, targetBucket)
 	assert.Nil(err)
 	pv = nil
-	value, err = getPathValue(key, crMeta.XATTR_PV_PATH, sourceBucket)
+	value, err = getPathValue(key, []string{crMeta.XATTR_PV_PATH}, sourceBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &pv)
 	assert.Equal(3, len(pv), fmt.Sprintf("key=%q Expect pv len to be 1 but got pv=%q", key, pv))
@@ -452,11 +467,11 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	err = waitForReplication(key, rmOut.Cas(), targetBucket)
 	assert.Nil(err)
-	value, err = getPathValue(key, base.XATTR_HLV, targetBucket)
+	value, err = getPathValue(key, []string{base.XATTR_HLV}, targetBucket)
 	assert.Nil(err)
-	var xdcr map[string]interface{}
-	value.ContentAt(0, &xdcr)
-	assert.Equal(3, len(xdcr))
+	var vv map[string]interface{}
+	value.ContentAt(0, &vv)
+	assert.Equal(4, len(vv))
 
 	/*
 	* Test 8. Recreate the document and old _vv is lost, unfortunately
@@ -470,11 +485,11 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	err = waitForReplication(key, upsOut.Cas(), targetBucket)
 	assert.Nil(err)
-	value, err = getPathValue(key, base.XATTR_HLV, targetBucket)
+	value, err = getPathValue(key, []string{base.XATTR_HLV}, targetBucket)
 	assert.Nil(err)
-	xdcr = nil
-	value.ContentAt(0, &xdcr)
-	assert.Equal(2, len(xdcr))
+	vv = nil
+	value.ContentAt(0, &vv)
+	assert.Equal(3, len(vv))
 }
 
 func MB_58490_TestCustomCRDeletedDocs(t *testing.T) {
@@ -524,7 +539,7 @@ func MB_58490_TestCustomCRDeletedDocs(t *testing.T) {
 	err = waitForReplication(key, rmOut.Cas(), targetBucket)
 	assert.Nil(err)
 	// verify deleted document has the expected XATTR
-	value, err := getPathValue(key, base.XATTR_HLV, targetBucket)
+	value, err := getPathValue(key, []string{base.XATTR_HLV}, targetBucket)
 	assert.Nil(err)
 	var xdcr map[string]interface{}
 	value.ContentAt(0, &xdcr)
@@ -668,7 +683,7 @@ func TestCustomCrXattrAfterMerge(t *testing.T) {
 	}
 	fmt.Printf("Verifying merge and replication of merged doc for %v documents\n", numDoc)
 	for i := 0; i < numDoc; i++ {
-		value, err := getPathValue(key[i], crMeta.XATTR_MV_PATH, sourceBucket)
+		value, err := getPathValue(key[i], []string{crMeta.XATTR_MV_PATH}, sourceBucket)
 		assert.Nil(err, "%v lookup failed for key %v", crMeta.XATTR_MV_PATH, key[i])
 		err = verifyCv(key[i], sourceBucket)
 		assert.Nil(err)
@@ -722,6 +737,7 @@ func TestCustomCrXattrSetBack(t *testing.T) {
 	mvTarget["Cluster3"] = "FhSITdr4ACA"
 	_, err = targetBucket.DefaultCollection().MutateIn(key,
 		[]gocb.MutateInSpec{
+			gocb.InsertSpec(crMeta.XATTR_CVCAS_PATH, gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_VER_PATH, gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_SRC_PATH, "C2", &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_MV_PATH, mvTarget, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
@@ -741,6 +757,7 @@ func TestCustomCrXattrSetBack(t *testing.T) {
 	mvSource["Cluster2"] = "FhSITdr4ABU"
 	_, err = sourceBucket.DefaultCollection().MutateIn(key,
 		[]gocb.MutateInSpec{
+			gocb.InsertSpec(crMeta.XATTR_CVCAS_PATH, gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_VER_PATH, gocb.MutationMacroCAS, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_SRC_PATH, "C1", &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true}),
 			gocb.InsertSpec(crMeta.XATTR_MV_PATH, mvSource, &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},

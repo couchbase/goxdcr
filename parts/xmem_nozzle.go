@@ -1937,9 +1937,14 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 	req := wrappedReq.Req
 
 	// Now we need to update CCR metadata either because of new changes or because we have to prune
-	// The max increase in body length is adding 2 uint32 and _xdcr\x00{"id":"<clusterId>","cv":"<18bytes>"}\x00
+	// The max increase in body length is adding 2 uint32 and _vv\x00{"cvCas":"0x...","src":"<clusterId>","ver":"0x..."}\x00
 	body := req.Body
-	var maxBodyIncrease = 8 /* 2 uint32*/ + 24 + len(xmem.sourceClusterId) + 18
+	var maxBodyIncrease = 8 /* 2 uint32 */ + len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
+		len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
+		len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
+		len(xmem.sourceClusterId) + 3 /* "<clusterId>", */ +
+		len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ +
+		18 /* "0x<16byte>"} */
 	newbodyLen := len(body) + maxBodyIncrease
 	newbody, err := xmem.dataPool.GetByteSlice(uint64(newbodyLen))
 	if err != nil {

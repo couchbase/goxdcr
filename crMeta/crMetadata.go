@@ -24,16 +24,18 @@ import (
 
 // Custom CR related constants
 const (
+	HLV_CVCAS_FIELD = "cvCas" // This stores the version of the HLV
 	// These are the fields in the HLV
 	HLV_SRC_FIELD = "src" // src and ver combined is the cv in the design
 	HLV_VER_FIELD = "ver" //
 	HLV_MV_FIELD  = "mv"  // the MV field in _xdcr
 	HLV_PV_FIELD  = "pv"  // The PV field in _xdcr
 
-	XATTR_SRC_PATH = base.XATTR_HLV + "." + HLV_SRC_FIELD
-	XATTR_VER_PATH = base.XATTR_HLV + "." + HLV_VER_FIELD
-	XATTR_MV_PATH  = base.XATTR_HLV + "." + HLV_MV_FIELD
-	XATTR_PV_PATH  = base.XATTR_HLV + "." + HLV_PV_FIELD
+	XATTR_CVCAS_PATH = base.XATTR_HLV + "." + HLV_CVCAS_FIELD
+	XATTR_SRC_PATH   = base.XATTR_HLV + "." + HLV_SRC_FIELD
+	XATTR_VER_PATH   = base.XATTR_HLV + "." + HLV_VER_FIELD
+	XATTR_MV_PATH    = base.XATTR_HLV + "." + HLV_MV_FIELD
+	XATTR_PV_PATH    = base.XATTR_HLV + "." + HLV_PV_FIELD
 )
 
 type CRMetadata struct {
@@ -92,7 +94,7 @@ func NewSourceDocument(req *base.WrappedMCRequest, source hlv.DocumentSourceId) 
 
 func (doc *SourceDocument) GetMetadata() (*CRMetadata, error) {
 	docMeta := base.DecodeSetMetaReq(doc.req.Req)
-	cas, cvSrc, cvVer, pvMap, mvMap, err := getMetaFromMCRequest(doc.req.Req)
+	cas, cvCas, cvSrc, cvVer, pvMap, mvMap, err := getMetaFromMCRequest(doc.req.Req)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +107,7 @@ func (doc *SourceDocument) GetMetadata() (*CRMetadata, error) {
 	if len(mvMap) > 0 {
 		meta.hadMv = true
 	}
-	meta.hlv, err = hlv.NewHLV(doc.source, cas, cvSrc, cvVer, pvMap, mvMap)
+	meta.hlv, err = hlv.NewHLV(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +157,7 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 		if err != nil {
 			return nil, err
 		}
-		cas, cvSrc, cvVer, pvMap, mvMap, err := getMetaFromMCResponse(doc.resp)
+		cas, cvCas, cvSrc, cvVer, pvMap, mvMap, err := getMetaFromMCResponse(doc.resp)
 		if err != nil {
 			return nil, err
 		}
@@ -168,7 +170,7 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 		if len(mvMap) > 0 {
 			meta.hadMv = true
 		}
-		meta.hlv, err = hlv.NewHLV(doc.source, cas, cvSrc, cvVer, pvMap, mvMap)
+		meta.hlv, err = hlv.NewHLV(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap)
 		if err != nil {
 			return nil, err
 		}
@@ -446,11 +448,16 @@ func VersionMapToBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction
 	return pos
 }
 
-// {"src":...;"ver":...
+// {"cvCas":...,"src":...,"ver":...
 func formatCv(meta *CRMetadata, body []byte, pos int) int {
-	src := meta.GetHLV().GetCvSrc()
-	ver := meta.GetHLV().GetCvVer()
-	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_SRC_FIELD), pos, base.WriteJsonKey, len(HLV_SRC_FIELD), true /*firstKey*/)
+	hlv := meta.GetHLV()
+	cvCas := hlv.GetCvCas()
+	cvCasHex := base.Uint64ToHexLittleEndian(cvCas)
+	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_CVCAS_FIELD), pos, base.WriteJsonKey, len(HLV_CVCAS_FIELD), true /*firstKey*/)
+	body, pos = base.WriteJsonRawMsg(body, cvCasHex, pos, base.WriteJsonValue, len(cvCasHex), false /*firstKey*/)
+	src := hlv.GetCvSrc()
+	ver := hlv.GetCvVer()
+	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_SRC_FIELD), pos, base.WriteJsonKey, len(HLV_SRC_FIELD), false /*firstKey*/)
 	body, pos = base.WriteJsonRawMsg(body, []byte(src), pos, base.WriteJsonValue, len(src), false /*firstKey*/)
 	cvHex := base.Uint64ToHexLittleEndian(ver)
 	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_VER_FIELD), pos, base.WriteJsonKey, len(HLV_VER_FIELD), false /*firstKey*/)
@@ -554,7 +561,7 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 
 }
 
-func findCustomCRXattrFields(xattr []byte) (src, ver, pv, mv []byte, err error) {
+func findCustomCRXattrFields(xattr []byte) (cvCas, src, ver, pv, mv []byte, err error) {
 	it, err := base.NewCCRXattrFieldIterator(xattr)
 	if err != nil {
 		return
@@ -565,31 +572,34 @@ func findCustomCRXattrFields(xattr []byte) (src, ver, pv, mv []byte, err error) 
 		if err != nil {
 			return
 		}
-		if base.Equals(key, HLV_SRC_FIELD) {
+		switch string(key) {
+		case HLV_SRC_FIELD:
 			src = value
-		} else if base.Equals(key, HLV_VER_FIELD) {
+		case HLV_VER_FIELD:
 			ver = value
-		} else if base.Equals(key, HLV_PV_FIELD) {
+		case HLV_PV_FIELD:
 			pv = value
-		} else if base.Equals(key, HLV_MV_FIELD) {
+		case HLV_MV_FIELD:
 			mv = value
+		case HLV_CVCAS_FIELD:
+			cvCas = value
 		}
 	}
 	return
 }
 
-func getMetaFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64,
+func getMetaFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64,
 	pvMap, mvMap hlv.VersionsMap, err error) {
 	cas = lookupResp.Resp.Cas
 	xattr, err := lookupResp.ResponseForAPath(base.XATTR_HLV)
 	if err != nil {
-		return 0, "", 0, nil, nil, err
+		return 0, 0, "", 0, nil, nil, err
 	}
 	if xattr == nil {
-		return cas, "", 0, nil, nil, nil
+		return cas, 0, "", 0, nil, nil, nil
 	}
 
-	srcBytes, ver, pv, mv, err := findCustomCRXattrFields(xattr)
+	cvCasHex, srcBytes, ver, pv, mv, err := findCustomCRXattrFields(xattr)
 	if err != nil {
 		return
 	}
@@ -603,7 +613,21 @@ func getMetaFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas uint64, c
 		}
 		if cvVer > cas {
 			// ver is initially the same as cas. Cas may increase later. So ver should never be greater than cas
-			err = fmt.Errorf("ver>cas, ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvVer, cas, ver, pv, mv)
+			err = fmt.Errorf("ver>cas, cvCas=%v,ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvCas, cvVer, cas, ver, pv, mv)
+			return
+		}
+	}
+	if len(cvCasHex) == 0 {
+		cvCas = 0
+	} else {
+		cvCas, err = base.HexLittleEndianToUint64(cvCasHex)
+		if err != nil {
+			return
+		}
+		if cvVer > cvCas {
+			// ver is initially the same as cas. Cas may increase later. So ver should never be greater than cas
+			err = fmt.Errorf("ver>cvCas, cvCas=%v,ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvCas, cvVer, cas, ver, pv, mv)
+			return
 		}
 	}
 	pvMap, err = xattrVVtoMap(pv)
@@ -618,10 +642,10 @@ func getMetaFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas uint64, c
 }
 
 // This will find the custom CR XATTR from the req body
-func getMetaFromMCRequest(req *mc.MCRequest) (cas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, err error) {
+func getMetaFromMCRequest(req *mc.MCRequest) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, err error) {
 	cas = binary.BigEndian.Uint64(req.Extras[16:24])
 	if req.DataType&mcc.XattrDataType == 0 {
-		return cas, "", 0, nil, nil, nil
+		return cas, 0, "", 0, nil, nil, nil
 	}
 	body := req.Body
 	var pos uint32 = 0
@@ -644,10 +668,10 @@ func getMetaFromMCRequest(req *mc.MCRequest) (cas uint64, cvSrc hlv.DocumentSour
 	}
 	if xattr == nil {
 		// Source does not have HLV XATTR
-		return cas, "", 0, nil, nil, nil
+		return cas, 0, "", 0, nil, nil, nil
 	}
 	// Found HLV XATTR. Now find the fields
-	srcBytes, ver, pv, mv, err := findCustomCRXattrFields(xattr)
+	cvCasHex, srcBytes, ver, pv, mv, err := findCustomCRXattrFields(xattr)
 	if err != nil {
 		return
 	}
@@ -662,6 +686,20 @@ func getMetaFromMCRequest(req *mc.MCRequest) (cas uint64, cvSrc hlv.DocumentSour
 		if cvVer > cas {
 			// ver is initially the same as cas. Cas may increase later. So ver should never be greater than cas
 			err = fmt.Errorf("ver>cas, ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvVer, cas, ver, pv, mv)
+			return
+		}
+	}
+	if len(cvCasHex) == 0 {
+		cvCas = 0
+	} else {
+		cvCas, err = base.HexLittleEndianToUint64(cvCasHex)
+		if err != nil {
+			return
+		}
+		if cvVer > cvCas {
+			// cvCas is initially the same as cas. Cas may increase later. So ver should never be greater than cas
+			err = fmt.Errorf("ver>cvCas, cvCas=%v,ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvCas, cvVer, cas, ver, pv, mv)
+			return
 		}
 	}
 	pvMap, err = xattrVVtoMap(pv)
