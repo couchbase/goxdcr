@@ -369,14 +369,18 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) *mc.MCRe
 
 	bodylen := 0
 	var spec SubdocMutationPathSpec
-	specs := make([]SubdocMutationPathSpec, 0, 5)
+	specs := make([]SubdocMutationPathSpec, 0, 6)
 	pv, mv, err := targetMeta.UpdateMetaForSetBack()
 	if err != nil {
 		// TODO: Remove before CC shipping
 		panic("setback unexpected values")
 	}
+	// cvCas path. We use macro expansion
+	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	specs = append(specs, spec)
+	bodylen = bodylen + spec.size()
 
-	// ID path. It is a new update (subdoc_multi_mutation) at source. So ID is source
+	// src path. It is a new update (subdoc_multi_mutation) at source. So src is source bucket
 	id := []byte("\"" + string(input.SourceId) + "\"")
 	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_SRC_PATH), id}
 	specs = append(specs, spec)
@@ -448,10 +452,14 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	}
 
 	bodylen := 0
-	specs := make([]SubdocMutationPathSpec, 0, 5)
+	specs := make([]SubdocMutationPathSpec, 0, 6)
+	// cvCas path. We use macro expansion
+	spec := SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	specs = append(specs, spec)
+	bodylen = bodylen + spec.size()
 	// ID path
 	sourceId := "\"" + string(input.SourceId) + "\""
-	spec := SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_SRC_PATH), []byte(sourceId)}
+	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_SRC_PATH), []byte(sourceId)}
 	bodylen = bodylen + spec.size()
 	specs = append(specs, spec)
 	// CV path
