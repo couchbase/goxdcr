@@ -97,7 +97,6 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, ti
 	data.Add("replicationType", "continuous")
 	data.Add("mergeFunctionMapping", "{\""+base.BucketMergeFunctionKey+"\":\""+mergeFunction+"\"}")
 	//data.Add("logLevel", "Debug")
-	data.Add(base.HlvPruningWindowKey, "0") // No purge
 	data.Add(base.JSFunctionTimeoutKey, fmt.Sprintf("%v", timeout))
 	req, err := http.NewRequest(base.MethodPost, urlCreateReplication, bytes.NewBufferString(data.Encode()))
 	assert.Nil(err)
@@ -404,11 +403,8 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	var pv4 map[string]interface{}
 	value.ContentAt(0, &pv4)
-	if len(pv4) == 0 {
-		assert.FailNow("pv should not be empty")
-	}
-	// There are 3 items in MV, 2 moved to PV, 1 is dedupped since its ID is in the cv
-	assert.Equal(2, len(pv4), fmt.Sprintf("Document %s, Unexpected pv: %v\n", key, pv4))
+	// There are 3 items in MV, 2 moved to PV and got pruned, 1 is dedupped since its ID is in the cv
+	assert.Nil(pv4)
 	mv = nil
 	value, err = getPathValue(key, []string{crMeta.XATTR_MV_PATH}, targetBucket)
 	assert.Nil(err)
@@ -435,7 +431,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	assert.Nil(err)
 	var pv map[string]interface{}
 	value.ContentAt(0, &pv)
-	assert.Equal(3, len(pv), fmt.Sprintf("Unexpected pv=%v\n", pv))
+	assert.Equal(1, len(pv), fmt.Sprintf("Unexpected pv=%v\n", pv))
 
 	/*
 	* Test 6: Do an upsert without subdoc flags and check that xattrs are preserved
@@ -457,7 +453,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	value, err = getPathValue(key, []string{crMeta.XATTR_PV_PATH}, sourceBucket)
 	assert.Nil(err)
 	value.ContentAt(0, &pv)
-	assert.Equal(3, len(pv), fmt.Sprintf("key=%q Expect pv len to be 1 but got pv=%q", key, pv))
+	assert.Equal(1, len(pv), fmt.Sprintf("key=%q Expect pv len to be 1 but got pv=%q", key, pv))
 
 	/*
 	* Test 7. Delete the document and _vv is intact

@@ -1717,7 +1717,7 @@ func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathS
 		spec := SubdocLookupPathSpec{GET, 0, nil}
 		specs = append(specs, spec)
 	}
-	return specs
+	return
 }
 
 type SortedSeqnoListWithLock struct {

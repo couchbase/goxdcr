@@ -443,6 +443,28 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			// This shouldn't happen.
 			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.CollectionsManifestUidKey, err.Error())
 		}
+
+		crossClusterVer, err := b.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
+		if err != nil {
+			// This shouldn't happen.
+			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.EnableCrossClusterVersioningKey, err.Error())
+		}
+
+		pruningWindownHrs, err := b.utils.GetVersionPruningWindowHrs(bucketInfo)
+		if err != nil {
+			// This shouldn't happen.
+			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.VersionPruningWindowHrsKey, err.Error())
+		}
+
+		var vbMaxCas []interface{}
+		if crossClusterVer {
+			vbMaxCas, err = b.utils.GetVbucketsMaxCas(bucketInfo)
+			if err != nil {
+				// This shouldn't happen.
+				watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.VbucketsMaxCasKey, err.Error())
+			}
+		}
+
 		watcher.latestCacheMtx.Lock()
 		if !watcher.cachePopulated {
 			watcher.cachePopulated = true
@@ -459,6 +481,9 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 		replacementNotification.SourceStorageBackend = storageBackend
 		replacementNotification.SourceCollectioManifestUid = manifestUid
 		replacementNotification.LocalBucketTopologyUpdateTime = time.Now()
+		replacementNotification.EnableCrossClusterVersioning = crossClusterVer
+		replacementNotification.VersionPruningWindowHrs = pruningWindownHrs
+		replacementNotification.VbucketsMaxCas = vbMaxCas
 
 		watcher.latestCached.Recycle()
 		watcher.latestCached = replacementNotification
@@ -1866,6 +1891,9 @@ type Notification struct {
 	SourceStorageBackend          string
 	SourceCollectioManifestUid    uint64
 	LocalBucketTopologyUpdateTime time.Time
+	EnableCrossClusterVersioning  bool
+	VbucketsMaxCas                []interface{}
+	VersionPruningWindowHrs       int
 
 	// Target only
 	TargetBucketUUID           string
@@ -2022,6 +2050,9 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		SourceStorageBackend:          n.SourceStorageBackend,
 		SourceCollectioManifestUid:    n.SourceCollectioManifestUid,
 		LocalBucketTopologyUpdateTime: n.LocalBucketTopologyUpdateTime,
+		EnableCrossClusterVersioning:  n.EnableCrossClusterVersioning,
+		VbucketsMaxCas:                n.VbucketsMaxCas,
+		VersionPruningWindowHrs:       n.VersionPruningWindowHrs,
 
 		TargetBucketUUID:           n.TargetBucketUUID,
 		TargetServerVBMap:          n.TargetServerVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
@@ -2094,4 +2125,19 @@ func (n *Notification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.Strin
 
 func (n *Notification) GetLocalTopologyUpdatedTime() time.Time {
 	return n.LocalBucketTopologyUpdateTime
+}
+
+func (n *Notification) GetEnableCrossClusterVersioning() bool {
+	return n.EnableCrossClusterVersioning
+}
+
+func (n *Notification) GetVersionPruningWindowHrs() int {
+	return n.VersionPruningWindowHrs
+}
+
+func (n *Notification) GetVbucketsMaxCas() []interface{} {
+	if n.EnableCrossClusterVersioning {
+		return n.VbucketsMaxCas
+	}
+	return []interface{}{}
 }

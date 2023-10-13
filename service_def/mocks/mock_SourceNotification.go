@@ -152,6 +152,47 @@ func (_c *SourceNotification_GetDcpStatsMapLegacy_Call) RunAndReturn(run func() 
 	return _c
 }
 
+// GetEnableCrossClusterVersioning provides a mock function with given fields:
+func (_m *SourceNotification) GetEnableCrossClusterVersioning() bool {
+	ret := _m.Called()
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// SourceNotification_GetEnableCrossClusterVersioning_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetEnableCrossClusterVersioning'
+type SourceNotification_GetEnableCrossClusterVersioning_Call struct {
+	*mock.Call
+}
+
+// GetEnableCrossClusterVersioning is a helper method to define mock.On call
+func (_e *SourceNotification_Expecter) GetEnableCrossClusterVersioning() *SourceNotification_GetEnableCrossClusterVersioning_Call {
+	return &SourceNotification_GetEnableCrossClusterVersioning_Call{Call: _e.mock.On("GetEnableCrossClusterVersioning")}
+}
+
+func (_c *SourceNotification_GetEnableCrossClusterVersioning_Call) Run(run func()) *SourceNotification_GetEnableCrossClusterVersioning_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SourceNotification_GetEnableCrossClusterVersioning_Call) Return(_a0 bool) *SourceNotification_GetEnableCrossClusterVersioning_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SourceNotification_GetEnableCrossClusterVersioning_Call) RunAndReturn(run func() bool) *SourceNotification_GetEnableCrossClusterVersioning_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetHighSeqnosMap provides a mock function with given fields:
 func (_m *SourceNotification) GetHighSeqnosMap() base.HighSeqnosMapType {
 	ret := _m.Called()
@@ -555,6 +596,90 @@ func (_c *SourceNotification_GetSourceVBMapRO_Call) Return(_a0 base.KvVBMapType)
 }
 
 func (_c *SourceNotification_GetSourceVBMapRO_Call) RunAndReturn(run func() base.KvVBMapType) *SourceNotification_GetSourceVBMapRO_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetVbucketsMaxCas provides a mock function with given fields:
+func (_m *SourceNotification) GetVbucketsMaxCas() []interface{} {
+	ret := _m.Called()
+
+	var r0 []interface{}
+	if rf, ok := ret.Get(0).(func() []interface{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]interface{})
+		}
+	}
+
+	return r0
+}
+
+// SourceNotification_GetVbucketsMaxCas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVbucketsMaxCas'
+type SourceNotification_GetVbucketsMaxCas_Call struct {
+	*mock.Call
+}
+
+// GetVbucketsMaxCas is a helper method to define mock.On call
+func (_e *SourceNotification_Expecter) GetVbucketsMaxCas() *SourceNotification_GetVbucketsMaxCas_Call {
+	return &SourceNotification_GetVbucketsMaxCas_Call{Call: _e.mock.On("GetVbucketsMaxCas")}
+}
+
+func (_c *SourceNotification_GetVbucketsMaxCas_Call) Run(run func()) *SourceNotification_GetVbucketsMaxCas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SourceNotification_GetVbucketsMaxCas_Call) Return(_a0 []interface{}) *SourceNotification_GetVbucketsMaxCas_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SourceNotification_GetVbucketsMaxCas_Call) RunAndReturn(run func() []interface{}) *SourceNotification_GetVbucketsMaxCas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetVersionPruningWindowHrs provides a mock function with given fields:
+func (_m *SourceNotification) GetVersionPruningWindowHrs() int {
+	ret := _m.Called()
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// SourceNotification_GetVersionPruningWindowHrs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVersionPruningWindowHrs'
+type SourceNotification_GetVersionPruningWindowHrs_Call struct {
+	*mock.Call
+}
+
+// GetVersionPruningWindowHrs is a helper method to define mock.On call
+func (_e *SourceNotification_Expecter) GetVersionPruningWindowHrs() *SourceNotification_GetVersionPruningWindowHrs_Call {
+	return &SourceNotification_GetVersionPruningWindowHrs_Call{Call: _e.mock.On("GetVersionPruningWindowHrs")}
+}
+
+func (_c *SourceNotification_GetVersionPruningWindowHrs_Call) Run(run func()) *SourceNotification_GetVersionPruningWindowHrs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SourceNotification_GetVersionPruningWindowHrs_Call) Return(_a0 int) *SourceNotification_GetVersionPruningWindowHrs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SourceNotification_GetVersionPruningWindowHrs_Call) RunAndReturn(run func() int) *SourceNotification_GetVersionPruningWindowHrs_Call {
 	_c.Call.Return(run)
 	return _c
 }

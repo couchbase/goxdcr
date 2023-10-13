@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	log "github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/peerToPeer"
@@ -82,6 +82,8 @@ type GenericPipeline struct {
 
 	//runtime context of the pipeline
 	context common.PipelineRuntimeContext
+
+	bucketTopologySvc service_def.BucketTopologySvc
 
 	//	//communication channel with PipelineManager
 	//	reqch chan []interface{}
@@ -245,6 +247,8 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	}
 }
 
+var genericPipelineIteration uint32
+
 // Start starts the pipeline
 //
 // settings - a map of parameter to start the pipeline. it can contain initialization paramters
@@ -270,6 +274,24 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	if err != nil {
 		errMap["genericPipeline.SetState.Pipeline_Starting"] = err
 		return errMap
+	}
+	genPipelineId := "GenericPipeline" + base.GetIterationId(&genericPipelineIteration)
+	spec := genericPipeline.Specification().GetReplicationSpec()
+	notificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketFeed(spec, genPipelineId)
+	if err != nil {
+		errMap["genericPipeline.SetState.Pipeline_Starting"] = err
+		return errMap
+	}
+	defer genericPipeline.bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, genPipelineId)
+	latestNotification := <-notificationCh
+	defer latestNotification.Recycle()
+	hlvEnable := latestNotification.GetEnableCrossClusterVersioning()
+	settings[base.EnableCrossClusterVersioningKey] = hlvEnable
+	pruningWindow := latestNotification.GetVersionPruningWindowHrs()
+	settings[base.VersionPruningWindowHrsKey] = pruningWindow
+	if hlvEnable {
+		maxCas := latestNotification.GetVbucketsMaxCas()
+		settings[base.VbucketsMaxCasKey] = maxCas
 	}
 
 	settings[base.VBTimestamps] = &base.ObjectWithLock{make(map[uint16]*base.VBTimestamp), &sync.RWMutex{}}
@@ -641,11 +663,12 @@ func NewGenericPipeline(t string,
 	return pipeline
 }
 
-func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, utils utilities.UtilsIface, prometheusStatusCbConstructor func(pipeline common.Pipeline) PrometheusPipelineStatusCb) *GenericPipeline {
+func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc, utils utilities.UtilsIface, prometheusStatusCbConstructor func(pipeline common.Pipeline) PrometheusPipelineStatusCb) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
 		targets:                            targets,
 		spec:                               spec,
+		bucketTopologySvc:                  bucketTopologySvc,
 		targetClusterRef:                   targetClusterRef,
 		partSetting_constructor:            partsSettingsConstructor,
 		connectorSetting_constructor:       connectorSettingsConstructor,

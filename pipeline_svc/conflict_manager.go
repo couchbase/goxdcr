@@ -170,8 +170,8 @@ func (c *ConflictManager) Start(settingsMap metadata.ReplicationSettingsMap) (er
 	if mergeFunction == "" {
 		return fmt.Errorf("%v: Default merge function is not set for the pipeline.", c.pipeline.FullTopic())
 	}
-	if value, ok := settingsMap[base.HlvPruningWindowKey]; ok {
-		pruningWindowInt := value.(int)
+	if value, ok := settingsMap[base.VersionPruningWindowHrsKey]; ok {
+		pruningWindowInt := value.(int) * 60 * 60
 		atomic.StoreUint32(&c.pruningWindowSec, uint32(pruningWindowInt))
 	}
 	if value, ok := settingsMap[base.JSFunctionTimeoutKey]; ok {
@@ -230,11 +230,6 @@ func (c *ConflictManager) IsSharable() bool {
 	return false
 }
 func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
-	if value, exists := settings[base.HlvPruningWindowKey]; exists {
-		pruningWindowInt := value.(int)
-		atomic.StoreUint32(&c.pruningWindowSec, uint32(pruningWindowInt))
-		c.Logger().Infof("%v: %v is set to %v.", c.pipeline.FullTopic(), base.HlvPruningWindowKey, uint32(c.pruningWindowSec))
-	}
 	if value, exists := settings[base.JSFunctionTimeoutKey]; exists {
 		valueInt := value.(int)
 		atomic.StoreUint32(&c.functionTimeoutMs, uint32(valueInt))
@@ -360,7 +355,7 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 // Target may or may not have MV. It just needs to contain everything source has. It may have merged everything that
 // source have merged, plus new updates.
 func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) *mc.MCRequest {
-	targetDoc := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true)
+	targetDoc := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true, true)
 	targetMeta, err := targetDoc.GetMetadata()
 	if err != nil {
 		// TODO: Remove before CC shipping
@@ -452,7 +447,7 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	if err != nil {
 		return nil, err
 	}
-	targetDoc := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true)
+	targetDoc := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true, true)
 	targetMeta, err := targetDoc.GetMetadata()
 
 	mergedMeta, err := sourceMeta.Merge(targetMeta)

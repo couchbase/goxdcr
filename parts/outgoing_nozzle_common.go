@@ -51,7 +51,9 @@ const (
 	EVENT_ADDI_REQ_EXPIRY_SET = "req_expiry_set"
 	EVENT_ADDI_REQ_SIZE       = "req_size"
 
-	HLV_PRUNING_WINDOW = base.HlvPruningWindowKey
+	HLV_PRUNING_WINDOW = "versionPruningWindow"
+	HLV_ENABLE         = "hlvEnable"
+	HLV_MAX_CAS        = "hlv_vb_max_cas"
 	MOBILE_COMPATBILE  = base.MobileCompatibleKey
 )
 
@@ -67,8 +69,10 @@ const (
 )
 
 type SetMetaXattrOptions struct {
-	sendHlv      bool
-	preserveSync bool
+	// Target KV cannot do CR if bucket uses CCR, or if we need to preserve _sync.
+	noTargetCR   bool
+	sendHlv      bool // Pack the HLV and send in setWithMeta to help mobile
+	preserveSync bool // Preserve target _sync XATTR and send it in setWithMeta.
 }
 
 /*
@@ -101,6 +105,8 @@ type baseConfig struct {
 	username            string
 	password            string
 	hlvPruningWindowSec uint32 // Interval for pruning PV in seconds
+	crossClusterVers    bool   // Whether to send HLV when bucket is not custom CR
+	vbMaxCas            []uint64
 	logger              *log.CommonLogger
 	mobileCompatible    uint32
 
@@ -191,12 +197,6 @@ func (config *baseConfig) initializeConfig(settings metadata.ReplicationSettings
 	if val, ok := settings[SETTING_OPTI_REP_THRESHOLD]; ok {
 		config.optiRepThreshold = uint32(val.(int))
 	}
-	if val, ok := settings[HLV_PRUNING_WINDOW]; ok {
-		config.hlvPruningWindowSec = uint32(val.(int))
-	}
-	if val, ok := settings[MOBILE_COMPATBILE]; ok {
-		config.mobileCompatible = uint32(val.(int))
-	}
 }
 
 /**
@@ -251,6 +251,7 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
 		setMetaXattrOptions: SetMetaXattrOptions{
+			noTargetCR:   false,
 			sendHlv:      false,
 			preserveSync: false,
 		},

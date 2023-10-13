@@ -325,7 +325,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
 		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck,
-		xdcrf.MergePeerNodesCkptsResponse, xdcrf.utils, xdcrf.GeneratePrometheusStatusCb)
+		xdcrf.MergePeerNodesCkptsResponse, xdcrf.bucketTopologySvc, xdcrf.utils, xdcrf.GeneratePrometheusStatusCb)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -587,13 +587,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 	maxTargetNozzlePerNode := spec.Settings.TargetNozzlePerNode
 	xdcrf.logger.Infof("Target topology retrieved. kvVBMap = %v\n", kvVBMap)
 
-	var sourceClusterUuid string
-	if sourceCRMode == base.CRMode_Custom {
-		if sourceClusterUuid, err = xdcrf.xdcr_topology_svc.MyClusterUuid(); err != nil {
-			return
-		}
-	}
-
 	var vbCouchApiBaseMap map[uint16]string
 
 	// For each destination host (kvaddr) and its vbucvket list that it has (kvVBList)
@@ -644,7 +637,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 					return
 				}
 				eventsProducer := replStatus.GetEventsProducer()
-				outNozzle = xdcrf.constructXMEMNozzle(topic, sourceClusterUuid, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList, eventsProducer)
+				outNozzle = xdcrf.constructXMEMNozzle(topic, spec.SourceBucketUUID, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList, eventsProducer)
 			}
 
 			// Add the created nozzle to the collective map of outNozzles to be returned
@@ -720,7 +713,7 @@ func (xdcrf *XDCRFactory) getOutNozzleType(targetClusterRef *metadata.RemoteClus
 }
 
 func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
-	sourceClusterUuid string,
+	sourceBucketUuid string,
 	targetClusterUuid string,
 	kvaddr string,
 	sourceBucketName string,
@@ -737,7 +730,7 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
 	eventsProducer common.PipelineEventsProducer) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
-	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, sourceClusterUuid, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
+	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, sourceBucketUuid, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
 		targetBucketUuid, username, password, sourceCRMode, logger_ctx, xdcrf.utils, vbList, eventsProducer)
 	return nozzle
 }
@@ -842,16 +835,11 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForXmemNozzle(pipeline common.P
 	if ok {
 		xmemSettings[parts.XMEM_DEV_BACKFILL_SLEEP_DELAY] = backfillSleepDelay
 	}
-	hlvPruningWindowSec, ok := settings[metadata.HlvPruningWindowKey]
-	if ok {
-		xmemSettings[parts.HLV_PRUNING_WINDOW] = hlvPruningWindowSec
-	}
 	mobile, ok := settings[metadata.MobileCompatibleKey]
 	if ok {
 		xmemSettings[parts.MobileCompatible] = mobile
 	}
 	return xmemSettings
-
 }
 
 func (xdcrf *XDCRFactory) constructUpdateSettingsForCapiNozzle(pipeline common.Pipeline, settings metadata.ReplicationSettingsMap) metadata.ReplicationSettingsMap {
@@ -1072,7 +1060,6 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	xmemSettings[parts.XMEM_SETTING_CLIENT_CERTIFICATE] = targetClusterRef.ClientCertificate()
 	xmemSettings[parts.XMEM_SETTING_CLIENT_KEY] = targetClusterRef.ClientKey()
 	xmemSettings[parts.XMEM_SETTING_ENCRYPTION_TYPE] = targetClusterRef.EncryptionType()
-	xmemSettings[parts.HLV_PRUNING_WINDOW] = metadata.GetSettingFromSettingsMap(settings, metadata.HlvPruningWindowKey, base.HlvPruningDefault)
 	if targetClusterRef.IsFullEncryption() {
 		mem_ssl_port, ok := ssl_port_map[xmemConnStr]
 		if !ok {
@@ -1086,7 +1073,15 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings.CloneAndRedact())
 	}
 	xmemSettings[parts.MobileCompatible] = metadata.GetSettingFromSettingsMap(settings, metadata.MobileCompatibleKey, base.MobileCompatibilityOff)
-
+	if val, ok := settings[base.EnableCrossClusterVersioningKey]; ok {
+		xmemSettings[base.EnableCrossClusterVersioningKey] = val
+	}
+	if val, ok := settings[base.VbucketsMaxCasKey]; ok {
+		xmemSettings[base.VbucketsMaxCasKey] = val
+	}
+	if val, ok := settings[base.VersionPruningWindowHrsKey]; ok {
+		xmemSettings[base.VersionPruningWindowHrsKey] = val
+	}
 	return xmemSettings, nil
 
 }
@@ -1574,9 +1569,6 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForConflictManager(pipeline com
 		xdcrf.logger.Debugf("constructUpdateSettingsForConflictManager called with settings=%v\n", settings.CloneAndRedact())
 	}
 	s := make(metadata.ReplicationSettingsMap)
-	if hlvPruningWindow, ok := settings[base.HlvPruningWindowKey]; ok {
-		s[base.HlvPruningWindowKey] = hlvPruningWindow
-	}
 	if functionTimeout, ok := settings[base.JSFunctionTimeoutKey]; ok {
 		s[base.JSFunctionTimeoutKey] = functionTimeout
 	}

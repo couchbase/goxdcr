@@ -2147,6 +2147,58 @@ func (_c *UtilsIface_GetConflictResolutionTypeFromBucketInfo_Call) RunAndReturn(
 	return _c
 }
 
+// GetCrossClusterVersioningFromBucketInfo provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) GetCrossClusterVersioningFromBucketInfo(bucketInfo map[string]interface{}) (bool, error) {
+	ret := _m.Called(bucketInfo)
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) (bool, error)); ok {
+		return rf(bucketInfo)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) bool); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCrossClusterVersioningFromBucketInfo'
+type UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call struct {
+	*mock.Call
+}
+
+// GetCrossClusterVersioningFromBucketInfo is a helper method to define mock.On call
+//   - bucketInfo map[string]interface{}
+func (_e *UtilsIface_Expecter) GetCrossClusterVersioningFromBucketInfo(bucketInfo interface{}) *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call {
+	return &UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call{Call: _e.mock.On("GetCrossClusterVersioningFromBucketInfo", bucketInfo)}
+}
+
+func (_c *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call) Run(run func(bucketInfo map[string]interface{})) *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call) Return(_a0 bool, _a1 error) *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call) RunAndReturn(run func(map[string]interface{}) (bool, error)) *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCurrentHostnameFromBucketInfo provides a mock function with given fields: bucketInfo
 func (_m *UtilsIface) GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketInfo)
@@ -4345,6 +4397,112 @@ func (_c *UtilsIface_GetStringSettingFromSettings_Call) Return(_a0 string, _a1 e
 }
 
 func (_c *UtilsIface_GetStringSettingFromSettings_Call) RunAndReturn(run func(metadata.ReplicationSettingsMap, string) (string, error)) *UtilsIface_GetStringSettingFromSettings_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetVbucketsMaxCas provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) GetVbucketsMaxCas(bucketInfo map[string]interface{}) ([]interface{}, error) {
+	ret := _m.Called(bucketInfo)
+
+	var r0 []interface{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) ([]interface{}, error)); ok {
+		return rf(bucketInfo)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) []interface{}); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetVbucketsMaxCas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVbucketsMaxCas'
+type UtilsIface_GetVbucketsMaxCas_Call struct {
+	*mock.Call
+}
+
+// GetVbucketsMaxCas is a helper method to define mock.On call
+//   - bucketInfo map[string]interface{}
+func (_e *UtilsIface_Expecter) GetVbucketsMaxCas(bucketInfo interface{}) *UtilsIface_GetVbucketsMaxCas_Call {
+	return &UtilsIface_GetVbucketsMaxCas_Call{Call: _e.mock.On("GetVbucketsMaxCas", bucketInfo)}
+}
+
+func (_c *UtilsIface_GetVbucketsMaxCas_Call) Run(run func(bucketInfo map[string]interface{})) *UtilsIface_GetVbucketsMaxCas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetVbucketsMaxCas_Call) Return(_a0 []interface{}, _a1 error) *UtilsIface_GetVbucketsMaxCas_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetVbucketsMaxCas_Call) RunAndReturn(run func(map[string]interface{}) ([]interface{}, error)) *UtilsIface_GetVbucketsMaxCas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetVersionPruningWindowHrs provides a mock function with given fields: bucketInfo
+func (_m *UtilsIface) GetVersionPruningWindowHrs(bucketInfo map[string]interface{}) (int, error) {
+	ret := _m.Called(bucketInfo)
+
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) (int, error)); ok {
+		return rf(bucketInfo)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) int); ok {
+		r0 = rf(bucketInfo)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(bucketInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetVersionPruningWindowHrs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVersionPruningWindowHrs'
+type UtilsIface_GetVersionPruningWindowHrs_Call struct {
+	*mock.Call
+}
+
+// GetVersionPruningWindowHrs is a helper method to define mock.On call
+//   - bucketInfo map[string]interface{}
+func (_e *UtilsIface_Expecter) GetVersionPruningWindowHrs(bucketInfo interface{}) *UtilsIface_GetVersionPruningWindowHrs_Call {
+	return &UtilsIface_GetVersionPruningWindowHrs_Call{Call: _e.mock.On("GetVersionPruningWindowHrs", bucketInfo)}
+}
+
+func (_c *UtilsIface_GetVersionPruningWindowHrs_Call) Run(run func(bucketInfo map[string]interface{})) *UtilsIface_GetVersionPruningWindowHrs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetVersionPruningWindowHrs_Call) Return(_a0 int, _a1 error) *UtilsIface_GetVersionPruningWindowHrs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetVersionPruningWindowHrs_Call) RunAndReturn(run func(map[string]interface{}) (int, error)) *UtilsIface_GetVersionPruningWindowHrs_Call {
 	_c.Call.Return(run)
 	return _c
 }

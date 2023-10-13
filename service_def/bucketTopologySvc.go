@@ -10,10 +10,11 @@ package service_def
 
 import (
 	"errors"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
 	"sync"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/metadata"
 )
 
 var ErrorBucketTopSvcUndergoingGC = errors.New("Specified bucket/spec is undergoing GC")
@@ -65,6 +66,9 @@ type SourceNotification interface {
 	GetSourceStorageBackend() string
 	GetSourceCollectionManifestUid() uint64
 	GetLocalTopologyUpdatedTime() time.Time
+	GetEnableCrossClusterVersioning() bool
+	GetVersionPruningWindowHrs() int
+	GetVbucketsMaxCas() []interface{}
 }
 
 type TargetNotification interface {

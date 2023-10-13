@@ -506,6 +506,43 @@ func (u *Utilities) GetCollectionManifestUidFromBucketInfo(bucketInfo map[string
 	}
 	return manifestUid, nil
 }
+
+func (u *Utilities) GetCrossClusterVersioningFromBucketInfo(bucketInfo map[string]interface{}) (bool, error) {
+	ccvObj, ok := bucketInfo[base.EnableCrossClusterVersioningKey]
+	if !ok {
+		return false, fmt.Errorf("Error looking up %v from bucketInfo %v", base.EnableCrossClusterVersioningKey, bucketInfo)
+	}
+	ccv, ok := ccvObj.(bool)
+	if !ok {
+		return false, fmt.Errorf("%v is of wrong type. Expect bool but got %v.", base.EnableCrossClusterVersioningKey, reflect.TypeOf(ccvObj))
+	}
+	return ccv, nil
+}
+
+func (u *Utilities) GetVersionPruningWindowHrs(bucketInfo map[string]interface{}) (int, error) {
+	pruningWindowObj, ok := bucketInfo[base.VersionPruningWindowHrsKey]
+	if !ok {
+		return 0, fmt.Errorf("Error looking up %v from bucketInfo %v", base.VersionPruningWindowHrsKey, bucketInfo)
+	}
+	pruningWindowFloat, ok := pruningWindowObj.(float64)
+	if !ok {
+		return 0, fmt.Errorf("%v is of wrong type. Expect float64 but got %v.", base.VersionPruningWindowHrsKey, reflect.TypeOf(pruningWindowFloat))
+	}
+	return int(pruningWindowFloat), nil
+}
+
+func (u *Utilities) GetVbucketsMaxCas(bucketInfo map[string]interface{}) ([]interface{}, error) {
+	maxCasObj, ok := bucketInfo[base.VbucketsMaxCasKey]
+	if !ok {
+		return nil, fmt.Errorf("Error looking up %v from bucketInfo %v", base.VbucketsMaxCasKey, bucketInfo)
+	}
+	maxCas, ok := maxCasObj.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("%v is of wrong type. Expect []interface{} but got %v.", base.VbucketsMaxCasKey, reflect.TypeOf(maxCasObj))
+	}
+	return maxCas, nil
+}
+
 func (u *Utilities) ReplicationStatusNotFoundError(topic string) error {
 	return fmt.Errorf("Cannot find replication status for topic %v", topic)
 }

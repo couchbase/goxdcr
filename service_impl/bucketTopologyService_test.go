@@ -11,22 +11,23 @@ package service_impl
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"sync"
+	"testing"
+	"time"
+
 	mocks2 "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	mocks "github.com/couchbase/goxdcr/service_def/mocks"
+	"github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/couchbase/goxdcr/streamApiWatcher"
 	mockStream "github.com/couchbase/goxdcr/streamApiWatcher/mocks"
 	utilities "github.com/couchbase/goxdcr/utils"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"sync"
-	"testing"
-	"time"
 )
 
 func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc, *mocks2.ClientIface, *mocks.SecuritySvc) {
@@ -155,7 +156,8 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	utils.On("GetServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapGetter(), nil)
 	utils.On("GetRemoteServerVBucketsMap", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(vbMapObjGetter(), nil)
 	utils.On("GetMemcachedClient", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mcClient, nil)
-
+	utils.On("GetCrossClusterVersioningFromBucketInfo", mock.Anything).Return(false, nil)
+	utils.On("GetVersionPruningWindowHrs", mock.Anything).Return(0, nil)
 	highSeqnosMap := make(map[uint16]uint64)
 	translateMap := make(map[string]string)
 	for i := uint16(0); i < 1024; i++ {

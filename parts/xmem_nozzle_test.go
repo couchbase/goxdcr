@@ -198,8 +198,8 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 	xmem.SetBandwidthThrottler(bandwidthThrottler)
 
 	xmem.eventsProducer = evtProducer
-	xmem.sourceClusterId = hlv.DocumentSourceId("SourceCluster")
-	xmem.targetClusterId = hlv.DocumentSourceId("TargetCluster")
+	xmem.sourceBucketId = hlv.DocumentSourceId("SourceCluster")
+	xmem.targetBucketId = hlv.DocumentSourceId("TargetCluster")
 
 	setupMocksRC(remoteClusterSvc)
 }
