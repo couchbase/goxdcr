@@ -94,6 +94,9 @@ type TopologyChangeDetectorSvc struct {
 	// Main pipeline to start or register once
 	startOnce sync.Once
 
+	enableCrossClusterVersioning bool
+	versionPruningWindow         int
+
 	bucketTopologySvc     service_def.BucketTopologySvc
 	bucketTopSubscriberId string
 }
@@ -134,11 +137,18 @@ func (top_detect_svc *TopologyChangeDetectorSvc) Attach(pipeline common.Pipeline
 	return nil
 }
 
-func (top_detect_svc *TopologyChangeDetectorSvc) Start(metadata.ReplicationSettingsMap) error {
+func (top_detect_svc *TopologyChangeDetectorSvc) Start(settings metadata.ReplicationSettingsMap) error {
 	top_detect_svc.pipelinesMtx.Lock()
 	defer top_detect_svc.pipelinesMtx.Unlock()
 	// Only the first Start() (main pipeline) is the actual start
 	// Secondary starts are to ensure that detachCbs are registered
+
+	if val, ok := settings[base.EnableCrossClusterVersioningKey]; ok {
+		top_detect_svc.enableCrossClusterVersioning = val.(bool)
+	}
+	if val, ok := settings[base.VersionPruningWindowHrsKey]; ok {
+		top_detect_svc.versionPruningWindow = val.(int)
+	}
 
 	for i, pipeline := range top_detect_svc.pipelines {
 		//register itself with pipeline supervisor
@@ -643,13 +653,23 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 				}
 
 				err := top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, updateOnceErr)
-				notification.Recycle()
 				if err != nil {
 					if err == errPipelinesDetached {
 						return
 					}
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when handling source topology change. err=%v", err)
 				}
+				newEnableCrossClusterVersioning := notification.GetEnableCrossClusterVersioning()
+				if top_detect_svc.enableCrossClusterVersioning != newEnableCrossClusterVersioning {
+					err = fmt.Errorf("enableCrossClusterVersioning for source bucket has changed from %v to %v. Restarting pipeline", top_detect_svc.enableCrossClusterVersioning, newEnableCrossClusterVersioning)
+					top_detect_svc.restartPipeline(err)
+				}
+				newVersionPruningWindow := notification.GetVersionPruningWindowHrs()
+				if top_detect_svc.versionPruningWindow != newVersionPruningWindow {
+					err = fmt.Errorf("versionPruningWindowHrs for source bucket has changed from %v to %v. Restarting pipeline", top_detect_svc.versionPruningWindow, newVersionPruningWindow)
+					top_detect_svc.restartPipeline(err)
+				}
+				notification.Recycle()
 			}
 		}
 	}()

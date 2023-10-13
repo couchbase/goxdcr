@@ -20,7 +20,7 @@ import (
 	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/filter"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -81,6 +81,9 @@ type UtilsIface interface {
 	LocalBucket(localConnectStr, bucketName string) (*couchbase.Bucket, error)
 	LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error)
 	BucketStorageBackend(bucketInfo map[string]interface{}) (string, error)
+	GetCrossClusterVersioningFromBucketInfo(bucketInfo map[string]interface{}) (bool, error)
+	GetVersionPruningWindowHrs(bucketInfo map[string]interface{}) (int, error)
+	GetVbucketsMaxCas(bucketInfo map[string]interface{}) ([]interface{}, error)
 
 	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error)
 	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string)

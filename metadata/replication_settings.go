@@ -83,7 +83,6 @@ const (
 
 	// custom CR settings
 	MergeFunctionMappingKey = base.MergeFunctionMappingKey
-	HlvPruningWindowKey     = base.HlvPruningWindowKey
 	JSFunctionTimeoutKey    = base.JSFunctionTimeoutKey
 
 	RetryOnRemoteAuthErrKey              = base.RetryOnRemoteAuthErrKey
@@ -202,9 +201,6 @@ var CollectionsDelVbBackfillConfig = &SettingsConfig{-1, &Range{0, base.NumberOf
 
 var MergeFunctionMappingConfig = &SettingsConfig{base.MergeFunctionMappingType{}, nil}
 
-// Default pruning window is 3 days (259200 seconds), 0 means no pruning, maximum is 365 days (31536000 seconds)
-var PruningWindowConfig = &SettingsConfig{base.HlvPruningDefault, &Range{0, 31536000}}
-
 var JSFunctionTimeoutConfig = &SettingsConfig{base.JSFunctionTimeoutDefault, &Range{1, 3600000}} // 1 millisecond to 1 hour
 
 var RetryOnRemoteAuthErrConfig = &SettingsConfig{true, nil}
@@ -271,7 +267,6 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	RetryOnRemoteAuthErrMaxWaitSecKey:    RetryOnRemoteAuthErrMaxWaitConfig,
 	RetryOnErrExceptAuthErrMaxWaitSecKey: RetryOnErrExceptAuthErrMaxWaitConfig,
 	MergeFunctionMappingKey:              MergeFunctionMappingConfig,
-	HlvPruningWindowKey:                  PruningWindowConfig,
 	JSFunctionTimeoutKey:                 JSFunctionTimeoutConfig,
 	DismissEventKey:                      DismissEventConfig,
 	PreReplicateVBMasterCheckKey:         PreReplicateVBMasterCheckConfig,
@@ -982,10 +977,6 @@ func (s *ReplicationSettings) GetDevBackfillPipelineDelay() int {
 
 func (s *ReplicationSettings) GetJsFunctionTimeoutMs() int {
 	return s.GetIntSettingValue(JSFunctionTimeoutKey)
-}
-
-func (s *ReplicationSettings) GetHlvPruningWindowSec() int {
-	return s.GetIntSettingValue(HlvPruningWindowKey)
 }
 
 func (s *ReplicationSettings) GetMergeFunctionMapping() base.MergeFunctionMappingType {

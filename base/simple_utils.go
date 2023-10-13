@@ -1015,8 +1015,7 @@ func CompressionStringToCompressionTypeConverter(userInput string) (int, error) 
 }
 
 func MobileCompatibilityStringToTypeConverter(userInput string) (int, error) {
-	//  disallow "Active" for now
-	for i := MobileCompatibilityOff; i <= MobileCompatibilityOff; i++ {
+	for i := 1; i <= MobileCompatibilityEndMarker; i++ {
 		if strings.ToLower(MobileCompatibilityStrings[i]) == strings.ToLower(userInput) {
 			return i, nil
 		}

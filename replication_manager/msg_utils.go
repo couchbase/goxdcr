@@ -93,7 +93,6 @@ const (
 	RetryOnRemoteAuthErrMaxWaitKey    = base.RetryOnRemoteAuthErrMaxWaitSecKey
 	RetryOnErrExceptAuthErrMaxWaitKey = base.RetryOnErrExceptAuthErrMaxWaitSecKey
 	MergeFunctionMappingKey           = base.MergeFunctionMappingKey
-	HlvPruningWindowLKey              = base.HlvPruningWindowKey
 	JSFunctionTimeoutKey              = base.JSFunctionTimeoutKey
 	DismissEventKey                   = metadata.DismissEventKey
 	PreReplicateVBMasterCheckKey      = base.PreReplicateVBMasterCheckKey
@@ -210,7 +209,6 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	RetryOnRemoteAuthErrMaxWaitKey:    metadata.RetryOnRemoteAuthErrMaxWaitSecKey,
 	RetryOnErrExceptAuthErrMaxWaitKey: metadata.RetryOnErrExceptAuthErrMaxWaitSecKey,
 	MergeFunctionMappingKey:           metadata.MergeFunctionMappingKey,
-	HlvPruningWindowLKey:              metadata.HlvPruningWindowKey,
 	JSFunctionTimeoutKey:              metadata.JSFunctionTimeoutKey,
 	DismissEventKey:                   metadata.DismissEventKey,
 	PreReplicateVBMasterCheckKey:      metadata.PreReplicateVBMasterCheckKey,
@@ -269,7 +267,6 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.RetryOnRemoteAuthErrMaxWaitSecKey:    RetryOnRemoteAuthErrMaxWaitKey,
 	metadata.RetryOnErrExceptAuthErrMaxWaitSecKey: RetryOnErrExceptAuthErrMaxWaitKey,
 	metadata.MergeFunctionMappingKey:              MergeFunctionMappingKey,
-	metadata.HlvPruningWindowKey:                  HlvPruningWindowLKey,
 	metadata.JSFunctionTimeoutKey:                 JSFunctionTimeoutKey,
 	metadata.DismissEventKey:                      DismissEventKey,
 	metadata.PreReplicateVBMasterCheckKey:         PreReplicateVBMasterCheckKey,
