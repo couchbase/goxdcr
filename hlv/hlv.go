@@ -87,7 +87,10 @@ func NewHLV(source DocumentSourceId, cas uint64, cvCas uint64, src DocumentSourc
 		cvCAS: cas,
 	}
 	if cas < cvCas {
-		// cvCas is initially the same as cas. Cas may increase later. So cvCas should never be greater than cas
+		// When XDCR or mobile sends a mutation, it sets cvCas to the same value as CAS.
+		// If cas == cvCas, it means there has been no local change since replication
+		// If cas > cvCas, it means there has been local changes after replication.
+		// cas should never be smaller
 		return nil, fmt.Errorf("cas < cvCas, cas=%v,cvCas=%v,ver=%v,src=%v,pv=%s,mv=%s", cas, cvCas, ver, src, pv, mv)
 	} else if cas == cvCas {
 		// The HLV did not change.

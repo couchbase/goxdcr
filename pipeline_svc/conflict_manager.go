@@ -366,15 +366,30 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) *mc.MCRe
 		// TODO: Remove before CC shipping
 		panic(fmt.Sprintf("error '%v' getting target meta", err))
 	}
-
-	bodylen := 0
-	var spec SubdocMutationPathSpec
-	specs := make([]SubdocMutationPathSpec, 0, 6)
 	pv, mv, err := targetMeta.UpdateMetaForSetBack()
 	if err != nil {
 		// TODO: Remove before CC shipping
 		panic("setback unexpected values")
 	}
+	sourceDoc := crMeta.NewSourceDocument(input.Source, input.SourceId)
+	sourceMeta, err := sourceDoc.GetMetadata()
+	if err != nil {
+		// TODO: Remove before CC shipping
+		panic(fmt.Sprintf("error '%v' getting source meta", err))
+	}
+	hadMv := sourceMeta.HadMv()
+	hadPv := sourceMeta.HadPv()
+	bodylen := 0
+	specslen := 4 // We always set cvCas, src, ver, body.
+	if mv != nil || hadMv {
+		specslen++
+	}
+	if pv != nil || hadPv {
+		specslen++
+	}
+	var spec SubdocMutationPathSpec
+	specs := make([]SubdocMutationPathSpec, 0, specslen)
+
 	// cvCas path. We use macro expansion
 	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION)}
 	specs = append(specs, spec)
@@ -396,12 +411,22 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) *mc.MCRe
 		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), mv}
 		specs = append(specs, spec)
 		bodylen = bodylen + spec.size()
+	} else if hadMv {
+		// There is no longer MV. Need to delete it.
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), nil}
+		bodylen = bodylen + spec.size()
+		specs = append(specs, spec)
 	}
 	// pv path
 	if pv != nil {
 		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), pv}
 		specs = append(specs, spec)
 		bodylen = bodylen + spec.size()
+	} else if hadPv {
+		// There is no longer PV. Need to delete it
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), nil}
+		bodylen = bodylen + spec.size()
+		specs = append(specs, spec)
 	}
 	// body path
 	body, _ := input.Target.ResponseForAPath("")
@@ -452,7 +477,14 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	}
 
 	bodylen := 0
-	specs := make([]SubdocMutationPathSpec, 0, 6)
+	specslen := 4 // We always set cvCas, src, ver, body.
+	if mvlen > 0 || sourceMeta.HadMv() {
+		specslen++
+	}
+	if pvlen > 0 || sourceMeta.HadPv() {
+		specslen++
+	}
+	specs := make([]SubdocMutationPathSpec, 0, specslen)
 	// cvCas path. We use macro expansion
 	spec := SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION)}
 	specs = append(specs, spec)
