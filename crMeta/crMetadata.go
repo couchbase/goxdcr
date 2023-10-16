@@ -561,7 +561,9 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 
 }
 
-func findCustomCRXattrFields(xattr []byte) (cvCas, src, ver, pv, mv []byte, err error) {
+func parseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, err error) {
+	var cvCasHex, verHex, pv, mv []byte
+	var err1 error
 	it, err := base.NewCCRXattrFieldIterator(xattr)
 	if err != nil {
 		return
@@ -574,16 +576,46 @@ func findCustomCRXattrFields(xattr []byte) (cvCas, src, ver, pv, mv []byte, err 
 		}
 		switch string(key) {
 		case HLV_SRC_FIELD:
-			src = value
+			src = hlv.DocumentSourceId(value)
 		case HLV_VER_FIELD:
-			ver = value
+			verHex = value
 		case HLV_PV_FIELD:
 			pv = value
 		case HLV_MV_FIELD:
 			mv = value
 		case HLV_CVCAS_FIELD:
-			cvCas = value
+			cvCasHex = value
 		}
+	}
+	if len(verHex) > 0 {
+		cvVer, err1 = base.HexLittleEndianToUint64(verHex)
+		if err1 != nil {
+			err = fmt.Errorf("failed to convert ver from hex %s to uint64. err: %v", verHex, err1)
+			return
+		}
+	}
+	if len(cvCasHex) > 0 {
+		cvCas, err1 = base.HexLittleEndianToUint64(cvCasHex)
+		if err1 != nil {
+			err = fmt.Errorf("failed to convert cvCas from hex %s to uint64. err: %v", cvCasHex, err1)
+			return
+		}
+	}
+	if cvVer > cvCas || cvVer > cas {
+		// ver should never be larger than cvCas.
+		// For server
+		err = fmt.Errorf("cvVer shoud not be greater than cvCas or cas, cvCas=%v,ver=%v,cvCasHex=%v,verHex=%s,pv=%s,mv=%s", cvCas, cvVer, cvCasHex, verHex, pv, mv)
+		return
+	}
+	pvMap, err1 = xattrVVtoMap(pv)
+	if err1 != nil {
+		err = fmt.Errorf("failed to convert pv '%s' to map, error: %v", pv, err1)
+		return
+	}
+	mvMap, err1 = xattrVVtoMap(mv)
+	if err1 != nil {
+		err = fmt.Errorf("failed to convert mv '%s' to map, error: %v", mv, err1)
+		return
 	}
 	return
 }
@@ -591,53 +623,20 @@ func findCustomCRXattrFields(xattr []byte) (cvCas, src, ver, pv, mv []byte, err 
 func getMetaFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64,
 	pvMap, mvMap hlv.VersionsMap, err error) {
 	cas = lookupResp.Resp.Cas
-	xattr, err := lookupResp.ResponseForAPath(base.XATTR_HLV)
-	if err != nil {
-		return 0, 0, "", 0, nil, nil, err
+	xattr, err1 := lookupResp.ResponseForAPath(base.XATTR_HLV)
+	if err1 != nil {
+		err = fmt.Errorf("failed to find subdoc_lookup result for path %s for document %s%q%s, error: %v", base.XATTR_HLV, base.UdTagBegin, lookupResp.Resp.Key, base.UdTagEnd, err1)
+		return
 	}
 	if xattr == nil {
-		return cas, 0, "", 0, nil, nil, nil
+		return
+	}
+	cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = parseHlvFields(cas, xattr)
+	if err1 != nil {
+		err = fmt.Errorf("failed to parse HLV fields for document %s%q%s, error: %v", base.UdTagBegin, lookupResp.Resp.Key, base.UdTagEnd, err)
+		return
 	}
 
-	cvCasHex, srcBytes, ver, pv, mv, err := findCustomCRXattrFields(xattr)
-	if err != nil {
-		return
-	}
-	cvSrc = hlv.DocumentSourceId(srcBytes)
-	if len(ver) == 0 {
-		cvVer = 0
-	} else {
-		cvVer, err = base.HexLittleEndianToUint64(ver)
-		if err != nil {
-			return
-		}
-		if cvVer > cas {
-			// ver is initially the same as cas. Cas may increase later. So ver should never be greater than cas
-			err = fmt.Errorf("ver>cas, cvCas=%v,ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvCas, cvVer, cas, ver, pv, mv)
-			return
-		}
-	}
-	if len(cvCasHex) == 0 {
-		cvCas = 0
-	} else {
-		cvCas, err = base.HexLittleEndianToUint64(cvCasHex)
-		if err != nil {
-			return
-		}
-		if cvVer > cvCas {
-			// ver is initially the same as cas. Cas may increase later. So ver should never be greater than cas
-			err = fmt.Errorf("ver>cvCas, cvCas=%v,ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvCas, cvVer, cas, ver, pv, mv)
-			return
-		}
-	}
-	pvMap, err = xattrVVtoMap(pv)
-	if err != nil {
-		return
-	}
-	mvMap, err = xattrVVtoMap(mv)
-	if err != nil {
-		return
-	}
 	return
 }
 
@@ -645,7 +644,7 @@ func getMetaFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas ui
 func getMetaFromMCRequest(req *mc.MCRequest) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, err error) {
 	cas = binary.BigEndian.Uint64(req.Extras[16:24])
 	if req.DataType&mcc.XattrDataType == 0 {
-		return cas, 0, "", 0, nil, nil, nil
+		return
 	}
 	body := req.Body
 	var pos uint32 = 0
@@ -656,6 +655,7 @@ func getMetaFromMCRequest(req *mc.MCRequest) (cas, cvCas uint64, cvSrc hlv.Docum
 	}
 	var key, value []byte
 	var xattr []byte
+	var err1 error
 	for xattrIter.HasNext() {
 		key, value, err = xattrIter.Next()
 		if err != nil {
@@ -668,46 +668,12 @@ func getMetaFromMCRequest(req *mc.MCRequest) (cas, cvCas uint64, cvSrc hlv.Docum
 	}
 	if xattr == nil {
 		// Source does not have HLV XATTR
-		return cas, 0, "", 0, nil, nil, nil
+		return
 	}
 	// Found HLV XATTR. Now find the fields
-	cvCasHex, srcBytes, ver, pv, mv, err := findCustomCRXattrFields(xattr)
-	if err != nil {
-		return
-	}
-	cvSrc = hlv.DocumentSourceId(srcBytes)
-	if len(ver) == 0 {
-		cvVer = 0
-	} else {
-		cvVer, err = base.HexLittleEndianToUint64(ver)
-		if err != nil {
-			return
-		}
-		if cvVer > cas {
-			// ver is initially the same as cas. Cas may increase later. So ver should never be greater than cas
-			err = fmt.Errorf("ver>cas, ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvVer, cas, ver, pv, mv)
-			return
-		}
-	}
-	if len(cvCasHex) == 0 {
-		cvCas = 0
-	} else {
-		cvCas, err = base.HexLittleEndianToUint64(cvCasHex)
-		if err != nil {
-			return
-		}
-		if cvVer > cvCas {
-			// cvCas is initially the same as cas. Cas may increase later. So ver should never be greater than cas
-			err = fmt.Errorf("ver>cvCas, cvCas=%v,ver=%v,cas=%v,cvHex=%s,pv=%s,mv=%s", cvCas, cvVer, cas, ver, pv, mv)
-			return
-		}
-	}
-	pvMap, err = xattrVVtoMap(pv)
-	if err != nil {
-		return
-	}
-	mvMap, err = xattrVVtoMap(mv)
-	if err != nil {
+	cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = parseHlvFields(cas, xattr)
+	if err1 != nil {
+		err = fmt.Errorf("failed to parse HLV fields for document %s%q%s, error: %v", base.UdTagBegin, req.Key, base.UdTagEnd, err1)
 		return
 	}
 	return
