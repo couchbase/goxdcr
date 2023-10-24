@@ -1015,12 +1015,12 @@ func CompressionStringToCompressionTypeConverter(userInput string) (int, error) 
 }
 
 func MobileCompatibilityStringToTypeConverter(userInput string) (int, error) {
-	for i := 1; i <= MobileCompatibilityEndMarker; i++ {
+	for i := MobileCompatibilityStartMarker + 1; i < MobileCompatibilityEndMarker; i++ {
 		if strings.ToLower(MobileCompatibilityStrings[i]) == strings.ToLower(userInput) {
 			return i, nil
 		}
 	}
-	return 0, fmt.Errorf("The only allowed values for setting %v are %v", MobileCompatibleKey, MobileCompatibilityStrings[MobileCompatibilityOff:MobileCompatibilityOff+1])
+	return 0, fmt.Errorf("The only allowed values for setting %v are %v", MobileCompatibleKey, MobileCompatibilityStrings[MobileCompatibilityStartMarker+1:MobileCompatibilityEndMarker])
 }
 
 func ConcatenateErrors(errorMap ErrorMap, incomingErrorMap ErrorMap, maxNumberOfErrors int, logger *log.CommonLogger) {

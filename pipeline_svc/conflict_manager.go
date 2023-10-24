@@ -335,13 +335,15 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 					c.Logger().Debugf("%v: conflictManagerWorker %v received key %v for format and set", c.pipeline.FullTopic(), id, v.Input.Source.Req.Key)
 				}
 				req, err := c.formatMergedDoc(v.Input, []byte(mergedDoc))
-				// TODO (MB-40143): Remove before CC shipping. The req should never be nil unless there are bugs in xattrs format.
 				if err != nil || req == nil {
-					panic(fmt.Sprintf("formatMergedDoc failed with error %v", err))
+					c.handleGeneralError(err)
 				}
 				c.sendDocument(id, v.Input, req, client)
 			} else if v.Action == base.SetTargetToSource {
-				req := c.formatTargetDoc(v.Input)
+				req, err := c.formatTargetDoc(v.Input)
+				if err != nil {
+					c.handleGeneralError(err)
+				}
 				c.sendDocument(id, v.Input, req, client)
 			}
 		case <-c.finish_ch:
@@ -354,12 +356,14 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 // This can only happen when source is a merged doc.
 // Target may or may not have MV. It just needs to contain everything source has. It may have merged everything that
 // source have merged, plus new updates.
-func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) *mc.MCRequest {
-	targetDoc := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true, true)
+func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) (*mc.MCRequest, error) {
+	targetDoc, err := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true, true)
+	if err != nil {
+		return nil, err
+	}
 	targetMeta, err := targetDoc.GetMetadata()
 	if err != nil {
-		// TODO: Remove before CC shipping
-		panic(fmt.Sprintf("error '%v' getting target meta", err))
+		return nil, err
 	}
 	pv, mv, err := targetMeta.UpdateMetaForSetBack()
 	if err != nil {
@@ -369,8 +373,7 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) *mc.MCRe
 	sourceDoc := crMeta.NewSourceDocument(input.Source, input.SourceId)
 	sourceMeta, err := sourceDoc.GetMetadata()
 	if err != nil {
-		// TODO: Remove before CC shipping
-		panic(fmt.Sprintf("error '%v' getting source meta", err))
+		return nil, err
 	}
 	hadMv := sourceMeta.HadMv()
 	hadPv := sourceMeta.HadPv()
@@ -438,7 +441,7 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) *mc.MCRe
 	// TODO(MB-41808): data pool
 	newbody := make([]byte, bodylen)
 	req := c.composeRequestForSubdocMutation(specs, input.Source.Req, newbody, true)
-	return req
+	return req, nil
 }
 
 func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDoc []byte) (*mc.MCRequest, error) {
@@ -447,9 +450,14 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	if err != nil {
 		return nil, err
 	}
-	targetDoc := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true, true)
+	targetDoc, err := crMeta.NewTargetDocument(input.Target.Resp.Key, input.Target.Resp, input.Target.Specs, input.TargetId, true, true)
+	if err != nil {
+		return nil, err
+	}
 	targetMeta, err := targetDoc.GetMetadata()
-
+	if err != nil {
+		return nil, err
+	}
 	mergedMeta, err := sourceMeta.Merge(targetMeta)
 	if err != nil {
 		return nil, err
