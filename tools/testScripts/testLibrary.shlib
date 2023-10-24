@@ -33,6 +33,7 @@ P2P_PULL_ERR_MSG="Unable to respond to caller given type"
 BACKFILL_START_MSG="Starting BackfillPipeline"
 TOPOLOGY_RESTART_MSG="Topology change detected. Estimated time of pipeline restart"
 BACKFILL_KILLED="background waiting backfill streams to all be replicated timed out"
+DCP_ROLLBACK_MSG="Received rollback from DCP stream"
 
 # These should be imported after clusterRunProvision script
 

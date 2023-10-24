@@ -1,0 +1,148 @@
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+}
+
+function validateDataLoad {
+	echo "VALIDATING Data..."
+	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
+	checkBidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running purge seqno rollback test case"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	echo "Sleeping 10 seconds for XDCR CPUs to have a chance to idle before measurement"
+	sleep 10
+	testIdleXdcrCPU
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+
+	local itemCount=1024
+
+	echo "Writing $itemCount documents"
+	local i
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		writeJSONDocument "C1" "B1" "regDocA${i}" '{"foo":"bar"}' >/dev/null 2>&1
+	done
+
+	sleep 10
+
+	echo "Deleting $itemCount documents"
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		deleteJSONDocument "C1" "B1" "regDocA${i}" >/dev/null 2>&1
+	done
+
+	sleep 10
+
+	echo "Write back $itemCount documents"
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		deleteJSONDocument "C1" "B1" "regDocB${i}" >/dev/null 2>&1
+	done
+
+	# Force a purge
+	# At this point, the purge sequence number should be non-0
+	forceBucketPurge "C1" "B1"
+
+	# Pause to create checkpoint
+	pauseReplication "C1" "B1" "C2" "B2"
+	sleep 20
+
+	# Now we need to push the purge seqno forward such that the checkpoint resume at a purgeSeqno > resume seqno
+	echo "Deleting all $itemCount documents and write them back"
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		deleteJSONDocument "C1" "B1" "regDocB${i}" >/dev/null 2>&1
+	done
+	sleep 10
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		writeJSONDocument "C1" "B1" "regDocC${i}" '{"foo":"bar2"}' >/dev/null 2>&1
+	done
+	forceBucketPurge "C1" "B1"
+
+	sleep 10
+	echo "Deleting all $itemCount documents and write them back"
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		deleteJSONDocument "C1" "B1" "regDocC${i}" >/dev/null 2>&1
+	done
+	sleep 10
+	for ((i = 0; $i < $itemCount; i = $(($i + 1)))); do
+		writeJSONDocument "C1" "B1" "regDocD${i}" '{"foo":"bar2"}' >/dev/null 2>&1
+	done
+	forceBucketPurge "C1" "B1"
+
+	sleep 10
+
+	echo "Resuming replication to after forced purge"
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 20
+
+	validateInternalLogWithInstance "C1" "$DCP_ROLLBACK_MSG" 0
+	checkItemCnt "C1" "B1" $itemCount
+	checkItemCnt "C2" "B2" $itemCount
+	cleanupBucketReplications
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

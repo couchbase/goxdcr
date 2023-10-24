@@ -102,6 +102,7 @@ const (
 	ReplicateCkptIntervalKey          = base.ReplicateCkptIntervalKey
 	CkptSvcCacheEnabledKey            = metadata.CkptSvcCacheEnabledKey
 	FilterBinaryDocsKey               = metadata.FilterBinaryDocsKey
+	EnableDcpPurgeRollback            = base.EnableDcpPurgeRollback
 )
 
 // constants for parsing create/change/view replication response
@@ -221,6 +222,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	ReplicateCkptIntervalKey:          metadata.ReplicateCkptIntervalKey,
 	CkptSvcCacheEnabledKey:            metadata.CkptSvcCacheEnabledKey,
 	FilterBinaryDocsKey:               metadata.FilterBinaryDocsKey,
+	EnableDcpPurgeRollback:            metadata.EnableDcpPurgeRollback,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -276,6 +278,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.ReplicateCkptIntervalKey:             ReplicateCkptIntervalKey,
 	metadata.CkptSvcCacheEnabledKey:               CkptSvcCacheEnabledKey,
 	metadata.FilterBinaryDocsKey:                  FilterBinaryDocsKey,
+	metadata.EnableDcpPurgeRollback:               EnableDcpPurgeRollback,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
