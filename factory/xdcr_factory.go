@@ -1160,6 +1160,8 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 		}
 	}
 
+	dcpNozzleSettings[metadata.EnableDcpPurgeRollback] = metadata.GetSettingFromSettingsMap(settings, metadata.EnableDcpPurgeRollback, false)
+
 	if err := xdcrf.constructSharedSettingsForDcpNozzle(settings, dcpNozzleSettings, repSettings,
 		pipeline); err != nil {
 		return nil, err

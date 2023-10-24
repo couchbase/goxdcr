@@ -98,6 +98,8 @@ const (
 	ReplicateCkptIntervalKey     = base.ReplicateCkptIntervalKey
 
 	CkptSvcCacheEnabledKey = base.CkptSvcCacheEnabled
+
+	EnableDcpPurgeRollback = base.EnableDcpPurgeRollback
 )
 
 // keys to facilitate redaction of replication settings map
@@ -212,6 +214,8 @@ var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 // In seconds
 var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
 
+var EnableDcpPurgeRollbackConfig = &SettingsConfig{false, nil}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -257,6 +261,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	PreReplicateVBMasterCheckKey:      PreReplicateVBMasterCheckConfig,
 	ReplicateCkptIntervalKey:          ReplicateCkptIntervalConfig,
 	CkptSvcCacheEnabledKey:            CkptSvcCacheEnabledConfig,
+	EnableDcpPurgeRollback:            EnableDcpPurgeRollbackConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead

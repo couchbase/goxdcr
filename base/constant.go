@@ -1508,6 +1508,8 @@ var CkptCacheReqChLen = 1000
 
 const CkptSvcCacheEnabled = "ckptSvcCacheEnabled"
 
+const EnableDcpPurgeRollback = "dcpEnablePurgeRollback"
+
 type GlobalOSOMode int
 
 const (
