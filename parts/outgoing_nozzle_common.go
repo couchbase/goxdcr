@@ -70,8 +70,9 @@ const (
 
 type SetMetaXattrOptions struct {
 	// Target KV cannot do CR if bucket uses CCR, or if we need to preserve _sync.
+	// TODO: this needs change once MB-44034 is done.
 	noTargetCR   bool
-	sendHlv      bool // Pack the HLV and send in setWithMeta to help mobile
+	sendHlv      bool // Pack the HLV and send in setWithMeta
 	preserveSync bool // Preserve target _sync XATTR and send it in setWithMeta.
 }
 

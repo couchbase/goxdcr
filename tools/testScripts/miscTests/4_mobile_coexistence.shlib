@@ -23,6 +23,7 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active")
 
 function testReplicationSettings {
+	echo "=========== testReplicationSettings =========="
 	echo "Creating replication with mobile=Active"
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
 
@@ -91,7 +92,7 @@ function testReplicationSettings {
 }
 
 function testMobileHlv {
-	echo "testMobileHlv"
+	echo "=========== testMobileHlv =========="
 
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
 	createBucketReplication "C2" "B2" "C1" "B1" BucketReplPropertiesWithMobile
@@ -115,7 +116,30 @@ function testMobileHlv {
 	# Update at C2.B2
 	writeJSONDocument "C2" "B2" "mobile1" '{"foo3":"bar3"}'
 	writeJSONDocument "C2" "B2" "mobile2" '{"foo3":"bar3"}'
-	waitForChangesLeft0 "C3" "B3" "C1" "B1"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	echo runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C1" "B1" &
+	echo runCbWorkloadGenBucket "C1" "B1" 1000 "common"
+	runCbWorkloadGenBucket "C1" "B1" 1000 "common" &
+
+	echo runCbWorkloadGenBucket "C2" "B2"
+	runCbWorkloadGenBucket "C2" "B2" &
+	echo runCbWorkloadGenBucket "C2" "B2" 1000 "common"
+	runCbWorkloadGenBucket "C2" "B2" 1000 "common" &
+	# wait for cbworkloadgen to finish
+	wait
+	sleepTime=20
+	echo "Sleep $sleepTime seconds to wait for replication to finish"
+	sleep $sleepTime
+
+	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+
+	grepForPanics
+	if (($? != 0)); then
+		exit 1
+	fi
 }
 
 function runTestCase {

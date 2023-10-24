@@ -444,17 +444,11 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.CollectionsManifestUidKey, err.Error())
 		}
 
-		crossClusterVer, err := b.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
-		if err != nil {
-			// This shouldn't happen.
-			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.EnableCrossClusterVersioningKey, err.Error())
-		}
+		// In mixed mode, this will return false with an error, which is OK
+		crossClusterVer, _ := b.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
 
-		pruningWindownHrs, err := b.utils.GetVersionPruningWindowHrs(bucketInfo)
-		if err != nil {
-			// This shouldn't happen.
-			watcher.logger.Errorf("%v Failed to get source %v. Error=%v", spec.SourceBucketName, base.VersionPruningWindowHrsKey, err.Error())
-		}
+		// In mixed mode, this will return 0 with an error, which is OK
+		pruningWindownHrs, _ := b.utils.GetVersionPruningWindowHrs(bucketInfo)
 
 		var vbMaxCas []interface{}
 		if crossClusterVer {

@@ -40,9 +40,13 @@ const (
 
 type CRMetadata struct {
 	docMeta *base.DocumentMetadata
-	hlv     *hlv.HLV
-	hadPv   bool
-	hadMv   bool
+	// The HLV is always updated from what's stored in the document XATTR,
+	// ie, MV may roll into PV if necessary, and PV may get pruned, and CV may be updated.
+	hlv *hlv.HLV
+	// The following indicate if the document has PV/MV in the XATTR. Since the HLV may be different from what's stored in
+	// XATTR, we need the following to decide whether to send delete for PV or MV in the subdoc command.
+	hadPv bool
+	hadMv bool
 }
 
 func (m *CRMetadata) GetDocumentMetadata() *base.DocumentMetadata {
@@ -102,9 +106,11 @@ func (doc *SourceDocument) GetMetadata() (*CRMetadata, error) {
 		docMeta: &docMeta,
 	}
 	if len(pvMap) > 0 {
+		// This comes straight from source document XATTR. So source had it.  meta.hlv tells us if it still has it
 		meta.hadPv = true
 	}
 	if len(mvMap) > 0 {
+		// This comes straight from source document XATTR. So source had it.  meta.hlv tells us if it still has it
 		meta.hadMv = true
 	}
 	meta.hlv, err = hlv.NewHLV(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap)
@@ -122,7 +128,10 @@ type TargetDocument struct {
 	includeHlv   bool
 }
 
-func NewTargetDocument(key []byte, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, source hlv.DocumentSourceId, xattrEnabled, includeHlv bool) *TargetDocument {
+func NewTargetDocument(key []byte, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, source hlv.DocumentSourceId, xattrEnabled, includeHlv bool) (*TargetDocument, error) {
+	if resp.Status == mc.KEY_ENOENT {
+		return nil, base.ErrorDocumentNotFound
+	}
 	return &TargetDocument{
 		source: source,
 		resp: &base.SubdocLookupResponse{
@@ -132,16 +141,12 @@ func NewTargetDocument(key []byte, resp *mc.MCResponse, specs []base.SubdocLooku
 		key:          key,
 		xattrEnabled: xattrEnabled,
 		includeHlv:   includeHlv,
-	}
+	}, nil
 }
 
 func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 	if doc.resp.Resp.Status == mc.KEY_ENOENT {
-		meta := CRMetadata{
-			docMeta: nil,
-			hlv:     nil,
-		}
-		return &meta, nil
+		return nil, base.ErrorDocumentNotFound
 	}
 	if doc.resp.Resp.Opcode == base.GET_WITH_META {
 		// This is a getMeta response from target
@@ -168,9 +173,11 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 				return nil, err
 			}
 			if len(pvMap) > 0 {
+				// This comes straight from source document XATTR. So target had it.  meta.hlv tells us if it still has it
 				meta.hadPv = true
 			}
 			if len(mvMap) > 0 {
+				// This comes straight from source document XATTR. So target had it.  meta.hlv tells us if it still has it
 				meta.hadMv = true
 			}
 			meta.hlv, err = hlv.NewHLV(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap)
@@ -194,7 +201,12 @@ func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, spec
 	if err != nil {
 		return base.Error, err
 	}
-	targetDoc := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
+	targetDoc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
+	if err == base.ErrorDocumentNotFound {
+		return base.SendToTarget, nil
+	} else if err != nil {
+		return base.Error, err
+	}
 	targetMeta, err := targetDoc.GetMetadata()
 	if err != nil {
 		return base.Error, err
@@ -254,7 +266,12 @@ func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 			return base.Error, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
-		target_doc := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
+		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
+		if err == base.ErrorDocumentNotFound {
+			return base.SendToTarget, nil
+		} else if err != nil {
+			return base.Error, err
+		}
 		target_meta, err := target_doc.GetMetadata()
 		if err != nil {
 			return base.Error, err
@@ -301,7 +318,12 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 			return base.Error, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
-		target_doc := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
+		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
+		if err == base.ErrorDocumentNotFound {
+			return base.SendToTarget, nil
+		} else if err != nil {
+			return base.Error, err
+		}
 		target_meta, err := target_doc.GetMetadata()
 		if err != nil {
 			return base.Error, err
