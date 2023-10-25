@@ -59,6 +59,10 @@ const (
 
 var dcp_inactive_stream_check_interval = 30 * time.Second
 
+const checkInactiveStreamsTimeout = 1000 * time.Millisecond
+
+const nonOkVbStreamEndCheckInterval = 300 * time.Second
+
 var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), false)}
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
@@ -372,6 +376,9 @@ type DcpNozzle struct {
 
 	devInjectionMainRollbackVb     int // -1 means not enabled
 	devInjectionBackfillRollbackVb int // -1 means not enabled
+
+	nonOKVbStreamEnds    map[uint16]bool
+	nonOKVbStreamEndsMtx sync.Mutex
 }
 
 func NewDcpNozzle(id string,
@@ -416,6 +423,7 @@ func NewDcpNozzle(id string,
 		backfillTaskEndSeqno:           make(map[uint16]*base.SeqnoWithLock),
 		backfillTaskStreamCloseSent:    make(map[uint16]*uint32),
 		backfillTaskStreamEndReceived:  make(map[uint16]*uint32),
+		nonOKVbStreamEnds:              make(map[uint16]bool),
 	}
 
 	// Allow one caller the ability to execute
@@ -1066,7 +1074,7 @@ func (dcp *DcpNozzle) processData() (err error) {
 				// https://github.com/couchbaselabs/dcp-documentation/blob/master/documentation/commands/stream-end.md
 				vbno := m.VBucket
 				seqno := dcp.endSeqnoForDcp[vbno].GetSeqno()
-				err = dcp.handleStreamEnd(vbno, seqno)
+				err = dcp.handleStreamEnd(vbno, seqno, m.Flags)
 				if err != nil {
 					return err
 				}
@@ -1151,10 +1159,10 @@ func (dcp *DcpNozzle) performRollback(vbno uint16, rollbackseq uint64) error {
 	return nil
 }
 
-func (dcp *DcpNozzle) handleStreamEnd(vbno uint16, seqno uint64) error {
+func (dcp *DcpNozzle) handleStreamEnd(vbno uint16, seqno uint64, flag uint32) error {
 	var err error
-	err_streamend := fmt.Errorf("%v stream for vb=%v is closed by producer", dcp.Id(), vbno)
-	dcp.Logger().Infof("%v: seqno: %v %v", dcp.Id(), seqno, err_streamend)
+	err_streamend := fmt.Errorf("%v stream for vb=%v is closed by producer with flag=0x%x", dcp.Id(), vbno, flag)
+	dcp.Logger().Warnf("%v: seqno: %v %v", dcp.Id(), seqno, err_streamend)
 	if dcp.vbStreamEndIsOk(vbno) {
 		err = dcp.setStreamState(vbno, Dcp_Stream_Closed)
 		if dcp.vbStreamEndShouldRaiseEvt(vbno) {
@@ -1167,11 +1175,15 @@ func (dcp *DcpNozzle) handleStreamEnd(vbno uint16, seqno uint64) error {
 			}
 		}
 	} else {
-		stream_status, err := dcp.GetStreamState(vbno)
-		if err != nil || stream_status != Dcp_Stream_Active {
-			dcp.handleVBError(vbno, err_streamend)
+		// For main pipeline, keep track of vbs whose stream was ended in Dcp_Stream_Active state
+		// so that the pipeline can be restarted soon
+		streamStatus, err := dcp.GetStreamState(vbno)
+		if err != nil || streamStatus != Dcp_Stream_Active {
 			return err
 		}
+		dcp.nonOKVbStreamEndsMtx.Lock()
+		dcp.nonOKVbStreamEnds[vbno] = true
+		dcp.nonOKVbStreamEndsMtx.Unlock()
 	}
 	return err
 }
@@ -1526,6 +1538,7 @@ func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, v
 				if err != nil {
 					return
 				}
+
 				// version passed in == opaque, which will be passed back to us
 				if !dcp.CollectionEnabled() {
 					err = dcp.uprFeed.UprRequestStream(vbno, version, flags, vbts.Vbuuid, vbts.Seqno, seqEnd, vbts.SnapshotStart, vbts.SnapshotEnd)
@@ -1792,7 +1805,9 @@ func (dcp *DcpNozzle) checkInactiveUprStreams() {
 	defer dcp.childrenWaitGrp.Done()
 
 	dcp_inactive_stream_check_ticker := time.NewTicker(dcp_inactive_stream_check_interval)
+	nonOKVbStreamEndsTicker := time.NewTicker(nonOkVbStreamEndCheckInterval)
 	defer dcp_inactive_stream_check_ticker.Stop()
+	defer nonOKVbStreamEndsTicker.Stop()
 
 	for {
 		select {
@@ -1805,11 +1820,20 @@ func (dcp *DcpNozzle) checkInactiveUprStreams() {
 				dcp.handleGeneralError(errors.New("DCP upr feed has been closed."))
 				return
 			}
-			err := base.ExecWithTimeout(dcp.checkInactiveUprStreams_once, 1000*time.Millisecond, dcp.Logger())
+			err := base.ExecWithTimeout(dcp.checkInactiveUprStreams_once, checkInactiveStreamsTimeout, dcp.Logger())
 			if err != nil {
 				// ignore error and continue
 				dcp.Logger().Infof("Received error when checking inactive steams for %v. err=%v\n", dcp.Id(), err)
 			}
+		case <-nonOKVbStreamEndsTicker.C:
+			// check if pipeline needs to be restarted if there are VBs with their streams ended in a non-OK manner
+			dcp.nonOKVbStreamEndsMtx.Lock()
+			if len(dcp.nonOKVbStreamEnds) > 0 {
+				errMsg := fmt.Sprintf("%v vbs received non-OK streamEnds", len(dcp.nonOKVbStreamEnds))
+				dcp.Logger().Warnf("%v", errMsg)
+				dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, dcp, nil, errors.New(errMsg)))
+			}
+			dcp.nonOKVbStreamEndsMtx.Unlock()
 		}
 	}
 }
@@ -1836,6 +1860,7 @@ func (dcp *DcpNozzle) isFeedClosed() bool {
  */
 func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 	streams_inactive := dcp.initedButInactiveDcpStreams()
+
 	if len(streams_inactive) > 0 {
 		updated_streams_inactive_count := atomic.AddUint32(&dcp.counter_streams_inactive, 1)
 		dcp.Logger().Infof("%v incrementing counter for inactive streams to %v\n", dcp.Id(), updated_streams_inactive_count)
@@ -1849,6 +1874,7 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 			atomic.StoreUint32(&dcp.counter_streams_inactive, 0)
 		}
 	}
+
 	return nil
 }
 
