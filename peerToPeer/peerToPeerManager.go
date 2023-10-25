@@ -215,6 +215,11 @@ func (p *P2PManagerImpl) runHandlers() error {
 				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
 			}
 			p.receiveHandlers[i] = NewBackfillDelHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.backfillMgrSvc)
+		case ReqSrcHeartbeat:
+			for j := RequestType; j < InvalidType; j++ {
+				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
+			}
+			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}

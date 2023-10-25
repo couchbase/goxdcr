@@ -402,3 +402,26 @@ func TestDeserializeGetManifestId(t *testing.T) {
 		unlock()
 	}
 }
+
+func TestSerializingHeartbeat(t *testing.T) {
+	fmt.Println("============== Test case start: TestSerializingHeartbeat =================")
+	defer fmt.Println("============== Test case end: TestSerializingHeartbeat =================")
+	assert := assert.New(t)
+
+	spec1, err := metadata.NewReplicationSpecification("B1", "uuid1", "uuid2", "B2", "uuid3")
+	assert.Nil(err)
+
+	spec2, err := metadata.NewReplicationSpecification("B1a", "uuid1", "uuid2", "B2a", "uuid3")
+	assert.Nil(err)
+
+	reqCommon := NewRequestCommon("sender", "target", "", "", uint32(9))
+	msg := NewSourceHeartbeatReq(reqCommon)
+	msg.AppendSpec(spec1)
+	msg.AppendSpec(spec2)
+
+	seralizedByte, err := msg.Serialize()
+	assert.Nil(err)
+
+	checkMsg := NewSourceHeartbeatReq(reqCommon)
+	assert.Nil(checkMsg.DeSerialize(seralizedByte))
+}

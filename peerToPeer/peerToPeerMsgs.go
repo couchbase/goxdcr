@@ -38,6 +38,7 @@ const (
 	ReqReplSpecManifests  OpCode = iota
 	ReqManualBackfill     OpCode = iota
 	ReqDeleteBackfill     OpCode = iota
+	ReqSrcHeartbeat       OpCode = iota
 	ReqMaxInvalid         OpCode = iota
 )
 
@@ -57,6 +58,8 @@ func (o OpCode) String() string {
 		return "ReqManualBackfill"
 	case ReqDeleteBackfill:
 		return "ReqDeleteBackfill"
+	case ReqSrcHeartbeat:
+		return "ReqSrcHeartbeat"
 	default:
 		return "?? (InvalidRequest)"
 	}
@@ -77,6 +80,8 @@ func (o OpCode) IsInterruptable() bool {
 	case ReqManualBackfill:
 		return false
 	case ReqDeleteBackfill:
+		return false
+	case ReqSrcHeartbeat:
 		return false
 	default:
 		return false
@@ -2092,4 +2097,90 @@ func (b *BackfillDelResponse) Serialize() ([]byte, error) {
 
 func (b *BackfillDelResponse) DeSerialize(stream []byte) error {
 	return json.Unmarshal(stream, b)
+}
+
+type SourceHeartbeatReq struct {
+	RequestCommon
+
+	SpecsCompressed []byte
+	specs           []*metadata.ReplicationSpecification
+}
+
+func NewSourceHeartbeatReq(common RequestCommon) *SourceHeartbeatReq {
+	req := &SourceHeartbeatReq{RequestCommon: common}
+	req.ReqType = ReqSrcHeartbeat
+	return req
+}
+
+func (s *SourceHeartbeatReq) AppendSpec(spec *metadata.ReplicationSpecification) {
+	s.specs = append(s.specs, spec)
+}
+
+func (s *SourceHeartbeatReq) Serialize() ([]byte, error) {
+	specsPayload, err := json.Marshal(s.specs)
+	if err != nil {
+		return nil, err
+	}
+	s.SpecsCompressed = snappy.Encode(nil, specsPayload)
+
+	return json.Marshal(s)
+}
+
+func (s *SourceHeartbeatReq) DeSerialize(stream []byte) error {
+	if err := json.Unmarshal(stream, s); err != nil {
+		return err
+	}
+
+	specsPayload, err := snappy.Decode(nil, s.SpecsCompressed)
+	if err != nil {
+		return err
+	}
+
+	if err = json.Unmarshal(specsPayload, &s.specs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *SourceHeartbeatReq) SameAs(otherRaw interface{}) (bool, error) {
+	other, ok := otherRaw.(*SourceHeartbeatReq)
+	if !ok {
+		return false, getWrongTypeErr("*SourceHeartbeatReq", otherRaw)
+	}
+
+	// Ignore compressed payload because it's mostly used for serialization
+
+	if len(s.specs) != len(other.specs) {
+		return false, nil
+	}
+
+	for i, spec := range s.specs {
+		if !spec.SameSpec(other.specs[i]) {
+			return false, nil
+		}
+	}
+
+	return s.RequestCommon.SameAs(&other.RequestCommon)
+}
+
+func (s *SourceHeartbeatReq) GenerateResponse() interface{} {
+	common := NewResponseCommon(s.ReqType, s.RemoteLifeCycleId, s.LocalLifeCycleId, s.Opaque, s.TargetAddr)
+	common.RespType = s.ReqType
+	resp := &SourceHeartbeatResp{
+		ResponseCommon: common,
+	}
+	return resp
+}
+
+type SourceHeartbeatResp struct {
+	ResponseCommon
+}
+
+func (s *SourceHeartbeatResp) Serialize() ([]byte, error) {
+	return json.Marshal(s)
+}
+
+func (s *SourceHeartbeatResp) DeSerialize(stream []byte) error {
+	return json.Unmarshal(stream, s)
 }
