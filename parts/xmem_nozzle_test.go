@@ -14,6 +14,7 @@ licenses/APL2.txt.
 package parts
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -285,6 +286,7 @@ func TestXmemSendAPacket(t *testing.T) {
 
 	uprNotCompressFile := "../utils/testInternalData/uprNotCompress.json"
 	xmemSendPackets(t, []string{uprNotCompressFile}, xmemBucket)
+
 }
 
 func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
@@ -301,16 +303,7 @@ func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
-	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := realUtils.GetBucketInfo(connString, bname, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
-	assert.Nil(err)
-	uuid, ok := bucketInfo["uuid"].(string)
-	assert.True(ok)
-	xmem.targetBucketUuid = uuid
-	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
-	settings[ForceCollectionDisableKey] = true
-	err = xmem.Start(settings)
-	assert.Nil(err)
+	startTargetXmem(xmem, settings, bname, assert)
 
 	// Send the events
 	var events []*mcc.UprEvent
@@ -340,6 +333,19 @@ func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 		_, err := bucket.DefaultCollection().Get(string(event.Key), nil)
 		assert.Nil(err)
 	}
+}
+
+func startTargetXmem(xmem *XmemNozzle, settings map[string]interface{}, bname string, assert *assert.Assertions) {
+	// Need to find the actual running targetBucketUUID
+	bucketInfo, err := xmem.utils.GetBucketInfo(connString, bname, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+	assert.Nil(err)
+	uuid, ok := bucketInfo["uuid"].(string)
+	assert.True(ok)
+	xmem.targetBucketUuid = uuid
+	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeSnappy)
+	settings[ForceCollectionDisableKey] = true
+	err = xmem.Start(settings)
+	assert.Nil(err)
 }
 
 type User struct {
@@ -589,4 +595,190 @@ func TestNonTempErrorResponsesEvents(t *testing.T) {
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 10}, false)
 	time.Sleep(5 * time.Second)
 	assert.Equal(0, len(events))
+}
+
+func GetAndFlushBucket(connStr, bucketName string) (cluster *gocb.Cluster, bucket *gocb.Bucket, err error) {
+	cluster, err = gocb.Connect(connStr, gocb.ClusterOptions{Authenticator: gocb.PasswordAuthenticator{
+		Username: username,
+		Password: password,
+	}})
+	if err != nil {
+		return
+	}
+	err = cluster.WaitUntilReady(15*time.Second, nil)
+	if err != nil {
+		return
+	}
+	mgr := cluster.Buckets()
+	err = mgr.FlushBucket(bucketName, nil)
+	bucket = cluster.Bucket(bucketName)
+	return
+}
+
+func TestMobilePreserveSync(t *testing.T) {
+	fmt.Println("============== Test case start: TestMobilePreserveSync =================")
+	defer fmt.Println("============== Test case end: TestMobilePreserveSync =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+	bucketName := "B0"
+	cluster, bucket, err := GetAndFlushBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("Skipping since bucket %v is not ready. err=%v.\n", bucketName, err)
+		return
+	}
+	defer cluster.Close(nil)
+
+	assert := assert.New(t)
+
+	// Set up target document first
+	targetDoc := "testdata/uprEventSyncTestDoc2Target.json"
+	xmemSendPackets(t, []string{targetDoc}, bucketName)
+
+	// Now set up Xmem for testing
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bucketName)
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+
+	settings[base.EnableCrossClusterVersioningKey] = true
+	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
+	settings[base.VersionPruningWindowHrsKey] = 720
+	router.setMobileCompatibility(base.MobileCompatibilityActive)
+
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
+
+	xmem.sourceBucketUuid = "12345678901234567890123456789023"
+	startTargetXmem(xmem, settings, bucketName, assert)
+
+	// Test 1. syncTestDoc1 has sync. Target does not have the document. _sync should be skipped
+	uprfile := "testdata/uprEventSyncTestDoc1WithSync.json"
+	key := "syncTestDoc1"
+	event, err := RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	xmem.Receive(wrappedMCRequest)
+	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@couchbase.com\""), false); err != nil {
+		assert.FailNow(err.Error())
+	}
+	if err = checkTarget(bucket, key, "_sync", nil, true); err != nil {
+		assert.FailNow(err.Error())
+	}
+
+	// Test 2. send updated syncTestDoc1 with _sync. It should be skipped again
+	uprfile = "testdata/uprEventSyncTestDoc1WithSyncUpdated.json"
+	event, err = RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	wrappedEvent = &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err = router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	xmem.Receive(wrappedMCRequest)
+	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@updated.couchbase.com\""), false); err != nil {
+		assert.FailNow(err.Error())
+	}
+	if err = checkTarget(bucket, key, "_sync", nil, true); err != nil {
+		assert.FailNow(err.Error())
+	}
+
+	// Test 3. Send syncTestDoc2. It should get source document body but keep the target _sync value
+	uprfile = "testdata/uprEventSyncTestDoc2Source.json"
+	key = "syncTestDoc2"
+	event, err = RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	wrappedEvent = &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err = router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	xmem.Receive(wrappedMCRequest)
+
+	if err = checkTarget(bucket, key, "email", []byte("\"kingarthur@source.couchbase.com\""), false); err != nil {
+		assert.FailNow(err.Error())
+	}
+	if err = checkTarget(bucket, key, "_sync", []byte("\"mobile sync XATTR target\""), true); err != nil {
+		assert.FailNow(err.Error())
+	}
+}
+
+func checkTarget(bucket *gocb.Bucket, key, path string, expectedValue []byte, isXattr bool) error {
+	var value []byte
+	for i := 0; i < 10; i++ {
+		res, err := bucket.DefaultCollection().LookupIn(key,
+			[]gocb.LookupInSpec{gocb.GetSpec(path, &gocb.GetSpecOptions{IsXattr: isXattr})}, nil)
+		if err == nil {
+			res.ContentAt(0, &value)
+			if bytes.Equal(value, expectedValue) {
+				return nil
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("value %q is not expected %q", value, expectedValue)
+}
+
+// This test was useful in development but is disabled because TestMobilePreserveSync is sufficient
+func DISABLE_TestMobilePreserveSyncLiveRep(t *testing.T) {
+	fmt.Println("============== Test case start: TestMobilePreserveSyncLiveRep =================")
+	defer fmt.Println("============== Test case end: TestMobilePreserveSyncLiveRep =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+	bucketName := "syncTest"
+	assert := assert.New(t)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName, "custom")
+	if err != nil {
+		fmt.Printf("TestMobilePreserveSyncLiveRep skipped because source cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer srcCluster.Close(nil)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName, "custom")
+	if err != nil {
+		fmt.Printf("TestMobilePreserveSyncLiveRep skipped because target cluster is not ready. Error: %v\n", err)
+		return
+	}
+	defer trgCluster.Close(nil)
+	assert.NotNil(sourceBucket)
+	assert.NotNil(targetBucket)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true, map[string]string{"mobile": "active"})
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, false, map[string]string{"mobile": "active"}) // reverse direction to test pruning
+	expire := 1 * time.Hour
+
+	// Test 1. syncTestDoc1 has sync. Target does not have the document. _sync should be skipped
+	key := "Doc1" + time.Now().Format(time.RFC3339)
+	fmt.Printf("Test 1: Insert %v and expect no _sync XATTR at target\n", key)
+	upsOut, err := sourceBucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows"}}, &gocb.UpsertOptions{Expiry: expire})
+	if err != nil {
+		assert.FailNow("Upsert failed with errror %v", err)
+	}
+	err = waitForReplication(key, upsOut.Cas(), targetBucket)
+	assert.Nil(err)
+	mutOut, err := sourceBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec(base.XATTR_MOBILE, "cluster C1 value", &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, mutOut.Cas(), targetBucket)
+	assert.Nil(err)
+	if err = checkTarget(targetBucket, key, base.XATTR_MOBILE, nil, true); err != nil {
+		assert.FailNow(err.Error())
+	}
+
+	// Test 2. Update and insert _sync at target. This value should be skipped and C1 keeps its original value
+	mutOut, err = targetBucket.DefaultCollection().MutateIn(key,
+		[]gocb.MutateInSpec{
+			gocb.InsertSpec(base.XATTR_MOBILE, "cluster C2 value", &gocb.InsertSpecOptions{IsXattr: true, CreatePath: true})},
+		&gocb.MutateInOptions{Expiry: expire})
+	assert.Nil(err)
+	err = waitForReplication(key, mutOut.Cas(), sourceBucket)
+	assert.Nil(err)
+	if err = checkTarget(sourceBucket, key, base.XATTR_MOBILE, []byte("\"cluster C1 value\""), true); err != nil {
+		assert.FailNow(err.Error())
+	}
 }

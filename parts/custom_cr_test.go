@@ -46,7 +46,7 @@ type SubdocInternal struct {
 	User     []byte
 }
 
-func createBucket(connStr, bucketName string) (cluster *gocb.Cluster, bucket *gocb.Bucket, err error) {
+func createBucket(connStr, bucketName string, crType gocb.ConflictResolutionType) (cluster *gocb.Cluster, bucket *gocb.Bucket, err error) {
 	cluster, err = gocb.Connect(connStr, gocb.ClusterOptions{Authenticator: gocb.PasswordAuthenticator{
 		Username: username,
 		Password: password,
@@ -70,7 +70,7 @@ func createBucket(connStr, bucketName string) (cluster *gocb.Cluster, bucket *go
 	// Don't check error since the bucket may already exist
 	mgr.CreateBucket(gocb.CreateBucketSettings{
 		BucketSettings:         setting,
-		ConflictResolutionType: "custom"},
+		ConflictResolutionType: crType},
 		&gocb.CreateBucketOptions{Timeout: 10 * time.Second})
 	// Wait for bucket ready
 	bucket = cluster.Bucket(bucketName)
@@ -78,7 +78,7 @@ func createBucket(connStr, bucketName string) (cluster *gocb.Cluster, bucket *go
 	return
 }
 
-func createReplication(t *testing.T, bucketName string, mergeFunction string, timeout int, sourceToTarget bool) {
+func createReplication(t *testing.T, bucketName string, mergeFunction string, timeout int, sourceToTarget bool, settings map[string]string) {
 	assert := assert.New(t)
 	client := &http.Client{}
 	data := url.Values{}
@@ -98,6 +98,9 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, ti
 	data.Add("mergeFunctionMapping", "{\""+base.BucketMergeFunctionKey+"\":\""+mergeFunction+"\"}")
 	//data.Add("logLevel", "Debug")
 	data.Add(base.JSFunctionTimeoutKey, fmt.Sprintf("%v", timeout))
+	for key, value := range settings {
+		data.Add(key, value)
+	}
 	req, err := http.NewRequest(base.MethodPost, urlCreateReplication, bytes.NewBufferString(data.Encode()))
 	assert.Nil(err)
 	req.Header.Set(base.ContentType, base.DefaultContentType)
@@ -256,13 +259,13 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	}
 	bucketName := "TestCustomCrXattrAfterRep"
 	assert := assert.New(t)
-	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCrXattrAfterRep skipped because source cluster is not ready. Error: %v\n", err)
 		return
 	}
 	defer srcCluster.Close(nil)
-	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCrXattrAfterRep skipped because target cluster is not ready. Error: %v\n", err)
 		return
@@ -270,8 +273,8 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 	defer trgCluster.Close(nil)
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
-	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, false) // reverse direction to test pruning
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true, nil)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, false, nil) // reverse direction to test pruning
 	expire := 1 * time.Hour
 	/*
 	 * Test 1: New doc at source. Expect to format _vv at target with cv and id.
@@ -497,13 +500,13 @@ func MB_58490_TestCustomCRDeletedDocs(t *testing.T) {
 	}
 	bucketName := "TestCustomCRDeletedDocs"
 	assert := assert.New(t)
-	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCRDeletedDocs skipped because source cluster is not ready. Error: %v\n", err)
 		return
 	}
 	defer srcCluster.Close(nil)
-	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCRDeletedDocs skipped because target cluster is not ready. Error: %v\n", err)
 		return
@@ -511,7 +514,7 @@ func MB_58490_TestCustomCRDeletedDocs(t *testing.T) {
 	defer trgCluster.Close(nil)
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true, nil)
 
 	key := time.Now().Format(time.RFC3339)
 	fmt.Printf("Test with key %q\n", key)
@@ -627,13 +630,13 @@ func TestCustomCrXattrAfterMerge(t *testing.T) {
 	}
 	bucketName := "TestCustomCrXattrAfterMerge"
 	assert := assert.New(t)
-	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCrXattrAfterMerge skipped because source cluster is not ready. Error: %v\n", err)
 		return
 	}
 	defer srcCluster.Close(nil)
-	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCrXattrAfterMerge skipped because target cluster is not ready. Error: %v\n", err)
 		return
@@ -643,7 +646,7 @@ func TestCustomCrXattrAfterMerge(t *testing.T) {
 	assert.NotNil(targetBucket)
 	mergeFunc := "simpleMerge"
 	createMergeFunction(t, mergeFunc)
-	createReplication(t, bucketName, mergeFunc, base.JSFunctionTimeoutDefault, true)
+	createReplication(t, bucketName, mergeFunc, base.JSFunctionTimeoutDefault, true, nil)
 
 	// Create documents at target and then at source to get conflicts
 	keyTime := time.Now().Format(time.RFC3339)
@@ -700,13 +703,13 @@ func TestCustomCrXattrSetBack(t *testing.T) {
 	}
 	assert := assert.New(t)
 	bucketName := "TestCustomCrXattrSetBack"
-	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName)
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCrXattrSetBack skipped because source cluster is not ready. Error: %v\n", err)
 		return
 	}
 	defer srcCluster.Close(nil)
-	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName)
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName, "custom")
 	if err != nil {
 		fmt.Printf("TestCustomCrXattrSetBack skipped because target cluster is not ready. Error: %v\n", err)
 		return
@@ -714,7 +717,7 @@ func TestCustomCrXattrSetBack(t *testing.T) {
 	defer trgCluster.Close(nil)
 	assert.NotNil(sourceBucket)
 	assert.NotNil(targetBucket)
-	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true)
+	createReplication(t, bucketName, base.DefaultMergeFunc, base.JSFunctionTimeoutDefault, true, nil)
 
 	key := time.Now().Format(time.RFC3339) + "_setback"
 	expire := 1 * time.Hour

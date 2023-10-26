@@ -357,30 +357,30 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 	}
 }
 
-func NeedToUpdateXattr(meta *CRMetadata, pruningWindow time.Duration) (bool, error) {
+func NeedToUpdateHlv(meta *CRMetadata, pruningWindow time.Duration) bool {
 	if meta == nil || meta.GetHLV() == nil {
-		return false, fmt.Errorf("HLV not available")
+		return false
 	}
 	hlv := meta.hlv
 	// We need to update if CAS has changed from ver.CAS
 	if hlv.Updated {
-		return true, nil
+		return true
 	}
 
 	// The CAS has not changed. But do we need to prune PV?
 
 	// No pruning if its setting is 0 or there is no hlv to prune
 	if pruningWindow == 0 || hlv == nil || len(hlv.GetPV()) == 0 {
-		return false, nil
+		return false
 	}
 	pv := hlv.GetPV()
 	for _, cas := range pv {
 		// Check for pruning window
 		if base.CasDuration(cas, meta.docMeta.Cas) >= pruningWindow {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 // This routine construct XATTR _vv:{...} based on meta. The constructed XATTRs includes updates for
