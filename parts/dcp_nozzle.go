@@ -526,6 +526,15 @@ func (dcp *DcpNozzle) initializeMemcachedClient(settings metadata.ReplicationSet
 
 func (dcp *DcpNozzle) initializeUprFeed() error {
 	var err error
+	dcp.lock_uprFeed.Lock()
+	defer dcp.lock_uprFeed.Unlock()
+
+	select {
+	case <-dcp.finch:
+		return fmt.Errorf("Stop() has already been executed prior to initializeUprFeed")
+	default:
+		break
+	}
 
 	// xdcr will send ack to upr feed
 	dcp.uprFeed, err = dcp.client.NewUprFeedWithConfigIface(true /*ackByClient*/)
@@ -574,12 +583,11 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.EnableOso = dcp.osoRequested
 		uprFeatures.EnableStreamId = false
 		uprFeatures.SendStreamEndOnClose = !dcp.isMainPipeline() && !dcp.osoRequested // nozzle could initiate streamClose
-		feed := dcp.getUprFeed()
-		if feed == nil {
+		if dcp.uprFeed == nil {
 			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
 			return err
 		}
-		featuresErr, activatedFeatures := feed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
+		featuresErr, activatedFeatures := dcp.uprFeed.UprOpenWithFeatures(uprFeedName, uint32(0) /*seqno*/, base.UprFeedBufferSize, uprFeatures)
 		if featuresErr != nil {
 			err = featuresErr
 			dcp.Logger().Errorf("Trying to activate UPRFeatures received error code: %v", err.Error())
@@ -972,7 +980,6 @@ func (dcp *DcpNozzle) closeUprFeed() error {
 	} else {
 		dcp.Logger().Infof("%v uprfeed is already closed. No-op", dcp.Id())
 	}
-
 	return nil
 }
 
