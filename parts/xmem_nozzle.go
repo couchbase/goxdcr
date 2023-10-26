@@ -406,7 +406,6 @@ func (buf *requestBuffer) enSlot(mcreq *base.WrappedMCRequest, opt SetMetaXattrO
 
 	//increase the occupied_count
 	atomic.AddInt32(&buf.occupied_count, 1)
-
 	return index, reservation_num, item_bytes, nil
 }
 
@@ -1268,7 +1267,6 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			return err
 		}
 		xmem.checkAndUpdateSentStats(item)
-
 		if item != nil {
 			xmem.checkSendDelayInjection()
 
@@ -1408,15 +1406,11 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 	}
 
 	// Send HLV and preserve _sync if necessary
-	if setMetaOptions.sendHlv {
-		err := xmem.updateHlvInXattrForTarget(req)
-		if err != nil {
-			return err
-		}
+	err := xmem.updateSystemXattrForTarget(req, lookup, setMetaOptions)
+	if err != nil {
+		return err
 	}
-	if setMetaOptions.preserveSync {
-		// TODO: If mobile, add _sync from lookup and remove _sync from source request.
-	}
+
 	if lookup == nil || lookup.Resp.Status == mc.KEY_ENOENT {
 		req.Req.Cas = 0
 	} else {
@@ -1984,31 +1978,33 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 	}
 	return nil
 }
-func (xmem *XmemNozzle) updateHlvInXattrForTarget(wrappedReq *base.WrappedMCRequest) (err error) {
+func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCRequest, lookup *base.SubdocLookupResponse, setOpt SetMetaXattrOptions) (err error) {
+	if !setOpt.sendHlv && !setOpt.preserveSync {
+		return
+	}
 	if err := xmem.uncompressBody(wrappedReq); err != nil {
 		return err
 	}
-	doc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
-	meta, err := doc.GetMetadata()
-	if err != nil {
-		return err
-	}
 
-	if needTo, err := crMeta.NeedToUpdateXattr(meta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second); needTo == false || err != nil {
-		return err
+	maxBodyIncrease := 0
+	if setOpt.sendHlv {
+		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 */ + len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
+			len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
+			len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
+			len(xmem.sourceBucketId) + 3 /* "<clusterId>", */ +
+			len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ +
+			18 /* "0x<16byte>"} */
 	}
-
-	req := wrappedReq.Req
+	var targetSyncVal []byte
+	if setOpt.preserveSync {
+		targetSyncVal, _ = lookup.ResponseForAPath(base.XATTR_MOBILE)
+		maxBodyIncrease = maxBodyIncrease + len(targetSyncVal)
+	}
 
 	// Now we need to update CCR metadata either because of new changes or because we have to prune
 	// The max increase in body length is adding 2 uint32 and _vv\x00{"cvCas":"0x...","src":"<clusterId>","ver":"0x..."}\x00
+	req := wrappedReq.Req
 	body := req.Body
-	var maxBodyIncrease = 8 /* 2 uint32 */ + len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
-		len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
-		len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
-		len(xmem.sourceBucketId) + 3 /* "<clusterId>", */ +
-		len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ +
-		18 /* "0x<16byte>"} */
 	newbodyLen := len(body) + maxBodyIncrease
 	newbody, err := xmem.dataPool.GetByteSlice(uint64(newbodyLen))
 	if err != nil {
@@ -2024,27 +2020,40 @@ func (xmem *XmemNozzle) updateHlvInXattrForTarget(wrappedReq *base.WrappedMCRequ
 	}
 
 	xattrComposer := base.NewXattrComposer(newbody)
+	hlvUpdated := false
+	if setOpt.sendHlv {
+		doc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
+		meta, err := doc.GetMetadata()
+		if err != nil {
+			return err
+		}
 
-	_, err = crMeta.ConstructXattrFromHlvForSetMeta(meta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
-	if err != nil {
-		// TODO (MB-44587): Remove before shipping. This should never happen unless we badly formated _xdcr.pc/_xdcr_mv..
-		panic(fmt.Sprintf("%v, updateHlvInXattrForTarget encountered error %v. This may cause unnecessary merge.", xmem.Id(), err))
+		if crMeta.NeedToUpdateHlv(meta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second) {
+			_, err = crMeta.ConstructXattrFromHlvForSetMeta(meta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
+			if err != nil {
+				return err
+			}
+			hlvUpdated = true
+		}
+	}
+	if setOpt.preserveSync && len(targetSyncVal) > 0 {
+		xattrComposer.WriteKV([]byte(base.XATTR_MOBILE), targetSyncVal)
 	}
 
 	if req.DataType&mcc.XattrDataType > 0 {
-		// Preserve all non-CCR Xattributes
+		// Preserve all Xattributes except source _sync and old HLV if it has been updated
 		it, err := base.NewXattrIterator(body)
 		if err != nil {
-			xmem.Logger().Errorf("%v: updateHlvInXattrForTarget received error '%v' from NewXattrIterator for key %v%s%v", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
+			xmem.Logger().Errorf("%v: updateSystemXattrForTarget received error '%v' from NewXattrIterator for key %v%s%v", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
 			return err
 		}
 		for it.HasNext() {
 			key, value, err := it.Next()
 			if err != nil {
-				xmem.Logger().Errorf("%v: updateHlvInXattrForTarget received error '%v' iterating through XATTR for key %v%s%v,", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
+				xmem.Logger().Errorf("%v: updateSystemXattrForTarget received error '%v' iterating through XATTR for key %v%s%v,", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
 				return err
 			}
-			if base.Equals(key, base.XATTR_HLV) {
+			if (hlvUpdated && base.Equals(key, base.XATTR_HLV)) || base.Equals(key, base.XATTR_MOBILE) {
 				continue
 			}
 			err = xattrComposer.WriteKV(key, value)
@@ -2313,7 +2322,6 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	if err != nil {
 		return err
 	}
-
 	err = xmem.initializeCompressionSettings(settings)
 	if err != nil {
 		return err
@@ -2598,29 +2606,29 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 								}
 								_, err = xmem.buf.modSlot(pos, markThenResend)
 							} else {
-								if response.Status == mc.XATTR_EINVAL && xmem.useCasLocking() {
+								if response.Status == mc.XATTR_EINVAL {
 									// There is something wrong with XATTR. This should never happen in released version.
 									// Print the CCR XATTR for debugging
 									if req.DataType&mcc.SnappyDataType == mcc.SnappyDataType {
 										body, err := snappy.Decode(nil, req.Body)
 										if err == nil {
 											xattrlen := binary.BigEndian.Uint32(body[0:4])
-											ccrxattrlen := binary.BigEndian.Uint32(body[4:8])
-											xmem.Logger().Errorf("%v received error response %v for key %v%s%v with compressed body. Total xattr length %v, custom CR xattr length %v, CCR xattr: %v",
-												xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, ccrxattrlen, body[8:ccrxattrlen+8])
+											bodyWithoutXattr, err := base.StripXattrAndGetBody(body)
+											xmem.Logger().Errorf("%v received error response %v for key %v%s%v with compressed body. Total xattr length %v, body with xattr: %q, body without xattr: %q, err %v",
+												xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, body, bodyWithoutXattr, err)
 										} else {
 											xmem.Logger().Errorf("%v received error response %v for key %v%s%v with compressed body. Decode failed with error %v",
 												xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, err)
 										}
 									} else {
 										xattrlen := binary.BigEndian.Uint32(req.Body[0:4])
-										ccrxattrlen := binary.BigEndian.Uint32(req.Body[4:8])
-										xmem.Logger().Errorf("%v received error response %v for key %v%s%v with uncompressed body. Total xattr length %v, custom CR xattr length %v, CCR xattr: %v",
-											xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, ccrxattrlen, req.Body[8:ccrxattrlen+8])
+										bodyWithoutXattr, err := base.StripXattrAndGetBody(req.Body)
+										xmem.Logger().Errorf("%v received error response %v for key %v%s%v with uncompressed body. Total xattr length %v, body with xattr: %q, body without xattr %q, err: %v",
+											xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, req.Body, bodyWithoutXattr, err)
 									}
 								}
 								// for other non-temporary errors, repair connections
-								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Datatype=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.DataType, req.Cas, req.Extras)
 								xmem.client_for_setMeta.ReportUnknownResponseReceived(response.Status)
 
 								nonTempErrReceived = true

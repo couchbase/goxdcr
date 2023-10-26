@@ -35,12 +35,14 @@ CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+cluster2BucketsArr=("B0" "B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster2BucketsArr[@]})
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
 declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
-insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+declare -A Bucket0Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active" ["flushEnabled"]=1)
+insertPropertyIntoBucketNamePropertyMap "B0" Bucket0Properties
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
