@@ -219,7 +219,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 			for j := RequestType; j < InvalidType; j++ {
 				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
 			}
-			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc)
+			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.xdcrCompSvc)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
