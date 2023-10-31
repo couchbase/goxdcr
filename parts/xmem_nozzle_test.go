@@ -719,7 +719,7 @@ func checkTarget(bucket *gocb.Bucket, key, path string, expectedValue []byte, is
 	return fmt.Errorf("value %q is not expected %q", value, expectedValue)
 }
 
-// This test was useful in development but is disabled because TestMobilePreserveSync is sufficient
+// This test was useful in development but is disabled. TestMobilePreserveSync is used instead
 func DISABLE_TestMobilePreserveSyncLiveRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestMobilePreserveSyncLiveRep =================")
 	defer fmt.Println("============== Test case end: TestMobilePreserveSyncLiveRep =================")
@@ -727,15 +727,20 @@ func DISABLE_TestMobilePreserveSyncLiveRep(t *testing.T) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
-	bucketName := "syncTest"
+	mobilePreserveSyncLiveRep(t, "syncTestLWW", "lww")
+	mobilePreserveSyncLiveRep(t, "syncTestRevId", "seqno")
+	mobilePreserveSyncLiveRep(t, "syncTestCustom", "custom")
+}
+func mobilePreserveSyncLiveRep(t *testing.T, bucketName string, crType gocb.ConflictResolutionType) {
+	fmt.Printf("running with CR type %s \n", crType)
 	assert := assert.New(t)
-	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName, "custom")
+	srcCluster, sourceBucket, err := createBucket(sourceConnStr, bucketName, crType)
 	if err != nil {
 		fmt.Printf("TestMobilePreserveSyncLiveRep skipped because source cluster is not ready. Error: %v\n", err)
 		return
 	}
 	defer srcCluster.Close(nil)
-	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName, "custom")
+	trgCluster, targetBucket, err := createBucket(targetConnStr, bucketName, crType)
 	if err != nil {
 		fmt.Printf("TestMobilePreserveSyncLiveRep skipped because target cluster is not ready. Error: %v\n", err)
 		return
@@ -749,7 +754,6 @@ func DISABLE_TestMobilePreserveSyncLiveRep(t *testing.T) {
 
 	// Test 1. syncTestDoc1 has sync. Target does not have the document. _sync should be skipped
 	key := "Doc1" + time.Now().Format(time.RFC3339)
-	fmt.Printf("Test 1: Insert %v and expect no _sync XATTR at target\n", key)
 	upsOut, err := sourceBucket.DefaultCollection().Upsert(key,
 		User{Id: "kingarthur",
 			Email:     "kingarthur@couchbase.com",
