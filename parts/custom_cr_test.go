@@ -95,7 +95,9 @@ func createReplication(t *testing.T, bucketName string, mergeFunction string, ti
 	data.Add("toCluster", toCluster)
 	data.Add("toBucket", bucketName)
 	data.Add("replicationType", "continuous")
-	data.Add("mergeFunctionMapping", "{\""+base.BucketMergeFunctionKey+"\":\""+mergeFunction+"\"}")
+	if len(mergeFunction) > 0 {
+		data.Add("mergeFunctionMapping", "{\""+base.BucketMergeFunctionKey+"\":\""+mergeFunction+"\"}")
+	}
 	//data.Add("logLevel", "Debug")
 	data.Add(base.JSFunctionTimeoutKey, fmt.Sprintf("%v", timeout))
 	for key, value := range settings {

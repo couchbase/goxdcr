@@ -887,9 +887,7 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	xmem.childrenWaitGrp.Add(1)
 	go xmem.processData_sendbatch(xmem.finish_ch, &xmem.childrenWaitGrp)
 
-	if xmem.source_cr_mode == base.CRMode_Custom || xmem.config.crossClusterVers {
-		xmem.dataPool = base.NewDataPool()
-	}
+	xmem.dataPool = base.NewDataPool()
 
 	xmem.start_time = time.Now()
 
@@ -1111,7 +1109,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				goto done
 			}
 
-			if len(xmem.batch.getMetaSpec) == 0 {
+			if len(batch.getMetaSpec) == 0 {
 				// There is no getMetaSpec. This is the default code path with no CCR or mobile.
 				// We get meta to find what needs not be sent. If getMeta fails, we just send and let target
 				// perform CR.
@@ -2067,7 +2065,9 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr)
 	req.Body = out
 	if atLeastOneXattr {
-		req.DataType = req.DataType | mcc.XattrDataType
+		req.DataType = req.DataType | base.PROTOCOL_BINARY_DATATYPE_XATTR
+	} else {
+		req.DataType = req.DataType & ^(base.PROTOCOL_BINARY_DATATYPE_XATTR)
 	}
 	return nil
 }
