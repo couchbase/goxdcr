@@ -87,4 +87,6 @@ type XDCRCompTopologySvc interface {
 	// Note that the setting is cluster wide but may take some time to sync during network partition
 	// Thus, code that uses this should check for specific string of ErrorStringClientCertMandatory
 	ClientCertIsMandatory() (bool, error)
+
+	IsOrchestratorNode() (bool, error)
 }

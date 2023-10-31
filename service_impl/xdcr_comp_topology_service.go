@@ -59,6 +59,72 @@ type XDCRTopologySvc struct {
 	cachedClientCertMandatory      bool
 	cachedClientCertMandatoryErr   error
 	cachedClientCertMandatoryTimer *time.Timer
+
+	clusterCompatRLO *RateLimitOperatorCache
+	terseInfoRLO     *RateLimitOperatorCache
+}
+
+type RateLimitOperatorCache struct {
+	cachedMtx   sync.RWMutex
+	cachedInfo  interface{}
+	cachedErr   error
+	cachedTimer *time.Timer
+
+	id               string
+	warningThreshold time.Duration
+	cooldownPeriod   time.Duration
+	utils            utilities.UtilsIface
+	op               RateLimitOperator
+}
+
+type RateLimitOperator func() (interface{}, error)
+
+func NewRateLimitOperatorCache(id string, warningThreshold, cooldownPeriod time.Duration, op RateLimitOperator, utils utilities.UtilsIface) *RateLimitOperatorCache {
+	return &RateLimitOperatorCache{
+		cachedMtx:        sync.RWMutex{},
+		cachedInfo:       nil,
+		cachedErr:        nil,
+		cachedTimer:      nil,
+		id:               id,
+		warningThreshold: warningThreshold,
+		cooldownPeriod:   cooldownPeriod,
+		utils:            utils,
+		op:               op,
+	}
+}
+
+func (r *RateLimitOperatorCache) GetResult() (interface{}, error) {
+	r.cachedMtx.RLock()
+	// Timer's existence determines whether or not we're in cool down period
+	if r.cachedTimer != nil {
+		r.cachedMtx.RUnlock()
+		return r.cachedInfo, r.cachedErr
+	}
+
+	// Upgrade lock
+	r.cachedMtx.RUnlock()
+	r.cachedMtx.Lock()
+	defer r.cachedMtx.Unlock()
+
+	if r.cachedTimer != nil {
+		// someone sneaked in
+		return r.cachedInfo, r.cachedErr
+	}
+
+	stopFunc := r.utils.StartDiagStopwatch(r.id, r.warningThreshold)
+	defer stopFunc()
+
+	r.cachedInfo, r.cachedErr = r.op()
+
+	r.cachedTimer = time.AfterFunc(r.cooldownPeriod, func() {
+		r.cachedMtx.Lock()
+		r.cachedTimer = nil
+		r.cachedErr = nil
+		r.cachedInfo = nil
+		r.cachedMtx.Unlock()
+	})
+
+	return r.cachedInfo, r.cachedErr
 }
 
 func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
@@ -72,6 +138,13 @@ func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 		logger:       log.NewLogger("TopoSvc", logger_ctx),
 		utils:        utilsIn,
 	}
+
+	top_svc.clusterCompatRLO = NewRateLimitOperatorCache("topSvc.MyClusterCompat()", base.DiagInternalThreshold,
+		base.TopologySvcCoolDownPeriod, top_svc.myClusterCompatibilityOp, utilsIn)
+
+	top_svc.terseInfoRLO = NewRateLimitOperatorCache("topSvc.TerseInfo()", base.DiagInternalThreshold,
+		base.RefreshRemoteClusterRefInterval, top_svc.getTerseInfoOp, utilsIn)
+
 	if ipv4 == base.IpFamilyRequiredOption {
 		top_svc.ipv4 = base.IpFamilyRequired
 	} else if ipv4 == base.IpFamilyOptionalOption {
@@ -437,65 +510,28 @@ func (top_svc *XDCRTopologySvc) MyNodeVersion() (string, error) {
 }
 
 func (top_svc *XDCRTopologySvc) MyClusterCompatibility() (int, error) {
+	result, err := top_svc.clusterCompatRLO.GetResult()
+	return result.(int), err
+}
+
+func (top_svc *XDCRTopologySvc) myClusterCompatibilityOp() (interface{}, error) {
 	var defaultPoolsInfo map[string]interface{}
 
-	top_svc.cachedClusterCompatMtx.RLock()
-	// Timer's existence determines whether or not we're in cool down period
-	if top_svc.cachedClusterCompatTimer != nil {
-		// still within cooldown period - return cached information
-		top_svc.cachedClusterCompatMtx.RUnlock()
-		return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
-	}
-
-	// Upgrade lock
-	top_svc.cachedClusterCompatMtx.RUnlock()
-	top_svc.cachedClusterCompatMtx.Lock()
-
-	if top_svc.cachedClusterCompatTimer != nil {
-		// someone sneaked in
-		top_svc.cachedClusterCompatMtx.Unlock()
-		return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
-	}
-
-	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.MyClusterCompat()", base.DiagInternalThreshold)
-	defer stopFunc()
-
-	var cooldownPeriod = base.TopologySvcCoolDownPeriod
 	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.DefaultPoolPath, false, base.MethodGet, "", nil, 0, &defaultPoolsInfo, top_svc.logger)
+
 	if err != nil || statusCode != http.StatusOK {
-		cooldownPeriod = base.TopologySvcErrCoolDownPeriod
 		retErr := errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.DefaultPoolPath, err, statusCode))
-		top_svc.cachedClusterCompatErr = retErr
-		top_svc.cachedClusterCompat = -1
+		return -1, retErr
 	}
 
-	if err == nil {
-		var nodeList []interface{}
-		nodeList, err = top_svc.utils.GetNodeListFromInfoMap(defaultPoolsInfo, top_svc.logger)
-		if err != nil || len(nodeList) == 0 {
-			cooldownPeriod = base.TopologySvcErrCoolDownPeriod
-			err = fmt.Errorf("Can't get nodes information, err=%v", err)
-			top_svc.cachedClusterCompatErr = err
-			top_svc.cachedClusterCompat = -1
-		} else {
-			top_svc.cachedClusterCompat, err = top_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
-			if err != nil {
-				cooldownPeriod = base.TopologySvcErrCoolDownPeriod
-			}
-			top_svc.cachedClusterCompatErr = err
-		}
+	var nodeList []interface{}
+	nodeList, err = top_svc.utils.GetNodeListFromInfoMap(defaultPoolsInfo, top_svc.logger)
+	if err != nil || len(nodeList) == 0 {
+		err = fmt.Errorf("Can't get nodes information, err=%v", err)
+		return -1, err
+	} else {
+		return top_svc.utils.GetClusterCompatibilityFromNodeList(nodeList)
 	}
-
-	top_svc.cachedClusterCompatTimer = time.AfterFunc(cooldownPeriod, func() {
-		top_svc.cachedClusterCompatMtx.Lock()
-		top_svc.cachedClusterCompatTimer = nil
-		top_svc.cachedClusterCompatErr = nil
-		top_svc.cachedClusterCompat = 0
-		top_svc.cachedClusterCompatMtx.Unlock()
-	})
-
-	top_svc.cachedClusterCompatMtx.Unlock()
-	return top_svc.cachedClusterCompat, top_svc.cachedClusterCompatErr
 }
 
 func (top_svc *XDCRTopologySvc) IsMyClusterDeveloperPreview() bool {
@@ -630,4 +666,58 @@ func (top_svc *XDCRTopologySvc) clearCachedClientCertCache() {
 	top_svc.cachedClientCertMandatoryErr = nil
 	top_svc.cachedClientCertMandatory = false
 	top_svc.cachedClientCertMandatoryMtx.Unlock()
+}
+
+func (top_svc *XDCRTopologySvc) getTerseInfoOp() (interface{}, error) {
+	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate,
+		clientKey, err := top_svc.MyCredentials()
+	if err != nil {
+		return nil, err
+	}
+
+	connStr, err := top_svc.MyConnectionStr()
+	if err != nil {
+		return nil, err
+	}
+
+	terseInfo, err := top_svc.utils.GetTerseInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_svc.logger)
+	return terseInfo, err
+}
+
+func (top_svc *XDCRTopologySvc) IsOrchestratorNode() (bool, error) {
+	terseInfoRaw, terseErr := top_svc.terseInfoRLO.GetResult()
+	if terseErr != nil {
+		return false, terseErr
+	}
+
+	terseInfo, ok := terseInfoRaw.(map[string]interface{})
+	if !ok {
+		return false, fmt.Errorf("Wrong type for terseInfo: %v", reflect.TypeOf(terseInfoRaw))
+	}
+
+	orchestratorNodeAddressRaw, ok := terseInfo[base.OrchestratorNodeKey]
+	if !ok {
+		return false, fmt.Errorf("%v not found in terseInfo", base.OrchestratorNodeKey)
+	}
+
+	orchestratorAddress, ok := orchestratorNodeAddressRaw.(string)
+	if !ok {
+		return false, fmt.Errorf("Wrong type for orchestratorAddress: %v", reflect.TypeOf(orchestratorNodeAddressRaw))
+	}
+
+	//"n_0@127.0.0.1"
+	hostInfo, err := top_svc.getHostInfo()
+	if err != nil {
+		return false, err
+	}
+
+	otpNodeName, ok := hostInfo[base.OtpNodeKey].(string)
+	if !ok {
+		return false, fmt.Errorf("Uable to find otpNode")
+	}
+
+	if otpNodeName == orchestratorAddress {
+		return true, nil
+	}
+	return false, nil
 }
