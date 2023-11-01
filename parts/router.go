@@ -118,14 +118,13 @@ type Router struct {
 	routingMap map[uint16]string // pvbno -> partId. This defines the loading balancing strategy of which vbnos would be routed to which part
 	topic      string
 	// whether lww conflict resolution mode has been enabled
-	sourceCRMode     base.ConflictResolutionMode
-	utils            utilities.UtilsIface
-	expDelMode       FilterExpDelAtomicType
-	collectionModes  CollectionsMgtAtomicType
-	mobileCompatible uint32
-	started          uint32
-	stopped          uint32
-	finCh            chan bool
+	sourceCRMode    base.ConflictResolutionMode
+	utils           utilities.UtilsIface
+	expDelMode      FilterExpDelAtomicType
+	collectionModes CollectionsMgtAtomicType
+	started         uint32
+	stopped         uint32
+	finCh           chan bool
 
 	throughputThrottlerSvc service_def.ThroughputThrottlerSvc
 	// whether the current replication is a high priority replication
@@ -1406,7 +1405,6 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		remoteClusterCapability:  remoteClusterCapability,
 		migrationUIRaiser:        migrationUIRaiser,
 		connectivityStatusGetter: connectivityStatusGetter,
-		mobileCompatible:         uint32(mobileCompatible),
 		finCh:                    make(chan bool),
 	}
 
@@ -1527,8 +1525,7 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 		event.Opcode == mc.UPR_EXPIRATION {
 
 		extrasSize := 24
-		mobile := router.getMobileCompatibility() != base.MobileCompatibilityOff
-		if router.sourceCRMode == base.CRMode_LWW || router.sourceCRMode == base.CRMode_Custom || event.Opcode == mc.UPR_EXPIRATION || mobile {
+		if router.sourceCRMode == base.CRMode_LWW || router.sourceCRMode == base.CRMode_Custom || event.Opcode == mc.UPR_EXPIRATION {
 			extrasSize = 28
 		}
 		if len(req.Extras) != extrasSize {
@@ -1547,12 +1544,11 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 			options |= base.FORCE_ACCEPT_WITH_META_OPS
 		} else if router.sourceCRMode == base.CRMode_Custom {
 			// Custom conflict resolution behaves the same as LWW in KV.
+			// For mobile, we also skip target conflict resolution. This will be done in xmem based on
+			// whether the mutation is being sent to target with mobile enabled. Setting it here can have
+			// race condition since the setting cab change in the middle of the replication.
 			options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
 			options |= base.FORCE_ACCEPT_WITH_META_OPS
-		}
-		if mobile {
-			// preserve mobile _sync is done at source only. We skip target CR and do cas locking
-			options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
 		}
 		if event.Opcode == mc.UPR_EXPIRATION {
 			options |= base.IS_EXPIRATION
@@ -1934,12 +1930,7 @@ func (router *Router) updateHighRepl(isHighReplicationObj interface{}) error {
 }
 
 func (router *Router) setMobileCompatibility(val uint32) {
-	atomic.StoreUint32(&router.mobileCompatible, val)
 	router.filter.SetMobileCompatibility(val)
-}
-
-func (router *Router) getMobileCompatibility() uint32 {
-	return atomic.LoadUint32(&router.mobileCompatible)
 }
 
 func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
