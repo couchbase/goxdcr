@@ -1409,12 +1409,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 		return err
 	}
 
-	if lookup == nil || lookup.Resp.Status == mc.KEY_ENOENT {
-		req.Req.Cas = 0
-	} else {
-		// Cas locking
-		req.Req.Cas = lookup.Resp.Cas
-	}
+	xmem.setCasLocking(req, lookup, setMetaOptions)
 
 	// Compress it if needed
 	if (setMetaOptions.sendHlv || setMetaOptions.preserveSync) && mc_req.DataType&mcc.SnappyDataType == 0 {
@@ -1439,6 +1434,25 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 	}
 	req.UpdateReqBytes()
 	return nil
+}
+
+func (xmem *XmemNozzle) setCasLocking(req *base.WrappedMCRequest, lookup *base.SubdocLookupResponse, opt SetMetaXattrOptions) {
+	if lookup == nil || lookup.Resp.Status == mc.KEY_ENOENT {
+		req.Req.Cas = 0
+	} else {
+		// Cas locking, meaning the request will only succeed if the target Cas matches this value
+		req.Req.Cas = lookup.Resp.Cas
+	}
+	if opt.noTargetCR {
+		if len(req.Req.Extras) < 28 {
+			extras := make([]byte, 28)
+			copy(extras, req.Req.Extras)
+			req.Req.Extras = extras
+		}
+		options := binary.BigEndian.Uint32(req.Req.Extras[24:28])
+		options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
+		binary.BigEndian.PutUint32(req.Req.Extras[24:28], options)
+	}
 }
 
 func (xmem *XmemNozzle) getConflictDetector(source_cr_mode base.ConflictResolutionMode) (ret ConflictResolver) {
