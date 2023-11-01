@@ -373,6 +373,53 @@ func (_c *P2PManager_SendDelBackfill_Call) RunAndReturn(run func(string) error) 
 	return _c
 }
 
+// SendHeartbeatToRemoteV1 provides a mock function with given fields: reference, specs
+func (_m *P2PManager) SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification) error {
+	ret := _m.Called(reference, specs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SendHeartbeatToRemoteV1")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, []*metadata.ReplicationSpecification) error); ok {
+		r0 = rf(reference, specs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// P2PManager_SendHeartbeatToRemoteV1_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SendHeartbeatToRemoteV1'
+type P2PManager_SendHeartbeatToRemoteV1_Call struct {
+	*mock.Call
+}
+
+// SendHeartbeatToRemoteV1 is a helper method to define mock.On call
+//   - reference *metadata.RemoteClusterReference
+//   - specs []*metadata.ReplicationSpecification
+func (_e *P2PManager_Expecter) SendHeartbeatToRemoteV1(reference interface{}, specs interface{}) *P2PManager_SendHeartbeatToRemoteV1_Call {
+	return &P2PManager_SendHeartbeatToRemoteV1_Call{Call: _e.mock.On("SendHeartbeatToRemoteV1", reference, specs)}
+}
+
+func (_c *P2PManager_SendHeartbeatToRemoteV1_Call) Run(run func(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification)) *P2PManager_SendHeartbeatToRemoteV1_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.RemoteClusterReference), args[1].([]*metadata.ReplicationSpecification))
+	})
+	return _c
+}
+
+func (_c *P2PManager_SendHeartbeatToRemoteV1_Call) Return(_a0 error) *P2PManager_SendHeartbeatToRemoteV1_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *P2PManager_SendHeartbeatToRemoteV1_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, []*metadata.ReplicationSpecification) error) *P2PManager_SendHeartbeatToRemoteV1_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SendManifests provides a mock function with given fields: spec, manifests
 func (_m *P2PManager) SendManifests(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) error {
 	ret := _m.Called(spec, manifests)

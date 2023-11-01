@@ -718,6 +718,7 @@ var VersionForClientCertSupport = ServerVersion{5, 5}
 var VersionForHttpScramShaSupport = ServerVersion{5, 5}
 var VersionForCollectionSupport = ServerVersion{7, 0}
 var VersionForAdvErrorMapSupport = ServerVersion{7, 5}
+var VersionForHeartbeatSupport = ServerVersion{8, 0}
 
 // ns_server and support would like to start seeing 3 digits for versions
 var VersionForAdvFilteringSupport = ServerVersion{6, 5, 0}
@@ -730,6 +731,7 @@ var VersionForSupportability = ServerVersion{7, 6, 0}
 var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
 var VersionForMobileSupport = ServerVersion{7, 6, 4}
 var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
+var VersionForSrcHeartbeatSupport = ServerVersion{8, 0, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -918,6 +920,9 @@ var CapiDataChanSizeMultiplier = 1
 
 // interval for refreshing remote cluster references
 var RefreshRemoteClusterRefInterval = 15 * time.Second
+
+// interval for potentially posting heartbeats
+var RemoteHeartbeatCheckInterval = 15 * time.Second
 
 // max retry for capi batchUpdateDocs operation
 var CapiMaxRetryBatchUpdateDocs = 6

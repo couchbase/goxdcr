@@ -1103,6 +1103,39 @@ func (_c *RemoteClusterSvc_SetBucketTopologySvc_Call) RunAndReturn(run func(serv
 	return _c
 }
 
+// SetHeartbeatSenderAPI provides a mock function with given fields: api
+func (_m *RemoteClusterSvc) SetHeartbeatSenderAPI(api service_def.ClusterHeartbeatAPI) {
+	_m.Called(api)
+}
+
+// RemoteClusterSvc_SetHeartbeatSenderAPI_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetHeartbeatSenderAPI'
+type RemoteClusterSvc_SetHeartbeatSenderAPI_Call struct {
+	*mock.Call
+}
+
+// SetHeartbeatSenderAPI is a helper method to define mock.On call
+//   - api service_def.ClusterHeartbeatAPI
+func (_e *RemoteClusterSvc_Expecter) SetHeartbeatSenderAPI(api interface{}) *RemoteClusterSvc_SetHeartbeatSenderAPI_Call {
+	return &RemoteClusterSvc_SetHeartbeatSenderAPI_Call{Call: _e.mock.On("SetHeartbeatSenderAPI", api)}
+}
+
+func (_c *RemoteClusterSvc_SetHeartbeatSenderAPI_Call) Run(run func(api service_def.ClusterHeartbeatAPI)) *RemoteClusterSvc_SetHeartbeatSenderAPI_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(service_def.ClusterHeartbeatAPI))
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetHeartbeatSenderAPI_Call) Return() *RemoteClusterSvc_SetHeartbeatSenderAPI_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetHeartbeatSenderAPI_Call) RunAndReturn(run func(service_def.ClusterHeartbeatAPI)) *RemoteClusterSvc_SetHeartbeatSenderAPI_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetMetadataChangeHandlerCallback provides a mock function with given fields: callBack
 func (_m *RemoteClusterSvc) SetMetadataChangeHandlerCallback(callBack base.MetadataChangeHandlerCallback) {
 	_m.Called(callBack)
@@ -1179,6 +1212,39 @@ func (_c *RemoteClusterSvc_SetRemoteCluster_Call) Return(_a0 error) *RemoteClust
 }
 
 func (_c *RemoteClusterSvc_SetRemoteCluster_Call) RunAndReturn(run func(string, *metadata.RemoteClusterReference) error) *RemoteClusterSvc_SetRemoteCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetReplReader provides a mock function with given fields: reader
+func (_m *RemoteClusterSvc) SetReplReader(reader service_def.ReplicationSpecReader) {
+	_m.Called(reader)
+}
+
+// RemoteClusterSvc_SetReplReader_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetReplReader'
+type RemoteClusterSvc_SetReplReader_Call struct {
+	*mock.Call
+}
+
+// SetReplReader is a helper method to define mock.On call
+//   - reader service_def.ReplicationSpecReader
+func (_e *RemoteClusterSvc_Expecter) SetReplReader(reader interface{}) *RemoteClusterSvc_SetReplReader_Call {
+	return &RemoteClusterSvc_SetReplReader_Call{Call: _e.mock.On("SetReplReader", reader)}
+}
+
+func (_c *RemoteClusterSvc_SetReplReader_Call) Run(run func(reader service_def.ReplicationSpecReader)) *RemoteClusterSvc_SetReplReader_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(service_def.ReplicationSpecReader))
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetReplReader_Call) Return() *RemoteClusterSvc_SetReplReader_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetReplReader_Call) RunAndReturn(run func(service_def.ReplicationSpecReader)) *RemoteClusterSvc_SetReplReader_Call {
 	_c.Call.Return(run)
 	return _c
 }

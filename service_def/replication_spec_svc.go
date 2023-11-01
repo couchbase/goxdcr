@@ -24,9 +24,19 @@ type UIWarnings interface {
 	AddWarning(key string, val string)
 }
 
-type ReplicationSpecSvc interface {
+type ReplicationSpecReader interface {
 	ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	ReplicationSpecReadOnly(replicationId string) (*metadata.ReplicationSpecification, error)
+	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
+	AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error)
+	AllReplicationSpecIds() ([]string, error)
+	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)
+	AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)
+}
+
+type ReplicationSpecSvc interface {
+	ReplicationSpecReader
+
 	// additionalInfo is an optional parameter, which, if provided, will be written to replication creation ui log
 	AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error
 	ValidateNewReplicationSpec(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, UIWarnings, *metadata.CollectionsManifestPair)
@@ -34,11 +44,6 @@ type ReplicationSpecSvc interface {
 	SetReplicationSpec(spec *metadata.ReplicationSpecification) error
 	DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error)
 	DelReplicationSpecWithReason(replicationId string, reason string) (*metadata.ReplicationSpecification, error)
-	AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error)
-	AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error)
-	AllReplicationSpecIds() ([]string, error)
-	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)
-	AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)
 
 	// checks if an error returned by the replication spec service is an internal server error or a validation error,
 	// e.g., an error indicating the replication spec involved should exist but does not, or the other way around

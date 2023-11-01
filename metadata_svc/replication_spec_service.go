@@ -179,6 +179,7 @@ func NewReplicationSpecService(uilog_svc service_def.UILogSvc, remote_cluster_sv
 		replicationSettingSvc:  replicationSettingsSvc,
 	}
 
+	remote_cluster_svc.SetReplReader(svc)
 	return svc, svc.initCacheFromMetaKV()
 }
 

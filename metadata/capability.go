@@ -26,6 +26,9 @@ type Capability struct {
 
 	// Advanced Xerror error map support
 	advErrorMapSupport uint32
+
+	// Remote cluster to accept heartbeat from sources
+	heartbeatSupport uint32
 }
 
 func (c *Capability) Reset() {
@@ -49,10 +52,15 @@ func (c Capability) HasAdvErrorMapSupport() bool {
 	return atomic.LoadUint32(&c.advErrorMapSupport) > 0
 }
 
+func (c Capability) HasHeartbeatSupport() bool {
+	return atomic.LoadUint32(&c.heartbeatSupport) > 0
+}
+
 func (c Capability) IsSameAs(otherCap Capability) bool {
 	// No slices or other reference types so simple comparison
 	return c.HasCollectionSupport() == otherCap.HasCollectionSupport() &&
-		c.HasAdvErrorMapSupport() == otherCap.HasAdvErrorMapSupport()
+		c.HasAdvErrorMapSupport() == otherCap.HasAdvErrorMapSupport() &&
+		c.HasHeartbeatSupport() == otherCap.HasHeartbeatSupport()
 }
 
 func (c *Capability) LoadFromOther(otherCap Capability) {
@@ -62,6 +70,9 @@ func (c *Capability) LoadFromOther(otherCap Capability) {
 	}
 	if otherCap.HasAdvErrorMapSupport() {
 		atomic.StoreUint32(&c.advErrorMapSupport, 1)
+	}
+	if otherCap.HasHeartbeatSupport() {
+		atomic.StoreUint32(&c.heartbeatSupport, 1)
 	}
 	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 }
@@ -84,6 +95,9 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 	if !c.HasAdvErrorMapSupport() && base.IsClusterCompatible(clusterCompatibility, base.VersionForAdvErrorMapSupport) {
 		atomic.StoreUint32(&c.advErrorMapSupport, 1)
 	}
+	if !c.HasHeartbeatSupport() && base.IsClusterCompatible(clusterCompatibility, base.VersionForHeartbeatSupport) {
+		atomic.StoreUint32(&c.heartbeatSupport, 1)
+	}
 
 	atomic.CompareAndSwapUint32(&c.initialized, 0, 1)
 	return nil
@@ -91,9 +105,9 @@ func (c *Capability) LoadFromDefaultPoolInfo(defaultPoolInfo map[string]interfac
 
 // Unit Test Only
 func UnitTestGetDefaultCapability() Capability {
-	return Capability{1, 0, 0}
+	return Capability{1, 0, 0, 0}
 }
 
 func UnitTestGetCollectionsCapability() Capability {
-	return Capability{1, 1, 0}
+	return Capability{1, 1, 0, 1}
 }

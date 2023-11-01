@@ -2107,18 +2107,28 @@ type SourceHeartbeatReq struct {
 	specs             []*metadata.ReplicationSpecification
 }
 
-func NewSourceHeartbeatReq(common RequestCommon) *SourceHeartbeatReq {
-	req := &SourceHeartbeatReq{RequestCommon: common}
+func NewSourceHeartbeatReq() *SourceHeartbeatReq {
+	req := &SourceHeartbeatReq{}
 	req.ReqType = ReqSrcHeartbeat
 	return req
+}
+
+func NewSourceHeartbeatReqWithCommon(common RequestCommon) *SourceHeartbeatReq {
+	return NewSourceHeartbeatReq().SetCommon(common)
+}
+
+func (s *SourceHeartbeatReq) SetCommon(common RequestCommon) *SourceHeartbeatReq {
+	s.RequestCommon = common
+	return s
 }
 
 func (s *SourceHeartbeatReq) AppendSpec(spec *metadata.ReplicationSpecification) {
 	s.specs = append(s.specs, spec)
 }
 
-func (s *SourceHeartbeatReq) SetUUID(uuid string) {
+func (s *SourceHeartbeatReq) SetUUID(uuid string) *SourceHeartbeatReq {
 	s.SourceClusterUUID = uuid
+	return s
 }
 
 func (s *SourceHeartbeatReq) Serialize() ([]byte, error) {

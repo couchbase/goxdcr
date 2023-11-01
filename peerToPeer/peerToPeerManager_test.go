@@ -96,7 +96,7 @@ func TestPeerToPeerMgrSendVBCheck(t *testing.T) {
 	getBackfillMgr := func() service_def_real.BackfillMgrIface {
 		return backfillMgr
 	}
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc, getBackfillMgr)
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc, getBackfillMgr, nil)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	mgr.SetPushReqMergerOnce(dummyMerger)
@@ -239,7 +239,7 @@ func TestSendSameHostDualSimultaneousReqs(t *testing.T) {
 	getBackfillMgr := func() service_def_real.BackfillMgrIface {
 		return backfillMgr
 	}
-	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc, getBackfillMgr)
+	mgr, err := NewPeerToPeerMgr(nil, xdcrComp, utilsMock, bucketSvc, replSvc, 100*time.Millisecond, ckptSvc, colManifestSvc, backfillReplSvc, securitySvc, getBackfillMgr, nil)
 	assert.Nil(err)
 	assert.NotNil(mgr)
 	mgr.SetPushReqMergerOnce(dummyMerger)

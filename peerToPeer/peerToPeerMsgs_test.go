@@ -415,13 +415,13 @@ func TestSerializingHeartbeat(t *testing.T) {
 	assert.Nil(err)
 
 	reqCommon := NewRequestCommon("sender", "target", "", "", uint32(9))
-	msg := NewSourceHeartbeatReq(reqCommon)
+	msg := NewSourceHeartbeatReqWithCommon(reqCommon)
 	msg.AppendSpec(spec1)
 	msg.AppendSpec(spec2)
 
 	seralizedByte, err := msg.Serialize()
 	assert.Nil(err)
 
-	checkMsg := NewSourceHeartbeatReq(reqCommon)
+	checkMsg := NewSourceHeartbeatReqWithCommon(reqCommon)
 	assert.Nil(checkMsg.DeSerialize(seralizedByte))
 }

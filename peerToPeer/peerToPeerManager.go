@@ -36,6 +36,7 @@ var ErrorPreCheckP2PSendFailure error = fmt.Errorf("Could not send request to pe
 type P2PManager interface {
 	VBMasterCheck
 	ConnectionPreCheck
+	service_def.ClusterHeartbeatAPI
 
 	Start() (PeerToPeerCommAPI, error)
 	Stop() error
@@ -83,6 +84,7 @@ type P2PManagerImpl struct {
 	backfillReplSvc   service_def.BackfillReplSvc
 	securitySvc       service_def.SecuritySvc
 	backfillMgrSvc    func() service_def.BackfillMgrIface
+	remoteClusterSvc  service_def.RemoteClusterSvc
 
 	lifeCycleId string
 	logger      *log.CommonLogger
@@ -107,10 +109,17 @@ type P2PManagerImpl struct {
 	mergerSetOnce sync.Once
 	mergerSetCh   chan bool
 	pushReqMerger func(string, string, interface{}) error
+
+	sourceClusterUUID string
 }
 
-func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, securitySvc service_def.SecuritySvc, backfillMgr func() service_def.BackfillMgrIface) (*P2PManagerImpl, error) {
+func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, securitySvc service_def.SecuritySvc, backfillMgr func() service_def.BackfillMgrIface, remoteClusterSvc service_def.RemoteClusterSvc) (*P2PManagerImpl, error) {
 	randId, err := base.GenerateRandomId(randIdLen, 100)
+	if err != nil {
+		return nil, err
+	}
+
+	clusterUUID, err := xdcrCompTopologySvc.MyClusterUuid()
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +145,8 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		securitySvc:         securitySvc,
 		replicatorInitCh:    make(chan bool, 1),
 		backfillMgrSvc:      backfillMgr,
+		remoteClusterSvc:    remoteClusterSvc,
+		sourceClusterUUID:   clusterUUID,
 	}, nil
 }
 
@@ -146,6 +157,8 @@ func initReceiveChsMap() map[OpCode][]chan interface{} {
 
 func (p *P2PManagerImpl) Start() (PeerToPeerCommAPI, error) {
 	if atomic.CompareAndSwapUint32(&p.started, 0, 1) {
+		p.remoteClusterSvc.SetHeartbeatSenderAPI(p)
+
 		p.waitForMergerToBeSet()
 		err := p.runHandlers()
 		if err != nil {
@@ -901,16 +914,9 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 		return
 	}
 
-	srcUUID, err := p.xdcrCompSvc.MyClusterUuid()
-	if err != nil {
-		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting srcUUID, err=%v", err)
-		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
-		return
-	}
-
 	// check for intra-cluster replication
-	if srcUUID == targetUUID {
-		logger.Infof("Connection Pre-Check exited because: srcUUID=%v and tgtUUID=%v", srcUUID, targetUUID)
+	if p.sourceClusterUUID == targetUUID {
+		logger.Infof("Connection Pre-Check exited because: srcUUID=%v and tgtUUID=%v", p.sourceClusterUUID, targetUUID)
 		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkIsIntraClusterReplication], taskId, myHostAddr, true, nil, logger)
 		return
 	}
@@ -1150,4 +1156,8 @@ func (p *P2PManagerImpl) SendDelBackfill(specId string) error {
 		return errors.New(errStr)
 	}
 	return nil
+}
+
+func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification) error {
+	return fmt.Errorf("to be implemented")
 }

@@ -75,7 +75,7 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 		return
 	}
 
-	s.logger.Infof("NEIL DEBUG peer addresses %v sender %v", peers, req.GetSender())
+	s.logger.Infof("peer addresses %v sender %v", peers, req.GetSender())
 
 	// Only respond if I am the proxy node
 	resp := req.GenerateResponse().(*SourceHeartbeatResp)

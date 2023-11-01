@@ -403,6 +403,15 @@ type RemoteClusterAgent struct {
 	// bootstrap is set to true when none of the nodes are reachable.
 	// When set to true, the refresh loop goes into bootstrap mode
 	bootstrap bool
+
+	// These are heartbeat related APIs
+	heartbeatAPIMtx             sync.RWMutex
+	heartbeatAPI                service_def.ClusterHeartbeatAPI
+	srcClusterSupportsHeartbeat bool
+
+	// specsReader is used to avoid circular reference with replication spec svc
+	specsReaderMtx sync.RWMutex
+	specsReader    service_def.ReplicationSpecReader
 }
 
 const (
@@ -1282,8 +1291,9 @@ func (agent *RemoteClusterAgent) Start(newRef *metadata.RemoteClusterReference, 
 		agentUuid := agent.pendingRef.Uuid()
 		agent.refMtx.RUnlock()
 		agent.logger.Infof("Agent %v %v started for cluster: %v synchronously? %v", agentId, agentName, agentUuid, userInitiated)
-		agent.agentWaitGrp.Add(1)
+		agent.agentWaitGrp.Add(2)
 		go agent.runPeriodicRefresh()
+		go agent.runHeartbeatSender()
 	} else {
 		agent.logger.Warnf("Agent %v starting resulted in error: %v", newRef.Id(), err)
 	}
@@ -2405,6 +2415,12 @@ type RemoteClusterService struct {
 	metakvCbSetMap map[string]bool // refId
 	metakvCbDelMtx sync.RWMutex
 	metakvCbDelMap map[string]bool // refId
+
+	heartbeatAPIMtx sync.RWMutex
+	heartbeatAPI    service_def.ClusterHeartbeatAPI
+
+	specsReaderMtx sync.RWMutex
+	specsReader    service_def.ReplicationSpecReader
 }
 
 func NewRemoteClusterService(uilog_svc service_def.UILogSvc, metakv_svc service_def.MetadataSvc,
@@ -2473,6 +2489,42 @@ func (service *RemoteClusterService) SetMetadataChangeHandlerCallback(call_back 
 	for _, agent := range service.agentMap {
 		agent.setMetadataChangeCb(service.metadata_change_callback)
 	}
+}
+
+func (service *RemoteClusterService) SetHeartbeatSenderAPI(api service_def.ClusterHeartbeatAPI) {
+	service.heartbeatAPIMtx.Lock()
+	service.heartbeatAPI = api
+	service.heartbeatAPIMtx.Unlock()
+
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+	for _, agent := range service.agentMap {
+		agent.setHeartbeatApi(api)
+	}
+}
+
+func (service *RemoteClusterService) getHeartbeatSenderAPI() service_def.ClusterHeartbeatAPI {
+	service.heartbeatAPIMtx.RLock()
+	defer service.heartbeatAPIMtx.RUnlock()
+	return service.heartbeatAPI
+}
+
+func (service *RemoteClusterService) SetReplReader(reader service_def.ReplicationSpecReader) {
+	service.specsReaderMtx.Lock()
+	service.specsReader = reader
+	service.specsReaderMtx.Unlock()
+
+	service.agentMutex.RLock()
+	defer service.agentMutex.RUnlock()
+	for _, agent := range service.agentMap {
+		agent.setReplReader(reader)
+	}
+}
+
+func (service *RemoteClusterService) getReplReader() service_def.ReplicationSpecReader {
+	service.specsReaderMtx.RLock()
+	defer service.specsReaderMtx.RUnlock()
+	return service.specsReader
 }
 
 func getRefreshErrorMsg(customStr string, err error) string {
@@ -3298,6 +3350,8 @@ func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent
 		bucketMaxCasStatsGetters: map[string]*MaxCasStatsGetter{},
 		targetKVComponents:       make(map[string]*component.RemoteMemcachedComponent),
 		bucketTopologySvc:        service.GetBucketTopologySvc,
+		heartbeatAPI:             service.getHeartbeatSenderAPI(),
+		specsReader:              service.getReplReader(),
 	}
 	newAgent.refreshCv = &sync.Cond{L: &newAgent.refreshMtx}
 	return newAgent
@@ -3961,6 +4015,108 @@ func (agent *RemoteClusterAgent) OneTimeGetRemoteBucketManifest(bucketName strin
 	}
 
 	return manifest, nil
+}
+
+func (agent *RemoteClusterAgent) heartbeatAPIReady() bool {
+	agent.heartbeatAPIMtx.RLock()
+	defer agent.heartbeatAPIMtx.RUnlock()
+	return agent.heartbeatAPI != nil
+}
+
+func (agent *RemoteClusterAgent) specsReaderReady() bool {
+	agent.specsReaderMtx.RLock()
+	defer agent.specsReaderMtx.RUnlock()
+	return agent.specsReader != nil
+}
+
+// Checks if every node in the source cluster supports heartbeat.
+// Not go-routine protected.
+func (agent *RemoteClusterAgent) srcSupportsHeartbeat() bool {
+	if agent.srcClusterSupportsHeartbeat { // we only consider rolling-forward upgrades
+		return true
+	}
+
+	clusterCompat, err := agent.topologySvc.MyClusterCompatibility()
+	if err != nil {
+		return false
+	}
+	if !base.IsClusterCompatible(clusterCompat, base.VersionForSrcHeartbeatSupport) {
+		return false
+	}
+
+	agent.srcClusterSupportsHeartbeat = true
+	return true
+}
+
+func (agent *RemoteClusterAgent) runHeartbeatSender() {
+	defer agent.agentWaitGrp.Done()
+
+	agent.refMtx.RLock()
+	cachedId := agent.reference.Id()
+	agent.refMtx.RUnlock()
+
+	ticker := time.NewTicker(base.RemoteHeartbeatCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-agent.agentFinCh:
+			agent.logger.Infof("Heartbeat sensor %v is stopped", cachedId)
+			return
+
+		case <-ticker.C:
+			if !agent.heartbeatAPIReady() || !agent.specsReaderReady() || !agent.srcSupportsHeartbeat() {
+				continue
+			}
+
+			// check if every node in the target cluster supports heartbeat
+			capability, err := agent.GetCapability()
+			if err != nil || !capability.HasHeartbeatSupport() {
+				// check again later
+				continue
+			}
+
+			amIOrchestrator, err := agent.topologySvc.IsOrchestratorNode()
+			if err != nil || !amIOrchestrator {
+				continue
+			}
+
+			agent.sendHeartbeat()
+		}
+	}
+}
+
+func (agent *RemoteClusterAgent) setHeartbeatApi(api service_def.ClusterHeartbeatAPI) {
+	agent.heartbeatAPIMtx.Lock()
+	defer agent.heartbeatAPIMtx.Unlock()
+
+	agent.heartbeatAPI = api
+}
+
+func (agent *RemoteClusterAgent) setReplReader(reader service_def.ReplicationSpecReader) {
+	agent.specsReaderMtx.Lock()
+	defer agent.specsReaderMtx.Unlock()
+
+	agent.specsReader = reader
+}
+
+func (agent *RemoteClusterAgent) sendHeartbeat() {
+	if !agent.InitDone() {
+		// Don't send heartbeat
+		return
+	}
+	clonedRef := agent.GetReferenceClone()
+
+	specs, err := agent.specsReader.AllReplicationSpecsWithRemote(clonedRef)
+	if err != nil {
+		agent.logger.Warnf("Unable to send heartbeat to %v as polling specs has err %v", clonedRef.Name(), err)
+		return
+	}
+
+	err = agent.heartbeatAPI.SendHeartbeatToRemoteV1(clonedRef, specs)
+	if err != nil {
+		agent.logger.Warnf("Sending heartbeat to %v has err %v", clonedRef.Name(), err)
+	}
 }
 
 func (service *RemoteClusterService) GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error) {

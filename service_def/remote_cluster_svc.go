@@ -101,4 +101,14 @@ type RemoteClusterSvc interface {
 	// given a fresh remote cluster reference with user input information like input hostname etc.,
 	// the function populates the reference with other implicit values like active hostname(s).
 	InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error
+
+	// API for remote cluster service to send heartbeat to remote clusters
+	SetHeartbeatSenderAPI(api ClusterHeartbeatAPI)
+
+	// Specs Reader
+	SetReplReader(reader ReplicationSpecReader)
+}
+
+type ClusterHeartbeatAPI interface {
+	SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification) error
 }
