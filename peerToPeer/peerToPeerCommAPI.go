@@ -10,13 +10,15 @@ package peerToPeer
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/v8/base"
-	"github.com/couchbase/goxdcr/v8/log"
-	"github.com/couchbase/goxdcr/v8/service_def"
-	"github.com/couchbase/goxdcr/v8/utils"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/service_def"
+	"github.com/couchbase/goxdcr/v8/utils"
 )
 
 var ErrorInvalidOpcode = fmt.Errorf("invalid Opcode")
@@ -64,6 +66,7 @@ type P2PSendType func(req Request, log *log.CommonLogger) (HandlerResult, error)
 type PeerToPeerCommAPI interface {
 	P2PReceive(reqOrResp ReqRespCommon) (HandlerResult, error)
 	P2PSend(req Request, log *log.CommonLogger) (HandlerResult, error)
+	P2PRemoteSend(req Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (HandlerResult, error)
 }
 
 type P2pCommAPIimpl struct {
@@ -188,4 +191,24 @@ func checkClientCertAndKeyExists(clientCert []byte, clientKey []byte) (HandlerRe
 		}, ErrorMissingClientKey
 	}
 	return nil, nil
+}
+
+func (p2p *P2pCommAPIimpl) P2PRemoteSend(req Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (HandlerResult, error) {
+	payload, err := req.Serialize()
+	if err != nil {
+		return nil, err
+	}
+	if ref == nil {
+		return nil, base.ErrorInvalidInput
+	}
+
+	var out interface{}
+	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, ref.UserName(), ref.Password(), ref.HttpAuthMech(), ref.Certificates(), ref.SANInCertificate(), ref.ClientCertificate(), ref.ClientKey(), base.MethodPost, base.JsonContentType,
+		payload, base.ShortHttpTimeout, &out, nil, false, logger)
+	// utils returns this error because body is empty, which is fine
+	if err == base.ErrorResourceDoesNotExist {
+		err = nil
+	}
+	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
+	return result, err
 }

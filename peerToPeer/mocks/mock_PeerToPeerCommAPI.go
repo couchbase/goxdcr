@@ -4,6 +4,7 @@ package mocks
 
 import (
 	log "github.com/couchbase/goxdcr/v8/log"
+	metadata "github.com/couchbase/goxdcr/v8/metadata"
 	mock "github.com/stretchr/testify/mock"
 
 	peerToPeer "github.com/couchbase/goxdcr/v8/peerToPeer"
@@ -76,6 +77,66 @@ func (_c *PeerToPeerCommAPI_P2PReceive_Call) Return(_a0 peerToPeer.HandlerResult
 }
 
 func (_c *PeerToPeerCommAPI_P2PReceive_Call) RunAndReturn(run func(peerToPeer.ReqRespCommon) (peerToPeer.HandlerResult, error)) *PeerToPeerCommAPI_P2PReceive_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// P2PRemoteSend provides a mock function with given fields: req, ref, logger
+func (_m *PeerToPeerCommAPI) P2PRemoteSend(req peerToPeer.Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger) (peerToPeer.HandlerResult, error) {
+	ret := _m.Called(req, ref, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for P2PRemoteSend")
+	}
+
+	var r0 peerToPeer.HandlerResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(peerToPeer.Request, *metadata.RemoteClusterReference, *log.CommonLogger) (peerToPeer.HandlerResult, error)); ok {
+		return rf(req, ref, logger)
+	}
+	if rf, ok := ret.Get(0).(func(peerToPeer.Request, *metadata.RemoteClusterReference, *log.CommonLogger) peerToPeer.HandlerResult); ok {
+		r0 = rf(req, ref, logger)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(peerToPeer.HandlerResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(peerToPeer.Request, *metadata.RemoteClusterReference, *log.CommonLogger) error); ok {
+		r1 = rf(req, ref, logger)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// PeerToPeerCommAPI_P2PRemoteSend_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'P2PRemoteSend'
+type PeerToPeerCommAPI_P2PRemoteSend_Call struct {
+	*mock.Call
+}
+
+// P2PRemoteSend is a helper method to define mock.On call
+//   - req peerToPeer.Request
+//   - ref *metadata.RemoteClusterReference
+//   - logger *log.CommonLogger
+func (_e *PeerToPeerCommAPI_Expecter) P2PRemoteSend(req interface{}, ref interface{}, logger interface{}) *PeerToPeerCommAPI_P2PRemoteSend_Call {
+	return &PeerToPeerCommAPI_P2PRemoteSend_Call{Call: _e.mock.On("P2PRemoteSend", req, ref, logger)}
+}
+
+func (_c *PeerToPeerCommAPI_P2PRemoteSend_Call) Run(run func(req peerToPeer.Request, ref *metadata.RemoteClusterReference, logger *log.CommonLogger)) *PeerToPeerCommAPI_P2PRemoteSend_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(peerToPeer.Request), args[1].(*metadata.RemoteClusterReference), args[2].(*log.CommonLogger))
+	})
+	return _c
+}
+
+func (_c *PeerToPeerCommAPI_P2PRemoteSend_Call) Return(_a0 peerToPeer.HandlerResult, _a1 error) *PeerToPeerCommAPI_P2PRemoteSend_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *PeerToPeerCommAPI_P2PRemoteSend_Call) RunAndReturn(run func(peerToPeer.Request, *metadata.RemoteClusterReference, *log.CommonLogger) (peerToPeer.HandlerResult, error)) *PeerToPeerCommAPI_P2PRemoteSend_Call {
 	_c.Call.Return(run)
 	return _c
 }

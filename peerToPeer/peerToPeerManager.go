@@ -232,7 +232,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 			for j := RequestType; j < InvalidType; j++ {
 				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
 			}
-			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.xdcrCompSvc)
+			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.xdcrCompSvc, p.commAPI)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -300,6 +300,15 @@ func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc
 	peers, myHost, err := p.getSendPreReq()
 	if err != nil {
 		return err, nil
+	}
+
+	if cbOpts != nil && cbOpts.remoteClusterRef != nil {
+		// override "peers" to mean "target reference"
+		peerAddr, err := cbOpts.remoteClusterRef.MyConnectionStr()
+		if err != nil {
+			return err, nil
+		}
+		peers = []string{peerAddr}
 	}
 
 	peersToRetry := make(map[string]bool)
@@ -388,7 +397,13 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					return
 				}
 
-				handlerResult, p2pSendErr := p.commAPI.P2PSend(compiledReq, p.logger)
+				var handlerResult HandlerResult
+				var p2pSendErr error
+				if cbOpts.remoteClusterRef == nil {
+					handlerResult, p2pSendErr = p.commAPI.P2PSend(compiledReq, p.logger)
+				} else {
+					handlerResult, p2pSendErr = p.commAPI.P2PRemoteSend(compiledReq, cbOpts.remoteClusterRef, p.logger)
+				}
 
 				if p2pSendErr != nil {
 					p.logger.Errorf("P2PSend resulted in %v", p2pSendErr)
@@ -479,6 +494,8 @@ type SendOpts struct {
 	respMap    SendOptsMap // If synchronous, then the sent requests and responses are stored
 
 	maxRetry int
+
+	remoteClusterRef *metadata.RemoteClusterReference // non-nil if we plan to send to a remote cluster's XDCR
 }
 
 type SendOptsMap map[string]chan ReqRespPair
@@ -495,6 +512,11 @@ func NewSendOpts(sync bool, timeout time.Duration, maxRetry int) *SendOpts {
 		newOpt.finCh = make(chan bool)
 	}
 	return newOpt
+}
+
+func (s *SendOpts) SetRemoteClusterRef(ref *metadata.RemoteClusterReference) *SendOpts {
+	s.remoteClusterRef = ref
+	return s
 }
 
 func (s *SendOpts) GetSentTime(key string) (time.Time, error) {
@@ -1159,5 +1181,45 @@ func (p *P2PManagerImpl) SendDelBackfill(specId string) error {
 }
 
 func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification) error {
-	return fmt.Errorf("to be implemented")
+	srcStr, err := p.xdcrCompSvc.MyHostAddr()
+	if err != nil {
+		return err
+	}
+	target, err := reference.MyConnectionStr()
+	if err != nil {
+		return err
+	}
+
+	nodesList, err := p.xdcrCompSvc.PeerNodesAdminAddrs()
+	if err != nil {
+		return err
+	}
+	// Add myself back in amongst the peers
+	nodesList = append(nodesList, srcStr)
+
+	getReqFunc := func(src, tgt string) Request {
+		common := NewRequestCommon(srcStr, target, p.GetLifecycleId(), "", getOpaqueWrapper())
+		req := NewSourceHeartbeatReq(common).SetUUID(p.sourceClusterUUID).SetNodesList(nodesList)
+		for _, spec := range specs {
+			req.AppendSpec(spec)
+		}
+		return req
+	}
+
+	// TODO - for POC, no sync and no response
+	opts := NewSendOpts(false, 0, base.PeerToPeerMaxRetry).SetRemoteClusterRef(reference)
+	err, failedToSend := p.sendToEachPeerOnce(ReqSrcHeartbeat, getReqFunc, opts)
+	if err != nil {
+		return err
+	}
+
+	if len(failedToSend) > 0 {
+		errStr := "Unable to send to the following nodes: "
+		for k, _ := range failedToSend {
+			errStr += fmt.Sprintf("%v ", k)
+		}
+		return errors.New(errStr)
+	}
+
+	return nil
 }

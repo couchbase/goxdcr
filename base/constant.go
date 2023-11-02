@@ -1812,3 +1812,5 @@ const (
 	StateKey                       = "state"
 	MandatoryVal                   = "mandatory"
 )
+
+var SrcHeartbeatExpirationTimeout = 5 * time.Minute

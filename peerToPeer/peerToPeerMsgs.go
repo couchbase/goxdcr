@@ -504,6 +504,17 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 		}
 		reqDelBackfill.RequestCommon = reqCommon
 		return reqDelBackfill, err
+	case ReqSrcHeartbeat:
+		reqHeartbeat := &SourceHeartbeatReq{}
+		err = reqHeartbeat.DeSerialize(body)
+		if err != nil {
+			err = fmt.Errorf("SourceHeartbeatReq deSerialize err: %v", err)
+		}
+		reqHeartbeat.RequestCommon = reqCommon
+		reqCommon.responseCb = func(resp Response) (HandlerResult, error) {
+			return &HandlerResultImpl{Err: base.ErrorNotSupported, HttpStatusCode: 500}, base.ErrorNotSupported
+		}
+		return reqHeartbeat, err
 	default:
 		return nil, fmt.Errorf("Unknown request %v", reqCommon.ReqType)
 	}
@@ -2104,22 +2115,15 @@ type SourceHeartbeatReq struct {
 
 	SourceClusterUUID string
 	SpecsCompressed   []byte
-	specs             []*metadata.ReplicationSpecification
+	NodesList         []string
+
+	specs []*metadata.ReplicationSpecification
 }
 
-func NewSourceHeartbeatReq() *SourceHeartbeatReq {
-	req := &SourceHeartbeatReq{}
+func NewSourceHeartbeatReq(common RequestCommon) *SourceHeartbeatReq {
+	req := &SourceHeartbeatReq{RequestCommon: common}
 	req.ReqType = ReqSrcHeartbeat
 	return req
-}
-
-func NewSourceHeartbeatReqWithCommon(common RequestCommon) *SourceHeartbeatReq {
-	return NewSourceHeartbeatReq().SetCommon(common)
-}
-
-func (s *SourceHeartbeatReq) SetCommon(common RequestCommon) *SourceHeartbeatReq {
-	s.RequestCommon = common
-	return s
 }
 
 func (s *SourceHeartbeatReq) AppendSpec(spec *metadata.ReplicationSpecification) {
@@ -2128,6 +2132,11 @@ func (s *SourceHeartbeatReq) AppendSpec(spec *metadata.ReplicationSpecification)
 
 func (s *SourceHeartbeatReq) SetUUID(uuid string) *SourceHeartbeatReq {
 	s.SourceClusterUUID = uuid
+	return s
+}
+
+func (s *SourceHeartbeatReq) SetNodesList(nodesList []string) *SourceHeartbeatReq {
+	s.NodesList = nodesList
 	return s
 }
 
@@ -2168,6 +2177,16 @@ func (s *SourceHeartbeatReq) SameAs(otherRaw interface{}) (bool, error) {
 
 	if s.SourceClusterUUID != other.SourceClusterUUID {
 		return false, nil
+	}
+
+	if len(s.NodesList) != len(other.NodesList) {
+		return false, nil
+	}
+
+	for i, node := range s.NodesList {
+		if other.NodesList[i] != node {
+			return false, nil
+		}
 	}
 
 	if len(s.specs) != len(other.specs) {
