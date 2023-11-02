@@ -72,8 +72,17 @@ func (_c *BandwidthThrottlerSvc_Throttle_Call) RunAndReturn(run func(int64, int6
 }
 
 // Wait provides a mock function with given fields:
-func (_m *BandwidthThrottlerSvc) Wait() {
-	_m.Called()
+func (_m *BandwidthThrottlerSvc) Wait() error {
+	ret := _m.Called()
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
 // BandwidthThrottlerSvc_Wait_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Wait'
@@ -93,12 +102,12 @@ func (_c *BandwidthThrottlerSvc_Wait_Call) Run(run func()) *BandwidthThrottlerSv
 	return _c
 }
 
-func (_c *BandwidthThrottlerSvc_Wait_Call) Return() *BandwidthThrottlerSvc_Wait_Call {
-	_c.Call.Return()
+func (_c *BandwidthThrottlerSvc_Wait_Call) Return(_a0 error) *BandwidthThrottlerSvc_Wait_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *BandwidthThrottlerSvc_Wait_Call) RunAndReturn(run func()) *BandwidthThrottlerSvc_Wait_Call {
+func (_c *BandwidthThrottlerSvc_Wait_Call) RunAndReturn(run func() error) *BandwidthThrottlerSvc_Wait_Call {
 	_c.Call.Return(run)
 	return _c
 }

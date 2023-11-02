@@ -3506,7 +3506,14 @@ func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byt
 			// push curBytesList back to the stack to be retried at a later time
 			stack.Push(curBytesList)
 			start_time := time.Now()
-			xmem.bandwidthThrottler.Wait()
+
+			// We do not error out when wait() fails. We simply return without raising the event
+			// We let the nozzle shutdown mechanism take care of gracefull cleanup
+			err2 := xmem.bandwidthThrottler.Wait()
+			if err2 != nil {
+				xmem.Logger().Warnf("%s bandwidth throttler failed on wait: %v", xmem.Id(), err2)
+				return
+			}
 			xmem.RaiseEvent(common.NewEvent(common.DataThrottled, nil, xmem, nil, time.Since(start_time)))
 		} else {
 			// split the input into two pieces
