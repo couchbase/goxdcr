@@ -21,5 +21,5 @@ type BandwidthThrottlerSvc interface {
 	Throttle(numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem int64) (bytesCanSend int64, bytesAllowed int64)
 
 	// blocks till the next measurement interval, when bandwidth usage allowance may become available
-	Wait()
+	Wait() error
 }

@@ -10,22 +10,23 @@ package pipeline_svc
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 // factors affecting bandwidth limit of the current node, which could be updated through UpdateSettings() call
 var OVERALL_BANDWIDTH_LIMIT = "overall_bandwidth_limit"
 var NUMBER_OF_SOURCE_NODES = "number_of_source_nodes"
 
-//BandwidthThrottler limits bandwidth usage of replication
+// BandwidthThrottler limits bandwidth usage of replication
 type BandwidthThrottler struct {
 	id string
 
@@ -135,6 +136,8 @@ func (throttler *BandwidthThrottler) update() error {
 		select {
 		case <-finish_ch:
 			throttler.logger.Infof("%v received finish signal and is exitting", throttler.id)
+			// At this point, we wake up all the writers waiting on the throttler one last time.
+			throttler.broadcast()
 			return nil
 		case <-ticker.C:
 			throttler.updateOnce()
@@ -182,10 +185,10 @@ func (throttler *BandwidthThrottler) updateOnce() {
 // When this happens, we will wait for bandwidth_usage_quota to climb back to the positive territory before we send any more mutations.
 
 // output:
-// 1. bytesCanSend - the number of bytes that caller can proceed to send.
-//    it can take one of four values: numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem, 0
-// 2. bytesAllowed - the number of bytes remaining in bandwidth allowance that caller can ATTEMPT to send
-//    caller cannot just send this number of bytes, though. It has to call Throttle() again
+//  1. bytesCanSend - the number of bytes that caller can proceed to send.
+//     it can take one of four values: numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem, 0
+//  2. bytesAllowed - the number of bytes remaining in bandwidth allowance that caller can ATTEMPT to send
+//     caller cannot just send this number of bytes, though. It has to call Throttle() again
 func (throttler *BandwidthThrottler) Throttle(numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem int64) (bytesCanSend int64, bytesAllowed int64) {
 	bandwidth_limit := atomic.LoadInt64(&throttler.bandwidth_limit)
 	if bandwidth_limit == 0 {
@@ -240,11 +243,29 @@ func (throttler *BandwidthThrottler) Throttle(numberOfBytes, minNumberOfBytes, n
 	}
 }
 
+func (throttler *BandwidthThrottler) isClosed() (ok bool) {
+	select {
+	case <-throttler.finish_ch:
+		ok = true
+	default:
+	}
+	return
+}
+
 // blocks till the next measurement interval, when bandwidth usage allowance may become available
-func (throttler *BandwidthThrottler) Wait() {
+func (throttler *BandwidthThrottler) Wait() (err error) {
+	// Calling cond_var.Wait() after cond_var.Broadcast() has been called results into a panic
+	// When the throttler is stopped, it closes the fin channel first before it cond_var.Broadcast().
+	// So, checking for close() here prevents the panic
+	if throttler.isClosed() {
+		err = fmt.Errorf("throttler is closed")
+		return
+	}
 	throttler.cond_var.L.Lock()
 	defer throttler.cond_var.L.Unlock()
 	throttler.cond_var.Wait()
+
+	return
 }
 
 // braodcast availability of new bandwidth allowance
@@ -298,7 +319,8 @@ func (throttler *BandwidthThrottler) UpdateSettings(settings metadata.Replicatio
 
 // update bandwidth limit related settings
 // note: the two bool inputs indicate whether the corresponding setting needs to be updated
-//       if a bool takes the value of false, the corresponding input setting is ignored
+//
+//	if a bool takes the value of false, the corresponding input setting is ignored
 func (throttler *BandwidthThrottler) updateBandwidthLimitSettings(number_of_source_nodes int,
 	update_number_of_source_nodes bool, overall_bandwidth_limit int, update_overall_bandwidth_limit bool) error {
 
