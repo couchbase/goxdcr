@@ -144,6 +144,14 @@ func GetVbListFromKvVbMap(kv_vb_map map[string][]uint16) []uint16 {
 	return vb_list
 }
 
+func CloneStringList(list []string) []string {
+	cloneList := make([]string, len(list))
+	for i, v := range list {
+		cloneList[i] = v
+	}
+	return cloneList
+}
+
 // type to facilitate the sorting of uint16 lists
 type Uint16List []uint16
 

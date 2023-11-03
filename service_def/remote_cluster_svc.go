@@ -111,4 +111,5 @@ type RemoteClusterSvc interface {
 
 type ClusterHeartbeatAPI interface {
 	SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification) error
+	GetHeartbeatsReceivedV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)
 }

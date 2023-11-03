@@ -12,6 +12,10 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_def"
 )
 
+type SourceClustersProvider interface {
+	GetSourceClustersInfoV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)
+}
+
 type HeartbeatCache struct {
 	cacheMtx sync.RWMutex
 
@@ -74,6 +78,8 @@ type SrcHeartbeatHandler struct {
 	heartbeatMtx sync.RWMutex
 	heartbeatMap map[string]*HeartbeatCache // key is cluster UUID
 }
+
+var _ SourceClustersProvider = (*SrcHeartbeatHandler)(nil)
 
 func NewSrcHeartbeatHandler(reqCh []chan interface{}, logger *log.CommonLogger, lifecycleId string, cleanupInterval time.Duration, replSpecSvc service_def.ReplicationSpecSvc, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, sendPeerOnce sendPeerOnceFunc, getLifeCycleId func() string) *SrcHeartbeatHandler {
 	finCh := make(chan bool)
@@ -237,4 +243,27 @@ func (s *SrcHeartbeatHandler) forwardToPeers(origReq *SourceHeartbeatReq) {
 		}
 		s.logger.Warnf(errStr)
 	}
+}
+
+func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+	sourceUuidSpecsMap := make(map[string][]*metadata.ReplicationSpecification)
+	sourceUuidNodesMap := make(map[string][]string)
+
+	s.heartbeatMtx.RLock()
+	defer s.heartbeatMtx.RUnlock()
+	for srcUUID, hb := range s.heartbeatMap {
+		hb.cacheMtx.RLock()
+
+		compiledSpecs := make([]*metadata.ReplicationSpecification, 0, len(hb.SourceSpecs))
+		for _, oneSpec := range hb.SourceSpecs {
+			compiledSpecs = append(compiledSpecs, oneSpec)
+		}
+
+		sourceUuidSpecsMap[srcUUID] = compiledSpecs
+		sourceUuidNodesMap[srcUUID] = base.SortStringList(base.CloneStringList(hb.NodesList))
+
+		hb.cacheMtx.RUnlock()
+	}
+
+	return sourceUuidSpecsMap, sourceUuidNodesMap, nil
 }

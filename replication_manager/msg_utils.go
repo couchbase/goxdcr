@@ -161,6 +161,13 @@ const (
 	USERNAME string = "username"
 )
 
+// Hearbeat related output constants
+const (
+	SrcClusterUUID  = "SourceClusterUUID"
+	SrcClusterSpecs = "SourceClusterReplSpecs"
+	SrcClusterNodes = "SourceClusterNodes"
+)
+
 // errors
 var ErrorParsingForm = errors.New("Error parsing http request")
 var MissingSettingsInRequest = errors.New("Invalid http request. No replication setting parameters have been supplied.")
@@ -1490,4 +1497,18 @@ func NewConnectionPreCheckGetResponse(taskId string, res base.ConnectionErrMapTy
 	resMap[DONE] = done
 	response, err := EncodeObjectIntoResponseSensitive(resMap)
 	return response, err
+}
+
+func NewSourceClustersV1Response(specsMap map[string][]*metadata.ReplicationSpecification, nodesMap map[string][]string) (*ap.Response, error) {
+	var respLists []interface{}
+
+	for uuid, specsList := range specsMap {
+		singleSrcResult := make(map[string]interface{})
+		singleSrcResult[SrcClusterUUID] = uuid
+		singleSrcResult[SrcClusterSpecs] = specsList
+		singleSrcResult[SrcClusterNodes] = nodesMap[uuid]
+		respLists = append(respLists, singleSrcResult)
+	}
+
+	return EncodeObjectIntoResponse(respLists)
 }

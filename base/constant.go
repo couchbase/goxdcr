@@ -1814,3 +1814,5 @@ const (
 )
 
 var SrcHeartbeatExpirationTimeout = 5 * time.Minute
+
+const XDCRSourceClustersPath = XDCRPrefix + "/sourceClusters"

@@ -37,7 +37,7 @@ import (
 	_ "net/http/pprof"
 )
 
-var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath}
+var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath, base.XDCRSourceClustersPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath}
 
 var logger_ap *log.CommonLogger = log.NewLogger(base.AdminPortKey, log.GetOrCreateContext(base.AdminPortKey))
@@ -242,6 +242,8 @@ func (adminport *Adminport) handleRequest(
 		response, err = adminport.doPostConnectionPreCheckRequest(request)
 	case base.XDCRConnectionPreCheckPath + base.UrlDelimiter + base.MethodGet:
 		response, err = adminport.doGetConnectionPreCheckResultRequest(request)
+	case base.XDCRSourceClustersPath + base.UrlDelimiter + base.MethodGet:
+		response, err = adminport.doGetSourceClustersRequest(request)
 	default:
 		errOutput := base.InvalidPathInHttpRequestError(key)
 		response, err = EncodeObjectIntoResponseWithStatusCode(errOutput.Error(), http.StatusNotFound)
@@ -1399,4 +1401,17 @@ func (adminport *Adminport) doGetConnectionPreCheckResultRequest(request *http.R
 	res, done, err := adminport.p2pMgr.RetrieveConnectionPreCheckResult(taskId)
 
 	return NewConnectionPreCheckGetResponse(taskId, res, done)
+}
+
+func (adminport *Adminport) doGetSourceClustersRequest(request *http.Request) (*ap.Response, error) {
+	redactedRequest := base.CloneAndTagHttpRequest(request)
+	logger_ap.Infof("doGetSourceClustersRequest req=%v\n", redactedRequest)
+	defer logger_ap.Infof("Finished doGetSourceClustersRequest\n")
+
+	srcSpecs, srcNodes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewSourceClustersV1Response(srcSpecs, srcNodes)
 }

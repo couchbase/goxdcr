@@ -87,6 +87,72 @@ func (_c *P2PManager_CheckVBMaster_Call) RunAndReturn(run func(peerToPeer.Bucket
 	return _c
 }
 
+// GetHeartbeatsReceivedV1 provides a mock function with given fields:
+func (_m *P2PManager) GetHeartbeatsReceivedV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHeartbeatsReceivedV1")
+	}
+
+	var r0 map[string][]*metadata.ReplicationSpecification
+	var r1 map[string][]string
+	var r2 error
+	if rf, ok := ret.Get(0).(func() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() map[string][]*metadata.ReplicationSpecification); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string][]*metadata.ReplicationSpecification)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() map[string][]string); ok {
+		r1 = rf()
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(map[string][]string)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func() error); ok {
+		r2 = rf()
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// P2PManager_GetHeartbeatsReceivedV1_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetHeartbeatsReceivedV1'
+type P2PManager_GetHeartbeatsReceivedV1_Call struct {
+	*mock.Call
+}
+
+// GetHeartbeatsReceivedV1 is a helper method to define mock.On call
+func (_e *P2PManager_Expecter) GetHeartbeatsReceivedV1() *P2PManager_GetHeartbeatsReceivedV1_Call {
+	return &P2PManager_GetHeartbeatsReceivedV1_Call{Call: _e.mock.On("GetHeartbeatsReceivedV1")}
+}
+
+func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) Run(run func()) *P2PManager_GetHeartbeatsReceivedV1_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) Return(_a0 map[string][]*metadata.ReplicationSpecification, _a1 map[string][]string, _a2 error) *P2PManager_GetHeartbeatsReceivedV1_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) RunAndReturn(run func() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)) *P2PManager_GetHeartbeatsReceivedV1_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLifecycleId provides a mock function with given fields:
 func (_m *P2PManager) GetLifecycleId() string {
 	ret := _m.Called()
