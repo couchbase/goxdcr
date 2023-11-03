@@ -99,7 +99,7 @@ func NewSrcHeartbeatHandler(reqCh []chan interface{}, logger *log.CommonLogger, 
 func (s *SrcHeartbeatHandler) Start() error {
 	s.HandlerCommon.Start()
 	go s.handler()
-	go s.PrintStatusSummary()
+	go s.periodicPrintSummary()
 	return nil
 }
 
@@ -129,13 +129,6 @@ func (s *SrcHeartbeatHandler) handler() {
 
 func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 	// For now just simple messaging
-	var specIDs []string
-	for _, spec := range req.specs {
-		specIDs = append(specIDs, spec.Id)
-	}
-	s.logger.Infof("Received heartbeat from source cluster %v with specs %v", req.SourceClusterUUID,
-		strings.Join(specIDs, ", "))
-
 	s.heartbeatMtx.RLock()
 	hbCache, found := s.heartbeatMap[req.SourceClusterUUID]
 	if found {
@@ -179,9 +172,6 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 		hbCache.LoadInfoFrom(req)
 	}
 	s.heartbeatMtx.Unlock()
-
-	s.PrintStatusSummary()
-
 }
 
 func (s *SrcHeartbeatHandler) handleResponse(resp *SourceHeartbeatResp) {
@@ -194,7 +184,7 @@ func (s *SrcHeartbeatHandler) PrintStatusSummary() {
 	select {
 	case <-s.printStatusTokenCh:
 		defer func() {
-			time.Sleep(base.StatsLogInterval)
+			time.Sleep(base.SrcHeartbeatCooldownPeriod)
 			s.printStatusTokenCh <- true
 		}()
 	default:
@@ -266,4 +256,17 @@ func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string][]*metadata.
 	}
 
 	return sourceUuidSpecsMap, sourceUuidNodesMap, nil
+}
+
+func (s *SrcHeartbeatHandler) periodicPrintSummary() {
+	ticker := time.NewTicker(base.SrcHeartbeatExpirationTimeout)
+	for {
+		select {
+		case <-s.finCh:
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			s.PrintStatusSummary()
+		}
+	}
 }

@@ -359,6 +359,8 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.CapellaHostNameSuffixKey].(string),
 		time.Duration(internal_settings.Values[metadata.NWLatencyToleranceMilliSecKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.CasPoisoningPreCheckEnabledKey].(int),
+		time.Duration(internal_settings.Values[metadata.SrcHeartbeatExpirationTimeoutMinKey].(int))*time.Minute,
+		time.Duration(internal_settings.Values[metadata.SrcHeartbeatCooldownPeriodSecsKey].(int))*time.Second,
 	)
 }
 
