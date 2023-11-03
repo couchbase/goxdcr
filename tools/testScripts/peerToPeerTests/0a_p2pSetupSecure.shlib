@@ -64,6 +64,7 @@ function runOneReplicationCycleAndPause {
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createSecureRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C2" "C1"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo
@@ -134,6 +135,10 @@ function runOneRebalanceCycle {
 
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1))
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PSECUREMSG" $(($currentPeerMsgsC1Secure + 1))
+
+	validateInternalLogWithInstance "C1" "$HEARTBEAT_RECEIVED" 1 100
+	validateInternalLogWithInstance "C1P" "$HEARTBEAT_RECEIVED" 1 100
+	validateInternalLogWithInstance "C2" "$HEARTBEAT_RECEIVED" 1 100
 
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"

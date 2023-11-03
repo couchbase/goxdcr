@@ -151,6 +151,7 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 	var out interface{}
 	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, clientCert, clientKey, base.MethodPost, base.JsonContentType,
 		payload, base.P2PCommTimeout, &out, nil, false, logger)
+
 	// utils returns this error because body is empty, which is fine
 	if err == base.ErrorResourceDoesNotExist {
 		err = nil

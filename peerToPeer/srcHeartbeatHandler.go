@@ -65,6 +65,8 @@ func NewHeartbeatCache(destroyOp func()) *HeartbeatCache {
 type SrcHeartbeatHandler struct {
 	*HandlerCommon
 	xdcrCompTopologySvc service_def.XDCRCompTopologySvc
+	sendFunc            sendPeerOnceFunc
+	lifecycleIdGetter   func() string
 
 	finCh              chan bool
 	printStatusTokenCh chan bool
@@ -73,7 +75,7 @@ type SrcHeartbeatHandler struct {
 	heartbeatMap map[string]*HeartbeatCache // key is cluster UUID
 }
 
-func NewSrcHeartbeatHandler(reqCh []chan interface{}, logger *log.CommonLogger, lifecycleId string, cleanupInterval time.Duration, replSpecSvc service_def.ReplicationSpecSvc, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, api PeerToPeerCommAPI) *SrcHeartbeatHandler {
+func NewSrcHeartbeatHandler(reqCh []chan interface{}, logger *log.CommonLogger, lifecycleId string, cleanupInterval time.Duration, replSpecSvc service_def.ReplicationSpecSvc, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, sendPeerOnce sendPeerOnceFunc, getLifeCycleId func() string) *SrcHeartbeatHandler {
 	finCh := make(chan bool)
 	handler := &SrcHeartbeatHandler{
 		HandlerCommon:       NewHandlerCommon("SrcHeartbeatHandler", logger, lifecycleId, finCh, cleanupInterval, reqCh, replSpecSvc),
@@ -81,6 +83,8 @@ func NewSrcHeartbeatHandler(reqCh []chan interface{}, logger *log.CommonLogger, 
 		xdcrCompTopologySvc: xdcrCompTopologySvc,
 		heartbeatMap:        map[string]*HeartbeatCache{},
 		printStatusTokenCh:  make(chan bool, 1),
+		sendFunc:            sendPeerOnce,
+		lifecycleIdGetter:   getLifeCycleId,
 	}
 	handler.printStatusTokenCh <- true
 	return handler
@@ -144,11 +148,18 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 		}
 		hbCache.expiryTimer.Reset(base.SrcHeartbeatExpirationTimeout)
 
+		if req.ProxyMode {
+			go s.forwardToPeers(req)
+		}
 		hbCache.UpdateRefreshTime()
 		hbCache.LoadInfoFrom(req)
 		return
 	}
 	s.heartbeatMtx.RUnlock()
+
+	if req.ProxyMode {
+		go s.forwardToPeers(req)
+	}
 
 	s.heartbeatMtx.Lock()
 	_, found = s.heartbeatMap[req.SourceClusterUUID]
@@ -202,5 +213,28 @@ func (s *SrcHeartbeatHandler) PrintStatusSummary() {
 
 	if atleastOne {
 		s.logger.Infof(strings.Join(outputBuffer, " "))
+	}
+}
+
+func (s *SrcHeartbeatHandler) forwardToPeers(origReq *SourceHeartbeatReq) {
+	origReq.DisableProxyMode()
+
+	opts := NewSendOpts(false, base.P2PCommTimeout, base.PeerToPeerMaxRetry)
+	getReqFunc := func(src, tgt string) Request {
+		requestCommon := NewRequestCommon(src, tgt, s.lifecycleIdGetter(), "", getOpaqueWrapper())
+		return NewSourceHeartbeatReq(requestCommon).LoadFromTemplate(origReq)
+	}
+
+	err, peersFailedToSend := s.sendFunc(ReqSrcHeartbeat, getReqFunc, opts)
+	if err != nil {
+		s.logger.Warnf("Unable to send proxy heartbeats to other nodes %v", err)
+	}
+
+	if len(peersFailedToSend) > 0 {
+		errStr := "Unable to proxy heartbeats to the following nodes: "
+		for k, _ := range peersFailedToSend {
+			errStr += fmt.Sprintf("%v ", k)
+		}
+		s.logger.Warnf(errStr)
 	}
 }

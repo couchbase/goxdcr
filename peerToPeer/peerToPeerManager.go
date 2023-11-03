@@ -232,7 +232,7 @@ func (p *P2PManagerImpl) runHandlers() error {
 			for j := RequestType; j < InvalidType; j++ {
 				p.receiveChsMap[i] = append(p.receiveChsMap[i], make(chan interface{}, base.MaxP2PReceiveChLen/int(InvalidType)))
 			}
-			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.xdcrCompSvc, p.commAPI)
+			p.receiveHandlers[i] = NewSrcHeartbeatHandler(p.receiveChsMap[i], p.logger, p.lifeCycleId, p.cleanupInterval, p.replSpecSvc, p.xdcrCompSvc, p.sendToEachPeerOnce, p.GetLifecycleId)
 		default:
 			return fmt.Errorf(fmt.Sprintf("Unknown opcode %v", i))
 		}
@@ -295,6 +295,8 @@ func (p *P2PManagerImpl) getSendPreReq() ([]string, string, error) {
 
 	return peers, myHostAddr, nil
 }
+
+type sendPeerOnceFunc func(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts) (error, map[string]bool)
 
 func (p *P2PManagerImpl) sendToEachPeerOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts) (error, map[string]bool) {
 	peers, myHost, err := p.getSendPreReq()
@@ -429,6 +431,13 @@ func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetR
 					peersToRetryReplacement[peerAddr] = true
 					peersToRetryMtx.Unlock()
 					// If unable to send properly, there is no reason to hear back from an opaque
+					p.receiveHandlersMtx.RLock()
+					p.receiveHandlers[opCode].GetReqAndClearOpaque(compiledReq.GetOpaque())
+					p.receiveHandlersMtx.RUnlock()
+				} else if cbOpts.remoteClusterRef != nil {
+					// If we are sending to a remote cluster, the remote cluster won't be able
+					// to directly reply back to us because they do not have response back capability since they are not
+					// in the same cluster
 					p.receiveHandlersMtx.RLock()
 					p.receiveHandlers[opCode].GetReqAndClearOpaque(compiledReq.GetOpaque())
 					p.receiveHandlersMtx.RUnlock()
