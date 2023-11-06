@@ -23,7 +23,7 @@ type HeartbeatCache struct {
 	refreshTime time.Time
 
 	SourceClusterUUID string
-	SourceSpecs       map[string]*metadata.ReplicationSpecification
+	SourceSpecsList   metadata.ReplSpecList
 	NodesList         []string
 }
 
@@ -31,9 +31,23 @@ type HeartbeatCache struct {
 func (h *HeartbeatCache) LoadInfoFrom(req *SourceHeartbeatReq) {
 	h.SourceClusterUUID = req.SourceClusterUUID
 	h.NodesList = req.NodesList
-	for _, spec := range req.specs {
-		h.SourceSpecs[spec.Id] = spec
+	h.SourceSpecsList = req.specs
+}
+
+func (h *HeartbeatCache) HasHeartbeatMetadataChanged(incomingReq *SourceHeartbeatReq) bool {
+	// check if the list of source cluster nodes has changed
+	if len(h.NodesList) != len(incomingReq.NodesList) ||
+		len(base.StringListsFindMissingFromFirst(h.NodesList, incomingReq.NodesList)) > 0 {
+		return true
 	}
+
+	// check if replications specs have changed
+	if len(h.SourceSpecsList) != len(incomingReq.specs) ||
+		!h.SourceSpecsList.SameAs(incomingReq.specs) {
+		return true
+	}
+
+	return false
 }
 
 func (h *HeartbeatCache) IsRequestTooSoon() bool {
@@ -62,7 +76,6 @@ func NewHeartbeatCache(destroyOp func()) *HeartbeatCache {
 	return &HeartbeatCache{
 		expiryTimer: time.AfterFunc(base.SrcHeartbeatExpirationTimeout, destroyOp),
 		refreshTime: time.Now(),
-		SourceSpecs: map[string]*metadata.ReplicationSpecification{},
 	}
 }
 
@@ -151,7 +164,10 @@ func (s *SrcHeartbeatHandler) handleRequest(req *SourceHeartbeatReq) {
 			go s.forwardToPeers(req)
 		}
 		hbCache.UpdateRefreshTime()
-		hbCache.LoadInfoFrom(req)
+
+		if hbCache.HasHeartbeatMetadataChanged(req) {
+			hbCache.LoadInfoFrom(req)
+		}
 		return
 	}
 	s.heartbeatMtx.RUnlock()
@@ -202,7 +218,7 @@ func (s *SrcHeartbeatHandler) PrintStatusSummary() {
 		atleastOne = true
 		outputBuffer = append(outputBuffer, fmt.Sprintf("SrcUUID: %v ", srcUUID))
 		outputBuffer = append(outputBuffer, fmt.Sprintf("Nodes: %v ", cache.NodesList))
-		for _, spec := range cache.SourceSpecs {
+		for _, spec := range cache.SourceSpecsList {
 			outputBuffer = append(outputBuffer, fmt.Sprintf("SrcBucket %v TgtBucket %v ", spec.SourceBucketName, spec.TargetBucketName))
 		}
 	}
@@ -244,12 +260,7 @@ func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string][]*metadata.
 	for srcUUID, hb := range s.heartbeatMap {
 		hb.cacheMtx.RLock()
 
-		compiledSpecs := make([]*metadata.ReplicationSpecification, 0, len(hb.SourceSpecs))
-		for _, oneSpec := range hb.SourceSpecs {
-			compiledSpecs = append(compiledSpecs, oneSpec)
-		}
-
-		sourceUuidSpecsMap[srcUUID] = compiledSpecs
+		sourceUuidSpecsMap[srcUUID] = hb.SourceSpecsList.Clone()
 		sourceUuidNodesMap[srcUUID] = base.SortStringList(base.CloneStringList(hb.NodesList))
 
 		hb.cacheMtx.RUnlock()

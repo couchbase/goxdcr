@@ -32,6 +32,7 @@ type ReplicationSpecReader interface {
 	AllReplicationSpecIds() ([]string, error)
 	AllReplicationSpecIdsForBucket(bucket string) ([]string, error)
 	AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)
+	AllActiveReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)
 }
 
 type ReplicationSpecSvc interface {

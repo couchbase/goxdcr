@@ -1015,6 +1015,7 @@ func (service *ReplicationSpecService) initCacheFromMetaKV() (err error) {
 
 }
 
+// Returns a map with clones of all the ReplicationSpecification associated with the service
 func (service *ReplicationSpecService) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	specs := make(map[string]*metadata.ReplicationSpecification, 0)
 	values_map := service.getCache().GetMap()
@@ -1110,6 +1111,27 @@ func (service *ReplicationSpecService) AllReplicationSpecIdsForTargetBucket(buck
 }
 
 func (service *ReplicationSpecService) AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) (list []*metadata.ReplicationSpecification, err error) {
+	if remoteClusterRef == nil {
+		err = base.ErrorInvalidInput
+		return
+	}
+
+	specClonesMap, err := service.AllReplicationSpecs()
+	if err != nil {
+		service.logger.Warnf("Error retrieving all replication specs: %v", err)
+		return
+	}
+
+	remoteUUID := remoteClusterRef.Uuid()
+	for _, spec := range specClonesMap {
+		if spec.TargetClusterUUID == remoteUUID {
+			list = append(list, spec)
+		}
+	}
+	return
+}
+
+func (service *ReplicationSpecService) AllActiveReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) (list []*metadata.ReplicationSpecification, err error) {
 	if remoteClusterRef == nil {
 		err = base.ErrorInvalidInput
 		return

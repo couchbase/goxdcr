@@ -22,6 +22,7 @@ import (
 
 type ExpVarExporter interface {
 	LoadExpVarMap(m *expvar.Map) bool
+	LoadSourceClustersInfoV1(srcSpecs map[string][]*metadata.ReplicationSpecification, srcNodes map[string][]string)
 	Export() ([]byte, error)
 }
 
@@ -29,6 +30,7 @@ var PrometheusTargetClusterUuidBytes = []byte(service_def.PrometheusTargetCluste
 var PrometheusSourceBucketBytes = []byte(service_def.PrometheusSourceBucketLabel)
 var PrometheusTargetBucketBytes = []byte(service_def.PrometheusTargetBucketLabel)
 var PrometheusPipelineTypeBytes = []byte(service_def.PrometheusPipelineTypeLabel)
+var PrometheusSourceClusterUuidBytes = []byte(service_def.PrometheusSourceClusterUUIDLabel)
 
 type PrometheusExporter struct {
 	// Read only
@@ -43,7 +45,7 @@ type PrometheusExporter struct {
 	// Prometheus expects the stats to be under certain metrics name
 	// Each metric name will contain one or more data depending on the number of current replications
 	// Thus, each metric will take up one entry in this metricsMap
-	// Each Replication will populate the stats under the ReplicationStatsMap
+	// Each Replication will populate the stats under the IdentifierStatsMap
 	metricsMap MetricsMapType
 
 	mapsMtx        sync.RWMutex
@@ -59,6 +61,13 @@ type PrometheusExporter struct {
 	utils utilities.UtilsIface
 
 	labelsTableConstructor PrometheusLabelsConstructorType
+
+	// Map used to keep track of known sources and to know when one drop off the map
+	// Key is the source stat key - and value is the source identifier
+	lastKnownIdentifiers map[string]base.StringList
+
+	srcNodes map[string][]string
+	srcSpecs map[string][]*metadata.ReplicationSpecification
 }
 
 func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap, labelsTableConstructor PrometheusLabelsConstructorType) *PrometheusExporter {
@@ -72,6 +81,7 @@ func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap, lab
 		outputBuffer:           make([]byte, 0),
 		utils:                  utilities.NewUtilities(),
 		labelsTableConstructor: labelsTableConstructor,
+		lastKnownIdentifiers:   map[string]base.StringList{},
 	}
 
 	for k, statsProperty := range prom.globalLookupMap {
@@ -91,7 +101,8 @@ func NewPrometheusExporter(translationMap service_def.StatisticsPropertyMap, lab
 	return prom
 }
 
-type MetricsMapType map[string]ReplicationStatsMap
+// Key is the metric name - and value is a map of identifiers + stat per identifier
+type MetricsMapType map[string]IdentifierStatsMap
 
 func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value interface{}, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
 	// If the statsConst is not part of the initialization, then it is not meant to be exported
@@ -102,19 +113,97 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 
 	_, replExists := replicationStatsMap[replicationId]
 	if !replExists {
-		statsProperty := lookupMap[statsConst]
+		statsProperty := lookupMap.GetStatsProperty(statsConst)
 		labelsTable := constructStatsTable(statsConst) // could be nil, depending on statsConst
 		replicationStatsMap[replicationId] = NewPerReplicationStatType(statsProperty, labelsTable)
 	}
 
 	// Update the value
-	replicationStatsMap[replicationId].Value = value
+	replicationStatsMap[replicationId].SetValue(value)
 
 	// If Prometheus labels exist, let them load the value
-	labelsTable := replicationStatsMap[replicationId].LabelsTable
+	labelsTable := replicationStatsMap[replicationId].GetLabelsTable()
 	if labelsTable != nil {
 		for _, extractor := range labelsTable {
 			extractor.LoadValue(value)
+		}
+	}
+}
+
+var sourceClusterStats = []string{service_def.SOURCE_CLUSTER_NUM_REPL, service_def.SOURCE_CLUSTER_NUM_NODES}
+
+func (m *MetricsMapType) RecordSourceClusterV1(specsIn map[string][]*metadata.ReplicationSpecification, nodesIn map[string][]string, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
+	constValueMap := make(map[string]map[string]int)
+	specsCountMap := make(map[string]int)
+	nodesCountMap := make(map[string]int)
+	runningSpecCountMap := make(map[string]int)
+	pausedSpecCountMap := make(map[string]int)
+	for uuid, specs := range specsIn {
+		specsCountMap[uuid] = len(specs)
+		nodesCountMap[uuid] = len(nodesIn[uuid])
+		var runningCnt int
+		var pausedCnt int
+		for _, spec := range specs {
+			if spec.Settings.Active {
+				runningCnt++
+			} else {
+				pausedCnt++
+			}
+		}
+		runningSpecCountMap[uuid] = runningCnt
+		pausedSpecCountMap[uuid] = pausedCnt
+	}
+
+	constValueMap[service_def.SOURCE_CLUSTER_NUM_REPL] = specsCountMap
+	constValueMap[service_def.SOURCE_CLUSTER_NUM_NODES] = nodesCountMap
+
+	for _, oneStat := range sourceClusterStats {
+		// As a reminder:
+		// m -> key is stat (i.e. numRepl, numNodes)
+		//   -> value is a map where:
+		//         -> key is either replication ID or source clusterUUID
+		//         -> value is
+		srcClusterUUIDToStatsMap, exists := (*m)[oneStat]
+		if !exists {
+			srcClusterUUIDToStatsMap = IdentifierStatsMap{}
+			(*m)[oneStat] = srcClusterUUIDToStatsMap
+		}
+
+		for srcClusterUuid, valueToStore := range constValueMap[oneStat] {
+			_, srcClusterExists := srcClusterUUIDToStatsMap[srcClusterUuid]
+			if !srcClusterExists {
+				statsProperty := lookupMap[oneStat]
+				labelsTable := constructStatsTable(oneStat)
+				srcClusterUUIDToStatsMap[srcClusterUuid] = NewPerSourceClusterStatsType(statsProperty, labelsTable, []byte(oneStat), srcClusterUuid)
+			}
+
+			srcClusterUUIDToStatsMap[srcClusterUuid].SetValue(valueToStore)
+
+			labelsTable := srcClusterUUIDToStatsMap[srcClusterUuid].GetLabelsTable()
+			if labelsTable != nil {
+				for runningOrPaused, extractor := range labelsTable {
+					if runningOrPaused == base.PipelineStatusPaused.String() {
+						extractor.LoadValue(pausedSpecCountMap[srcClusterUuid])
+					} else if runningOrPaused == base.PipelineStatusRunning.String() {
+						extractor.LoadValue(runningSpecCountMap[srcClusterUuid])
+					}
+				}
+			}
+		}
+
+		// Garbage collect any non-existant source UUIDs
+		for srcClusterUuid, _ := range srcClusterUUIDToStatsMap {
+			var gcNeeded = true
+			for currentSourceUuid, _ := range nodesIn {
+				if srcClusterUuid == currentSourceUuid {
+					gcNeeded = false
+					break
+				}
+			}
+			if gcNeeded {
+				// nodesIn for this sourceUUID is non existent - there's no way there's a replication coming in if there is no source KV nodes
+				delete(srcClusterUUIDToStatsMap, srcClusterUuid)
+			}
 		}
 	}
 }
@@ -156,17 +245,53 @@ func (e ExpVarParseMapType) CheckNoKeyChanges(varMap *expvar.Map) bool {
 	return keyLen == keyCount && !missingKey && subLevelCheckPasses && !inconsistentType
 }
 
-type ReplicationStatsMap map[string]*PerReplicationStatType
+type IdentifierStatsMap map[string]StatsPerExportedConst
+
+type StatsPerExportedConst interface {
+	SetValue(value interface{})
+	GetValue() interface{}
+	GetLabelsTable() PrometheusLabels
+	GetOutputBuffer() []byte
+	UpdateOutputBuffer(metricName []byte, id string)
+	ResetBuffer()
+}
+
+type PerItemStatTypeCommon struct {
+	Properties   service_def.StatsProperty
+	Value        interface{}
+	OutputBuffer []byte
+
+	LabelsTable           PrometheusLabels
+	IndividualLabelBuffer map[string]*[]byte // Uses PrometheusLabels key
+}
 
 // Prometheus only stores numerical values - ns_server request them to be in float64
 type PerReplicationStatType struct {
-	Properties                service_def.StatsProperty
-	Value                     interface{}
-	OutputBuffer              []byte
-	ReplIdDecompositionStruct *metadata.ReplIdComposition
+	PerItemStatTypeCommon
 
-	LabelsTable           PrometheusLabels
-	IndividualLabelBuffer map[string]*[]byte // Shares key as above
+	ReplIdDecompositionStruct *metadata.ReplIdComposition
+}
+
+func (t *PerItemStatTypeCommon) GetValue() interface{} {
+	return t.Value
+}
+
+func (t *PerItemStatTypeCommon) GetOutputBuffer() []byte {
+	return t.OutputBuffer
+}
+
+func (t *PerItemStatTypeCommon) GetLabelsTable() PrometheusLabels {
+	return t.LabelsTable
+}
+
+func (t *PerItemStatTypeCommon) SetValue(value interface{}) {
+	t.Value = value
+}
+
+// This call isn't supported really
+func (t *PerReplicationStatType) ResetBuffer() {
+	// do nothing
+	return
 }
 
 func (t *PerReplicationStatType) UpdateOutputBuffer(metricName []byte, replId string) {
@@ -184,7 +309,7 @@ func (t *PerReplicationStatType) UpdateOutputBuffer(metricName []byte, replId st
 		for customLabelName, extractor := range t.LabelsTable {
 			t.appendMetricName(metricName, t.IndividualLabelBuffer[customLabelName])
 			t.appendStandardLabels(replId, t.IndividualLabelBuffer[customLabelName])
-			t.appendCustomLabels(replId, t.IndividualLabelBuffer[customLabelName], extractor)
+			t.appendCustomLabels(t.IndividualLabelBuffer[customLabelName], extractor)
 			t.appendBufferWithValue(t.IndividualLabelBuffer[customLabelName], extractor.GetValueBaseUnit)
 		}
 		t.composeFinalOutputBufferFromLabelBuffers()
@@ -195,14 +320,14 @@ func (t *PerReplicationStatType) UpdateOutputBuffer(metricName []byte, replId st
 	}
 }
 
-func (t *PerReplicationStatType) resetBuffers() {
+func (t *PerItemStatTypeCommon) resetBuffers() {
 	t.OutputBuffer = t.OutputBuffer[:0]
 	for _, oneLabelBuffer := range t.IndividualLabelBuffer {
 		*oneLabelBuffer = (*oneLabelBuffer)[:0]
 	}
 }
 
-func (t *PerReplicationStatType) appendMetricName(metricName []byte, buffer *[]byte) {
+func (t *PerItemStatTypeCommon) appendMetricName(metricName []byte, buffer *[]byte) {
 	*buffer = append(*buffer, metricName...)
 }
 
@@ -243,7 +368,7 @@ func (t *PerReplicationStatType) appendStandardLabels(replId string, buffer *[]b
 	*buffer = append(*buffer, endBracketWithSpace...)
 }
 
-func (t *PerReplicationStatType) appendCustomLabels(replId string, buffer *[]byte, extractor LabelsValuesExtractor) {
+func (t *PerItemStatTypeCommon) appendCustomLabels(buffer *[]byte, extractor LabelsValuesExtractor) {
 	// Incoming from previous:
 	// { targetClusterUUID="abcdef", sourceBucketName="b1", targetBucketName="b2", pipelineType="Main"}
 	*buffer = bytes.Trim(*buffer, endBracketWithSpaceStr)
@@ -258,7 +383,7 @@ func (t *PerReplicationStatType) appendCustomLabels(replId string, buffer *[]byt
 	*buffer = append(*buffer, endBracketWithSpace...)
 }
 
-func (t *PerReplicationStatType) GetValueBaseUnit() interface{} {
+func (t *PerItemStatTypeCommon) GetValueBaseUnit() interface{} {
 	switch t.Properties.MetricType.Unit {
 	case service_def.StatsMgrNonCumulativeNoUnit:
 		fallthrough
@@ -301,7 +426,7 @@ func (t *PerReplicationStatType) GetValueBaseUnit() interface{} {
 }
 
 // For specific stats that may require precision, print with precision
-func (t *PerReplicationStatType) appendBufferWithValue(buffer *[]byte, getValueBaseUnit func() interface{}) {
+func (t *PerItemStatTypeCommon) appendBufferWithValue(buffer *[]byte, getValueBaseUnit func() interface{}) {
 	switch t.Properties.MetricType.Unit {
 	case service_def.StatsMgrNonCumulativeNoUnit:
 		fallthrough
@@ -324,7 +449,7 @@ func (t *PerReplicationStatType) appendBufferWithValue(buffer *[]byte, getValueB
 	}
 }
 
-func (t *PerReplicationStatType) composeFinalOutputBufferFromLabelBuffers() {
+func (t *PerItemStatTypeCommon) composeFinalOutputBufferFromLabelBuffers() {
 	totalLen := len(t.IndividualLabelBuffer)
 	i := 0
 
@@ -339,12 +464,75 @@ func (t *PerReplicationStatType) composeFinalOutputBufferFromLabelBuffers() {
 
 func NewPerReplicationStatType(properties service_def.StatsProperty, labelsTable PrometheusLabels) *PerReplicationStatType {
 	obj := &PerReplicationStatType{
-		Properties:            properties,
-		Value:                 nil,
-		LabelsTable:           labelsTable,
-		IndividualLabelBuffer: map[string]*[]byte{},
+		PerItemStatTypeCommon: PerItemStatTypeCommon{
+			Properties:            properties,
+			Value:                 nil,
+			LabelsTable:           labelsTable,
+			IndividualLabelBuffer: map[string]*[]byte{},
+		},
 	}
 
+	for k, _ := range labelsTable {
+		oneSlice := make([]byte, 0)
+		obj.IndividualLabelBuffer[k] = &oneSlice
+	}
+	return obj
+}
+
+type PerSourceClusterStatsType struct {
+	PerItemStatTypeCommon
+
+	StatsNameToOutput []byte
+	SourceClusterUuid string
+}
+
+func (p *PerSourceClusterStatsType) UpdateOutputBuffer(metricKey []byte, srcUuid string) {
+	p.resetBuffers()
+
+	if p.LabelsTable != nil {
+		for customLabelName, extractor := range p.LabelsTable {
+			p.appendMetricName(metricKey, p.IndividualLabelBuffer[customLabelName])
+			p.appendStandardLabels(srcUuid, p.IndividualLabelBuffer[customLabelName])
+			p.appendCustomLabels(p.IndividualLabelBuffer[customLabelName], extractor)
+			p.appendBufferWithValue(p.IndividualLabelBuffer[customLabelName], extractor.GetValueBaseUnit)
+		}
+		p.composeFinalOutputBufferFromLabelBuffers()
+	} else {
+		p.appendMetricName(metricKey, &p.OutputBuffer)
+		p.appendStandardLabels(srcUuid, &p.OutputBuffer)
+		p.appendBufferWithValue(&p.OutputBuffer, p.GetValueBaseUnit)
+	}
+}
+
+func (p *PerSourceClusterStatsType) appendStandardLabels(uuid string, buffer *[]byte) {
+	// {
+	*buffer = append(*buffer, []byte(" {")...)
+
+	// {sourceClusterUUID="abcdef"
+	*buffer = append(*buffer, PrometheusSourceClusterUuidBytes...)
+	*buffer = append(*buffer, []byte("=\"")...)
+	*buffer = append(*buffer, []byte(p.SourceClusterUuid)...)
+	*buffer = append(*buffer, []byte("\"")...)
+
+	// {sourceClusterUUID="abcdef"}
+	*buffer = append(*buffer, endBracketWithSpace...)
+}
+
+func (p *PerSourceClusterStatsType) ResetBuffer() {
+	p.resetBuffers()
+}
+
+func NewPerSourceClusterStatsType(properties service_def.StatsProperty, labelsTable PrometheusLabels, keyBytesCache []byte, uuid string) *PerSourceClusterStatsType {
+	obj := &PerSourceClusterStatsType{
+		PerItemStatTypeCommon: PerItemStatTypeCommon{
+			Properties:            properties,
+			Value:                 nil,
+			LabelsTable:           labelsTable,
+			IndividualLabelBuffer: map[string]*[]byte{},
+		},
+		StatsNameToOutput: keyBytesCache,
+		SourceClusterUuid: uuid,
+	}
 	for k, _ := range labelsTable {
 		oneSlice := make([]byte, 0)
 		obj.IndividualLabelBuffer[k] = &oneSlice
@@ -409,11 +597,67 @@ func (p *PrometheusExporter) LoadExpVarMap(m *expvar.Map) (noKeysChanged bool) {
 	p.mapsMtx.Unlock()
 
 	if keysChanged {
-		p.outputBufferMtx.Lock()
-		p.outputBuffer = make([]byte, 0)
-		p.outputBufferMtx.Unlock()
+		p.resetOutputBuffer()
 	}
 	return
+}
+
+func (p *PrometheusExporter) resetOutputBuffer() {
+	p.outputBufferMtx.Lock()
+	p.outputBuffer = make([]byte, 0)
+	p.outputBufferMtx.Unlock()
+}
+
+func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string) {
+	p.mapsMtx.Lock()
+	defer p.mapsMtx.Unlock()
+
+	// check for changes
+	var cacheOutdated bool
+	if len(p.srcSpecs) != len(srcSpecsIn) ||
+		len(p.srcNodes) != len(srcNodesIn) {
+		cacheOutdated = true
+		p.srcNodes = srcNodesIn
+		p.srcSpecs = srcSpecsIn
+	} else {
+		// check to make sure srcNodes are correct
+		for srcUuid, nodesList := range srcNodesIn {
+			cachedNodesList, exists := p.srcNodes[srcUuid]
+			if !exists {
+				cacheOutdated = true
+				break
+			}
+			if len(nodesList) != len(cachedNodesList) {
+				cacheOutdated = true
+				break
+			}
+			for _, node := range nodesList {
+				if found := base.StringList(cachedNodesList).Search(node, false); !found {
+					cacheOutdated = true
+					break
+				}
+			}
+		}
+
+		if !cacheOutdated {
+			// nodes list the same, check specs
+			for srcUuid, specsIn := range srcSpecsIn {
+				cachedSpecs, exists := p.srcSpecs[srcUuid]
+				if !exists {
+					cacheOutdated = true
+					break
+				}
+				if !metadata.ReplSpecList(specsIn).SameAs(cachedSpecs) {
+					cacheOutdated = true
+					break
+				}
+			}
+		}
+	}
+	if cacheOutdated {
+		p.resetOutputBuffer()
+		p.metricsMap.RecordSourceClusterV1(srcSpecsIn, srcNodesIn, p.globalLookupMap, p.labelsTableConstructor)
+	}
 }
 
 func (p *PrometheusExporter) LoadMetricsMap(needToReallocate bool) error {
@@ -437,8 +681,9 @@ func (p *PrometheusExporter) LoadMetricsMap(needToReallocate bool) error {
 // Write lock should be held
 func (p *PrometheusExporter) InitializeMetricsMapNoLock() {
 	p.metricsMap = make(MetricsMapType)
-	for k, _ := range p.globalLookupMap {
-		p.metricsMap[k] = ReplicationStatsMap{}
+	keys := p.globalLookupMap.GetAllKeys()
+	for _, k := range keys {
+		p.metricsMap[k] = IdentifierStatsMap{}
 	}
 }
 
@@ -449,9 +694,9 @@ func (p *PrometheusExporter) InitializeMetricsMapNoLock() {
 // the data underneath may be changed
 func (p *PrometheusExporter) Export() ([]byte, error) {
 	// First, prepare each stat buffer
-	atLeastOneStatsActive := p.prepareStatsBuffer()
+	needToOutput := p.prepareStatsBuffer()
 
-	if !atLeastOneStatsActive {
+	if !needToOutput {
 		// Nothing to output
 		return nil, nil
 	}
@@ -463,28 +708,32 @@ func (p *PrometheusExporter) Export() ([]byte, error) {
 	p.outputBuffer = p.outputBuffer[:0]
 
 	// Then, read all the prepared stats buffer
-	p.outputToBuffer()
-
+	if needToOutput {
+		p.outputReplStatsToBuffer()
+	}
+	//if p.hasSourceInfo() {
+	//	p.outputSourceClusterStatsV1ToBuffer()
+	//}
 	return p.outputBuffer, nil
 }
 
-func (p *PrometheusExporter) outputToBuffer() {
+func (p *PrometheusExporter) outputReplStatsToBuffer() {
 	p.mapsMtx.RLock()
 	defer p.mapsMtx.RUnlock()
-	for statsMgrMetricKey, replicationStatsMap := range p.metricsMap {
+	for statsMgrMetricKey, identifierStatsMap := range p.metricsMap {
 		// # HELP xdcr_dcp_datach_length_total Blah Blah Blah
 		// # TYPE xdcr_dcp_datach_length_total gauge
 		// xdcr_dcp_datach_length_total {repl_id="0746d42b7e44e5840dc02a9249efaef0/B0/B2"} 0
 		// xdcr_dcp_datach_length_total {repl_id="0746d42b7e44e5840dc02a9249efaef0/B1/B2"} 13260
 
-		if _, exists := p.globalLookupMap[statsMgrMetricKey]; !exists {
+		if !p.globalLookupMap.KeyExists(statsMgrMetricKey) {
 			continue
 		}
 
 		p.outputHelp(statsMgrMetricKey)
 		p.outputType(statsMgrMetricKey)
-		for _, perReplStats := range replicationStatsMap {
-			p.outputOneReplStat(perReplStats.OutputBuffer)
+		for _, statPerIdentifier := range identifierStatsMap {
+			p.outputOneReplStat(statPerIdentifier.GetOutputBuffer())
 		}
 		// Newline not necessary but makes it more human readable
 		p.outputBufferNewLine()
@@ -513,28 +762,71 @@ func (p *PrometheusExporter) outputHelp(k string) {
 	p.outputBufferNewLine()
 }
 
-func (p *PrometheusExporter) prepareStatsBuffer() (atLeastOneStatsActive bool) {
+func (p *PrometheusExporter) prepareStatsBuffer() (needToOutput bool) {
 	p.mapsMtx.Lock()
 	defer p.mapsMtx.Unlock()
-	for k, replicationStatsMap := range p.metricsMap {
-		if _, exists := p.globalLookupMap[k]; !exists {
+
+	// Used to compare the latest known sources with what has been known
+	// key is the stat constant - value is the identifier (i.e. replID or sourceUUID)
+	currentKnownIdentifier := make(map[string][]string)
+
+	for statConst, identifierStatsMap := range p.metricsMap {
+		if !p.globalLookupMap.KeyExists(statConst) {
 			continue
 		}
 
-		metricKey, exists := p.globalMetricKeyMap[k]
+		metricKey, exists := p.globalMetricKeyMap[statConst]
 		if !exists {
 			panic("FIXME")
 		}
 
-		for replId, perReplStats := range replicationStatsMap {
-			if perReplStats == nil {
+		for identifier, perIdentifierStat := range identifierStatsMap {
+			if perIdentifierStat == nil {
 				continue
 			}
-			atLeastOneStatsActive = true
-			perReplStats.UpdateOutputBuffer(metricKey, replId)
+			needToOutput = true
+			currentKnownIdentifier[statConst] = append(currentKnownIdentifier[statConst], identifier)
+			found := p.lastKnownIdentifiers[statConst].Search(identifier, false)
+			if !found {
+				p.lastKnownIdentifiers[statConst] = append(p.lastKnownIdentifiers[statConst], identifier)
+			}
+			perIdentifierStat.UpdateOutputBuffer(metricKey, identifier)
 		}
 	}
 
+	// Remove any sources that no longer exist
+	for statConst, knownIdentifiers := range p.lastKnownIdentifiers {
+		currentIdentifiers, statStillExists := currentKnownIdentifier[statConst]
+		if !statStillExists || len(currentIdentifiers) == 0 {
+			// The whole category no longer exists - wipe it clean
+			needToOutput = true
+			p.metricsMap[statConst] = IdentifierStatsMap{}
+			continue
+		}
+
+		// check individual identifier
+		currentIdentifiersList := base.SortStringList(currentKnownIdentifier[statConst])
+		for _, lastKnownIdentifier := range knownIdentifiers {
+			found := base.StringList(currentIdentifiersList).Search(lastKnownIdentifier, true)
+			if !found {
+				// need to remove lastKnownIdentifier
+				needToOutput = true
+				p.lastKnownIdentifiers[statConst] = p.lastKnownIdentifiers[statConst].RemoveInstances(lastKnownIdentifier)
+			}
+		}
+	}
+
+	//for _, srcStatKey := range sourceClusterStats {
+	//	identifierStatsMap := p.metricsMap[srcStatKey]
+	//	for identifier, _ := range identifierStatsMap {
+	//		_, stillExists := latestKnownSrc[identifier]
+	//		if !stillExists {
+	//			delete(identifierStatsMap, identifier)
+	//			needToOutput = true
+	//			break
+	//		}
+	//	}
+	//}
 	return
 }
 
@@ -542,6 +834,26 @@ func (p *PrometheusExporter) outputOneReplStat(buffer []byte) {
 	p.outputBuffer = append(p.outputBuffer, buffer...)
 	p.outputBufferNewLine()
 }
+
+// V1 is very basic stats
+//func (p *PrometheusExporter) outputSourceClusterStatsV1ToBuffer() {
+//	p.mapsMtx.RLock()
+//	defer p.mapsMtx.RUnlock()
+//
+//	if len(p.srcNodes) == 0 {
+//		// no incoming sources
+//		return
+//	}
+//
+//	// 1. number of nodes per source
+//	statsTemplate := p.globalLookupMap[service_def.SOURCE_CLUSTER_NUM_NODES]
+//	p.outputHelp(service_def.SOURCE_CLUSTER_NUM_NODES)
+//	p.outputType(service_def.SOURCE_CLUSTER_NUM_NODES)
+//	// TODO: labels
+//
+//	// 2. Number of source replications
+//
+//}
 
 type LabelsValuesExtractor interface {
 	LoadValue(value interface{})
@@ -570,6 +882,17 @@ func NewPrometheusLabelsTable(labelName string) PrometheusLabels {
 			},
 			base.PipelineStatusError.String(): &PipelineStatusErrorExtractor{
 				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Error\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+		}
+	case service_def.SOURCE_CLUSTER_NUM_REPL:
+		return PrometheusLabels{
+			base.PipelineStatusPaused.String(): &IncomingReplicationCountExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Paused\"")},
+				valueInt64Common: &valueInt64Common{},
+			},
+			base.PipelineStatusRunning.String(): &IncomingReplicationCountExtractor{
+				extractorCommon:  &extractorCommon{LabelBytes: []byte("status=\"Running\"")},
 				valueInt64Common: &valueInt64Common{},
 			},
 		}
@@ -634,4 +957,14 @@ func (p *PipelineStatusErrorExtractor) LoadValue(value interface{}) {
 	} else {
 		p.Value = 0
 	}
+}
+
+type IncomingReplicationCountExtractor struct {
+	*extractorCommon
+	*valueInt64Common
+}
+
+func (i *IncomingReplicationCountExtractor) LoadValue(value interface{}) {
+	incomingVal := value.(int)
+	i.Value = int64(incomingVal)
 }

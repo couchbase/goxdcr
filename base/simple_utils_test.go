@@ -581,3 +581,20 @@ func TestUint64ToHexLittleEndianAndStrip0s(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestStringListSearch(t *testing.T) {
+	assert := assert.New(t)
+
+	list1 := StringList{"a", "b", "c"}
+	list2 := StringList{"c", "b", "a"}
+	list3 := StringList{}
+
+	assert.True(list1.Search("a", false))
+	assert.True(list1.Search("a", true))
+	assert.False(list1.Search("1", false))
+	assert.False(list1.Search("1", true))
+
+	assert.True(list2.Search("a", false))
+
+	assert.False(list3.Search("a", true))
+}

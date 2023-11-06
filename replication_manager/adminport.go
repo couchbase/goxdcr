@@ -1312,6 +1312,13 @@ func (adminport *Adminport) doGetPrometheusStatsRequest(request *http.Request, h
 		return nil, err
 	}
 	adminport.prometheusExporter.LoadExpVarMap(expVarMap)
+
+	sourceSpecs, sourceNodes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
+	if err != nil {
+		return nil, err
+	}
+	adminport.prometheusExporter.LoadSourceClustersInfoV1(sourceSpecs, sourceNodes)
+
 	outputBytes, err := adminport.prometheusExporter.Export()
 	if err != nil {
 		return EncodeErrorMessageIntoResponse(err, http.StatusInternalServerError)

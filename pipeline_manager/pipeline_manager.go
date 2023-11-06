@@ -323,7 +323,7 @@ func (pipelineMgr *PipelineManager) HandleClusterEncryptionLevelChange(old, new 
 			continue
 		}
 
-		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
+		replSpecsList, err := pipelineMgr.repl_spec_svc.AllActiveReplicationSpecsWithRemote(ref)
 		if err != nil {
 			pipelineMgr.logger.Errorf("Unable to retrieve specs for remote cluster %v ... user should manually restart pipelines replicating to this remote cluster", ref.Id())
 			continue
@@ -352,7 +352,7 @@ func (pipelineMgr *PipelineManager) checkRemoteClusterSvcForChangedConfigs() {
 		return
 	}
 	for _, ref := range refList {
-		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
+		replSpecsList, err := pipelineMgr.repl_spec_svc.AllActiveReplicationSpecsWithRemote(ref)
 		if err != nil {
 			pipelineMgr.logger.Warnf("Unable to retrieve specs for remote cluster %v ... user should manually restart pipelines replicating to this remote cluster", ref.Id())
 			continue
@@ -377,7 +377,7 @@ func (pipelineMgr *PipelineManager) checkAndHandleRemoteClusterAuthErrs() {
 		pipelineMgr.logger.Warnf("Checkpipeline got %v when asking for any remote cluster reference that experienced auth error", err)
 	}
 	for _, ref := range refList {
-		replSpecsList, err := pipelineMgr.repl_spec_svc.AllReplicationSpecsWithRemote(ref)
+		replSpecsList, err := pipelineMgr.repl_spec_svc.AllActiveReplicationSpecsWithRemote(ref)
 		if err != nil {
 			pipelineMgr.logger.Warnf("Unable to retrieve specs for remote cluster %v ... user should manually pause pipelines replicating to this remote cluster because remote side authentication has changed", ref.Id())
 			continue

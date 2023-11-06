@@ -128,6 +128,64 @@ func (_c *ReplicationSpecSvc_AllActiveReplicationSpecsReadOnly_Call) RunAndRetur
 	return _c
 }
 
+// AllActiveReplicationSpecsWithRemote provides a mock function with given fields: remoteClusterRef
+func (_m *ReplicationSpecSvc) AllActiveReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error) {
+	ret := _m.Called(remoteClusterRef)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllActiveReplicationSpecsWithRemote")
+	}
+
+	var r0 []*metadata.ReplicationSpecification
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)); ok {
+		return rf(remoteClusterRef)
+	}
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) []*metadata.ReplicationSpecification); ok {
+		r0 = rf(remoteClusterRef)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*metadata.ReplicationSpecification)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*metadata.RemoteClusterReference) error); ok {
+		r1 = rf(remoteClusterRef)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllActiveReplicationSpecsWithRemote'
+type ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call struct {
+	*mock.Call
+}
+
+// AllActiveReplicationSpecsWithRemote is a helper method to define mock.On call
+//   - remoteClusterRef *metadata.RemoteClusterReference
+func (_e *ReplicationSpecSvc_Expecter) AllActiveReplicationSpecsWithRemote(remoteClusterRef interface{}) *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call {
+	return &ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call{Call: _e.mock.On("AllActiveReplicationSpecsWithRemote", remoteClusterRef)}
+}
+
+func (_c *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call) Run(run func(remoteClusterRef *metadata.RemoteClusterReference)) *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.RemoteClusterReference))
+	})
+	return _c
+}
+
+func (_c *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call) Return(_a0 []*metadata.ReplicationSpecification, _a1 error) *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call) RunAndReturn(run func(*metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error)) *ReplicationSpecSvc_AllActiveReplicationSpecsWithRemote_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllReplicationSpecIds provides a mock function with given fields:
 func (_m *ReplicationSpecSvc) AllReplicationSpecIds() ([]string, error) {
 	ret := _m.Called()

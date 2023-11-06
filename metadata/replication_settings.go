@@ -377,7 +377,7 @@ type ReplicationSettings struct {
 	// Compression type - 1: None, 2: Snappy, 3: Auto - REST will be inputting with string coming in
 	CompressionType int `json:"compression_type"`
 
-	// revision number to be used by metadata service. not included in json - not currently being used/set
+	// revision number to be used by metadata service
 	Revision interface{}
 }
 

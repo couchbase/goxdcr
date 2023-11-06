@@ -172,6 +172,10 @@ const (
 	//docs sent with poisoned CAS
 	DOCS_SENT_WITH_POISONED_CAS_ERROR   = base.DocsSentWithPoisonedCasErrorMode
 	DOCS_SENT_WITH_POISONED_CAS_REPLACE = base.DocsSentWithPoisonedCasReplaceMode
+
+	// Heartbeat
+	SOURCE_CLUSTER_NUM_NODES = "number_of_source_nodes"
+	SOURCE_CLUSTER_NUM_REPL  = "number_of_source_replications"
 )
 
 const (
@@ -358,6 +362,25 @@ func (s StatsLabels) ToGenerics() []interface{} {
 	return generics
 }
 
+// Returns true if at least one
+func (s StatsLabels) IsSourceClustersStats() bool {
+	for _, label := range s {
+		if label.IsSourceClusterStats() {
+			return true
+		}
+	}
+	return false
+}
+
+func (s StatsLabels) HasPipelineStatus() bool {
+	for _, label := range s {
+		if label.Name == PipelineTypeLabel.Name {
+			return true
+		}
+	}
+	return false
+}
+
 type statsLabelMetaObj struct {
 	Name       string `json:"name"`
 	Help       string `json:"help,omitempty"`
@@ -418,7 +441,12 @@ var (
 	TargetClusterUUIDLabel = StatsLabel{Name: PrometheusTargetClusterUuidLabel}
 	PipelineTypeLabel      = StatsLabel{Name: PrometheusPipelineTypeLabel}
 	PipelineStatusLabel    = StatsLabel{Name: PrometheusPipelineStatusLabel}
+	SourceClusterUUIDLabel = StatsLabel{Name: PrometheusSourceClusterUUIDLabel}
 )
+
+func (s StatsLabel) IsSourceClusterStats() bool {
+	return s.Name == PrometheusSourceClusterUUIDLabel
+}
 
 var StandardLabels = StatsLabels{
 	SourceBucketNameLabel,
@@ -432,6 +460,15 @@ var PipelineStatusLabels = StatsLabels{
 	TargetClusterUUIDLabel,
 	TargetBucketNameLabel,
 	PipelineTypeLabel,
+	PipelineStatusLabel,
+}
+
+var SourceClusterV1Labels = StatsLabels{
+	SourceClusterUUIDLabel,
+}
+
+var SourceClusterV1ReplLabels = StatsLabels{
+	SourceClusterUUIDLabel,
 	PipelineStatusLabel,
 }
 
@@ -539,6 +576,23 @@ func (s *StatsProperty) toMetaObj() *statsPropertyMetaObj {
 }
 
 type StatisticsPropertyMap map[string]StatsProperty
+
+func (sm StatisticsPropertyMap) KeyExists(key string) bool {
+	_, exists := sm[key]
+	return exists
+}
+
+func (sm StatisticsPropertyMap) GetAllKeys() []string {
+	keys := make([]string, len(sm))
+	for k, _ := range sm {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (sm StatisticsPropertyMap) GetStatsProperty(key string) StatsProperty {
+	return sm[key]
+}
 
 func (sm StatisticsPropertyMap) GetPrometheusMetricName(internalConst string) (string, error) {
 	var output []string
@@ -1453,6 +1507,23 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
+
+	SOURCE_CLUSTER_NUM_NODES: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForHeartbeatSupport,
+		Description:  "For a given source cluster, the number of data service nodes that it contains",
+		Stability:    Committed,
+		Labels:       SourceClusterV1Labels,
+	},
+	SOURCE_CLUSTER_NUM_REPL: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForHeartbeatSupport,
+		Description:  "For a given source cluster, the total number of outbound replications to this cluster",
+		Stability:    Committed,
+		Labels:       SourceClusterV1ReplLabels,
+	},
 }
 
 const (
@@ -1461,4 +1532,5 @@ const (
 	PrometheusTargetBucketLabel      = "targetBucketName"
 	PrometheusPipelineTypeLabel      = "pipelineType"
 	PrometheusPipelineStatusLabel    = "status"
+	PrometheusSourceClusterUUIDLabel = "sourceClusterUUID"
 )

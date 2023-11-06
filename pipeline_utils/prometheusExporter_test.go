@@ -97,19 +97,19 @@ func TestPrometheusParseMapToMetricMap(t *testing.T) {
 	assert.NotNil(replStatus)
 	stats := replStatus["0746d42b7e44e5840dc02a9249efaef0/B1/B2"]
 	assert.NotNil(stats)
-	assert.Equal(float64(23234), stats.Value.(float64))
+	assert.Equal(float64(23234), stats.GetValue().(float64))
 	stats = replStatus["0746d42b7e44e5840dc02a9249efaef0/B0/B2"]
 	assert.NotNil(stats)
-	assert.Equal(float64(0), stats.Value.(float64))
+	assert.Equal(float64(0), stats.GetValue().(float64))
 
 	replStatus = exporter.metricsMap["size_rep_queue"]
 	assert.NotNil(replStatus)
 	stats = replStatus["0746d42b7e44e5840dc02a9249efaef0/B1/B2"]
 	assert.NotNil(stats)
-	assert.Equal(float64(1339711), stats.Value.(float64))
+	assert.Equal(float64(1339711), stats.GetValue().(float64))
 	stats = replStatus["0746d42b7e44e5840dc02a9249efaef0/B0/B2"]
 	assert.NotNil(stats)
-	assert.Equal(float64(0), stats.Value.(float64))
+	assert.Equal(float64(0), stats.GetValue().(float64))
 
 	_, err = exporter.Export()
 	assert.Nil(err)

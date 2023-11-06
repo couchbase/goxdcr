@@ -367,8 +367,34 @@ func (s StringList) Len() int           { return len(s) }
 func (s StringList) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s StringList) Less(i, j int) bool { return s[i] < s[j] }
 
+func (s StringList) RemoveInstances(str string) StringList {
+	var replacementList StringList
+	for _, oneStr := range s {
+		if str == oneStr {
+			continue
+		}
+		replacementList = append(replacementList, oneStr)
+	}
+	return replacementList
+}
+
 // Not safe from concurrent access.
 // Caller has to make sure synchronisation is achieved, if necessary.
+func (s StringList) Search(str string, alreadySorted bool) (found bool) {
+	var listToSearch StringList
+	if !alreadySorted {
+		listToSearch = SortStringList(s)
+	} else {
+		listToSearch = s
+	}
+
+	searchIdx := sort.SearchStrings(listToSearch, str)
+	doesNotExist := searchIdx == len(listToSearch) || listToSearch[searchIdx] != str
+
+	found = !doesNotExist
+	return
+}
+
 func SortStringList(list []string) []string {
 	sort.Sort(StringList(list))
 	return list
@@ -893,15 +919,6 @@ func ShuffleVbList(list []uint16) {
 			list[i-1], list[randIndex] = list[randIndex], list[i-1]
 		}
 	}
-}
-
-func StringListContains(list []string, checkStr string) bool {
-	for _, str := range list {
-		if str == checkStr {
-			return true
-		}
-	}
-	return false
 }
 
 // Linearly combine two lists into one and also deduplicates duplicated entries, returns the result
