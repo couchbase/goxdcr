@@ -100,6 +100,7 @@ type P2PManagerImpl struct {
 
 	vbMasterCheckHelper VbMasterCheckHelper
 	replicator          ReplicaReplicator
+	replicatorInitCh    chan bool
 
 	mergerSetOnce sync.Once
 	mergerSetCh   chan bool
@@ -131,6 +132,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		backfillReplSvc:     backfillReplSvc,
 		mergerSetCh:         make(chan bool),
 		securitySvc:         securitySvc,
+		replicatorInitCh:    make(chan bool, 1),
 		backfillMgrSvc:      backfillMgr,
 	}, nil
 }
@@ -647,6 +649,7 @@ func (p *P2PManagerImpl) ReplicationSpecChangeCallback(id string, oldVal, newVal
 		return base.ErrorInvalidInput
 	}
 
+	<-p.replicatorInitCh
 	if oldSpec == nil && newSpec != nil {
 		p.vbMasterCheckHelper.HandleSpecCreation(newSpec)
 		p.replicator.HandleSpecCreation(newSpec)
@@ -692,6 +695,7 @@ func (p *P2PManagerImpl) loadSpecsFromMetakv() error {
 }
 
 func (p *P2PManagerImpl) initReplicator() {
+	defer close(p.replicatorInitCh)
 	p.replicator = NewReplicaReplicator(p.bucketTopologySvc, p.logger.LoggerContext(), p.ckptSvc, p.backfillReplSvc, p.utils, p.colManifestSvc, p.replSpecSvc, p.sendPeriodicPushRequest)
 	p.replicator.Start()
 }
