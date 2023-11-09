@@ -369,13 +369,13 @@ func (_c *PipelineEventsManager_ResetDismissedHistory_Call) RunAndReturn(run fun
 	return _c
 }
 
-// UpdateEvent provides a mock function with given fields: eventId, eventDesc, eventExtras
-func (_m *PipelineEventsManager) UpdateEvent(eventId int64, eventDesc string, eventExtras *base.EventsMap) error {
-	ret := _m.Called(eventId, eventDesc, eventExtras)
+// UpdateEvent provides a mock function with given fields: oldEventId, newEventDesc, newEventExtras
+func (_m *PipelineEventsManager) UpdateEvent(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
+	ret := _m.Called(oldEventId, newEventDesc, newEventExtras)
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(int64, string, *base.EventsMap) error); ok {
-		r0 = rf(eventId, eventDesc, eventExtras)
+		r0 = rf(oldEventId, newEventDesc, newEventExtras)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -389,14 +389,14 @@ type PipelineEventsManager_UpdateEvent_Call struct {
 }
 
 // UpdateEvent is a helper method to define mock.On call
-//   - eventId int64
-//   - eventDesc string
-//   - eventExtras *base.EventsMap
-func (_e *PipelineEventsManager_Expecter) UpdateEvent(eventId interface{}, eventDesc interface{}, eventExtras interface{}) *PipelineEventsManager_UpdateEvent_Call {
-	return &PipelineEventsManager_UpdateEvent_Call{Call: _e.mock.On("UpdateEvent", eventId, eventDesc, eventExtras)}
+//   - oldEventId int64
+//   - newEventDesc string
+//   - newEventExtras *base.EventsMap
+func (_e *PipelineEventsManager_Expecter) UpdateEvent(oldEventId interface{}, newEventDesc interface{}, newEventExtras interface{}) *PipelineEventsManager_UpdateEvent_Call {
+	return &PipelineEventsManager_UpdateEvent_Call{Call: _e.mock.On("UpdateEvent", oldEventId, newEventDesc, newEventExtras)}
 }
 
-func (_c *PipelineEventsManager_UpdateEvent_Call) Run(run func(eventId int64, eventDesc string, eventExtras *base.EventsMap)) *PipelineEventsManager_UpdateEvent_Call {
+func (_c *PipelineEventsManager_UpdateEvent_Call) Run(run func(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap)) *PipelineEventsManager_UpdateEvent_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(int64), args[1].(string), args[2].(*base.EventsMap))
 	})

@@ -169,4 +169,8 @@ type Component interface {
 type PipelineEventsProducer interface {
 	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) (eventId int64)
 	DismissEvent(eventId int) error
+	// UpdateEvent should not modify the event type. If needed in the future, need to analyze the reason why it needs to be changed
+	// Updating an event will update the time to the time this method is being called
+	// eventExtras can be nil, and the existing information won't be changed
+	UpdateEvent(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap) error
 }

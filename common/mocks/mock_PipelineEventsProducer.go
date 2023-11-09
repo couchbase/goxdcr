@@ -108,6 +108,50 @@ func (_c *PipelineEventsProducer_DismissEvent_Call) RunAndReturn(run func(int) e
 	return _c
 }
 
+// UpdateEvent provides a mock function with given fields: oldEventId, newEventDesc, newEventExtras
+func (_m *PipelineEventsProducer) UpdateEvent(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
+	ret := _m.Called(oldEventId, newEventDesc, newEventExtras)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, string, *base.EventsMap) error); ok {
+		r0 = rf(oldEventId, newEventDesc, newEventExtras)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PipelineEventsProducer_UpdateEvent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateEvent'
+type PipelineEventsProducer_UpdateEvent_Call struct {
+	*mock.Call
+}
+
+// UpdateEvent is a helper method to define mock.On call
+//   - oldEventId int64
+//   - newEventDesc string
+//   - newEventExtras *base.EventsMap
+func (_e *PipelineEventsProducer_Expecter) UpdateEvent(oldEventId interface{}, newEventDesc interface{}, newEventExtras interface{}) *PipelineEventsProducer_UpdateEvent_Call {
+	return &PipelineEventsProducer_UpdateEvent_Call{Call: _e.mock.On("UpdateEvent", oldEventId, newEventDesc, newEventExtras)}
+}
+
+func (_c *PipelineEventsProducer_UpdateEvent_Call) Run(run func(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap)) *PipelineEventsProducer_UpdateEvent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(string), args[2].(*base.EventsMap))
+	})
+	return _c
+}
+
+func (_c *PipelineEventsProducer_UpdateEvent_Call) Return(_a0 error) *PipelineEventsProducer_UpdateEvent_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *PipelineEventsProducer_UpdateEvent_Call) RunAndReturn(run func(int64, string, *base.EventsMap) error) *PipelineEventsProducer_UpdateEvent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewPipelineEventsProducer creates a new instance of PipelineEventsProducer. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewPipelineEventsProducer(t interface {
