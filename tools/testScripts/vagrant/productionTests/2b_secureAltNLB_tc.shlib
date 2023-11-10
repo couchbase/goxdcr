@@ -20,10 +20,14 @@ VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C1P"]=15201 ["C2"]=15202 ["C2P"]=1520
 VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
 VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.1" ["C1P"]="192.168.56.2" ["C2"]="192.168.56.3" ["C2P"]="192.168.56.4")
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
+VAGRANT_IP_EXTERNAL_MAP=(["C1"]="192.168.56.5" ["C1P"]="192.168.56.6" ["C2"]="192.168.56.7" ["C2P"]="192.168.56.8")
+VAGRANT_LB_IP="192.168.56.9"
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -45,11 +49,22 @@ function runDataLoad {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running Full secure with client cert replication"
+	echo "Running Full secure with client cert replication with NLB"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
-	vagrantInstallCBServerAll "7.1.3"
+	vagrantInstallCBServerAll "neo"
+
+	# Node 5 (idx 4) is to be haproxy
+	vagrantRemoveCbServer 4
+	vagrantRemoveHaproxy 4
+	vagrantInstallHaproxy 4
+
+	local tempCfgFile=$(mktemp)
+	vagrantCompileHaproxyCfg $tempCfgFile
+	vscp 4 "$tempCfgFile" "/tmp/haproxyCfg"
+	${VSSH[4]} "cat /tmp/haproxyCfg | sudo tee -a /etc/haproxy/haproxy.cfg > /dev/null"
+	vagrantRestartHaproxy 4
 
 	setupTopologies
 
@@ -74,7 +89,7 @@ function runTestCase {
 	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
 	runDataLoad
-	sleep 10
+	sleep 20
 
 	checkUnidirectionalChangesLeft
 
@@ -84,5 +99,5 @@ function runTestCase {
 
 	cleanupBucketReplications
 	cleanupBuckets
-
+	unset VAGRANT_LB_IP
 }

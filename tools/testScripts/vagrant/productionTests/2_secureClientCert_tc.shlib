@@ -20,11 +20,12 @@ VAGRANT_KVSSL_EXTERNAL_MAP=(["C1"]=15200 ["C1P"]=15201 ["C2"]=15202 ["C2P"]=1520
 VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013)
 VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.1" ["C1P"]="192.168.56.2" ["C2"]="192.168.56.3" ["C2P"]="192.168.56.4")
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
-VAGRANT_IP_EXTERNAL_MAP=(["C1"]="192.168.56.5" ["C1P"]="192.168.56.6" ["C2"]="192.168.56.7" ["C2P"]="192.168.56.8")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -50,7 +51,7 @@ function runTestCase {
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
-	vagrantInstallCBServerAll "7.6.0"
+	vagrantInstallCBServerAll "neo"
 
 	setupTopologies
 

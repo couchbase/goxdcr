@@ -42,23 +42,61 @@ function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B1"
 }
 
+function runDataLoadBothSidesAndCheck {
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 20
+	checkBidirectionalChangesLeft
+}
+
+function pauseAndResumeBothSidesAndCheck {
+	pauseReplication "C1" "B1" "C2" "B2"
+	pauseReplication "C2" "B2" "C1" "B1"
+	sleep 30
+	resumeReplication "C1" "B1" "C2" "B2"
+	resumeReplication "C2" "B2" "C1" "B1"
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 30
+	checkBidirectionalChangesLeft
+}
+
+function deleteRecreateReplicationsAndCheck {
+	deleteBucketReplication "C1" "B1" "C2" "B2"
+	deleteBucketReplication "C2" "B2" "C1" "B1"
+	sleep 5
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	sleep 5
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 30
+	checkBidirectionalChangesLeft
+}
+
 function runTestCase {
 	echo "============================================================================"
-	echo "Running 6.6.5 to 6.6.5-MP upgrade test case"
+	echo "Running baseline to toy upgrade test case"
 	echo "============================================================================"
+
+	local versionFrom="neo"
+	local versionTo="trinity"
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServerAll "6.6.5"
+	vagrantInstallCBServerAll "$versionFrom"
 
 	setupTopologies
 
 	# Shorten the amount of time pipeline restarts
+	sleep 20
 	local checkInterval=10
 	local maxChangeCnt=3
 	local maxStableCnt=3
 	local coolDownPeriod=1
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	setInternalSettings "C2" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
+	sleep 10
 
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
@@ -82,42 +120,43 @@ function runTestCase {
 	checkBidirectionalChangesLeft
 
 	# Upgrade source nodes
-	vagrantRebalanceAndUpgrade "C1" "0" "C1P" "toy"
+	vagrantRebalanceAndUpgrade "C1" "0" "C1P" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
 	vagrantGrepForPanic "0"
-	sleep 40
+	sleep 60
 
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 5
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
-	vagrantRebalanceAndUpgrade "C1P" "1" "C1" "toy"
+	vagrantRebalanceAndUpgrade "C1P" "1" "C1" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
+	sleep 60
 	vagrantGrepForPanic "1"
 
-	runCbWorkloadGenBucket "C1" "B1"
-	sleep 5
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
 	# Upgrade target nodes
-	vagrantRebalanceAndUpgrade "C2" "2" "C2P" "toy"
+	vagrantRebalanceAndUpgrade "C2" "2" "C2P" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
+	sleep 60
 	vagrantGrepForPanic "2"
 
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 5
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
-	vagrantRebalanceAndUpgrade "C2P" "3" "C2" "toy"
+	vagrantRebalanceAndUpgrade "C2P" "3" "C2" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 40
+	sleep 60
 	vagrantGrepForPanic "3"
 
-	runCbWorkloadGenBucket "C2" "B2"
-	sleep 5
-	checkBidirectionalChangesLeft
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
+
 	vagrantGrepForPanicAll
 
 	echo "============================================================================"

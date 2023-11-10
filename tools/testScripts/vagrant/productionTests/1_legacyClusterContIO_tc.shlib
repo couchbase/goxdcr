@@ -24,6 +24,8 @@ VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
 CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -57,10 +59,10 @@ function runTestCase {
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServer 0 "7.6.1" # To be updated
-	vagrantInstallCBServer 1 "7.6.1"
-	vagrantInstallCBServer 2 "6.6.5"
-	vagrantInstallCBServer 3 "6.6.5"
+	vagrantInstallCBServer 0 "neo" # To be updated
+	vagrantInstallCBServer 1 "neo"
+	vagrantInstallCBServer 2 "cheshirecat"
+	vagrantInstallCBServer 3 "cheshirecat"
 
 	setupTopologies
 
