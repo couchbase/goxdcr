@@ -1664,8 +1664,9 @@ func (xfi *CCRXattrFieldIterator) Next() (key, value []byte, err error) {
 }
 
 type SubdocSpecOption struct {
-	IncludeHlv        bool
-	IncludeMobileSync bool
+	IncludeHlv        bool // Get target HLV only for CCR
+	IncludeMobileSync bool // Get target _sync if we need to preserve target _sync
+	IncludeImportCas  bool // Include target importCas if enableCrossClusterVersioning.
 	IncludeBody       bool // Get the target body for merge
 	IncludeVXattr     bool // Get the target document metadata as Virtual so we can perform CR and format target HLV
 }
@@ -1676,6 +1677,9 @@ func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathS
 		specLen++
 	}
 	if option.IncludeMobileSync {
+		specLen++
+	}
+	if option.IncludeImportCas {
 		specLen++
 	}
 	if option.IncludeBody {
@@ -1713,6 +1717,10 @@ func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathS
 		specs = append(specs, spec)
 	}
 
+	if option.IncludeImportCas {
+		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_IMPORTCAS)}
+		specs = append(specs, spec)
+	}
 	if option.IncludeBody {
 		spec := SubdocLookupPathSpec{GET, 0, nil}
 		specs = append(specs, spec)

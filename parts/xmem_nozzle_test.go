@@ -31,6 +31,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/base/generator"
 	"github.com/couchbase/goxdcr/common/mocks"
+	"github.com/couchbase/goxdcr/crMeta"
 	"github.com/couchbase/goxdcr/hlv"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -60,7 +61,7 @@ var events []string
 var eventID int64
 var err error
 
-func setupBoilerPlateXmem(bname string, optional ...int) (*utilsMock.UtilsIface, map[string]interface{}, *XmemNozzle, *Router, *serviceDefMocks.BandwidthThrottlerSvc, *serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CollectionsManifestSvc, *mocks.PipelineEventsProducer) {
+func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, optional ...int) (*utilsMock.UtilsIface, map[string]interface{}, *XmemNozzle, *Router, *serviceDefMocks.BandwidthThrottlerSvc, *serviceDefMocks.RemoteClusterSvc, *serviceDefMocks.CollectionsManifestSvc, *mocks.PipelineEventsProducer) {
 
 	utilitiesMock := &utilsMock.UtilsIface{}
 	utilitiesMock.On("NewDataPool").Return(base.NewFakeDataPool())
@@ -73,7 +74,7 @@ func setupBoilerPlateXmem(bname string, optional ...int) (*utilsMock.UtilsIface,
 	remoteClusterSvc := &serviceDefMocks.RemoteClusterSvc{}
 
 	// local cluster run has KV port starting at 12000
-	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvString, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe", base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList, nil)
+	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvString, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe", crMode, log.DefaultLoggerContext, utilitiesMock, vbList, nil)
 
 	// settings map
 	settingsMap := make(map[string]interface{})
@@ -96,7 +97,7 @@ func setupBoilerPlateXmem(bname string, optional ...int) (*utilsMock.UtilsIface,
 
 	colManifestSvc := &serviceDefMocks.CollectionsManifestSvc{}
 
-	router, _ := NewRouter("testId", spec, nil, nil, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil, metadata.UnitTestGetCollectionsCapability(), nil, nil)
+	router, _ := NewRouter("testId", spec, nil, nil, crMode, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil, metadata.UnitTestGetCollectionsCapability(), nil, nil)
 
 	producer := &mocks.PipelineEventsProducer{}
 
@@ -227,7 +228,7 @@ func setupMocksConflictMgr(xmem *XmemNozzle) *serviceDefMocks.ConflictManagerIfa
 func TestPositiveXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, eventProducer)
 	assert.Nil(xmem.initialize(settings))
 	fmt.Println("============== Test case end: TestPositiveXmemNozzle =================")
@@ -236,7 +237,7 @@ func TestPositiveXmemNozzle(t *testing.T) {
 func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, rc, _, _ := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, _, rc, _, _ := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId)
 	setupMocksCompressNeg(utils)
 	setupMocksRC(rc)
 
@@ -247,7 +248,7 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, rc, _, _ := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, _, rc, _, _ := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
 	settings[ForceCollectionDisableKey] = true
 	setupMocksCompressNeg(utils)
@@ -261,7 +262,7 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 func TestPositiveXmemNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzleAuto =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, evtProducer := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, evtProducer := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, evtProducer)
 
@@ -297,7 +298,7 @@ func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 
 	assert := assert.New(t)
 
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bname)
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bname, base.CRMode_RevId)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
@@ -335,16 +336,21 @@ func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 	}
 }
 
-func startTargetXmem(xmem *XmemNozzle, settings map[string]interface{}, bname string, assert *assert.Assertions) {
-	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := xmem.utils.GetBucketInfo(connString, bname, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
+func getBucketUuid(conStr, bucketName string, assert *assert.Assertions) string {
+	realUtils := utilsReal.NewUtilities()
+	bucketInfo, err := realUtils.GetBucketInfo(conStr, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, nil)
 	assert.Nil(err)
 	uuid, ok := bucketInfo["uuid"].(string)
 	assert.True(ok)
-	xmem.targetBucketUuid = uuid
+	return uuid
+}
+
+func startTargetXmem(xmem *XmemNozzle, settings map[string]interface{}, bname string, assert *assert.Assertions) {
+	// Need to find the actual running targetBucketUUID
+	xmem.targetBucketUuid = getBucketUuid(connString, bname, assert)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeSnappy)
 	settings[ForceCollectionDisableKey] = true
-	err = xmem.Start(settings)
+	err := xmem.Start(settings)
 	assert.Nil(err)
 }
 
@@ -513,7 +519,7 @@ func TestNonTempErrorResponsesEvents(t *testing.T) {
 	fmt.Println("============== Test case start: TestNonTempErrorResponsesEvents =================")
 	defer fmt.Println("============== Test case end: TestNonTempErrorResponsesEvents =================")
 
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(xmemBucket, 3)
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId, 3)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
 	assert.Nil(xmem.initialize(settings))
@@ -637,7 +643,7 @@ func TestMobilePreserveSync(t *testing.T) {
 	xmemSendPackets(t, []string{targetDoc}, bucketName)
 
 	// Now set up Xmem for testing
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bucketName)
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bucketName, base.CRMode_RevId)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
@@ -785,4 +791,200 @@ func mobilePreserveSyncLiveRep(t *testing.T, bucketName string, crType gocb.Conf
 	if err = checkTarget(sourceBucket, key, base.XATTR_MOBILE, []byte("\"cluster C1 value\""), true); err != nil {
 		assert.FailNow(err.Error())
 	}
+}
+
+// We want to avoid replicating import mutation by using its pre-import metadata for CR.
+// This only works for LWW since pre-import revId is not saved so import mutations are still
+// replicated for revId buckets
+func TestMobileImportCasLWW(t *testing.T) {
+	fmt.Println("============== Test case start: TestMobileImportCasLWW =================")
+	defer fmt.Println("============== Test case end: TestMobileImportCasLWW =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+	assert := assert.New(t)
+	// Create and flush target bucket
+	bucketName := "importLWW"
+	cluster, bucket, err := createBucket(targetConnStr, bucketName, "lww")
+	if err != nil {
+		fmt.Printf("TestMobileImportCasLWW skipped because bucket is cannot be created. Error: %v\n", err)
+		return
+	}
+	if cluster, bucket, err = GetAndFlushBucket(targetConnStr, bucketName); err != nil {
+		fmt.Printf("TestMobileImportCasLWW skipped because bucket cannot be flusehed. Error: %v\n", err)
+		return
+	}
+	defer cluster.Close(nil)
+	// Create Xmem for testing
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bucketName, base.CRMode_LWW)
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+
+	settings[base.EnableCrossClusterVersioningKey] = true
+	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
+	settings[base.VersionPruningWindowHrsKey] = 720
+	router.setMobileCompatibility(base.MobileCompatibilityActive)
+
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
+
+	// This is the source bucket uuid when mutations in this test are generated. It may be used in the mutation HLV
+	xmem.sourceBucketUuid = "93fcf4f0fcc94fdb3d6196235029d6bf"
+	startTargetXmem(xmem, settings, bucketName, assert)
+
+	// Test 1. Replicate an import document (Doc1) when target doesn't have the document at all. It should replicate
+	uprfile := "testdata/uprEventDoc1ImportMutation1.json"
+	key := "Doc1ImportTest"
+	event, err := RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	xmem.Receive(wrappedMCRequest)
+	err = waitForReplication(key, 1700503142566854656, bucket)
+	assert.Nil(err)
+
+	out, err := bucket.DefaultCollection().Get(key, nil)
+	assert.Nil(err)
+	assert.Equal(gocb.Cas(1700503142566854656), out.Cas())
+	err = checkTarget(bucket, key, base.XATTR_IMPORTCAS, []byte("\"0x0000223899669917\""), true)
+	assert.Nil(err)
+
+	// Test 2. Update the import document (Doc1). It should replicate with importCas removed
+	uprfile = "testdata/uprEventDoc1UpdateAfterImport.json"
+	event, err = RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	wrappedEvent = &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err = router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	xmem.Receive(wrappedMCRequest)
+	err = waitForReplication(key, 1700503747140517888, bucket)
+	assert.Nil(err)
+	value, err := bucket.DefaultCollection().LookupIn(key,
+		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_IMPORTCAS, &gocb.GetSpecOptions{IsXattr: true})}, nil)
+	assert.Nil(err)
+	assert.False(value.Exists(0))
+
+	// Test 3. Import the document again (Doc1). It should not replicate
+	uprfile = "testdata/uprEventDoc1ImportAgainAfterUpdate.json"
+	event, err = RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	wrappedEvent = &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err = router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	xmem.Receive(wrappedMCRequest)
+	// To check it is not sent, we send another document, wait for it to be sent, and then check the doc
+	secondDoc := "../utils/testInternalData/uprNotCompress.json"
+	event, err = RetrieveUprFile(secondDoc)
+	assert.Nil(err)
+	secondKey := "TestDocKey"
+	wrappedEvent = &base.WrappedUprEvent{UprEvent: event}
+	wrappedMCRequest, err = router.ComposeMCRequest(wrappedEvent)
+	assert.Nil(err)
+	assert.NotNil(wrappedMCRequest)
+	xmem.Receive(wrappedMCRequest)
+	err = waitForReplication(secondKey, 1538667181248217088, bucket)
+	assert.Nil(err)
+	out, err = bucket.DefaultCollection().Get(key, nil)
+	assert.Nil(err) // Should get a path not found error
+	assert.Equal(gocb.Cas(1700503747140517888), out.Cas())
+}
+
+// This routine was used to generate import mutations used in TestMobileImportCasLWW.
+// When mobile imports a document, it will:
+//  1. Update its HLV, with cvCAS set to the document CAS.
+//  2. Add the mobile metadata in the document XATTR (_sync)
+//  3. Write back the document. This results in a new mutation with new CAS.
+//     Mobile will set an XATTR _importCAS to the same value as the new CAS
+//
+// The resulting import mutation has the following properties:
+// 1. importCAS == document.CAS
+// 2. cvCAS == pre-import document CAS
+// cvCAS represents the HLV version. It is the CAS value used for conflict resolution
+// If there is a new mutation on the document, the new mutation will have:
+// document.CAS > importCAS
+// This new mutation is no longer considered import mutation. It is a local mutation. When it is replicated to a target,
+// the importCAS XATTR will be removed.
+func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key string, bucketUuid hlv.DocumentSourceId) gocb.Cas {
+	// Lookup
+	values, err := getPathValue(key, []string{crMeta.XATTR_CVCAS_PATH, crMeta.XATTR_SRC_PATH, crMeta.XATTR_VER_PATH, crMeta.XATTR_MV_PATH, crMeta.XATTR_PV_PATH, crMeta.XATTR_IMPORTCAS, base.XATTR_MOBILE}, bucket)
+	a.Nil(err)
+	var cvCas, src, ver, mv, pv, importCas []byte
+	if values.Exists(0) {
+		err = values.ContentAt(0, &cvCas)
+		a.Nil(err)
+		l := len(cvCas)
+		// Remove the quotes
+		cvCas = cvCas[1 : l-1]
+	}
+	if values.Exists(1) {
+		err = values.ContentAt(1, &src)
+		a.Nil(err)
+		l := len(src)
+		src = src[1 : l-1]
+	}
+	if values.Exists(2) {
+		err = values.ContentAt(2, &ver)
+		a.Nil(err)
+		l := len(ver)
+		ver = ver[1 : l-1]
+	}
+	if values.Exists(3) {
+		err = values.ContentAt(3, &mv)
+		a.Nil(err)
+	}
+	if values.Exists(4) {
+		err = values.ContentAt(4, &pv)
+		a.Nil(err)
+	}
+	if values.Exists(5) {
+		err = values.ContentAt(5, &importCas)
+		a.Nil(err)
+	}
+	meta, err := crMeta.NewMetadataForTest([]byte(key), []byte(bucketUuid), uint64(values.Cas()), 1, cvCas, src, ver, pv, mv)
+	a.Nil(err)
+	hlv := meta.GetHLV()
+
+	mutateInSpec := []gocb.MutateInSpec{}
+	// Update PV
+	pvMap := hlv.GetPV()
+	if len(pvMap) > 0 {
+		newPvMap := srcCasMapToBase64(pvMap)
+		mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PV_PATH, newPvMap, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	} else if meta.HadPv() {
+		mutateInSpec = append(mutateInSpec, gocb.RemoveSpec(crMeta.XATTR_PV_PATH, &gocb.RemoveSpecOptions{IsXattr: true}))
+	}
+	// Update MV
+	mvMap := hlv.GetMV()
+	if len(mvMap) > 0 {
+		newMvMap := srcCasMapToBase64(mvMap)
+		mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_MV_PATH, newMvMap, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	} else if meta.HadMv() {
+		mutateInSpec = append(mutateInSpec, gocb.RemoveSpec(crMeta.XATTR_MV_PATH, &gocb.RemoveSpecOptions{IsXattr: true}))
+	}
+	// Update ver, src stays the same
+	newVer := base.Uint64ToHexLittleEndian(uint64(values.Cas()))
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_VER_PATH, string(newVer), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// Update cvCas to the same value
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_CVCAS_PATH, string(newVer), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// Add _importCas
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_IMPORTCAS, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	res, err := bucket.DefaultCollection().MutateIn(key, mutateInSpec, nil)
+	a.Nil(err)
+	return res.Cas()
+}
+
+func srcCasMapToBase64(input hlv.VersionsMap) (output map[string]string) {
+	if len(input) == 0 {
+		return
+	}
+	output = make(map[string]string)
+	for key, val := range input {
+		base64Val := base.Uint64ToBase64(val)
+		output[string(key)] = string(base64Val)
+	}
+	return
 }
