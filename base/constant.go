@@ -357,6 +357,7 @@ var ErrorSystemScopeMapped = errors.New("System scope is mapped")
 var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
 var ErrorJSONReEncodeFailed = errors.New("JSON string passed in did not pass re-encode test. Potentially duplicated keys or characters except: A-Z a-z 0-9 _ - %")
 var ErrorDocumentNotFound = errors.New("Document not found")
+var ErrorSubdocLookupPathNotFound = errors.New("SUBDOC_MULTI_LOOKUP does not include the path")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -1512,6 +1513,8 @@ const (
 	XATTR_MOBILE = "_sync"
 	// This is the HLV XATTR name.
 	XATTR_HLV = "_vv" // The HLV XATTR
+
+	XATTR_IMPORTCAS = "_importCAS"
 
 	FunctionUrlFmt         = "http://%v:%v/evaluator/v1/libraries"
 	DefaultMergeFunc       = "defaultLWW"

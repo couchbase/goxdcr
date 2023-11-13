@@ -76,7 +76,7 @@ type currentVersion struct {
 
 // This creates a new updated HLV based on XATTR and document.CAS
 // Input:
-// - cas: this is the document CAS
+// - cas: this is the document CAS, representing the latest mutation excluding import mutation
 // - source: this is the bucket XDCR get this mutation from, either through DCP or subdoc_get
 // - {src,ver} these combined is the input cv
 // If cas > ver, then the document has been mutated since replication.

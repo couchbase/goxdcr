@@ -1865,7 +1865,7 @@ func (lookupResp *SubdocLookupResponse) ResponseForAPath(path string) ([]byte, e
 			pos = pos + 4 + len
 		}
 	}
-	return nil, fmt.Errorf("SUBDOC_MULTI_LOOKUP does not include the path %v", path)
+	return nil, ErrorSubdocLookupPathNotFound
 }
 
 func (lookupResp *SubdocLookupResponse) FindTargetBodyWithoutXattr() ([]byte, error) {

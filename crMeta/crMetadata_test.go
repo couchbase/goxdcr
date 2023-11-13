@@ -17,55 +17,8 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/hlv"
 	"github.com/stretchr/testify/assert"
 )
-
-func NewMetadataForTest(key, source []byte, cas, revId uint64, cvCasHex, cvSrc, verHex, pv, mv []byte) (*CRMetadata, error) {
-	var cvCas, ver uint64
-	var err error
-	if len(verHex) == 0 {
-		ver = 0
-	} else {
-		ver, err = base.HexLittleEndianToUint64(verHex)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(cvCasHex) == 0 {
-		cvCas = 0
-	} else {
-		cvCas, err = base.HexLittleEndianToUint64(verHex)
-		if err != nil {
-			return nil, err
-		}
-	}
-	pvMap, err := xattrVVtoMap(pv)
-	if err != nil {
-		return nil, err
-	}
-	mvMap, err := xattrVVtoMap(mv)
-	if err != nil {
-		return nil, err
-	}
-	hlv, err := hlv.NewHLV(hlv.DocumentSourceId(source), cas, cvCas, hlv.DocumentSourceId(cvSrc), ver, pvMap, mvMap)
-	if err != nil {
-		return nil, err
-	}
-	meta := CRMetadata{
-		docMeta: &base.DocumentMetadata{
-			Key:      key,
-			RevSeq:   revId,
-			Cas:      cas,
-			Flags:    0,
-			Expiry:   0,
-			Deletion: false,
-			DataType: 0,
-		},
-		hlv: hlv,
-	}
-	return &meta, nil
-}
 
 func TestConstructCustomCRXattrForSetMeta(t *testing.T) {
 	fmt.Println("============== Test case start: TestConstructCustomCRXattr =================")

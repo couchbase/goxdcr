@@ -1497,7 +1497,7 @@ func (xmem *XmemNozzle) sendSetMeta_internal(batch *dataBatch) error {
 		err = xmem.batchSetMetaWithRetry(batch, xmem.config.maxRetry)
 		if err != nil && err != PartStoppedError {
 			high_level_err := "Error writing documents to memcached in target cluster."
-			xmem.Logger().Errorf("%v %v. err=%v", xmem.Id(), high_level_err, err)
+			xmem.Logger().Errorf("%v %v err=%v", xmem.Id(), high_level_err, err)
 			xmem.handleGeneralError(errors.New(high_level_err))
 		}
 	}
@@ -1888,11 +1888,15 @@ func (xmem *XmemNozzle) batchSubDocGet(get_map base.McRequestMap, getSpec []base
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
 			if ok && (resp.Status == mc.KEY_ENOENT || base.IsSuccessSubdocLookupResponse(resp)) {
+				if err = xmem.uncompressBody(wrappedReq); err != nil {
+					xmem.Logger().Errorf("%v failed to uncompress %v%q%v: '%v'", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, err)
+					return nil, nil, nil, nil, err
+				}
 				var res base.ConflictResult
 				res, err = xmem.conflict_resolver(wrappedReq, resp, getSpec, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
-					xmem.Logger().Errorf("%v Custom CR: '%v'", xmem.Id(), err)
+					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
 					continue
 				}
 				switch res {
@@ -2037,9 +2041,10 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 
 	xattrComposer := base.NewXattrComposer(newbody)
 	hlvUpdated := false
+	var meta *crMeta.CRMetadata
 	if setOpt.sendHlv {
 		doc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
-		meta, err := doc.GetMetadata()
+		meta, err = doc.GetMetadata()
 		if err != nil {
 			return err
 		}
@@ -2069,8 +2074,22 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 				xmem.Logger().Errorf("%v: updateSystemXattrForTarget received error '%v' iterating through XATTR for key %v%s%v,", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
 				return err
 			}
-			if (hlvUpdated && base.Equals(key, base.XATTR_HLV)) || base.Equals(key, base.XATTR_MOBILE) {
-				continue
+			switch string(key) {
+			case base.XATTR_HLV:
+				if hlvUpdated {
+					// We have updated the hlv so skip the old HLV
+					continue
+				}
+			case base.XATTR_MOBILE:
+				if setOpt.preserveSync {
+					// Skip the source _sync value
+					continue
+				}
+			case base.XATTR_IMPORTCAS:
+				if meta != nil && !meta.IsImportMutation() {
+					// Skip it if it is no longer an import mutation. This happens when import mutation is mutated again.
+					continue
+				}
 			}
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {
@@ -2278,15 +2297,16 @@ func (xmem *XmemNozzle) initNewBatch() {
 	// For the current batch, getMeta, conflict detection algorithm, and setMeta depend on
 	// CRR, HLV, and mobile
 	isCCR := xmem.source_cr_mode == base.CRMode_Custom
-	isHLV := xmem.getHlvMode()
+	crossClusterVers := xmem.getCrossClusterVers()
 	isMobile := xmem.getMobileCompatible() != base.MobileCompatibilityOff
 
 	// If it is CCR, we need to get target version vector for conflict detection
 	// If mobile on, we need to preserve target _sync XATTR so get _sync
-	if isCCR || isMobile {
+	if isCCR || isMobile || crossClusterVers {
 		option := base.SubdocSpecOption{
-			IncludeHlv:        isCCR,    // For CCR, we need to get target HLV
-			IncludeMobileSync: isMobile, // For mobile, we need to get target _sync so we can preserve it
+			IncludeHlv:        isCCR || crossClusterVers, // CCR needs target HLV for CR. crossClusterVers needs cvCas
+			IncludeMobileSync: isMobile,                  // For mobile, we need to get target _sync so we can preserve it
+			IncludeImportCas:  crossClusterVers,
 			IncludeBody:       false,
 			IncludeVXattr:     true, // Get all the document metadata since we won't be calling getMeta
 		}
@@ -2307,7 +2327,7 @@ func (xmem *XmemNozzle) initNewBatch() {
 	if isCCR || isMobile {
 		xmem.batch.setMetaXattrOptions.noTargetCR = true
 	}
-	if isHLV || isCCR {
+	if crossClusterVers || isCCR {
 		xmem.batch.setMetaXattrOptions.sendHlv = true
 	}
 }
@@ -3857,7 +3877,7 @@ func (xmem *XmemNozzle) getMobileCompatible() int {
 	return int(atomic.LoadUint32(&xmem.config.mobileCompatible))
 }
 
-func (xmem *XmemNozzle) getHlvMode() bool {
+func (xmem *XmemNozzle) getCrossClusterVers() bool {
 	// No need for atomic load since we restart pipeline if this changes.
 	return xmem.config.crossClusterVers
 }
