@@ -3,8 +3,9 @@ package memcached
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/couchbase/gomemcached"
 	"math"
+
+	"github.com/couchbase/gomemcached"
 )
 
 type SystemEventType int
@@ -160,6 +161,8 @@ func makeUprEvent(rq gomemcached.MCRequest, stream *UprStream, bytesReceivedFrom
 		event.PopulateSeqnoAdv(rq.Extras)
 	} else if event.IsOsoSnapshot() {
 		event.PopulateOso(rq.Extras)
+	} else if event.IsStreamEnd() {
+		event.PopulateStreamEndFlags(rq.Extras)
 	}
 
 	return event
@@ -225,6 +228,10 @@ func (event *UprEvent) IsOsoSnapshot() bool {
 	return event.Opcode == gomemcached.DCP_OSO_SNAPSHOT
 }
 
+func (event *UprEvent) IsStreamEnd() bool {
+	return event.Opcode == gomemcached.UPR_STREAMEND
+}
+
 func (event *UprEvent) PopulateEvent(extras []byte) {
 	if len(extras) < dcpSystemEventExtraLen {
 		// Wrong length, don't parse
@@ -248,6 +255,14 @@ func (event *UprEvent) PopulateSeqnoAdv(extras []byte) {
 
 func (event *UprEvent) PopulateOso(extras []byte) {
 	if len(extras) < dcpOsoExtraLen {
+		// Wrong length, don't parse
+		return
+	}
+	event.Flags = binary.BigEndian.Uint32(extras[:4])
+}
+
+func (event *UprEvent) PopulateStreamEndFlags(extras []byte) {
+	if len(extras) < dcpStreamEndExtraLen {
 		// Wrong length, don't parse
 		return
 	}

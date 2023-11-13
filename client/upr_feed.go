@@ -8,11 +8,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/goutils/logging"
 	"strconv"
 	"sync"
 	"sync/atomic"
+
+	"github.com/couchbase/gomemcached"
+	"github.com/couchbase/goutils/logging"
 )
 
 const uprMutationExtraLen = 30
@@ -27,6 +28,7 @@ const opaqueFailover = 0xDEADBEEF
 const opaqueGetSeqno = 0xDEADBEEF
 const uprDefaultNoopInterval = 120
 const dcpOsoExtraLen = 4
+const dcpStreamEndExtraLen = 4
 
 // Counter on top of opaqueOpen that others can draw from for open and control msgs
 var opaqueOpenCtrlWell uint32 = opaqueOpen
