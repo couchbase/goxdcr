@@ -1539,15 +1539,9 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 		binary.BigEndian.PutUint64(req.Extras[16:24], event.Cas)
 
 		var options uint32
-		if router.sourceCRMode == base.CRMode_LWW {
-			// if source bucket is of lww type, add FORCE_ACCEPT_WITH_META_OPS options for memcached
-			options |= base.FORCE_ACCEPT_WITH_META_OPS
-		} else if router.sourceCRMode == base.CRMode_Custom {
-			// Custom conflict resolution behaves the same as LWW in KV.
-			// For mobile, we also skip target conflict resolution. This will be done in xmem based on
-			// whether the mutation is being sent to target with mobile enabled. Setting it here can have
-			// race condition since the setting cab change in the middle of the replication.
-			options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
+		// base.SKIP_CONFLICT_RESOLUTION_FLAG will be set in Xmem when we actually decide to do source CR only
+		if router.sourceCRMode == base.CRMode_LWW || router.sourceCRMode == base.CRMode_Custom {
+			// if source bucket is of lww or custom type, add FORCE_ACCEPT_WITH_META_OPS options for memcached
 			options |= base.FORCE_ACCEPT_WITH_META_OPS
 		}
 		if event.Opcode == mc.UPR_EXPIRATION {

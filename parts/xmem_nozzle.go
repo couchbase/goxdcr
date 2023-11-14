@@ -1444,15 +1444,19 @@ func (xmem *XmemNozzle) setCasLocking(req *base.WrappedMCRequest, lookup *base.S
 		req.Req.Cas = lookup.Resp.Cas
 	}
 	if opt.noTargetCR {
-		if len(req.Req.Extras) < 28 {
-			extras := make([]byte, 28)
-			copy(extras, req.Req.Extras)
-			req.Req.Extras = extras
-		}
-		options := binary.BigEndian.Uint32(req.Req.Extras[24:28])
-		options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
-		binary.BigEndian.PutUint32(req.Req.Extras[24:28], options)
+		xmem.setSkipTargetCR(req)
 	}
+}
+
+func (xmem *XmemNozzle) setSkipTargetCR(req *base.WrappedMCRequest) {
+	if len(req.Req.Extras) < 28 {
+		extras := make([]byte, 28)
+		copy(extras, req.Req.Extras)
+		req.Req.Extras = extras
+	}
+	options := binary.BigEndian.Uint32(req.Req.Extras[24:28])
+	options |= base.SKIP_CONFLICT_RESOLUTION_FLAG
+	binary.BigEndian.PutUint32(req.Req.Extras[24:28], options)
 }
 
 func (xmem *XmemNozzle) getConflictDetector(source_cr_mode base.ConflictResolutionMode) (ret ConflictResolver) {
