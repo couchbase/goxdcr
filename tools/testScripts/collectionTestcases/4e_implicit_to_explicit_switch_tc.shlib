@@ -93,10 +93,6 @@ function runTestCase {
 	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 
-	# Account for no-op backfill
-#	currentBackfillInstanceCnt=$(($currentBackfillInstanceCnt + 1))
-#	currentVBTasksDoneInstanceCnt=$(($currentVBTasksDoneInstanceCnt + 1))
-
 	validateInternalLogWithInstance "C1" "$BACKFILL_MSG" $currentBackfillInstanceCnt
 	validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentVBTasksDoneInstanceCnt))
 

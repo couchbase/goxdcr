@@ -1317,7 +1317,7 @@ function createBucketReplication {
 
 	for ((i = 0; $i < 3; i = $(($i + 1)))); do
 		repId=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/createReplication -d fromBucket=$sourceBucket -d toCluster=$targetCluster -d toBucket=$targetBucket "${getBucketReplOutArr[@]}")
-		if (((($? == 0)) && (($(echo "$repId" | grep -c error) == 0)) && (($(echo "$repId" | grep -c "kv vb map is empty") == 0)) && (( $(echo "$repId" | grep -c "Unable to send to the following nodes") == 0 )) )); then
+		if (((($? == 0)) && (($(echo "$repId" | grep -c error) == 0)) && (($(echo "$repId" | grep -c "kv vb map is empty") == 0)) && (($(echo "$repId" | grep -c "Unable to send to the following nodes") == 0)))); then
 			if (($(checkJQ) == 0)); then
 				repIdReal=$(getKeyUsingJQ "$repId" '.id')
 				if [[ "$repIdReal" == "" ]]; then

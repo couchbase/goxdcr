@@ -76,7 +76,7 @@ function deleteRecreateReplicationsAndCheck {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running baseline to toy upgrade test case"
+	echo "Running major releases upgrade test case"
 	echo "============================================================================"
 
 	local versionFrom="neo"
@@ -123,7 +123,7 @@ function runTestCase {
 	vagrantRebalanceAndUpgrade "C1" "0" "C1P" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
 	vagrantGrepForPanic "0"
-	sleep 60
+	sleep 300
 
 	runDataLoadBothSidesAndCheck
 	pauseAndResumeBothSidesAndCheck
@@ -131,7 +131,7 @@ function runTestCase {
 
 	vagrantRebalanceAndUpgrade "C1P" "1" "C1" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 60
+	sleep 300
 	vagrantGrepForPanic "1"
 
 	runDataLoadBothSidesAndCheck
@@ -141,7 +141,7 @@ function runTestCase {
 	# Upgrade target nodes
 	vagrantRebalanceAndUpgrade "C2" "2" "C2P" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 60
+	sleep 300
 	vagrantGrepForPanic "2"
 
 	runDataLoadBothSidesAndCheck
@@ -150,7 +150,7 @@ function runTestCase {
 
 	vagrantRebalanceAndUpgrade "C2P" "3" "C2" "$versionTo"
 	echo "Waiting for topology detector to kick in and restart pipeline"
-	sleep 60
+	sleep 300
 	vagrantGrepForPanic "3"
 
 	runDataLoadBothSidesAndCheck

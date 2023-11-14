@@ -84,6 +84,7 @@ function vagrantRemoveCbServer {
 function vagrantRemoveCbServerAll {
 	local i
 	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		checkAndWaitForUnattendedUpgrade $i
 		vagrantRemoveCbServer $i
 	done
 }
@@ -512,4 +513,19 @@ function setupVagrantAltPortForwarding {
 	echo "==== Running $cmd ===="
 	eval $cmd &
 	sleep 3
+}
+
+function checkAndWaitForUnattendedUpgrade {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+	local cmd
+	local count=1
+
+	cmd="${VSSH[$idx]} \"ps -ef | grep unattended-upgrade-shutdown | grep -v grep | grep -v shutdown | grep -c .\""
+
+	echo "==== Running $cmd repeatedly until upgrade is finished ===="
+	while [[ ! "$count" =~ 0 ]]; do
+		count=$(eval $cmd)
+		sleep 10
+	done
 }

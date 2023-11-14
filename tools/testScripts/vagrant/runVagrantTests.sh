@@ -48,7 +48,6 @@ if [[ -z "$testCasesDirectory" ]]; then
 	exit 1
 fi
 
-
 vagrantUp
 
 if [[ -z "$testCaseNumber" ]]; then
