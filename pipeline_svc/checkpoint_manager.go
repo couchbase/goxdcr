@@ -184,6 +184,8 @@ type CheckpointManager struct {
 	periodicPushDedupMtx sync.RWMutex
 	periodicPushDedupArg *MergeCkptArgs
 	periodicMerger       periodicMergerType // can be replaced for unit test
+
+	lastHighSeqnoVbUuidMap base.HighSeqnoAndVbUuidMap
 }
 
 type checkpointSyncHelper struct {
@@ -762,21 +764,27 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool
 	waitGrp.Wait()
 
 	// A map of vbucketID -> slice of 2 elements of 1)HighSeqNo and 2)VbUuid in that order
-	high_seqno_and_vbuuid_map := make(map[uint16][]uint64)
+	highSeqnoAndVbUuidMap := make(base.HighSeqnoAndVbUuidMap)
 	invalidVbNos := make([]uint16, 0)
 	serverWarningsMap := make(map[string]map[uint16]string)
 	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
 		if _, found := serverClientStatsMap[serverAddr]; !found {
 			continue
 		}
-		invalidVbnosSubset, warnings := ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], high_seqno_and_vbuuid_map)
+		invalidVbnosSubset, warnings := ckmgr.utils.ParseHighSeqnoAndVBUuidFromStats(vbnos, serverClientStatsMap[serverAddr], highSeqnoAndVbUuidMap)
 		invalidVbNos = append(invalidVbNos, invalidVbnosSubset...)
 		serverWarningsMap[serverAddr] = warnings
 	}
-	ckmgr.logger.Warnf("Can't find high seqno or vbuuid for vbnos=%v in stats map or are in invalid format. Target topology may have changed.\n", invalidVbNos)
-	ckmgr.logger.Debugf("Warnings encountered during getHighSeqnoAndVBUuidFromTarget are: %v", serverWarningsMap)
-
-	return high_seqno_and_vbuuid_map, nil
+	if len(invalidVbNos) > 0 {
+		ckmgr.logger.Warnf("Can't find high seqno or vbuuid for vbnos=%v in stats map or are in invalid format. Target topology may have changed.\n", invalidVbNos)
+		ckmgr.logger.Debugf("Warnings encountered during getHighSeqnoAndVBUuidFromTarget are: %v", serverWarningsMap)
+	}
+	diffMap := highSeqnoAndVbUuidMap.Diff(ckmgr.lastHighSeqnoVbUuidMap)
+	if len(diffMap) > 0 {
+		ckmgr.logger.Infof("highSeqnoAndVbUuidMap=%v\n", highSeqnoAndVbUuidMap)
+	}
+	ckmgr.lastHighSeqnoVbUuidMap = highSeqnoAndVbUuidMap
+	return highSeqnoAndVbUuidMap, nil
 }
 
 // checkpointing cannot be done without high seqno and vbuuid from target
@@ -2000,6 +2008,12 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		return
 	}
 
+	// This should not occur, and should be removed in a subsequent changeset
+	if curCkptTargetVBOpaque == nil {
+		ckmgr.logger.Infof("remote bucket is an older node, no checkpointing should be done.")
+		return
+	}
+
 	// Item 1:
 	// Update the one and only check point record that checkpoint_manager keeps track of in its "cur_ckpts" with the through_seq_no
 	// that was found from "GetThroughSeqno", which has already done the work to single out the number to represent the latest state
@@ -2010,16 +2024,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		ckmgr.logger.Infof("Checkpoint seqno went backward, possibly due to rollback. vb=%v, old_seqno=%v, new_seqno=%v", vbno, last_seqno, through_seqno)
 	}
 
-	if through_seqno == last_seqno {
-		ckmgr.logger.Debugf("No replication has happened in vb %v since replication start or last checkpoint. seqno=%v. Skip checkpointing\\n", vbno, last_seqno)
-		return
-	}
-
-	if curCkptTargetVBOpaque == nil {
-		ckmgr.logger.Infof("remote bucket is an older node, no checkpointing should be done.")
-		return
-	}
-
+	// Do this before through seqno check to ensure we catch failover as soon as we can
 	remote_seqno, err := ckmgr.getRemoteSeqno(vbno, high_seqno_and_vbuuid_map, curCkptTargetVBOpaque)
 	if err != nil {
 		if err == targetVbuuidChangedError {
@@ -2030,6 +2035,11 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 			err = nil
 			return
 		}
+	}
+
+	if through_seqno == last_seqno {
+		ckmgr.logger.Debugf("No replication has happened in vb %v since replication start or last checkpoint. seqno=%v. Skip checkpointing\\n", vbno, last_seqno)
+		return
 	}
 
 	// Go through the local snapshot records repository and figure out which snapshot contains this latest sequence number

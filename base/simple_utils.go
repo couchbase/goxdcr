@@ -299,6 +299,26 @@ func SearchUint64ListUnsorted(seqno_list []uint64, seqno uint64) (int, bool) {
 	return 0, false
 }
 
+func SortedUint64ListsAreSame(sorted_list_1, sorted_list_2 []uint64) bool {
+	if len(sorted_list_1) != len(sorted_list_2) {
+		return false
+	}
+
+	if len(sorted_list_1) == 0 {
+		return true
+	}
+
+	isSame := true
+	for i := 0; i < len(sorted_list_1); i++ {
+		if sorted_list_1[i] != sorted_list_2[i] {
+			isSame = false
+			break
+		}
+	}
+
+	return isSame
+}
+
 type Uint32List []uint32
 
 func (u Uint32List) Len() int           { return len(u) }
@@ -2059,4 +2079,28 @@ func DecomposeVBHighSeqnoStatsKey(key string) (uint16, error) {
 		return 0, err
 	}
 	return uint16(vbnoInt), nil
+}
+
+type HighSeqnoAndVbUuidMap map[uint16][]uint64
+
+func (h *HighSeqnoAndVbUuidMap) Diff(prev HighSeqnoAndVbUuidMap) HighSeqnoAndVbUuidMap {
+	if h == nil {
+		return nil
+	} else if prev == nil {
+		return *h
+	}
+
+	diffMap := make(HighSeqnoAndVbUuidMap)
+	for k, v := range *h {
+		if vbList, exists := prev[k]; !exists {
+			diffMap[k] = v
+		} else {
+			sorted1 := SortUint64List(v)
+			sorted2 := SortUint64List(vbList)
+			if !SortedUint64ListsAreSame(sorted1, sorted2) {
+				diffMap[k] = v
+			}
+		}
+	}
+	return diffMap
 }
