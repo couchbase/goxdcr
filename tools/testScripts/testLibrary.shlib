@@ -32,6 +32,7 @@ UNABLE_TO_GET_HIGH_SEQNO_MSG="Unable to find any collection ID for getHighSeqno"
 P2P_PULL_ERR_MSG="Unable to respond to caller given type"
 BACKFILL_START_MSG="Starting BackfillPipeline"
 TOPOLOGY_RESTART_MSG="Topology change detected. Estimated time of pipeline restart"
+BACKFILL_KILLED="background waiting backfill streams to all be replicated timed out"
 
 # These should be imported after clusterRunProvision script
 
@@ -1401,4 +1402,99 @@ function validateVBTasksProgress {
 		fi
 	done
 	IFS="$OLDIFS"
+}
+
+# Validates that the result is greater than 0
+function validatePrometheusStatsRRNon0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+	local count
+	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep xdcr_guardrail_resident_ratio_total |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	if (($count == 0)); then
+		echo "Guardrail resident ratio shows 0"
+		exit 1
+	fi
+}
+
+# use cbc-pillowfight to create a large bucket
+function runCbcPillowFight {
+	local cluster=$1
+	local bucket=$2
+	local numDocs=$3
+	local scope=$4
+	local collection=$5
+
+	if [[ -z "${cluster:-}" ]] || [[ -z "${bucket:-}" ]] || [[ -z "${numDocs:-}" ]]; then
+		echo "Error: Expected to pass cluster, bucket and numDocs"
+		return 1
+	fi
+
+	if [[ -z "${scope:-}" ]]; then
+		scope="_default"
+	fi
+	if [[ -z "${collection:-}" ]]; then
+		collection="_default"
+	fi
+
+	local port=${CLUSTER_NAME_PORT_MAP[$cluster]}
+	if [[ -z "${port:-}" ]]; then
+		echo "Error: Invalid cluster - $cluster"
+		return 1
+	fi
+
+	local cbcPillowfight
+	cbcPillowfight=$(locate cbc-pillowfight | grep install | grep bin | head -n 1)
+	if [[ -z "${cbcPillowfight:-}" ]]; then
+		cbcPillowfight=$(mdfind cbc-pillowfight | grep install | grep bin | head -n 1)
+	fi
+	if [[ -z "${cbcPillowfight:-}" ]]; then
+		echo "Error: cannot locate cbc-pillowfight"
+		return 1
+	fi
+
+	$cbcPillowfight -U http://localhost:$port/$bucket --collection $scope.$collection -M 2000000 -m 2000000 -I $numDocs --json --populate-only -u $DEFAULT_ADMIN -P $DEFAULT_PW -t 5
+
+	return 0
+}
+
+# The cbepctl tool is used to control vBucket states, configuration, and memory and disk persistence behavior.
+function runCbepctl {
+	local cluster=$1
+	local bucket=$2
+	local paramType=$3
+	local param=$4
+	local val=$5
+	local kvPort
+
+	if [[ -z "${cluster:-}" ]] || [[ -z "${bucket:-}" ]] || [[ -z "${paramType:-}" ]] || [[ -z "${param:-}" ]] || [[ -z "${param:-}" ]]; then
+		echo "Error: Expected to pass cluster, bucket, paramType, param and val"
+		return 1
+	fi
+
+	kvPort=${CLUSTER_NAME_KV_PORT_MAP[$cluster]}
+	if [[ -z "${kvPort:-}" ]]; then
+		echo "kvPort for $cluster is not set in CLUSTER_NAME_KV_PORT_MAP"
+		return 1
+	fi
+
+	local cbepctl
+	cbepctl=$(locate cbepctl | grep install | grep bin | head -n 1)
+	if [[ -z "${cbepctl:-}" ]]; then
+		cbepctl=$(mdfind cbepctl | grep install | grep bin | head -n 1)
+	fi
+	if [[ -z "${cbepctl:-}" ]]; then
+		echo "Error: cannot locate cbepctl"
+		return 1
+	fi
+
+	$cbepctl localhost:$kvPort -u $DEFAULT_ADMIN -p $DEFAULT_PW -b $bucket set $paramType $param $val
+
+	return 0
 }

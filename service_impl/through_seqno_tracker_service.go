@@ -1109,26 +1109,50 @@ func (tsTracker *ThroughSeqnoTrackerSvc) handleBackfillStreamEnd(vbno uint16) {
 func (tsTracker *ThroughSeqnoTrackerSvc) bgScanForThroughSeqno() {
 	// Wait for max time it takes for xmem to finish sending a mutation
 	totalScanTime := time.Duration(base.XmemMaxRetry) * base.XmemMaxRetryInterval
+	progressCheckTime := base.XmemMaxRetryInterval // a multiple of totalScanTime
 	killTimer := time.NewTimer(totalScanTime)
 	periodicScanner := time.NewTicker(base.ThroughSeqnoBgScannerFreq)
 	logPrinter := time.NewTicker(base.ThroughSeqnoBgScannerLogFreq)
+	progressChecker := time.NewTicker(progressCheckTime)
 
 	defer killTimer.Stop()
 	defer periodicScanner.Stop()
+	defer logPrinter.Stop()
+	defer progressChecker.Stop()
+
+	var numProgressChecks, numProgressions, totalDonePrev int
 
 	for {
 		select {
 		case <-killTimer.C:
-			total, totalDone, waitingOnVbs := tsTracker.bgScanForDoneVBs()
-			if total == totalDone {
-				// Last minute catch
-				tsTracker.logger.Infof("%v Background check task finished", tsTracker.Id())
+			tsTracker.Logger().Infof("%v bg scanner: In the last %v, progress was observed %v times out of %v checks",
+				tsTracker.id, totalScanTime, numProgressions, numProgressChecks)
+			if numProgressions > 0 {
+				// with the default settings, this may cause a worst case wait time upto 30mins more if the progress
+				// is stuck after a subset of progress is observed.
+				numProgressions = 0
+				numProgressChecks = 0
+			} else {
+				total, totalDone, waitingOnVbs := tsTracker.bgScanForDoneVBs()
+				if total == totalDone {
+					// Last minute catch
+					tsTracker.logger.Infof("%v Background check task finished", tsTracker.Id())
+					return
+				}
+
+				// With the default settings, error out when there is no progress whatsoever in the last 25mins.
+				err := fmt.Errorf("ThroughSeqno %v background waiting backfill streams to all be replicated timed out. Expected count: %v actual count %v. VBs waiting on: %v",
+					tsTracker.Id(), total, totalDone, waitingOnVbs)
+				tsTracker.handleGeneralError(err)
 				return
 			}
-			err := fmt.Errorf("ThroughSeqno %v background waiting backfill streams to all be replicated timed out. Expected count: %v actual count %v. VBs waiting on: %v",
-				tsTracker.Id(), total, totalDone, waitingOnVbs)
-			tsTracker.handleGeneralError(err)
-			return
+		case <-progressChecker.C:
+			_, totalDone, _ := tsTracker.bgScanForDoneVBs()
+			numProgressChecks++
+			if totalDone > totalDonePrev {
+				numProgressions++
+				totalDonePrev = totalDone
+			}
 		case <-logPrinter.C:
 			total, totalDone, waitingOn := tsTracker.bgScanForDoneVBs()
 			tsTracker.Logger().Infof("%v bg scanner: total %v totalDone %v waitingOnVBs %v", tsTracker.id, total, totalDone, waitingOn)

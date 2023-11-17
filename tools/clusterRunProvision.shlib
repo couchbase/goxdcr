@@ -60,6 +60,7 @@ declare -A NODE_CERT_MAP
 declare -A NODE_KEY_MAP
 declare -A CLIENT_CERT_MAP
 declare -A CLIENT_KEY_MAP
+declare -A CLUSTER_NAME_KV_PORT_MAP
 
 # optional globals
 # -----------------
