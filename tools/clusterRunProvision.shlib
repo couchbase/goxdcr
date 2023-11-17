@@ -70,6 +70,7 @@ declare -A VAGRANT_IP_EXTERNAL_MAP
 declare -A VAGRANT_VM_IP_MAP
 declare -A VAGRANT_VM_IDX_MAP
 declare -A VAGRANT_VERSION_MAP
+declare -A CLUSTER_NAME_KV_PORT_MAP
 
 # optional globals
 # -----------------
