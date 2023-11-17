@@ -92,8 +92,8 @@ type BucketBasicStats struct {
 	ItemCount int `json:"itemCount"`
 }
 
-//Only used by unit test
-//TODO: replace with go-couchbase bucket stats API
+// Only used by unit test
+// TODO: replace with go-couchbase bucket stats API
 type CouchBucket struct {
 	Name string           `json:"name"`
 	Stat BucketBasicStats `json:"basicStats"`
@@ -218,7 +218,7 @@ func (u *Utilities) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interf
 	return regMap
 }
 
-//convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
+// convert the format returned by go-memcached StatMap - map[string]string to map[uint16]uint64
 // Returns a list of vbnos that was not able to parsed. If all vbnos were not parsed, then return an error instead
 func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error) {
 	var unableToParseVBs []uint16
@@ -251,35 +251,51 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 	return unableToParseVBs, nil
 }
 
-//convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
-func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) {
+// convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
+func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string) {
+	invalidVbnos := make([]uint16, 0)
+	warnings := make(map[uint16]string)
 	for _, vbno := range vbnos {
 		high_seqno_stats_key := fmt.Sprintf(base.VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 		highseqnostr, ok := stats_map[high_seqno_stats_key]
 		if !ok {
-			u.logger_utils.Warnf("Can't find high seqno for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			invalidVbnos = append(invalidVbnos, vbno)
+			if _, ok := warnings[vbno]; !ok {
+				warnings[vbno] = fmt.Sprintf("Can't find high seqno for vbno=%v in stats map. Target topology may have changed.\n", vbno)
+			}
 			continue
 		}
 		high_seqno, err := strconv.ParseUint(highseqnostr, 10, 64)
 		if err != nil {
-			u.logger_utils.Warnf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
+			invalidVbnos = append(invalidVbnos, vbno)
+			if _, ok := warnings[vbno]; !ok {
+				warnings[vbno] = fmt.Sprintf("high seqno for vbno=%v in stats map is not a valid uint64. high seqno=%v\n", vbno, highseqnostr)
+			}
 			continue
 		}
 
 		vbuuid_stats_key := fmt.Sprintf(base.VBUCKET_UUID_STAT_KEY_FORMAT, vbno)
 		vbuuidstr, ok := stats_map[vbuuid_stats_key]
 		if !ok {
-			u.logger_utils.Warnf("Can't find vbuuid for vbno=%v in stats map. Source topology may have changed.\n", vbno)
+			invalidVbnos = append(invalidVbnos, vbno)
+			if _, ok := warnings[vbno]; !ok {
+				warnings[vbno] = fmt.Sprintf("Can't find vbuuid for vbno=%v in stats map. Target topology may have changed.\n", vbno)
+			}
 			continue
 		}
 		vbuuid, err := strconv.ParseUint(vbuuidstr, 10, 64)
 		if err != nil {
-			u.logger_utils.Warnf("vbuuid for vbno=%v in stats map is not a valid uint64. vbuuid=%v\n", vbno, vbuuidstr)
+			invalidVbnos = append(invalidVbnos, vbno)
+			if _, ok := warnings[vbno]; !ok {
+				warnings[vbno] = fmt.Sprintf("vbuuid for vbno=%v in stats map is not a valid uint64. vbuuid=%v\n", vbno, vbuuidstr)
+			}
 			continue
 		}
 
 		high_seqno_and_vbuuid_map[vbno] = []uint64{high_seqno, vbuuid}
 	}
+
+	return invalidVbnos, warnings
 }
 
 // encode data in a map into a byte array, which can then be used as
@@ -2150,7 +2166,7 @@ func (u *Utilities) getHostNameWithoutPortFromNodeInfo(adminHostAddr string, nod
 	return hostName, err
 }
 
-//convenient api for rest calls to local cluster
+// convenient api for rest calls to local cluster
 func (u *Utilities) QueryRestApi(baseURL string,
 	path string,
 	preservePathEncoding bool,
@@ -2176,7 +2192,7 @@ func (u *Utilities) RemovePrefix(prefix string, str string) string {
 	return ret_str
 }
 
-//this expect the baseURL doesn't contain username and password
+// this expect the baseURL doesn't contain username and password
 func (u *Utilities) QueryRestApiWithAuth(
 	baseURL string,
 	path string,
@@ -2385,7 +2401,7 @@ func (u *Utilities) parseResponseBody(res *http.Response, out interface{}, logge
 	return
 }
 
-//convenient api for rest calls to local cluster
+// convenient api for rest calls to local cluster
 func (u *Utilities) InvokeRestWithRetry(baseURL string,
 	path string,
 	preservePathEncoding bool,
@@ -2476,7 +2492,7 @@ func (u *Utilities) GetHttpClient(username string, authMech base.HttpAuthMech, c
 	return client, nil
 }
 
-//this expect the baseURL doesn't contain username and password
+// this expect the baseURL doesn't contain username and password
 func (u *Utilities) ConstructHttpRequest(
 	baseURL string,
 	path string,

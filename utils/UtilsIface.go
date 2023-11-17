@@ -82,7 +82,7 @@ type UtilsIface interface {
 	BucketStorageBackend(bucketInfo map[string]interface{}) (string, error)
 
 	ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error)
-	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64)
+	ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string)
 
 	// Cluster related utilities
 	GetClusterCompatibilityFromNodeList(nodeList []interface{}) (int, error)

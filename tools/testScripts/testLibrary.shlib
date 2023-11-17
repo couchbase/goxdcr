@@ -282,6 +282,12 @@ function killGoXdcr {
 	ps -ef | grep goxdcr | grep $sourcePort | awk '{print $2}' | xargs kill
 }
 
+function killMemcached {
+	local nodePrefix=$1
+
+	ps -ef | grep memcached | grep -v grep | grep -v beam | grep "$nodePrefix" | awk '{print $2}' | xargs kill -9
+}
+
 # Input:
 # 1 - cluster name
 # 2 - String to look for
