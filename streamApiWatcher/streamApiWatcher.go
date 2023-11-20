@@ -11,13 +11,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/utils"
 	"github.com/pkg/errors"
-	"net/http"
-	"sync"
-	"time"
 )
 
 const defaultSelfRestartSleep = 1 * time.Second
@@ -121,7 +122,13 @@ func (w *StreamApiWatcherImpl) watchClusterChanges() {
 	w.closeCh = make(chan bool)
 	w.mutex.Unlock()
 	selfRestart := func() {
-		time.Sleep(w.selfRestartSleep)
+		sleepTimer := time.NewTicker(w.selfRestartSleep)
+		select {
+		case <-sleepTimer.C:
+		case <-w.finCh:
+			w.waitGrp.Done()
+			return
+		}
 		go w.watchClusterChanges()
 		w.logger.Infof("Restart watching %v after %v", w.path, w.selfRestartSleep)
 		w.selfRestartSleep = 2 * w.selfRestartSleep
