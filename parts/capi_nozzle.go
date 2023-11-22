@@ -83,18 +83,23 @@ var MaxErrorMessageLength = 400
 // nnumber of last sent batch to remember and log
 var BatchHistorySize = 20
 
-/************************************
+/*
+***********************************
 /* struct capiBatch
- * NOTE: see dataBatch comments for more info
-*************************************/
+  - NOTE: see dataBatch comments for more info
+
+************************************
+*/
 type capiBatch struct {
 	dataBatch
 	vbno uint16
 }
 
-/************************************
+/*
+***********************************
 /* struct capiConfig
-*************************************/
+************************************
+*/
 type capiConfig struct {
 	baseConfig
 	uploadWindowSize int
@@ -146,9 +151,11 @@ func (config *capiConfig) initializeConfig(settings metadata.ReplicationSettings
 	return err
 }
 
-/************************************
+/*
+***********************************
 /* struct CapiNozzle
-*************************************/
+************************************
+*/
 type CapiNozzle struct {
 	AbstractPart
 
@@ -712,13 +719,13 @@ func (capi *CapiNozzle) batchGetMeta(vbno uint16, bigDoc_map base.McRequestMap) 
 			docKey := string(req.Req.Key)
 			if _, ok = bigDoc_rep_map[docKey]; !ok {
 				// true -> failed CR
-				bigDoc_noRep_map[id] = Not_Send_Failed_CR
+				bigDoc_noRep_map[id] = NotSendFailedCR
 			}
 		} else {
 			// if id is not found in sent_id_map, it must have been de-duped
 			// do not send it to target
 			// consider it to have failed CR with other source side mutations
-			bigDoc_noRep_map[id] = Not_Send_Failed_CR
+			bigDoc_noRep_map[id] = NotSendFailedCR
 		}
 	}
 
@@ -756,7 +763,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			capi.adjustRequest(item)
 			req_list = append(req_list, item)
 		} else {
-			if needSendStatus == Not_Send_Failed_CR {
+			if needSendStatus == NotSendFailedCR {
 				if capi.Logger().GetLogLevel() >= log.LogLevelDebug {
 					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), base.TagUD(item.Req.Key))
 				}
@@ -850,7 +857,7 @@ func (capi *CapiNozzle) adjustRequest(req *base.WrappedMCRequest) {
 	mc_req.Cas = 0
 }
 
-//batch call to update docs on target
+// batch call to update docs on target
 func (capi *CapiNozzle) batchUpdateDocsWithRetry(vbno uint16, req_list *[]*base.WrappedMCRequest) error {
 	if len(*req_list) == 0 {
 		return nil
