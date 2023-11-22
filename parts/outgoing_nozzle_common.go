@@ -60,12 +60,13 @@ const (
 type NeedSendStatus int
 
 const (
-	Send               NeedSendStatus = iota
-	Not_Send_Failed_CR NeedSendStatus = iota
-	Not_Send_Detecting NeedSendStatus = iota // Still doing the conflict detection
-	To_Resolve         NeedSendStatus = iota
-	To_Setback         NeedSendStatus = iota
-	Not_Send_Other     NeedSendStatus = iota
+	Send              NeedSendStatus = iota
+	NotSendFailedCR   NeedSendStatus = iota
+	NotSendDetecting  NeedSendStatus = iota // Still doing the conflict detection
+	ToResolve         NeedSendStatus = iota
+	ToSetback         NeedSendStatus = iota
+	RetryTargetLocked NeedSendStatus = iota
+	NotSendOther      NeedSendStatus = iota
 )
 
 /*
@@ -143,6 +144,10 @@ func (doc_meta *documentMetadata) CloneAndRedact() *documentMetadata {
 		return doc_meta.Clone().Redact()
 	}
 	return doc_meta
+}
+
+func (docMeta *documentMetadata) IsLocked() bool {
+	return docMeta != nil && docMeta.cas == base.MaxCas
 }
 
 // We determine the "commit" time as the time we hear back from the target, for statistics purposes
@@ -328,8 +333,8 @@ func (b *dataBatch) incrementSize(delta uint32) uint32 {
 // Given a request to be sent and the batch of requests metadata that has been pre-processed
 // returns three possible values
 // Send - doc needs to be sent to target
-// Not_Send_Failed_CR - doc does not need to be sent to target since it failed source side conflict resolution
-// Not_Send_Other - doc does not need to be sent to target for other reasons, e.g., since target no longer owns the vbucket involved
+// NotSendFailedCR - doc does not need to be sent to target since it failed source side conflict resolution
+// NotSendOther - doc does not need to be sent to target for other reasons, e.g., since target no longer owns the vbucket involved
 func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLogger) (NeedSendStatus, error) {
 	if req == nil || req.Req == nil {
 		return Send, errors.New("needSend saw a nil req")

@@ -47,6 +47,7 @@ declare -A CLUSTER_NAME_SSLPORT_MAP
 declare -A CLUSTER_SETUP_DONE_MAP
 declare -A CLUSTER_NAME_SECURE_PORT_MAP
 declare -A CLUSTER_NAME_XDCR_PORT_MAP
+declare -A CLUSTER_NAME_KV_PORT_MAP
 declare -A CLUSTER_NAME_BUCKET_MAP
 declare -A BUCKET_NAME_RAMQUOTA_MAP
 declare -A BUCKET_NAME_SCOPE_MAP
@@ -984,6 +985,15 @@ function writeJSONDocument {
 		-u $DEFAULT_ADMIN:$DEFAULT_PW --data-urlencode value=$jsonData >/dev/null
 }
 
+function getJSONDocument {
+	local clusterName=$1
+	local bucketName=$2
+	local docName=$3
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+
+	$CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/docs/$docName
+}
+
 function writeBinaryDocument {
 	local clusterName=$1
 	local bucketName=$2
@@ -993,6 +1003,49 @@ function writeBinaryDocument {
 
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/$POOLS_DEFAULT_BUCKETS_PATH/$bucketName/docs/$docName \
 		--data-urlencode value=$binaryData
+}
+
+function pipCheckCouchbase {
+	if (($(pip3 list 2>&1 | grep -c couchbase) == 0)); then
+		pip3 install couchbase
+	fi
+}
+
+function lockDocument {
+	local clusterName=$1
+	local bucketName=$2
+	local docName=$3
+	local secsToLock=$4
+	local kvPort=${CLUSTER_NAME_KV_PORT_MAP[$clusterName]:-}
+
+	pipCheckCouchbase
+
+	python3 <<END
+
+from couchbase.auth import PasswordAuthenticator
+from couchbase.bucket import Bucket
+from couchbase.cluster import Cluster
+from couchbase.options import ClusterOptions
+from datetime import timedelta
+import sys
+import time
+
+bootstrap="127.0.0.1:$kvPort"
+bucket_name="$bucketName"
+
+# Connect options - authentication
+auth = PasswordAuthenticator(
+    "$DEFAULT_ADMIN",
+    "$DEFAULT_PW",
+)
+
+cluster = Cluster('couchbase://{}'.format(bootstrap), ClusterOptions(auth))
+bucket = cluster.bucket(bucket_name)
+
+cb_coll = bucket.default_collection()
+cb_coll.get_and_lock("$docName", timedelta(seconds=$secsToLock))
+
+END
 }
 
 function deleteJSONDocument {

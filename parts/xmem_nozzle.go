@@ -1245,8 +1245,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			if err != nil {
 				return err
 			}
-			if needSendStatus == Send {
-
+			switch needSendStatus {
+			case Send:
 				err = xmem.preprocessMCRequest(item)
 				if err != nil {
 					return err
@@ -1283,11 +1283,12 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					reqs_bytes = [][]byte{}
 					index_reservation_list = make([][]uint16, base.XmemMaxBatchSize+1)
 				}
-			} else if needSendStatus == Not_Send_Detecting {
-				xmem.Logger().Errorf("%v document %v%s%v has a unexpected Not_Send_Detecting status after conflict detection has finished", xmem.Id(),
+			case NotSendDetecting:
+				xmem.Logger().Errorf("%v document %v%s%v has a unexpected NotSendDetecting status after conflict detection has finished", xmem.Id(),
 					base.UdTagBegin, bytes.Trim(item.Req.Key, "\x00"), base.UdTagEnd)
+				// TODO - fix this for CCR
 				panic("Unexpected needSendStatus")
-			} else if needSendStatus == To_Resolve {
+			case ToResolve:
 				// Call conflictMgr to resolve conflict
 				atomic.AddUint64(&xmem.counter_to_resolve, 1)
 				lookupResp := batch.cr_resp_map[item.UniqueKey]
@@ -1298,7 +1299,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				if err != nil {
 					return err
 				}
-			} else if needSendStatus == To_Setback {
+			case ToSetback:
 				atomic.AddUint64(&xmem.counter_to_setback, 1)
 				lookupResp := batch.cr_resp_map[item.UniqueKey]
 				if lookupResp == nil {
@@ -1309,24 +1310,26 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				if err != nil {
 					return err
 				}
-			} else {
-				if needSendStatus == Not_Send_Failed_CR {
-					//lost on conflict resolution on source side
-					// this still counts as data sent
-					additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-						Opcode:      encodeOpCode(item.Req, xmem.source_cr_mode == base.CRMode_Custom),
-						IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
-						VBucket:     item.Req.VBucket,
-						ManifestId:  item.GetManifestId(),
-						Cloned:      item.Cloned,
-						CloneSyncCh: item.ClonedSyncCh,
-					}
-					xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
+			case RetryTargetLocked:
+				atomic.AddUint64(&xmem.counter_locked, 1)
+				go xmem.retryAfterCasLockingFailure(item)
+			case NotSendFailedCR:
+				//lost on conflict resolution on source side
+				// this still counts as data sent
+				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
+					Opcode:      encodeOpCode(item.Req, xmem.source_cr_mode == base.CRMode_Custom),
+					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+					VBucket:     item.Req.VBucket,
+					ManifestId:  item.GetManifestId(),
+					Cloned:      item.Cloned,
+					CloneSyncCh: item.ClonedSyncCh,
 				}
+				xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
+				xmem.recycleDataObj(item)
+			default:
 				xmem.recycleDataObj(item)
 			}
 		}
-
 	}
 
 	//send the batch in one shot - in case the batch didn't hit the max limit
@@ -1730,20 +1733,26 @@ func (xmem *XmemNozzle) batchGetMeta(bigDoc_map base.McRequestMap) (map[string]N
 				continue
 			}
 			doc_meta_source := decodeSetMetaReq(wrappedReq.Req)
-			if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.xattrEnabled, xmem.Logger()) {
+			if doc_meta_target.IsLocked() {
+				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
+					docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
+					xmem.Logger().Debugf("%v doc %v%s%v is locked on the target, target meta=%v. will need to retry\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaTgtRedacted)
+				}
+				bigDoc_noRep_map[wrappedReq.UniqueKey] = RetryTargetLocked
+			} else if !xmem.conflict_resolver(doc_meta_source, doc_meta_target, xmem.source_cr_mode, xmem.xattrEnabled, xmem.Logger()) {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 					docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
 					docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
 					xmem.Logger().Debugf("%v doc %v%s%v failed source side conflict resolution. source meta=%v, target meta=%v. no need to send\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 				}
-				bigDoc_noRep_map[wrappedReq.UniqueKey] = Not_Send_Failed_CR
+				bigDoc_noRep_map[wrappedReq.UniqueKey] = NotSendFailedCR
 			} else if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
 				docMetaSrcRedacted := doc_meta_source.CloneAndRedact()
 				docMetaTgtRedacted := doc_meta_target.CloneAndRedact()
 				xmem.Logger().Debugf("%v doc %v%s%v succeeded source side conflict resolution. source meta=%v, target meta=%v. sending it to target\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, docMetaSrcRedacted, docMetaTgtRedacted)
 			}
 		} else if ok && base.IsTopologyChangeMCError(resp.Status) {
-			bigDoc_noRep_map[wrappedReq.UniqueKey] = Not_Send_Other
+			bigDoc_noRep_map[wrappedReq.UniqueKey] = NotSendOther
 
 		} else if ok && base.IsCollectionMappingError(resp.Status) {
 			if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
@@ -1993,14 +2002,14 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 						wrappedReq.Req.Cas = resp.Cas
 					}
 				case SourceEqualsTarget:
-					noRep_map[uniqueKey] = Not_Send_Failed_CR
+					noRep_map[uniqueKey] = NotSendFailedCR
 				case TargetDominate:
-					noRep_map[uniqueKey] = Not_Send_Failed_CR
+					noRep_map[uniqueKey] = NotSendFailedCR
 				case Conflict:
-					noRep_map[uniqueKey] = Not_Send_Detecting
+					noRep_map[uniqueKey] = NotSendDetecting
 					getDoc_map[uniqueKey] = wrappedReq
 				case TargetSetBack:
-					noRep_map[uniqueKey] = Not_Send_Detecting
+					noRep_map[uniqueKey] = NotSendDetecting
 					getDoc_map[uniqueKey] = wrappedReq
 				}
 				keys_to_be_deleted[uniqueKey] = true
@@ -2130,14 +2139,14 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 						wrappedReq.Req.Cas = resp.Cas
 					}
 				case SourceEqualsTarget:
-					noRep_map[uniqueKey] = Not_Send_Failed_CR
+					noRep_map[uniqueKey] = NotSendFailedCR
 				case TargetDominate:
-					noRep_map[uniqueKey] = Not_Send_Failed_CR
+					noRep_map[uniqueKey] = NotSendFailedCR
 				case Conflict:
-					noRep_map[uniqueKey] = To_Resolve
+					noRep_map[uniqueKey] = ToResolve
 					lookUpRespMap[uniqueKey] = lookupResp
 				case TargetSetBack:
-					noRep_map[uniqueKey] = To_Setback
+					noRep_map[uniqueKey] = ToSetback
 					lookUpRespMap[uniqueKey] = lookupResp
 				}
 				keys_to_be_deleted[uniqueKey] = true

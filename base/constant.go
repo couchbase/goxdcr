@@ -829,6 +829,8 @@ var MaxDocSizeByte uint32 = 20 << 20
 
 var MaxCollectionNameBytes int = 251
 
+const MaxCas = 0xFFFFFFFFFFFFFFFF
+
 // --------------- Constants that are configurable -----------------
 
 // timeout for checkpointing attempt before pipeline is stopped - to put an upper bound on the delay of pipeline stop/restart
