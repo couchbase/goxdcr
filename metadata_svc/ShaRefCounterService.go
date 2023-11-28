@@ -12,13 +12,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"sync"
-	"sync/atomic"
 )
 
 type ShaRefCounterService struct {
@@ -295,8 +295,8 @@ func UnableToUpsertErr(id string) error {
 type MapShaRefCounter struct {
 	id                 string
 	lock               sync.RWMutex
-	closed             uint32
 	singleUpsert       chan bool
+	finch              chan bool
 	refCnt             map[string]uint64                    // map of sha to refCnt (1/2)
 	shaToMapping       metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping (2/2)
 	needToSync         bool                                 // needs to sync refCnt to shaMap and then also persist to metakv
@@ -313,6 +313,7 @@ func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc ser
 		id:             topic,
 		shaToMapping:   make(metadata.ShaToCollectionNamespaceMap),
 		singleUpsert:   make(chan bool, 1),
+		finch:          make(chan bool, 1),
 		metadataSvc:    metadataSvc,
 		metakvOpKey:    metakvOpKey,
 		internalSpecId: internalId,
@@ -414,6 +415,8 @@ func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc *metadata.CollectionNsMappin
 	c.lock.RUnlock()
 
 	select {
+	case <-c.finch:
+		return mapShaRefCounterStopped
 	case <-upsertCh:
 		defer func() {
 			upsertCh <- true
@@ -566,6 +569,8 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 	}
 
 	select {
+	case <-c.finch:
+		return mapShaRefCounterStopped
 	case <-upsertCh:
 		var err error
 		// Got the go-ahead to do the upsert
@@ -640,20 +645,24 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 }
 
 func (c *MapShaRefCounter) DelAndCleanup() error {
-	atomic.StoreUint32(&c.closed, 1)
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	// Don't allow any upserts to occur concurrently - force hold lock
 	select {
+	case <-c.finch:
+		return mapShaRefCounterStopped
 	case <-c.singleUpsert:
 		c.metadataSvc.Del(c.metakvOpKey, nil /*revision*/)
 	}
-	close(c.singleUpsert)
+	close(c.finch)
 	return nil
 }
 
 func (c *MapShaRefCounter) isClosed() bool {
-	return atomic.LoadUint32(&c.closed) == 1
+	select {
+	case <-c.finch:
+		return true
+	default:
+		return false
+	}
 }
 
 // Used only when doing a complete overwrite after major merge operations
