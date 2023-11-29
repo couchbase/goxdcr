@@ -10,13 +10,15 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"sync"
 )
 
 type ShaRefCounterService struct {
@@ -285,8 +287,6 @@ func (s *ShaRefCounterService) EnableRefCntDecrement(topic string) {
 	}
 }
 
-//func (c *MapShaRefCounter) reInitUsingMergedMappingDoc(doc *metadata.CollectionNsMappingsDoc, ckpt) error {
-
 func UnableToUpsertErr(id string) error {
 	return fmt.Errorf("Unable to clean broken mappings for %v due to concurrent ongoing upsert operation", id)
 }
@@ -296,6 +296,7 @@ type MapShaRefCounter struct {
 	id                 string
 	lock               sync.RWMutex
 	singleUpsert       chan bool
+	finch              chan bool
 	refCnt             map[string]uint64                    // map of sha to refCnt (1/2)
 	shaToMapping       metadata.ShaToCollectionNamespaceMap // map of sha to actual mapping (2/2)
 	needToSync         bool                                 // needs to sync refCnt to shaMap and then also persist to metakv
@@ -312,12 +313,15 @@ func NewMapShaRefCounterWithInternalId(topic, internalId string, metadataSvc ser
 		id:             topic,
 		shaToMapping:   make(metadata.ShaToCollectionNamespaceMap),
 		singleUpsert:   make(chan bool, 1),
+		finch:          make(chan bool, 1),
 		metadataSvc:    metadataSvc,
 		metakvOpKey:    metakvOpKey,
 		internalSpecId: internalId,
 		logger:         logger,
 	}
 }
+
+var mapShaRefCounterStopped = errors.New("Replication has been deleted")
 
 func (c *MapShaRefCounter) Init() {
 	c.lock.Lock()
@@ -326,6 +330,9 @@ func (c *MapShaRefCounter) Init() {
 }
 
 func (c *MapShaRefCounter) CheckOrSetInternalSpecId(internalId string) error {
+	if c.isClosed() {
+		return mapShaRefCounterStopped
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if c.internalSpecId == "" {
@@ -338,12 +345,18 @@ func (c *MapShaRefCounter) CheckOrSetInternalSpecId(internalId string) error {
 }
 
 func (c *MapShaRefCounter) GetShaNamespaceMap() metadata.ShaToCollectionNamespaceMap {
+	if c.isClosed() {
+		return nil
+	}
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	return c.shaToMapping
 }
 
 func (c *MapShaRefCounter) upsertCollectionNsMappingsDoc(doc *metadata.CollectionNsMappingsDoc, addOp bool) error {
+	if c.isClosed() {
+		return nil
+	}
 	data, err := json.Marshal(doc)
 	if err != nil {
 		return err
@@ -357,12 +370,18 @@ func (c *MapShaRefCounter) upsertCollectionNsMappingsDoc(doc *metadata.Collectio
 }
 
 func (c *MapShaRefCounter) getCollectionNsMappingsDocData() ([]byte, error) {
+	if c.isClosed() {
+		return nil, nil
+	}
 	docData, _, err := c.metadataSvc.Get(c.metakvOpKey)
 
 	return docData, err
 }
 
 func (c *MapShaRefCounter) RecordOneCount(shaString string, mapping *metadata.CollectionNamespaceMapping) {
+	if c.isClosed() {
+		return
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if _, exists := c.shaToMapping[shaString]; !exists {
@@ -373,6 +392,9 @@ func (c *MapShaRefCounter) RecordOneCount(shaString string, mapping *metadata.Co
 }
 
 func (c *MapShaRefCounter) UnrecordOneCount(shaString string) {
+	if c.isClosed() {
+		return
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if count, exists := c.refCnt[shaString]; exists && count > 0 {
@@ -384,12 +406,17 @@ func (c *MapShaRefCounter) UnrecordOneCount(shaString string) {
 }
 
 func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc *metadata.CollectionNsMappingsDoc) error {
+	if c.isClosed() {
+		return mapShaRefCounterStopped
+	}
 	c.lock.RLock()
 	upsertCh := c.singleUpsert
 	needToSyncRev := c.needToSyncRevision
 	c.lock.RUnlock()
 
 	select {
+	case <-c.finch:
+		return mapShaRefCounterStopped
 	case <-upsertCh:
 		defer func() {
 			upsertCh <- true
@@ -425,6 +452,9 @@ func (c *MapShaRefCounter) GCDocUsingLatestInfo(doc *metadata.CollectionNsMappin
 }
 
 func (c *MapShaRefCounter) InitShaToActualMappings(topic, internalSpecId string, mapping metadata.ShaToCollectionNamespaceMap) error {
+	if c.isClosed() {
+		return mapShaRefCounterStopped
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -439,6 +469,9 @@ func (c *MapShaRefCounter) InitShaToActualMappings(topic, internalSpecId string,
 
 // Currently, starts count at 0
 func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mapping *metadata.CollectionNamespaceMapping) error {
+	if c.isClosed() {
+		return mapShaRefCounterStopped
+	}
 	sha, err := mapping.Sha256()
 	if err != nil {
 		return fmt.Errorf("Unable to get sha256 %v for mapping %v", c.id, mapping.String())
@@ -468,6 +501,9 @@ func (c *MapShaRefCounter) RegisterMapping(internalSpecId string, mapping *metad
 }
 
 func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.CollectionNsMappingsDoc, error) {
+	if c.isClosed() {
+		return nil, mapShaRefCounterStopped
+	}
 	docData, err := c.getCollectionNsMappingsDocData()
 	docReturn := &metadata.CollectionNsMappingsDoc{}
 
@@ -510,11 +546,17 @@ func (c *MapShaRefCounter) GetMappingsDoc(initIfNotFound bool) (*metadata.Collec
 
 // Write lock must be held
 func (c *MapShaRefCounter) setNeedToSyncNoLock(val bool) {
+	if c.isClosed() {
+		return
+	}
 	c.needToSync = val
 	c.needToSyncRevision++
 }
 
 func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) error {
+	if c.isClosed() {
+		return mapShaRefCounterStopped
+	}
 	c.lock.RLock()
 	needToSync := c.needToSync
 	needToSyncRev := c.needToSyncRevision
@@ -527,6 +569,8 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 	}
 
 	select {
+	case <-c.finch:
+		return mapShaRefCounterStopped
 	case <-upsertCh:
 		var err error
 		// Got the go-ahead to do the upsert
@@ -601,19 +645,31 @@ func (c *MapShaRefCounter) upsertMapping(specInternalId string, cleanup bool) er
 }
 
 func (c *MapShaRefCounter) DelAndCleanup() error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
 	// Don't allow any upserts to occur concurrently - force hold lock
 	select {
+	case <-c.finch:
+		return mapShaRefCounterStopped
 	case <-c.singleUpsert:
 		c.metadataSvc.Del(c.metakvOpKey, nil /*revision*/)
 	}
-	close(c.singleUpsert)
+	close(c.finch)
 	return nil
+}
+
+func (c *MapShaRefCounter) isClosed() bool {
+	select {
+	case <-c.finch:
+		return true
+	default:
+		return false
+	}
 }
 
 // Used only when doing a complete overwrite after major merge operations
 func (c *MapShaRefCounter) ReInitUsingMergedMappingDoc(brokenMappingDoc *metadata.CollectionNsMappingsDoc, ckptsDocs map[uint16]*metadata.CheckpointsDoc, internalId string) error {
+	if c.isClosed() {
+		return mapShaRefCounterStopped
+	}
 	if brokenMappingDoc == nil {
 		return base.ErrorNilPtr
 	}
