@@ -345,7 +345,9 @@ func IsIgnorableMCResponse(resp *gomemcached.MCResponse, caslock bool) bool {
 	return false
 }
 
-func IsSuccessSubdocLookupResponse(resp *gomemcached.MCResponse) bool {
+// getMeta will return SUCCESS
+// subdoc_multi_lookup may return the other status that are also success.
+func IsSuccessGetResponse(resp *gomemcached.MCResponse) bool {
 	if resp == nil {
 		return false
 	}
