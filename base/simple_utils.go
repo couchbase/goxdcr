@@ -2043,7 +2043,7 @@ func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMet
 	specs := lookupResp.Specs
 	resp := lookupResp.Resp
 	body := resp.Body
-	if IsSuccessSubdocLookupResponse(resp) == false {
+	if IsSuccessGetResponse(resp) == false {
 		return DocumentMetadata{}, fmt.Errorf("Cannot decode subdoc lookup response because the lookup failed with status %v", resp.Status)
 	}
 	pos := 0

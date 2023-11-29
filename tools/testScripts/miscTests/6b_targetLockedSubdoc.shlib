@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -u
+
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# This is an example provision script that can be edited to quickly conjure up a
+# 2 1-node clusters, bidirectional replication to one another via a clean "cluster_run -n 2"
+# then load 10k documents on each bucket, resulting in 20k total docs per bucket after
+# bi-directional replication
+
+# main logic all exist elsewhere
+. ./clusterRunProvision.shlib
+if (($? != 0)); then
+	exit $?
+fi
+
+# set globals
+# -----------------
+DEFAULT_ADMIN="Administrator"
+DEFAULT_PW="wewewe"
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+CLUSTER_NAME_KV_PORT_MAP=(["C1"]=12000 ["C2"]=12002)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A LWWBucketProperty=(["ramQuotaMB"]=100 ["conflictResolutionType"]="lww")
+insertPropertyIntoBucketNamePropertyMap "B0" LWWBucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" LWWBucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" LWWBucketProperty
+
+declare -A PessimisticReplicationProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["optimisticReplicationThreshold"]=0 ["logLevel"]="Info")
+
+function runTestCase {
+	local docCount
+
+	echo "============================================================================"
+	echo "Running target document locked with mobile (subdoc) test case"
+	echo "============================================================================"
+
+	testForClusterRun
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	setupTopologies
+	if (($? != 0)); then
+		exit $?
+	fi
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" PessimisticReplicationProperties
+	setReplicationSettings "C1" "B1" "C2" "B2" "mobile=Active"
+	setBucket "C1" "B1" "enableCrossClusterVersioning" "true"
+	# Wait for replication to restart
+	sleep 15
+	printGlobalScopeAndCollectionInfo
+
+	echo "Writing a document with foo:bar"
+	writeJSONDocument "C1" "B1" "regDoc" '{"foo":"bar"}'
+	sleep 5
+
+	docCount=$(getJSONDocument "C2" "B2" "regDoc" | jq | grep -c "bar")
+	if (($docCount == 0)); then
+		echo "Unable to find initial doc replicated"
+		exit 1
+	fi
+
+	local timeToLock=30
+	echo "Locking document on target for $timeToLock seconds then write new doc to source to make sure it replicates eventually"
+	lockDocument "C2" "B2" "regDoc" $timeToLock
+	writeJSONDocument "C1" "B1" "regDoc" '{"foo":"bar2"}'
+
+	echo "Sleeping $(($timeToLock + 5)) for doc to be replicated"
+	sleep $(($timeToLock + 5))
+
+	checkUnidirectionalChangesLeft
+
+	docCount=$(getJSONDocument "C2" "B2" "regDoc" | jq | grep -c "bar2")
+	if (($docCount == 0)); then
+		echo "Unable to find updated doc replicated"
+		exit 1
+	fi
+
+	grepForPanics
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

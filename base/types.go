@@ -2568,3 +2568,12 @@ func (doc_meta *DocumentMetadata) CloneAndRedact() *DocumentMetadata {
 func (docMeta *DocumentMetadata) IsLocked() bool {
 	return docMeta != nil && docMeta.Cas == MaxCas
 }
+
+func IsDocLocked(resp *gomemcached.MCResponse) bool {
+	if resp.Opcode == GET_WITH_META && resp.Cas == MaxCas {
+		return true
+	} else if resp.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP && resp.Status == gomemcached.LOCKED {
+		return true
+	}
+	return false
+}

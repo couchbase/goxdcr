@@ -628,6 +628,7 @@ func TestMobilePreserveSync(t *testing.T) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
+	// This is a revId bucket while other mobile tests use LWW bucket.
 	bucketName := "B0"
 	cluster, bucket, err := GetAndFlushBucket(targetConnStr, bucketName)
 	if err != nil {
@@ -805,7 +806,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 	}
 	assert := assert.New(t)
 	// Create and flush target bucket
-	bucketName := "importLWW"
+	bucketName := "mobileLWW"
 	cluster, bucket, err := createBucket(targetConnStr, bucketName, "lww")
 	if err != nil {
 		fmt.Printf("TestMobileImportCasLWW skipped because bucket is cannot be created. Error: %v\n", err)
@@ -891,6 +892,102 @@ func TestMobileImportCasLWW(t *testing.T) {
 	out, err = bucket.DefaultCollection().Get(key, nil)
 	assert.Nil(err) // Should get a path not found error
 	assert.Equal(gocb.Cas(1700503747140517888), out.Cas())
+}
+
+func TestMobileMixedMode(t *testing.T) {
+	fmt.Println("============== Test case start: TestMobileMixedMode =================")
+	defer fmt.Println("============== Test case end: TestMobileMixedMode =================")
+	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+		fmt.Println("Skipping since live cluster_run setup has not been detected")
+		return
+	}
+	assert := assert.New(t)
+	bucketName := "mobileLWW"
+	cluster, _, err := createBucket(targetConnStr, bucketName, "lww")
+	if err != nil {
+		fmt.Printf("TestMobileImportCasLWW skipped because bucket is cannot be created. Error: %v\n", err)
+		return
+	}
+	defer cluster.Close(nil)
+	// Create Xmem for testing
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(bucketName, base.CRMode_LWW)
+	realUtils := utilsReal.NewUtilities()
+	xmem.utils = realUtils
+
+	settings[base.EnableCrossClusterVersioningKey] = true
+	settings[base.VersionPruningWindowHrsKey] = 720
+	router.setMobileCompatibility(base.MobileCompatibilityActive)
+
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
+
+	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityOff
+	xmem.sourceBucketUuid = "93fcf4f0fcc94fdb3d6196235029d6bf"
+	startTargetXmem(xmem, settings, bucketName, assert)
+	fmt.Println("=== Test mobile mixed mode with mobile off ===")
+	mobileMixedModeTest(xmem, router, settings, bucketName, assert)
+
+	fmt.Println("=== Test mobile mixed mode with mobile active ===")
+	xmem.config.mobileCompatible = base.MobileCompatibilityActive
+	mobileMixedModeTest(xmem, router, settings, bucketName, assert)
+}
+
+func mobileMixedModeTest(xmem *XmemNozzle, router *Router, settings map[string]interface{}, bucketName string, assert *assert.Assertions) {
+	_, bucket, err := GetAndFlushBucket(targetConnStr, bucketName)
+	if err != nil {
+		fmt.Printf("TestMobileImportCasLWW skipped because bucket cannot be flusehed. Error: %v\n", err)
+		return
+	}
+
+	uprfile := "./testdata/uprEventSyncTestDoc1WithSyncUpdated.json"
+	doc1event, err := RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	doc1MCRequest, err := router.ComposeMCRequest(&base.WrappedUprEvent{UprEvent: doc1event})
+	assert.Nil(err)
+
+	uprfile = "./testdata/uprEventSyncTestDoc2Source.json"
+	doc2event, err := RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	doc2MCRequest, err := router.ComposeMCRequest(&base.WrappedUprEvent{UprEvent: doc2event})
+	assert.Nil(err)
+
+	uprfile = "./testdata/uprEventDoc1UpdateAfterImport.json"
+	updatedImportEvent, err := RetrieveUprFile(uprfile)
+	assert.Nil(err)
+	updatedImportMCRequest, err := router.ComposeMCRequest(&base.WrappedUprEvent{UprEvent: updatedImportEvent})
+	assert.Nil(err)
+
+	xmem.config.vbMaxCas[doc1event.VBucket] = doc1event.Cas + 10                   // doc1 CAS is smaller
+	xmem.config.vbMaxCas[doc2event.VBucket] = doc2event.Cas - 10                   // doc2 CAS is larger
+	xmem.config.vbMaxCas[updatedImportEvent.VBucket] = updatedImportEvent.Cas + 10 // import CAS is smaller
+
+	xmem.Receive(doc1MCRequest)
+	xmem.Receive(doc2MCRequest)
+	xmem.Receive(updatedImportMCRequest)
+
+	err = waitForReplication(string(doc1event.Key), gocb.Cas(doc1event.Cas), bucket)
+	assert.Nil(err)
+	err = waitForReplication(string(doc2event.Key), gocb.Cas(doc2event.Cas), bucket)
+	assert.Nil(err)
+	err = waitForReplication(string(updatedImportEvent.Key), gocb.Cas(updatedImportEvent.Cas), bucket)
+	assert.Nil(err)
+
+	// Doc1 Cas is smaller than its vbMaxCas. So it does not have HLV
+	value, err := bucket.DefaultCollection().LookupIn(string(doc1event.Key),
+		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
+	assert.Nil(err)
+	assert.False(value.Exists(0))
+
+	// Doc2 Cas is larger than its vbMaxCas. So it does  have HLV
+	value, err = bucket.DefaultCollection().LookupIn(string(doc2event.Key),
+		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
+	assert.Nil(err)
+	assert.True(value.Exists(0))
+
+	// The import doc Cas is smaller than its vbMaxCas, but it already has HLV. So the HLV gets updated
+	value, err = bucket.DefaultCollection().LookupIn(string(updatedImportEvent.Key),
+		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
+	assert.Nil(err)
+	assert.True(value.Exists(0))
 }
 
 // This routine was used to generate import mutations used in TestMobileImportCasLWW.

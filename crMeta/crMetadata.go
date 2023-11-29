@@ -74,6 +74,8 @@ type CRMetadata struct {
 	// XATTR, we need the following to decide whether to send delete for PV or MV in the subdoc command.
 	hadPv bool
 	hadMv bool
+	// If the document does not already have HLV, we will not generate one if the mutation is older than vbMaxCas
+	hadHlv bool
 	// It is import mutation if importCas == document.CAS. In that case, docMeta.Cas is the pre-import CAS value.
 	isImport bool
 	// This is the value parsed from the XATTR _importCAS.
@@ -139,6 +141,10 @@ func (doc *SourceDocument) GetMetadata() (*CRMetadata, error) {
 	}
 	meta := CRMetadata{
 		docMeta: &docMeta,
+	}
+	if cvCas > 0 {
+		// The document already has an HLV. In this case we need to keep it updated even if enableCrossClusterVersioning is off
+		meta.hadHlv = true
 	}
 	if len(pvMap) > 0 {
 		// This comes straight from source document XATTR. So source had it.  meta.hlv tells us if it still has it
@@ -222,7 +228,7 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 				meta.hadPv = true
 			}
 			if len(mvMap) > 0 {
-				// This comes straight from source document XATTR. So target had it.  meta.hlv tells us if it still has it
+				// This comes straight from target document XATTR. So target had it.  meta.hlv tells us if it still has it
 				meta.hadMv = true
 			}
 			if importCas == cas {
@@ -416,12 +422,16 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 	}
 }
 
-func NeedToUpdateHlv(meta *CRMetadata, pruningWindow time.Duration) bool {
+func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Duration) bool {
 	if meta == nil || meta.GetHLV() == nil {
 		return false
 	}
 	if meta.isImport {
 		// We have an import mutation that's winning CR. mobile has already updated HLV so it doesn't need update
+		return false
+	}
+	if meta.hadHlv == false && meta.docMeta.Cas < vbMaxCas {
+		// This is older mutation that doesn't already have an HLV
 		return false
 	}
 	hlv := meta.hlv
