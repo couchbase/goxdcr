@@ -60,6 +60,10 @@ declare -A CBServerLink=(
 	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
+declare -A SGWLink=(
+	["4.0.0-2"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/sync_gateway/4.0.0/2/couchbase-sync-gateway-enterprise_4.0.0-2_x86_64.deb"
+)
+
 function vagrantUp {
 	vagrant up
 }
@@ -89,6 +93,19 @@ function vagrantRemoveCbServerAll {
 	done
 }
 
+function vagrantRemoveSGW {
+	local clusterName=$1
+	local i="$(getClusterIdx "$clusterName")"
+
+	cmd="${VSSH[$i]} \"sudo dpkg --purge couchbase-sync-gateway\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+
+	cmd="${VSSH[$i]} \"sudo rm -rf /opt/couchbase-sync-gateway\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
 # If VPN is not set up, this should catch it
 function checkBuildServerAccessibility {
 	wget -q latestbuilds.service.couchbase.com/builds/ -O "/tmp/index.html" &
@@ -101,15 +118,27 @@ function checkBuildServerAccessibility {
 	fi
 }
 
-function vagrantGetLocalDebFileName {
+function vagrantGetLocalCBServerDebFileName {
 	local version="$1"
-
 	echo "cbServer_$version.deb"
+}
+
+function vagrantGetLocalSGWDebFileName {
+	local version="$1"
+	echo "couchbase-sync-gateway-enterprise_${version}_x86_64.deb"
+}
+
+function wgetWithProgress {
+	local downloadFileName="$1"
+	local localFileName="$2"
+
+	echo "=== Need to download $downloadFileName... ==="
+	wget --show-progress "$downloadFileName" -O "$localFileName"
 }
 
 function downloadCBServerDeb {
 	local version="$1"
-	local localFileName=$(vagrantGetLocalDebFileName "$version")
+	local localFileName=$(vagrantGetLocalCBServerDebFileName "$version")
 	if [[ -z "${CBServerLink[$version]:-}" ]]; then
 		echo "Version $version is not linked"
 		return 1
@@ -121,8 +150,25 @@ function downloadCBServerDeb {
 	fi
 
 	checkBuildServerAccessibility
-	echo "=== Need to download ${CBServerLink[$version]}... ==="
-	wget --show-progress "${CBServerLink[$version]}" -O "$localFileName"
+	wgetWithProgress "${CBServerLink[$version]}" "$localFileName"
+}
+
+function downloadSGWDeb {
+	local version="$1"
+	local localFileName=$(vagrantGetLocalSGWDebFileName "$version")
+
+	if [[ -z "${SGWLink[$version]:-}" ]]; then
+		echo "SGW Version $version is not linked"
+		return 1
+	fi
+
+	if [[ -f "$localFileName" ]]; then
+		echo "Found pre-downloaded file $localFileName"
+		return 0
+	fi
+
+	checkBuildServerAccessibility
+	wgetWithProgress "${SGWLink[$version]}" "$localFileName"
 }
 
 function vagrantInstallCBServerAll {
@@ -133,11 +179,28 @@ function vagrantInstallCBServerAll {
 	done
 }
 
+function mountVagrantSharedFilter {
+	local i=$1
+
+	cmd="${VSSH[$i]} \"sudo mount -t vboxsf vagrant /vagrant\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
+function vagrantInstallDebFile {
+	local i=$1
+	local debFile=$2
+
+	cmd="${VSSH[$i]} \"sudo dpkg -i /vagrant/$debFile\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
 function vagrantInstallCBServer {
 	local i=$1
 	local version="$2"
 	local cmd
-	local debFile=$(vagrantGetLocalDebFileName "$version")
+	local debFile=$(vagrantGetLocalCBServerDebFileName "$version")
 	local nodeName=${VAGRANT_VM_IDX_MAP["$i"]:-}
 
 	vagrantInstallNtp "$i"
@@ -149,13 +212,23 @@ function vagrantInstallCBServer {
 		VAGRANT_VERSION_MAP[$nodeName]="$version"
 	fi
 
-	cmd="${VSSH[$i]} \"sudo mount -t vboxsf vagrant /vagrant\""
-	echo "==== Running $cmd ===="
-	eval $cmd
+	mountVagrantSharedFilter $i
+	vagrantInstallDebFile $i "$debFile"
+}
 
-	cmd="${VSSH[$i]} \"sudo dpkg -i /vagrant/$debFile\""
-	echo "==== Running $cmd ===="
-	eval $cmd
+function vagrantInstallSGW {
+	local clusterName=$1
+	local i="$(getClusterIdx "$clusterName")"
+	local version="$2"
+	local cmd
+	local debFile=$(vagrantGetLocalSGWDebFileName "$version")
+
+	local nodeName=${VAGRANT_VM_IDX_MAP["$i"]:-}
+
+	downloadSGWDeb "$version"
+	mountVagrantSharedFilter $i
+
+	vagrantInstallDebFile "$i" "$debFile"
 }
 
 function vagrantInstallPythonHttpLib {
@@ -516,8 +589,7 @@ function setupVagrantAltPortForwarding {
 }
 
 function checkAndWaitForUnattendedUpgrade {
-	local clusterName=$1
-	local idx="$(getClusterIdx "$clusterName")"
+	local idx=$1
 	local cmd
 	local count=1
 
@@ -528,4 +600,94 @@ function checkAndWaitForUnattendedUpgrade {
 		count=$(eval $cmd)
 		sleep 10
 	done
+}
+
+function vagrantStopSGW {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	${VSSH[$idx]} "sudo systemctl stop sync_gateway"
+}
+
+function vagrantStartSGW {
+	local clusterName=$1
+	local idx="$(getClusterIdx "$clusterName")"
+
+	${VSSH[$idx]} "sudo systemctl start sync_gateway"
+}
+
+function vagrantSetConfigSGW {
+	local clusterName="$1"
+	local idx="$(getClusterIdx "$clusterName")"
+	local tmpFile="/tmp/sgwConfig.cfg"
+
+	cat <<EOF >$tmpFile
+{
+  "bootstrap": {
+    "server": "couchbase://${VAGRANT_VM_IP_MAP[$clusterName]}",
+    "username": "$DEFAULT_ADMIN",
+    "password": "$DEFAULT_PW",
+    "use_tls_server": false
+  },
+  "logging": {
+    "console": {
+      "enabled": true,
+      "log_level": "debug",
+      "log_keys": ["*"]
+    }
+  }
+}
+EOF
+
+	vscp "$idx" "$tmpFile" "$tmpFile"
+	${VSSH[$idx]} "sudo mv $tmpFile /home/sync_gateway/sync_gateway.json"
+}
+
+function vagrantSetSecureConfigSGW {
+	local clusterName="$1"
+	local idx="$(getClusterIdx "$clusterName")"
+	local tmpFile="/tmp/sgwConfig.cfg"
+
+	cat <<EOF >$tmpFile
+{
+  "bootstrap": {
+    "server": "couchbases://${VAGRANT_VM_IP_MAP[$clusterName]}",
+    "username": "$DEFAULT_ADMIN",
+    "password": "$DEFAULT_PW",
+    "server_tls_skip_verify": true,
+    "use_tls_server": true
+  },
+  "logging": {
+    "console": {
+      "enabled": true,
+      "log_level": "debug",
+      "log_keys": ["*"]
+    }
+  }
+}
+EOF
+
+	vscp "$idx" "$tmpFile" "$tmpFile"
+	${VSSH[$idx]} "sudo mv $tmpFile /home/sync_gateway/sync_gateway.json"
+}
+
+function vagrantSGWDigest {
+	local digest
+	digest=$(echo -n "$DEFAULT_ADMIN:$DEFAULT_PW" | base64)
+	echo "$digest"
+}
+
+function vagrantSGWAddDbConfig {
+	local clusterName="$1"
+	local bucketName="$2"
+	local dbName="$3"
+	local digest=$(vagrantSGWDigest)
+
+	local idx="$(getClusterIdx "$clusterName")"
+
+	# The following adds a specific user in case admin is not what we want to use:
+	#${VSSH[$idx]} "curl -X PUT http://127.0.0.1:8091/settings/rbac/users/local/$DEFAULT_ADMIN -u $DEFAULT_ADMIN:$DEFAULT_PW -d password=$DEFAULT_PW -d roles='mobile_sync_gateway[*]'"
+
+	# the following will create a sync gateway database config
+	${VSSH[$idx]} "curl -X PUT 'http://127.0.0.1:4985/$dbName/' --header \"Authorization: Basic $digest\"  --header 'Content-Type: application/json' --data-raw '{\"bucket\": \"$bucketName\", \"num_index_replicas\": 0, \"use_views\": true}'"
 }

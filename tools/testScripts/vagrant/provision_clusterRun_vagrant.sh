@@ -66,9 +66,18 @@ SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@
 function runDataLoad {
 	# Run CBWorkloadgen in parallel
 	runCbWorkloadGenBucket "C1" "B1" &
-	# Collection workload would fail in 6.6.x
+	runCbWorkloadGenBucket "C2" "B2" &
 	runCbWorkloadGenCollection "C1" "B1" "S1" "col1" "col_" &
 	waitForBgJobs
+}
+
+function setupSGW {
+	local clusterName=$1
+	vagrantRemoveSGW "$clusterName"
+	vagrantInstallSGW "$clusterName" "4.0.0-2"
+	vagrantStopSGW "$clusterName"
+	vagrantSetConfigSGW "$clusterName"
+	vagrantStartSGW "$clusterName"
 }
 
 #MAIN
@@ -78,12 +87,7 @@ if (($? != 0)); then
 fi
 
 vagrantRemoveCbServerAll
-
 vagrantInstallCBServerAll "trinity"
-
-# Some other options...
-#vagrantInstallCBServerAll "toy"
-#vagrantInstallCBServerAll "6.6.5"
 
 setupTopologies
 
@@ -98,6 +102,14 @@ vagrantLoadCerts
 for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
 	setEnableClientCert "$clusterName"
 done
+
+# Below should be activated once Mobile XDCR intergration is done
+#setupSGW "C1"
+#setupSGW "C2"
+#sleep 5
+#vagrantSGWAddDbConfig "C1" "B1" "b1db"
+#vagrantSGWAddDbConfig "C2" "B2" "b2db"
+# At this point, "runDataLoad" should trigger SGW import
 
 sleep 5
 #createRemoteClusterReference "C1" "C2"
