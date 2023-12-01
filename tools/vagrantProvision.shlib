@@ -93,6 +93,13 @@ function vagrantRemoveCbServerAll {
 	done
 }
 
+function vagrantRemoveSGWAll {
+	local i
+	for ((i = 0; $i < ${#VSSH[@]}; i++)); do
+		vagrantRemoveSGW $i
+	done
+}
+
 function vagrantRemoveSGW {
 	local clusterName=$1
 	local i="$(getClusterIdx "$clusterName")"
@@ -191,6 +198,8 @@ function vagrantInstallDebFile {
 	local i=$1
 	local debFile=$2
 
+	checkAndWaitForUnattendedUpgrade $i
+
 	cmd="${VSSH[$i]} \"sudo dpkg -i /vagrant/$debFile\""
 	echo "==== Running $cmd ===="
 	eval $cmd
@@ -231,58 +240,63 @@ function vagrantInstallSGW {
 	vagrantInstallDebFile "$i" "$debFile"
 }
 
-function vagrantInstallPythonHttpLib {
+function vagrantAptInstall {
 	local i=$1
+	local aptName=$2
 	local cmd
 
-	cmd="${VSSH[$i]} \"sudo apt-get -y install python-httplib2\""
+	cmd="${VSSH[$i]} \"sudo apt-get -y install $aptName\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+}
+
+function vagrantInstallPythonHttpLib {
+	local i=$1
+	vagrantAptInstall $i "python-httplib2"
 }
 
 function vagrantInstallJq {
 	local i=$1
-	local cmd
-
-	cmd="${VSSH[$i]} \"sudo apt-get -y install jq\""
-	echo "==== Running $cmd ===="
-	eval $cmd
+	vagrantAptInstall $i "jq"
 }
 
 function vagrantInstallNtp {
 	local i=$1
-	local cmd
-
-	cmd="${VSSH[$i]} \"sudo apt-get -y install ntp\""
-	echo "==== Running $cmd ===="
-	eval $cmd
+	vagrantAptInstall $i "ntp"
 }
 
 function vagrantInstallLibInfo {
 	local i=$1
-	local cmd
-
-	cmd="${VSSH[$i]} \"sudo apt-get -y install libtinfo5\""
-	echo "==== Running $cmd ===="
-	eval $cmd
+	vagrantAptInstall $i "libtinfo5"
 }
 
 function vagrantInstallSocat {
 	local i=$1
-	local cmd
+	vagrantAptInstall $i "socat"
+}
 
-	cmd="${VSSH[$i]} \"sudo apt-get -y install socat\""
+function vagrantAptUpdate {
+	local i=$1
+
+	cmd="${VSSH[$i]} \"sudo apt update\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 }
 
-function vagrantInstallHaproxy {
+function vagrantInstallGo {
 	local i=$1
-	local cmd
 
-	cmd="${VSSH[$i]} \"sudo apt-get -y install haproxy\""
+	cmd="${VSSH[$i]} \"sudo add-apt-repository -y ppa:longsleep/golang-backports\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+
+	vagrantAptUpdate $i
+	vagrantAptInstall $i "golang-go"
+}
+
+function vagrantInstallHaproxy {
+	local i=$1
+	vagrantAptInstall $i "haproxy"
 }
 
 function vagrantRemoveHaproxy {
@@ -600,6 +614,15 @@ function checkAndWaitForUnattendedUpgrade {
 		count=$(eval $cmd)
 		sleep 10
 	done
+
+	count=1
+	cmd="${VSSH[$idx]} \"ps -ef | grep /usr/bin/unattended-upgrade | grep -v grep | grep -c .\""
+	echo "==== Running $cmd repeatedly until upgrade is finished ===="
+	while [[ ! "$count" =~ 0 ]]; do
+		count=$(eval $cmd)
+		sleep 10
+	done
+
 }
 
 function vagrantStopSGW {
@@ -690,4 +713,19 @@ function vagrantSGWAddDbConfig {
 
 	# the following will create a sync gateway database config
 	${VSSH[$idx]} "curl -X PUT 'http://127.0.0.1:4985/$dbName/' --header \"Authorization: Basic $digest\"  --header 'Content-Type: application/json' --data-raw '{\"bucket\": \"$bucketName\", \"num_index_replicas\": 0, \"use_views\": true}'"
+}
+
+function vagrantInstallXdcrDiffer {
+	local clusterName="$1"
+	local differDir="$2"
+	local idx="$(getClusterIdx "$clusterName")"
+
+	vagrantAptInstall "$idx" "git"
+	vagrantAptInstall "$idx" "golang-go"
+
+	${VSSH[$idx]} "mkdir -p $differDir"
+	${VSSH[$idx]} "git clone https://github.com/couchbaselabs/xdcrDiffer.git $differDir"
+	cmd="${VSSH[$i]} \"cd /home/vagrant/xdcrDiffer; make clean; make deps; make\""
+	echo "==== Running $cmd ===="
+	eval $cmd
 }
