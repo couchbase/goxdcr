@@ -29,7 +29,12 @@ func GenerateStatsTable() {
 	tableToGenerate := make(service_def.StatisticsPropertyMap)
 	// Shallow copy the values
 	for key, value := range origTable {
-		tableToGenerate[fmt.Sprintf("xdcr_%s", key)] = value
+		keyStr := fmt.Sprintf("xdcr_%s", key)
+		unitStr := service_def.GlobalBaseUnitTable[value.MetricType.Unit]
+		if unitStr != "" {
+			keyStr = fmt.Sprintf("%s_%s", keyStr, unitStr)
+		}
+		tableToGenerate[keyStr] = value
 	}
 
 	out, err := json.MarshalIndent(tableToGenerate, "", "    ")

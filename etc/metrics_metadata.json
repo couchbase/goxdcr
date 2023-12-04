@@ -1,5 +1,5 @@
 {
-    "xdcr_add_docs_cas_changed": {
+    "xdcr_add_docs_cas_changed_total": {
         "type": "counter",
         "help": "Number of Add operations that failed because the CAS on the Target changed",
         "added": "7.0.0",
@@ -11,7 +11,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_add_docs_written": {
+    "xdcr_add_docs_written_total": {
         "type": "counter",
         "help": "Number of Add operations successfully written to the Target",
         "added": "7.0.0",
@@ -24,7 +24,7 @@
         "notes": "This means that the Target did not have the Source Document by name prior to this operation",
         "stability": "internal"
     },
-    "xdcr_add_failed_cr_target": {
+    "xdcr_add_failed_cr_target_total": {
         "type": "counter",
         "help": "Number of Add operations failed Conflict Resolution at the Target",
         "added": "7.1.0",
@@ -36,7 +36,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_atr_txn_docs_filtered": {
+    "xdcr_atr_txn_docs_filtered_total": {
         "type": "counter",
         "help": "Total number of documents filtered and not replicated because the documents were ATR documents",
         "added": "7.6.0",
@@ -48,7 +48,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_binary_filtered": {
+    "xdcr_binary_filtered_total": {
         "type": "counter",
         "help": "Number of documents filtered that were binary documents",
         "added": "7.6.0",
@@ -60,7 +60,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_changes_left": {
+    "xdcr_changes_left_total": {
         "type": "gauge",
         "help": "Given the vBuckets of this node, the number of sequence numbers that need to be processed (either replicated or handled) before catching up to the high sequence numbers for the vBuckets",
         "added": "7.0.0",
@@ -74,7 +74,7 @@
         "notes": "This metric is calculated as (totalChanges - docsProcessed).  TotalChanges is calculated as: SumForEachVB(HighSeqno) that this node owns.The term 'changes' is more of a misnomer as it is still defined as each mutation or event that gets stamped with a sequence number. Since 7.0, system events also get stamped as a seqno per VB and thus the changes_left term no longer accurately represents actual mutations that needs to be replicated. Regardless, this number represents the concept of how much work is to be done before a replication is considered caught up.",
         "stability": "committed"
     },
-    "xdcr_client_txn_docs_filtered": {
+    "xdcr_client_txn_docs_filtered_total": {
         "type": "counter",
         "help": "Total number of documents filtered and not replicated because the documents were transaction client records",
         "added": "7.6.0",
@@ -86,7 +86,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_data_merge_failed": {
+    "xdcr_data_merge_failed_bytes": {
         "type": "counter",
         "help": "Amount of data failed to merge as part of Source custom conflict-resolution",
         "added": "7.0.0",
@@ -99,7 +99,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_data_merged": {
+    "xdcr_data_merged_bytes": {
         "type": "counter",
         "help": "Amount of data merged for a Replication when performing Source custom conflict-resolution",
         "added": "7.0.0",
@@ -112,7 +112,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_data_replicated": {
+    "xdcr_data_replicated_bytes": {
         "type": "counter",
         "help": "Amount of data replicated for a Replication",
         "added": "7.0.0",
@@ -126,7 +126,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_data_replicated_uncompress": {
+    "xdcr_data_replicated_uncompress_bytes": {
         "type": "counter",
         "help": "Theoretical amount of data replicated for a Replication if compression were not used",
         "added": "7.0.0",
@@ -140,7 +140,7 @@
         "notes": "This stat is used in conjunction with data_replicated such that compression ratios can be calculated",
         "stability": "committed"
     },
-    "xdcr_datapool_failed_gets": {
+    "xdcr_datapool_failed_gets_total": {
         "type": "counter",
         "help": "The total number of failed GET() operation on a reusable datapool within XDCR for the purpose of avoiding garbage generation",
         "added": "7.0.0",
@@ -153,7 +153,7 @@
         "notes": "This stats usually should be 0. If it is non-0, it could represent that the memory is under pressure.",
         "stability": "committed"
     },
-    "xdcr_dcp_datach_length": {
+    "xdcr_dcp_datach_length_total": {
         "type": "gauge",
         "help": "The number of items sent by the Data Service waiting for the XDCR Source Nozzle to ingest and process",
         "added": "7.0.0",
@@ -165,7 +165,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_dcp_dispatch_time": {
+    "xdcr_dcp_dispatch_time_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes for a document to be received by XDCR from the Data Service, to the time it is queued up in the Target Nozzle ready to be sent",
         "added": "7.0.0",
@@ -178,7 +178,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_deletion_cloned": {
+    "xdcr_deletion_cloned_total": {
         "type": "counter",
         "help": "The number of times a Source Deletion or Expiration is cloned to be written to multiple Target Namespaces",
         "added": "7.2.1",
@@ -191,7 +191,7 @@
         "notes": "This usually happens in collection migration using explicit rule-based mapping where Deletions and Expirations will pass all rules.",
         "stability": "committed"
     },
-    "xdcr_deletion_docs_cas_changed": {
+    "xdcr_deletion_docs_cas_changed_total": {
         "type": "counter",
         "help": "Number of Deletions failed because Target CAS changed",
         "added": "7.0.0",
@@ -203,7 +203,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_deletion_docs_written": {
+    "xdcr_deletion_docs_written_total": {
         "type": "counter",
         "help": "Number of Deletions written to Target",
         "added": "7.0.0",
@@ -215,7 +215,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_deletion_failed_cr_source": {
+    "xdcr_deletion_failed_cr_source_total": {
         "type": "counter",
         "help": "Number of Deletions that failed Source-side Conflict Resolution",
         "added": "7.0.0",
@@ -227,7 +227,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_deletion_failed_cr_target": {
+    "xdcr_deletion_failed_cr_target_total": {
         "type": "counter",
         "help": "Number of Deletions that failed Conflict Resolution at the Target",
         "added": "7.1.0",
@@ -239,7 +239,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_deletion_filtered": {
+    "xdcr_deletion_filtered_total": {
         "type": "counter",
         "help": "Number of Deletions that were filtered Source-side",
         "added": "7.0.0",
@@ -251,7 +251,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_deletion_received_from_dcp": {
+    "xdcr_deletion_received_from_dcp_total": {
         "type": "counter",
         "help": "Number of Deletions received from the Data Service",
         "added": "7.0.0",
@@ -263,7 +263,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_deletion_target_docs_skipped": {
+    "xdcr_deletion_target_docs_skipped_total": {
         "type": "counter",
         "help": "Subset of the number of documents that originated from the target that were delete operations",
         "added": "7.0.0",
@@ -275,7 +275,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_docs_checked": {
+    "xdcr_docs_checked_total": {
         "type": "gauge",
         "help": "Across vBuckets for this node, the sum of all sequence numbers that have been considered to be checkpointed",
         "added": "7.0.0",
@@ -289,7 +289,7 @@
         "notes": "This metric is often used in conjunction with docs_processed. The wider the difference means the more duplicate replication would take place if a replication pipeline were to restart, as it means less information is checkpointed",
         "stability": "committed"
     },
-    "xdcr_docs_cloned": {
+    "xdcr_docs_cloned_total": {
         "type": "counter",
         "help": "Number of Source Document Mutation cloned to be written to different Target Namespaces",
         "added": "7.0.0",
@@ -302,7 +302,7 @@
         "notes": "This usually means that one source mutation is now going to exist in two or more target collections, leading to mismatching doc counts between buckets. This can happen when migration mode is turned on, and the migration filtering expression is not specific enough, leading to a single doc matching multiple migration filtering expressions. To prevent this, ensure that the filtering expr are more specific such that each doc is migrated to only one target collection.",
         "stability": "committed"
     },
-    "xdcr_docs_failed_cr_source": {
+    "xdcr_docs_failed_cr_source_total": {
         "type": "counter",
         "help": "Number of documents (or tombstones) that were not replicated to the Target due to Conflict Resolution evaluated on the Source",
         "added": "7.0.0",
@@ -316,7 +316,7 @@
         "notes": "This metric contains all types of docs that were not successfully sent to target due to failed CR, including deletions and expiries. It is also possible that a source document could fail CR due to a tombstone that exists in the target bucket. In that case, it may look like that a document is not replicated to the target, but in fact it is because target contains a tombstone that causes source CR to lose. Vice versa, it is possible that a deletion on the source could lose, and the target document continues to exist even though the source counterpart does not.",
         "stability": "committed"
     },
-    "xdcr_docs_failed_cr_target": {
+    "xdcr_docs_failed_cr_target_total": {
         "type": "counter",
         "help": "Number of documents failed Conflict Resolution at the Target",
         "added": "7.1.0",
@@ -330,7 +330,31 @@
         "notes": "This metric contains all types of docs that were replicated to the target but were ultimately rejected due to target side conflict-resolution. This can happen either due to optimistic replication or due to other actors that are mutating the same document on the target bucket even if source CR succeeded.",
         "stability": "committed"
     },
-    "xdcr_docs_filtered": {
+    "xdcr_docs_filtered_on_txn_xattr_total": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated due to the presence of transaction related xattrs in it",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_docs_filtered_on_user_defined_filter_total": {
+        "type": "counter",
+        "help": "Total number of documents filtered and not replicated because of user defined filter expressions",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_docs_filtered_total": {
         "type": "gauge",
         "help": "Total number of documents filtered and not replicated due to any type of filtering",
         "added": "7.0.0",
@@ -343,31 +367,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_docs_filtered_on_txn_xattr": {
-        "type": "counter",
-        "help": "Total number of documents filtered and not replicated due to the presence of transaction related xattrs in it",
-        "added": "7.6.0",
-        "labels": [
-            "sourceBucketName",
-            "targetClusterUUID",
-            "targetBucketName",
-            "pipelineType"
-        ],
-        "stability": "committed"
-    },
-    "xdcr_docs_filtered_on_user_defined_filter": {
-        "type": "counter",
-        "help": "Total number of documents filtered and not replicated because of user defined filter expressions",
-        "added": "7.6.0",
-        "labels": [
-            "sourceBucketName",
-            "targetClusterUUID",
-            "targetBucketName",
-            "pipelineType"
-        ],
-        "stability": "committed"
-    },
-    "xdcr_docs_merge_cas_changed": {
+    "xdcr_docs_merge_cas_changed_total": {
         "type": "counter",
         "help": "Number of documents from Source custom conflict-resolution that failed to merge back to Source because the Source CAS changed",
         "added": "7.0.0",
@@ -379,7 +379,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_docs_merge_failed": {
+    "xdcr_docs_merge_failed_total": {
         "type": "counter",
         "help": "Number of conflicting docs failed to merge as part of Source custom conflict-resolution",
         "added": "7.0.0",
@@ -391,7 +391,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_docs_merged": {
+    "xdcr_docs_merged_total": {
         "type": "counter",
         "help": "Number of conflicting docs successfully merged and written to the Source after performing Source custom conflict-resolution",
         "added": "7.0.0",
@@ -403,7 +403,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_docs_opt_repd": {
+    "xdcr_docs_opt_repd_total": {
         "type": "counter",
         "help": "Number of Documents Optimistically Replicated to the Target Cluster",
         "added": "7.0.0",
@@ -417,7 +417,7 @@
         "notes": "Optimistic Replication takes one less round trip on the network, but could potentially cause more network usage if the documents are reasonably sized",
         "stability": "committed"
     },
-    "xdcr_docs_processed": {
+    "xdcr_docs_processed_total": {
         "type": "gauge",
         "help": "Number of Documents processed for a Replication",
         "added": "7.0.0",
@@ -430,7 +430,7 @@
         "notes": "Each Document is considered to be a single Mutation or event tagged with a Sequence Number. It is considered processed when a Mutation is either Replicated to the Target Cluster, or not replicated due to a decision made, such as a document being filtered, or if it loses Source Conflict Resolution. Another example can be a system event such as a Collection creation that gets its own Sequence Number, but is not actually something that can be replicated. These are also counted as a doc being processed.",
         "stability": "committed"
     },
-    "xdcr_docs_received_from_dcp": {
+    "xdcr_docs_received_from_dcp_total": {
         "type": "counter",
         "help": "Number of Document Mutations received from the Data Service",
         "added": "7.0.0",
@@ -443,7 +443,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_docs_unable_to_filter": {
+    "xdcr_docs_unable_to_filter_total": {
         "type": "gauge",
         "help": "Number of Document Mutations that couldn't be filtered due to inability to parse the document through Advanced Filtering engine and were not replicated",
         "added": "7.0.0",
@@ -455,7 +455,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_docs_written": {
+    "xdcr_docs_written_total": {
         "type": "counter",
         "help": "Number of docs Document Mutations written/sent to the Target",
         "added": "7.0.0",
@@ -468,7 +468,7 @@
         "notes": "This metric counts any type of mutations that are sent to the target cluster, and includes mutations that had failed target side Conflict Resolution",
         "stability": "committed"
     },
-    "xdcr_expiry_docs_merge_failed": {
+    "xdcr_expiry_docs_merge_failed_total": {
         "type": "counter",
         "help": "Number of conflicting expiry docs failed to merge as part of Source custom conflict-resolution",
         "added": "7.0.0",
@@ -480,7 +480,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_expiry_docs_merged": {
+    "xdcr_expiry_docs_merged_total": {
         "type": "counter",
         "help": "Number of Expirations merged and written to the Source",
         "added": "7.0.0",
@@ -492,7 +492,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_expiry_docs_written": {
+    "xdcr_expiry_docs_written_total": {
         "type": "counter",
         "help": "Number of Expirations written to the Target",
         "added": "7.0.0",
@@ -504,7 +504,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_expiry_failed_cr_source": {
+    "xdcr_expiry_failed_cr_source_total": {
         "type": "counter",
         "help": "Number of Expirations that failed Source-side Conflict Resolution",
         "added": "7.0.0",
@@ -516,7 +516,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_expiry_failed_cr_target": {
+    "xdcr_expiry_failed_cr_target_total": {
         "type": "counter",
         "help": "Number of Expirations that failed Conflict Resolution at the Target",
         "added": "7.1.0",
@@ -528,7 +528,7 @@
         ],
         "stability": "volatile"
     },
-    "xdcr_expiry_filtered": {
+    "xdcr_expiry_filtered_total": {
         "type": "counter",
         "help": "Number of Expirations filtered Source-side",
         "added": "7.0.0",
@@ -540,7 +540,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_expiry_merge_cas_changed": {
+    "xdcr_expiry_merge_cas_changed_total": {
         "type": "counter",
         "help": "Number of expiry from Source custom conflict-resolution that failed to merge back to Source because the Source CAS changed",
         "added": "7.0.0",
@@ -552,7 +552,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_expiry_received_from_dcp": {
+    "xdcr_expiry_received_from_dcp_total": {
         "type": "counter",
         "help": "Number of Expirations or documents with TTL received from the Data Service",
         "added": "7.0.0",
@@ -564,7 +564,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_expiry_stripped": {
+    "xdcr_expiry_stripped_total": {
         "type": "counter",
         "help": "Number of Document Mutations replicated that had the TTL changed to 0 before writing to Target (Source is unmodified)",
         "added": "7.0.0",
@@ -577,7 +577,7 @@
         "notes": "The source has an expiry set and the target does not. When the source document expires, it will trigger a expiry event that should be replicated to the target. If that expiry event is not replicated for any reason and is purged (i.e. tombstone purge interval), then the target doucment will contiue to live for perpetuity. If the purpose is for archival such that the target should live for perpetuity, then it is adv filter for expiry should also be set, but will cause document count divergence",
         "stability": "committed"
     },
-    "xdcr_expiry_target_docs_skipped": {
+    "xdcr_expiry_target_docs_skipped_total": {
         "type": "counter",
         "help": "Subset of the number of Document Mutations that originated from the Target that specifically had Expiry flag set",
         "added": "7.0.0",
@@ -589,7 +589,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_guardrail_data_size": {
+    "xdcr_guardrail_data_size_total": {
         "type": "counter",
         "help": "The number of writes that target rejected because each target data node is holding too much data",
         "added": "7.6.0",
@@ -602,7 +602,7 @@
         "notes": "When target bucket has guardrail enabled and a threshold set, it will return this error indicating that the target data nodes are holding too much data per node, which could lead to rebalance failures or cluster instability. To resume replication, additional data nodes must be added",
         "stability": "committed"
     },
-    "xdcr_guardrail_disk_space": {
+    "xdcr_guardrail_disk_space_total": {
         "type": "counter",
         "help": "The number of writes that target rejected because a data node is running out of disk space",
         "added": "7.6.0",
@@ -615,7 +615,7 @@
         "notes": "When target bucket has guardrail enabled and a threshold set, it will return this error indicating that one or more data nodes is running out of disk space. To resume replication, additional disk storage must be added",
         "stability": "committed"
     },
-    "xdcr_guardrail_resident_ratio": {
+    "xdcr_guardrail_resident_ratio_total": {
         "type": "counter",
         "help": "The number of writes that target rejected due to the target bucket being under the resident ratio threshold",
         "added": "7.6.0",
@@ -628,7 +628,7 @@
         "notes": "When target bucket has guardrail enabled and a threshold set, it will return this error indicating that the bucket is currently below the resident ratio. Data writes can only continue once the target bucket's resident ratio rises above the threshold",
         "stability": "committed"
     },
-    "xdcr_mobile_docs_filtered": {
+    "xdcr_mobile_docs_filtered_total": {
         "type": "counter",
         "help": "Total number of documents filtered and not replicated because the documents were mobile records",
         "added": "7.6.0",
@@ -640,7 +640,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_num_checkpoints": {
+    "xdcr_num_checkpoints_total": {
         "type": "counter",
         "help": "The number of times checkpoint operation has completed successfully since this XDCR process instance is made aware of this replication",
         "added": "7.0.0",
@@ -652,7 +652,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_num_failedckpts": {
+    "xdcr_num_failedckpts_total": {
         "type": "counter",
         "help": "The number of times checkpoint operation has encountered an error since this XDCR process instance is made aware of this replication",
         "added": "7.0.0",
@@ -691,7 +691,7 @@
         "notes": "A set of stats that represents the state of a pipeline, whether or not it is running or manually paused, or is in a erroneous state",
         "stability": "committed"
     },
-    "xdcr_resp_wait_time": {
+    "xdcr_resp_wait_time_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write",
         "added": "7.0.0",
@@ -705,7 +705,7 @@
         "notes": "This metric indicates just the amount of wait time it takes for KV to send a respond back to XDCR as part of the complete docs_latency metrics. This can be used to give more granularity into how the overall latency situation looks like.",
         "stability": "committed"
     },
-    "xdcr_set_docs_cas_changed": {
+    "xdcr_set_docs_cas_changed_total": {
         "type": "counter",
         "help": "Number of Set operations that failed because the CAS on the Target changed",
         "added": "7.0.0",
@@ -717,7 +717,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_set_docs_written": {
+    "xdcr_set_docs_written_total": {
         "type": "counter",
         "help": "Number of Set operations successfully written to the Target",
         "added": "7.0.0",
@@ -729,7 +729,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_set_failed_cr_source": {
+    "xdcr_set_failed_cr_source_total": {
         "type": "counter",
         "help": "Number of Set operations that failed Source-side Conflict Resolution",
         "added": "7.0.0",
@@ -741,7 +741,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_set_failed_cr_target": {
+    "xdcr_set_failed_cr_target_total": {
         "type": "counter",
         "help": "Number of Set operations that failed Conflict Resolution at the Target",
         "added": "7.1.0",
@@ -753,7 +753,7 @@
         ],
         "stability": "volatile"
     },
-    "xdcr_set_filtered": {
+    "xdcr_set_filtered_total": {
         "type": "counter",
         "help": "Number of documents filtered that was of a DCP mutation",
         "added": "7.0.0",
@@ -765,7 +765,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_set_received_from_dcp": {
+    "xdcr_set_received_from_dcp_total": {
         "type": "counter",
         "help": "Number of Sets received from the Data Service",
         "added": "7.0.0",
@@ -777,7 +777,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_set_target_docs_skipped": {
+    "xdcr_set_target_docs_skipped_total": {
         "type": "counter",
         "help": "Subset of the number of documents that originated from the target that were set operations",
         "added": "7.0.0",
@@ -789,7 +789,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_size_rep_queue": {
+    "xdcr_size_rep_queue_bytes": {
         "type": "gauge",
         "help": "Amount of data being queued to be sent in a Target Nozzle",
         "added": "7.0.0",
@@ -803,7 +803,7 @@
         "notes": "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.  If too much memory is being used, consider decreasing the number of nozzles or tune such that less data will be buffered",
         "stability": "committed"
     },
-    "xdcr_target_docs_skipped": {
+    "xdcr_target_docs_skipped_total": {
         "type": "counter",
         "help": "Number of Document Mutations that were not replicated to the Target because they originated from the Target",
         "added": "7.0.0",
@@ -815,7 +815,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_target_eaccess": {
+    "xdcr_target_eaccess_total": {
         "type": "counter",
         "help": "The total number of EACCESS errors returned from the target node.",
         "added": "7.6.0",
@@ -827,7 +827,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_target_tmpfail": {
+    "xdcr_target_tmpfail_total": {
         "type": "counter",
         "help": "The total number of TMPFAIL errors returned from the target node.",
         "added": "7.6.0",
@@ -839,7 +839,19 @@
         ],
         "stability": "committed"
     },
-    "xdcr_throttle_latency": {
+    "xdcr_target_unknown_status_total": {
+        "type": "counter",
+        "help": "The total number of writes to target KV that returned with a status code that XDCR cannot comprehend",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_throttle_latency_seconds": {
         "type": "gauge",
         "help": "The rolling average of the latency time introduced due to bandwith throttler",
         "added": "7.0.0",
@@ -852,7 +864,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_throughput_throttle_latency": {
+    "xdcr_throughput_throttle_latency_seconds": {
         "type": "gauge",
         "help": "The rolling average of the latency time introduced due to throughput throttler",
         "added": "7.0.0",
@@ -865,7 +877,7 @@
         ],
         "stability": "committed"
     },
-    "xdcr_time_committing": {
+    "xdcr_time_committing_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes for a checkpoint operation to complete",
         "added": "7.0.0",
@@ -879,7 +891,7 @@
         "notes": "The higher the number, the more burdened XDCR is or the slower the performance of simple_store (metakv)",
         "stability": "committed"
     },
-    "xdcr_wtavg_docs_latency": {
+    "xdcr_wtavg_docs_latency_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes for the source cluster to receive the acknowledgement of a SET_WITH_META response after the Memcached request has been composed to be processed by the XDCR Target Nozzle",
         "added": "7.0.0",
@@ -894,7 +906,7 @@
         "notes": "This metric indicates the lag time of both the network as well as the target Key-Value set latency. The latency tracks the followings: 1. The time it takes to issue a SET_WITH_META from the source to the target. 2. The time it takes for KV to handle the SET_WITH_META request. 3. The time it takes for KV to send a response back to XDCR indicating that a SET_WITH_META has been handled. When combined with traditional network diagnostic tools, one can use this number to differentiate between the network latency as well as target KV latency.",
         "stability": "committed"
     },
-    "xdcr_wtavg_get_doc_latency": {
+    "xdcr_wtavg_get_doc_latency_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes once a get document command is composed to be sent to the time the request is handled once the target node has responded",
         "added": "7.0.0",
@@ -907,7 +919,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_wtavg_merge_latency": {
+    "xdcr_wtavg_merge_latency_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes from routing, conflict detection and resolution, to receive the acknowledgement of merge",
         "added": "7.0.0",
@@ -920,7 +932,7 @@
         ],
         "stability": "internal"
     },
-    "xdcr_wtavg_meta_latency": {
+    "xdcr_wtavg_meta_latency_seconds": {
         "type": "gauge",
         "help": "The rolling average amount of time it takes once a getMeta command is composed to be sent to the time the request is handled once the target node has responded",
         "added": "7.0.0",
