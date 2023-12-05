@@ -9,12 +9,16 @@
 package metadata_svc
 
 import (
+	"errors"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"time"
 )
+
+var checkpointsServiceCacheStopped = errors.New("Replication has been deleted")
 
 type CheckpointsServiceCache interface {
 	GetLatestDocs() (metadata.VBsCkptsDocMap, error)
@@ -121,10 +125,14 @@ func (c *CheckpointsServiceCacheImpl) StoreLatestDocs(incoming metadata.VBsCkpts
 	select {
 	case c.setCh <- req:
 		select {
+		case <-c.finCh:
+			return checkpointsServiceCacheStopped
 		case <-req.resultReady:
-			return nil
 		}
+	case <-c.finCh:
+		return checkpointsServiceCacheStopped
 	}
+	return nil
 }
 
 func (c *CheckpointsServiceCacheImpl) StoreOneVbDoc(vbno uint16, ckpt *metadata.CheckpointsDoc, internalId string) error {
@@ -141,10 +149,12 @@ func (c *CheckpointsServiceCacheImpl) StoreOneVbDoc(vbno uint16, ckpt *metadata.
 	select {
 	case c.setOneCh <- req:
 		select {
+		case <-c.finCh:
+			return checkpointsServiceCacheStopped
 		case <-req.setDone:
-			return nil
 		}
 	}
+	return nil
 }
 
 func (c *CheckpointsServiceCacheImpl) GetLatestDocs() (metadata.VBsCkptsDocMap, error) {
@@ -152,7 +162,11 @@ func (c *CheckpointsServiceCacheImpl) GetLatestDocs() (metadata.VBsCkptsDocMap, 
 
 	select {
 	case c.requestCh <- request:
-		<-request.resultReady
+		select {
+		case <-c.finCh:
+			return nil, checkpointsServiceCacheStopped
+		case <-request.resultReady:
+		}
 	}
 	return request.clonedRetVal, request.errorCode
 }
@@ -165,6 +179,8 @@ func (c *CheckpointsServiceCacheImpl) GetOneVBDoc(vbno uint16) (*metadata.Checkp
 	select {
 	case c.requestCh <- request:
 		select {
+		case <-c.finCh:
+			return nil, checkpointsServiceCacheStopped
 		case <-request.resultReady:
 		}
 	}
@@ -187,8 +203,10 @@ func (c *CheckpointsServiceCacheImpl) InvalidateCache() {
 	req := NewInvalidateReq()
 	select {
 	case c.externalInvalidateCh <- req:
-		<-req.invalidatedAck
-		return
+		select {
+		case <-c.finCh:
+		case <-req.invalidatedAck:
+		}
 	}
 }
 
@@ -196,8 +214,10 @@ func (c *CheckpointsServiceCacheImpl) ValidateCache(internalId string) {
 	req := NewValidateReq(internalId)
 	select {
 	case c.externalValidateCh <- req:
-		<-req.validatedAck
-		return
+		select {
+		case <-c.finCh:
+		case <-req.validatedAck:
+		}
 	}
 }
 
