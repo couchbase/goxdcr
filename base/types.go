@@ -1367,7 +1367,7 @@ func ValidateAndConvertStringToMergeFunctionMappingType(value string) (MergeFunc
 		return MergeFunctionMappingType{}, err
 	}
 	if res == false {
-		return MergeFunctionMappingType{}, fmt.Errorf("JSON string passed in for merge function did not pass re-encode test. Are there potentially duplicated keys?")
+		return MergeFunctionMappingType{}, ErrorJSONReEncodeFailed
 	}
 	mergeFunc := make(MergeFunctionMappingType, len(jsonMap))
 	for k, v := range jsonMap {

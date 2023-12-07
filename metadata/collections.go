@@ -2132,7 +2132,7 @@ func ValidateAndConvertStringToMappingRuleType(value string) (CollectionsMapping
 		return CollectionsMappingRulesType{}, err
 	}
 	if res == false {
-		return CollectionsMappingRulesType{}, fmt.Errorf("JSON string passed in did not pass re-encode test. Are there potentially duplicated keys?")
+		return CollectionsMappingRulesType{}, base.ErrorJSONReEncodeFailed
 	}
 
 	// Because adv filtering won't work if space is removed - jsonMap should be the original version
