@@ -793,7 +793,7 @@ func MapToSupportedIpFamily(connStr string, isTLS bool) (string, error) {
 
 	addrs, err := net.LookupIP(hostname)
 	if err != nil {
-		return "", fmt.Errorf("Lookup failed for %v", hostname)
+		return "", fmt.Errorf("Lookup failed for %v: %v", hostname, err)
 	}
 	switch isTLS {
 	case true:
