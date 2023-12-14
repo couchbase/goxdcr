@@ -1804,7 +1804,7 @@ func (ckmgr *CheckpointManager) performCkpt(fin_ch chan bool, wait_grp *sync.Wai
 	defer wait_grp.Done()
 
 	if !ckmgr.isCheckpointAllowed() {
-		ckmgr.logger.Errorf("Pipeline has not been started - checkpointing is skipped")
+		ckmgr.logger.Errorf("Pipeline has not been started (or has been disabled) - checkpointing is skipped")
 		return
 	}
 
