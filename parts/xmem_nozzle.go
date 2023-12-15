@@ -564,7 +564,7 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 					casStr := casObj.(string)
 					cas, err := strconv.ParseUint(casStr, 10, 64)
 					if err != nil {
-						return fmt.Errorf("bad value %v in vbucketsMaxCas %v", casStr, vbMaxCas)
+						return fmt.Errorf("bad value %v in vbucketsMaxCas %v. err=%v", casStr, vbMaxCas, err)
 					}
 					config.vbMaxCas[uint16(i)] = cas
 				}
@@ -1109,7 +1109,7 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 			}
 
 			// batchGet may use getMeta or subdoc_multi_lookup to get the results.
-			noRepMap, conflictMap, sendLookup_map, _, err := xmem.batchGet(batch.getMeta_map, batch.getMetaSpecWithHlv, batch.getMetaSpecWithoutHlv)
+			noRepMap, conflictMap, sendLookup_map, _, err := xmem.batchGet(batch.getMetaMap, batch.getMetaSpecWithHlv, batch.getMetaSpecWithoutHlv)
 			if err != nil {
 				if err == PartStoppedError {
 					goto done
@@ -1139,10 +1139,10 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					// Anything to be sent should not be in noRepMap
 					delete(noRepMap, k)
 				}
-				batch.mergeLookup_map = mergeLookupMap
+				batch.mergeLookupMap = mergeLookupMap
 			}
-			batch.noRep_map = noRepMap
-			batch.sendLookup_map = sendLookup_map
+			batch.noRepMap = noRepMap
+			batch.sendLookupMap = sendLookup_map
 
 			err = xmem.processBatch(batch)
 			if err != nil {
@@ -1262,7 +1262,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			}
 			switch needSendStatus {
 			case Send:
-				lookupResp := batch.sendLookup_map[item.UniqueKey]
+				lookupResp := batch.sendLookupMap[item.UniqueKey]
 				err = xmem.preprocessMCRequest(item, lookupResp, batch.setMetaXattrOptions)
 				if err != nil {
 					return err
@@ -1307,11 +1307,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			case NotSendMerge:
 				// Call conflictMgr to resolve conflict
 				atomic.AddUint64(&xmem.counter_to_resolve, 1)
-				lookupResp, ok := batch.mergeLookup_map[item.UniqueKey]
+				lookupResp, ok := batch.mergeLookupMap[item.UniqueKey]
 				if !ok || lookupResp == nil {
 					xmem.Logger().Errorf("key=%q, batch.noRep=%v, sendLookup=%v, mergeLookup=%v\n",
-						[]byte(item.UniqueKey), batch.noRep_map[item.UniqueKey], batch.sendLookup_map[item.UniqueKey],
-						batch.mergeLookup_map[item.UniqueKey])
+						[]byte(item.UniqueKey), batch.noRepMap[item.UniqueKey], batch.sendLookupMap[item.UniqueKey],
+						batch.mergeLookupMap[item.UniqueKey])
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
 				err = xmem.conflictMgr.ResolveConflict(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.recycleDataObj)
@@ -1320,7 +1320,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 			case NotSendSetback:
 				atomic.AddUint64(&xmem.counter_to_setback, 1)
-				lookupResp := batch.mergeLookup_map[item.UniqueKey]
+				lookupResp := batch.mergeLookupMap[item.UniqueKey]
 				if lookupResp == nil {
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
@@ -1634,10 +1634,10 @@ func (xmem *XmemNozzle) composeRequestForGetMeta(key []byte, vb uint16, opaque u
 	return req
 }
 
-// For each document in the get_map, this routine will compose subdoc_get or getMeta, and send the requests
-func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int, getSpecWithHlv, getSpecWithoutHlv []base.SubdocLookupPathSpec) (respMap map[string]*base.SubdocLookupResponse, err error) {
+// For each document in the getMap, this routine will compose subdoc_get or getMeta, and send the requests
+func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int, getSpecWithHlv, getSpecWithoutHlv []base.SubdocLookupPathSpec) (respMap map[string]*base.SubdocLookupResponse, err error) {
 	// if input size is 0, then we are done
-	if len(get_map) == 0 {
+	if len(getMap) == 0 {
 		return nil, nil
 	}
 
@@ -1659,15 +1659,15 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 
 	// Establish an opaque based on the current time - and since getting doc doesn't utilize buffer buckets, feed it 0
 	opaque := base.GetOpaque(0, uint16(time.Now().UnixNano()))
-	sent_key_map := make(map[string]bool, len(get_map))
+	sent_key_map := make(map[string]bool, len(getMap))
 	getSpecMap := make(map[string][]base.SubdocLookupPathSpec)
 
 	//de-dupe and prepare the packages
-	for _, originalReq := range get_map {
+	for _, originalReq := range getMap {
 		docKey := string(originalReq.Req.Key)
 		if docKey == "" {
-			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%q%v, req=%v%v%v, getMeta_map=%v%v%v", xmem.Id(),
-				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, get_map, base.UdTagEnd)
+			xmem.Logger().Errorf("%v received empty docKey. unique-key= %v%q%v, req=%v%v%v, getMetaMap=%v%v%v", xmem.Id(),
+				base.UdTagBegin, originalReq.Req.Key, base.UdTagEnd, base.UdTagBegin, originalReq.Req, base.UdTagEnd, base.UdTagBegin, getMap, base.UdTagEnd)
 			return respMap, errors.New(xmem.Id() + " received empty docKey.")
 		}
 
@@ -1741,17 +1741,17 @@ func (xmem *XmemNozzle) sendBatchGetRequest(get_map base.McRequestMap, retry int
 // - getSpecWithHlv: the spec for subdoc_get paths, if nil, getMeta will be used.
 // - getSpecWithoutHlv: the spec if not CCR and enableCrossClusterVersion is off. If nil, getMeta will be used
 // Output:
-// - noRep_map: the documents we don't need to send to target
-// - sendLookup_map: the response for documents we need to send to target. These are not in noRep_map.
-// - conflict_map: These documents have conflict. These are also in noRep_map with corresponding NeedSendStatus
-// - mergeLookup_map: The response for the documents in conflict_map
+// - noRepMap: the documents we don't need to send to target
+// - sendLookupMap: the response for documents we need to send to target. These are not in noRepMap.
+// - conflictMap: These documents have conflict. These are also in noRepMap with corresponding NeedSendStatus
+// - mergeLookupMap: The response for the documents in conflict_map
 func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getSpecWithoutHlv []base.SubdocLookupPathSpec) (noRep_map map[string]NeedSendStatus,
-	conflict_map base.McRequestMap, sendLookup_map, mergeLookup_map map[string]*base.SubdocLookupResponse, err error) {
+	conflictMap base.McRequestMap, sendLookupMap, mergeLookupMap map[string]*base.SubdocLookupResponse, err error) {
 
 	noRep_map = make(map[string]NeedSendStatus)
-	conflict_map = make(base.McRequestMap)
-	sendLookup_map = make(map[string]*base.SubdocLookupResponse)
-	mergeLookup_map = make(map[string]*base.SubdocLookupResponse)
+	conflictMap = make(base.McRequestMap)
+	sendLookupMap = make(map[string]*base.SubdocLookupResponse)
+	mergeLookupMap = make(map[string]*base.SubdocLookupResponse)
 	var respMap map[string]*base.SubdocLookupResponse
 	var hasTmpErr bool
 	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
@@ -1774,7 +1774,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getS
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
 			if ok && (resp.Resp.Status == mc.KEY_ENOENT) {
-				sendLookup_map[uniqueKey] = resp
+				sendLookupMap[uniqueKey] = resp
 				delete(get_map, uniqueKey)
 			} else if ok && base.IsDocLocked(resp.Resp) {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
@@ -1796,24 +1796,24 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getS
 				}
 				switch res {
 				case base.SendToTarget:
-					sendLookup_map[uniqueKey] = resp
+					sendLookupMap[uniqueKey] = resp
 				case base.Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
 				case base.Merge:
 					noRep_map[uniqueKey] = NotSendMerge
-					conflict_map[uniqueKey] = wrappedReq
-					mergeLookup_map[uniqueKey] = resp
+					conflictMap[uniqueKey] = wrappedReq
+					mergeLookupMap[uniqueKey] = resp
 				case base.SetBackToSource:
 					noRep_map[uniqueKey] = NotSendSetback
-					conflict_map[uniqueKey] = wrappedReq
-					mergeLookup_map[uniqueKey] = resp
+					conflictMap[uniqueKey] = wrappedReq
+					mergeLookupMap[uniqueKey] = resp
 				default:
 					panic(fmt.Sprintf("Unexpcted conflict result %v", res))
 				}
 				delete(get_map, uniqueKey)
 			} else if opcode, _ := xmem.opcodeAndSpecsForGetOp(wrappedReq.Req, getSpecWithHlv, getSpecWithoutHlv); opcode == base.GET_WITH_META {
 				// For getMeta, we can just send optimistically
-				sendLookup_map[uniqueKey] = resp
+				sendLookupMap[uniqueKey] = resp
 				delete(get_map, uniqueKey)
 			} else if resp != nil {
 				if base.IsTemporaryMCError(resp.Resp.Status) {
@@ -1844,15 +1844,19 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(incomingReq *mc.MCRequest, getSpe
 	if getSpecs == nil {
 		return base.GET_WITH_META, nil
 	}
-	return base.SUBDOC_MULTI_MUTATION, getSpecs
+	return mc.SUBDOC_MULTI_LOOKUP, getSpecs
 }
 
 func (xmem *XmemNozzle) composeRequestForGet(incomingReq *mc.MCRequest, getSpecWithHlv, getSpecWithoutHlv []base.SubdocLookupPathSpec, opaque uint32) (*mc.MCRequest, []base.SubdocLookupPathSpec) {
 	opcode, specs := xmem.opcodeAndSpecsForGetOp(incomingReq, getSpecWithHlv, getSpecWithoutHlv)
-	if opcode == base.GET_WITH_META {
+	switch opcode {
+	case base.GET_WITH_META:
 		return xmem.composeRequestForGetMeta(incomingReq.Key, incomingReq.VBucket, opaque), nil
+	case mc.SUBDOC_MULTI_LOOKUP:
+		return xmem.composeRequestForSubdocGet(specs, incomingReq.Key, incomingReq.VBucket, opaque), specs
+	default:
+		panic(fmt.Sprintf("Unknown opcode %v. Need to implement", opcode))
 	}
-	return xmem.composeRequestForSubdocGet(specs, incomingReq.Key, incomingReq.VBucket, opaque), specs
 }
 
 // Request to get _xdcr XATTR. If document body is included, it must be the last path
@@ -3198,7 +3202,7 @@ func (xmem *XmemNozzle) handleGeneralError(err error) {
 
 func (xmem *XmemNozzle) optimisticRep(req *mc.MCRequest) bool {
 	opcode, _ := xmem.opcodeAndSpecsForGetOp(req, xmem.batch.getMetaSpecWithHlv, xmem.batch.getMetaSpecWithoutHlv)
-	if opcode == base.SUBDOC_MULTI_MUTATION {
+	if opcode == mc.SUBDOC_MULTI_LOOKUP {
 		// If we need to get anything from target, optimisticRep can't be used.
 		return false
 	}

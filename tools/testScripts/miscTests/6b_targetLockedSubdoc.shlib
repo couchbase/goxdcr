@@ -67,11 +67,10 @@ function runTestCase {
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
+	setBucket "C1" "B1" "enableCrossClusterVersioning" "true"
+	setBucket "C2" "B2" "enableCrossClusterVersioning" "true"
 	createBucketReplication "C1" "B1" "C2" "B2" PessimisticReplicationProperties
 	setReplicationSettings "C1" "B1" "C2" "B2" "mobile=Active"
-	setBucket "C1" "B1" "enableCrossClusterVersioning" "true"
-	# Wait for replication to restart
-	sleep 15
 	printGlobalScopeAndCollectionInfo
 
 	echo "Writing a document with foo:bar"
