@@ -607,12 +607,12 @@ func (capi *CapiNozzle) send_internal(batch *capiBatch) error {
 		// A map of documents that should not be replicated
 		var bigDoc_noRep_map map[string]NeedSendStatus
 		// Populate no replication map to optimize data bandwidth before actually sending
-		bigDoc_noRep_map, err = capi.batchGetMeta(batch.vbno, batch.getMeta_map)
+		bigDoc_noRep_map, err = capi.batchGetMeta(batch.vbno, batch.getMetaMap)
 		if err != nil {
 			capi.Logger().Errorf("%v batchGetMeta failed. err=%v\n", capi.Id(), err)
 		} else {
 			// Attach the map to the batch before actually sending
-			batch.noRep_map = bigDoc_noRep_map
+			batch.noRepMap = bigDoc_noRep_map
 		}
 
 		//batch send

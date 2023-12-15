@@ -213,16 +213,16 @@ type dataBatch struct {
 	// They can be documents larger than optimistic replication threshold or
 	// documents that needs source side custom conflict resolution.
 	// Key of the map is the document unique key
-	getMeta_map base.McRequestMap
+	getMetaMap base.McRequestMap
 	// tracks docs that do not need to be replicated based on source side conflict resolution
 	// key of the map is the document key_revSeqno
 	// value of the map can be anything except Send. Anything not in the map will be sent through setWithMeta
-	noRep_map map[string]NeedSendStatus
-	// For CCR, noRep_map value may be Not_Send_Merge or Not_Send_Setback. For these, the target document lookup
+	noRepMap map[string]NeedSendStatus
+	// For CCR, noRepMap value may be Not_Send_Merge or Not_Send_Setback. For these, the target document lookup
 	// response is stored in here.
-	mergeLookup_map map[string]*base.SubdocLookupResponse
+	mergeLookupMap map[string]*base.SubdocLookupResponse
 	// If mobile is on, for document winning conflict resolution, we need to preserve target _sync XATTR. The lookup for these are stored in here
-	sendLookup_map map[string]*base.SubdocLookupResponse
+	sendLookupMap map[string]*base.SubdocLookupResponse
 
 	// XMEM config may change but only affect the next batch
 	// At the beginning of each batch we will check the config to decide the getMeta/getSubdoc and setMeta behavior
@@ -248,10 +248,10 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		curSize:           0,
 		capacity_count:    cap_count,
 		capacity_size:     cap_size,
-		getMeta_map:       make(base.McRequestMap),
-		noRep_map:         nil,
-		mergeLookup_map:   nil,
-		sendLookup_map:    nil,
+		getMetaMap:        make(base.McRequestMap),
+		noRepMap:          nil,
+		mergeLookupMap:    nil,
+		sendLookupMap:     nil,
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
 		setMetaXattrOptions: SetMetaXattrOptions{
@@ -279,7 +279,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		}
 		if !classifyFunc(req.Req) {
 			// If it fails the classifyFunc, then we're going to do bigDoc processing on it
-			b.getMeta_map[req.UniqueKey] = req
+			b.getMetaMap[req.UniqueKey] = req
 		}
 		curSize := b.incrementSize(uint32(size))
 		if curCount < b.capacity_count && curSize < b.capacity_size*1000 {
@@ -319,7 +319,7 @@ func needSend(req *base.WrappedMCRequest, batch *dataBatch, logger *log.CommonLo
 		return Send, errors.New("needSend saw a nil req")
 	}
 
-	failedCR, ok := batch.noRep_map[req.UniqueKey]
+	failedCR, ok := batch.noRepMap[req.UniqueKey]
 	if !ok {
 		return Send, nil
 	} else {
