@@ -1404,7 +1404,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 	xmem.setCasLocking(req, lookup, setMetaOptions)
 
 	// Compress it if needed
-	if (setMetaOptions.sendHlv || setMetaOptions.preserveSync) && mc_req.DataType&mcc.SnappyDataType == 0 {
+	if req.NeedToRecompress && mc_req.DataType&mcc.SnappyDataType == 0 {
 		maxEncodedLen := snappy.MaxEncodedLen(len(mc_req.Body))
 		if maxEncodedLen > 0 && maxEncodedLen < len(mc_req.Body) {
 			body, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
@@ -1422,6 +1422,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 			body = snappy.Encode(body, mc_req.Body)
 			mc_req.Body = body
 			mc_req.DataType = mc_req.DataType | mcc.SnappyDataType
+			req.NeedToRecompress = false
 		}
 	}
 	req.UpdateReqBytes()
@@ -1837,6 +1838,11 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(incomingReq *mc.MCRequest, getSpe
 		getSpecs = getSpecWithHlv
 	} else if xmem.getCrossClusterVers() == true && incomingReq.Cas >= xmem.config.vbMaxCas[incomingReq.VBucket] {
 		// These are the mutations we need to maintain HLV for mobile and get target importCas/cvCas for CR
+		// Note that there is no mixed mode support for import mutations. If enableCrossClusterVersioning is false,
+		// and current source mutation already has HLV, we still don't get target importCas/HLV. The reason is to
+		// figure out that current source mutation already has HLV will require us to parse the body. It has a
+		// performance impact. Mobile does not expect to support import in mixed mode. Doing import during mixed
+		// mode may cause data loss. See design spec for more details.
 		getSpecs = getSpecWithHlv
 	} else {
 		getSpecs = getSpecWithoutHlv
@@ -1917,6 +1923,7 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 		}
 		req.Req.Body = body
 		req.Req.DataType = req.Req.DataType &^ mcc.SnappyDataType
+		req.NeedToRecompress = true
 		req.UpdateReqBytes()
 	}
 	return nil
