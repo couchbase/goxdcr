@@ -471,15 +471,18 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	var mv, pv, mvSlice, pvSlice []byte
 	if mvlen > 0 {
 		mvSlice = make([]byte, mvlen)
-		pos := crMeta.VersionMapToBytes(mergedMeta.GetHLV().GetMV(), mvSlice, 0, nil)
+		pos, _ := crMeta.VersionMapToBytes(mergedMeta.GetHLV().GetMV(), mvSlice, 0, nil)
 		mv = mvSlice[:pos]
 	}
 	if pvlen > 0 {
 		pruneFunc := base.GetHLVPruneFunction(sourceMeta.GetDocumentMetadata().Cas,
 			time.Duration(atomic.LoadUint32(&c.pruningWindowSec))*time.Second)
 		pvSlice = make([]byte, pvlen)
-		pos := crMeta.VersionMapToBytes(mergedMeta.GetHLV().GetPV(), pvSlice, 0, &pruneFunc)
+		pos, pruned := crMeta.VersionMapToBytes(mergedMeta.GetHLV().GetPV(), pvSlice, 0, &pruneFunc)
 		pv = pvSlice[:pos]
+		if pruned {
+			c.RaiseEvent(common.NewEvent(common.HlvPrunedAtMerge, nil, c, nil, nil))
+		}
 	}
 
 	bodylen := 0

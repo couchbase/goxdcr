@@ -446,6 +446,24 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		dataSentFailedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DataSentFailedListener, i),
 			pipeline.Topic(), logger_ctx)
+		sourceSyncXattrRemovedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.SrcSyncXattrRemovedEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		targetSyncXattrPreservedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.TgtSyncXattrPreservedEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		importMutationsSkippedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.ImportMutationsSkippedEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		importMutationsSentEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.ImportMutationsSentEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		hlvPrunedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.HlvPrunedEventListener, i),
+			pipeline.Topic(), logger_ctx)
+		hlvUpdatedEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.HlvUpdatedEventListener, i),
+			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			out_nozzle := targets[index]
@@ -459,6 +477,12 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.DataSentFailed, dataSentFailedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.DataSentHitGuardrail, dataSentFailedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.DataSentFailedUnknownStatus, dataSentFailedEventListener)
+			out_nozzle.RegisterComponentEventListener(common.SourceSyncXattrRemoved, sourceSyncXattrRemovedEventListener)
+			out_nozzle.RegisterComponentEventListener(common.TargetSyncXattrPreserved, targetSyncXattrPreservedEventListener)
+			out_nozzle.RegisterComponentEventListener(common.ImportMutationsSkipped, importMutationsSkippedEventListener)
+			out_nozzle.RegisterComponentEventListener(common.ImportMutationsSent, importMutationsSentEventListener)
+			out_nozzle.RegisterComponentEventListener(common.HlvPruned, hlvPrunedEventListener)
+			out_nozzle.RegisterComponentEventListener(common.HlvUpdated, hlvUpdatedEventListener)
 		}
 	}
 }

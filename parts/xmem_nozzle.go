@@ -84,7 +84,7 @@ var ErrorXmemIsStuck = errors.New("Xmem is stuck")
 
 var ErrorBufferInvalidState = errors.New("xmem buffer is in invalid state")
 
-type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error)
+type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, bool, error)
 
 var GetMetaClientName = "client_getMeta"
 var SetMetaClientName = "client_setMeta"
@@ -1784,8 +1784,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getS
 				noRep_map[uniqueKey] = RetryTargetLocked
 				delete(get_map, uniqueKey)
 			} else if ok && base.IsSuccessGetResponse(resp.Resp) {
-				var res base.ConflictResult
-				res, err = xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
+				res, isImport, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
 					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
@@ -1793,9 +1792,14 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getS
 				}
 				switch res {
 				case base.SendToTarget:
+					// Import mutations sent will be counted when we send since we will get a more accurate count then.
+					// If target document does not exist, we only parse for importCas at send time.
 					sendLookupMap[uniqueKey] = resp
 				case base.Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
+					if isImport {
+						xmem.RaiseEvent(common.NewEvent(common.ImportMutationsSkipped, nil, xmem, nil, nil))
+					}
 				case base.Merge:
 					noRep_map[uniqueKey] = NotSendMerge
 					conflictMap[uniqueKey] = wrappedReq
@@ -1991,15 +1995,20 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		}
 
 		if crMeta.NeedToUpdateHlv(meta, xmem.config.vbMaxCas[req.VBucket], time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second) {
-			_, err = crMeta.ConstructXattrFromHlvForSetMeta(meta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
+			_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(meta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
 			if err != nil {
 				return err
 			}
 			hlvUpdated = true
+			xmem.RaiseEvent(common.NewEvent(common.HlvUpdated, nil, xmem, nil, nil))
+			if pruned {
+				xmem.RaiseEvent(common.NewEvent(common.HlvPruned, nil, xmem, nil, nil))
+			}
 		}
 	}
 	if setOpt.preserveSync && len(targetSyncVal) > 0 {
 		xattrComposer.WriteKV([]byte(base.XATTR_MOBILE), targetSyncVal)
+		xmem.RaiseEvent(common.NewEvent(common.TargetSyncXattrPreserved, nil, xmem, nil, nil))
 	}
 
 	if req.DataType&mcc.XattrDataType > 0 {
@@ -2024,6 +2033,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 			case base.XATTR_MOBILE:
 				if setOpt.preserveSync {
 					// Skip the source _sync value
+					xmem.RaiseEvent(common.NewEvent(common.SourceSyncXattrRemoved, nil, xmem, nil, nil))
 					continue
 				}
 			case base.XATTR_IMPORTCAS:
@@ -2031,6 +2041,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 					// Skip it if it is no longer an import mutation. This happens when import mutation is mutated again.
 					continue
 				}
+				xmem.RaiseEvent(common.NewEvent(common.ImportMutationsSent, nil, xmem, nil, nil))
 			}
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {

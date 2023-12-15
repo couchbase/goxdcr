@@ -90,6 +90,15 @@ const (
 	DELETION_TARGET_DOCS_SKIPPED_METRIC = "deletion_target_docs_skipped"
 	SET_TARGET_DOCS_SKIPPED_METRIC      = "set_target_docs_skipped"
 
+	// For mobile
+	SOURCE_SYNC_XATTR_REMOVED_METRIC   = "source_sync_xattr_removed"
+	TARGET_SYNC_XATTR_PRESERVED_METRIC = "target_sync_xattr_preserved"
+	IMPORT_MUTATIONS_SKIPPED_METRIC    = "import_mutations_skipped"
+	IMPORT_MUTATIONS_SENT_METRIX       = "import_mutations_sent"
+	HLV_UPDATED_METRIC                 = "hlv_updated"
+	HLV_PRUNED_METRIC                  = "hlv_pruned"
+	HLV_PRUNED_AT_MERGE_METRIC         = "hlv_pruned_at_merge"
+
 	CHANGES_LEFT_METRIC    = base.ChangesLeftStats
 	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
 	MERGE_LATENCY_METRIC   = "wtavg_merge_latency"
@@ -940,6 +949,63 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Subset of the number of documents that originated from the target that were set operations",
 		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+
+	SOURCE_SYNC_XATTR_REMOVED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of mutations with source mobile XATTR removed",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	TARGET_SYNC_XATTR_PRESERVED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of mutations with target mobile XATTR preserved",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	IMPORT_MUTATIONS_SKIPPED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of mobile import mutations skipped. This is only counted in LWW buckets when enableCrossClusterVersioning is true",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	IMPORT_MUTATIONS_SENT_METRIX: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of import mutations replicated",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	HLV_UPDATED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of mutations with HLV updated",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	HLV_PRUNED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of mutations with HLV pruned",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	HLV_PRUNED_AT_MERGE_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of mutations with HLV pruned when it is merged with target document",
+		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
 

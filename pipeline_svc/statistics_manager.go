@@ -52,7 +52,8 @@ var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METR
 	service_def.TIME_COMMITING_METRIC, service_def.NUM_FAILEDCKPTS_METRIC, service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC,
 	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC,
 	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC, service_def.DELETION_CLONED_METRIC, service_def.TARGET_TMPFAIL_METRIC,
-	service_def.TARGET_EACCESS_METRIC}
+	service_def.HLV_UPDATED_METRIC, service_def.HLV_PRUNED_METRIC, service_def.IMPORT_MUTATIONS_SENT_METRIX, service_def.IMPORT_MUTATIONS_SKIPPED_METRIC, service_def.SOURCE_SYNC_XATTR_REMOVED_METRIC,
+	service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC, service_def.TARGET_EACCESS_METRIC, service_def.HLV_PRUNED_AT_MERGE_METRIC}
 
 // keys for metrics in overview
 // Note the values used here does not correspond to the service_def GlobalStatsTable, since these are used internally
@@ -1317,6 +1318,8 @@ func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipelin
 	registry.Register(service_def.EXPIRY_DOCS_MERGE_FAILED_METRIC, expiry_docs_merge_failed)
 	data_merge_failed := metrics.NewCounter()
 	registry.Register(service_def.DATA_MERGE_FAILED_METRIC, data_merge_failed)
+	hlvPruned := metrics.NewCounter()
+	registry.Register(service_def.HLV_PRUNED_AT_MERGE_METRIC, hlvPruned)
 
 	metric_map := make(map[string]interface{})
 	metric_map[service_def.DOCS_MERGED_METRIC] = docs_merged
@@ -1329,11 +1332,19 @@ func (conflictMgr_collector *conflictMgrCollector) Mount(pipeline common.Pipelin
 	metric_map[service_def.DOCS_MERGE_FAILED_METRIC] = docs_merge_failed
 	metric_map[service_def.EXPIRY_DOCS_MERGE_FAILED_METRIC] = expiry_docs_merge_failed
 	metric_map[service_def.DATA_MERGE_FAILED_METRIC] = data_merge_failed
+	metric_map[service_def.HLV_PRUNED_AT_MERGE_METRIC] = hlvPruned
 	conflictMgr_collector.component_map[conflictManager.Id()] = metric_map
 
 	conflictManager.RegisterComponentEventListener(common.DataMerged, conflictMgr_collector)
 	conflictManager.RegisterComponentEventListener(common.MergeCasChanged, conflictMgr_collector)
 	conflictManager.RegisterComponentEventListener(common.MergeFailed, conflictMgr_collector)
+	conflictManager.RegisterComponentEventListener(common.HlvPrunedAtMerge, conflictMgr_collector)
+
+	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataMergedEventListener, conflictMgr_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.MergeCasChangedEventListener, conflictMgr_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.MergeFailedEventListener, conflictMgr_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvPrunedAtMergeEventListener, conflictMgr_collector)
 
 	return nil
 }
@@ -1353,7 +1364,8 @@ func (conflictMgr_collector *conflictMgrCollector) HandleLatestThroughSeqnos(Seq
 
 func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Event) error {
 	metric_map := conflictMgr_collector.component_map[event.Component.Id()]
-	if event.EventType == common.DataMerged {
+	switch event.EventType {
+	case common.DataMerged:
 		event_otherInfo := event.OtherInfos.(DataMergedEventAdditional)
 		req_size := event_otherInfo.Req_size
 		commit_time := event_otherInfo.Commit_time
@@ -1368,16 +1380,14 @@ func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Ev
 
 		metric_map[service_def.MERGE_LATENCY_METRIC].(metrics.Histogram).Sample().Update(commit_time.Nanoseconds() / 1000000)
 		metric_map[service_def.RESP_WAIT_METRIC].(metrics.Histogram).Sample().Update(resp_wait_time.Nanoseconds() / 1000000)
-	}
-	if event.EventType == common.MergeCasChanged {
+	case common.MergeCasChanged:
 		event_otherInfo := event.OtherInfos.(DataMergeCasChangedEventAdditional)
 		metric_map[service_def.DOCS_MERGE_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
 
 		if event_otherInfo.IsExpirySet {
 			metric_map[service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
 		}
-	}
-	if event.EventType == common.MergeFailed {
+	case common.MergeFailed:
 		event_otherInfo := event.OtherInfos.(DataMergeFailedEventAdditional)
 		metric_map[service_def.DOCS_MERGE_FAILED_METRIC].(metrics.Counter).Inc(1)
 		metric_map[service_def.DATA_MERGE_FAILED_METRIC].(metrics.Counter).Inc(int64(event_otherInfo.Req_size))
@@ -1385,6 +1395,8 @@ func (conflictMgr_collector *conflictMgrCollector) ProcessEvent(event *common.Ev
 		if event_otherInfo.IsExpirySet {
 			metric_map[service_def.EXPIRY_DOCS_MERGE_FAILED_METRIC].(metrics.Counter).Inc(1)
 		}
+	case common.HlvPrunedAtMerge:
+		metric_map[service_def.HLV_PRUNED_AT_MERGE_METRIC].(metrics.Counter).Inc(1)
 	}
 	return nil
 }
@@ -1494,6 +1506,18 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.GUARDRAIL_DISK_SPACE_METRIC, guardRailDiskSpace)
 		unknownStatusReceived := metrics.NewCounter()
 		registry.Register(service_def.TARGET_UNKNOWN_STATUS_METRIC, unknownStatusReceived)
+		sourceSyncXattrRemoved := metrics.NewCounter()
+		registry.Register(service_def.SOURCE_SYNC_XATTR_REMOVED_METRIC, sourceSyncXattrRemoved)
+		targetSyncXattrPreserved := metrics.NewCounter()
+		registry.Register(service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC, targetSyncXattrPreserved)
+		importMutationsProcessed := metrics.NewCounter()
+		registry.Register(service_def.IMPORT_MUTATIONS_SKIPPED_METRIC, importMutationsProcessed)
+		importMutationsSent := metrics.NewCounter()
+		registry.Register(service_def.IMPORT_MUTATIONS_SENT_METRIX, importMutationsSent)
+		hlvPruned := metrics.NewCounter()
+		registry.Register(service_def.HLV_PRUNED_METRIC, hlvPruned)
+		hlvUpdated := metrics.NewCounter()
+		registry.Register(service_def.HLV_UPDATED_METRIC, hlvUpdated)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1533,11 +1557,15 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.GUARDRAIL_DATA_SIZE_METRIC] = guardRailDataSz
 		metric_map[service_def.GUARDRAIL_DISK_SPACE_METRIC] = guardRailDiskSpace
 		metric_map[service_def.TARGET_UNKNOWN_STATUS_METRIC] = unknownStatusReceived
-
+		metric_map[service_def.SOURCE_SYNC_XATTR_REMOVED_METRIC] = sourceSyncXattrRemoved
+		metric_map[service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC] = targetSyncXattrPreserved
+		metric_map[service_def.IMPORT_MUTATIONS_SKIPPED_METRIC] = importMutationsProcessed
+		metric_map[service_def.IMPORT_MUTATIONS_SENT_METRIX] = importMutationsSent
+		metric_map[service_def.HLV_PRUNED_METRIC] = hlvPruned
+		metric_map[service_def.HLV_UPDATED_METRIC] = hlvUpdated
 		listOfVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), OutNozzleVBMetricKeys)
 		outNozzle_collector.component_map[part.Id()] = metric_map
-
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
 		part.RegisterComponentEventListener(common.StatsUpdate, outNozzle_collector)
 	}
@@ -1551,6 +1579,12 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataThrottledEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentCasChangedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DataSentFailedListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.SrcSyncXattrRemovedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TgtSyncXattrPreservedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.ImportMutationsSentEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.ImportMutationsSkippedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvUpdatedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvPrunedEventListener, outNozzle_collector)
 
 	return nil
 }
@@ -1708,6 +1742,18 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			metricMap[service_def.TARGET_EACCESS_METRIC].(metrics.Counter).Inc(1)
 		}
 
+	case common.SourceSyncXattrRemoved:
+		metricMap[service_def.SOURCE_SYNC_XATTR_REMOVED_METRIC].(metrics.Counter).Inc(1)
+	case common.TargetSyncXattrPreserved:
+		metricMap[service_def.TARGET_SYNC_XATTR_PRESERVED_METRIC].(metrics.Counter).Inc(1)
+	case common.ImportMutationsSkipped:
+		metricMap[service_def.IMPORT_MUTATIONS_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+	case common.ImportMutationsSent:
+		metricMap[service_def.IMPORT_MUTATIONS_SENT_METRIX].(metrics.Counter).Inc(1)
+	case common.HlvPruned:
+		metricMap[service_def.HLV_PRUNED_METRIC].(metrics.Counter).Inc(1)
+	case common.HlvUpdated:
+		metricMap[service_def.HLV_UPDATED_METRIC].(metrics.Counter).Inc(1)
 	case common.DataSentHitGuardrail:
 		responseCode, ok := event.Data.(mc.Status)
 		if !ok {

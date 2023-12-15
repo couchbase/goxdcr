@@ -288,7 +288,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 			Email:     "kingarthur@couchbase.com",
 			Interests: []string{"Holy Grail", "African Swallows"}}, &gocb.UpsertOptions{Expiry: expire})
 	if err != nil {
-		assert.FailNow("Upsert failed with errror %v", err)
+		assert.FailNow(err.Error())
 	}
 	err = waitForReplication(key, upsOut.Cas(), targetBucket)
 	assert.Nil(err)
