@@ -246,95 +246,98 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 
 // This is called after getting the target document based on the lookup spec. We should have both source and target XATTRs
 // If target doesn't exist (target.Status == KEY_ENOENT), return SourceDominate
-func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
+func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, bool, error) {
 	if resp.Status == mc.KEY_ENOENT {
-		return base.SendToTarget, nil
+		// At this point we don't know if it is import. When we send we will figure out.
+		return base.SendToTarget, false, nil
 	}
 	sourceDoc := NewSourceDocument(req, sourceId)
 	sourceMeta, err := sourceDoc.GetMetadata(uncompressFunc)
 	if err != nil {
-		return base.Error, err
+		return base.Error, false, err
 	}
 	targetDoc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
 	if err == base.ErrorDocumentNotFound {
-		return base.SendToTarget, nil
+		return base.SendToTarget, sourceMeta.isImport, nil
 	} else if err != nil {
-		return base.Error, err
+		return base.Error, sourceMeta.isImport, err
 	}
 	targetMeta, err := targetDoc.GetMetadata()
 	if err != nil {
-		return base.Error, err
+		return base.Error, sourceMeta.isImport, err
 	}
 	targetDocMeta := targetMeta.GetDocumentMetadata()
 	if targetDocMeta == nil {
 		// Target document does not exist
-		return base.SendToTarget, nil
+		return base.SendToTarget, sourceMeta.isImport, nil
 	}
 	sourceDocMeta := sourceMeta.GetDocumentMetadata()
 	if sourceDocMeta.Cas < targetDocMeta.Cas {
 		// We can only replicate from larger CAS to smaller
-		return base.Skip, nil
+		return base.Skip, sourceMeta.isImport, nil
 	}
 
 	sourceHLV := sourceMeta.GetHLV()
 	targetHLV := targetMeta.GetHLV()
 	conflictResult, err := sourceHLV.DetectConflict(targetHLV)
 	if err != nil {
-		return base.Error, err
+		return base.Error, sourceMeta.isImport, err
 	}
 
 	logger.Debugf("DetectConflictWithHLV key=%q, result=%s, sourceHLV=%s, targetHL=%s", sourceMeta.docMeta.Key, conflictResult, sourceHLV, targetHLV)
 	switch conflictResult {
 	case hlv.Win:
-		return base.SendToTarget, nil
+		return base.SendToTarget, sourceMeta.isImport, nil
 	case hlv.Lose:
 		if sourceDocMeta.Cas > targetDocMeta.Cas {
-			return base.SetBackToSource, nil
+			return base.SetBackToSource, sourceMeta.isImport, nil
 		} else {
-			return base.Skip, nil
+			return base.Skip, sourceMeta.isImport, nil
 		}
 	case hlv.Conflict:
-		return base.Merge, nil
+		return base.Merge, sourceMeta.isImport, nil
 	case hlv.Equal:
 		if sourceDocMeta.Cas > targetDocMeta.Cas {
 			// When HLV says equal because they contain each other, if source Cas is larger, we want to send so the CAS will converge
-			return base.SendToTarget, nil
+			return base.SendToTarget, sourceMeta.isImport, nil
 		} else {
-			return base.Skip, nil
+			return base.Skip, sourceMeta.isImport, nil
 		}
 	}
-	return base.Error, fmt.Errorf("Bad result from ccrMeta.DetectConlict: %v, source meta: %s, %s, target meta: %s, %s",
+	return base.Error, sourceMeta.isImport, fmt.Errorf("Bad result from ccrMeta.DetectConlict: %v, source meta: %s, %s, target meta: %s, %s",
 		conflictResult, sourceDocMeta, sourceHLV, targetDocMeta, targetHLV)
 }
 
-func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
+func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, bool, error) {
 	if resp.Status == mc.KEY_ENOENT {
-		return base.SendToTarget, nil
+		return base.SendToTarget, false, nil
 	}
+	var isImport bool
 	var doc_meta_source, doc_meta_target base.DocumentMetadata
 	var err error
 	if resp.Opcode == base.GET_WITH_META {
 		doc_meta_source = base.DecodeSetMetaReq(req.Req)
 		doc_meta_target, err = base.DecodeGetMetaResp(req.Req.Key, resp, xattrEnabled)
 		if err != nil {
-			return base.Error, err
+			return base.Error, isImport, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
 		source_doc := NewSourceDocument(req, sourceId)
 		source_meta, err := source_doc.GetMetadata(uncompressFunc)
 		if err != nil {
-			return base.Error, err
+			return base.Error, isImport, err
 		}
+		isImport = source_meta.isImport
 		doc_meta_source = *source_meta.docMeta
 		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
 		if err == base.ErrorDocumentNotFound {
-			return base.SendToTarget, nil
+			return base.SendToTarget, isImport, nil
 		} else if err != nil {
-			return base.Error, err
+			return base.Error, source_meta.isImport, err
 		}
 		target_meta, err := target_doc.GetMetadata()
 		if err != nil {
-			return base.Error, err
+			return base.Error, isImport, err
 		}
 		doc_meta_target = *target_meta.docMeta
 	}
@@ -360,15 +363,15 @@ func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 		}
 	}
 	if sourceWin {
-		return base.SendToTarget, nil
+		return base.SendToTarget, isImport, nil
 	} else {
-		return base.Skip, nil
+		return base.Skip, isImport, nil
 	}
 }
 
-func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
+func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, bool, error) {
 	if resp.Status == mc.KEY_ENOENT {
-		return base.SendToTarget, nil
+		return base.SendToTarget, false, nil
 	}
 	doc_meta_source := base.DecodeSetMetaReq(req.Req)
 	var doc_meta_target base.DocumentMetadata
@@ -376,18 +379,18 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 	if resp.Opcode == base.GET_WITH_META {
 		doc_meta_target, err = base.DecodeGetMetaResp(req.Req.Key, resp, xattrEnabled)
 		if err != nil {
-			return base.Error, err
+			return base.Error, false, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
 		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
 		if err == base.ErrorDocumentNotFound {
-			return base.SendToTarget, nil
+			return base.SendToTarget, false, nil
 		} else if err != nil {
-			return base.Error, err
+			return base.Error, false, err
 		}
 		target_meta, err := target_doc.GetMetadata()
 		if err != nil {
-			return base.Error, err
+			return base.Error, false, err
 		}
 		doc_meta_target = *target_meta.docMeta
 	}
@@ -412,9 +415,9 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 		}
 	}
 	if sourceWin {
-		return base.SendToTarget, nil
+		return base.SendToTarget, false, nil
 	} else {
-		return base.Skip, nil
+		return base.Skip, false, nil
 	}
 }
 
@@ -454,23 +457,23 @@ func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Durat
 
 // This routine construct XATTR _vv:{...} based on meta. The constructed XATTRs includes updates for
 // new change (meta.cas > meta.ver) and pruning in PV
-func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Duration, xattrComposer *base.XattrComposer) (int, error) {
+func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Duration, xattrComposer *base.XattrComposer) (int, bool, error) {
 	if meta == nil {
-		return 0, fmt.Errorf("Metadata cannot be nil")
+		return 0, false, fmt.Errorf("Metadata cannot be nil")
 	}
 	err := xattrComposer.StartRawMode()
 	if err != nil {
-		return -1, err
+		return -1, false, err
 	}
 
 	err = xattrComposer.RawWriteKey([]byte(base.XATTR_HLV))
 	if err != nil {
-		return -1, err
+		return -1, false, err
 	}
 
 	body, pos, err := xattrComposer.RawHijackValue()
 	if err != nil {
-		return -1, err
+		return -1, false, err
 	}
 
 	pruneFunc := base.GetHLVPruneFunction(meta.GetDocumentMetadata().Cas, pruningWindow)
@@ -480,15 +483,16 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 	if len(mv) > 0 {
 		// This is not the first since we have cv before this
 		body, *pos = base.WriteJsonRawMsg(body, []byte(HLV_MV_FIELD), *pos, base.WriteJsonKey, len([]byte(HLV_MV_FIELD)), false)
-		*pos = VersionMapToBytes(mv, body, *pos, nil)
+		*pos, _ = VersionMapToBytes(mv, body, *pos, nil)
 	}
 	// Format PV
 	pv := meta.GetHLV().GetPV()
+	var pruned bool
 	if len(pv) > 0 {
 		startPos := *pos
 		body, *pos = base.WriteJsonRawMsg(body, []byte(HLV_PV_FIELD), *pos, base.WriteJsonKey, len([]byte(HLV_PV_FIELD)), false)
 		afterKeyPos := *pos
-		*pos = VersionMapToBytes(pv, body, *pos, &pruneFunc)
+		*pos, pruned = VersionMapToBytes(pv, body, *pos, &pruneFunc)
 		if *pos == afterKeyPos {
 			// Did not add PV, need to back of and remove the PV key
 			*pos = startPos
@@ -497,7 +501,8 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 	body[*pos] = '}'
 	*pos++
 
-	return xattrComposer.CommitRawKVPair()
+	*pos, err = xattrComposer.CommitRawKVPair()
+	return *pos, pruned, err
 }
 
 type ConflictParams struct {
@@ -523,9 +528,10 @@ type MergeResultNotifier interface {
 	NotifyMergeResult(input *ConflictParams, mergeResult interface{}, mergeError error)
 }
 
-func VersionMapToBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) int {
+func VersionMapToBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) (int, bool) {
 	startPos := pos
 	first := true
+	pruned := false
 	for key, cas := range vMap {
 		if (pruneFunction == nil) || ((*pruneFunction)(cas) == false) {
 			// Not pruned.
@@ -533,15 +539,17 @@ func VersionMapToBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction
 			body, pos = base.WriteJsonRawMsg(body, []byte(key), pos, base.WriteJsonKey, len(key), first /*firstKey*/)
 			body, pos = base.WriteJsonRawMsg(body, value, pos, base.WriteJsonValue, len(value), false /*firstKey*/)
 			first = false
+		} else {
+			pruned = true
 		}
 	}
 	if first {
 		// We haven't added anything
-		return startPos
+		return startPos, pruned
 	}
 	body[pos] = '}'
 	pos++
-	return pos
+	return pos, pruned
 }
 
 // {"cvCas":...,"src":...,"ver":...

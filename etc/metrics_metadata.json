@@ -628,6 +628,66 @@
         "notes": "When target bucket has guardrail enabled and a threshold set, it will return this error indicating that the bucket is currently below the resident ratio. Data writes can only continue once the target bucket's resident ratio rises above the threshold",
         "stability": "committed"
     },
+    "xdcr_hlv_pruned_at_merge_total": {
+        "type": "counter",
+        "help": "Number of mutations with HLV pruned when it is merged with target document",
+        "added": "7.6.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_hlv_pruned_total": {
+        "type": "counter",
+        "help": "Number of mutations with HLV pruned",
+        "added": "7.6.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_hlv_updated_total": {
+        "type": "counter",
+        "help": "Number of mutations with HLV updated",
+        "added": "7.6.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_import_mutations_sent_total": {
+        "type": "counter",
+        "help": "Number of import mutations replicated",
+        "added": "7.6.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_import_mutations_skipped_total": {
+        "type": "counter",
+        "help": "Number of mobile import mutations skipped. This is only counted in LWW buckets when enableCrossClusterVersioning is true",
+        "added": "7.6.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_mobile_docs_filtered_total": {
         "type": "counter",
         "help": "Total number of documents filtered and not replicated because the documents were mobile records",
@@ -803,6 +863,18 @@
         "notes": "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.  If too much memory is being used, consider decreasing the number of nozzles or tune such that less data will be buffered",
         "stability": "committed"
     },
+    "xdcr_source_sync_xattr_removed_total": {
+        "type": "counter",
+        "help": "Number of mutations with source mobile XATTR removed",
+        "added": "7.6.1",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_target_docs_skipped_total": {
         "type": "counter",
         "help": "Number of Document Mutations that were not replicated to the Target because they originated from the Target",
@@ -819,6 +891,18 @@
         "type": "counter",
         "help": "The total number of EACCESS errors returned from the target node.",
         "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_target_sync_xattr_preserved_total": {
+        "type": "counter",
+        "help": "Number of mutations with target mobile XATTR preserved",
+        "added": "7.6.1",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",

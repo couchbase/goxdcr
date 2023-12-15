@@ -551,6 +551,16 @@ const (
 	CollectionRoutingEventListener       = "CollectionRoutingEventListener"
 	DataClonedEventListener              = "DataClonedEventListener"
 	DataSentFailedListener               = "DataSentFailedListener"
+	DataMergedEventListener              = "DataMergedEventListener"
+	MergeCasChangedEventListener         = "MergeCasChangedEventListener"
+	MergeFailedEventListener             = "MergeFailedEventListener"
+	SrcSyncXattrRemovedEventListener     = "SourceSyncXattrRemovedEventListener"
+	TgtSyncXattrPreservedEventListener   = "TargetSyncXattrPreservedEventListenr"
+	ImportMutationsSkippedEventListener  = "ImportMutationsSkippedEventListener"
+	ImportMutationsSentEventListener     = "ImportMutationsSentEventListener"
+	HlvUpdatedEventListener              = "HlvUpdatedEventListener"
+	HlvPrunedEventListener               = "HlvPrunedEventListener"
+	HlvPrunedAtMergeEventListener        = "HlvPrunedAtMergeEventListener"
 )
 
 const (
@@ -705,6 +715,7 @@ var Version7_2_1 = ServerVersion{7, 2, 1}
 var VersionForConnectionPreCheckSupport = ServerVersion{7, 6, 0}
 var VersionForSupportability = ServerVersion{7, 6, 0}
 var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
+var VersionForMobileSupport = ServerVersion{7, 6, 1}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
