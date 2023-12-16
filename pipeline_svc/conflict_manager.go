@@ -246,7 +246,7 @@ func (c *ConflictManager) UpdateSettings(settings metadata.ReplicationSettingsMa
 	}
 	return nil
 }
-func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, recycler func(*base.WrappedMCRequest)) error {
+func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	if !pipeline_utils.IsPipelineRunning(c.pipeline.State()) {
 		return parts.PartStoppedError
 	}
@@ -258,6 +258,7 @@ func (c *ConflictManager) ResolveConflict(source *base.WrappedMCRequest, target 
 		c,
 		atomic.LoadUint32(&c.functionTimeoutMs),
 		recycler,
+		uncompressFunc,
 	}
 	// Send to the larger conflict channel instead of ResolverSvc input channel so XMEM will not block
 	start := time.Now()
@@ -276,6 +277,8 @@ func (c *ConflictManager) sendToResolverSvc() {
 		select {
 		case aConflict := <-c.conflict_ch:
 			start := time.Now()
+			// We need to uncompress before sending to resolver
+			aConflict.UncompressFunc(aConflict.Source)
 			c.resolverSvc.ResolveAsync(aConflict, c.finish_ch)
 			atomic.AddUint64(&c.counter_resolver_waittime, uint64(time.Since(start).Nanoseconds()/1000))
 			atomic.AddUint64(&c.counter_resolver_sent, 1)
@@ -371,7 +374,7 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) (*mc.MCR
 		panic("setback unexpected values")
 	}
 	sourceDoc := crMeta.NewSourceDocument(input.Source, input.SourceId)
-	sourceMeta, err := sourceDoc.GetMetadata()
+	sourceMeta, err := sourceDoc.GetMetadata(input.UncompressFunc)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +449,7 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) (*mc.MCR
 
 func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDoc []byte) (*mc.MCRequest, error) {
 	sourceDoc := crMeta.NewSourceDocument(input.Source, input.SourceId)
-	sourceMeta, err := sourceDoc.GetMetadata()
+	sourceMeta, err := sourceDoc.GetMetadata(input.UncompressFunc)
 	if err != nil {
 		return nil, err
 	}
@@ -877,7 +880,7 @@ func (c *ConflictManager) NotifyMergeResult(input *crMeta.ConflictParams, merged
 	}
 }
 
-func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, recycler func(*base.WrappedMCRequest)) error {
+func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	if !pipeline_utils.IsPipelineRunning(c.pipeline.State()) {
 		return parts.PartStoppedError
 	}
@@ -888,6 +891,7 @@ func (c *ConflictManager) SetBackToSource(source *base.WrappedMCRequest, target 
 		SourceId:       sourceId,
 		TargetId:       targetId,
 		ObjectRecycler: recycler,
+		UncompressFunc: uncompressFunc,
 	}
 	select {
 	case c.result_ch <- &crMeta.MergeInputAndResult{base.SetTargetToSource, &input, nil, nil}:

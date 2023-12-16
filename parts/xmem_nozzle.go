@@ -84,7 +84,7 @@ var ErrorXmemIsStuck = errors.New("Xmem is stuck")
 
 var ErrorBufferInvalidState = errors.New("xmem buffer is in invalid state")
 
-type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, logger *log.CommonLogger) (base.ConflictResult, error)
+type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error)
 
 var GetMetaClientName = "client_getMeta"
 var SetMetaClientName = "client_setMeta"
@@ -1314,7 +1314,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						batch.mergeLookupMap[item.UniqueKey])
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
-				err = xmem.conflictMgr.ResolveConflict(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.recycleDataObj)
+				err = xmem.conflictMgr.ResolveConflict(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.uncompressBody, xmem.recycleDataObj)
 				if err != nil {
 					return err
 				}
@@ -1325,7 +1325,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
 				// This is the case where target has smaller CAS but it dominates source MV.
-				err = xmem.conflictMgr.SetBackToSource(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.recycleDataObj)
+				err = xmem.conflictMgr.SetBackToSource(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.uncompressBody, xmem.recycleDataObj)
 				if err != nil {
 					return err
 				}
@@ -1784,12 +1784,8 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getS
 				noRep_map[uniqueKey] = RetryTargetLocked
 				delete(get_map, uniqueKey)
 			} else if ok && base.IsSuccessGetResponse(resp.Resp) {
-				if err = xmem.uncompressBody(wrappedReq); err != nil {
-					xmem.Logger().Errorf("%v failed to uncompress %v%q%v: '%v'", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, err)
-					return nil, nil, nil, nil, err
-				}
 				var res base.ConflictResult
-				res, err = xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.Logger())
+				res, err = xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
 					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
@@ -1989,7 +1985,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	var meta *crMeta.CRMetadata
 	if setOpt.sendHlv {
 		doc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
-		meta, err = doc.GetMetadata()
+		meta, err = doc.GetMetadata(xmem.uncompressBody)
 		if err != nil {
 			return err
 		}
@@ -2059,12 +2055,10 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 	if xmem.source_cr_mode != base.CRMode_Custom {
 		return false, nil
 	}
-	if err := xmem.uncompressBody(req); err != nil {
-		return false, err
-	}
+
 	if req.RetryCRCount == 0 {
 		doc := crMeta.NewSourceDocument(req, xmem.sourceBucketId)
-		meta, err := doc.GetMetadata()
+		meta, err := doc.GetMetadata(xmem.uncompressBody)
 		if err != nil {
 			return false, err
 		}
