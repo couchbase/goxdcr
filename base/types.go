@@ -902,6 +902,8 @@ type VBErrorEventAdditional struct {
 	ErrorType VBErrorType
 }
 
+type UncompressFunc func(req *WrappedMCRequest) error
+
 type ConflictResolutionMode int
 
 const (

@@ -16,6 +16,6 @@ import (
 )
 
 type ConflictManagerIface interface {
-	ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, recycler func(*base.WrappedMCRequest)) error
-	SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, recycler func(*base.WrappedMCRequest)) error
+	ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error
+	SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error
 }

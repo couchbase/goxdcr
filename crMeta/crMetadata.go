@@ -117,10 +117,6 @@ func (m *CRMetadata) IsImportMutation() bool {
 	return m.isImport
 }
 
-type Document interface {
-	GetMetadata() (*CRMetadata, error)
-}
-
 type SourceDocument struct {
 	source hlv.DocumentSourceId // This would be the source bucket UUID converted to the DocumentSourceId format
 	req    *base.WrappedMCRequest
@@ -133,9 +129,9 @@ func NewSourceDocument(req *base.WrappedMCRequest, source hlv.DocumentSourceId) 
 	}
 }
 
-func (doc *SourceDocument) GetMetadata() (*CRMetadata, error) {
+func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRMetadata, error) {
 	docMeta := base.DecodeSetMetaReq(doc.req.Req)
-	cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, err := getHlvFromMCRequest(doc.req.Req)
+	cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, err := getHlvFromMCRequest(doc.req, uncompressFunc)
 	if err != nil {
 		return nil, err
 	}
@@ -250,12 +246,12 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 
 // This is called after getting the target document based on the lookup spec. We should have both source and target XATTRs
 // If target doesn't exist (target.Status == KEY_ENOENT), return SourceDominate
-func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, logger *log.CommonLogger) (base.ConflictResult, error) {
+func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
 	if resp.Status == mc.KEY_ENOENT {
 		return base.SendToTarget, nil
 	}
 	sourceDoc := NewSourceDocument(req, sourceId)
-	sourceMeta, err := sourceDoc.GetMetadata()
+	sourceMeta, err := sourceDoc.GetMetadata(uncompressFunc)
 	if err != nil {
 		return base.Error, err
 	}
@@ -311,7 +307,7 @@ func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, spec
 		conflictResult, sourceDocMeta, sourceHLV, targetDocMeta, targetHLV)
 }
 
-func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, logger *log.CommonLogger) (base.ConflictResult, error) {
+func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
 	if resp.Status == mc.KEY_ENOENT {
 		return base.SendToTarget, nil
 	}
@@ -325,7 +321,7 @@ func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
 		source_doc := NewSourceDocument(req, sourceId)
-		source_meta, err := source_doc.GetMetadata()
+		source_meta, err := source_doc.GetMetadata(uncompressFunc)
 		if err != nil {
 			return base.Error, err
 		}
@@ -370,7 +366,7 @@ func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 	}
 }
 
-func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, logger *log.CommonLogger) (base.ConflictResult, error) {
+func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
 	if resp.Status == mc.KEY_ENOENT {
 		return base.SendToTarget, nil
 	}
@@ -513,6 +509,7 @@ type ConflictParams struct {
 	ResultNotifier MergeResultNotifier
 	TimeoutMs      uint32
 	ObjectRecycler func(request *base.WrappedMCRequest) // for source WrappedMCRequest cleanup
+	UncompressFunc base.UncompressFunc
 }
 
 type MergeInputAndResult struct {
@@ -745,9 +742,13 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 }
 
 // This will find the custom CR XATTR from the req body, including HLV and _importCas
-func getHlvFromMCRequest(req *mc.MCRequest) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, importCas uint64, err error) {
+func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.UncompressFunc) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, importCas uint64, err error) {
+	req := wrappedReq.Req
 	cas = binary.BigEndian.Uint64(req.Extras[16:24])
 	if req.DataType&mcc.XattrDataType == 0 {
+		return
+	}
+	if err = uncompressFunc(wrappedReq); err != nil {
 		return
 	}
 	body := req.Body
