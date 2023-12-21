@@ -84,7 +84,7 @@ var ErrorXmemIsStuck = errors.New("Xmem is stuck")
 
 var ErrorBufferInvalidState = errors.New("xmem buffer is in invalid state")
 
-type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, bool, error)
+type ConflictResolver func(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error)
 
 var GetMetaClientName = "client_getMeta"
 var SetMetaClientName = "client_setMeta"
@@ -1336,12 +1336,13 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				//lost on conflict resolution on source side
 				// this still counts as data sent
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-					Opcode:      encodeOpCode(item.Req, xmem.batch.setMetaXattrOptions),
-					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
-					VBucket:     item.Req.VBucket,
-					ManifestId:  item.GetManifestId(),
-					Cloned:      item.Cloned,
-					CloneSyncCh: item.ClonedSyncCh,
+					Opcode:         encodeOpCode(item.Req, xmem.batch.setMetaXattrOptions),
+					IsExpirySet:    (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+					VBucket:        item.Req.VBucket,
+					ManifestId:     item.GetManifestId(),
+					Cloned:         item.Cloned,
+					CloneSyncCh:    item.ClonedSyncCh,
+					ImportMutation: item.ImportMutation,
 				}
 				xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				xmem.recycleDataObj(item)
@@ -1784,7 +1785,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getS
 				noRep_map[uniqueKey] = RetryTargetLocked
 				delete(get_map, uniqueKey)
 			} else if ok && base.IsSuccessGetResponse(resp.Resp) {
-				res, isImport, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
+				res, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
 					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
@@ -1797,9 +1798,6 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap, getSpecWithHlv, getS
 					sendLookupMap[uniqueKey] = resp
 				case base.Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
-					if isImport {
-						xmem.RaiseEvent(common.NewEvent(common.ImportMutationsSkipped, nil, xmem, nil, nil))
-					}
 				case base.Merge:
 					noRep_map[uniqueKey] = NotSendMerge
 					conflictMap[uniqueKey] = wrappedReq
@@ -2041,7 +2039,6 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 					// Skip it if it is no longer an import mutation. This happens when import mutation is mutated again.
 					continue
 				}
-				xmem.RaiseEvent(common.NewEvent(common.ImportMutationsSent, nil, xmem, nil, nil))
 			}
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {
@@ -2657,6 +2654,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						ManifestId:          manifestId,
 						FailedTargetCR:      base.IsEExistsError(response.Status),
 						UncompressedReqSize: req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
+						ImportMutation:      wrappedReq.ImportMutation,
 						Cloned:              wrappedReq.Cloned,
 						CloneSyncCh:         wrappedReq.ClonedSyncCh,
 					}

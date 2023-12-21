@@ -125,13 +125,14 @@ type GetReceivedEventAdditional struct {
 }
 
 type DataFailedCRSourceEventAdditional struct {
-	Seqno       uint64
-	Opcode      mc.CommandCode
-	IsExpirySet bool
-	VBucket     uint16
-	ManifestId  uint64
-	Cloned      bool
-	CloneSyncCh chan bool
+	Seqno          uint64
+	Opcode         mc.CommandCode
+	IsExpirySet    bool
+	VBucket        uint16
+	ManifestId     uint64
+	Cloned         bool
+	CloneSyncCh    chan bool
+	ImportMutation bool
 }
 
 type TargetDataSkippedEventAdditional DataFailedCRSourceEventAdditional
@@ -148,6 +149,7 @@ type DataSentEventAdditional struct {
 	ManifestId          uint64
 	FailedTargetCR      bool
 	UncompressedReqSize int
+	ImportMutation      bool
 	Cloned              bool
 	CloneSyncCh         chan bool
 }
