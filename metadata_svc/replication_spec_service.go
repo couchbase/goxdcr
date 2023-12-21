@@ -685,6 +685,32 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 		}
 	}
 
+	if mobile, ok := settings[metadata.MobileCompatibleKey].(int); ok {
+		if mobile != base.MobileCompatibilityOff {
+			// Mobile is on. Make sure source bucket enableCrossClusterVersioning is true.
+			connstr, err := service.xdcr_comp_topology_svc.MyConnectionStr()
+			if err != nil {
+				return err, nil
+			}
+			username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, err := service.xdcr_comp_topology_svc.MyCredentials()
+			if err != nil {
+				service.logger.Warnf("Unable to retrieve credentials due to %v", err.Error())
+				return err, nil
+			}
+			bucketInfo, err := service.utils.GetBucketInfo(connstr, sourceBucket, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger)
+			if err != nil {
+				return err, nil
+			}
+			crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(bucketInfo)
+			if err != nil {
+				return err, nil
+			}
+			if !crossClusterVer {
+				return fmt.Errorf("mobile must be off when %v is false for the source bucket", base.EnableCrossClusterVersioningKey), nil
+			}
+		}
+	}
+
 	warnings := base.NewUIWarning()
 	if performTargetValidation {
 		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo, allKvConnStrs[0], username, password)
@@ -708,6 +734,18 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 					err = nil
 				} else {
 					return err, warnings
+				}
+			}
+		}
+		if mobile, ok := settings[metadata.MobileCompatibleKey].(int); ok {
+			if mobile != base.MobileCompatibilityOff {
+				// Mobile is on. Make sure target bucket enableCrossClusterVersioning is true.
+				crossClusterVer, err := service.utils.GetCrossClusterVersioningFromBucketInfo(targetBucketInfo)
+				if err != nil {
+					return err, nil
+				}
+				if !crossClusterVer {
+					return fmt.Errorf("mobile must be off when %v is false for the target bucket", base.EnableCrossClusterVersioningKey), nil
 				}
 			}
 		}

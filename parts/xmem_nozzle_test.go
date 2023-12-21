@@ -990,6 +990,47 @@ func mobileMixedModeTest(xmem *XmemNozzle, router *Router, settings map[string]i
 	assert.True(value.Exists(0))
 }
 
+// This test can be enabled to generate some simulated import documents.
+func Disable_TestLiveImportDoc(t *testing.T) {
+	assert := assert.New(t)
+	bucketName := "B1"
+	cluster, err := gocb.Connect(sourceConnStr, gocb.ClusterOptions{Authenticator: gocb.PasswordAuthenticator{
+		Username: username,
+		Password: password,
+	}})
+	if err != nil {
+		return
+	}
+	err = cluster.WaitUntilReady(15*time.Second, nil)
+	if err != nil {
+		return
+	}
+	bucket := cluster.Bucket(bucketName)
+	err = bucket.WaitUntilReady(20*time.Second, &gocb.WaitUntilReadyOptions{DesiredState: gocb.ClusterStateOnline})
+	if err != nil {
+		fmt.Printf("TestMobileImportCasLWW skipped because bucket is cannot be created. Error: %v\n", err)
+		return
+	}
+	defer cluster.Close(nil)
+
+	key := "importDoc"
+	upsOut, err := bucket.DefaultCollection().Upsert(key,
+		User{Id: "kingarthur",
+			Email:     "kingarthur@couchbase.com",
+			Interests: []string{"Holy Grail", "African Swallows"}}, nil)
+	if err != nil {
+		assert.FailNow("Upsert failed with errror %v", err)
+	}
+	fmt.Printf("Upsert CAS: %v, result %v\n", upsOut.Cas(), upsOut.Result)
+
+	// After enabling enableCrossClusterVersioning
+	// curl -X POST -u Administrator:wewewe http://127.0.0.1:9000/pools/default/buckets/B1 -d enableCrossClusterVersioning=true
+	// In goxdcr.log, we have:
+	// 2024-01-03T09:55:01.810-08:00 INFO GOXDCR.XmemNozzle: pipelineFullTopic=44d5d82a3909c505c52133a353d98254/B1/B2, xmem_44d5d82a3909c505c52133a353d98254/B1/B2_127.0.0.1:12002_0: Using adX1DsoRpCb6kQWoZYq5ew(UUID 69d5f50eca11a426fa9105a8658ab97b) and QIpU9Op/zY2WDmGxkjwvPQ(UUID 408a54f4ea7fcd8d960e61b1923c2f3d) as source and target bucket IDs for HLV.
+	// Use the source bucket Id.
+	simulateImportOperation(assert, bucket, key, "adX1DsoRpCb6kQWoZYq5ew")
+}
+
 // This routine was used to generate import mutations used in TestMobileImportCasLWW.
 // When mobile imports a document, it will:
 //  1. Update its HLV, with cvCAS set to the document CAS.
@@ -1005,7 +1046,7 @@ func mobileMixedModeTest(xmem *XmemNozzle, router *Router, settings map[string]i
 // document.CAS > importCAS
 // This new mutation is no longer considered import mutation. It is a local mutation. When it is replicated to a target,
 // the importCAS XATTR will be removed.
-func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key string, bucketUuid hlv.DocumentSourceId) gocb.Cas {
+func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key string, bucketId hlv.DocumentSourceId) gocb.Cas {
 	// Lookup
 	values, err := getPathValue(key, []string{crMeta.XATTR_CVCAS_PATH, crMeta.XATTR_SRC_PATH, crMeta.XATTR_VER_PATH, crMeta.XATTR_MV_PATH, crMeta.XATTR_PV_PATH, crMeta.XATTR_IMPORTCAS, base.XATTR_MOBILE}, bucket)
 	a.Nil(err)
@@ -1041,7 +1082,7 @@ func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key stri
 		err = values.ContentAt(5, &importCas)
 		a.Nil(err)
 	}
-	meta, err := crMeta.NewMetadataForTest([]byte(key), []byte(bucketUuid), uint64(values.Cas()), 1, cvCas, src, ver, pv, mv)
+	meta, err := crMeta.NewMetadataForTest([]byte(key), []byte(bucketId), uint64(values.Cas()), 1, cvCas, src, ver, pv, mv)
 	a.Nil(err)
 	hlv := meta.GetHLV()
 
