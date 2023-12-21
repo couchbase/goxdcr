@@ -91,13 +91,13 @@ const (
 	SET_TARGET_DOCS_SKIPPED_METRIC      = "set_target_docs_skipped"
 
 	// For mobile
-	SOURCE_SYNC_XATTR_REMOVED_METRIC   = "source_sync_xattr_removed"
-	TARGET_SYNC_XATTR_PRESERVED_METRIC = "target_sync_xattr_preserved"
-	IMPORT_MUTATIONS_SKIPPED_METRIC    = "import_mutations_skipped"
-	IMPORT_MUTATIONS_SENT_METRIX       = "import_mutations_sent"
-	HLV_UPDATED_METRIC                 = "hlv_updated"
-	HLV_PRUNED_METRIC                  = "hlv_pruned"
-	HLV_PRUNED_AT_MERGE_METRIC         = "hlv_pruned_at_merge"
+	SOURCE_SYNC_XATTR_REMOVED_METRIC    = "source_sync_xattr_removed"
+	TARGET_SYNC_XATTR_PRESERVED_METRIC  = "target_sync_xattr_preserved"
+	IMPORT_DOCS_FAILED_CR_SOURCE_METRIC = "import_docs_failed_cr_source"
+	IMPORT_DOCS_WRITTEN_METRIX          = "import_docs_written"
+	HLV_UPDATED_METRIC                  = "hlv_updated"
+	HLV_PRUNED_METRIC                   = "hlv_pruned"
+	HLV_PRUNED_AT_MERGE_METRIC          = "hlv_pruned_at_merge"
 
 	CHANGES_LEFT_METRIC    = base.ChangesLeftStats
 	DOCS_LATENCY_METRIC    = "wtavg_docs_latency"
@@ -956,7 +956,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
-		Description:  "Number of mutations with source mobile XATTR removed",
+		Description:  "Number of mutations with source mobile extended attributes removed",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
@@ -964,23 +964,23 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
-		Description:  "Number of mutations with target mobile XATTR preserved",
+		Description:  "Number of mutations with target mobile extended attributes preserved",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
-	IMPORT_MUTATIONS_SKIPPED_METRIC: StatsProperty{
+	IMPORT_DOCS_FAILED_CR_SOURCE_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
-		Description:  "Number of mobile import mutations skipped. This is only counted in LWW buckets when enableCrossClusterVersioning is true",
+		Description:  "Number of mobile import mutations failed Source side Conflict Resolution. This is only counted in LWW buckets when enableCrossClusterVersioning is true",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
-	IMPORT_MUTATIONS_SENT_METRIX: StatsProperty{
+	IMPORT_DOCS_WRITTEN_METRIX: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
-		Description:  "Number of import mutations replicated",
+		Description:  "Number of import mutations sent",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
@@ -1037,11 +1037,11 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Notes: "This metric indicates the lag time of both the network as well as the target Key-Value set latency. The " +
 			"latency tracks the followings: " +
 			"1. The time it takes to issue a SET_WITH_META from the source to the target. " +
-			"2. The time it takes for KV to handle the SET_WITH_META request. " +
-			"3. The time it takes for KV to send a response back to XDCR indicating that a SET_WITH_META has been " +
+			"2. The time it takes for data service to handle the SET_WITH_META request. " +
+			"3. The time it takes for data service to send a response back to XDCR indicating that a SET_WITH_META has been " +
 			"handled. " +
 			"When combined with traditional network diagnostic tools, one can use this number to differentiate " +
-			"between the network latency as well as target KV latency.",
+			"between the network latency as well as target data service latency.",
 	},
 	META_LATENCY_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrMilliSecond},
@@ -1069,7 +1069,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The rolling average amount of time it takes from when a MemcachedRequest is created to be ready to route to an outnozzle to the time that the response has been heard back from the target node after a successful write",
 		Stability:    Committed,
 		Labels:       StandardLabels,
-		Notes: "This metric indicates just the amount of wait time it takes for KV to send a respond back to XDCR as " +
+		Notes: "This metric indicates just the amount of wait time it takes for data service to send a respond back to XDCR as " +
 			"part of the complete docs_latency metrics. This can be used to give more granularity into how " +
 			"the overall latency situation looks like.",
 	},
@@ -1236,7 +1236,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForSupportability,
-		Description:  "The total number of writes to target KV that returned with a status code that XDCR cannot comprehend",
+		Description:  "The total number of writes to target data service that returned with a status code that XDCR cannot comprehend",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},

@@ -96,12 +96,9 @@ const (
 	SourceSyncXattrRemoved ComponentEventType = iota
 	// When mobile is active, target _sync XATTR is preserved if it exists
 	TargetSyncXattrPreserved ComponentEventType = iota
-	ImportMutationsSkipped   ComponentEventType = iota
-	// Number of import mutation winnng CR
-	ImportMutationsSent ComponentEventType = iota
-	HlvUpdated          ComponentEventType = iota
-	HlvPruned           ComponentEventType = iota
-	HlvPrunedAtMerge    ComponentEventType = iota
+	HlvUpdated               ComponentEventType = iota
+	HlvPruned                ComponentEventType = iota
+	HlvPrunedAtMerge         ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {

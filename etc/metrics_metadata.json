@@ -664,9 +664,9 @@
         ],
         "stability": "committed"
     },
-    "xdcr_import_mutations_sent_total": {
+    "xdcr_import_docs_failed_cr_source_total": {
         "type": "counter",
-        "help": "Number of import mutations replicated",
+        "help": "Number of mobile import mutations failed Source side Conflict Resolution. This is only counted in LWW buckets when enableCrossClusterVersioning is true",
         "added": "7.6.1",
         "labels": [
             "sourceBucketName",
@@ -676,9 +676,9 @@
         ],
         "stability": "committed"
     },
-    "xdcr_import_mutations_skipped_total": {
+    "xdcr_import_docs_written_total": {
         "type": "counter",
-        "help": "Number of mobile import mutations skipped. This is only counted in LWW buckets when enableCrossClusterVersioning is true",
+        "help": "Number of import mutations sent",
         "added": "7.6.1",
         "labels": [
             "sourceBucketName",
@@ -762,7 +762,7 @@
             "targetBucketName",
             "pipelineType"
         ],
-        "notes": "This metric indicates just the amount of wait time it takes for KV to send a respond back to XDCR as part of the complete docs_latency metrics. This can be used to give more granularity into how the overall latency situation looks like.",
+        "notes": "This metric indicates just the amount of wait time it takes for data service to send a respond back to XDCR as part of the complete docs_latency metrics. This can be used to give more granularity into how the overall latency situation looks like.",
         "stability": "committed"
     },
     "xdcr_set_docs_cas_changed_total": {
@@ -865,7 +865,7 @@
     },
     "xdcr_source_sync_xattr_removed_total": {
         "type": "counter",
-        "help": "Number of mutations with source mobile XATTR removed",
+        "help": "Number of mutations with source mobile extended attributes removed",
         "added": "7.6.1",
         "labels": [
             "sourceBucketName",
@@ -901,7 +901,7 @@
     },
     "xdcr_target_sync_xattr_preserved_total": {
         "type": "counter",
-        "help": "Number of mutations with target mobile XATTR preserved",
+        "help": "Number of mutations with target mobile extended attributes preserved",
         "added": "7.6.1",
         "labels": [
             "sourceBucketName",
@@ -925,7 +925,7 @@
     },
     "xdcr_target_unknown_status_total": {
         "type": "counter",
-        "help": "The total number of writes to target KV that returned with a status code that XDCR cannot comprehend",
+        "help": "The total number of writes to target data service that returned with a status code that XDCR cannot comprehend",
         "added": "7.6.0",
         "labels": [
             "sourceBucketName",
@@ -987,7 +987,7 @@
             "targetBucketName",
             "pipelineType"
         ],
-        "notes": "This metric indicates the lag time of both the network as well as the target Key-Value set latency. The latency tracks the followings: 1. The time it takes to issue a SET_WITH_META from the source to the target. 2. The time it takes for KV to handle the SET_WITH_META request. 3. The time it takes for KV to send a response back to XDCR indicating that a SET_WITH_META has been handled. When combined with traditional network diagnostic tools, one can use this number to differentiate between the network latency as well as target KV latency.",
+        "notes": "This metric indicates the lag time of both the network as well as the target Key-Value set latency. The latency tracks the followings: 1. The time it takes to issue a SET_WITH_META from the source to the target. 2. The time it takes for data service to handle the SET_WITH_META request. 3. The time it takes for data service to send a response back to XDCR indicating that a SET_WITH_META has been handled. When combined with traditional network diagnostic tools, one can use this number to differentiate between the network latency as well as target data service latency.",
         "stability": "committed"
     },
     "xdcr_wtavg_get_doc_latency_seconds": {
