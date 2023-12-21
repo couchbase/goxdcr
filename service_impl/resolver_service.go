@@ -6,6 +6,7 @@
 // will be governed by the Apache License, Version 2.0, included in the file
 // licenses/APL2.txt.
 
+//go:build enterprise
 // +build enterprise
 
 package service_impl
@@ -14,12 +15,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	evaluatorApi "github.com/couchbase/eventing-ee/evaluator/api"
-	evaluatorClient "github.com/couchbase/eventing-ee/evaluator/client"
 	"net/http"
 	"time"
 
 	"github.com/couchbase/cbauth"
+	evaluatorApi "github.com/couchbase/eventing-ee/evaluator/api"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/service_def"
@@ -184,11 +184,16 @@ func (rs *ResolverSvc) resolveOne(threadId int) {
 }
 
 func (rs *ResolverSvc) initEvaluator(sourceKVHost string, xdcrRestPort uint16) error {
-	rs.engine = evaluatorClient.Singleton
+	rs.engine = evaluatorApi.Singleton
 
-	config := make(map[evaluatorApi.Config]interface{})
+	globalCfg := evaluatorApi.GlobalConfig{}
+	if fault := evaluatorApi.ConfigureGlobalConfig(globalCfg); fault != nil {
+		return fmt.Errorf("Encountered error while configuring globalCfg. err: %v", fault.Error())
+	}
+	engConfig := evaluatorApi.StaticEngineConfig{}
+	dynamicConfig := evaluatorApi.DynamicEngineConfig{}
 
-	if fault := rs.engine.Initialize(config); fault != nil {
+	if fault := rs.engine.Initialize(engConfig, dynamicConfig); fault != nil {
 		return fmt.Errorf("Unable to configure engine. err: %v", fault.Error())
 	}
 	rs.adminService = rs.engine.AdminService()
@@ -218,25 +223,26 @@ func (rs *ResolverSvc) execute(libraryName string, functionName string, params [
 	if rs.started == false {
 		return nil, fmt.Errorf("ResolverSvc is not started.")
 	}
-	options := map[evaluatorApi.Option]interface{}{evaluatorApi.Timeout: int(timeoutMs)}
+	options := evaluatorApi.Options{Timeout: timeoutMs}
 	worker := <-rs.workerPool
 	defer func() {
 		rs.workerPool <- worker
 	}()
-	if stale := rs.engine.CheckStaleWorker(worker); stale == true {
-		tmpworker, fault := rs.engine.Create(uint64(base.JSWorkerQuota))
-		if fault == nil {
-			go func(oldworker evaluatorApi.Worker) {
-				if disposeFault := rs.engine.Dispose(oldworker); disposeFault != nil {
-					rs.logger.Warnf("Failed to dispose an older workerr. Error: %v", disposeFault.Error())
-				}
-			}(worker)
-			worker = tmpworker
-			tmpworker = nil
-		} else {
-			rs.logger.Warnf("Failed to create a new worker to replace a stale worker. Error: %v", fault.Error())
+	var loctr evaluatorApi.Locator
+	loctr.FromString(libraryName)
+
+	onlyInWorker, onlyInStore, isVersionMismatch := worker.IsStale(loctr)
+	if isVersionMismatch || onlyInWorker {
+		if fault := worker.Unload(loctr); fault != nil {
+			return nil, fault.Error()
 		}
 	}
+	if isVersionMismatch || onlyInStore {
+		if fault := worker.Load(loctr); fault != nil {
+			return nil, fault.Error()
+		}
+	}
+
 	res, fault := worker.Run(nil, libraryName, functionName, options, params...)
 	if fault != nil && fault.Error() != nil {
 		return nil, fmt.Errorf("Javascript Evaluate() returned error: %v", fault.Error())

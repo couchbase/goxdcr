@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/couchbase/eventing-ee/evaluator/api"
-	"github.com/couchbase/eventing-ee/evaluator/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
 )
@@ -44,7 +43,7 @@ var password = "wewewe"
 
 var once sync.Once
 var sleepTime = 30 * time.Second
-var engine = client.Singleton
+var engine = api.Singleton
 var workerpool chan api.Worker
 
 // All function files are under ../tools/testScripts/customConflict/
@@ -238,23 +237,13 @@ func initEvaluator() {
 				evaluatorQuota = quota
 			}
 		}
-		config := make(map[api.Config]interface{})
-		//syslog := "sys.out"
-		//applog := "app.out"
-		//appFD, err := os.OpenFile(applog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 664)
-		//if err != nil {
-		//	fmt.Printf("Could not open applog file, err: %v\n", err)
-		//	os.Exit(1)
-		//}
-		//sysFD, err := os.OpenFile(syslog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 664)
-		//if err != nil {
-		//	fmt.Printf("Could not open syslog file: err: %v\n", err)
-		//	os.Exit(1)
-		//}
-		//config[api.SystemLog] = sysFD
-		//config[api.ApplicationLog] = appFD
-		// One time op. Init V8 and time to configure syslog and application log
-		if fault := engine.Initialize(config); fault != nil {
+		globalCfg := api.GlobalConfig{}
+		api.ConfigureGlobalConfig(globalCfg)
+
+		engConfig := api.StaticEngineConfig{}
+		dynamicConfig := api.DynamicEngineConfig{}
+
+		if fault := engine.Initialize(engConfig, dynamicConfig); fault != nil {
 			fmt.Printf("Unable to configure engine. err: %v\n", fault.Error())
 			os.Exit(1)
 		}
@@ -277,23 +266,26 @@ func initEvaluator() {
 	})
 }
 
-func execute(funcName string, opt map[api.Option]interface{}, params []interface{}) (interface{}, api.Fault) {
+func execute(funcName string, opt api.Options, params []interface{}) (interface{}, api.Fault) {
 	worker := <-workerpool
 	defer func() {
 		workerpool <- worker
 	}()
-	if engine.CheckStaleWorker(worker) == true {
-		tmpworker, fault := engine.Create(uint64(evaluatorQuota))
-		if fault == nil {
-			go func(oldworker api.Worker) {
-				if disposeFault := engine.Dispose(oldworker); disposeFault != nil {
-					fmt.Printf("Error while desposing worker: %v\n", disposeFault)
-				}
-			}(worker)
-			worker = tmpworker
-			tmpworker = nil
+	var loctr api.Locator
+	loctr.FromString(funcName)
+
+	onlyInWorker, onlyInStore, isVersionMismatch := worker.IsStale(loctr)
+	if isVersionMismatch || onlyInWorker {
+		if fault := worker.Unload(loctr); fault != nil {
+			return nil, fault
 		}
 	}
+	if isVersionMismatch || onlyInStore {
+		if fault := worker.Load(loctr); fault != nil {
+			return nil, fault
+		}
+	}
+
 	result, fault := worker.Run(nil, funcName, funcName, opt, params...)
 
 	return result, fault
@@ -411,7 +403,7 @@ func printStats() {
 	}
 }
 
-func doEvaluatorWorkload(t *testing.T, repeat int, funcName string, opt map[api.Option]interface{}, params []interface{}) {
+func doEvaluatorWorkload(t *testing.T, repeat int, funcName string, opt api.Options, params []interface{}) {
 	assert := assert.New(t)
 	waitGrp := sync.WaitGroup{}
 	t1 := time.Now()
@@ -434,7 +426,7 @@ func doEvaluatorWorkload(t *testing.T, repeat int, funcName string, opt map[api.
 	collectStats(fmt.Sprintf("%v %v evals per thread", repeat, funcName), evalTime)
 }
 
-func doEvaluatorMultiFunctionsWorkload(t *testing.T, prefix string, funcCount int, opt map[api.Option]interface{}, params []interface{}) {
+func doEvaluatorMultiFunctionsWorkload(t *testing.T, prefix string, funcCount int, opt api.Options, params []interface{}) {
 	assert := assert.New(t)
 	waitGrp := sync.WaitGroup{}
 	t1 := time.Now()
@@ -464,7 +456,7 @@ func TestEvaluatorError(t *testing.T) {
 	doc2 := generateDoc(2*1024, 50, 3)
 	assert.Equal(2*1024, len(doc1))
 	assert.Equal(2*1024, len(doc2))
-	opt := make(map[api.Option]interface{})
+	opt := api.Options{}
 	var params []interface{}
 	params = append(params, "key")
 	params = append(params, doc1)
@@ -500,7 +492,7 @@ func TestEvaluatorError(t *testing.T) {
 	res, err = checkFunction(funcName)
 	assert.Nil(err)
 	assert.Equal(http.StatusOK, res)
-	opt[api.Timeout] = 3000 // 3s
+	opt := api.Options{}
 	result, fault := execute(funcName, opt, params)
 	fmt.Printf("funcName: %v \nresult: %v\nFault: %v\n", funcName, result, fault.Error())
 	assert.NotNil(fault)
@@ -548,7 +540,7 @@ func TestEvaluatorWorkloadSingleFunctionSmallDocs(t *testing.T) {
 
 func evaluatorWorkloadSingleFunc(doc1, doc2 string, t *testing.T) {
 	assert := assert.New(t)
-	opt := make(map[api.Option]interface{})
+	opt := api.Options{}
 	var params []interface{}
 	params = append(params, "key")
 	params = append(params, doc1)
@@ -602,7 +594,7 @@ func TestEvaluatorWorkloadMultiFunctionsSmallDoc(t *testing.T) {
 	assert.Equal(2*1024, len(doc1))
 	assert.Equal(2*1024, len(doc2))
 
-	opt := make(map[api.Option]interface{})
+	opt := api.Options{}
 	evaluatorWorkloadMultiFuncs(doc1, doc2, opt, t)
 }
 
@@ -616,14 +608,14 @@ func TestEvaluatorWorkloadMultiFunctionsLargeDocs(t *testing.T) {
 	largeDoc2 := generateDoc(1*1024*1024, 10000, 3)
 	assert.Equal(1*1024*1024, len(largeDoc1))
 	assert.Equal(1*1024*1024, len(largeDoc2))
-	opt := make(map[api.Option]interface{})
+	opt := api.Options{}
 	// In a busy system, OS context switch may cause longer execution time.
 	// Timeout > 10s has been observed with 10 workers and 1000 functions
 	opt[api.Timeout] = 60000 // 60s
 	evaluatorWorkloadMultiFuncs(largeDoc1, largeDoc2, opt, t)
 }
 
-func evaluatorWorkloadMultiFuncs(doc1, doc2 string, opt map[api.Option]interface{}, t *testing.T) {
+func evaluatorWorkloadMultiFuncs(doc1, doc2 string, opt api.Options, t *testing.T) {
 	assert := assert.New(t)
 	var params []interface{}
 	params = append(params, "key")
@@ -670,7 +662,7 @@ func TestEvaluatorWorkloadSlowFunction(t *testing.T) {
 	doc2 := generateDoc(2*1024, 50, 3)
 	assert.Equal(2*1024, len(doc1))
 	assert.Equal(2*1024, len(doc2))
-	opt := make(map[api.Option]interface{})
+	opt := api.Options{}
 	var params []interface{}
 	params = append(params, "key")
 	params = append(params, doc1)
