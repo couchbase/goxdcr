@@ -1687,5 +1687,6 @@ function setBucket {
 
 	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
 	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value"
-	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value
+	output=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value)
+	echo $output
 }

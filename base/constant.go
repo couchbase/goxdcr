@@ -363,6 +363,8 @@ func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
 }
 
+const ImportDetectedStr = "Import mutations detected when mobile is Off. This is not supported."
+
 const FinClosureStr = "because of finch closure"
 
 const StringTargetCollectionMappingErr = "Target node unable to find"

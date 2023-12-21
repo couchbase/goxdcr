@@ -25,12 +25,15 @@ declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["ch
 function testReplicationSettings {
 	echo "=========== testReplicationSettings =========="
 	echo "Creating replication with mobile=Active"
+	setBucket "C1" "B1" "enableCrossClusterVersioning" "true"
+	setBucket "C2" "B2" "enableCrossClusterVersioning" "true"
+	sleep 5
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
 
 	echo "Checking replication setting mobileCompatible=Active"
 	mobile=$(getReplicationSettings "C1" "B1" "C2" "B2" | jq .mobile)
 	if [[ "$mobile" != \"Active\" ]]; then
-		echo "mobile should be \"Active\" but got $mobile"
+		echo "mobile should be \"Active\" but got \"$mobile\""
 		exit 1
 	fi
 	local expected=0
@@ -94,17 +97,13 @@ function testReplicationSettings {
 function testMobileHlv {
 	echo "=========== testMobileHlv =========="
 
-	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
-	createBucketReplication "C2" "B2" "C1" "B1" BucketReplPropertiesWithMobile
-
-	echo "Changing replication setting to mobile=Active"
-	setReplicationSettings "C1" "B1" "C2" "B2" "mobile=Active"
-
 	echo "Set enableCrossClusterVersioning to true"
 	setBucket "C1" "B1" "enableCrossClusterVersioning" "true"
 	setBucket "C2" "B2" "enableCrossClusterVersioning" "true"
-	echo "Sleep 15 seconds and replicate"
-	sleep 15
+
+	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
+	createBucketReplication "C2" "B2" "C1" "B1" BucketReplPropertiesWithMobile
+
 	# Insert
 	writeJSONDocument "C1" "B1" "mobile1" '{"foo":"bar"}'
 	writeJSONDocument "C1" "B1" "mobile2" '{"foo":"bar"}'
