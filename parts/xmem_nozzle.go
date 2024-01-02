@@ -29,6 +29,7 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/ccrMetadata"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -58,11 +59,11 @@ const (
 type ConflictResult uint32
 
 const (
-	TargetDominate     ConflictResult = iota // Source CAS is smaller. Skip
-	SourceDominate     ConflictResult = iota // Source CAS is larger and it contains target. Send
-	Conflict           ConflictResult = iota // Source CAS is larger and they don't contain each other. Merge
-	TargetSetBack      ConflictResult = iota // Source CAS is larger but target dominates source MV. Set target back to source
-	SourceEqualsTarget ConflictResult = iota
+	SendToTarget    ConflictResult = iota // Souce wins
+	Skip            ConflictResult = iota // Target wins
+	Merge           ConflictResult = iota // Conflict
+	SetBackToSource ConflictResult = iota // Source has larger CAS but target wins. This can happen when target MV wins
+	ErrorAction     ConflictResult = iota // We have an error detecting conflict. This should not happen.
 )
 
 type RequestToResponse struct {
@@ -1828,7 +1829,7 @@ func (xmem *XmemNozzle) decodeSubDocResp(key []byte, lookupResp *base.SubdocLook
 		xattrlen := int(binary.BigEndian.Uint32(body[pos : pos+4]))
 		if pos+xattrlen > len(body) {
 			// This should never happen
-			xmem.Logger().Errorf("Returned value length %v for subdoc_get path %v exceeds body length", xattrlen, spec.Path)
+			xmem.Logger().Errorf("%v: Returned value length %v for subdoc_get path %v exceeds body length", xmem.Id(), xattrlen, spec.Path)
 			return documentMetadata{}
 		}
 		pos = pos + 4
@@ -1999,23 +2000,23 @@ func (xmem *XmemNozzle) batchGetXattrForCustomCR(getMeta_map base.McRequestMap) 
 					continue
 				}
 				switch res {
-				case SourceDominate:
+				case SendToTarget:
 					// Set the expected CAS value at target
 					if resp.Status == mc.KEY_ENOENT {
 						wrappedReq.Req.Cas = 0
 					} else {
 						wrappedReq.Req.Cas = resp.Cas
 					}
-				case SourceEqualsTarget:
+				case Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
-				case TargetDominate:
-					noRep_map[uniqueKey] = NotSendFailedCR
-				case Conflict:
+				case Merge:
 					noRep_map[uniqueKey] = NotSendDetecting
 					getDoc_map[uniqueKey] = wrappedReq
-				case TargetSetBack:
+				case SetBackToSource:
 					noRep_map[uniqueKey] = NotSendDetecting
 					getDoc_map[uniqueKey] = wrappedReq
+				default:
+					xmem.handleGeneralError(fmt.Errorf("Bad result from detectConflictWithXattr: %v", res))
 				}
 				keys_to_be_deleted[uniqueKey] = true
 			} else if resp != nil {
@@ -2049,7 +2050,7 @@ func (xmem *XmemNozzle) composeSpecForSubdocGet(include_doc bool) (specs []base.
 	}
 	specs = make([]base.SubdocLookupPathSpec, 0, specLen)
 	// _xdcr XATTR for CCR
-	spec := base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(base.XATTR_XDCR)}
+	spec := base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(ccrMetadata.XATTR_HLV)}
 	specs = append(specs, spec)
 	// $document.revid
 	spec = base.SubdocLookupPathSpec{mc.SUBDOC_GET, mc.SUBDOC_FLAG_XATTR_PATH, []byte(base.VXATTR_REVID)}
@@ -2135,7 +2136,7 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 					continue
 				}
 				switch res {
-				case SourceDominate:
+				case SendToTarget:
 					// We are here because we have a conflict based on XATTR. Now the same source dominates. Maybe target had a rollback?
 					delete(noRep_map, uniqueKey)
 					if resp.Status == mc.KEY_ENOENT {
@@ -2143,14 +2144,12 @@ func (xmem *XmemNozzle) batchGetDocForCustomCR(getDoc_map base.McRequestMap, noR
 					} else {
 						wrappedReq.Req.Cas = resp.Cas
 					}
-				case SourceEqualsTarget:
+				case Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
-				case TargetDominate:
-					noRep_map[uniqueKey] = NotSendFailedCR
-				case Conflict:
+				case Merge:
 					noRep_map[uniqueKey] = ToResolve
 					lookUpRespMap[uniqueKey] = lookupResp
-				case TargetSetBack:
+				case SetBackToSource:
 					noRep_map[uniqueKey] = ToSetback
 					lookUpRespMap[uniqueKey] = lookupResp
 				}
@@ -2185,31 +2184,29 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, lookupResp
 	target := lookupResp.Resp
 	if target.Status == mc.KEY_ENOENT {
 		// Target doesn't exist
-		return SourceDominate, nil
+		return SendToTarget, nil
 	}
-	targetMeta, err := lookupResp.FindTargetCustomCRXattr(xmem.targetClusterId)
+	targetMeta, err := ccrMetadata.GetTargetCustomCRXattr(lookupResp, xmem.targetClusterId)
 	if err != nil {
-		return TargetDominate, err
+		return ErrorAction, err
 	}
-	sourceMeta, err := base.FindSourceCustomCRXattr(source, xmem.sourceClusterId)
+	sourceMeta, err := ccrMetadata.GetSourceCustomCRXattr(source, xmem.sourceClusterId)
 	if err != nil {
-		xmem.Logger().Errorf("FindSourceCustomCRXattr returned %v for key %s, meta=%v", err, bytes.Trim(source.Key, "\x00"), sourceMeta)
-		panic("FindSourceCustomCRXattr error")
-		return TargetDominate, err
+		xmem.Logger().Errorf("%v: GetSourceCustomCRXattr returned %v for key %q, meta=%v", xmem.Id(), err, source.Key, sourceMeta)
+		return ErrorAction, err
 	}
 	/*
 	 * Source has smaller CAS
 	 */
-	if sourceMeta.GetCas() < targetMeta.GetCas() {
+	if sourceMeta.GetMutationCas() < targetMeta.GetMutationCas() {
 		// We can only replicate from larger CAS to smaller
-		return TargetDominate, nil
+		return Skip, nil
 	}
 
 	isTargetJson, err := lookupResp.IsTargetJson()
 	if err != nil {
-		return TargetDominate, err
+		return ErrorAction, err
 	}
-
 	/*
 	 * USE LWW for non-json or deleted docs.
 	 */
@@ -2218,77 +2215,42 @@ func (xmem *XmemNozzle) detectConflictWithXattr(source *mc.MCRequest, lookupResp
 		doc_meta_source := decodeSetMetaReq(source)
 		doc_meta_target := xmem.decodeSubDocResp(source.Key, lookupResp)
 		if xmem.conflict_resolver(doc_meta_source, doc_meta_target, base.CRMode_LWW, xmem.xattrEnabled, xmem.Logger()) {
-			return SourceDominate, nil
+			return SendToTarget, nil
 		} else {
-			return TargetDominate, nil
+			return Skip, nil
 		}
-	}
-
-	/*
-	 * Check if they are the same document.
-	 */
-	if sourceMeta.GetCas() == targetMeta.GetCas() && bytes.Equal(sourceMeta.DocumentSourceId(), targetMeta.DocumentSourceId()) {
-		// Same CAS, generated by the same cluster
-		return SourceEqualsTarget, nil
 	}
 
 	/*
 	 * Source CAS same or larger than target
 	 */
-	var sourceContainTarget bool
-	var targetContainSource bool
-	if targetMeta.IsMergedDoc() {
-		sourceContainTarget, err = sourceMeta.ContainsVV(targetMeta.GetMv())
-	} else {
-		sourceContainTarget, err = sourceMeta.ContainsVersion(targetMeta.DocumentSourceId(), targetMeta.GetCas())
-	}
+
+	conflictResult, err := sourceMeta.DetectConflict(targetMeta)
 	if err != nil {
-		return Conflict, err
+		xmem.Logger().Errorf("%v: Conflict detection returned error '%v' for targetMeta", xmem.Id(), err, targetMeta)
+		return ErrorAction, err
 	}
-	if sourceMeta.IsMergedDoc() {
-		targetContainSource, err = targetMeta.ContainsVV(sourceMeta.GetMv())
-	} else {
-		targetContainSource, err = targetMeta.ContainsVersion(sourceMeta.DocumentSourceId(), sourceMeta.GetCas())
+
+	switch conflictResult {
+	case ccrMetadata.Win:
+		return SendToTarget, nil
+	case ccrMetadata.Lose:
+		return Skip, nil
+	case ccrMetadata.Conflict:
+		return Merge, nil
+	case ccrMetadata.Equal:
+		return Skip, nil
+	case ccrMetadata.LoseWithLargerCas:
+		return SetBackToSource, nil
 	}
-	if sourceContainTarget && targetContainSource {
-		if sourceMeta.GetCas() > targetMeta.GetCas() {
-			// The documents are the same but we want to converge to larger CAS
-			return SourceDominate, nil
-		} else {
-			return SourceEqualsTarget, nil
-		}
-	} else if sourceContainTarget {
-		return SourceDominate, nil
-	} else if targetContainSource {
-		if sourceMeta.GetCas() > targetMeta.GetCas() {
-			// Target dominate but its CAS is smaller. Needs to set back to source
-			if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-				xmem.Logger().Debugf("%v key: %s, TargetSetBack: source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
-					xmem.Id(), bytes.Trim(source.Key, "\x00"),
-					sourceMeta.GetCas(), sourceMeta.GetCv(), sourceMeta.GetCvId(), sourceMeta.GetPcas(), sourceMeta.GetMv(),
-					targetMeta.GetCas(), targetMeta.GetCv(), targetMeta.GetCvId(), targetMeta.GetPcas(), targetMeta.GetMv())
-			}
-			return TargetSetBack, nil
-		} else {
-			// The reverse replication direction can take care of this.
-			return TargetDominate, nil
-		}
-	} else {
-		if sourceMeta.GetCas() > targetMeta.GetCas() {
-			xmem.Logger().Debugf("%v Conflict: key: %s, source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
-				xmem.Id(), bytes.Trim(source.Key, "\x00"),
-				sourceMeta.GetCas(), sourceMeta.GetCv(), sourceMeta.GetCvId(), sourceMeta.GetPcas(), sourceMeta.GetMv(),
-				targetMeta.GetCas(), targetMeta.GetCv(), targetMeta.GetCvId(), targetMeta.GetPcas(), targetMeta.GetMv())
-		}
-		return Conflict, nil
-	}
+	return ErrorAction, fmt.Errorf("Bad result from ccrMeta.DetectConlict: %v", conflictResult)
 }
 
 func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCRequest) (err error) {
 	req := wrappedReq.Req
-	meta, err := base.FindSourceCustomCRXattr(req, xmem.sourceClusterId)
+	meta, err := ccrMetadata.GetSourceCustomCRXattr(req, xmem.sourceClusterId)
 	if err != nil {
-		xmem.Logger().Errorf("%v: FindSourceCustomCRXattr returned %v, err: %v", xmem.Id(), meta, err)
+		xmem.Logger().Errorf("%v: GetSourceCustomCRXattr returned %v, err: %v", xmem.Id(), meta, err)
 		return err
 	}
 
@@ -2335,7 +2297,7 @@ func (xmem *XmemNozzle) updateCustomCRXattrForTarget(wrappedReq *base.WrappedMCR
 				xmem.Logger().Errorf("%v: updateCustomCRXattrForTarget received error '%v' iterating through XATTR for key %v%s%v,", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
 				return err
 			}
-			if base.Equals(key, base.XATTR_XDCR) {
+			if base.Equals(key, ccrMetadata.XATTR_HLV) {
 				continue
 			}
 			err = xattrComposer.WriteKV(key, value)
@@ -2388,11 +2350,11 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 		req.UpdateReqBytes()
 	}
 	if req.RetryCRCount == 0 {
-		ccrMeta, err := base.FindSourceCustomCRXattr(req.Req, xmem.sourceClusterId)
+		ccrMeta, err := ccrMetadata.GetSourceCustomCRXattr(req.Req, xmem.sourceClusterId)
 		if err != nil {
 			return false, err
 		}
-		if bytes.Equal(ccrMeta.DocumentSourceId(), xmem.targetClusterId) {
+		if bytes.Equal(ccrMeta.GetMutationSource(), xmem.targetClusterId) {
 			return true, nil
 		}
 	}

@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/couchbase/goxdcr/common/mocks"
+
 	"github.com/couchbase/gocb/v2"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -151,7 +153,7 @@ func targetXmemIsUpAndCorrectSetupExists(bname string) bool {
 		return false
 	}
 	mgr := cluster.Buckets()
-	_, err = mgr.GetBucket(bname, nil)
+	_, err = mgr.GetBucket(xmemBucket, nil)
 	if err != nil {
 		clusterReady = false
 		return false
@@ -344,163 +346,6 @@ type User struct {
 	Interests []string `json:"interests"`
 }
 
-/*
- * This testcase will create a bucket GetXattrForCCR and test conflict detection.
- *
- * To avoid tightly couple the test files with real clusterID/UUID, we will use
- * "SourceCluster" and "TargetCluster" as clusterIDs for the tests.
- */
-func TestGetXattrForCustomCR(t *testing.T) {
-	fmt.Println("============== Test case start: TestGetXattrForCustomCR =================")
-	defer fmt.Println("============== Test case end: TestGetXattrForCustomCR =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
-		fmt.Println("Skipping since live cluster_run setup has not been detected")
-		return
-	}
-	bucketName := xmemBucket
-	//bucketName := "GetXattrForCCR"
-	assert := assert.New(t)
-
-	targetCluster, _, err := createBucket(targetConnStr, bucketName)
-	if err != nil {
-		fmt.Printf("createBucket %v returned %v\n", bucketName, err)
-		fmt.Println("Skipping since live cluster_run setup has not been detected")
-		return
-	}
-	targetCluster.Close(nil)
-	fmt.Printf("Created bucket %v\n", bucketName)
-
-	// Set up target documents
-	xmemSendPackets(t, []string{"testdata/customCR/kingarthur2_new_cas2.json",
-		"testdata/customCR/kingarthur3_cv1_cas1.json",
-		"testdata/customCR/kingarthur4_cv1_cas2.json",
-		"testdata/customCR/kingarthur5_cv1_cas2.json",
-		"testdata/customCR/kingarthur6_mv.json",
-		"testdata/customCR/kingarthur7_mv.json",
-		"testdata/customCR/kingarthur8_cas1.json",
-	}, bucketName)
-
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, evtProducer := setupBoilerPlateXmem(bucketName)
-	realUtils := utilsReal.NewUtilities()
-	xmem.utils = realUtils
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, evtProducer)
-
-	// Need to find the actual running targetBucketUUID
-	bucketInfo, err := realUtils.GetBucketInfo(connString, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
-	assert.Nil(err)
-	uuid, ok := bucketInfo["uuid"].(string)
-	assert.True(ok)
-	xmem.targetBucketUuid = uuid
-	settings[SETTING_COMPRESSION_TYPE] = base.CompressionTypeSnappy
-	settings[ForceCollectionDisableKey] = true
-	xmem.Logger().LoggerContext().SetLogLevel(log.LogLevelDebug)
-	err = xmem.Start(settings)
-	assert.Nil(err)
-	/*
-	 * Test 1: Doc never existed at target, source wins
-	 * Source doc: kingarthur1_new
-	 * Target doc: none
-	 */
-	fmt.Println("Test 1: Source dominates when it doesn't exist at target.")
-	getXattrForCustomCR(1, t, "testdata/customCR/kingarthur1_new.json", xmem, router, SourceDominate)
-	/*
-	 * Test 2: Target larger CAS. Target wins
-	 * Source: kingarthur2_new_cas1
-	 * Target: kingarthur2_new_cas2
-	 */
-	fmt.Println("Test 2: Target dominates when it has larger CAS.")
-	getXattrForCustomCR(2, t, "testdata/customCR/kingarthur2_new_cas1.json", xmem, router, TargetDominate)
-	/*
-	 * Test 3: Target doc comes from source. Source larger CAS. Source wins
-	 * Source: kingarthur3_new_cas2
-	 * Target: kingarthur3_cv1_cas1 (cv1 == cas1)
-	 *         _xdcr{"cv":"0x0000ccae473b1316","id":"SourceCluster"}
-	 */
-	fmt.Println("Test 3: Source larger CAS. Target comes from source with no new change. Source wins")
-	getXattrForCustomCR(3, t, "testdata/customCR/kingarthur3_new_cas2.json", xmem, router, SourceDominate)
-	/*
-	 * Test 4: Both has local changes and source pcas does not dominate. Conflict
-	 * Source: kingarthur4_pcasNoTarget_cas3:
-	 *		_xdcr{"cv":"0x0000ccae473b1316","id":"Cluster4","pc":{"cluster3":"Fge5BJLoAAQ"}}
-	 *		Fge5BJLoAAQ is base64 of 1587440822967074820
-	 * Target: kingarthur4_cv1_cas2, new change (Cas > cv)
-	 *		_xdcr{"cv":"0x0000ccae473b1316","id":"SourceCluster"}
-	 */
-	fmt.Println("Test 4: Both has changes (CAS > cv), source has PCAS but does not dominate. Conflict")
-	getXattrForCustomCR(4, t, "testdata/customCR/kingarthur4_pcasNoTarget_cas3.json", xmem, router, Conflict)
-
-	/*
-	 * Test 5: Both has local changes and source pcas that dominates target change
-	 * Source: kingarthur5_pcasDominateTargetCas.json:
-	 *		_xdcr{"cv":"0x0b00f8da4d881416","id":"Cluster3","pc":{"TargetCluster":"FhSITdr4AAA"}}
-	 * Target: kingarthur5_cv1_cas2, new change (Cas > cv)
-	 *		_xdcr{"cv":"0x0400e89204b90716","id":"SourceCluster"}, Cas: 1591046436336173056
-	 */
-	fmt.Println("Test 5: Both has changes (CAS > cv), source has PCAS that dominates.")
-	getXattrForCustomCR(5, t, "testdata/customCR/kingarthur5_pcasDominateTargetCas.json", xmem, router, SourceDominate)
-	/*
-	 * Test 6: Target is a merged doc (has mv, CAS == cv). Source PCAS dominates
-	 * Source: kingarthur6_pcasDominateMv
-	 *		_xdcr{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	 * Target: kingarthur6_mv, no new change (Cas == cv)
-	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	 */
-	fmt.Println("Test 6: Target is a merged doc, source PCAS dominates MV.")
-	getXattrForCustomCR(6, t, "testdata/customCR/kingarthur6_pcasDominateMv.json", xmem, router, SourceDominate)
-	/*
-	 * Test 7: Target is a merged doc (has mv, CAS == cv). Source PCAS does not dominate
-	 * Source: kingarthur7_pcasNotDominateMv
-	 *		_xdcr{"cv":"0x0b0085b25e8d1416","id":"Cluster4","pc":{"Cluster1":"FhSITdr4AAA","Cluster3":"FhSITdr4ACA"}}
-	 * Target: kingarthur7_mv, no new change (Cas == cv)
-	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	 */
-	fmt.Println("Test 7: Target is a merged doc, source PCAS does not dominates. Conflict.")
-	getXattrForCustomCR(7, t, "testdata/customCR/kingarthur7_pcasNotDominateMv.json", xmem, router, Conflict)
-	/*
-	 * Test 8: Target does not have _xdcr, Source pcas dominates target
-	 * Source: kingarthur8_pcasDominateTargetCas1
-	 *		_xdcr{"cv":"0x0b00104adc921416","id":"Cluster4","pc":{"Cluster2":"FhSITdr4ABU","TargetCluster":"FhSS3EoQAAA"}}
-	 * Target: kingarthur8_cas1
-	 */
-	fmt.Println("Test 8: Target does not have _xdcr, source PCAS dominates target CAS.")
-	getXattrForCustomCR(8, t, "testdata/customCR/kingarthur8_pcasDominateTargetCas1.json", xmem, router, SourceDominate)
-	/*
-	 * Test 9: Source larger CAS, both merged doc, but target MV dominates source MV. Setback
-	 * Source: kingarthur6_pcasDominateMv
-	 *		_xdcr{"cv":"0x0000d4a7994f1716","id":"SourceCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU"}}
-	 * Target: kingarthur6_mv, no new change (Cas == cv)
-	 *		_xdcr{"cv":"0x00009125328d1416","id":"TargetCluster","mv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	 */
-	fmt.Println("Test 9: Source larger CAS, but target MV dominates source MV. TargetSetBack.")
-	getXattrForCustomCR(9, t, "testdata/customCR/kingarthur6_largerCasSmallerMv.json", xmem, router, TargetSetBack)
-}
-func getXattrForCustomCR(testId uint32, t *testing.T, fname string, xmem *XmemNozzle, router *Router, expectedResult ConflictResult) {
-	assert := assert.New(t)
-	event, err := RetrieveUprFile(fname)
-	assert.Nil(err)
-	wrappedEvent := &base.WrappedUprEvent{UprEvent: event}
-	wrappedMCRequest, err := router.ComposeMCRequest(wrappedEvent)
-	assert.Nil(err)
-	assert.NotNil(wrappedMCRequest)
-	getMeta_map := make(base.McRequestMap)
-	getMeta_map[wrappedMCRequest.UniqueKey] = wrappedMCRequest
-	noRep_map, getDoc_map, err := xmem.batchGetXattrForCustomCR(getMeta_map)
-	assert.Nil(err)
-	if expectedResult == SourceDominate {
-		assert.Equal(0, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
-		assert.Equal(0, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
-	} else if expectedResult == TargetDominate {
-		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
-		assert.Equal(0, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
-	} else if expectedResult == Conflict || expectedResult == TargetSetBack {
-		assert.Equal(1, len(noRep_map), fmt.Sprintf("Test %d failed", testId))
-		assert.Equal(1, len(getDoc_map), fmt.Sprintf("Test %d failed", testId))
-	}
-	if len(getDoc_map) > 0 {
-		_, err := xmem.batchGetDocForCustomCR(getDoc_map, noRep_map)
-		assert.Nil(err)
-	}
-}
 func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
 	assert := assert.New(t)
 	var i = 0
