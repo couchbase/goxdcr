@@ -15,14 +15,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/parts"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"io"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/ccrMetadata"
+	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 
 	mcc "github.com/couchbase/gomemcached/client"
 
@@ -202,7 +204,7 @@ func (c *ConflictManager) Attach(pipeline common.Pipeline) (err error) {
 	c.Logger().Infof("Attach conflictManager with %v pipeline %v\n", pipeline.Type().String(), pipeline.FullTopic())
 	c.Id()
 	c.pipeline = pipeline
-	c.userAgent = fmt.Sprintf("Goxdcr customCR bucket: %s", c.sourceBucketName)
+	c.userAgent = fmt.Sprintf("Goxdcr ccrMetadata bucket: %s", c.sourceBucketName)
 	// register pipeline supervisor as conflict manager's error handler
 	supervisor := c.pipeline.RuntimeContext().Service(base.PIPELINE_SUPERVISOR_SVC)
 	if supervisor == nil {
@@ -339,8 +341,8 @@ func (c *ConflictManager) conflictManagerWorker(id int) {
 				req := c.formatMergedDoc(v.Input, []byte(mergedDoc))
 				// TODO (MB-40143): Remove before CC shipping. The req should never be nil unless there are bugs in xattrs format.
 				if req == nil {
-					sourceMeta, _ := base.FindSourceCustomCRXattr(v.Input.Source.Req, v.Input.SourceId)
-					targetMeta, _ := v.Input.Target.FindTargetCustomCRXattr(v.Input.TargetId)
+					sourceMeta, _ := ccrMetadata.GetSourceCustomCRXattr(v.Input.Source.Req, v.Input.SourceId)
+					targetMeta, _ := ccrMetadata.GetTargetCustomCRXattr(v.Input.Target, v.Input.TargetId)
 					c.Logger().Errorf("conflictManagerWorker failed calling formatMergedDoc. sourceMeta: %v, targetMeta: %v", sourceMeta, targetMeta)
 					panic("mergeXattr failed")
 				}
@@ -363,42 +365,42 @@ func (c *ConflictManager) formatTargetDoc(input *base.ConflictParams) *mc.MCRequ
 	bodylen := 0
 	var spec SubdocMutationPathSpec
 	specs := make([]SubdocMutationPathSpec, 0, 5)
-	targetMeta, err := input.Target.FindTargetCustomCRXattr(input.TargetId)
+	targetMeta, err := ccrMetadata.GetTargetCustomCRXattr(input.Target, input.TargetId)
 	if err != nil {
 		// TODO: MB-40143: Remove before CC shipping
 		panic(fmt.Sprintf("error '%v' getting target meta", err))
 	}
-	sourceMeta, err := base.FindSourceCustomCRXattr(input.Source.Req, input.SourceId)
+	sourceMeta, err := ccrMetadata.GetSourceCustomCRXattr(input.Source.Req, input.SourceId)
 	pcas, mv, err := targetMeta.UpdateMetaForSetBack()
 	if err != nil || sourceMeta.IsMergedDoc() == false {
 		// TODO: MB-40143: Remove before CC shipping
 		c.Logger().Errorf("Setback err=%v, isMergedDoc=%v, source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
 			err, sourceMeta.IsMergedDoc(),
-			sourceMeta.GetCas(), sourceMeta.GetCv(), sourceMeta.GetCvId(), sourceMeta.GetPcas(), sourceMeta.GetMv(),
-			targetMeta.GetCas(), targetMeta.GetCv(), targetMeta.GetCvId(), targetMeta.GetPcas(), targetMeta.GetMv())
+			sourceMeta.GetMutationCas(), sourceMeta.GetCvVer(), sourceMeta.GetCvSrc(), sourceMeta.GetPv(), sourceMeta.GetMv(),
+			targetMeta.GetMutationCas(), targetMeta.GetCvVer(), targetMeta.GetCvSrc(), targetMeta.GetPv(), targetMeta.GetMv())
 		panic("setback unexpected values")
 	}
 
 	// ID path. It is a new update (subdoc_multi_mutation) at source. So ID is source
 	id := []byte("\"" + string(input.SourceId) + "\"")
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_ID_PATH), id}
+	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_SRC_PATH), id}
 	specs = append(specs, spec)
 	bodylen = bodylen + spec.size()
 
 	// CV path. We use macro expansion to match the new CAS.
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(base.XATTR_CV_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(ccrMetadata.XATTR_VER_PATH), []byte(base.CAS_MACRO_EXPANSION)}
 	specs = append(specs, spec)
 	bodylen = bodylen + spec.size()
 
 	// MV path. Target MV could be nil as long as its PCAS dominates.
 	if mv != nil {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MV_PATH), mv}
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_MV_PATH), mv}
 		specs = append(specs, spec)
 		bodylen = bodylen + spec.size()
 	}
 	// PCAS path
 	if pcas != nil {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_PCAS_PATH), pcas}
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_PV_PATH), pcas}
 		specs = append(specs, spec)
 		bodylen = bodylen + spec.size()
 	}
@@ -429,30 +431,30 @@ func (c *ConflictManager) formatMergedDoc(input *base.ConflictParams, mergedDoc 
 	specs := make([]SubdocMutationPathSpec, 0, 5)
 	// ID path
 	sourceId := "\"" + string(input.SourceId) + "\""
-	spec := SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_ID_PATH), []byte(sourceId)}
+	spec := SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_SRC_PATH), []byte(sourceId)}
 	bodylen = bodylen + spec.size()
 	specs = append(specs, spec)
 	// CV path
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(base.XATTR_CV_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(ccrMetadata.XATTR_VER_PATH), []byte(base.CAS_MACRO_EXPANSION)}
 	bodylen = bodylen + spec.size()
 	specs = append(specs, spec)
 	// MV path
 	if len(mv) > 0 {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MV_PATH), mv}
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_MV_PATH), mv}
 		bodylen = bodylen + spec.size()
 		specs = append(specs, spec)
 	} else if oldmvlen > 0 {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MV_PATH), nil}
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_MV_PATH), nil}
 		bodylen = bodylen + spec.size()
 		specs = append(specs, spec)
 	}
 	// PCAS path
 	if len(pcas) > 0 {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_PCAS_PATH), pcas}
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_PV_PATH), pcas}
 		bodylen = bodylen + spec.size()
 		specs = append(specs, spec)
 	} else if oldpcaslen > 0 {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_PCAS_PATH), nil}
+		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(ccrMetadata.XATTR_PV_PATH), nil}
 		bodylen = bodylen + spec.size()
 		specs = append(specs, spec)
 	}
@@ -570,32 +572,32 @@ func (c *ConflictManager) sendDocument(id int, input *base.ConflictParams, req *
 
 func (c *ConflictManager) mergeXattr(input *base.ConflictParams) (mv, pcas []byte, oldmvlen, oldpcaslen int, err error) {
 	source := input.Source.Req
-	sourceMeta, err := base.FindSourceCustomCRXattr(source, input.SourceId)
+	sourceMeta, err := ccrMetadata.GetSourceCustomCRXattr(source, input.SourceId)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for source document body %v%v%v.",
 			c.pipeline.FullTopic(), err, base.UdTagBegin, source.Body, base.UdTagEnd)
 		return nil, nil, 0, 0, err
 	}
-	targetMeta, err := input.Target.FindTargetCustomCRXattr(input.TargetId)
+	targetMeta, err := ccrMetadata.GetTargetCustomCRXattr(input.Target, input.TargetId)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom conflict resolution: mergeXattr() received error '%v' calling findSourceCustomCRXattr for target document body %v%v%v.",
 			c.pipeline.FullTopic(), err, base.UdTagBegin, input.Target.Resp.Body, base.UdTagEnd)
 		return nil, nil, 0, 0, err
 	}
 	oldmvlen = len(sourceMeta.GetMv())
-	oldpcaslen = len(sourceMeta.GetPcas())
+	oldpcaslen = len(sourceMeta.GetPv())
 	// "mv":{"<sourceId>":"<B64>","targetId>":"<B64>",...}
-	mvlen := base.MergedMvLength(sourceMeta, targetMeta)
-	pcaslen := base.MergedPcasLength(sourceMeta, targetMeta)
+	mvlen := ccrMetadata.MergedMvLength(sourceMeta, targetMeta)
+	pcaslen := ccrMetadata.MergedPvLength(sourceMeta, targetMeta)
 	// TODO (MB-41808): data pool
 	mergedMvSlice := make([]byte, mvlen)
 	mergedPcasSlice := make([]byte, pcaslen)
-	mvlen, pcaslen, err = sourceMeta.MergeMeta(targetMeta, mergedMvSlice, mergedPcasSlice, time.Duration(atomic.LoadUint32(&c.pruningWindowSec))*time.Second)
+	mvlen, pcaslen, err = sourceMeta.MergeCustomCRMetadata(targetMeta, mergedMvSlice, mergedPcasSlice, time.Duration(atomic.LoadUint32(&c.pruningWindowSec))*time.Second)
 	if err != nil {
 		c.Logger().Errorf("%v: Custom CR: failed to merge metadata for document key %s, error: %v source CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s, target CAS=%v, cv=%v, cvid=%s, pcas=%s, mv=%s",
 			c.pipeline.FullTopic(), bytes.Trim(input.Source.Req.Key, "\x00"), err,
-			sourceMeta.GetCas(), sourceMeta.GetCv(), sourceMeta.GetCvId(), sourceMeta.GetPcas(), sourceMeta.GetMv(),
-			targetMeta.GetCas(), targetMeta.GetCv(), targetMeta.GetCvId(), targetMeta.GetPcas(), targetMeta.GetMv())
+			sourceMeta.GetMutationCas(), sourceMeta.GetCvVer(), sourceMeta.GetCvSrc(), sourceMeta.GetPv(), sourceMeta.GetMv(),
+			targetMeta.GetMutationCas(), targetMeta.GetCvVer(), targetMeta.GetCvSrc(), targetMeta.GetPv(), targetMeta.GetMv())
 	} else {
 		mv = mergedMvSlice[:mvlen]
 		pcas = mergedPcasSlice[:pcaslen]

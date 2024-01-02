@@ -1471,23 +1471,15 @@ var (
 	MobileDocPrefixSyncAtt = []byte("_sync:att")
 )
 
-// Custom CR related constants
+// Required for conflict resolution
 const (
+	// This is for subdoc set operation
 	CAS_MACRO_EXPANSION = "\"${Mutation.CAS}\"" // The value for the cv field when setting back to source
-	VXATTR_REVID        = "$document.revid"
-	VXATTR_FLAGS        = "$document.flags"
-	VXATTR_EXPIRY       = "$document.exptime"
-	VXATTR_DATATYPE     = "$document.datatype"
-	XATTR_ID            = "id"    // The cluster ID field in _xdcr
-	XATTR_CV            = "cv"    // The Cas field in _xdcr
-	XATTR_MV            = "mv"    // the MV field in _xdcr
-	XATTR_PCAS          = "pc"    // The Pcas field in _xdcr
-	XATTR_XDCR          = "_xdcr" // The XDCR XATTR
-
-	XATTR_ID_PATH   = "_xdcr.id"
-	XATTR_CV_PATH   = "_xdcr.cv"
-	XATTR_MV_PATH   = "_xdcr.mv"
-	XATTR_PCAS_PATH = "_xdcr.pc"
+	// These are for subdoc get operations
+	VXATTR_REVID    = "$document.revid"
+	VXATTR_FLAGS    = "$document.flags"
+	VXATTR_EXPIRY   = "$document.exptime"
+	VXATTR_DATATYPE = "$document.datatype"
 
 	FunctionUrlFmt         = "http://%v:%v/evaluator/v1/libraries"
 	DefaultMergeFunc       = "defaultLWW"
