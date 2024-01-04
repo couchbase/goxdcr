@@ -1875,16 +1875,20 @@ func (b *BackfillMgr) HandleRollbackTo0ForVB(topic string, vbno uint16) error {
 	// to handle this VB, so that if another VB needs to rollback to 0, this path is called again
 	// relatively quickly
 	// Once all the VBs that need to rollback to 0 has rolled back, checkpointing will then take place
-	err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb, true)
-	if err != nil {
-		b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - vbno %v rollback to zero from DCP will trigger this process again", topic, err, vbno)
-		return err
-	}
-	err = b.pipelineMgr.RequestBackfill(topic)
-	if err != nil {
-		b.logger.Errorf("Unable to request backfill pipeline to start for %v : %v - may require manual restart of pipeline", topic, err)
-		return err
-	}
+
+	// spawn this in a separate go-routine to prevent circular deadlock (e.g with DcpNozzle.onExit())
+	go func() {
+		err := b.pipelineMgr.HaltBackfillWithCb(topic, cb, errCb, true)
+		if err != nil {
+			b.logger.Errorf("Unable to request backfill pipeline to stop for %v : %v - vbno %v rollback to zero from DCP will trigger this process again", topic, err, vbno)
+			return
+		}
+		err = b.pipelineMgr.RequestBackfill(topic)
+		if err != nil {
+			b.logger.Errorf("Unable to request backfill pipeline to start for %v : %v - may require manual restart of pipeline", topic, err)
+			return
+		}
+	}()
 	return nil
 }
 
