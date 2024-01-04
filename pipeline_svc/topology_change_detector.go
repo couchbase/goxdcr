@@ -655,6 +655,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 				err := top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, updateOnceErr)
 				if err != nil {
 					if err == errPipelinesDetached {
+						notification.Recycle()
 						return
 					}
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when handling source topology change. err=%v", err)
