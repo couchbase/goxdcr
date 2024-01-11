@@ -25,7 +25,7 @@ func TestConstructCustomCRXattrForSetMeta(t *testing.T) {
 	defer fmt.Println("============== Test case end: TestConstructCustomCRXattr =================")
 
 	assert := assert.New(t)
-	// _vv:{"ver":"0x0b0085b25e8d1416","src":"Cluster4","pv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	// _vv:{"ver":"0x0b0085b25e8d1416","src":"s_Cluster4","pv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
 	ver, err := base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
 
 	docKey := []byte("docKey")
@@ -40,30 +40,30 @@ func TestConstructCustomCRXattrForSetMeta(t *testing.T) {
 	composer := base.NewXattrRawComposer(body)
 	pos, _, err := ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
-	assert.Equal("_vv\x00{\"cvCas\":\"0x0b0085b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0x0b0085b25e8d1416\"}\x00", string(body[4:pos]))
+	assert.Equal("_vv\x00{\"cvCas\":\"0x0b0085b25e8d1416\",\"src\":\"s_SourceCluster\",\"ver\":\"0x0b0085b25e8d1416\"}\x00", string(body[4:pos]))
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 2: New change cas > ver, expected to have updated srv, ver, and pv
-	// oldXattr = "_vv\x00{\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\"}\x00"
+	// oldXattr = "_vv\x00{\"src\":\"s_Cluster4\",\"ver\":\"0x0b0085b25e8d1416\"}\x00"
 	meta, err = NewMetadataForTest(docKey, sourceClusterId, ver+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, nil)
 	assert.Nil(err)
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
-	newXattr := "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":{\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
+	newXattr := "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"s_SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":{\"Cluster4\":\"FhSNXrKFAAs\"}}\x00"
 	assert.Equal(newXattr, string(body[4:pos]))
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 3: New change (cas=ver+1000) with existing XATTR (pv):
-	// _vv:{\"cvCas\":\"0xf30385b25e8d1416\","ver":"0x0b0085b25e8d1416","src":"Cluster4","pv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
-	// oldXattr = "_vv\x00{\"cvCas\":\"0x0b0085b25e8d1416\",\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
+	// _vv:{\"cvCas\":\"0xf30385b25e8d1416\","ver":"0x0b0085b25e8d1416","src":"s_Cluster4","pv":{"Cluster1":"FhSITdr4AAA","Cluster2":"FhSITdr4ABU","Cluster3":"FhSITdr4ACA"}}
+	// oldXattr = "_vv\x00{\"cvCas\":\"0x0b0085b25e8d1416\",\"src\":\"s_Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
 	meta, err = NewMetadataForTest(docKey, sourceClusterId, ver+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
 		[]byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
 	assert.Nil(err)
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
+	assert.Contains(string(body[4:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"s_SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
 	assert.Contains(string(body[4:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
 	assert.Contains(string(body[4:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
 	assert.Contains(string(body[4:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
@@ -78,7 +78,7 @@ func TestConstructCustomCRXattrForSetMeta(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[0:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
+	assert.Contains(string(body[0:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"s_SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
 	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
 	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
 	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
@@ -92,7 +92,7 @@ func TestConstructCustomCRXattrForSetMeta(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[0:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
+	assert.Contains(string(body[0:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"s_SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
 	assert.Contains(string(body[0:pos]), "\"Cluster1\":\"FhSITdr4AAA\"")
 	assert.Contains(string(body[0:pos]), "\"Cluster2\":\"FhSITdr4ABU\"")
 	assert.Contains(string(body[0:pos]), "\"Cluster3\":\"FhSITdr4ACA\"")
@@ -135,7 +135,7 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	composer := base.NewXattrRawComposer(body)
 	pos, _, err := ConstructXattrFromHlvForSetMeta(meta, 5*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	assert.Contains(string(body[4:pos]), p2)
 	assert.Contains(string(body[4:pos]), p3)
 	assert.Contains(string(body[4:pos]), p4)
@@ -147,7 +147,7 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	assert.Contains(string(body[4:pos]), p2)
 	assert.Contains(string(body[4:pos]), p3)
 	assert.NotContains(string(body[4:pos]), p4)
@@ -166,7 +166,7 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	assert.Contains(string(body[4:pos]), p4)
 	assert.Contains(string(body[4:pos]), p5)
 	assert.NotContains(string(body[4:pos]), p2)
@@ -186,7 +186,7 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	assert.Contains(string(body[4:pos]), p3)
 	assert.Contains(string(body[4:pos]), p5)
 	assert.NotContains(string(body[4:pos]), p2)
@@ -227,7 +227,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	pos, _, err := ConstructXattrFromHlvForSetMeta(meta, 6*time.Second, composer)
 	assert.Nil(err)
 	newCvHex := base.Uint64ToHexLittleEndian(cas)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
 	assert.Contains(string(body[4:pos]), p1)
 	assert.Contains(string(body[4:pos]), p2)
 	assert.Contains(string(body[4:pos]), p3)
@@ -240,7 +240,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
 	assert.Contains(string(body[4:pos]), p1)
 	assert.Contains(string(body[4:pos]), p2)
 	assert.NotContains(string(body[4:pos]), p3)
@@ -260,7 +260,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
 	assert.Contains(string(body[4:pos]), p1)
 	assert.Contains(string(body[4:pos]), p4)
 	assert.NotContains(string(body[4:pos]), p2)
@@ -282,7 +282,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 4*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
 	assert.Contains(string(body[4:pos]), p1)
 	assert.Contains(string(body[4:pos]), p3)
 	assert.Contains(string(body[4:pos]), p5)
@@ -322,7 +322,7 @@ func setMetaPruningWithMvNoNewChange(t *testing.T) {
 	composer := base.NewXattrRawComposer(body)
 	pos, _, err := ConstructXattrFromHlvForSetMeta(meta, 5*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	assert.Contains(string(body[4:pos]), v4)
 	assert.Contains(string(body[4:pos]), v5)
 	assert.Contains(string(body[4:pos]), v2)
@@ -333,7 +333,7 @@ func setMetaPruningWithMvNoNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	assert.NotContains(string(body[4:pos]), "pv")
 	assert.Contains(string(body[4:pos]), v2)
 	assert.Contains(string(body[4:pos]), v3)
@@ -347,7 +347,7 @@ func setMetaPruningWithMvNoNewChange(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 4*time.Second, composer)
 	assert.Nil(err)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	pvPruned := fmt.Sprintf("\"pv\":{\"Cluster5\":\"%s\"}", base.Uint64ToBase64(t4))
 	assert.Contains(string(body[4:pos]), pvPruned)
 	// These are in MV
@@ -388,7 +388,7 @@ func setMetaPruningWithMvNewChange(t *testing.T) {
 	pos, _, err := ConstructXattrFromHlvForSetMeta(meta, 7*time.Second, composer)
 	assert.Nil(err)
 	newCvHex := base.Uint64ToHexLittleEndian(cas)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
 	assert.Contains(string(body[4:pos]), "pv")
 	assert.Contains(string(body[4:pos]), v2)
 	assert.Contains(string(body[4:pos]), v3)
@@ -407,7 +407,7 @@ func setMetaPruningWithMvNewChange(t *testing.T) {
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 5*time.Second, composer)
 	assert.Nil(err)
 	newCvHex = base.Uint64ToHexLittleEndian(cas)
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
 	assert.Contains(string(body[4:pos]), "pv")
 	assert.Contains(string(body[4:pos]), v2)
 	assert.Contains(string(body[4:pos]), v3)
@@ -421,7 +421,7 @@ func setMetaPruningWithMvNewChange(t *testing.T) {
 	assert.Nil(err)
 	newCvHex = base.Uint64ToHexLittleEndian(cas)
 
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"s_SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
 	assert.Contains(string(body[4:pos]), v2)
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
@@ -459,7 +459,7 @@ func TestMergeMeta(t *testing.T) {
 	/*
 	* 2. Source and target both updated the same old document (from Cluster4)
 	*    The two pv should be combined with srv/ver
-	* oldXattr = "_vv\x00{\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
+	* oldXattr = "_vv\x00{\"src\":\"s_Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
 	 */
 	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv+20000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
 		[]byte("{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}"), nil)
@@ -480,8 +480,8 @@ func TestMergeMeta(t *testing.T) {
 
 	/*
 	* 3. Source and target contain conflict with updates from other clusters. Both have different pv
-	* Source cluster contains changes coming from cluster4: "_vv\x00{\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\"}}\x00"
-	* Target cluster contains changes coming from cluster5: "_vv\x00{\"src\":\"Cluster5\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
+	* Source cluster contains changes coming from cluster4: "_vv\x00{\"src\":\"s_Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\"}}\x00"
+	* Target cluster contains changes coming from cluster5: "_vv\x00{\"src\":\"s_Cluster5\"ver\":\"0x0b0085b25e8d1416\",\"pv\":{\"Cluster1\":\"FhSITdr4AAA\",\"Cluster2\":\"FhSITdr4ABU\",\"Cluster3\":\"FhSITdr4ACA\"}}\x00"
 	 */
 	cv, _ = base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
 	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("{\"Cluster1\":\"FhSITdr4AAA\"}"), nil)
