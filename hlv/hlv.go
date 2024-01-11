@@ -47,6 +47,14 @@ func UUIDtoDocumentSource(uuid string) (DocumentSourceId, error) {
 	return DocumentSourceId(ret), err
 }
 
+func ParseDocumentSource(src []byte) DocumentSourceId {
+	prefixLen := len(base.SERVER_SRC_PREFIX)
+	if len(src) <= prefixLen {
+		return ""
+	}
+	return DocumentSourceId(src[prefixLen:])
+}
+
 type VersionsMap map[DocumentSourceId]uint64
 
 // Add the other {src,ver} to vm if it is not there or if other has higher ver
@@ -70,7 +78,7 @@ type HLV struct {
 
 // This is the mutation current version
 type currentVersion struct {
-	source  DocumentSourceId
+	source  DocumentSourceId // this is the base64 encoded string of UUID and without the "s_" prefix
 	version uint64
 }
 

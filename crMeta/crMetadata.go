@@ -560,7 +560,8 @@ func formatCv(meta *CRMetadata, body []byte, pos int) int {
 	src := hlv.GetCvSrc()
 	ver := hlv.GetCvVer()
 	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_SRC_FIELD), pos, base.WriteJsonKey, len(HLV_SRC_FIELD), false /*firstKey*/)
-	body, pos = base.WriteJsonRawMsg(body, []byte(src), pos, base.WriteJsonValue, len(src), false /*firstKey*/)
+	prefixedSrc := append([]byte(base.SERVER_SRC_PREFIX), []byte(src)...)
+	body, pos = base.WriteJsonRawMsg(body, prefixedSrc, pos, base.WriteJsonValue, len(prefixedSrc), false /*firstKey*/)
 	cvHex := base.Uint64ToHexLittleEndian(ver)
 	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_VER_FIELD), pos, base.WriteJsonKey, len(HLV_VER_FIELD), false /*firstKey*/)
 	body, pos = base.WriteJsonRawMsg(body, cvHex, pos, base.WriteJsonValue, len(cvHex), false /*firstKey*/)
@@ -678,7 +679,7 @@ func parseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSou
 		}
 		switch string(key) {
 		case HLV_SRC_FIELD:
-			src = hlv.DocumentSourceId(value)
+			src = hlv.ParseDocumentSource(value)
 		case HLV_VER_FIELD:
 			verHex = value
 		case HLV_PV_FIELD:
