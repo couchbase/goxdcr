@@ -40,6 +40,7 @@ func (cr ConflictDetectionResult) String() string {
 	return "Unknown"
 }
 
+// the values of this type are base64 encoded strings and without any prefix like s_
 type DocumentSourceId string
 
 func UUIDtoDocumentSource(uuid string) (DocumentSourceId, error) {
@@ -78,7 +79,7 @@ type HLV struct {
 
 // This is the mutation current version
 type currentVersion struct {
-	source  DocumentSourceId // this is the base64 encoded string of UUID and without the "s_" prefix
+	source  DocumentSourceId
 	version uint64
 }
 
