@@ -68,14 +68,6 @@ const (
 	NotSendOther      NeedSendStatus = iota
 )
 
-type SetMetaXattrOptions struct {
-	// Target KV cannot do CR if bucket uses CCR, or if we need to preserve _sync.
-	// TODO: this needs change once MB-44034 is done.
-	noTargetCR   bool
-	sendHlv      bool // Pack the HLV and send in setWithMeta
-	preserveSync bool // Preserve target _sync XATTR and send it in setWithMeta.
-}
-
 /*
 ***********************************
 /* struct baseConfig
@@ -229,10 +221,10 @@ type dataBatch struct {
 	// XMEM config may change but only affect the next batch
 	// At the beginning of each batch we will check the config to decide the getMeta/getSubdoc and setMeta behavior
 	// Note that these are only needed for CCR and mobile currently. The specs will be nil otherwise. If nil, getMeta will be used.
+	// These are "templated" and references in each wrapped MCRequest will be created to refer to them
 	getMetaSpecWithoutHlv []base.SubdocLookupPathSpec
 	getMetaSpecWithHlv    []base.SubdocLookupPathSpec
 	getBodySpec           []base.SubdocLookupPathSpec // This one will get document body in addition to document metadata. Used for CCR only
-	setMetaXattrOptions   SetMetaXattrOptions
 
 	curCount          uint32
 	curSize           uint32
@@ -256,15 +248,10 @@ func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *data
 		sendLookupMap:     nil,
 		batch_nonempty_ch: make(chan bool),
 		nonempty_set:      false,
-		setMetaXattrOptions: SetMetaXattrOptions{
-			noTargetCR:   false,
-			sendHlv:      false,
-			preserveSync: false,
-		},
-		logger: logger}
+		logger:            logger}
 }
 
-func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *mc.MCRequest) bool) (uint32, bool, bool, error) {
+func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(req *base.WrappedMCRequest) bool) (uint32, bool, bool, error) {
 	var curCount uint32
 	var isFirst bool = false
 	var isFull bool = true
@@ -279,7 +266,7 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 			b.nonempty_set = true
 			close(b.batch_nonempty_ch)
 		}
-		if !classifyFunc(req.Req) {
+		if !classifyFunc(req) {
 			// If it fails the classifyFunc, then we're going to do bigDoc processing on it
 			b.getMetaMap[req.UniqueKey] = req
 		}
@@ -287,6 +274,11 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 		if curCount < b.capacity_count && curSize < b.capacity_size*1000 {
 			isFull = false
 		}
+
+		// When this batch is established, it establishes these specs so store it to be used in case of mutation retries
+		req.GetMetaSpecWithoutHlv = b.getMetaSpecWithoutHlv
+		req.GetMetaSpecWithHlv = b.getMetaSpecWithHlv
+		req.GetBodySpec = b.getBodySpec
 		return curCount, isFirst, isFull, nil
 	}
 
