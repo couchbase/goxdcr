@@ -152,6 +152,9 @@ type Router struct {
 	migrationUIRaiser func(string)
 
 	connectivityStatusGetter func() (metadata.ConnectivityStatus, error)
+
+	crossClusterVersioning uint32
+	mobileCompatMode       uint32
 }
 
 /**
@@ -1573,6 +1576,16 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 	wrapped_req.ColInfo = router.targetColInfoPool.Get()
 	wrapped_req.ColInfoMtx.Unlock()
 
+	isCCR := router.sourceCRMode == base.CRMode_Custom
+	isMobile := router.getMobileCompatMode() != base.MobileCompatibilityOff
+	crossClusterVersioning := router.getCrossClusterVersioning()
+	if isMobile {
+		wrapped_req.SetMetaXattrOptions.PreserveSync = true
+	}
+	if crossClusterVersioning || isCCR {
+		wrapped_req.SetMetaXattrOptions.SendHlv = true
+	}
+
 	return wrapped_req, nil
 }
 
@@ -1923,8 +1936,13 @@ func (router *Router) updateHighRepl(isHighReplicationObj interface{}) error {
 	return nil
 }
 
-func (router *Router) setMobileCompatibility(val uint32) {
+func (router *Router) SetMobileCompatibility(val uint32) {
 	router.filter.SetMobileCompatibility(val)
+	atomic.StoreUint32(&router.mobileCompatMode, val)
+}
+
+func (router *Router) getMobileCompatMode() int {
+	return int(atomic.LoadUint32(&router.mobileCompatMode))
 }
 
 func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
@@ -1992,7 +2010,12 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 
 	mobileCompatibleMode, ok := settings[metadata.MobileCompatibleKey].(int)
 	if ok {
-		router.setMobileCompatibility(uint32(mobileCompatibleMode))
+		router.SetMobileCompatibility(uint32(mobileCompatibleMode))
+	}
+
+	val, ok := settings[base.EnableCrossClusterVersioningKey].(bool)
+	if ok {
+		router.SetCrossClusterVersioning(val)
 	}
 
 	if len(errMap) > 0 {
@@ -2083,4 +2106,16 @@ func (router *Router) recycleDataObj(obj interface{}) {
 	default:
 		panic(fmt.Sprintf("Coding bug type is %v", reflect.TypeOf(obj)))
 	}
+}
+
+func (router *Router) SetCrossClusterVersioning(val bool) {
+	var storeVal uint32
+	if val {
+		storeVal = 1
+	}
+	atomic.StoreUint32(&router.crossClusterVersioning, storeVal)
+}
+
+func (router *Router) getCrossClusterVersioning() bool {
+	return atomic.LoadUint32(&router.crossClusterVersioning) == 1
 }

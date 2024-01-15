@@ -651,7 +651,7 @@ func TestMobilePreserveSync(t *testing.T) {
 	settings[base.EnableCrossClusterVersioningKey] = true
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
 	settings[base.VersionPruningWindowHrsKey] = 720
-	router.setMobileCompatibility(base.MobileCompatibilityActive)
+	router.SetMobileCompatibility(base.MobileCompatibilityActive)
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
@@ -825,7 +825,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 	settings[base.EnableCrossClusterVersioningKey] = true
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityActive
 	settings[base.VersionPruningWindowHrsKey] = 720
-	router.setMobileCompatibility(base.MobileCompatibilityActive)
+	router.SetMobileCompatibility(base.MobileCompatibilityActive)
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
@@ -916,7 +916,7 @@ func TestMobileMixedMode(t *testing.T) {
 
 	settings[base.EnableCrossClusterVersioningKey] = true
 	settings[base.VersionPruningWindowHrsKey] = 720
-	router.setMobileCompatibility(base.MobileCompatibilityActive)
+	router.SetMobileCompatibility(base.MobileCompatibilityActive)
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 

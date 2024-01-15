@@ -700,6 +700,12 @@ type WrappedMCRequest struct {
 	RetryCRCount   int
 	Cloned         bool
 	ClonedSyncCh   chan bool
+
+	SetMetaXattrOptions SetMetaXattrOptions
+	// The followings are established per batch and are references to those established per batch - read only
+	GetMetaSpecWithoutHlv []SubdocLookupPathSpec
+	GetMetaSpecWithHlv    []SubdocLookupPathSpec
+	GetBodySpec           []SubdocLookupPathSpec
 }
 
 func (req *WrappedMCRequest) GetReqBytes() []byte {
@@ -799,6 +805,62 @@ func (req *WrappedMCRequest) GetUncompressedBodySize() int {
 	} else {
 		return req.GetBodySize()
 	}
+}
+
+func (req *WrappedMCRequest) SetSkipTargetCRFlag() {
+	if len(req.Req.Extras) < 28 {
+		extras := make([]byte, 28)
+		copy(extras, req.Req.Extras)
+		req.Req.Extras = extras
+	}
+	options := binary.BigEndian.Uint32(req.Req.Extras[24:28])
+	options |= SKIP_CONFLICT_RESOLUTION_FLAG
+	binary.BigEndian.PutUint32(req.Req.Extras[24:28], options)
+}
+
+func (req *WrappedMCRequest) SetCasLockIfNeeded(lookup *SubdocLookupResponse) {
+	if lookup == nil || lookup.Resp.Status == gomemcached.KEY_ENOENT {
+		req.Req.Cas = 0
+	} else {
+		// Cas locking, meaning the request will only succeed if the target Cas matches this value
+		req.Req.Cas = lookup.Resp.Cas
+	}
+	if req.SetMetaXattrOptions.NoTargetCR {
+		req.SetSkipTargetCRFlag()
+	}
+}
+
+func (req *WrappedMCRequest) IsCasLockingRequest() bool {
+	if req.Req.Opcode == ADD_WITH_META && req.Req.Cas == 0 {
+		return true
+	}
+	if req.Req.Opcode == SET_WITH_META && req.Req.Cas != 0 {
+		return true
+	}
+	return false
+}
+
+// Used to translate to Memcached Opcodes that XDCR will issue for the target
+// based on the context of the current wrapped request
+func (wrappedReq *WrappedMCRequest) GetMemcachedCommand() gomemcached.CommandCode {
+	mcReq := wrappedReq.Req
+	opcode := mcReq.Opcode
+	if opcode == gomemcached.UPR_MUTATION || opcode == gomemcached.TAP_MUTATION {
+		if wrappedReq.SetMetaXattrOptions.NoTargetCR {
+			// We do source side CR only. Before calling this, CAS was set to the expected target CAS
+			if mcReq.Cas == 0 {
+				// 0 means target doesn't have the document do ADD
+				return ADD_WITH_META
+			} else {
+				return SET_WITH_META
+			}
+		} else {
+			return SET_WITH_META
+		}
+	} else if opcode == gomemcached.TAP_DELETE || opcode == gomemcached.UPR_DELETION || opcode == gomemcached.UPR_EXPIRATION {
+		return DELETE_WITH_META
+	}
+	return opcode
 }
 
 type McRequestMap map[string]*WrappedMCRequest
@@ -2580,4 +2642,12 @@ func IsDocLocked(resp *gomemcached.MCResponse) bool {
 		return true
 	}
 	return false
+}
+
+type SetMetaXattrOptions struct {
+	// Target KV cannot do CR if bucket uses CCR, or if we need to preserve _sync.
+	// TODO: this needs change once MB-44034 is done.
+	NoTargetCR   bool
+	SendHlv      bool // Pack the HLV and send in setWithMeta
+	PreserveSync bool // Preserve target _sync XATTR and send it in setWithMeta.
 }

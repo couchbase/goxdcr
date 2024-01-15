@@ -1324,6 +1324,11 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[metadata.CollectionsMappingRulesKey] = explicitMappingRules
 	}
 
+	crossCluster, ok := settings[base.EnableCrossClusterVersioningKey]
+	if ok {
+		routerSettings[base.EnableCrossClusterVersioningKey] = crossCluster
+	}
+
 	return routerSettings, nil
 }
 

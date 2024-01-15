@@ -768,7 +768,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 					capi.Logger().Debugf("%v did not send doc with key %v since it failed conflict resolution\n", capi.Id(), base.TagUD(item.Req.Key))
 				}
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
-					Opcode:      encodeOpCode(item.Req, SetMetaXattrOptions{}),
+					Opcode:      item.GetMemcachedCommand(),
 					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 					VBucket:     item.Req.VBucket,
 				}
@@ -787,7 +787,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 			// requests in req_list have strictly increasing seqnos
 			// each seqno is the new high seqno
 			additionalInfo := DataSentEventAdditional{Seqno: req.Seqno,
-				IsOptRepd:   capi.optimisticRep(req.Req),
+				IsOptRepd:   capi.optimisticRep(req),
 				Commit_time: time.Since(req.Start_time),
 				Opcode:      req.Req.Opcode,
 				IsExpirySet: (binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
@@ -853,7 +853,7 @@ func (capi *CapiNozzle) validateRunningState() error {
 
 func (capi *CapiNozzle) adjustRequest(req *base.WrappedMCRequest) {
 	mc_req := req.Req
-	mc_req.Opcode = encodeOpCode(mc_req, SetMetaXattrOptions{})
+	mc_req.Opcode = req.GetMemcachedCommand()
 	mc_req.Cas = 0
 }
 
@@ -1226,7 +1226,8 @@ func (capi *CapiNozzle) handleGeneralError(err error) {
 	}
 }
 
-func (capi *CapiNozzle) optimisticRep(req *mc.MCRequest) bool {
+func (capi *CapiNozzle) optimisticRep(wrappedReq *base.WrappedMCRequest) bool {
+	req := wrappedReq.Req
 	if req != nil {
 		return uint32(req.Size()) < capi.getOptiRepThreshold()
 	}
