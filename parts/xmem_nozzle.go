@@ -1349,7 +1349,9 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					ImportMutation: item.ImportMutation,
 				}
 				xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
-				if item.ImportMutation && xmem.getMobileCompatible() == base.MobileCompatibilityOff && atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 0, 1) {
+				if item.ImportMutation &&
+					!item.SetMetaXattrOptions.PreserveSync &&
+					atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 0, 1) {
 					xmem.importMutationEventId = xmem.eventsProducer.AddEvent(
 						base.LowPriorityMsg,
 						base.ImportDetectedStr,
