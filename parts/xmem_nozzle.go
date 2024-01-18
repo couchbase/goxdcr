@@ -1951,7 +1951,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 */ + len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
 			len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
 			len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
-			len(base.SERVER_SRC_PREFIX) + len(xmem.sourceBucketId) + 3 /* "s_<bucketId>", */ +
+			len(xmem.sourceBucketId) + 3 /* "<bucketId>", */ +
 			len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ +
 			18 /* "0x<16byte>"} */
 	}

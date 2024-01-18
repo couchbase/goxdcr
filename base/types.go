@@ -2080,7 +2080,8 @@ type StoppedPipelineErrCallback func(err error, cbCalled bool)
 
 type PipelineMgrStopCbType func(string, StoppedPipelineCallback, StoppedPipelineErrCallback) error
 
-var MaxBase64CASLength = len(Uint64ToBase64(math.MaxUint64))
+// for consistency, we will use all the version values in the HLV as HexLittleEndian with a 0x prefix
+var MaxHexCASLength = len(Uint64ToHexLittleEndian(math.MaxUint64)) + 2
 
 type ConflictManagerAction int
 

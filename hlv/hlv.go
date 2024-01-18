@@ -48,14 +48,6 @@ func UUIDtoDocumentSource(uuid string) (DocumentSourceId, error) {
 	return DocumentSourceId(ret), err
 }
 
-func ParseDocumentSource(src []byte) DocumentSourceId {
-	prefixLen := len(base.SERVER_SRC_PREFIX)
-	if len(src) <= prefixLen {
-		return ""
-	}
-	return DocumentSourceId(src[prefixLen:])
-}
-
 type VersionsMap map[DocumentSourceId]uint64
 
 // Add the other {src,ver} to vm if it is not there or if other has higher ver
@@ -293,8 +285,8 @@ func BytesRequired(vMap VersionsMap) int {
 	}
 	res := 0
 	for k, _ := range vMap {
-		res = res + len(k) + 3                  // quotes and column
-		res = res + base.MaxBase64CASLength + 3 // quotes and comma
+		res = res + len(k) + 3               // quotes and column
+		res = res + base.MaxHexCASLength + 3 // quotes and comma
 	}
 	if res != 0 {
 		res = res + 3 // Add { and } and nil terminator

@@ -1534,8 +1534,6 @@ const (
 	BucketMergeFunctionKey = "default"
 
 	CCRKVRestCallRetryInterval = 2 * time.Second
-
-	SERVER_SRC_PREFIX = "s_"
 )
 
 const (
