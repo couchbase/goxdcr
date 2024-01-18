@@ -533,9 +533,8 @@ func VersionMapToBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction
 	for key, cas := range vMap {
 		if (pruneFunction == nil) || ((*pruneFunction)(cas) == false) {
 			// Not pruned.
-			prefixedKey := append([]byte(base.SERVER_SRC_PREFIX), []byte(key)...)
-			value := base.Uint64ToBase64(cas)
-			body, pos = base.WriteJsonRawMsg(body, []byte(prefixedKey), pos, base.WriteJsonKey, len(prefixedKey), first /*firstKey*/)
+			value := base.Uint64ToHexLittleEndian(cas)
+			body, pos = base.WriteJsonRawMsg(body, []byte(key), pos, base.WriteJsonKey, len(key), first /*firstKey*/)
 			body, pos = base.WriteJsonRawMsg(body, value, pos, base.WriteJsonValue, len(value), false /*firstKey*/)
 			first = false
 		} else {
@@ -561,8 +560,7 @@ func formatCv(meta *CRMetadata, body []byte, pos int) int {
 	src := hlv.GetCvSrc()
 	ver := hlv.GetCvVer()
 	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_SRC_FIELD), pos, base.WriteJsonKey, len(HLV_SRC_FIELD), false /*firstKey*/)
-	prefixedSrc := append([]byte(base.SERVER_SRC_PREFIX), []byte(src)...)
-	body, pos = base.WriteJsonRawMsg(body, prefixedSrc, pos, base.WriteJsonValue, len(prefixedSrc), false /*firstKey*/)
+	body, pos = base.WriteJsonRawMsg(body, []byte(src), pos, base.WriteJsonValue, len(src), false /*firstKey*/)
 	cvHex := base.Uint64ToHexLittleEndian(ver)
 	body, pos = base.WriteJsonRawMsg(body, []byte(HLV_VER_FIELD), pos, base.WriteJsonKey, len(HLV_VER_FIELD), false /*firstKey*/)
 	body, pos = base.WriteJsonRawMsg(body, cvHex, pos, base.WriteJsonValue, len(cvHex), false /*firstKey*/)
@@ -591,8 +589,8 @@ func xattrVVtoMap(vvBytes []byte) (hlv.VersionsMap, error) {
 		if err != nil {
 			return nil, err
 		}
-		src := hlv.ParseDocumentSource(k)
-		ver, err := base.Base64ToUint64(v)
+		src := hlv.DocumentSourceId(k)
+		ver, err := base.HexLittleEndianToUint64(v)
 		if err != nil {
 			return nil, err
 		}
@@ -605,25 +603,23 @@ func xattrVVtoMap(vvBytes []byte) (hlv.VersionsMap, error) {
 // This routine receives the target metadata and returns an updated pv and mv to be used to send subdoc_multi_mutation to source.
 // Target with smaller CAS can only dominate source if source document is a merged document.
 func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err error) {
-	prefixLen := len(base.SERVER_SRC_PREFIX)
 	pv := meta.hlv.GetPV()
 	pvPos := 0
 	if len(pv) > 0 {
 		pvlen := 0
 		for src, _ := range pv {
-			pvlen = pvlen + prefixLen + len(src) + base.MaxBase64CASLength + 6 // quotes and sepeartors
+			pvlen = pvlen + len(src) + base.MaxHexCASLength + 6 // quotes and sepeartors
 		}
 		// We may need to add cv and document CAS to it also
-		pvlen = pvlen + prefixLen + len(meta.hlv.GetCvSrc()) + (base.MaxBase64CASLength + 6)
+		pvlen = pvlen + len(meta.hlv.GetCvSrc()) + (base.MaxHexCASLength + 6)
 		pvlen = pvlen + 2 // { and }
 
 		// TODO(MB-41808): data pool
 		pvBytes = make([]byte, pvlen)
 		firstKey := true
 		for src, ver := range pv {
-			value := base.Uint64ToBase64(ver)
-			prefixedSrc := append([]byte(base.SERVER_SRC_PREFIX), []byte(src)...)
-			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, prefixedSrc, pvPos, base.WriteJsonKey, len(prefixedSrc), firstKey /*firstKey*/)
+			value := base.Uint64ToHexLittleEndian(ver)
+			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, []byte(src), pvPos, base.WriteJsonKey, len(src), firstKey /*firstKey*/)
 			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, value, pvPos, base.WriteJsonValue, len(value), false /*firstKey*/)
 			firstKey = false
 		}
@@ -635,16 +631,15 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 	if len(mv) > 0 {
 		mvlen := 0
 		for src, _ := range mv {
-			mvlen = mvlen + prefixLen + len(src) + base.MaxBase64CASLength + 6 // quotes and sepeartors
+			mvlen = mvlen + len(src) + base.MaxHexCASLength + 6 // quotes and sepeartors
 		}
 		mvlen = mvlen + 2 // { and }
 		// TODO(MB-41808): data pool
 		mvBytes = make([]byte, mvlen)
 		firstKey := true
 		for src, ver := range mv {
-			value := base.Uint64ToBase64(ver)
-			prefixedSrc := append([]byte(base.SERVER_SRC_PREFIX), []byte(src)...)
-			mvBytes, mvPos = base.WriteJsonRawMsg(mvBytes, prefixedSrc, mvPos, base.WriteJsonKey, len(prefixedSrc), firstKey /*firstKey*/)
+			value := base.Uint64ToHexLittleEndian(ver)
+			mvBytes, mvPos = base.WriteJsonRawMsg(mvBytes, []byte(src), mvPos, base.WriteJsonKey, len(src), firstKey /*firstKey*/)
 			mvBytes, mvPos = base.WriteJsonRawMsg(mvBytes, value, mvPos, base.WriteJsonValue, len(value), false /*firstKey*/)
 			firstKey = false
 		}
@@ -660,9 +655,8 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 		}
 
 		source := meta.hlv.GetCvSrc()
-		version := base.Uint64ToBase64(meta.hlv.GetCvVer())
-		prefixedSource := append([]byte(base.SERVER_SRC_PREFIX), []byte(source)...)
-		pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, prefixedSource, pvPos, base.WriteJsonKey, len(prefixedSource), first /*firstKey*/)
+		version := base.Uint64ToHexLittleEndian(meta.hlv.GetCvVer())
+		pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, []byte(source), pvPos, base.WriteJsonKey, len(source), first /*firstKey*/)
 		pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, version, pvPos, base.WriteJsonValue, len(version), false /*firstKey*/)
 		pvBytes[pvPos] = '}'
 		pvPos++
@@ -686,7 +680,7 @@ func parseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSou
 		}
 		switch string(key) {
 		case HLV_SRC_FIELD:
-			src = hlv.ParseDocumentSource(value)
+			src = hlv.DocumentSourceId(value)
 		case HLV_VER_FIELD:
 			verHex = value
 		case HLV_PV_FIELD:
@@ -852,7 +846,7 @@ func NewMetadataForTest(key, source []byte, cas, revId uint64, cvCasHex, cvSrc, 
 	if err != nil {
 		return nil, err
 	}
-	hlv, err := hlv.NewHLV(hlv.ParseDocumentSource(source), cas, cvCas, hlv.ParseDocumentSource(cvSrc), ver, pvMap, mvMap)
+	hlv, err := hlv.NewHLV(hlv.DocumentSourceId(source), cas, cvCas, hlv.DocumentSourceId(cvSrc), ver, pvMap, mvMap)
 	if err != nil {
 		return nil, err
 	}
