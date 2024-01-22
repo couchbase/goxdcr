@@ -704,16 +704,66 @@ type WrappedMCRequest struct {
 	Cloned         bool
 	ClonedSyncCh   chan bool
 
-	SetMetaXattrOptions SetMetaXattrOptions
+	HLVModeOptions   HLVModeOptions
+	SubdocCmdOptions *SubdocCmdOptions
+
 	// The followings are established per batch and are references to those established per batch - read only
 	GetMetaSpecWithoutHlv []SubdocLookupPathSpec
 	GetMetaSpecWithHlv    []SubdocLookupPathSpec
 	GetBodySpec           []SubdocLookupPathSpec
-	// copy of Req.Cas, which can be used if Req.Cas is set to 0
-	ActualCas uint64
 
-	// nil if it doesn't exist or the new mou would be empty
+	// In the mobile mode, we might have to recompose _mou before replicating
+	// This stores the re-composed _mou to replicate, nil if it doesn't exist or the new mou would be empty
 	MouAfterProcessing []byte
+}
+
+// set the intent to use subdoc command
+func (req *WrappedMCRequest) SetSubdocOp() {
+	if req == nil {
+		return
+	}
+
+	req.SubdocCmdOptions = &SubdocCmdOptions{}
+
+	// the actual CAS is not yet set, so cannot set req.Req.Opcode yet
+	opcode := req.GetMemcachedCommand()
+	switch opcode {
+	case mc.DELETE_WITH_META:
+		req.SubdocCmdOptions.SubdocOp = SubdocDelete
+	case mc.ADD_WITH_META:
+		fallthrough
+	case mc.SET_WITH_META:
+		req.SubdocCmdOptions.SubdocOp = SubdocSet
+	default:
+		panic(fmt.Sprintf("invalid memcached opcode %v", opcode))
+	}
+}
+
+// returns true if the command used will be a subdoc operation instead of *_WITH_META
+func (req *WrappedMCRequest) IsSubdocOp() bool {
+	return req.SubdocCmdOptions != nil &&
+		req.SubdocCmdOptions.SubdocOp != NotSubdoc
+}
+
+// store some fields incase we need to retry because "cas locking" failed
+// if we need to retry on cas locking failure with *_with_meta, the structure for request body, extras and datatype would be different incase of non-subdoc operations
+func (req *WrappedMCRequest) SetSubdocOptionsForRetry(body, extras []byte, datatype uint8) {
+	if req.SubdocCmdOptions == nil {
+		return
+	}
+	req.SubdocCmdOptions.BodyPreSubdocCmd = body
+	req.SubdocCmdOptions.ExtrasPreSubdocCmd = extras
+	req.SubdocCmdOptions.DatatypePreSubdocCmd = datatype
+}
+
+func (req *WrappedMCRequest) ResetSubdocOptionsForRetry() {
+	if req.SubdocCmdOptions == nil {
+		return
+	}
+
+	req.SubdocCmdOptions.BodyPreSubdocCmd = nil
+	req.SubdocCmdOptions.ExtrasPreSubdocCmd = nil
+	req.SubdocCmdOptions = nil
 }
 
 func (req *WrappedMCRequest) GetReqBytes() []byte {
@@ -761,6 +811,7 @@ func (req *WrappedMCRequest) UpdateReqBytes() {
 func (req *WrappedMCRequest) ConstructUniqueKey(mutationCnter uint64) {
 	var buffer bytes.Buffer
 	buffer.Write(req.Req.Key)
+	buffer.WriteString("-")
 	buffer.WriteString(strconv.FormatUint(mutationCnter, 10))
 	req.UniqueKey = buffer.String()
 
@@ -827,14 +878,21 @@ func (req *WrappedMCRequest) SetSkipTargetCRFlag() {
 	binary.BigEndian.PutUint32(req.Req.Extras[24:28], options)
 }
 
-func (req *WrappedMCRequest) SetCasLockIfNeeded(lookup *SubdocLookupResponse) {
+// set appropriate CAS and skip target CR flag for *_WITH_META requests
+func (req *WrappedMCRequest) SetCasAndFlagsForMetaOp(lookup *SubdocLookupResponse) {
+	if req.IsSubdocOp() {
+		return
+	}
+
 	if lookup == nil || lookup.Resp.Status == gomemcached.KEY_ENOENT {
+		// ADD_WITH_META in mobile/CCR mode - fails with KEY_EEXISTS if the doc exists.
 		req.Req.Cas = 0
 	} else {
-		// Cas locking, meaning the request will only succeed if the target Cas matches this value
+		// (SET|DELETE)_WITH_META in mobile/CCR mode - cas locking - request will fail with KEY_EEXISTS if the CAS of the doc doesn't match the set CAS.
 		req.Req.Cas = lookup.Resp.Cas
 	}
-	if req.SetMetaXattrOptions.NoTargetCR {
+
+	if req.HLVModeOptions.NoTargetCR {
 		req.SetSkipTargetCRFlag()
 	}
 }
@@ -846,16 +904,20 @@ func (req *WrappedMCRequest) IsCasLockingRequest() bool {
 	if req.Req.Opcode == SET_WITH_META && req.Req.Cas != 0 {
 		return true
 	}
+	if req.IsSubdocOp() {
+		return true
+	}
 	return false
 }
 
 // Used to translate to Memcached Opcodes that XDCR will issue for the target
-// based on the context of the current wrapped request
+// based on the context of the current wrapped request.
+// In NoTargetCR mode (mobile/CCR mode), req.Cas is expected to be already set.
 func (wrappedReq *WrappedMCRequest) GetMemcachedCommand() gomemcached.CommandCode {
 	mcReq := wrappedReq.Req
 	opcode := mcReq.Opcode
 	if opcode == gomemcached.UPR_MUTATION || opcode == gomemcached.TAP_MUTATION {
-		if wrappedReq.SetMetaXattrOptions.NoTargetCR {
+		if wrappedReq.HLVModeOptions.NoTargetCR {
 			// We do source side CR only. Before calling this, CAS was set to the expected target CAS
 			if mcReq.Cas == 0 {
 				// 0 means target doesn't have the document do ADD
@@ -2689,10 +2751,156 @@ func IsDocLocked(resp *gomemcached.MCResponse) bool {
 	return false
 }
 
-type SetMetaXattrOptions struct {
+type SubdocOpType uint8
+
+const (
+	NotSubdoc    SubdocOpType = iota
+	SubdocSet    SubdocOpType = iota
+	SubdocDelete SubdocOpType = iota
+)
+
+// HLVModeOptions indicate the options set when performing replication using HLV i.e. CCR, mobile mode etc
+type HLVModeOptions struct {
 	// Target KV cannot do CR if bucket uses CCR, or if we need to preserve _sync.
 	// TODO: this needs change once MB-44034 is done.
 	NoTargetCR   bool
-	SendHlv      bool // Pack the HLV and send in setWithMeta
-	PreserveSync bool // Preserve target _sync XATTR and send it in setWithMeta.
+	SendHlv      bool   // Pack the HLV and send in setWithMeta
+	PreserveSync bool   // Preserve target _sync XATTR and send it in setWithMeta.
+	ActualCas    uint64 // copy of Req.Cas, which can be used if Req.Cas is set to 0
+}
+
+// These options are explicitly set when SubdocOp != NotSubdoc
+// i.e. when subdoc command is used for replication instead of *_with_meta
+type SubdocCmdOptions struct {
+	SubdocOp                             SubdocOpType
+	BodyPreSubdocCmd, ExtrasPreSubdocCmd []byte
+	DatatypePreSubdocCmd                 uint8
+	// booleans to indicate if corresponding target doc has an non empty pv and mv
+	TargetHasPv          bool
+	TargetHasMv          bool
+	TargetDocIsTombstone bool
+}
+
+type SubdocMutationPathSpec struct {
+	Opcode uint8
+	Flags  uint8
+	Path   []byte
+	Value  []byte
+}
+
+func NewSubdocMutationPathSpec(opcodeIn uint8, flagsIn uint8, pathIn []byte, valueIn []byte) SubdocMutationPathSpec {
+	return SubdocMutationPathSpec{
+		Opcode: opcodeIn,
+		Flags:  flagsIn,
+		Path:   pathIn,
+		Value:  valueIn,
+	}
+}
+
+func (spec *SubdocMutationPathSpec) Size() int {
+	// 1B opcode, 1B flags, 2B path len, 4B value len
+	return 8 + len(spec.Path) + len(spec.Value)
+}
+
+type SubdocMutationPathSpecs []SubdocMutationPathSpec
+
+func NewSubdocMutationPathSpecs() SubdocMutationPathSpecs {
+	return make(SubdocMutationPathSpecs, 0)
+}
+
+// Given a xattr key and value - add a spec to upsert the xattr.
+// Uses SUBDOC_DICT_UPSERT opcode and SUBDOC_FLAG_MKDIR_P|SUBDOC_FLAG_XATTR flags
+func (smps *SubdocMutationPathSpecs) WriteKV(path, value []byte) error {
+	if smps == nil {
+		return ErrorNilPtr
+	}
+
+	newSpec := NewSubdocMutationPathSpec(uint8(SUBDOC_DICT_UPSERT), uint8(SUBDOC_FLAG_MKDIR_P|SUBDOC_FLAG_XATTR), path, value)
+	*smps = append(*smps, newSpec)
+
+	return nil
+}
+
+func (smps SubdocMutationPathSpecs) Size() int {
+	if len(smps) == 0 {
+		return 0
+	}
+
+	var length int
+	for _, spec := range smps {
+		length += spec.Size()
+	}
+
+	return length
+}
+
+// If document body is included, it must be specified as the last path in the specs.
+// If targetDocIsTombstone is true, we set CAS to 0 and set an ADD flag. It will fail with KEY_EEXISTS if the doc exists.
+// If targetDocIsTombstone is false, targetCas must match the document CAS. Otherwise it will fail with KEY_EEXISTS (i.e. cas locking).
+// Make sure that accessDeleted is false if one of the subdoc spec is for CMD_SET.
+// If reuseReq is set, then the source request which was input, will be modified and returned, instead of a creating a new request instance.
+func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, targetCas uint64, bodyslice []byte, accessDeleted, targetDocIsTombstone, reuseReq bool) *mc.MCRequest {
+	// Each path has: 1B Opcode -> 1B flag -> 2B path length -> 4B value length -> path -> value
+	pos := 0
+	n := 0
+	for i := 0; i < len(specs); i++ {
+		bodyslice[pos] = specs[i].Opcode // 1B opcode
+		pos++
+		bodyslice[pos] = specs[i].Flags // 1B flag
+		pos++
+		binary.BigEndian.PutUint16(bodyslice[pos:pos+2], uint16(len(specs[i].Path))) // 2B path length
+		pos = pos + 2
+		binary.BigEndian.PutUint32(bodyslice[pos:pos+4], uint32(len(specs[i].Value))) // 4B value length
+		pos = pos + 4
+		n = copy(bodyslice[pos:], specs[i].Path)
+		pos = pos + n
+		n = copy(bodyslice[pos:], specs[i].Value)
+		pos = pos + n
+	}
+
+	var extras []byte
+	cas := targetCas
+
+	// Set expiry
+	if len(source.Extras) >= 8 && binary.BigEndian.Uint32(source.Extras[4:8]) != 0 {
+		extras = source.Extras[4:8]
+	}
+
+	var flags uint8 = 0
+	if accessDeleted {
+		flags |= mc.SUBDOC_FLAG_ACCESS_DELETED
+	} else if targetDocIsTombstone {
+		// The subdoc command will follow the ADD semantics i.e.
+		// cas should be 0 and returns KEY_EEXISTS if the document exists
+		flags |= mc.SUBDOC_FLAG_ADD
+		cas = 0
+	}
+
+	// Set Flags
+	if flags != 0 {
+		extras = append(extras, flags)
+	}
+
+	if reuseReq {
+		source.Opcode = SUBDOC_MULTI_MUTATION
+		source.Body = bodyslice[:pos]
+		source.Extras = extras
+		source.Cas = cas
+		// since the body of subdoc command consists of operational specs, the only supported datatype will be Raw/Unknown.
+		// Snappy could be supported in future, but as of the date of writing this code, we cannot compress the body of subdoc command.
+		source.DataType = RawDataType
+		return source
+	}
+
+	// TODO: MB-61803 - use mcRequestPool
+	req := mc.MCRequest{
+		Opcode:   SUBDOC_MULTI_MUTATION,
+		VBucket:  source.VBucket,
+		Key:      source.Key,
+		Cas:      cas,
+		Extras:   extras,
+		Body:     bodyslice[:pos],
+		DataType: RawDataType,
+	}
+	return &req
 }

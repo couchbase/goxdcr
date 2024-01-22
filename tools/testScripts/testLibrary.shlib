@@ -95,6 +95,32 @@ function grepForPanics {
 	return 0
 }
 
+function grepForErrs {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+	for dir in $(ls $logsDir); do
+		count=$(grep -c "decoding source mutation" ${logsDir}/${dir}/goxdcr.log)
+		if (($count > 0)); then
+			echo "WARNING Found errs in ${logsDir}/${dir}"
+			exit 1
+		fi
+	done
+	return 0
+}
+
+function grepForEINVAL {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+	for dir in $(ls $logsDir); do
+		count=$(grep -c "EINVAL" ${logsDir}/${dir}/goxdcr.log)
+		if (($count > 0)); then
+			echo "WARNING Found errs in ${logsDir}/${dir}"
+			exit 1
+		fi
+	done
+	return 0
+}
+
 function grepForInvalidCommand {
 	local ns_serverDir=$(getNsServerDir)
 	local logsDir="${ns_serverDir}/logs"
@@ -104,6 +130,38 @@ function grepForInvalidCommand {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found invalid format in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
+function grepForMultiError {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "SUBDOC_BAD_MULTI" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found SUBDOC_BAD_MULTI in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
+function grepForDecodingError {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "error decoding" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'error decoding' in ${logsDir}/${dir}"
 				exit 1
 			fi
 		done
@@ -168,13 +226,16 @@ function waitForChangesLeft0 {
 		elif (($changesLeft > 0)); then
 			echo "Changes left $changesLeft is not 0 yet..."
 		elif (($changesLeft == 0)); then
-			break
+			return 0
 		else
 			echo "Changes left unknown value: $changesLeft"
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+
+	echo "changes_left never went to zero"
+	return 0
 }
 
 function checkNonNegativeChangesLeft {
@@ -1601,6 +1662,27 @@ function validatePrometheusStatsNon0 {
 
 	if (($count == 0)); then
 		echo "Guardrail resident ratio shows 0"
+		echo "Stat $prometheusStatsName shows 0"
+		exit 1
+	fi
+}
+
+# Validates that the result is 0
+function validatePrometheusStatsIs0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	local prometheusStatsName=$4
+	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+	local prometheusOut
+	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+	local count
+	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
+		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+	if (($count > 0)); then
+		echo "Stat $prometheusStatsName shows $count"
 		exit 1
 	fi
 }

@@ -116,17 +116,7 @@ type mergeFailureInfo struct {
 	cas   uint64
 	err   string
 }
-type SubdocMutationPathSpec struct {
-	opcode uint8
-	flags  uint8
-	path   []byte
-	value  []byte
-}
 
-func (spec *SubdocMutationPathSpec) size() int {
-	// 1B opcode, 1B flags, 2B path len, 4B value len
-	return 8 + len(spec.path) + len(spec.value)
-}
 func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string, top_svc service_def.XDCRCompTopologySvc, utils utilities.UtilsIface) *ConflictManager {
 	return &ConflictManager{
 		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, log.NewLogger("ConflictManager", log.DefaultLoggerContext)),
@@ -388,62 +378,62 @@ func (c *ConflictManager) formatTargetDoc(input *crMeta.ConflictParams) (*mc.MCR
 	if pv != nil || hadPv {
 		specslen++
 	}
-	var spec SubdocMutationPathSpec
-	specs := make([]SubdocMutationPathSpec, 0, specslen)
+	var spec base.SubdocMutationPathSpec
+	specs := make([]base.SubdocMutationPathSpec, 0, specslen)
 
 	// cvCas path. We use macro expansion
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR|base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION))
 	specs = append(specs, spec)
-	bodylen = bodylen + spec.size()
+	bodylen = bodylen + spec.Size()
 
 	// src path. It is a new update (subdoc_multi_mutation) at source. So src is source bucket
 	id := []byte("\"" + string(input.SourceId) + "\"")
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_SRC_PATH), id}
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_SRC_PATH), id)
 	specs = append(specs, spec)
-	bodylen = bodylen + spec.size()
+	bodylen = bodylen + spec.Size()
 
 	// CV path. We use macro expansion to match the new CAS.
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_VER_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR|base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_VER_PATH), []byte(base.CAS_MACRO_EXPANSION))
 	specs = append(specs, spec)
-	bodylen = bodylen + spec.size()
+	bodylen = bodylen + spec.Size()
 
 	// MV path. Target MV could be nil as long as its PV dominates.
 	if mv != nil {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), mv}
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), mv)
 		specs = append(specs, spec)
-		bodylen = bodylen + spec.size()
+		bodylen = bodylen + spec.Size()
 	} else if hadMv {
 		// There is no longer MV. Need to delete it.
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), nil}
-		bodylen = bodylen + spec.size()
+		base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), nil)
+		bodylen = bodylen + spec.Size()
 		specs = append(specs, spec)
 	}
 	// pv path
 	if pv != nil {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), pv}
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), pv)
 		specs = append(specs, spec)
-		bodylen = bodylen + spec.size()
+		bodylen = bodylen + spec.Size()
 	} else if hadPv {
 		// There is no longer PV. Need to delete it
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), nil}
-		bodylen = bodylen + spec.size()
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), nil)
+		bodylen = bodylen + spec.Size()
 		specs = append(specs, spec)
 	}
 	// body path
 	body, _ := input.Target.ResponseForAPath("")
 	if body != nil {
-		spec = SubdocMutationPathSpec{uint8(mc.SET), uint8(0), []byte(""), body}
+		spec = base.NewSubdocMutationPathSpec(uint8(mc.SET), uint8(0), []byte(""), body)
 	} else {
-		spec = SubdocMutationPathSpec{uint8(mc.DELETE), uint8(0), []byte(""), nil}
+		spec = base.NewSubdocMutationPathSpec(uint8(mc.DELETE), uint8(0), []byte(""), nil)
 		c.Logger().Errorf("%v: Unexpected empty target document for key %v%v%v. LWW should have been used.", c.pipeline.FullTopic(), base.UdTagBegin, input.Target.Resp.Key, base.UdTagEnd)
 		// TODO (MB-40143). Remove before CC shipping
 		panic("Empty doc SetBack to source")
 	}
 	specs = append(specs, spec)
-	bodylen = bodylen + spec.size()
+	bodylen = bodylen + spec.Size()
 	// TODO(MB-41808): data pool
 	newbody := make([]byte, bodylen)
-	req := c.composeRequestForSubdocMutation(specs, input.Source.Req, newbody, true)
+	req := base.ComposeRequestForSubdocMutation(specs, input.Source.Req, input.Source.Req.Cas, newbody, false, false, false)
 	return req, nil
 }
 
@@ -493,49 +483,49 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	if pvlen > 0 || sourceMeta.HadPv() {
 		specslen++
 	}
-	specs := make([]SubdocMutationPathSpec, 0, specslen)
+	specs := make([]base.SubdocMutationPathSpec, 0, specslen)
 	// cvCas path. We use macro expansion
-	spec := SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION)}
+	spec := base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR|base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION))
 	specs = append(specs, spec)
-	bodylen = bodylen + spec.size()
+	bodylen = bodylen + spec.Size()
 	// ID path
 	sourceId := "\"" + string(input.SourceId) + "\""
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_SRC_PATH), []byte(sourceId)}
-	bodylen = bodylen + spec.size()
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_SRC_PATH), []byte(sourceId))
+	bodylen = bodylen + spec.Size()
 	specs = append(specs, spec)
 	// CV path
-	spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR | base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_VER_PATH), []byte(base.CAS_MACRO_EXPANSION)}
-	bodylen = bodylen + spec.size()
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR|base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_VER_PATH), []byte(base.CAS_MACRO_EXPANSION))
+	bodylen = bodylen + spec.Size()
 	specs = append(specs, spec)
 	// MV path
 	if mvlen > 0 {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), mv}
-		bodylen = bodylen + spec.size()
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), mv)
+		bodylen = bodylen + spec.Size()
 		specs = append(specs, spec)
 	} else if sourceMeta.HadMv() {
 		// There is no longer MV. Need to delete it.
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), nil}
-		bodylen = bodylen + spec.size()
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_MV_PATH), nil)
+		bodylen = bodylen + spec.Size()
 		specs = append(specs, spec)
 	}
 	// PV path
 	if pvlen > 0 {
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P | base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), pv}
-		bodylen = bodylen + spec.size()
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), pv)
+		bodylen = bodylen + spec.Size()
 		specs = append(specs, spec)
 	} else if sourceMeta.HadPv() {
 		// There is no longer PV. Need to delete it
-		spec = SubdocMutationPathSpec{uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), nil}
-		bodylen = bodylen + spec.size()
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(crMeta.XATTR_PV_PATH), nil)
+		bodylen = bodylen + spec.Size()
 		specs = append(specs, spec)
 	}
 	// body path
-	spec = SubdocMutationPathSpec{uint8(mc.SET), uint8(0), nil, mergedDoc}
-	bodylen = bodylen + spec.size()
+	spec = base.NewSubdocMutationPathSpec(uint8(mc.SET), uint8(0), nil, mergedDoc)
+	bodylen = bodylen + spec.Size()
 	specs = append(specs, spec)
 	// TODO(MB-41808): data pool
 	newbody := make([]byte, bodylen)
-	req := c.composeRequestForSubdocMutation(specs, input.Source.Req, newbody, true)
+	req := base.ComposeRequestForSubdocMutation(specs, input.Source.Req, input.Source.Req.Cas, newbody, false, false, false)
 	return req, nil
 }
 func (c *ConflictManager) sendDocument(id int, input *crMeta.ConflictParams, req *mc.MCRequest, client *base.XmemClient) {
@@ -691,47 +681,9 @@ func (c *ConflictManager) initializeClient() (*base.XmemClient, error) {
 		base.XmemMaxRetry, base.XmemMaxReadDownTime, c.Logger())
 	return xmemClient, nil
 }
+
 func (c *ConflictManager) getPoolName() string {
 	return c.pipeline.Topic() + "conflictManager/"
-}
-
-// If document body is included, it must be specified as the last path in the specs.
-// If caslock is true, source.Cas must match the document. Otherwise it will fail with KEY_EEXIST
-func (c *ConflictManager) composeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, bodyslice []byte, caslock bool) *mc.MCRequest {
-	// Each path has: 1B Opcode -> 1B flag -> 2B path length -> 4B value length -> path -> value
-	pos := 0
-	for i := 0; i < len(specs); i++ {
-		bodyslice[pos] = specs[i].opcode // 1B opcode
-		pos++
-		bodyslice[pos] = specs[i].flags // 1B flag
-		pos++
-		binary.BigEndian.PutUint16(bodyslice[pos:pos+2], uint16(len(specs[i].path))) // 2B path length
-		pos = pos + 2
-		binary.BigEndian.PutUint32(bodyslice[pos:pos+4], uint32(len(specs[i].value))) // 4B value length
-		pos = pos + 4
-		n := copy(bodyslice[pos:], specs[i].path)
-		pos = pos + n
-		n = copy(bodyslice[pos:], specs[i].value)
-		pos = pos + n
-	}
-	var cas uint64 = 0
-	if caslock {
-		cas = source.Cas
-	}
-	// We don't need ACCESS_DELETED in this command since we use LWW for deleted docs and the expected source doc should never be deleted here.
-	// If user deleted it before we setback, we will get ENOENT error which is correct.
-	// Set expiry
-	var extras []byte
-	if binary.BigEndian.Uint32(source.Extras[4:8]) != 0 {
-		extras = source.Extras[4:8]
-	}
-	req := mc.MCRequest{Opcode: base.SUBDOC_MULTI_MUTATION,
-		VBucket: source.VBucket,
-		Key:     source.Key,
-		Cas:     cas,
-		Extras:  extras,
-		Body:    bodyslice[:pos]}
-	return &req
 }
 
 // TODO: MB-41122, consolidate with same in XMEM

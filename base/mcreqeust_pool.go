@@ -67,6 +67,12 @@ func (pool *MCRequestPool) cleanReq(req *WrappedMCRequest) *WrappedMCRequest {
 	req.RetryCRCount = 0
 	req.NeedToRecompress = false
 	req.ImportMutation = false
+	req.HLVModeOptions.NoTargetCR = false
+	req.HLVModeOptions.PreserveSync = false
+	req.HLVModeOptions.SendHlv = false
+	req.HLVModeOptions.ActualCas = 0
+	req.MouAfterProcessing = nil
+	req.ResetSubdocOptionsForRetry()
 	return req
 }
 

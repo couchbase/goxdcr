@@ -769,7 +769,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 				}
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
 					Opcode:      item.GetMemcachedCommand(),
-					IsExpirySet: (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+					IsExpirySet: (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 					VBucket:     item.Req.VBucket,
 				}
 				capi.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, capi, nil, additionalInfo))
@@ -790,7 +790,7 @@ func (capi *CapiNozzle) batchSendWithRetry(batch *capiBatch) error {
 				IsOptRepd:   capi.optimisticRep(req),
 				Commit_time: time.Since(req.Start_time),
 				Opcode:      req.Req.Opcode,
-				IsExpirySet: (binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
+				IsExpirySet: (len(req.Req.Extras) >= 8 && binary.BigEndian.Uint32(req.Req.Extras[4:8]) != 0),
 				VBucket:     req.Req.VBucket,
 				Req_size:    req.Req.Size(),
 			}
@@ -853,8 +853,8 @@ func (capi *CapiNozzle) validateRunningState() error {
 
 func (capi *CapiNozzle) adjustRequest(req *base.WrappedMCRequest) {
 	mc_req := req.Req
-	mc_req.Opcode = req.GetMemcachedCommand()
 	mc_req.Cas = 0
+	mc_req.Opcode = req.GetMemcachedCommand()
 }
 
 // batch call to update docs on target

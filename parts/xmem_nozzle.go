@@ -412,10 +412,12 @@ func (buf *requestBuffer) enSlot(mcReq *base.WrappedMCRequest) (uint16, int, []b
 // always called with lock on buf.slots[index]. no need for separate lock on buf.sequences[index]
 func (buf *requestBuffer) adjustRequest(req *base.WrappedMCRequest, index uint16) {
 	mc_req := req.Req
-	mc_req.Opcode = req.GetMemcachedCommand()
-	if !req.SetMetaXattrOptions.NoTargetCR {
-		//if !opt.NoTargetCR {
-		// No need for Cas locking in normal case when target CR is expected
+	mc_req.Opaque = base.GetOpaque(index, buf.sequences[int(index)])
+
+	// Set opcode and CAS for normal (non-mobile/non-CCR) mode.
+	if !req.HLVModeOptions.NoTargetCR {
+		// No need for Cas locking in normal case (non-mobile/non-CCR mode) when target CR is expected
+		// Wildcard CAS of 0 will not result in KEY_EEXISTS even if the request CAS != doc CAS
 		mc_req.Cas = 0
 	}
 
@@ -1010,7 +1012,7 @@ func (xmem *XmemNozzle) accumuBatch(request *base.WrappedMCRequest) error {
 		// Change is from target. Don't replicate back
 		additionalInfo := TargetDataSkippedEventAdditional{Seqno: request.Seqno,
 			Opcode:      request.GetMemcachedCommand(),
-			IsExpirySet: (binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
+			IsExpirySet: (len(request.Req.Extras) >= 8 && binary.BigEndian.Uint32(request.Req.Extras[4:8]) != 0),
 			VBucket:     request.Req.VBucket,
 			ManifestId:  request.GetManifestId(),
 		}
@@ -1289,9 +1291,9 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 
 				if lookupResp != nil && lookupResp.Resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
-					item.SetMetaXattrOptions.NoTargetCR = true
+					item.HLVModeOptions.NoTargetCR = true
 				} else {
-					item.SetMetaXattrOptions.NoTargetCR = false
+					item.HLVModeOptions.NoTargetCR = false
 				}
 
 				if lookupResp != nil && lookupResp.Resp != nil {
@@ -1377,11 +1379,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				atomic.AddUint64(&xmem.counter_locked, 1)
 				go xmem.retryAfterCasLockingFailure(item)
 			case NotSendFailedCR:
-				//lost on conflict resolution on source side
+				// lost on conflict resolution on source side
 				// this still counts as data sent
 				additionalInfo := DataFailedCRSourceEventAdditional{Seqno: item.Seqno,
 					Opcode:         item.GetMemcachedCommand(),
-					IsExpirySet:    (binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
+					IsExpirySet:    (len(item.Req.Extras) >= 8 && binary.BigEndian.Uint32(item.Req.Extras[4:8]) != 0),
 					VBucket:        item.Req.VBucket,
 					ManifestId:     item.GetManifestId(),
 					Cloned:         item.Cloned,
@@ -1390,7 +1392,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 				xmem.RaiseEvent(common.NewEvent(common.DataFailedCRSource, nil, xmem, nil, additionalInfo))
 				if item.ImportMutation &&
-					!item.SetMetaXattrOptions.PreserveSync &&
+					!item.HLVModeOptions.PreserveSync &&
 					atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 0, 1) {
 					xmem.importMutationEventId = xmem.eventsProducer.AddEvent(
 						base.LowPriorityMsg,
@@ -1433,7 +1435,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 		if len(mc_req.Body) < 4 {
 			xmem.Logger().Errorf("%v mutation body is too short to store xattr. key=%v%v%v, body=%v%v%v", xmem.Id(), base.UdTagBegin, string(mc_req.Key), base.UdTagEnd,
 				base.UdTagBegin, mc_req.Body, base.UdTagEnd)
-			return fmt.Errorf("%v mutation body is too short to store xattr.", xmem.Id())
+			return fmt.Errorf("%v mutation body is too short to store xattr", xmem.Id())
 		}
 		// the first four bytes in body stored the length of the xattr fields
 		xattr_length := binary.BigEndian.Uint32(mc_req.Body[0:4])
@@ -1452,13 +1454,18 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 	// Send HLV and preserve _sync if necessary
 	err := xmem.updateSystemXattrForTarget(req, lookup)
 	if err != nil {
-		return err
+		var respBody []byte
+		if lookup != nil && lookup.Resp != nil {
+			respBody = lookup.Resp.Body
+		}
+
+		xmem.Logger().Errorf("%v error from updateSystemXattrForTarget, isSubdocOp=%v, key=%v%s%v, body=%v%v%v, respBody=%v%v%v, err=%v", xmem.Id(), req.IsSubdocOp(), base.UdTagBegin, string(req.Req.Key), base.UdTagEnd, base.UdTagBegin, req.Req.Body, base.UdTagEnd, base.UdTagBegin, respBody, base.UdTagEnd, err)
+		return fmt.Errorf("%v error from updateSystemXattrForTarget, err=%v", xmem.Id(), err)
 	}
 
-	req.SetCasLockIfNeeded(lookup)
-
 	// Compress it if needed
-	if req.NeedToRecompress && mc_req.DataType&mcc.SnappyDataType == 0 {
+	// if the request is a subdoc op, then the body would be composed of operational specs. KV doesn't support snappy compression on it.
+	if !req.IsSubdocOp() && req.NeedToRecompress && mc_req.DataType&mcc.SnappyDataType == 0 {
 		maxEncodedLen := snappy.MaxEncodedLen(len(mc_req.Body))
 		if maxEncodedLen > 0 && maxEncodedLen < len(mc_req.Body) {
 			body, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
@@ -1596,7 +1603,7 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 					manifestId, ok4 := keySeqno[4].(uint64)
 					if ok1 && ok2 && ok3 && ok4 {
 						specs := getSpecMap[key]
-						respMap[key] = &base.SubdocLookupResponse{specs, response}
+						respMap[key] = &base.SubdocLookupResponse{Specs: specs, Resp: response}
 
 						// GetMeta successful means that the target manifest ID is valid for the collection ID of this key
 						additionalInfo := GetReceivedEventAdditional{Key: key,
@@ -1928,7 +1935,7 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 		// CCR mode requires fetching the document metadata and body for the purpose of conflict resolution
 		// Since they are considered true conflicts
 		getSpecs = getBodySpec
-	} else if xmem.getCrossClusterVers() == true && wrappedReq.ActualCas >= xmem.config.vbMaxCas[incomingReq.VBucket] {
+	} else if xmem.getCrossClusterVers() && wrappedReq.HLVModeOptions.ActualCas >= xmem.config.vbMaxCas[incomingReq.VBucket] {
 		// These are the mutations we need to maintain HLV for mobile and get target importCas/cvCas for CR
 		// Note that there is no mixed mode support for import mutations. If enableCrossClusterVersioning is false,
 		// and current source mutation already has HLV, we still don't get target importCas/HLV. The reason is to
@@ -2020,21 +2027,70 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 	return nil
 }
 
-func (xmem *XmemNozzle) handleUpdateSystemXattrErr(errPhase string, err error, key string, xattr []byte) error {
-	xmem.Logger().Errorf("%v: updateSystemXattrForTarget received error='%v', when='%s' for key=%v%s%v, xattr='%v'", xmem.Id(), err, errPhase, base.UdTagBegin, key, base.UdTagEnd, xattr)
-	return err
+// Preserve all Xattributes except source _sync and old HLV if it has been updated
+func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, sourceDocMeta *crMeta.CRMetadata, updatedHLV bool, updater func(key []byte, val []byte) error) error {
+	if !base.HasXattr(wrappedReq.Req.DataType) {
+		// no xattrs to process
+		return nil
+	}
+
+	req := wrappedReq.Req
+	body := req.Body
+
+	it, err := base.NewXattrIterator(body)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		key, value, err := it.Next()
+		if err != nil {
+			return err
+		}
+		switch string(key) {
+		case base.XATTR_HLV:
+			if updatedHLV {
+				// We have updated the hlv so skip the old HLV
+				continue
+			}
+		case base.XATTR_MOBILE:
+			if wrappedReq.HLVModeOptions.PreserveSync {
+				// Skip the source _sync value. No need to create a spec to upsert target _sync, as it is already there on target
+				xmem.RaiseEvent(common.NewEvent(common.SourceSyncXattrRemoved, nil, xmem, nil, nil))
+				continue
+			}
+		case base.XATTR_MOU:
+			if sourceDocMeta != nil && !sourceDocMeta.IsImportMutation() {
+				// Remove importCAS from _mou if it is no longer an import mutation.
+				// This happens when are non-imported updates on top of an import mutation
+
+				if wrappedReq.MouAfterProcessing == nil {
+					// _mou had only importCAS and pRev, no need to write
+					continue
+				}
+				value = wrappedReq.MouAfterProcessing
+			}
+		}
+
+		err = updater(key, value)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
+// updates the request body (with xattrs), CAS, extras (flags), datatype and opcode to appropriate values for the request in the mobile/CCR mode.
+// opaque is set in adjustRequest down the line.
 func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCRequest, lookup *base.SubdocLookupResponse) (err error) {
 	var needToUpdateSysXattrs bool
 	if wrappedReq.Req.DataType&mcc.XattrDataType != 0 {
 		// in this case, we may need to update HLV if source already has it, even if mobile/HLV are all off.
 		needToUpdateSysXattrs = true
-	} else if wrappedReq.SetMetaXattrOptions.PreserveSync {
+	} else if wrappedReq.HLVModeOptions.PreserveSync {
 		needToUpdateSysXattrs = true
 	} else if xmem.source_cr_mode == base.CRMode_Custom {
 		needToUpdateSysXattrs = true
-	} else if wrappedReq.SetMetaXattrOptions.SendHlv {
+	} else if wrappedReq.HLVModeOptions.SendHlv {
 		maxCas := xmem.config.vbMaxCas[wrappedReq.Req.VBucket]
 		if wrappedReq.Req.Cas >= maxCas {
 			needToUpdateSysXattrs = true
@@ -2044,10 +2100,33 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	if !needToUpdateSysXattrs {
 		return
 	}
+
 	if err = xmem.uncompressBody(wrappedReq); err != nil {
 		return
 	}
 
+	var updateHLV bool
+	var sourceDocMeta *crMeta.CRMetadata
+
+	if wrappedReq.HLVModeOptions.SendHlv {
+		sourceDoc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
+		sourceDocMeta, err = sourceDoc.GetMetadata(xmem.uncompressBody)
+		if err != nil {
+			return err
+		}
+
+		updateHLV = crMeta.NeedToUpdateHlv(sourceDocMeta, xmem.config.vbMaxCas[wrappedReq.Req.VBucket], time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
+	}
+
+	if wrappedReq.IsSubdocOp() {
+		return xmem.updateSystemXattrForSubdocOp(wrappedReq, lookup, sourceDocMeta, updateHLV)
+	} else {
+		return xmem.updateSystemXattrForMetaOp(wrappedReq, lookup, sourceDocMeta, updateHLV)
+	}
+}
+
+// will update the system xattr to replicate when using the *_WITH_META commands.
+func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCRequest, lookup *base.SubdocLookupResponse, sourceDocMeta *crMeta.CRMetadata, updateHLV bool) (err error) {
 	// Now we need to update HLV xattr either because of new changes or because we have to prune
 	// The max increase in body length is adding 2 uint32 and _vv\x00{"cvCas":"0x...","src":"<clusterId>","ver":"0x..."}\x00
 
@@ -2060,8 +2139,8 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	//	docBody											- actual document body without any xattrs
 
 	maxBodyIncrease := 0
-	if wrappedReq.SetMetaXattrOptions.SendHlv {
-		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 - total xattr length and _vv xattr length */ +
+	if wrappedReq.HLVModeOptions.SendHlv {
+		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 - xattrTotalLen and _vv's length */ +
 			len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
 			len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
 			len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
@@ -2071,7 +2150,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	}
 
 	var targetSyncVal []byte
-	if wrappedReq.SetMetaXattrOptions.PreserveSync && lookup != nil {
+	if wrappedReq.HLVModeOptions.PreserveSync && lookup != nil {
 		targetSyncVal, _ = lookup.ResponseForAPath(base.XATTR_MOBILE)
 		if len(targetSyncVal) > 0 {
 			maxBodyIncrease = maxBodyIncrease + 4 + /* _sync xattr length */
@@ -2092,83 +2171,130 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	}
 
 	xattrComposer := base.NewXattrComposer(newbody)
-	hlvUpdated := false
-	var meta *crMeta.CRMetadata
-	if wrappedReq.SetMetaXattrOptions.SendHlv {
-		doc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
-		meta, err = doc.GetMetadata(xmem.uncompressBody)
+
+	if updateHLV {
+		_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
 		if err != nil {
 			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForTarget", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd)
 			return err
 		}
 
-		if crMeta.NeedToUpdateHlv(meta, xmem.config.vbMaxCas[req.VBucket], time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second) {
-			_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(meta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
-			if err != nil {
-				return err
-			}
-			hlvUpdated = true
-			xmem.RaiseEvent(common.NewEvent(common.HlvUpdated, nil, xmem, nil, nil))
-			if pruned {
-				xmem.RaiseEvent(common.NewEvent(common.HlvPruned, nil, xmem, nil, nil))
-			}
+		xmem.RaiseEvent(common.NewEvent(common.HlvUpdated, nil, xmem, nil, nil))
+		if pruned {
+			xmem.RaiseEvent(common.NewEvent(common.HlvPruned, nil, xmem, nil, nil))
 		}
 	}
-	if wrappedReq.SetMetaXattrOptions.PreserveSync && len(targetSyncVal) > 0 {
-		xattrComposer.WriteKV([]byte(base.XATTR_MOBILE), targetSyncVal)
+
+	if wrappedReq.HLVModeOptions.PreserveSync && len(targetSyncVal) > 0 {
+		err = xattrComposer.WriteKV([]byte(base.XATTR_MOBILE), targetSyncVal)
+		if err != nil {
+			return err
+		}
 		xmem.RaiseEvent(common.NewEvent(common.TargetSyncXattrPreserved, nil, xmem, nil, nil))
 	}
 
-	if req.DataType&mcc.XattrDataType > 0 {
-		// Preserve all Xattributes except source _sync and old HLV if it has been updated
-		it, err := base.NewXattrIterator(body)
-		if err != nil {
-			return xmem.handleUpdateSystemXattrErr("from NewXattrIterator", err, string(req.Key), body)
-		}
-		for it.HasNext() {
-			key, value, err := it.Next()
-			if err != nil {
-				return xmem.handleUpdateSystemXattrErr("iterating through XATTR", err, string(req.Key), body)
-			}
-			switch string(key) {
-			case base.XATTR_HLV:
-				if hlvUpdated {
-					// We have updated the hlv so skip the old HLV
-					continue
-				}
-			case base.XATTR_MOBILE:
-				if wrappedReq.SetMetaXattrOptions.PreserveSync {
-					// Skip the source _sync value
-					xmem.RaiseEvent(common.NewEvent(common.SourceSyncXattrRemoved, nil, xmem, nil, nil))
-					continue
-				}
-			case base.XATTR_MOU:
-				if meta != nil && !meta.IsImportMutation() {
-					// Remove importCAS from _mou if it is no longer an import mutation.
-					// This happens when import mutation is mutated again.
-
-					if wrappedReq.MouAfterProcessing == nil {
-						// _mou had only importCAS and pRev, no need to write
-						continue
-					}
-					value = wrappedReq.MouAfterProcessing
-				}
-			}
-			err = xattrComposer.WriteKV(key, value)
-			if err != nil {
-				return xmem.handleUpdateSystemXattrErr("writing new xattrs", err, string(req.Key), body)
-			}
-		}
+	// decide to preserve or not preserve source xattrs before replicating to target
+	err = xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, xattrComposer.WriteKV)
+	if err != nil {
+		return err
 	}
 
 	docWithoutXattr := base.FindSourceBodyWithoutXattr(req)
 	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr, req, lookup)
 	req.Body = out
+
 	if atLeastOneXattr {
 		req.DataType = req.DataType | base.PROTOCOL_BINARY_DATATYPE_XATTR
 	} else {
 		req.DataType = req.DataType & ^(base.PROTOCOL_BINARY_DATATYPE_XATTR)
 	}
+
+	// set opcode, CAS and extras (flags).
+	wrappedReq.SetCasAndFlagsForMetaOp(lookup)
+	wrappedReq.Req.Opcode = wrappedReq.GetMemcachedCommand()
+
+	return nil
+}
+
+// will update the system xattr to replicate when using the subdoc SET or subdoc DELETE commands.
+func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCRequest, lookup *base.SubdocLookupResponse, sourceDocMeta *crMeta.CRMetadata, updateHLV bool) (err error) {
+
+	wrappedReq.SetSubdocOptionsForRetry(wrappedReq.Req.Body, wrappedReq.Req.Extras, wrappedReq.Req.DataType)
+
+	req := wrappedReq.Req
+	var spec base.SubdocMutationPathSpec
+	var pruned bool
+	specs := base.NewSubdocMutationPathSpecs()
+
+	if updateHLV {
+		var pvSlice, mvSlice []byte
+		pv := sourceDocMeta.GetHLV().GetPV()
+		mv := sourceDocMeta.GetHLV().GetMV()
+		if len(pv) > 0 {
+			pvlen := hlv.BytesRequired(pv)
+			pvSlice, err = xmem.dataPool.GetByteSlice(uint64(pvlen))
+			if err != nil {
+				pvSlice = make([]byte, pvlen)
+				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+			} else {
+				wrappedReq.AddByteSliceForXmemToRecycle(pvSlice)
+			}
+		}
+		if len(mv) > 0 {
+			mvlen := hlv.BytesRequired(mv)
+			mvSlice, err = xmem.dataPool.GetByteSlice(uint64(mvlen))
+			if err != nil {
+				mvSlice = make([]byte, mvlen)
+				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+			} else {
+				wrappedReq.AddByteSliceForXmemToRecycle(mvSlice)
+			}
+		}
+		pruned, err = crMeta.ConstructSpecsFromHlvForSubdocOp(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, &specs, wrappedReq.SubdocCmdOptions.TargetHasPv, wrappedReq.SubdocCmdOptions.TargetHasMv, pvSlice, mvSlice)
+		if err != nil {
+			return err
+		}
+
+		xmem.RaiseEvent(common.NewEvent(common.HlvUpdated, nil, xmem, nil, nil))
+		if pruned {
+			xmem.RaiseEvent(common.NewEvent(common.HlvPruned, nil, xmem, nil, nil))
+		}
+	}
+
+	// decide to preserve or not preserve source xattrs before replicating to target
+	err = xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, specs.WriteKV)
+	if err != nil {
+		return err
+	}
+
+	var accessDeleted bool
+	// body path
+	switch wrappedReq.SubdocCmdOptions.SubdocOp {
+	case base.SubdocDelete:
+		// CMD_DELETE - subdoc delete - no doc body
+		spec = base.NewSubdocMutationPathSpec(uint8(mc.DELETE), uint8(0), []byte(""), nil)
+		accessDeleted = true
+	case base.SubdocSet:
+		// CMD_SET - subdoc set
+		body := base.FindSourceBodyWithoutXattr(wrappedReq.Req)
+		spec = base.NewSubdocMutationPathSpec(uint8(mc.SET), uint8(0), []byte(""), body)
+	default:
+		panic(fmt.Sprintf("unknown subdoc op %v", wrappedReq.SubdocCmdOptions.SubdocOp))
+	}
+	specs = append(specs, spec)
+
+	bodylen := specs.Size()
+	newbody, err := xmem.dataPool.GetByteSlice(uint64(bodylen))
+	if err != nil {
+		newbody = make([]byte, bodylen)
+		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+	} else {
+		wrappedReq.AddByteSliceForXmemToRecycle(newbody)
+	}
+
+	// Compose the subdoc request and also set the appropriate CAS.
+	base.ComposeRequestForSubdocMutation(specs, req, lookup.Resp.Cas, newbody, accessDeleted, wrappedReq.SubdocCmdOptions.TargetDocIsTombstone, true)
+
 	return nil
 }
 
@@ -2366,7 +2492,7 @@ func (xmem *XmemNozzle) getPoolName() string {
 	return xmem.config.connPoolNamePrefix + base.KeyPartsDelimiter + "Couch_Xmem_" + xmem.config.connectStr + base.KeyPartsDelimiter + xmem.config.bucketName
 }
 
-// setMetaXattrOptions.NoTargetCR is not set for the batch. It is set whenever subdoc get is used.
+// HLVModeOptions.NoTargetCR is not set for the batch. It is set whenever subdoc get is used.
 // For mixed mode where old mutations uses getMeta (mobile=off), target CR is used
 func (xmem *XmemNozzle) initNewBatch() {
 	xmem.batch = newBatch(uint32(xmem.config.maxCount), uint32(xmem.config.maxSize), xmem.Logger())
@@ -2605,6 +2731,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					// set the mutationLocked flag on the corresponding bufferedMCRequest
 					// which will allow resendIfTimeout() method to perform resend with exponential backoff with appropriate settings
 					_, err = xmem.buf.modSlot(pos, xmem.setMutationLockedFlag)
+					if err != nil {
+						xmem.Logger().Errorf("%v received error with setMutationLockedFlag, err=%v", xmem.Id(), err)
+					}
 				} else if base.IsTemporaryMCError(response.Status) {
 					// target may be overloaded. increase backoff factor to alleviate stress on target
 					xmem.client_for_setMeta.IncrementBackOffFactor()
@@ -2617,6 +2746,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					//resend and reset the retry=0 as retry is an indicator of network status,
 					//here we have received the response, so reset retry=0
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
+					if err != nil {
+						xmem.Logger().Errorf("%v received error for resendWithReset, err=%v", err)
+					}
 				} else if base.IsEAccessError(response.Status) {
 					// Losing access can happen when it is revoked on purpose or can happen temporarily
 					// when target is undergoing topology changes like node leaving cluster. We will retry.
@@ -2626,6 +2758,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					atomic.AddUint64(&xmem.counter_eaccess, 1)
 					xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
+					if err != nil {
+						xmem.Logger().Errorf("%v received error for resendWithReset during EAccess error, err=%v", xmem.Id(), err)
+					}
 				} else if base.IsEExistsError(response.Status) || base.IsENoEntError(response.Status) {
 					// request failed because target Cas changed.
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -2661,6 +2796,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						if xmem.buf.evictSlot(pos) != nil {
 							panic(fmt.Sprintf("Failed to evict slot %d\n", pos))
 						}
+
 						// Put it back to the next batch so we can retry conflict resolution Do this in the background.
 						// Otherwise xmem may go into deadlock if receiveResponse is blocked because dataChan is full
 						go xmem.retryAfterCasLockingFailure(wrappedReq)
@@ -2705,10 +2841,13 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 									return xmem.resendWithReset(req, pos)
 								}
 								_, err = xmem.buf.modSlot(pos, markThenResend)
+								if err != nil {
+									xmem.Logger().Errorf("%v received error for markThenResend, err=%v", xmem.Id(), err)
+								}
 							} else {
 								if response.Status == mc.XATTR_EINVAL {
 									// There is something wrong with XATTR. This should never happen in released version.
-									// Print the CCR XATTR for debugging
+									// Print the XATTR for debugging
 									if req.DataType&mcc.SnappyDataType == mcc.SnappyDataType {
 										body, err := snappy.Decode(nil, req.Body)
 										if err == nil {
@@ -2728,7 +2867,10 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 									}
 								}
 								// for other non-temporary errors, repair connections
-								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Datatype=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.DataType, req.Cas, req.Extras)
+								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. %v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Body=%v%v%v, req.Datatype=%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), xmem.PrintResponseStatusError(response.Status), response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, req.DataType, req.Cas, req.Extras)
+								if response.Status == mc.EINVAL {
+									xmem.Logger().Errorf("%v Reason for EINVAL response from memcached for %v%s%v is %v%v%v", xmem.Id(), base.UdTagBegin, string(req.Key), base.UdTagEnd, base.UdTagBegin, response.Body, base.UdTagEnd)
+								}
 								xmem.client_for_setMeta.ReportUnknownResponseReceived(response.Status)
 
 								nonTempErrReceived = true
@@ -2746,7 +2888,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					}
 				}
 			} else {
-				//raiseEvent
+				// Raise needed events
 				pos := xmem.getPosFromOpaque(response.Opaque)
 				wrappedReq, sent_time, err := xmem.buf.slotWithSentTime(pos)
 				if err != nil {
@@ -2768,10 +2910,16 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				}
 
 				if req != nil && req.Opaque == response.Opaque {
+					isExpirySet := false
+					if wrappedReq.IsSubdocOp() {
+						isExpirySet = (len(req.Extras) > 1)
+					} else {
+						isExpirySet = (len(req.Extras) >= 8 && binary.BigEndian.Uint32(req.Extras[4:8]) != 0)
+					}
 					additionalInfo := DataSentEventAdditional{Seqno: seqno,
 						IsOptRepd:           xmem.optimisticRep(wrappedReq),
 						Opcode:              req.Opcode,
-						IsExpirySet:         (binary.BigEndian.Uint32(req.Extras[4:8]) != 0),
+						IsExpirySet:         isExpirySet,
 						VBucket:             req.VBucket,
 						Req_size:            req.Size(),
 						Commit_time:         committing_time,
@@ -2790,6 +2938,12 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							base.ImportDetectedStr,
 							base.EventsMap{},
 							nil)
+					}
+
+					if wrappedReq.IsSubdocOp() {
+						vbno := wrappedReq.Req.VBucket
+						seqno := wrappedReq.Seqno
+						xmem.RaiseEvent(common.NewEvent(common.DocsSentWithSubdocCmd, wrappedReq.SubdocCmdOptions.SubdocOp, xmem, []interface{}{vbno, seqno}, nil))
 					}
 					//feedback the most current commit_time to xmem.config.respTimeout
 					xmem.adjustRespTimeout(resp_wait_time)
@@ -2820,12 +2974,25 @@ done:
 }
 
 func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) {
-	// If it is ADD_WITH_META, it needs to be SET_WITH_META in the next try because target now has the doc
-	if req.Req.Opcode == base.ADD_WITH_META {
-		req.Req.Opcode = base.SET_WITH_META
+	if req.IsSubdocOp() {
+		// If we have used subdoc command before for this request before, enter the retry assuming we wouldn't need subdoc command anymore
+		if req.SubdocCmdOptions.SubdocOp == base.SubdocDelete {
+			req.Req.Opcode = mc.DELETE_WITH_META
+		} else {
+			req.Req.Opcode = mc.SET_WITH_META
+		}
+		req.Req.Body = req.SubdocCmdOptions.BodyPreSubdocCmd
+		req.Req.DataType = req.SubdocCmdOptions.DatatypePreSubdocCmd
+		req.Req.Extras = req.SubdocCmdOptions.ExtrasPreSubdocCmd
+		req.ResetSubdocOptionsForRetry()
+	} else {
+		// If it is ADD_WITH_META, it needs to be SET_WITH_META in the next try because target now has the doc
+		if req.Req.Opcode == base.ADD_WITH_META {
+			req.Req.Opcode = base.SET_WITH_META
+		}
 	}
-	req.Req.Opaque = 0
 	req.Req.Cas = binary.BigEndian.Uint64(req.Req.Extras[16:24])
+	req.Req.Opaque = 0
 	// Don't free the slices from datapool since that's the mutation body.
 	req.RetryCRCount++
 	err := xmem.accumuBatch(req)

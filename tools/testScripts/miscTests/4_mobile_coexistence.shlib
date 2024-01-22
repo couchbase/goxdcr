@@ -8,10 +8,7 @@
 
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
-# Set c1 to have 2 buckets and c2 to have 1 bucket
-declare -a cluster1BucketsArr
-cluster1BucketsArr=("B0" "B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B1" ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -20,7 +17,17 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active")
+declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["mobile"]="Active" ["filterBinary"]=true)
+
+function verifyPromStats {
+	# verify no data-corruption
+	validateBinaryFilteredIs0 "C1" "B1" "B2"
+	validateBinaryFilteredIs0 "C2" "B2" "B1"
+
+	# verify no datapool get failures
+	validateDatapoolFailIs0 "C1" "B1" "B2"
+	validateDatapoolFailIs0 "C2" "B2" "B1"
+}
 
 function testReplicationSettings {
 	echo "=========== testReplicationSettings =========="
@@ -97,9 +104,12 @@ function testReplicationSettings {
 function testMobileHlv {
 	echo "=========== testMobileHlv =========="
 
-	echo "Set enableCrossClusterVersioning to true"
+	echo "Setting enableCrossClusterVersioning to true"
 	setCrossClusterVersioningForBucket "C1" "B1"
 	setCrossClusterVersioningForBucket "C2" "B2"
+
+	enableMobileImportSimIfPresent "C1" "B1"
+	enableMobileImportSimIfPresent "C2" "B2"
 
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
 	createBucketReplication "C2" "B2" "C1" "B1" BucketReplPropertiesWithMobile
@@ -108,6 +118,7 @@ function testMobileHlv {
 	writeJSONDocument "C1" "B1" "mobile1" '{"foo":"bar"}'
 	writeJSONDocument "C1" "B1" "mobile2" '{"foo":"bar"}'
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
 	# Update
 	writeJSONDocument "C1" "B1" "mobile1" '{"foo2":"bar2"}'
 	writeJSONDocument "C1" "B1" "mobile2" '{"foo2":"bar2"}'
@@ -116,18 +127,22 @@ function testMobileHlv {
 	writeJSONDocument "C2" "B2" "mobile1" '{"foo3":"bar3"}'
 	writeJSONDocument "C2" "B2" "mobile2" '{"foo3":"bar3"}'
 	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	grepForAbnormalities
 
 	echo runCbWorkloadGenBucket "C1" "B1"
 	runCbWorkloadGenBucket "C1" "B1" &
-	echo runCbWorkloadGenBucket "C1" "B1" 1000 "common"
-	runCbWorkloadGenBucket "C1" "B1" 1000 "common" &
+	echo runCbWorkloadGenBucket "C1" "B1" 10000 "common"
+	runCbWorkloadGenBucket "C1" "B1" 10000 "common" &
 
 	echo runCbWorkloadGenBucket "C2" "B2"
 	runCbWorkloadGenBucket "C2" "B2" &
-	echo runCbWorkloadGenBucket "C2" "B2" 1000 "common"
-	runCbWorkloadGenBucket "C2" "B2" 1000 "common" &
-	# wait for cbworkloadgen to finish
-	wait
+	echo runCbWorkloadGenBucket "C2" "B2" 10000 "common"
+	runCbWorkloadGenBucket "C2" "B2" 10000 "common" &
+
+	echo "sleeping 10 seconds for cbworkloadgen to finish"
+	sleep 10
+
 	sleepTime=20
 	echo "Sleep $sleepTime seconds to wait for replication to finish"
 	sleep $sleepTime
@@ -135,10 +150,9 @@ function testMobileHlv {
 	waitForChangesLeft0 "C1" "B1" "C2" "B2"
 	waitForChangesLeft0 "C2" "B2" "C1" "B1"
 
-	grepForPanics
-	if (($? != 0)); then
-		exit 1
-	fi
+	grepForAbnormalities
+
+	verifyPromStats
 }
 
 function runTestCase {
@@ -163,7 +177,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "Mobile coexistence test case passed"
 	echo "============================================================================"
-	cleanupBucketReplications
 	cleanupBuckets
+	cleanupBucketReplications
 	cleanupRemoteClusterRefs
 }

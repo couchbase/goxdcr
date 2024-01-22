@@ -1214,10 +1214,11 @@ func HexLittleEndianToUint64(hexLE []byte) (uint64, error) {
 	// Decoding the hexLE will need the string to be of even length
 	// If hexLE is not of even length, it was probably stripped off of zeroes at the end as part of Uint64ToHexLittleEndianAndStrip
 	if len(hexLE)%2 != 0 {
-		// hexLE originally comes from the xattr slice after extracting it from the right positions and after stripping surrounding quotes.
-		// So the following append of 0 to hexLE will not allocate a new slice, since the capacity of hexLE would be considered from the original xattr slice.
-		// Infact, the stripped quote on the right of the hexLE will be replaced with a 0 in the original xattr slice, without any change in the capacity of hexLE.
-		hexLE = append(hexLE, '0')
+		// TODO: Use datapool - MB-61748
+		evenLenHexLE := make([]byte, len(hexLE), len(hexLE)+1)
+		copy(evenLenHexLE, hexLE)
+		evenLenHexLE = append(evenLenHexLE, '0')
+		hexLE = evenLenHexLE
 	}
 
 	// hexLE may not necessarily be 16+2 bytes because of Uint64ToHexLittleEndianAndStrip0s

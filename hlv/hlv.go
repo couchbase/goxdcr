@@ -188,7 +188,7 @@ func NewHLV(source DocumentSourceId, cas uint64, cvCas uint64, src DocumentSourc
 			}
 		} else if len(src) > 0 {
 			// Add cv to pv only if mv does not exist.
-			// When there is no mv, cv represents a mutation and needs to be added to vrsion history
+			// When there is no mv, cv represents a mutation and needs to be added to version history
 			hlv.pv[src] = ver
 		}
 		hlv.mv = nil

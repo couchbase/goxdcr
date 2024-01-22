@@ -30,14 +30,18 @@ type StatsMgrIface interface {
 
 const (
 	// the number of docs written/sent to target cluster
-	DOCS_WRITTEN_METRIC              = "docs_written"
-	EXPIRY_DOCS_WRITTEN_METRIC       = "expiry_docs_written"
-	DELETION_DOCS_WRITTEN_METRIC     = "deletion_docs_written"
-	SET_DOCS_WRITTEN_METRIC          = "set_docs_written"
-	ADD_DOCS_WRITTEN_METRIC          = "add_docs_written"
-	DELETION_DOCS_CAS_CHANGED_METRIC = "deletion_docs_cas_changed"
-	SET_DOCS_CAS_CHANGED_METRIC      = "set_docs_cas_changed"
-	ADD_DOCS_CAS_CHANGED_METRIC      = "add_docs_cas_changed"
+	DOCS_WRITTEN_METRIC                = "docs_written"
+	EXPIRY_DOCS_WRITTEN_METRIC         = "expiry_docs_written"
+	DELETION_DOCS_WRITTEN_METRIC       = "deletion_docs_written"
+	SET_DOCS_WRITTEN_METRIC            = "set_docs_written"
+	ADD_DOCS_WRITTEN_METRIC            = "add_docs_written"
+	DELETION_DOCS_CAS_CHANGED_METRIC   = "deletion_docs_cas_changed"
+	SET_DOCS_CAS_CHANGED_METRIC        = "set_docs_cas_changed"
+	ADD_DOCS_CAS_CHANGED_METRIC        = "add_docs_cas_changed"
+	SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC = "subdoc_cmd_docs_cas_changed"
+	// To avoid cas rollback for a specific mobile/xdcr case, we send the doc using subdoc command
+	DOCS_SENT_WITH_SUBDOC_SET    = base.DocsSentWithSubdocSet
+	DOCS_SENT_WITH_SUBDOC_DELETE = base.DocsSentWithSubdocDelete
 
 	// the number of docs merged and sent to source cluster
 	DOCS_MERGED_METRIC              = "docs_merged"
@@ -659,6 +663,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCcrDpSupport,
 		Description:  "Number of Add operations that failed because the CAS on the Target changed",
+		Stability:    Internal,
+		Labels:       StandardLabels,
+	},
+	SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "Number of Subdoc sets and delete operations that failed because the CAS on the Target changed",
 		Stability:    Internal,
 		Labels:       StandardLabels,
 	},
@@ -1386,6 +1398,22 @@ var GlobalStatsTable = StatisticsPropertyMap{
 			"statistics, but are not actually replicable data",
 		Stability: Committed,
 		Labels:    StandardLabels,
+	},
+	DOCS_SENT_WITH_SUBDOC_DELETE: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "The number of deletes issued using subdoc command instead of delete_with_meta to avoid cas rollback on target",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	DOCS_SENT_WITH_SUBDOC_SET: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForMobileSupport,
+		Description:  "The number of sets issued using subdoc command instead of set_with_meta to avoid cas rollback on target",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 }
 

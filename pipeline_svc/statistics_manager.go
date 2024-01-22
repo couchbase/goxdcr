@@ -136,6 +136,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DELETION_DOCS_CAS_CHANGED_METRIC:    service_def.MetricTypeCounter,
 	service_def.ADD_DOCS_CAS_CHANGED_METRIC:         service_def.MetricTypeCounter,
 	service_def.SET_DOCS_CAS_CHANGED_METRIC:         service_def.MetricTypeCounter,
+	service_def.SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC:  service_def.MetricTypeCounter,
 	service_def.DELETION_FAILED_CR_TARGET_METRIC:    service_def.MetricTypeCounter,
 	service_def.DOCS_MERGE_FAILED_METRIC:            service_def.MetricTypeCounter,
 	service_def.EXPIRY_MERGE_CAS_CHANGED_METRIC:     service_def.MetricTypeCounter,
@@ -144,6 +145,8 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.EXPIRY_TARGET_DOCS_SKIPPED_METRIC:   service_def.MetricTypeCounter,
 	service_def.SYSTEM_EVENTS_RECEIVED_DCP_METRIC:   service_def.MetricTypeCounter,
 	service_def.SEQNO_ADV_RECEIVED_DCP_METRIC:       service_def.MetricTypeCounter,
+	service_def.DOCS_SENT_WITH_SUBDOC_SET:           service_def.MetricTypeCounter,
+	service_def.DOCS_SENT_WITH_SUBDOC_DELETE:        service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
@@ -151,7 +154,8 @@ var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.
 	service_def.DOCS_FILTERED_TXN_ATR_METRIC, service_def.DOCS_FILTERED_CLIENT_TXN_METRIC, service_def.DOCS_FILTERED_TXN_XATTR_METRIC,
 	service_def.DOCS_FILTERED_MOBILE_METRIC, service_def.DOCS_FILTERED_USER_DEFINED_METRIC}
 
-var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC, service_def.GUARDRAIL_DATA_SIZE_METRIC, service_def.GUARDRAIL_DISK_SPACE_METRIC}
+var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC, service_def.GUARDRAIL_DATA_SIZE_METRIC, service_def.GUARDRAIL_DISK_SPACE_METRIC,
+	service_def.DOCS_SENT_WITH_SUBDOC_SET, service_def.DOCS_SENT_WITH_SUBDOC_DELETE}
 
 var VBMetricKeys []string
 var compileVBMetricKeyOnce sync.Once
@@ -191,6 +195,8 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 	vbStatMap[service_def.GUARDRAIL_RESIDENT_RATIO_METRIC] = base.Uint64ToInt64(record.GuardrailResidentRatioCnt)
 	vbStatMap[service_def.GUARDRAIL_DISK_SPACE_METRIC] = base.Uint64ToInt64(record.GuardrailDiskSpaceCnt)
 	vbStatMap[service_def.GUARDRAIL_DATA_SIZE_METRIC] = base.Uint64ToInt64(record.GuardrailDataSizeCnt)
+	vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_SET] = base.Uint64ToInt64(record.DocsSentWithSubdocSetCnt)
+	vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE] = base.Uint64ToInt64(record.DocsSentWithSubdocDeleteCnt)
 	return vbStatMap
 }
 
@@ -1516,6 +1522,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.SET_DOCS_CAS_CHANGED_METRIC, set_cas_changed)
 		add_cas_changed := metrics.NewCounter()
 		registry.Register(service_def.ADD_DOCS_CAS_CHANGED_METRIC, add_cas_changed)
+		subdoc_cmd_cas_changed := metrics.NewCounter()
+		registry.Register(service_def.SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC, subdoc_cmd_cas_changed)
 		data_replicated_uncompressed := metrics.NewCounter()
 		registry.Register(service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC, data_replicated_uncompressed)
 		eaccessReceived := metrics.NewCounter()
@@ -1542,6 +1550,10 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.HLV_PRUNED_METRIC, hlvPruned)
 		hlvUpdated := metrics.NewCounter()
 		registry.Register(service_def.HLV_UPDATED_METRIC, hlvUpdated)
+		docsSentWithSubdocSet := metrics.NewCounter()
+		registry.Register(service_def.DOCS_SENT_WITH_SUBDOC_SET, docsSentWithSubdocSet)
+		docsSentWithSubdocDelete := metrics.NewCounter()
+		registry.Register(service_def.DOCS_SENT_WITH_SUBDOC_DELETE, docsSentWithSubdocDelete)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.SIZE_REP_QUEUE_METRIC] = size_rep_queue
@@ -1574,6 +1586,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC] = deletion_cas_changed
 		metric_map[service_def.SET_DOCS_CAS_CHANGED_METRIC] = set_cas_changed
 		metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC] = add_cas_changed
+		metric_map[service_def.SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC] = subdoc_cmd_cas_changed
 		metric_map[service_def.DATA_REPLICATED_UNCOMPRESSED_METRIC] = data_replicated_uncompressed
 		metric_map[service_def.TARGET_EACCESS_METRIC] = eaccessReceived
 		metric_map[service_def.TARGET_TMPFAIL_METRIC] = tmpfailReceived
@@ -1587,6 +1600,9 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.IMPORT_DOCS_WRITTEN_METRIC] = importMutationsSent
 		metric_map[service_def.HLV_PRUNED_METRIC] = hlvPruned
 		metric_map[service_def.HLV_UPDATED_METRIC] = hlvUpdated
+		metric_map[service_def.DOCS_SENT_WITH_SUBDOC_SET] = docsSentWithSubdocSet
+		metric_map[service_def.DOCS_SENT_WITH_SUBDOC_DELETE] = docsSentWithSubdocDelete
+
 		listOfVBs := part.ResponsibleVBs()
 		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), OutNozzleVBMetricKeys)
 		outNozzle_collector.component_map[part.Id()] = metric_map
@@ -1607,6 +1623,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.TgtSyncXattrPreservedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvUpdatedEventListener, outNozzle_collector)
 	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.HlvPrunedEventListener, outNozzle_collector)
+	pipeline_utils.RegisterAsyncComponentEventHandler(async_listener_map, base.DocsSentWithSubdocCmdEventListener, outNozzle_collector)
 
 	return nil
 }
@@ -1678,6 +1695,10 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			if event_otherInfo.FailedTargetCR {
 				metricMap[service_def.ADD_FAILED_CR_TARGET_METRIC].(metrics.Counter).Inc(1)
 			}
+
+		case base.SUBDOC_MULTI_MUTATION:
+			// SUBDOC_MULTI_MUTATION docs written as taken care as part of DocsSentWithSubdocCmd event, so ignore here.
+			// There are no failed CR on target SUBDOC_MULTI_MUTATION docs, because it is only used in mobile mode.
 
 		default:
 			outNozzle_collector.stats_mgr.logger.Warnf("Invalid opcode, %v, in DataSent event from %v.", opcode, event.Component.Id())
@@ -1755,6 +1776,8 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 			metricMap[service_def.SET_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
 		case base.ADD_WITH_META:
 			metricMap[service_def.ADD_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
+		case base.SUBDOC_MULTI_MUTATION:
+			metricMap[service_def.SUBDOC_CMD_DOCS_CAS_CHANGED_METRIC].(metrics.Counter).Inc(1)
 		}
 
 	case common.DataSentFailed:
@@ -1811,6 +1834,26 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 	case common.DataSentFailedUnknownStatus:
 		metricMap[service_def.TARGET_UNKNOWN_STATUS_METRIC].(metrics.Counter).Inc(1)
 
+	case common.DocsSentWithSubdocCmd:
+		subdocOp := event.Data.(base.SubdocOpType)
+		switch subdocOp {
+		case base.SubdocDelete:
+			metricMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE].(metrics.Counter).Inc(1)
+			err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_DELETE)
+			if err != nil {
+				return err
+			}
+		case base.SubdocSet:
+			metricMap[service_def.DOCS_SENT_WITH_SUBDOC_SET].(metrics.Counter).Inc(1)
+			err := outNozzle_collector.handleVBEvent(event, service_def.DOCS_SENT_WITH_SUBDOC_SET)
+			if err != nil {
+				return err
+			}
+		default:
+			err := base.ErrorUnexpectedSubdocOp
+			outNozzle_collector.stats_mgr.logger.Errorf(err.Error())
+			return err
+		}
 	}
 
 	return nil
@@ -1818,6 +1861,10 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 
 func (outNozzle_collector *outNozzleCollector) handleVBEvent(event *common.Event, metricKey string) error {
 	switch metricKey {
+	case service_def.DOCS_SENT_WITH_SUBDOC_SET:
+		fallthrough
+	case service_def.DOCS_SENT_WITH_SUBDOC_DELETE:
+		fallthrough
 	case service_def.GUARDRAIL_DISK_SPACE_METRIC:
 		fallthrough
 	case service_def.GUARDRAIL_RESIDENT_RATIO_METRIC:
