@@ -41,16 +41,18 @@ function man() {
 	echo "Usage: "
 	echo "$0 [--help] [--run=<testcaseNo>] [--from=<testcaseNo>] [--mobile] [--cr=(lww | seqno)] [--override]"
 	echo "Note: "
-	echo "$0 				: Runs ALL the intended testcases."
+	echo "$0                : Runs ALL the intended testcases."
 	echo "Options:"
-	echo "-h OR --help                           		: Help"
-	echo "-r <testcaseNo> OR --run=<testcaseNo>  		: Run a specific testcase. Note: Cannot be used with -f."
-	echo "-f <testcaseNo> OR --from=<testcaseNo> 		: Run all testcases >= <testcaseNo>. Note: Cannot be used with -r."
-	echo "-c <crMode> OR --cr=<crMode>           		: Run all the tests to be run once again, but with the provided value conflict resolution mode as an override. Note: <crMode> can only be lww or seqno."
-	echo "-m OR --mobile                         		: Run all the tests to be run once again, but with mobile and enableCrossClusterVersioning turned on as an override."
-	echo "-o OR --override                       		: Run all the tests once with the overriden settings only. Note: Can be used only if there is a -m or a -c."
+	echo "-h OR --help                                      : Help"
+	echo "-r <testcaseNo> OR --run=<testcaseNo>             : Run a specific testcase. Note: Cannot be used with -f."
+	echo "-f <testcaseNo> OR --from=<testcaseNo>            : Run all testcases >= <testcaseNo>. Note: Cannot be used with -r."
+	echo "-c <crMode> OR --cr=<crMode>                      : Run all the tests to be run once again, but with the provided value conflict resolution mode as an override. Note: <crMode> can only be lww or seqno."
+	echo "-m OR --mobile                                    : Run all the tests to be run once again, but with mobile and enableCrossClusterVersioning turned on as an override."
+	echo "-o OR --override                                  : Run all the tests once with the overriden settings only. Note: Can be used only if there is a -m or a -c."
 	echo "-x <path/to/xdcrDifferBin> "
-	echo "OR --xdcrDifferDir=<path/to/xdcrDifferBin>	: Specify the directory where the xdcrDiffer binary exists for running the differ test cases."
+	echo "OR --xdcrDifferDir=<path/to/xdcrDifferBin>        : Specify the directory where the xdcrDiffer binary exists for running the differ test cases."
+	echo "-s <path/to/mobileImportSimBin> "
+	echo "OR --mobileImportDir=<path/to/mobileImportSimBin> : Specify the directory where the mobileImportSim binary exists for running the mobile/XDCR coexistence test cases."
 }
 
 # variables
@@ -62,6 +64,8 @@ crMode=""
 mobileMode=0
 overrideMode=0
 xdcrDifferDir=""
+mobileImportSimDir=""
+mobileImportSimBin=""
 differBin=""
 differSh=""
 mutationDir=""
@@ -95,6 +99,9 @@ while getopts "$optspec" optchar; do
 		xdcrDifferDir=*)
 			xdcrDifferDir=${OPTARG#*=}
 			;;
+		mobileImportSimDir=*)
+			mobileImportSimDir=${OPTARG#*=}
+			;;
 		help)
 			man $0
 			exit 0
@@ -123,6 +130,9 @@ while getopts "$optspec" optchar; do
 		;;
 	x)
 		xdcrDifferDir=${OPTARG}
+		;;
+	s)
+		mobileImportSimDir=${OPTARG}
 		;;
 	h)
 		man $0
@@ -155,6 +165,14 @@ elif [ "$xdcrDifferDir" != "" ]; then
 
 	mutationDir="$xdcrDifferDir/mutationDiff"
 	mutationDiffResults="$mutationDir/mutationDiffDetails"
+fi
+
+if [[ "$mobileImportSimDir" != "" ]]; then
+	mobileImportSimBin="$mobileImportSimDir/mobileImportSim"
+	if [[ ! -f "$mobileImportSimBin" ]]; then
+		echo "ERRO: cannot find mobileImportSimBin binary in $mobileImportSimBin. Did you run compile?"
+		exit 1
+	fi
 fi
 
 if [ "$testCaseNumber" != "" ] && [ "$from" != "" ]; then

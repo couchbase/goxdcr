@@ -84,6 +84,9 @@ type CRMetadata struct {
 	isImport bool
 	// This is the value parsed from the XATTR _importCAS.
 	importCas uint64
+	// if isImport is true, we will use this to store the actual Cas,
+	// since we replace doc.Cas with pre-import Cas i.e. cvCas for conflict resolution
+	actualCas uint64
 }
 
 func (m *CRMetadata) GetDocumentMetadata() *base.DocumentMetadata {
@@ -186,7 +189,8 @@ func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRM
 	}
 
 	meta := CRMetadata{
-		docMeta: &docMeta,
+		docMeta:   &docMeta,
+		actualCas: docMeta.Cas,
 	}
 
 	err = meta.UpdateHLVIfNeeded(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev)
@@ -244,7 +248,8 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 			return nil, err
 		}
 		meta := CRMetadata{
-			docMeta: &docMeta,
+			docMeta:   &docMeta,
+			actualCas: docMeta.Cas,
 		}
 		if doc.includeHlv {
 			cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev, err := getHlvFromMCResponse(doc.resp)
@@ -283,6 +288,7 @@ func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, spec
 	if err != nil {
 		return base.Error, err
 	}
+
 	targetDocMeta := targetMeta.GetDocumentMetadata()
 	if targetDocMeta == nil {
 		// Target document does not exist
@@ -327,17 +333,18 @@ func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, spec
 
 func GetMetadataForCR(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc) (base.DocumentMetadata, base.DocumentMetadata, error) {
 	var doc_meta_source, doc_meta_target base.DocumentMetadata
+	var target_meta, source_meta *CRMetadata
 	var err error
 	if resp.Opcode == base.GET_WITH_META {
 		doc_meta_source = base.DecodeSetMetaReq(req.Req)
 		doc_meta_target, err = base.DecodeGetMetaResp(req.Req.Key, resp, xattrEnabled)
 		if err != nil {
-			err = fmt.Errorf("error decoding GET_META response for key=%v%s%v, resp=%v%v%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			err = fmt.Errorf("error decoding GET_META response for key=%v%s%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
 			return doc_meta_source, doc_meta_target, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
 		source_doc := NewSourceDocument(req, sourceId)
-		source_meta, err := source_doc.GetMetadata(uncompressFunc)
+		source_meta, err = source_doc.GetMetadata(uncompressFunc)
 		if err != nil {
 			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, req.Req, base.UdTagEnd, base.UdTagBegin, req.Req.Body, base.UdTagEnd)
 			return doc_meta_source, doc_meta_target, err
@@ -348,16 +355,26 @@ func GetMetadataForCR(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []b
 			if err == base.ErrorDocumentNotFound {
 				return doc_meta_source, doc_meta_target, err
 			}
-			err = fmt.Errorf("error creating target document for key=%v%s%v, resp=%v%v%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			err = fmt.Errorf("error creating target document for key=%v%s%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
 			return doc_meta_source, doc_meta_target, err
 		}
-		target_meta, err := target_doc.GetMetadata()
+		target_meta, err = target_doc.GetMetadata()
 		if err != nil {
-			err = fmt.Errorf("error decoding target SUBDOC_MULTI_LOOKUP response for key=%v%s%v, resp=%v%v%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			err = fmt.Errorf("error decoding target SUBDOC_MULTI_LOOKUP response for key=%v%s%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
 			return doc_meta_source, doc_meta_target, err
 		}
 		doc_meta_target = *target_meta.docMeta
+
+		if target_meta.IsImportMutation() && source_meta.actualCas < target_meta.actualCas {
+			// This is the case when target CAS will rollback if source wins
+			// So use subdoc command in this case instead of *_WITH_META commands
+			req.SetSubdocOp()
+			req.SubdocCmdOptions.TargetHasPv = target_meta.hadPv
+			req.SubdocCmdOptions.TargetHasMv = target_meta.hadMv
+			req.SubdocCmdOptions.TargetDocIsTombstone = doc_meta_target.Deletion
+		}
 	}
+
 	return doc_meta_source, doc_meta_target, nil
 }
 
@@ -416,6 +433,7 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 	sourceWin := true
 	if doc_meta_target.RevSeq > doc_meta_source.RevSeq {
 		sourceWin = false
+		// TODO: Revisit MB-60346 for RevId rollback, after MB-60385 is done
 	} else if doc_meta_target.RevSeq == doc_meta_source.RevSeq {
 		if doc_meta_target.Cas > doc_meta_source.Cas {
 			sourceWin = false
@@ -513,7 +531,7 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 		afterKeyPos := *pos
 		*pos, pruned = VersionMapToDeltasBytes(pv, body, *pos, &pruneFunc)
 		if *pos == afterKeyPos {
-			// Did not add PV, need to back of and remove the PV key
+			// Did not add PV, need to back off and remove the PV key
 			*pos = startPos
 		}
 	}
@@ -522,6 +540,76 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 
 	*pos, err = xattrComposer.CommitRawKVPair()
 	return *pos, pruned, err
+}
+
+// This routine contructs HLV related operational specs for subdoc operation
+func ConstructSpecsFromHlvForSubdocOp(meta *CRMetadata, pruningWindow time.Duration, specs *base.SubdocMutationPathSpecs, targetHasPV, targetHasMv bool, pvSlice, mvSlice []byte) (bool, error) {
+	if meta == nil {
+		return false, fmt.Errorf("metadata cannot be nil")
+	}
+
+	var spec base.SubdocMutationPathSpec
+	var idx int
+
+	pruneFunc := base.GetHLVPruneFunction(meta.GetDocumentMetadata().Cas, pruningWindow)
+	HLV := meta.GetHLV()
+
+	// set cvCas as regenerated Cas from mc.SET/DELETE using macro expansion.
+	// MKDIR_P is not set, because we know for sure there exists cvCas on target since we used it for conflict resolution, otherwise there is something wrong
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_XATTR|base.SUBDOC_FLAG_EXPAND_MACROS), []byte(XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION))
+	*specs = append(*specs, spec)
+
+	// format CV
+	// src
+	srcVal := HLV.GetCvSrc()
+	src := []byte("\"" + string(srcVal) + "\"")
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(XATTR_SRC_PATH), src)
+	*specs = append(*specs, spec)
+
+	// ver should also be macro expanded cas and should not need MKDIR_P
+	spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_XATTR|base.SUBDOC_FLAG_EXPAND_MACROS), []byte(XATTR_VER_PATH), []byte(base.CAS_MACRO_EXPANSION))
+	*specs = append(*specs, spec)
+
+	// Format MV
+	mv := HLV.GetMV()
+	if len(mv) > 0 {
+		idx = 0
+		idx, _ = VersionMapToDeltasBytes(mv, mvSlice, idx, nil)
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(XATTR_MV_PATH), mvSlice[:idx])
+		*specs = append(*specs, spec)
+	} else if targetHasMv {
+		// no mv left after processing - remove from target if mv already exists
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(XATTR_MV_PATH), nil)
+		*specs = append(*specs, spec)
+	}
+
+	// Format PV, after pruning
+	pv := HLV.GetPV()
+	var pruned bool
+	if len(pv) > 0 {
+		idx = 0
+		afterKeyPos := idx
+		idx, pruned = VersionMapToDeltasBytes(pv, pvSlice, idx, &pruneFunc)
+		if idx == afterKeyPos {
+			// PV is all pruned - remove from target
+			if !targetHasPV {
+				// _vv doesn't exist on target or pv doesn't exist already, no need to remove
+				return pruned, nil
+			}
+			// pv exists on target, but the source mutation PV is all pruned, so delete the one on target.
+			spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(XATTR_PV_PATH), nil)
+			*specs = append(*specs, spec)
+		} else {
+			spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(XATTR_PV_PATH), pvSlice[:idx])
+			*specs = append(*specs, spec)
+		}
+	} else if targetHasPV {
+		// no pv left after processing - remove from target if pv already exists
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(XATTR_PV_PATH), nil)
+		*specs = append(*specs, spec)
+	}
+
+	return pruned, nil
 }
 
 type ConflictParams struct {
@@ -795,7 +883,7 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 	if xattr != nil && !base.Equals(xattr, base.EmptyJsonObject) {
 		cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = ParseHlvFields(cas, xattr)
 		if err1 != nil {
-			err = fmt.Errorf("failed to parse HLV fields for document %s%q%s, error: %v", base.UdTagBegin, lookupResp.Resp.Key, base.UdTagEnd, err)
+			err = fmt.Errorf("failed to parse HLV fields for document %s%q%s, error: %v", base.UdTagBegin, lookupResp.Resp.Key, base.UdTagEnd, err1)
 			return
 		}
 	}
@@ -925,7 +1013,7 @@ func NewMetadataForTest(key, source []byte, cas, revId uint64, cvCasHex, cvSrc, 
 	if len(cvCasHex) == 0 {
 		cvCas = 0
 	} else {
-		cvCas, err = base.HexLittleEndianToUint64(verHex)
+		cvCas, err = base.HexLittleEndianToUint64(cvCasHex)
 		if err != nil {
 			return nil, err
 		}

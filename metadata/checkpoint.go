@@ -48,6 +48,8 @@ const (
 	GuardrailResidentRatioCnt          string = "guardrail_resident_ratio_cnt"
 	GuardrailDataSizeCnt               string = "guardrail_data_size_cnt"
 	GuardrailDiskSpaceCnt              string = "guardrail_disk_space_cnt"
+	DocsSentWithSubdocSetCnt           string = "docs_sent_with_subdoc_set"
+	DocsSentWithSubdocDeleteCnt        string = "docs_sent_with_subdoc_delete"
 )
 
 type CheckpointRecord struct {
@@ -102,6 +104,9 @@ type CheckpointRecord struct {
 	GuardrailResidentRatioCnt uint64 `json:"guardrail_resident_ratio_cnt"`
 	GuardrailDataSizeCnt      uint64 `json:"guardrail_data_size_cnt"`
 	GuardrailDiskSpaceCnt     uint64 `json:"guardrail_disk_space_cnt"`
+	// Number of subdoc commands used, instead of set_with_meta/delete_with_meta
+	DocsSentWithSubdocSetCnt    uint64 `json:"docs_sent_with_subdoc_set"`
+	DocsSentWithSubdocDeleteCnt uint64 `json:"docs_sent_with_subdoc_delete"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -145,6 +150,8 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 	guardrailResidentRatioItems := uint64(vbCountMetrics[base.GuardrailResidentRatio])
 	guardrailDataSizeItems := uint64(vbCountMetrics[base.GuardrailDataSize])
 	guardrailDiskSpaceItems := uint64(vbCountMetrics[base.GuardrailDiskSpace])
+	subdocSetItems := uint64(vbCountMetrics[base.DocsSentWithSubdocSet])
+	subdocDeleteItems := uint64(vbCountMetrics[base.DocsSentWithSubdocDelete])
 
 	record := &CheckpointRecord{
 		Failover_uuid:                      failoverUuid,
@@ -172,6 +179,8 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		GuardrailResidentRatioCnt:          guardrailResidentRatioItems,
 		GuardrailDataSizeCnt:               guardrailDataSizeItems,
 		GuardrailDiskSpaceCnt:              guardrailDiskSpaceItems,
+		DocsSentWithSubdocSetCnt:           subdocSetItems,
+		DocsSentWithSubdocDeleteCnt:        subdocDeleteItems,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -228,7 +237,9 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.CreationTime == newRecord.CreationTime &&
 		ckptRecord.GuardrailDiskSpaceCnt == newRecord.GuardrailDiskSpaceCnt &&
 		ckptRecord.GuardrailDataSizeCnt == newRecord.GuardrailDataSizeCnt &&
-		ckptRecord.GuardrailResidentRatioCnt == newRecord.GuardrailResidentRatioCnt {
+		ckptRecord.GuardrailResidentRatioCnt == newRecord.GuardrailResidentRatioCnt &&
+		ckptRecord.DocsSentWithSubdocDeleteCnt == newRecord.DocsSentWithSubdocDeleteCnt &&
+		ckptRecord.DocsSentWithSubdocSetCnt == newRecord.DocsSentWithSubdocSetCnt {
 		return true
 	} else {
 		return false
@@ -265,6 +276,8 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.GuardrailResidentRatioCnt = other.GuardrailResidentRatioCnt
 	ckptRecord.GuardrailDataSizeCnt = other.GuardrailDataSizeCnt
 	ckptRecord.GuardrailDiskSpaceCnt = other.GuardrailDiskSpaceCnt
+	ckptRecord.DocsSentWithSubdocDeleteCnt = other.DocsSentWithSubdocDeleteCnt
+	ckptRecord.DocsSentWithSubdocSetCnt = other.DocsSentWithSubdocSetCnt
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -417,6 +430,16 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	guardrailDiskSpace, ok := fieldMap[GuardrailDiskSpaceCnt]
 	if ok {
 		ckptRecord.GuardrailDiskSpaceCnt = uint64(guardrailDiskSpace.(float64))
+	}
+
+	docsSentWithSubdocSet, ok := fieldMap[DocsSentWithSubdocSetCnt]
+	if ok {
+		ckptRecord.DocsSentWithSubdocSetCnt = uint64(docsSentWithSubdocSet.(float64))
+	}
+
+	docsSentWithSubdocDelete, ok := fieldMap[DocsSentWithSubdocDeleteCnt]
+	if ok {
+		ckptRecord.DocsSentWithSubdocDeleteCnt = uint64(docsSentWithSubdocDelete.(float64))
 	}
 
 	return nil
@@ -1038,6 +1061,8 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		GuardrailDiskSpaceCnt:              c.GuardrailDiskSpaceCnt,
 		GuardrailDataSizeCnt:               c.GuardrailDataSizeCnt,
 		GuardrailResidentRatioCnt:          c.GuardrailResidentRatioCnt,
+		DocsSentWithSubdocSetCnt:           c.DocsSentWithSubdocSetCnt,
+		DocsSentWithSubdocDeleteCnt:        c.DocsSentWithSubdocDeleteCnt,
 	}
 	return retVal
 }

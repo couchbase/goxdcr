@@ -95,6 +95,32 @@ function grepForPanics {
 	return 0
 }
 
+function grepForErrs {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+	for dir in $(ls $logsDir); do
+		count=$(grep -c "decoding source mutation" ${logsDir}/${dir}/goxdcr.log)
+		if (($count > 0)); then
+			echo "WARNING Found errs in ${logsDir}/${dir}"
+			exit 1
+		fi
+	done
+	return 0
+}
+
+function grepForEINVAL {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+	for dir in $(ls $logsDir); do
+		count=$(grep -c "EINVAL" ${logsDir}/${dir}/goxdcr.log)
+		if (($count > 0)); then
+			echo "WARNING Found errs in ${logsDir}/${dir}"
+			exit 1
+		fi
+	done
+	return 0
+}
+
 function grepForInvalidCommand {
 	local ns_serverDir=$(getNsServerDir)
 	local logsDir="${ns_serverDir}/logs"
@@ -104,6 +130,38 @@ function grepForInvalidCommand {
 		for count in $(echo "$counts"); do
 			if (($count > 0)); then
 				echo "WARNING Found invalid format in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
+function grepForMultiError {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "SUBDOC_BAD_MULTI" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found SUBDOC_BAD_MULTI in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
+function grepForDecodingError {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "error decoding" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'error decoding' in ${logsDir}/${dir}"
 				exit 1
 			fi
 		done
@@ -168,13 +226,16 @@ function waitForChangesLeft0 {
 		elif (($changesLeft > 0)); then
 			echo "Changes left $changesLeft is not 0 yet..."
 		elif (($changesLeft == 0)); then
-			break
+			return 0
 		else
 			echo "Changes left unknown value: $changesLeft"
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+
+	echo "changes_left never went to zero"
+	return 0
 }
 
 function checkNonNegativeChangesLeft {
@@ -1620,7 +1681,7 @@ function validatePrometheusStatsIs0 {
 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
 
 	if (($count > 0)); then
-		echo "Stat $prometheusStatsName shows 0"
+		echo "Stat $prometheusStatsName shows $count"
 		exit 1
 	fi
 }
@@ -1651,6 +1712,13 @@ function validateDatapoolFailIs0 {
 	local sourceBucket=$2
 	local targetBucket=$3
 	validatePrometheusStatsIs0 "$node" "$sourceBucket" "$targetBucket" "xdcr_datapool_failed_gets_total"
+}
+
+function validateBinaryFilteredIs0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	validatePrometheusStatsIs0 "$node" "$sourceBucket" "$targetBucket" "xdcr_binary_filtered_total"
 }
 
 # use cbc-pillowfight to create a large bucket
@@ -1755,4 +1823,47 @@ function setBucket {
 	local port=${CLUSTER_NAME_PORT_MAP[$cluster]:-}
 	output=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value)
 	echo $output
+}
+
+function enableMobileImportSimIfPresent {
+	if [[ -z ${mobileImportSimBin:-} ]]; then
+		return
+	fi
+
+	clusterName=$1
+	bucketName=$2
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	echo "Enabling mobile import simulator on $bucketName of 127.0.0.1:$port"
+
+	$mobileImportSimBin -username $DEFAULT_ADMIN -password $DEFAULT_PW -bucketname $bucketName -hostAddr 127.0.0.1:$port 2>&1 >/dev/null &
+
+	echo "Sleeping 3 seconds for simulator to start"
+	sleep 3
+}
+
+function grepForAbnormalities {
+	grepForPanics
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForErrs
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForEINVAL
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForMultiError
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForDecodingError
+	if (($? != 0)); then
+		exit 1
+	fi
 }

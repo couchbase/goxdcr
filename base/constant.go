@@ -233,9 +233,10 @@ const CompressionTypeKey = "compression_type"
 // DataType fields of MCRequest
 // kv_engine/include/mcbp/protocol/datatype.h
 const (
-	JSONDataType   = 1
-	SnappyDataType = 2
-	XattrDataType  = 4
+	RawDataType    uint8 = 0 // "unknown" datatype. Eg: subdoc commands with body containing operational specs
+	JSONDataType   uint8 = 1
+	SnappyDataType uint8 = 2
+	XattrDataType  uint8 = 4
 	// In subdoc lookup for vxattr $document, KV returns an array of the following strings instead
 	JsonDataTypeStr   string = "json"
 	SnappyDataTypeStr string = "snappy"
@@ -358,6 +359,7 @@ var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advan
 var ErrorJSONReEncodeFailed = errors.New("JSON string passed in did not pass re-encode test. Potentially duplicated keys or characters except: A-Z a-z 0-9 _ - %")
 var ErrorDocumentNotFound = errors.New("Document not found")
 var ErrorSubdocLookupPathNotFound = errors.New("SUBDOC_MULTI_LOOKUP does not include the path")
+var ErrorUnexpectedSubdocOp = errors.New("Unexpected subdoc op was observed")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -561,6 +563,7 @@ const (
 	HlvUpdatedEventListener              = "HlvUpdatedEventListener"
 	HlvPrunedEventListener               = "HlvPrunedEventListener"
 	HlvPrunedAtMergeEventListener        = "HlvPrunedAtMergeEventListener"
+	DocsSentWithSubdocCmdEventListener   = "DocsSentWithSubdocSetEventListener"
 )
 
 const (
@@ -1706,6 +1709,8 @@ const (
 	GuardrailResidentRatio          = "guardrail_resident_ratio"
 	GuardrailDataSize               = "guardrail_data_size"
 	GuardrailDiskSpace              = "guardrail_disk_space"
+	DocsSentWithSubdocSet           = "docs_sent_with_subdoc_set"
+	DocsSentWithSubdocDelete        = "docs_sent_with_subdoc_delete"
 )
 
 var ValidJsonEnds []byte = []byte{
