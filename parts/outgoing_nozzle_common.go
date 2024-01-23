@@ -257,6 +257,11 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 	var isFull bool = true
 
 	if req != nil && req.Req != nil {
+		// When this batch is established, it establishes these specs so store it to be used in case of mutation retries
+		req.GetMetaSpecWithoutHlv = b.getMetaSpecWithoutHlv
+		req.GetMetaSpecWithHlv = b.getMetaSpecWithHlv
+		req.GetBodySpec = b.getBodySpec
+
 		size := req.Req.Size()
 
 		curCount = b.incrementCount(1)
@@ -275,10 +280,6 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 			isFull = false
 		}
 
-		// When this batch is established, it establishes these specs so store it to be used in case of mutation retries
-		req.GetMetaSpecWithoutHlv = b.getMetaSpecWithoutHlv
-		req.GetMetaSpecWithHlv = b.getMetaSpecWithHlv
-		req.GetBodySpec = b.getBodySpec
 		return curCount, isFirst, isFull, nil
 	}
 

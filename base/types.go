@@ -706,6 +706,8 @@ type WrappedMCRequest struct {
 	GetMetaSpecWithoutHlv []SubdocLookupPathSpec
 	GetMetaSpecWithHlv    []SubdocLookupPathSpec
 	GetBodySpec           []SubdocLookupPathSpec
+	// copy of Req.Cas, which can be used if Req.Cas is set to 0
+	ActualCas uint64
 }
 
 func (req *WrappedMCRequest) GetReqBytes() []byte {

@@ -1491,6 +1491,7 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 
 	req := wrapped_req.Req
 	req.Cas = event.Cas
+	wrapped_req.ActualCas = event.Cas
 	req.Opaque = 0
 	req.VBucket = event.VBucket
 	req.Key = event.Key

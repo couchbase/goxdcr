@@ -1267,16 +1267,17 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			switch needSendStatus {
 			case Send:
 				lookupResp := batch.sendLookupMap[item.UniqueKey]
+				if lookupResp != nil && lookupResp.Resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
+					item.SetMetaXattrOptions.NoTargetCR = true
+				} else {
+					item.SetMetaXattrOptions.NoTargetCR = false
+				}
+
 				err = xmem.preprocessMCRequest(item, lookupResp)
 				if err != nil {
 					return err
 				}
 
-				if lookupResp != nil && lookupResp.Resp.Opcode == base.SUBDOC_MULTI_MUTATION {
-					item.SetMetaXattrOptions.NoTargetCR = true
-				} else {
-					item.SetMetaXattrOptions.NoTargetCR = false
-				}
 				//blocking
 				index, reserv_num, item_bytes, err := xmem.buf.enSlot(item)
 				if err != nil {
@@ -1830,7 +1831,7 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 		// CCR mode requires fetching the document metadata and body for the purpose of conflict resolution
 		// Since they are considered true conflicts
 		getSpecs = getBodySpec
-	} else if xmem.getCrossClusterVers() == true && incomingReq.Cas >= xmem.config.vbMaxCas[incomingReq.VBucket] {
+	} else if xmem.getCrossClusterVers() == true && wrappedReq.ActualCas >= xmem.config.vbMaxCas[incomingReq.VBucket] {
 		// These are the mutations we need to maintain HLV for mobile and get target importCas/cvCas for CR
 		// Note that there is no mixed mode support for import mutations. If enableCrossClusterVersioning is false,
 		// and current source mutation already has HLV, we still don't get target importCas/HLV. The reason is to
