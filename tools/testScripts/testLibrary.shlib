@@ -1689,4 +1689,11 @@ function setBucket {
 	echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value"
 	output=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value)
 	echo $output
+	while [[ "$output" != "" && "$output" != "Cross cluster versioning already enabled" ]]; do
+		echo "retrying..."
+		sleep 2
+		echo "$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value"
+		output=$($CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$port/pools/default/buckets/$bucketName -d $setting=$value)
+		echo $output
+	done
 }
