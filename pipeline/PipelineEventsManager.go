@@ -192,12 +192,25 @@ func (p *PipelineEventsMgr) AddEvent(eventType base.EventInfoType, eventDesc str
 	newEvent.EventDesc = eventDesc
 	newEvent.EventExtras = eventExtras
 	newEvent.SetHint(hint)
+	if eventExtras.Len() > 0 {
+		newEvent.EventExtras = p.reKeyEventExtras(eventExtras)
+	}
 
 	p.events.Mutex.Lock()
 	defer p.events.Mutex.Unlock()
 	p.events.TimeInfos = append(p.events.TimeInfos, time.Now().UnixNano())
 	p.events.EventInfos = append(p.events.EventInfos, newEvent)
 	return newEvent.EventId
+}
+
+func (p *PipelineEventsMgr) reKeyEventExtras(eventExtras base.EventsMap) base.EventsMap {
+	reKeyedExtras := base.NewEventsMap()
+	eventExtras.GetRWLock().RLock()
+	for _, v := range eventExtras.EventsMap {
+		reKeyedExtras.EventsMap[base.GetEventIdFromWell(p.eventIdWell)] = v
+	}
+	eventExtras.GetRWLock().RUnlock()
+	return reKeyedExtras
 }
 
 func (p *PipelineEventsMgr) UpdateEvent(eventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
@@ -209,7 +222,8 @@ func (p *PipelineEventsMgr) UpdateEvent(eventId int64, newEventDesc string, newE
 		if eventInfo != nil && eventInfo.EventId == eventId {
 			eventInfo.EventDesc = newEventDesc
 			if newEventExtras != nil {
-				eventInfo.EventExtras = *newEventExtras
+				rekeyedEvents := p.reKeyEventExtras(*newEventExtras)
+				eventInfo.EventExtras.Merge(rekeyedEvents)
 			}
 			p.events.TimeInfos[i] = time.Now().UnixNano()
 

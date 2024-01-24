@@ -502,7 +502,9 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible() ||
 		oldSettings.GetJsFunctionTimeoutMs() != newSettings.GetJsFunctionTimeoutMs() ||
 		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() ||
-		len(newMergeFuncMapping) > 0 && newMergeFuncMapping.SameAs(oldMergeFuncMapping) == false {
+		len(newMergeFuncMapping) > 0 && newMergeFuncMapping.SameAs(oldMergeFuncMapping) == false ||
+		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
+		oldSettings.GetCasDriftInjectDocKey() != newSettings.GetCasDriftInjectDocKey() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 

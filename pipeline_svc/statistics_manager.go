@@ -147,12 +147,13 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.SEQNO_ADV_RECEIVED_DCP_METRIC:       service_def.MetricTypeCounter,
 	service_def.DOCS_SENT_WITH_SUBDOC_SET:           service_def.MetricTypeCounter,
 	service_def.DOCS_SENT_WITH_SUBDOC_DELETE:        service_def.MetricTypeCounter,
+	service_def.DOCS_FILTERED_CAS_POISONING_METRIC:  service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
 	service_def.DELETION_FILTERED_METRIC, service_def.SET_FILTERED_METRIC, service_def.BINARY_FILTERED_METRIC, service_def.EXPIRY_STRIPPED_METRIC,
 	service_def.DOCS_FILTERED_TXN_ATR_METRIC, service_def.DOCS_FILTERED_CLIENT_TXN_METRIC, service_def.DOCS_FILTERED_TXN_XATTR_METRIC,
-	service_def.DOCS_FILTERED_MOBILE_METRIC, service_def.DOCS_FILTERED_USER_DEFINED_METRIC}
+	service_def.DOCS_FILTERED_MOBILE_METRIC, service_def.DOCS_FILTERED_USER_DEFINED_METRIC, service_def.DOCS_FILTERED_CAS_POISONING_METRIC}
 
 var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC, service_def.GUARDRAIL_DATA_SIZE_METRIC, service_def.GUARDRAIL_DISK_SPACE_METRIC,
 	service_def.DOCS_SENT_WITH_SUBDOC_SET, service_def.DOCS_SENT_WITH_SUBDOC_DELETE}
@@ -197,6 +198,7 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 	vbStatMap[service_def.GUARDRAIL_DATA_SIZE_METRIC] = base.Uint64ToInt64(record.GuardrailDataSizeCnt)
 	vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_SET] = base.Uint64ToInt64(record.DocsSentWithSubdocSetCnt)
 	vbStatMap[service_def.DOCS_SENT_WITH_SUBDOC_DELETE] = base.Uint64ToInt64(record.DocsSentWithSubdocDeleteCnt)
+	vbStatMap[service_def.DOCS_FILTERED_CAS_POISONING_METRIC] = base.Uint64ToInt64(record.CasPoisonCnt)
 	return vbStatMap
 }
 
@@ -2244,6 +2246,8 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		registry_router.Register(service_def.DOCS_FILTERED_USER_DEFINED_METRIC, docs_filtered_on_user_defined_filter)
 		mobile_docs_filtered := metrics.NewCounter()
 		registry_router.Register(service_def.DOCS_FILTERED_MOBILE_METRIC, mobile_docs_filtered)
+		casPoisoned := metrics.NewCounter()
+		registry_router.Register(service_def.DOCS_FILTERED_CAS_POISONING_METRIC, casPoisoned)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.DOCS_FILTERED_METRIC] = docs_filtered
@@ -2262,6 +2266,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 		metric_map[service_def.DOCS_FILTERED_TXN_XATTR_METRIC] = docs_filtered_on_txn_xattr
 		metric_map[service_def.DOCS_FILTERED_USER_DEFINED_METRIC] = docs_filtered_on_user_defined_filter
 		metric_map[service_def.DOCS_FILTERED_MOBILE_METRIC] = mobile_docs_filtered
+		metric_map[service_def.DOCS_FILTERED_CAS_POISONING_METRIC] = casPoisoned
 
 		// VB specific stats
 		listOfVbs := dcp_part.ResponsibleVBs()
@@ -2309,6 +2314,16 @@ func (r_collector *routerCollector) handleVBEvent(event *common.Event, metricKey
 		uprEvent := event.Data.(*mcc.UprEvent)
 		vbucket := uprEvent.VBucket
 		seqno := uprEvent.Seqno
+		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
+		if !ok {
+			return base.ErrorNotMyVbucket
+		}
+		helper.handleIncomingSeqno(seqno, metricKey)
+		return nil
+	case service_def.DOCS_FILTERED_CAS_POISONING_METRIC:
+		mcReq := event.Data.(*base.WrappedMCRequest)
+		vbucket := mcReq.Req.VBucket
+		seqno := mcReq.Seqno
 		helper, ok := r_collector.vbMetricHelper.vbBasedHelper[vbucket]
 		if !ok {
 			return base.ErrorNotMyVbucket
@@ -2422,6 +2437,12 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		metric_map[service_def.DOCS_CLONED_METRIC].(metrics.Counter).Inc(int64(totalCount - 1))
 		if isDelete := data[3].(bool); isDelete {
 			metric_map[service_def.DELETION_CLONED_METRIC].(metrics.Counter).Inc(int64(totalCount - 1))
+		}
+	case common.DataNotReplicated:
+		casPoisonErrChk := event.DerivedData[0].(error)
+		if casPoisonErrChk == base.ErrorCasPoisoningDetected {
+			metric_map[service_def.DOCS_FILTERED_CAS_POISONING_METRIC].(metrics.Counter).Inc(1)
+			err = r_collector.handleVBEvent(event, service_def.DOCS_FILTERED_CAS_POISONING_METRIC)
 		}
 	}
 

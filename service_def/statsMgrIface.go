@@ -62,18 +62,19 @@ const (
 	DOCS_REP_QUEUE_METRIC               = base.DocsRepQueueStats
 	DATA_REPLICATED_UNCOMPRESSED_METRIC = "data_replicated_uncompress"
 
-	DOCS_FILTERED_METRIC              = base.DocsFiltered
-	DOCS_UNABLE_TO_FILTER_METRIC      = base.DocsUnableToFilter
-	EXPIRY_FILTERED_METRIC            = base.ExpiryFiltered
-	DELETION_FILTERED_METRIC          = base.DeletionFiltered
-	SET_FILTERED_METRIC               = base.SetFiltered
-	BINARY_FILTERED_METRIC            = base.BinaryFiltered
-	EXPIRY_STRIPPED_METRIC            = base.ExpiryStripped
-	DOCS_FILTERED_TXN_ATR_METRIC      = base.AtrTxnDocsFiltered
-	DOCS_FILTERED_CLIENT_TXN_METRIC   = base.ClientTxnDocsFiltered
-	DOCS_FILTERED_TXN_XATTR_METRIC    = base.DocsFilteredOnTxnXattr
-	DOCS_FILTERED_USER_DEFINED_METRIC = base.DocsFilteredOnUserDefinedFilter
-	DOCS_FILTERED_MOBILE_METRIC       = base.MobileDocsFiltered
+	DOCS_FILTERED_METRIC               = base.DocsFiltered
+	DOCS_UNABLE_TO_FILTER_METRIC       = base.DocsUnableToFilter
+	EXPIRY_FILTERED_METRIC             = base.ExpiryFiltered
+	DELETION_FILTERED_METRIC           = base.DeletionFiltered
+	SET_FILTERED_METRIC                = base.SetFiltered
+	BINARY_FILTERED_METRIC             = base.BinaryFiltered
+	EXPIRY_STRIPPED_METRIC             = base.ExpiryStripped
+	DOCS_FILTERED_TXN_ATR_METRIC       = base.AtrTxnDocsFiltered
+	DOCS_FILTERED_CLIENT_TXN_METRIC    = base.ClientTxnDocsFiltered
+	DOCS_FILTERED_TXN_XATTR_METRIC     = base.DocsFilteredOnTxnXattr
+	DOCS_FILTERED_USER_DEFINED_METRIC  = base.DocsFilteredOnUserDefinedFilter
+	DOCS_FILTERED_MOBILE_METRIC        = base.MobileDocsFiltered
+	DOCS_FILTERED_CAS_POISONING_METRIC = base.DocsCasPoisoned
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
 	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
@@ -1412,6 +1413,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
 		Description:  "The number of sets issued using subdoc command instead of set_with_meta to avoid cas rollback on target",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	DOCS_FILTERED_CAS_POISONING_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCasPoisonDetection,
+		Description:  "Total number of documents not replicated because cas is beyond acceptable drift threshold",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},

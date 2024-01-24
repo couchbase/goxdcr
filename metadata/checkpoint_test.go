@@ -48,6 +48,7 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 		GuardrailResidentRatioCnt:    100,
 		GuardrailDataSizeCnt:         200,
 		GuardrailDiskSpaceCnt:        300,
+		CasPoisonCnt:                 1,
 	}
 
 	brokenMap := make(CollectionNamespaceMapping)
@@ -74,6 +75,7 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 		GuardrailResidentRatioCnt:    50,
 		GuardrailDataSizeCnt:         100,
 		GuardrailDiskSpaceCnt:        200,
+		CasPoisonCnt:                 2,
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
 

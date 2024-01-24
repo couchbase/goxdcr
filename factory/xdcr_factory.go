@@ -633,6 +633,12 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 		load_distribution := base.BalanceLoad(numOfOutNozzles, numOfVbs)
 		xdcrf.logger.Infof("topic=%v, numOfOutNozzles=%v, numOfVbs=%v, load_distribution=%v\n", spec.Id, numOfOutNozzles, numOfVbs, load_distribution)
 
+		var eventsProducer common.PipelineEventsProducer
+		eventsProducer, err = xdcrf.GetEventsProducer(topic)
+		if err != nil {
+			return
+		}
+
 		for i := 0; i < numOfOutNozzles; i++ {
 			// construct vb list for the out nozzle, which is needed by capi nozzle
 			// before statistics info is available, the default load balancing stragegy is to evenly distribute vbuckets among out nozzles
@@ -651,13 +657,6 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				mainPipelineTopic, _ := common.DecomposeFullTopic(topic)
-				replStatus, replStatusErr := xdcrf.replStatusGetter(mainPipelineTopic)
-				if replStatusErr != nil {
-					err = fmt.Errorf("Unable to find replicationStatus for pipeline topic %v", mainPipelineTopic)
-					return
-				}
-				eventsProducer := replStatus.GetEventsProducer()
 				outNozzle = xdcrf.constructXMEMNozzle(topic, spec.SourceBucketUUID, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList, eventsProducer)
 			}
 
@@ -708,10 +707,18 @@ func (xdcrf *XDCRFactory) constructRouter(id string, spec *metadata.ReplicationS
 		return xdcrf.remote_cluster_svc.GetConnectivityStatus(ref)
 	}
 
+	eventsProducer, err := xdcrf.GetEventsProducer(spec.Id)
+	if err != nil {
+		return nil, err
+	}
+
 	// when initializing router, isHighReplication is set to true only if replication priority is High
 	// for replications with Medium priority and ongoing flag set, isHighReplication will be updated to true
 	// through a UpdateSettings() call to the router in the pipeline startup sequence before parts are started
-	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, xdcrf.utils, xdcrf.throughput_throttler_svc, spec.Settings.GetPriority() == base.PriorityTypeHigh, spec.Settings.GetExpDelMode(), xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler, remoteClusterCapability, migrationUIMsgRaiser, connectivityStatusGetter)
+	router, err := parts.NewRouter(routerId, spec, downStreamParts, vbNozzleMap, sourceCRMode, logger_ctx, xdcrf.utils,
+		xdcrf.throughput_throttler_svc, spec.Settings.GetPriority() == base.PriorityTypeHigh,
+		spec.Settings.GetExpDelMode(), xdcrf.collectionsManifestSvc, srcNozzleObjRecycler, explicitMappingChangeHandler,
+		remoteClusterCapability, migrationUIMsgRaiser, connectivityStatusGetter, eventsProducer)
 
 	if err != nil {
 		xdcrf.logger.Errorf("Error (%v) constructing router %v", err.Error(), routerId)
@@ -1334,6 +1341,16 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[base.EnableCrossClusterVersioningKey] = crossCluster
 	}
 
+	casDriftThreshold, ok := settings[metadata.CASDriftThresholdHoursKey]
+	if ok {
+		routerSettings[metadata.CASDriftThresholdHoursKey] = casDriftThreshold
+	}
+
+	devCasDriftForceDocKey, ok := settings[metadata.DevCasDrfitForceDocKey]
+	if ok {
+		routerSettings[metadata.DevCasDrfitForceDocKey] = devCasDriftForceDocKey
+	}
+
 	return routerSettings, nil
 }
 
@@ -1805,4 +1822,15 @@ func (xdcrf *XDCRFactory) GeneratePrometheusStatusCb(pipeline common.Pipeline) p
 	}
 
 	return callbacks
+}
+
+func (xdcrf *XDCRFactory) GetEventsProducer(topic string) (common.PipelineEventsProducer, error) {
+	mainPipelineTopic, _ := common.DecomposeFullTopic(topic)
+	replStatus, replStatusErr := xdcrf.replStatusGetter(mainPipelineTopic)
+	if replStatusErr != nil {
+		err := fmt.Errorf("Unable to find replicationStatus for pipeline topic %v", mainPipelineTopic)
+		return nil, err
+	}
+	eventsProducer := replStatus.GetEventsProducer()
+	return eventsProducer, nil
 }

@@ -362,6 +362,7 @@ var ErrorJSONReEncodeFailed = errors.New("JSON string passed in did not pass re-
 var ErrorDocumentNotFound = errors.New("Document not found")
 var ErrorSubdocLookupPathNotFound = errors.New("SUBDOC_MULTI_LOOKUP does not include the path")
 var ErrorUnexpectedSubdocOp = errors.New("Unexpected subdoc op was observed")
+var ErrorCasPoisoningDetected = errors.New("Document CAS is stamped with a time beyond allowable drift threshold")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -721,6 +722,7 @@ var VersionForConnectionPreCheckSupport = ServerVersion{7, 6, 0}
 var VersionForSupportability = ServerVersion{7, 6, 0}
 var VersionForP2PManifestSharing = ServerVersion{7, 6, 0}
 var VersionForMobileSupport = ServerVersion{7, 6, 2}
+var VersionForCasPoisonDetection = ServerVersion{8, 0, 0}
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -1458,6 +1460,7 @@ const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
 const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
 const DevBucketTopologyLegacyDelay = "xdcrDevBucketTopologyLegacyDelay"
 const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
+const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
@@ -1721,6 +1724,7 @@ const (
 	GuardrailDiskSpace              = "guardrail_disk_space"
 	DocsSentWithSubdocSet           = "docs_sent_with_subdoc_set"
 	DocsSentWithSubdocDelete        = "docs_sent_with_subdoc_delete"
+	DocsCasPoisoned                 = "docs_cas_poisoned"
 )
 
 var ValidJsonEnds []byte = []byte{
@@ -1728,3 +1732,7 @@ var ValidJsonEnds []byte = []byte{
 }
 
 const EmptyJsonObject string = "{}"
+
+const CASDriftThresholdHoursKey = "casDriftThresholdHours"
+
+const CASDriftLiveDetected = "One or more documents are not replicated because their CAS values are beyond the acceptable drift threshold"
