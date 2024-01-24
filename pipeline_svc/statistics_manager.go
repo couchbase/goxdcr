@@ -2030,6 +2030,9 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 	subscriberId := getUpdateStatsInstanceId()
 
 	for repl_id, repl_status := range repStatusMapGetter() {
+		// For a paused replication,
+		// Main pipeline stats are cumulative of both main and backfill pipeline
+		// Backfill pipeline stats are just backfill stats
 		overview_stats := repl_status.GetOverviewStats(common.MainPipeline)
 		spec := repl_status.Spec()
 		if spec == nil {
@@ -2041,23 +2044,10 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			continue
 		}
 
-		localBucketNotificationCh, err := bucketTopologySvc.SubscribeToLocalBucketFeed(spec, subscriberId)
-		if err != nil {
-			logger.Errorf("Error subscribing to local bucket feed for paused replication %v. err=%v", repl_id, err)
-			continue
-		}
-		notification := <-localBucketNotificationCh
-		cur_kv_vb_map := notification.GetKvVbMapRO()
-		err = bucketTopologySvc.UnSubscribeLocalBucketFeed(spec, subscriberId)
-		if err != nil {
-			logger.Errorf("Error unsubscribing to local bucket feed for paused replication %v - err: %v", ref.Id(), err)
-		}
-
 		// Check to ensure remote cluster collection capability is aligned with the current memcached connections
 		remoteClusterCapability, err := remoteClusterSvc.GetCapability(ref)
 		if err != nil {
 			logger.Errorf("Error retrieving capability for remote cluster %v - err: %v", ref.Id(), err)
-			notification.Recycle()
 			continue
 		}
 
@@ -2068,7 +2058,6 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
 				logger.Errorf("Error subscribing to highSeqnosFeed %v - err: %v", ref.Id(), err)
-				notification.Recycle()
 				continue
 			}
 
@@ -2085,7 +2074,6 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			highSeqnoFeed, _, err := bucketTopologySvc.SubscribeToLocalBucketHighSeqnosLegacyFeed(spec, subscriberId, base.ReplSpecCheckInterval)
 			if err != nil {
 				logger.Errorf("Error subscribing to highSeqnosLegacyFeed %v - err: %v", ref.Id(), err)
-				notification.Recycle()
 				continue
 			}
 
@@ -2114,10 +2102,9 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 			// overview stats may be nil the first time GetStats is called on a paused replication that has never been run in the current goxdcr session
 			// or it may be nil when the underying replication is not paused but has not completed startup process
 			// construct it
-			err := constructStatsForReplication(repl_status, spec, cur_kv_vb_map, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
+			err := constructStatsForReplication(repl_status, spec, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
 			if err != nil {
 				logger.Errorf("Error constructing stats for paused replication %v. err=%v", repl_id, err)
-				notification.Recycle()
 				continue
 			}
 		} else {
@@ -2125,7 +2112,6 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 				err := updateStatsForReplication(repl_status, overview_stats, checkpoints_svc, logger, backfillSpec, highSeqnoAndSourceVBGetter)
 				if err != nil {
 					logger.Errorf("Error updating stats for paused replication %v. err=%v", repl_id, err)
-					notification.Recycle()
 					continue
 				}
 			}
@@ -2140,7 +2126,6 @@ func UpdateStats(checkpoints_svc service_def.CheckpointsService, logger *log.Com
 				overview_stats.Set(service_def.PIPELINE_STATUS, pausedVar)
 			}
 		}
-		notification.Recycle()
 	}
 }
 
@@ -2187,66 +2172,138 @@ func checkMccConnectionsCapability(bucket_kv_mem_clients map[string]map[string]m
 	return kv_mem_clients
 }
 
+func calculateBackfillStatsForPausedRepl(specId string, curVbListRo []uint16, backfillSpec *metadata.BackfillReplicationSpec, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger) (int64, int64, int64, bool) {
+	if backfillSpec == nil {
+		return 0, 0, 0, false
+	}
+	var backfillStatsCalculated, backfillCkptsExist bool
+	var backfillTotalChanges, backfillChangesLeft, backfillDocsProcessed int64
+	var backfillDocsProcessedUint uint64
+	var err error
+	backfillTotalChanges, backfillCkptsExist, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc, curVbListRo, true)
+	if err != nil {
+		logger.Warnf("Unable to get backfill total changes, err=%v", err)
+		return 0, 0, 0, false
+	}
+
+	backfillStatsCalculated = true
+
+	if !backfillCkptsExist {
+		logger.Warnf("No backfill checkpoints, skipping backfill docs processed")
+		return backfillTotalChanges, 0, backfillTotalChanges, backfillStatsCalculated
+	}
+
+	backfillTopic := common.ComposeFullTopic(specId, common.BackfillPipeline)
+	backfillDocsProcessedUint, err = getDocsProcessedForReplication(backfillTopic, curVbListRo, checkpoints_svc, logger)
+	if err != nil {
+		logger.Warnf("Unable to get backfill docs processed, err=%v", err)
+		return backfillTotalChanges, 0, backfillTotalChanges, backfillStatsCalculated
+	}
+
+	backfillDocsProcessed = int64(backfillDocsProcessedUint)
+	backfillChangesLeft = backfillTotalChanges - backfillDocsProcessed
+	if backfillChangesLeft < 0 {
+		// shouldn't reach here. This is just a safety check
+		backfillChangesLeft = 0
+		backfillDocsProcessed = 0
+		backfillTotalChanges = 0
+		logger.Warnf("Backfill changes_left went negative for replication %v: backfillTotalChanges=%v, backfillDocsProcessed=%v, backfillChangesLeft=%v",
+			specId, backfillTotalChanges, backfillDocsProcessed, backfillChangesLeft)
+	}
+	return backfillTotalChanges, backfillDocsProcessed, backfillChangesLeft, backfillStatsCalculated
+}
+
+func calculateMainStatsForPausedRepl(specId string, curVbListRo []uint16, checkpoints_svc service_def.CheckpointsService, highSeqnosMap base.HighSeqnosMapType, curKvVbMapRo base.KvVBMapType,
+	backfillTotalChanges, backfillDocsProcessed, backfillChangesLeft int64, backfillStatsCalculated bool, needToCalcDocsProcessed bool, docsProcessedOld int64, logger *log.CommonLogger) (int64, int64, int64, error) {
+
+	var changes_left, docs_processed, total_changes int64
+	var err error
+
+	// only calculate docsProcessed if the caller asks for it, or else just use the old value
+	if needToCalcDocsProcessed {
+		docs_processed_uint, err := getDocsProcessedForReplication(specId, curVbListRo, checkpoints_svc, logger)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		docs_processed = int64(docs_processed_uint)
+	} else {
+		docs_processed = docsProcessedOld
+	}
+
+	total_changes, _, err = calculateTotalChanges(logger, highSeqnosMap, curKvVbMapRo)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	// for a paused replication, main pipeline overview stats stores the cumulative of both main and backfill pipeline
+	if backfillStatsCalculated {
+		docs_processed += backfillDocsProcessed
+		total_changes += backfillTotalChanges
+	}
+
+	changes_left = total_changes - docs_processed
+	if changes_left < 0 {
+		// shouldn't reach here. This is just a safety check
+		changes_left = 0
+		docs_processed = 0
+		total_changes = 0
+		logger.Warnf("Main changes_left went negative for replication %v: docs_processed=%v, total_changes=%v, changes_left=%v, backfillTotalChanges=%v, backfillDocsProcessed=%v, backfillChangesLeft=%v",
+			specId, docs_processed, total_changes, changes_left, backfillTotalChanges, backfillDocsProcessed, backfillChangesLeft)
+	}
+
+	return total_changes, docs_processed, changes_left, nil
+}
+
+func createOrUpdateOverviewStats(repl_status pipeline_pkg.ReplicationStatusIface, docs_processed, changes_left int64, pipelineType common.PipelineType) {
+	overviewStats := repl_status.GetOverviewStats(pipelineType)
+	if overviewStats == nil {
+		// Create new stats
+		overviewStats = new(expvar.Map).Init()
+		overviewStats.Add(service_def.DOCS_PROCESSED_METRIC, docs_processed)
+		overviewStats.Add(service_def.CHANGES_LEFT_METRIC, changes_left)
+		for _, statsToInitialize := range StatsToInitializeForPausedReplications {
+			overviewStats.Add(statsToInitialize, 0)
+		}
+		repl_status.SetOverviewStats(overviewStats, pipelineType)
+	} else {
+		// Update existing stats
+		changesLeftVar := new(expvar.Int)
+		changesLeftVar.Set(changes_left)
+		docsProcessedVar := new(expvar.Int)
+		docsProcessedVar.Set(docs_processed)
+		overviewStats.Set(service_def.DOCS_PROCESSED_METRIC, docsProcessedVar)
+		overviewStats.Set(service_def.CHANGES_LEFT_METRIC, changesLeftVar)
+	}
+}
+
 // compute and set changes_left and docs_processed stats. set other stats to 0
-func constructStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, spec *metadata.ReplicationSpecification, curKvVbMapRo map[string][]uint16, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger, backfillSpec *metadata.BackfillReplicationSpec, highSeqnosMapGetter func() (base.HighSeqnosMapType, base.KvVBMapType, func())) error {
-	highSeqnosMap, _, doneFunc := highSeqnosMapGetter()
+func constructStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, spec *metadata.ReplicationSpecification, checkpoints_svc service_def.CheckpointsService, logger *log.CommonLogger,
+	backfillSpec *metadata.BackfillReplicationSpec, highSeqnosMapGetter func() (base.HighSeqnosMapType, base.KvVBMapType, func())) error {
+	highSeqnosMap, curKvVbMapRo, doneFunc := highSeqnosMapGetter()
 	defer doneFunc()
 
 	curVbListRo := base.GetVbListFromKvVbMap(curKvVbMapRo)
-	docs_processed, err := getDocsProcessedForReplication(spec.Id, curVbListRo, checkpoints_svc, logger)
+	base.SortUint16List(curVbListRo)
+
+	backfillTotalChanges, backfillDocsProcessed, backfillChangesLeft, backfillStatsCalculated := calculateBackfillStatsForPausedRepl(spec.Id, curVbListRo, backfillSpec, checkpoints_svc, logger)
+
+	total_changes, docs_processed, changes_left, err := calculateMainStatsForPausedRepl(spec.Id, curVbListRo, checkpoints_svc, highSeqnosMap, curKvVbMapRo, backfillTotalChanges, backfillDocsProcessed,
+		backfillChangesLeft, backfillStatsCalculated, true, 0, logger)
 	if err != nil {
 		return err
 	}
 
-	total_changes, _, err := calculateTotalChanges(logger, highSeqnosMap, curKvVbMapRo)
-	if err != nil {
-		return err
-	}
-
-	changes_left := total_changes - int64(docs_processed)
-
-	var logBackfillStat bool
-	var backfillCkptsExist bool
-	var backfillTotalChanges int64
-	var backfillDocsProcessed uint64
-	if backfillSpec != nil {
-		// Need to also construct stats with backfill info
-		backfillTotalChanges, backfillCkptsExist, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc,
-			curVbListRo, true)
-		if err == nil {
-			logBackfillStat = true
-			total_changes += backfillTotalChanges
-			if backfillCkptsExist {
-				backfillTopic := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
-				backfillDocsProcessed, err = getDocsProcessedForReplication(backfillTopic, curVbListRo, checkpoints_svc, logger)
-				if err != nil {
-					logger.Warnf("Unable to get backfill docs processed for %v", backfillTopic)
-				} else {
-					docs_processed += backfillDocsProcessed
-				}
-			}
-		}
-	}
-
-	if logBackfillStat {
+	if backfillStatsCalculated {
 		logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v (total_backfill_docs=%v), docs_processed=%v (backfill_docs_processed=%v), changes_left=%v\n",
 			spec.Id, curKvVbMapRo, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
+
+		createOrUpdateOverviewStats(repl_status, backfillDocsProcessed, backfillChangesLeft, common.BackfillPipeline)
+
 	} else {
 		logger.Infof("Calculating stats for never run replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, curKvVbMapRo, total_changes, docs_processed, changes_left)
 	}
 
-	overview_stats := new(expvar.Map).Init()
-	overview_stats.Add(service_def.DOCS_PROCESSED_METRIC, int64(docs_processed))
-	overview_stats.Add(service_def.CHANGES_LEFT_METRIC, changes_left)
-	for _, statsToInitialize := range StatsToInitializeForPausedReplications {
-		overview_stats.Add(statsToInitialize, 0)
-	}
-
-	if backfillSpec != nil {
-		repl_status.SetOverviewStats(overview_stats, common.BackfillPipeline)
-	} else {
-		repl_status.SetOverviewStats(overview_stats, common.MainPipeline)
-	}
+	createOrUpdateOverviewStats(repl_status, docs_processed, changes_left, common.MainPipeline)
 
 	// set vb list to establish the base for future stats update,
 	// so that we can avoid re-computation when vb list does not change
@@ -2278,7 +2335,6 @@ func calculateTotalChanges(logger *log.CommonLogger, highSeqnoKvMap base.HighSeq
 // The total number of changes will be: SUM_ALL_VBS(endSeqnoRequested - startSeqnoRequested)
 func calculateTotalPausedBackfillChanges(backfillSpec *metadata.BackfillReplicationSpec, checkpointsSvc service_def.CheckpointsService, cur_vb_list []uint16, findCkpts bool) (int64, bool, error) {
 	var backfillTotalChanges int64 = 0
-	// TODO MB-44909 - missing seeing if checkpoint exists
 	var checkpointExists bool
 
 	if findCkpts {
@@ -2315,8 +2371,6 @@ func updateStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, 
 	// if not, the doc_processed stats in overview stats is still accurate and we will just use it
 	// otherwise, need to re-compute docs_processed stats by filtering the checkpoint docs using the current kv_vb_map
 
-	var docs_processed int64
-	var docs_processed_uint64 uint64
 	var err error
 	// old_vb_list is already sorted
 	old_vb_list := repl_status.VbList()
@@ -2333,63 +2387,35 @@ func updateStatsForReplication(repl_status pipeline_pkg.ReplicationStatusIface, 
 	base.SortUint16List(cur_vb_list)
 	sameList := base.AreSortedUint16ListsTheSame(old_vb_list, cur_vb_list)
 
-	var backfillDocsProcessed uint64
+	var docsProcessedOld int64
 	if sameList {
-		docs_processed, err = strconv.ParseInt(overview_stats.Get(service_def.DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
+		docsProcessedOld, err = strconv.ParseInt(overview_stats.Get(service_def.DOCS_PROCESSED_METRIC).String(), base.ParseIntBase, base.ParseIntBitSize)
 		if err != nil {
 			return err
 		}
 	} else {
 		logger.Infof("%v Source topology changed. Re-compute docs_processed. old_vb_list=%v, cur_vb_list=%v\n", repl_status.RepId(), old_vb_list, cur_vb_list)
-		docs_processed_uint64, err = getDocsProcessedForReplication(spec.Id, cur_vb_list, checkpoints_svc, logger)
-		if err != nil {
-			return err
-		}
-
-		docs_processed = int64(docs_processed_uint64)
-
-		if backfillSpec != nil {
-			backfillTopic := common.ComposeFullTopic(spec.Id, common.BackfillPipeline)
-			backfillDocsProcessed, err = getDocsProcessedForReplication(backfillTopic, cur_vb_list, checkpoints_svc, logger)
-			if err != nil {
-				return err
-			}
-			docs_processed += int64(backfillDocsProcessed)
-		}
-
-		docs_processed_var := new(expvar.Int)
-		docs_processed_var.Set(docs_processed)
-		overview_stats.Set(service_def.DOCS_PROCESSED_METRIC, docs_processed_var)
-
 		repl_status.SetVbList(cur_vb_list)
 	}
 
-	total_changes, _, err := calculateTotalChanges(logger, highSeqnoKvMap, curKvVbMap)
+	backfillTotalChanges, backfillDocsProcessed, backfillChangesLeft, backfillStatsCalculated := calculateBackfillStatsForPausedRepl(spec.Id, cur_vb_list, backfillSpec, checkpoints_svc, logger)
+
+	total_changes, docs_processed, changes_left, err := calculateMainStatsForPausedRepl(spec.Id, cur_vb_list, checkpoints_svc, highSeqnoKvMap, curKvVbMap, backfillTotalChanges, int64(backfillDocsProcessed), backfillChangesLeft, backfillStatsCalculated, !sameList, docsProcessedOld, logger)
 	if err != nil {
 		return err
 	}
 
-	var backfillTotalChanges int64
-	if backfillSpec != nil {
-		backfillTotalChanges, _, err = calculateTotalPausedBackfillChanges(backfillSpec, checkpoints_svc, cur_vb_list, false)
-		if err != nil {
-			return err
-		}
-		total_changes += backfillTotalChanges
-	}
+	if backfillStatsCalculated {
+		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v (totalBackfillDocs=%v), docs_processed=%v (totalBackfillDocsProcessed=%v), changes_left=%v (totalBackfillChangesLeft=%v)\n",
+			spec.Id, curKvVbMap, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left, backfillChangesLeft)
 
-	changes_left := total_changes - docs_processed
-	changes_left_var := new(expvar.Int)
-	changes_left_var.Set(changes_left)
-
-	overview_stats.Set(service_def.CHANGES_LEFT_METRIC, changes_left_var)
-
-	if backfillSpec != nil {
-		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v (totalBackfillDocs=%v), docs_processed=%v (totalBackfillDocsProcessed=%v), changes_left=%v\n",
-			spec.Id, curKvVbMap, total_changes, backfillTotalChanges, docs_processed, backfillDocsProcessed, changes_left)
+		createOrUpdateOverviewStats(repl_status, backfillDocsProcessed, backfillChangesLeft, common.BackfillPipeline)
 	} else {
 		logger.Infof("Updating status for paused replication %v. kv_vb_map=%v, total_docs=%v, docs_processed=%v, changes_left=%v\n", spec.Id, curKvVbMap, total_changes, docs_processed, changes_left)
 	}
+
+	createOrUpdateOverviewStats(repl_status, docs_processed, changes_left, common.MainPipeline)
+
 	return nil
 }
 
