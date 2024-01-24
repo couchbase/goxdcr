@@ -60,13 +60,14 @@ const (
 	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
 	DOCS_REP_QUEUE_METRIC  = base.DocsRepQueueStats
 
-	DOCS_FILTERED_METRIC         = "docs_filtered"
-	DOCS_UNABLE_TO_FILTER_METRIC = "docs_unable_to_filter"
-	EXPIRY_FILTERED_METRIC       = "expiry_filtered"
-	DELETION_FILTERED_METRIC     = "deletion_filtered"
-	SET_FILTERED_METRIC          = "set_filtered"
-	BINARY_FILTERED_METRIC       = "binary_filtered"
-	EXPIRY_STRIPPED_METRIC       = "expiry_stripped"
+	DOCS_FILTERED_METRIC               = "docs_filtered"
+	DOCS_UNABLE_TO_FILTER_METRIC       = "docs_unable_to_filter"
+	EXPIRY_FILTERED_METRIC             = "expiry_filtered"
+	DELETION_FILTERED_METRIC           = "deletion_filtered"
+	SET_FILTERED_METRIC                = "set_filtered"
+	BINARY_FILTERED_METRIC             = "binary_filtered"
+	EXPIRY_STRIPPED_METRIC             = "expiry_stripped"
+	DOCS_FILTERED_CAS_POISONING_METRIC = "docs_cas_poisoned"
 
 	// the number of docs that failed conflict resolution on the source cluster side due to optimistic replication
 	DOCS_FAILED_CR_SOURCE_METRIC     = "docs_failed_cr_source"
@@ -1209,6 +1210,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 			"statistics, but are not actually replicable data",
 		Stability: Committed,
 		Labels:    StandardLabels,
+	},
+	DOCS_FILTERED_CAS_POISONING_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCasPoisonDetection,
+		Description:  "Total number of documents not replicated because cas is beyond acceptable drift threshold",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 }
 

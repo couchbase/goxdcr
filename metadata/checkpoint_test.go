@@ -45,6 +45,7 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 		TargetManifest:               9,
 		BrokenMappingSha256:          "",
 		brokenMappings:               nil,
+		CasPoisonCnt:                 1,
 	}
 
 	brokenMap := make(CollectionNamespaceMapping)
@@ -68,6 +69,7 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 		TargetManifest:               9,
 		BrokenMappingSha256:          "",
 		brokenMappings:               brokenMap,
+		CasPoisonCnt:                 2,
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
 

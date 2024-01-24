@@ -13,11 +13,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	"github.com/couchbase/goxdcr/base"
 	pc "github.com/couchbase/goxdcr/common"
 	couchlog "github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
 	parts "github.com/couchbase/goxdcr/parts"
 	utils "github.com/couchbase/goxdcr/utils"
 	"log"
@@ -182,7 +182,7 @@ func startRouter() {
 		partMap[partId] = NewTestPart(partId)
 	}
 
-	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil, utils, nil, nil, nil, 0)
+	router, _ = parts.NewRouter("router1", "router1", options.filter_expression, partMap, buildVbMap(partMap), base.CRMode_RevId, couchlog.DefaultLoggerContext, nil, utils, nil, nil, nil, 0, nil)
 }
 
 func buildVbMap(downStreamParts map[string]pc.Part) map[uint16]string {

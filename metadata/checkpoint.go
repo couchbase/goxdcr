@@ -34,6 +34,7 @@ const (
 	TargetManifest               string = "target_manifest"
 	BrokenCollectionsMapSha      string = "brokenCollectionsMapSha256"
 	CreationTime                 string = "creationTime"
+	CasPoisonCnt                 string = "cas_poison_cnt"
 )
 
 type CheckpointRecord struct {
@@ -64,6 +65,7 @@ type CheckpointRecord struct {
 	brokenMappingsMtx sync.RWMutex
 	// Epoch timestamp of when this record was created
 	CreationTime uint64 `json:"creationTime"`
+	CasPoisonCnt uint64 `json:"cas_poison_cnt"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -88,7 +90,7 @@ func (c *CheckpointRecord) Size() int {
 	return totalSize
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed, srcManifestForDCP, srcManifestForBackfill, tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, filteredItems, filterFailed, srcManifestForDCP, srcManifestForBackfill, tgtManifest, casPoisonedItems uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
 	record := &CheckpointRecord{
 		Failover_uuid:                failoverUuid,
 		Seqno:                        seqno,
@@ -102,6 +104,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		TargetManifest:               tgtManifest,
 		brokenMappings:               brokenMappings,
 		CreationTime:                 creationTime,
+		CasPoisonCnt:                 casPoisonedItems,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -145,7 +148,8 @@ func (ckptRecord *CheckpointRecord) SameAs(new_record *CheckpointRecord) bool {
 		ckptRecord.SourceManifestForBackfillMgr == new_record.SourceManifestForBackfillMgr &&
 		ckptRecord.TargetManifest == new_record.TargetManifest &&
 		ckptRecord.BrokenMappingSha256 == new_record.BrokenMappingSha256 &&
-		ckptRecord.CreationTime == new_record.CreationTime {
+		ckptRecord.CreationTime == new_record.CreationTime &&
+		ckptRecord.CasPoisonCnt == new_record.CasPoisonCnt {
 		return true
 	} else {
 		return false
@@ -169,6 +173,7 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.TargetManifest = other.TargetManifest
 	ckptRecord.LoadBrokenMapping(*other.BrokenMappings())
 	ckptRecord.CreationTime = other.CreationTime
+	ckptRecord.CasPoisonCnt = other.CasPoisonCnt
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -256,6 +261,11 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	creationTime, ok := fieldMap[CreationTime]
 	if ok {
 		ckptRecord.CreationTime = uint64(creationTime.(float64))
+	}
+
+	casPoisonCnt, ok := fieldMap[CasPoisonCnt]
+	if ok {
+		ckptRecord.CasPoisonCnt = uint64(casPoisonCnt.(float64))
 	}
 
 	return nil
@@ -863,6 +873,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		BrokenMappingSha256:          c.BrokenMappingSha256,
 		brokenMappings:               c.brokenMappings.Clone(),
 		brokenMappingsMtx:            sync.RWMutex{},
+		CasPoisonCnt:                 c.CasPoisonCnt,
 	}
 	return retVal
 }
@@ -890,7 +901,7 @@ func NewCheckpointsDocFromSnappy(snappyBytes []byte, compressedMap ShaMappingCom
 	return ckptDoc, nil
 }
 
-//Not concurrency safe. It should be used by one goroutine only
+// Not concurrency safe. It should be used by one goroutine only
 func (ckptsDoc *CheckpointsDoc) AddRecord(record *CheckpointRecord) (added bool, removedRecords []*CheckpointRecord) {
 	length := len(ckptsDoc.Checkpoint_records)
 	if length > 0 {

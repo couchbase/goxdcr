@@ -2072,12 +2072,13 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	}
 	filteredItems := vbCountMetrics[service_def.DOCS_FILTERED_METRIC]
 	filterFailed := vbCountMetrics[service_def.DOCS_UNABLE_TO_FILTER_METRIC]
+	casPoisonItems := vbCountMetrics[service_def.DOCS_FILTERED_CAS_POISONING_METRIC]
 
 	// Collection-Related items
 	srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping := ckmgr.getCollectionItemsIfEnabled(vbno, ok, srcManifestIds, tgtManifestIds)
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
-	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno, uint64(filteredItems), uint64(filterFailed), srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping, uint64(time.Now().Unix()))
+	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno, ckptRecordTargetSeqno, uint64(filteredItems), uint64(filterFailed), srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, uint64(casPoisonItems), brokenMapping, uint64(time.Now().Unix()))
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
 		err = nil

@@ -343,6 +343,7 @@ var ErrorNilCertificateStrictMode = errors.New("cluster encryption is set to str
 var ErrorOpInterrupted = errors.New("Operation interrupted")
 var ErrorNoVbSpecified = errors.New("No vb being specified")
 var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
+var ErrorCasPoisoningDetected = errors.New("Document CAS is stamped with a time beyond allowable drift threshold")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)
@@ -658,6 +659,8 @@ var Version7_2_1 = ServerVersion{7, 2, 1}
 var VersionForConnectionPreCheckSupport = ServerVersion{7, 2, 1}
 var VersionForSupportability = Version7_2_1
 var Version7_2_5 = ServerVersion{7, 2, 5}
+var Version7_2_6 = ServerVersion{7, 2, 6}
+var VersionForCasPoisonDetection = Version7_2_6
 
 func (s ServerVersion) String() string {
 	builder := strings.Builder{}
@@ -1383,6 +1386,7 @@ const DevCkptMgrForceGCWaitSec = "xdcrDevCkptMgrForceGCWaitSec"
 const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
 const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
 const DevBucketTopologyLegacyDelay = "xdcrDevBucketTopologyLegacyDelay"
+const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
@@ -1589,3 +1593,6 @@ var ValidJsonEnds []byte = []byte{
 var DatapoolLogFrequency = 10
 
 const ConnectionPreCheckTaskId string = "taskId"
+
+const CASDriftThresholdHoursKey = "casDriftThresholdHours"
+const CASDriftLiveDetected = "One or more documents are not replicated because their CAS values are beyond the acceptable drift threshold"

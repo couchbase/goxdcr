@@ -176,10 +176,12 @@ type Component interface {
 }
 
 type PipelineEventsProducer interface {
+	// If there are elements in the eventExtras, the key (eventIDs) will be re-keyed to ensure global event ID uniqueness
 	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) (eventId int64)
 	DismissEvent(eventId int) error
 	// UpdateEvent should not modify the event type. If needed in the future, need to analyze the reason why it needs to be changed
 	// Updating an event will update the time to the time this method is being called
 	// eventExtras can be nil, and the existing information won't be changed
+	// If eventExtras is not nil, the newEventExtras will be taken, re-keyed and merged with whatever is there currently
 	UpdateEvent(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap) error
 }

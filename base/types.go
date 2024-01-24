@@ -352,6 +352,21 @@ func (c *EventsMap) Len() int {
 	return len(c.EventsMap)
 }
 
+func (c *EventsMap) Merge(other EventsMap) {
+	if c == nil {
+		return
+	}
+
+	c.eventMapMtx.Lock()
+	defer c.eventMapMtx.Unlock()
+
+	other.eventMapMtx.RLock()
+	for k, v := range other.EventsMap {
+		c.EventsMap[k] = v
+	}
+	other.eventMapMtx.RUnlock()
+}
+
 /*
  * Usage for EventInfo data structure:
  *
@@ -468,11 +483,11 @@ func (e *EventInfo) GetLegacyErrMsg() string {
 	}
 	switch e.EventType {
 	case HighPriorityMsg:
-		return e.EventDesc
+		return e.GetDescAndExtrasStr()
 	case LowPriorityMsg:
-		return e.EventDesc
+		return e.GetDescAndExtrasStr()
 	case PersistentMsg:
-		return e.EventDesc
+		return e.GetDescAndExtrasStr()
 	case BrokenMappingInfoType:
 		hint, isString := e.GetHint().(string)
 		if isString {
@@ -484,6 +499,25 @@ func (e *EventInfo) GetLegacyErrMsg() string {
 	default:
 		return "?? (EventInfo)"
 	}
+}
+
+func (e *EventInfo) GetDescAndExtrasStr() string {
+	if e.EventExtras.Len() == 0 {
+		return e.EventDesc
+	}
+
+	// Else need to compile buffer
+	var buffer bytes.Buffer
+	buffer.WriteString(e.EventDesc)
+	e.EventExtras.GetRWLock().RLock()
+	for _, v := range e.EventExtras.EventsMap {
+		if vStr, ok := v.(string); ok {
+			buffer.WriteString("\n")
+			buffer.WriteString(vStr)
+		}
+	}
+	e.EventExtras.GetRWLock().RUnlock()
+	return buffer.String()
 }
 
 type ErrorInfo struct {

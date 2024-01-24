@@ -24,7 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbaselabs/gojsonsm"
 	"github.com/stretchr/testify/assert"
-	"gopkg.in/couchbase/gocb.v1"
+	//"gopkg.in/couchbase/gocb.v1"
 )
 
 // Don't change these - these are already dumped in the testData files
@@ -211,7 +211,7 @@ func TestDataPool(t *testing.T) {
 // If ns_server cluster run is running, generate a Xattr doc
 // And then also retrieve it back via gocb
 // At DCP nozzle, serialize the uprEvent as a json and write it to a file
-func TestGenerateXattrUsingGoCB(t *testing.T) {
+func Disabled_TestGenerateXattrUsingGoCB(t *testing.T) {
 	cluster, err := gocb.Connect("http://localhost:9000")
 	if err != nil {
 		return
@@ -381,7 +381,7 @@ func TestGenerateXattrUsingGoCB(t *testing.T) {
 	fmt.Println("============== Test case end: TestGenerateXattrUsingGoCB =================")
 }
 
-func TestGenerateXattrPureArrayUsingGoCB(t *testing.T) {
+func Disabled_TestGenerateXattrPureArrayUsingGoCB(t *testing.T) {
 	cluster, err := gocb.Connect("http://localhost:9000")
 	if err != nil {
 		return
@@ -477,7 +477,7 @@ func TestGenerateXattrPureArrayUsingGoCB(t *testing.T) {
 // If ns_server cluster run is running, generate a Xattr doc
 // And then also retrieve it back via gocb
 // At DCP nozzle, serialize the uprEvent as a json and write it to a file
-func TestGenerateOnlyTxnXattrUsingGoCB(t *testing.T) {
+func Disabled_TestGenerateOnlyTxnXattrUsingGoCB(t *testing.T) {
 	cluster, err := gocb.Connect("http://localhost:9000")
 	if err != nil {
 		return
@@ -662,7 +662,7 @@ func TestMatchPcreNegLookahead(t *testing.T) {
 	fmt.Println("============== Test case end: TestMatchPcreNegLookahead =================")
 }
 
-func TestGenerateBinaryDoc(t *testing.T) {
+func Disabled_TestGenerateBinaryDoc(t *testing.T) {
 	cluster, err := gocb.Connect("http://localhost:9000")
 	if err != nil {
 		return

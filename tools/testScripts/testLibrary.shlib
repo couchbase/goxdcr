@@ -1446,6 +1446,28 @@ function validatePrometheusStatsSeqAdvNon0 {
   validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_seqno_adv_received_from_dcp_total"
 }
 
+function validateDatapoolFailIs0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	validatePrometheusStatsIs0 "$node" "$sourceBucket" "$targetBucket" "xdcr_datapool_failed_gets_total"
+}
+
+function validateBinaryFilteredIs0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+	validatePrometheusStatsIs0 "$node" "$sourceBucket" "$targetBucket" "xdcr_binary_filtered_total"
+}
+
+function validatePrometheusStatsCasPoisonNon0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+
+	validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_docs_cas_poisoned_total"
+}
+
 # use cbc-pillowfight to create a large bucket
 function runCbcPillowFight {
 	local cluster=$1
