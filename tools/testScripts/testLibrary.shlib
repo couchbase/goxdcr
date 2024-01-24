@@ -1731,6 +1731,27 @@ function validateBinaryFilteredIs0 {
 	validatePrometheusStatsIs0 "$node" "$sourceBucket" "$targetBucket" "xdcr_binary_filtered_total"
 }
 
+function validatePrometheusStatsCasPoisonNon0 {
+	local node=$1
+	local sourceBucket=$2
+	local targetBucket=$3
+
+	validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_docs_cas_poisoned_total"
+#	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+#	local prometheusOut
+#	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+#	local count
+#	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep xdcr_docs_cas_poisoned_total |
+#		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+#
+#	if (($count == 0)); then
+#		echo "Poisoned CAS count shows 0"
+#		exit 1
+#	fi
+#>>>>>>> 955334cb (MB-55758: cas poisoning live pipeline guardrail)
+}
+
 # use cbc-pillowfight to create a large bucket
 function runCbcPillowFight {
 	local cluster=$1

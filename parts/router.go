@@ -55,6 +55,8 @@ type CollectionsRoutingUpdater func(CollectionsRoutingInfo) error
 // When data cannot be sent because mapping is broken, this function is used to raise the event
 type IgnoreDataEventer func(*base.WrappedMCRequest)
 
+const MaxCasDriftItemCount = 50
+
 /**
  * The RoutingInfo is used to communicate between router and checkpoint manager
  * When collection routing routes are broken, they are saved alongside the checkpoints
@@ -160,6 +162,17 @@ type Router struct {
 	// This is because of the possibility of same revID or CAS mutations over the dcp stream
 	// This monotonic counter will be used to construct unique-key instead
 	mutationCounter uint64
+
+	casDriftThreshold uint32
+
+	casDriftUIMtx     sync.Mutex
+	casDriftUIEventId int64
+	casDriftItemCount int
+
+	devCasDriftInjectOn uint32
+	devCasDriftKey      string
+
+	eventsProducer common.PipelineEventsProducer
 }
 
 /**
@@ -1361,7 +1374,7 @@ func (c CollectionsRoutingMap) UpdateBrokenMappingsPair(brokenMapsRO *metadata.C
  * 2. routingMap == vbNozzleMap, which is a map of <vbucketID> -> <targetNozzleID>
  * 3+ Rest should be relatively obv
  */
-func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error)) (*Router, error) {
+func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamParts map[string]common.Part, routingMap map[uint16]string, sourceCRMode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, throughputThrottlerSvc service_def.ThroughputThrottlerSvc, isHighReplication bool, filterExpDelType base.FilterExpDelType, collectionsManifestSvc service_def.CollectionsManifestSvc, dcpObjRecycler utilities.RecycleObjFunc, explicitMapChangeHandler func(diff metadata.CollectionNamespaceMappingsDiffPair), remoteClusterCapability metadata.Capability, migrationUIRaiser func(string), connectivityStatusGetter func() (metadata.ConnectivityStatus, error), eventsProducer common.PipelineEventsProducer) (*Router, error) {
 
 	topic := spec.Id
 	filterExpression, exprFound := spec.Settings.Values[metadata.FilterExpressionKey].(string)
@@ -1395,6 +1408,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		filterPrintMsg = fmt.Sprintf("%v%v%v", base.UdTagBegin, filter.GetInternalExpr(), base.UdTagEnd)
 	}
 
+	casDriftThreshold := spec.Settings.GetCasDriftThreshold()
+
 	router := &Router{
 		id:                       id,
 		filter:                   filter,
@@ -1414,6 +1429,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 		migrationUIRaiser:        migrationUIRaiser,
 		connectivityStatusGetter: connectivityStatusGetter,
 		finCh:                    make(chan bool),
+		eventsProducer:           eventsProducer,
+		casDriftThreshold:        casDriftThreshold,
 	}
 
 	router.expDelMode.Set(filterExpDelType)
@@ -1702,11 +1719,13 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return result, nil
 	}
 
-	var raiseDataNotReplicated bool
+	var raiseDataNotReplicatedColDNE bool
 	if wrappedUpr.Flags.CollectionDNE() {
 		// Special flag handling here
-		raiseDataNotReplicated = true
+		raiseDataNotReplicatedColDNE = true
 	}
+
+	raiseDataNotReplicatedCasDrift := router.CheckCasDrift(wrappedUpr)
 
 	mcRequest, err := router.ComposeMCRequest(wrappedUpr)
 	if err != nil {
@@ -1716,9 +1735,36 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("Unable to create new mcRequest")
 	}
 
-	if raiseDataNotReplicated {
+	if raiseDataNotReplicatedColDNE {
 		err := fmt.Errorf("collection ID %v no longer exists, so the data is not to be replicated", wrappedUpr.UprEvent.CollectionId)
 		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{err}, nil))
+		return result, nil
+	} else if raiseDataNotReplicatedCasDrift {
+		router.RaiseEvent(common.NewEvent(common.DataNotReplicated, mcRequest, router, []interface{}{base.ErrorCasPoisoningDetected}, nil))
+		eventMap := base.NewEventsMap()
+		keyToLog := string(wrappedUpr.UprEvent.Key)
+		// The key for eventsMap doesn't matter - it will get re-keyed
+		eventMap.EventsMap[0] = fmt.Sprintf("ColId: %v Key: %v", wrappedUpr.UprEvent.CollectionId, keyToLog)
+		router.casDriftUIMtx.Lock()
+		if router.casDriftItemCount == 0 {
+			router.casDriftUIEventId = router.eventsProducer.AddEvent(
+				base.HighPriorityMsg,
+				base.CASDriftLiveDetected,
+				eventMap,
+				nil)
+			router.casDriftItemCount++
+		} else if router.casDriftItemCount < MaxCasDriftItemCount {
+			err := router.eventsProducer.UpdateEvent(router.casDriftUIEventId,
+				base.CASDriftLiveDetected,
+				&eventMap)
+			if err != nil {
+				router.Logger().Errorf("Unable to update event %v to note %s as cas poisoned",
+					router.casDriftUIEventId, base.TagUD(keyToLog))
+			} else {
+				router.casDriftItemCount++
+			}
+		}
+		router.casDriftUIMtx.Unlock()
 		return result, nil
 	}
 
@@ -2029,6 +2075,18 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		router.SetCrossClusterVersioning(val)
 	}
 
+	casDriftThreshold, ok := settings[metadata.CASDriftThresholdHoursKey].(int)
+	if ok {
+		casUint := uint32(casDriftThreshold)
+		atomic.StoreUint32(&router.casDriftThreshold, casUint)
+	}
+
+	casDriftInjectDocKey, ok := settings[metadata.DevCasDrfitForceDocKey].(string)
+	if ok && casDriftInjectDocKey != "" {
+		router.devCasDriftKey = casDriftInjectDocKey
+		atomic.StoreUint32(&router.devCasDriftInjectOn, 1)
+	}
+
 	if len(errMap) > 0 {
 		return fmt.Errorf("Router %v UpdateSettings error(s): %v", router.id, base.FlattenErrorMap(errMap))
 	} else {
@@ -2128,4 +2186,42 @@ func (router *Router) SetCrossClusterVersioning(val bool) {
 
 func (router *Router) getCrossClusterVersioning() bool {
 	return atomic.LoadUint32(&router.crossClusterVersioning) == 1
+}
+
+// Returns a bool set to true if not to be replicated
+func (router *Router) CheckCasDrift(wrappedUpr *base.WrappedUprEvent) bool {
+	if wrappedUpr == nil {
+		// Very odd - just say false for now and let other subsequent code handle it
+		return false
+	}
+
+	casDriftThresholdHours := atomic.LoadUint32(&router.casDriftThreshold)
+	if casDriftThresholdHours == 0 {
+		// Not enabled
+		return false
+	}
+
+	if atomic.LoadUint32(&router.devCasDriftInjectOn) == 1 {
+		keyToCheck := router.devCasDriftKey
+		if keyToCheck == string(wrappedUpr.UprEvent.Key) {
+			return true
+		}
+	}
+
+	casDriftThresholdDuration := time.Duration(casDriftThresholdHours) * time.Hour
+
+	casInt64 := int64(wrappedUpr.UprEvent.Cas)
+	if casInt64 < 0 {
+		// overflow - CAS posioned
+		return true
+	}
+
+	currentWallTime := time.Now()
+	casTime := time.Unix(0, casInt64)
+
+	if casTime.After(currentWallTime.Add(casDriftThresholdDuration)) {
+		return true
+	}
+
+	return false
 }

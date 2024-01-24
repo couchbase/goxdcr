@@ -103,6 +103,7 @@ const (
 	MobileCompatibleKey               = base.MobileCompatibleKey
 	EnableDcpPurgeRollback            = base.EnableDcpPurgeRollback
 	TargetTopologyLogFreq             = base.TargetTopologyLogFreqKey
+	CasDriftThresholdHoursKey         = base.CASDriftThresholdHoursKey
 )
 
 // constants for parsing create/change/view replication response
@@ -174,6 +175,8 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	base.DevNsServerPortSpecifier:     metadata.DevNsServerPortSpecifier,
 	base.DevBucketTopologyLegacyDelay: metadata.DevBucketTopologyLegacyDelay,
 	base.DevBackfillReplUpdateDelay:   metadata.DevBackfillReplUpdateDelay,
+	base.DevCasDriftForceDocKey:       metadata.DevCasDrfitForceDocKey,
+
 	base.Type:                         metadata.ReplicationTypeKey,
 	FilterExpression:                  metadata.FilterExpressionKey,
 	PauseRequested:                    metadata.ActiveKey,
@@ -220,19 +223,22 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	MobileCompatibleKey:               metadata.MobileCompatibleKey,
 	EnableDcpPurgeRollback:            metadata.EnableDcpPurgeRollback,
 	TargetTopologyLogFreq:             metadata.TargetTopologyLogFreqKey,
+	CasDriftThresholdHoursKey:         metadata.CASDriftThresholdHoursKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
 var SettingsKeyToRestKeyMap = map[string]string{
-	metadata.DevMainPipelineSendDelay:             base.DevMainPipelineSendDelay,
-	metadata.DevBackfillPipelineSendDelay:         base.DevBackfillPipelineSendDelay,
-	metadata.DevMainPipelineRollbackTo0VB:         base.DevMainPipelineRollbackTo0VB,
-	metadata.DevBackfillRollbackTo0VB:             base.DevBackfillRollbackTo0VB,
-	metadata.DevCkptMgrForceGCWaitSec:             base.DevCkptMgrForceGCWaitSec,
-	metadata.DevColManifestSvcDelaySec:            base.DevColManifestSvcDelaySec,
-	metadata.DevNsServerPortSpecifier:             base.DevNsServerPortSpecifier,
-	metadata.DevBucketTopologyLegacyDelay:         base.DevBucketTopologyLegacyDelay,
-	metadata.DevBackfillReplUpdateDelay:           base.DevBackfillReplUpdateDelay,
+	metadata.DevMainPipelineSendDelay:     base.DevMainPipelineSendDelay,
+	metadata.DevBackfillPipelineSendDelay: base.DevBackfillPipelineSendDelay,
+	metadata.DevMainPipelineRollbackTo0VB: base.DevMainPipelineRollbackTo0VB,
+	metadata.DevBackfillRollbackTo0VB:     base.DevBackfillRollbackTo0VB,
+	metadata.DevCkptMgrForceGCWaitSec:     base.DevCkptMgrForceGCWaitSec,
+	metadata.DevColManifestSvcDelaySec:    base.DevColManifestSvcDelaySec,
+	metadata.DevNsServerPortSpecifier:     base.DevNsServerPortSpecifier,
+	metadata.DevBucketTopologyLegacyDelay: base.DevBucketTopologyLegacyDelay,
+	metadata.DevBackfillReplUpdateDelay:   base.DevBackfillReplUpdateDelay,
+	metadata.DevCasDrfitForceDocKey:       base.DevCasDriftForceDocKey,
+
 	metadata.ReplicationTypeKey:                   base.Type,
 	metadata.FilterExpressionKey:                  FilterExpression,
 	metadata.ActiveKey:                            PauseRequested,
@@ -279,6 +285,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.MobileCompatibleKey:                  MobileCompatibleKey,
 	metadata.EnableDcpPurgeRollback:               EnableDcpPurgeRollback,
 	metadata.TargetTopologyLogFreqKey:             TargetTopologyLogFreq,
+	metadata.CASDriftThresholdHoursKey:            CasDriftThresholdHoursKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

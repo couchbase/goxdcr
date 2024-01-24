@@ -275,6 +275,18 @@
         ],
         "stability": "internal"
     },
+    "xdcr_docs_cas_poisoned_total": {
+        "type": "counter",
+        "help": "Total number of documents not replicated because cas is beyond acceptable drift threshold",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_docs_checked_total": {
         "type": "gauge",
         "help": "Across vBuckets for this node, the sum of all sequence numbers that have been considered to be checkpointed",
