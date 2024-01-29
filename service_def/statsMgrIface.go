@@ -94,7 +94,7 @@ const (
 	SOURCE_SYNC_XATTR_REMOVED_METRIC    = "source_sync_xattr_removed"
 	TARGET_SYNC_XATTR_PRESERVED_METRIC  = "target_sync_xattr_preserved"
 	IMPORT_DOCS_FAILED_CR_SOURCE_METRIC = "import_docs_failed_cr_source"
-	IMPORT_DOCS_WRITTEN_METRIX          = "import_docs_written"
+	IMPORT_DOCS_WRITTEN_METRIC          = "import_docs_written"
 	HLV_UPDATED_METRIC                  = "hlv_updated"
 	HLV_PRUNED_METRIC                   = "hlv_pruned"
 	HLV_PRUNED_AT_MERGE_METRIC          = "hlv_pruned_at_merge"
@@ -976,7 +976,7 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},
-	IMPORT_DOCS_WRITTEN_METRIX: StatsProperty{
+	IMPORT_DOCS_WRITTEN_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForMobileSupport,
