@@ -401,6 +401,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnSources(pipeline common.Pipeli
 			dcp_part.RegisterComponentEventListener(common.DataProcessed, data_processed_event_listener)
 			dcp_part.RegisterComponentEventListener(common.SystemEventReceived, data_received_event_listener)
 			dcp_part.RegisterComponentEventListener(common.OsoSnapshotReceived, data_received_event_listener)
+			dcp_part.RegisterComponentEventListener(common.SeqnoAdvReceived, data_received_event_listener)
 
 			dcp_part.RegisterComponentEventListener(common.DataFiltered, data_filtered_event_listener)
 			dcp_part.RegisterComponentEventListener(common.DataUnableToFilter, data_filtered_event_listener)

@@ -142,6 +142,8 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.SET_TARGET_DOCS_SKIPPED_METRIC:      service_def.MetricTypeCounter,
 	service_def.SET_FAILED_CR_TARGET_METRIC:         service_def.MetricTypeCounter,
 	service_def.EXPIRY_TARGET_DOCS_SKIPPED_METRIC:   service_def.MetricTypeCounter,
+	service_def.SYSTEM_EVENTS_RECEIVED_DCP_METRIC:   service_def.MetricTypeCounter,
+	service_def.SEQNO_ADV_RECEIVED_DCP_METRIC:       service_def.MetricTypeCounter,
 }
 
 var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
@@ -1877,6 +1879,10 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 		registry.Register(service_def.DCP_DISPATCH_TIME_METRIC, dcp_dispatch_time)
 		dcp_datach_len := metrics.NewCounter()
 		registry.Register(service_def.DCP_DATACH_LEN, dcp_datach_len)
+		systemEventsCounter := metrics.NewCounter()
+		registry.Register(service_def.SYSTEM_EVENTS_RECEIVED_DCP_METRIC, systemEventsCounter)
+		seqnoAdvCounter := metrics.NewCounter()
+		registry.Register(service_def.SEQNO_ADV_RECEIVED_DCP_METRIC, seqnoAdvCounter)
 
 		metric_map := make(map[string]interface{})
 		metric_map[service_def.DOCS_RECEIVED_DCP_METRIC] = docs_received_dcp
@@ -1885,6 +1891,8 @@ func (dcp_collector *dcpCollector) Mount(pipeline common.Pipeline, stats_mgr *St
 		metric_map[service_def.SET_RECEIVED_DCP_METRIC] = set_received_dcp
 		metric_map[service_def.DCP_DISPATCH_TIME_METRIC] = dcp_dispatch_time
 		metric_map[service_def.DCP_DATACH_LEN] = dcp_datach_len
+		metric_map[service_def.SYSTEM_EVENTS_RECEIVED_DCP_METRIC] = systemEventsCounter
+		metric_map[service_def.SEQNO_ADV_RECEIVED_DCP_METRIC] = seqnoAdvCounter
 		dcp_collector.component_map[dcp_part.Id()] = metric_map
 
 		dcp_part.RegisterComponentEventListener(common.StatsUpdate, dcp_collector)
@@ -1935,6 +1943,10 @@ func (dcp_collector *dcpCollector) ProcessEvent(event *common.Event) error {
 	case common.StatsUpdate:
 		dcp_datach_len := event.OtherInfos.(int)
 		setCounter(metric_map[service_def.DCP_DATACH_LEN].(metrics.Counter), dcp_datach_len)
+	case common.SystemEventReceived:
+		metric_map[service_def.SYSTEM_EVENTS_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
+	case common.SeqnoAdvReceived:
+		metric_map[service_def.SEQNO_ADV_RECEIVED_DCP_METRIC].(metrics.Counter).Inc(1)
 	}
 
 	return nil

@@ -99,6 +99,8 @@ const (
 	HlvUpdated               ComponentEventType = iota
 	HlvPruned                ComponentEventType = iota
 	HlvPrunedAtMerge         ComponentEventType = iota
+	// DCP SeqnoAdv
+	SeqnoAdvReceived ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
