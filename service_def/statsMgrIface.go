@@ -159,6 +159,9 @@ const (
 	GUARDRAIL_RESIDENT_RATIO_METRIC = base.GuardrailResidentRatio
 	GUARDRAIL_DATA_SIZE_METRIC      = base.GuardrailDataSize
 	GUARDRAIL_DISK_SPACE_METRIC     = base.GuardrailDiskSpace
+
+	SYSTEM_EVENTS_RECEIVED_DCP_METRIC = "system_events_received_from_dcp"
+	SEQNO_ADV_RECEIVED_DCP_METRIC     = "seqno_adv_received_from_dcp"
 )
 
 const (
@@ -1361,6 +1364,26 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Notes: "When target bucket has guardrail enabled and a threshold set, it will return this error " +
 			"indicating that one or more data nodes is running out of disk space. " +
 			"To resume replication, additional disk storage must be added",
+		Stability: Committed,
+		Labels:    StandardLabels,
+	},
+	SYSTEM_EVENTS_RECEIVED_DCP_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The number of system events received from source data service",
+		Notes: "These events are sent down from source data service and counted as a processed document in " +
+			"statistics such as collection creation events, but are not actually replicable data",
+		Stability: Committed,
+		Labels:    StandardLabels,
+	},
+	SEQNO_ADV_RECEIVED_DCP_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForSupportability,
+		Description:  "The number of seqno advance events received from source data service",
+		Notes: "These events are sent down from source data service and counted as a processed document in " +
+			"statistics, but are not actually replicable data",
 		Stability: Committed,
 		Labels:    StandardLabels,
 	},
