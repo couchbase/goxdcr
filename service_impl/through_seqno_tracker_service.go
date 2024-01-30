@@ -1020,6 +1020,26 @@ func (tsTracker *ThroughSeqnoTrackerSvc) ProcessEvent(event *common.Event) error
 			manifestId, _ := uprEvent.GetManifestId()
 			session.MarkManifestReceived(manifestId)
 		}
+	case common.SeqnoAdvReceived:
+		// For SeqnoAdv - handle it as any other mutations that's being passed down
+		uprEvent := event.Data.(*mcc.UprEvent)
+		seqno := uprEvent.Seqno
+		vbno := uprEvent.VBucket
+		processedAsOSO, session := tsTracker.shouldReceiveAsOso(vbno)
+		if !processedAsOSO {
+			tsTracker.processGapSeqnos(vbno, seqno)
+		} else {
+			session.MarkSeqnoReceived(seqno)
+		}
+		// But instead of doing additional work, just follow the recipe for TargetDataSkipped
+		if !processedAsOSO {
+			tsTracker.addIgnoredSeqno(vbno, seqno)
+		} else {
+			done := session.MarkSeqnoProcessed(vbno, seqno, 0, nil)
+			if done {
+				tsTracker.HandleDoneSession(vbno, session)
+			}
+		}
 	case common.DataNotReplicated:
 		wrappedMcr := event.Data.(*base.WrappedMCRequest)
 		vbno := wrappedMcr.Req.VBucket

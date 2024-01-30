@@ -705,6 +705,19 @@
         "notes": "This metric indicates just the amount of wait time it takes for KV to send a respond back to XDCR as part of the complete docs_latency metrics. This can be used to give more granularity into how the overall latency situation looks like.",
         "stability": "committed"
     },
+    "xdcr_seqno_adv_received_from_dcp_total": {
+        "type": "counter",
+        "help": "The number of seqno advance events received from source data service",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "notes": "These events are sent down from source data service and counted as a processed document in statistics, but are not actually replicable data",
+        "stability": "committed"
+    },
     "xdcr_set_docs_cas_changed_total": {
         "type": "counter",
         "help": "Number of Set operations that failed because the CAS on the Target changed",
@@ -801,6 +814,19 @@
             "pipelineType"
         ],
         "notes": "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.  If too much memory is being used, consider decreasing the number of nozzles or tune such that less data will be buffered",
+        "stability": "committed"
+    },
+    "xdcr_system_events_received_from_dcp_total": {
+        "type": "counter",
+        "help": "The number of system events received from source data service",
+        "added": "7.6.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "notes": "These events are sent down from source data service and counted as a processed document in statistics such as collection creation events, but are not actually replicable data",
         "stability": "committed"
     },
     "xdcr_target_docs_skipped_total": {

@@ -92,6 +92,8 @@ const (
 	DataSentHitGuardrail ComponentEventType = iota
 	// When target KV returned a status code that this XDCR does not understand
 	DataSentFailedUnknownStatus ComponentEventType = iota
+	// DCP SeqnoAdv
+	SeqnoAdvReceived ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
