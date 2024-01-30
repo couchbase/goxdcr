@@ -1081,6 +1081,8 @@ func (dcp *DcpNozzle) processData() (err error) {
 			} else if m.IsSystemEvent() {
 				dcp.handleSystemEvent(m)
 				dcp.RaiseEvent(common.NewEvent(common.SystemEventReceived, m, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
+			} else if m.IsSeqnoAdv() {
+				dcp.handleSeqnoAdv(m)
 			} else if m.IsOsoSnapshot() {
 				osoBegins, _ := m.GetOsoBegin()
 				var helperItems = make([]interface{}, 2)
@@ -1202,6 +1204,15 @@ func (dcp *DcpNozzle) handleSystemEvent(event *mcc.UprEvent) {
 
 	vbno := event.VBucket
 	atomic.StoreUint64(&dcp.vbHighestManifestUidArray[vbno], manifestId)
+}
+
+func (dcp *DcpNozzle) handleSeqnoAdv(event *mcc.UprEvent) {
+	if !event.IsSeqnoAdv() {
+		dcp.Logger().Warnf("Event %v%v%v is not a system event", base.UdTagBegin, event, base.UdTagEnd)
+		return
+	}
+
+	dcp.RaiseEvent(common.NewEvent(common.SeqnoAdvReceived, event, dcp, nil /*derivedItems*/, nil /*otherInfos*/))
 }
 
 // Only ok situation dcp should receive a streamEnd is if it's a backfill

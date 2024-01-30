@@ -1405,22 +1405,44 @@ function validateVBTasksProgress {
 }
 
 # Validates that the result is greater than 0
+function validatePrometheusStatsNon0 {
+ 	local node=$1
+ 	local sourceBucket=$2
+ 	local targetBucket=$3
+ 	local prometheusStatsName=$4
+ 	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
+ 	local prometheusOut
+ 	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+
+ 	local count
+ 	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep $prometheusStatsName |
+ 		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+
+ 	if (($count == 0)); then
+ 		echo "Guardrail resident ratio shows 0"
+ 		exit 1
+ 	fi
+}
+
 function validatePrometheusStatsRRNon0 {
-	local node=$1
-	local sourceBucket=$2
-	local targetBucket=$3
-	local sourcePort=${CLUSTER_NAME_XDCR_PORT_MAP[$node]:-}
-	local prometheusOut
-	prometheusOut=$($CURL -X GET -u $DEFAULT_ADMIN:$DEFAULT_PW http://127.0.0.1:$sourcePort/_prometheusMetrics)
+  local node=$1
+  local sourceBucket=$2
+  local targetBucket=$3
+  validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_guardrail_resident_ratio_total"
+}
 
-	local count
-	count=$(echo "$prometheusOut" | grep pipelineType | grep Main | grep xdcr_guardrail_resident_ratio_total |
-		grep "sourceBucketName=\"${sourceBucket}\"" | grep "targetBucketName=\"${targetBucket}\"" | awk '{print $NF}')
+function validatePrometheusStatsSystemEventsNon0 {
+  local node=$1
+  local sourceBucket=$2
+  local targetBucket=$3
+  validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_system_events_received_from_dcp_total"
+}
 
-	if (($count == 0)); then
-		echo "Guardrail resident ratio shows 0"
-		exit 1
-	fi
+function validatePrometheusStatsSeqAdvNon0 {
+  local node=$1
+  local sourceBucket=$2
+  local targetBucket=$3
+  validatePrometheusStatsNon0 "$node" "$sourceBucket" "$targetBucket" "xdcr_seqno_adv_received_from_dcp_total"
 }
 
 # use cbc-pillowfight to create a large bucket

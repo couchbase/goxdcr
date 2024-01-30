@@ -86,6 +86,8 @@ const (
 	OsoSnapshotReceived ComponentEventType = iota
 	// When target rejected writes
 	DataSentFailed ComponentEventType = iota
+	// DCP SeqnoAdv
+	SeqnoAdvReceived ComponentEventType = iota
 )
 
 func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {

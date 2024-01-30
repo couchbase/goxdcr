@@ -141,6 +141,9 @@ const (
 	// Pipeline Status to be exported as a guage
 	PIPELINE_STATUS = "pipeline_status"
 	PIPELINE_ERRORS = "pipeline_errors"
+
+	SYSTEM_EVENTS_RECEIVED_DCP_METRIC = "system_events_received_from_dcp"
+	SEQNO_ADV_RECEIVED_DCP_METRIC     = "seqno_adv_received_from_dcp"
 )
 
 const (
@@ -1184,6 +1187,26 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Description:  "The number of currently present errors for a specific Replication Pipeline",
 		Notes: "If the number is non zero, it could indicate potential replication errors that requires some " +
 			"human intervention to look into the UI console or logs to decipher what errors could currently exist.",
+		Stability: Committed,
+		Labels:    StandardLabels,
+	},
+	SYSTEM_EVENTS_RECEIVED_DCP_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.Version7_2_5,
+		Description:  "The number of system events received from source data service",
+		Notes: "These events are sent down from source data service and counted as a processed document in " +
+			"statistics such as collection creation events, but are not actually replicable data",
+		Stability: Committed,
+		Labels:    StandardLabels,
+	},
+	SEQNO_ADV_RECEIVED_DCP_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.Version7_2_5,
+		Description:  "The number of seqno advance events received from source data service",
+		Notes: "These events are sent down from source data service and counted as a processed document in " +
+			"statistics, but are not actually replicable data",
 		Stability: Committed,
 		Labels:    StandardLabels,
 	},
