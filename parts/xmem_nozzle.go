@@ -2531,7 +2531,6 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							xmem.Logger().Debugf("Request in the buffer for key %v%s%v has opaque=%v while the response opaque=%v",
 								base.UdTagBegin, bytes.Trim(wrappedReq.Req.Key, "\x00"), base.UdTagEnd, wrappedReq.Req.Opaque, response.Opaque)
 						}
-						xmem.recycleDataObj(wrappedReq)
 					} else if wrappedReq.IsCasLockingRequest() {
 						// We only care about this if we are doing CAS locking for CCR or mobile, otherwise we can ignore this error.
 						xmem.Logger().Infof("%v Retry conflict resolution for %v%q%v because target Cas has changed (EEXISTS).", xmem.Id(), base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd)
