@@ -1947,23 +1947,34 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		return
 	}
 
+	// Now we need to update HLV xattr either because of new changes or because we have to prune
+	// The max increase in body length is adding 2 uint32 and _vv\x00{"cvCas":"0x...","src":"<clusterId>","ver":"0x..."}\x00
+
+	// Body with xattrs will look like the following:
+	// | xattrTotalLen | xattr1Len | xattr1 | xattr2Len | xattr2Len | xattr2 | ... | xattrNLen | xattrN | docBody |
+	// where,
+	// 	xattrTotalLen									- 1 uint32, Total xattr section length from first byte of "xattr1Len" to last byte of "xattrNLen"
+	// 	xattr1Len, xattr2Len, ... xattrNLen				- 1 unit32 each, Length of xattr1, xattr2, ... xattrN respectively
+	// 	xattr1, xattr2, ... xattrN will each look like	- | xattrKey | 0x00 | xattrVal | 0x00 |
+	//	docBody											- actual document body without any xattrs
+
 	maxBodyIncrease := 0
 	if wrappedReq.SetMetaXattrOptions.SendHlv {
-		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 */ + len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
+		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 - xattrTotalLen and _vv's length */ +
+			len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
 			len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
 			len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
 			len(xmem.sourceBucketId) + 3 /* "<bucketId>", */ +
 			len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ +
-			18 /* "0x<16byte>"} */
+			20 /* "0x<16byte>" */ + 2 /* }\x00 */
 	}
+
 	var targetSyncVal []byte
 	if wrappedReq.SetMetaXattrOptions.PreserveSync && lookup != nil {
 		targetSyncVal, _ = lookup.ResponseForAPath(base.XATTR_MOBILE)
 		maxBodyIncrease = maxBodyIncrease + len(targetSyncVal)
 	}
 
-	// Now we need to update CCR metadata either because of new changes or because we have to prune
-	// The max increase in body length is adding 2 uint32 and _vv\x00{"cvCas":"0x...","src":"<clusterId>","ver":"0x..."}\x00
 	req := wrappedReq.Req
 	body := req.Body
 	newbodyLen := len(body) + maxBodyIncrease
