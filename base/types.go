@@ -751,6 +751,7 @@ func (req *WrappedMCRequest) UpdateReqBytes() {
 	}
 }
 
+// unique-key is a combination of doc key and revSeqno of the mutation
 func (req *WrappedMCRequest) ConstructUniqueKey() {
 	var buffer bytes.Buffer
 	buffer.Write(req.Req.Key)
