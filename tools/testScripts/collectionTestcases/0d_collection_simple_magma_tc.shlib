@@ -99,6 +99,9 @@ function runTestCase {
 	cleanupBuckets
 	cleanupRemoteClusterRefs
 
+	# Magma buckets should not be used for future tests
+	cleanupBucketNamePropertyMap
+
 	# For magma clean up, sleep a bit
 	sleep 20
 }
