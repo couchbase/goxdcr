@@ -24,6 +24,10 @@ func (_m *stateCheckFunc) EXPECT() *stateCheckFunc_Expecter {
 func (_m *stateCheckFunc) Execute(state parts.DcpStreamState) bool {
 	ret := _m.Called(state)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(parts.DcpStreamState) bool); ok {
 		r0 = rf(state)

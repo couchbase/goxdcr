@@ -24,6 +24,10 @@ func (_m *ResolverSvcIface) EXPECT() *ResolverSvcIface_Expecter {
 func (_m *ResolverSvcIface) CheckMergeFunction(fname string) error {
 	ret := _m.Called(fname)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckMergeFunction")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(fname)
@@ -165,6 +169,10 @@ func (_c *ResolverSvcIface_Start_Call) RunAndReturn(run func(string, uint16)) *R
 // Started provides a mock function with given fields:
 func (_m *ResolverSvcIface) Started() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Started")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {

@@ -24,6 +24,10 @@ func (_m *BackfillMgrGetter) EXPECT() *BackfillMgrGetter_Expecter {
 func (_m *BackfillMgrGetter) Execute() service_def.BackfillMgrIface {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 service_def.BackfillMgrIface
 	if rf, ok := ret.Get(0).(func() service_def.BackfillMgrIface); ok {
 		r0 = rf()

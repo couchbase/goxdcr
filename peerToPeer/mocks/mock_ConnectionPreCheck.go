@@ -26,6 +26,10 @@ func (_m *ConnectionPreCheck) EXPECT() *ConnectionPreCheck_Expecter {
 func (_m *ConnectionPreCheck) RetrieveConnectionPreCheckResult(_a0 string) (base.ConnectionErrMapType, bool, error) {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RetrieveConnectionPreCheckResult")
+	}
+
 	var r0 base.ConnectionErrMapType
 	var r1 bool
 	var r2 error

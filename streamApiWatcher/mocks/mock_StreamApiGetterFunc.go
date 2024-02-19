@@ -30,6 +30,10 @@ func (_m *StreamApiGetterFunc) EXPECT() *StreamApiGetterFunc_Expecter {
 func (_m *StreamApiGetterFunc) Execute(path string, connInfo base.ClusterConnectionInfoProvider, _a2 utils.UtilsIface, callback func(), logger *log.CommonLogger) streamApiWatcher.StreamApiWatcher {
 	ret := _m.Called(path, connInfo, _a2, callback, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 streamApiWatcher.StreamApiWatcher
 	if rf, ok := ret.Get(0).(func(string, base.ClusterConnectionInfoProvider, utils.UtilsIface, func(), *log.CommonLogger) streamApiWatcher.StreamApiWatcher); ok {
 		r0 = rf(path, connInfo, _a2, callback, logger)

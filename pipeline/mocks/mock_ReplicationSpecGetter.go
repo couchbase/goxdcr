@@ -24,6 +24,10 @@ func (_m *ReplicationSpecGetter) EXPECT() *ReplicationSpecGetter_Expecter {
 func (_m *ReplicationSpecGetter) Execute(specId string) (*metadata.ReplicationSpecification, error) {
 	ret := _m.Called(specId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 *metadata.ReplicationSpecification
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (*metadata.ReplicationSpecification, error)); ok {

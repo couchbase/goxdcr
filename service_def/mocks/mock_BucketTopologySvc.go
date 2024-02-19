@@ -30,6 +30,10 @@ func (_m *BucketTopologySvc) EXPECT() *BucketTopologySvc_Expecter {
 func (_m *BucketTopologySvc) RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error {
 	ret := _m.Called(specId, srcBucketName, vbno, requestId, gcFunc, timeToFire)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterGarbageCollect")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, uint16, string, func() error, time.Duration) error); ok {
 		r0 = rf(specId, srcBucketName, vbno, requestId, gcFunc, timeToFire)
@@ -77,6 +81,10 @@ func (_c *BucketTopologySvc_RegisterGarbageCollect_Call) RunAndReturn(run func(s
 func (_m *BucketTopologySvc) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecChangeCallback")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}, *sync.WaitGroup) error); ok {
 		r0 = rf(id, oldVal, newVal, wg)
@@ -121,6 +129,10 @@ func (_c *BucketTopologySvc_ReplicationSpecChangeCallback_Call) RunAndReturn(run
 // SubscribeToLocalBucketDcpStatsFeed provides a mock function with given fields: spec, subscriberId
 func (_m *BucketTopologySvc) SubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
 	ret := _m.Called(spec, subscriberId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SubscribeToLocalBucketDcpStatsFeed")
+	}
 
 	var r0 chan service_def.SourceNotification
 	var r1 error
@@ -177,6 +189,10 @@ func (_c *BucketTopologySvc_SubscribeToLocalBucketDcpStatsFeed_Call) RunAndRetur
 func (_m *BucketTopologySvc) SubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
 	ret := _m.Called(spec, subscriberId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SubscribeToLocalBucketDcpStatsLegacyFeed")
+	}
+
 	var r0 chan service_def.SourceNotification
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) (chan service_def.SourceNotification, error)); ok {
@@ -232,6 +248,10 @@ func (_c *BucketTopologySvc_SubscribeToLocalBucketDcpStatsLegacyFeed_Call) RunAn
 func (_m *BucketTopologySvc) SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
 	ret := _m.Called(spec, subscriberId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SubscribeToLocalBucketFeed")
+	}
+
 	var r0 chan service_def.SourceNotification
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) (chan service_def.SourceNotification, error)); ok {
@@ -286,6 +306,10 @@ func (_c *BucketTopologySvc_SubscribeToLocalBucketFeed_Call) RunAndReturn(run fu
 // SubscribeToLocalBucketHighSeqnosFeed provides a mock function with given fields: spec, subscriberId, requestedInterval
 func (_m *BucketTopologySvc) SubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan service_def.SourceNotification, func(time.Duration), error) {
 	ret := _m.Called(spec, subscriberId, requestedInterval)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SubscribeToLocalBucketHighSeqnosFeed")
+	}
 
 	var r0 chan service_def.SourceNotification
 	var r1 func(time.Duration)
@@ -352,6 +376,10 @@ func (_c *BucketTopologySvc_SubscribeToLocalBucketHighSeqnosFeed_Call) RunAndRet
 func (_m *BucketTopologySvc) SubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan service_def.SourceNotification, func(time.Duration), error) {
 	ret := _m.Called(spec, subscriberId, requestedInterval)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SubscribeToLocalBucketHighSeqnosLegacyFeed")
+	}
+
 	var r0 chan service_def.SourceNotification
 	var r1 func(time.Duration)
 	var r2 error
@@ -417,6 +445,10 @@ func (_c *BucketTopologySvc_SubscribeToLocalBucketHighSeqnosLegacyFeed_Call) Run
 func (_m *BucketTopologySvc) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, error) {
 	ret := _m.Called(spec, subscriberId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SubscribeToRemoteBucketFeed")
+	}
+
 	var r0 chan service_def.TargetNotification
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) (chan service_def.TargetNotification, error)); ok {
@@ -472,6 +504,10 @@ func (_c *BucketTopologySvc_SubscribeToRemoteBucketFeed_Call) RunAndReturn(run f
 func (_m *BucketTopologySvc) UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	ret := _m.Called(spec, subscriberId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UnSubscribeLocalBucketFeed")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
 		r0 = rf(spec, subscriberId)
@@ -514,6 +550,10 @@ func (_c *BucketTopologySvc_UnSubscribeLocalBucketFeed_Call) RunAndReturn(run fu
 // UnSubscribeRemoteBucketFeed provides a mock function with given fields: spec, subscriberId
 func (_m *BucketTopologySvc) UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	ret := _m.Called(spec, subscriberId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnSubscribeRemoteBucketFeed")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
@@ -558,6 +598,10 @@ func (_c *BucketTopologySvc_UnSubscribeRemoteBucketFeed_Call) RunAndReturn(run f
 func (_m *BucketTopologySvc) UnSubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	ret := _m.Called(spec, subscriberId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UnSubscribeToLocalBucketDcpStatsFeed")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
 		r0 = rf(spec, subscriberId)
@@ -600,6 +644,10 @@ func (_c *BucketTopologySvc_UnSubscribeToLocalBucketDcpStatsFeed_Call) RunAndRet
 // UnSubscribeToLocalBucketDcpStatsLegacyFeed provides a mock function with given fields: spec, subscriberId
 func (_m *BucketTopologySvc) UnSubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	ret := _m.Called(spec, subscriberId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnSubscribeToLocalBucketDcpStatsLegacyFeed")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
@@ -644,6 +692,10 @@ func (_c *BucketTopologySvc_UnSubscribeToLocalBucketDcpStatsLegacyFeed_Call) Run
 func (_m *BucketTopologySvc) UnSubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	ret := _m.Called(spec, subscriberId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UnSubscribeToLocalBucketHighSeqnosFeed")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
 		r0 = rf(spec, subscriberId)
@@ -686,6 +738,10 @@ func (_c *BucketTopologySvc_UnSubscribeToLocalBucketHighSeqnosFeed_Call) RunAndR
 // UnSubscribeToLocalBucketHighSeqnosLegacyFeed provides a mock function with given fields: spec, subscriberId
 func (_m *BucketTopologySvc) UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	ret := _m.Called(spec, subscriberId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnSubscribeToLocalBucketHighSeqnosLegacyFeed")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {

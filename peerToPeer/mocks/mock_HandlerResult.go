@@ -21,6 +21,10 @@ func (_m *HandlerResult) EXPECT() *HandlerResult_Expecter {
 func (_m *HandlerResult) GetError() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -61,6 +65,10 @@ func (_c *HandlerResult_GetError_Call) RunAndReturn(run func() error) *HandlerRe
 // GetHttpStatusCode provides a mock function with given fields:
 func (_m *HandlerResult) GetHttpStatusCode() int {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHttpStatusCode")
+	}
 
 	var r0 int
 	if rf, ok := ret.Get(0).(func() int); ok {

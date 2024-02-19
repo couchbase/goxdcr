@@ -24,6 +24,10 @@ func (_m *ManifestsGetter) EXPECT() *ManifestsGetter_Expecter {
 func (_m *ManifestsGetter) Execute(spec *metadata.ReplicationSpecification, specMayNotExist bool) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec, specMayNotExist)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 *metadata.CollectionsManifest
 	var r2 error

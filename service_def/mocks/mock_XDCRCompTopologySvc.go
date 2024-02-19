@@ -24,6 +24,10 @@ func (_m *XDCRCompTopologySvc) EXPECT() *XDCRCompTopologySvc_Expecter {
 func (_m *XDCRCompTopologySvc) GetLocalHostName() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetLocalHostName")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -64,6 +68,10 @@ func (_c *XDCRCompTopologySvc_GetLocalHostName_Call) RunAndReturn(run func() str
 // IsIpv4Blocked provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) IsIpv4Blocked() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsIpv4Blocked")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
@@ -106,6 +114,10 @@ func (_c *XDCRCompTopologySvc_IsIpv4Blocked_Call) RunAndReturn(run func() bool) 
 func (_m *XDCRCompTopologySvc) IsIpv6Blocked() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsIpv6Blocked")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -146,6 +158,10 @@ func (_c *XDCRCompTopologySvc_IsIpv6Blocked_Call) RunAndReturn(run func() bool) 
 // IsKVNode provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) IsKVNode() (bool, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsKVNode")
+	}
 
 	var r0 bool
 	var r1 error
@@ -198,6 +214,10 @@ func (_c *XDCRCompTopologySvc_IsKVNode_Call) RunAndReturn(run func() (bool, erro
 func (_m *XDCRCompTopologySvc) IsMyClusterDeveloperPreview() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsMyClusterDeveloperPreview")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -239,6 +259,10 @@ func (_c *XDCRCompTopologySvc_IsMyClusterDeveloperPreview_Call) RunAndReturn(run
 func (_m *XDCRCompTopologySvc) IsMyClusterEncryptionLevelStrict() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsMyClusterEncryptionLevelStrict")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -279,6 +303,10 @@ func (_c *XDCRCompTopologySvc_IsMyClusterEncryptionLevelStrict_Call) RunAndRetur
 // IsMyClusterEnterprise provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) IsMyClusterEnterprise() (bool, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsMyClusterEnterprise")
+	}
 
 	var r0 bool
 	var r1 error
@@ -331,6 +359,10 @@ func (_c *XDCRCompTopologySvc_IsMyClusterEnterprise_Call) RunAndReturn(run func(
 func (_m *XDCRCompTopologySvc) IsMyClusterIpv6() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsMyClusterIpv6")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -371,6 +403,10 @@ func (_c *XDCRCompTopologySvc_IsMyClusterIpv6_Call) RunAndReturn(run func() bool
 // MyAdminPort provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) MyAdminPort() (uint16, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for MyAdminPort")
+	}
 
 	var r0 uint16
 	var r1 error
@@ -423,6 +459,10 @@ func (_c *XDCRCompTopologySvc_MyAdminPort_Call) RunAndReturn(run func() (uint16,
 func (_m *XDCRCompTopologySvc) MyClusterCompatibility() (int, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for MyClusterCompatibility")
+	}
+
 	var r0 int
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (int, error)); ok {
@@ -473,6 +513,10 @@ func (_c *XDCRCompTopologySvc_MyClusterCompatibility_Call) RunAndReturn(run func
 // MyClusterUuid provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) MyClusterUuid() (string, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for MyClusterUuid")
+	}
 
 	var r0 string
 	var r1 error
@@ -525,6 +569,10 @@ func (_c *XDCRCompTopologySvc_MyClusterUuid_Call) RunAndReturn(run func() (strin
 func (_m *XDCRCompTopologySvc) MyConnectionStr() (string, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for MyConnectionStr")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (string, error)); ok {
@@ -575,6 +623,10 @@ func (_c *XDCRCompTopologySvc_MyConnectionStr_Call) RunAndReturn(run func() (str
 // MyCredentials provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for MyCredentials")
+	}
 
 	var r0 string
 	var r1 string
@@ -675,6 +727,10 @@ func (_c *XDCRCompTopologySvc_MyCredentials_Call) RunAndReturn(run func() (strin
 func (_m *XDCRCompTopologySvc) MyHost() (string, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for MyHost")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (string, error)); ok {
@@ -726,6 +782,10 @@ func (_c *XDCRCompTopologySvc_MyHost_Call) RunAndReturn(run func() (string, erro
 func (_m *XDCRCompTopologySvc) MyHostAddr() (string, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for MyHostAddr")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (string, error)); ok {
@@ -776,6 +836,10 @@ func (_c *XDCRCompTopologySvc_MyHostAddr_Call) RunAndReturn(run func() (string, 
 // MyKVNodes provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) MyKVNodes() ([]string, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for MyKVNodes")
+	}
 
 	var r0 []string
 	var r1 error
@@ -830,6 +894,10 @@ func (_c *XDCRCompTopologySvc_MyKVNodes_Call) RunAndReturn(run func() ([]string,
 func (_m *XDCRCompTopologySvc) MyMemcachedAddr() (string, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for MyMemcachedAddr")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (string, error)); ok {
@@ -880,6 +948,10 @@ func (_c *XDCRCompTopologySvc_MyMemcachedAddr_Call) RunAndReturn(run func() (str
 // MyNodeVersion provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) MyNodeVersion() (string, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for MyNodeVersion")
+	}
 
 	var r0 string
 	var r1 error
@@ -932,6 +1004,10 @@ func (_c *XDCRCompTopologySvc_MyNodeVersion_Call) RunAndReturn(run func() (strin
 func (_m *XDCRCompTopologySvc) NumberOfKVNodes() (int, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for NumberOfKVNodes")
+	}
+
 	var r0 int
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (int, error)); ok {
@@ -982,6 +1058,10 @@ func (_c *XDCRCompTopologySvc_NumberOfKVNodes_Call) RunAndReturn(run func() (int
 // PeerNodesAdminAddrs provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) PeerNodesAdminAddrs() ([]string, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PeerNodesAdminAddrs")
+	}
 
 	var r0 []string
 	var r1 error
@@ -1035,6 +1115,10 @@ func (_c *XDCRCompTopologySvc_PeerNodesAdminAddrs_Call) RunAndReturn(run func() 
 // XDCRCompToKVNodeMap provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) XDCRCompToKVNodeMap() (map[string][]string, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for XDCRCompToKVNodeMap")
+	}
 
 	var r0 map[string][]string
 	var r1 error

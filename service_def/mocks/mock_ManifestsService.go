@@ -24,6 +24,10 @@ func (_m *ManifestsService) EXPECT() *ManifestsService_Expecter {
 func (_m *ManifestsService) DelManifests(replSpec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(replSpec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DelManifests")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
 		r0 = rf(replSpec)
@@ -65,6 +69,10 @@ func (_c *ManifestsService_DelManifests_Call) RunAndReturn(run func(*metadata.Re
 // GetSourceManifests provides a mock function with given fields: replSpec
 func (_m *ManifestsService) GetSourceManifests(replSpec *metadata.ReplicationSpecification) (*metadata.ManifestsList, error) {
 	ret := _m.Called(replSpec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSourceManifests")
+	}
 
 	var r0 *metadata.ManifestsList
 	var r1 error
@@ -120,6 +128,10 @@ func (_c *ManifestsService_GetSourceManifests_Call) RunAndReturn(run func(*metad
 func (_m *ManifestsService) GetTargetManifests(replSpec *metadata.ReplicationSpecification) (*metadata.ManifestsList, error) {
 	ret := _m.Called(replSpec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetManifests")
+	}
+
 	var r0 *metadata.ManifestsList
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) (*metadata.ManifestsList, error)); ok {
@@ -174,6 +186,10 @@ func (_c *ManifestsService_GetTargetManifests_Call) RunAndReturn(run func(*metad
 func (_m *ManifestsService) UpsertSourceManifests(replSpec *metadata.ReplicationSpecification, src *metadata.ManifestsList) error {
 	ret := _m.Called(replSpec, src)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertSourceManifests")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, *metadata.ManifestsList) error); ok {
 		r0 = rf(replSpec, src)
@@ -216,6 +232,10 @@ func (_c *ManifestsService_UpsertSourceManifests_Call) RunAndReturn(run func(*me
 // UpsertTargetManifests provides a mock function with given fields: replSpec, tgt
 func (_m *ManifestsService) UpsertTargetManifests(replSpec *metadata.ReplicationSpecification, tgt *metadata.ManifestsList) error {
 	ret := _m.Called(replSpec, tgt)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertTargetManifests")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, *metadata.ManifestsList) error); ok {

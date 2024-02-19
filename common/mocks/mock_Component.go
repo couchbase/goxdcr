@@ -24,6 +24,10 @@ func (_m *Component) EXPECT() *Component_Expecter {
 func (_m *Component) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for AsyncComponentEventListeners")
+	}
+
 	var r0 map[string]common.AsyncComponentEventListener
 	if rf, ok := ret.Get(0).(func() map[string]common.AsyncComponentEventListener); ok {
 		r0 = rf()
@@ -66,6 +70,10 @@ func (_c *Component_AsyncComponentEventListeners_Call) RunAndReturn(run func() m
 // Id provides a mock function with given fields:
 func (_m *Component) Id() string {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Id")
+	}
 
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
@@ -141,6 +149,10 @@ func (_c *Component_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *Comp
 func (_m *Component) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterComponentEventListener")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {
 		r0 = rf(eventType, listener)
@@ -183,6 +195,10 @@ func (_c *Component_RegisterComponentEventListener_Call) RunAndReturn(run func(c
 // UnRegisterComponentEventListener provides a mock function with given fields: eventType, listener
 func (_m *Component) UnRegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnRegisterComponentEventListener")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {

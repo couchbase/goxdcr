@@ -26,6 +26,10 @@ func (_m *OutNozzle) EXPECT() *OutNozzle_Expecter {
 func (_m *OutNozzle) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for AsyncComponentEventListeners")
+	}
+
 	var r0 map[string]common.AsyncComponentEventListener
 	if rf, ok := ret.Get(0).(func() map[string]common.AsyncComponentEventListener); ok {
 		r0 = rf()
@@ -69,6 +73,10 @@ func (_c *OutNozzle_AsyncComponentEventListeners_Call) RunAndReturn(run func() m
 func (_m *OutNozzle) Close() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Close")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -109,6 +117,10 @@ func (_c *OutNozzle_Close_Call) RunAndReturn(run func() error) *OutNozzle_Close_
 // Connector provides a mock function with given fields:
 func (_m *OutNozzle) Connector() common.Connector {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Connector")
+	}
 
 	var r0 common.Connector
 	if rf, ok := ret.Get(0).(func() common.Connector); ok {
@@ -153,6 +165,10 @@ func (_c *OutNozzle_Connector_Call) RunAndReturn(run func() common.Connector) *O
 func (_m *OutNozzle) Id() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Id")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -194,6 +210,10 @@ func (_c *OutNozzle_Id_Call) RunAndReturn(run func() string) *OutNozzle_Id_Call 
 func (_m *OutNozzle) IsOpen() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsOpen")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -234,6 +254,10 @@ func (_c *OutNozzle_IsOpen_Call) RunAndReturn(run func() bool) *OutNozzle_IsOpen
 // Open provides a mock function with given fields:
 func (_m *OutNozzle) Open() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Open")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
@@ -308,6 +332,10 @@ func (_c *OutNozzle_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *OutN
 // Receive provides a mock function with given fields: data
 func (_m *OutNozzle) Receive(data interface{}) error {
 	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Receive")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
@@ -384,6 +412,10 @@ func (_c *OutNozzle_RecycleDataObj_Call) RunAndReturn(run func(interface{})) *Ou
 func (_m *OutNozzle) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterComponentEventListener")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {
 		r0 = rf(eventType, listener)
@@ -427,6 +459,10 @@ func (_c *OutNozzle_RegisterComponentEventListener_Call) RunAndReturn(run func(c
 func (_m *OutNozzle) ResponsibleVBs() []uint16 {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for ResponsibleVBs")
+	}
+
 	var r0 []uint16
 	if rf, ok := ret.Get(0).(func() []uint16); ok {
 		r0 = rf()
@@ -469,6 +505,10 @@ func (_c *OutNozzle_ResponsibleVBs_Call) RunAndReturn(run func() []uint16) *OutN
 // SetConnector provides a mock function with given fields: connector
 func (_m *OutNozzle) SetConnector(connector common.Connector) error {
 	ret := _m.Called(connector)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetConnector")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Connector) error); ok {
@@ -578,6 +618,10 @@ func (_c *OutNozzle_SetUpstreamObjRecycler_Call) RunAndReturn(run func(func(inte
 func (_m *OutNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(settings)
@@ -620,6 +664,10 @@ func (_c *OutNozzle_Start_Call) RunAndReturn(run func(metadata.ReplicationSettin
 func (_m *OutNozzle) State() common.PartState {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for State")
+	}
+
 	var r0 common.PartState
 	if rf, ok := ret.Get(0).(func() common.PartState); ok {
 		r0 = rf()
@@ -661,6 +709,10 @@ func (_c *OutNozzle_State_Call) RunAndReturn(run func() common.PartState) *OutNo
 func (_m *OutNozzle) Stop() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -701,6 +753,10 @@ func (_c *OutNozzle_Stop_Call) RunAndReturn(run func() error) *OutNozzle_Stop_Ca
 // UnRegisterComponentEventListener provides a mock function with given fields: eventType, listener
 func (_m *OutNozzle) UnRegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnRegisterComponentEventListener")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {
@@ -744,6 +800,10 @@ func (_c *OutNozzle_UnRegisterComponentEventListener_Call) RunAndReturn(run func
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *OutNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

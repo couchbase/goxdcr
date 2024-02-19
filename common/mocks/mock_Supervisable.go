@@ -25,6 +25,10 @@ func (_m *Supervisable) EXPECT() *Supervisable_Expecter {
 func (_m *Supervisable) HeartBeat_async(respchan chan []interface{}, timestamp time.Time) error {
 	ret := _m.Called(respchan, timestamp)
 
+	if len(ret) == 0 {
+		panic("no return value specified for HeartBeat_async")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(chan []interface{}, time.Time) error); ok {
 		r0 = rf(respchan, timestamp)
@@ -68,6 +72,10 @@ func (_c *Supervisable_HeartBeat_async_Call) RunAndReturn(run func(chan []interf
 func (_m *Supervisable) HeartBeat_sync() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for HeartBeat_sync")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -109,6 +117,10 @@ func (_c *Supervisable_HeartBeat_sync_Call) RunAndReturn(run func() bool) *Super
 func (_m *Supervisable) Id() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Id")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -149,6 +161,10 @@ func (_c *Supervisable_Id_Call) RunAndReturn(run func() string) *Supervisable_Id
 // IsReadyForHeartBeat provides a mock function with given fields:
 func (_m *Supervisable) IsReadyForHeartBeat() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsReadyForHeartBeat")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {

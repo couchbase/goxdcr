@@ -24,6 +24,10 @@ func (_m *MetadataSvc) EXPECT() *MetadataSvc_Expecter {
 func (_m *MetadataSvc) Add(key string, value []byte) error {
 	ret := _m.Called(key, value)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Add")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte) error); ok {
 		r0 = rf(key, value)
@@ -67,6 +71,10 @@ func (_c *MetadataSvc_Add_Call) RunAndReturn(run func(string, []byte) error) *Me
 func (_m *MetadataSvc) AddSensitive(key string, value []byte) error {
 	ret := _m.Called(key, value)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddSensitive")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte) error); ok {
 		r0 = rf(key, value)
@@ -109,6 +117,10 @@ func (_c *MetadataSvc_AddSensitive_Call) RunAndReturn(run func(string, []byte) e
 // AddSensitiveWithCatalog provides a mock function with given fields: catalogKey, key, value
 func (_m *MetadataSvc) AddSensitiveWithCatalog(catalogKey string, key string, value []byte) error {
 	ret := _m.Called(catalogKey, key, value)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddSensitiveWithCatalog")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, []byte) error); ok {
@@ -154,6 +166,10 @@ func (_c *MetadataSvc_AddSensitiveWithCatalog_Call) RunAndReturn(run func(string
 func (_m *MetadataSvc) AddWithCatalog(catalogKey string, key string, value []byte) error {
 	ret := _m.Called(catalogKey, key, value)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddWithCatalog")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, []byte) error); ok {
 		r0 = rf(catalogKey, key, value)
@@ -198,6 +214,10 @@ func (_c *MetadataSvc_AddWithCatalog_Call) RunAndReturn(run func(string, string,
 func (_m *MetadataSvc) Del(key string, rev interface{}) error {
 	ret := _m.Called(key, rev)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Del")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}) error); ok {
 		r0 = rf(key, rev)
@@ -241,6 +261,10 @@ func (_c *MetadataSvc_Del_Call) RunAndReturn(run func(string, interface{}) error
 func (_m *MetadataSvc) DelAllFromCatalog(catalogKey string) error {
 	ret := _m.Called(catalogKey)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DelAllFromCatalog")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(catalogKey)
@@ -282,6 +306,10 @@ func (_c *MetadataSvc_DelAllFromCatalog_Call) RunAndReturn(run func(string) erro
 // DelWithCatalog provides a mock function with given fields: catalogKey, key, rev
 func (_m *MetadataSvc) DelWithCatalog(catalogKey string, key string, rev interface{}) error {
 	ret := _m.Called(catalogKey, key, rev)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DelWithCatalog")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, interface{}) error); ok {
@@ -326,6 +354,10 @@ func (_c *MetadataSvc_DelWithCatalog_Call) RunAndReturn(run func(string, string,
 // Get provides a mock function with given fields: key
 func (_m *MetadataSvc) Get(key string) ([]byte, interface{}, error) {
 	ret := _m.Called(key)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Get")
+	}
 
 	var r0 []byte
 	var r1 interface{}
@@ -390,6 +422,10 @@ func (_c *MetadataSvc_Get_Call) RunAndReturn(run func(string) ([]byte, interface
 func (_m *MetadataSvc) GetAllKeysFromCatalog(catalogKey string) ([]string, error) {
 	ret := _m.Called(catalogKey)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllKeysFromCatalog")
+	}
+
 	var r0 []string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) ([]string, error)); ok {
@@ -443,6 +479,10 @@ func (_c *MetadataSvc_GetAllKeysFromCatalog_Call) RunAndReturn(run func(string) 
 // GetAllMetadataFromCatalog provides a mock function with given fields: catalogKey
 func (_m *MetadataSvc) GetAllMetadataFromCatalog(catalogKey string) ([]*service_def.MetadataEntry, error) {
 	ret := _m.Called(catalogKey)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllMetadataFromCatalog")
+	}
 
 	var r0 []*service_def.MetadataEntry
 	var r1 error
@@ -498,6 +538,10 @@ func (_c *MetadataSvc_GetAllMetadataFromCatalog_Call) RunAndReturn(run func(stri
 func (_m *MetadataSvc) Set(key string, value []byte, rev interface{}) error {
 	ret := _m.Called(key, value, rev)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Set")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte, interface{}) error); ok {
 		r0 = rf(key, value, rev)
@@ -541,6 +585,10 @@ func (_c *MetadataSvc_Set_Call) RunAndReturn(run func(string, []byte, interface{
 // SetSensitive provides a mock function with given fields: key, value, rev
 func (_m *MetadataSvc) SetSensitive(key string, value []byte, rev interface{}) error {
 	ret := _m.Called(key, value, rev)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetSensitive")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte, interface{}) error); ok {

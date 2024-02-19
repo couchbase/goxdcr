@@ -26,6 +26,10 @@ func (_m *PipelineFactory) EXPECT() *PipelineFactory_Expecter {
 func (_m *PipelineFactory) NewPipeline(topic string, progressRecorder common.PipelineProgressRecorder) (common.Pipeline, error) {
 	ret := _m.Called(topic, progressRecorder)
 
+	if len(ret) == 0 {
+		panic("no return value specified for NewPipeline")
+	}
+
 	var r0 common.Pipeline
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, common.PipelineProgressRecorder) (common.Pipeline, error)); ok {
@@ -80,6 +84,10 @@ func (_c *PipelineFactory_NewPipeline_Call) RunAndReturn(run func(string, common
 // NewSecondaryPipeline provides a mock function with given fields: topic, primaryPipeline, progress_recorder, pipelineType
 func (_m *PipelineFactory) NewSecondaryPipeline(topic string, primaryPipeline common.Pipeline, progress_recorder common.PipelineProgressRecorder, pipelineType common.PipelineType) (common.Pipeline, error) {
 	ret := _m.Called(topic, primaryPipeline, progress_recorder, pipelineType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NewSecondaryPipeline")
+	}
 
 	var r0 common.Pipeline
 	var r1 error

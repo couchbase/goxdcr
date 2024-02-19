@@ -28,6 +28,10 @@ func (_m *BackfillReplSvc) EXPECT() *BackfillReplSvc_Expecter {
 func (_m *BackfillReplSvc) AddBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddBackfillReplSpec")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.BackfillReplicationSpec) error); ok {
 		r0 = rf(spec)
@@ -69,6 +73,10 @@ func (_c *BackfillReplSvc_AddBackfillReplSpec_Call) RunAndReturn(run func(*metad
 // AllActiveBackfillSpecsReadOnly provides a mock function with given fields:
 func (_m *BackfillReplSvc) AllActiveBackfillSpecsReadOnly() (map[string]*metadata.BackfillReplicationSpec, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllActiveBackfillSpecsReadOnly")
+	}
 
 	var r0 map[string]*metadata.BackfillReplicationSpec
 	var r1 error
@@ -122,6 +130,10 @@ func (_c *BackfillReplSvc_AllActiveBackfillSpecsReadOnly_Call) RunAndReturn(run 
 // BackfillReplSpec provides a mock function with given fields: replicationId
 func (_m *BackfillReplSvc) BackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	ret := _m.Called(replicationId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BackfillReplSpec")
+	}
 
 	var r0 *metadata.BackfillReplicationSpec
 	var r1 error
@@ -177,6 +189,10 @@ func (_c *BackfillReplSvc_BackfillReplSpec_Call) RunAndReturn(run func(string) (
 func (_m *BackfillReplSvc) DelBackfillReplSpec(replicationId string) (*metadata.BackfillReplicationSpec, error) {
 	ret := _m.Called(replicationId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DelBackfillReplSpec")
+	}
+
 	var r0 *metadata.BackfillReplicationSpec
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (*metadata.BackfillReplicationSpec, error)); ok {
@@ -231,6 +247,10 @@ func (_c *BackfillReplSvc_DelBackfillReplSpec_Call) RunAndReturn(run func(string
 func (_m *BackfillReplSvc) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecChangeCallback")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}, *sync.WaitGroup) error); ok {
 		r0 = rf(id, oldVal, newVal, wg)
@@ -276,6 +296,10 @@ func (_c *BackfillReplSvc_ReplicationSpecChangeCallback_Call) RunAndReturn(run f
 func (_m *BackfillReplSvc) SetBackfillReplSpec(spec *metadata.BackfillReplicationSpec) error {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SetBackfillReplSpec")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.BackfillReplicationSpec) error); ok {
 		r0 = rf(spec)
@@ -317,6 +341,10 @@ func (_c *BackfillReplSvc_SetBackfillReplSpec_Call) RunAndReturn(run func(*metad
 // SetCompleteBackfillRaiser provides a mock function with given fields: backfillCallback
 func (_m *BackfillReplSvc) SetCompleteBackfillRaiser(backfillCallback func(string) error) error {
 	ret := _m.Called(backfillCallback)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetCompleteBackfillRaiser")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(func(string) error) error); ok {

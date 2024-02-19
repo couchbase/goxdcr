@@ -30,6 +30,10 @@ func (_m *CollectionsManifestSvc) EXPECT() *CollectionsManifestSvc_Expecter {
 func (_m *CollectionsManifestSvc) CollectionManifestGetter(bucketName string, hasStoredManifest bool, storedManifestUid uint64, spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(bucketName, hasStoredManifest, storedManifestUid, spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CollectionManifestGetter")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, bool, uint64, *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error)); ok {
@@ -87,6 +91,10 @@ func (_c *CollectionsManifestSvc_CollectionManifestGetter_Call) RunAndReturn(run
 func (_m *CollectionsManifestSvc) ForceTargetManifestRefresh(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ForceTargetManifestRefresh")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
 		r0 = rf(spec)
@@ -128,6 +136,10 @@ func (_c *CollectionsManifestSvc_ForceTargetManifestRefresh_Call) RunAndReturn(r
 // GetAllCachedManifests provides a mock function with given fields: spec
 func (_m *CollectionsManifestSvc) GetAllCachedManifests(spec *metadata.ReplicationSpecification) (map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllCachedManifests")
+	}
 
 	var r0 map[uint64]*metadata.CollectionsManifest
 	var r1 map[uint64]*metadata.CollectionsManifest
@@ -192,6 +204,10 @@ func (_c *CollectionsManifestSvc_GetAllCachedManifests_Call) RunAndReturn(run fu
 func (_m *CollectionsManifestSvc) GetLastPersistedManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error) {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetLastPersistedManifests")
+	}
+
 	var r0 *metadata.CollectionsManifestPair
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) (*metadata.CollectionsManifestPair, error)); ok {
@@ -245,6 +261,10 @@ func (_c *CollectionsManifestSvc_GetLastPersistedManifests_Call) RunAndReturn(ru
 // GetLatestManifests provides a mock function with given fields: spec, specMayNotExist
 func (_m *CollectionsManifestSvc) GetLatestManifests(spec *metadata.ReplicationSpecification, specMayNotExist bool) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec, specMayNotExist)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestManifests")
+	}
 
 	var r0 *metadata.CollectionsManifest
 	var r1 *metadata.CollectionsManifest
@@ -310,6 +330,10 @@ func (_c *CollectionsManifestSvc_GetLatestManifests_Call) RunAndReturn(run func(
 func (_m *CollectionsManifestSvc) GetSpecificSourceManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec, manifestVersion)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpecificSourceManifest")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, uint64) (*metadata.CollectionsManifest, error)); ok {
@@ -365,6 +389,10 @@ func (_c *CollectionsManifestSvc_GetSpecificSourceManifest_Call) RunAndReturn(ru
 func (_m *CollectionsManifestSvc) GetSpecificTargetManifest(spec *metadata.ReplicationSpecification, manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec, manifestVersion)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpecificTargetManifest")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, uint64) (*metadata.CollectionsManifest, error)); ok {
@@ -419,6 +447,10 @@ func (_c *CollectionsManifestSvc_GetSpecificTargetManifest_Call) RunAndReturn(ru
 // GetStartingManifests provides a mock function with given fields: spec
 func (_m *CollectionsManifestSvc) GetStartingManifests(spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, *metadata.CollectionsManifest, error) {
 	ret := _m.Called(spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStartingManifests")
+	}
 
 	var r0 *metadata.CollectionsManifest
 	var r1 *metadata.CollectionsManifest
@@ -483,6 +515,10 @@ func (_c *CollectionsManifestSvc_GetStartingManifests_Call) RunAndReturn(run fun
 func (_m *CollectionsManifestSvc) PersistNeededManifests(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for PersistNeededManifests")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
 		r0 = rf(spec)
@@ -524,6 +560,10 @@ func (_c *CollectionsManifestSvc_PersistNeededManifests_Call) RunAndReturn(run f
 // PersistReceivedManifests provides a mock function with given fields: spec, srcManifests, tgtManifests
 func (_m *CollectionsManifestSvc) PersistReceivedManifests(spec *metadata.ReplicationSpecification, srcManifests map[uint64]*metadata.CollectionsManifest, tgtManifests map[uint64]*metadata.CollectionsManifest) error {
 	ret := _m.Called(spec, srcManifests, tgtManifests)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PersistReceivedManifests")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, map[uint64]*metadata.CollectionsManifest, map[uint64]*metadata.CollectionsManifest) error); ok {
@@ -568,6 +608,10 @@ func (_c *CollectionsManifestSvc_PersistReceivedManifests_Call) RunAndReturn(run
 // ReplicationSpecChangeCallback provides a mock function with given fields: id, oldVal, newVal, wg
 func (_m *CollectionsManifestSvc) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecChangeCallback")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}, *sync.WaitGroup) error); ok {

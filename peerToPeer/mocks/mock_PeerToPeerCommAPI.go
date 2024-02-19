@@ -26,6 +26,10 @@ func (_m *PeerToPeerCommAPI) EXPECT() *PeerToPeerCommAPI_Expecter {
 func (_m *PeerToPeerCommAPI) P2PReceive(reqOrResp peerToPeer.ReqRespCommon) (peerToPeer.HandlerResult, error) {
 	ret := _m.Called(reqOrResp)
 
+	if len(ret) == 0 {
+		panic("no return value specified for P2PReceive")
+	}
+
 	var r0 peerToPeer.HandlerResult
 	var r1 error
 	if rf, ok := ret.Get(0).(func(peerToPeer.ReqRespCommon) (peerToPeer.HandlerResult, error)); ok {
@@ -79,6 +83,10 @@ func (_c *PeerToPeerCommAPI_P2PReceive_Call) RunAndReturn(run func(peerToPeer.Re
 // P2PSend provides a mock function with given fields: req, _a1
 func (_m *PeerToPeerCommAPI) P2PSend(req peerToPeer.Request, _a1 *log.CommonLogger) (peerToPeer.HandlerResult, error) {
 	ret := _m.Called(req, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for P2PSend")
+	}
 
 	var r0 peerToPeer.HandlerResult
 	var r1 error

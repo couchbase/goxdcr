@@ -21,6 +21,10 @@ func (_m *SpecialSettingValue) EXPECT() *SpecialSettingValue_Expecter {
 func (_m *SpecialSettingValue) SameAs(other interface{}) bool {
 	ret := _m.Called(other)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SameAs")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(interface{}) bool); ok {
 		r0 = rf(other)

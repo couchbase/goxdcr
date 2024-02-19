@@ -26,6 +26,10 @@ func (_m *ReplicaCache) EXPECT() *ReplicaCache_Expecter {
 func (_m *ReplicaCache) GetReplicaInfo(spec *metadata.ReplicationSpecification) (int, *base.VbHostsMapType, *base.StringStringMap, func(), error) {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicaInfo")
+	}
+
 	var r0 int
 	var r1 *base.VbHostsMapType
 	var r2 *base.StringStringMap

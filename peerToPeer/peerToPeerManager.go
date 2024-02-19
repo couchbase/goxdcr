@@ -815,11 +815,13 @@ func sendConnectionPreCheckRequestErrHelper(errMsg string, taskId string, myHost
 
 func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.RemoteClusterReference, taskId string) {
 	httpAuthMech := base.HttpAuthMechPlain
+	useSecurePort := false
 	if remoteRef.IsEncryptionEnabled() {
 		if remoteRef.IsHalfEncryption() {
 			httpAuthMech = base.HttpAuthMechScramSha
 		} else {
 			httpAuthMech = base.HttpAuthMechHttps
+			useSecurePort = true
 		}
 	}
 	remoteRef.SetHttpAuthMech(httpAuthMech)
@@ -909,9 +911,9 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, p.logger)
 		return
 	}
-	portsMap, targetNodes, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo, hostname, p.logger)
+	portsMap, targetNodes, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo, hostname, useSecurePort, p.logger)
 	if err != nil {
-		errMsg := fmt.Sprintf("Connection Pre-Check exited while getting ports and hostAddrs from nodeServicesInfo, taskId=%v, err=%v", taskId, err)
+		errMsg := fmt.Sprintf("Connection Pre-Check exited while getting ports and hostAddrs from nodeServicesInfo, taskId=%v, useSecurePort=%v, err=%v", taskId, useSecurePort, err)
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, p.logger)
 		return
 	}

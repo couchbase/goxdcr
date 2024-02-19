@@ -26,6 +26,10 @@ func (_m *ConflictManagerIface) EXPECT() *ConflictManagerIface_Expecter {
 func (_m *ConflictManagerIface) ResolveConflict(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	ret := _m.Called(source, target, sourceId, targetId, uncompressFunc, recycler)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ResolveConflict")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *base.SubdocLookupResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error); ok {
 		r0 = rf(source, target, sourceId, targetId, uncompressFunc, recycler)
@@ -72,6 +76,10 @@ func (_c *ConflictManagerIface_ResolveConflict_Call) RunAndReturn(run func(*base
 // SetBackToSource provides a mock function with given fields: source, target, sourceId, targetId, uncompressFunc, recycler
 func (_m *ConflictManagerIface) SetBackToSource(source *base.WrappedMCRequest, target *base.SubdocLookupResponse, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, uncompressFunc base.UncompressFunc, recycler func(*base.WrappedMCRequest)) error {
 	ret := _m.Called(source, target, sourceId, targetId, uncompressFunc, recycler)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetBackToSource")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *base.SubdocLookupResponse, hlv.DocumentSourceId, hlv.DocumentSourceId, base.UncompressFunc, func(*base.WrappedMCRequest)) error); ok {

@@ -26,6 +26,10 @@ func (_m *SourceNotification) EXPECT() *SourceNotification_Expecter {
 func (_m *SourceNotification) Clone(numOfReaders int) interface{} {
 	ret := _m.Called(numOfReaders)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Clone")
+	}
+
 	var r0 interface{}
 	if rf, ok := ret.Get(0).(func(int) interface{}); ok {
 		r0 = rf(numOfReaders)
@@ -70,6 +74,10 @@ func (_c *SourceNotification_Clone_Call) RunAndReturn(run func(int) interface{})
 func (_m *SourceNotification) GetDcpStatsMap() base.DcpStatsMapType {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetDcpStatsMap")
+	}
+
 	var r0 base.DcpStatsMapType
 	if rf, ok := ret.Get(0).(func() base.DcpStatsMapType); ok {
 		r0 = rf()
@@ -112,6 +120,10 @@ func (_c *SourceNotification_GetDcpStatsMap_Call) RunAndReturn(run func() base.D
 // GetDcpStatsMapLegacy provides a mock function with given fields:
 func (_m *SourceNotification) GetDcpStatsMapLegacy() base.DcpStatsMapType {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDcpStatsMapLegacy")
+	}
 
 	var r0 base.DcpStatsMapType
 	if rf, ok := ret.Get(0).(func() base.DcpStatsMapType); ok {
@@ -156,6 +168,10 @@ func (_c *SourceNotification_GetDcpStatsMapLegacy_Call) RunAndReturn(run func() 
 func (_m *SourceNotification) GetEnableCrossClusterVersioning() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetEnableCrossClusterVersioning")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -196,6 +212,10 @@ func (_c *SourceNotification_GetEnableCrossClusterVersioning_Call) RunAndReturn(
 // GetHighSeqnosMap provides a mock function with given fields:
 func (_m *SourceNotification) GetHighSeqnosMap() base.HighSeqnosMapType {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHighSeqnosMap")
+	}
 
 	var r0 base.HighSeqnosMapType
 	if rf, ok := ret.Get(0).(func() base.HighSeqnosMapType); ok {
@@ -240,6 +260,10 @@ func (_c *SourceNotification_GetHighSeqnosMap_Call) RunAndReturn(run func() base
 func (_m *SourceNotification) GetHighSeqnosMapLegacy() base.HighSeqnosMapType {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetHighSeqnosMapLegacy")
+	}
+
 	var r0 base.HighSeqnosMapType
 	if rf, ok := ret.Get(0).(func() base.HighSeqnosMapType); ok {
 		r0 = rf()
@@ -282,6 +306,10 @@ func (_c *SourceNotification_GetHighSeqnosMapLegacy_Call) RunAndReturn(run func(
 // GetKvVbMapRO provides a mock function with given fields:
 func (_m *SourceNotification) GetKvVbMapRO() base.KvVBMapType {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetKvVbMapRO")
+	}
 
 	var r0 base.KvVBMapType
 	if rf, ok := ret.Get(0).(func() base.KvVBMapType); ok {
@@ -326,6 +354,10 @@ func (_c *SourceNotification_GetKvVbMapRO_Call) RunAndReturn(run func() base.KvV
 func (_m *SourceNotification) GetLocalTopologyUpdatedTime() time.Time {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetLocalTopologyUpdatedTime")
+	}
+
 	var r0 time.Time
 	if rf, ok := ret.Get(0).(func() time.Time); ok {
 		r0 = rf()
@@ -367,6 +399,10 @@ func (_c *SourceNotification_GetLocalTopologyUpdatedTime_Call) RunAndReturn(run 
 func (_m *SourceNotification) GetNumberOfSourceNodes() int {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetNumberOfSourceNodes")
+	}
+
 	var r0 int
 	if rf, ok := ret.Get(0).(func() int); ok {
 		r0 = rf()
@@ -407,6 +443,10 @@ func (_c *SourceNotification_GetNumberOfSourceNodes_Call) RunAndReturn(run func(
 // GetReplicasInfo provides a mock function with given fields:
 func (_m *SourceNotification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.StringStringMap, []uint16) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicasInfo")
+	}
 
 	var r0 int
 	var r1 *base.VbHostsMapType
@@ -479,6 +519,10 @@ func (_c *SourceNotification_GetReplicasInfo_Call) RunAndReturn(run func() (int,
 func (_m *SourceNotification) GetSourceCollectionManifestUid() uint64 {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSourceCollectionManifestUid")
+	}
+
 	var r0 uint64
 	if rf, ok := ret.Get(0).(func() uint64); ok {
 		r0 = rf()
@@ -520,6 +564,10 @@ func (_c *SourceNotification_GetSourceCollectionManifestUid_Call) RunAndReturn(r
 func (_m *SourceNotification) GetSourceStorageBackend() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSourceStorageBackend")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -560,6 +608,10 @@ func (_c *SourceNotification_GetSourceStorageBackend_Call) RunAndReturn(run func
 // GetSourceVBMapRO provides a mock function with given fields:
 func (_m *SourceNotification) GetSourceVBMapRO() base.KvVBMapType {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSourceVBMapRO")
+	}
 
 	var r0 base.KvVBMapType
 	if rf, ok := ret.Get(0).(func() base.KvVBMapType); ok {
@@ -604,6 +656,10 @@ func (_c *SourceNotification_GetSourceVBMapRO_Call) RunAndReturn(run func() base
 func (_m *SourceNotification) GetVbucketsMaxCas() []interface{} {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetVbucketsMaxCas")
+	}
+
 	var r0 []interface{}
 	if rf, ok := ret.Get(0).(func() []interface{}); ok {
 		r0 = rf()
@@ -647,6 +703,10 @@ func (_c *SourceNotification_GetVbucketsMaxCas_Call) RunAndReturn(run func() []i
 func (_m *SourceNotification) GetVersionPruningWindowHrs() int {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetVersionPruningWindowHrs")
+	}
+
 	var r0 int
 	if rf, ok := ret.Get(0).(func() int); ok {
 		r0 = rf()
@@ -687,6 +747,10 @@ func (_c *SourceNotification_GetVersionPruningWindowHrs_Call) RunAndReturn(run f
 // IsSourceNotification provides a mock function with given fields:
 func (_m *SourceNotification) IsSourceNotification() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsSourceNotification")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {

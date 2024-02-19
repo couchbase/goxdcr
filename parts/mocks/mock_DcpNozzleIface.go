@@ -32,6 +32,10 @@ func (_m *DcpNozzleIface) EXPECT() *DcpNozzleIface_Expecter {
 func (_m *DcpNozzleIface) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for AsyncComponentEventListeners")
+	}
+
 	var r0 map[string]common.AsyncComponentEventListener
 	if rf, ok := ret.Get(0).(func() map[string]common.AsyncComponentEventListener); ok {
 		r0 = rf()
@@ -75,6 +79,10 @@ func (_c *DcpNozzleIface_AsyncComponentEventListeners_Call) RunAndReturn(run fun
 func (_m *DcpNozzleIface) CheckStuckness(dcp_stats base.DcpStatsMapType) error {
 	ret := _m.Called(dcp_stats)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckStuckness")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(base.DcpStatsMapType) error); ok {
 		r0 = rf(dcp_stats)
@@ -117,6 +125,10 @@ func (_c *DcpNozzleIface_CheckStuckness_Call) RunAndReturn(run func(base.DcpStat
 func (_m *DcpNozzleIface) Close() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Close")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -158,6 +170,10 @@ func (_c *DcpNozzleIface_Close_Call) RunAndReturn(run func() error) *DcpNozzleIf
 func (_m *DcpNozzleIface) CollectionEnabled() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for CollectionEnabled")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -198,6 +214,10 @@ func (_c *DcpNozzleIface_CollectionEnabled_Call) RunAndReturn(run func() bool) *
 // Connector provides a mock function with given fields:
 func (_m *DcpNozzleIface) Connector() common.Connector {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Connector")
+	}
 
 	var r0 common.Connector
 	if rf, ok := ret.Get(0).(func() common.Connector); ok {
@@ -241,6 +261,10 @@ func (_c *DcpNozzleIface_Connector_Call) RunAndReturn(run func() common.Connecto
 // GetStreamState provides a mock function with given fields: vbno
 func (_m *DcpNozzleIface) GetStreamState(vbno uint16) (parts.DcpStreamState, error) {
 	ret := _m.Called(vbno)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStreamState")
+	}
 
 	var r0 parts.DcpStreamState
 	var r1 error
@@ -294,6 +318,10 @@ func (_c *DcpNozzleIface_GetStreamState_Call) RunAndReturn(run func(uint16) (par
 func (_m *DcpNozzleIface) Id() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Id")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -335,6 +363,10 @@ func (_c *DcpNozzleIface_Id_Call) RunAndReturn(run func() string) *DcpNozzleIfac
 func (_m *DcpNozzleIface) IsOpen() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsOpen")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -375,6 +407,10 @@ func (_c *DcpNozzleIface_IsOpen_Call) RunAndReturn(run func() bool) *DcpNozzleIf
 // Logger provides a mock function with given fields:
 func (_m *DcpNozzleIface) Logger() *log.CommonLogger {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Logger")
+	}
 
 	var r0 *log.CommonLogger
 	if rf, ok := ret.Get(0).(func() *log.CommonLogger); ok {
@@ -418,6 +454,10 @@ func (_c *DcpNozzleIface_Logger_Call) RunAndReturn(run func() *log.CommonLogger)
 // Open provides a mock function with given fields:
 func (_m *DcpNozzleIface) Open() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Open")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
@@ -525,6 +565,10 @@ func (_c *DcpNozzleIface_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) 
 func (_m *DcpNozzleIface) Receive(data interface{}) error {
 	ret := _m.Called(data)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Receive")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
 		r0 = rf(data)
@@ -600,6 +644,10 @@ func (_c *DcpNozzleIface_RecycleDataObj_Call) RunAndReturn(run func(interface{})
 func (_m *DcpNozzleIface) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterComponentEventListener")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {
 		r0 = rf(eventType, listener)
@@ -643,6 +691,10 @@ func (_c *DcpNozzleIface_RegisterComponentEventListener_Call) RunAndReturn(run f
 func (_m *DcpNozzleIface) ResponsibleVBs() []uint16 {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for ResponsibleVBs")
+	}
+
 	var r0 []uint16
 	if rf, ok := ret.Get(0).(func() []uint16); ok {
 		r0 = rf()
@@ -685,6 +737,10 @@ func (_c *DcpNozzleIface_ResponsibleVBs_Call) RunAndReturn(run func() []uint16) 
 // SetConnector provides a mock function with given fields: connector
 func (_m *DcpNozzleIface) SetConnector(connector common.Connector) error {
 	ret := _m.Called(connector)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetConnector")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Connector) error); ok {
@@ -761,6 +817,10 @@ func (_c *DcpNozzleIface_SetMaxMissCount_Call) RunAndReturn(run func(int)) *DcpN
 func (_m *DcpNozzleIface) Start(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(settings)
@@ -803,6 +863,10 @@ func (_c *DcpNozzleIface_Start_Call) RunAndReturn(run func(metadata.ReplicationS
 func (_m *DcpNozzleIface) State() common.PartState {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for State")
+	}
+
 	var r0 common.PartState
 	if rf, ok := ret.Get(0).(func() common.PartState); ok {
 		r0 = rf()
@@ -844,6 +908,10 @@ func (_c *DcpNozzleIface_State_Call) RunAndReturn(run func() common.PartState) *
 func (_m *DcpNozzleIface) Stop() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -884,6 +952,10 @@ func (_c *DcpNozzleIface_Stop_Call) RunAndReturn(run func() error) *DcpNozzleIfa
 // UnRegisterComponentEventListener provides a mock function with given fields: eventType, listener
 func (_m *DcpNozzleIface) UnRegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnRegisterComponentEventListener")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {
@@ -927,6 +999,10 @@ func (_c *DcpNozzleIface_UnRegisterComponentEventListener_Call) RunAndReturn(run
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *DcpNozzleIface) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

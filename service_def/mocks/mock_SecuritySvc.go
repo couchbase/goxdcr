@@ -26,6 +26,10 @@ func (_m *SecuritySvc) EXPECT() *SecuritySvc_Expecter {
 func (_m *SecuritySvc) EncryptData() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for EncryptData")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -66,6 +70,10 @@ func (_c *SecuritySvc_EncryptData_Call) RunAndReturn(run func() bool) *SecurityS
 // GetCACertificates provides a mock function with given fields:
 func (_m *SecuritySvc) GetCACertificates() []byte {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCACertificates")
+	}
 
 	var r0 []byte
 	if rf, ok := ret.Get(0).(func() []byte); ok {
@@ -110,6 +118,10 @@ func (_c *SecuritySvc_GetCACertificates_Call) RunAndReturn(run func() []byte) *S
 func (_m *SecuritySvc) GetCaPool() *x509.CertPool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCaPool")
+	}
+
 	var r0 *x509.CertPool
 	if rf, ok := ret.Get(0).(func() *x509.CertPool); ok {
 		r0 = rf()
@@ -152,6 +164,10 @@ func (_c *SecuritySvc_GetCaPool_Call) RunAndReturn(run func() *x509.CertPool) *S
 // IsClusterEncryptionLevelStrict provides a mock function with given fields:
 func (_m *SecuritySvc) IsClusterEncryptionLevelStrict() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsClusterEncryptionLevelStrict")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {

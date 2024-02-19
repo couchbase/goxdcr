@@ -28,6 +28,10 @@ func (_m *RemoteClusterSvc) EXPECT() *RemoteClusterSvc_Expecter {
 func (_m *RemoteClusterSvc) AddRemoteCluster(ref *metadata.RemoteClusterReference, skipConnectivityValidation bool) error {
 	ret := _m.Called(ref, skipConnectivityValidation)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddRemoteCluster")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, bool) error); ok {
 		r0 = rf(ref, skipConnectivityValidation)
@@ -70,6 +74,10 @@ func (_c *RemoteClusterSvc_AddRemoteCluster_Call) RunAndReturn(run func(*metadat
 // CheckAndUnwrapRemoteClusterError provides a mock function with given fields: err
 func (_m *RemoteClusterSvc) CheckAndUnwrapRemoteClusterError(err error) (bool, error) {
 	ret := _m.Called(err)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckAndUnwrapRemoteClusterError")
+	}
 
 	var r0 bool
 	var r1 error
@@ -122,6 +130,10 @@ func (_c *RemoteClusterSvc_CheckAndUnwrapRemoteClusterError_Call) RunAndReturn(r
 // DelRemoteCluster provides a mock function with given fields: refName
 func (_m *RemoteClusterSvc) DelRemoteCluster(refName string) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(refName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DelRemoteCluster")
+	}
 
 	var r0 *metadata.RemoteClusterReference
 	var r1 error
@@ -176,6 +188,10 @@ func (_c *RemoteClusterSvc_DelRemoteCluster_Call) RunAndReturn(run func(string) 
 // GetBucketInfoGetter provides a mock function with given fields: ref, bucketName
 func (_m *RemoteClusterSvc) GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.BucketInfoGetter, error) {
 	ret := _m.Called(ref, bucketName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBucketInfoGetter")
+	}
 
 	var r0 service_def.BucketInfoGetter
 	var r1 error
@@ -232,6 +248,10 @@ func (_c *RemoteClusterSvc_GetBucketInfoGetter_Call) RunAndReturn(run func(*meta
 func (_m *RemoteClusterSvc) GetCapability(ref *metadata.RemoteClusterReference) (metadata.Capability, error) {
 	ret := _m.Called(ref)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCapability")
+	}
+
 	var r0 metadata.Capability
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) (metadata.Capability, error)); ok {
@@ -283,6 +303,10 @@ func (_c *RemoteClusterSvc_GetCapability_Call) RunAndReturn(run func(*metadata.R
 // GetConnectionStringForRemoteCluster provides a mock function with given fields: ref, isCapiReplication
 func (_m *RemoteClusterSvc) GetConnectionStringForRemoteCluster(ref *metadata.RemoteClusterReference, isCapiReplication bool) (string, error) {
 	ret := _m.Called(ref, isCapiReplication)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetConnectionStringForRemoteCluster")
+	}
 
 	var r0 string
 	var r1 error
@@ -337,6 +361,10 @@ func (_c *RemoteClusterSvc_GetConnectionStringForRemoteCluster_Call) RunAndRetur
 func (_m *RemoteClusterSvc) GetConnectivityStatus(ref *metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error) {
 	ret := _m.Called(ref)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetConnectivityStatus")
+	}
+
 	var r0 metadata.ConnectivityStatus
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) (metadata.ConnectivityStatus, error)); ok {
@@ -388,6 +416,10 @@ func (_c *RemoteClusterSvc_GetConnectivityStatus_Call) RunAndReturn(run func(*me
 // GetManifestByUuid provides a mock function with given fields: uuid, bucketName, forceRefresh, restAPIQuery
 func (_m *RemoteClusterSvc) GetManifestByUuid(uuid string, bucketName string, forceRefresh bool, restAPIQuery bool) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(uuid, bucketName, forceRefresh, restAPIQuery)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetManifestByUuid")
+	}
 
 	var r0 *metadata.CollectionsManifest
 	var r1 error
@@ -446,6 +478,10 @@ func (_c *RemoteClusterSvc_GetManifestByUuid_Call) RunAndReturn(run func(string,
 func (_m *RemoteClusterSvc) GetRefListForFirstTimeBadAuths() ([]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetRefListForFirstTimeBadAuths")
+	}
+
 	var r0 []*metadata.RemoteClusterReference
 	var r1 error
 	if rf, ok := ret.Get(0).(func() ([]*metadata.RemoteClusterReference, error)); ok {
@@ -498,6 +534,10 @@ func (_c *RemoteClusterSvc_GetRefListForFirstTimeBadAuths_Call) RunAndReturn(run
 // GetRefListForRestartAndClearState provides a mock function with given fields:
 func (_m *RemoteClusterSvc) GetRefListForRestartAndClearState() ([]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRefListForRestartAndClearState")
+	}
 
 	var r0 []*metadata.RemoteClusterReference
 	var r1 error
@@ -552,6 +592,10 @@ func (_c *RemoteClusterSvc_GetRefListForRestartAndClearState_Call) RunAndReturn(
 func (_m *RemoteClusterSvc) GetRemoteClusterNameFromClusterUuid(uuid string) string {
 	ret := _m.Called(uuid)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteClusterNameFromClusterUuid")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func(string) string); ok {
 		r0 = rf(uuid)
@@ -593,6 +637,10 @@ func (_c *RemoteClusterSvc_GetRemoteClusterNameFromClusterUuid_Call) RunAndRetur
 // RemoteClusterByRefId provides a mock function with given fields: refId, refresh
 func (_m *RemoteClusterSvc) RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(refId, refresh)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteClusterByRefId")
+	}
 
 	var r0 *metadata.RemoteClusterReference
 	var r1 error
@@ -649,6 +697,10 @@ func (_c *RemoteClusterSvc_RemoteClusterByRefId_Call) RunAndReturn(run func(stri
 func (_m *RemoteClusterSvc) RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(refName, refresh)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteClusterByRefName")
+	}
+
 	var r0 *metadata.RemoteClusterReference
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, bool) (*metadata.RemoteClusterReference, error)); ok {
@@ -703,6 +755,10 @@ func (_c *RemoteClusterSvc_RemoteClusterByRefName_Call) RunAndReturn(run func(st
 // RemoteClusterByUuid provides a mock function with given fields: uuid, refresh
 func (_m *RemoteClusterSvc) RemoteClusterByUuid(uuid string, refresh bool) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(uuid, refresh)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteClusterByUuid")
+	}
 
 	var r0 *metadata.RemoteClusterReference
 	var r1 error
@@ -759,6 +815,10 @@ func (_c *RemoteClusterSvc_RemoteClusterByUuid_Call) RunAndReturn(run func(strin
 func (_m *RemoteClusterSvc) RemoteClusterServiceCallback(path string, value []byte, rev interface{}) error {
 	ret := _m.Called(path, value, rev)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteClusterServiceCallback")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte, interface{}) error); ok {
 		r0 = rf(path, value, rev)
@@ -802,6 +862,10 @@ func (_c *RemoteClusterSvc_RemoteClusterServiceCallback_Call) RunAndReturn(run f
 // RemoteClusters provides a mock function with given fields:
 func (_m *RemoteClusterSvc) RemoteClusters() (map[string]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteClusters")
+	}
 
 	var r0 map[string]*metadata.RemoteClusterReference
 	var r1 error
@@ -855,6 +919,10 @@ func (_c *RemoteClusterSvc_RemoteClusters_Call) RunAndReturn(run func() (map[str
 // RequestRemoteMonitoring provides a mock function with given fields: spec
 func (_m *RemoteClusterSvc) RequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestRemoteMonitoring")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
@@ -931,6 +999,10 @@ func (_c *RemoteClusterSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(r
 func (_m *RemoteClusterSvc) SetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	ret := _m.Called(refName, ref)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SetRemoteCluster")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, *metadata.RemoteClusterReference) error); ok {
 		r0 = rf(refName, ref)
@@ -973,6 +1045,10 @@ func (_c *RemoteClusterSvc_SetRemoteCluster_Call) RunAndReturn(run func(string, 
 // ShouldUseAlternateAddress provides a mock function with given fields: ref
 func (_m *RemoteClusterSvc) ShouldUseAlternateAddress(ref *metadata.RemoteClusterReference) (bool, error) {
 	ret := _m.Called(ref)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ShouldUseAlternateAddress")
+	}
 
 	var r0 bool
 	var r1 error
@@ -1026,6 +1102,10 @@ func (_c *RemoteClusterSvc_ShouldUseAlternateAddress_Call) RunAndReturn(run func
 func (_m *RemoteClusterSvc) UnRequestRemoteMonitoring(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UnRequestRemoteMonitoring")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
 		r0 = rf(spec)
@@ -1067,6 +1147,10 @@ func (_c *RemoteClusterSvc_UnRequestRemoteMonitoring_Call) RunAndReturn(run func
 // ValidateAddRemoteCluster provides a mock function with given fields: ref
 func (_m *RemoteClusterSvc) ValidateAddRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	ret := _m.Called(ref)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateAddRemoteCluster")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) error); ok {
@@ -1110,6 +1194,10 @@ func (_c *RemoteClusterSvc_ValidateAddRemoteCluster_Call) RunAndReturn(run func(
 func (_m *RemoteClusterSvc) ValidateRemoteCluster(ref *metadata.RemoteClusterReference) error {
 	ret := _m.Called(ref)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateRemoteCluster")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) error); ok {
 		r0 = rf(ref)
@@ -1151,6 +1239,10 @@ func (_c *RemoteClusterSvc_ValidateRemoteCluster_Call) RunAndReturn(run func(*me
 // ValidateSetRemoteCluster provides a mock function with given fields: refName, ref
 func (_m *RemoteClusterSvc) ValidateSetRemoteCluster(refName string, ref *metadata.RemoteClusterReference) error {
 	ret := _m.Called(refName, ref)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateSetRemoteCluster")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, *metadata.RemoteClusterReference) error); ok {

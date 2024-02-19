@@ -26,6 +26,10 @@ func (_m *StatsMgrIface) EXPECT() *StatsMgrIface_Expecter {
 func (_m *StatsMgrIface) GetCountMetrics(key string) (int64, error) {
 	ret := _m.Called(key)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCountMetrics")
+	}
+
 	var r0 int64
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (int64, error)); ok {
@@ -78,6 +82,10 @@ func (_c *StatsMgrIface_GetCountMetrics_Call) RunAndReturn(run func(string) (int
 func (_m *StatsMgrIface) GetThroughSeqnosFromTsService() map[uint16]uint64 {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetThroughSeqnosFromTsService")
+	}
+
 	var r0 map[uint16]uint64
 	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
 		r0 = rf()
@@ -120,6 +128,10 @@ func (_c *StatsMgrIface_GetThroughSeqnosFromTsService_Call) RunAndReturn(run fun
 // GetVBCountMetrics provides a mock function with given fields: vb
 func (_m *StatsMgrIface) GetVBCountMetrics(vb uint16) (base.VBCountMetricMap, error) {
 	ret := _m.Called(vb)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVBCountMetrics")
+	}
 
 	var r0 base.VBCountMetricMap
 	var r1 error
@@ -208,6 +220,10 @@ func (_c *StatsMgrIface_HandleLatestThroughSeqnos_Call) RunAndReturn(run func(ma
 func (_m *StatsMgrIface) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetricMap) error {
 	ret := _m.Called(vb, metricKVs)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SetVBCountMetrics")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(uint16, base.VBCountMetricMap) error); ok {
 		r0 = rf(vb, metricKVs)
@@ -251,6 +267,10 @@ func (_c *StatsMgrIface_SetVBCountMetrics_Call) RunAndReturn(run func(uint16, ba
 func (_m *StatsMgrIface) Start(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(settings)
@@ -292,6 +312,10 @@ func (_c *StatsMgrIface_Start_Call) RunAndReturn(run func(metadata.ReplicationSe
 // Stop provides a mock function with given fields:
 func (_m *StatsMgrIface) Stop() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

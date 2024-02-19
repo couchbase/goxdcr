@@ -26,6 +26,10 @@ func (_m *PartsSettingsConstructor) EXPECT() *PartsSettingsConstructor_Expecter 
 func (_m *PartsSettingsConstructor) Execute(_a0 common.Pipeline, part common.Part, pipeline_settings metadata.ReplicationSettingsMap, targetClusterref *metadata.RemoteClusterReference, ssl_port_map map[string]uint16) (metadata.ReplicationSettingsMap, error) {
 	ret := _m.Called(_a0, part, pipeline_settings, targetClusterref, ssl_port_map)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 metadata.ReplicationSettingsMap
 	var r1 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline, common.Part, metadata.ReplicationSettingsMap, *metadata.RemoteClusterReference, map[string]uint16) (metadata.ReplicationSettingsMap, error)); ok {

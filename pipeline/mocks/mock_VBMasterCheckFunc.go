@@ -26,6 +26,10 @@ func (_m *VBMasterCheckFunc) EXPECT() *VBMasterCheckFunc_Expecter {
 func (_m *VBMasterCheckFunc) Execute(_a0 common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error) {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 map[string]*peerToPeer.VBMasterCheckResp
 	var r1 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error)); ok {

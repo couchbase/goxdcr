@@ -30,6 +30,10 @@ func (_m *ConflictResolver) EXPECT() *ConflictResolver_Expecter {
 func (_m *ConflictResolver) Execute(req *base.WrappedMCRequest, resp *gomemcached.MCResponse, specs []base.SubdocLookupPathSpec, sourceId hlv.DocumentSourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
 	ret := _m.Called(req, resp, specs, sourceId, targetId, xattrEnabled, uncompressFunc, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 base.ConflictResult
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*base.WrappedMCRequest, *gomemcached.MCResponse, []base.SubdocLookupPathSpec, hlv.DocumentSourceId, hlv.DocumentSourceId, bool, base.UncompressFunc, *log.CommonLogger) (base.ConflictResult, error)); ok {

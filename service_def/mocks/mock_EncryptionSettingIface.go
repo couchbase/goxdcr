@@ -21,6 +21,10 @@ func (_m *EncryptionSettingIface) EXPECT() *EncryptionSettingIface_Expecter {
 func (_m *EncryptionSettingIface) IsStrictEncryption() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsStrictEncryption")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()

@@ -98,6 +98,10 @@ func (_c *ReplicationStatusIface_AddErrorsFromMap_Call) RunAndReturn(run func(ba
 func (_m *ReplicationStatusIface) AllPipelines() []common.Pipeline {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for AllPipelines")
+	}
+
 	var r0 []common.Pipeline
 	if rf, ok := ret.Get(0).(func() []common.Pipeline); ok {
 		r0 = rf()
@@ -140,6 +144,10 @@ func (_c *ReplicationStatusIface_AllPipelines_Call) RunAndReturn(run func() []co
 // BackfillPipeline provides a mock function with given fields:
 func (_m *ReplicationStatusIface) BackfillPipeline() common.Pipeline {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for BackfillPipeline")
+	}
 
 	var r0 common.Pipeline
 	if rf, ok := ret.Get(0).(func() common.Pipeline); ok {
@@ -347,6 +355,10 @@ func (_c *ReplicationStatusIface_ClearTemporaryCustomSettings_Call) RunAndReturn
 func (_m *ReplicationStatusIface) Errors() pipeline.PipelineErrorArray {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Errors")
+	}
+
 	var r0 pipeline.PipelineErrorArray
 	if rf, ok := ret.Get(0).(func() pipeline.PipelineErrorArray); ok {
 		r0 = rf()
@@ -389,6 +401,10 @@ func (_c *ReplicationStatusIface_Errors_Call) RunAndReturn(run func() pipeline.P
 // GetEventsManager provides a mock function with given fields:
 func (_m *ReplicationStatusIface) GetEventsManager() pipeline.PipelineEventsManager {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetEventsManager")
+	}
 
 	var r0 pipeline.PipelineEventsManager
 	if rf, ok := ret.Get(0).(func() pipeline.PipelineEventsManager); ok {
@@ -433,6 +449,10 @@ func (_c *ReplicationStatusIface_GetEventsManager_Call) RunAndReturn(run func() 
 func (_m *ReplicationStatusIface) GetEventsProducer() common.PipelineEventsProducer {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetEventsProducer")
+	}
+
 	var r0 common.PipelineEventsProducer
 	if rf, ok := ret.Get(0).(func() common.PipelineEventsProducer); ok {
 		r0 = rf()
@@ -475,6 +495,10 @@ func (_c *ReplicationStatusIface_GetEventsProducer_Call) RunAndReturn(run func()
 // GetOverviewStats provides a mock function with given fields: pipelineType
 func (_m *ReplicationStatusIface) GetOverviewStats(pipelineType common.PipelineType) *expvar.Map {
 	ret := _m.Called(pipelineType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOverviewStats")
+	}
 
 	var r0 *expvar.Map
 	if rf, ok := ret.Get(0).(func(common.PipelineType) *expvar.Map); ok {
@@ -520,6 +544,10 @@ func (_c *ReplicationStatusIface_GetOverviewStats_Call) RunAndReturn(run func(co
 func (_m *ReplicationStatusIface) GetProgress() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetProgress")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -561,6 +589,10 @@ func (_c *ReplicationStatusIface_GetProgress_Call) RunAndReturn(run func() strin
 func (_m *ReplicationStatusIface) GetSpecInternalId() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpecInternalId")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -601,6 +633,10 @@ func (_c *ReplicationStatusIface_GetSpecInternalId_Call) RunAndReturn(run func()
 // GetStats provides a mock function with given fields: registryName, pipelineType
 func (_m *ReplicationStatusIface) GetStats(registryName string, pipelineType common.PipelineType) *expvar.Map {
 	ret := _m.Called(registryName, pipelineType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStats")
+	}
 
 	var r0 *expvar.Map
 	if rf, ok := ret.Get(0).(func(string, common.PipelineType) *expvar.Map); ok {
@@ -678,6 +714,10 @@ func (_c *ReplicationStatusIface_LoadLatestBrokenMap_Call) RunAndReturn(run func
 // Pipeline provides a mock function with given fields:
 func (_m *ReplicationStatusIface) Pipeline() common.Pipeline {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Pipeline")
+	}
 
 	var r0 common.Pipeline
 	if rf, ok := ret.Get(0).(func() common.Pipeline); ok {
@@ -923,6 +963,10 @@ func (_c *ReplicationStatusIface_RemovePipeline_Call) RunAndReturn(run func(comm
 func (_m *ReplicationStatusIface) RepId() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for RepId")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -996,6 +1040,10 @@ func (_c *ReplicationStatusIface_ResetStorage_Call) RunAndReturn(run func(common
 // RuntimeStatus provides a mock function with given fields: lock
 func (_m *ReplicationStatusIface) RuntimeStatus(lock bool) pipeline.ReplicationState {
 	ret := _m.Called(lock)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RuntimeStatus")
+	}
 
 	var r0 pipeline.ReplicationState
 	if rf, ok := ret.Get(0).(func(bool) pipeline.ReplicationState); ok {
@@ -1174,6 +1222,10 @@ func (_c *ReplicationStatusIface_SetStats_Call) RunAndReturn(run func(string, *e
 func (_m *ReplicationStatusIface) SetUpdater(updater interface{}) error {
 	ret := _m.Called(updater)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SetUpdater")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
 		r0 = rf(updater)
@@ -1249,6 +1301,10 @@ func (_c *ReplicationStatusIface_SetVbList_Call) RunAndReturn(run func([]uint16)
 func (_m *ReplicationStatusIface) SettingsMap() map[string]interface{} {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for SettingsMap")
+	}
+
 	var r0 map[string]interface{}
 	if rf, ok := ret.Get(0).(func() map[string]interface{}); ok {
 		r0 = rf()
@@ -1292,6 +1348,10 @@ func (_c *ReplicationStatusIface_SettingsMap_Call) RunAndReturn(run func() map[s
 func (_m *ReplicationStatusIface) Spec() *metadata.ReplicationSpecification {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Spec")
+	}
+
 	var r0 *metadata.ReplicationSpecification
 	if rf, ok := ret.Get(0).(func() *metadata.ReplicationSpecification); ok {
 		r0 = rf()
@@ -1334,6 +1394,10 @@ func (_c *ReplicationStatusIface_Spec_Call) RunAndReturn(run func() *metadata.Re
 // Storage provides a mock function with given fields: pipelineType
 func (_m *ReplicationStatusIface) Storage(pipelineType common.PipelineType) *expvar.Map {
 	ret := _m.Called(pipelineType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Storage")
+	}
 
 	var r0 *expvar.Map
 	if rf, ok := ret.Get(0).(func(common.PipelineType) *expvar.Map); ok {
@@ -1379,6 +1443,10 @@ func (_c *ReplicationStatusIface_Storage_Call) RunAndReturn(run func(common.Pipe
 func (_m *ReplicationStatusIface) String() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for String")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -1419,6 +1487,10 @@ func (_c *ReplicationStatusIface_String_Call) RunAndReturn(run func() string) *R
 // Updater provides a mock function with given fields:
 func (_m *ReplicationStatusIface) Updater() interface{} {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Updater")
+	}
 
 	var r0 interface{}
 	if rf, ok := ret.Get(0).(func() interface{}); ok {
@@ -1462,6 +1534,10 @@ func (_c *ReplicationStatusIface_Updater_Call) RunAndReturn(run func() interface
 // VbList provides a mock function with given fields:
 func (_m *ReplicationStatusIface) VbList() []uint16 {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for VbList")
+	}
 
 	var r0 []uint16
 	if rf, ok := ret.Get(0).(func() []uint16); ok {

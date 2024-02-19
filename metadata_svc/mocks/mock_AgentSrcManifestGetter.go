@@ -25,6 +25,10 @@ func (_m *AgentSrcManifestGetter) EXPECT() *AgentSrcManifestGetter_Expecter {
 func (_m *AgentSrcManifestGetter) Execute() *metadata.CollectionsManifest {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	if rf, ok := ret.Get(0).(func() *metadata.CollectionsManifest); ok {
 		r0 = rf()

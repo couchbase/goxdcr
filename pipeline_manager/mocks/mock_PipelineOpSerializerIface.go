@@ -28,6 +28,10 @@ func (_m *PipelineOpSerializerIface) EXPECT() *PipelineOpSerializerIface_Expecte
 func (_m *PipelineOpSerializerIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
 	ret := _m.Called(topic, diffPair, srcManifestsDelta)
 
+	if len(ret) == 0 {
+		panic("no return value specified for BackfillMappingStatusUpdate")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
 		r0 = rf(topic, diffPair, srcManifestsDelta)
@@ -72,6 +76,10 @@ func (_c *PipelineOpSerializerIface_BackfillMappingStatusUpdate_Call) RunAndRetu
 func (_m *PipelineOpSerializerIface) CleanBackfill(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CleanBackfill")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -113,6 +121,10 @@ func (_c *PipelineOpSerializerIface_CleanBackfill_Call) RunAndReturn(run func(st
 // Delete provides a mock function with given fields: topic
 func (_m *PipelineOpSerializerIface) Delete(topic string) error {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Delete")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
@@ -156,6 +168,10 @@ func (_c *PipelineOpSerializerIface_Delete_Call) RunAndReturn(run func(string) e
 func (_m *PipelineOpSerializerIface) DismissEvent(topic string, eventId int) error {
 	ret := _m.Called(topic, eventId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DismissEvent")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, int) error); ok {
 		r0 = rf(topic, eventId)
@@ -198,6 +214,10 @@ func (_c *PipelineOpSerializerIface_DismissEvent_Call) RunAndReturn(run func(str
 // GetOrCreateReplicationStatus provides a mock function with given fields: topic, cur_err
 func (_m *PipelineOpSerializerIface) GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error) {
 	ret := _m.Called(topic, cur_err)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOrCreateReplicationStatus")
+	}
 
 	var r0 *pipeline.ReplicationStatus
 	var r1 error
@@ -254,6 +274,10 @@ func (_c *PipelineOpSerializerIface_GetOrCreateReplicationStatus_Call) RunAndRet
 func (_m *PipelineOpSerializerIface) Init(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Init")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -295,6 +319,10 @@ func (_c *PipelineOpSerializerIface_Init_Call) RunAndReturn(run func(string) err
 // Pause provides a mock function with given fields: topic
 func (_m *PipelineOpSerializerIface) Pause(topic string) error {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Pause")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
@@ -338,6 +366,10 @@ func (_c *PipelineOpSerializerIface_Pause_Call) RunAndReturn(run func(string) er
 func (_m *PipelineOpSerializerIface) ReInit(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReInit")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -379,6 +411,10 @@ func (_c *PipelineOpSerializerIface_ReInit_Call) RunAndReturn(run func(string) e
 // StartBackfill provides a mock function with given fields: topic
 func (_m *PipelineOpSerializerIface) StartBackfill(topic string) error {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StartBackfill")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
@@ -454,6 +490,10 @@ func (_c *PipelineOpSerializerIface_Stop_Call) RunAndReturn(run func()) *Pipelin
 func (_m *PipelineOpSerializerIface) StopBackfill(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for StopBackfill")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -495,6 +535,10 @@ func (_c *PipelineOpSerializerIface_StopBackfill_Call) RunAndReturn(run func(str
 // StopBackfillWithCb provides a mock function with given fields: pipelineName, cb, errCb, skipCkpt
 func (_m *PipelineOpSerializerIface) StopBackfillWithCb(pipelineName string, cb base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
 	ret := _m.Called(pipelineName, cb, errCb, skipCkpt)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StopBackfillWithCb")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback, bool) error); ok {
@@ -541,6 +585,10 @@ func (_c *PipelineOpSerializerIface_StopBackfillWithCb_Call) RunAndReturn(run fu
 func (_m *PipelineOpSerializerIface) Update(topic string, err error) error {
 	ret := _m.Called(topic, err)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, error) error); ok {
 		r0 = rf(topic, err)
@@ -583,6 +631,10 @@ func (_c *PipelineOpSerializerIface_Update_Call) RunAndReturn(run func(string, e
 // UpdateWithStoppedCb provides a mock function with given fields: topic, callback, errCb
 func (_m *PipelineOpSerializerIface) UpdateWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
 	ret := _m.Called(topic, callback, errCb)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateWithStoppedCb")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) error); ok {

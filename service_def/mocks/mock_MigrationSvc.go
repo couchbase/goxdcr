@@ -21,6 +21,10 @@ func (_m *MigrationSvc) EXPECT() *MigrationSvc_Expecter {
 func (_m *MigrationSvc) Migrate() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Migrate")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()

@@ -24,6 +24,10 @@ func (_m *ReplicationSettingsSvc) EXPECT() *ReplicationSettingsSvc_Expecter {
 func (_m *ReplicationSettingsSvc) GetDefaultReplicationSettings() (*metadata.ReplicationSettings, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetDefaultReplicationSettings")
+	}
+
 	var r0 *metadata.ReplicationSettings
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (*metadata.ReplicationSettings, error)); ok {
@@ -76,6 +80,10 @@ func (_c *ReplicationSettingsSvc_GetDefaultReplicationSettings_Call) RunAndRetur
 // UpdateDefaultReplicationSettings provides a mock function with given fields: _a0
 func (_m *ReplicationSettingsSvc) UpdateDefaultReplicationSettings(_a0 map[string]interface{}) (metadata.ReplicationSettingsMap, map[string]error, error) {
 	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateDefaultReplicationSettings")
+	}
 
 	var r0 metadata.ReplicationSettingsMap
 	var r1 map[string]error

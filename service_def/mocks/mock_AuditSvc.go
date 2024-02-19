@@ -24,6 +24,10 @@ func (_m *AuditSvc) EXPECT() *AuditSvc_Expecter {
 func (_m *AuditSvc) Write(eventId uint32, event service_def.AuditEventIface) error {
 	ret := _m.Called(eventId, event)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Write")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(uint32, service_def.AuditEventIface) error); ok {
 		r0 = rf(eventId, event)

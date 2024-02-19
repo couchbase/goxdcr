@@ -26,6 +26,10 @@ func (_m *VBMasterCheck) EXPECT() *VBMasterCheck_Expecter {
 func (_m *VBMasterCheck) CheckVBMaster(_a0 peerToPeer.BucketVBMapType, _a1 common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error) {
 	ret := _m.Called(_a0, _a1)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckVBMaster")
+	}
+
 	var r0 map[string]*peerToPeer.VBMasterCheckResp
 	var r1 error
 	if rf, ok := ret.Get(0).(func(peerToPeer.BucketVBMapType, common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error)); ok {

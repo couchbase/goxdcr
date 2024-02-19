@@ -24,6 +24,10 @@ func (_m *BackfillMgrComponentListenerGetter) EXPECT() *BackfillMgrComponentList
 func (_m *BackfillMgrComponentListenerGetter) GetComponentEventListener(pipeline common.Pipeline) (common.ComponentEventListener, error) {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetComponentEventListener")
+	}
+
 	var r0 common.ComponentEventListener
 	var r1 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) (common.ComponentEventListener, error)); ok {

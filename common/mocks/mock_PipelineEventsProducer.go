@@ -25,6 +25,10 @@ func (_m *PipelineEventsProducer) EXPECT() *PipelineEventsProducer_Expecter {
 func (_m *PipelineEventsProducer) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) int64 {
 	ret := _m.Called(eventType, eventDesc, eventExtras, hint)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddEvent")
+	}
+
 	var r0 int64
 	if rf, ok := ret.Get(0).(func(base.EventInfoType, string, base.EventsMap, interface{}) int64); ok {
 		r0 = rf(eventType, eventDesc, eventExtras, hint)
@@ -70,6 +74,10 @@ func (_c *PipelineEventsProducer_AddEvent_Call) RunAndReturn(run func(base.Event
 func (_m *PipelineEventsProducer) DismissEvent(eventId int) error {
 	ret := _m.Called(eventId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DismissEvent")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(int) error); ok {
 		r0 = rf(eventId)
@@ -111,6 +119,10 @@ func (_c *PipelineEventsProducer_DismissEvent_Call) RunAndReturn(run func(int) e
 // UpdateEvent provides a mock function with given fields: oldEventId, newEventDesc, newEventExtras
 func (_m *PipelineEventsProducer) UpdateEvent(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
 	ret := _m.Called(oldEventId, newEventDesc, newEventExtras)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEvent")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(int64, string, *base.EventsMap) error); ok {

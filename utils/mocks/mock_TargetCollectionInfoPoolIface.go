@@ -24,6 +24,10 @@ func (_m *TargetCollectionInfoPoolIface) EXPECT() *TargetCollectionInfoPoolIface
 func (_m *TargetCollectionInfoPoolIface) Get() *base.TargetCollectionInfo {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Get")
+	}
+
 	var r0 *base.TargetCollectionInfo
 	if rf, ok := ret.Get(0).(func() *base.TargetCollectionInfo); ok {
 		r0 = rf()

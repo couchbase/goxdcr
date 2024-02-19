@@ -26,6 +26,10 @@ func (_m *PipelineService) EXPECT() *PipelineService_Expecter {
 func (_m *PipelineService) Attach(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Attach")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
 		r0 = rf(pipeline)
@@ -67,6 +71,10 @@ func (_c *PipelineService_Attach_Call) RunAndReturn(run func(common.Pipeline) er
 // Detach provides a mock function with given fields: pipeline
 func (_m *PipelineService) Detach(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Detach")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
@@ -110,6 +118,10 @@ func (_c *PipelineService_Detach_Call) RunAndReturn(run func(common.Pipeline) er
 func (_m *PipelineService) IsSharable() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsSharable")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -150,6 +162,10 @@ func (_c *PipelineService_IsSharable_Call) RunAndReturn(run func() bool) *Pipeli
 // Start provides a mock function with given fields: _a0
 func (_m *PipelineService) Start(_a0 metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
@@ -193,6 +209,10 @@ func (_c *PipelineService_Start_Call) RunAndReturn(run func(metadata.Replication
 func (_m *PipelineService) Stop() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -233,6 +253,10 @@ func (_c *PipelineService_Stop_Call) RunAndReturn(run func() error) *PipelineSer
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *PipelineService) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

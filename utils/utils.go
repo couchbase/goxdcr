@@ -1155,7 +1155,7 @@ func nodeServicesInfoParseError(nodeServicesInfo map[string]interface{}, logger 
 
 // Input is the result for pools/default/nodeServices, port keys and a default hostAddr
 // returns hostAddr -> <portKey -> port> mapping and list of hostAddrs (only for KV nodes)
-func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, useSecurePort bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
 	nodesExt, ok := nodeServicesInfo[base.NodeExtKey]
 	portsMap := make(base.HostPortMapType)
 	hostAddrs := make([]string, 0)
@@ -1198,6 +1198,8 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[st
 
 		_, hasKV := services_map[base.KVPortKey]
 		_, hasKVSSL := services_map[base.KVSSLPortKey]
+		_, hasMgmtSSL := services_map[base.SSLMgtPortKey]
+		useSecurePort = useSecurePort && hasMgmtSSL
 
 		// consider the nodes if it has KV service only
 		if !hasKV && !hasKVSSL {
@@ -1205,7 +1207,12 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[st
 		}
 
 		hostAddr := hostName
-		port, ok := services_map[base.MgtPortKey]
+		var port interface{}
+		if useSecurePort {
+			port, ok = services_map[base.SSLMgtPortKey]
+		} else {
+			port, ok = services_map[base.MgtPortKey]
+		}
 		if ok {
 			portFloat, ok := port.(float64)
 			if !ok {

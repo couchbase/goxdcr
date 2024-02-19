@@ -24,6 +24,10 @@ func (_m *CacheableMetadataObj) EXPECT() *CacheableMetadataObj_Expecter {
 func (_m *CacheableMetadataObj) CAS(obj metadata_svc.CacheableMetadataObj) bool {
 	ret := _m.Called(obj)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CAS")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(metadata_svc.CacheableMetadataObj) bool); ok {
 		r0 = rf(obj)
@@ -65,6 +69,10 @@ func (_c *CacheableMetadataObj_CAS_Call) RunAndReturn(run func(metadata_svc.Cach
 // Clone provides a mock function with given fields:
 func (_m *CacheableMetadataObj) Clone() metadata_svc.CacheableMetadataObj {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Clone")
+	}
 
 	var r0 metadata_svc.CacheableMetadataObj
 	if rf, ok := ret.Get(0).(func() metadata_svc.CacheableMetadataObj); ok {
@@ -109,6 +117,10 @@ func (_c *CacheableMetadataObj_Clone_Call) RunAndReturn(run func() metadata_svc.
 func (_m *CacheableMetadataObj) CloneAndRedact() metadata_svc.CacheableMetadataObj {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for CloneAndRedact")
+	}
+
 	var r0 metadata_svc.CacheableMetadataObj
 	if rf, ok := ret.Get(0).(func() metadata_svc.CacheableMetadataObj); ok {
 		r0 = rf()
@@ -151,6 +163,10 @@ func (_c *CacheableMetadataObj_CloneAndRedact_Call) RunAndReturn(run func() meta
 // Redact provides a mock function with given fields:
 func (_m *CacheableMetadataObj) Redact() metadata_svc.CacheableMetadataObj {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Redact")
+	}
 
 	var r0 metadata_svc.CacheableMetadataObj
 	if rf, ok := ret.Get(0).(func() metadata_svc.CacheableMetadataObj); ok {

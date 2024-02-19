@@ -30,6 +30,10 @@ func (_m *CheckpointsService) EXPECT() *CheckpointsService_Expecter {
 func (_m *CheckpointsService) BackfillReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}) error {
 	ret := _m.Called(metadataId, oldMetadata, newMetadata)
 
+	if len(ret) == 0 {
+		panic("no return value specified for BackfillReplicationSpecChangeCallback")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}) error); ok {
 		r0 = rf(metadataId, oldMetadata, newMetadata)
@@ -73,6 +77,10 @@ func (_c *CheckpointsService_BackfillReplicationSpecChangeCallback_Call) RunAndR
 // CheckpointsDoc provides a mock function with given fields: replicationId, vbno
 func (_m *CheckpointsService) CheckpointsDoc(replicationId string, vbno uint16) (*metadata.CheckpointsDoc, error) {
 	ret := _m.Called(replicationId, vbno)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckpointsDoc")
+	}
 
 	var r0 *metadata.CheckpointsDoc
 	var r1 error
@@ -129,6 +137,10 @@ func (_c *CheckpointsService_CheckpointsDoc_Call) RunAndReturn(run func(string, 
 func (_m *CheckpointsService) CheckpointsDocs(replicationId string, brokenMappingsNeeded bool) (map[uint16]*metadata.CheckpointsDoc, error) {
 	ret := _m.Called(replicationId, brokenMappingsNeeded)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckpointsDocs")
+	}
+
 	var r0 map[uint16]*metadata.CheckpointsDoc
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, bool) (map[uint16]*metadata.CheckpointsDoc, error)); ok {
@@ -184,6 +196,10 @@ func (_c *CheckpointsService_CheckpointsDocs_Call) RunAndReturn(run func(string,
 func (_m *CheckpointsService) CollectionsManifestChangeCb(metadataId string, oldMetadata interface{}, newMetadata interface{}) error {
 	ret := _m.Called(metadataId, oldMetadata, newMetadata)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CollectionsManifestChangeCb")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}) error); ok {
 		r0 = rf(metadataId, oldMetadata, newMetadata)
@@ -228,6 +244,10 @@ func (_c *CheckpointsService_CollectionsManifestChangeCb_Call) RunAndReturn(run 
 func (_m *CheckpointsService) DelCheckpointsDoc(replicationId string, vbno uint16, specInternalId string) error {
 	ret := _m.Called(replicationId, vbno, specInternalId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DelCheckpointsDoc")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, uint16, string) error); ok {
 		r0 = rf(replicationId, vbno, specInternalId)
@@ -271,6 +291,10 @@ func (_c *CheckpointsService_DelCheckpointsDoc_Call) RunAndReturn(run func(strin
 // DelCheckpointsDocs provides a mock function with given fields: replicationId
 func (_m *CheckpointsService) DelCheckpointsDocs(replicationId string) error {
 	ret := _m.Called(replicationId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DelCheckpointsDocs")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
@@ -380,6 +404,10 @@ func (_c *CheckpointsService_EnableRefCntDecrement_Call) RunAndReturn(run func(s
 func (_m *CheckpointsService) GetCkptsMappingsCleanupCallback(specId string, specInternalId string, toBeRemoved metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
 	ret := _m.Called(specId, specInternalId, toBeRemoved)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCkptsMappingsCleanupCallback")
+	}
+
 	var r0 base.StoppedPipelineCallback
 	var r1 base.StoppedPipelineErrCallback
 	if rf, ok := ret.Get(0).(func(string, string, metadata.ScopesMap) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)); ok {
@@ -438,6 +466,10 @@ func (_c *CheckpointsService_GetCkptsMappingsCleanupCallback_Call) RunAndReturn(
 func (_m *CheckpointsService) GetVbnosFromCheckpointDocs(replicationId string) ([]uint16, error) {
 	ret := _m.Called(replicationId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetVbnosFromCheckpointDocs")
+	}
+
 	var r0 []uint16
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) ([]uint16, error)); ok {
@@ -491,6 +523,10 @@ func (_c *CheckpointsService_GetVbnosFromCheckpointDocs_Call) RunAndReturn(run f
 // LoadBrokenMappings provides a mock function with given fields: replicationId
 func (_m *CheckpointsService) LoadBrokenMappings(replicationId string) (metadata.ShaToCollectionNamespaceMap, *metadata.CollectionNsMappingsDoc, service_def.IncrementerFunc, bool, error) {
 	ret := _m.Called(replicationId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadBrokenMappings")
+	}
 
 	var r0 metadata.ShaToCollectionNamespaceMap
 	var r1 *metadata.CollectionNsMappingsDoc
@@ -571,6 +607,10 @@ func (_c *CheckpointsService_LoadBrokenMappings_Call) RunAndReturn(run func(stri
 func (_m *CheckpointsService) PreUpsertBrokenMapping(replicationId string, specInternalId string, oneBrokenMapping *metadata.CollectionNamespaceMapping) error {
 	ret := _m.Called(replicationId, specInternalId, oneBrokenMapping)
 
+	if len(ret) == 0 {
+		panic("no return value specified for PreUpsertBrokenMapping")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, *metadata.CollectionNamespaceMapping) error); ok {
 		r0 = rf(replicationId, specInternalId, oneBrokenMapping)
@@ -614,6 +654,10 @@ func (_c *CheckpointsService_PreUpsertBrokenMapping_Call) RunAndReturn(run func(
 // ReplicationSpecChangeCallback provides a mock function with given fields: metadataId, oldMetadata, newMetadata, wg
 func (_m *CheckpointsService) ReplicationSpecChangeCallback(metadataId string, oldMetadata interface{}, newMetadata interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(metadataId, oldMetadata, newMetadata, wg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecChangeCallback")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}, *sync.WaitGroup) error); ok {
@@ -660,6 +704,10 @@ func (_c *CheckpointsService_ReplicationSpecChangeCallback_Call) RunAndReturn(ru
 func (_m *CheckpointsService) UpsertAndReloadCheckpointCompleteSet(replicationId string, mappingDoc *metadata.CollectionNsMappingsDoc, ckptDoc map[uint16]*metadata.CheckpointsDoc, internalId string) error {
 	ret := _m.Called(replicationId, mappingDoc, ckptDoc, internalId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertAndReloadCheckpointCompleteSet")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNsMappingsDoc, map[uint16]*metadata.CheckpointsDoc, string) error); ok {
 		r0 = rf(replicationId, mappingDoc, ckptDoc, internalId)
@@ -705,6 +753,10 @@ func (_c *CheckpointsService_UpsertAndReloadCheckpointCompleteSet_Call) RunAndRe
 func (_m *CheckpointsService) UpsertBrokenMapping(replicationId string, specInternalId string) error {
 	ret := _m.Called(replicationId, specInternalId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertBrokenMapping")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string) error); ok {
 		r0 = rf(replicationId, specInternalId)
@@ -747,6 +799,10 @@ func (_c *CheckpointsService_UpsertBrokenMapping_Call) RunAndReturn(run func(str
 // UpsertCheckpoints provides a mock function with given fields: replicationId, specInternalId, vbno, ckpt_record
 func (_m *CheckpointsService) UpsertCheckpoints(replicationId string, specInternalId string, vbno uint16, ckpt_record *metadata.CheckpointRecord) (int, error) {
 	ret := _m.Called(replicationId, specInternalId, vbno, ckpt_record)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertCheckpoints")
+	}
 
 	var r0 int
 	var r1 error
@@ -802,6 +858,10 @@ func (_c *CheckpointsService_UpsertCheckpoints_Call) RunAndReturn(run func(strin
 // UpsertCheckpointsDone provides a mock function with given fields: replicationId, internalId
 func (_m *CheckpointsService) UpsertCheckpointsDone(replicationId string, internalId string) error {
 	ret := _m.Called(replicationId, internalId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpsertCheckpointsDone")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string) error); ok {

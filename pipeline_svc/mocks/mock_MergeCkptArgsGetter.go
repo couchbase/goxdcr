@@ -24,6 +24,10 @@ func (_m *MergeCkptArgsGetter) EXPECT() *MergeCkptArgsGetter_Expecter {
 func (_m *MergeCkptArgsGetter) Execute() *pipeline_svc.MergeCkptArgs {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 *pipeline_svc.MergeCkptArgs
 	if rf, ok := ret.Get(0).(func() *pipeline_svc.MergeCkptArgs); ok {
 		r0 = rf()

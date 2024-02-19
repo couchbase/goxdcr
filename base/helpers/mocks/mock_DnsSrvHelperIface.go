@@ -26,6 +26,10 @@ func (_m *DnsSrvHelperIface) EXPECT() *DnsSrvHelperIface_Expecter {
 func (_m *DnsSrvHelperIface) DnsSrvLookup(hostname string) ([]*net.SRV, base.SrvRecordsType, error) {
 	ret := _m.Called(hostname)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DnsSrvLookup")
+	}
+
 	var r0 []*net.SRV
 	var r1 base.SrvRecordsType
 	var r2 error

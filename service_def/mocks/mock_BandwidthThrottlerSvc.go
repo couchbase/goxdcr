@@ -21,6 +21,10 @@ func (_m *BandwidthThrottlerSvc) EXPECT() *BandwidthThrottlerSvc_Expecter {
 func (_m *BandwidthThrottlerSvc) Throttle(numberOfBytes int64, minNumberOfBytes int64, numberOfBytesOfFirstItem int64) (int64, int64) {
 	ret := _m.Called(numberOfBytes, minNumberOfBytes, numberOfBytesOfFirstItem)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Throttle")
+	}
+
 	var r0 int64
 	var r1 int64
 	if rf, ok := ret.Get(0).(func(int64, int64, int64) (int64, int64)); ok {
@@ -74,6 +78,10 @@ func (_c *BandwidthThrottlerSvc_Throttle_Call) RunAndReturn(run func(int64, int6
 // Wait provides a mock function with given fields:
 func (_m *BandwidthThrottlerSvc) Wait() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Wait")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

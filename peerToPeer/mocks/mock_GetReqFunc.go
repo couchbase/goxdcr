@@ -24,6 +24,10 @@ func (_m *GetReqFunc) EXPECT() *GetReqFunc_Expecter {
 func (_m *GetReqFunc) Execute(source string, target string) peerToPeer.Request {
 	ret := _m.Called(source, target)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 peerToPeer.Request
 	if rf, ok := ret.Get(0).(func(string, string) peerToPeer.Request); ok {
 		r0 = rf(source, target)

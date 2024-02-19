@@ -21,6 +21,10 @@ func (_m *StreamApiWatcher) EXPECT() *StreamApiWatcher_Expecter {
 func (_m *StreamApiWatcher) GetResult() map[string]interface{} {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetResult")
+	}
+
 	var r0 map[string]interface{}
 	if rf, ok := ret.Get(0).(func() map[string]interface{}); ok {
 		r0 = rf()

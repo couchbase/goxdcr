@@ -24,6 +24,10 @@ func (_m *CollectionNamespacePoolIface) EXPECT() *CollectionNamespacePoolIface_E
 func (_m *CollectionNamespacePoolIface) Get() *base.CollectionNamespace {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Get")
+	}
+
 	var r0 *base.CollectionNamespace
 	if rf, ok := ret.Get(0).(func() *base.CollectionNamespace); ok {
 		r0 = rf()

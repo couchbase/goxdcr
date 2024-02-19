@@ -124,6 +124,10 @@ func (_c *ReplicaReplicator_HandleSpecDeletion_Call) RunAndReturn(run func(*meta
 func (_m *ReplicaReplicator) RequestImmediatePush(replId string) error {
 	ret := _m.Called(replId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RequestImmediatePush")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(replId)

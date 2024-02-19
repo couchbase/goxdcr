@@ -25,6 +25,10 @@ func (_m *RemoteClusterAgentIface) EXPECT() *RemoteClusterAgentIface_Expecter {
 func (_m *RemoteClusterAgentIface) DeleteReference(delFromMetaKv bool) (*metadata.RemoteClusterReference, error) {
 	ret := _m.Called(delFromMetaKv)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteReference")
+	}
+
 	var r0 *metadata.RemoteClusterReference
 	var r1 error
 	if rf, ok := ret.Get(0).(func(bool) (*metadata.RemoteClusterReference, error)); ok {
@@ -79,6 +83,10 @@ func (_c *RemoteClusterAgentIface_DeleteReference_Call) RunAndReturn(run func(bo
 func (_m *RemoteClusterAgentIface) GetCapability() (metadata.Capability, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCapability")
+	}
+
 	var r0 metadata.Capability
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (metadata.Capability, error)); ok {
@@ -130,6 +138,10 @@ func (_c *RemoteClusterAgentIface_GetCapability_Call) RunAndReturn(run func() (m
 func (_m *RemoteClusterAgentIface) GetConnectionStringForCAPIRemoteCluster() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetConnectionStringForCAPIRemoteCluster")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -170,6 +182,10 @@ func (_c *RemoteClusterAgentIface_GetConnectionStringForCAPIRemoteCluster_Call) 
 // GetReferenceAndStatusClone provides a mock function with given fields:
 func (_m *RemoteClusterAgentIface) GetReferenceAndStatusClone() *metadata.RemoteClusterReference {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReferenceAndStatusClone")
+	}
 
 	var r0 *metadata.RemoteClusterReference
 	if rf, ok := ret.Get(0).(func() *metadata.RemoteClusterReference); ok {
@@ -214,6 +230,10 @@ func (_c *RemoteClusterAgentIface_GetReferenceAndStatusClone_Call) RunAndReturn(
 func (_m *RemoteClusterAgentIface) GetReferenceClone() *metadata.RemoteClusterReference {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetReferenceClone")
+	}
+
 	var r0 *metadata.RemoteClusterReference
 	if rf, ok := ret.Get(0).(func() *metadata.RemoteClusterReference); ok {
 		r0 = rf()
@@ -257,6 +277,10 @@ func (_c *RemoteClusterAgentIface_GetReferenceClone_Call) RunAndReturn(run func(
 func (_m *RemoteClusterAgentIface) Refresh() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Refresh")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -297,6 +321,10 @@ func (_c *RemoteClusterAgentIface_Refresh_Call) RunAndReturn(run func() error) *
 // Start provides a mock function with given fields: newRef
 func (_m *RemoteClusterAgentIface) Start(newRef *metadata.RemoteClusterReference) error {
 	ret := _m.Called(newRef)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference) error); ok {
@@ -372,6 +400,10 @@ func (_c *RemoteClusterAgentIface_Stop_Call) RunAndReturn(run func()) *RemoteClu
 func (_m *RemoteClusterAgentIface) UpdateReferenceFrom(newRef *metadata.RemoteClusterReference, writeToMetaKv bool) error {
 	ret := _m.Called(newRef, writeToMetaKv)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateReferenceFrom")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, bool) error); ok {
 		r0 = rf(newRef, writeToMetaKv)
@@ -415,6 +447,10 @@ func (_c *RemoteClusterAgentIface_UpdateReferenceFrom_Call) RunAndReturn(run fun
 func (_m *RemoteClusterAgentIface) UpdateReferenceFromAsync(newRef *metadata.RemoteClusterReference, writeToMetaKv bool) error {
 	ret := _m.Called(newRef, writeToMetaKv)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateReferenceFromAsync")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, bool) error); ok {
 		r0 = rf(newRef, writeToMetaKv)
@@ -457,6 +493,10 @@ func (_c *RemoteClusterAgentIface_UpdateReferenceFromAsync_Call) RunAndReturn(ru
 // UsesAlternateAddress provides a mock function with given fields:
 func (_m *RemoteClusterAgentIface) UsesAlternateAddress() (bool, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for UsesAlternateAddress")
+	}
 
 	var r0 bool
 	var r1 error

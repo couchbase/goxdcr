@@ -21,6 +21,10 @@ func (_m *ExponentialOpFunc2) EXPECT() *ExponentialOpFunc2_Expecter {
 func (_m *ExponentialOpFunc2) Execute(_a0 interface{}) (interface{}, error) {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 interface{}
 	var r1 error
 	if rf, ok := ret.Get(0).(func(interface{}) (interface{}, error)); ok {

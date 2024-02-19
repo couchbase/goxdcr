@@ -24,6 +24,10 @@ func (_m *TargetVBOpaque) EXPECT() *TargetVBOpaque_Expecter {
 func (_m *TargetVBOpaque) IsSame(targetVBOpaque metadata.TargetVBOpaque) bool {
 	ret := _m.Called(targetVBOpaque)
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsSame")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(metadata.TargetVBOpaque) bool); ok {
 		r0 = rf(targetVBOpaque)
@@ -66,6 +70,10 @@ func (_c *TargetVBOpaque_IsSame_Call) RunAndReturn(run func(metadata.TargetVBOpa
 func (_m *TargetVBOpaque) Size() int {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Size")
+	}
+
 	var r0 int
 	if rf, ok := ret.Get(0).(func() int); ok {
 		r0 = rf()
@@ -106,6 +114,10 @@ func (_c *TargetVBOpaque_Size_Call) RunAndReturn(run func() int) *TargetVBOpaque
 // Value provides a mock function with given fields:
 func (_m *TargetVBOpaque) Value() interface{} {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Value")
+	}
 
 	var r0 interface{}
 	if rf, ok := ret.Get(0).(func() interface{}); ok {

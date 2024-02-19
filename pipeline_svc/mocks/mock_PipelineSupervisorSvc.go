@@ -26,6 +26,10 @@ func (_m *PipelineSupervisorSvc) EXPECT() *PipelineSupervisorSvc_Expecter {
 func (_m *PipelineSupervisorSvc) Attach(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Attach")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
 		r0 = rf(pipeline)
@@ -68,6 +72,10 @@ func (_c *PipelineSupervisorSvc_Attach_Call) RunAndReturn(run func(common.Pipeli
 func (_m *PipelineSupervisorSvc) Detach(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Detach")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
 		r0 = rf(pipeline)
@@ -109,6 +117,10 @@ func (_c *PipelineSupervisorSvc_Detach_Call) RunAndReturn(run func(common.Pipeli
 // IsSharable provides a mock function with given fields:
 func (_m *PipelineSupervisorSvc) IsSharable() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsSharable")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
@@ -184,6 +196,10 @@ func (_c *PipelineSupervisorSvc_OnEvent_Call) RunAndReturn(run func(*common.Even
 func (_m *PipelineSupervisorSvc) Start(_a0 metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(_a0)
@@ -226,6 +242,10 @@ func (_c *PipelineSupervisorSvc_Start_Call) RunAndReturn(run func(metadata.Repli
 func (_m *PipelineSupervisorSvc) Stop() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -266,6 +286,10 @@ func (_c *PipelineSupervisorSvc_Stop_Call) RunAndReturn(run func() error) *Pipel
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *PipelineSupervisorSvc) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

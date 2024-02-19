@@ -26,6 +26,10 @@ func (_m *InternalSettingsSvc) EXPECT() *InternalSettingsSvc_Expecter {
 func (_m *InternalSettingsSvc) GetInternalSettings() *metadata.InternalSettings {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetInternalSettings")
+	}
+
 	var r0 *metadata.InternalSettings
 	if rf, ok := ret.Get(0).(func() *metadata.InternalSettings); ok {
 		r0 = rf()
@@ -68,6 +72,10 @@ func (_c *InternalSettingsSvc_GetInternalSettings_Call) RunAndReturn(run func() 
 // InternalSettingsServiceCallback provides a mock function with given fields: path, value, rev
 func (_m *InternalSettingsSvc) InternalSettingsServiceCallback(path string, value []byte, rev interface{}) error {
 	ret := _m.Called(path, value, rev)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InternalSettingsServiceCallback")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte, interface{}) error); ok {
@@ -145,6 +153,10 @@ func (_c *InternalSettingsSvc_SetMetadataChangeHandlerCallback_Call) RunAndRetur
 // UpdateInternalSettings provides a mock function with given fields: settingsMap
 func (_m *InternalSettingsSvc) UpdateInternalSettings(settingsMap map[string]interface{}) (*metadata.InternalSettings, map[string]error, error) {
 	ret := _m.Called(settingsMap)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateInternalSettings")
+	}
 
 	var r0 *metadata.InternalSettings
 	var r1 map[string]error

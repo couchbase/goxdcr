@@ -26,6 +26,10 @@ func (_m *GetUUIDFunc) EXPECT() *GetUUIDFunc_Expecter {
 func (_m *GetUUIDFunc) Execute(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (string, error)); ok {

@@ -28,6 +28,10 @@ func (_m *Pipeline) EXPECT() *Pipeline_Expecter {
 func (_m *Pipeline) FullTopic() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for FullTopic")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -68,6 +72,10 @@ func (_c *Pipeline_FullTopic_Call) RunAndReturn(run func() string) *Pipeline_Ful
 // GetAsyncListenerMap provides a mock function with given fields:
 func (_m *Pipeline) GetAsyncListenerMap() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAsyncListenerMap")
+	}
 
 	var r0 map[string]common.AsyncComponentEventListener
 	if rf, ok := ret.Get(0).(func() map[string]common.AsyncComponentEventListener); ok {
@@ -111,6 +119,10 @@ func (_c *Pipeline_GetAsyncListenerMap_Call) RunAndReturn(run func() map[string]
 // GetBrokenMapRO provides a mock function with given fields:
 func (_m *Pipeline) GetBrokenMapRO() (metadata.CollectionNamespaceMapping, func()) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBrokenMapRO")
+	}
 
 	var r0 metadata.CollectionNamespaceMapping
 	var r1 func()
@@ -167,6 +179,10 @@ func (_c *Pipeline_GetBrokenMapRO_Call) RunAndReturn(run func() (metadata.Collec
 func (_m *Pipeline) GetRebalanceProgress() (string, string) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetRebalanceProgress")
+	}
+
 	var r0 string
 	var r1 string
 	if rf, ok := ret.Get(0).(func() (string, string)); ok {
@@ -217,6 +233,10 @@ func (_c *Pipeline_GetRebalanceProgress_Call) RunAndReturn(run func() (string, s
 // InstanceId provides a mock function with given fields:
 func (_m *Pipeline) InstanceId() string {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for InstanceId")
+	}
 
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
@@ -291,6 +311,10 @@ func (_c *Pipeline_ReportProgress_Call) RunAndReturn(run func(string)) *Pipeline
 // RuntimeContext provides a mock function with given fields:
 func (_m *Pipeline) RuntimeContext() common.PipelineRuntimeContext {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RuntimeContext")
+	}
 
 	var r0 common.PipelineRuntimeContext
 	if rf, ok := ret.Get(0).(func() common.PipelineRuntimeContext); ok {
@@ -467,6 +491,10 @@ func (_c *Pipeline_SetRuntimeContext_Call) RunAndReturn(run func(common.Pipeline
 func (_m *Pipeline) SetState(state common.PipelineState) error {
 	ret := _m.Called(state)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SetState")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.PipelineState) error); ok {
 		r0 = rf(state)
@@ -508,6 +536,10 @@ func (_c *Pipeline_SetState_Call) RunAndReturn(run func(common.PipelineState) er
 // Settings provides a mock function with given fields:
 func (_m *Pipeline) Settings() metadata.ReplicationSettingsMap {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Settings")
+	}
 
 	var r0 metadata.ReplicationSettingsMap
 	if rf, ok := ret.Get(0).(func() metadata.ReplicationSettingsMap); ok {
@@ -552,6 +584,10 @@ func (_c *Pipeline_Settings_Call) RunAndReturn(run func() metadata.ReplicationSe
 func (_m *Pipeline) Sources() map[string]common.Nozzle {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Sources")
+	}
+
 	var r0 map[string]common.Nozzle
 	if rf, ok := ret.Get(0).(func() map[string]common.Nozzle); ok {
 		r0 = rf()
@@ -595,6 +631,10 @@ func (_c *Pipeline_Sources_Call) RunAndReturn(run func() map[string]common.Nozzl
 func (_m *Pipeline) Specification() metadata.GenericSpecification {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Specification")
+	}
+
 	var r0 metadata.GenericSpecification
 	if rf, ok := ret.Get(0).(func() metadata.GenericSpecification); ok {
 		r0 = rf()
@@ -637,6 +677,10 @@ func (_c *Pipeline_Specification_Call) RunAndReturn(run func() metadata.GenericS
 // Start provides a mock function with given fields: settings
 func (_m *Pipeline) Start(settings metadata.ReplicationSettingsMap) base.ErrorMap {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
 
 	var r0 base.ErrorMap
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) base.ErrorMap); ok {
@@ -682,6 +726,10 @@ func (_c *Pipeline_Start_Call) RunAndReturn(run func(metadata.ReplicationSetting
 func (_m *Pipeline) State() common.PipelineState {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for State")
+	}
+
 	var r0 common.PipelineState
 	if rf, ok := ret.Get(0).(func() common.PipelineState); ok {
 		r0 = rf()
@@ -722,6 +770,10 @@ func (_c *Pipeline_State_Call) RunAndReturn(run func() common.PipelineState) *Pi
 // Stop provides a mock function with given fields:
 func (_m *Pipeline) Stop() base.ErrorMap {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
 
 	var r0 base.ErrorMap
 	if rf, ok := ret.Get(0).(func() base.ErrorMap); ok {
@@ -766,6 +818,10 @@ func (_c *Pipeline_Stop_Call) RunAndReturn(run func() base.ErrorMap) *Pipeline_S
 func (_m *Pipeline) Targets() map[string]common.Nozzle {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Targets")
+	}
+
 	var r0 map[string]common.Nozzle
 	if rf, ok := ret.Get(0).(func() map[string]common.Nozzle); ok {
 		r0 = rf()
@@ -809,6 +865,10 @@ func (_c *Pipeline_Targets_Call) RunAndReturn(run func() map[string]common.Nozzl
 func (_m *Pipeline) Topic() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Topic")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -850,6 +910,10 @@ func (_c *Pipeline_Topic_Call) RunAndReturn(run func() string) *Pipeline_Topic_C
 func (_m *Pipeline) Type() common.PipelineType {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Type")
+	}
+
 	var r0 common.PipelineType
 	if rf, ok := ret.Get(0).(func() common.PipelineType); ok {
 		r0 = rf()
@@ -890,6 +954,10 @@ func (_c *Pipeline_Type_Call) RunAndReturn(run func() common.PipelineType) *Pipe
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *Pipeline) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

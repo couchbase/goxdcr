@@ -28,6 +28,10 @@ func (_m *ReplicationSpecSvc) EXPECT() *ReplicationSpecSvc_Expecter {
 func (_m *ReplicationSpecSvc) AddReplicationSpec(spec *metadata.ReplicationSpecification, additionalInfo string) error {
 	ret := _m.Called(spec, additionalInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddReplicationSpec")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, string) error); ok {
 		r0 = rf(spec, additionalInfo)
@@ -70,6 +74,10 @@ func (_c *ReplicationSpecSvc_AddReplicationSpec_Call) RunAndReturn(run func(*met
 // AllActiveReplicationSpecsReadOnly provides a mock function with given fields:
 func (_m *ReplicationSpecSvc) AllActiveReplicationSpecsReadOnly() (map[string]*metadata.ReplicationSpecification, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllActiveReplicationSpecsReadOnly")
+	}
 
 	var r0 map[string]*metadata.ReplicationSpecification
 	var r1 error
@@ -124,6 +132,10 @@ func (_c *ReplicationSpecSvc_AllActiveReplicationSpecsReadOnly_Call) RunAndRetur
 func (_m *ReplicationSpecSvc) AllReplicationSpecIds() ([]string, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplicationSpecIds")
+	}
+
 	var r0 []string
 	var r1 error
 	if rf, ok := ret.Get(0).(func() ([]string, error)); ok {
@@ -176,6 +188,10 @@ func (_c *ReplicationSpecSvc_AllReplicationSpecIds_Call) RunAndReturn(run func()
 // AllReplicationSpecIdsForBucket provides a mock function with given fields: bucket
 func (_m *ReplicationSpecSvc) AllReplicationSpecIdsForBucket(bucket string) ([]string, error) {
 	ret := _m.Called(bucket)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplicationSpecIdsForBucket")
+	}
 
 	var r0 []string
 	var r1 error
@@ -231,6 +247,10 @@ func (_c *ReplicationSpecSvc_AllReplicationSpecIdsForBucket_Call) RunAndReturn(r
 func (_m *ReplicationSpecSvc) AllReplicationSpecs() (map[string]*metadata.ReplicationSpecification, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplicationSpecs")
+	}
+
 	var r0 map[string]*metadata.ReplicationSpecification
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (map[string]*metadata.ReplicationSpecification, error)); ok {
@@ -283,6 +303,10 @@ func (_c *ReplicationSpecSvc_AllReplicationSpecs_Call) RunAndReturn(run func() (
 // AllReplicationSpecsWithRemote provides a mock function with given fields: remoteClusterRef
 func (_m *ReplicationSpecSvc) AllReplicationSpecsWithRemote(remoteClusterRef *metadata.RemoteClusterReference) ([]*metadata.ReplicationSpecification, error) {
 	ret := _m.Called(remoteClusterRef)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplicationSpecsWithRemote")
+	}
 
 	var r0 []*metadata.ReplicationSpecification
 	var r1 error
@@ -337,6 +361,10 @@ func (_c *ReplicationSpecSvc_AllReplicationSpecsWithRemote_Call) RunAndReturn(ru
 // ConstructNewReplicationSpec provides a mock function with given fields: sourceBucketName, targetClusterUUID, targetBucketName
 func (_m *ReplicationSpecSvc) ConstructNewReplicationSpec(sourceBucketName string, targetClusterUUID string, targetBucketName string) (*metadata.ReplicationSpecification, error) {
 	ret := _m.Called(sourceBucketName, targetClusterUUID, targetBucketName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructNewReplicationSpec")
+	}
 
 	var r0 *metadata.ReplicationSpecification
 	var r1 error
@@ -394,6 +422,10 @@ func (_c *ReplicationSpecSvc_ConstructNewReplicationSpec_Call) RunAndReturn(run 
 func (_m *ReplicationSpecSvc) DelReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
 	ret := _m.Called(replicationId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DelReplicationSpec")
+	}
+
 	var r0 *metadata.ReplicationSpecification
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (*metadata.ReplicationSpecification, error)); ok {
@@ -447,6 +479,10 @@ func (_c *ReplicationSpecSvc_DelReplicationSpec_Call) RunAndReturn(run func(stri
 // DelReplicationSpecWithReason provides a mock function with given fields: replicationId, reason
 func (_m *ReplicationSpecSvc) DelReplicationSpecWithReason(replicationId string, reason string) (*metadata.ReplicationSpecification, error) {
 	ret := _m.Called(replicationId, reason)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DelReplicationSpecWithReason")
+	}
 
 	var r0 *metadata.ReplicationSpecification
 	var r1 error
@@ -503,6 +539,10 @@ func (_c *ReplicationSpecSvc_DelReplicationSpecWithReason_Call) RunAndReturn(run
 func (_m *ReplicationSpecSvc) GetDerivedObj(specId string) (interface{}, error) {
 	ret := _m.Called(specId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetDerivedObj")
+	}
+
 	var r0 interface{}
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (interface{}, error)); ok {
@@ -557,6 +597,10 @@ func (_c *ReplicationSpecSvc_GetDerivedObj_Call) RunAndReturn(run func(string) (
 func (_m *ReplicationSpecSvc) IsReplicationValidationError(err error) bool {
 	ret := _m.Called(err)
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsReplicationValidationError")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(error) bool); ok {
 		r0 = rf(err)
@@ -598,6 +642,10 @@ func (_c *ReplicationSpecSvc_IsReplicationValidationError_Call) RunAndReturn(run
 // ReplicationSpec provides a mock function with given fields: replicationId
 func (_m *ReplicationSpecSvc) ReplicationSpec(replicationId string) (*metadata.ReplicationSpecification, error) {
 	ret := _m.Called(replicationId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpec")
+	}
 
 	var r0 *metadata.ReplicationSpecification
 	var r1 error
@@ -653,6 +701,10 @@ func (_c *ReplicationSpecSvc_ReplicationSpec_Call) RunAndReturn(run func(string)
 func (_m *ReplicationSpecSvc) ReplicationSpecReadOnly(replicationId string) (*metadata.ReplicationSpecification, error) {
 	ret := _m.Called(replicationId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecReadOnly")
+	}
+
 	var r0 *metadata.ReplicationSpecification
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (*metadata.ReplicationSpecification, error)); ok {
@@ -707,6 +759,10 @@ func (_c *ReplicationSpecSvc_ReplicationSpecReadOnly_Call) RunAndReturn(run func
 func (_m *ReplicationSpecSvc) ReplicationSpecServiceCallback(path string, value []byte, rev interface{}) error {
 	ret := _m.Called(path, value, rev)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecServiceCallback")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte, interface{}) error); ok {
 		r0 = rf(path, value, rev)
@@ -750,6 +806,10 @@ func (_c *ReplicationSpecSvc_ReplicationSpecServiceCallback_Call) RunAndReturn(r
 // SetDerivedObj provides a mock function with given fields: specId, derivedObj
 func (_m *ReplicationSpecSvc) SetDerivedObj(specId string, derivedObj interface{}) error {
 	ret := _m.Called(specId, derivedObj)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetDerivedObj")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}) error); ok {
@@ -864,6 +924,10 @@ func (_c *ReplicationSpecSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn
 func (_m *ReplicationSpecSvc) SetReplicationSpec(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SetReplicationSpec")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
 		r0 = rf(spec)
@@ -938,6 +1002,10 @@ func (_c *ReplicationSpecSvc_ValidateAndGC_Call) RunAndReturn(run func(*metadata
 // ValidateNewReplicationSpec provides a mock function with given fields: sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation
 func (_m *ReplicationSpecSvc) ValidateNewReplicationSpec(sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (string, string, *metadata.RemoteClusterReference, base.ErrorMap, error, service_def.UIWarnings, *metadata.CollectionsManifestPair) {
 	ret := _m.Called(sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateNewReplicationSpec")
+	}
 
 	var r0 string
 	var r1 string
@@ -1037,6 +1105,10 @@ func (_c *ReplicationSpecSvc_ValidateNewReplicationSpec_Call) RunAndReturn(run f
 // ValidateReplicationSettings provides a mock function with given fields: sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation
 func (_m *ReplicationSpecSvc) ValidateReplicationSettings(sourceBucket string, targetCluster string, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (base.ErrorMap, error, service_def.UIWarnings) {
 	ret := _m.Called(sourceBucket, targetCluster, targetBucket, settings, performRemoteValidation)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateReplicationSettings")
+	}
 
 	var r0 base.ErrorMap
 	var r1 error

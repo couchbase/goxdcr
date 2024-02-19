@@ -30,6 +30,10 @@ func (_m *BackfillMgrIface) EXPECT() *BackfillMgrIface_Expecter {
 func (_m *BackfillMgrIface) GetExplicitMappingChangeHandler(specId string, internalSpecId string, oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
 	ret := _m.Called(specId, internalSpecId, oldSettings, newSettings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetExplicitMappingChangeHandler")
+	}
+
 	var r0 base.StoppedPipelineCallback
 	var r1 base.StoppedPipelineErrCallback
 	if rf, ok := ret.Get(0).(func(string, string, *metadata.ReplicationSettings, *metadata.ReplicationSettings) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback)); ok {
@@ -89,6 +93,10 @@ func (_c *BackfillMgrIface_GetExplicitMappingChangeHandler_Call) RunAndReturn(ru
 func (_m *BackfillMgrIface) GetLastSuccessfulSourceManifestId(specId string) (uint64, error) {
 	ret := _m.Called(specId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetLastSuccessfulSourceManifestId")
+	}
+
 	var r0 uint64
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (uint64, error)); ok {
@@ -141,6 +149,10 @@ func (_c *BackfillMgrIface_GetLastSuccessfulSourceManifestId_Call) RunAndReturn(
 func (_m *BackfillMgrIface) GetPipelineSvc() common.PipelineService {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetPipelineSvc")
+	}
+
 	var r0 common.PipelineService
 	if rf, ok := ret.Get(0).(func() common.PipelineService); ok {
 		r0 = rf()
@@ -183,6 +195,10 @@ func (_c *BackfillMgrIface_GetPipelineSvc_Call) RunAndReturn(run func() common.P
 // GetRouterMappingChangeHandler provides a mock function with given fields: specId, internalSpecId, diff
 func (_m *BackfillMgrIface) GetRouterMappingChangeHandler(specId string, internalSpecId string, diff metadata.CollectionNamespaceMappingsDiffPair) (base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) {
 	ret := _m.Called(specId, internalSpecId, diff)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRouterMappingChangeHandler")
+	}
 
 	var r0 base.StoppedPipelineCallback
 	var r1 base.StoppedPipelineErrCallback
@@ -242,6 +258,10 @@ func (_c *BackfillMgrIface_GetRouterMappingChangeHandler_Call) RunAndReturn(run 
 func (_m *BackfillMgrIface) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecChangeCallback")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}, *sync.WaitGroup) error); ok {
 		r0 = rf(id, oldVal, newVal, wg)
@@ -287,6 +307,10 @@ func (_c *BackfillMgrIface_ReplicationSpecChangeCallback_Call) RunAndReturn(run 
 func (_m *BackfillMgrIface) SetLastSuccessfulSourceManifestId(specId string, manifestId uint64, dcpRollbackScenario bool, finCh chan bool) error {
 	ret := _m.Called(specId, manifestId, dcpRollbackScenario, finCh)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SetLastSuccessfulSourceManifestId")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, uint64, bool, chan bool) error); ok {
 		r0 = rf(specId, manifestId, dcpRollbackScenario, finCh)
@@ -331,6 +355,10 @@ func (_c *BackfillMgrIface_SetLastSuccessfulSourceManifestId_Call) RunAndReturn(
 // Start provides a mock function with given fields:
 func (_m *BackfillMgrIface) Start() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

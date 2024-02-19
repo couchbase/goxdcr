@@ -26,6 +26,10 @@ func (_m *Supervisor) EXPECT() *Supervisor_Expecter {
 func (_m *Supervisor) AddChild(child common.Supervisable) error {
 	ret := _m.Called(child)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddChild")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Supervisable) error); ok {
 		r0 = rf(child)
@@ -67,6 +71,10 @@ func (_c *Supervisor_AddChild_Call) RunAndReturn(run func(common.Supervisable) e
 // Child provides a mock function with given fields: childId
 func (_m *Supervisor) Child(childId string) (common.Supervisable, error) {
 	ret := _m.Called(childId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Child")
+	}
 
 	var r0 common.Supervisable
 	var r1 error
@@ -122,6 +130,10 @@ func (_c *Supervisor_Child_Call) RunAndReturn(run func(string) (common.Supervisa
 func (_m *Supervisor) Id() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Id")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -162,6 +174,10 @@ func (_c *Supervisor_Id_Call) RunAndReturn(run func() string) *Supervisor_Id_Cal
 // RemoveChild provides a mock function with given fields: childId
 func (_m *Supervisor) RemoveChild(childId string) error {
 	ret := _m.Called(childId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveChild")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
@@ -238,6 +254,10 @@ func (_c *Supervisor_ReportFailure_Call) RunAndReturn(run func(map[string]error)
 func (_m *Supervisor) Start(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(settings)
@@ -279,6 +299,10 @@ func (_c *Supervisor_Start_Call) RunAndReturn(run func(metadata.ReplicationSetti
 // Stop provides a mock function with given fields:
 func (_m *Supervisor) Stop() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

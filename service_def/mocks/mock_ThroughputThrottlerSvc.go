@@ -21,6 +21,10 @@ func (_m *ThroughputThrottlerSvc) EXPECT() *ThroughputThrottlerSvc_Expecter {
 func (_m *ThroughputThrottlerSvc) CanSend(isHighPriorityReplication bool) bool {
 	ret := _m.Called(isHighPriorityReplication)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CanSend")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(bool) bool); ok {
 		r0 = rf(isHighPriorityReplication)
@@ -63,6 +67,10 @@ func (_c *ThroughputThrottlerSvc_CanSend_Call) RunAndReturn(run func(bool) bool)
 func (_m *ThroughputThrottlerSvc) Start() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -104,6 +112,10 @@ func (_c *ThroughputThrottlerSvc_Start_Call) RunAndReturn(run func() error) *Thr
 func (_m *ThroughputThrottlerSvc) Stop() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -144,6 +156,10 @@ func (_c *ThroughputThrottlerSvc_Stop_Call) RunAndReturn(run func() error) *Thro
 // UpdateSettings provides a mock function with given fields: setting
 func (_m *ThroughputThrottlerSvc) UpdateSettings(setting map[string]interface{}) map[string]error {
 	ret := _m.Called(setting)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 map[string]error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) map[string]error); ok {

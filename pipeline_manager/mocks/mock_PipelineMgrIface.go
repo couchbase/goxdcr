@@ -30,6 +30,10 @@ func (_m *PipelineMgrIface) EXPECT() *PipelineMgrIface_Expecter {
 func (_m *PipelineMgrIface) AllReplicationSpecsForTargetCluster(targetClusterUuid string) map[string]*metadata.ReplicationSpecification {
 	ret := _m.Called(targetClusterUuid)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplicationSpecsForTargetCluster")
+	}
+
 	var r0 map[string]*metadata.ReplicationSpecification
 	if rf, ok := ret.Get(0).(func(string) map[string]*metadata.ReplicationSpecification); ok {
 		r0 = rf(targetClusterUuid)
@@ -74,6 +78,10 @@ func (_c *PipelineMgrIface_AllReplicationSpecsForTargetCluster_Call) RunAndRetur
 func (_m *PipelineMgrIface) AllReplications() []string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplications")
+	}
+
 	var r0 []string
 	if rf, ok := ret.Get(0).(func() []string); ok {
 		r0 = rf()
@@ -116,6 +124,10 @@ func (_c *PipelineMgrIface_AllReplications_Call) RunAndReturn(run func() []strin
 // AllReplicationsForBucket provides a mock function with given fields: bucket
 func (_m *PipelineMgrIface) AllReplicationsForBucket(bucket string) []string {
 	ret := _m.Called(bucket)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplicationsForBucket")
+	}
 
 	var r0 []string
 	if rf, ok := ret.Get(0).(func(string) []string); ok {
@@ -160,6 +172,10 @@ func (_c *PipelineMgrIface_AllReplicationsForBucket_Call) RunAndReturn(run func(
 // AllReplicationsForTargetCluster provides a mock function with given fields: targetClusterUuid
 func (_m *PipelineMgrIface) AllReplicationsForTargetCluster(targetClusterUuid string) []string {
 	ret := _m.Called(targetClusterUuid)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllReplicationsForTargetCluster")
+	}
 
 	var r0 []string
 	if rf, ok := ret.Get(0).(func(string) []string); ok {
@@ -237,6 +253,10 @@ func (_c *PipelineMgrIface_CheckPipelines_Call) RunAndReturn(run func()) *Pipeli
 func (_m *PipelineMgrIface) DeletePipeline(pipelineName string) error {
 	ret := _m.Called(pipelineName)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DeletePipeline")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(pipelineName)
@@ -278,6 +298,10 @@ func (_c *PipelineMgrIface_DeletePipeline_Call) RunAndReturn(run func(string) er
 // DismissEventForPipeline provides a mock function with given fields: pipelineName, eventId
 func (_m *PipelineMgrIface) DismissEventForPipeline(pipelineName string, eventId int) error {
 	ret := _m.Called(pipelineName, eventId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DismissEventForPipeline")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, int) error); ok {
@@ -356,6 +380,10 @@ func (_c *PipelineMgrIface_HandleClusterEncryptionLevelChange_Call) RunAndReturn
 func (_m *PipelineMgrIface) HandlePeerCkptPush(fullTopic string, sender string, dynamicEvt interface{}) error {
 	ret := _m.Called(fullTopic, sender, dynamicEvt)
 
+	if len(ret) == 0 {
+		panic("no return value specified for HandlePeerCkptPush")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, interface{}) error); ok {
 		r0 = rf(fullTopic, sender, dynamicEvt)
@@ -400,6 +428,10 @@ func (_c *PipelineMgrIface_HandlePeerCkptPush_Call) RunAndReturn(run func(string
 func (_m *PipelineMgrIface) InitiateRepStatus(pipelineName string) error {
 	ret := _m.Called(pipelineName)
 
+	if len(ret) == 0 {
+		panic("no return value specified for InitiateRepStatus")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(pipelineName)
@@ -442,6 +474,10 @@ func (_c *PipelineMgrIface_InitiateRepStatus_Call) RunAndReturn(run func(string)
 func (_m *PipelineMgrIface) OnExit() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for OnExit")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -482,6 +518,10 @@ func (_c *PipelineMgrIface_OnExit_Call) RunAndReturn(run func() error) *Pipeline
 // ReInitStreams provides a mock function with given fields: pipelineName
 func (_m *PipelineMgrIface) ReInitStreams(pipelineName string) error {
 	ret := _m.Called(pipelineName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReInitStreams")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
@@ -524,6 +564,10 @@ func (_c *PipelineMgrIface_ReInitStreams_Call) RunAndReturn(run func(string) err
 // ReplicationStatus provides a mock function with given fields: topic
 func (_m *PipelineMgrIface) ReplicationStatus(topic string) (pipeline.ReplicationStatusIface, error) {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationStatus")
+	}
 
 	var r0 pipeline.ReplicationStatusIface
 	var r1 error
@@ -579,6 +623,10 @@ func (_c *PipelineMgrIface_ReplicationStatus_Call) RunAndReturn(run func(string)
 func (_m *PipelineMgrIface) ReplicationStatusMap() map[string]pipeline.ReplicationStatusIface {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationStatusMap")
+	}
+
 	var r0 map[string]pipeline.ReplicationStatusIface
 	if rf, ok := ret.Get(0).(func() map[string]pipeline.ReplicationStatusIface); ok {
 		r0 = rf()
@@ -622,6 +670,10 @@ func (_c *PipelineMgrIface_ReplicationStatusMap_Call) RunAndReturn(run func() ma
 func (_m *PipelineMgrIface) UpdatePipeline(pipelineName string, cur_err error) error {
 	ret := _m.Called(pipelineName, cur_err)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UpdatePipeline")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, error) error); ok {
 		r0 = rf(pipelineName, cur_err)
@@ -664,6 +716,10 @@ func (_c *PipelineMgrIface_UpdatePipeline_Call) RunAndReturn(run func(string, er
 // UpdatePipelineWithStoppedCb provides a mock function with given fields: topic, callback, errCb
 func (_m *PipelineMgrIface) UpdatePipelineWithStoppedCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback) error {
 	ret := _m.Called(topic, callback, errCb)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdatePipelineWithStoppedCb")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback) error); ok {

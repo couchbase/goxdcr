@@ -26,6 +26,10 @@ func (_m *ReplicatorAgent) EXPECT() *ReplicatorAgent_Expecter {
 func (_m *ReplicatorAgent) GetAndClearInfoToReplicate() (*metadata.ReplicationSpecification, *peerToPeer.VBPeriodicReplicateReq, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetAndClearInfoToReplicate")
+	}
+
 	var r0 *metadata.ReplicationSpecification
 	var r1 *peerToPeer.VBPeriodicReplicateReq
 	var r2 error
@@ -87,6 +91,10 @@ func (_c *ReplicatorAgent_GetAndClearInfoToReplicate_Call) RunAndReturn(run func
 // RequestImmediateDataGather provides a mock function with given fields:
 func (_m *ReplicatorAgent) RequestImmediateDataGather() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestImmediateDataGather")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

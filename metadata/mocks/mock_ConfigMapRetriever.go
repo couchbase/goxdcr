@@ -24,6 +24,10 @@ func (_m *ConfigMapRetriever) EXPECT() *ConfigMapRetriever_Expecter {
 func (_m *ConfigMapRetriever) Execute() map[string]*metadata.SettingsConfig {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 map[string]*metadata.SettingsConfig
 	if rf, ok := ret.Get(0).(func() map[string]*metadata.SettingsConfig); ok {
 		r0 = rf()
