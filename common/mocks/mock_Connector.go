@@ -26,6 +26,10 @@ func (_m *Connector) EXPECT() *Connector_Expecter {
 func (_m *Connector) AddDownStream(partId string, part common.Part) error {
 	ret := _m.Called(partId, part)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddDownStream")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, common.Part) error); ok {
 		r0 = rf(partId, part)
@@ -68,6 +72,10 @@ func (_c *Connector_AddDownStream_Call) RunAndReturn(run func(string, common.Par
 // AsyncComponentEventListeners provides a mock function with given fields:
 func (_m *Connector) AsyncComponentEventListeners() map[string]common.AsyncComponentEventListener {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for AsyncComponentEventListeners")
+	}
 
 	var r0 map[string]common.AsyncComponentEventListener
 	if rf, ok := ret.Get(0).(func() map[string]common.AsyncComponentEventListener); ok {
@@ -112,6 +120,10 @@ func (_c *Connector_AsyncComponentEventListeners_Call) RunAndReturn(run func() m
 func (_m *Connector) DownStreams() map[string]common.Part {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for DownStreams")
+	}
+
 	var r0 map[string]common.Part
 	if rf, ok := ret.Get(0).(func() map[string]common.Part); ok {
 		r0 = rf()
@@ -155,6 +167,10 @@ func (_c *Connector_DownStreams_Call) RunAndReturn(run func() map[string]common.
 func (_m *Connector) Forward(data interface{}) error {
 	ret := _m.Called(data)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Forward")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
 		r0 = rf(data)
@@ -196,6 +212,10 @@ func (_c *Connector_Forward_Call) RunAndReturn(run func(interface{}) error) *Con
 // GetUpstreamObjRecycler provides a mock function with given fields:
 func (_m *Connector) GetUpstreamObjRecycler() func(interface{}) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUpstreamObjRecycler")
+	}
 
 	var r0 func(interface{})
 	if rf, ok := ret.Get(0).(func() func(interface{})); ok {
@@ -240,6 +260,10 @@ func (_c *Connector_GetUpstreamObjRecycler_Call) RunAndReturn(run func() func(in
 func (_m *Connector) Id() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Id")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -280,6 +304,10 @@ func (_c *Connector_Id_Call) RunAndReturn(run func() string) *Connector_Id_Call 
 // IsStartable provides a mock function with given fields:
 func (_m *Connector) IsStartable() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsStartable")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
@@ -355,6 +383,10 @@ func (_c *Connector_RaiseEvent_Call) RunAndReturn(run func(*common.Event)) *Conn
 func (_m *Connector) RegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterComponentEventListener")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {
 		r0 = rf(eventType, listener)
@@ -398,6 +430,10 @@ func (_c *Connector_RegisterComponentEventListener_Call) RunAndReturn(run func(c
 func (_m *Connector) Start() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -439,6 +475,10 @@ func (_c *Connector_Start_Call) RunAndReturn(run func() error) *Connector_Start_
 func (_m *Connector) Stop() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -479,6 +519,10 @@ func (_c *Connector_Stop_Call) RunAndReturn(run func() error) *Connector_Stop_Ca
 // UnRegisterComponentEventListener provides a mock function with given fields: eventType, listener
 func (_m *Connector) UnRegisterComponentEventListener(eventType common.ComponentEventType, listener common.ComponentEventListener) error {
 	ret := _m.Called(eventType, listener)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnRegisterComponentEventListener")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.ComponentEventType, common.ComponentEventListener) error); ok {
@@ -522,6 +566,10 @@ func (_c *Connector_UnRegisterComponentEventListener_Call) RunAndReturn(run func
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *Connector) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

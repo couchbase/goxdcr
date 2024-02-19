@@ -30,6 +30,10 @@ func (_m *PipelineMgrInternalIface) EXPECT() *PipelineMgrInternalIface_Expecter 
 func (_m *PipelineMgrInternalIface) AutoPauseReplication(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AutoPauseReplication")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -71,6 +75,10 @@ func (_c *PipelineMgrInternalIface_AutoPauseReplication_Call) RunAndReturn(run f
 // ForceTargetRefreshManifest provides a mock function with given fields: spec
 func (_m *PipelineMgrInternalIface) ForceTargetRefreshManifest(spec *metadata.ReplicationSpecification) error {
 	ret := _m.Called(spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ForceTargetRefreshManifest")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification) error); ok {
@@ -114,6 +122,10 @@ func (_c *PipelineMgrInternalIface_ForceTargetRefreshManifest_Call) RunAndReturn
 func (_m *PipelineMgrInternalIface) GetLastUpdateResult(topic string) bool {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetLastUpdateResult")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(string) bool); ok {
 		r0 = rf(topic)
@@ -155,6 +167,10 @@ func (_c *PipelineMgrInternalIface_GetLastUpdateResult_Call) RunAndReturn(run fu
 // GetLogSvc provides a mock function with given fields:
 func (_m *PipelineMgrInternalIface) GetLogSvc() service_def.UILogSvc {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLogSvc")
+	}
 
 	var r0 service_def.UILogSvc
 	if rf, ok := ret.Get(0).(func() service_def.UILogSvc); ok {
@@ -198,6 +214,10 @@ func (_c *PipelineMgrInternalIface_GetLogSvc_Call) RunAndReturn(run func() servi
 // GetOrCreateReplicationStatus provides a mock function with given fields: topic, cur_err
 func (_m *PipelineMgrInternalIface) GetOrCreateReplicationStatus(topic string, cur_err error) (*pipeline.ReplicationStatus, error) {
 	ret := _m.Called(topic, cur_err)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOrCreateReplicationStatus")
+	}
 
 	var r0 *pipeline.ReplicationStatus
 	var r1 error
@@ -254,6 +274,10 @@ func (_c *PipelineMgrInternalIface_GetOrCreateReplicationStatus_Call) RunAndRetu
 func (_m *PipelineMgrInternalIface) GetRemoteClusterSvc() service_def.RemoteClusterSvc {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteClusterSvc")
+	}
+
 	var r0 service_def.RemoteClusterSvc
 	if rf, ok := ret.Get(0).(func() service_def.RemoteClusterSvc); ok {
 		r0 = rf()
@@ -297,6 +321,10 @@ func (_c *PipelineMgrInternalIface_GetRemoteClusterSvc_Call) RunAndReturn(run fu
 func (_m *PipelineMgrInternalIface) GetReplSpecSvc() service_def.ReplicationSpecSvc {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplSpecSvc")
+	}
+
 	var r0 service_def.ReplicationSpecSvc
 	if rf, ok := ret.Get(0).(func() service_def.ReplicationSpecSvc); ok {
 		r0 = rf()
@@ -339,6 +367,10 @@ func (_c *PipelineMgrInternalIface_GetReplSpecSvc_Call) RunAndReturn(run func() 
 // GetXDCRTopologySvc provides a mock function with given fields:
 func (_m *PipelineMgrInternalIface) GetXDCRTopologySvc() service_def.XDCRCompTopologySvc {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetXDCRTopologySvc")
+	}
 
 	var r0 service_def.XDCRCompTopologySvc
 	if rf, ok := ret.Get(0).(func() service_def.XDCRCompTopologySvc); ok {
@@ -415,6 +447,10 @@ func (_c *PipelineMgrInternalIface_PostTopologyStatus_Call) RunAndReturn(run fun
 func (_m *PipelineMgrInternalIface) RemoveReplicationStatus(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveReplicationStatus")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -456,6 +492,10 @@ func (_c *PipelineMgrInternalIface_RemoveReplicationStatus_Call) RunAndReturn(ru
 // StartPipeline provides a mock function with given fields: topic
 func (_m *PipelineMgrInternalIface) StartPipeline(topic string) base.ErrorMap {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StartPipeline")
+	}
 
 	var r0 base.ErrorMap
 	if rf, ok := ret.Get(0).(func(string) base.ErrorMap); ok {
@@ -533,6 +573,10 @@ func (_c *PipelineMgrInternalIface_StopAllUpdaters_Call) RunAndReturn(run func()
 func (_m *PipelineMgrInternalIface) StopPipeline(rep_status pipeline.ReplicationStatusIface) base.ErrorMap {
 	ret := _m.Called(rep_status)
 
+	if len(ret) == 0 {
+		panic("no return value specified for StopPipeline")
+	}
+
 	var r0 base.ErrorMap
 	if rf, ok := ret.Get(0).(func(pipeline.ReplicationStatusIface) base.ErrorMap); ok {
 		r0 = rf(rep_status)
@@ -576,6 +620,10 @@ func (_c *PipelineMgrInternalIface_StopPipeline_Call) RunAndReturn(run func(pipe
 // Update provides a mock function with given fields: topic, cur_err
 func (_m *PipelineMgrInternalIface) Update(topic string, cur_err error) error {
 	ret := _m.Called(topic, cur_err)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, error) error); ok {

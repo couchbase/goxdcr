@@ -28,6 +28,10 @@ func (_m *PipelineRuntimeContext) EXPECT() *PipelineRuntimeContext_Expecter {
 func (_m *PipelineRuntimeContext) Pipeline() common.Pipeline {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Pipeline")
+	}
+
 	var r0 common.Pipeline
 	if rf, ok := ret.Get(0).(func() common.Pipeline); ok {
 		r0 = rf()
@@ -71,6 +75,10 @@ func (_c *PipelineRuntimeContext_Pipeline_Call) RunAndReturn(run func() common.P
 func (_m *PipelineRuntimeContext) RegisterService(svc_name string, svc common.PipelineService) error {
 	ret := _m.Called(svc_name, svc)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterService")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, common.PipelineService) error); ok {
 		r0 = rf(svc_name, svc)
@@ -113,6 +121,10 @@ func (_c *PipelineRuntimeContext_RegisterService_Call) RunAndReturn(run func(str
 // Service provides a mock function with given fields: svc_name
 func (_m *PipelineRuntimeContext) Service(svc_name string) common.PipelineService {
 	ret := _m.Called(svc_name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Service")
+	}
 
 	var r0 common.PipelineService
 	if rf, ok := ret.Get(0).(func(string) common.PipelineService); ok {
@@ -158,6 +170,10 @@ func (_c *PipelineRuntimeContext_Service_Call) RunAndReturn(run func(string) com
 func (_m *PipelineRuntimeContext) Start(_a0 metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(_a0)
@@ -199,6 +215,10 @@ func (_c *PipelineRuntimeContext_Start_Call) RunAndReturn(run func(metadata.Repl
 // Stop provides a mock function with given fields:
 func (_m *PipelineRuntimeContext) Stop() base.ErrorMap {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
 
 	var r0 base.ErrorMap
 	if rf, ok := ret.Get(0).(func() base.ErrorMap); ok {
@@ -243,6 +263,10 @@ func (_c *PipelineRuntimeContext_Stop_Call) RunAndReturn(run func() base.ErrorMa
 func (_m *PipelineRuntimeContext) UnregisterService(srv_name string) error {
 	ret := _m.Called(srv_name)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UnregisterService")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(srv_name)
@@ -284,6 +308,10 @@ func (_c *PipelineRuntimeContext_UnregisterService_Call) RunAndReturn(run func(s
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *PipelineRuntimeContext) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

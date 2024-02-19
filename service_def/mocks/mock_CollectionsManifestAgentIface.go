@@ -24,6 +24,10 @@ func (_m *CollectionsManifestAgentIface) EXPECT() *CollectionsManifestAgentIface
 func (_m *CollectionsManifestAgentIface) ForceTargetManifestRefresh() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for ForceTargetManifestRefresh")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -64,6 +68,10 @@ func (_c *CollectionsManifestAgentIface_ForceTargetManifestRefresh_Call) RunAndR
 // GetLastPersistedManifests provides a mock function with given fields:
 func (_m *CollectionsManifestAgentIface) GetLastPersistedManifests() (*metadata.CollectionsManifestPair, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLastPersistedManifests")
+	}
 
 	var r0 *metadata.CollectionsManifestPair
 	var r1 error
@@ -118,6 +126,10 @@ func (_c *CollectionsManifestAgentIface_GetLastPersistedManifests_Call) RunAndRe
 func (_m *CollectionsManifestAgentIface) GetSourceManifest() (*metadata.CollectionsManifest, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSourceManifest")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (*metadata.CollectionsManifest, error)); ok {
@@ -170,6 +182,10 @@ func (_c *CollectionsManifestAgentIface_GetSourceManifest_Call) RunAndReturn(run
 // GetSpecificSourceManifest provides a mock function with given fields: manifestVersion
 func (_m *CollectionsManifestAgentIface) GetSpecificSourceManifest(manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(manifestVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpecificSourceManifest")
+	}
 
 	var r0 *metadata.CollectionsManifest
 	var r1 error
@@ -225,6 +241,10 @@ func (_c *CollectionsManifestAgentIface_GetSpecificSourceManifest_Call) RunAndRe
 func (_m *CollectionsManifestAgentIface) GetSpecificTargetManifest(manifestVersion uint64) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(manifestVersion)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpecificTargetManifest")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func(uint64) (*metadata.CollectionsManifest, error)); ok {
@@ -279,6 +299,10 @@ func (_c *CollectionsManifestAgentIface_GetSpecificTargetManifest_Call) RunAndRe
 func (_m *CollectionsManifestAgentIface) GetTargetManifest() (*metadata.CollectionsManifest, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetManifest")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (*metadata.CollectionsManifest, error)); ok {
@@ -331,6 +355,10 @@ func (_c *CollectionsManifestAgentIface_GetTargetManifest_Call) RunAndReturn(run
 // PersistNeededManifests provides a mock function with given fields:
 func (_m *CollectionsManifestAgentIface) PersistNeededManifests() (error, error, bool, bool) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PersistNeededManifests")
+	}
 
 	var r0 error
 	var r1 error
@@ -428,6 +456,10 @@ func (_c *CollectionsManifestAgentIface_SetTempAgent_Call) RunAndReturn(run func
 // Start provides a mock function with given fields:
 func (_m *CollectionsManifestAgentIface) Start() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

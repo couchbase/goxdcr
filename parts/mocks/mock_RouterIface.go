@@ -24,6 +24,10 @@ func (_m *RouterIface) EXPECT() *RouterIface_Expecter {
 func (_m *RouterIface) Route(data interface{}) (map[string]interface{}, error) {
 	ret := _m.Called(data)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Route")
+	}
+
 	var r0 map[string]interface{}
 	var r1 error
 	if rf, ok := ret.Get(0).(func(interface{}) (map[string]interface{}, error)); ok {
@@ -78,6 +82,10 @@ func (_c *RouterIface_Route_Call) RunAndReturn(run func(interface{}) (map[string
 func (_m *RouterIface) RouteCollection(data interface{}, partId string, origUprEvent *base.WrappedUprEvent) error {
 	ret := _m.Called(data, partId, origUprEvent)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RouteCollection")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(interface{}, string, *base.WrappedUprEvent) error); ok {
 		r0 = rf(data, partId, origUprEvent)
@@ -122,6 +130,10 @@ func (_c *RouterIface_RouteCollection_Call) RunAndReturn(run func(interface{}, s
 func (_m *RouterIface) Start() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -162,6 +174,10 @@ func (_c *RouterIface_Start_Call) RunAndReturn(run func() error) *RouterIface_St
 // Stop provides a mock function with given fields:
 func (_m *RouterIface) Stop() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

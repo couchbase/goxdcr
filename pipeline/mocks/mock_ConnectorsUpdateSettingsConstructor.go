@@ -26,6 +26,10 @@ func (_m *ConnectorsUpdateSettingsConstructor) EXPECT() *ConnectorsUpdateSetting
 func (_m *ConnectorsUpdateSettingsConstructor) Execute(_a0 common.Pipeline, connector common.Connector, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	ret := _m.Called(_a0, connector, pipeline_settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 metadata.ReplicationSettingsMap
 	var r1 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline, common.Connector, metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)); ok {

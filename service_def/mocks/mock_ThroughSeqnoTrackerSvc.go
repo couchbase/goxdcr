@@ -26,6 +26,10 @@ func (_m *ThroughSeqnoTrackerSvc) EXPECT() *ThroughSeqnoTrackerSvc_Expecter {
 func (_m *ThroughSeqnoTrackerSvc) Attach(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Attach")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
 		r0 = rf(pipeline)
@@ -67,6 +71,10 @@ func (_c *ThroughSeqnoTrackerSvc_Attach_Call) RunAndReturn(run func(common.Pipel
 // GetThroughSeqno provides a mock function with given fields: vbno
 func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqno(vbno uint16) uint64 {
 	ret := _m.Called(vbno)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetThroughSeqno")
+	}
 
 	var r0 uint64
 	if rf, ok := ret.Get(0).(func(uint16) uint64); ok {
@@ -110,6 +118,10 @@ func (_c *ThroughSeqnoTrackerSvc_GetThroughSeqno_Call) RunAndReturn(run func(uin
 func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqnos() map[uint16]uint64 {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetThroughSeqnos")
+	}
+
 	var r0 map[uint16]uint64
 	if rf, ok := ret.Get(0).(func() map[uint16]uint64); ok {
 		r0 = rf()
@@ -152,6 +164,10 @@ func (_c *ThroughSeqnoTrackerSvc_GetThroughSeqnos_Call) RunAndReturn(run func() 
 // GetThroughSeqnosAndManifestIds provides a mock function with given fields:
 func (_m *ThroughSeqnoTrackerSvc) GetThroughSeqnosAndManifestIds() (map[uint16]uint64, map[uint16]uint64, map[uint16]uint64) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetThroughSeqnosAndManifestIds")
+	}
 
 	var r0 map[uint16]uint64
 	var r1 map[uint16]uint64

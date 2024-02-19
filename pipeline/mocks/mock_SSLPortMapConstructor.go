@@ -24,6 +24,10 @@ func (_m *SSLPortMapConstructor) EXPECT() *SSLPortMapConstructor_Expecter {
 func (_m *SSLPortMapConstructor) Execute(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, error) {
 	ret := _m.Called(targetClusterRef, spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 map[string]uint16
 	var r1 error
 	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, *metadata.ReplicationSpecification) (map[string]uint16, error)); ok {

@@ -24,6 +24,10 @@ func (_m *AsyncComponentEventHandler) EXPECT() *AsyncComponentEventHandler_Expec
 func (_m *AsyncComponentEventHandler) Id() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Id")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -64,6 +68,10 @@ func (_c *AsyncComponentEventHandler_Id_Call) RunAndReturn(run func() string) *A
 // ProcessEvent provides a mock function with given fields: event
 func (_m *AsyncComponentEventHandler) ProcessEvent(event *common.Event) error {
 	ret := _m.Called(event)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ProcessEvent")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*common.Event) error); ok {

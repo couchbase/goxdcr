@@ -26,6 +26,10 @@ func (_m *P2PSendType) EXPECT() *P2PSendType_Expecter {
 func (_m *P2PSendType) Execute(req peerToPeer.Request, _a1 *log.CommonLogger) (peerToPeer.HandlerResult, error) {
 	ret := _m.Called(req, _a1)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 peerToPeer.HandlerResult
 	var r1 error
 	if rf, ok := ret.Get(0).(func(peerToPeer.Request, *log.CommonLogger) (peerToPeer.HandlerResult, error)); ok {

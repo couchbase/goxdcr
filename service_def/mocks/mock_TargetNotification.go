@@ -24,6 +24,10 @@ func (_m *TargetNotification) EXPECT() *TargetNotification_Expecter {
 func (_m *TargetNotification) Clone(numOfReaders int) interface{} {
 	ret := _m.Called(numOfReaders)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Clone")
+	}
+
 	var r0 interface{}
 	if rf, ok := ret.Get(0).(func(int) interface{}); ok {
 		r0 = rf(numOfReaders)
@@ -67,6 +71,10 @@ func (_c *TargetNotification_Clone_Call) RunAndReturn(run func(int) interface{})
 // GetReplicasInfo provides a mock function with given fields:
 func (_m *TargetNotification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.StringStringMap, []uint16) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicasInfo")
+	}
 
 	var r0 int
 	var r1 *base.VbHostsMapType
@@ -139,6 +147,10 @@ func (_c *TargetNotification_GetReplicasInfo_Call) RunAndReturn(run func() (int,
 func (_m *TargetNotification) GetTargetBucketInfo() base.BucketInfoMapType {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetBucketInfo")
+	}
+
 	var r0 base.BucketInfoMapType
 	if rf, ok := ret.Get(0).(func() base.BucketInfoMapType); ok {
 		r0 = rf()
@@ -182,6 +194,10 @@ func (_c *TargetNotification_GetTargetBucketInfo_Call) RunAndReturn(run func() b
 func (_m *TargetNotification) GetTargetBucketUUID() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetBucketUUID")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -222,6 +238,10 @@ func (_c *TargetNotification_GetTargetBucketUUID_Call) RunAndReturn(run func() s
 // GetTargetServerVBMap provides a mock function with given fields:
 func (_m *TargetNotification) GetTargetServerVBMap() base.KvVBMapType {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetServerVBMap")
+	}
 
 	var r0 base.KvVBMapType
 	if rf, ok := ret.Get(0).(func() base.KvVBMapType); ok {
@@ -266,6 +286,10 @@ func (_c *TargetNotification_GetTargetServerVBMap_Call) RunAndReturn(run func() 
 func (_m *TargetNotification) GetTargetStorageBackend() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetTargetStorageBackend")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -306,6 +330,10 @@ func (_c *TargetNotification_GetTargetStorageBackend_Call) RunAndReturn(run func
 // IsSourceNotification provides a mock function with given fields:
 func (_m *TargetNotification) IsSourceNotification() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsSourceNotification")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {

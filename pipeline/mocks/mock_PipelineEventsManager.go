@@ -28,6 +28,10 @@ func (_m *PipelineEventsManager) EXPECT() *PipelineEventsManager_Expecter {
 func (_m *PipelineEventsManager) AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) int64 {
 	ret := _m.Called(eventType, eventDesc, eventExtras, hint)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddEvent")
+	}
+
 	var r0 int64
 	if rf, ok := ret.Get(0).(func(base.EventInfoType, string, base.EventsMap, interface{}) int64); ok {
 		r0 = rf(eventType, eventDesc, eventExtras, hint)
@@ -72,6 +76,10 @@ func (_c *PipelineEventsManager_AddEvent_Call) RunAndReturn(run func(base.EventI
 // BackfillUpdateCb provides a mock function with given fields: diffPair, srcManifestsDelta
 func (_m *PipelineEventsManager) BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error {
 	ret := _m.Called(diffPair, srcManifestsDelta)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BackfillUpdateCb")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
@@ -181,6 +189,10 @@ func (_c *PipelineEventsManager_ClearNonBrokenMapEventsWithString_Call) RunAndRe
 func (_m *PipelineEventsManager) ContainsEvent(eventId int) bool {
 	ret := _m.Called(eventId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ContainsEvent")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(int) bool); ok {
 		r0 = rf(eventId)
@@ -223,6 +235,10 @@ func (_c *PipelineEventsManager_ContainsEvent_Call) RunAndReturn(run func(int) b
 func (_m *PipelineEventsManager) DismissEvent(eventId int) error {
 	ret := _m.Called(eventId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DismissEvent")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(int) error); ok {
 		r0 = rf(eventId)
@@ -264,6 +280,10 @@ func (_c *PipelineEventsManager_DismissEvent_Call) RunAndReturn(run func(int) er
 // GetCurrentEvents provides a mock function with given fields:
 func (_m *PipelineEventsManager) GetCurrentEvents() *pipeline.PipelineEventList {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCurrentEvents")
+	}
 
 	var r0 *pipeline.PipelineEventList
 	if rf, ok := ret.Get(0).(func() *pipeline.PipelineEventList); ok {
@@ -372,6 +392,10 @@ func (_c *PipelineEventsManager_ResetDismissedHistory_Call) RunAndReturn(run fun
 // UpdateEvent provides a mock function with given fields: oldEventId, newEventDesc, newEventExtras
 func (_m *PipelineEventsManager) UpdateEvent(oldEventId int64, newEventDesc string, newEventExtras *base.EventsMap) error {
 	ret := _m.Called(oldEventId, newEventDesc, newEventExtras)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateEvent")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(int64, string, *base.EventsMap) error); ok {

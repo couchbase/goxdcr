@@ -25,6 +25,10 @@ func (_m *Filter) EXPECT() *Filter_Expecter {
 func (_m *Filter) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64, base.FilteringStatusType) {
 	ret := _m.Called(wrappedUprEvent)
 
+	if len(ret) == 0 {
+		panic("no return value specified for FilterUprEvent")
+	}
+
 	var r0 bool
 	var r1 error
 	var r2 string

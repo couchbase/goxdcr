@@ -26,6 +26,10 @@ func (_m *Handler) EXPECT() *Handler_Expecter {
 func (_m *Handler) GetReqAndClearOpaque(opaque uint32) (*peerToPeer.Request, chan peerToPeer.ReqRespPair, bool) {
 	ret := _m.Called(opaque)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetReqAndClearOpaque")
+	}
+
 	var r0 *peerToPeer.Request
 	var r1 chan peerToPeer.ReqRespPair
 	var r2 bool
@@ -88,6 +92,10 @@ func (_c *Handler_GetReqAndClearOpaque_Call) RunAndReturn(run func(uint32) (*pee
 // GetSpecDelNotification provides a mock function with given fields: specId, internalId
 func (_m *Handler) GetSpecDelNotification(specId string, internalId string) (chan bool, error) {
 	ret := _m.Called(specId, internalId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSpecDelNotification")
+	}
 
 	var r0 chan bool
 	var r1 error
@@ -244,6 +252,10 @@ func (_c *Handler_HandleSpecDeletion_Call) RunAndReturn(run func(*metadata.Repli
 func (_m *Handler) RegisterOpaque(req peerToPeer.Request, opts *peerToPeer.SendOpts) error {
 	ret := _m.Called(req, opts)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RegisterOpaque")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(peerToPeer.Request, *peerToPeer.SendOpts) error); ok {
 		r0 = rf(req, opts)
@@ -287,6 +299,10 @@ func (_c *Handler_RegisterOpaque_Call) RunAndReturn(run func(peerToPeer.Request,
 func (_m *Handler) Start() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -327,6 +343,10 @@ func (_c *Handler_Start_Call) RunAndReturn(run func() error) *Handler_Start_Call
 // Stop provides a mock function with given fields:
 func (_m *Handler) Stop() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

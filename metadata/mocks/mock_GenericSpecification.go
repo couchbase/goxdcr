@@ -24,6 +24,10 @@ func (_m *GenericSpecification) EXPECT() *GenericSpecification_Expecter {
 func (_m *GenericSpecification) CloneGeneric() metadata.GenericSpecification {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for CloneGeneric")
+	}
+
 	var r0 metadata.GenericSpecification
 	if rf, ok := ret.Get(0).(func() metadata.GenericSpecification); ok {
 		r0 = rf()
@@ -66,6 +70,10 @@ func (_c *GenericSpecification_CloneGeneric_Call) RunAndReturn(run func() metada
 // GetBackfillSpec provides a mock function with given fields:
 func (_m *GenericSpecification) GetBackfillSpec() *metadata.BackfillReplicationSpec {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBackfillSpec")
+	}
 
 	var r0 *metadata.BackfillReplicationSpec
 	if rf, ok := ret.Get(0).(func() *metadata.BackfillReplicationSpec); ok {
@@ -110,6 +118,10 @@ func (_c *GenericSpecification_GetBackfillSpec_Call) RunAndReturn(run func() *me
 func (_m *GenericSpecification) GetFullId() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetFullId")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -150,6 +162,10 @@ func (_c *GenericSpecification_GetFullId_Call) RunAndReturn(run func() string) *
 // GetReplicationSpec provides a mock function with given fields:
 func (_m *GenericSpecification) GetReplicationSpec() *metadata.ReplicationSpecification {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicationSpec")
+	}
 
 	var r0 *metadata.ReplicationSpecification
 	if rf, ok := ret.Get(0).(func() *metadata.ReplicationSpecification); ok {
@@ -194,6 +210,10 @@ func (_c *GenericSpecification_GetReplicationSpec_Call) RunAndReturn(run func() 
 func (_m *GenericSpecification) RedactGeneric() metadata.GenericSpecification {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for RedactGeneric")
+	}
+
 	var r0 metadata.GenericSpecification
 	if rf, ok := ret.Get(0).(func() metadata.GenericSpecification); ok {
 		r0 = rf()
@@ -237,6 +257,10 @@ func (_c *GenericSpecification_RedactGeneric_Call) RunAndReturn(run func() metad
 func (_m *GenericSpecification) SameSpecGeneric(other metadata.GenericSpecification) bool {
 	ret := _m.Called(other)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SameSpecGeneric")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(metadata.GenericSpecification) bool); ok {
 		r0 = rf(other)
@@ -278,6 +302,10 @@ func (_c *GenericSpecification_SameSpecGeneric_Call) RunAndReturn(run func(metad
 // Type provides a mock function with given fields:
 func (_m *GenericSpecification) Type() metadata.ReplicationType {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Type")
+	}
 
 	var r0 metadata.ReplicationType
 	if rf, ok := ret.Get(0).(func() metadata.ReplicationType); ok {

@@ -24,6 +24,10 @@ func (_m *AuditEventIface) EXPECT() *AuditEventIface_Expecter {
 func (_m *AuditEventIface) Clone() service_def.AuditEventIface {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Clone")
+	}
+
 	var r0 service_def.AuditEventIface
 	if rf, ok := ret.Get(0).(func() service_def.AuditEventIface); ok {
 		r0 = rf()
@@ -66,6 +70,10 @@ func (_c *AuditEventIface_Clone_Call) RunAndReturn(run func() service_def.AuditE
 // Redact provides a mock function with given fields:
 func (_m *AuditEventIface) Redact() service_def.AuditEventIface {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Redact")
+	}
 
 	var r0 service_def.AuditEventIface
 	if rf, ok := ret.Get(0).(func() service_def.AuditEventIface); ok {

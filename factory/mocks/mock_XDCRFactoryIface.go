@@ -28,6 +28,10 @@ func (_m *XDCRFactoryIface) EXPECT() *XDCRFactoryIface_Expecter {
 func (_m *XDCRFactoryIface) CheckpointBeforeStop(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckpointBeforeStop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
 		r0 = rf(pipeline)
@@ -69,6 +73,10 @@ func (_c *XDCRFactoryIface_CheckpointBeforeStop_Call) RunAndReturn(run func(comm
 // ConstructSSLPortMap provides a mock function with given fields: targetClusterRef, spec
 func (_m *XDCRFactoryIface) ConstructSSLPortMap(targetClusterRef *metadata.RemoteClusterReference, spec *metadata.ReplicationSpecification) (map[string]uint16, bool, error) {
 	ret := _m.Called(targetClusterRef, spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructSSLPortMap")
+	}
 
 	var r0 map[string]uint16
 	var r1 bool
@@ -132,6 +140,10 @@ func (_c *XDCRFactoryIface_ConstructSSLPortMap_Call) RunAndReturn(run func(*meta
 func (_m *XDCRFactoryIface) ConstructSettingsForConnector(pipeline common.Pipeline, connector common.Connector, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	ret := _m.Called(pipeline, connector, settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructSettingsForConnector")
+	}
+
 	var r0 metadata.ReplicationSettingsMap
 	var r1 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline, common.Connector, metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)); ok {
@@ -187,6 +199,10 @@ func (_c *XDCRFactoryIface_ConstructSettingsForConnector_Call) RunAndReturn(run 
 // ConstructSettingsForPart provides a mock function with given fields: pipeline, part, settings, targetClusterRef, ssl_port_map, isSSLOverMem
 func (_m *XDCRFactoryIface) ConstructSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, ssl_port_map map[string]uint16, isSSLOverMem bool) (metadata.ReplicationSettingsMap, error) {
 	ret := _m.Called(pipeline, part, settings, targetClusterRef, ssl_port_map, isSSLOverMem)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructSettingsForPart")
+	}
 
 	var r0 metadata.ReplicationSettingsMap
 	var r1 error
@@ -247,6 +263,10 @@ func (_c *XDCRFactoryIface_ConstructSettingsForPart_Call) RunAndReturn(run func(
 func (_m *XDCRFactoryIface) ConstructUpdateSettingsForConnector(pipeline common.Pipeline, connector common.Connector, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	ret := _m.Called(pipeline, connector, settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructUpdateSettingsForConnector")
+	}
+
 	var r0 metadata.ReplicationSettingsMap
 	var r1 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline, common.Connector, metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)); ok {
@@ -302,6 +322,10 @@ func (_c *XDCRFactoryIface_ConstructUpdateSettingsForConnector_Call) RunAndRetur
 // ConstructUpdateSettingsForPart provides a mock function with given fields: pipeline, part, settings
 func (_m *XDCRFactoryIface) ConstructUpdateSettingsForPart(pipeline common.Pipeline, part common.Part, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	ret := _m.Called(pipeline, part, settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructUpdateSettingsForPart")
+	}
 
 	var r0 metadata.ReplicationSettingsMap
 	var r1 error
@@ -359,6 +383,10 @@ func (_c *XDCRFactoryIface_ConstructUpdateSettingsForPart_Call) RunAndReturn(run
 func (_m *XDCRFactoryIface) ConstructUpdateSettingsForService(pipeline common.Pipeline, service common.PipelineService, settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error) {
 	ret := _m.Called(pipeline, service, settings)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructUpdateSettingsForService")
+	}
+
 	var r0 metadata.ReplicationSettingsMap
 	var r1 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline, common.PipelineService, metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)); ok {
@@ -415,6 +443,10 @@ func (_c *XDCRFactoryIface_ConstructUpdateSettingsForService_Call) RunAndReturn(
 func (_m *XDCRFactoryIface) NewPipeline(topic string, progressRecorder common.PipelineProgressRecorder) (common.Pipeline, error) {
 	ret := _m.Called(topic, progressRecorder)
 
+	if len(ret) == 0 {
+		panic("no return value specified for NewPipeline")
+	}
+
 	var r0 common.Pipeline
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, common.PipelineProgressRecorder) (common.Pipeline, error)); ok {
@@ -469,6 +501,10 @@ func (_c *XDCRFactoryIface_NewPipeline_Call) RunAndReturn(run func(string, commo
 // NewSecondaryPipeline provides a mock function with given fields: topic, primaryPipeline, progress_recorder, pipelineType
 func (_m *XDCRFactoryIface) NewSecondaryPipeline(topic string, primaryPipeline common.Pipeline, progress_recorder common.PipelineProgressRecorder, pipelineType common.PipelineType) (common.Pipeline, error) {
 	ret := _m.Called(topic, primaryPipeline, progress_recorder, pipelineType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NewSecondaryPipeline")
+	}
 
 	var r0 common.Pipeline
 	var r1 error
@@ -559,6 +595,10 @@ func (_c *XDCRFactoryIface_SetPipelineStopCallback_Call) RunAndReturn(run func(b
 // SetStartSeqno provides a mock function with given fields: pipeline
 func (_m *XDCRFactoryIface) SetStartSeqno(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetStartSeqno")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {

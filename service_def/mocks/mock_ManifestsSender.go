@@ -26,6 +26,10 @@ func (_m *ManifestsSender) EXPECT() *ManifestsSender_Expecter {
 func (_m *ManifestsSender) Execute(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) base.ErrorMap {
 	ret := _m.Called(spec, manifests)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 base.ErrorMap
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, *metadata.CollectionsManifestPair) base.ErrorMap); ok {
 		r0 = rf(spec, manifests)

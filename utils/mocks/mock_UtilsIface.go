@@ -44,6 +44,10 @@ func (_m *UtilsIface) EXPECT() *UtilsIface_Expecter {
 func (_m *UtilsIface) AddKeyToBeFiltered(currentValue []byte, key []byte, dpGetter base.DpGetterFunc, toBeReleased *[][]byte, currentValueEndBody int) ([]byte, error, int64, int) {
 	ret := _m.Called(currentValue, key, dpGetter, toBeReleased, currentValueEndBody)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddKeyToBeFiltered")
+	}
+
 	var r0 []byte
 	var r1 error
 	var r2 int64
@@ -116,6 +120,10 @@ func (_c *UtilsIface_AddKeyToBeFiltered_Call) RunAndReturn(run func([]byte, []by
 func (_m *UtilsIface) BucketInfoParseError(bucketInfo map[string]interface{}, errMsg string, logger *log.CommonLogger) error {
 	ret := _m.Called(bucketInfo, errMsg, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for BucketInfoParseError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, *log.CommonLogger) error); ok {
 		r0 = rf(bucketInfo, errMsg, logger)
@@ -160,6 +168,10 @@ func (_c *UtilsIface_BucketInfoParseError_Call) RunAndReturn(run func(map[string
 func (_m *UtilsIface) BucketNotFoundError(bucketName string) error {
 	ret := _m.Called(bucketName)
 
+	if len(ret) == 0 {
+		panic("no return value specified for BucketNotFoundError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(bucketName)
@@ -201,6 +213,10 @@ func (_c *UtilsIface_BucketNotFoundError_Call) RunAndReturn(run func(string) err
 // BucketStorageBackend provides a mock function with given fields: bucketInfo
 func (_m *UtilsIface) BucketStorageBackend(bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BucketStorageBackend")
+	}
 
 	var r0 string
 	var r1 error
@@ -253,6 +269,10 @@ func (_c *UtilsIface_BucketStorageBackend_Call) RunAndReturn(run func(map[string
 // BucketUUID provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) BucketUUID(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BucketUUID")
+	}
 
 	var r0 string
 	var r1 error
@@ -314,6 +334,10 @@ func (_c *UtilsIface_BucketUUID_Call) RunAndReturn(run func(string, string, stri
 // BucketValidationInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) BucketValidationInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BucketValidationInfo")
+	}
 
 	var r0 map[string]interface{}
 	var r1 string
@@ -415,6 +439,10 @@ func (_c *UtilsIface_BucketValidationInfo_Call) RunAndReturn(run func(string, st
 func (_m *UtilsIface) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, []byte, int, error, string, int64, []byte) {
 	ret := _m.Called(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckForTransactionXattrsInUprEvent")
+	}
+
 	var r0 bool
 	var r1 []byte
 	var r2 int
@@ -509,6 +537,10 @@ func (_c *UtilsIface_CheckForTransactionXattrsInUprEvent_Call) RunAndReturn(run 
 func (_m *UtilsIface) ComposeHELORequest(userAgent string, features utils.HELOFeatures) *gomemcached.MCRequest {
 	ret := _m.Called(userAgent, features)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ComposeHELORequest")
+	}
+
 	var r0 *gomemcached.MCRequest
 	if rf, ok := ret.Get(0).(func(string, utils.HELOFeatures) *gomemcached.MCRequest); ok {
 		r0 = rf(userAgent, features)
@@ -553,6 +585,10 @@ func (_c *UtilsIface_ComposeHELORequest_Call) RunAndReturn(run func(string, util
 // ConstructHttpRequest provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, logger
 func (_m *UtilsIface) ConstructHttpRequest(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, userAuthMode base.UserAuthMode, httpCommand string, contentType string, body []byte, logger *log.CommonLogger) (*http.Request, string, error) {
 	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, userAuthMode, httpCommand, contentType, body, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConstructHttpRequest")
+	}
 
 	var r0 *http.Request
 	var r1 string
@@ -625,6 +661,10 @@ func (_c *UtilsIface_ConstructHttpRequest_Call) RunAndReturn(run func(string, st
 func (_m *UtilsIface) DumpStackTraceAfterThreshold(id string, threshold time.Duration, goroutines base.PprofLookupTypes) func() {
 	ret := _m.Called(id, threshold, goroutines)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DumpStackTraceAfterThreshold")
+	}
+
 	var r0 func()
 	if rf, ok := ret.Get(0).(func(string, time.Duration, base.PprofLookupTypes) func()); ok {
 		r0 = rf(id, threshold, goroutines)
@@ -670,6 +710,10 @@ func (_c *UtilsIface_DumpStackTraceAfterThreshold_Call) RunAndReturn(run func(st
 // EncodeHttpRequest provides a mock function with given fields: req
 func (_m *UtilsIface) EncodeHttpRequest(req *http.Request) ([]byte, error) {
 	ret := _m.Called(req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EncodeHttpRequest")
+	}
 
 	var r0 []byte
 	var r1 error
@@ -725,6 +769,10 @@ func (_c *UtilsIface_EncodeHttpRequest_Call) RunAndReturn(run func(*http.Request
 func (_m *UtilsIface) EncodeHttpRequestHeader(reqBytes []byte, key string, value string) []byte {
 	ret := _m.Called(reqBytes, key, value)
 
+	if len(ret) == 0 {
+		panic("no return value specified for EncodeHttpRequestHeader")
+	}
+
 	var r0 []byte
 	if rf, ok := ret.Get(0).(func([]byte, string, string) []byte); ok {
 		r0 = rf(reqBytes, key, value)
@@ -770,6 +818,10 @@ func (_c *UtilsIface_EncodeHttpRequestHeader_Call) RunAndReturn(run func([]byte,
 // EncodeMapIntoByteArray provides a mock function with given fields: data
 func (_m *UtilsIface) EncodeMapIntoByteArray(data map[string]interface{}) ([]byte, error) {
 	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EncodeMapIntoByteArray")
+	}
 
 	var r0 []byte
 	var r1 error
@@ -825,6 +877,10 @@ func (_c *UtilsIface_EncodeMapIntoByteArray_Call) RunAndReturn(run func(map[stri
 func (_m *UtilsIface) EnforcePrefix(prefix string, str string) string {
 	ret := _m.Called(prefix, str)
 
+	if len(ret) == 0 {
+		panic("no return value specified for EnforcePrefix")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func(string, string) string); ok {
 		r0 = rf(prefix, str)
@@ -867,6 +923,10 @@ func (_c *UtilsIface_EnforcePrefix_Call) RunAndReturn(run func(string, string) s
 // ExponentialBackoffExecutor provides a mock function with given fields: name, initialWait, maxRetries, factor, op
 func (_m *UtilsIface) ExponentialBackoffExecutor(name string, initialWait time.Duration, maxRetries int, factor int, op utils.ExponentialOpFunc) error {
 	ret := _m.Called(name, initialWait, maxRetries, factor, op)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExponentialBackoffExecutor")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, time.Duration, int, int, utils.ExponentialOpFunc) error); ok {
@@ -913,6 +973,10 @@ func (_c *UtilsIface_ExponentialBackoffExecutor_Call) RunAndReturn(run func(stri
 // ExponentialBackoffExecutorWithFinishSignal provides a mock function with given fields: name, initialWait, maxRetries, factor, op, param, finCh
 func (_m *UtilsIface) ExponentialBackoffExecutorWithFinishSignal(name string, initialWait time.Duration, maxRetries int, factor int, op utils.ExponentialOpFunc2, param interface{}, finCh chan bool) (interface{}, error) {
 	ret := _m.Called(name, initialWait, maxRetries, factor, op, param, finCh)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExponentialBackoffExecutorWithFinishSignal")
+	}
 
 	var r0 interface{}
 	var r1 error
@@ -974,6 +1038,10 @@ func (_c *UtilsIface_ExponentialBackoffExecutorWithFinishSignal_Call) RunAndRetu
 func (_m *UtilsIface) ExponentialBackoffExecutorWithOriginalError(name string, initialWait time.Duration, maxRetries int, factor int, op utils.ExponentialOpFunc) error {
 	ret := _m.Called(name, initialWait, maxRetries, factor, op)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ExponentialBackoffExecutorWithOriginalError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, time.Duration, int, int, utils.ExponentialOpFunc) error); ok {
 		r0 = rf(name, initialWait, maxRetries, factor, op)
@@ -1019,6 +1087,10 @@ func (_c *UtilsIface_ExponentialBackoffExecutorWithOriginalError_Call) RunAndRet
 // FilterExpressionMatchesDoc provides a mock function with given fields: expression, docId, bucketName, collectionNs, addr, port
 func (_m *UtilsIface) FilterExpressionMatchesDoc(expression string, docId string, bucketName string, collectionNs *base.CollectionNamespace, addr string, port uint16) (bool, error) {
 	ret := _m.Called(expression, docId, bucketName, collectionNs, addr, port)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FilterExpressionMatchesDoc")
+	}
 
 	var r0 bool
 	var r1 error
@@ -1077,6 +1149,10 @@ func (_c *UtilsIface_FilterExpressionMatchesDoc_Call) RunAndReturn(run func(stri
 func (_m *UtilsIface) GetAuthMode(username string, clientCertificate []byte, path string, authMech base.HttpAuthMech) base.UserAuthMode {
 	ret := _m.Called(username, clientCertificate, path, authMech)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetAuthMode")
+	}
+
 	var r0 base.UserAuthMode
 	if rf, ok := ret.Get(0).(func(string, []byte, string, base.HttpAuthMech) base.UserAuthMode); ok {
 		r0 = rf(username, clientCertificate, path, authMech)
@@ -1121,6 +1197,10 @@ func (_c *UtilsIface_GetAuthMode_Call) RunAndReturn(run func(string, []byte, str
 // GetBucketInfo provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetBucketInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBucketInfo")
+	}
 
 	var r0 map[string]interface{}
 	var r1 error
@@ -1185,6 +1265,10 @@ func (_c *UtilsIface_GetBucketInfo_Call) RunAndReturn(run func(string, string, s
 func (_m *UtilsIface) GetBucketRecreatedError() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetBucketRecreatedError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -1225,6 +1309,10 @@ func (_c *UtilsIface_GetBucketRecreatedError_Call) RunAndReturn(run func() error
 // GetBucketTypeFromBucketInfo provides a mock function with given fields: bucketName, bucketInfo
 func (_m *UtilsIface) GetBucketTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketName, bucketInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBucketTypeFromBucketInfo")
+	}
 
 	var r0 string
 	var r1 error
@@ -1279,6 +1367,10 @@ func (_c *UtilsIface_GetBucketTypeFromBucketInfo_Call) RunAndReturn(run func(str
 func (_m *UtilsIface) GetBucketUuidFromBucketInfo(bucketName string, bucketInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(bucketName, bucketInfo, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetBucketUuidFromBucketInfo")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, *log.CommonLogger) (string, error)); ok {
@@ -1332,6 +1424,10 @@ func (_c *UtilsIface_GetBucketUuidFromBucketInfo_Call) RunAndReturn(run func(str
 // GetBuckets provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetBuckets(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]string, error) {
 	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBuckets")
+	}
 
 	var r0 map[string]string
 	var r1 error
@@ -1395,6 +1491,10 @@ func (_c *UtilsIface_GetBuckets_Call) RunAndReturn(run func(string, string, stri
 func (_m *UtilsIface) GetClusterCompatibilityFromBucketInfo(bucketInfo map[string]interface{}, logger *log.CommonLogger) (int, error) {
 	ret := _m.Called(bucketInfo, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterCompatibilityFromBucketInfo")
+	}
+
 	var r0 int
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}, *log.CommonLogger) (int, error)); ok {
@@ -1448,6 +1548,10 @@ func (_c *UtilsIface_GetClusterCompatibilityFromBucketInfo_Call) RunAndReturn(ru
 func (_m *UtilsIface) GetClusterCompatibilityFromNodeList(nodeList []interface{}) (int, error) {
 	ret := _m.Called(nodeList)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterCompatibilityFromNodeList")
+	}
+
 	var r0 int
 	var r1 error
 	if rf, ok := ret.Get(0).(func([]interface{}) (int, error)); ok {
@@ -1499,6 +1603,10 @@ func (_c *UtilsIface_GetClusterCompatibilityFromNodeList_Call) RunAndReturn(run 
 // GetClusterHeartbeatStatusFromNodeList provides a mock function with given fields: nodeList
 func (_m *UtilsIface) GetClusterHeartbeatStatusFromNodeList(nodeList []interface{}) (map[string]base.HeartbeatStatus, error) {
 	ret := _m.Called(nodeList)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterHeartbeatStatusFromNodeList")
+	}
 
 	var r0 map[string]base.HeartbeatStatus
 	var r1 error
@@ -1553,6 +1661,10 @@ func (_c *UtilsIface_GetClusterHeartbeatStatusFromNodeList_Call) RunAndReturn(ru
 // GetClusterInfo provides a mock function with given fields: hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetClusterInfo(hostAddr string, path string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	ret := _m.Called(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterInfo")
+	}
 
 	var r0 map[string]interface{}
 	var r1 error
@@ -1616,6 +1728,10 @@ func (_c *UtilsIface_GetClusterInfo_Call) RunAndReturn(run func(string, string, 
 // GetClusterInfoWStatusCode provides a mock function with given fields: hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetClusterInfoWStatusCode(hostAddr string, path string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error, int) {
 	ret := _m.Called(hostAddr, path, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterInfoWStatusCode")
+	}
 
 	var r0 map[string]interface{}
 	var r1 error
@@ -1687,6 +1803,10 @@ func (_c *UtilsIface_GetClusterInfoWStatusCode_Call) RunAndReturn(run func(strin
 func (_m *UtilsIface) GetClusterUUID(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterUUID")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (string, error)); ok {
@@ -1746,6 +1866,10 @@ func (_c *UtilsIface_GetClusterUUID_Call) RunAndReturn(run func(string, string, 
 // GetClusterUUIDAndNodeListWithMinInfo provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetClusterUUIDAndNodeListWithMinInfo(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (string, []interface{}, error) {
 	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterUUIDAndNodeListWithMinInfo")
+	}
 
 	var r0 string
 	var r1 []interface{}
@@ -1816,6 +1940,10 @@ func (_c *UtilsIface_GetClusterUUIDAndNodeListWithMinInfo_Call) RunAndReturn(run
 func (_m *UtilsIface) GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo(defaultPoolInfo map[string]interface{}, logger *log.CommonLogger) (string, []interface{}, error) {
 	ret := _m.Called(defaultPoolInfo, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo")
+	}
+
 	var r0 string
 	var r1 []interface{}
 	var r2 error
@@ -1878,6 +2006,10 @@ func (_c *UtilsIface_GetClusterUUIDAndNodeListWithMinInfoFromDefaultPoolInfo_Cal
 func (_m *UtilsIface) GetClusterUUIDFromDefaultPoolInfo(defaultPoolInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(defaultPoolInfo, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterUUIDFromDefaultPoolInfo")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}, *log.CommonLogger) (string, error)); ok {
@@ -1931,6 +2063,10 @@ func (_c *UtilsIface_GetClusterUUIDFromDefaultPoolInfo_Call) RunAndReturn(run fu
 func (_m *UtilsIface) GetClusterUUIDFromURI(uri string) (string, error) {
 	ret := _m.Called(uri)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetClusterUUIDFromURI")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
@@ -1983,6 +2119,10 @@ func (_c *UtilsIface_GetClusterUUIDFromURI_Call) RunAndReturn(run func(string) (
 func (_m *UtilsIface) GetCollectionManifestUidFromBucketInfo(bucketInfo map[string]interface{}) (uint64, error) {
 	ret := _m.Called(bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionManifestUidFromBucketInfo")
+	}
+
 	var r0 uint64
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) (uint64, error)); ok {
@@ -2034,6 +2174,10 @@ func (_c *UtilsIface_GetCollectionManifestUidFromBucketInfo_Call) RunAndReturn(r
 // GetCollectionsManifest provides a mock function with given fields: hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetCollectionsManifest(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionsManifest")
+	}
 
 	var r0 *metadata.CollectionsManifest
 	var r1 error
@@ -2098,6 +2242,10 @@ func (_c *UtilsIface_GetCollectionsManifest_Call) RunAndReturn(run func(string, 
 func (_m *UtilsIface) GetConflictResolutionTypeFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketName, bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetConflictResolutionTypeFromBucketInfo")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) (string, error)); ok {
@@ -2151,6 +2299,10 @@ func (_c *UtilsIface_GetConflictResolutionTypeFromBucketInfo_Call) RunAndReturn(
 func (_m *UtilsIface) GetCrossClusterVersioningFromBucketInfo(bucketInfo map[string]interface{}) (bool, error) {
 	ret := _m.Called(bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCrossClusterVersioningFromBucketInfo")
+	}
+
 	var r0 bool
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) (bool, error)); ok {
@@ -2203,6 +2355,10 @@ func (_c *UtilsIface_GetCrossClusterVersioningFromBucketInfo_Call) RunAndReturn(
 func (_m *UtilsIface) GetCurrentHostnameFromBucketInfo(bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetCurrentHostnameFromBucketInfo")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) (string, error)); ok {
@@ -2254,6 +2410,10 @@ func (_c *UtilsIface_GetCurrentHostnameFromBucketInfo_Call) RunAndReturn(run fun
 // GetDefaultPoolInfoUsingHttps provides a mock function with given fields: hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetDefaultPoolInfoUsingHttps(hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	ret := _m.Called(hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDefaultPoolInfoUsingHttps")
+	}
 
 	var r0 map[string]interface{}
 	var r1 int
@@ -2322,6 +2482,10 @@ func (_c *UtilsIface_GetDefaultPoolInfoUsingHttps_Call) RunAndReturn(run func(st
 func (_m *UtilsIface) GetDefaultPoolInfoUsingScramSha(hostAddr string, username string, password string, logger *log.CommonLogger) (map[string]interface{}, int, error) {
 	ret := _m.Called(hostAddr, username, password, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetDefaultPoolInfoUsingScramSha")
+	}
+
 	var r0 map[string]interface{}
 	var r1 int
 	var r2 error
@@ -2386,6 +2550,10 @@ func (_c *UtilsIface_GetDefaultPoolInfoUsingScramSha_Call) RunAndReturn(run func
 func (_m *UtilsIface) GetEvictionPolicyFromBucketInfo(bucketName string, bucketInfo map[string]interface{}) (string, error) {
 	ret := _m.Called(bucketName, bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetEvictionPolicyFromBucketInfo")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) (string, error)); ok {
@@ -2438,6 +2606,10 @@ func (_c *UtilsIface_GetEvictionPolicyFromBucketInfo_Call) RunAndReturn(run func
 // GetExternalAddressAndKvPortsFromNodeInfo provides a mock function with given fields: nodeInfo
 func (_m *UtilsIface) GetExternalAddressAndKvPortsFromNodeInfo(nodeInfo map[string]interface{}) (string, int, error, int, error) {
 	ret := _m.Called(nodeInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExternalAddressAndKvPortsFromNodeInfo")
+	}
 
 	var r0 string
 	var r1 int
@@ -2512,6 +2684,10 @@ func (_c *UtilsIface_GetExternalAddressAndKvPortsFromNodeInfo_Call) RunAndReturn
 func (_m *UtilsIface) GetExternalMgtHostAndPort(nodeInfo map[string]interface{}, isHttps bool) (string, int, error) {
 	ret := _m.Called(nodeInfo, isHttps)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetExternalMgtHostAndPort")
+	}
+
 	var r0 string
 	var r1 int
 	var r2 error
@@ -2571,6 +2747,10 @@ func (_c *UtilsIface_GetExternalMgtHostAndPort_Call) RunAndReturn(run func(map[s
 // GetHighSeqNos provides a mock function with given fields: vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap
 func (_m *UtilsIface) GetHighSeqNos(vbnos []uint16, conn memcached.ClientIface, stats_map *map[string]string, collectionIds []uint32, recycledVbSeqnoMap *map[uint16]uint64) (*map[uint16]uint64, *map[string]string, []uint16, error) {
 	ret := _m.Called(vbnos, conn, stats_map, collectionIds, recycledVbSeqnoMap)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHighSeqNos")
+	}
 
 	var r0 *map[uint16]uint64
 	var r1 *map[string]string
@@ -2648,6 +2828,10 @@ func (_c *UtilsIface_GetHighSeqNos_Call) RunAndReturn(run func([]uint16, memcach
 func (_m *UtilsIface) GetHostAddrFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, isHttps bool, logger *log.CommonLogger, useExternal bool) (string, error) {
 	ret := _m.Called(adminHostAddr, nodeInfo, isHttps, logger, useExternal)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetHostAddrFromNodeInfo")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, bool, *log.CommonLogger, bool) (string, error)); ok {
@@ -2704,6 +2888,10 @@ func (_c *UtilsIface_GetHostAddrFromNodeInfo_Call) RunAndReturn(run func(string,
 func (_m *UtilsIface) GetHostNameFromNodeInfo(adminHostAddr string, nodeInfo map[string]interface{}, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(adminHostAddr, nodeInfo, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetHostNameFromNodeInfo")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, map[string]interface{}, *log.CommonLogger) (string, error)); ok {
@@ -2758,6 +2946,10 @@ func (_c *UtilsIface_GetHostNameFromNodeInfo_Call) RunAndReturn(run func(string,
 func (_m *UtilsIface) GetHostNamesFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error) {
 	ret := _m.Called(bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetHostNamesFromBucketInfo")
+	}
+
 	var r0 []string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) ([]string, error)); ok {
@@ -2811,6 +3003,10 @@ func (_c *UtilsIface_GetHostNamesFromBucketInfo_Call) RunAndReturn(run func(map[
 // GetHttpClient provides a mock function with given fields: username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger
 func (_m *UtilsIface) GetHttpClient(username string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, ssl_con_str string, logger *log.CommonLogger) (*http.Client, error) {
 	ret := _m.Called(username, authMech, certificate, san_in_certificate, clientCertificate, clientKey, ssl_con_str, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHttpClient")
+	}
 
 	var r0 *http.Client
 	var r1 error
@@ -2873,6 +3069,10 @@ func (_c *UtilsIface_GetHttpClient_Call) RunAndReturn(run func(string, base.Http
 func (_m *UtilsIface) GetHttpsMgtPortFromNodeInfo(nodeInfo map[string]interface{}) (int, error) {
 	ret := _m.Called(nodeInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetHttpsMgtPortFromNodeInfo")
+	}
+
 	var r0 int
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) (int, error)); ok {
@@ -2924,6 +3124,10 @@ func (_c *UtilsIface_GetHttpsMgtPortFromNodeInfo_Call) RunAndReturn(run func(map
 // GetIntExtHostNameKVPortTranslationMap provides a mock function with given fields: mapContainingNodesKey
 func (_m *UtilsIface) GetIntExtHostNameKVPortTranslationMap(mapContainingNodesKey map[string]interface{}) (map[string]string, error) {
 	ret := _m.Called(mapContainingNodesKey)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIntExtHostNameKVPortTranslationMap")
+	}
 
 	var r0 map[string]string
 	var r1 error
@@ -2979,6 +3183,10 @@ func (_c *UtilsIface_GetIntExtHostNameKVPortTranslationMap_Call) RunAndReturn(ru
 func (_m *UtilsIface) GetIntSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (int, error) {
 	ret := _m.Called(settings, settingName)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetIntSettingFromSettings")
+	}
+
 	var r0 int
 	var r1 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap, string) (int, error)); ok {
@@ -3031,6 +3239,10 @@ func (_c *UtilsIface_GetIntSettingFromSettings_Call) RunAndReturn(run func(metad
 // GetLocalBuckets provides a mock function with given fields: hostAddr, logger
 func (_m *UtilsIface) GetLocalBuckets(hostAddr string, logger *log.CommonLogger) (map[string]string, error) {
 	ret := _m.Called(hostAddr, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLocalBuckets")
+	}
 
 	var r0 map[string]string
 	var r1 error
@@ -3087,6 +3299,10 @@ func (_c *UtilsIface_GetLocalBuckets_Call) RunAndReturn(run func(string, *log.Co
 func (_m *UtilsIface) GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{} {
 	ret := _m.Called(expvarMap)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetMapFromExpvarMap")
+	}
+
 	var r0 map[string]interface{}
 	if rf, ok := ret.Get(0).(func(*expvar.Map) map[string]interface{}); ok {
 		r0 = rf(expvarMap)
@@ -3130,6 +3346,10 @@ func (_c *UtilsIface_GetMapFromExpvarMap_Call) RunAndReturn(run func(*expvar.Map
 // GetMemcachedClient provides a mock function with given fields: serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features
 func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, kv_mem_clients map[string]memcached.ClientIface, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger, features utils.HELOFeatures) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMemcachedClient")
+	}
 
 	var r0 memcached.ClientIface
 	var r1 error
@@ -3191,6 +3411,10 @@ func (_c *UtilsIface_GetMemcachedClient_Call) RunAndReturn(run func(string, stri
 func (_m *UtilsIface) GetMemcachedConnection(serverAddr string, bucketName string, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, bucketName, userAgent, keepAlivePeriod, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetMemcachedConnection")
+	}
+
 	var r0 memcached.ClientIface
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, string, time.Duration, *log.CommonLogger) (memcached.ClientIface, error)); ok {
@@ -3248,6 +3472,10 @@ func (_c *UtilsIface_GetMemcachedConnection_Call) RunAndReturn(run func(string, 
 // GetMemcachedConnectionWFeatures provides a mock function with given fields: serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger
 func (_m *UtilsIface) GetMemcachedConnectionWFeatures(serverAddr string, bucketName string, userAgent string, keepAlivePeriod time.Duration, features utils.HELOFeatures, logger *log.CommonLogger) (memcached.ClientIface, utils.HELOFeatures, error) {
 	ret := _m.Called(serverAddr, bucketName, userAgent, keepAlivePeriod, features, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMemcachedConnectionWFeatures")
+	}
 
 	var r0 memcached.ClientIface
 	var r1 utils.HELOFeatures
@@ -3315,6 +3543,10 @@ func (_c *UtilsIface_GetMemcachedConnectionWFeatures_Call) RunAndReturn(run func
 func (_m *UtilsIface) GetMemcachedRawConn(serverAddr string, username string, password string, bucketName string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, username, password, bucketName, plainAuth, keepAlivePeriod, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetMemcachedRawConn")
+	}
+
 	var r0 memcached.ClientIface
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, string, string, bool, time.Duration, *log.CommonLogger) (memcached.ClientIface, error)); ok {
@@ -3374,6 +3606,10 @@ func (_c *UtilsIface_GetMemcachedRawConn_Call) RunAndReturn(run func(string, str
 // GetMemcachedSSLPortMap provides a mock function with given fields: hostName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, bucket, logger, useExternal
 func (_m *UtilsIface) GetMemcachedSSLPortMap(hostName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, bucket string, logger *log.CommonLogger, useExternal bool) (base.SSLPortMap, error) {
 	ret := _m.Called(hostName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, bucket, logger, useExternal)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMemcachedSSLPortMap")
+	}
 
 	var r0 base.SSLPortMap
 	var r1 error
@@ -3439,6 +3675,10 @@ func (_c *UtilsIface_GetMemcachedSSLPortMap_Call) RunAndReturn(run func(string, 
 func (_m *UtilsIface) GetNodeListFromInfoMap(infoMap map[string]interface{}, logger *log.CommonLogger) ([]interface{}, error) {
 	ret := _m.Called(infoMap, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodeListFromInfoMap")
+	}
+
 	var r0 []interface{}
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}, *log.CommonLogger) ([]interface{}, error)); ok {
@@ -3493,6 +3733,10 @@ func (_c *UtilsIface_GetNodeListFromInfoMap_Call) RunAndReturn(run func(map[stri
 // GetNodeListWithMinInfo provides a mock function with given fields: hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger
 func (_m *UtilsIface) GetNodeListWithMinInfo(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) ([]interface{}, error) {
 	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodeListWithMinInfo")
+	}
 
 	var r0 []interface{}
 	var r1 error
@@ -3556,6 +3800,10 @@ func (_c *UtilsIface_GetNodeListWithMinInfo_Call) RunAndReturn(run func(string, 
 func (_m *UtilsIface) GetNodeServicesInfo(hostAddr string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger) (map[string]interface{}, error) {
 	ret := _m.Called(hostAddr, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodeServicesInfo")
+	}
+
 	var r0 map[string]interface{}
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, *log.CommonLogger) (map[string]interface{}, error)); ok {
@@ -3618,6 +3866,10 @@ func (_c *UtilsIface_GetNodeServicesInfo_Call) RunAndReturn(run func(string, str
 func (_m *UtilsIface) GetNonExistentBucketError() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetNonExistentBucketError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -3655,34 +3907,38 @@ func (_c *UtilsIface_GetNonExistentBucketError_Call) RunAndReturn(run func() err
 	return _c
 }
 
-// GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodeServicesInfo, defaultConnStr, logger
-func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
-	ret := _m.Called(nodeServicesInfo, defaultConnStr, logger)
+// GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodeServicesInfo, defaultConnStr, useSecurePort, logger
+func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, useSecurePort bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+	ret := _m.Called(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPortsAndHostAddrsFromNodeServices")
+	}
 
 	var r0 base.HostPortMapType
 	var r1 []string
 	var r2 error
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
-		return rf(nodeServicesInfo, defaultConnStr, logger)
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
+		return rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
 	}
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, *log.CommonLogger) base.HostPortMapType); ok {
-		r0 = rf(nodeServicesInfo, defaultConnStr, logger)
+	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, bool, *log.CommonLogger) base.HostPortMapType); ok {
+		r0 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.HostPortMapType)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(map[string]interface{}, string, *log.CommonLogger) []string); ok {
-		r1 = rf(nodeServicesInfo, defaultConnStr, logger)
+	if rf, ok := ret.Get(1).(func(map[string]interface{}, string, bool, *log.CommonLogger) []string); ok {
+		r1 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(map[string]interface{}, string, *log.CommonLogger) error); ok {
-		r2 = rf(nodeServicesInfo, defaultConnStr, logger)
+	if rf, ok := ret.Get(2).(func(map[string]interface{}, string, bool, *log.CommonLogger) error); ok {
+		r2 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -3698,14 +3954,15 @@ type UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call struct {
 // GetPortsAndHostAddrsFromNodeServices is a helper method to define mock.On call
 //   - nodeServicesInfo map[string]interface{}
 //   - defaultConnStr string
+//   - useSecurePort bool
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo interface{}, defaultConnStr interface{}, logger interface{}) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
-	return &UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call{Call: _e.mock.On("GetPortsAndHostAddrsFromNodeServices", nodeServicesInfo, defaultConnStr, logger)}
+func (_e *UtilsIface_Expecter) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo interface{}, defaultConnStr interface{}, useSecurePort interface{}, logger interface{}) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+	return &UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call{Call: _e.mock.On("GetPortsAndHostAddrsFromNodeServices", nodeServicesInfo, defaultConnStr, useSecurePort, logger)}
 }
 
-func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Run(run func(nodeServicesInfo map[string]interface{}, defaultConnStr string, logger *log.CommonLogger)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Run(run func(nodeServicesInfo map[string]interface{}, defaultConnStr string, useSecurePort bool, logger *log.CommonLogger)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[string]interface{}), args[1].(string), args[2].(*log.CommonLogger))
+		run(args[0].(map[string]interface{}), args[1].(string), args[2].(bool), args[3].(*log.CommonLogger))
 	})
 	return _c
 }
@@ -3715,7 +3972,7 @@ func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Return(_a0 base.
 	return _c
 }
 
-func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) RunAndReturn(run func(map[string]interface{}, string, *log.CommonLogger) (base.HostPortMapType, []string, error)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) RunAndReturn(run func(map[string]interface{}, string, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3723,6 +3980,10 @@ func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) RunAndReturn(run
 // GetRemoteMemcachedConnection provides a mock function with given fields: serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, logger
 func (_m *UtilsIface) GetRemoteMemcachedConnection(serverAddr string, username string, password string, bucketName string, userAgent string, plainAuth bool, keepAlivePeriod time.Duration, logger *log.CommonLogger) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteMemcachedConnection")
+	}
 
 	var r0 memcached.ClientIface
 	var r1 error
@@ -3784,6 +4045,10 @@ func (_c *UtilsIface_GetRemoteMemcachedConnection_Call) RunAndReturn(run func(st
 // GetRemoteMemcachedConnectionWFeatures provides a mock function with given fields: serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, features, logger
 func (_m *UtilsIface) GetRemoteMemcachedConnectionWFeatures(serverAddr string, username string, password string, bucketName string, userAgent string, plainAuth bool, keepAlivePeriod time.Duration, features utils.HELOFeatures, logger *log.CommonLogger) (memcached.ClientIface, utils.HELOFeatures, error) {
 	ret := _m.Called(serverAddr, username, password, bucketName, userAgent, plainAuth, keepAlivePeriod, features, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteMemcachedConnectionWFeatures")
+	}
 
 	var r0 memcached.ClientIface
 	var r1 utils.HELOFeatures
@@ -3854,6 +4119,10 @@ func (_c *UtilsIface_GetRemoteMemcachedConnectionWFeatures_Call) RunAndReturn(ru
 func (_m *UtilsIface) GetRemoteNodeAddressesListFromNodeList(nodeList []interface{}, connStr string, needHttps bool, logger *log.CommonLogger, useExternal bool) (base.StringPairList, error) {
 	ret := _m.Called(nodeList, connStr, needHttps, logger, useExternal)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteNodeAddressesListFromNodeList")
+	}
+
 	var r0 base.StringPairList
 	var r1 error
 	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, *log.CommonLogger, bool) (base.StringPairList, error)); ok {
@@ -3911,6 +4180,10 @@ func (_c *UtilsIface_GetRemoteNodeAddressesListFromNodeList_Call) RunAndReturn(r
 // GetRemoteSSLPorts provides a mock function with given fields: hostAddr, logger
 func (_m *UtilsIface) GetRemoteSSLPorts(hostAddr string, logger *log.CommonLogger) (uint16, error, uint16, error) {
 	ret := _m.Called(hostAddr, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteSSLPorts")
+	}
 
 	var r0 uint16
 	var r1 error
@@ -3979,6 +4252,10 @@ func (_c *UtilsIface_GetRemoteSSLPorts_Call) RunAndReturn(run func(string, *log.
 func (_m *UtilsIface) GetRemoteServerVBucketsMap(connStr string, bucketName string, bucketInfo map[string]interface{}, useExternal bool) (map[string][]uint16, error) {
 	ret := _m.Called(connStr, bucketName, bucketInfo, useExternal)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetRemoteServerVBucketsMap")
+	}
+
 	var r0 map[string][]uint16
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}, bool) (map[string][]uint16, error)); ok {
@@ -4035,6 +4312,10 @@ func (_c *UtilsIface_GetRemoteServerVBucketsMap_Call) RunAndReturn(run func(stri
 // GetReplicasInfo provides a mock function with given fields: bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter
 func (_m *UtilsIface) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictlySecure bool, recycledStringStringMap *base.StringStringMap, recycledVbHostMapGetter func([]uint16) *base.VbHostsMapType, recycledStringSliceGetter func() *[]string) (*base.VbHostsMapType, *base.StringStringMap, int, []uint16, error) {
 	ret := _m.Called(bucketInfo, isStrictlySecure, recycledStringStringMap, recycledVbHostMapGetter, recycledStringSliceGetter)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicasInfo")
+	}
 
 	var r0 *base.VbHostsMapType
 	var r1 *base.StringStringMap
@@ -4119,6 +4400,10 @@ func (_c *UtilsIface_GetReplicasInfo_Call) RunAndReturn(run func(map[string]inte
 func (_m *UtilsIface) GetSecuritySettingsAndDefaultPoolInfo(hostAddr string, hostHttpsAddr string, username string, password string, certificate []byte, clientCertificate []byte, clientKey []byte, scramShaEnabled bool, logger *log.CommonLogger) (base.HttpAuthMech, map[string]interface{}, int, error) {
 	ret := _m.Called(hostAddr, hostHttpsAddr, username, password, certificate, clientCertificate, clientKey, scramShaEnabled, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSecuritySettingsAndDefaultPoolInfo")
+	}
+
 	var r0 base.HttpAuthMech
 	var r1 map[string]interface{}
 	var r2 int
@@ -4195,6 +4480,10 @@ func (_c *UtilsIface_GetSecuritySettingsAndDefaultPoolInfo_Call) RunAndReturn(ru
 func (_m *UtilsIface) GetServerVBucketsMap(connStr string, bucketName string, bucketInfo map[string]interface{}, recycledMapGetter func([]string) *base.KvVBMapType, serversList []string) (*base.KvVBMapType, error) {
 	ret := _m.Called(connStr, bucketName, bucketInfo, recycledMapGetter, serversList)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetServerVBucketsMap")
+	}
+
 	var r0 *base.KvVBMapType
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}, func([]string) *base.KvVBMapType, []string) (*base.KvVBMapType, error)); ok {
@@ -4253,6 +4542,10 @@ func (_c *UtilsIface_GetServerVBucketsMap_Call) RunAndReturn(run func(string, st
 func (_m *UtilsIface) GetServersListFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error) {
 	ret := _m.Called(bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetServersListFromBucketInfo")
+	}
+
 	var r0 []string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) ([]string, error)); ok {
@@ -4307,6 +4600,10 @@ func (_c *UtilsIface_GetServersListFromBucketInfo_Call) RunAndReturn(run func(ma
 func (_m *UtilsIface) GetSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) interface{} {
 	ret := _m.Called(settings, settingName)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetSettingFromSettings")
+	}
+
 	var r0 interface{}
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap, string) interface{}); ok {
 		r0 = rf(settings, settingName)
@@ -4351,6 +4648,10 @@ func (_c *UtilsIface_GetSettingFromSettings_Call) RunAndReturn(run func(metadata
 // GetStringSettingFromSettings provides a mock function with given fields: settings, settingName
 func (_m *UtilsIface) GetStringSettingFromSettings(settings metadata.ReplicationSettingsMap, settingName string) (string, error) {
 	ret := _m.Called(settings, settingName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStringSettingFromSettings")
+	}
 
 	var r0 string
 	var r1 error
@@ -4404,6 +4705,10 @@ func (_c *UtilsIface_GetStringSettingFromSettings_Call) RunAndReturn(run func(me
 // GetVbucketsMaxCas provides a mock function with given fields: bucketInfo
 func (_m *UtilsIface) GetVbucketsMaxCas(bucketInfo map[string]interface{}) ([]interface{}, error) {
 	ret := _m.Called(bucketInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVbucketsMaxCas")
+	}
 
 	var r0 []interface{}
 	var r1 error
@@ -4459,6 +4764,10 @@ func (_c *UtilsIface_GetVbucketsMaxCas_Call) RunAndReturn(run func(map[string]in
 func (_m *UtilsIface) GetVersionPruningWindowHrs(bucketInfo map[string]interface{}) (int, error) {
 	ret := _m.Called(bucketInfo)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetVersionPruningWindowHrs")
+	}
+
 	var r0 int
 	var r1 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) (int, error)); ok {
@@ -4510,6 +4819,10 @@ func (_c *UtilsIface_GetVersionPruningWindowHrs_Call) RunAndReturn(run func(map[
 // HttpsRemoteHostAddr provides a mock function with given fields: hostAddr, logger
 func (_m *UtilsIface) HttpsRemoteHostAddr(hostAddr string, logger *log.CommonLogger) (string, string, error) {
 	ret := _m.Called(hostAddr, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HttpsRemoteHostAddr")
+	}
 
 	var r0 string
 	var r1 string
@@ -4571,6 +4884,10 @@ func (_c *UtilsIface_HttpsRemoteHostAddr_Call) RunAndReturn(run func(string, *lo
 func (_m *UtilsIface) InvalidRuneIndexErrorMessage(key string, index int) string {
 	ret := _m.Called(key, index)
 
+	if len(ret) == 0 {
+		panic("no return value specified for InvalidRuneIndexErrorMessage")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func(string, int) string); ok {
 		r0 = rf(key, index)
@@ -4613,6 +4930,10 @@ func (_c *UtilsIface_InvalidRuneIndexErrorMessage_Call) RunAndReturn(run func(st
 // InvokeRestWithRetry provides a mock function with given fields: baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry
 func (_m *UtilsIface) InvokeRestWithRetry(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int) {
 	ret := _m.Called(baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InvokeRestWithRetry")
+	}
 
 	var r0 error
 	var r1 int
@@ -4676,6 +4997,10 @@ func (_c *UtilsIface_InvokeRestWithRetry_Call) RunAndReturn(run func(string, str
 // InvokeRestWithRetryWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry
 func (_m *UtilsIface) InvokeRestWithRetryWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, insecureSkipVerify bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger, num_retry int) (error, int) {
 	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, insecureSkipVerify, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger, num_retry)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InvokeRestWithRetryWithAuth")
+	}
 
 	var r0 error
 	var r1 int
@@ -4748,6 +5073,10 @@ func (_c *UtilsIface_InvokeRestWithRetryWithAuth_Call) RunAndReturn(run func(str
 func (_m *UtilsIface) IsSeriousNetError(err error) bool {
 	ret := _m.Called(err)
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsSeriousNetError")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func(error) bool); ok {
 		r0 = rf(err)
@@ -4789,6 +5118,10 @@ func (_c *UtilsIface_IsSeriousNetError_Call) RunAndReturn(run func(error) bool) 
 // LocalBucket provides a mock function with given fields: localConnectStr, bucketName
 func (_m *UtilsIface) LocalBucket(localConnectStr string, bucketName string) (*couchbase.Bucket, error) {
 	ret := _m.Called(localConnectStr, bucketName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LocalBucket")
+	}
 
 	var r0 *couchbase.Bucket
 	var r1 error
@@ -4845,6 +5178,10 @@ func (_c *UtilsIface_LocalBucket_Call) RunAndReturn(run func(string, string) (*c
 func (_m *UtilsIface) LocalBucketUUID(local_connStr string, bucketName string, logger *log.CommonLogger) (string, error) {
 	ret := _m.Called(local_connStr, bucketName, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for LocalBucketUUID")
+	}
+
 	var r0 string
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string, *log.CommonLogger) (string, error)); ok {
@@ -4899,6 +5236,10 @@ func (_c *UtilsIface_LocalBucketUUID_Call) RunAndReturn(run func(string, string,
 func (_m *UtilsIface) LocalPool(localConnectStr string) (couchbase.Pool, error) {
 	ret := _m.Called(localConnectStr)
 
+	if len(ret) == 0 {
+		panic("no return value specified for LocalPool")
+	}
+
 	var r0 couchbase.Pool
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (couchbase.Pool, error)); ok {
@@ -4951,6 +5292,10 @@ func (_c *UtilsIface_LocalPool_Call) RunAndReturn(run func(string) (couchbase.Po
 func (_m *UtilsIface) NewDataPool() base.DataPool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for NewDataPool")
+	}
+
 	var r0 base.DataPool
 	if rf, ok := ret.Get(0).(func() base.DataPool); ok {
 		r0 = rf()
@@ -4994,6 +5339,10 @@ func (_c *UtilsIface_NewDataPool_Call) RunAndReturn(run func() base.DataPool) *U
 func (_m *UtilsIface) NewEnhancedError(msg string, err error) error {
 	ret := _m.Called(msg, err)
 
+	if len(ret) == 0 {
+		panic("no return value specified for NewEnhancedError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, error) error); ok {
 		r0 = rf(msg, err)
@@ -5036,6 +5385,10 @@ func (_c *UtilsIface_NewEnhancedError_Call) RunAndReturn(run func(string, error)
 // NewTCPConn provides a mock function with given fields: hostName
 func (_m *UtilsIface) NewTCPConn(hostName string) (*net.TCPConn, error) {
 	ret := _m.Called(hostName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NewTCPConn")
+	}
 
 	var r0 *net.TCPConn
 	var r1 error
@@ -5090,6 +5443,10 @@ func (_c *UtilsIface_NewTCPConn_Call) RunAndReturn(run func(string) (*net.TCPCon
 // ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, high_seqno_and_vbuuid_map
 func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string) {
 	ret := _m.Called(vbnos, stats_map, high_seqno_and_vbuuid_map)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ParseHighSeqnoAndVBUuidFromStats")
+	}
 
 	var r0 []uint16
 	var r1 map[uint16]string
@@ -5149,6 +5506,10 @@ func (_c *UtilsIface_ParseHighSeqnoAndVBUuidFromStats_Call) RunAndReturn(run fun
 func (_m *UtilsIface) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]string, highseqno_map map[uint16]uint64) ([]uint16, error) {
 	ret := _m.Called(vbnos, stats_map, highseqno_map)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ParseHighSeqnoStat")
+	}
+
 	var r0 []uint16
 	var r1 error
 	if rf, ok := ret.Get(0).(func([]uint16, map[string]string, map[uint16]uint64) ([]uint16, error)); ok {
@@ -5204,6 +5565,10 @@ func (_c *UtilsIface_ParseHighSeqnoStat_Call) RunAndReturn(run func([]uint16, ma
 // ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, body, endBodyPos, dp, flags, slicesBuf
 func (_m *UtilsIface) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, dp base.DataPool, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64) {
 	ret := _m.Called(uprEvent, body, endBodyPos, dp, flags, slicesBuf)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ProcessUprEventForFiltering")
+	}
 
 	var r0 []byte
 	var r1 error
@@ -5278,6 +5643,10 @@ func (_c *UtilsIface_ProcessUprEventForFiltering_Call) RunAndReturn(run func(*me
 func (_m *UtilsIface) QueryRestApi(baseURL string, path string, preservePathEncoding bool, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, logger *log.CommonLogger) (error, int) {
 	ret := _m.Called(baseURL, path, preservePathEncoding, httpCommand, contentType, body, timeout, out, logger)
 
+	if len(ret) == 0 {
+		panic("no return value specified for QueryRestApi")
+	}
+
 	var r0 error
 	var r1 int
 	if rf, ok := ret.Get(0).(func(string, string, bool, string, string, []byte, time.Duration, interface{}, *log.CommonLogger) (error, int)); ok {
@@ -5337,6 +5706,10 @@ func (_c *UtilsIface_QueryRestApi_Call) RunAndReturn(run func(string, string, bo
 // QueryRestApiWithAuth provides a mock function with given fields: baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger
 func (_m *UtilsIface) QueryRestApiWithAuth(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, certificate []byte, san_in_certificate bool, clientCertificate []byte, clientKey []byte, httpCommand string, contentType string, body []byte, timeout time.Duration, out interface{}, client *http.Client, keep_client_alive bool, logger *log.CommonLogger) (error, int) {
 	ret := _m.Called(baseURL, path, preservePathEncoding, username, password, authMech, certificate, san_in_certificate, clientCertificate, clientKey, httpCommand, contentType, body, timeout, out, client, keep_client_alive, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryRestApiWithAuth")
+	}
 
 	var r0 error
 	var r1 int
@@ -5440,6 +5813,10 @@ func (_c *UtilsIface_RecoverPanic_Call) RunAndReturn(run func(*error)) *UtilsIfa
 func (_m *UtilsIface) RemoteBucketValidationInfo(hostAddr string, bucketName string, username string, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate []byte, clientKey []byte, logger *log.CommonLogger, useExternal bool) (map[string]interface{}, string, string, string, string, map[string][]uint16, error) {
 	ret := _m.Called(hostAddr, bucketName, username, password, authMech, certificate, sanInCertificate, clientCertificate, clientKey, logger, useExternal)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteBucketValidationInfo")
+	}
+
 	var r0 map[string]interface{}
 	var r1 string
 	var r2 string
@@ -5541,6 +5918,10 @@ func (_c *UtilsIface_RemoteBucketValidationInfo_Call) RunAndReturn(run func(stri
 func (_m *UtilsIface) RemovePrefix(prefix string, str string) string {
 	ret := _m.Called(prefix, str)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RemovePrefix")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func(string, string) string); ok {
 		r0 = rf(prefix, str)
@@ -5583,6 +5964,10 @@ func (_c *UtilsIface_RemovePrefix_Call) RunAndReturn(run func(string, string) st
 // ReplaceCouchApiBaseObjWithExternals provides a mock function with given fields: couchApiBase, nodeInfo
 func (_m *UtilsIface) ReplaceCouchApiBaseObjWithExternals(couchApiBase string, nodeInfo map[string]interface{}) string {
 	ret := _m.Called(couchApiBase, nodeInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplaceCouchApiBaseObjWithExternals")
+	}
 
 	var r0 string
 	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) string); ok {
@@ -5627,6 +6012,10 @@ func (_c *UtilsIface_ReplaceCouchApiBaseObjWithExternals_Call) RunAndReturn(run 
 func (_m *UtilsIface) ReplicationStatusNotFoundError(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationStatusNotFoundError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -5668,6 +6057,10 @@ func (_c *UtilsIface_ReplicationStatusNotFoundError_Call) RunAndReturn(run func(
 // SendHELO provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, logger
 func (_m *UtilsIface) SendHELO(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, logger *log.CommonLogger) error {
 	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SendHELO")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(memcached.ClientIface, string, time.Duration, time.Duration, *log.CommonLogger) error); ok {
@@ -5714,6 +6107,10 @@ func (_c *UtilsIface_SendHELO_Call) RunAndReturn(run func(memcached.ClientIface,
 // SendHELOWithFeatures provides a mock function with given fields: client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger
 func (_m *UtilsIface) SendHELOWithFeatures(client memcached.ClientIface, userAgent string, readTimeout time.Duration, writeTimeout time.Duration, requestedFeatures utils.HELOFeatures, logger *log.CommonLogger) (utils.HELOFeatures, error) {
 	ret := _m.Called(client, userAgent, readTimeout, writeTimeout, requestedFeatures, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SendHELOWithFeatures")
+	}
 
 	var r0 utils.HELOFeatures
 	var r1 error
@@ -5772,6 +6169,10 @@ func (_c *UtilsIface_SendHELOWithFeatures_Call) RunAndReturn(run func(memcached.
 func (_m *UtilsIface) StartDebugExec(id string, threshold time.Duration, debugFunc func()) func() {
 	ret := _m.Called(id, threshold, debugFunc)
 
+	if len(ret) == 0 {
+		panic("no return value specified for StartDebugExec")
+	}
+
 	var r0 func()
 	if rf, ok := ret.Get(0).(func(string, time.Duration, func()) func()); ok {
 		r0 = rf(id, threshold, debugFunc)
@@ -5817,6 +6218,10 @@ func (_c *UtilsIface_StartDebugExec_Call) RunAndReturn(run func(string, time.Dur
 // StartDiagStopwatch provides a mock function with given fields: id, threshold
 func (_m *UtilsIface) StartDiagStopwatch(id string, threshold time.Duration) func() {
 	ret := _m.Called(id, threshold)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StartDiagStopwatch")
+	}
 
 	var r0 func()
 	if rf, ok := ret.Get(0).(func(string, time.Duration) func()); ok {
@@ -5897,6 +6302,10 @@ func (_c *UtilsIface_TranslateKvVbMap_Call) RunAndReturn(run func(base.KvVBMapTy
 func (_m *UtilsIface) UnwrapError(infos map[string]interface{}) error {
 	ret := _m.Called(infos)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UnwrapError")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(map[string]interface{}) error); ok {
 		r0 = rf(infos)
@@ -5939,6 +6348,10 @@ func (_c *UtilsIface_UnwrapError_Call) RunAndReturn(run func(map[string]interfac
 func (_m *UtilsIface) UrlForLog(urlStr string) string {
 	ret := _m.Called(urlStr)
 
+	if len(ret) == 0 {
+		panic("no return value specified for UrlForLog")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func(string) string); ok {
 		r0 = rf(urlStr)
@@ -5980,6 +6393,10 @@ func (_c *UtilsIface_UrlForLog_Call) RunAndReturn(run func(string) string) *Util
 // ValidateSettings provides a mock function with given fields: defs, settings, logger
 func (_m *UtilsIface) ValidateSettings(defs base.SettingDefinitions, settings metadata.ReplicationSettingsMap, logger *log.CommonLogger) error {
 	ret := _m.Called(defs, settings, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(base.SettingDefinitions, metadata.ReplicationSettingsMap, *log.CommonLogger) error); ok {
@@ -6024,6 +6441,10 @@ func (_c *UtilsIface_ValidateSettings_Call) RunAndReturn(run func(base.SettingDe
 // VerifyTargetBucket provides a mock function with given fields: targetBucketName, targetBucketUuid, remoteClusterRef, logger
 func (_m *UtilsIface) VerifyTargetBucket(targetBucketName string, targetBucketUuid string, remoteClusterRef *metadata.RemoteClusterReference, logger *log.CommonLogger) error {
 	ret := _m.Called(targetBucketName, targetBucketUuid, remoteClusterRef, logger)
+
+	if len(ret) == 0 {
+		panic("no return value specified for VerifyTargetBucket")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, *metadata.RemoteClusterReference, *log.CommonLogger) error); ok {

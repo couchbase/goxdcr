@@ -26,6 +26,10 @@ func (_m *PipelineMgrBackfillIface) EXPECT() *PipelineMgrBackfillIface_Expecter 
 func (_m *PipelineMgrBackfillIface) BackfillMappingStatusUpdate(topic string, diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestDelta []*metadata.CollectionsManifest) error {
 	ret := _m.Called(topic, diffPair, srcManifestDelta)
 
+	if len(ret) == 0 {
+		panic("no return value specified for BackfillMappingStatusUpdate")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, *metadata.CollectionNamespaceMappingsDiffPair, []*metadata.CollectionsManifest) error); ok {
 		r0 = rf(topic, diffPair, srcManifestDelta)
@@ -70,6 +74,10 @@ func (_c *PipelineMgrBackfillIface_BackfillMappingStatusUpdate_Call) RunAndRetur
 func (_m *PipelineMgrBackfillIface) CleanupBackfillCkpts(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CleanupBackfillCkpts")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -111,6 +119,10 @@ func (_c *PipelineMgrBackfillIface_CleanupBackfillCkpts_Call) RunAndReturn(run f
 // GetMainPipelineThroughSeqnos provides a mock function with given fields: topic
 func (_m *PipelineMgrBackfillIface) GetMainPipelineThroughSeqnos(topic string) (map[uint16]uint64, error) {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMainPipelineThroughSeqnos")
+	}
 
 	var r0 map[uint16]uint64
 	var r1 error
@@ -166,6 +178,10 @@ func (_c *PipelineMgrBackfillIface_GetMainPipelineThroughSeqnos_Call) RunAndRetu
 func (_m *PipelineMgrBackfillIface) HaltBackfill(topic string) error {
 	ret := _m.Called(topic)
 
+	if len(ret) == 0 {
+		panic("no return value specified for HaltBackfill")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(topic)
@@ -207,6 +223,10 @@ func (_c *PipelineMgrBackfillIface_HaltBackfill_Call) RunAndReturn(run func(stri
 // HaltBackfillWithCb provides a mock function with given fields: topic, callback, errCb, skipCkpt
 func (_m *PipelineMgrBackfillIface) HaltBackfillWithCb(topic string, callback base.StoppedPipelineCallback, errCb base.StoppedPipelineErrCallback, skipCkpt bool) error {
 	ret := _m.Called(topic, callback, errCb, skipCkpt)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HaltBackfillWithCb")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, base.StoppedPipelineCallback, base.StoppedPipelineErrCallback, bool) error); ok {
@@ -253,6 +273,10 @@ func (_c *PipelineMgrBackfillIface_HaltBackfillWithCb_Call) RunAndReturn(run fun
 func (_m *PipelineMgrBackfillIface) ReInitStreams(pipelineName string) error {
 	ret := _m.Called(pipelineName)
 
+	if len(ret) == 0 {
+		panic("no return value specified for ReInitStreams")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(pipelineName)
@@ -294,6 +318,10 @@ func (_c *PipelineMgrBackfillIface_ReInitStreams_Call) RunAndReturn(run func(str
 // RequestBackfill provides a mock function with given fields: topic
 func (_m *PipelineMgrBackfillIface) RequestBackfill(topic string) error {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequestBackfill")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {

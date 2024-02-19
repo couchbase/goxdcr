@@ -24,6 +24,10 @@ func (_m *ReqCreator) EXPECT() *ReqCreator_Expecter {
 func (_m *ReqCreator) Execute(id string) (*base.WrappedMCRequest, error) {
 	ret := _m.Called(id)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 *base.WrappedMCRequest
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string) (*base.WrappedMCRequest, error)); ok {

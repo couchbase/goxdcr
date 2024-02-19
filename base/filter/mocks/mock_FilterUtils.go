@@ -27,6 +27,10 @@ func (_m *FilterUtils) EXPECT() *FilterUtils_Expecter {
 func (_m *FilterUtils) CheckForTransactionXattrsInUprEvent(uprEvent *memcached.UprEvent, dp base.DataPool, slicesToBeReleased *[][]byte, needToFilterBody bool) (bool, []byte, int, error, string, int64, []byte) {
 	ret := _m.Called(uprEvent, dp, slicesToBeReleased, needToFilterBody)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckForTransactionXattrsInUprEvent")
+	}
+
 	var r0 bool
 	var r1 []byte
 	var r2 int
@@ -121,6 +125,10 @@ func (_c *FilterUtils_CheckForTransactionXattrsInUprEvent_Call) RunAndReturn(run
 func (_m *FilterUtils) NewDataPool() base.DataPool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for NewDataPool")
+	}
+
 	var r0 base.DataPool
 	if rf, ok := ret.Get(0).(func() base.DataPool); ok {
 		r0 = rf()
@@ -163,6 +171,10 @@ func (_c *FilterUtils_NewDataPool_Call) RunAndReturn(run func() base.DataPool) *
 // ProcessUprEventForFiltering provides a mock function with given fields: uprEvent, body, endBodyPos, dp, flags, slicesBuf
 func (_m *FilterUtils) ProcessUprEventForFiltering(uprEvent *memcached.UprEvent, body []byte, endBodyPos int, dp base.DataPool, flags base.FilterFlagType, slicesBuf *[][]byte) ([]byte, error, string, int64) {
 	ret := _m.Called(uprEvent, body, endBodyPos, dp, flags, slicesBuf)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ProcessUprEventForFiltering")
+	}
 
 	var r0 []byte
 	var r1 error

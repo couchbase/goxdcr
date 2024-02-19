@@ -24,6 +24,10 @@ func (_m *Connectable) EXPECT() *Connectable_Expecter {
 func (_m *Connectable) Connector() common.Connector {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Connector")
+	}
+
 	var r0 common.Connector
 	if rf, ok := ret.Get(0).(func() common.Connector); ok {
 		r0 = rf()
@@ -66,6 +70,10 @@ func (_c *Connectable_Connector_Call) RunAndReturn(run func() common.Connector) 
 // SetConnector provides a mock function with given fields: connector
 func (_m *Connectable) SetConnector(connector common.Connector) error {
 	ret := _m.Called(connector)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetConnector")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Connector) error); ok {

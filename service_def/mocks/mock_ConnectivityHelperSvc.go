@@ -26,6 +26,10 @@ func (_m *ConnectivityHelperSvc) EXPECT() *ConnectivityHelperSvc_Expecter {
 func (_m *ConnectivityHelperSvc) GetOverallStatus() metadata.ConnectivityStatus {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetOverallStatus")
+	}
+
 	var r0 metadata.ConnectivityStatus
 	if rf, ok := ret.Get(0).(func() metadata.ConnectivityStatus); ok {
 		r0 = rf()
@@ -133,6 +137,10 @@ func (_c *ConnectivityHelperSvc_MarkIpFamilyError_Call) RunAndReturn(run func(bo
 func (_m *ConnectivityHelperSvc) MarkNode(nodeName string, status metadata.ConnectivityStatus) (bool, bool) {
 	ret := _m.Called(nodeName, status)
 
+	if len(ret) == 0 {
+		panic("no return value specified for MarkNode")
+	}
+
 	var r0 bool
 	var r1 bool
 	if rf, ok := ret.Get(0).(func(string, metadata.ConnectivityStatus) (bool, bool)); ok {
@@ -219,6 +227,10 @@ func (_c *ConnectivityHelperSvc_MarkNodeHeartbeatStatus_Call) RunAndReturn(run f
 // String provides a mock function with given fields:
 func (_m *ConnectivityHelperSvc) String() string {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for String")
+	}
 
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {

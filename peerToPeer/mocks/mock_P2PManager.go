@@ -32,6 +32,10 @@ func (_m *P2PManager) EXPECT() *P2PManager_Expecter {
 func (_m *P2PManager) CheckVBMaster(_a0 peerToPeer.BucketVBMapType, _a1 common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error) {
 	ret := _m.Called(_a0, _a1)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CheckVBMaster")
+	}
+
 	var r0 map[string]*peerToPeer.VBMasterCheckResp
 	var r1 error
 	if rf, ok := ret.Get(0).(func(peerToPeer.BucketVBMapType, common.Pipeline) (map[string]*peerToPeer.VBMasterCheckResp, error)); ok {
@@ -87,6 +91,10 @@ func (_c *P2PManager_CheckVBMaster_Call) RunAndReturn(run func(peerToPeer.Bucket
 func (_m *P2PManager) GetLifecycleId() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetLifecycleId")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -127,6 +135,10 @@ func (_c *P2PManager_GetLifecycleId_Call) RunAndReturn(run func() string) *P2PMa
 // ReplicationSpecChangeCallback provides a mock function with given fields: id, oldVal, newVal, wg
 func (_m *P2PManager) ReplicationSpecChangeCallback(id string, oldVal interface{}, newVal interface{}, wg *sync.WaitGroup) error {
 	ret := _m.Called(id, oldVal, newVal, wg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplicationSpecChangeCallback")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, interface{}, interface{}, *sync.WaitGroup) error); ok {
@@ -173,6 +185,10 @@ func (_c *P2PManager_ReplicationSpecChangeCallback_Call) RunAndReturn(run func(s
 func (_m *P2PManager) RequestImmediateCkptBkfillPush(replicationId string) error {
 	ret := _m.Called(replicationId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for RequestImmediateCkptBkfillPush")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(replicationId)
@@ -214,6 +230,10 @@ func (_c *P2PManager_RequestImmediateCkptBkfillPush_Call) RunAndReturn(run func(
 // RetrieveConnectionPreCheckResult provides a mock function with given fields: _a0
 func (_m *P2PManager) RetrieveConnectionPreCheckResult(_a0 string) (base.ConnectionErrMapType, bool, error) {
 	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RetrieveConnectionPreCheckResult")
+	}
 
 	var r0 base.ConnectionErrMapType
 	var r1 bool
@@ -310,6 +330,10 @@ func (_c *P2PManager_SendConnectionPreCheckRequest_Call) RunAndReturn(run func(*
 func (_m *P2PManager) SendDelBackfill(specId string) error {
 	ret := _m.Called(specId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SendDelBackfill")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
 		r0 = rf(specId)
@@ -351,6 +375,10 @@ func (_c *P2PManager_SendDelBackfill_Call) RunAndReturn(run func(string) error) 
 // SendManifests provides a mock function with given fields: spec, manifests
 func (_m *P2PManager) SendManifests(spec *metadata.ReplicationSpecification, manifests *metadata.CollectionsManifestPair) error {
 	ret := _m.Called(spec, manifests)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SendManifests")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*metadata.ReplicationSpecification, *metadata.CollectionsManifestPair) error); ok {
@@ -394,6 +422,10 @@ func (_c *P2PManager_SendManifests_Call) RunAndReturn(run func(*metadata.Replica
 // SendManualBackfill provides a mock function with given fields: specId, request
 func (_m *P2PManager) SendManualBackfill(specId string, request string) error {
 	ret := _m.Called(specId, request)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SendManualBackfill")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string) error); ok {
@@ -471,6 +503,10 @@ func (_c *P2PManager_SetPushReqMergerOnce_Call) RunAndReturn(run func(func(strin
 func (_m *P2PManager) Start() (peerToPeer.PeerToPeerCommAPI, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 peerToPeer.PeerToPeerCommAPI
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (peerToPeer.PeerToPeerCommAPI, error)); ok {
@@ -523,6 +559,10 @@ func (_c *P2PManager_Start_Call) RunAndReturn(run func() (peerToPeer.PeerToPeerC
 // Stop provides a mock function with given fields:
 func (_m *P2PManager) Stop() error {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {

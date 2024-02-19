@@ -24,6 +24,10 @@ func (_m *CollectionsRoutingUpdater) EXPECT() *CollectionsRoutingUpdater_Expecte
 func (_m *CollectionsRoutingUpdater) Execute(_a0 parts.CollectionsRoutingInfo) error {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(parts.CollectionsRoutingInfo) error); ok {
 		r0 = rf(_a0)

@@ -26,6 +26,10 @@ func (_m *CAPIService) EXPECT() *CAPIService_Expecter {
 func (_m *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucketInfo, remoteVBOpaque metadata.TargetVBOpaque, vbno uint16) (uint64, metadata.TargetVBOpaque, error) {
 	ret := _m.Called(remoteBucket, remoteVBOpaque, vbno)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CommitForCheckpoint")
+	}
+
 	var r0 uint64
 	var r1 metadata.TargetVBOpaque
 	var r2 error
@@ -88,6 +92,10 @@ func (_c *CAPIService_CommitForCheckpoint_Call) RunAndReturn(run func(*service_d
 // PreReplicate provides a mock function with given fields: remoteBucket, knownRemoteVBStatus, xdcrCheckpointingCapbility
 func (_m *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo, knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bool, metadata.TargetVBOpaque, error) {
 	ret := _m.Called(remoteBucket, knownRemoteVBStatus, xdcrCheckpointingCapbility)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PreReplicate")
+	}
 
 	var r0 bool
 	var r1 metadata.TargetVBOpaque

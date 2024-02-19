@@ -26,6 +26,10 @@ func (_m *MergeVBMasterRespCkptsFunc) EXPECT() *MergeVBMasterRespCkptsFunc_Expec
 func (_m *MergeVBMasterRespCkptsFunc) Execute(_a0 common.Pipeline, _a1 peerToPeer.PeersVBMasterCheckRespMap) error {
 	ret := _m.Called(_a0, _a1)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline, peerToPeer.PeersVBMasterCheckRespMap) error); ok {
 		r0 = rf(_a0, _a1)

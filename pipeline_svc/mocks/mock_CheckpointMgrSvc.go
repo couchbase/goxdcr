@@ -26,6 +26,10 @@ func (_m *CheckpointMgrSvc) EXPECT() *CheckpointMgrSvc_Expecter {
 func (_m *CheckpointMgrSvc) Attach(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Attach")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
 		r0 = rf(pipeline)
@@ -67,6 +71,10 @@ func (_c *CheckpointMgrSvc_Attach_Call) RunAndReturn(run func(common.Pipeline) e
 // CheckpointsExist provides a mock function with given fields: topic
 func (_m *CheckpointMgrSvc) CheckpointsExist(topic string) (bool, error) {
 	ret := _m.Called(topic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckpointsExist")
+	}
 
 	var r0 bool
 	var r1 error
@@ -120,6 +128,10 @@ func (_c *CheckpointMgrSvc_CheckpointsExist_Call) RunAndReturn(run func(string) 
 func (_m *CheckpointMgrSvc) DelSingleVBCheckpoint(topic string, vbno uint16, internalId string) error {
 	ret := _m.Called(topic, vbno, internalId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DelSingleVBCheckpoint")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, uint16, string) error); ok {
 		r0 = rf(topic, vbno, internalId)
@@ -164,6 +176,10 @@ func (_c *CheckpointMgrSvc_DelSingleVBCheckpoint_Call) RunAndReturn(run func(str
 func (_m *CheckpointMgrSvc) Detach(pipeline common.Pipeline) error {
 	ret := _m.Called(pipeline)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Detach")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline) error); ok {
 		r0 = rf(pipeline)
@@ -206,6 +222,10 @@ func (_c *CheckpointMgrSvc_Detach_Call) RunAndReturn(run func(common.Pipeline) e
 func (_m *CheckpointMgrSvc) IsSharable() bool {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for IsSharable")
+	}
+
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {
 		r0 = rf()
@@ -246,6 +266,10 @@ func (_c *CheckpointMgrSvc_IsSharable_Call) RunAndReturn(run func() bool) *Check
 // MergePeerNodesCkptInfo provides a mock function with given fields: genericResponse
 func (_m *CheckpointMgrSvc) MergePeerNodesCkptInfo(genericResponse interface{}) error {
 	ret := _m.Called(genericResponse)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MergePeerNodesCkptInfo")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(interface{}) error); ok {
@@ -289,6 +313,10 @@ func (_c *CheckpointMgrSvc_MergePeerNodesCkptInfo_Call) RunAndReturn(run func(in
 func (_m *CheckpointMgrSvc) Start(_a0 metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {
 		r0 = rf(_a0)
@@ -331,6 +359,10 @@ func (_c *CheckpointMgrSvc_Start_Call) RunAndReturn(run func(metadata.Replicatio
 func (_m *CheckpointMgrSvc) Stop() error {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func() error); ok {
 		r0 = rf()
@@ -371,6 +403,10 @@ func (_c *CheckpointMgrSvc_Stop_Call) RunAndReturn(run func() error) *Checkpoint
 // UpdateSettings provides a mock function with given fields: settings
 func (_m *CheckpointMgrSvc) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	ret := _m.Called(settings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateSettings")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.ReplicationSettingsMap) error); ok {

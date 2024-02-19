@@ -24,6 +24,10 @@ func (_m *CollectionsManifestOps) EXPECT() *CollectionsManifestOps_Expecter {
 func (_m *CollectionsManifestOps) CollectionManifestGetter(bucketName string, hasStoredManifest bool, storedManifestUid uint64, spec *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(bucketName, hasStoredManifest, storedManifestUid, spec)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CollectionManifestGetter")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, bool, uint64, *metadata.ReplicationSpecification) (*metadata.CollectionsManifest, error)); ok {

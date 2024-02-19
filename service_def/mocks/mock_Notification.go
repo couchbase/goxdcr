@@ -24,6 +24,10 @@ func (_m *Notification) EXPECT() *Notification_Expecter {
 func (_m *Notification) Clone(numOfReaders int) interface{} {
 	ret := _m.Called(numOfReaders)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Clone")
+	}
+
 	var r0 interface{}
 	if rf, ok := ret.Get(0).(func(int) interface{}); ok {
 		r0 = rf(numOfReaders)
@@ -67,6 +71,10 @@ func (_c *Notification_Clone_Call) RunAndReturn(run func(int) interface{}) *Noti
 // GetReplicasInfo provides a mock function with given fields:
 func (_m *Notification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.StringStringMap, []uint16) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicasInfo")
+	}
 
 	var r0 int
 	var r1 *base.VbHostsMapType
@@ -138,6 +146,10 @@ func (_c *Notification_GetReplicasInfo_Call) RunAndReturn(run func() (int, *base
 // IsSourceNotification provides a mock function with given fields:
 func (_m *Notification) IsSourceNotification() bool {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsSourceNotification")
+	}
 
 	var r0 bool
 	if rf, ok := ret.Get(0).(func() bool); ok {

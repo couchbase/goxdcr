@@ -24,6 +24,10 @@ func (_m *CollectionsManifestReqFunc) EXPECT() *CollectionsManifestReqFunc_Expec
 func (_m *CollectionsManifestReqFunc) Execute(manifestUid uint64) (*metadata.CollectionsManifest, error) {
 	ret := _m.Called(manifestUid)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 *metadata.CollectionsManifest
 	var r1 error
 	if rf, ok := ret.Get(0).(func(uint64) (*metadata.CollectionsManifest, error)); ok {

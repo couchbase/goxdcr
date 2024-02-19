@@ -30,6 +30,10 @@ func (_m *MetricsCollector) EXPECT() *MetricsCollector_Expecter {
 func (_m *MetricsCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
 	ret := _m.Called(vbno, compiledMap)
 
+	if len(ret) == 0 {
+		panic("no return value specified for AddVbSpecificMetrics")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(uint16, base.VBCountMetricMap) error); ok {
 		r0 = rf(vbno, compiledMap)
@@ -106,6 +110,10 @@ func (_c *MetricsCollector_HandleLatestThroughSeqnos_Call) RunAndReturn(run func
 func (_m *MetricsCollector) Mount(pipeline common.Pipeline, stats_mgr *pipeline_svc.StatisticsManager) error {
 	ret := _m.Called(pipeline, stats_mgr)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Mount")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(common.Pipeline, *pipeline_svc.StatisticsManager) error); ok {
 		r0 = rf(pipeline, stats_mgr)
@@ -181,6 +189,10 @@ func (_c *MetricsCollector_OnEvent_Call) RunAndReturn(run func(*common.Event)) *
 // UpdateCurrentVbSpecificMetrics provides a mock function with given fields: vbno, valuesToApply, currentRegistries
 func (_m *MetricsCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
 	ret := _m.Called(vbno, valuesToApply, currentRegistries)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateCurrentVbSpecificMetrics")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(uint16, base.VBCountMetricMap, map[string]metrics.Registry) error); ok {

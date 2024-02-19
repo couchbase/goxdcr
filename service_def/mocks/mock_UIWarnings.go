@@ -88,6 +88,10 @@ func (_c *UIWarnings_AppendGeneric_Call) RunAndReturn(run func(string)) *UIWarni
 func (_m *UIWarnings) GetFieldWarningsOnly() map[string]interface{} {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetFieldWarningsOnly")
+	}
+
 	var r0 map[string]interface{}
 	if rf, ok := ret.Get(0).(func() map[string]interface{}); ok {
 		r0 = rf()
@@ -130,6 +134,10 @@ func (_c *UIWarnings_GetFieldWarningsOnly_Call) RunAndReturn(run func() map[stri
 // GetSuccessfulWarningStrings provides a mock function with given fields:
 func (_m *UIWarnings) GetSuccessfulWarningStrings() []string {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSuccessfulWarningStrings")
+	}
 
 	var r0 []string
 	if rf, ok := ret.Get(0).(func() []string); ok {
@@ -174,6 +182,10 @@ func (_c *UIWarnings_GetSuccessfulWarningStrings_Call) RunAndReturn(run func() [
 func (_m *UIWarnings) Len() int {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Len")
+	}
+
 	var r0 int
 	if rf, ok := ret.Get(0).(func() int); ok {
 		r0 = rf()
@@ -214,6 +226,10 @@ func (_c *UIWarnings_Len_Call) RunAndReturn(run func() int) *UIWarnings_Len_Call
 // String provides a mock function with given fields:
 func (_m *UIWarnings) String() string {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for String")
+	}
 
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {

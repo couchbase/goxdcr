@@ -25,6 +25,10 @@ func (_m *CheckpointsServiceCache) EXPECT() *CheckpointsServiceCache_Expecter {
 func (_m *CheckpointsServiceCache) GetLatestDocs() (metadata.VBsCkptsDocMap, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestDocs")
+	}
+
 	var r0 metadata.VBsCkptsDocMap
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (metadata.VBsCkptsDocMap, error)); ok {
@@ -77,6 +81,10 @@ func (_c *CheckpointsServiceCache_GetLatestDocs_Call) RunAndReturn(run func() (m
 // GetOneVBDoc provides a mock function with given fields: vbno
 func (_m *CheckpointsServiceCache) GetOneVBDoc(vbno uint16) (*metadata.CheckpointsDoc, error) {
 	ret := _m.Called(vbno)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOneVBDoc")
+	}
 
 	var r0 *metadata.CheckpointsDoc
 	var r1 error
@@ -198,6 +206,10 @@ func (_c *CheckpointsServiceCache_SpecChangeCb_Call) RunAndReturn(run func(*meta
 func (_m *CheckpointsServiceCache) StoreLatestDocs(incoming metadata.VBsCkptsDocMap) error {
 	ret := _m.Called(incoming)
 
+	if len(ret) == 0 {
+		panic("no return value specified for StoreLatestDocs")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func(metadata.VBsCkptsDocMap) error); ok {
 		r0 = rf(incoming)
@@ -239,6 +251,10 @@ func (_c *CheckpointsServiceCache_StoreLatestDocs_Call) RunAndReturn(run func(me
 // StoreOneVbDoc provides a mock function with given fields: vbno, ckpt, internalId
 func (_m *CheckpointsServiceCache) StoreOneVbDoc(vbno uint16, ckpt *metadata.CheckpointsDoc, internalId string) error {
 	ret := _m.Called(vbno, ckpt, internalId)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StoreOneVbDoc")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(uint16, *metadata.CheckpointsDoc, string) error); ok {

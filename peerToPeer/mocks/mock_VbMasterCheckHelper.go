@@ -26,6 +26,10 @@ func (_m *VbMasterCheckHelper) EXPECT() *VbMasterCheckHelper_Expecter {
 func (_m *VbMasterCheckHelper) GetUnverifiedSubset(requestedSet peerToPeer.BucketVBMapType) (peerToPeer.BucketVBMapType, error) {
 	ret := _m.Called(requestedSet)
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetUnverifiedSubset")
+	}
+
 	var r0 peerToPeer.BucketVBMapType
 	var r1 error
 	if rf, ok := ret.Get(0).(func(peerToPeer.BucketVBMapType) (peerToPeer.BucketVBMapType, error)); ok {

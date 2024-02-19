@@ -21,6 +21,10 @@ func (_m *BucketInfoGetter) EXPECT() *BucketInfoGetter_Expecter {
 func (_m *BucketInfoGetter) Execute() (map[string]interface{}, bool, string, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 map[string]interface{}
 	var r1 bool
 	var r2 string

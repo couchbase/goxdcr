@@ -24,6 +24,10 @@ func (_m *PeerManifestsGetter) EXPECT() *PeerManifestsGetter_Expecter {
 func (_m *PeerManifestsGetter) Execute(specId string, specInternalId string) (*metadata.CollectionsManifestPair, error) {
 	ret := _m.Called(specId, specInternalId)
 
+	if len(ret) == 0 {
+		panic("no return value specified for Execute")
+	}
+
 	var r0 *metadata.CollectionsManifestPair
 	var r1 error
 	if rf, ok := ret.Get(0).(func(string, string) (*metadata.CollectionsManifestPair, error)); ok {

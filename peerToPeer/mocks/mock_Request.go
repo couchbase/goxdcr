@@ -26,6 +26,10 @@ func (_m *Request) EXPECT() *Request_Expecter {
 func (_m *Request) CallBack(resp peerToPeer.Response) (peerToPeer.HandlerResult, error) {
 	ret := _m.Called(resp)
 
+	if len(ret) == 0 {
+		panic("no return value specified for CallBack")
+	}
+
 	var r0 peerToPeer.HandlerResult
 	var r1 error
 	if rf, ok := ret.Get(0).(func(peerToPeer.Response) (peerToPeer.HandlerResult, error)); ok {
@@ -80,6 +84,10 @@ func (_c *Request_CallBack_Call) RunAndReturn(run func(peerToPeer.Response) (pee
 func (_m *Request) DeSerialize(_a0 []byte) error {
 	ret := _m.Called(_a0)
 
+	if len(ret) == 0 {
+		panic("no return value specified for DeSerialize")
+	}
+
 	var r0 error
 	if rf, ok := ret.Get(0).(func([]byte) error); ok {
 		r0 = rf(_a0)
@@ -121,6 +129,10 @@ func (_c *Request_DeSerialize_Call) RunAndReturn(run func([]byte) error) *Reques
 // GenerateResponse provides a mock function with given fields:
 func (_m *Request) GenerateResponse() interface{} {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GenerateResponse")
+	}
 
 	var r0 interface{}
 	if rf, ok := ret.Get(0).(func() interface{}); ok {
@@ -165,6 +177,10 @@ func (_c *Request_GenerateResponse_Call) RunAndReturn(run func() interface{}) *R
 func (_m *Request) GetEnqueuedTime() time.Time {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetEnqueuedTime")
+	}
+
 	var r0 time.Time
 	if rf, ok := ret.Get(0).(func() time.Time); ok {
 		r0 = rf()
@@ -205,6 +221,10 @@ func (_c *Request_GetEnqueuedTime_Call) RunAndReturn(run func() time.Time) *Requ
 // GetOpaque provides a mock function with given fields:
 func (_m *Request) GetOpaque() uint32 {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOpaque")
+	}
 
 	var r0 uint32
 	if rf, ok := ret.Get(0).(func() uint32); ok {
@@ -247,6 +267,10 @@ func (_c *Request_GetOpaque_Call) RunAndReturn(run func() uint32) *Request_GetOp
 func (_m *Request) GetOpcode() peerToPeer.OpCode {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetOpcode")
+	}
+
 	var r0 peerToPeer.OpCode
 	if rf, ok := ret.Get(0).(func() peerToPeer.OpCode); ok {
 		r0 = rf()
@@ -287,6 +311,10 @@ func (_c *Request_GetOpcode_Call) RunAndReturn(run func() peerToPeer.OpCode) *Re
 // GetSender provides a mock function with given fields:
 func (_m *Request) GetSender() string {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSender")
+	}
 
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
@@ -329,6 +357,10 @@ func (_c *Request_GetSender_Call) RunAndReturn(run func() string) *Request_GetSe
 func (_m *Request) GetTarget() string {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetTarget")
+	}
+
 	var r0 string
 	if rf, ok := ret.Get(0).(func() string); ok {
 		r0 = rf()
@@ -369,6 +401,10 @@ func (_c *Request_GetTarget_Call) RunAndReturn(run func() string) *Request_GetTa
 // GetType provides a mock function with given fields:
 func (_m *Request) GetType() peerToPeer.ReqRespType {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetType")
+	}
 
 	var r0 peerToPeer.ReqRespType
 	if rf, ok := ret.Get(0).(func() peerToPeer.ReqRespType); ok {
@@ -443,6 +479,10 @@ func (_c *Request_RecordEnqueuedTime_Call) RunAndReturn(run func()) *Request_Rec
 func (_m *Request) SameAs(other interface{}) (bool, error) {
 	ret := _m.Called(other)
 
+	if len(ret) == 0 {
+		panic("no return value specified for SameAs")
+	}
+
 	var r0 bool
 	var r1 error
 	if rf, ok := ret.Get(0).(func(interface{}) (bool, error)); ok {
@@ -494,6 +534,10 @@ func (_c *Request_SameAs_Call) RunAndReturn(run func(interface{}) (bool, error))
 // Serialize provides a mock function with given fields:
 func (_m *Request) Serialize() ([]byte, error) {
 	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Serialize")
+	}
 
 	var r0 []byte
 	var r1 error

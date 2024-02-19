@@ -26,6 +26,10 @@ func (_m *GlobalSettingsSvc) EXPECT() *GlobalSettingsSvc_Expecter {
 func (_m *GlobalSettingsSvc) GetGlobalSettings() (*metadata.GlobalSettings, error) {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for GetGlobalSettings")
+	}
+
 	var r0 *metadata.GlobalSettings
 	var r1 error
 	if rf, ok := ret.Get(0).(func() (*metadata.GlobalSettings, error)); ok {
@@ -78,6 +82,10 @@ func (_c *GlobalSettingsSvc_GetGlobalSettings_Call) RunAndReturn(run func() (*me
 // GlobalSettingsServiceCallback provides a mock function with given fields: path, value, rev
 func (_m *GlobalSettingsSvc) GlobalSettingsServiceCallback(path string, value []byte, rev interface{}) error {
 	ret := _m.Called(path, value, rev)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GlobalSettingsServiceCallback")
+	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []byte, interface{}) error); ok {
@@ -155,6 +163,10 @@ func (_c *GlobalSettingsSvc_SetMetadataChangeHandlerCallback_Call) RunAndReturn(
 // UpdateGlobalSettings provides a mock function with given fields: _a0
 func (_m *GlobalSettingsSvc) UpdateGlobalSettings(_a0 metadata.ReplicationSettingsMap) (map[string]error, error) {
 	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateGlobalSettings")
+	}
 
 	var r0 map[string]error
 	var r1 error

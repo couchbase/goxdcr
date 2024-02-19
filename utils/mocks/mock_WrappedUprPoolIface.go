@@ -24,6 +24,10 @@ func (_m *WrappedUprPoolIface) EXPECT() *WrappedUprPoolIface_Expecter {
 func (_m *WrappedUprPoolIface) Get() *base.WrappedUprEvent {
 	ret := _m.Called()
 
+	if len(ret) == 0 {
+		panic("no return value specified for Get")
+	}
+
 	var r0 *base.WrappedUprEvent
 	if rf, ok := ret.Get(0).(func() *base.WrappedUprEvent); ok {
 		r0 = rf()
