@@ -11,9 +11,10 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	"testing"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestBackfillReplMarshal(t *testing.T) {
@@ -608,5 +609,109 @@ func TestBackfillVBTimestamps_IsValidForStart(t *testing.T) {
 			}
 			assert.Equalf(t, tt.want, b.IsValidForStart(), "IsValidForStart()")
 		})
+	}
+}
+
+func TestMergeTasksIntoSpecWithNilTask(t *testing.T) {
+	fmt.Println("============== Test case start: TestMergeTasksIntoSpecWithNilTask =================")
+	defer fmt.Println("============== Test case end: TestMergeTasksIntoSpecWithNilTask =================")
+	assert := assert.New(t)
+
+	defaultNamespace := &base.CollectionNamespace{base.DefaultScopeCollectionName, base.DefaultScopeCollectionName}
+	namespace2 := &base.CollectionNamespace{"scope2", "collection2"}
+	namespace3 := &base.CollectionNamespace{"scope3", "collection3"}
+
+	namespaceMapping := make(CollectionNamespaceMapping)
+	namespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
+	namespaceMapping.AddSingleMapping(namespace2, namespace2)
+
+	defaultNamespaceMapping := make(CollectionNamespaceMapping)
+	defaultNamespaceMapping.AddSingleMapping(defaultNamespace, defaultNamespace)
+
+	namespace2Mapping := make(CollectionNamespaceMapping)
+	namespace2Mapping.AddSingleMapping(namespace2, namespace2)
+
+	assert.True(namespace2Mapping.IsSubset(namespaceMapping))
+	assert.False(namespace2Mapping.IsSame(namespaceMapping))
+	assert.True(namespace2Mapping.IsSame(namespace2Mapping))
+
+	superSetMapping := namespaceMapping.Clone()
+	superSetMapping.AddSingleMapping(namespace3, namespace3)
+
+	manifestsIdPair := base.CollectionsManifestIdPair{0, 0}
+	ts0 := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 0, 10, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 6000, manifestsIdPair},
+	}
+
+	vb0Task0 := NewBackfillTask(ts0, []CollectionNamespaceMapping{namespaceMapping})
+
+	vb0Tasks := NewBackfillTasks()
+	vb0Tasks.List = append(vb0Tasks.List, vb0Task0)
+
+	vbTasksMap := make(map[uint16]*BackfillTasks)
+	vbTasksMap[0] = &vb0Tasks
+
+	testId := "testId"
+	testInternalId := "testInternalId"
+	testSpec := &BackfillReplicationSpec{
+		Id:         testId,
+		InternalId: testInternalId,
+		VBTasksMap: NewVBTasksMapWithMTasks(vbTasksMap),
+	}
+
+	newTs := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 6, 0, 10, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 5005, 500, 6000, manifestsIdPair},
+	}
+	newVb0Task := NewBackfillTask(newTs, []CollectionNamespaceMapping{namespaceMapping})
+	newVb0Tasks := NewBackfillTasks()
+	newVb0Tasks.List = append(newVb0Tasks.List, newVb0Task)
+	newVbTaskMap := make(map[uint16]*BackfillTasks)
+	newVbTaskMap[0] = &newVb0Tasks
+
+	for _, task := range testSpec.VBTasksMap.VBTasksMap[0].List {
+		assert.NotNil(task)
+	}
+	testSpec.MergeNewTasks(NewVBTasksMapWithMTasks(newVbTaskMap), false /*skipFirst*/)
+	for _, task := range testSpec.VBTasksMap.VBTasksMap[0].List {
+		assert.NotNil(task)
+	}
+
+	ts1 := &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 5, 0, 10, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 5000, 500, 6000, manifestsIdPair},
+	}
+
+	vb0Task1 := NewBackfillTask(ts1, []CollectionNamespaceMapping{namespaceMapping})
+
+	vb0Tasks = NewBackfillTasks()
+	vb0Tasks.List = append(vb0Tasks.List, vb0Task1)
+
+	vbTasksMap = make(map[uint16]*BackfillTasks)
+	vbTasksMap[0] = &vb0Tasks
+
+	testSpec = &BackfillReplicationSpec{
+		Id:         testId,
+		InternalId: testInternalId,
+		VBTasksMap: NewVBTasksMapWithMTasks(vbTasksMap),
+	}
+
+	newTs = &BackfillVBTimestamps{
+		StartingTimestamp: &base.VBTimestamp{0, 0, 0, 0, 5, manifestsIdPair},
+		EndingTimestamp:   &base.VBTimestamp{0, 0, 10, 7, 500, manifestsIdPair},
+	}
+	newVb1Task := NewBackfillTask(newTs, []CollectionNamespaceMapping{namespaceMapping})
+	newVb1Tasks := NewBackfillTasks()
+	newVb1Tasks.List = append(newVb0Tasks.List, newVb1Task)
+	newVbTaskMap = make(map[uint16]*BackfillTasks)
+	newVbTaskMap[0] = &newVb0Tasks
+
+	for _, task := range testSpec.VBTasksMap.VBTasksMap[0].List {
+		assert.NotNil(task)
+	}
+	testSpec.MergeNewTasks(NewVBTasksMapWithMTasks(newVbTaskMap), false /*skipFirst*/)
+	for _, task := range testSpec.VBTasksMap.VBTasksMap[0].List {
+		assert.NotNil(task)
 	}
 }
