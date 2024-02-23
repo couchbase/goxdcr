@@ -12,10 +12,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/base"
 	"strings"
 	"sync"
+
+	mcc "github.com/couchbase/gomemcached/client"
+	"github.com/couchbase/goxdcr/base"
 )
 
 type BackfillReplicationSpec struct {
@@ -1053,6 +1054,9 @@ func (b *BackfillTasks) GetAllCollectionNamespaceMappings() ShaToCollectionNames
  * No locking is to be done as this will be called recursively. top level call should lock it accordingly
  */
 func (b *BackfillTasks) MergeIncomingTaskIntoTasksNoLock(task *BackfillTask, unmergableTasks *BackfillTasks, index int) {
+	if task == nil {
+		return
+	}
 	if b == nil || len(b.List) == 0 || index >= len(b.List) {
 		unmergableTasks.List = append(unmergableTasks.List, task)
 		return
