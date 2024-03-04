@@ -473,6 +473,7 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 		backfillSpec, _ := pipelineMgr.backfillReplSvc.BackfillReplSpec(topic)
 		if backfillSpec != nil {
 			// Has backfill pipeline waiting
+			pipelineMgr.logger.Infof("%s: backfill pipeline started by main pipeline", backfillSpec.Id)
 			backfillStartQueueErr := pipelineMgr.StartBackfill(topic)
 			if backfillStartQueueErr != nil {
 				pipelineMgr.logger.Errorf("Unable to queue backfill pipeline start for %v", topic)
@@ -1000,6 +1001,7 @@ func (pipelineMgr *PipelineManager) StartBackfillPipeline(topic string) base.Err
 	}
 
 	if backfillSpec.VBTasksMap.Len() == 0 || backfillSpec.VBTasksMap.LenWithVBs(mainPipelineVbs) == 0 {
+		pipelineMgr.logger.Infof("No tasks for backfill pipeline mainVBs: %v, specTasks: %v", mainPipelineVbs, backfillSpec.VBTasksMap.GetVBs())
 		errMap["pipelineMgr.StartBackfillPipeline"] = ErrorBackfillSpecHasNoVBTasks
 		return errMap
 	}

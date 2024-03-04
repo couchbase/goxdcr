@@ -1015,7 +1015,7 @@ func (b *BackfillMgr) handleSourceOnlyChange(replId string, oldSourceManifest, n
 
 	// Only raise backfill req if necessary because each req will result in a metakv set (could be expensive)
 	if len(diffPair.Added) > 0 || len(diffPair.Removed) > 0 {
-		err = b.raiseBackfillReq(replId, diffPair, false, newSourceManifest.Uid())
+		err = b.raiseBackfillReq(replId, diffPair, false, newSourceManifest.Uid(), "collectionNamespaceMappingsDiffPair")
 	}
 
 	if errMeansReqNeedsToBeRetried(err) {
@@ -1143,7 +1143,7 @@ func (b *BackfillMgr) diffManifestsAndRaiseBackfill(replId string, oldSourceMani
 		b.notifyBackfillMappingStatusUpdateToEventMgr(replId, diffPair, []*metadata.CollectionsManifest{oldSourceManifest, newSourceManifest})
 	}
 	if !skipRaiseBackfillReq {
-		err = b.raiseBackfillReq(replId, backfillReq, false, newSourceManifest.Uid())
+		err = b.raiseBackfillReq(replId, backfillReq, false, newSourceManifest.Uid(), "diffManifestsAndRaiseBackfill")
 	}
 
 	if errMeansReqNeedsToBeRetried(err) {
@@ -1203,7 +1203,7 @@ func (b *BackfillMgr) cleanupInvalidImplicitBackfillMappings(replId string, oldS
 			Removed:                    cleanupNamespace,
 			CorrespondingSrcManifestId: newSourceManifest.Uid(),
 		}
-		err = b.raiseBackfillReq(replId, cleanupPair, false, newSourceManifest.Uid())
+		err = b.raiseBackfillReq(replId, cleanupPair, false, newSourceManifest.Uid(), "cleanupInvalidImplicitBackfillMappings")
 		if errMeansReqNeedsToBeRetried(err) {
 			req := BackfillRetryRequest{
 				replId:                     replId,
@@ -1330,7 +1330,7 @@ func (b *BackfillMgr) compileExplicitBackfillReq(spec *metadata.ReplicationSpeci
 
 var QueuedForRetry = fmt.Errorf("queued a job for retry")
 
-func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, overridePreviousBackfills bool, newSourceManifestId uint64) error {
+func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, overridePreviousBackfills bool, newSourceManifestId uint64, reason string) error {
 	handler := b.internalGetHandler(replId)
 	b.errorRetryQMtx.RLock()
 	if handler == nil || len(b.errorRetryQueue) > 0 {
@@ -1349,7 +1349,7 @@ func (b *BackfillMgr) raiseBackfillReq(replId string, backfillReq interface{}, o
 		return QueuedForRetry
 	} else {
 		b.errorRetryQMtx.RUnlock()
-		return handler.handleBackfillRequestWithArgs(backfillReq, overridePreviousBackfills)
+		return handler.handleBackfillRequestWithArgs(backfillReq, overridePreviousBackfills, reason)
 	}
 }
 
@@ -1387,7 +1387,7 @@ func (b *BackfillMgr) handleExplicitMapChangeBackfillReq(replId string, added me
 	}
 
 	handleRequestWrapper := func(interface{}) (interface{}, error) {
-		return nil, handler.HandleBackfillRequest(mapPair)
+		return nil, handler.HandleBackfillRequest(mapPair, "explicit map change")
 	}
 	_, err = b.utils.ExponentialBackoffExecutorWithFinishSignal("explicitMapChange", base.RetryIntervalMetakv, base.MaxNumOfMetakvRetries, base.MetaKvBackoffFactor, handleRequestWrapper, nil, handlerFinCh)
 	if err != nil {
@@ -1453,7 +1453,7 @@ func (b *BackfillMgr) RequestOnDemandBackfill(specId string, pendingMappings met
 }
 
 func (b *BackfillMgr) onDemandBackfillRaiseRequest(specId string, backfillReq interface{}) error {
-	err := b.raiseBackfillReq(specId, backfillReq, true, 0)
+	err := b.raiseBackfillReq(specId, backfillReq, true, 0, "onDemandBackfillRequest")
 	if err == base.GetBackfillFatalDataLossError(specId) {
 		// fatal error means restream is happening - everything is deleted, so let it pass
 		err = nil
@@ -1732,7 +1732,7 @@ func (b *BackfillMgr) retryJob(job BackfillRetryRequest, unableToBeProcessedQueu
 		}
 	}
 	if handler != nil {
-		err = handler.handleBackfillRequestWithArgs(job.req, job.force)
+		err = handler.handleBackfillRequestWithArgs(job.req, job.force, "retry job")
 	}
 	if err != nil {
 		// errorStopped by handler means that a repl spec has been deleted. If a spec hasn't been
@@ -2051,7 +2051,7 @@ func (b *BackfillMgr) mergeP2PReqAndUnlockCommon(bucketMapPayload *peerToPeer.Bu
 		backfillSpec: backfillSpec,
 		pushMode:     pushMode,
 	}
-	err = handler.HandleBackfillRequest(mergeReq)
+	err = handler.HandleBackfillRequest(mergeReq, "internalPeerBackfillTaskMergeReq")
 	if err != nil {
 		b.logger.Errorf(fmt.Sprintf("node %v backfill merge request was unable to be merged - %v", nodeName, err))
 		return err

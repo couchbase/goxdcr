@@ -618,7 +618,7 @@ func TestPausedReplicationStats1a(t *testing.T) {
 	defer fmt.Println("============== Test case start: TestPausedReplicationContructStats 1a =================")
 
 	assert := assert.New(t)
-	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc, _ := setupBoilerPlate()
+	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc := setupBoilerPlate()
 	// main is nil, backfill is not
 	bucketSvc, replGetter := setupPausedStatsMocks(backfillSvc, remoteSvc, ckptSvc, ref, targetKVVbMap, replSpec, assert, true, false)
 	UpdateStats(ckptSvc, logger, remoteSvc, backfillSvc, bucketSvc, replGetter)
@@ -630,7 +630,7 @@ func TestPausedReplicationStats1b(t *testing.T) {
 	defer fmt.Println("============== Test case start: TestPausedReplicationContructStats 1b =================")
 
 	assert := assert.New(t)
-	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc, _ := setupBoilerPlate()
+	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc := setupBoilerPlate()
 	// main is nil, backfill is nil
 	bucketSvc, replGetter := setupPausedStatsMocks(backfillSvc, remoteSvc, ckptSvc, ref, targetKVVbMap, replSpec, assert, true, true)
 	UpdateStats(ckptSvc, logger, remoteSvc, backfillSvc, bucketSvc, replGetter)
@@ -642,7 +642,7 @@ func TestPausedReplicationStats2a(t *testing.T) {
 	defer fmt.Println("============== Test case start: TestPausedReplicationUpdateStats 2a =================")
 
 	assert := assert.New(t)
-	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc, _ := setupBoilerPlate()
+	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc := setupBoilerPlate()
 	// main is not nil, backfill is not nil
 	bucketSvc, replGetter := setupPausedStatsMocks(backfillSvc, remoteSvc, ckptSvc, ref, targetKVVbMap, replSpec, assert, false, false)
 	UpdateStats(ckptSvc, logger, remoteSvc, backfillSvc, bucketSvc, replGetter)
@@ -654,7 +654,7 @@ func TestPausedReplicationStats2b(t *testing.T) {
 	defer fmt.Println("============== Test case start: TestPausedReplicationUpdateStats 2b =================")
 
 	assert := assert.New(t)
-	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc, _ := setupBoilerPlate()
+	logger, _, _, _, _, _, replSpec, _, ckptSvc, _, remoteSvc, _, targetKVVbMap, ref, _, _, _, _, backfillSvc := setupBoilerPlate()
 	// main is not nil, backfill is nil
 	bucketSvc, replGetter := setupPausedStatsMocks(backfillSvc, remoteSvc, ckptSvc, ref, targetKVVbMap, replSpec, assert, false, true)
 	UpdateStats(ckptSvc, logger, remoteSvc, backfillSvc, bucketSvc, replGetter)
