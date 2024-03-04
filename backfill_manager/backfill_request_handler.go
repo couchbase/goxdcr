@@ -10,6 +10,11 @@ package backfill_manager
 
 import (
 	"fmt"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	component "github.com/couchbase/goxdcr/component"
@@ -20,10 +25,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_svc"
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
-	"reflect"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 var errorStopped error = fmt.Errorf("BackfillReqHandler is stopping")
@@ -280,7 +281,7 @@ func (b *BackfillRequestHandler) run() {
 							specificVBRequested: true,
 							vbno:                vb,
 						}
-						go b.HandleBackfillRequest(delReq)
+						go b.HandleBackfillRequest(delReq, "removedVBs")
 					}
 				}
 			case reflect.TypeOf(internalPeerBackfillTaskMergeReq{}):
@@ -366,11 +367,11 @@ func (b *BackfillRequestHandler) IsStopped() bool {
 	return atomic.LoadUint32(&(b.stopRequested)) == 1
 }
 
-func (b *BackfillRequestHandler) HandleBackfillRequest(req interface{}) error {
-	return b.handleBackfillRequestWithArgs(req, false)
+func (b *BackfillRequestHandler) HandleBackfillRequest(req interface{}, reason string) error {
+	return b.handleBackfillRequestWithArgs(req, false, reason)
 }
 
-func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, forceFlag bool) error {
+func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, forceFlag bool, reason string) error {
 	if b.IsStopped() {
 		return errorStopped
 	}
@@ -387,6 +388,7 @@ func (b *BackfillRequestHandler) handleBackfillRequestWithArgs(req interface{}, 
 	default:
 		// Serialize the requests - goes to run()
 		b.incomingReqCh <- reqAndResp
+		b.logger.Infof("sent backfill request reason=%s, forceFlag=%v, req=%T", reason, reqAndResp.Force, req)
 
 		select {
 		// In case we didn't catch it in time
@@ -510,6 +512,7 @@ func (b *BackfillRequestHandler) updateBackfillSpec(persistResponse chan error, 
 
 	exists := b.cachedBackfillSpec != nil
 
+	b.logger.Infof("%s: backfill spec exists=%v, force=%v", b.id, exists, force)
 	if force {
 		// Force means that backfillSpec is being forced updated either in a severe metakv error, or if user is raising it manually
 		// We need to ensure AddOp is used if currently it doesn't exist in metakv
@@ -740,6 +743,7 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 	var hasMoreTasks bool
 	if backfillDone {
 		hasMoreTasks = b.cachedBackfillSpec.VBTasksMap.ContainsAtLeastOneTask()
+		b.logger.Infof("%s: backfill done tasksRemaining: %v", b.id, b.cachedBackfillSpec.VBTasksMap.CompactTaskMap())
 	}
 
 	var err error
@@ -769,11 +773,19 @@ func (b *BackfillRequestHandler) handleVBDone(reqAndResp ReqAndResp) error {
 }
 
 func (b *BackfillRequestHandler) metaKvOp(op PersistType) error {
+	if b.cachedBackfillSpec != nil {
+		b.logger.Infof("%s: metakv operation on backfill spec internalId=%s op=%d",
+			b.cachedBackfillSpec.Id, b.cachedBackfillSpec.InternalId, op)
+	} else {
+		b.logger.Infof("metakv operation on backfill spec op=%d", op)
+	}
+	// For Add & Set, we clone the spec to ensure the object in spec cache is different.
+	// This ensures that two different spec objects are compared.
 	switch op {
 	case AddOp:
-		return b.backfillReplSvc.AddBackfillReplSpec(b.cachedBackfillSpec)
+		return b.backfillReplSvc.AddBackfillReplSpec(b.cachedBackfillSpec.Clone())
 	case SetOp:
-		return b.backfillReplSvc.SetBackfillReplSpec(b.cachedBackfillSpec)
+		return b.backfillReplSvc.SetBackfillReplSpec(b.cachedBackfillSpec.Clone())
 	default:
 		_, err := b.backfillReplSvc.DelBackfillReplSpec(b.id)
 		return err
@@ -906,9 +918,9 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 		// It's either backfillMap or ExplicitPair
 		var err error
 		if len(routingInfo.BackfillMap) > 0 {
-			err = b.HandleBackfillRequest(routingInfo.BackfillMap)
+			err = b.HandleBackfillRequest(routingInfo.BackfillMap, "FixedRoutingUpdateEvent backfill map")
 		} else if len(routingInfo.ExplicitBackfillMap.Added) > 0 || len(routingInfo.ExplicitBackfillMap.Removed) > 0 {
-			err = b.HandleBackfillRequest(routingInfo.ExplicitBackfillMap)
+			err = b.HandleBackfillRequest(routingInfo.ExplicitBackfillMap, "FixedRoutingUpdateEvent map added or removed")
 		} else {
 			err = base.ErrorInvalidInput
 		}
@@ -985,10 +997,12 @@ func (b *BackfillRequestHandler) handleBackfillRequestDiffPair(resp ReqAndResp) 
 	}
 
 	if len(pairRO.Removed) > 0 && b.cachedBackfillSpec != nil {
+		b.logger.Infof("%s: backfill spec mapping removed", b.id)
 		b.cachedBackfillSpec.VBTasksMap.RemoveNamespaceMappings(pairRO.Removed)
 	}
 
 	if len(pairRO.Added) > 0 {
+		b.logger.Infof("%s: backfill spec mapping added", b.id)
 		maxSeqnos, newVBsList, err := b.getMaxSeqnosMapToBackfill()
 		if err != nil {
 			return err
@@ -1081,7 +1095,7 @@ func (b *BackfillRequestHandler) getMaxSeqnosMapToBackfill() (map[uint16]uint64,
 
 func (b *BackfillRequestHandler) DelAllBackfills() error {
 	var delBackfillReq internalDelBackfillReq
-	return b.HandleBackfillRequest(delBackfillReq)
+	return b.HandleBackfillRequest(delBackfillReq, "DelAllBackfills")
 }
 
 func (b *BackfillRequestHandler) handleRollbackTo0(reqAndResp ReqAndResp) error {
@@ -1157,7 +1171,7 @@ func (b *BackfillRequestHandler) GetDelVBSpecificBackfillCb(vbno uint16) (cb bas
 			specificVBRequested: true,
 			vbno:                vbno,
 		}
-		return b.HandleBackfillRequest(delReq)
+		return b.HandleBackfillRequest(delReq, "GetDelVBSpecificBackfillCb")
 	}
 
 	errCb = func(err error, cbCalled bool) {
@@ -1171,7 +1185,7 @@ func (b *BackfillRequestHandler) GetRollbackTo0VBSpecificBackfillCb(vbno uint16,
 		rollbackReq := internalRollbackTo0Req{
 			vbno: vbno,
 		}
-		handlerErr := b.HandleBackfillRequest(rollbackReq)
+		handlerErr := b.HandleBackfillRequest(rollbackReq, "rollbackTo0VB")
 		if handlerErr != nil {
 			return handlerErr
 		}
@@ -1216,7 +1230,7 @@ func (b *BackfillRequestHandler) gcFuncOneVBTask(vbno uint16) error {
 		specificVBRequested: true,
 		vbno:                vbno,
 	}
-	go b.HandleBackfillRequest(oneVBReq)
+	go b.HandleBackfillRequest(oneVBReq, "internalDelBackfillReq")
 	return nil
 }
 

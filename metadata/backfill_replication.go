@@ -380,6 +380,36 @@ func (v *VBTasksMapType) ContainsAtLeastOneTask() bool {
 	return false
 }
 
+// CompactTaskMap returns tasks in the form of map: vbno -> [[0, 100],[150,200]]
+// The main use-case is to print to the logs
+func (v *VBTasksMapType) CompactTaskMap() (ret map[uint16][][2]uint64) {
+	ret = map[uint16][][2]uint64{}
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
+
+	for vbno, tasks := range v.VBTasksMap {
+		if tasks == nil || tasks.Len() == 0 {
+			ret[vbno] = nil
+			continue
+		}
+		taskList := [][2]uint64{}
+		for _, t := range tasks.List {
+			if t == nil {
+				continue
+			}
+			t.mutex.RLock()
+			var singleTask [2]uint64
+			singleTask[0] = t.Timestamps.StartingTimestamp.Seqno
+			singleTask[1] = t.Timestamps.EndingTimestamp.Seqno
+			taskList = append(taskList, singleTask)
+			t.mutex.RUnlock()
+		}
+		ret[vbno] = taskList
+	}
+
+	return ret
+}
+
 // Remember to call unlockFunc even if exists is false
 func (v *VBTasksMapType) Get(vbno uint16, writeRequested bool) (tasks *BackfillTasks, exists bool, unlockFunc func()) {
 	if v == nil {

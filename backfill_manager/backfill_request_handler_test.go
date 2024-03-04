@@ -12,6 +12,11 @@ package backfill_manager
 
 import (
 	"fmt"
+	"io/ioutil"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	commonReal "github.com/couchbase/goxdcr/common"
 	common "github.com/couchbase/goxdcr/common/mocks"
@@ -23,10 +28,6 @@ import (
 	service_def "github.com/couchbase/goxdcr/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"sync"
-	"testing"
-	"time"
 )
 
 func setupBRHBoilerPlate() (*log.CommonLogger, *service_def.BackfillReplSvc, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, func() (uint64, error)) {
@@ -261,11 +262,11 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	var err1 error
 	var err2 error
 	go func() {
-		err1 = rh.HandleBackfillRequest(requestMapping)
+		err1 = rh.HandleBackfillRequest(requestMapping, "test")
 		waitGroup.Done()
 	}()
 	go func() {
-		err2 = rh.HandleBackfillRequest(requestMapping)
+		err2 = rh.HandleBackfillRequest(requestMapping, "test")
 		waitGroup.Done()
 	}()
 	waitGroup.Wait()
@@ -281,7 +282,7 @@ func TestBackfillReqHandlerCreateReqThenMarkDone(t *testing.T) {
 	// Doing another handle will result in a set
 	// Change requestMapping to avoid errorDuplicate
 	requestMapping.AddSingleMapping(dummyNs, dummyNs)
-	assert.Nil(rh.HandleBackfillRequest(requestMapping))
+	assert.Nil(rh.HandleBackfillRequest(requestMapping, "test"))
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -452,21 +453,21 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 		Added:   metadata.CollectionNamespaceMapping{},
 		Removed: requestMapping,
 	}
-	err := rh.HandleBackfillRequest(pair)
+	err := rh.HandleBackfillRequest(pair, "test")
 	assert.Nil(err)
 	assert.Nil(rh.cachedBackfillSpec)
 
 	// Test add
 	pair.Added = requestMapping
 	pair.Removed = metadata.CollectionNamespaceMapping{}
-	err = rh.HandleBackfillRequest(pair)
+	err = rh.HandleBackfillRequest(pair, "test")
 	assert.Nil(err)
 	assert.Equal(1024, rh.cachedBackfillSpec.VBTasksMap.Len())
 
 	// Removed should cause the whole thing to be removed
 	pair.Added = metadata.CollectionNamespaceMapping{}
 	pair.Removed = requestMapping
-	err = rh.HandleBackfillRequest(pair)
+	err = rh.HandleBackfillRequest(pair, "test")
 	assert.Nil(err)
 	assert.Nil(rh.cachedBackfillSpec)
 
@@ -543,7 +544,7 @@ func TestHandleMigrationDiff(t *testing.T) {
 		Added:   explicitMap,
 		Removed: nil,
 	}
-	err = rh.HandleBackfillRequest(pair)
+	err = rh.HandleBackfillRequest(pair, "test")
 	assert.Nil(err)
 	assert.NotNil(rh.cachedBackfillSpec)
 }
@@ -635,7 +636,7 @@ func TestBackfillReqHandlerCreateReqThenMergePeerReq(t *testing.T) {
 	backfillSpec := metadata.NewBackfillReplicationSpec(spec.Id, spec.InternalId, vbTaskMap, spec, 0)
 	internalReq := internalPeerBackfillTaskMergeReq{backfillSpec: backfillSpec}
 
-	assert.Nil(rh.HandleBackfillRequest(internalReq))
+	assert.Nil(rh.HandleBackfillRequest(internalReq, "test"))
 
 	time.Sleep(100 * time.Millisecond)
 	// After merging, vb 0 has 1 task
