@@ -538,6 +538,12 @@ func (agent *RemoteClusterAgent) initializeNewRefreshContext() (*refreshContext,
 
 	rctx := &refreshContext{agent: agent}
 	rctx.initialize()
+
+	rctx.authErrFixedCb = func() {
+		agent.refMtx.Lock()
+		agent.configurationChanged = true
+		agent.refMtx.Unlock()
+	}
 	return rctx, nil, nil
 }
 
@@ -599,6 +605,9 @@ type refreshContext struct {
 
 	// non-empty if the refresh context needs to raise an UI error message when committing
 	uiErrorMsg string
+
+	// callback for restarting replications due to auth error being fixed
+	authErrFixedCb func()
 }
 
 // Initializes the context and also populates the credentials for connecting to nodes
@@ -856,6 +865,7 @@ func (rctx *refreshContext) markNodeWithStatus(statusCode int, err error) {
 		_, authErrFixed := rctx.agent.connectivityHelper.MarkNode(markedHostname, metadata.ConnValid)
 		if authErrFixed {
 			rctx.agent.uiLogSvc.Write(fmt.Sprintf("The remote cluster credentials that includes node %v have now been fixed", markedHostname))
+			rctx.authErrFixedCb()
 		}
 	} else {
 		// Any non-OK return code

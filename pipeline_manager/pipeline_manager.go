@@ -1835,7 +1835,10 @@ func backfillStartSuccessful(retErrMap base.ErrorMap, logger *log.CommonLogger, 
 
 func (r *PipelineUpdater) checkIfNeedToReUpdate(retErrMap base.ErrorMap, retErr error) bool {
 	var updateAgain bool
-	if r.getLastResult() {
+
+	remoteClusterConfigChanged := retErrMap.HasError(base.ErrorPipelineRestartDueToClusterConfigChange)
+
+	if r.getLastResult() || remoteClusterConfigChanged {
 		// Last time update succeeded, so this error then triggers an immediate update
 		r.logger.Infof("Replication %v's status experienced changes or errors (%v), updating now\n", r.pipeline_name, base.FlattenErrorMap(retErrMap))
 		retErrMap = r.update()
