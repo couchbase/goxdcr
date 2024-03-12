@@ -2028,7 +2028,6 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 
 func (router *Router) newWrappedMCRequest() (*base.WrappedMCRequest, error) {
 	newReq := router.mcRequestPool.Get()
-	newReq.Req = &mc.MCRequest{}
 	newReq.ColInfoMtx.Lock()
 	newReq.ColInfo = nil
 	newReq.ColInfoMtx.Unlock()

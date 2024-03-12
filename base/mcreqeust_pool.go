@@ -11,6 +11,7 @@ licenses/APL2.txt.
 package base
 
 import (
+	"encoding/binary"
 	"sync"
 
 	"github.com/couchbase/gomemcached"
@@ -73,12 +74,26 @@ func (pool *MCRequestPool) cleanMCReq(req *gomemcached.MCRequest) *gomemcached.M
 	req.Cas = 0
 	req.Opaque = 0
 	req.VBucket = 0
-	req.Key = nil
-	req.Body = nil
 	pool.cleanExtras(req)
 	//opCode
 	req.Opcode = 0
 
+	req.Key = req.Key[:0]
+	req.Body = req.Body[:0]
+	req.ExtMeta = req.ExtMeta[:0]
+
+	req.DataType = 0
+	req.Keylen = 0
+	for i := 0; i < binary.MaxVarintLen32; i++ {
+		req.CollId[i] = 0
+	}
+	req.CollIdLen = 0
+	for i := 0; i < gomemcached.MAX_USER_LEN; i++ {
+		req.Username[i] = 0
+	}
+	req.UserLen = 0
+	req.FramingExtras = req.FramingExtras[:0]
+	req.FramingElen = 0
 	return req
 }
 
