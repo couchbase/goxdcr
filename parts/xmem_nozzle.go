@@ -872,6 +872,8 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 		return err
 	}
 
+	xmem.dataPool = base.NewDataPool()
+
 	err = xmem.initialize(settings)
 	if err != nil {
 		return err
@@ -889,8 +891,6 @@ func (xmem *XmemNozzle) Start(settings metadata.ReplicationSettingsMap) error {
 
 	xmem.childrenWaitGrp.Add(1)
 	go xmem.processData_sendbatch(xmem.finish_ch, &xmem.childrenWaitGrp)
-
-	xmem.dataPool = base.NewDataPool()
 
 	xmem.start_time = time.Now()
 
@@ -1246,6 +1246,13 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	count := batch.count()
 	batch_replicated_count := 0
 	reqs_bytes := [][]byte{}
+
+	// When processing a batch, the batch's responses are used to compose databytes to be sent
+	// The responses can only be GC'ed after the actual bytes have been sent over the wire
+	// to prevent zeroing out data prior to send
+	// This is a list that stores such these responses
+	var respToGc []*mc.MCResponse
+
 	// A list of reservations for each request in the batch
 	index_reservation_list := make([][]uint16, base.XmemMaxBatchSize+1)
 
@@ -1271,6 +1278,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					item.SetMetaXattrOptions.NoTargetCR = true
 				} else {
 					item.SetMetaXattrOptions.NoTargetCR = false
+				}
+
+				if lookupResp != nil && lookupResp.Resp != nil {
+					respToGc = append(respToGc, lookupResp.Resp)
 				}
 
 				err = xmem.preprocessMCRequest(item, lookupResp)
@@ -1304,6 +1315,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						}
 						return err
 					}
+
+					for _, oneResp := range respToGc {
+						oneResp.Recycle()
+					}
+					respToGc = respToGc[:0]
 
 					batch_replicated_count = 0
 					reqs_bytes = [][]byte{}
@@ -1377,6 +1393,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			}
 			return err
 		}
+
+		for _, oneResp := range respToGc {
+			oneResp.Recycle()
+		}
+		respToGc = respToGc[:0]
 	}
 	return err
 }
@@ -1798,6 +1819,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				}
 				noRep_map[uniqueKey] = RetryTargetLocked
 				delete(get_map, uniqueKey)
+				resp.Resp.Recycle()
 			} else if ok && base.IsSuccessGetResponse(resp.Resp) {
 				res, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
@@ -1812,14 +1834,17 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 					sendLookupMap[uniqueKey] = resp
 				case base.Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
+					resp.Resp.Recycle()
 				case base.Merge:
 					noRep_map[uniqueKey] = NotSendMerge
 					conflictMap[uniqueKey] = wrappedReq
 					mergeLookupMap[uniqueKey] = resp
+					// TODO: recycle response after merge
 				case base.SetBackToSource:
 					noRep_map[uniqueKey] = NotSendSetback
 					conflictMap[uniqueKey] = wrappedReq
 					mergeLookupMap[uniqueKey] = resp
+					// TODO: recycle response after merge
 				default:
 					panic(fmt.Sprintf("Unexpcted conflict result %v", res))
 				}
@@ -1835,6 +1860,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug && resp.Resp != nil {
 					xmem.Logger().Debugf("Received %v for key %v", xmem.PrintResponseStatusError(resp.Resp.Status), key)
 				}
+				resp.Resp.Recycle()
 			}
 		}
 	}
@@ -2194,6 +2220,11 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 	if err != nil {
 		return
 	}
+	err = memClient_setMeta.EnableDataPool(xmem.dataPool.GetByteSlice, xmem.dataPool.PutByteSlice)
+	if err != nil {
+		xmem.Logger().Errorf("Error enabling datapool for setmeta client %v", err)
+		return
+	}
 	// Set client immediately so that if the pipeline start times out during the next getClientWithRetry call, this client connection can be cleaned up
 	xmem.setClient(base.NewXmemClient(SetMetaClientName, xmem.config.readTimeout,
 		xmem.config.writeTimeout, memClient_setMeta,
@@ -2201,6 +2232,11 @@ func (xmem *XmemNozzle) initializeConnection() (err error) {
 
 	memClient_getMeta, err := xmem.getClientWithRetry(xmem.Id(), pool, xmem.finish_ch, true /*initializing*/, xmem.Logger())
 	if err != nil {
+		return
+	}
+	err = memClient_getMeta.EnableDataPool(xmem.dataPool.GetByteSlice, xmem.dataPool.PutByteSlice)
+	if err != nil {
+		xmem.Logger().Errorf("Error enabling datapool for getmeta client %v", err)
 		return
 	}
 	xmem.setClient(base.NewXmemClient(GetMetaClientName, xmem.config.readTimeout,
@@ -2719,6 +2755,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			}
 
 			xmem.markNonTempErrorResponse(response, nonTempErrReceived)
+			response.Recycle()
 		}
 	}
 
