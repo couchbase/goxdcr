@@ -641,8 +641,13 @@ func HasXattr(dataType uint8) bool {
 }
 
 // flatten an array of byte array into a byte array
-func FlattenBytesList(bytesList [][]byte, size int64) []byte {
-	flattenedBytes := make([]byte, 0, size)
+func FlattenBytesList(bytesList [][]byte, size int64, preAllocatedSlice []byte) []byte {
+	flattenedBytes := preAllocatedSlice
+	if flattenedBytes == nil {
+		flattenedBytes = make([]byte, 0, size)
+	} else {
+		flattenedBytes = flattenedBytes[:0]
+	}
 	for _, bytes := range bytesList {
 		flattenedBytes = append(flattenedBytes, bytes...)
 	}

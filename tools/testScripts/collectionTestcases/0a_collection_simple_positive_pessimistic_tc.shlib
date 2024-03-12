@@ -81,6 +81,9 @@ function runTestCase {
 
 	validateDataLoad
 
+	validateInternalLogWithInstance "C1" "$BAD_MAGIC_MSG" "0"
+	validateInternalLogWithInstance "C2" "$BAD_MAGIC_MSG" "0"
+
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
