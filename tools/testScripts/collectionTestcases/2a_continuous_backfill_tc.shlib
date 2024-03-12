@@ -128,6 +128,8 @@ function deleteAndRecreateBackfillMultiples {
 		checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
 		validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentVBTasksDoneInstanceCnt + 2))
 
+		validateInternalLogWithInstance "C1" "$BAD_MAGIC_MSG" "0"
+
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
 		sleep 15
 		# Main pipeline should show repaired message

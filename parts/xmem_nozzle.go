@@ -1462,15 +1462,20 @@ func (xmem *XmemNozzle) getConflictDetector(source_cr_mode base.ConflictResoluti
 }
 
 func (xmem *XmemNozzle) sendWithRetry(client *base.XmemClient, numOfRetry int, item_byte [][]byte) error {
+	gcList := [][]byte{}
 
 	var err error
 	for j := 0; j < numOfRetry; j++ {
-		err, rev := xmem.writeToClient(client, item_byte, true)
+		err, rev := xmem.writeToClient(client, item_byte, true, gcList)
 		if err == nil {
 			return nil
 		} else if err == base.BadConnectionError {
 			xmem.repairConn(client, err.Error(), rev)
 		}
+	}
+
+	for _, bytesToRecycle := range gcList {
+		xmem.dataPool.PutByteSlice(bytesToRecycle)
 	}
 	return err
 }
@@ -1643,6 +1648,9 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 	// A list (slice) of req_bytes
 	reqs_bytes_list := [][][]byte{}
 
+	// list to gc before this function returns
+	gcList := [][]byte{}
+
 	// Slice of requests that have been converted to serialized bytes
 	reqs_bytes := [][]byte{}
 	// Counts the number of requests that will fit into each req_bytes slice
@@ -1670,8 +1678,20 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 				getSpecMap[docKey] = getSpec
 			}
 
-			// .Bytes() returns data ready to be fed over the wire
-			reqs_bytes = append(reqs_bytes, req.Bytes())
+			preAllocatedBytes, err := xmem.dataPool.GetByteSlice(uint64(req.Size()))
+			if err != nil {
+				// .Bytes() returns data ready to be fed over the wire
+				reqs_bytes = append(reqs_bytes, req.Bytes())
+				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+			} else {
+				// PreallocatedBytes can be longer, need to trim the length
+				preAllocatedBytes = preAllocatedBytes[0:req.Size()]
+				// BytesPreallocated will modify the preallocated byte slice
+				req.BytesPreallocated(preAllocatedBytes)
+				reqs_bytes = append(reqs_bytes, preAllocatedBytes)
+				gcList = append(gcList, preAllocatedBytes)
+			}
+
 			// a Map of array of items and map key is the opaque currently based on time (passed to the target and back)
 			opaque_keySeqno_map[opaque] = compileOpaqueKeySeqnoValue(docKey, originalReq.Seqno, originalReq.Req.VBucket, time.Now(), originalReq.GetManifestId())
 			opaque++
@@ -1704,7 +1724,7 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 	for _, packet := range reqs_bytes_list {
 		if totalNumOfReqsForSubdocGet == 0 {
 			// We are doing getMeta only. Failure is tolerated.
-			err, _ = xmem.writeToClient(xmem.client_for_getMeta, packet, true)
+			err, _ = xmem.writeToClient(xmem.client_for_getMeta, packet, true, gcList)
 		} else {
 			// We have some subdoc lookup. The get must succeed. Do sendWithRetry
 			err = xmem.sendWithRetry(xmem.client_for_getMeta, retry, packet)
@@ -1724,6 +1744,9 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 	//wait for receiver to finish
 	<-receiver_return_ch
 
+	for _, bytesToRecycle := range gcList {
+		xmem.dataPool.PutByteSlice(bytesToRecycle)
+	}
 	return
 }
 
@@ -2090,14 +2113,18 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 func (xmem *XmemNozzle) sendSingleSetMeta(bytesList [][]byte, numOfRetry int) error {
 	var err error
 	if xmem.client_for_setMeta != nil {
+		gcList := [][]byte{}
 		for j := 0; j < numOfRetry; j++ {
-			err, rev := xmem.writeToClient(xmem.client_for_setMeta, bytesList, true)
+			err, rev := xmem.writeToClient(xmem.client_for_setMeta, bytesList, true, gcList)
 			if err == nil {
 				atomic.AddUint64(&xmem.counter_resend, 1)
 				return nil
 			} else if err == base.BadConnectionError {
 				xmem.repairConn(xmem.client_for_setMeta, err.Error(), rev)
 			}
+		}
+		for _, bytesToRecycle := range gcList {
+			xmem.dataPool.PutByteSlice(bytesToRecycle)
 		}
 		return err
 
@@ -3275,7 +3302,7 @@ func (xmem *XmemNozzle) validateRunningState() error {
 	return nil
 }
 
-func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byte, renewTimeout bool) (err error, rev int) {
+func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byte, renewTimeout bool, gcList [][]byte) (err error, rev int) {
 	if len(bytesList) == 0 {
 		// should not happen. just to be safe
 		return nil, 0
@@ -3305,7 +3332,14 @@ func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byt
 
 		if bytesCanSend == numberOfBytes {
 			// if all the bytes can be sent, send them
-			flattenedBytes := base.FlattenBytesList(curBytesList, numberOfBytes)
+			preAllocatedSlice, poolGetErr := xmem.dataPool.GetByteSlice(uint64(numberOfBytes))
+			if poolGetErr != nil {
+				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+				preAllocatedSlice = nil
+			} else {
+				gcList = append(gcList, preAllocatedSlice)
+			}
+			flattenedBytes := base.FlattenBytesList(curBytesList, numberOfBytes, preAllocatedSlice)
 			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
 			if err != nil {
 				return
@@ -3315,7 +3349,14 @@ func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byt
 
 		if bytesCanSend == minNumberOfBytes {
 			// send minNumberOfBytes
-			flattenedBytes := base.FlattenBytesList(curBytesList[:minIndex+1], minNumberOfBytes)
+			preAllocatedSlice, poolGetErr := xmem.dataPool.GetByteSlice(uint64(minNumberOfBytes))
+			if poolGetErr != nil {
+				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+				preAllocatedSlice = nil
+			} else {
+				gcList = append(gcList, preAllocatedSlice)
+			}
+			flattenedBytes := base.FlattenBytesList(curBytesList[:minIndex+1], minNumberOfBytes, preAllocatedSlice)
 			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
 			if err != nil {
 				return
@@ -3324,7 +3365,14 @@ func (xmem *XmemNozzle) writeToClient(client *base.XmemClient, bytesList [][]byt
 			curBytesList = curBytesList[minIndex+1:]
 		} else if bytesCanSend == numberOfBytesOfFirstItem {
 			// send numberOfBytesOfFirstItem
-			flattenedBytes := base.FlattenBytesList(curBytesList[:1], numberOfBytesOfFirstItem)
+			preAllocatedSlice, poolGetErr := xmem.dataPool.GetByteSlice(uint64(numberOfBytesOfFirstItem))
+			if poolGetErr != nil {
+				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+				preAllocatedSlice = nil
+			} else {
+				gcList = append(gcList, preAllocatedSlice)
+			}
+			flattenedBytes := base.FlattenBytesList(curBytesList[:1], numberOfBytesOfFirstItem, preAllocatedSlice)
 			err, rev = xmem.writeToClientWithoutThrottling(client, flattenedBytes, renewTimeout)
 			if err != nil {
 				return
