@@ -23,6 +23,8 @@ type MCResponse struct {
 	Fatal bool
 	// Datatype identifier
 	DataType uint8
+
+	recycleFunc func()
 }
 
 // A debugging string representation of this response
@@ -161,10 +163,19 @@ func (res *MCResponse) Receive(r io.Reader, hdrBytes []byte) (n int, err error) 
 	return res.ReceiveWithBuf(r, hdrBytes, nil)
 }
 
-// ReceiveWithBuf takes an optional pre-allocated []byte buf which
+func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrbytes, buf []byte) (n int, err error) {
+	return res.receiveInternal(r, hdrbytes, buf, nil, nil)
+}
+
+func (res *MCResponse) ReceiveWithDatapool(r io.Reader, hdrbytes []byte, getter func(uint64) ([]byte, error), done func([]byte)) (n int, err error) {
+	return res.receiveInternal(r, hdrbytes, nil, getter, done)
+}
+
+// receiveInternal takes an optional pre-allocated []byte buf which
 // will be used if its capacity is large enough, otherwise a new
-// []byte slice is allocated.
-func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int, err error) {
+// []byte slice is allocated
+// If a getter is provided, it'll attempt to use it before allocating
+func (res *MCResponse) receiveInternal(r io.Reader, hdrBytes, buf []byte, getter func(uint64) ([]byte, error), done func([]byte)) (n int, err error) {
 	if len(hdrBytes) < HDR_LEN {
 		hdrBytes = []byte{
 			0, 0, 0, 0, 0, 0, 0, 0,
@@ -210,7 +221,19 @@ func (res *MCResponse) ReceiveWithBuf(r io.Reader, hdrBytes, buf []byte) (n int,
 	if buf != nil && cap(buf) >= bufNeed {
 		buf = buf[0:bufNeed]
 	} else {
-		buf = make([]byte, bufNeed)
+		if getter != nil {
+			buf, err = getter(uint64(bufNeed))
+			if err != nil {
+				buf = make([]byte, bufNeed)
+			} else {
+				buf = buf[0:bufNeed]
+				res.recycleFunc = func() {
+					done(buf)
+				}
+			}
+		} else {
+			buf = make([]byte, bufNeed)
+		}
 	}
 
 	m, err := io.ReadFull(r, buf)
@@ -259,6 +282,12 @@ func (res *MCResponse) ComputeUnits() (ru uint64, wu uint64) {
 		}
 	}
 	return
+}
+
+func (res *MCResponse) Recycle() {
+	if res != nil && res.recycleFunc != nil {
+		res.recycleFunc()
+	}
 }
 
 type MCResponsePool struct {

@@ -39,6 +39,7 @@ type ClientIface interface {
 	Del(vb uint16, key string, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	EnableMutationToken() (*gomemcached.MCResponse, error)
 	EnableFeatures(features Features) (*gomemcached.MCResponse, error)
+	EnableDataPool(getter func(uint64) ([]byte, error), doneCb func([]byte)) error
 	Get(vb uint16, key string, context ...*ClientContext) (*gomemcached.MCResponse, error)
 	GetAllVbSeqnos(vbSeqnoMap map[uint16]uint64, context ...*ClientContext) (map[uint16]uint64, error)
 	GetAndTouch(vb uint16, key string, exp int, context ...*ClientContext) (*gomemcached.MCResponse, error)
@@ -264,6 +265,10 @@ type Client struct {
 	bucket             string
 	// If set, this takes precedence over the global variable ConnName
 	connName string
+
+	objPoolEnabled uint32
+	datapoolGetter func(uint64) ([]byte, error)
+	datapoolDone   func([]byte)
 }
 
 var (
@@ -276,6 +281,10 @@ var (
 	dialFun = func(prot, dest string) (net.Conn, error) {
 		return net.DialTimeout(prot, dest, DefaultDialTimeout)
 	}
+
+	datapoolDisabled = uint32(0)
+	datapoolInit     = uint32(1)
+	datapoolInitDone = uint32(2)
 )
 
 func SetConnectionName(name string) {
@@ -430,7 +439,14 @@ func (c *Client) TransmitResponse(res *gomemcached.MCResponse) error {
 
 // Receive a response
 func (c *Client) Receive() (*gomemcached.MCResponse, error) {
-	resp, _, err := getResponse(c.conn, c.hdrBuf)
+	var resp *gomemcached.MCResponse
+	var err error
+
+	if atomic.LoadUint32(&c.objPoolEnabled) == datapoolInitDone {
+		resp, _, err = getResponseWithPool(c.conn, c.hdrBuf, c.datapoolGetter, c.datapoolDone)
+	} else {
+		resp, _, err = getResponse(c.conn, c.hdrBuf)
+	}
 	if err != nil && !isNonFatalStatus(resp.Status) {
 		c.setHealthy(false)
 	}
@@ -1978,4 +1994,14 @@ func (c *Client) GetErrorMap(errMapVersion gomemcached.ErrorMapVersion) (map[str
 		return nil, err
 	}
 	return errMap, nil
+}
+
+func (c *Client) EnableDataPool(getter func(uint64) ([]byte, error), doneCb func([]byte)) error {
+	if atomic.CompareAndSwapUint32(&c.objPoolEnabled, datapoolDisabled, datapoolInit) {
+		c.datapoolGetter = getter
+		c.datapoolDone = doneCb
+		atomic.CompareAndSwapUint32(&c.objPoolEnabled, datapoolInit, datapoolInitDone)
+		return nil
+	}
+	return fmt.Errorf("Already enabled")
 }

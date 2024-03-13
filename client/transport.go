@@ -44,6 +44,24 @@ func getResponse(s io.Reader, hdrBytes []byte) (rv *gomemcached.MCResponse, n in
 	return rv, n, err
 }
 
+func getResponseWithPool(s io.Reader, hdrBytes []byte, getter func(uint64) ([]byte, error), done func([]byte)) (rv *gomemcached.MCResponse, n int, err error) {
+	if s == nil {
+		return nil, 0, errNoConn
+	}
+
+	rv = &gomemcached.MCResponse{}
+	n, err = rv.ReceiveWithDatapool(s, hdrBytes, getter, done)
+
+	if ReceiveHook != nil {
+		ReceiveHook(rv, n, err)
+	}
+
+	if err == nil && (rv.Status != gomemcached.SUCCESS && rv.Status != gomemcached.AUTH_CONTINUE) {
+		err = rv
+	}
+	return rv, n, err
+}
+
 // TransmitHook is called after each packet is transmitted.
 var TransmitHook func(*gomemcached.MCRequest, int, error)
 

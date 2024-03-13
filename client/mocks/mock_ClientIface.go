@@ -1049,6 +1049,49 @@ func (_c *ClientIface_Del_Call) RunAndReturn(run func(uint16, string, ...*memcac
 	return _c
 }
 
+// EnableDataPool provides a mock function with given fields: getter, doneCb
+func (_m *ClientIface) EnableDataPool(getter func(uint64) ([]byte, error), doneCb func([]byte)) error {
+	ret := _m.Called(getter, doneCb)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(func(uint64) ([]byte, error), func([]byte)) error); ok {
+		r0 = rf(getter, doneCb)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ClientIface_EnableDataPool_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnableDataPool'
+type ClientIface_EnableDataPool_Call struct {
+	*mock.Call
+}
+
+// EnableDataPool is a helper method to define mock.On call
+//   - getter func(uint64)([]byte , error)
+//   - doneCb func([]byte)
+func (_e *ClientIface_Expecter) EnableDataPool(getter interface{}, doneCb interface{}) *ClientIface_EnableDataPool_Call {
+	return &ClientIface_EnableDataPool_Call{Call: _e.mock.On("EnableDataPool", getter, doneCb)}
+}
+
+func (_c *ClientIface_EnableDataPool_Call) Run(run func(getter func(uint64) ([]byte, error), doneCb func([]byte))) *ClientIface_EnableDataPool_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(func(uint64) ([]byte, error)), args[1].(func([]byte)))
+	})
+	return _c
+}
+
+func (_c *ClientIface_EnableDataPool_Call) Return(_a0 error) *ClientIface_EnableDataPool_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *ClientIface_EnableDataPool_Call) RunAndReturn(run func(func(uint64) ([]byte, error), func([]byte)) error) *ClientIface_EnableDataPool_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // EnableFeatures provides a mock function with given fields: features
 func (_m *ClientIface) EnableFeatures(features memcached.Features) (*gomemcached.MCResponse, error) {
 	ret := _m.Called(features)
