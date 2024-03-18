@@ -1644,6 +1644,20 @@ func NewXattrIterator(body []byte) (*XattrIterator, error) {
 	}, nil
 }
 
+func (xi *XattrIterator) ResetXattrIterator(body []byte, size uint32) error {
+	bodyLength := uint32(len(body))
+	if body == nil {
+		return fmt.Errorf("Error in resetting the XattrIterator, body cannot be nil")
+	}
+	if size > bodyLength {
+		return fmt.Errorf("Error in resetting the XattrIterator, given size %v exceeds the actual length %v", size, bodyLength)
+	}
+	xi.body = body
+	xi.pos = 0
+	xi.endPos = size
+	return nil
+}
+
 func (xi *XattrIterator) HasNext() bool {
 	return xi.pos < xi.endPos
 }

@@ -665,7 +665,7 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 
 }
 
-func parseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, err error) {
+func ParseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, err error) {
 	var cvCasHex, verHex, pv, mv []byte
 	var err1 error
 	it, err := base.NewCCRXattrFieldIterator(xattr)
@@ -733,7 +733,7 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 		return
 	}
 	if xattr != nil {
-		cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = parseHlvFields(cas, xattr)
+		cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = ParseHlvFields(cas, xattr)
 		if err1 != nil {
 			err = fmt.Errorf("failed to parse HLV fields for document %s%q%s, error: %v", base.UdTagBegin, lookupResp.Resp.Key, base.UdTagEnd, err)
 			return
@@ -794,7 +794,7 @@ func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.
 		return
 	}
 	// Found HLV XATTR. Now find the fields
-	cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = parseHlvFields(cas, xattrHlv)
+	cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = ParseHlvFields(cas, xattrHlv)
 	if err1 != nil {
 		err = fmt.Errorf("failed to parse HLV fields for document %s%q%s, error: %v", base.UdTagBegin, req.Key, base.UdTagEnd, err1)
 		return
