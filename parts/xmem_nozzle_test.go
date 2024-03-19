@@ -169,6 +169,7 @@ func setupMocksCommon(utils *utilsMock.UtilsIface) {
 
 	memcachedMock := &mcMock.ClientIface{}
 	memcachedMock.On("Closed").Return(true)
+	memcachedMock.On("EnableDataPool", mock.Anything, mock.Anything).Return(nil)
 
 	emptyMap := make(map[string]interface{})
 	memcachedMock.On("GetErrorMap", mock.Anything).Return(emptyMap, nil)
@@ -230,6 +231,7 @@ func TestPositiveXmemNozzle(t *testing.T) {
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
 	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, eventProducer)
+	xmem.dataPool = &base.FakeDataPool{}
 	assert.Nil(xmem.initialize(settings))
 	fmt.Println("============== Test case end: TestPositiveXmemNozzle =================")
 }
@@ -241,6 +243,7 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	setupMocksCompressNeg(utils)
 	setupMocksRC(rc)
 
+	xmem.dataPool = &base.FakeDataPool{}
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
 }
@@ -254,6 +257,7 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	setupMocksCompressNeg(utils)
 	setupMocksRC(rc)
 
+	xmem.dataPool = &base.FakeDataPool{}
 	assert.Equal(nil, xmem.initialize(settings))
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
 }
@@ -266,6 +270,7 @@ func TestPositiveXmemNozzleAuto(t *testing.T) {
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, evtProducer)
 
+	xmem.dataPool = &base.FakeDataPool{}
 	assert.NotNil(xmem.initialize(settings))
 	fmt.Println("============== Test case end: TestPositiveXmemNozzleAuto =================")
 }
@@ -522,6 +527,7 @@ func TestNonTempErrorResponsesEvents(t *testing.T) {
 	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(xmemBucket, base.CRMode_RevId, 3)
 	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
+	xmem.dataPool = &base.FakeDataPool{}
 	assert.Nil(xmem.initialize(settings))
 	assert.Nil(xmem.Start(settings))
 
