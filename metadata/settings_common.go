@@ -26,6 +26,10 @@ type SettingsConfig struct {
 	*Range
 }
 
+func (sc *SettingsConfig) Default() interface{} {
+	return sc.defaultValue
+}
+
 type Range struct {
 	MinValue int
 	MaxValue int
