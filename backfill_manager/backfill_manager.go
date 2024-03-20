@@ -295,6 +295,9 @@ func (b *BackfillMgr) Start() error {
 	// once all pipelines have restarted and stabilized
 	b.collectionsManifestSvc.SetMetadataChangeHandlerCallback(b.checkpointsSvc.CollectionsManifestChangeCb)
 
+	// Spawn the goroutine first else any error in subsequent will bail out early
+	go b.runRetryMonitor()
+
 	err := b.initCache()
 	if err != nil {
 		b.logger.Errorf("Unable to initCache: %v", err.Error())
@@ -306,8 +309,6 @@ func (b *BackfillMgr) Start() error {
 		b.logger.Errorf("Unable to set backfill raiser: %v", err.Error())
 		return err
 	}
-
-	go b.runRetryMonitor()
 
 	b.logger.Infof("BackfillMgr Started")
 	return nil
