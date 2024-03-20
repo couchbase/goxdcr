@@ -11,10 +11,11 @@ licenses/APL2.txt.
 package base
 
 import (
-	"github.com/couchbase/goxdcr/log"
 	"math/rand"
 	"sort"
 	"sync"
+
+	"github.com/couchbase/goxdcr/log"
 )
 
 const NumOfSizes = 20
@@ -97,13 +98,18 @@ func NewDataPool() *DataPoolImpl {
 	return newPool
 }
 
+// output slice will have cap(out) >= (sizeRequested == len(out))
 func (p *DataPoolImpl) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 	i := sort.Search(NumOfSizes, func(i int) bool {
 		return p.byteSlicePoolClasses[i] >= sizeRequested
 	})
 
 	if i >= 0 && i < NumOfSizes {
-		return p.byteSlicePools[i].Get().([]byte), nil
+		out := p.byteSlicePools[i].Get().([]byte)
+		if len(out) != int(sizeRequested) {
+			out = out[:sizeRequested]
+		}
+		return out, nil
 	}
 	return nil, ErrorSizeExceeded
 }

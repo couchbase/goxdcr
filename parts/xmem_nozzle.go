@@ -1684,8 +1684,6 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 				reqs_bytes = append(reqs_bytes, req.Bytes())
 				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 			} else {
-				// PreallocatedBytes can be longer, need to trim the length
-				preAllocatedBytes = preAllocatedBytes[0:req.Size()]
 				// BytesPreallocated will modify the preallocated byte slice
 				req.BytesPreallocated(preAllocatedBytes)
 				reqs_bytes = append(reqs_bytes, preAllocatedBytes)
