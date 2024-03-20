@@ -1513,8 +1513,6 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 			recycledSlice = snappy.Encode(recycledSlice, wrappedEvent.DecompressedValue)
 		} else {
 			copy(recycledSlice, wrappedEvent.DecompressedValue)
-			// Recycled slice may have extra garbage at the end. Trim it manually
-			recycledSlice = recycledSlice[0:len(wrappedEvent.DecompressedValue)]
 		}
 		req.Body = recycledSlice
 	} else {
