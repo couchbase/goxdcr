@@ -214,9 +214,9 @@ type dataBatch struct {
 	noRepMap map[string]NeedSendStatus
 	// For CCR, noRepMap value may be Not_Send_Merge or Not_Send_Setback. For these, the target document lookup
 	// response is stored in here.
-	mergeLookupMap map[string]*base.SubdocLookupResponse
+	mergeLookupMap *responseLookup
 	// If mobile is on, for document winning conflict resolution, we need to preserve target _sync XATTR. The lookup for these are stored in here
-	sendLookupMap map[string]*base.SubdocLookupResponse
+	sendLookupMap *responseLookup
 
 	// XMEM config may change but only affect the next batch
 	// At the beginning of each batch we will check the config to decide the getMeta/getSubdoc and setMeta behavior
@@ -234,6 +234,56 @@ type dataBatch struct {
 	logger            *log.CommonLogger
 	batch_nonempty_ch chan bool
 	nonempty_set      bool
+}
+
+type responseLookup struct {
+	// uinque-key to response mapping
+	responses map[string]*base.SubdocLookupResponse
+	// There may be multiple unique-keys that are refering to the same response of a given document key
+	// Therefore, GC or recycle the response only when refCnt is zero
+	refCnter map[*mc.MCResponse]int
+}
+
+func NewResponseLookup() *responseLookup {
+	return &responseLookup{
+		responses: make(map[string]*base.SubdocLookupResponse),
+		refCnter:  make(map[*mc.MCResponse]int),
+	}
+}
+
+// stores response and increases the reference count by 1
+func (lookup *responseLookup) registerLookup(uniqueKey string, resp *base.SubdocLookupResponse) {
+	if lookup == nil {
+		return
+	}
+	lookup.responses[uniqueKey] = resp
+	lookup.refCnter[resp.Resp]++
+}
+
+// returns the response and decreases the reference count by 1
+func (lookup *responseLookup) deregisterLookup(uniqueKey string) *base.SubdocLookupResponse {
+	if lookup == nil {
+		return nil
+	}
+	response, ok := lookup.responses[uniqueKey]
+	if !ok {
+		return nil
+	}
+	lookup.refCnter[response.Resp]--
+	return response
+}
+
+// only recycle if the response referenced by noone responseLookup
+func (lookup *responseLookup) canRecycle(resp *mc.MCResponse) bool {
+	if lookup == nil {
+		return true
+	}
+	refCnt, ok := lookup.refCnter[resp]
+	if !ok {
+		// not present at all in lookup map, safe to recycle
+		return true
+	}
+	return refCnt <= 0
 }
 
 func newBatch(cap_count uint32, cap_size uint32, logger *log.CommonLogger) *dataBatch {

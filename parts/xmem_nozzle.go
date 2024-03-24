@@ -1138,8 +1138,8 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 				for k, v := range noRepMap2 {
 					noRepMap[k] = v
 				}
-				for k, v := range sendLookupMap2 {
-					sendLookup_map[k] = v
+				for k, v := range sendLookupMap2.responses {
+					sendLookup_map.registerLookup(k, v)
 					// Anything to be sent should not be in noRepMap
 					delete(noRepMap, k)
 				}
@@ -1251,7 +1251,13 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 	// The responses can only be GC'ed after the actual bytes have been sent over the wire
 	// to prevent zeroing out data prior to send
 	// This is a list that stores such these responses
-	var respToGc []*mc.MCResponse
+	respToGc := make(map[*mc.MCResponse]bool)
+	defer func() {
+		// make sure at the end, everything left is recycled
+		for oneResp := range respToGc {
+			oneResp.Recycle()
+		}
+	}()
 
 	// A list of reservations for each request in the batch
 	index_reservation_list := make([][]uint16, base.XmemMaxBatchSize+1)
@@ -1273,7 +1279,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			}
 			switch needSendStatus {
 			case Send:
-				lookupResp := batch.sendLookupMap[item.UniqueKey]
+				lookupResp := batch.sendLookupMap.deregisterLookup(item.UniqueKey)
+
 				if lookupResp != nil && lookupResp.Resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
 					item.SetMetaXattrOptions.NoTargetCR = true
 				} else {
@@ -1281,7 +1288,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 
 				if lookupResp != nil && lookupResp.Resp != nil {
-					respToGc = append(respToGc, lookupResp.Resp)
+					respToGc[lookupResp.Resp] = true
 				}
 
 				err = xmem.preprocessMCRequest(item, lookupResp)
@@ -1316,10 +1323,13 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						return err
 					}
 
-					for _, oneResp := range respToGc {
-						oneResp.Recycle()
+					for oneResp := range respToGc {
+						if batch.sendLookupMap.canRecycle(oneResp) &&
+							batch.mergeLookupMap.canRecycle(oneResp) {
+							oneResp.Recycle()
+							delete(respToGc, oneResp)
+						}
 					}
-					respToGc = respToGc[:0]
 
 					batch_replicated_count = 0
 					reqs_bytes = [][]byte{}
@@ -1328,11 +1338,11 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			case NotSendMerge:
 				// Call conflictMgr to resolve conflict
 				atomic.AddUint64(&xmem.counter_to_resolve, 1)
-				lookupResp, ok := batch.mergeLookupMap[item.UniqueKey]
-				if !ok || lookupResp == nil {
+				lookupResp := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
+				if lookupResp == nil {
 					xmem.Logger().Errorf("key=%q, batch.noRep=%v, sendLookup=%v, mergeLookup=%v\n",
-						[]byte(item.UniqueKey), batch.noRepMap[item.UniqueKey], batch.sendLookupMap[item.UniqueKey],
-						batch.mergeLookupMap[item.UniqueKey])
+						[]byte(item.UniqueKey), batch.noRepMap[item.UniqueKey], batch.sendLookupMap.responses[item.UniqueKey],
+						lookupResp)
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
 				err = xmem.conflictMgr.ResolveConflict(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.uncompressBody, xmem.recycleDataObj)
@@ -1341,7 +1351,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 			case NotSendSetback:
 				atomic.AddUint64(&xmem.counter_to_setback, 1)
-				lookupResp := batch.mergeLookupMap[item.UniqueKey]
+				lookupResp := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
 				if lookupResp == nil {
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
@@ -1393,11 +1403,6 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			}
 			return err
 		}
-
-		for _, oneResp := range respToGc {
-			oneResp.Recycle()
-		}
-		respToGc = respToGc[:0]
 	}
 	return err
 }
@@ -1773,22 +1778,34 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 // and return all the result in the result_map
 // Input:
 // - get_map: the documents we want to fetch from target. When this call returns, get_map will be empty
-// - getSpecWithHlv: the spec for subdoc_get paths, if nil, getMeta will be used.
-// - getSpecWithoutHlv: the spec if not CCR and enableCrossClusterVersion is off. If nil, getMeta will be used
 // Output:
 // - noRepMap: the documents we don't need to send to target
 // - sendLookupMap: the response for documents we need to send to target. These are not in noRepMap.
 // - conflictMap: These documents have conflict. These are also in noRepMap with corresponding NeedSendStatus
 // - mergeLookupMap: The response for the documents in conflict_map
 func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[string]NeedSendStatus,
-	conflictMap base.McRequestMap, sendLookupMap, mergeLookupMap map[string]*base.SubdocLookupResponse, err error) {
+	conflictMap base.McRequestMap, sendLookupMap, mergeLookupMap *responseLookup, err error) {
 
 	noRep_map = make(map[string]NeedSendStatus)
 	conflictMap = make(base.McRequestMap)
-	sendLookupMap = make(map[string]*base.SubdocLookupResponse)
-	mergeLookupMap = make(map[string]*base.SubdocLookupResponse)
+	sendLookupMap = NewResponseLookup()
+	mergeLookupMap = NewResponseLookup()
 	var respMap map[string]*base.SubdocLookupResponse
 	var hasTmpErr bool
+
+	// Note that there could be some responses that could be recycled immediately, i.e. if it is an error response
+	// But, some responses (eg. of those who are skipped to send) could have been refered by some other unique-keys (other mutations with the same doc key)
+	// Store such responses here and take the call to recycle or not before the routine exits based on the refCnter
+	respToGc := make(map[*mc.MCResponse]bool)
+	defer func() {
+		for resp := range respToGc {
+			if sendLookupMap.canRecycle(resp) &&
+				mergeLookupMap.canRecycle(resp) {
+				resp.Recycle()
+			}
+		}
+	}()
+
 	for i := 0; i < xmem.config.maxRetry || hasTmpErr; i++ {
 		if len(get_map) == 0 {
 			// Got all result
@@ -1809,7 +1826,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
 			if ok && (resp.Resp.Status == mc.KEY_ENOENT) {
-				sendLookupMap[uniqueKey] = resp
+				sendLookupMap.registerLookup(uniqueKey, resp)
 				delete(get_map, uniqueKey)
 			} else if ok && base.IsDocLocked(resp.Resp) {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
@@ -1829,19 +1846,19 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				case base.SendToTarget:
 					// Import mutations sent will be counted when we send since we will get a more accurate count then.
 					// If target document does not exist, we only parse for importCas at send time.
-					sendLookupMap[uniqueKey] = resp
+					sendLookupMap.registerLookup(uniqueKey, resp)
 				case base.Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
-					resp.Resp.Recycle()
+					respToGc[resp.Resp] = true
 				case base.Merge:
 					noRep_map[uniqueKey] = NotSendMerge
 					conflictMap[uniqueKey] = wrappedReq
-					mergeLookupMap[uniqueKey] = resp
+					mergeLookupMap.registerLookup(uniqueKey, resp)
 					// TODO: recycle response after merge
 				case base.SetBackToSource:
 					noRep_map[uniqueKey] = NotSendSetback
 					conflictMap[uniqueKey] = wrappedReq
-					mergeLookupMap[uniqueKey] = resp
+					mergeLookupMap.registerLookup(uniqueKey, resp)
 					// TODO: recycle response after merge
 				default:
 					panic(fmt.Sprintf("Unexpcted conflict result %v", res))
@@ -1849,7 +1866,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				delete(get_map, uniqueKey)
 			} else if opcode, _ := xmem.opcodeAndSpecsForGetOp(wrappedReq); opcode == base.GET_WITH_META {
 				// For getMeta, we can just send optimistically
-				sendLookupMap[uniqueKey] = resp
+				sendLookupMap.registerLookup(uniqueKey, resp)
 				delete(get_map, uniqueKey)
 			} else if resp != nil {
 				if base.IsTemporaryMCError(resp.Resp.Status) {
