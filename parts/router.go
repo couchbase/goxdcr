@@ -155,6 +155,11 @@ type Router struct {
 
 	crossClusterVersioning uint32
 	mobileCompatMode       uint32
+
+	// RevID or CAS can't be used with doc key to create a unique-key when we skip targetCR
+	// This is because of the possibility of same revID or CAS mutations over the dcp stream
+	// This monotonic counter will be used to construct unique-key instead
+	mutationCounter uint64
 }
 
 /**
@@ -1480,6 +1485,14 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 	return router, nil
 }
 
+func (router *Router) nextMutationCounter() uint64 {
+	if router.mutationCounter == math.MaxUint64 {
+		router.mutationCounter = 0
+	}
+	router.mutationCounter++
+	return router.mutationCounter
+}
+
 // NOTE - The caller of this ComposeMCRequest must separately call ConstructUniqueKey()
 func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*base.WrappedMCRequest, error) {
 	wrapped_req, err := router.newWrappedMCRequest()
@@ -1717,7 +1730,7 @@ func (router *Router) Route(data interface{}) (map[string]interface{}, error) {
 		return result, err
 	}
 
-	mcRequest.ConstructUniqueKey()
+	mcRequest.ConstructUniqueKey(router.nextMutationCounter())
 	result[partId] = mcRequest
 
 	return result, nil

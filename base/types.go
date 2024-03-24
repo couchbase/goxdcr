@@ -18,6 +18,7 @@ import (
 	mrand "math/rand"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -751,18 +752,18 @@ func (req *WrappedMCRequest) UpdateReqBytes() {
 	}
 }
 
-// unique-key is a combination of doc key and revSeqno of the mutation
-func (req *WrappedMCRequest) ConstructUniqueKey() {
+// unique-key is a combination of doc key and mutationCounter which is a monotonic integer
+func (req *WrappedMCRequest) ConstructUniqueKey(mutationCnter uint64) {
 	var buffer bytes.Buffer
 	buffer.Write(req.Req.Key)
-	buffer.Write(req.Req.Extras[8:16])
+	buffer.WriteString(strconv.FormatUint(mutationCnter, 10))
 	req.UniqueKey = buffer.String()
 
 	req.SiblingReqsMtx.RLock()
 	if len(req.SiblingReqs) > 0 {
 		for _, sibling := range req.SiblingReqs {
 			if sibling != nil {
-				sibling.ConstructUniqueKey()
+				sibling.ConstructUniqueKey(mutationCnter)
 			}
 		}
 	}
