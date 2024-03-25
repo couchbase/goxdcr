@@ -1453,12 +1453,7 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 				body = make([]byte, maxEncodedLen)
 				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 			} else {
-				req.SlicesToBeReleasedMtx.Lock()
-				if req.SlicesToBeReleasedByXmem == nil {
-					req.SlicesToBeReleasedByXmem = make([][]byte, 0, 1)
-				}
-				req.SlicesToBeReleasedByXmem = append(req.SlicesToBeReleasedByXmem, body)
-				req.SlicesToBeReleasedMtx.Unlock()
+				req.AddByteSliceForXmemToRecycle(body)
 			}
 			body = snappy.Encode(body, mc_req.Body)
 			mc_req.Body = body
@@ -1643,9 +1638,9 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 	}
 }
 
-func (xmem *XmemNozzle) composeRequestForGetMeta(key []byte, vb uint16, opaque uint32) *mc.MCRequest {
-	req := &mc.MCRequest{VBucket: vb,
-		Key:    key,
+func (xmem *XmemNozzle) composeRequestForGetMeta(wrappedReq *base.WrappedMCRequest, opaque uint32) *mc.MCRequest {
+	req := &mc.MCRequest{VBucket: wrappedReq.Req.VBucket,
+		Key:    wrappedReq.Req.Key,
 		Opaque: opaque,
 		Opcode: base.GET_WITH_META}
 
@@ -1913,25 +1908,30 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 }
 
 func (xmem *XmemNozzle) composeRequestForGet(wrappedReq *base.WrappedMCRequest, opaque uint32) (*mc.MCRequest, []base.SubdocLookupPathSpec) {
-	incomingReq := wrappedReq.Req
 	opcode, specs := xmem.opcodeAndSpecsForGetOp(wrappedReq)
 	switch opcode {
 	case base.GET_WITH_META:
-		return xmem.composeRequestForGetMeta(incomingReq.Key, incomingReq.VBucket, opaque), nil
+		return xmem.composeRequestForGetMeta(wrappedReq, opaque), nil
 	case mc.SUBDOC_MULTI_LOOKUP:
-		return xmem.composeRequestForSubdocGet(specs, incomingReq.Key, incomingReq.VBucket, opaque), specs
+		return xmem.composeRequestForSubdocGet(specs, wrappedReq, opaque), specs
 	default:
 		panic(fmt.Sprintf("Unknown opcode %v. Need to implement", opcode))
 	}
 }
 
-// Request to get _xdcr XATTR. If document body is included, it must be the last path
-func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPathSpec, key []byte, vb uint16, opaque uint32) *mc.MCRequest {
+// Request to get _xdcr or _vv XATTR. If document body is included, it must be the last path
+func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPathSpec, wrappedReq *base.WrappedMCRequest, opaque uint32) *mc.MCRequest {
 	bodylen := 0
 	for i := 0; i < len(specs); i++ {
 		bodylen = bodylen + specs[i].Size()
 	}
-	body := make([]byte, bodylen)
+	body, err := xmem.dataPool.GetByteSlice(uint64(bodylen))
+	if err != nil {
+		body = make([]byte, bodylen)
+		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+	} else {
+		wrappedReq.AddByteSliceForXmemToRecycle(body)
+	}
 
 	pos := 0
 	for i := 0; i < len(specs); i++ {
@@ -1948,8 +1948,8 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPath
 	}
 
 	return &mc.MCRequest{
-		VBucket: vb,
-		Key:     key,
+		VBucket: wrappedReq.Req.VBucket,
+		Key:     wrappedReq.Req.Key,
 		Opaque:  opaque,
 		Extras:  []byte{mc.SUBDOC_FLAG_ACCESS_DELETED},
 		Body:    body,
@@ -1968,14 +1968,7 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 			body = make([]byte, decodedLen)
 			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 		} else {
-			req.SlicesToBeReleasedMtx.Lock()
-			// For target we need up to 3 byte slices, 1 to decompress, 1 for body with new XATTR, 1 to compress
-			// For merge back to source, we need up to 4 byte slices, 1 to decompress, 2 to format pcas and mv, 1 for new body and XATTR
-			if req.SlicesToBeReleasedByXmem == nil {
-				req.SlicesToBeReleasedByXmem = make([][]byte, 0, 4)
-			}
-			req.SlicesToBeReleasedByXmem = append(req.SlicesToBeReleasedByXmem, body)
-			req.SlicesToBeReleasedMtx.Unlock()
+			req.AddByteSliceForXmemToRecycle(body)
 		}
 		body, err = snappy.Decode(body, req.Req.Body)
 		if err != nil {
@@ -2047,12 +2040,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		newbody = make([]byte, newbodyLen)
 		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 	} else {
-		wrappedReq.SlicesToBeReleasedMtx.Lock()
-		if wrappedReq.SlicesToBeReleasedByXmem == nil {
-			wrappedReq.SlicesToBeReleasedByXmem = make([][]byte, 0, 2)
-		}
-		wrappedReq.SlicesToBeReleasedByXmem = append(wrappedReq.SlicesToBeReleasedByXmem, newbody)
-		wrappedReq.SlicesToBeReleasedMtx.Unlock()
+		wrappedReq.AddByteSliceForXmemToRecycle(newbody)
 	}
 
 	xattrComposer := base.NewXattrComposer(newbody)

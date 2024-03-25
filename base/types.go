@@ -867,6 +867,15 @@ func (wrappedReq *WrappedMCRequest) GetMemcachedCommand() gomemcached.CommandCod
 	return opcode
 }
 
+func (wrappedReq *WrappedMCRequest) AddByteSliceForXmemToRecycle(slice []byte) {
+	wrappedReq.SlicesToBeReleasedMtx.Lock()
+	if wrappedReq.SlicesToBeReleasedByXmem == nil {
+		wrappedReq.SlicesToBeReleasedByXmem = make([][]byte, 0)
+	}
+	wrappedReq.SlicesToBeReleasedByXmem = append(wrappedReq.SlicesToBeReleasedByXmem, slice)
+	wrappedReq.SlicesToBeReleasedMtx.Unlock()
+}
+
 type McRequestMap map[string]*WrappedMCRequest
 
 type MCResponseMap map[string]*gomemcached.MCResponse
