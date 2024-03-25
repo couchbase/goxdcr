@@ -327,7 +327,7 @@ func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs
 			return base.Error, err
 		}
 		doc_meta_source = *source_meta.docMeta
-		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
+		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
 		if err == base.ErrorDocumentNotFound {
 			return base.SendToTarget, nil
 		} else if err != nil {
@@ -380,7 +380,7 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 			return base.Error, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
-		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, false)
+		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
 		if err == base.ErrorDocumentNotFound {
 			return base.SendToTarget, nil
 		} else if err != nil {
