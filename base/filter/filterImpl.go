@@ -250,11 +250,6 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEven
 		return false, nil, 0, nil, "", 0, false, FilteredOnATRDocument
 	}
 
-	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
-		// these mutations do not have xattrs and do not need xattr processing
-		return true, nil, 0, nil, "", 0, false, NotFiltered
-	}
-
 	if uprEvent.DataType&mcc.XattrDataType == 0 {
 		// no xattrs, no op
 		return true, nil, 0, nil, "", 0, false, NotFiltered
