@@ -12,11 +12,12 @@ package filter
 
 import (
 	"fmt"
+	"sync/atomic"
+
 	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/gomemcached/client"
+	memcached "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbaselabs/gojsonsm"
-	"sync/atomic"
 )
 
 const collateErrDesc = " Collate was used to determine outcome"
@@ -199,11 +200,6 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 	if base.ActiveTxnRecordRegexp.Match(uprEvent.Key) {
 		// filter out active transaction record
 		return false, nil, 0, nil, "", 0, false
-	}
-
-	if uprEvent.Opcode == gomemcached.UPR_DELETION || uprEvent.Opcode == gomemcached.UPR_EXPIRATION {
-		// these mutations do not have xattrs and do not need xattr processing
-		return true, nil, 0, nil, "", 0, false
 	}
 
 	if uprEvent.DataType&memcached.XattrDataType == 0 {
