@@ -543,6 +543,10 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			if err != nil {
 				return err
 			}
+			VersionPruningWindowHrs, err := b.utils.GetVersionPruningWindowHrs(targetBucketInfo)
+			if err != nil {
+				return err
+			}
 
 			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
 			if err != nil {
@@ -580,6 +584,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			replacementNotification.TargetReplicaCnt = numOfReplicas
 			replacementNotification.TargetVbReplicasMember = vbReplicaMember
 			replacementNotification.TargetStorageBackend = storageBackend
+			replacementNotification.VersionPruningWindowHrs = VersionPruningWindowHrs
 			watcher.latestCached.Recycle()
 			watcher.latestCached = replacementNotification
 			watcher.latestCacheMtx.Unlock()

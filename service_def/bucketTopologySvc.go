@@ -77,4 +77,5 @@ type TargetNotification interface {
 	GetTargetBucketUUID() string
 	GetTargetBucketInfo() base.BucketInfoMapType
 	GetTargetStorageBackend() string
+	GetVersionPruningWindowHrs() int
 }
