@@ -692,6 +692,12 @@ type XmemNozzle struct {
 	upstreamObjRecycler utilities.RecycleObjFunc
 
 	upstreamErrReporter utilities.ErrReportFunc
+
+	eventsProducer common.PipelineEventsProducer
+
+	// position of the item in the buffer to non-temporary error code mapping
+	nonTempErrsSeen    map[uint16]mc.Status
+	nonTempErrsSeenMtx sync.RWMutex
 }
 
 func NewXmemNozzle(id string,
@@ -710,7 +716,8 @@ func NewXmemNozzle(id string,
 	source_cr_mode base.ConflictResolutionMode,
 	logger_context *log.LoggerContext,
 	utilsIn utilities.UtilsIface,
-	vbList []uint16) *XmemNozzle {
+	vbList []uint16,
+	eventsProducer common.PipelineEventsProducer) *XmemNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
@@ -745,6 +752,8 @@ func NewXmemNozzle(id string,
 		utils:               utilsIn,
 		vbList:              vbList,
 		collectionEnabled:   1, /*Default to true unless otherwise disabled*/
+		eventsProducer:      eventsProducer,
+		nonTempErrsSeen:     make(map[uint16]mc.Status),
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -2620,9 +2629,43 @@ func (xmem *XmemNozzle) setClient(client *base.XmemClient, isSetMeta bool) {
 	}
 }
 
+func shouldUpdateNonTempErrResponse(seenBefore, nonTempErrSeen bool, nonTempErrSeenBefore, nonTempErrSeenNow mc.Status) bool {
+	return nonTempErrSeen &&
+		((seenBefore && nonTempErrSeenBefore != nonTempErrSeenNow) || !seenBefore)
+}
+
+func (xmem *XmemNozzle) markNonTempErrorResponse(response *mc.MCResponse, nonTempErrSeen bool) {
+	if response == nil {
+		return
+	}
+
+	pos := xmem.getPosFromOpaque(response.Opaque)
+	nonTempErrSeenNow := response.Status
+
+	xmem.nonTempErrsSeenMtx.RLock()
+	nonTempErrSeenBefore, seenBefore := xmem.nonTempErrsSeen[pos]
+	xmem.nonTempErrsSeenMtx.RUnlock()
+
+	if shouldUpdateNonTempErrResponse(seenBefore, nonTempErrSeen, nonTempErrSeenBefore, nonTempErrSeenNow) {
+		xmem.nonTempErrsSeenMtx.Lock()
+		nonTempErrSeenBefore, seenBefore := xmem.nonTempErrsSeen[pos]
+		if shouldUpdateNonTempErrResponse(seenBefore, nonTempErrSeen, nonTempErrSeenBefore, nonTempErrSeenNow) {
+			xmem.nonTempErrsSeen[pos] = nonTempErrSeenNow
+		}
+		xmem.nonTempErrsSeenMtx.Unlock()
+	} else if !nonTempErrSeen && seenBefore {
+		xmem.nonTempErrsSeenMtx.Lock()
+		if _, seenBefore := xmem.nonTempErrsSeen[pos]; !nonTempErrSeen && seenBefore {
+			delete(xmem.nonTempErrsSeen, pos)
+		}
+		xmem.nonTempErrsSeenMtx.Unlock()
+	}
+}
+
 func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup) {
 	defer waitGrp.Done()
 
+	var nonTempErrReceived bool
 	for {
 		select {
 		case <-finch:
@@ -2634,6 +2677,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 				goto done
 			}
 
+			nonTempErrReceived = false
 			response, err, rev := xmem.readFromClient(xmem.client_for_setMeta, true)
 			if err != nil {
 				if err == PartStoppedError {
@@ -2775,6 +2819,9 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 											xmem.Id(), response.Status, base.UdTagBegin, req.Key, base.UdTagEnd, xattrlen, ccrxattrlen, req.Body[8:ccrxattrlen+8])
 									}
 								}
+
+								nonTempErrReceived = true
+
 								xmem.Logger().Errorf("%v received error response from setMeta client. Repairing connection. response status=%v, opcode=%v, seqno=%v, req.Key=%v%s%v, req.Cas=%v, req.Extras=%v\n", xmem.Id(), response.Status, response.Opcode, seqno, base.UdTagBegin, string(req.Key), base.UdTagEnd, req.Cas, req.Extras)
 								xmem.repairConn(xmem.client_for_setMeta, "error response from memcached", rev)
 							}
@@ -2841,6 +2888,8 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					}
 				}
 			}
+
+			xmem.markNonTempErrorResponse(response, nonTempErrReceived)
 		}
 	}
 
@@ -2941,6 +2990,10 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 	var count uint64
 	// freeze_counter is used to count the number of check iterations that data has been stuck
 	var freeze_counter uint32 = 0
+
+	var nonTempErrMsgId int64 = -1
+	var lastTotalNonTempErrMap map[mc.Status]uint16
+
 	for {
 		select {
 		case <-finch:
@@ -2988,13 +3041,68 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			if freeze_counter > max_idle_count {
 				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem_id, max_idle_count, len(dataChan), buffer_count <= xmem.buf.notify_threshold, xmem.client_for_setMeta.GetContinuousWriteFailureCounter(), xmem.client_for_setMeta.GetBackOffFactor(), xmem.client_for_getMeta.GetBackOffFactor())
 				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, ignored %v item, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(dataChan), received_count, xmem_count_sent, xmem_count_ignored, int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
-				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
 				xmem.client_for_setMeta.MarkConnUnhealthy()
 				xmem.client_for_getMeta.MarkConnUnhealthy()
 				xmem.handleGeneralError(ErrorXmemIsStuck)
 				goto done
 			}
+
+			// non-temp error response to number of items in the current state of the buffer with the given reponse mapping
+			var totalNonTempErrCodes map[mc.Status]uint16
+			xmem.nonTempErrsSeenMtx.RLock()
+			if len(xmem.nonTempErrsSeen) > 0 {
+				totalNonTempErrCodes = make(map[mc.Status]uint16)
+				for _, status := range xmem.nonTempErrsSeen {
+					totalNonTempErrCodes[status]++
+				}
+			} else if len(lastTotalNonTempErrMap) > 0 {
+				lastTotalNonTempErrMap = map[mc.Status]uint16{}
+			}
+			xmem.nonTempErrsSeenMtx.RUnlock()
+
+			if totalNonTempErrCodes == nil {
+				if nonTempErrMsgId >= 0 {
+					// delete the message if any, since there are no non-temp error responses seen
+					err := xmem.eventsProducer.DismissEvent(int(nonTempErrMsgId))
+					if err != nil {
+						xmem.Logger().Warnf("Unable to dismiss event %v: %v", nonTempErrMsgId, err)
+					} else {
+						nonTempErrMsgId = -1
+					}
+				}
+				continue
+			}
+
+			eventMsgStr := "Following number of mutations are rejected by target due to non-temporary error responses: "
+			changed := false
+			for status, count := range totalNonTempErrCodes {
+				eventMsgStr = eventMsgStr + fmt.Sprintf("{responseStatus=%v : count=%v} | ", status, count)
+				if !changed && count != lastTotalNonTempErrMap[status] {
+					changed = true
+				}
+			}
+
+			if !changed {
+				// nothing changed from last the tick
+				continue
+			}
+
+			if nonTempErrMsgId == -1 {
+				// new message
+				eventId := xmem.eventsProducer.AddEvent(base.LowPriorityMsg,
+					fmt.Sprintf("%sPipeline: %s", eventMsgStr, xmem.topic), base.EventsMap{}, nil)
+				nonTempErrMsgId = eventId
+			} else if nonTempErrMsgId >= 0 {
+				// update the message
+				err := xmem.eventsProducer.UpdateEvent(nonTempErrMsgId,
+					fmt.Sprintf("%sPipeline: %s", eventMsgStr, xmem.topic), nil)
+				if err != nil {
+					xmem.Logger().Warnf("Unable to update event %v: %v", nonTempErrMsgId, err)
+				}
+			}
+
+			lastTotalNonTempErrMap = totalNonTempErrCodes
 		case <-statsTicker.C:
 			xmem.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, xmem, nil, []int{len(xmem.dataChan), xmem.bytesInDataChan()}))
 		}

@@ -13,13 +13,15 @@ package pipeline
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	utilities "github.com/couchbase/goxdcr/utils"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/metadata"
+	utilities "github.com/couchbase/goxdcr/utils"
 )
 
 var ErrorCannotDismiss = errors.New("Specified event cannot be dismissed")
@@ -108,20 +110,15 @@ func (p *PipelineEventList) tempUpgradeLockAndCreateNewBrokenMapEvent(idWell *in
 }
 
 type PipelineEventsManager interface {
+	common.PipelineEventsProducer
+
 	GetCurrentEvents() *PipelineEventList
-	AddEvent(eventType base.EventInfoType, eventDesc string, eventExtras base.EventsMap, hint interface{}) (eventId int64)
 	ClearNonBrokenMapEvents()
 	ClearNonBrokenMapEventsWithString(substr string)
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
 	ContainsEvent(eventId int) bool
-	DismissEvent(eventId int) error
 	ResetDismissedHistory()
 	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
-
-	// UpdateEvent should not modify the event type. If needed in the future, need to analyze the reason why it needs to be changed
-	// Updating an event will update the time to the time this method is being called
-	// eventExtras can be nil, and the existing information won't be changed
-	UpdateEvent(eventId int64, eventDesc string, eventExtras *base.EventsMap) error
 }
 
 // The pipeline events mgr's job is to handle the exporting of events and also remember the user's preference

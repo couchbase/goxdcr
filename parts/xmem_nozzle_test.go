@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -16,12 +17,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
+	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
 	base "github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	serviceDefMocks "github.com/couchbase/goxdcr/service_def/mocks"
@@ -44,13 +48,18 @@ const password = "wewewe"
 var kvString = fmt.Sprintf("%s:%s", "127.0.0.1", xmemPort)
 var connString = fmt.Sprintf("%s:%s", "127.0.0.1", targetPort)
 
-func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
+var events []string
+var eventID int64
+var err error
+
+func setupBoilerPlateXmem(bname string, optional ...int) (*utilsMock.UtilsIface,
 	map[string]interface{},
 	*XmemNozzle,
 	*Router,
 	*serviceDefMocks.BandwidthThrottlerSvc,
 	*serviceDefMocks.RemoteClusterSvc,
-	*serviceDefMocks.CollectionsManifestSvc) {
+	*serviceDefMocks.CollectionsManifestSvc,
+	*mocks.PipelineEventsProducer) {
 
 	utilitiesMock := &utilsMock.UtilsIface{}
 	utilitiesMock.On("NewDataPool").Return(base.NewFakeDataPool())
@@ -65,7 +74,7 @@ func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
 	// local cluster run has KV port starting at 12000
 	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, /* connPoolConnSize*/
 		kvString, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe",
-		base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList)
+		base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, vbList, nil)
 
 	// settings map
 	settingsMap := make(map[string]interface{})
@@ -76,6 +85,9 @@ func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
 
 	// Other live XMEM settings in case cluster_run is active
 	settingsMap[SETTING_SELF_MONITOR_INTERVAL] = time.Duration(15 * time.Second)
+	if len(optional) > 0 {
+		settingsMap[SETTING_SELF_MONITOR_INTERVAL] = time.Duration(time.Duration(optional[0]) * time.Second)
+	}
 	settingsMap[SETTING_STATS_INTERVAL] = 10000
 	settingsMap[SETTING_OPTI_REP_THRESHOLD] = 0
 	settingsMap[SETTING_BATCHSIZE] = 1024
@@ -87,7 +99,41 @@ func setupBoilerPlateXmem(bname string) (*utilsMock.UtilsIface,
 
 	router, _ := NewRouter("testId", spec, nil, nil, base.CRMode_RevId, log.DefaultLoggerContext, utilitiesMock, nil, false, base.FilterExpDelNone, colManifestSvc, nil, nil, metadata.UnitTestGetCollectionsCapability(), nil, nil)
 
-	return utilitiesMock, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc, colManifestSvc
+	producer := &mocks.PipelineEventsProducer{}
+
+	producer.On("DismissEvent", mock.Anything).Return(err).Run(func(args mock.Arguments) {
+		id, ok := args.Get(0).(int)
+		N := len(events)
+		if ok && id < N && id >= 0 {
+			events[id], events[N-1] = events[N-1], events[id]
+			events = events[0 : N-1]
+			err = nil
+		} else {
+			err = base.ErrorNotFound
+		}
+	})
+
+	producer.On("AddEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(eventID).Run(func(args mock.Arguments) {
+		msg := args.Get(1).(string)
+		events = append(events, msg)
+		eventID = int64(len(events) - 1)
+		fmt.Println(events)
+	})
+
+	producer.On("UpdateEvent", mock.Anything, mock.Anything, mock.Anything).Return(err).Run(func(args mock.Arguments) {
+		id, ok := args.Get(0).(int64)
+		if ok && int(id) < len(events) && id >= 0 {
+			msg, ok := args.Get(1).(string)
+			if ok {
+				events[id] = msg
+				err = nil
+				return
+			}
+		}
+		err = base.ErrorNotFound
+	})
+
+	return utilitiesMock, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc, colManifestSvc, producer
 }
 
 func targetXmemIsUpAndCorrectSetupExists() bool {
@@ -130,7 +176,7 @@ func setupMocksCompressNeg(utils *utilsMock.UtilsIface) {
 }
 
 func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThrottler *serviceDefMocks.BandwidthThrottlerSvc,
-	remoteClusterSvc *serviceDefMocks.RemoteClusterSvc, collectionsManifestSvc *serviceDefMocks.CollectionsManifestSvc) {
+	remoteClusterSvc *serviceDefMocks.RemoteClusterSvc, collectionsManifestSvc *serviceDefMocks.CollectionsManifestSvc, evtProducer *mocks.PipelineEventsProducer) {
 	setupMocksCommon(utils)
 
 	var allFeatures utilsReal.HELOFeatures
@@ -152,6 +198,7 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 	remoteClusterSvc.On("RemoteClusterByUuid", mock.Anything, mock.Anything).Return(remoteClusterRef, nil)
 	xmem.sourceClusterId = []byte("SourceCluster")
 	xmem.targetClusterId = []byte("TargetCluster")
+	xmem.eventsProducer = evtProducer
 }
 
 func setupMocksConflictMgr(xmem *XmemNozzle) *serviceDefMocks.ConflictManagerIface {
@@ -164,8 +211,8 @@ func setupMocksConflictMgr(xmem *XmemNozzle) *serviceDefMocks.ConflictManagerIfa
 func TestPositiveXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzle =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
-	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, ep := setupBoilerPlateXmem(xmemBucket)
+	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, ep)
 
 	assert.Nil(xmem.initialize(settings))
 	fmt.Println("============== Test case end: TestPositiveXmemNozzle =================")
@@ -174,7 +221,7 @@ func TestPositiveXmemNozzle(t *testing.T) {
 func TestNegNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
 	setupMocksCompressNeg(utils)
 
 	assert.Equal(base.ErrorCompressionNotSupported, xmem.initialize(settings))
@@ -184,7 +231,7 @@ func TestNegNoCompressionXmemNozzle(t *testing.T) {
 func TestPosNoCompressionXmemNozzle(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestNegNoCompressionXmemNozzle =================")
-	utils, settings, xmem, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, _, _, _, _ := setupBoilerPlateXmem(xmemBucket)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeForceUncompress)
 	settings[ForceCollectionDisableKey] = true
 	setupMocksCompressNeg(utils)
@@ -197,9 +244,9 @@ func TestPosNoCompressionXmemNozzle(t *testing.T) {
 func TestPositiveXmemNozzleAuto(t *testing.T) {
 	assert := assert.New(t)
 	fmt.Println("============== Test case start: TestPositiveXmemNozzleAuto =================")
-	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(xmemBucket)
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, ep := setupBoilerPlateXmem(xmemBucket)
 	settings[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeAuto)
-	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc)
+	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, ep)
 
 	assert.NotNil(xmem.initialize(settings))
 	fmt.Println("============== Test case end: TestPositiveXmemNozzleAuto =================")
@@ -232,11 +279,11 @@ func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
 
 	assert := assert.New(t)
 
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bname)
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, ep := setupBoilerPlateXmem(bname)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
 
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, ep)
 
 	// Need to find the actual running targetBucketUUID
 	bucketInfo, err := realUtils.GetBucketInfo(connString, bname, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
@@ -344,10 +391,10 @@ func TestGetXattrForCustomCR(t *testing.T) {
 		"testdata/customCR/kingarthur8_cas1.json",
 	}, bucketName)
 
-	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc := setupBoilerPlateXmem(bucketName)
+	utilsNotUsed, settings, xmem, router, throttler, remoteClusterSvc, colManSvc, ep := setupBoilerPlateXmem(bucketName)
 	realUtils := utilsReal.NewUtilities()
 	xmem.utils = realUtils
-	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc)
+	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, ep)
 
 	// Need to find the actual running targetBucketUUID
 	bucketInfo, err := realUtils.GetBucketInfo(connString, bucketName, username, password, base.HttpAuthMechPlain, nil, false, nil, nil, xmem.Logger())
@@ -486,4 +533,104 @@ func printMultiLookupResult(testId uint32, t *testing.T, body []byte) {
 	assert.Greater(len, 0, fmt.Sprintf("Test %d failed", testId))
 	doc := body[i : i+len]
 	fmt.Printf("status=%v, Document=%s\n", status, doc)
+}
+
+func eventExists(ev []string) bool {
+	contains := true
+	allEvents := strings.Join(events, ";")
+	for _, e := range ev {
+		contains = contains && strings.Contains(allEvents, e)
+	}
+	return contains
+}
+func TestNonTempErrorResponsesEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestNonTempErrorResponsesEvents")
+	}
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestNonTempErrorResponsesEvents =================")
+	defer fmt.Println("============== Test case end: TestNonTempErrorResponsesEvents =================")
+
+	utils, settings, xmem, _, throttler, remoteClusterSvc, colManSvc, eventProducer := setupBoilerPlateXmem(xmemBucket, 3)
+	setupMocksXmem(xmem, utils, throttler, remoteClusterSvc, colManSvc, eventProducer)
+
+	assert.Nil(xmem.initialize(settings))
+	assert.Nil(xmem.Start(settings))
+
+	success := mc.SUCCESS
+	fail1 := mc.EINVAL
+	fail2 := mc.DURABILITY_IMPOSSIBLE
+	fail3 := mc.DURABILITY_INVALID_LEVEL
+	fail4 := mc.NOT_STORED
+	// send 2 success packets at pos 0 - sleep 5s - [<>, <>, <>, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 0}, false)
+	time.Sleep(5 * time.Second)
+	assert.Equal(0, len(events))
+	// send 2 success packets at pos 1 - sleep 5s - [<>, <>, <>, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 1}, false)
+	time.Sleep(5 * time.Second)
+	assert.Equal(0, len(events))
+	// send 3 failure1 packets at pos 0 - sleep 5 seconds - [fail1, <>, <>, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 0}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 0}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 0}, true)
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1)}))
+	// send 2 failure 2 packets at pos 1 - sleep 5 seconds - [fail1, fail2, <>, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail2, Opaque: 1}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail2, Opaque: 1}, true)
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail2)}))
+	// send 2 failure 3 packets at pos 1 and failure 1 packets at pos 2 - sleep 5 seconds - [fail1, fail3, fail1, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail3, Opaque: 1}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail3, Opaque: 1}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 2}, true)
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	// sleep 5 seconds - do nothing - same state
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	// sleep 5 seconds - send 1 success packet at pos 0 - [<>, fail3, fail1, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 0}, false)
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	// sleep 5 seconds - do nothing - same state
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	// send fail 4 packet at pos 3 and fail 1 packet at pos 4-7 - sleep 5 seconds - [<>, fail3, fail1, fail4, fail1, fail1, fail1, fail1]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail4, Opaque: 3}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 4}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 5}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 6}, true)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 7}, true)
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail4), fmt.Sprintf("response=%v", fail3)}))
+	// send success at pos 5 and 6 - sleep 5s - [<>, fail3, fail1, fail4, fail1, <>, <>, fail1]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 5}, false)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 6}, false)
+	time.Sleep(5 * time.Second)
+	assert.Equal(1, len(events))
+	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3), fmt.Sprintf("response=%v", fail3)}))
+	// send success in all - sleep 5 seconds - [<>, <>, <>, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 1}, false)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 2}, false)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 3}, false)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 4}, false)
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 7}, false)
+	time.Sleep(5 * time.Second)
+	assert.Equal(0, len(events))
+	// sleep 5 seconds - do nothing - same state
+	time.Sleep(5 * time.Second)
+	assert.Equal(0, len(events))
+	// send success in pos 10 - sleep 5 seconds - [<>, <>, <>, <>, <>, <>, <>, <>]
+	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 10}, false)
+	time.Sleep(5 * time.Second)
+	assert.Equal(0, len(events))
 }

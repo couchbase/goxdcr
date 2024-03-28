@@ -22,7 +22,7 @@ import (
 
 	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
-	gocb "gopkg.in/couchbase/gocb.v1"
+	// gocb "gopkg.in/couchbase/gocb.v1"
 )
 
 /**

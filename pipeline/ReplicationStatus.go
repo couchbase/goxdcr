@@ -13,6 +13,10 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -20,9 +24,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
-	"strings"
-	"sync"
-	"time"
 )
 
 type ReplicationState int
@@ -111,6 +112,7 @@ type ReplicationStatusIface interface {
 	PopulateReplInfo(replInfo *base.ReplicationInfo, bypassUIErrorCodes func(string) bool, processErrorMsgForUI func(string) string)
 	LoadLatestBrokenMap()
 	RecordBackfillProgress(progress string)
+	GetEventsProducer() common.PipelineEventsProducer
 }
 
 type ReplicationStatus struct {
@@ -165,6 +167,13 @@ func NewReplicationStatus(specId string, spec_getter ReplicationSpecGetter, logg
 
 	rep_status.Publish(false)
 	return rep_status
+}
+
+func (rs *ReplicationStatus) GetEventsProducer() common.PipelineEventsProducer {
+	rs.lock.RLock()
+	defer rs.lock.RUnlock()
+
+	return rs.eventsManager
 }
 
 func (rs *ReplicationStatus) SetPipeline(pipeline common.Pipeline) {

@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -15,6 +16,9 @@ package parts
 import (
 	"errors"
 	"fmt"
+	"testing"
+	"time"
+
 	mc "github.com/couchbase/gomemcached"
 	mcReal "github.com/couchbase/gomemcached/client"
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
@@ -27,8 +31,6 @@ import (
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"testing"
-	"time"
 )
 
 func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
@@ -163,7 +165,7 @@ func setupMocksInternal(xdcrTopology *service_def.XDCRCompTopologySvc,
 	// client mock
 	mcClient.On("NewUprFeedWithConfigIface", mock.Anything, mock.Anything).Return(uprFeed, nil)
 	mcClient.On("Close").Return(nil)
-
+	uprFeed.On("Closed").Return(nozzle.bOpen)
 	// UprMock
 	nozzle.uprFeed = uprFeed
 }
