@@ -593,10 +593,10 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 	pipelineMgr.logger.Infof("Trying to stop the pipeline %s", replId)
 
 	p := rep_status.Pipeline()
+	bp := rep_status.BackfillPipeline()
 	if p != nil {
 		state := p.State()
 		if state != common.Pipeline_Stopping && state != common.Pipeline_Stopped {
-			bp := rep_status.BackfillPipeline()
 			var bgWaitGrp *sync.WaitGroup
 			var bgErrMap base.ErrorMap
 			var bgErrMapMtx sync.RWMutex
@@ -654,7 +654,16 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 			pipelineMgr.logger.Infof("%v Cleaning up replication status since repl spec has been deleted and recreated. oldSpecInternalId=%v, newSpecInternalId=%v\n", replId, rep_status.GetSpecInternalId(), spec.InternalId)
 		}
 
-		pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
+		if bp != nil {
+			// reset stats for backfill pipeline
+			// checkpoints for backfill pipeline will be deleted as part of replication spec change callbacks of backfill components in postDeleteBackfillRepl
+			rep_status.ResetStorage(common.BackfillPipeline)
+		}
+
+		err := pipelineMgr.checkpoint_svc.DelCheckpointsDocs(replId)
+		if err != nil {
+			pipelineMgr.logger.Errorf("MainPipeline %v saw an error while deleting checkpoints as part of StopPipeline. err=%v\n", replId, err)
+		}
 
 		rep_status.ResetStorage(common.MainPipeline)
 		pipelineMgr.repl_spec_svc.SetDerivedObj(replId, nil)
@@ -743,7 +752,7 @@ func (pipelineMgr *PipelineManager) CleanupBackfillPipeline(topic string) error 
 
 	err = pipelineMgr.utils.ExponentialBackoffExecutor(fmt.Sprintf("DelCheckpointsDocs %v", backfillSpecId), base.PipelineSerializerRetryWaitTime, base.PipelineSerializerMaxRetry, base.PipelineSerializerRetryFactor, retryOp)
 	if err != nil {
-		pipelineMgr.logger.Warnf("Removing checkpoint resulting in error: %v\n")
+		pipelineMgr.logger.Warnf("Removing backfill checkpoint resulting in error: %v\n")
 	}
 	return err
 }
