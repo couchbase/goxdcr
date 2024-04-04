@@ -105,8 +105,19 @@ func (p *DataPoolImpl) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 	})
 
 	if i >= 0 && i < NumOfSizes {
-		out := p.byteSlicePools[i].Get().([]byte)
-		if len(out) != int(sizeRequested) {
+		var out []byte
+		out = p.byteSlicePools[i].Get().([]byte)
+		if len(out) < int(sizeRequested) {
+			p.PutByteSlice(out)
+			// need to get from the (i+1)th datapool
+			if i+1 >= 0 && i+1 < NumOfSizes {
+				out = p.byteSlicePools[i+1].Get().([]byte)
+			} else {
+				return nil, ErrorSizeExceeded
+			}
+		}
+
+		if len(out) > int(sizeRequested) {
 			out = out[:sizeRequested]
 		}
 		return out, nil
