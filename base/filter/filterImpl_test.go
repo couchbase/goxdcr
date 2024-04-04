@@ -106,6 +106,30 @@ func TestFilterBool2(t *testing.T) {
 	fmt.Println("============== Test case end: TestFilterBool2 =================")
 }
 
+func TestFilterOnDocWithWhiteSpaces(t *testing.T) {
+	fmt.Println("============== Test case start: TestFilterOnDocWithWhiteSpaces =================")
+	assert := assert.New(t)
+
+	uprEvent, err := RetrieveUprFile("./testdata/MB-60674UprWithWhitespaceAtEnd.json")
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	filter, err := NewFilter(filterId, "__t=\"cos\"", realUtil, 0)
+	assert.Nil(err)
+	assert.NotNil(filter)
+	assert.Equal(base.FilterFlagType(3), filter.flags)
+
+	slices := make([][]byte, 0, 2)
+	dataSlice, err, _, _ := realUtil.ProcessUprEventForFiltering(uprEvent.UprEvent, nil, 0, dp, filter.flags, &slices)
+	assert.Nil(err)
+
+	matchResult, err := filter.matcher.Match(dataSlice)
+	assert.Nil(err)
+	assert.True(matchResult)
+
+	fmt.Println("============== Test case end: TestFilterOnDocWithWhiteSpaces =================")
+}
+
 func TestFilterPerf(t *testing.T) {
 	fmt.Println("============== Test case start: TestFilterPerf =================")
 	assert := assert.New(t)

@@ -1570,3 +1570,7 @@ var PortsKeysForConnectionPreCheck = map[PortType]string{
 
 var ConnectionPreCheckGCTimeout = 120 * time.Second
 var ConnectionPreCheckRPCTimeout = 15 * time.Second
+
+var ValidJsonEnds []byte = []byte{
+	'}', ']',
+}

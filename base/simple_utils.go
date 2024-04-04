@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -2089,4 +2090,21 @@ func (h *HighSeqnoAndVbUuidMap) Diff(prev HighSeqnoAndVbUuidMap) HighSeqnoAndVbU
 		}
 	}
 	return diffMap
+}
+
+// check if the first non-whitespace character from the end is a valid json end character
+func IsJsonEndValid(body []byte, endPos int) bool {
+	for endPos >= 0 {
+		if unicode.IsSpace(int32(body[endPos])) {
+			endPos--
+			continue
+		}
+		for _, char := range ValidJsonEnds {
+			if body[endPos] == char {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }

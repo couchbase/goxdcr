@@ -415,3 +415,37 @@ func TestSanitizeSeqnoMapKey(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(uint16(123), vbno)
 }
+
+func TestIsJsonEndValid(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+		want bool
+	}{
+		{
+			name: "Success, without whitespaces",
+			body: []byte("{\"foo\":\"bar\",\"foo1\":\"bar1\"}"),
+			want: true,
+		},
+		{
+			name: "Success, with whitespaces",
+			body: []byte("[\"foo\",\"bar\"] \r\n"),
+			want: true,
+		},
+		{
+			name: "Failure, no } or ]",
+			body: []byte("{\"foo\":\"bar\",\"foo1\":\"bar1\""),
+		},
+		{
+			name: "Failure, no } or ], with whitespaces",
+			body: []byte("{\"foo\":\"bar\",\"foo1\":\"bar1\"\r\n "),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsJsonEndValid(tt.body, len(tt.body)-1); got != tt.want {
+				t.Errorf("IsJsonEndValid() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

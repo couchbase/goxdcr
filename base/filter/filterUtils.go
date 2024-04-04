@@ -14,7 +14,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/couchbase/gomemcached/client"
+
+	memcached "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/golang/snappy"
 )
@@ -256,7 +257,7 @@ func decompressSnappyBody(incomingBody, key []byte, dp base.DataPool, slicesToBe
 	}
 
 	// Check to make sure the last bracket position is correct
-	if isJson && body[lastBodyPos] != '}' && body[lastBodyPos] != ']' {
+	if isJson && !base.IsJsonEndValid(body, lastBodyPos) {
 		return nil, base.ErrorInvalidInput, fmt.Sprintf("XDCR for key %v%v%v after decompression %s", base.UdTagBegin, string(key), base.UdTagEnd, InvalidJSONMsg), dpFailedCnt, lastBodyPos
 	}
 
@@ -269,7 +270,7 @@ func getBodySlice(incomingBody, key []byte, dp base.DataPool, slicesToBeReleased
 	lastBodyPos := incomingBodyLen - 1
 	bodySize := uint64(incomingBodyLen + len(key) + base.AddFilterKeyExtraBytes)
 
-	if incomingBody[lastBodyPos] != '}' {
+	if !base.IsJsonEndValid(incomingBody, lastBodyPos) {
 		return nil, base.ErrorInvalidInput, fmt.Sprintf("Document %v%v%v body is not a valid JSON", base.UdTagBegin, string(key), base.UdTagEnd), dpFailedCnt, lastBodyPos
 	}
 
