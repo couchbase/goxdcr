@@ -1691,3 +1691,7 @@ const (
 	GuardrailDataSize               = "guardrail_data_size"
 	GuardrailDiskSpace              = "guardrail_disk_space"
 )
+
+var ValidJsonEnds []byte = []byte{
+	'}', ']',
+}
