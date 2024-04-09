@@ -129,6 +129,7 @@ function deleteAndRecreateBackfillMultiples {
 		validateInternalLogWithInstance "C1" "$VBTASKS_DONE_MSG" $(($currentBackfillInstanceCnt + 1)) $(($currentVBTasksDoneInstanceCnt + 2))
 
 		validateInternalLogWithInstance "C1" "$BAD_MAGIC_MSG" "0"
+		validateDatapoolFailIs0 "C1" "B1" "B2"
 
 		echo "Giving XDCR 15 seconds for UI to show repair messages"
 		sleep 15

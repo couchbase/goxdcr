@@ -63,6 +63,8 @@ function runTestCase {
 	local -i currentBackfillStartCnt
 	local currentXdcrLog
 	currentXdcrLog=$(getInternalNodeXdcrLog "C1")
+	local currentClusterLog
+	currentClusterLog=$(getClusterLogs "C1")
 	currentBackfillStartCnt=$(echo "$currentClusterLog" | grep -c "$BACKFILL_PIPELINE_START")
 
 	runDataLoad

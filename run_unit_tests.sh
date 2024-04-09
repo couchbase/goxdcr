@@ -9,19 +9,37 @@
 # licenses/APL2.txt.
 
 function man() {
-	echo "Usage: $0 [-d <path>] [-l]" 1>&2
-	echo ""
-	echo "d: Root directory absolute path of goxdcr (default is pwd)" 1>&2
-	echo "h: Help" 1>&2
-	echo "l: Run all tests including lengthy tests (which are not run by default)" 1>&2
+	echo "Usage: $0 [--dir=<path>] [--long]" 1>&2
+	echo "-h OR --help						: Help" 1>&2
+	echo "-l OR --long						: Run all tests including lengthy tests (which are not run by default)" 1>&2
+	echo "-d <path/to/testcase/dir> OR" 1>&2
+	echo "--dir=<path/to/testcase/dir>				: Absolute path of the directory to run go test on (default is pwd)" 1>&2
 	exit 1
 }
 
 declare ROOT_DIR
 declare runAllTests
 
-while getopts "d:lh" opt; do
+while getopts "lhd:-:" opt; do
 	case "${opt}" in
+	-)
+		case "${OPTARG}" in
+			long)
+				runAllTests=1
+				;;
+			dir=*)
+				ROOT_DIR=${OPTARG#*=}
+				;;
+			help)
+				man $0
+				exit 0
+				;;
+			*)
+				echo "ERRO: Unknown option --${OPTARG}" >&2
+				man $0
+				exit 1
+				;;
+		esac;;
 	l)
 		runAllTests=1
 		;;
@@ -29,10 +47,11 @@ while getopts "d:lh" opt; do
 		ROOT_DIR=${OPTARG}
 		;;
 	h)
-		man
+		man $0
 		;;
 	*)
-		man
+		echo "ERRO: Unknown option --${OPTARG}" >&2
+		man $0
 		;;
 	esac
 done
@@ -42,7 +61,7 @@ if [[ -z "$ROOT_DIR" ]]; then
 fi
 
 if [[ ${ROOT_DIR:0:1} == "." ]]; then
-	echo "Cannot pass in relative path for -d"
+	echo "ERRO: Cannot pass in relative path for -d."
 	man
 fi
 
@@ -86,7 +105,7 @@ for directory in ${DIRS_WITH_UT[@]}; do
 		go test >/tmp/${fileFriendlyFileName}.out 2>&1 &
 	fi
 	lastPid="$!"
-	echo "Test $directory with background PID $lastPid"
+	echo "INFO: Test $directory with background PID $lastPid"
 	outputs[$lastPid]="/tmp/${fileFriendlyFileName}.out"
 	pids+=" $lastPid"
 	totalTasks=$(($totalTasks + 1))
@@ -105,7 +124,7 @@ for directory in ${DIRS_WITH_UT[@]}; do
 			go test -tags=pcre >/tmp/${fileFriendlyFileName}_pcre.out 2>&1 &
 		fi
 		lastPid2="$!"
-		echo "Test $directory PCRE tests with background PID $lastPid2"
+		echo "INFO: Test $directory PCRE tests with background PID $lastPid2"
 		pids+=" $lastPid2"
 		outputs[$lastPid2]="/tmp/${fileFriendlyFileName}_pcre.out"
 		totalTasks=$(($totalTasks + 1))
@@ -113,7 +132,7 @@ for directory in ${DIRS_WITH_UT[@]}; do
 done
 # Do a pretty print progress bar
 # https://stackoverflow.com/questions/12498304/using-bash-to-display-a-progress-indicator
-echo "Total tasks running: $totalTasks"
+echo "INFO: Total tasks running: $totalTasks"
 count=0
 failedCnt=0
 pstr="[=======================================================================]"
@@ -130,7 +149,7 @@ while (($count < $totalTasks)); do
 			wait $p
 			if (($? > 0)); then
 				echo ""
-				echo "PID $p failed unit test"
+				echo "ERRO: PID $p failed unit test"
 				failedCnt=$(($failedCnt + 1))
 			else
 				rm ${outputs[p]}
@@ -146,6 +165,6 @@ done
 
 if (($failedCnt > 0)); then
 	echo ""
-	echo "See ${outputs[@]} for failed test outputs"
+	echo "WARN: See ${outputs[@]} for failed test outputs"
 	exit 1
 fi

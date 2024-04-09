@@ -25,8 +25,8 @@ declare -A BucketReplPropertiesWithMobile=(["replicationType"]="continuous" ["ch
 function testReplicationSettings {
 	echo "=========== testReplicationSettings =========="
 	echo "Creating replication with mobile=Active"
-	setBucket "C1" "B1" "enableCrossClusterVersioning" "true"
-	setBucket "C2" "B2" "enableCrossClusterVersioning" "true"
+	setCrossClusterVersioningForBucket "C1" "B1"
+	setCrossClusterVersioningForBucket "C2" "B2"
 	sleep 5
 	createBucketReplication "C1" "B1" "C2" "B2" BucketReplPropertiesWithMobile
 

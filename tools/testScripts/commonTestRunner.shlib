@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+
+# Copyright 2019-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# This is a common entry point for all the test runners (collection tests, P2P tests etc).
+# This script gives a way to define input test parameters using getopts and runs the testcases expected accordingly.
+# The expectation is that the variable "testCasesDirectory" is set to the path where the actual testcases exist, that needs to be run.
+
+# Throw an error if the variable is accessed, but not set yet (instead of the default behaviour of considering it as an null/empty string)
+# Hence use ${x:-} for such variables to avoid such an error, wherever necessary
+set -u
+
+# main logic all exist elsewhere
+. ./clusterRunProvision.shlib
+if (($? != 0)); then
+	exit $?
+fi
+
+. ./testLibrary.shlib
+if (($? != 0)); then
+	exit $?
+fi
+
+# set globals
+# -----------------
+DEFAULT_ADMIN="Administrator"
+DEFAULT_PW="wewewe"
+
+testForClusterRun
+if (($? != 0)); then
+	exit $?
+fi
+
+function man() {
+	echo "Usage: "
+	echo "$0 [--help] [--run=<testcaseNo>] [--from=<testcaseNo>] [--mobile] [--cr=(lww | seqno)] [--override]"
+	echo "Note: "
+	echo "$0 				: Runs ALL the intended testcases."
+	echo "Options:"
+	echo "-h OR --help                           		: Help"
+	echo "-r <testcaseNo> OR --run=<testcaseNo>  		: Run a specific testcase. Note: Cannot be used with -f."
+	echo "-f <testcaseNo> OR --from=<testcaseNo> 		: Run all testcases >= <testcaseNo>. Note: Cannot be used with -r."
+	echo "-c <crMode> OR --cr=<crMode>           		: Run all the tests to be run once again, but with the provided value conflict resolution mode as an override. Note: <crMode> can only be lww or seqno."
+	echo "-m OR --mobile                         		: Run all the tests to be run once again, but with mobile and enableCrossClusterVersioning turned on as an override."
+	echo "-o OR --override                       		: Run all the tests once with the overriden settings only. Note: Can be used only if there is a -m or a -c."
+	echo "-x <path/to/xdcrDifferBin> "
+	echo "OR --xdcrDifferDir=<path/to/xdcrDifferBin>	: Specify the directory where the xdcrDiffer binary exists for running the differ test cases."
+}
+
+# variables
+# -----------------
+testCaseNumber=""
+from=""
+fromTestCaseNumber=""
+crMode=""
+mobileMode=0
+overrideMode=0
+xdcrDifferDir=""
+differBin=""
+differSh=""
+mutationDir=""
+mutationDiffResults=""
+tests=$(ls ${testCasesDirectory:-} | sort)
+testsToRun=$tests
+
+OVERRIDE_MOBILE=0
+OVERRIDE_CRMODE=""
+
+optspec="homf:r:c:x:-:"
+while getopts "$optspec" optchar; do
+	case "${optchar}" in
+	-)
+		case "${OPTARG}" in
+		override)
+			overrideMode=1
+			;;
+		mobile)
+			mobileMode=1
+			;;
+		cr=*)
+			crMode=${OPTARG#*=}
+			;;
+		from=*)
+			from=${OPTARG#*=}
+			;;
+		run=*)
+			testCaseNumber=${OPTARG#*=}
+			;;
+		xdcrDifferDir=*)
+			xdcrDifferDir=${OPTARG#*=}
+			;;
+		help)
+			man $0
+			exit 0
+			;;
+		*)
+			echo "ERRO: Unknown option --${OPTARG}" >&2
+			man $0
+			exit 1
+			;;
+		esac
+		;;
+	o)
+		overrideMode=1
+		;;
+	m)
+		mobileMode=1
+		;;
+	c)
+		crMode=${OPTARG}
+		;;
+	r)
+		testCaseNumber=${OPTARG}
+		;;
+	f)
+		from=${OPTARG}
+		;;
+	x)
+		xdcrDifferDir=${OPTARG}
+		;;
+	h)
+		man $0
+		exit 0
+		;;
+	*)
+		echo "ERRO: Unknown option -${OPTARG}" >&2
+		man $0
+		exit 1
+		;;
+	esac
+done
+
+if [ "$xdcrDifferDir" != "" ] && [ "${testCasesDirectory:-}" != "xdcrDifferTestcases" ]; then
+	echo "ERRO: Cannot use -x OR --xdcrDifferDir when it not xdcr differ testcases."
+	man $0
+	exit 1
+elif [ "$xdcrDifferDir" != "" ]; then
+	differBin="$xdcrDifferDir/xdcrDiffer"
+	if [[ ! -f "$differBin" ]]; then
+		echo "ERRO: cannot find xdcrDiffer binary. Did you run compile?"
+		exit 1
+	fi
+
+	differSh="$xdcrDifferDir/runDiffer.sh"
+	if [[ ! -f "$differSh" ]]; then
+		echo "ERRO: cannot find xdcrDiffer run script"
+		exit 1
+	fi
+
+	mutationDir="$xdcrDifferDir/mutationDiff"
+	mutationDiffResults="$mutationDir/mutationDiffDetails"
+fi
+
+if [ "$testCaseNumber" != "" ] && [ "$from" != "" ]; then
+	echo "ERRO: Cannot use both --from AND --run set in the same command."
+	man $0
+	exit 1
+fi
+
+if [ "$crMode" != "" ] && [ "$crMode" != "lww" ] && [ "$crMode" != "seqno" ]; then
+	echo "ERRO: -c OR --cr can only accept \"lww\" OR \"seqno\" as input."
+	man $0
+	exit 1
+fi
+
+if (($overrideMode == 1)) && [ "$crMode" == "" ] && (($mobileMode == 0)); then
+	echo "ERRO: -o OR --override needs -c or -m or both to be in use."
+	man $0
+	exit 1
+fi
+
+if [ "$from" != "" ]; then
+	fromTestCaseNumber=$(find ${testCasesDirectory:-}/${from}_*)
+	if [[ -z "$fromTestCaseNumber" ]]; then
+		echo "ERRO: Cannot find test case number $from"
+		exit 1
+	fi
+fi
+
+if [[ -z "$testCaseNumber" ]]; then
+	for testcase in $testsToRun; do
+		if [[ "${testCasesDirectory:-}/$testcase" < "$fromTestCaseNumber" ]]; then
+			echo ""
+			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
+			continue
+		fi
+
+		if [[ "$testcase" =~ _idle_ ]]; then
+			# test cases with _idle_ in the filename means they take too long for the whole suite
+			# and should be run on an individual basis only
+			echo ""
+			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"
+			continue
+		fi
+
+		. ${testCasesDirectory:-}/$testcase
+
+		if (($overrideMode == 0)); then
+			echo ""
+			echo "INFO: Running test - ${testCasesDirectory:-}/$testcase"
+
+			date
+			runTestCase
+		fi
+
+		if [ "$crMode" != "" ] || (($mobileMode != 0)); then
+			echo ""
+			echo "INFO: Re-running test - ${testCasesDirectory:-}/$testcase - but with crMode=$crMode and mobileMode=$mobileMode"
+			if [[ "$testcase" =~ _idle_ ]]; then
+				# test cases with _idle_ in the filename means they take too long for the whole suite
+				# and should be run on an individual basis only
+				continue
+			fi
+
+			OVERRIDE_CRMODE=$crMode
+			OVERRIDE_MOBILE=$mobileMode
+
+			date
+			runTestCase
+
+			OVERRIDE_CRMODE=""
+			OVERRIDE_MOBILE=0
+		fi
+	done
+else
+	testCase=$(find ${testCasesDirectory:-}/${testCaseNumber}_*)
+	if [[ -z "$testCase" ]]; then
+		echo "ERRO: Cannot find test case number $testCaseNumber"
+		exit 1
+	fi
+
+	echo "INFO: Running test - $testCase"
+	. $testCase
+
+	if (($overrideMode == 0)); then
+		date
+		runTestCase
+	fi
+
+	if [ "$crMode" != "" ] || (($mobileMode != 0)); then
+		echo ""
+		echo "INFO: Re-running test - $testCase - with crMode=$crMode and mobileMode=$mobileMode"
+
+		OVERRIDE_CRMODE=$crMode
+		OVERRIDE_MOBILE=$mobileMode
+
+		. $testCase
+		date
+		runTestCase
+
+		OVERRIDE_CRMODE=""
+		OVERRIDE_MOBILE=0
+	fi
+fi
+
+echo "INFO: Done - all specified tests successful!"
+exit 0

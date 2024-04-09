@@ -361,18 +361,35 @@ declare -a getBucketOutArr
 function getBucketPropertiesRESTString {
 	getBucketOutArr=()
 	for property in "${!BUCKET_PROPERTIES_OUTPUT_MAP[@]}"; do
-		getBucketOutArr+=("-d")
-		getBucketOutArr+=("${property}=${BUCKET_PROPERTIES_OUTPUT_MAP[$property]}")
+		if [[ "$property" != "conflictResolutionType" ]] || [[ -z "${OVERRIDE_CRMODE:-}" ]]; then
+			getBucketOutArr+=("-d")
+			getBucketOutArr+=("${property}=${BUCKET_PROPERTIES_OUTPUT_MAP[$property]}")
+		fi
 	done
+
+	if [[ -n "${OVERRIDE_CRMODE:-}" ]]; then
+		echo "INFO: Overriding conflictResolutionType bucket setting to ${OVERRIDE_CRMODE:-} due to OVERRIDE_CRMODE=${OVERRIDE_CRMODE:-}"
+		getBucketOutArr+=("-d")
+		getBucketOutArr+=("conflictResolutionType=${OVERRIDE_CRMODE:-}")
+	fi
+
 }
 
 declare -a getBucketReplOutArr
 function getBucketReplPropertiesRESTString {
 	getBucketReplOutArr=()
 	for property in "${!BUCKET_REPL_PROPERTIES_OUTPUT_MAP[@]}"; do
-		getBucketReplOutArr+=("-d")
-		getBucketReplOutArr+=("${property}=${BUCKET_REPL_PROPERTIES_OUTPUT_MAP[$property]}")
+		if [[ "$property" != "mobile" ]] || ((${OVERRIDE_MOBILE:-} == 0)); then
+			getBucketReplOutArr+=("-d")
+			getBucketReplOutArr+=("${property}=${BUCKET_REPL_PROPERTIES_OUTPUT_MAP[$property]}")
+		fi
 	done
+
+	if ((${OVERRIDE_MOBILE:-} != 0)); then
+		echo "INFO: Overriding mobile replication setting to Active due to OVERRIDE_MOBILE=${OVERRIDE_MOBILE:-}"
+		getBucketReplOutArr+=("-d")
+		getBucketReplOutArr+=("mobile=Active")
+	fi
 }
 
 function getBucketInfoRaw {
@@ -969,6 +986,11 @@ function createBucket {
 	# If bucket has scopes
 	if [[ ! -z "${BUCKET_NAME_SCOPE_MAP[$bucketName]:-}" ]]; then
 		setupScopes $clusterName $bucketName
+	fi
+
+	if ((${OVERRIDE_MOBILE:-} != 0)); then
+		echo "INFO: Overriding enableCrossClusterVersioning setting to true due to OVERRIDE_MOBILE=${OVERRIDE_MOBILE:-}"
+		setCrossClusterVersioningForBucket $clusterName $bucketName
 	fi
 }
 
