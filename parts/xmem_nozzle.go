@@ -1139,7 +1139,10 @@ func (xmem *XmemNozzle) processData_sendbatch(finch chan bool, waitGrp *sync.Wai
 					noRepMap[k] = v
 				}
 				for k, v := range sendLookupMap2.responses {
-					sendLookup_map.registerLookup(k, v)
+					err := sendLookup_map.registerLookup(k, v)
+					if err != nil {
+						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for conflict map, err=%v", base.UdTagBegin, k, base.UdTagEnd, err)
+					}
 					// Anything to be sent should not be in noRepMap
 					delete(noRepMap, k)
 				}
@@ -1279,7 +1282,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			}
 			switch needSendStatus {
 			case Send:
-				lookupResp := batch.sendLookupMap.deregisterLookup(item.UniqueKey)
+				lookupResp, err := batch.sendLookupMap.deregisterLookup(item.UniqueKey)
+				if err != nil {
+					xmem.Logger().Warnf("For unique-key %v%s%v, error deregistering lookupResp for Send, err=%v", base.UdTagBegin, item.UniqueKey, base.UdTagEnd, err)
+				}
 
 				if lookupResp != nil && lookupResp.Resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
 					item.SetMetaXattrOptions.NoTargetCR = true
@@ -1338,7 +1344,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			case NotSendMerge:
 				// Call conflictMgr to resolve conflict
 				atomic.AddUint64(&xmem.counter_to_resolve, 1)
-				lookupResp := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
+				lookupResp, err := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
+				if err != nil {
+					xmem.Logger().Warnf("For unique-key %v%s%v, error deregistering lookupResp for NotSendMerge, err=%v", base.UdTagBegin, item.UniqueKey, base.UdTagEnd, err)
+				}
 				if lookupResp == nil {
 					xmem.Logger().Errorf("key=%q, batch.noRep=%v, sendLookup=%v, mergeLookup=%v\n",
 						[]byte(item.UniqueKey), batch.noRepMap[item.UniqueKey], batch.sendLookupMap.responses[item.UniqueKey],
@@ -1351,7 +1360,10 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 				}
 			case NotSendSetback:
 				atomic.AddUint64(&xmem.counter_to_setback, 1)
-				lookupResp := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
+				lookupResp, err := batch.mergeLookupMap.deregisterLookup(item.UniqueKey)
+				if err != nil {
+					xmem.Logger().Warnf("For unique-key %v%s%v, error deregistering lookupResp for NotSendMerge, err=%v", base.UdTagBegin, item.UniqueKey, base.UdTagEnd, err)
+				}
 				if lookupResp == nil {
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
@@ -1820,17 +1832,25 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 		for uniqueKey, wrappedReq := range get_map {
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
-			if ok && (resp.Resp.Status == mc.KEY_ENOENT) {
-				sendLookupMap.registerLookup(uniqueKey, resp)
+			if !ok || resp == nil {
+				xmem.Logger().Errorf("Received nil response for unique-key %v%s%v", uniqueKey)
+				continue
+			}
+
+			if resp.Resp.Status == mc.KEY_ENOENT {
+				err := sendLookupMap.registerLookup(uniqueKey, resp)
+				if err != nil {
+					xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for KEY_ENOENT response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
+				}
 				delete(get_map, uniqueKey)
-			} else if ok && base.IsDocLocked(resp.Resp) {
+			} else if base.IsDocLocked(resp.Resp) {
 				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug {
-					xmem.Logger().Debugf("%v doc %v%q%v is locked on the target, opcode=%v, cas=%v, status=%v. will need to retry\n", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, resp.Resp.Opcode, resp.Resp.Cas, resp.Resp.Status)
+					xmem.Logger().Debugf("%v doc %v%q%v is locked on the target, opcode=%v, cas=%v, status=%v. will need to retry", xmem.Id(), base.UdTagBegin, key, base.UdTagEnd, resp.Resp.Opcode, resp.Resp.Cas, resp.Resp.Status)
 				}
 				noRep_map[uniqueKey] = RetryTargetLocked
 				delete(get_map, uniqueKey)
 				resp.Resp.Recycle()
-			} else if ok && base.IsSuccessGetResponse(resp.Resp) {
+			} else if base.IsSuccessGetResponse(resp.Resp) {
 				res, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
@@ -1841,19 +1861,28 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				case base.SendToTarget:
 					// Import mutations sent will be counted when we send since we will get a more accurate count then.
 					// If target document does not exist, we only parse for importCas at send time.
-					sendLookupMap.registerLookup(uniqueKey, resp)
+					err := sendLookupMap.registerLookup(uniqueKey, resp)
+					if err != nil {
+						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for SendToTarget response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
+					}
 				case base.Skip:
 					noRep_map[uniqueKey] = NotSendFailedCR
 					respToGc[resp.Resp] = true
 				case base.Merge:
 					noRep_map[uniqueKey] = NotSendMerge
 					conflictMap[uniqueKey] = wrappedReq
-					mergeLookupMap.registerLookup(uniqueKey, resp)
+					err := mergeLookupMap.registerLookup(uniqueKey, resp)
+					if err != nil {
+						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for Merge response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
+					}
 					// TODO: recycle response after merge
 				case base.SetBackToSource:
 					noRep_map[uniqueKey] = NotSendSetback
 					conflictMap[uniqueKey] = wrappedReq
-					mergeLookupMap.registerLookup(uniqueKey, resp)
+					err := mergeLookupMap.registerLookup(uniqueKey, resp)
+					if err != nil {
+						xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for SetBackToSource response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
+					}
 					// TODO: recycle response after merge
 				default:
 					panic(fmt.Sprintf("Unexpcted conflict result %v", res))
@@ -1861,21 +1890,27 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				delete(get_map, uniqueKey)
 			} else if opcode, _ := xmem.opcodeAndSpecsForGetOp(wrappedReq); opcode == base.GET_WITH_META {
 				// For getMeta, we can just send optimistically
-				sendLookupMap.registerLookup(uniqueKey, resp)
+				err := sendLookupMap.registerLookup(uniqueKey, resp)
+				if err != nil {
+					xmem.Logger().Warnf("For unique-key %v%s%v, error registering lookup for GET_WITH_META response, err=%v", base.UdTagBegin, uniqueKey, base.UdTagEnd, err)
+				}
 				delete(get_map, uniqueKey)
 			} else if resp != nil {
 				if base.IsTemporaryMCError(resp.Resp.Status) {
 					hasTmpErr = true
 				}
-				if xmem.Logger().GetLogLevel() >= log.LogLevelDebug && resp.Resp != nil {
-					xmem.Logger().Debugf("Received %v for key %v", xmem.PrintResponseStatusError(resp.Resp.Status), key)
+
+				if resp.Resp != nil {
+					xmem.Logger().Errorf("Received %v for key %v%q%v", xmem.PrintResponseStatusError(resp.Resp.Status), base.UdTagBegin, key, base.UdTagEnd)
+				} else {
+					xmem.Logger().Errorf("Received nil MCResponse for key %v%q%v", base.UdTagBegin, key, base.UdTagEnd)
 				}
 				resp.Resp.Recycle()
 			}
 		}
 	}
 	if len(get_map) > 0 {
-		err = errors.New(fmt.Sprintf("Failed to get XATTR from target for %v documents after %v retries", len(get_map), xmem.config.maxRetry))
+		err = fmt.Errorf("failed to get XATTR from target for %v documents after %v retries", len(get_map), xmem.config.maxRetry)
 	}
 	return
 }
@@ -3054,8 +3089,8 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 		}
 		if req.num_of_retry > maxRetry {
 			req.timedout = true
-			err = errors.New(fmt.Sprintf("%v Failed to resend document %v%q%v, has tried to resend it %v, maximum retry %v reached",
-				xmem.Id(), base.UdTagBegin, req.req.Req.Key, base.UdTagEnd, req.num_of_retry, maxRetry))
+			err = fmt.Errorf("%v Failed to resend document %v%q%v, has tried to resend it %v, maximum retry %v reached",
+				xmem.Id(), base.UdTagBegin, req.req.Req.Key, base.UdTagEnd, req.num_of_retry, maxRetry)
 			xmem.Logger().Error(err.Error())
 
 			lastErrIsDueToCollectionMapping := req.collectionMapErr
