@@ -252,25 +252,35 @@ func NewResponseLookup() *responseLookup {
 }
 
 // stores response and increases the reference count by 1
-func (lookup *responseLookup) registerLookup(uniqueKey string, resp *base.SubdocLookupResponse) {
+func (lookup *responseLookup) registerLookup(uniqueKey string, resp *base.SubdocLookupResponse) error {
 	if lookup == nil {
-		return
+		return base.ErrorNilPtr
 	}
+	if resp == nil {
+		return base.ErrorNilPtr
+	}
+
 	lookup.responses[uniqueKey] = resp
 	lookup.refCnter[resp.Resp]++
+	return nil
 }
 
 // returns the response and decreases the reference count by 1
-func (lookup *responseLookup) deregisterLookup(uniqueKey string) *base.SubdocLookupResponse {
+func (lookup *responseLookup) deregisterLookup(uniqueKey string) (*base.SubdocLookupResponse, error) {
 	if lookup == nil {
-		return nil
+		return nil, base.ErrorNilPtr
 	}
+
 	response, ok := lookup.responses[uniqueKey]
 	if !ok {
-		return nil
+		return nil, base.ErrorNilPtr
 	}
+	if response == nil {
+		return nil, base.ErrorNilPtr
+	}
+
 	lookup.refCnter[response.Resp]--
-	return response
+	return response, nil
 }
 
 // only recycle if the response referenced by noone responseLookup
