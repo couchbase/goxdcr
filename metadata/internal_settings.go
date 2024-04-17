@@ -281,6 +281,8 @@ const (
 
 	PeerManifestsGetterSleepTimeKey = "PeerManifestsGetterSleepTimeSec"
 	PeerManifestsGetterMaxRetryKey  = "PeersManifestsGetterMaxRetry"
+
+	DatapoolLogFrequencyKey = "DatapoolLogFrequency"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -407,6 +409,7 @@ var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), 
 var ConnErrsListMaxEntriesConfig = &SettingsConfig{defaultValue: base.ConnErrorsListMaxEntries, Range: &Range{1, 100}}
 var PeerManifestsGetterSleepTimeConfig = &SettingsConfig{base.ManifestsGetterSleepTimeSecs, &Range{1, 60}}
 var PeerManifestsGetterMaxRetryConfig = &SettingsConfig{base.ManifestsGetterMaxRetry, &Range{1, 60}}
+var DatapoolLogFrequencyConfig = &SettingsConfig{base.DatapoolLogFrequency, &Range{0, 10000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -533,6 +536,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ConnErrorsListMaxEntriesKey:                   ConnErrsListMaxEntriesConfig,
 	PeerManifestsGetterSleepTimeKey:               PeerManifestsGetterSleepTimeConfig,
 	PeerManifestsGetterMaxRetryKey:                PeerManifestsGetterMaxRetryConfig,
+	DatapoolLogFrequencyKey:                       DatapoolLogFrequencyConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

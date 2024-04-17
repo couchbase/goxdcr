@@ -356,6 +356,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.P2PRetryWaitTimeMilliSecKey].(int))*time.Millisecond,
 		internal_settings.Values[metadata.PeerManifestsGetterSleepTimeKey].(int),
 		internal_settings.Values[metadata.PeerManifestsGetterMaxRetryKey].(int),
+		internal_settings.Values[metadata.DatapoolLogFrequencyKey].(int),
 	)
 }
 

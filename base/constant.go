@@ -1281,7 +1281,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
 	connErrsListMaxEntries, P2PRetryFactor int,
 	P2PRetryWaitTimeMilliSec time.Duration,
-	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int) {
+	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
+	datapoolLogFrequency int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1437,6 +1438,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	PeerToPeerRetryFactor = P2PRetryFactor
 	ManifestsGetterSleepTimeSecs = p2pManifestsGetterSleepTimeSecs
 	ManifestsGetterMaxRetry = p2pManifestsGetterMaxRetry
+	DatapoolLogFrequency = datapoolLogFrequency
 }
 
 // XDCR Dev hidden replication settings
@@ -1671,6 +1673,8 @@ var ConnectionPreCheckRPCTimeout = 15 * time.Second
 var ConnErrorsListMaxEntries = 20
 var ManifestsGetterSleepTimeSecs = 1
 var ManifestsGetterMaxRetry = 8
+
+var DatapoolLogFrequency = 10
 
 const PipelineFullTopic string = "pipelineFullTopic"
 
