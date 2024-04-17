@@ -1283,7 +1283,8 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 			switch needSendStatus {
 			case Send:
 				lookupResp, err := batch.sendLookupMap.deregisterLookup(item.UniqueKey)
-				if err != nil {
+				if xmem.nonOptimisticCROnly() && err != nil {
+					// only relevent when only source CR is to be done i.e. mobile and CCR mode
 					xmem.Logger().Warnf("For unique-key %v%s%v, error deregistering lookupResp for Send, err=%v", base.UdTagBegin, item.UniqueKey, base.UdTagEnd, err)
 				}
 
@@ -1641,7 +1642,7 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 				}
 			}
 
-			//*count == 0 means write is still in session, can't return
+			//*count < len(respMap) means write is still in session, can't return
 			if len(respMap) >= count {
 				logger.Debugf("%v Expected %v response, got all", xmem.Id(), count)
 				return
@@ -1833,7 +1834,9 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 			key := string(wrappedReq.Req.Key)
 			resp, ok := respMap[key]
 			if !ok || resp == nil {
-				xmem.Logger().Errorf("Received nil response for unique-key %v%s%v", uniqueKey)
+				if err == nil {
+					xmem.Logger().Errorf("Received nil response for unique-key %v%s%v even with no errors", base.UdTagBegin, uniqueKey, base.UdTagEnd)
+				}
 				continue
 			}
 
@@ -2532,8 +2535,8 @@ func (xmem *XmemNozzle) markNonTempErrorResponse(response *mc.MCResponse, nonTem
 	}
 }
 
-func (xmem *XmemNozzle) useCasLocking() bool {
-	if xmem.source_cr_mode == base.CRMode_Custom || xmem.getMobileCompatible() != base.MobileCompatibilityOff {
+func (xmem *XmemNozzle) nonOptimisticCROnly() bool {
+	if xmem.getMobileCompatible() != base.MobileCompatibilityOff || xmem.source_cr_mode == base.CRMode_Custom {
 		return true
 	}
 	return false
@@ -2579,7 +2582,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 			} else if response == nil {
 				errMsg := fmt.Sprintf("%v readFromClient returned nil error and nil response. Ignoring it", xmem.Id())
 				xmem.Logger().Warn(errMsg)
-			} else if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, xmem.useCasLocking()) {
+			} else if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, xmem.nonOptimisticCROnly()) {
 				if base.IsMutationLockedError(response.Status) {
 					// if target mutation is currently locked, resend doc
 					pos := xmem.getPosFromOpaque(response.Opaque)
@@ -2634,7 +2637,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						}
 					} else if wrappedReq.IsCasLockingRequest() {
 						// We only care about this if we are doing CAS locking for CCR or mobile, otherwise we can ignore this error.
-						xmem.Logger().Infof("%v Retry conflict resolution for %v%q%v because target Cas has changed (EEXISTS).", xmem.Id(), base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd)
+						xmem.Logger().Debugf("%v Retry conflict resolution for %v%q%v because target Cas has changed (EEXISTS).", xmem.Id(), base.UdTagBegin, wrappedReq.Req.Key, base.UdTagEnd)
 						additionalInfo := SentCasChangedEventAdditional{
 							Opcode: wrappedReq.Req.Opcode,
 						}
