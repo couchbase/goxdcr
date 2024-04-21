@@ -13,6 +13,7 @@ package crMeta
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"time"
 
 	mc "github.com/couchbase/gomemcached"
@@ -20,6 +21,7 @@ import (
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/hlv"
 	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbaselabs/gojsonsm"
 )
 
 // Custom CR related constants
@@ -31,13 +33,14 @@ const (
 	HLV_MV_FIELD  = "mv"  // the MV field in _xdcr
 	HLV_PV_FIELD  = "pv"  // The PV field in _xdcr
 
-	XATTR_CVCAS_PATH = base.XATTR_HLV + "." + HLV_CVCAS_FIELD
-	XATTR_SRC_PATH   = base.XATTR_HLV + "." + HLV_SRC_FIELD
-	XATTR_VER_PATH   = base.XATTR_HLV + "." + HLV_VER_FIELD
-	XATTR_MV_PATH    = base.XATTR_HLV + "." + HLV_MV_FIELD
-	XATTR_PV_PATH    = base.XATTR_HLV + "." + HLV_PV_FIELD
+	XATTR_CVCAS_PATH = base.XATTR_HLV + base.PERIOD + HLV_CVCAS_FIELD
+	XATTR_SRC_PATH   = base.XATTR_HLV + base.PERIOD + HLV_SRC_FIELD
+	XATTR_VER_PATH   = base.XATTR_HLV + base.PERIOD + HLV_VER_FIELD
+	XATTR_MV_PATH    = base.XATTR_HLV + base.PERIOD + HLV_MV_FIELD
+	XATTR_PV_PATH    = base.XATTR_HLV + base.PERIOD + HLV_PV_FIELD
 
-	XATTR_IMPORTCAS = base.XATTR_IMPORTCAS
+	XATTR_IMPORTCAS   = base.XATTR_IMPORTCAS
+	XATTR_PREVIOUSREV = base.XATTR_PREVIOUSREV
 )
 
 // CRMetadata contains the metadata required to perform conflict resolution. It has two main parts:
@@ -117,6 +120,38 @@ func (m *CRMetadata) IsImportMutation() bool {
 	return m.isImport
 }
 
+func (m *CRMetadata) UpdateHLVIfNeeded(source hlv.DocumentSourceId, cas uint64, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap hlv.VersionsMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64) (err error) {
+	if cvCas > 0 {
+		// The document already has an HLV. In this case we need to keep it updated even if enableCrossClusterVersioning is off
+		m.hadHlv = true
+	}
+	if len(pvMap) > 0 {
+		// This comes straight from the document XATTR. So the document had it.  meta.hlv tells us if it still has it
+		// after replication
+		m.hadPv = true
+	}
+	if len(mvMap) > 0 {
+		// This comes straight from the document XATTR. So the documentc had it.  meta.hlv tells us if it still has it
+		// after replication
+		m.hadMv = true
+	}
+	if importCas == cas {
+		// This is an import mutation. cvCas represents the pre-import CAS and that is used for CR
+		// pRev is the pre-import revId which is used for CR
+		m.isImport = true
+		m.docMeta.Cas = cvCas
+		m.docMeta.RevSeq = pRev
+	}
+
+	// The docMeta.Cas below represents the last mutation that's not import mutation.
+	m.hlv, err = hlv.NewHLV(source, m.docMeta.Cas, cvCas, cvSrc, cvVer, pvMap, mvMap)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 type SourceDocument struct {
 	source hlv.DocumentSourceId // This would be the source bucket UUID converted to the DocumentSourceId format
 	req    *base.WrappedMCRequest
@@ -131,40 +166,22 @@ func NewSourceDocument(req *base.WrappedMCRequest, source hlv.DocumentSourceId) 
 
 func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRMetadata, error) {
 	docMeta := base.DecodeSetMetaReq(doc.req.Req)
-	cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, err := getHlvFromMCRequest(doc.req, uncompressFunc)
+	cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev, err := getHlvFromMCRequest(doc.req, uncompressFunc)
 	if err != nil {
 		return nil, err
 	}
+
 	meta := CRMetadata{
 		docMeta: &docMeta,
 	}
-	if cvCas > 0 {
-		// The document already has an HLV. In this case we need to keep it updated even if enableCrossClusterVersioning is off
-		meta.hadHlv = true
-	}
-	if len(pvMap) > 0 {
-		// This comes straight from source document XATTR. So source had it.  meta.hlv tells us if it still has it
-		// after replication
-		meta.hadPv = true
-	}
-	if len(mvMap) > 0 {
-		// This comes straight from source document XATTR. So source had it.  meta.hlv tells us if it still has it
-		// after replication
-		meta.hadMv = true
-	}
-	if importCas == cas {
-		// This is an import mutation. cvCas represents the pre-import CAS and that is used for CR
-		// pre-import revId is not saved. We cannot use revId. set it to 0
-		meta.isImport = true
-		docMeta.Cas = cvCas
-		docMeta.RevSeq = 0
-	}
-	doc.req.ImportMutation = meta.isImport
-	// The docMeta.Cas below represents the last mutation that's not import mutation.
-	meta.hlv, err = hlv.NewHLV(doc.source, docMeta.Cas, cvCas, cvSrc, cvVer, pvMap, mvMap)
+
+	err = meta.UpdateHLVIfNeeded(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev)
 	if err != nil {
 		return nil, err
 	}
+
+	doc.req.ImportMutation = meta.isImport
+
 	return &meta, nil
 }
 
@@ -216,26 +233,12 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 			docMeta: &docMeta,
 		}
 		if doc.includeHlv {
-			cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, err := getHlvFromMCResponse(doc.resp)
+			cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev, err := getHlvFromMCResponse(doc.resp)
 			if err != nil {
 				return nil, err
 			}
-			if len(pvMap) > 0 {
-				// This comes straight from target document XATTR. So target had it. meta.hlv tells us if it still has it after replication
-				meta.hadPv = true
-			}
-			if len(mvMap) > 0 {
-				// This comes straight from target document XATTR. So target had it.  meta.hlv tells us if it still has it
-				meta.hadMv = true
-			}
-			if importCas == cas {
-				// This is an import mutation. cvCas represents the pre-import CAS and that is used for CR
-				// Pre-import revId is not used. So we cannot use revId. set it to 0
-				meta.isImport = true
-				docMeta.Cas = cvCas
-				docMeta.RevSeq = 0
-			}
-			meta.hlv, err = hlv.NewHLV(doc.source, docMeta.Cas, cvCas, cvSrc, cvVer, pvMap, mvMap)
+
+			err = meta.UpdateHLVIfNeeded(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev)
 			if err != nil {
 				return nil, err
 			}
@@ -304,41 +307,58 @@ func DetectConflictWithHLV(req *base.WrappedMCRequest, resp *mc.MCResponse, spec
 			return base.Skip, nil
 		}
 	}
-	return base.Error, fmt.Errorf("Bad result from ccrMeta.DetectConlict: %v, source meta: %s, %s, target meta: %s, %s",
+	return base.Error, fmt.Errorf("bad result from ccrMeta.DetectConlict: %v, source meta: %s, %s, target meta: %s, %s",
 		conflictResult, sourceDocMeta, sourceHLV, targetDocMeta, targetHLV)
 }
 
-func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
-	if resp.Status == mc.KEY_ENOENT {
-		return base.SendToTarget, nil
-	}
+func GetMetadataForCR(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc) (base.DocumentMetadata, base.DocumentMetadata, error) {
 	var doc_meta_source, doc_meta_target base.DocumentMetadata
 	var err error
 	if resp.Opcode == base.GET_WITH_META {
 		doc_meta_source = base.DecodeSetMetaReq(req.Req)
 		doc_meta_target, err = base.DecodeGetMetaResp(req.Req.Key, resp, xattrEnabled)
 		if err != nil {
-			return base.Error, err
+			err = fmt.Errorf("error decoding GET_META response for key=%v%s%v, resp=%v%v%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			return doc_meta_source, doc_meta_target, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
 		source_doc := NewSourceDocument(req, sourceId)
 		source_meta, err := source_doc.GetMetadata(uncompressFunc)
 		if err != nil {
-			return base.Error, err
+			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, req.Req, base.UdTagEnd, base.UdTagBegin, req.Req.Body, base.UdTagEnd)
+			return doc_meta_source, doc_meta_target, err
 		}
 		doc_meta_source = *source_meta.docMeta
 		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
-		if err == base.ErrorDocumentNotFound {
-			return base.SendToTarget, nil
-		} else if err != nil {
-			return base.Error, err
+		if err != nil {
+			if err == base.ErrorDocumentNotFound {
+				return doc_meta_source, doc_meta_target, err
+			}
+			err = fmt.Errorf("error creating target document for key=%v%s%v, resp=%v%v%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			return doc_meta_source, doc_meta_target, err
 		}
 		target_meta, err := target_doc.GetMetadata()
 		if err != nil {
-			return base.Error, err
+			err = fmt.Errorf("error decoding target SUBDOC_MULTI_LOOKUP response for key=%v%s%v, resp=%v%v%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			return doc_meta_source, doc_meta_target, err
 		}
 		doc_meta_target = *target_meta.docMeta
 	}
+	return doc_meta_source, doc_meta_target, nil
+}
+
+func ResolveConflictByCAS(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []base.SubdocLookupPathSpec, sourceId, targetId hlv.DocumentSourceId, xattrEnabled bool, uncompressFunc base.UncompressFunc, logger *log.CommonLogger) (base.ConflictResult, error) {
+	if resp.Status == mc.KEY_ENOENT {
+		return base.SendToTarget, nil
+	}
+
+	doc_meta_source, doc_meta_target, err := GetMetadataForCR(req, resp, specs, sourceId, targetId, xattrEnabled, uncompressFunc)
+	if err == base.ErrorDocumentNotFound {
+		return base.SendToTarget, nil
+	} else if err != nil {
+		return base.Error, err
+	}
+
 	sourceWin := true
 	if doc_meta_target.Cas > doc_meta_source.Cas {
 		sourceWin = false
@@ -371,27 +391,14 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 	if resp.Status == mc.KEY_ENOENT {
 		return base.SendToTarget, nil
 	}
-	doc_meta_source := base.DecodeSetMetaReq(req.Req)
-	var doc_meta_target base.DocumentMetadata
-	var err error
-	if resp.Opcode == base.GET_WITH_META {
-		doc_meta_target, err = base.DecodeGetMetaResp(req.Req.Key, resp, xattrEnabled)
-		if err != nil {
-			return base.Error, err
-		}
-	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
-		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
-		if err == base.ErrorDocumentNotFound {
-			return base.SendToTarget, nil
-		} else if err != nil {
-			return base.Error, err
-		}
-		target_meta, err := target_doc.GetMetadata()
-		if err != nil {
-			return base.Error, err
-		}
-		doc_meta_target = *target_meta.docMeta
+
+	doc_meta_source, doc_meta_target, err := GetMetadataForCR(req, resp, specs, sourceId, targetId, xattrEnabled, uncompressFunc)
+	if err == base.ErrorDocumentNotFound {
+		return base.SendToTarget, nil
+	} else if err != nil {
+		return base.Error, err
 	}
+
 	sourceWin := true
 	if doc_meta_target.RevSeq > doc_meta_source.RevSeq {
 		sourceWin = false
@@ -746,32 +753,40 @@ func ParseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSou
 }
 
 func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64,
-	pvMap, mvMap hlv.VersionsMap, importCas uint64, err error) {
+	pvMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64, err error) {
 	cas = lookupResp.Resp.Cas
 	xattr, err1 := lookupResp.ResponseForAPath(base.XATTR_HLV)
 	if err1 != nil {
 		err = fmt.Errorf("failed to find subdoc_lookup result for path %s for document %s%q%s, error: %v", base.XATTR_HLV, base.UdTagBegin, lookupResp.Resp.Key, base.UdTagEnd, err1)
 		return
 	}
-	if xattr != nil {
+	if xattr != nil && !base.Equals(xattr, base.EmptyJsonObject) {
 		cvCas, cvSrc, cvVer, pvMap, mvMap, err1 = ParseHlvFields(cas, xattr)
 		if err1 != nil {
 			err = fmt.Errorf("failed to parse HLV fields for document %s%q%s, error: %v", base.UdTagBegin, lookupResp.Resp.Key, base.UdTagEnd, err)
 			return
 		}
 	}
-	// It is ok to not find this path, since we may not be getting it if enableCrossClusterVersioning is not on, or target is not an import mutation.
+
+	// It is ok to not find _mou.importCAS or _mou.pRev, since we may not be getting it if enableCrossClusterVersioning is not on, or target is not an import mutation.
 	xattr, err1 = lookupResp.ResponseForAPath(XATTR_IMPORTCAS)
 	xattrLen := len(xattr)
 	if err1 == nil && xattrLen > 0 {
 		// Strip the start/end quotes to get the importCas value
 		importCas, err = base.HexLittleEndianToUint64(xattr[1 : xattrLen-1])
 	}
+
+	xattr, err1 = lookupResp.ResponseForAPath(XATTR_PREVIOUSREV)
+	xattrLen = len(xattr)
+	if err1 == nil && xattrLen > 0 {
+		// Strip the start/end quotes to get the pRev value
+		pRev, err = strconv.ParseUint(string(xattr[1:xattrLen-1]), 10, 64)
+	}
 	return
 }
 
 // This will find the custom CR XATTR from the req body, including HLV and _importCas
-func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.UncompressFunc) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, importCas uint64, err error) {
+func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.UncompressFunc) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64, err error) {
 	req := wrappedReq.Req
 	cas = binary.BigEndian.Uint64(req.Extras[16:24])
 	if req.DataType&mcc.XattrDataType == 0 {
@@ -781,28 +796,43 @@ func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.
 		return
 	}
 	body := req.Body
-	var pos uint32 = 0
-	pos = pos + 4
 	xattrIter, err := base.NewXattrIterator(body)
 	if err != nil {
 		return
 	}
 	var key, value []byte
-	var xattrHlv, xattrImportCas []byte
+	var xattrHlv, xattrImportCas, xattrPRev []byte
 	var err1 error
+	var foundImportCas, foundPRev bool
+
 	for xattrIter.HasNext() {
 		key, value, err = xattrIter.Next()
 		if err != nil {
 			return
 		}
-		if base.Equals(key, base.XATTR_HLV) {
+		if base.Equals(key, base.XATTR_HLV) && !base.Equals(value, base.EmptyJsonObject) {
 			xattrHlv = value
 		}
-		if base.Equals(key, XATTR_IMPORTCAS) {
-			xattrImportCas = value
+		if base.Equals(key, base.XATTR_MOU) && !base.Equals(value, base.EmptyJsonObject) {
+			// TODO: MB-61748 - can use datapool + new pool for removedFromMou
+			newMou := make([]byte, len(value))
+			removedFromMou := make(map[string][]byte)
+
+			newMouLen, _, atleastOneLeft, err1 := gojsonsm.MatchAndRemoveItemsFromJsonObject(value, base.MouXattrValuesForCR, newMou, removedFromMou)
+			if err1 != nil {
+				return
+			}
+			newMou = newMou[:newMouLen]
+
+			if atleastOneLeft {
+				wrappedReq.MouAfterProcessing = newMou
+			}
+
+			xattrImportCas, foundImportCas = removedFromMou[base.IMPORTCAS]
+			xattrPRev, foundPRev = removedFromMou[base.PREVIOUSREV]
 		}
 	}
-	if xattrImportCas != nil {
+	if foundImportCas && xattrImportCas != nil {
 		// Remove the start/end quotes before converting it to uint64
 		xattrLen := len(xattrImportCas)
 		importCas, err = base.HexLittleEndianToUint64(xattrImportCas[1 : xattrLen-1])
@@ -810,6 +840,15 @@ func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.
 			return
 		}
 	}
+	if foundPRev && xattrPRev != nil {
+		// Remove the start/end quotes before converting it to uint64
+		xattrLen := len(xattrPRev)
+		pRev, err = strconv.ParseUint(string(xattrPRev[1:xattrLen-1]), 10, 64)
+		if err != nil {
+			return
+		}
+	}
+
 	if xattrHlv == nil {
 		// Source does not have HLV XATTR
 		return

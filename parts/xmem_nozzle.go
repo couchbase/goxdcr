@@ -1626,7 +1626,7 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 						if response.Status != mc.SUCCESS && !base.IsIgnorableMCResponse(response, false) && !base.IsTemporaryMCError(response.Status) &&
 							!base.IsCollectionMappingError(response.Status) {
 							if base.IsTopologyChangeMCError(response.Status) {
-								vb_err := fmt.Errorf("Received error %v on vb %v\n", base.ErrorNotMyVbucket, vbno)
+								vb_err := fmt.Errorf("received error %v on vb %v", base.ErrorNotMyVbucket, vbno)
 								xmem.handleVBError(vbno, vb_err)
 							} else if base.IsEAccessError(response.Status) && !isGetMeta {
 								// For getMeta, we will skip source side CR so this error is OK.
@@ -2051,6 +2051,12 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 	}
 	return nil
 }
+
+func (xmem *XmemNozzle) handleUpdateSystemXattrErr(errPhase string, err error, key string, xattr []byte) error {
+	xmem.Logger().Errorf("%v: updateSystemXattrForTarget received error='%v', when='%s' for key=%v%s%v, xattr='%v'", xmem.Id(), err, errPhase, base.UdTagBegin, key, base.UdTagEnd, xattr)
+	return err
+}
+
 func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCRequest, lookup *base.SubdocLookupResponse) (err error) {
 	var needToUpdateSysXattrs bool
 	if wrappedReq.Req.DataType&mcc.XattrDataType != 0 {
@@ -2120,6 +2126,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		doc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
 		meta, err = doc.GetMetadata(xmem.uncompressBody)
 		if err != nil {
+			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForTarget", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd)
 			return err
 		}
 
@@ -2144,14 +2151,12 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 		// Preserve all Xattributes except source _sync and old HLV if it has been updated
 		it, err := base.NewXattrIterator(body)
 		if err != nil {
-			xmem.Logger().Errorf("%v: updateSystemXattrForTarget received error '%v' from NewXattrIterator for key %v%s%v", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
-			return err
+			return xmem.handleUpdateSystemXattrErr("from NewXattrIterator", err, string(req.Key), body)
 		}
 		for it.HasNext() {
 			key, value, err := it.Next()
 			if err != nil {
-				xmem.Logger().Errorf("%v: updateSystemXattrForTarget received error '%v' iterating through XATTR for key %v%s%v,", xmem.Id(), err, base.UdTagBegin, req.Key, base.UdTagEnd)
-				return err
+				return xmem.handleUpdateSystemXattrErr("iterating through XATTR", err, string(req.Key), body)
 			}
 			switch string(key) {
 			case base.XATTR_HLV:
@@ -2165,15 +2170,21 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 					xmem.RaiseEvent(common.NewEvent(common.SourceSyncXattrRemoved, nil, xmem, nil, nil))
 					continue
 				}
-			case base.XATTR_IMPORTCAS:
+			case base.XATTR_MOU:
 				if meta != nil && !meta.IsImportMutation() {
-					// Skip it if it is no longer an import mutation. This happens when import mutation is mutated again.
-					continue
+					// Remove importCAS from _mou if it is no longer an import mutation.
+					// This happens when import mutation is mutated again.
+
+					if wrappedReq.MouAfterProcessing == nil {
+						// _mou had only importCAS and pRev, no need to write
+						continue
+					}
+					value = wrappedReq.MouAfterProcessing
 				}
 			}
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {
-				return err
+				return xmem.handleUpdateSystemXattrErr("writing new xattrs", err, string(req.Key), body)
 			}
 		}
 	}

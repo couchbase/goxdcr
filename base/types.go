@@ -707,6 +707,9 @@ type WrappedMCRequest struct {
 	GetBodySpec           []SubdocLookupPathSpec
 	// copy of Req.Cas, which can be used if Req.Cas is set to 0
 	ActualCas uint64
+
+	// nil if it doesn't exist or the new mou would be empty
+	MouAfterProcessing []byte
 }
 
 // This should avoid to be used as this will cause memory allocation
@@ -1447,7 +1450,7 @@ func JsonStringReEncodeTest(value string) (bool, error) {
 
 func GetXattrSize(body []byte) (uint32, error) {
 	if len(body) < 4 {
-		return 0, fmt.Errorf("body is too short to contain valid xattrs")
+		return 0, fmt.Errorf("body is too short to contain valid xattrs, len=%v", len(body))
 	}
 	xattrSize := binary.BigEndian.Uint32(body[0:4])
 	// Couchbase doc size is max of 20MB. Xattribute count against this limit.
@@ -1652,7 +1655,7 @@ func (xi *XattrIterator) Next() ([]byte, []byte, error) {
 	// Search for end of key
 	for separator = xi.pos; xi.body[separator] != '\x00'; separator++ {
 		if separator >= xi.endPos {
-			return nil, nil, fmt.Errorf("Error parsing xattr key")
+			return nil, nil, fmt.Errorf("Error parsing xattr key, xi.body=%s", xi.body)
 		}
 	}
 
@@ -1663,7 +1666,7 @@ func (xi *XattrIterator) Next() ([]byte, []byte, error) {
 	// Search for end of value
 	for separator = xi.pos; xi.body[separator] != '\x00'; separator++ {
 		if separator >= xi.endPos {
-			return nil, nil, fmt.Errorf("Error parsing xattr value")
+			return nil, nil, fmt.Errorf("Error parsing xattr value, xi.body=%s", xi.body)
 		}
 	}
 
@@ -1785,6 +1788,9 @@ func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathS
 
 	if option.IncludeImportCas {
 		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_IMPORTCAS)}
+		specs = append(specs, spec)
+
+		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_PREVIOUSREV)}
 		specs = append(specs, spec)
 	}
 	if option.IncludeBody {

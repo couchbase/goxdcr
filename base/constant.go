@@ -1515,6 +1515,10 @@ var (
 
 // Required for conflict resolution
 const (
+	PERIOD      = "."
+	IMPORTCAS   = "importCAS"
+	PREVIOUSREV = "pRev"
+
 	// This is for subdoc set operation
 	CAS_MACRO_EXPANSION = "\"${Mutation.CAS}\"" // The value for the cv field when setting back to source
 	// These are for subdoc get operations
@@ -1525,9 +1529,12 @@ const (
 	// The leading "_" indicates a system XATTR
 	XATTR_MOBILE = "_sync"
 	// This is the HLV XATTR name.
-	XATTR_HLV = "_vv" // The HLV XATTR
+	XATTR_HLV = "_vv"  // The HLV XATTR
+	XATTR_MOU = "_mou" // The Metadata Only Update XATTR
 
-	XATTR_IMPORTCAS = "_importCAS"
+	// nested xattrs
+	XATTR_IMPORTCAS   = XATTR_MOU + PERIOD + IMPORTCAS
+	XATTR_PREVIOUSREV = XATTR_MOU + PERIOD + PREVIOUSREV
 
 	FunctionUrlFmt         = "http://%v:%v/evaluator/v1/libraries"
 	DefaultMergeFunc       = "defaultLWW"
@@ -1538,12 +1545,17 @@ const (
 	CCRKVRestCallRetryInterval = 2 * time.Second
 )
 
+var MouXattrValuesForCR []string = []string{
+	IMPORTCAS,
+	PREVIOUSREV,
+}
+
 const (
 	// Bucket setting for version vector pruning
 	VersionPruningWindowHrsKey = "versionPruningWindowHrs"
 	// Bucket setting for enable versioning when CR mode is not custom CR
 	EnableCrossClusterVersioningKey = "enableCrossClusterVersioning"
-	// Bucket setting for starting timestamp (CAS) to eanble versioning
+	// Bucket setting for starting timestamp (CAS) to enable versioning
 	VbucketsMaxCasKey = "vbucketsMaxCas"
 )
 
