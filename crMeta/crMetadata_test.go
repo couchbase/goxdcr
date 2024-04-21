@@ -11,12 +11,17 @@ licenses/APL2.txt.
 package crMeta
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/couchbase/gomemcached"
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/hlv"
+	"github.com/couchbaselabs/gojsonsm"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -614,4 +619,391 @@ func TestUpdateMetaForSetBack(t *testing.T) {
 	assert.Nil(err)
 	assert.Nil(mv)
 	assert.Equal(string(pv), "{\"Cluster1\":\"0x0000f8da4d881416\",\"Cluster2\":\"0x15\",\"Cluster3\":\"0x0b\",\"TargetCluster\":\"0xd3038dd71005\"}")
+}
+
+// Heap's Algorithm: generates all possible permutations for a given array, with minimal movements.
+func Permutations(arr []int) [][]int {
+	var helper func([]int, int)
+	res := [][]int{}
+
+	helper = func(arr []int, n int) {
+		if n == 1 {
+			tmp := make([]int, len(arr))
+			copy(tmp, arr)
+			res = append(res, tmp)
+		} else {
+			for i := 0; i < n; i++ {
+				helper(arr, n-1)
+				if n%2 == 1 {
+					arr[i], arr[n-1] = arr[n-1], arr[i]
+				} else {
+					arr[0], arr[n-1] = arr[n-1], arr[0]
+				}
+			}
+		}
+	}
+	helper(arr, len(arr))
+	return res
+}
+func TestParseHlvFromMCRequest(t *testing.T) {
+	a := assert.New(t)
+
+	uncompress := func(req *base.WrappedMCRequest) error { return nil }
+	req := &base.WrappedMCRequest{Req: &gomemcached.MCRequest{Key: []byte("test")}}
+	req.Req.DataType = base.XattrDataType | base.JSONDataType
+	req.Req.Extras = make([]byte, 24)
+	var CAS uint64 = 27382937393749
+	binary.BigEndian.PutUint64(req.Req.Extras[16:24], uint64(CAS))
+	srcVal := "asqsqqwasass"
+	src := fmt.Sprintf("\"%s\":\"%s\"", HLV_SRC_FIELD, srcVal)
+	var verVal uint64 = 6172839283
+	ver := fmt.Sprintf("\"%s\":\"%s\"", HLV_VER_FIELD, base.Uint64ToHexLittleEndian(verVal))
+	cvCasVal := verVal
+	cvCas := fmt.Sprintf("\"%s\":\"%s\"", HLV_CVCAS_FIELD, base.Uint64ToHexLittleEndian(cvCasVal))
+	pv1Val := verVal - 100
+	var pv2Val uint64 = 10
+	pv1Key := "ksajxsjx"
+	pv2Key := "ksajxsjy"
+	PV := fmt.Sprintf("\"%s\":{\"%s\":\"%s\",\"%s\":\"%s\"}", HLV_PV_FIELD, pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv1Val), pv2Key, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val))
+	vv1s := []string{
+		"{" + src + "," + ver + "," + cvCas + "}",
+		"{" + src + "," + cvCas + "," + ver + "}",
+		"{" + ver + "," + cvCas + "," + src + "}",
+		"{" + ver + "," + src + "," + cvCas + "}",
+		"{" + cvCas + "," + src + "," + ver + "}",
+		"{" + cvCas + "," + ver + "," + src + "}",
+	}
+	str := "\"foo\":\"bar\""
+	num := "\"prevRev\":12345678901234567890"
+	objStr := "\"lorem\":\"ipsum\""
+	objNum := "\"foo\":12345"
+	objObj1 := "\"obj1\":{\"def\":\"geh\",\"num\":9876}"
+	objObj2 := "\"obj2\":{\"num\":9876,\"def\":\"geh\"}"
+	importCasVal := verVal
+	importCAS := fmt.Sprintf("\"%s\":\"%s\"", base.IMPORTCAS, base.Uint64ToHexLittleEndian(importCasVal))
+	var pRevIdVal uint64 = 314231423142
+	pRevId := fmt.Sprintf("\"%s\":\"%v\"", base.PREVIOUSREV, pRevIdVal)
+	doc := "{\"foo\":\"bar\"}"
+
+	for _, vv1 := range vv1s {
+		// 1. _vv.src and _vv.ver, no _vv.pv, no _mou
+		body := make([]byte, 4+4+2+len(base.XATTR_HLV)+len(vv1)+len(doc))
+		pos := 0
+		binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_HLV)+len(vv1)+2+4))
+		pos += 4
+		binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_HLV)+len(vv1)+2))
+		pos += 4
+		copy(body[pos:pos+len(base.XATTR_HLV)], []byte(base.XATTR_HLV))
+		pos += len(base.XATTR_HLV)
+		body[pos] = '\x00'
+		pos++
+		copy(body[pos:pos+len(vv1)], []byte(vv1))
+		pos += len(vv1)
+		body[pos] = '\x00'
+		pos++
+		copy(body[pos:pos+len(doc)], []byte(doc))
+		pos += len(doc)
+		req.Req.Body = body[:pos]
+		cas, cvCAS, cvSrc, cvVer, pv, mv, importCas, pRev, err := getHlvFromMCRequest(req, uncompress)
+		a.Nil(err)
+		a.Equal(cas, CAS)
+		a.Equal(cvCAS, cvCasVal)
+		a.Equal(string(cvSrc), srcVal)
+		a.Equal(cvVer, verVal)
+		a.Equal(len(mv), 0)
+		a.Equal(len(pv), 0)
+		a.Equal(importCas, uint64(0))
+		a.Equal(pRev, uint64(0))
+
+		// 2. _vv.src, _vv.ver, _vv.pv, no _mou
+		vv2s := []string{
+			"{" + vv1[1:len(vv1)-1] + "," + PV + "}",
+			"{" + PV + "," + vv1[1:len(vv1)-1] + "}",
+		}
+
+		for _, vv2 := range vv2s {
+			body = make([]byte, 4+4+2+len(base.XATTR_HLV)+len(vv2)+len(doc))
+			pos = 0
+			binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_HLV)+len(vv2)+2+4))
+			pos += 4
+			binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_HLV)+len(vv2)+2))
+			pos += 4
+			copy(body[pos:pos+len(base.XATTR_HLV)], []byte(base.XATTR_HLV))
+			pos += len(base.XATTR_HLV)
+			body[pos] = '\x00'
+			pos++
+			copy(body[pos:pos+len(vv2)], []byte(vv2))
+			pos += len(vv2)
+			body[pos] = '\x00'
+			pos++
+			copy(body[pos:pos+len(doc)], []byte(doc))
+			pos += len(doc)
+			req.Req.Body = body[:pos]
+			cas, cvCAS, cvSrc, cvVer, pv, mv, importCas, pRev, err = getHlvFromMCRequest(req, uncompress)
+			a.Nil(err)
+			a.Equal(cas, CAS)
+			a.Equal(cvCAS, cvCasVal)
+			a.Equal(string(cvSrc), srcVal)
+			a.Equal(cvVer, verVal)
+			a.Equal(len(mv), 0)
+			a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
+			a.Equal(pv[hlv.DocumentSourceId(pv2Key)], pv2Val+pv1Val)
+			a.Equal(importCas, uint64(0))
+			a.Equal(pRev, uint64(0))
+
+			// 3. _vv.src, _vv.ver, _vv.pv, and _mou.importCAS
+			objs := []string{}
+			possibleObjFields := []string{objStr, objNum, objObj1, objObj2}
+			objIdxs := []int{0, 1, 2, 3}
+			objPerms := Permutations(objIdxs)
+			for _, perm := range objPerms {
+				input := ""
+				for _, idx := range perm {
+					input = input + possibleObjFields[idx] + ","
+				}
+				// remove , at the end and add { and }
+				input = "{" + input[0:len(input)-1] + "}"
+				objs = append(objs, "\"obj\":"+input)
+			}
+
+			// test all possible permutation arrangements of mou possible items
+			for _, obj := range objs {
+				possibleFields := []string{str, num, obj, importCAS, pRevId}
+				idxs := []int{0, 1, 2, 3, 4}
+				perms := Permutations(idxs)
+				for _, perm := range perms {
+					mou := ""
+					for _, idx := range perm {
+						mou = mou + possibleFields[idx] + ","
+					}
+					// remove , at the end and add { and }
+					mou = "{" + mou[0:len(mou)-1] + "}"
+
+					vvs := []string{
+						vv1, vv2,
+					}
+					for _, vv := range vvs {
+						// 3a. _mou first
+						body = make([]byte, 4+4+2+len(base.XATTR_HLV)+len(vv)+4+2+len(mou)+len(base.XATTR_MOU)+len(doc))
+						pos = 0
+						binary.BigEndian.PutUint32(body[pos:pos+4], uint32(4+2+len(base.XATTR_HLV)+len(vv)+4+2+len(base.XATTR_MOU)+len(mou)))
+						pos += 4
+						binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_MOU)+len(mou)+2))
+						pos += 4
+						copy(body[pos:pos+len(base.XATTR_MOU)], []byte(base.XATTR_MOU))
+						pos += len(base.XATTR_MOU)
+						body[pos] = '\x00'
+						pos++
+						copy(body[pos:pos+len(mou)], []byte(mou))
+						pos += len(mou)
+						body[pos] = '\x00'
+						pos++
+						binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_HLV)+len(vv)+2))
+						pos += 4
+						copy(body[pos:pos+len(base.XATTR_HLV)], []byte(base.XATTR_HLV))
+						pos += len(base.XATTR_HLV)
+						body[pos] = '\x00'
+						pos++
+						copy(body[pos:pos+len(vv)], []byte(vv))
+						pos += len(vv)
+						body[pos] = '\x00'
+						pos++
+						copy(body[pos:pos+len(doc)], []byte(doc))
+						pos += len(doc)
+						req.Req.Body = body[:pos]
+						cas, cvCAS, cvSrc, cvVer, pv, mv, importCas, pRev, err = getHlvFromMCRequest(req, uncompress)
+						a.Nil(err)
+						a.Equal(cas, CAS)
+						a.Equal(cvCAS, cvCasVal)
+						a.Equal(string(cvSrc), srcVal)
+						a.Equal(cvVer, verVal)
+						a.Equal(len(mv), 0)
+						if strings.Contains(vv, HLV_PV_FIELD) {
+							a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
+							a.Equal(pv[hlv.DocumentSourceId(pv2Key)], pv2Val+pv1Val)
+						} else {
+							a.Equal(len(pv), 0)
+						}
+						a.Equal(importCas, importCasVal)
+						a.Equal(pRev, pRevIdVal)
+
+						// 3b. _vv first
+						body = make([]byte, 4+4+2+len(base.XATTR_HLV)+len(vv)+4+2+len(mou)+len(base.XATTR_MOU)+len(doc))
+						pos = 0
+						binary.BigEndian.PutUint32(body[pos:pos+4], uint32(4+2+len(base.XATTR_HLV)+len(vv)+4+2+len(base.XATTR_MOU)+len(mou)))
+						pos += 4
+						binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_HLV)+len(vv)+2))
+						pos += 4
+						copy(body[pos:pos+len(base.XATTR_HLV)], []byte(base.XATTR_HLV))
+						pos += len(base.XATTR_HLV)
+						body[pos] = '\x00'
+						pos++
+						copy(body[pos:pos+len(vv)], []byte(vv))
+						pos += len(vv)
+						body[pos] = '\x00'
+						pos++
+						binary.BigEndian.PutUint32(body[pos:pos+4], uint32(len(base.XATTR_MOU)+len(mou)+2))
+						pos += 4
+						copy(body[pos:pos+len(base.XATTR_MOU)], []byte(base.XATTR_MOU))
+						pos += len(base.XATTR_MOU)
+						body[pos] = '\x00'
+						pos++
+						copy(body[pos:pos+len(mou)], []byte(mou))
+						pos += len(mou)
+						body[pos] = '\x00'
+						pos++
+						copy(body[pos:pos+len(doc)], []byte(doc))
+						pos += len(doc)
+						req.Req.Body = body[:pos]
+						cas, cvCAS, cvSrc, cvVer, pv, mv, importCas, pRev, err = getHlvFromMCRequest(req, uncompress)
+						a.Nil(err)
+						a.Equal(cas, CAS)
+						a.Equal(cvCAS, cvCasVal)
+						a.Equal(string(cvSrc), srcVal)
+						a.Equal(cvVer, verVal)
+						a.Equal(len(mv), 0)
+						if strings.Contains(vv, HLV_PV_FIELD) {
+							a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
+							a.Equal(pv[hlv.DocumentSourceId(pv2Key)], pv2Val+pv1Val)
+						} else {
+							a.Equal(len(pv), 0)
+						}
+						a.Equal(importCas, importCasVal)
+						a.Equal(pRev, pRevIdVal)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestXattrToVersionMap(t *testing.T) {
+	a := assert.New(t)
+
+	// deltas
+	var pv1Val uint64 = 10000
+	var pv2Val uint64 = 1000
+	var pv3Val uint64 = 100
+	// source
+	pv1Key := "ksajxsjx"
+	pv2Key := "ksajxsjy"
+	pv3Key := "ksajxsjz"
+
+	PV := fmt.Sprintf("{\"%s\":\"%s\",\"%s\":\"%s\",\"%s\":\"%s\"}", pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv1Val), pv2Key, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val), pv3Key, base.Uint64ToHexLittleEndianAndStrip0s(pv3Val))
+	pv, err := xattrVVtoDeltas([]byte(PV))
+	a.Nil(err)
+	a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
+	a.Equal(pv[hlv.DocumentSourceId(pv2Key)], pv2Val+pv1Val)
+	a.Equal(pv[hlv.DocumentSourceId(pv3Key)], pv3Val+pv2Val+pv1Val)
+
+	PV = fmt.Sprintf("{\"%s\":\"%s\",\"%s\":\"%s\"}", pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv1Val), pv2Key, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val))
+	pv, err = xattrVVtoDeltas([]byte(PV))
+	a.Nil(err)
+	a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
+	a.Equal(pv[hlv.DocumentSourceId(pv2Key)], pv2Val+pv1Val)
+
+	PV = fmt.Sprintf("{\"%s\":\"%s\"}", pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv1Val))
+	pv, err = xattrVVtoDeltas([]byte(PV))
+	a.Nil(err)
+	a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
+
+	PV = "{}"
+	pv, err = xattrVVtoDeltas([]byte(PV))
+	a.Nil(err)
+	a.Equal(len(pv), 0)
+
+	PV = ""
+	pv, err = xattrVVtoDeltas([]byte(PV))
+	a.Nil(err)
+	a.Equal(len(pv), 0)
+}
+
+func Test_MouNestedXattrParsing(t *testing.T) {
+	a := assert.New(t)
+
+	// As of the date of writing this test, _mou will contain the following 3 fields.
+	// Add more and test them here when mobile adds more.
+	pCAS := "\"pCAS\":\"0x1234567890123456\""
+	importCas := fmt.Sprintf("\"%s\":\"0x1234567890123456\"", base.IMPORTCAS)
+	pRev := fmt.Sprintf("\"%s\":\"1234567890123456\"", base.PREVIOUSREV)
+
+	// 1. test all possible permutation arrangements of mou xattr's fields
+	possibleFields := []string{pCAS, importCas, pRev}
+	idxs := []int{0, 1, 2}
+	perms := Permutations(idxs)
+	for _, perm := range perms {
+		input := ""
+		output := ""
+		for _, idx := range perm {
+			input = input + possibleFields[idx] + ","
+			if idx != len(possibleFields)-1 && idx != len(possibleFields)-2 {
+				// if importCas or pRev - don't add in output
+				output = output + possibleFields[idx] + ","
+			}
+		}
+		// remove , at the end and add { and }
+		input = "{" + input[0:len(input)-1] + "}"
+		output = "{" + output[0:len(output)-1] + "}"
+
+		dst := make([]byte, len(input))
+		removed := make(map[string][]byte)
+		dstLen, removedLen, atleastOneField, err := gojsonsm.MatchAndRemoveItemsFromJsonObject([]byte(input), base.MouXattrValuesForCR, dst, removed)
+		dst = dst[:dstLen]
+		a.Nil(err)
+		a.Equal(removedLen, len(base.MouXattrValuesForCR))
+		a.Equal(atleastOneField, true)
+		a.Equal(bytes.Equal(dst, []byte(output)), true)
+	}
+
+	// 2. test corner cases
+	tests := []struct {
+		name                       string
+		before, expectedAfter      []byte
+		expectedAtleastOnFieldLeft bool
+		expectedRemoved            int
+	}{
+		{
+			name:          "empty mou",
+			before:        []byte("{}"),
+			expectedAfter: []byte("{}"),
+		},
+		{
+			name:            "only importCAS and pRev",
+			before:          []byte("{\"pRev\":\"12345\",\"importCAS\":\"0x1234567890123456\"}"),
+			expectedAfter:   []byte("{}"),
+			expectedRemoved: 2,
+		},
+		{
+			name:            "only importCAS",
+			before:          []byte("{\"importCAS\":\"0x1234567890123456\"}"),
+			expectedAfter:   []byte("{}"),
+			expectedRemoved: 1,
+		},
+		{
+			name:                       "only importCas and pCas",
+			before:                     []byte("{\"pCAS\":\"0x1234567890123456\",\"importCAS\":\"0x1234567890123456\"}"),
+			expectedAfter:              []byte("{\"pCAS\":\"0x1234567890123456\"}"),
+			expectedRemoved:            1,
+			expectedAtleastOnFieldLeft: true,
+		},
+		{
+			name:                       "only pCas",
+			before:                     []byte("{\"pCAS\":\"0x1234567890123456\"}"),
+			expectedAfter:              []byte("{\"pCAS\":\"0x1234567890123456\"}"),
+			expectedRemoved:            0,
+			expectedAtleastOnFieldLeft: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dst := make([]byte, len(tt.before))
+			removed := make(map[string][]byte)
+			dstLen, removedLen, atleastOneField, err := gojsonsm.MatchAndRemoveItemsFromJsonObject([]byte(tt.before), base.MouXattrValuesForCR, dst, removed)
+			dst = dst[:dstLen]
+			a.Nil(err)
+			a.Equal(removedLen, tt.expectedRemoved)
+			a.Equal(atleastOneField, tt.expectedAtleastOnFieldLeft)
+			a.Equal(bytes.Equal(dst, []byte(tt.expectedAfter)), true)
+		})
+	}
 }
