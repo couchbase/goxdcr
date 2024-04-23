@@ -1,5 +1,5 @@
 /*
-Copyright 2024-Present Couchbase, Inc.
+Copyright 2023-Present Couchbase, Inc.
 
 Use of this software is governed by the Business Source License included in
 the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
@@ -15,8 +15,140 @@ import (
 	"testing"
 	"time"
 
+	"github.com/couchbase/goxdcr/base"
 	"github.com/stretchr/testify/assert"
 )
+
+func randomString(l int) string {
+	bytes := make([]byte, l)
+	for i := 0; i < l; i++ {
+		bytes[i] = byte(randInt(65, 90))
+	}
+	return string(bytes)
+}
+func randInt(min int, max int) int {
+	return min + rand.Intn(max-min)
+}
+func Test_compareHlv(t *testing.T) {
+	sourcePruningWindow := time.Duration(5) * time.Nanosecond
+	targetPruningWindow := time.Duration(5) * time.Nanosecond
+	sourceBucketUUID := DocumentSourceId(randomString(10))
+	targetBucketUUID := DocumentSourceId(randomString(10))
+	type args struct {
+		hlv1              *HLV
+		hlv2              *HLV
+		sourcePruningFunc base.PruningFunc
+		targetPruningFunc base.PruningFunc
+	}
+	tests := []struct {
+		name       string
+		args       args
+		same       bool
+		errPresent bool
+	}{
+		//Test1 : both source and target HLVs are nil
+		{
+			name: "HLVs Absent",
+			args: args{
+				hlv1:              nil,
+				hlv2:              nil,
+				sourcePruningFunc: base.GetHLVPruneFunction(rand.Uint64(), sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(rand.Uint64(), targetPruningWindow),
+			},
+			same:       false,
+			errPresent: true,
+		},
+		//Test2 : HLV is present at the source
+		{
+			name: "HLV present at Source",
+			args: args{
+				hlv1:              generateHLV(sourceBucketUUID, 10, 10, targetBucketUUID, 10, nil, nil),
+				hlv2:              nil,
+				sourcePruningFunc: base.GetHLVPruneFunction(10, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(10, targetPruningWindow),
+			},
+			same:       false,
+			errPresent: true,
+		},
+		//Test3 : HLV is present at the target
+		{
+			name: "HLV present at Target",
+			args: args{
+				hlv1:              nil,
+				hlv2:              generateHLV(targetBucketUUID, 20, 20, sourceBucketUUID, 20, nil, nil),
+				sourcePruningFunc: base.GetHLVPruneFunction(20, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(20, targetPruningWindow),
+			},
+			same:       false,
+			errPresent: true,
+		},
+		//Test4 : both the HLVs are present - with one of them outdated(This case involves implicit construction of HLV)
+		{
+			name: "HLV present at both source and target but outdated at source",
+			args: args{
+				hlv1:              generateHLV(sourceBucketUUID, 30, 20, targetBucketUUID, 20, VersionsMap{}, nil),
+				hlv2:              generateHLV(targetBucketUUID, 30, 30, sourceBucketUUID, 30, VersionsMap{targetBucketUUID: 20}, nil),
+				sourcePruningFunc: base.GetHLVPruneFunction(30, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(30, targetPruningWindow),
+			},
+			same:       true,
+			errPresent: false,
+		},
+		//Test5 : both the HLVs are present - with PV pruned in one of them
+		{
+			name: "HLV present at both source and target with Missing PVs(Pruned version at Target) ",
+			args: args{
+				hlv1:              generateHLV(sourceBucketUUID, 30, 20, sourceBucketUUID, 20, VersionsMap{DocumentSourceId(randomString(10)): 1}, nil),
+				hlv2:              generateHLV(targetBucketUUID, 30, 30, sourceBucketUUID, 30, VersionsMap{}, nil),
+				sourcePruningFunc: base.GetHLVPruneFunction(30, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(30, targetPruningWindow),
+			},
+			same:       true,
+			errPresent: false,
+		},
+		//Test6: HLV cvCASs missmatch
+		{
+			name: "HLV cvCAS mismatch",
+			args: args{
+				hlv1:              generateHLV(sourceBucketUUID, 40, 40, sourceBucketUUID, 40, nil, nil),
+				hlv2:              generateHLV(targetBucketUUID, 20, 20, sourceBucketUUID, 20, nil, nil),
+				sourcePruningFunc: base.GetHLVPruneFunction(40, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(20, targetPruningWindow),
+			},
+			same:       false,
+			errPresent: false,
+		},
+		//Test7: PVs present on both source and target with pruning and data mismatch
+		{
+			name: "PV pruning+mismatch",
+			args: args{
+				hlv1:              generateHLV(sourceBucketUUID, 30, 30, sourceBucketUUID, 30, VersionsMap{targetBucketUUID: 10, DocumentSourceId(randomString(10)): 1}, nil),
+				hlv2:              generateHLV(targetBucketUUID, 30, 30, sourceBucketUUID, 30, VersionsMap{targetBucketUUID: 20}, nil),
+				sourcePruningFunc: base.GetHLVPruneFunction(30, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(30, targetPruningWindow),
+			},
+			same:       false,
+			errPresent: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.args.hlv1.SameAs(tt.args.hlv2, tt.args.sourcePruningFunc, tt.args.targetPruningFunc)
+			if (err != nil) != tt.errPresent {
+				t.Errorf("HLV.Diff() error = %v, wantErr %v", err, tt.errPresent)
+				return
+			}
+			if got != tt.same {
+				t.Errorf("CRMetadata.Diff() = %v, want %v", got, tt.same)
+			}
+		})
+	}
+}
+
+func generateHLV(source DocumentSourceId, cas uint64, cvCas uint64, src DocumentSourceId, ver uint64, pv VersionsMap, mv VersionsMap) *HLV {
+	HLV, _ := NewHLV(source, cas, cvCas, src, ver, pv, mv)
+	return HLV
+}
 
 func Test_VersionsMapAndDeltas(t *testing.T) {
 	a := assert.New(t)

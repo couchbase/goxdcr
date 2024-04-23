@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/couchbase/gomemcached"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
@@ -91,12 +92,25 @@ func (m *CRMetadata) GetDocumentMetadata() *base.DocumentMetadata {
 	}
 	return m.docMeta
 }
+func (m *CRMetadata) SetDocumentMetadata(docMeta *base.DocumentMetadata) {
+	m.docMeta = docMeta
+}
 
 func (m *CRMetadata) GetHLV() *hlv.HLV {
 	if m == nil {
 		return nil
 	}
 	return m.hlv
+}
+func (m *CRMetadata) SetHLV(hlv *hlv.HLV) {
+	m.hlv = hlv
+}
+
+func (m *CRMetadata) GetImportCas() uint64 {
+	return m.importCas
+}
+func (m *CRMetadata) SetImportCas(importCas uint64) {
+	m.importCas = importCas
 }
 
 func (m *CRMetadata) Merge(other *CRMetadata) (*CRMetadata, error) {
@@ -691,6 +705,24 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 
 	return pvBytes[:pvPos], mvBytes[:mvPos], nil
 
+}
+
+func (source *CRMetadata) Diff(target *CRMetadata, sourcePruningFunc, targetPruningFunc base.PruningFunc) (bool, error) {
+	if source.docMeta.Opcode != target.docMeta.Opcode {
+		return false, nil
+	}
+	if source.docMeta.Opcode == gomemcached.UPR_MUTATION {
+		if source.docMeta.RevSeq != target.docMeta.RevSeq || source.docMeta.Cas != target.docMeta.Cas || source.docMeta.Flags != target.docMeta.Flags ||
+			(source.docMeta.DataType&base.JSONDataType != target.docMeta.DataType&base.JSONDataType) || (source.docMeta.DataType&base.XattrDataType != target.docMeta.DataType&base.XattrDataType) {
+			return false, nil
+		}
+		same, err := source.hlv.SameAs(target.hlv, sourcePruningFunc, targetPruningFunc)
+		if err != nil {
+			return false, err
+		}
+		return same, nil
+	}
+	return true, nil
 }
 
 func ParseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, err error) {

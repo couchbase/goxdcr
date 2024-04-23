@@ -2609,6 +2609,7 @@ type DocumentMetadata struct {
 	Expiry   uint32 // Item expiration time
 	Deletion bool
 	DataType uint8 // item data type
+	Opcode   gomemcached.CommandCode
 }
 
 func (doc_meta DocumentMetadata) String() string {

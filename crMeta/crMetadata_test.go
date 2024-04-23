@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -619,6 +620,174 @@ func TestUpdateMetaForSetBack(t *testing.T) {
 	assert.Nil(err)
 	assert.Nil(mv)
 	assert.Equal(string(pv), "{\"Cluster1\":\"0x0000f8da4d881416\",\"Cluster2\":\"0x15\",\"Cluster3\":\"0x0b\",\"TargetCluster\":\"0xd3038dd71005\"}")
+}
+
+func randomString(l int) string {
+	bytes := make([]byte, l)
+	for i := 0; i < l; i++ {
+		bytes[i] = byte(randInt(65, 90))
+	}
+	return string(bytes)
+}
+func randInt(min int, max int) int {
+	return min + rand.Intn(max-min)
+}
+func TestCRMetadata_Diff(t *testing.T) {
+	sourcePruningWindow := time.Duration(5) * time.Nanosecond
+	targetPruningWindow := time.Duration(5) * time.Nanosecond
+	sourceBucketUUID := hlv.DocumentSourceId(randomString(10))
+	targetBucketUUID := hlv.DocumentSourceId(randomString(10))
+	type args struct {
+		sourceMeta        *base.DocumentMetadata
+		targetMeta        *base.DocumentMetadata
+		sourceHlv         *hlv.HLV
+		targetHlv         *hlv.HLV
+		sourcePruningFunc base.PruningFunc
+		targetPruningFunc base.PruningFunc
+	}
+	tests := []struct {
+		name       string
+		args       args
+		want       bool
+		errPresent bool
+	}{
+		//Test1 : Source and Target having Different opcodes
+		{
+			name: "Source and Target having Different opcodes",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_DELETION},
+				sourceHlv:         nil,
+				targetHlv:         nil,
+				sourcePruningFunc: nil,
+				targetPruningFunc: nil,
+			},
+			want:       false,
+			errPresent: false,
+		},
+		//Test 2 : Source and target have the same Opcode but its not equal to UPR_MUTATION
+		{
+			name: "Source and Target having same opcodes but not equal to UPR_MUTATION",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_DELETION},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_DELETION},
+				sourceHlv:         nil,
+				targetHlv:         nil,
+				sourcePruningFunc: nil,
+				targetPruningFunc: nil,
+			},
+			want:       true,
+			errPresent: false,
+		},
+		//Test 3 : Source and Target having different RevIDs
+		{
+			name: "Source and Target having different RevIDs",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 2},
+				sourceHlv:         nil,
+				targetHlv:         nil,
+				sourcePruningFunc: nil,
+				targetPruningFunc: nil,
+			},
+			want:       false,
+			errPresent: false,
+		},
+		//Test 4 : Source and Target having different CAS's
+		{
+			name: "Source and Target having different CAS's",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 110},
+				sourceHlv:         nil,
+				targetHlv:         nil,
+				sourcePruningFunc: nil,
+				targetPruningFunc: nil,
+			},
+			want:       false,
+			errPresent: false,
+		},
+		//Test 5 : Source and Target having different Flags
+		{
+			name: "Source and Target having different Flags",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 10},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 20},
+				sourceHlv:         nil,
+				targetHlv:         nil,
+				sourcePruningFunc: nil,
+				targetPruningFunc: nil,
+			},
+			want:       false,
+			errPresent: false,
+		},
+		//Test 6 : Source and Target having different Datatype
+		{
+			name: "Source and Target having different Datatype",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 10, DataType: 5},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 10, DataType: 4},
+				sourceHlv:         nil,
+				targetHlv:         nil,
+				sourcePruningFunc: nil,
+				targetPruningFunc: nil,
+			},
+			want:       false,
+			errPresent: false,
+		},
+		//Test 7 : Source and Target having different HLVs
+		{
+			name: "Source and Target having different HLVs",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 10, DataType: 5},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 10, DataType: 5},
+				sourceHlv:         generateHLV(sourceBucketUUID, 40, 40, sourceBucketUUID, 40, nil, nil),
+				targetHlv:         generateHLV(targetBucketUUID, 20, 20, sourceBucketUUID, 20, nil, nil),
+				sourcePruningFunc: base.GetHLVPruneFunction(40, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(20, targetPruningWindow),
+			},
+			want:       false,
+			errPresent: false,
+		},
+		//Test 8 : Source and target have the same metadata
+		{
+			name: "Source and target have the same metadata",
+			args: args{
+				sourceMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 10, DataType: 5},
+				targetMeta:        &base.DocumentMetadata{Opcode: gomemcached.UPR_MUTATION, RevSeq: 1, Cas: 100, Flags: 10, DataType: 5},
+				sourceHlv:         generateHLV(sourceBucketUUID, 30, 20, targetBucketUUID, 20, hlv.VersionsMap{}, nil),
+				targetHlv:         generateHLV(targetBucketUUID, 30, 30, sourceBucketUUID, 30, hlv.VersionsMap{targetBucketUUID: 20}, nil),
+				sourcePruningFunc: base.GetHLVPruneFunction(30, sourcePruningWindow),
+				targetPruningFunc: base.GetHLVPruneFunction(30, targetPruningWindow),
+			},
+			want:       true,
+			errPresent: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := &CRMetadata{
+				docMeta: tt.args.sourceMeta,
+				hlv:     tt.args.sourceHlv,
+			}
+			target := &CRMetadata{
+				docMeta: tt.args.targetMeta,
+				hlv:     tt.args.targetHlv,
+			}
+			got, err := source.Diff(target, tt.args.sourcePruningFunc, tt.args.targetPruningFunc)
+			if (err != nil) != tt.errPresent {
+				t.Errorf("CRMetadata.Diff() error = %v, wantErr %v", err, tt.errPresent)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("CRMetadata.Diff() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+func generateHLV(source hlv.DocumentSourceId, cas uint64, cvCas uint64, src hlv.DocumentSourceId, ver uint64, pv hlv.VersionsMap, mv hlv.VersionsMap) *hlv.HLV {
+	HLV, _ := hlv.NewHLV(source, cas, cvCas, src, ver, pv, mv)
+	return HLV
 }
 
 // Heap's Algorithm: generates all possible permutations for a given array, with minimal movements.

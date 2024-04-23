@@ -369,3 +369,53 @@ func BytesRequired(vMap VersionsMap) int {
 	}
 	return res
 }
+
+func (sourceHlv *HLV) SameAs(targetHlv *HLV, sourcePruningFunc, targetPruningFunc base.PruningFunc) (bool, error) {
+	if sourceHlv == nil || targetHlv == nil {
+		return false, fmt.Errorf("cannot compare if the HLVs are nil")
+	}
+	if sourceHlv.GetCvCas() != targetHlv.GetCvCas() || sourceHlv.GetCvSrc() != targetHlv.GetCvSrc() || sourceHlv.GetCvVer() != targetHlv.GetCvVer() ||
+		!comparePv(sourceHlv.GetPV(), targetHlv.GetPV(), sourcePruningFunc, targetPruningFunc) {
+		return false, nil
+	}
+	return true, nil
+}
+
+// Darshan:TODO Accomodate the CAS delta computation inorder to reduce the PV size MB-60961
+func comparePv(Pv1 VersionsMap, Pv2 VersionsMap, sourcePruningFunc, targetPruningFunc base.PruningFunc) bool {
+	if len(Pv1) == len(Pv2) {
+		for key, value1 := range Pv1 {
+			value2, ok := Pv2[key]
+			if !ok {
+				return false
+			} else {
+				if value1 != value2 {
+					return false
+				}
+			}
+		}
+	} else { // Unequal length implies that the PVs are pruned
+		var pruningFunc base.PruningFunc
+		iteratePv := Pv1
+		otherPv := Pv2
+		pruningFunc = sourcePruningFunc
+		if len(Pv2) > len(Pv1) {
+			iteratePv = Pv2
+			otherPv = Pv1
+			pruningFunc = targetPruningFunc
+		}
+		for key, value1 := range iteratePv {
+			value2, ok := otherPv[key]
+			if !ok {
+				if !pruningFunc(value1) { //If the entry does not meet the pruning criteria
+					return false
+				}
+				continue
+			}
+			if value1 != value2 {
+				return false
+			}
+		}
+	}
+	return true
+}
