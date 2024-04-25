@@ -157,9 +157,10 @@ type requestBuffer struct {
 	logger           *log.CommonLogger
 	notifych_lock    sync.RWMutex
 	token_ch         chan int
+	datapool         base.DataPool
 }
 
-func newReqBuffer(size uint16, threshold uint16, token_ch chan int, logger *log.CommonLogger) *requestBuffer {
+func newReqBuffer(size uint16, threshold uint16, token_ch chan int, logger *log.CommonLogger, pool base.DataPool) *requestBuffer {
 	logger.Debugf("Create a new request buffer of size %d\n", size)
 	buf := &requestBuffer{
 		slots:            make([]*bufferedMCRequest, size, size),
@@ -172,7 +173,9 @@ func newReqBuffer(size uint16, threshold uint16, token_ch chan int, logger *log.
 		token_ch:         token_ch,
 		logger:           logger,
 		notifych_lock:    sync.RWMutex{},
-		occupied_count:   0}
+		occupied_count:   0,
+		datapool:         pool,
+	}
 
 	logger.Debug("Slots have been initialized")
 
@@ -399,7 +402,11 @@ func (buf *requestBuffer) enSlot(mcReq *base.WrappedMCRequest) (uint16, int, []b
 	req.reservation = reservation_num
 	req.req = mcReq
 	buf.adjustRequest(mcReq, index)
-	item_bytes := mcReq.GetReqBytes()
+	item_bytes, dpErr := buf.datapool.GetByteSlice(uint64(mcReq.Req.Size()))
+	if dpErr != nil {
+		item_bytes = make([]byte, mcReq.Req.Size())
+	}
+	mcReq.Req.BytesPreallocated(item_bytes)
 	now := time.Now()
 	req.sent_time = &now
 	buf.token_ch <- 1
@@ -1339,6 +1346,9 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					}
 
 					batch_replicated_count = 0
+					for _, dpSlice := range reqs_bytes {
+						xmem.dataPool.PutByteSlice(dpSlice)
+					}
 					reqs_bytes = [][]byte{}
 					index_reservation_list = make([][]uint16, base.XmemMaxBatchSize+1)
 				}
@@ -2441,7 +2451,7 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 	xmem.initNewBatch()
 
 	xmem.receive_token_ch = make(chan int, xmem.config.maxCount*2)
-	xmem.setRequestBuffer(newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger()))
+	xmem.setRequestBuffer(newReqBuffer(uint16(xmem.config.maxCount*2), uint16(float64(xmem.config.maxCount)*0.2), xmem.receive_token_ch, xmem.Logger(), xmem.dataPool))
 
 	_, exists := settings[ForceCollectionDisableKey]
 	if exists {
@@ -3114,7 +3124,7 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 		if respWaitTime > xmem.timeoutDuration(req.num_of_retry, req.mutationLocked) {
 			// resend the mutation
 
-			bytesList := getBytesListFromReq(req)
+			bytesList := getBytesListFromReq(req, xmem.dataPool)
 			old_sequence := xmem.buf.sequences[pos]
 
 			// release the lock on req before calling sendSingleSetMeta, which may block
@@ -3136,6 +3146,10 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 				}
 				req.lock.Unlock()
 			}
+
+			for _, gcSlice := range bytesList {
+				xmem.dataPool.PutByteSlice(gcSlice)
+			}
 			return modified, err
 		}
 	}
@@ -3144,13 +3158,19 @@ func (xmem *XmemNozzle) resendIfTimeout(req *bufferedMCRequest, pos uint16) (boo
 	return false, nil
 }
 
-func getBytesListFromReq(req *bufferedMCRequest) [][]byte {
+func getBytesListFromReq(req *bufferedMCRequest, dp base.DataPool) [][]byte {
 	if req.req == nil || req.req.Req == nil {
 		// should not happen. just in case
 		return nil
 	}
 	bytesList := make([][]byte, 1)
-	bytesList[0] = req.req.GetReqBytes()
+	dpSlice, dpErr := dp.GetByteSlice(uint64(req.req.Req.Size()))
+	if dpErr != nil {
+		bytesList[0] = req.req.GetReqBytes()
+	} else {
+		req.req.Req.BytesPreallocated(dpSlice)
+		bytesList[0] = dpSlice
+	}
 	return bytesList
 }
 
@@ -3182,7 +3202,7 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 	var modified bool
 	var err error
 
-	bytesList := getBytesListFromReq(req)
+	bytesList := getBytesListFromReq(req, xmem.dataPool)
 	old_sequence := xmem.buf.sequences[pos]
 
 	if req.mutationLocked {
@@ -3206,6 +3226,9 @@ func (xmem *XmemNozzle) resendWithReset(req *bufferedMCRequest, pos uint16) (boo
 	req.lock.Unlock()
 
 	err = xmem.sendSingleSetMeta(bytesList, xmem.config.maxRetry)
+	for _, gcSlice := range bytesList {
+		xmem.dataPool.PutByteSlice(gcSlice)
+	}
 
 	if err != nil {
 		return modified, err
