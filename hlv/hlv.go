@@ -12,6 +12,7 @@ package hlv
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/couchbase/goxdcr/base"
 )
@@ -60,6 +61,80 @@ func (vm VersionsMap) Add(other VersionsMap) {
 	}
 }
 
+// convert VersionsMap to VersionsDeltas
+// 1. The entries are sorted based on increasing order of version values
+// 2. The first entry in the sorted order, is kept as is
+// 3. ith delta value will be the difference of ith version value and (i-1)th version value; i >= 1
+func (vm VersionsMap) VersionsDeltas() VersionsDeltas {
+	if vm == nil {
+		return nil
+	}
+	// TODO: MB-61748 -  Use datapool
+	vdm := make(VersionsDeltas, 0, len(vm))
+
+	for source, version := range vm {
+		vdm = append(vdm, versionSourcePair{
+			source:  source,
+			version: version,
+		})
+	}
+
+	// sort it based on version values
+	sort.Sort(vdm)
+
+	for idx := len(vm) - 1; idx >= 1; idx-- {
+		vdm[idx].version = vdm[idx].version - vdm[idx-1].version
+	}
+
+	return vdm
+}
+
+type versionSourcePair struct {
+	source  DocumentSourceId
+	version uint64
+}
+
+func (vsp versionSourcePair) GetSource() DocumentSourceId {
+	return vsp.source
+}
+
+func (vsp versionSourcePair) GetVersion() uint64 {
+	return vsp.version
+}
+
+// should be sorted by version.
+// first entry is not a delta, but a full version
+type VersionsDeltas []versionSourcePair
+
+func (vde VersionsDeltas) Len() int { return len(vde) }
+
+func (vde VersionsDeltas) Swap(i, j int) {
+	vde[i], vde[j] = vde[j], vde[i]
+}
+
+func (vde VersionsDeltas) Less(i, j int) bool {
+	if vde[i].version == vde[j].version {
+		return vde[i].source < vde[j].source
+	}
+	return vde[i].version < vde[j].version
+}
+
+// convert VersionsDeltas to VersionsMap
+func (vde VersionsDeltas) VersionsMap() VersionsMap {
+	if vde == nil {
+		return nil
+	}
+	vm := make(VersionsMap)
+	var lastEntryVersion uint64
+	for _, entry := range vde {
+		source := entry.source
+		delta := entry.version
+		lastEntryVersion = delta + lastEntryVersion
+		vm[source] = lastEntryVersion
+	}
+	return vm
+}
+
 type HLV struct {
 	cvCAS   uint64
 	cv      currentVersion
@@ -92,7 +167,7 @@ func NewHLV(source DocumentSourceId, cas uint64, cvCas uint64, src DocumentSourc
 		// If cas == cvCas, it means there has been no local change since replication
 		// If cas > cvCas, it means there has been local changes after replication.
 		// cas should never be smaller
-		return nil, fmt.Errorf("cas < cvCas, cas=%v,cvCas=%v,ver=%v,src=%v,pv=%s,mv=%s", cas, cvCas, ver, src, pv, mv)
+		return nil, fmt.Errorf("cas < cvCas, cas=%v,cvCas=%v,ver=%v,src=%v,pv=%v,mv=%v", cas, cvCas, ver, src, pv, mv)
 	} else if cas == cvCas {
 		// The HLV did not change.
 		hlv.cvCAS = cvCas
@@ -284,12 +359,13 @@ func BytesRequired(vMap VersionsMap) int {
 		return 0
 	}
 	res := 0
-	for k, _ := range vMap {
-		res = res + len(k) + 3               // quotes and column
-		res = res + base.MaxHexCASLength + 3 // quotes and comma
+	for k := range vMap {
+		res = res + len(k)
+		res = res + base.MaxHexCASLength
+		res = res + base.QuotesAndSepLenForVVEntry
 	}
 	if res != 0 {
-		res = res + 3 // Add { and } and nil terminator
+		res = res + len(base.EmptyJsonObject) + 1 // Add { and } and nil terminator
 	}
 	return res
 }

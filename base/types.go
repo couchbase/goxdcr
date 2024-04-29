@@ -1675,23 +1675,25 @@ func (xi *XattrIterator) Next() ([]byte, []byte, error) {
 }
 
 type CCRXattrFieldIterator struct {
-	xattr []byte
-	pos   int
+	xattr    []byte
+	pos      int
+	hasItems bool
 }
 
 func NewCCRXattrFieldIterator(xattr []byte) (*CCRXattrFieldIterator, error) {
 	length := len(xattr)
 	if xattr[0] != '{' || xattr[length-1] != '}' {
-		return nil, fmt.Errorf("Invalid format for XATTR: %v", xattr)
+		return nil, fmt.Errorf("invalid format for XATTR: %v", xattr)
 	}
 	return &CCRXattrFieldIterator{
-		xattr: xattr,
-		pos:   1,
+		xattr:    xattr,
+		pos:      1,
+		hasItems: !Equals(xattr, EmptyJsonObject),
 	}, nil
 }
 
 func (xfi *CCRXattrFieldIterator) HasNext() bool {
-	return xfi.pos < len(xfi.xattr)
+	return xfi.hasItems && xfi.pos < len(xfi.xattr)
 }
 
 // Expected format is: {"key":"value","key":"value","key":{...},key:{...}}
@@ -2078,8 +2080,11 @@ type StoppedPipelineErrCallback func(err error, cbCalled bool)
 
 type PipelineMgrStopCbType func(string, StoppedPipelineCallback, StoppedPipelineErrCallback) error
 
-// for consistency, we will use all the version values in the HLV as HexLittleEndian with a 0x prefix
-var MaxHexCASLength = len(Uint64ToHexLittleEndian(math.MaxUint64)) + 2
+// for consistency, we will use all the version values in the HLV as HexLittleEndian with a 0x prefix i.e 16+2
+var MaxHexDecodedLength = len(Uint64ToHexLittleEndian(math.MaxUint64))
+var MaxHexCASLength = MaxHexDecodedLength + 2
+
+const QuotesAndSepLenForVVEntry = 6 /* quotes and sepeartors. Eg - "src":"ver", */
 
 type ConflictManagerAction int
 

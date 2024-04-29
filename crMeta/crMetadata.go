@@ -427,7 +427,7 @@ func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Durat
 		// We have an import mutation that's winning CR. mobile has already updated HLV so it doesn't need update
 		return false
 	}
-	if meta.hadHlv == false && meta.docMeta.Cas < vbMaxCas {
+	if !meta.hadHlv && meta.docMeta.Cas < vbMaxCas {
 		// This is older mutation that doesn't already have an HLV
 		return false
 	}
@@ -457,7 +457,7 @@ func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Durat
 // new change (meta.cas > meta.ver) and pruning in PV
 func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Duration, xattrComposer *base.XattrComposer) (int, bool, error) {
 	if meta == nil {
-		return 0, false, fmt.Errorf("Metadata cannot be nil")
+		return 0, false, fmt.Errorf("metadata cannot be nil")
 	}
 	err := xattrComposer.StartRawMode()
 	if err != nil {
@@ -481,7 +481,7 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 	if len(mv) > 0 {
 		// This is not the first since we have cv before this
 		body, *pos = base.WriteJsonRawMsg(body, []byte(HLV_MV_FIELD), *pos, base.WriteJsonKey, len([]byte(HLV_MV_FIELD)), false)
-		*pos, _ = VersionMapToBytes(mv, body, *pos, nil)
+		*pos, _ = VersionMapToDeltasBytes(mv, body, *pos, nil)
 	}
 	// Format PV
 	pv := meta.GetHLV().GetPV()
@@ -490,7 +490,7 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 		startPos := *pos
 		body, *pos = base.WriteJsonRawMsg(body, []byte(HLV_PV_FIELD), *pos, base.WriteJsonKey, len([]byte(HLV_PV_FIELD)), false)
 		afterKeyPos := *pos
-		*pos, pruned = VersionMapToBytes(pv, body, *pos, &pruneFunc)
+		*pos, pruned = VersionMapToDeltasBytes(pv, body, *pos, &pruneFunc)
 		if *pos == afterKeyPos {
 			// Did not add PV, need to back of and remove the PV key
 			*pos = startPos
@@ -526,21 +526,37 @@ type MergeResultNotifier interface {
 	NotifyMergeResult(input *ConflictParams, mergeResult interface{}, mergeError error)
 }
 
-func VersionMapToBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) (int, bool) {
+// given a version map (PV or MV), this function,
+// 1. applies the pruning function on top of the version entries if they are PVs i.e. if the pruning function is passed in.
+// 2. converts the entries into version deltas, strips the leading zeroes of delta values and composes the PV or MV for the target doc.
+func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) (int, bool) {
 	startPos := pos
 	first := true
 	pruned := false
-	for key, cas := range vMap {
-		if (pruneFunction == nil) || ((*pruneFunction)(cas) == false) {
-			// Not pruned.
-			value := base.Uint64ToHexLittleEndian(cas)
-			body, pos = base.WriteJsonRawMsg(body, []byte(key), pos, base.WriteJsonKey, len(key), first /*firstKey*/)
-			body, pos = base.WriteJsonRawMsg(body, value, pos, base.WriteJsonValue, len(value), false /*firstKey*/)
-			first = false
-		} else {
+
+	if pruneFunction != nil {
+		// prune PVs if possible
+		for key, cas := range vMap {
+			if !((*pruneFunction)(cas)) {
+				continue
+			}
+			// Pruned entry
+			delete(vMap, key)
 			pruned = true
 		}
 	}
+
+	// deltas need to be recomputed from the non-pruned versions
+	deltas := vMap.VersionsDeltas()
+	for _, delta := range deltas {
+		key := delta.GetSource()
+		ver := delta.GetVersion()
+		value := base.Uint64ToHexLittleEndianAndStrip0s(ver)
+		body, pos = base.WriteJsonRawMsg(body, []byte(key), pos, base.WriteJsonKey, len(key), first /*firstKey*/)
+		body, pos = base.WriteJsonRawMsg(body, value, pos, base.WriteJsonValue, len(value), false /*firstKey*/)
+		first = false
+	}
+
 	if first {
 		// We haven't added anything
 		return startPos, pruned
@@ -575,15 +591,18 @@ func (meta *CRMetadata) HadPv() bool {
 	return meta.hadPv
 }
 
-func xattrVVtoMap(vvBytes []byte) (hlv.VersionsMap, error) {
-	res := make(hlv.VersionsMap)
+func xattrVVtoDeltas(vvBytes []byte) (hlv.VersionsMap, error) {
+	vv := make(hlv.VersionsMap)
+
 	if len(vvBytes) == 0 {
-		return res, nil
+		return vv, nil
 	}
+
 	it, err := base.NewCCRXattrFieldIterator(vvBytes)
 	if err != nil {
 		return nil, err
 	}
+	var lastEntryVersion uint64
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -594,9 +613,12 @@ func xattrVVtoMap(vvBytes []byte) (hlv.VersionsMap, error) {
 		if err != nil {
 			return nil, err
 		}
-		res[src] = ver
+
+		lastEntryVersion = ver + lastEntryVersion
+		vv[src] = lastEntryVersion
 	}
-	return res, nil
+
+	return vv, nil
 }
 
 // Called when target has a smaller CAS but its xattrs dominates
@@ -604,41 +626,23 @@ func xattrVVtoMap(vvBytes []byte) (hlv.VersionsMap, error) {
 // Target with smaller CAS can only dominate source if source document is a merged document.
 func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err error) {
 	pv := meta.hlv.GetPV()
-	pvPos := 0
-	if len(pv) > 0 {
-		pvlen := 0
-		for src, _ := range pv {
-			pvlen = pvlen + len(src) + base.MaxHexCASLength + 6 // quotes and sepeartors
-		}
-		// We may need to add cv and document CAS to it also
-		pvlen = pvlen + len(meta.hlv.GetCvSrc()) + (base.MaxHexCASLength + 6)
-		pvlen = pvlen + 2 // { and }
 
-		// TODO(MB-41808): data pool
-		pvBytes = make([]byte, pvlen)
-		firstKey := true
-		for src, ver := range pv {
-			value := base.Uint64ToHexLittleEndian(ver)
-			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, []byte(src), pvPos, base.WriteJsonKey, len(src), firstKey /*firstKey*/)
-			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, value, pvPos, base.WriteJsonValue, len(value), false /*firstKey*/)
-			firstKey = false
-		}
-		pvBytes[pvPos] = '}'
-		pvPos++
-	}
 	mv := meta.hlv.GetMV()
 	mvPos := 0
 	if len(mv) > 0 {
 		mvlen := 0
-		for src, _ := range mv {
-			mvlen = mvlen + len(src) + base.MaxHexCASLength + 6 // quotes and sepeartors
+		for src := range mv {
+			mvlen = mvlen + len(src) + base.MaxHexCASLength + base.QuotesAndSepLenForVVEntry
 		}
 		mvlen = mvlen + 2 // { and }
 		// TODO(MB-41808): data pool
 		mvBytes = make([]byte, mvlen)
+		mvDeltas := mv.VersionsDeltas()
 		firstKey := true
-		for src, ver := range mv {
-			value := base.Uint64ToHexLittleEndian(ver)
+		for _, delta := range mvDeltas {
+			src := delta.GetSource()
+			ver := delta.GetVersion()
+			value := base.Uint64ToHexLittleEndianAndStrip0s(ver)
 			mvBytes, mvPos = base.WriteJsonRawMsg(mvBytes, []byte(src), mvPos, base.WriteJsonKey, len(src), firstKey /*firstKey*/)
 			mvBytes, mvPos = base.WriteJsonRawMsg(mvBytes, value, mvPos, base.WriteJsonValue, len(value), false /*firstKey*/)
 			firstKey = false
@@ -647,20 +651,37 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 		mvPos++
 	} else {
 		// If there is no mv, then cv and document.CAS represent mutation events. It needs to be in pv
-		first := false
-		if pvPos == 0 {
-			first = true
-		} else {
-			pvPos--
-		}
-
 		source := meta.hlv.GetCvSrc()
-		version := base.Uint64ToHexLittleEndian(meta.hlv.GetCvVer())
-		pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, []byte(source), pvPos, base.WriteJsonKey, len(source), first /*firstKey*/)
-		pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, version, pvPos, base.WriteJsonValue, len(version), false /*firstKey*/)
+		version := meta.hlv.GetCvVer()
+		pv[source] = version
+	}
+
+	pvPos := 0
+	if len(pv) > 0 {
+		pvlen := 0
+		for src := range pv {
+			pvlen = pvlen + len(src) + base.MaxHexCASLength + base.QuotesAndSepLenForVVEntry
+		}
+		// We may need to add cv and document CAS to it also
+		pvlen = pvlen + len(meta.hlv.GetCvSrc()) + (base.MaxHexCASLength + base.QuotesAndSepLenForVVEntry)
+		pvlen = pvlen + len(base.EmptyJsonObject) // { and }
+
+		// TODO(MB-41808): data pool
+		pvBytes = make([]byte, pvlen)
+		pvDeltas := pv.VersionsDeltas()
+		firstKey := true
+		for _, delta := range pvDeltas {
+			src := delta.GetSource()
+			ver := delta.GetVersion()
+			value := base.Uint64ToHexLittleEndianAndStrip0s(ver)
+			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, []byte(src), pvPos, base.WriteJsonKey, len(src), firstKey /*firstKey*/)
+			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, value, pvPos, base.WriteJsonValue, len(value), false /*firstKey*/)
+			firstKey = false
+		}
 		pvBytes[pvPos] = '}'
 		pvPos++
 	}
+
 	return pvBytes[:pvPos], mvBytes[:mvPos], nil
 
 }
@@ -711,12 +732,12 @@ func ParseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSou
 		err = fmt.Errorf("cvVer shoud not be greater than cvCas or cas, cvCas=%v,ver=%v,cvCasHex=%v,verHex=%s,pv=%s,mv=%s", cvCas, cvVer, cvCasHex, verHex, pv, mv)
 		return
 	}
-	pvMap, err1 = xattrVVtoMap(pv)
+	pvMap, err1 = xattrVVtoDeltas(pv)
 	if err1 != nil {
-		err = fmt.Errorf("failed to convert pv '%s' to map, error: %v", pv, err1)
+		err = fmt.Errorf("failed to convert pv '%s' to deltas, error: %v", pv, err1)
 		return
 	}
-	mvMap, err1 = xattrVVtoMap(mv)
+	mvMap, err1 = xattrVVtoDeltas(mv)
 	if err1 != nil {
 		err = fmt.Errorf("failed to convert mv '%s' to map, error: %v", mv, err1)
 		return
@@ -838,11 +859,11 @@ func NewMetadataForTest(key, source []byte, cas, revId uint64, cvCasHex, cvSrc, 
 			return nil, err
 		}
 	}
-	pvMap, err := xattrVVtoMap(pv)
+	pvMap, err := xattrVVtoDeltas(pv)
 	if err != nil {
 		return nil, err
 	}
-	mvMap, err := xattrVVtoMap(mv)
+	mvMap, err := xattrVVtoDeltas(mv)
 	if err != nil {
 		return nil, err
 	}

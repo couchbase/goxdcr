@@ -1699,3 +1699,5 @@ const (
 var ValidJsonEnds []byte = []byte{
 	'}', ']',
 }
+
+const EmptyJsonObject string = "{}"
