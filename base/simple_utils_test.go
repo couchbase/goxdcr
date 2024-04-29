@@ -14,8 +14,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/couchbaselabs/gojsonsm"
@@ -487,4 +489,95 @@ func TestIsJsonEndValid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUint64ToHexLittleEndianAndStrip0s(t *testing.T) {
+	a := assert.New(t)
+
+	// 1. test all positions
+	hexLE := []byte("0x0000000000000000")
+	for i := 2; i < 18; i++ {
+		hexLE[i] = '1'
+		u64, err := HexLittleEndianToUint64(hexLE)
+		a.Nil(err)
+		hexLEStripped := Uint64ToHexLittleEndianAndStrip0s(u64)
+		// inverse should result in the same result
+		u64Stripped, err := HexLittleEndianToUint64(hexLEStripped)
+		a.Nil(err)
+		a.Equal(u64, u64Stripped)
+
+		hexLE[i] = '9'
+		u64, err = HexLittleEndianToUint64(hexLE)
+		a.Nil(err)
+		hexLEStripped = Uint64ToHexLittleEndianAndStrip0s(u64)
+		u64Stripped, err = HexLittleEndianToUint64(hexLEStripped)
+		a.Nil(err)
+		a.Equal(u64, u64Stripped)
+
+		hexLE[i] = 'a'
+		u64, err = HexLittleEndianToUint64(hexLE)
+		a.Nil(err)
+		hexLEStripped = Uint64ToHexLittleEndianAndStrip0s(u64)
+		u64Stripped, err = HexLittleEndianToUint64(hexLEStripped)
+		a.Nil(err)
+		a.Equal(u64, u64Stripped)
+
+		hexLE[i] = 'f'
+		u64, err = HexLittleEndianToUint64(hexLE)
+		a.Nil(err)
+		hexLEStripped = Uint64ToHexLittleEndianAndStrip0s(u64)
+		u64Stripped, err = HexLittleEndianToUint64(hexLEStripped)
+		a.Nil(err)
+		a.Equal(u64, u64Stripped)
+
+		hexLE[i] = '0'
+	}
+
+	// 2. test some cases
+	hexLE = []byte("0x0000000000000000")
+	u64, err := HexLittleEndianToUint64(hexLE)
+	a.Nil(err)
+	hexLEStripped := Uint64ToHexLittleEndianAndStrip0s(u64)
+	u64Stripped, err := HexLittleEndianToUint64(hexLEStripped)
+	a.Nil(err)
+	a.Equal(u64, u64Stripped)
+
+	hexLE = []byte("0xffffffffffffffff")
+	u64, err = HexLittleEndianToUint64(hexLE)
+	a.Nil(err)
+	hexLEStripped = Uint64ToHexLittleEndianAndStrip0s(u64)
+	u64Stripped, err = HexLittleEndianToUint64(hexLEStripped)
+	a.Nil(err)
+	a.Equal(u64, u64Stripped)
+
+	hexLE = []byte("0xd123456e789a0bcf")
+	u64, err = HexLittleEndianToUint64(hexLE)
+	a.Nil(err)
+	hexLEStripped = Uint64ToHexLittleEndianAndStrip0s(u64)
+	u64Stripped, err = HexLittleEndianToUint64(hexLEStripped)
+	a.Nil(err)
+	a.Equal(u64, u64Stripped)
+
+	if testing.Short() {
+		return
+	}
+
+	// 3. random subset: run manually with -timeout 1000s
+	threads := 20
+	nums := 60000000
+	var wg sync.WaitGroup
+	for i := 0; i < threads; i++ {
+		wg.Add(1)
+		go func() {
+			for j := 0; j < nums; j++ {
+				u64 := uint64(rand.Int63())
+				hexLEStripped := Uint64ToHexLittleEndianAndStrip0s(u64)
+				u64Stripped, err := HexLittleEndianToUint64(hexLEStripped)
+				assert.Nil(t, err)
+				assert.Equal(t, u64, u64Stripped)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }

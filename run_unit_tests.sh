@@ -50,18 +50,19 @@ declare -a DIRS_WITH_UT
 declare -a outputs
 
 DIRS_WITH_UT=(
+backfill_manager
 base
 base/filter
 crMeta
-backfill_manager
 factory
+hlv
+metadata
+metadata_svc
+parts
 peerToPeer
 pipeline
 pipeline_svc
 pipeline_manager
-parts
-metadata
-metadata_svc
 service_impl
 streamApiWatcher
 utils

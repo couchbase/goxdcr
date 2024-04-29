@@ -1205,12 +1205,23 @@ func Uint64ToBase64(u64 uint64) []byte {
 // This routine expect prefix 0x since this is included in KV macro expansion.
 func HexLittleEndianToUint64(hexLE []byte) (uint64, error) {
 	if len(hexLE) <= 2 {
-		return 0, fmt.Errorf("Hex input value %s is too short. Leading 0x is expected.", hexLE)
+		return 0, fmt.Errorf("hex input value %s is too short. Leading 0x is expected", hexLE)
 	}
 	if hexLE[0] != '0' || hexLE[1] != 'x' {
-		return 0, fmt.Errorf("Incorrect hex little endian input %s", hexLE)
+		return 0, fmt.Errorf("incorrect hex little endian input %s", hexLE)
 	}
-	decoded := make([]byte, hex.DecodedLen(len(hexLE[2:])))
+
+	// Decoding the hexLE will need the string to be of even length
+	// If hexLE is not of even length, it was probably stripped off of zeroes at the end as part of Uint64ToHexLittleEndianAndStrip
+	if len(hexLE)%2 != 0 {
+		// hexLE originally comes from the xattr slice after extracting it from the right positions and after stripping surrounding quotes.
+		// So the following append of 0 to hexLE will not allocate a new slice, since the capacity of hexLE would be considered from the original xattr slice.
+		// Infact, the stripped quote on the right of the hexLE will be replaced with a 0 in the original xattr slice, without any change in the capacity of hexLE.
+		hexLE = append(hexLE, '0')
+	}
+
+	// hexLE may not necessarily be 16+2 bytes because of Uint64ToHexLittleEndianAndStrip0s
+	decoded := make([]byte, MaxHexDecodedLength)
 	_, err := hex.Decode(decoded, hexLE[2:])
 	if err != nil {
 		return 0, err
@@ -1227,6 +1238,21 @@ func Uint64ToHexLittleEndian(u64 uint64) []byte {
 	encoded[0] = '0'
 	encoded[1] = 'x'
 	return encoded
+}
+
+// strips 0s from the end of the resultant hex little endian string
+func Uint64ToHexLittleEndianAndStrip0s(u64 uint64) []byte {
+	hexLE := Uint64ToHexLittleEndian(u64)
+
+	// theoritically,
+	// 0x0 is numerically the least output
+	// 0xffffffffffffffff being the highest
+	idx := len(hexLE) - 1
+	for idx > 2 && hexLE[idx] == '0' {
+		idx--
+	}
+
+	return hexLE[:idx+1]
 }
 
 func HexToBase64(h string) ([]byte, error) {
