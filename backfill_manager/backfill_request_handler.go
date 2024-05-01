@@ -251,7 +251,7 @@ func (b *BackfillRequestHandler) run() {
 	case notification := <-b.sourceBucketTopologyCh:
 		b.latestCachedSourceNotificationMtx.Lock()
 		b.latestCachedSourceNotification = notification.Clone(1).(service_def.SourceNotification)
-		kv_vb_map := b.latestCachedSourceNotification.GetKvVbMapRO()
+		kv_vb_map := b.latestCachedSourceNotification.GetSourceVBMapRO()
 		b.latestVBs = kv_vb_map.GetSortedVBList()
 		timeUpdated := b.latestCachedSourceNotification.GetLocalTopologyUpdatedTime()
 		b.latestCachedSourceNotificationMtx.Unlock()
