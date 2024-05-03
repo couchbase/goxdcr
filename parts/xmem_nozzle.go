@@ -770,6 +770,8 @@ type XmemNozzle struct {
 
 	importMutationEventRaised uint32
 	importMutationEventId     int64
+
+	mcRequestPool *base.MCRequestPool
 }
 
 func getGuardrailIdx(status mc.Status) int {
@@ -818,6 +820,7 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 		collectionEnabled:   1, /*Default to true unless otherwise disabled*/
 		eventsProducer:      eventsProducer,
 		nonTempErrsSeen:     make(map[uint16]mc.Status),
+		mcRequestPool:       base.NewMCRequestPool(id, nil),
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -1660,19 +1663,26 @@ func (xmem *XmemNozzle) batchGetHandler(count int, finch chan bool, return_ch ch
 	}
 }
 
-func (xmem *XmemNozzle) composeRequestForGetMeta(wrappedReq *base.WrappedMCRequest, opaque uint32) *mc.MCRequest {
-	req := &mc.MCRequest{VBucket: wrappedReq.Req.VBucket,
-		Key:    wrappedReq.Req.Key,
-		Opaque: opaque,
-		Opcode: base.GET_WITH_META}
+func (xmem *XmemNozzle) composeRequestForGetMeta(wrappedReq *base.WrappedMCRequest, opaque uint32) *base.WrappedMCRequest {
+	newReq := xmem.mcRequestPool.Get()
+	req := newReq.Req
+	req.Body = req.Body[:0]
+	req.VBucket = wrappedReq.Req.VBucket
+	req.Key = wrappedReq.Req.Key
+	req.Opaque = opaque
+	req.Opcode = base.GET_WITH_META
 
 	// if xattr is enabled, request that data type be included in getMeta response
 	// Not needed for compression since GetMeta connection is to not use compression
 	if xmem.xattrEnabled {
-		req.Extras = make([]byte, 1)
+		if req.Extras == nil || len(req.Extras) == 0 {
+			req.Extras = make([]byte, 1)
+		} else {
+			req.Extras = req.Extras[:1]
+		}
 		req.Extras[0] = byte(base.ReqExtMetaDataType)
 	}
-	return req
+	return newReq
 }
 
 // For each document in the getMap, this routine will compose subdoc_get or getMeta, and send the requests
@@ -1706,6 +1716,8 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 	sent_key_map := make(map[string]bool, len(getMap))
 	getSpecMap := make(map[string][]base.SubdocLookupPathSpec)
 
+	var getWrappedReqToRecycle []*base.WrappedMCRequest
+
 	//de-dupe and prepare the packages
 	for _, originalReq := range getMap {
 		docKey := string(originalReq.Req.Key)
@@ -1716,7 +1728,9 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 		}
 
 		if _, ok := sent_key_map[docKey]; !ok {
-			req, getSpec := xmem.composeRequestForGet(originalReq, opaque)
+			getWrappedReq, getSpec := xmem.composeRequestForGet(originalReq, opaque)
+			getWrappedReqToRecycle = append(getWrappedReqToRecycle, getWrappedReq)
+			req := getWrappedReq.Req
 			if getSpec != nil {
 				getSpecMap[docKey] = getSpec
 			}
@@ -1787,6 +1801,14 @@ func (xmem *XmemNozzle) sendBatchGetRequest(getMap base.McRequestMap, retry int)
 
 	for _, bytesToRecycle := range gcList {
 		xmem.dataPool.PutByteSlice(bytesToRecycle)
+	}
+
+	for _, getWrappedReq := range getWrappedReqToRecycle {
+		if getWrappedReq == nil {
+			// odd
+			continue
+		}
+		xmem.mcRequestPool.Put(getWrappedReq)
 	}
 	return
 }
@@ -1927,12 +1949,12 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 	return
 }
 
-func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest) (mc.CommandCode, []base.SubdocLookupPathSpec) {
+func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest) (mc.CommandCode, base.SubdocLookupPathSpecs) {
 	incomingReq := wrappedReq.Req
 	getSpecWithHlv := wrappedReq.GetMetaSpecWithHlv
 	getSpecWithoutHlv := wrappedReq.GetMetaSpecWithoutHlv
 	getBodySpec := wrappedReq.GetBodySpec
-	var getSpecs []base.SubdocLookupPathSpec
+	var getSpecs base.SubdocLookupPathSpecs
 	if xmem.source_cr_mode == base.CRMode_Custom {
 		// CCR mode requires fetching the document metadata and body for the purpose of conflict resolution
 		// Since they are considered true conflicts
@@ -1954,7 +1976,7 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 	return mc.SUBDOC_MULTI_LOOKUP, getSpecs
 }
 
-func (xmem *XmemNozzle) composeRequestForGet(wrappedReq *base.WrappedMCRequest, opaque uint32) (*mc.MCRequest, []base.SubdocLookupPathSpec) {
+func (xmem *XmemNozzle) composeRequestForGet(wrappedReq *base.WrappedMCRequest, opaque uint32) (*base.WrappedMCRequest, []base.SubdocLookupPathSpec) {
 	opcode, specs := xmem.opcodeAndSpecsForGetOp(wrappedReq)
 	switch opcode {
 	case base.GET_WITH_META:
@@ -1967,19 +1989,21 @@ func (xmem *XmemNozzle) composeRequestForGet(wrappedReq *base.WrappedMCRequest, 
 }
 
 // Request to get _xdcr or _vv XATTR. If document body is included, it must be the last path
-func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPathSpec, wrappedReq *base.WrappedMCRequest, opaque uint32) *mc.MCRequest {
-	bodylen := 0
-	for i := 0; i < len(specs); i++ {
-		bodylen = bodylen + specs[i].Size()
-	}
-	body, err := xmem.dataPool.GetByteSlice(uint64(bodylen))
-	if err != nil {
-		body = make([]byte, bodylen)
+func (xmem *XmemNozzle) composeRequestForSubdocGet(specs base.SubdocLookupPathSpecs, wrappedReq *base.WrappedMCRequest, opaque uint32) *base.WrappedMCRequest {
+	newReq := xmem.mcRequestPool.Get()
+	req := newReq.Req
+
+	totalBodySize := specs.Size()
+	dpSlice, dpErr := xmem.dataPool.GetByteSlice(uint64(totalBodySize))
+	if dpErr != nil {
+		req.Body = make([]byte, totalBodySize)
 		xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 	} else {
-		wrappedReq.AddByteSliceForXmemToRecycle(body)
+		wrappedReq.AddByteSliceForXmemToRecycle(dpSlice)
+		req.Body = dpSlice
 	}
 
+	body := req.Body
 	pos := 0
 	for i := 0; i < len(specs); i++ {
 		body[pos] = uint8(specs[i].Opcode)
@@ -1994,14 +2018,14 @@ func (xmem *XmemNozzle) composeRequestForSubdocGet(specs []base.SubdocLookupPath
 		}
 	}
 
-	return &mc.MCRequest{
-		VBucket: wrappedReq.Req.VBucket,
-		Key:     wrappedReq.Req.Key,
-		Opaque:  opaque,
-		Extras:  []byte{mc.SUBDOC_FLAG_ACCESS_DELETED},
-		Body:    body,
-		Opcode:  mc.SUBDOC_MULTI_LOOKUP,
-	}
+	req.VBucket = wrappedReq.Req.VBucket
+	req.Key = wrappedReq.Req.Key
+	req.Opaque = opaque
+	req.Extras = []byte{mc.SUBDOC_FLAG_ACCESS_DELETED}
+	req.Body = body[:pos]
+	req.Opcode = mc.SUBDOC_MULTI_LOOKUP
+
+	return newReq
 }
 
 func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {

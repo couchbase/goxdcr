@@ -1818,6 +1818,19 @@ func FindSourceBodyWithoutXattr(req *mc.MCRequest) []byte {
 	return req.Body[4+xattrLen:]
 }
 
+type SubdocLookupPathSpecs []SubdocLookupPathSpec
+
+func (ss *SubdocLookupPathSpecs) Size() int {
+	var totalSize int
+	if ss == nil {
+		return totalSize
+	}
+	for _, oneSpec := range *ss {
+		totalSize += oneSpec.Size()
+	}
+	return totalSize
+}
+
 type SubdocLookupPathSpec struct {
 	Opcode mc.CommandCode
 	Flags  uint8

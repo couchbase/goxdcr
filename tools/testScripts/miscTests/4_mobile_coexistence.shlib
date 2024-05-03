@@ -116,6 +116,7 @@ function testMobileHlv {
 	writeJSONDocument "C2" "B2" "mobile1" '{"foo3":"bar3"}'
 	writeJSONDocument "C2" "B2" "mobile2" '{"foo3":"bar3"}'
 	waitForChangesLeft0 "C2" "B2" "C1" "B1"
+	grepForPanics
 
 	echo runCbWorkloadGenBucket "C1" "B1"
 	runCbWorkloadGenBucket "C1" "B1" &
