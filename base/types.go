@@ -690,8 +690,6 @@ type WrappedMCRequest struct {
 	SlicesToBeReleasedByXmem   [][]byte
 	SlicesToBeReleasedByRouter [][]byte
 	SlicesToBeReleasedMtx      sync.Mutex
-	ReqBytesCachedMtx          sync.RWMutex
-	ReqBytesCached             []byte
 	NeedToRecompress           bool
 	ImportMutation             bool
 
@@ -711,45 +709,18 @@ type WrappedMCRequest struct {
 	ActualCas uint64
 }
 
+// This should avoid to be used as this will cause memory allocation
+// Use BytesPreallocated as much as possible
 func (req *WrappedMCRequest) GetReqBytes() []byte {
-	req.ReqBytesCachedMtx.RLock()
-	retBytes := req.ReqBytesCached
-	if retBytes != nil {
-		req.ReqBytesCachedMtx.RUnlock()
-		return retBytes
+	if req == nil || req.Req == nil {
+		return nil
 	}
-	req.ReqBytesCachedMtx.RUnlock()
-	return req.populateReqCache()
+
+	return req.Req.Bytes()
 }
 
-func (req *WrappedMCRequest) populateReqCache() []byte {
-	req.ReqBytesCachedMtx.Lock()
-	defer req.ReqBytesCachedMtx.Unlock()
-	req.ReqBytesCached = req.Req.Bytes()
-	return req.ReqBytesCached
-}
-
-func (req *WrappedMCRequest) UpdateReqBytes() {
-	req.ReqBytesCachedMtx.RLock()
-	curReqBytesLen := len(req.ReqBytesCached)
-	req.ReqBytesCachedMtx.RUnlock()
-
-	if curReqBytesLen == 0 {
-		// Never established
-		req.populateReqCache()
-	} else {
-		req.ReqBytesCachedMtx.Lock()
-		defer req.ReqBytesCachedMtx.Unlock()
-		if cap(req.ReqBytesCached) >= req.Req.Size() {
-			// Repopulate cache
-			req.Req.BytesPreallocated(req.ReqBytesCached)
-		} else {
-			// Too small, reallocate
-			req.ReqBytesCached = req.Req.Bytes()
-		}
-		// Trim just in case
-		req.ReqBytesCached = req.ReqBytesCached[0:req.Req.Size()]
-	}
+func (req *WrappedMCRequest) GetReqBytesPreallocated(slice []byte) {
+	req.Req.BytesPreallocated(slice)
 }
 
 // unique-key is a combination of doc key and mutationCounter which is a monotonic integer

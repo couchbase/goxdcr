@@ -402,18 +402,19 @@ func (buf *requestBuffer) enSlot(mcReq *base.WrappedMCRequest) (uint16, int, []b
 	req.reservation = reservation_num
 	req.req = mcReq
 	buf.adjustRequest(mcReq, index)
-	item_bytes, dpErr := buf.datapool.GetByteSlice(uint64(mcReq.Req.Size()))
+	itemBytes, dpErr := buf.datapool.GetByteSlice(uint64(mcReq.Req.Size()))
 	if dpErr != nil {
-		item_bytes = make([]byte, mcReq.Req.Size())
+		itemBytes = mcReq.GetReqBytes()
+	} else {
+		mcReq.GetReqBytesPreallocated(itemBytes)
 	}
-	mcReq.Req.BytesPreallocated(item_bytes)
 	now := time.Now()
 	req.sent_time = &now
 	buf.token_ch <- 1
 
 	//increase the occupied_count
 	atomic.AddInt32(&buf.occupied_count, 1)
-	return index, reservation_num, item_bytes, nil
+	return index, reservation_num, itemBytes, nil
 }
 
 // always called with lock on buf.slots[index]. no need for separate lock on buf.sequences[index]
@@ -427,7 +428,6 @@ func (buf *requestBuffer) adjustRequest(req *base.WrappedMCRequest, index uint16
 	}
 
 	mc_req.Opaque = base.GetOpaque(index, buf.sequences[int(index)])
-	req.UpdateReqBytes()
 }
 
 func (buf *requestBuffer) bufferSize() uint16 {
@@ -1484,7 +1484,6 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 			req.NeedToRecompress = false
 		}
 	}
-	req.UpdateReqBytes()
 	return nil
 }
 
@@ -2025,7 +2024,6 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 		req.Req.Body = body
 		req.Req.DataType = req.Req.DataType &^ mcc.SnappyDataType
 		req.NeedToRecompress = true
-		req.UpdateReqBytes()
 	}
 	return nil
 }
@@ -3168,7 +3166,7 @@ func getBytesListFromReq(req *bufferedMCRequest, dp base.DataPool) [][]byte {
 	if dpErr != nil {
 		bytesList[0] = req.req.GetReqBytes()
 	} else {
-		req.req.Req.BytesPreallocated(dpSlice)
+		req.req.GetReqBytesPreallocated(dpSlice)
 		bytesList[0] = dpSlice
 	}
 	return bytesList
