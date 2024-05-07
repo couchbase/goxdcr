@@ -131,7 +131,6 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 	errs := make([]error, 0)
 	defer func() { ch <- errs }()
 
-	poolName := "connectionPreCheckPool"
 	hostname := base.GetHostName(hostAddr)
 
 	username, password, _, cert, SANInCert, clientCert, clientKey, err := ref.MyCredentials()
@@ -146,7 +145,6 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 		return
 	}
 
-	var pool base.ConnPool
 	var port uint16
 	if !ref.DemandEncryption() || ref.EncryptionType() == metadata.EncryptionType_Half {
 		port, ok = portsInfo[base.PortsKeysForConnectionPreCheck[base.KVIdxForConnPreChk]]
@@ -164,23 +162,19 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 			return
 		}
 	}
-
-	if !ref.DemandEncryption() || ref.EncryptionType() == metadata.EncryptionType_Half {
-		hostAddr = base.GetHostAddr(hostname, uint16(port))
-		pool, err = base.ConnPoolMgr().GetOrCreatePool(poolName, hostAddr, "", username, password, 0, !ref.DemandEncryption())
-	} else {
-		pool, err = base.ConnPoolMgr().GetOrCreateSSLOverMemPool(poolName, hostname, "", username, password, 0, int(port), cert, SANInCert, clientCert, clientKey)
-	}
-	if err != nil {
-		errs = append(errs, err)
-		return
-	}
-
 	resultCh := make(chan mccClientIfcWithErr, 1)
 	go func() {
-		result, err := pool.GetNew(SANInCert)
+		var conn mcc.ClientIface
+		var err error
+		if !ref.DemandEncryption() || ref.EncryptionType() == metadata.EncryptionType_Half {
+			hostAddr = base.GetHostAddr(hostname, uint16(port))
+			conn, err = base.NewConn(hostAddr, username, password, "", !ref.DemandEncryption(), base.KeepAlivePeriod, logger)
+		} else {
+			ssl_con_str := base.GetHostAddr(hostname, uint16(port))
+			conn, err = base.NewTLSConn(ssl_con_str, username, password, cert, SANInCert, clientCert, clientKey, "", logger)
+		}
 		select {
-		case resultCh <- mccClientIfcWithErr{clientIfc: result, err: err}:
+		case resultCh <- mccClientIfcWithErr{clientIfc: conn, err: err}:
 			return
 		default:
 			return
