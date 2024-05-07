@@ -102,6 +102,7 @@ type BackfillRequestHandler struct {
 	lastPushMergedMap map[string]*metadata.VBTasksMapType
 
 	runWaitGrp sync.WaitGroup
+	isKVNode   bool
 }
 
 type SeqnosGetter func() (map[uint16]uint64, error)
@@ -171,6 +172,7 @@ func (b *BackfillRequestHandler) Start() error {
 			return
 		}
 
+		b.isKVNode = true
 		b.runWaitGrp.Add(1)
 		go b.run()
 	})
@@ -224,6 +226,22 @@ func (b *BackfillRequestHandler) run() {
 		select {
 		case <-batchPersistCh:
 		default:
+		}
+	}
+
+	// if the node is not a KV then we cannot subscribe to local bucket feed.
+	// In that case, we ignore requests else the submitters will get blocked
+	// and thereby end-up blocking some other part of the XDCR
+	if !b.isKVNode {
+		b.logger.Warnf("backfill requests will be ignored as this is not a KV node")
+		for {
+			select {
+			case <-b.finCh:
+				b.bucketTopologySvc.UnSubscribeLocalBucketFeed(b.spec, b.bucketSvcId)
+				return
+			case req := <-b.incomingReqCh:
+				b.logger.Warnf("this is not a KV node, so backfill requests will be ignored: %v", req)
+			}
 		}
 	}
 
