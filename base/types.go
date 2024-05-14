@@ -27,6 +27,7 @@ import (
 	"github.com/golang/snappy"
 
 	"github.com/couchbase/gomemcached"
+	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/google/uuid"
 )
@@ -678,6 +679,7 @@ type TargetCollectionInfo struct {
 	TargetNamespace *CollectionNamespace
 }
 
+// Remember to reset the field values for recycling in MCRequestPool.cleanReq
 type WrappedMCRequest struct {
 	Seqno                      uint64
 	Req                        *gomemcached.MCRequest
@@ -1593,7 +1595,8 @@ func (x *XattrComposer) CommitRawKVPair() (int, error) {
 
 // Once all the Xattributes are finished, calculate the whole xattr section and append doc value
 // Remember to set Xattr flag
-func (x *XattrComposer) FinishAndAppendDocValue(val []byte) ([]byte, bool) {
+// req and lookup are passed in for debugging info only
+func (x *XattrComposer) FinishAndAppendDocValue(val []byte, req *mc.MCRequest, lookup *SubdocLookupResponse) ([]byte, bool) {
 	if !x.atLeastOneXattr {
 		// No xattr written - do not do anything
 		copy(x.body[0:len(val)], val)
@@ -1602,8 +1605,25 @@ func (x *XattrComposer) FinishAndAppendDocValue(val []byte) ([]byte, bool) {
 
 	// Write the entire Xattr size at the beginning of body
 	binary.BigEndian.PutUint32(x.body[0:4], uint32(x.pos-4))
-	copy(x.body[x.pos:], val)
+
+	n := copy(x.body[x.pos:], val)
+	if n != len(val) {
+		// be defensive against data loss or replicating corrupted data
+		// some things to debug are:
+		// 1. datapool usage: Make sure we do not put back the byte slices or the objects back to the pool when it is still in use.
+		// 2. maxBodyIncrease calculation: make sure the xattr (re)composition length calculation is correct.
+		var respBody, reqBody, key []byte
+		if lookup != nil && lookup.Resp != nil {
+			respBody = lookup.Resp.Body
+		}
+		if req != nil {
+			reqBody = req.Body
+			key = req.Key
+		}
+		panic(fmt.Sprintf("The whole doc body was not written, key=%v%s%v, x.body=%v%v%v, x.pos=%v, val=%v%v%v, reqBody=%v%v%v, respBody=%v%v%v", UdTagBegin, key, UdTagEnd, UdTagBegin, x.body, UdTagEnd, x.pos, UdTagBegin, val, UdTagEnd, UdTagBegin, reqBody, UdTagEnd, UdTagBegin, respBody, UdTagEnd))
+	}
 	x.pos = x.pos + len(val)
+
 	return x.body[0:x.pos], x.atLeastOneXattr
 }
 
