@@ -2061,7 +2061,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 
 	maxBodyIncrease := 0
 	if wrappedReq.SetMetaXattrOptions.SendHlv {
-		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 - xattrTotalLen and _vv's length */ +
+		maxBodyIncrease = maxBodyIncrease + 8 /* 2 uint32 - total xattr length and _vv xattr length */ +
 			len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
 			len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
 			len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
@@ -2073,7 +2073,11 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	var targetSyncVal []byte
 	if wrappedReq.SetMetaXattrOptions.PreserveSync && lookup != nil {
 		targetSyncVal, _ = lookup.ResponseForAPath(base.XATTR_MOBILE)
-		maxBodyIncrease = maxBodyIncrease + len(targetSyncVal)
+		if len(targetSyncVal) > 0 {
+			maxBodyIncrease = maxBodyIncrease + 4 + /* _sync xattr length */
+				len(base.XATTR_MOBILE) + 1 /* _sync\x00 */ +
+				len(targetSyncVal) + 1 /* <targetSyncVal>\x00 */
+		}
 	}
 
 	req := wrappedReq.Req
@@ -2158,7 +2162,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	}
 
 	docWithoutXattr := base.FindSourceBodyWithoutXattr(req)
-	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr)
+	out, atLeastOneXattr := xattrComposer.FinishAndAppendDocValue(docWithoutXattr, req, lookup)
 	req.Body = out
 	if atLeastOneXattr {
 		req.DataType = req.DataType | base.PROTOCOL_BINARY_DATATYPE_XATTR
