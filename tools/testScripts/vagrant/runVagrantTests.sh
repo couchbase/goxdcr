@@ -14,61 +14,26 @@ set -u
 # then load 10k documents on each bucket, resulting in 20k total docs per bucket after
 # bi-directional replication
 
-# main logic all exist elsewhere
-. ./clusterRunProvision.shlib
-if (($? != 0)); then
-	exit $?
-fi
-
-. ./testLibrary.shlib
-if (($? != 0)); then
-	exit $?
-fi
-
-. ./vagrantProvision.shlib
-if (($? != 0)); then
-	exit $?
-fi
-
-# set globals
-# -----------------
-DEFAULT_ADMIN="Administrator"
-DEFAULT_PW="wewewe"
-
 if [[ ! -f "./Vagrantfile" ]]; then
 	echo "Cannot find vagrant file"
 	exit 1
 fi
 
-testCasesDirectory="${1:-}"
-testCaseNumber="${2:-}"
+testCasesDirectory="vagrantTestCases"
 
-if [[ -z "$testCasesDirectory" ]]; then
-	echo "Need to specify a type of test"
-	exit 1
+# Need special vagrant libraries
+. ./vagrantProvision.shlib
+if (($? != 0)); then
+       exit $?
 fi
 
 vagrantUp
 
-if [[ -z "$testCaseNumber" ]]; then
-	for testcase in $(ls $testCasesDirectory); do
-		if [[ "$testcase" =~ _idle_ ]]; then
-			# test cases with _idle_ in the filename means they take too long for the whole suite
-			# and should be run on an individual basis only
-			continue
-		fi
-		. $testCasesDirectory/$testcase
-		date
-		runTestCase
-	done
-else
-	testCase=$(find $testCasesDirectory/${testCaseNumber}*)
-	if [[ -z "$testCase" ]]; then
-		echo "Cannot find test case number $testCaseNumber"
-		exit 1
-	fi
-	. $testCase
-	runTestCase
+# main logic all exist elsewhere
+. ./commonTestRunner.shlib
+if (($? != 0)); then
+	exit $?
 fi
+
 
 vagrantHalt

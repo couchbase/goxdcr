@@ -41,17 +41,20 @@ declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["check
 
 # Test cases assume vagrant up has already been called
 
+# XDCR DIFFER TEST PREREQUISITES
+# A linux xdcrDiffer binary must have already been compiled
+
 function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B1" &
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running Full secure with client cert replication"
+	echo "Running Full secure with client cert replication with xdcrDiffer"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
-	vagrantInstallCBServerAll "neo"
+	vagrantInstallCBServerAll "trinity"
 
 	setupTopologies
 
@@ -79,6 +82,9 @@ function runTestCase {
 	sleep 10
 
 	checkUnidirectionalChangesLeft
+
+	vagrantRunXdcrDiffer "${xdcrDifferDir}" "C1" "B1" "C2" "B2"
+	vagrantValidateDifferResults "${xdcrDifferDir}" "C1" 0 0 0
 
 	echo "============================================================================"
 	echo "PASSED"

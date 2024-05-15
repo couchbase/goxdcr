@@ -649,7 +649,6 @@ function runXdcrDiffer {
 	local extraOpts2=${6:-}
 	local opts1Flag=""
 	local opts2Flag=""
-
 	local compareBody
 
 	if [[ ! -z "${extraOpts1:-}" ]]; then
@@ -693,6 +692,23 @@ function validateDifferResults {
 	local expectedMissingTgtCnt=$3
 	local expectedDeletedSrcCnt=${4:-}
 	local expectedDeletedTgtCnt=${5:-}
+
+	if [[ ! -f "$mutationDiffResults" ]]; then
+		echo "Error: Unable to find mutation results file: $mutationDiffResults"
+		return 1
+	fi
+
+	resultOutput=$(cat $mutationDiffResults)
+	validateDifferResultsInternal "$resultOutput" "$expectedMismatchCnt" "$expectedMissingSrcCnt" "$expectedMissingTgtCnt" "$expectedDeletedSrcCnt" "$expectedDeletedTgtCnt"
+}
+
+function validateDifferResultsInternal {
+	local resultOutput="$1"
+	local expectedMismatchCnt="$2"
+	local expectedMissingSrcCnt="$3"
+	local expectedMissingTgtCnt="$4"
+	local expectedDeletedSrcCnt=${5:-}
+	local expectedDeletedTgtCnt=${6:-}
 	local numOfMismatch
 	local numOfMissingSrc
 	local numOfMissingTgt
@@ -706,12 +722,6 @@ function validateDifferResults {
 	local deletedFromSourceOutput
 	local deletedFromTargetOutput
 
-	if [[ ! -f "$mutationDiffResults" ]]; then
-		echo "Error: Unable to find mutation results file: $mutationDiffResults"
-		return 1
-	fi
-
-	resultOutput=$(cat $mutationDiffResults)
 	mismatchOutput=$(echo "$resultOutput" | jq '.Mismatch')
 	missingFromSourceOutput=$(echo "$resultOutput" | jq '.MissingFromSource')
 	missingFromTargetOutput=$(echo "$resultOutput" | jq '.MissingFromTarget')
