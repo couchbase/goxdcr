@@ -543,10 +543,15 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			if err != nil {
 				return err
 			}
-			VersionPruningWindowHrs, err := b.utils.GetVersionPruningWindowHrs(targetBucketInfo)
-			if err != nil {
-				return err
-			}
+
+			/**
+			Target bucket pruning window parameter is only used by xdcrDiffer at the moment.
+			Reasons for ignoring the error:
+			* Bucket parameter "versionPruningWindowHrs" will have a default value provided by the CB server.
+			* On older versions (< 7.5.0), the parameter does not exist, and thus should be ignored.
+			* Additionally versionPruningWindowHrs=0 (default int value) implies no PV pruning is performed.
+			**/
+			versionPruningWindowHrs, _ := b.utils.GetVersionPruningWindowHrs(targetBucketInfo)
 
 			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
 			if err != nil {
@@ -584,7 +589,7 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 			replacementNotification.TargetReplicaCnt = numOfReplicas
 			replacementNotification.TargetVbReplicasMember = vbReplicaMember
 			replacementNotification.TargetStorageBackend = storageBackend
-			replacementNotification.VersionPruningWindowHrs = VersionPruningWindowHrs
+			replacementNotification.VersionPruningWindowHrs = versionPruningWindowHrs
 			watcher.latestCached.Recycle()
 			watcher.latestCached = replacementNotification
 			watcher.latestCacheMtx.Unlock()
@@ -1892,7 +1897,6 @@ type Notification struct {
 	LocalBucketTopologyUpdateTime time.Time
 	EnableCrossClusterVersioning  bool
 	VbucketsMaxCas                []interface{}
-	VersionPruningWindowHrs       int
 
 	// Target only
 	TargetBucketUUID           string
@@ -1903,6 +1907,9 @@ type Notification struct {
 	TargetReplicasTranslateMap *base.StringStringMap // nil if not initialized
 	TargetVbReplicasMember     []uint16
 	TargetStorageBackend       string
+
+	// Source & Target
+	VersionPruningWindowHrs int
 }
 
 func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification {
