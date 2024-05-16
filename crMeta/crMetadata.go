@@ -905,6 +905,42 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 	return
 }
 
+func GetImportCasAndPrevFromMou(mou []byte) (newMou []byte, atleastOneLeft bool, importCas uint64, pRev uint64, err error) {
+	if base.Equals(mou, base.EmptyJsonObject) {
+		return
+	}
+	var newMouLen int
+	// TODO: MB-61748 - can use datapool + new pool for removedFromMou
+	newMou = make([]byte, len(mou))
+	removedFromMou := make(map[string][]byte)
+	newMouLen, _, atleastOneLeft, err = gojsonsm.MatchAndRemoveItemsFromJsonObject(mou, base.MouXattrValuesForCR, newMou, removedFromMou)
+	if err != nil {
+		return
+	}
+	newMou = newMou[:newMouLen]
+
+	xattrImportCas, foundImportCas := removedFromMou[base.IMPORTCAS]
+	xattrPRev, foundPRev := removedFromMou[base.PREVIOUSREV]
+
+	if foundImportCas && xattrImportCas != nil {
+		// Remove the start/end quotes before converting it to uint64
+		xattrLen := len(xattrImportCas)
+		importCas, err = base.HexLittleEndianToUint64(xattrImportCas[1 : xattrLen-1])
+		if err != nil {
+			return
+		}
+	}
+	if foundPRev && xattrPRev != nil {
+		// Remove the start/end quotes before converting it to uint64
+		xattrLen := len(xattrPRev)
+		pRev, err = strconv.ParseUint(string(xattrPRev[1:xattrLen-1]), 10, 64)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
 // This will find the custom CR XATTR from the req body, including HLV and _importCas
 func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.UncompressFunc) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64, err error) {
 	req := wrappedReq.Req
@@ -920,10 +956,10 @@ func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.
 	if err != nil {
 		return
 	}
-	var key, value []byte
-	var xattrHlv, xattrImportCas, xattrPRev []byte
+	var key, value, newMou []byte
+	var xattrHlv []byte
 	var err1 error
-	var foundImportCas, foundPRev bool
+	var atleastOneLeft bool
 
 	for xattrIter.HasNext() {
 		key, value, err = xattrIter.Next()
@@ -933,39 +969,15 @@ func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.
 		if base.Equals(key, base.XATTR_HLV) && !base.Equals(value, base.EmptyJsonObject) {
 			xattrHlv = value
 		}
-		if base.Equals(key, base.XATTR_MOU) && !base.Equals(value, base.EmptyJsonObject) {
-			// TODO: MB-61748 - can use datapool + new pool for removedFromMou
-			newMou := make([]byte, len(value))
-			removedFromMou := make(map[string][]byte)
-
-			newMouLen, _, atleastOneLeft, err1 := gojsonsm.MatchAndRemoveItemsFromJsonObject(value, base.MouXattrValuesForCR, newMou, removedFromMou)
-			if err1 != nil {
+		if base.Equals(key, base.XATTR_MOU) {
+			newMou, atleastOneLeft, importCas, pRev, err = GetImportCasAndPrevFromMou(value)
+			if err != nil {
 				return
 			}
-			newMou = newMou[:newMouLen]
 
 			if atleastOneLeft {
 				wrappedReq.MouAfterProcessing = newMou
 			}
-
-			xattrImportCas, foundImportCas = removedFromMou[base.IMPORTCAS]
-			xattrPRev, foundPRev = removedFromMou[base.PREVIOUSREV]
-		}
-	}
-	if foundImportCas && xattrImportCas != nil {
-		// Remove the start/end quotes before converting it to uint64
-		xattrLen := len(xattrImportCas)
-		importCas, err = base.HexLittleEndianToUint64(xattrImportCas[1 : xattrLen-1])
-		if err != nil {
-			return
-		}
-	}
-	if foundPRev && xattrPRev != nil {
-		// Remove the start/end quotes before converting it to uint64
-		xattrLen := len(xattrPRev)
-		pRev, err = strconv.ParseUint(string(xattrPRev[1:xattrLen-1]), 10, 64)
-		if err != nil {
-			return
 		}
 	}
 
