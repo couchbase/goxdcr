@@ -558,6 +558,7 @@ func (rs *ReplicationStatus) ClearErrorsWithString(subStr string) {
 	}
 
 	rs.err_list = replacementArr
+	rs.Publish(false)
 }
 
 func (rs *ReplicationStatus) RecordProgress(progress string) {
