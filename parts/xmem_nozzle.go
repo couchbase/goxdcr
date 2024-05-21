@@ -421,7 +421,7 @@ func (buf *requestBuffer) adjustRequest(req *base.WrappedMCRequest, index uint16
 		mc_req.Cas = 0
 	}
 
-	mc_req.Opaque = base.GetOpaque(index, buf.sequences[int(index)])
+	mc_req.Opcode = req.GetMemcachedCommand()
 	req.UpdateReqBytes()
 }
 
