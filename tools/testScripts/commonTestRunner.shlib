@@ -150,8 +150,8 @@ if [ "$xdcrDifferDir" != "" ] && [ "${testCasesDirectory:-}" != "xdcrDifferTestc
 	echo "ERRO: Cannot use -x OR --xdcrDifferDir when it not xdcr differ testcases."
 	man $0
 	exit 1
-elif [ "$xdcrDifferDir" != "" ] && (( ${#VSSH[@]} == 0 )); then
-  # Only check the following in non-Vagrant mode
+elif [ "$xdcrDifferDir" != "" ] && ((${#VSSH[@]} == 0)); then
+	# Only check the following in non-Vagrant mode
 	differBin="$xdcrDifferDir/xdcrDiffer"
 	if [[ ! -f "$differBin" ]]; then
 		echo "ERRO: cannot find xdcrDiffer binary. Did you run compile?"

@@ -384,7 +384,7 @@ function getBucketReplPropertiesRESTString {
 		fi
 	done
 
-	if ((${OVERRIDE_MOBILE:-} != 0)); then
+	if [[ ! -z "${OVERRIDE_MOBILE:-}" ]] && ((${OVERRIDE_MOBILE:-} != 0)); then
 		echo "INFO: Overriding mobile replication setting to Active due to OVERRIDE_MOBILE=${OVERRIDE_MOBILE:-}"
 		getBucketReplOutArr+=("-d")
 		getBucketReplOutArr+=("mobile=Active")
@@ -987,7 +987,8 @@ function createBucket {
 		setupScopes $clusterName $bucketName
 	fi
 
-	if ((${OVERRIDE_MOBILE:-} != 0)); then
+	#if ((${OVERRIDE_MOBILE:-} != 0)); then
+	if [[ ! -z "${OVERRIDE_MOBILE:-}" ]] && ((${OVERRIDE_MOBILE:-} != 0)); then
 		echo "INFO: Overriding enableCrossClusterVersioning setting to true due to OVERRIDE_MOBILE=${OVERRIDE_MOBILE:-}"
 		setCrossClusterVersioningForBucket $clusterName $bucketName
 	fi

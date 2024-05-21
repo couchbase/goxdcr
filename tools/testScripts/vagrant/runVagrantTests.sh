@@ -24,7 +24,7 @@ testCasesDirectory="vagrantTestCases"
 # Need special vagrant libraries
 . ./vagrantProvision.shlib
 if (($? != 0)); then
-       exit $?
+	exit $?
 fi
 
 vagrantUp
@@ -34,6 +34,5 @@ vagrantUp
 if (($? != 0)); then
 	exit $?
 fi
-
 
 vagrantHalt
