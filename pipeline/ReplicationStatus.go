@@ -13,6 +13,10 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -20,9 +24,6 @@ import (
 	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/utils"
-	"strings"
-	"sync"
-	"time"
 )
 
 type ReplicationState int
@@ -550,6 +551,7 @@ func (rs *ReplicationStatus) ClearErrorsWithString(subStr string) {
 	}
 
 	rs.err_list = replacementArr
+	rs.Publish(false)
 }
 
 func (rs *ReplicationStatus) RecordProgress(progress string) {
