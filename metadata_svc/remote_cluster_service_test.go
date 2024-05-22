@@ -18,6 +18,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -2866,4 +2867,112 @@ func TestRefreshSRVRebootstrap(t *testing.T) {
 	time.Sleep(unitTestRefreshInterval + 100*time.Millisecond)
 	// Ensure activeHostname is repopulated
 	assert.NotEqual("", agent.reference.ActiveHostName())
+}
+
+func TestConnectivityHelper_SyncWithValidList(t *testing.T) {
+	tests := []struct {
+		name     string
+		c        *ConnectivityHelper
+		nodeList base.StringPairList
+	}{
+		{
+			name: "completely changed target topology",
+			nodeList: base.StringPairList{
+				{"node1", ""},
+				{"node2", ""},
+				{"node3", ""},
+			},
+			c: &ConnectivityHelper{
+				nodeStatus: map[string]metadata.ConnectivityStatus{
+					"node4": 1,
+					"node5": 1,
+					"node6": 1,
+				},
+			},
+		},
+		{
+			name: "new nodes added to target topology",
+			nodeList: base.StringPairList{
+				{"node4", ""},
+				{"node5", ""},
+				{"node6", ""},
+				{"node1", ""},
+				{"node2", ""},
+			},
+			c: &ConnectivityHelper{
+				nodeStatus: map[string]metadata.ConnectivityStatus{
+					"node4": 1,
+					"node5": 1,
+					"node6": 1,
+				},
+			},
+		},
+		{
+			name: "some nodes removed from target topology",
+			nodeList: base.StringPairList{
+				{"node6", ""},
+			},
+			c: &ConnectivityHelper{
+				nodeStatus: map[string]metadata.ConnectivityStatus{
+					"node4": 1,
+					"node5": 1,
+					"node6": 1,
+				},
+			},
+		},
+		{
+			name: "some nodes added and some removed from target topology",
+			nodeList: base.StringPairList{
+				{"node6", ""},
+				{"node7", ""},
+				{"node8", ""},
+			},
+			c: &ConnectivityHelper{
+				nodeStatus: map[string]metadata.ConnectivityStatus{
+					"node4": 1,
+					"node5": 1,
+					"node6": 1,
+				},
+			},
+		},
+		{
+			name: "no change target topology",
+			nodeList: base.StringPairList{
+				{"node4", ""},
+				{"node5", ""},
+				{"node6", ""},
+			},
+			c: &ConnectivityHelper{
+				nodeStatus: map[string]metadata.ConnectivityStatus{
+					"node4": 1,
+					"node5": 1,
+					"node6": 1,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			tt.c.SyncWithValidList(tt.nodeList)
+
+			var list1, list2 []string
+			for _, node := range tt.nodeList {
+				list1 = append(list1, node.GetFirstString())
+			}
+
+			for node := range tt.c.nodeStatus {
+				list2 = append(list2, node)
+			}
+
+			sort.Strings(list1)
+			sort.Strings(list2)
+
+			assert.Equal(t, len(list1), len(list2))
+			for i := 0; i < len(list1) && i < len(list2); i++ {
+				assert.Equal(t, list1[i], list2[i])
+			}
+
+		})
+	}
 }

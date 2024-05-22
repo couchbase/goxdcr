@@ -152,29 +152,28 @@ func (c *ConnectivityHelper) MarkEncryptionError(val bool) {
 	c.encryptionError = val
 }
 
+// Syncs the freshly identified target cluster "nodeList" with nodeStatus cache.
+// deletes the stale nodes from nodeStatus that are not present in the fresh nodeList and adds the new nodes identified, if not present already in nodeStatus.
 func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
-	var keysToDelete []string
-	for _, nodePair := range nodeList {
+	/* Step 1: Delete the nodes that are in nodeStatus, but not in the fresh "nodeList" */
+	for nodeName := range c.nodeStatus {
 		var found bool
-		var nodeName string
-		for nodeName, _ = range c.nodeStatus {
-			if nodeName == nodePair.GetFirstString() {
+		for _, nodePair := range nodeList {
+			if nodePair.GetFirstString() == nodeName {
 				found = true
 				break
 			}
 		}
+
 		if !found {
-			keysToDelete = append(keysToDelete, nodeName)
+			delete(c.nodeStatus, nodeName)
 		}
 	}
 
-	for _, key := range keysToDelete {
-		delete(c.nodeStatus, key)
-	}
-
+	/* Step 2: Add the new nodes identified, if any */
 	// The Given the list, only set to connValid if it never existed before
 	for _, nodePair := range nodeList {
 		_, exists := c.nodeStatus[nodePair.GetFirstString()]
