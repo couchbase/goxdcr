@@ -159,16 +159,16 @@ func (c *ConnectivityHelper) SyncWithValidList(nodeList base.StringPairList) {
 
 	/* Step 1: Delete the nodes that are in nodeStatus, but not in the fresh "nodeList" */
 	for nodeName := range c.nodeStatus {
+		var found bool
 		for _, nodePair := range nodeList {
-			var found bool
 			if nodePair.GetFirstString() == nodeName {
 				found = true
 				break
 			}
+		}
 
-			if !found {
-				delete(c.nodeStatus, nodeName)
-			}
+		if !found {
+			delete(c.nodeStatus, nodeName)
 		}
 	}
 
