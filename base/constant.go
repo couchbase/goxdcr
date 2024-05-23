@@ -280,6 +280,8 @@ const CouchbaseSecureDnsServiceName = "couchbases"
 var CouchbaseUri = fmt.Sprintf("%v://", CouchbaseDnsServiceName)
 var CouchbaseSecureUri = fmt.Sprintf("%v://", CouchbaseSecureDnsServiceName)
 
+var CapellaHostnameSuffix = ".cloud.couchbase.com"
+
 // Various error messages
 var ErrorNotResponding = errors.New("Not responding")
 var ErrorNotOK = errors.New("Not OK")
@@ -1285,7 +1287,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	connErrsListMaxEntries, P2PRetryFactor int,
 	P2PRetryWaitTimeMilliSec time.Duration,
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
-	datapoolLogFrequency int) {
+	datapoolLogFrequency int,
+	capellaHostNameSuffix string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1442,6 +1445,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ManifestsGetterSleepTimeSecs = p2pManifestsGetterSleepTimeSecs
 	ManifestsGetterMaxRetry = p2pManifestsGetterMaxRetry
 	DatapoolLogFrequency = datapoolLogFrequency
+	CapellaHostnameSuffix = capellaHostNameSuffix
 }
 
 // XDCR Dev hidden replication settings

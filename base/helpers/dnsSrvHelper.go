@@ -10,6 +10,7 @@
 package base
 
 import (
+	"fmt"
 	"net"
 	"sync"
 )
@@ -71,7 +72,7 @@ func (dsh *DnsSrvHelper) DnsSrvLookup(hostname string) (srvEntries []*net.SRV, s
 
 	// As long as one worked, returned error should be nil
 	if secureErr != nil && nonSecureErr != nil {
-		err = nonSecureErr
+		err = fmt.Errorf("secureErr:%s, nonSecureErr:%s", secureErr.Error(), nonSecureErr.Error())
 	}
 	return
 }

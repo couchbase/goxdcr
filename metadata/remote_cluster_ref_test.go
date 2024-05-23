@@ -15,13 +15,14 @@ package metadata
 
 import (
 	"fmt"
+	"net"
+	"testing"
+
 	"github.com/couchbase/goxdcr/base"
 	base2 "github.com/couchbase/goxdcr/base/helpers"
 	baseH "github.com/couchbase/goxdcr/base/helpers/mocks"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/stretchr/testify/assert"
-	"net"
-	"testing"
 )
 
 var dnsSrvHostname string = "xdcr.couchbase.target.local"
@@ -105,7 +106,7 @@ func TestNewRefWithDNSSrv(t *testing.T) {
 	ref, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
 
-	ref.PopulateDnsSrvIfNeeded()
+	ref.PopulateDnsSrvIfNeeded(nil)
 
 	// Test SameAs
 	ref0 := ref.Clone()
@@ -205,7 +206,7 @@ func TestNewRefWithDNSSrvInvalidPort(t *testing.T) {
 	ref, _ := NewRemoteClusterReference("testsUuid", "testName", invalidHostName, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
 
-	ref.PopulateDnsSrvIfNeeded()
+	ref.PopulateDnsSrvIfNeeded(nil)
 
 	assert.False(ref.IsDnsSRV())
 	assert.Equal(0, len(ref.srvEntries))
@@ -223,7 +224,7 @@ func TestNewRefWithDNSSrvSecure(t *testing.T) {
 	ref, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
 
-	ref.PopulateDnsSrvIfNeeded()
+	ref.PopulateDnsSrvIfNeeded(nil)
 
 	// Test SameAs
 	assert.True(ref.IsDnsSRV())
@@ -266,7 +267,7 @@ func TestDNSSRVBoth(t *testing.T) {
 	// Non-Full encryption reference
 	nonSecureRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", false, "", nil, nil, nil, helper)
-	nonSecureRef.PopulateDnsSrvIfNeeded()
+	nonSecureRef.PopulateDnsSrvIfNeeded(nil)
 
 	assert.Equal(HostNameBothSRV, nonSecureRef.hostnameSRVType)
 	assert.False(nonSecureRef.IsFullEncryption())
@@ -283,7 +284,7 @@ func TestDNSSRVBoth(t *testing.T) {
 	// Full encryption reference
 	fullEncryptionRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", true, EncryptionType_Full, nil, nil, nil, helper)
-	fullEncryptionRef.PopulateDnsSrvIfNeeded()
+	fullEncryptionRef.PopulateDnsSrvIfNeeded(nil)
 
 	assert.Equal(HostNameBothSRV, fullEncryptionRef.hostnameSRVType)
 	assert.True(fullEncryptionRef.IsFullEncryption())
@@ -348,7 +349,7 @@ func TestEnforceIP_TLS(t *testing.T) {
 	helper := setupDNSBothMocks()
 	fullEncryptionRef, _ := NewRemoteClusterReference("testsUuid", "testName", dnsSrvHostname, "testUserName", "testPassword",
 		"", true, EncryptionType_Full, nil, nil, nil, helper)
-	fullEncryptionRef.PopulateDnsSrvIfNeeded()
+	fullEncryptionRef.PopulateDnsSrvIfNeeded(nil)
 
 	// Mock the NetParseIP function
 	base.NetParseIP = func(input string) net.IP {

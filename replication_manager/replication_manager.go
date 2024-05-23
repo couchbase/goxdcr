@@ -357,6 +357,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		internal_settings.Values[metadata.PeerManifestsGetterSleepTimeKey].(int),
 		internal_settings.Values[metadata.PeerManifestsGetterMaxRetryKey].(int),
 		internal_settings.Values[metadata.DatapoolLogFrequencyKey].(int),
+		internal_settings.Values[metadata.CapellaHostNameSuffixKey].(string),
 	)
 }
 
