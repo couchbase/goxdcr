@@ -1898,8 +1898,8 @@ func TestSetHostNamesAndSecuritySettings(t *testing.T) {
 	ref.EncryptionType_ = metadata.EncryptionType_Full
 	ref.DemandEncryption_ = true
 	assert.Equal(0, len(ref.HttpsHostName()))
-
-	err := remoteClusterSvc.setHostNamesAndSecuritySettings(ref)
+	logger := remoteClusterSvc.logger
+	err := setHostNamesAndSecuritySettings(logger, remoteClusterSvc.utils, ref, xdcrTopologyMock.IsMyClusterEncryptionLevelStrict())
 	assert.Nil(err)
 	assert.Equal(hostnameSSL, ref.HttpsHostName())
 	fmt.Println("============== Test case end: TestSetHostNamesAndSecuritySettings =================")
@@ -1930,8 +1930,9 @@ func TestSetHostNamesAndSecuritySettings2(t *testing.T) {
 	ref.EncryptionType_ = metadata.EncryptionType_Full
 	ref.DemandEncryption_ = true
 	assert.Equal(0, len(ref.HttpsHostName()))
+	logger := remoteClusterSvc.logger
 
-	err := remoteClusterSvc.setHostNamesAndSecuritySettings(ref)
+	err := setHostNamesAndSecuritySettings(logger, remoteClusterSvc.utils, ref, xdcrTopologyMock.IsMyClusterEncryptionLevelStrict())
 	assert.Nil(err)
 	assert.Equal(externalHostnameSSL, ref.HttpsHostName())
 	fmt.Println("============== Test case end: TestSetHostNamesAndSecuritySettings2 =================")
@@ -2838,6 +2839,7 @@ func TestRefreshSRVRebootstrap(t *testing.T) {
 
 	// Wait until the periodic refresh hits and utils returns an error
 	// Then it should trigger a re-bootstrap of SRV entries
+	agent.reference.PopulateDnsSrvIfNeeded(nil)
 	time.Sleep(unitTestRefreshInterval + 100*time.Millisecond)
 
 	agent.refMtx.RLock()

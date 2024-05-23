@@ -283,6 +283,8 @@ const (
 	PeerManifestsGetterMaxRetryKey  = "PeersManifestsGetterMaxRetry"
 
 	DatapoolLogFrequencyKey = "DatapoolLogFrequency"
+
+	CapellaHostNameSuffixKey = "CapellaHostNameSuffix"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -410,6 +412,7 @@ var ConnErrsListMaxEntriesConfig = &SettingsConfig{defaultValue: base.ConnErrors
 var PeerManifestsGetterSleepTimeConfig = &SettingsConfig{base.ManifestsGetterSleepTimeSecs, &Range{1, 60}}
 var PeerManifestsGetterMaxRetryConfig = &SettingsConfig{base.ManifestsGetterMaxRetry, &Range{1, 60}}
 var DatapoolLogFrequencyConfig = &SettingsConfig{base.DatapoolLogFrequency, &Range{0, 10000}}
+var CapellaHostnameSuffixConfig = &SettingsConfig{base.CapellaHostnameSuffix, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -537,6 +540,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	PeerManifestsGetterSleepTimeKey:               PeerManifestsGetterSleepTimeConfig,
 	PeerManifestsGetterMaxRetryKey:                PeerManifestsGetterMaxRetryConfig,
 	DatapoolLogFrequencyKey:                       DatapoolLogFrequencyConfig,
+	CapellaHostNameSuffixKey:                      CapellaHostnameSuffixConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

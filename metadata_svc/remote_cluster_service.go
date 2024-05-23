@@ -25,6 +25,7 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/utils"
 	utilities "github.com/couchbase/goxdcr/utils"
 )
 
@@ -390,6 +391,10 @@ type RemoteClusterAgent struct {
 	// To prevent malicious actors, for REST querying of target bucket manifest
 	// this is set to non-0 if in cool down period
 	restQueryCoolDown uint32
+
+	// bootstrap is set to true when none of the nodes are reachable.
+	// When set to true, the refresh loop goes into bootstrap mode
+	bootstrap bool
 }
 
 const (
@@ -408,6 +413,24 @@ func (agent *RemoteClusterAgent) Id() string {
 	agent.refMtx.RLock()
 	defer agent.refMtx.RUnlock()
 	return agent.reference.Id()
+}
+
+func (agent *RemoteClusterAgent) SetBootstrap() {
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
+	agent.bootstrap = true
+}
+
+func (agent *RemoteClusterAgent) IsBootstrap() bool {
+	agent.refMtx.RLock()
+	defer agent.refMtx.RUnlock()
+	return agent.bootstrap
+}
+
+func (agent *RemoteClusterAgent) ClearBootstrap() {
+	agent.refMtx.Lock()
+	defer agent.refMtx.Unlock()
+	agent.bootstrap = false
 }
 
 func (agent *RemoteClusterAgent) GetReferenceClone() *metadata.RemoteClusterReference {
@@ -626,18 +649,40 @@ func (rctx *refreshContext) initialize() {
 	}
 	rctx.agent.refMtx.RUnlock()
 
+	if rctx.agent.IsBootstrap() {
+		rctx.agent.logger.Infof("%s starting agent refresh context bootstrap ref:%s", rctx.refCache.Name(), rctx.refCache.SmallString())
+		// if bootstrap fails it could mean one of the two things:
+		// 1. The hostname given by the user while creating remote ref is not valid anymore
+		// 2. The hostname is actually not transiently not reachable
+
+		rctx.refCache.PopulateDnsSrvIfNeeded(rctx.agent.logger)
+
+		err := setHostNamesAndSecuritySettings(rctx.agent.logger, rctx.agent.utils, rctx.refCache, rctx.agent.topologySvc.IsMyClusterEncryptionLevelStrict())
+		if err != nil {
+			rctx.agent.logger.Errorf("%s refresh context bootstrap failed: %v", rctx.agent.Id(), err)
+			return
+		}
+
+		rctx.agent.ClearBootstrap()
+		// We clear the active host names because an active host name could be one of the SRV nodes
+		// We have to retain the original hostname
+		rctx.agent.logger.Infof("%s refCache at end of bootstrap: %s", rctx.refCache.Name(), rctx.refCache.SmallString())
+		rctx.refCache.SetActiveHostName("")
+		rctx.refCache.SetActiveHttpsHostName("")
+	}
+
 	rctx.index = 0
 	rctx.atLeastOneValid = false
 
 	if len(rctx.cachedRefNodesList) == 0 {
 		// target node list may be empty if goxdcr process has been restarted. populate it with ActiveHostName or HostName
-		activeHostName := rctx.refOrig.ActiveHostName()
+		activeHostName := rctx.refCache.ActiveHostName()
 		if len(activeHostName) == 0 {
-			activeHostName = rctx.refOrig.HostName()
+			activeHostName = rctx.refCache.HostName()
 		}
-		activeHttpsHostName := rctx.refOrig.ActiveHttpsHostName()
+		activeHttpsHostName := rctx.refCache.ActiveHttpsHostName()
 		if len(activeHttpsHostName) == 0 {
-			activeHttpsHostName = rctx.refOrig.HttpsHostName()
+			activeHttpsHostName = rctx.refCache.HttpsHostName()
 		}
 		rctx.cachedRefNodesList = append(rctx.cachedRefNodesList, base.StringPair{activeHostName, activeHttpsHostName})
 	} else if len(rctx.cachedRefNodesList) > 1 {
@@ -1147,7 +1192,7 @@ func (rctx *refreshContext) replaceHostNameUsingList(nodeAddressesList base.Stri
 		// updateSecuritySettings is set to false since security settings should have been updated shortly before in Refresh()
 		_, err := rctx.verifyNodeAndGetList(rctx.connStr, false /*updateSecuritySettings*/)
 
-		if err == nil && !rctx.agent.reference.RestrictHostnameReplaceAtRefresh() {
+		if err == nil && !rctx.agent.reference.RestrictHostnameReplaceAtRefresh() && !rctx.agent.reference.IsCapellaHostname() {
 			// this is the node to set
 			oldHostName := rctx.refCache.HostName()
 			if rctx.refCache.IsFullEncryption() {
@@ -1389,7 +1434,7 @@ func (agent *RemoteClusterAgent) getCredentialsAndMisc() (username, password str
 	agent.refMtx.RLock()
 	go func() {
 		defer populateSRVWaitGrp.Done()
-		agent.pendingRef.PopulateDnsSrvIfNeeded()
+		agent.pendingRef.PopulateDnsSrvIfNeeded(agent.logger)
 	}()
 	agent.refMtx.RUnlock()
 	populateSRVWaitGrp.Wait()
@@ -1678,19 +1723,15 @@ func (agent *RemoteClusterAgent) runPeriodicRefresh() {
 				} else {
 					agent.connectivityHelper.MarkIpFamilyError(false)
 				}
-				agent.refMtx.RLock()
-				isDnsSrv := agent.reference.IsDnsSRV()
-				agent.refMtx.RUnlock()
-				if err == ErrorRefreshUnreachable && isDnsSrv && base.DNSSrvReBootstrap {
+
+				if err == ErrorRefreshUnreachable {
+					agent.SetBootstrap()
 					// If rebootstrap is enabled, clear any previously stored nodes in the nodes list so it refresh ops
 					// will start fresh
-					// And then re-execute populateDnsSrv to force a re-lookup using the SRV records and populate
-					// the A records
 					agent.refMtx.Lock()
 					agent.refNodesList = base.StringPairList{}
 					agent.reference.SetActiveHostName("")
 					agent.reference.SetActiveHttpsHostName("")
-					agent.reference.PopulateDnsSrvIfNeeded()
 					agent.refMtx.Unlock()
 				}
 			}
@@ -2768,7 +2809,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	srvStop := service.utils.StartDiagStopwatch(fmt.Sprintf("ref(%v).PopulateDnsSrv", ref.Name()), base.DiagNetworkThreshold)
-	ref.PopulateDnsSrvIfNeeded()
+	ref.PopulateDnsSrvIfNeeded(service.logger)
 	srvStop()
 	refHostName, err := ref.MyConnectionStr()
 	if err != nil {
@@ -2781,10 +2822,11 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	}
 
 	if updateRef {
-		err = service.setHostNamesAndSecuritySettings(ref)
+		err = setHostNamesAndSecuritySettings(service.logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict())
 		if err != nil {
 			return wrapAsInvalidRemoteClusterError(err.Error())
 		}
+		service.logger.Infof("%s after set hostname and security, ref: %s", ref.Name(), ref.SmallString())
 	}
 
 	startTime := time.Now()
@@ -2849,7 +2891,7 @@ func (service *RemoteClusterService) validateRemoteCluster(ref *metadata.RemoteC
 	return nil
 }
 
-func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.RemoteClusterReference, nodeList []interface{}) (useExternal bool, err error) {
+func getUserIntentFromNodeList(_logger *log.CommonLogger, utils utils.UtilsIface, ref *metadata.RemoteClusterReference, nodeList []interface{}) (useExternal bool, err error) {
 	checkHostName := base.GetHostName(ref.HostName())
 	checkPortNo, checkPortErr := base.GetPortNumber(ref.HostName())
 
@@ -2859,7 +2901,7 @@ func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.Rem
 			err = fmt.Errorf("node info is not of map type")
 			return
 		}
-		extHost, extPort, extErr := service.utils.GetExternalMgtHostAndPort(nodeInfoMap, ref.IsHttps())
+		extHost, extPort, extErr := utils.GetExternalMgtHostAndPort(nodeInfoMap, ref.IsHttps())
 		if ref.IsFullEncryption() {
 			// Calling this from full-encryption means user may have entered a SSL port already
 			if extErr == nil && checkPortErr == nil && checkHostName == extHost && int(checkPortNo) == extPort {
@@ -2868,7 +2910,7 @@ func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.Rem
 				break
 			}
 			// It is possible that the user is asking for full encryption but contacting the nonSSL port:
-			extHost2, extPort2, extErr2 := service.utils.GetExternalMgtHostAndPort(nodeInfoMap, false /*isHttps*/)
+			extHost2, extPort2, extErr2 := utils.GetExternalMgtHostAndPort(nodeInfoMap, false /*isHttps*/)
 			if extErr2 == base.ErrorNoPortNumber && checkPortErr == base.ErrorNoPortNumber && checkHostName == extHost2 {
 				// 2. alternateHostname (8091 is implied)
 				useExternal = true
@@ -2893,9 +2935,19 @@ func (service *RemoteClusterService) getUserIntentFromNodeList(ref *metadata.Rem
 	return
 }
 
-func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metadata.RemoteClusterReference) error {
-	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("setHostNamesAndSecuritySettings(%v)", ref.Name()), base.DiagNetworkThreshold)
+// setHostNamesAndSecuritySettings sets the hostnames which include active hostnames and httpsHostName
+// A call to DNS SRV lookup is assumed prior to calling this function
+func setHostNamesAndSecuritySettings(logger *log.CommonLogger, utils utils.UtilsIface, ref *metadata.RemoteClusterReference, isClusterEncrLevelStrict bool) error {
+	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("setHostNamesAndSecuritySettings(%v)", ref.Name()), base.DiagNetworkThreshold)
 	defer stopFunc()
+
+	logger.Infof("%s start of set host names and security, ref: %s", ref.Name(), ref.SmallString())
+	defer logger.Infof("%s end of set host names and security", ref.Name())
+
+	if ref.IsDnsSRV() {
+		logger.Infof("%s SRV hostname list: %v", ref.Name(), ref.GetSRVHostNames())
+	}
+
 	if !ref.IsEncryptionEnabled() {
 		if ref.IsDnsSRV() {
 			srvHosts := ref.GetSRVHostNames()
@@ -2928,7 +2980,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 			// half encryption mode
 			// refHostName is always a http address
 			// we will need to retrieve https port from target and compute https address
-			refHttpsHostName, _, err = service.getHttpsRemoteHostAddr(refHostName)
+			refHttpsHostName, _, err = getHttpsRemoteHostAddr(logger, utils, refHostName)
 			if err != nil {
 				if strings.Contains(err.Error(), base.EOFString) {
 					err = fmt.Errorf("%v; %v", err.Error(),
@@ -2944,7 +2996,13 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		}
 	}
 
-	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err, refHttpsHostName := service.getDefaultPoolInfoAndAuthMech(ref, refHostName, refHttpsHostName)
+	logger.Infof("%s before querying default pools info refHostName=%s, refHttpsHostName=%s", ref.Name(), refHostName, refHttpsHostName)
+	refSANInCertificate, refHttpAuthMech, defaultPoolInfo, err, refHttpsHostName := getDefaultPoolInfoAndAuthMech(logger,
+		utils,
+		ref,
+		isClusterEncrLevelStrict,
+		refHostName,
+		refHttpsHostName)
 	if err != nil {
 		if strings.Contains(err.Error(), base.RESTNoSuchHost) {
 			err = wrapNoSuchHostRecommendationError(err.Error())
@@ -2952,6 +3010,7 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		return err
 	}
 
+	logger.Infof("%s after querying default pools info refHostName=%s, refHttpsHostName=%s", ref.Name(), refHostName, refHttpsHostName)
 	// by now defaultPoolInfo contains valid info
 	// Set this now so isHttps() call is correct
 	ref.SetHttpAuthMech(refHttpAuthMech)
@@ -2959,23 +3018,25 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 	// compute http address based on the returned defaultPoolInfo
 	// even though http address is needed only by half secure type reference as of now,
 	// always compute and populate http address to be more consistent and less error prone
-	nodeList, err := service.utils.GetNodeListFromInfoMap(defaultPoolInfo, service.logger)
+	nodeList, err := utils.GetNodeListFromInfoMap(defaultPoolInfo, logger)
 	if err != nil {
 		err = fmt.Errorf("Can't get nodes information for cluster %v for ref %v, err=%v", refHostName, ref.Id(), err)
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 
-	useExternal, err := service.getUserIntentFromNodeList(ref, nodeList)
+	useExternal, err := getUserIntentFromNodeList(logger, utils, ref, nodeList)
 	if err != nil {
 		err = fmt.Errorf("Can't get user intent from node list, err=%v", err)
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
 
-	nodeAddressesList, err := service.utils.GetRemoteNodeAddressesListFromNodeList(nodeList, refHostName, true /*needHttps*/, service.logger, useExternal)
+	nodeAddressesList, err := utils.GetRemoteNodeAddressesListFromNodeList(nodeList, refHostName, true /*needHttps*/, logger, useExternal)
 	if err != nil {
 		err = fmt.Errorf("Can't get node addresses from node info for cluster %v for cluster reference %v, err=%v", refHostName, ref.Id(), err)
 		return wrapAsInvalidRemoteClusterError(err.Error())
 	}
+
+	logger.Infof("%s nodelist after querying pools default info useExternal: %v, nodelist: %v", ref.Name(), useExternal, nodeAddressesList)
 
 	refHttpHostName := ""
 	for _, pair := range nodeAddressesList {
@@ -2992,15 +3053,14 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 		// this should not happen in production
 		// if it does happen, leave refHttpHostName empty for now.
 		// hopefully remote cluster refresh will get ref.ActiveHostName refreshed/populated
-		service.logger.Warnf("Can't get http address for cluster %v for cluster reference %v", refHostName, ref.Id())
+		logger.Warnf("Can't get http address for cluster %v for cluster reference %v", refHostName, ref.Id())
 	}
 
 	ref.SetActiveHostName(refHttpHostName)
 	ref.SetHttpsHostName(refHttpsHostName)
 	ref.SetActiveHttpsHostName(refHttpsHostName)
-
 	ref.SetSANInCertificate(refSANInCertificate)
-	service.logger.Infof("Set hostName=%v, httpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
+	logger.Infof("Set refHttpHostName=%v, refHttpsHostName=%v, SANInCertificate=%v HttpAuthMech=%v for remote cluster reference %v\n", refHttpHostName, refHttpsHostName, refSANInCertificate, refHttpAuthMech, ref.Id())
 
 	return nil
 }
@@ -3011,8 +3071,8 @@ func (service *RemoteClusterService) setHostNamesAndSecuritySettings(ref *metada
 // then the call below will fail, and we'll need to figure out the SSL port by using getHttpsRemoteHostAddr(), if it's possible
 // The second part of "figuring out https" if the first fails, can be done in parallel to save time
 // This method lets both go at the same time, and whoever comes back first with a valid result wins
-func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata.RemoteClusterReference, refHostName string, refHttpsHostNameIn string) (bool, base.HttpAuthMech, map[string]interface{}, error, string) {
-	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("getDefaultPoolInfoAndAuthMech(%v, %v, %v", ref.Name(), refHostName, refHttpsHostNameIn), base.DiagNetworkThreshold)
+func getDefaultPoolInfoAndAuthMech(logger *log.CommonLogger, utils utilities.UtilsIface, ref *metadata.RemoteClusterReference, isClusterEncrLevelStrict bool, refHostName string, refHttpsHostNameIn string) (bool, base.HttpAuthMech, map[string]interface{}, error, string) {
+	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("getDefaultPoolInfoAndAuthMech(%v, %v, %v", ref.Name(), refHostName, refHttpsHostNameIn), base.DiagNetworkThreshold)
 	defer stopFunc()
 	// Synchronization primitives for racing
 	firstWinnerCh := make(chan bool)
@@ -3028,7 +3088,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 		}
 	}
 
-	if service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict() {
+	if isClusterEncrLevelStrict {
 		// If source cluster is strict encryption, we cannot send anything to remote 8091 port.
 		// Sending request to 8091 without TLS will succeed if target is not strict. But we don't want to do it.
 		// Sending request to 8091 with TLS will fail if target is strict (target refuses connection) or
@@ -3062,7 +3122,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 	go func() {
 		defer close(firstWinnerCh)
 		// Attempt to retrieve defaultPoolInfo with what the user initially entered
-		refHttpAuthMech, defaultPoolInfo, _, err = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+		refHttpAuthMech, defaultPoolInfo, _, err = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, refHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger)
 		if err == nil && refHttpAuthMech == base.HttpAuthMechHttps {
 			refSANInCertificate = true
 		}
@@ -3077,9 +3137,9 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 			// in full encryption mode, the error could have been caused by refHostName, and hence refHttpsHostName, containing a http address,
 			// try treating refHostName as a http address and compute the corresponding https address by retrieving tls port from target
 			var err1 error
-			if service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict() == false {
+			if !isClusterEncrLevelStrict {
 				// This call is not encrypted. We only do it if it is not strict
-				bgRefHttpsHostName, bgExternalRefHttpsHostName, err1 = service.getHttpsRemoteHostAddr(refHostName)
+				bgRefHttpsHostName, bgExternalRefHttpsHostName, err1 = getHttpsRemoteHostAddr(logger, utils, refHostName)
 			}
 			if err1 != nil && !tryDefaultSSLAdminPort {
 				// if the attempt to treat refHostName as a http address also fails, return all errors and let user decide what to do
@@ -3096,7 +3156,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 			}
 
 			// now we potentially have valid https address, re-do security settings retrieval
-			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+			bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger)
 			if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
 				bgSANInCertificate = true
 			}
@@ -3108,7 +3168,7 @@ func (service *RemoteClusterService) getDefaultPoolInfoAndAuthMech(ref *metadata
 					// If the https address doesn't work, and remote cluster has set-up an alternate SSL port,
 					// as a last resort, try that for a third time
 					bgRefHttpsHostName = bgExternalRefHttpsHostName
-					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = service.utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), service.logger)
+					bgRefHttpAuthMech, bgDefaultPoolInfo, _, bgErr = utils.GetSecuritySettingsAndDefaultPoolInfo(refHostName, bgRefHttpsHostName, ref.UserName(), ref.Password(), ref.Certificates(), ref.ClientCertificate(), ref.ClientKey(), ref.IsHalfEncryption(), logger)
 					if bgErr == nil && bgRefHttpAuthMech == base.HttpAuthMechHttps {
 						bgSANInCertificate = true
 					}
@@ -3164,10 +3224,10 @@ func getCombinedError(ref *metadata.RemoteClusterReference, err error, bgErr err
 	return bgErr
 }
 
-func (service *RemoteClusterService) getHttpsRemoteHostAddr(hostName string) (string, string, error) {
-	stopFunc := service.utils.StartDiagStopwatch(fmt.Sprintf("getHttpsRemoteHostAddr(%v)", hostName), base.DiagNetworkThreshold)
+func getHttpsRemoteHostAddr(logger *log.CommonLogger, u utils.UtilsIface, hostName string) (string, string, error) {
+	stopFunc := u.StartDiagStopwatch(fmt.Sprintf("getHttpsRemoteHostAddr(%v)", hostName), base.DiagNetworkThreshold)
 	defer stopFunc()
-	internalHttpsHostname, externalHttpsHostname, err := service.utils.HttpsRemoteHostAddr(hostName, service.logger)
+	internalHttpsHostname, externalHttpsHostname, err := u.HttpsRemoteHostAddr(hostName, logger)
 	if err != nil {
 		if err.Error() == base.ErrorUnauthorized.Error() {
 			return "", "", wrapAsInvalidRemoteClusterError(fmt.Sprintf("Could not get ssl port for %v. Remote cluster could be an Elasticsearch cluster that does not support ssl encryption. Please double check remote cluster configuration or turn off ssl encryption.", hostName))
@@ -3448,7 +3508,7 @@ func constructRemoteClusterReference(value []byte, rev interface{}, skipPopulate
 	}
 	ref.SetRevision(rev)
 	if !skipPopulateDnsSrv {
-		ref.PopulateDnsSrvIfNeeded()
+		ref.PopulateDnsSrvIfNeeded(nil)
 	}
 
 	return ref, err
