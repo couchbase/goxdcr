@@ -60,6 +60,9 @@ type TopologyChangeDetectorSvc struct {
 	// vb server map of target bucket when pipeline was first started
 	// used for target topology change detection
 	target_vb_server_map_original map[uint16]string
+	// kvVbMap of target bucket when pipeline was first started
+	// used for logging only
+	targetKvVbMapOriginal base.KvVBMapType
 	// vb server map of target bucket in the last topology change check time
 	// used for target topology change detection
 	target_vb_server_map_last map[uint16]string
@@ -99,6 +102,10 @@ type TopologyChangeDetectorSvc struct {
 
 	bucketTopologySvc     service_def.BucketTopologySvc
 	bucketTopSubscriberId string
+
+	// number of times target topology was checked to have changed by monitorTarget
+	targetMonitorCnt uint64
+	logFrequency     uint64
 }
 
 func NewTopologyChangeDetectorSvc(xdcr_topology_svc service_def.XDCRCompTopologySvc, remote_cluster_svc service_def.RemoteClusterSvc, repl_spec_svc service_def.ReplicationSpecSvc, logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc) *TopologyChangeDetectorSvc {
@@ -476,7 +483,7 @@ func (top_detect_svc *TopologyChangeDetectorSvc) handleTargetTopologyChange(diff
 		}
 	}
 
-	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline handleTargetTopologyChange completed")
+	top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline handleTargetTopologyChange(%v mod %v) completed", top_detect_svc.targetMonitorCnt, top_detect_svc.logFrequency)
 	return nil
 }
 
@@ -706,6 +713,10 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 	// monitorSource must have had occurred first already
 	<-top_detect_svc.vblistOriginalInitDone
 	top_detect_svc.target_vb_server_map_original = base.ConstructVbServerMap(top_detect_svc.vblist_original, target_server_vb_map)
+	top_detect_svc.targetKvVbMapOriginal = target_server_vb_map
+	if spec != nil && spec.Settings != nil {
+		top_detect_svc.logFrequency = spec.Settings.GetTargetTopologyLogFrequency()
+	}
 
 	go func() {
 		for {
@@ -718,6 +729,8 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc validateTargetTopology completed")
 				return
 			case notification := <-targetVbUpdateCh:
+				top_detect_svc.targetMonitorCnt++
+
 				if top_detect_svc.pipelineHasStopped() {
 					notification.Recycle()
 					err := top_detect_svc.bucketTopologySvc.UnSubscribeRemoteBucketFeed(spec, top_detect_svc.bucketTopSubscriberId)
@@ -747,7 +760,21 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorTarget(initWg *sync.Wait
 					errToHandleTargetChange = target_topology_changedErr
 					top_detect_svc.logger.Warnf("TopologyChangeDetectorSvc received error when validating target topology change. err=%v", errToHandleTargetChange)
 				}
-				err := top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
+
+				freshSpec, err := top_detect_svc.repl_spec_svc.ReplicationSpecReadOnly(spec.Id)
+				if err == nil && freshSpec != nil && freshSpec.Settings != nil {
+					// update the value if the setting was changed
+					top_detect_svc.logFrequency = freshSpec.Settings.GetTargetTopologyLogFrequency()
+				}
+
+				currentCnt := top_detect_svc.targetMonitorCnt
+				logFrequency := top_detect_svc.logFrequency
+				if currentCnt%logFrequency == 0 {
+					// By default, for every pipeline this log line will be printed once every 5 hours.
+					top_detect_svc.logger.Infof("Actual target kvVbMap=%v; Cached kvVbMap=%v, vbList=%v", targetServerVBMap, top_detect_svc.targetKvVbMapOriginal, top_detect_svc.vblist_original)
+				}
+
+				err = top_detect_svc.handleTargetTopologyChange(diff_vb_list, target_vb_server_map, errToHandleTargetChange)
 				notification.Recycle()
 				if err != nil {
 					if err == errPipelinesDetached {
