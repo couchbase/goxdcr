@@ -1519,6 +1519,12 @@ const CkptSvcCacheEnabled = "ckptSvcCacheEnabled"
 
 const EnableDcpPurgeRollback = "dcpEnablePurgeRollback"
 
+const TargetTopologyLogFreqKey = "targetTopologyLogFrequency"
+
+// Each iteration of monitorTarget will be exectued every 10 seconds by default.
+// So for the logging to take place once every 5 hours (18000 seconds), we need to wait for 1800 iteration of monitorTarget
+var TargetTopologyLogFreqVal = 1800
+
 type GlobalOSOMode int
 
 const (

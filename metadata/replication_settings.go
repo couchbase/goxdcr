@@ -101,6 +101,8 @@ const (
 	CkptSvcCacheEnabledKey = base.CkptSvcCacheEnabled
 
 	EnableDcpPurgeRollback = base.EnableDcpPurgeRollback
+
+	TargetTopologyLogFreqKey = base.TargetTopologyLogFreqKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -219,6 +221,8 @@ var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
 
 var EnableDcpPurgeRollbackConfig = &SettingsConfig{false, nil}
 
+var TargetTopologyLogFrequencyConfig = &SettingsConfig{base.TargetTopologyLogFreqVal, &Range{0, 60480}}
+
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
@@ -266,6 +270,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	ReplicateCkptIntervalKey:             ReplicateCkptIntervalConfig,
 	CkptSvcCacheEnabledKey:               CkptSvcCacheEnabledConfig,
 	EnableDcpPurgeRollback:               EnableDcpPurgeRollbackConfig,
+	TargetTopologyLogFreqKey:             TargetTopologyLogFrequencyConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -981,6 +986,12 @@ func (s *ReplicationSettings) GetMergeFunctionMapping() base.MergeFunctionMappin
 		}
 	}
 	return base.MergeFunctionMappingType{}
+}
+
+func (s *ReplicationSettings) GetTargetTopologyLogFrequency() uint64 {
+	freq, _ := s.GetSettingValueOrDefaultValue(base.TargetTopologyLogFreqKey)
+	freqInt, _ := freq.(int)
+	return uint64(freqInt)
 }
 
 func (s *ReplicationSettings) NeedToRestartPipelineDueToCollectionModeChanges(other *ReplicationSettings) bool {
