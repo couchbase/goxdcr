@@ -332,7 +332,7 @@ func GetStatisticsForPipeline(topic string, repStatusGetter func(topic string) (
 	for pipelineType := common.PipelineTypeBegin; pipelineType < common.PipelineTypeInvalidEnd; pipelineType++ {
 		oneStats := repl_status.GetOverviewStats(pipelineType)
 		if oneStats == nil {
-			oneStats = GetReadOnlyOverviewStats()
+			oneStats = GetReadOnlyOverviewStats(repl_status, pipelineType)
 		}
 		allPipelinesStats = append(allPipelinesStats, oneStats)
 	}
@@ -2980,7 +2980,7 @@ func (statsMgr *StatisticsManager) Detach(pipeline common.Pipeline) error {
 var readOnlyInitOverview metrics.Registry
 var readOnlyInitOnce sync.Once
 
-func GetReadOnlyOverviewStats() *expvar.Map {
+func GetReadOnlyOverviewStats(repStatus pipeline_pkg.ReplicationStatusIface, pipelineType common.PipelineType) *expvar.Map {
 	readOnlyInitOnce.Do(func() {
 		readOnlyInitOverview = metrics.NewRegistry()
 		for overviewKey, metricType := range OverviewMetricKeys {
@@ -3006,6 +3006,17 @@ func GetReadOnlyOverviewStats() *expvar.Map {
 		_, okForGauge := i.(metrics.Gauge)
 		if okForGauge || okForCounter {
 			expvarVal := new(expvar.Int)
+
+			// For readonly stats, because StatsMgr is not running, there will be no proper pipeline status or error count
+			// Need to inject it manually here and only for main pipeline
+			if pipelineType == common.MainPipeline && len(repStatus.Errors()) > 0 {
+				if name == service_def.PIPELINE_ERRORS {
+					expvarVal.Set(int64(len(repStatus.Errors())))
+				} else if name == service_def.PIPELINE_STATUS {
+					expvarVal.Set(int64(base.PipelineStatusError))
+				}
+			}
+
 			initOverviewMap.Set(name, expvarVal)
 		}
 	})
