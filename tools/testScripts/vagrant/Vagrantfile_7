@@ -94,8 +94,8 @@ Vagrant.configure("2") do |config|
     node1.vm.network "forwarded_port", guest: 11210, host: 15100
     node1.vm.network "forwarded_port", guest: 11207, host: 15200
     node1.vm.network "forwarded_port", guest: 9998,  host: 15996
-    node1.vm.network "private_network", ip: "192.168.56.1"
-    node1.vm.network "private_network", ip: "192.168.56.5"
+    node1.vm.network "private_network", ip: "192.168.56.2"
+    node1.vm.network "private_network", ip: "192.168.56.6"
     #curl -X PUT -u Administrator:wewewe -d 'hostname=127.0.0.1&mgmt=15000&kv=15100&kvSSL=15200&capi=15010'  http://127.0.0.1:15000/node/controller/setupAlternateAddresses/external
   end
 
@@ -107,8 +107,8 @@ Vagrant.configure("2") do |config|
     node2.vm.network "forwarded_port", guest: 11210, host: 15101
     node2.vm.network "forwarded_port", guest: 11207, host: 15201
     node2.vm.network "forwarded_port", guest: 9998,  host: 15997
-    node2.vm.network "private_network", ip: "192.168.56.2"
-    node2.vm.network "private_network", ip: "192.168.56.6"
+    node2.vm.network "private_network", ip: "192.168.56.3"
+    node2.vm.network "private_network", ip: "192.168.56.7"
     #curl -X PUT -u Administrator:wewewe -d 'hostname=127.0.0.1&mgmt=15001&kv=15101&kvSSL=15201&capi=15011'  http://127.0.0.1:15001/node/controller/setupAlternateAddresses/external
   end
 
@@ -120,8 +120,8 @@ Vagrant.configure("2") do |config|
     node3.vm.network "forwarded_port", guest: 11210, host: 15102
     node3.vm.network "forwarded_port", guest: 11207, host: 15202
     node3.vm.network "forwarded_port", guest: 9998,  host: 15998
-    node3.vm.network "private_network", ip: "192.168.56.3"
-    node3.vm.network "private_network", ip: "192.168.56.7"
+    node3.vm.network "private_network", ip: "192.168.56.4"
+    node3.vm.network "private_network", ip: "192.168.56.8"
     #curl -X PUT -u Administrator:wewewe -d 'hostname=127.0.0.1&mgmt=15002&kv=15102&kvSSL=15202&capi=15012'  http://127.0.0.1:15002/node/controller/setupAlternateAddresses/external
   end
 
@@ -133,8 +133,8 @@ Vagrant.configure("2") do |config|
     node4.vm.network "forwarded_port", guest: 11210, host: 15103
     node4.vm.network "forwarded_port", guest: 11207, host: 15203
     node4.vm.network "forwarded_port", guest: 9998,  host: 15999
-    node4.vm.network "private_network", ip: "192.168.56.4"
-    node4.vm.network "private_network", ip: "192.168.56.8"
+    node4.vm.network "private_network", ip: "192.168.56.5"
+    node4.vm.network "private_network", ip: "192.168.56.9"
     #curl -X PUT -u Administrator:wewewe -d 'hostname=127.0.0.1&mgmt=15003&kv=15103&kvSSL=15203&capi=15013'  http://127.0.0.1:15003/node/controller/setupAlternateAddresses/external
   end
 
@@ -147,7 +147,7 @@ Vagrant.configure("2") do |config|
     node5.vm.network "forwarded_port", guest: 11210, host: 15104
     node5.vm.network "forwarded_port", guest: 11207, host: 15204
     #node5.vm.network "forwarded_port", guest: 9998,  host: 15981
-    node5.vm.network "private_network", ip: "192.168.56.9"
+    node5.vm.network "private_network", ip: "192.168.56.10"
   end
 
 

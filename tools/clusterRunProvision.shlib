@@ -643,6 +643,7 @@ function addOneNodeIn {
 	local dependentNodeHostname
 	local dependentNodePortToUse
 	local httpStr
+	local output
 
 	for ((retryCnt = 0; $retryCnt < 5; retryCnt = $(($retryCnt + 1)))); do
 		echo "Adding $dependentClusterName:$dependentNodePort ($nodeName) to $port"
@@ -663,7 +664,10 @@ function addOneNodeIn {
 			dependentNodePortToUse="1${dependentNodePort}"
 		fi
 
-		$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="${httpStr}${dependentNodeHostname}:${dependentNodePortToUse}"
+		output=$($CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:$port/controller/addNode -d user=$DEFAULT_ADMIN -d password=$DEFAULT_PW -d hostname="${httpStr}${dependentNodeHostname}:${dependentNodePortToUse}" 2>&1)
+		if [[ "$output" =~ Node\ is\ already\ part\ of\ cluster ]]; then
+			return 0
+		fi
 
 		echo "Waiting for membership update"
 		sleep 10
@@ -676,6 +680,8 @@ function addOneNodeIn {
 			return 0
 		fi
 	done
+
+	exit 1
 }
 
 function addNodesIn {

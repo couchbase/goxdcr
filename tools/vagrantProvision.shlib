@@ -57,6 +57,7 @@ declare -A CBServerLink=(
 	["cheshirecat"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/cheshire-cat/latest/couchbase-server-enterprise_cheshire-cat-ubuntu20.04_amd64.deb"
 	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-ubuntu20.04_amd64.deb"
 	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-ubuntu20.04_amd64.deb"
+	["morpheus"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-enterprise_morpheus-ubuntu20.04_amd64.deb"
 	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
@@ -767,7 +768,7 @@ function vagrantRunXdcrDiffer {
 		opts2Flag="$(xdcrDifferParseOpts "$extraOpts2")"
 	fi
 
-	cmd="${VSSH[$idx]} \"cd ${differDir}; ./runDiffer.sh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h 192.168.56.1:8091 -s $srcBucket -t $tgtBucket -r $tgtCluster -c $opts1Flag $opts2Flag\""
+	cmd="${VSSH[$idx]} \"cd ${differDir}; ./runDiffer.sh -u $DEFAULT_ADMIN -p $DEFAULT_PW -h ${VAGRANT_VM_IP_MAP["$clusterName"]}:8091 -s $srcBucket -t $tgtBucket -r $tgtCluster -c $opts1Flag $opts2Flag\""
 	echo "==== Running $cmd ===="
 	eval $cmd
 
