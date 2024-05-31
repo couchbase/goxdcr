@@ -2898,9 +2898,10 @@ type SubdocCmdOptions struct {
 	SubdocOp                             SubdocOpType
 	BodyPreSubdocCmd, ExtrasPreSubdocCmd []byte
 	DatatypePreSubdocCmd                 uint8
-	// booleans to indicate if corresponding target doc has an non empty pv and mv
+	// booleans to indicate if corresponding target doc has the following non-empty metadata
 	TargetHasPv          bool
 	TargetHasMv          bool
+	TargetHasMou         bool
 	TargetDocIsTombstone bool
 }
 

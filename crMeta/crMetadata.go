@@ -79,6 +79,8 @@ type CRMetadata struct {
 	hadMv bool
 	// If the document does not already have HLV, we will not generate one if the mutation is older than vbMaxCas
 	hadHlv bool
+	// If the document has _mou, we need the following to decide whether to delete _mou in the subdoc command.
+	hadMou bool
 	// It is import mutation if importCas == document.CAS. In that case, docMeta.Cas is the pre-import CAS value.
 	isImport bool
 	// This is the value parsed from the XATTR _importCAS.
@@ -177,6 +179,7 @@ func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRM
 	meta := CRMetadata{
 		docMeta:   &docMeta,
 		actualCas: docMeta.Cas,
+		hadMou:    importCas > 0, // we will use the presence of importCAS to determine if we have _mou
 	}
 
 	err = meta.UpdateHLVIfNeeded(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev)
@@ -242,6 +245,9 @@ func (doc *TargetDocument) GetMetadata() (*CRMetadata, error) {
 			if err != nil {
 				return nil, err
 			}
+
+			// We will use the presence of importCAS to determine if we have _mou
+			meta.hadMou = importCas > 0
 
 			err = meta.UpdateHLVIfNeeded(doc.source, cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev)
 			if err != nil {
@@ -357,6 +363,7 @@ func GetMetadataForCR(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []b
 			req.SetSubdocOp()
 			req.SubdocCmdOptions.TargetHasPv = target_meta.hadPv
 			req.SubdocCmdOptions.TargetHasMv = target_meta.hadMv
+			req.SubdocCmdOptions.TargetHasMou = target_meta.hadMou
 			req.SubdocCmdOptions.TargetDocIsTombstone = doc_meta_target.Deletion
 		}
 	}
