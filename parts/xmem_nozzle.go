@@ -2059,10 +2059,12 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 }
 
 // Preserve all Xattributes except source _sync and old HLV if it has been updated
-func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, sourceDocMeta *crMeta.CRMetadata, updatedHLV bool, updater func(key []byte, val []byte) error) error {
+// Returns the error if any and a boolean which indicates if we are replicating the source _mou. The caller may have to manually delete the target _mou if the return value is false.
+func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, sourceDocMeta *crMeta.CRMetadata, updatedHLV bool, updater func(key []byte, val []byte) error) (bool, error) {
+	mouIsReplicated := false
 	if !base.HasXattr(wrappedReq.Req.DataType) {
 		// no xattrs to process
-		return nil
+		return mouIsReplicated, nil
 	}
 
 	req := wrappedReq.Req
@@ -2070,12 +2072,12 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 
 	it, err := base.NewXattrIterator(body)
 	if err != nil {
-		return err
+		return mouIsReplicated, err
 	}
 	for it.HasNext() {
 		key, value, err := it.Next()
 		if err != nil {
-			return err
+			return mouIsReplicated, err
 		}
 		switch string(key) {
 		case base.XATTR_HLV:
@@ -2090,12 +2092,14 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 				continue
 			}
 		case base.XATTR_MOU:
+			mouIsReplicated = true
 			if sourceDocMeta != nil && !sourceDocMeta.IsImportMutation() {
 				// Remove importCAS from _mou if it is no longer an import mutation.
 				// This happens when are non-imported updates on top of an import mutation
 
 				if wrappedReq.MouAfterProcessing == nil {
 					// _mou had only importCAS and pRev, no need to write
+					mouIsReplicated = false
 					continue
 				}
 				value = wrappedReq.MouAfterProcessing
@@ -2104,10 +2108,10 @@ func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, 
 
 		err = updater(key, value)
 		if err != nil {
-			return err
+			return mouIsReplicated, err
 		}
 	}
-	return nil
+	return mouIsReplicated, nil
 }
 
 // updates the request body (with xattrs), CAS, extras (flags), datatype and opcode to appropriate values for the request in the mobile/CCR mode.
@@ -2225,7 +2229,7 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	}
 
 	// decide to preserve or not preserve source xattrs before replicating to target
-	err = xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, xattrComposer.WriteKV)
+	_, err = xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, xattrComposer.WriteKV)
 	if err != nil {
 		return err
 	}
@@ -2293,9 +2297,16 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 	}
 
 	// decide to preserve or not preserve source xattrs before replicating to target
-	err = xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, specs.WriteKV)
+	mouReplicated, err := xmem.preserveSourceXattrs(wrappedReq, sourceDocMeta, updateHLV, specs.WriteKV)
 	if err != nil {
 		return err
+	}
+
+	// if we are not replicating source _mou or if source doesn't have _mou,
+	// we have to individually add a spec to remove target _mou, if it has it.
+	if !mouReplicated && wrappedReq.SubdocCmdOptions.TargetHasMou {
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_MOU), nil)
+		specs = append(specs, spec)
 	}
 
 	var accessDeleted bool
