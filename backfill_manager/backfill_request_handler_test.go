@@ -476,9 +476,8 @@ func TestBackfillHandlerExplicitMapChange(t *testing.T) {
 	var channels []interface{}
 	syncCh := make(chan error)
 	finCh := make(chan bool)
-	channels = append(channels, syncCh)
 	channels = append(channels, finCh)
-	backfillEvent := commonReal.NewEvent(commonReal.FixedRoutingUpdateEvent, info, nil, channels, nil)
+	backfillEvent := commonReal.NewEvent(commonReal.FixedRoutingUpdateEvent, info, nil, channels, syncCh)
 	go rh.OnEvent(backfillEvent)
 	err = <-syncCh
 	assert.Nil(err)

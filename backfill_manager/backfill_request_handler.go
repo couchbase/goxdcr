@@ -914,17 +914,17 @@ func (b *BackfillRequestHandler) ProcessEvent(event *common.Event) error {
 			// ProcessEvent doesn't care about return code
 			return nil
 		}
-		if len(event.DerivedData) != 2 {
+		if len(event.DerivedData) != 1 {
 			b.logger.Errorf("Invalid routing info number of channels %v type", len(event.DerivedData))
 			return nil
 		}
-		syncCh, ok := event.DerivedData[0].(chan error)
+		syncCh, ok := event.OtherInfos.(chan error)
 		if !ok {
 			b.logger.Errorf("Invalid routing info response channel %v type", reflect.TypeOf(event.DerivedData[0]))
 			// ProcessEvent doesn't care about return code
 			return nil
 		}
-		routerFinCh, ok := event.DerivedData[1].(chan bool)
+		routerFinCh, ok := event.DerivedData[0].(chan bool)
 		if !ok {
 			b.logger.Errorf("Invalid routing info fin channel %v type", reflect.TypeOf(event.DerivedData[1]))
 			// ProcessEvent doesn't care about return code

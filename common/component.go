@@ -107,6 +107,17 @@ func (c ComponentEventType) IsOutNozzleThroughSeqnoRelated() bool {
 	}
 }
 
+func (c ComponentEventType) IsSynchronousEvent() bool {
+	switch c {
+	case FixedRoutingUpdateEvent:
+		return true
+	case BrokenRoutingUpdateEvent:
+		return true
+	default:
+		return false
+	}
+}
+
 type Event struct {
 	//the type of component event
 	EventType ComponentEventType

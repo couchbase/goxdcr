@@ -1411,9 +1411,8 @@ func NewRouter(id string, spec *metadata.ReplicationSpecification, downStreamPar
 			len(info.ExplicitBackfillMap.Added) > 0 || len(info.ExplicitBackfillMap.Removed) > 0 {
 			syncCh := make(chan error)
 			var channels []interface{}
-			channels = append(channels, syncCh)
 			channels = append(channels, router.finCh)
-			backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, channels, nil)
+			backfillEvent := common.NewEvent(common.FixedRoutingUpdateEvent, info, router, channels, syncCh)
 			go router.RaiseEvent(backfillEvent)
 			err := <-syncCh
 			if err != nil {
