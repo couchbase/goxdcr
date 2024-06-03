@@ -2103,7 +2103,7 @@ func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMet
 		if status == mc.SUCCESS {
 			switch string(spec.Path) {
 			case VXATTR_REVID:
-				if xattrlen < 3 {
+				if xattrlen < MinRevIdLengthWithQuotes {
 					// This should never happen
 					return DocumentMetadata{}, fmt.Errorf("Unexpected return value length %v for subdoc_get path %v", xattrlen, VXATTR_REVID)
 				}

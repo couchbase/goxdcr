@@ -859,14 +859,14 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 	// It is ok to not find _mou.importCAS or _mou.pRev, since we may not be getting it if enableCrossClusterVersioning is not on, or target is not an import mutation.
 	xattr, err1 = lookupResp.ResponseForAPath(XATTR_IMPORTCAS)
 	xattrLen := len(xattr)
-	if err1 == nil && xattrLen > 0 {
+	if err1 == nil && xattrLen == base.MaxHexCASLength {
 		// Strip the start/end quotes to get the importCas value
 		importCas, err = base.HexLittleEndianToUint64(xattr[1 : xattrLen-1])
 	}
 
 	xattr, err1 = lookupResp.ResponseForAPath(XATTR_PREVIOUSREV)
 	xattrLen = len(xattr)
-	if err1 == nil && xattrLen > 0 {
+	if err1 == nil && xattrLen >= base.MinRevIdLengthWithQuotes {
 		// Strip the start/end quotes to get the pRev value
 		pRev, err = strconv.ParseUint(string(xattr[1:xattrLen-1]), 10, 64)
 	}
@@ -920,18 +920,20 @@ func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.
 			xattrPRev, foundPRev = removedFromMou[base.PREVIOUSREV]
 		}
 	}
-	if foundImportCas && xattrImportCas != nil {
+
+	xattrImportCASLen := len(xattrImportCas)
+	xattrPRevLen := len(xattrPRev)
+
+	if foundImportCas && xattrImportCASLen == base.MaxHexCASLength {
 		// Remove the start/end quotes before converting it to uint64
-		xattrLen := len(xattrImportCas)
-		importCas, err = base.HexLittleEndianToUint64(xattrImportCas[1 : xattrLen-1])
+		importCas, err = base.HexLittleEndianToUint64(xattrImportCas[1 : xattrImportCASLen-1])
 		if err != nil {
 			return
 		}
 	}
-	if foundPRev && xattrPRev != nil {
+	if foundPRev && xattrPRevLen >= base.MinRevIdLengthWithQuotes {
 		// Remove the start/end quotes before converting it to uint64
-		xattrLen := len(xattrPRev)
-		pRev, err = strconv.ParseUint(string(xattrPRev[1:xattrLen-1]), 10, 64)
+		pRev, err = strconv.ParseUint(string(xattrPRev[1:xattrPRevLen-1]), 10, 64)
 		if err != nil {
 			return
 		}
