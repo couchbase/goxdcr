@@ -2172,6 +2172,9 @@ type PipelineMgrStopCbType func(string, StoppedPipelineCallback, StoppedPipeline
 var MaxHexDecodedLength = len(Uint64ToHexLittleEndian(math.MaxUint64))
 var MaxHexCASLength = MaxHexDecodedLength + 2
 
+var MinRevIdLength = 1
+var MinRevIdLengthWithQuotes = MinRevIdLength + 2
+
 const QuotesAndSepLenForVVEntry = 6 /* quotes and sepeartors. Eg - "src":"ver", */
 
 type ConflictManagerAction int
