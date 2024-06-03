@@ -1,3 +1,4 @@
+//go:build !pcre
 // +build !pcre
 
 /*
@@ -16,10 +17,17 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"reflect"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	service_def_mocks "github.com/couchbase/goxdcr/service_def/mocks"
@@ -27,11 +35,6 @@ import (
 	UtilitiesMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"reflect"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 var dummyDownStream string = "dummy"
@@ -39,7 +42,7 @@ var dummyDownStream string = "dummy"
 var collectionsCap = metadata.UnitTestGetCollectionsCapability()
 var nonCollectionsCap = metadata.UnitTestGetDefaultCapability()
 
-//func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock utilities.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc) {
+// func setupBoilerPlateRouter() (routerId string, downStreamParts map[string]common.Part, routingMap map[uint16]string, crMode base.ConflictResolutionMode, loggerCtx *log.LoggerContext, utilsMock utilities.UtilsIface, throughputThrottlerSvc *service_def_mocks.ThroughputThrottlerSvc, needToThrottle bool, expDelMode base.FilterExpDelType, collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, spec *metadata.ReplicationSpecification, dcpRecycler utilities.RecycleObjFunc) {
 func RetrieveUprFile(fileName string) (*mcc.UprEvent, error) {
 	data, err := ioutil.ReadFile(fileName)
 	if err != nil {
@@ -114,6 +117,23 @@ func setupCollectionManifestsSvcRouterWithDefaultTarget(collectionsManifestSvc *
 		panic(err.Error())
 	}
 	collectionsManifestSvc.On("GetLatestManifests", mock.Anything, mock.Anything).Return(&manifest, &defaultManifest, nil)
+}
+
+func setupCollectionManifestsSvcRouterWithSpecificDefaultTarget(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc) {
+	defaultManifest := metadata.NewDefaultCollectionsManifest()
+	manifestFileDir := "../metadata/testdata"
+	manifestFileName := "provisionedManifest.json"
+
+	data, err := ioutil.ReadFile(fmt.Sprintf("%v/%v", manifestFileDir, manifestFileName))
+	if err != nil {
+		panic(err.Error())
+	}
+	manifest, err := metadata.NewCollectionsManifestFromBytes(data)
+	if err != nil {
+		panic(err.Error())
+	}
+	collectionsManifestSvc.On("GetLatestManifests", mock.Anything, mock.Anything).Return(&manifest, &defaultManifest, nil)
+	collectionsManifestSvc.On("GetSpecificTargetManifest", mock.Anything, mock.Anything).Return(&defaultManifest, nil)
 }
 
 func setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc *service_def_mocks.CollectionsManifestSvc, version int) (pair metadata.CollectionsManifestPair) {
@@ -942,4 +962,63 @@ func TestRouterRaceyBrokenMapIdle(t *testing.T) {
 	assert.NotNil(lastCalledBackfillMap)
 	assert.Equal(0, len(collectionsRouter.brokenMapping))
 	assert.Nil(collectionsRouter.brokenMapDblChkKicker)
+}
+
+func TestClosedListenerCase(t *testing.T) {
+	fmt.Println("============== Test case start: TestClosedListenerCase =================")
+	defer fmt.Println("============== Test case end: TestClosedListenerCase =================")
+	assert := assert.New(t)
+
+	routerId, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, spec, _, _ := setupBoilerPlateRouter()
+
+	router, err := NewRouter(routerId, spec, downStreamParts, routingMap, crMode, loggerCtx, utilsMock, throughputThrottlerSvc, needToThrottle, expDelMode, collectionsManifestSvc, nil, nil, collectionsCap, nil, nil)
+
+	assert.Nil(err)
+
+	listener := component.NewDefaultAsyncComponentEventListenerImpl("1", "", log.DefaultLoggerContext)
+	router.RegisterComponentEventListener(common.BrokenRoutingUpdateEvent, listener)
+
+	listener = component.NewDefaultAsyncComponentEventListenerImpl("2", "", log.DefaultLoggerContext)
+	router.RegisterComponentEventListener(common.FixedRoutingUpdateEvent, listener)
+
+	listeners := router.AsyncComponentEventListeners()
+	for _, listener := range listeners {
+		assert.Nil(listener.Start())
+	}
+
+	// stop the listeners
+	for _, listener := range listeners {
+		assert.Nil(listener.Stop())
+	}
+
+	var ignoreCnt int
+	ignoreFunc := func(*base.WrappedMCRequest) {
+		ignoreCnt++
+	}
+
+	sourceNs := &base.CollectionNamespace{ScopeName: "S1", CollectionName: "col1"}
+	mcReq := &gomemcached.MCRequest{
+		Key:    []byte("testKey"),
+		Keylen: len("testKey"),
+	}
+	dummyData := &base.WrappedMCRequest{
+		Req:             mcReq,
+		SrcColNamespace: sourceNs,
+		ColInfo:         &base.TargetCollectionInfo{ColId: 123},
+	}
+
+	collectionsRouter := router.collectionsRouting[dummyDownStream]
+	assert.NotNil(collectionsRouter)
+	collectionsRouter.ignoreDataFunc = ignoreFunc
+
+	// 1. The target will return default manifest
+	setupCollectionManifestsSvcRouterWithSpecificDefaultTarget(collectionsManifestSvc)
+	assert.Nil(collectionsRouter.Start())
+	router.RouteCollection(dummyData, dummyDownStream, nil)
+
+	// 2. target will now return version 1 manifest (not default manifest)
+	collectionsManifestSvc2 := &service_def_mocks.CollectionsManifestSvc{}
+	setupCollectionManifestsSvcRouterWithSpecificTarget(collectionsManifestSvc2, 1)
+	router.collectionsRouting[dummyDownStream].collectionsManifestSvc = collectionsManifestSvc2
+	router.RouteCollection(dummyData, dummyDownStream, nil)
 }

@@ -10,12 +10,13 @@
 package Component
 
 import (
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/log"
 )
 
 type AsyncComponentEventListenerImpl struct {
@@ -50,8 +51,27 @@ func NewDefaultAsyncComponentEventListenerImpl(id, topic string,
 
 func (l *AsyncComponentEventListenerImpl) OnEvent(event *common.Event) {
 	select {
-	case l.event_chan <- event:
 	case <-l.fin_ch:
+		if event == nil {
+			return
+		}
+
+		// if the event is synchronous, unblock the caller by closing the blocking channel.
+		if event.EventType.IsSynchronousEvent() {
+			syncErrCh, ok1 := event.OtherInfos.(chan error)
+			if ok1 {
+				close(syncErrCh)
+				return
+			}
+
+			syncBoolCh, ok2 := event.OtherInfos.(chan bool)
+			if ok2 {
+				close(syncBoolCh)
+				return
+			}
+		}
+	default:
+		l.event_chan <- event
 	}
 }
 
