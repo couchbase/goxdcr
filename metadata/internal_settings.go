@@ -273,6 +273,8 @@ const (
 
 	ConnectionPreCheckGCTimeoutKey  = "ConnectionPreCheckGCTimeoutSec"
 	ConnectionPreCheckRPCTimeoutKey = "ConnectionPreCheckRPCTimeoutSec"
+
+	CapellaHostNameSuffixKey = "CapellaHostNameSuffix"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -394,6 +396,7 @@ var ConnectionPreCheckRPCTimeoutConfig = &SettingsConfig{int(base.ConnectionPreC
 var GlobalOSOConfig = &SettingsConfig{defaultValue: int(base.GlobalOSOSetting), Range: &Range{int(base.GlobalOSONoOp), int(base.GlobalOSOMax) - 1}}
 var HumanRecoveryThresholdConfig = &SettingsConfig{int(base.HumanRecoveryThreshold.Seconds()), &Range{10, 600}}
 var DnsSrvReBootstrapConfig = &SettingsConfig{base.DNSSrvReBootstrap, nil}
+var CapellaHostnameSuffixConfig = &SettingsConfig{base.CapellaHostnameSuffix, nil}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -515,6 +518,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	DnsSrvReBootstrapKey:                          DnsSrvReBootstrapConfig,
 	ConnectionPreCheckGCTimeoutKey:                ConnectionPreCheckGCTimeoutConfig,
 	ConnectionPreCheckRPCTimeoutKey:               ConnectionPreCheckRPCTimeoutConfig,
+	CapellaHostNameSuffixKey:                      CapellaHostnameSuffixConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

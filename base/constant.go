@@ -267,6 +267,8 @@ const CouchbaseSecureDnsServiceName = "couchbases"
 var CouchbaseUri = fmt.Sprintf("%v://", CouchbaseDnsServiceName)
 var CouchbaseSecureUri = fmt.Sprintf("%v://", CouchbaseSecureDnsServiceName)
 
+var CapellaHostnameSuffix = ".cloud.couchbase.com"
+
 // Various error messages
 var ErrorNotResponding = errors.New("Not responding")
 var ErrorNotOK = errors.New("Not OK")
@@ -1217,7 +1219,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	globalOSOMode int,
 	humanRecoveryThreshold time.Duration,
 	dnsSrvReBootstrap bool,
-	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration) {
+	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
+	capellaHostNameSuffix string) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1367,6 +1370,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	DNSSrvReBootstrap = dnsSrvReBootstrap
 	ConnectionPreCheckGCTimeout = connectionPreCheckGCTimeout
 	ConnectionPreCheckRPCTimeout = connectionPreCheckRPCTimeout
+	CapellaHostnameSuffix = capellaHostNameSuffix
 }
 
 // XDCR Dev hidden replication settings

@@ -73,10 +73,8 @@ fRIiVzm7VFLc7kWbp7ENH39HVG6TZzKnfl9zJYeiklo5vQQhGSMhzBsO70z4RRzi
 DPFAN/4qZAgD5q3AFNIq2WWADFQGSwVJhg==
 -----END CERTIFICATE-----`
 
-const CapellaHostnameSuffix = ".cloud.couchbase.com"
-
 func IsCapellaHostname(hostname string) bool {
-	return strings.Contains(hostname, CapellaHostnameSuffix)
+	return strings.Contains(hostname, base.CapellaHostnameSuffix)
 }
 
 /*
@@ -276,6 +274,16 @@ func RemoteClusterRefId() (string, error) {
 	}
 	parts := []string{RemoteClusterKeyPrefix, refUuid}
 	return strings.Join(parts, base.KeyPartsDelimiter), nil
+}
+
+// SmallString is String() but much more consise and logging friendly
+func (ref *RemoteClusterReference) SmallString() string {
+	return fmt.Sprintf("isHTTPS:%v,isEncEnabled:%v,isFullEnc:%v,isDNSSrv:%v,host:[%s,%s],activeHost:[%s,%s]",
+		ref.IsHttps(),
+		ref.IsEncryptionEnabled(),
+		ref.IsFullEncryption(),
+		ref.IsDnsSRV(),
+		ref.HostName(), ref.HttpsHostName(), ref.ActiveHostName(), ref.ActiveHttpsHostName())
 }
 
 // implements base.ClusterConnectionInfoProvider
@@ -703,9 +711,9 @@ func (ref *RemoteClusterReference) IsCapellaHostname() bool {
 }
 
 func (ref *RemoteClusterReference) isCapellaHostnameNoLock() bool {
-	return strings.Contains(ref.HostName_, CapellaHostnameSuffix) ||
-		strings.Contains(ref.ActiveHostName_, CapellaHostnameSuffix) ||
-		strings.Contains(ref.ActiveHttpsHostName_, CapellaHostnameSuffix)
+	return strings.Contains(ref.HostName_, base.CapellaHostnameSuffix) ||
+		strings.Contains(ref.ActiveHostName_, base.CapellaHostnameSuffix) ||
+		strings.Contains(ref.ActiveHttpsHostName_, base.CapellaHostnameSuffix)
 }
 
 func (ref *RemoteClusterReference) SetHostName(name string) {
@@ -902,7 +910,7 @@ func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
 // because the user can fix any DNS SRV look up error if it isn't right
 // If it is a cold start-up or metakv callback, retry on error before giving up
 // because there is no way to manually intervene before the system corrects itself
-func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded() {
+func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(logger *log.CommonLogger) {
 	// hostname may have port
 	hostNameWithoutPort := base.GetHostName(ref.HostName())
 	if net.ParseIP(hostNameWithoutPort) != nil {
@@ -929,6 +937,9 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded() {
 	lookupName, err := ref.getSRVLookupHostnameNoLock()
 	ref.mutex.RUnlock()
 	if err != nil {
+		if logger != nil {
+			logger.Errorf("%s dnsSrv failed while getting lookup name err=%v", ref.Id(), err)
+		}
 		ref.mutex.Lock()
 		ref.hostnameSRVType.ClearSRV()
 		ref.mutex.Unlock()
@@ -940,6 +951,9 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded() {
 	ref.mutex.Lock()
 	defer ref.mutex.Unlock()
 	if err != nil {
+		if logger != nil {
+			logger.Errorf("%s dnsSrv failed while lookup lookupHost=%s, err=%v", ref.Name_, lookupName, err)
+		}
 		ref.hostnameSRVType.ClearSRV()
 		return
 	}
