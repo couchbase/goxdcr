@@ -2059,7 +2059,8 @@ func (xmem *XmemNozzle) uncompressBody(req *base.WrappedMCRequest) error {
 }
 
 // Preserve all Xattributes except source _sync and old HLV if it has been updated
-// Returns the error if any and a boolean which indicates if we are replicating the source _mou. The caller may have to manually delete the target _mou if the return value is false.
+// Returns the error if any and a boolean which indicates if we are replicating the source _mou.
+// The caller may have to manually delete the target _mou if the return value is false.
 func (xmem *XmemNozzle) preserveSourceXattrs(wrappedReq *base.WrappedMCRequest, sourceDocMeta *crMeta.CRMetadata, updatedHLV bool, updater func(key []byte, val []byte) error) (bool, error) {
 	mouIsReplicated := false
 	if !base.HasXattr(wrappedReq.Req.DataType) {
