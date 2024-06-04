@@ -11,10 +11,12 @@ licenses/APL2.txt.
 package base
 
 import (
-	"github.com/couchbase/goxdcr/log"
 	"math/rand"
 	"sort"
 	"sync"
+	"sync/atomic"
+
+	"github.com/couchbase/goxdcr/log"
 )
 
 const NumOfSizes = 20
@@ -41,6 +43,8 @@ type DataPoolImpl struct {
 	byteSlicePools       [NumOfSizes]sync.Pool
 
 	logger_utils *log.CommonLogger
+
+	errCnt uint32
 }
 
 func NewDataPool() *DataPoolImpl {
@@ -97,17 +101,42 @@ func NewDataPool() *DataPoolImpl {
 	return newPool
 }
 
+// output slice will have cap(out) >= (sizeRequested == len(out))
 func (p *DataPoolImpl) GetByteSlice(sizeRequested uint64) ([]byte, error) {
 	i := sort.Search(NumOfSizes, func(i int) bool {
 		return p.byteSlicePoolClasses[i] >= sizeRequested
 	})
 
 	if i >= 0 && i < NumOfSizes {
-		return p.byteSlicePools[i].Get().([]byte), nil
+		var out []byte
+		out = p.byteSlicePools[i].Get().([]byte)
+		if cap(out) < int(sizeRequested) {
+			// it should not happen unless there is a misuse
+			// if this happens, then we probably have a case where we "put" a byte slice that originated outside of a "get" from datapool
+			errCnt := atomic.AddUint32(&p.errCnt, 1)
+			if (errCnt-1)%uint32(DatapoolLogFrequency) == 0 {
+				// log only once every 10 occurances to reduce spam
+				p.logger_utils.Warnf("Probable misuse of datapool, errCnt=%v, i=%v, cap(out)=%v, sizeRequested=%v", i, errCnt, cap(out), sizeRequested)
+			}
+			p.PutByteSlice(out)
+			// need to get from the (i+1)th datapool
+			if i+1 >= 0 && i+1 < NumOfSizes {
+				out = p.byteSlicePools[i+1].Get().([]byte)
+			} else {
+				return nil, ErrorSizeExceeded
+			}
+		}
+
+		if len(out) != int(sizeRequested) {
+			out = out[:sizeRequested]
+		}
+		return out, nil
 	}
 	return nil, ErrorSizeExceeded
 }
 
+// It should be taken care that the doneSlice should have been originated from the datapool p itself
+// i.e using p.GetByteSlice
 func (p *DataPoolImpl) PutByteSlice(doneSlice []byte) {
 	sliceCap := uint64(cap(doneSlice))
 	i := sort.Search(NumOfSizes, func(i int) bool {

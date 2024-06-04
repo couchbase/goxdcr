@@ -1220,7 +1220,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	humanRecoveryThreshold time.Duration,
 	dnsSrvReBootstrap bool,
 	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
-	capellaHostNameSuffix string) {
+	capellaHostNameSuffix string, datapoolLogFrequency int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1371,6 +1371,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ConnectionPreCheckGCTimeout = connectionPreCheckGCTimeout
 	ConnectionPreCheckRPCTimeout = connectionPreCheckRPCTimeout
 	CapellaHostnameSuffix = capellaHostNameSuffix
+	DatapoolLogFrequency = datapoolLogFrequency
 }
 
 // XDCR Dev hidden replication settings
@@ -1584,3 +1585,5 @@ var ConnectionPreCheckRPCTimeout = 15 * time.Second
 var ValidJsonEnds []byte = []byte{
 	'}', ']',
 }
+
+var DatapoolLogFrequency = 10

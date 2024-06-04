@@ -168,7 +168,6 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		}
 		wrappedUprEvent.Flags.SetShouldUseDecompressedValue()
 		copy(valueBod, body[0:endBodyPos])
-		valueBod = valueBod[0:endBodyPos] // Ensure trailing garbage are removed and len() calls are accurate
 		wrappedUprEvent.DecompressedValue = valueBod
 	}
 	return needToReplicate, err, errDesc, totalFailedDpCnt

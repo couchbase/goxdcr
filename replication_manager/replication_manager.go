@@ -351,6 +351,7 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.ConnectionPreCheckGCTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.ConnectionPreCheckRPCTimeoutKey].(int))*time.Second,
 		internal_settings.Values[metadata.CapellaHostNameSuffixKey].(string),
+		internal_settings.Values[metadata.DatapoolLogFrequencyKey].(int),
 	)
 }
 
