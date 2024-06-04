@@ -982,9 +982,9 @@ func mobileMixedModeTest(xmem *XmemNozzle, router *Router, settings map[string]i
 	updatedImportMCRequest, err := router.ComposeMCRequest(&base.WrappedUprEvent{UprEvent: updatedImportEvent})
 	assert.Nil(err)
 
-	xmem.config.vbMaxCas[doc1event.VBucket] = doc1event.Cas + 10                   // doc1 CAS is smaller
-	xmem.config.vbMaxCas[doc2event.VBucket] = doc2event.Cas - 10                   // doc2 CAS is larger
-	xmem.config.vbMaxCas[updatedImportEvent.VBucket] = updatedImportEvent.Cas + 10 // import CAS is smaller
+	xmem.config.vbHlvMaxCas[doc1event.VBucket] = doc1event.Cas + 10                   // doc1 CAS is smaller
+	xmem.config.vbHlvMaxCas[doc2event.VBucket] = doc2event.Cas - 10                   // doc2 CAS is larger
+	xmem.config.vbHlvMaxCas[updatedImportEvent.VBucket] = updatedImportEvent.Cas + 10 // import CAS is smaller
 
 	xmem.Receive(doc1MCRequest)
 	xmem.Receive(doc2MCRequest)
@@ -997,19 +997,19 @@ func mobileMixedModeTest(xmem *XmemNozzle, router *Router, settings map[string]i
 	err = waitForReplication(string(updatedImportEvent.Key), gocb.Cas(updatedImportEvent.Cas), bucket)
 	assert.Nil(err)
 
-	// Doc1 Cas is smaller than its vbMaxCas. So it does not have HLV
+	// Doc1 Cas is smaller than its vbHlvMaxCas. So it does not have HLV
 	value, err := bucket.DefaultCollection().LookupIn(string(doc1event.Key),
 		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
 	assert.Nil(err)
 	assert.False(value.Exists(0))
 
-	// Doc2 Cas is larger than its vbMaxCas. So it does  have HLV
+	// Doc2 Cas is larger than its vbHlvMaxCas. So it does  have HLV
 	value, err = bucket.DefaultCollection().LookupIn(string(doc2event.Key),
 		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
 	assert.Nil(err)
 	assert.True(value.Exists(0))
 
-	// The import doc Cas is smaller than its vbMaxCas, but it already has HLV. So the HLV gets updated
+	// The import doc Cas is smaller than its vbHlvMaxCas, but it already has HLV. So the HLV gets updated
 	value, err = bucket.DefaultCollection().LookupIn(string(updatedImportEvent.Key),
 		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
 	assert.Nil(err)

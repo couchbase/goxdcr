@@ -104,6 +104,7 @@ const (
 	EnableDcpPurgeRollback            = base.EnableDcpPurgeRollback
 	TargetTopologyLogFreq             = base.TargetTopologyLogFreqKey
 	CasDriftThresholdHoursKey         = base.CASDriftThresholdHoursKey
+	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
 )
 
 // constants for parsing create/change/view replication response
@@ -166,16 +167,17 @@ var MissingOldSettingsInRequest = errors.New("Invalid http request. No old repli
 
 // replication settings key in rest api -> internal replication settings key
 var RestKeyToSettingsKeyMap = map[string]string{
-	base.DevMainPipelineSendDelay:     metadata.DevMainPipelineSendDelay,
-	base.DevBackfillPipelineSendDelay: metadata.DevBackfillPipelineSendDelay,
-	base.DevMainPipelineRollbackTo0VB: metadata.DevMainPipelineRollbackTo0VB,
-	base.DevBackfillRollbackTo0VB:     metadata.DevBackfillRollbackTo0VB,
-	base.DevCkptMgrForceGCWaitSec:     metadata.DevCkptMgrForceGCWaitSec,
-	base.DevColManifestSvcDelaySec:    metadata.DevColManifestSvcDelaySec,
-	base.DevNsServerPortSpecifier:     metadata.DevNsServerPortSpecifier,
-	base.DevBucketTopologyLegacyDelay: metadata.DevBucketTopologyLegacyDelay,
-	base.DevBackfillReplUpdateDelay:   metadata.DevBackfillReplUpdateDelay,
-	base.DevCasDriftForceDocKey:       metadata.DevCasDrfitForceDocKey,
+	base.DevMainPipelineSendDelay:      metadata.DevMainPipelineSendDelay,
+	base.DevBackfillPipelineSendDelay:  metadata.DevBackfillPipelineSendDelay,
+	base.DevMainPipelineRollbackTo0VB:  metadata.DevMainPipelineRollbackTo0VB,
+	base.DevBackfillRollbackTo0VB:      metadata.DevBackfillRollbackTo0VB,
+	base.DevCkptMgrForceGCWaitSec:      metadata.DevCkptMgrForceGCWaitSec,
+	base.DevColManifestSvcDelaySec:     metadata.DevColManifestSvcDelaySec,
+	base.DevNsServerPortSpecifier:      metadata.DevNsServerPortSpecifier,
+	base.DevBucketTopologyLegacyDelay:  metadata.DevBucketTopologyLegacyDelay,
+	base.DevBackfillReplUpdateDelay:    metadata.DevBackfillReplUpdateDelay,
+	base.DevCasDriftForceDocKey:        metadata.DevCasDriftForceDocKey,
+	base.DevPreCheckCasDriftForceVbKey: metadata.DevPreCheckCasDriftForceVbKey,
 
 	base.Type:                         metadata.ReplicationTypeKey,
 	FilterExpression:                  metadata.FilterExpressionKey,
@@ -224,20 +226,22 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	EnableDcpPurgeRollback:            metadata.EnableDcpPurgeRollback,
 	TargetTopologyLogFreq:             metadata.TargetTopologyLogFreqKey,
 	CasDriftThresholdHoursKey:         metadata.CASDriftThresholdHoursKey,
+	PreCheckCasDriftThresholdHoursKey: metadata.PreCheckCasDriftThresholdHoursKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
 var SettingsKeyToRestKeyMap = map[string]string{
-	metadata.DevMainPipelineSendDelay:     base.DevMainPipelineSendDelay,
-	metadata.DevBackfillPipelineSendDelay: base.DevBackfillPipelineSendDelay,
-	metadata.DevMainPipelineRollbackTo0VB: base.DevMainPipelineRollbackTo0VB,
-	metadata.DevBackfillRollbackTo0VB:     base.DevBackfillRollbackTo0VB,
-	metadata.DevCkptMgrForceGCWaitSec:     base.DevCkptMgrForceGCWaitSec,
-	metadata.DevColManifestSvcDelaySec:    base.DevColManifestSvcDelaySec,
-	metadata.DevNsServerPortSpecifier:     base.DevNsServerPortSpecifier,
-	metadata.DevBucketTopologyLegacyDelay: base.DevBucketTopologyLegacyDelay,
-	metadata.DevBackfillReplUpdateDelay:   base.DevBackfillReplUpdateDelay,
-	metadata.DevCasDrfitForceDocKey:       base.DevCasDriftForceDocKey,
+	metadata.DevMainPipelineSendDelay:      base.DevMainPipelineSendDelay,
+	metadata.DevBackfillPipelineSendDelay:  base.DevBackfillPipelineSendDelay,
+	metadata.DevMainPipelineRollbackTo0VB:  base.DevMainPipelineRollbackTo0VB,
+	metadata.DevBackfillRollbackTo0VB:      base.DevBackfillRollbackTo0VB,
+	metadata.DevCkptMgrForceGCWaitSec:      base.DevCkptMgrForceGCWaitSec,
+	metadata.DevColManifestSvcDelaySec:     base.DevColManifestSvcDelaySec,
+	metadata.DevNsServerPortSpecifier:      base.DevNsServerPortSpecifier,
+	metadata.DevBucketTopologyLegacyDelay:  base.DevBucketTopologyLegacyDelay,
+	metadata.DevBackfillReplUpdateDelay:    base.DevBackfillReplUpdateDelay,
+	metadata.DevCasDriftForceDocKey:        base.DevCasDriftForceDocKey,
+	metadata.DevPreCheckCasDriftForceVbKey: base.DevPreCheckCasDriftForceVbKey,
 
 	metadata.ReplicationTypeKey:                   base.Type,
 	metadata.FilterExpressionKey:                  FilterExpression,
@@ -286,6 +290,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.EnableDcpPurgeRollback:               EnableDcpPurgeRollback,
 	metadata.TargetTopologyLogFreqKey:             TargetTopologyLogFreq,
 	metadata.CASDriftThresholdHoursKey:            CasDriftThresholdHoursKey,
+	metadata.PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation

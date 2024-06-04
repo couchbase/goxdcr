@@ -1104,8 +1104,8 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 	if val, ok := settings[base.EnableCrossClusterVersioningKey]; ok {
 		xmemSettings[base.EnableCrossClusterVersioningKey] = val
 	}
-	if val, ok := settings[base.VbucketsMaxCasKey]; ok {
-		xmemSettings[base.VbucketsMaxCasKey] = val
+	if val, ok := settings[base.HlvVbMaxCasKey]; ok {
+		xmemSettings[base.HlvVbMaxCasKey] = val
 	}
 	if val, ok := settings[base.VersionPruningWindowHrsKey]; ok {
 		xmemSettings[base.VersionPruningWindowHrsKey] = val
@@ -1346,9 +1346,9 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[metadata.CASDriftThresholdHoursKey] = casDriftThreshold
 	}
 
-	devCasDriftForceDocKey, ok := settings[metadata.DevCasDrfitForceDocKey]
+	devCasDriftForceDocKey, ok := settings[metadata.DevCasDriftForceDocKey]
 	if ok {
-		routerSettings[metadata.DevCasDrfitForceDocKey] = devCasDriftForceDocKey
+		routerSettings[metadata.DevCasDriftForceDocKey] = devCasDriftForceDocKey
 	}
 
 	return routerSettings, nil

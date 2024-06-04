@@ -788,7 +788,7 @@ func TestCkptMgrPerformCkpt(t *testing.T) {
 	assert.NotNil(ckptMgr)
 	ckptMgr.unitTest = true
 	ckptMgr.checkpointAllowedHelper.setCheckpointAllowed()
-	ckptMgr.initConnections()
+	ckptMgr.InitConnections()
 
 	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
 	assert.Nil(ckptMgr.Attach(mainPipeline))
@@ -831,7 +831,7 @@ func TestCkptMgrPerformCkptWithDelay(t *testing.T) {
 	assert.NotNil(ckptMgr)
 	ckptMgr.unitTest = true
 	ckptMgr.checkpointAllowedHelper.setCheckpointAllowed()
-	ckptMgr.initConnections()
+	ckptMgr.InitConnections()
 
 	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
 	assert.Nil(ckptMgr.Attach(mainPipeline))
@@ -880,7 +880,7 @@ func TestCkptMgrPerformCkptWithDelayAndOneTime(t *testing.T) {
 	assert.NotNil(ckptMgr)
 	ckptMgr.unitTest = true
 	ckptMgr.checkpointAllowedHelper.setCheckpointAllowed()
-	ckptMgr.initConnections()
+	ckptMgr.InitConnections()
 
 	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
 	assert.Nil(ckptMgr.Attach(mainPipeline))

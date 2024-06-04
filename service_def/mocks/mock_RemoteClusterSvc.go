@@ -474,6 +474,65 @@ func (_c *RemoteClusterSvc_GetManifestByUuid_Call) RunAndReturn(run func(string,
 	return _c
 }
 
+// GetMaxVBStatsGetter provides a mock function with given fields: ref, bucketName
+func (_m *RemoteClusterSvc) GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.MaxVBCasStatsGetter, error) {
+	ret := _m.Called(ref, bucketName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMaxVBStatsGetter")
+	}
+
+	var r0 service_def.MaxVBCasStatsGetter
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, string) (service_def.MaxVBCasStatsGetter, error)); ok {
+		return rf(ref, bucketName)
+	}
+	if rf, ok := ret.Get(0).(func(*metadata.RemoteClusterReference, string) service_def.MaxVBCasStatsGetter); ok {
+		r0 = rf(ref, bucketName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(service_def.MaxVBCasStatsGetter)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*metadata.RemoteClusterReference, string) error); ok {
+		r1 = rf(ref, bucketName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemoteClusterSvc_GetMaxVBStatsGetter_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMaxVBStatsGetter'
+type RemoteClusterSvc_GetMaxVBStatsGetter_Call struct {
+	*mock.Call
+}
+
+// GetMaxVBStatsGetter is a helper method to define mock.On call
+//   - ref *metadata.RemoteClusterReference
+//   - bucketName string
+func (_e *RemoteClusterSvc_Expecter) GetMaxVBStatsGetter(ref interface{}, bucketName interface{}) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
+	return &RemoteClusterSvc_GetMaxVBStatsGetter_Call{Call: _e.mock.On("GetMaxVBStatsGetter", ref, bucketName)}
+}
+
+func (_c *RemoteClusterSvc_GetMaxVBStatsGetter_Call) Run(run func(ref *metadata.RemoteClusterReference, bucketName string)) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*metadata.RemoteClusterReference), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_GetMaxVBStatsGetter_Call) Return(_a0 service_def.MaxVBCasStatsGetter, _a1 error) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemoteClusterSvc_GetMaxVBStatsGetter_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, string) (service_def.MaxVBCasStatsGetter, error)) *RemoteClusterSvc_GetMaxVBStatsGetter_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRefListForFirstTimeBadAuths provides a mock function with given fields:
 func (_m *RemoteClusterSvc) GetRefListForFirstTimeBadAuths() ([]*metadata.RemoteClusterReference, error) {
 	ret := _m.Called()
@@ -958,6 +1017,39 @@ func (_c *RemoteClusterSvc_RequestRemoteMonitoring_Call) Return(_a0 error) *Remo
 }
 
 func (_c *RemoteClusterSvc_RequestRemoteMonitoring_Call) RunAndReturn(run func(*metadata.ReplicationSpecification) error) *RemoteClusterSvc_RequestRemoteMonitoring_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetBucketTopologySvc provides a mock function with given fields: svc
+func (_m *RemoteClusterSvc) SetBucketTopologySvc(svc service_def.BucketTopologySvc) {
+	_m.Called(svc)
+}
+
+// RemoteClusterSvc_SetBucketTopologySvc_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetBucketTopologySvc'
+type RemoteClusterSvc_SetBucketTopologySvc_Call struct {
+	*mock.Call
+}
+
+// SetBucketTopologySvc is a helper method to define mock.On call
+//   - svc service_def.BucketTopologySvc
+func (_e *RemoteClusterSvc_Expecter) SetBucketTopologySvc(svc interface{}) *RemoteClusterSvc_SetBucketTopologySvc_Call {
+	return &RemoteClusterSvc_SetBucketTopologySvc_Call{Call: _e.mock.On("SetBucketTopologySvc", svc)}
+}
+
+func (_c *RemoteClusterSvc_SetBucketTopologySvc_Call) Run(run func(svc service_def.BucketTopologySvc)) *RemoteClusterSvc_SetBucketTopologySvc_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(service_def.BucketTopologySvc))
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetBucketTopologySvc_Call) Return() *RemoteClusterSvc_SetBucketTopologySvc_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *RemoteClusterSvc_SetBucketTopologySvc_Call) RunAndReturn(run func(service_def.BucketTopologySvc)) *RemoteClusterSvc_SetBucketTopologySvc_Call {
 	_c.Call.Return(run)
 	return _c
 }

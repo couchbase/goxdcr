@@ -327,6 +327,98 @@ func (_c *TargetNotification_GetTargetStorageBackend_Call) RunAndReturn(run func
 	return _c
 }
 
+// GetVBMaxCasStats provides a mock function with given fields:
+func (_m *TargetNotification) GetVBMaxCasStats() base.HighSeqnosMapType {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVBMaxCasStats")
+	}
+
+	var r0 base.HighSeqnosMapType
+	if rf, ok := ret.Get(0).(func() base.HighSeqnosMapType); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(base.HighSeqnosMapType)
+		}
+	}
+
+	return r0
+}
+
+// TargetNotification_GetVBMaxCasStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVBMaxCasStats'
+type TargetNotification_GetVBMaxCasStats_Call struct {
+	*mock.Call
+}
+
+// GetVBMaxCasStats is a helper method to define mock.On call
+func (_e *TargetNotification_Expecter) GetVBMaxCasStats() *TargetNotification_GetVBMaxCasStats_Call {
+	return &TargetNotification_GetVBMaxCasStats_Call{Call: _e.mock.On("GetVBMaxCasStats")}
+}
+
+func (_c *TargetNotification_GetVBMaxCasStats_Call) Run(run func()) *TargetNotification_GetVBMaxCasStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TargetNotification_GetVBMaxCasStats_Call) Return(_a0 base.HighSeqnosMapType) *TargetNotification_GetVBMaxCasStats_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *TargetNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() base.HighSeqnosMapType) *TargetNotification_GetVBMaxCasStats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetVersionPruningWindowHrs provides a mock function with given fields:
+func (_m *TargetNotification) GetVersionPruningWindowHrs() int {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVersionPruningWindowHrs")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// TargetNotification_GetVersionPruningWindowHrs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVersionPruningWindowHrs'
+type TargetNotification_GetVersionPruningWindowHrs_Call struct {
+	*mock.Call
+}
+
+// GetVersionPruningWindowHrs is a helper method to define mock.On call
+func (_e *TargetNotification_Expecter) GetVersionPruningWindowHrs() *TargetNotification_GetVersionPruningWindowHrs_Call {
+	return &TargetNotification_GetVersionPruningWindowHrs_Call{Call: _e.mock.On("GetVersionPruningWindowHrs")}
+}
+
+func (_c *TargetNotification_GetVersionPruningWindowHrs_Call) Run(run func()) *TargetNotification_GetVersionPruningWindowHrs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TargetNotification_GetVersionPruningWindowHrs_Call) Return(_a0 int) *TargetNotification_GetVersionPruningWindowHrs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *TargetNotification_GetVersionPruningWindowHrs_Call) RunAndReturn(run func() int) *TargetNotification_GetVersionPruningWindowHrs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsSourceNotification provides a mock function with given fields:
 func (_m *TargetNotification) IsSourceNotification() bool {
 	ret := _m.Called()

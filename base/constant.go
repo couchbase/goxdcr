@@ -473,6 +473,9 @@ const (
 	DCP_STAT_NAME                      = "dcp"
 	DCP_XDCR_STATS_PREFIX              = "eq_dcpq:xdcr:"
 	DCP_XDCR_ITEMS_REMAINING_SUFFIX    = ":items_remaining"
+	VBUCKET_DETAILS_NAME               = "vbucket-details"
+	MAXCAS_CONST                       = ":max_cas"
+	VBUCKET_MAXCAS_STAT_KEY_FORMAT     = VBUCKET_PREFIX + "%v" + MAXCAS_CONST
 )
 
 var ErrorsStatsKey = "Errors"
@@ -1461,6 +1464,7 @@ const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may 
 const DevBucketTopologyLegacyDelay = "xdcrDevBucketTopologyLegacyDelay"
 const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
 const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
+const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
@@ -1567,6 +1571,8 @@ const (
 	EnableCrossClusterVersioningKey = "enableCrossClusterVersioning"
 	// Bucket setting for starting timestamp (CAS) to enable versioning
 	VbucketsMaxCasKey = "vbucketsMaxCas"
+	// Bucket setting for starting timestamp (CAS) to eanble versioning
+	HlvVbMaxCasKey = "vbucketsMaxCas"
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)
@@ -1733,6 +1739,10 @@ var ValidJsonEnds []byte = []byte{
 
 const EmptyJsonObject string = "{}"
 
-const CASDriftThresholdHoursKey = "casDriftThresholdHours"
+const (
+	CASDriftThresholdHoursKey         = "casDriftThresholdHours"
+	PreCheckCasDriftThresholdHoursKey = "preCheckCasDriftThresholdHours"
+)
 
 const CASDriftLiveDetected = "One or more documents are not replicated because their CAS values are beyond the acceptable drift threshold"
+const PreCheckCASDriftDetected = "The following VBs have time drift (nanoSecs) beyond acceptable threshold"

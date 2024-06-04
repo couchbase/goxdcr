@@ -373,9 +373,9 @@ func TestDataPool(t *testing.T) {
 // 	//	json.NewEncoder(dumpBytes).Encode(*m)
 // 	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
 // 	//	if writeErr == nil {
-// 	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+// 	//		dcp.LoggerImpl().Infof("Wrote dump file successfully to %v\n", fileName)
 // 	//	} else {
-// 	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+// 	//		dcp.LoggerImpl().Warnf("Unable to write file due to %v\n", writeErr)
 // 	//	}
 
 // 	fmt.Println("============== Test case end: TestGenerateXattrUsingGoCB =================")
@@ -596,9 +596,9 @@ func TestDataPool(t *testing.T) {
 // 	//	json.NewEncoder(dumpBytes).Encode(*m)
 // 	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
 // 	//	if writeErr == nil {
-// 	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+// 	//		dcp.LoggerImpl().Infof("Wrote dump file successfully to %v\n", fileName)
 // 	//	} else {
-// 	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+// 	//		dcp.LoggerImpl().Warnf("Unable to write file due to %v\n", writeErr)
 // 	//	}
 // }
 
@@ -695,8 +695,8 @@ func TestMatchPcreNegLookahead(t *testing.T) {
 // 	//	json.NewEncoder(dumpBytes).Encode(*m)
 // 	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
 // 	//	if writeErr == nil {
-// 	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+// 	//		dcp.LoggerImpl().Infof("Wrote dump file successfully to %v\n", fileName)
 // 	//	} else {
-// 	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+// 	//		dcp.LoggerImpl().Warnf("Unable to write file due to %v\n", writeErr)
 // 	//	}
 // }

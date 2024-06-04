@@ -20,6 +20,8 @@ import (
 // 4. err
 type BucketInfoGetter func() (map[string]interface{}, bool, string, error)
 
+type MaxVBCasStatsGetter func() (base.HighSeqnosMapType, error)
+
 type RemoteClusterSvc interface {
 	RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error)
 	RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error)
@@ -89,4 +91,9 @@ type RemoteClusterSvc interface {
 
 	// Gives an API that returns the ability to retrieve target bucket info - note that this call may be heavy on ns_server
 	GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (BucketInfoGetter, error)
+
+	SetBucketTopologySvc(svc BucketTopologySvc)
+
+	// MaxVBStats getter specific to KV
+	GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (MaxVBCasStatsGetter, error)
 }

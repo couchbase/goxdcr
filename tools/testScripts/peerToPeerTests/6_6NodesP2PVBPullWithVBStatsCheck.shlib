@@ -19,7 +19,7 @@ declare -A SOURCE_CLUSTER_AFTER=(["C1"]=9000 ["C1P0"]=9001 ["C1P1"]=9002 ["C1P2"
 declare -A CLUSTER_NAME_N1QL_PORT_MAP=(["C1"]=9499 ["C1P0"]=9498 ["C1P1"]=9497 ["C1P2"]=9496 ["C1P3"]=9495 ["C1P4"]=9494 ["C2"]=9493)
 
 # Set c1 to have 2 buckets and c2 to have 1 bucket
-CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0 B1" ["C2"]="B1")
 unset CLUSTER_SETUP_DONE_MAP
 declare -gA CLUSTER_SETUP_DONE_MAP
 
@@ -30,6 +30,7 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
 declare -A DefaultBucketReplPropertiesWithFilterExp=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true" ["filterExpression"]="REGEXP_CONTAINS(META().id, '10')")
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
@@ -74,6 +75,22 @@ function induceGuardrailFailedWrites {
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
 }
 
+function induceCasPoisonGuardrailFailedWrites {
+	local numberOfCasPoisonDocs=500
+	local i=0
+	local docName
+
+	for ((i = 0; $i < $numberOfCasPoisonDocs; i = $(($i + 1)))); do
+		docName="casPoisonDoc_$i"
+		echo "Writing $docName out of $numberOfCasPoisonDocs"
+		setReplicationSettings "C1" "B1" "C2" "B1" "xdcrDevCasDriftInjectDocKey=$docName"
+		sleep 0.5
+		writeJSONDocument "C1" "B1" "$docName" '{"colFoo":"colBar"}'
+		sleep 0.5
+	done
+	validatePrometheusStatsCasPoisonNon0 "C1" "B1" "B1"
+}
+
 function runOneReplicationCycle {
 	local timeIntervalSecs=5
 	local checkInterval=$TC_CHECK_INTERVAL
@@ -101,6 +118,7 @@ function runOneReplicationCycle {
 	createRemoteClusterReference "C1" "C2"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplPropertiesWithFilterExp
+	createBucketReplication "C1" "B1" "C2" "B1" DefaultBucketReplProperties
 
 	runDataLoad
 
@@ -110,8 +128,10 @@ function runOneReplicationCycle {
 	sleep 30
 
 	checkChangesLeftInternal "C1" "B0" "C2" "B1"
+	checkChangesLeftInternal "C1" "B1" "C2" "B1"
 	validateXDCRCheckpoints "C1"
 
+	induceCasPoisonGuardrailFailedWrites
 	induceGuardrailFailedWrites
 
 	grepForPanics
@@ -160,8 +180,11 @@ declare -A filteringStatsAfter=(["xdcr_atr_txn_docs_filtered_total"]=0 ["xdcr_bi
 	["xdcr_expiry_filtered_total"]=0 ["xdcr_mobile_docs_filtered_total"]=0 ["xdcr_set_filtered_total"]=0 ["xdcr_expiry_stripped_total"]=0)
 declare -a increasingStats=("xdcr_binary_filtered_total" "xdcr_client_txn_docs_filtered_total" "xdcr_docs_filtered_total" "xdcr_set_filtered_total")
 
-declare -A guardrailStatsBefore=(["xdcr_guardrail_resident_ratio_total"]=0 ["xdcr_guardrail_data_size_total"]=0 ["xdcr_guardrail_disk_space_total"]=0)
-declare -A guardrailStatsAfter=(["xdcr_guardrail_resident_ratio_total"]=0 ["xdcr_guardrail_data_size_total"]=0 ["xdcr_guardrail_disk_space_total"]=0)
+declare -A guardrailStatsBefore=(["xdcr_guardrail_resident_ratio_total"]=0 ["xdcr_guardrail_data_size_total"]=0 ["xdcr_guardrail_disk_space_total"]=0 ["xdcr_docs_cas_poisoned_total"]=0)
+declare -A guardrailStatsAfter=(["xdcr_guardrail_resident_ratio_total"]=0 ["xdcr_guardrail_data_size_total"]=0 ["xdcr_guardrail_disk_space_total"]=0 ["xdcr_docs_cas_poisoned_total"]=0)
+
+declare -A casPoisonStatsBefore=(["xdcr_docs_cas_poisoned_total"]=0)
+declare -A casPoisonStatsAfter=(["xdcr_docs_cas_poisoned_total"]=0)
 
 function executeTxn {
 	local clusterName=$1
@@ -203,9 +226,10 @@ function executeTxn {
 
 function getFilteringStatsBefore {
 	local clusterName=$1
+	local sourceBucketName=$2
 	echo "Getting filtering stats for $clusterName"
 	for statKey in $(echo ${!filteringStatsBefore[@]}); do
-		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
+		newVal=$(getSpecificStatFromPrometheus $clusterName $sourceBucketName $statKey)
 		oldVal=${filteringStatsBefore[${statKey}]}
 		sum=$(($oldVal + $newVal))
 		filteringStatsBefore[${statKey}]=$sum
@@ -214,9 +238,10 @@ function getFilteringStatsBefore {
 
 function getFilteringStatsAfter {
 	local clusterName=$1
+	local sourceBucketName=$2
 	echo "Getting filtering stats for $clusterName"
 	for statKey in $(echo ${!filteringStatsAfter[@]}); do
-		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
+		newVal=$(getSpecificStatFromPrometheus $clusterName $sourceBucketName $statKey)
 		oldVal=${filteringStatsAfter[${statKey}]}
 		sum=$(($oldVal + $newVal))
 		filteringStatsAfter[${statKey}]=$sum
@@ -225,23 +250,53 @@ function getFilteringStatsAfter {
 
 function getGuardrailStatsBefore {
 	local clusterName=$1
+	local sourceBucketName=$2
 	echo "Getting guardrail stats for $clusterName"
 	for statKey in $(echo ${!guardrailStatsBefore[@]}); do
-		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
+		newVal=$(getSpecificStatFromPrometheus $clusterName $sourceBucketName $statKey)
 		oldVal=${guardrailStatsBefore[${statKey}]}
 		sum=$(($oldVal + $newVal))
 		guardrailStatsBefore[${statKey}]=$sum
+		echo "BEFORE: logging $statKey with $sum"
+	done
+}
+
+function getCasPoisonStatsBefore {
+	local clusterName=$1
+	local sourceBucketName=$2
+	echo "Getting cas poison stats for $clusterName"
+	for statKey in $(echo ${!casPoisonStatsBefore[@]}); do
+		newVal=$(getSpecificStatFromPrometheus $clusterName $sourceBucketName $statKey)
+		oldVal=${casPoisonStatsBefore[${statKey}]}
+		sum=$(($oldVal + $newVal))
+		casPoisonStatsBefore[${statKey}]=$sum
+		echo "BEFORE: logging $statKey with $sum"
 	done
 }
 
 function getGuardrailStatsAfter {
 	local clusterName=$1
+	local sourceBucketName=$2
 	echo "Getting guardrail stats for $clusterName"
 	for statKey in $(echo ${!guardrailStatsAfter[@]}); do
-		newVal=$(getSpecificStatFromPrometheus $clusterName $statKey)
+		newVal=$(getSpecificStatFromPrometheus $clusterName $sourceBucketName $statKey)
 		oldVal=${guardrailStatsAfter[${statKey}]}
 		sum=$(($oldVal + $newVal))
 		guardrailStatsAfter[${statKey}]=$sum
+		echo "AFTER: logging $statKey with $sum"
+	done
+}
+
+function getCasPoisonStatsAfter {
+	local clusterName=$1
+	local sourceBucketName=$2
+	echo "Getting cas poison stats for $clusterName"
+	for statKey in $(echo ${!casPoisonStatsAfter[@]}); do
+		newVal=$(getSpecificStatFromPrometheus $clusterName $sourceBucketName $statKey)
+		oldVal=${casPoisonStatsAfter[${statKey}]}
+		sum=$(($oldVal + $newVal))
+		casPoisonStatsAfter[${statKey}]=$sum
+		echo "AFTER: logging $statKey with $sum"
 	done
 }
 
@@ -279,7 +334,7 @@ function checkFilteringStatsAreEqual {
 			fi
 		fi
 	done
-	echo "All the guardrail stats are equal."
+	echo "All the filtering stats are equal."
 }
 
 function checkGuardrailStatsAreEqual {
@@ -287,6 +342,25 @@ function checkGuardrailStatsAreEqual {
 		# Use greather than to account for leakage
 		if [ ${guardrailStatsBefore[${statKey}]} -gt ${guardrailStatsAfter[${statKey}]} ]; then
 			echo "Guardrail stats are not the same. StatKey=${statKey}, StatValBefore=${guardrailStatsBefore[${statKey}]}, StatValAfter=${guardrailStatsAfter[${statKey}]}"
+			echo "============================================================================"
+			echo "FAILED"
+			echo "============================================================================"
+			cleanupBucketReplications
+			cleanupBuckets
+			cleanupRemoteClusterRefs
+
+			echo "Cleaning up topology..."
+			restoreClusterBack "C1"
+			exit 1
+		fi
+	done
+}
+
+function checkCasPoisonStatsAreEqual {
+	for statKey in $(echo ${!casPoisonStatsAfter[@]}); do
+		# Use greather than to account for leakage
+		if [ ${casPoisonStatsBefore[${statKey}]} -gt ${casPoisonStatsAfter[${statKey}]} ]; then
+			echo "Cas poison stats are not the same. StatKey=${statKey}, StatValBefore=${casPoisonStatsBefore[${statKey}]}, StatValAfter=${casPoisonStatsAfter[${statKey}]}"
 			echo "============================================================================"
 			echo "FAILED"
 			echo "============================================================================"
@@ -320,8 +394,9 @@ function runTestCase {
 	sleep 60
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_BEFORE[@]}); do
-		getFilteringStatsBefore $clusterName
-		getGuardrailStatsBefore $clusterName
+		getFilteringStatsBefore $clusterName "B0"
+		getGuardrailStatsBefore $clusterName "B0"
+		getCasPoisonStatsBefore $clusterName "B1"
 	done
 
 	pauseAndResumeReplication
@@ -332,12 +407,14 @@ function runTestCase {
 	sleep 60
 
 	for clusterName in $(echo ${!SOURCE_CLUSTER_AFTER[@]}); do
-		getFilteringStatsAfter $clusterName
-		getGuardrailStatsAfter $clusterName
+		getFilteringStatsAfter $clusterName "B0"
+		getGuardrailStatsAfter $clusterName "B0"
+		getCasPoisonStatsAfter $clusterName "B1"
 	done
 
 	checkFilteringStatsAreEqual
 	checkGuardrailStatsAreEqual
+	checkCasPoisonStatsAreEqual
 
 	echo "============================================================================"
 	echo "PASSED"
