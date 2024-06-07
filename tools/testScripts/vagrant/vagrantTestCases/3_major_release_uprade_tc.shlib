@@ -79,8 +79,8 @@ function runTestCase {
 	echo "Running major releases upgrade test case"
 	echo "============================================================================"
 
-	local versionFrom="neo"
-	local versionTo="trinity"
+	local versionFrom="trinity"
+	local versionTo="toy"
 
 	vagrantRemoveCbServerAll
 

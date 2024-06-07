@@ -59,10 +59,10 @@ function runTestCase {
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServer 0 "neo" # To be updated
-	vagrantInstallCBServer 1 "neo"
-	vagrantInstallCBServer 2 "cheshirecat"
-	vagrantInstallCBServer 3 "cheshirecat"
+	vagrantInstallCBServer 0 "toy" # To be updated
+	vagrantInstallCBServer 1 "toy"
+	vagrantInstallCBServer 2 "neo"
+	vagrantInstallCBServer 3 "neo"
 
 	setupTopologies
 

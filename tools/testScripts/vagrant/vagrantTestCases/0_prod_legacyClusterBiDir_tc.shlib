@@ -22,8 +22,10 @@ VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C1P"]="192.168.56.3" ["C2"]="192.168.
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
-cluster1BucketsArr=("B1")
-CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]=${cluster1BucketsArr[@]})
+unset CLUSTER_SETUP_DONE_MAP
+declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
@@ -31,31 +33,59 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
-declare -A ExplicitReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["collectionsExplicitMapping"]="true" ["colMappingRules"]='{"_default._default":"test.test"}')
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevBucketTopologyLegacyDelay"]=3)
 
-BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
-SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
+#BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
+#SCOPE_NAME_COLLECTION_MAP=(["test"]="test")
 
 # Test cases assume vagrant up has already been called
 
-function runDataLoad {
-	#runCbWorkloadGenBucket "C1" "B1"
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\tbk_ouvidoria_total(hw)::174" '{"foo":"bar"}'
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u0000bk_ouvidoria_total(hw)::1700" '{"foo":"bar"}'
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u0009bk_ouvidoria_total(hw)::1709" '{"foo":"bar"}'
-	writeJSONDocument "C1" "B1" "index::webHook::nameAndUserId::\u000bk_ouvidoria_total(hw)::170" '{"foo":"bar"}'
+function runDataLoadBothSidesAndCheck {
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 20
+	checkBidirectionalChangesLeft
+}
+
+function pauseAndResumeBothSidesAndCheck {
+	pauseReplication "C1" "B1" "C2" "B2"
+	pauseReplication "C2" "B2" "C1" "B1"
+	sleep 30
+	resumeReplication "C1" "B1" "C2" "B2"
+	resumeReplication "C2" "B2" "C1" "B1"
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 30
+	checkBidirectionalChangesLeft
+}
+
+function deleteRecreateReplicationsAndCheck {
+	deleteBucketReplication "C1" "B1" "C2" "B2"
+	deleteBucketReplication "C2" "B2" "C1" "B1"
+	sleep 5
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	sleep 5
+	runCbWorkloadGenBucket "C1" "B1"
+	runCbWorkloadGenBucket "C2" "B2"
+	sleep 30
+	checkBidirectionalChangesLeft
 }
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running 7.0.4 tab character OSO test"
+	echo "Running legacy and current bidir"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServerAll "7.0.4"
+	vagrantInstallCBServer 0 "toy" # To be updated
+	vagrantInstallCBServer 1 "toy"
+	vagrantInstallCBServer 2 "neo"
+	vagrantInstallCBServer 3 "neo"
 
 	setupTopologies
 
@@ -78,22 +108,14 @@ function runTestCase {
 	echo "Rebalancing nodes to become a 2-node target cluster"
 	startRebalancing "C2"
 
-	local loopCounter=0
+	createBucketReplication "C1" "B1" "C2" "B2" DefaultBucketReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
 
-	while ((1)); do
-		setupBuckets
-		runDataLoad
-		createBucketReplication "C1" "B1" "C2" "B2" ExplicitReplProperties
-		checkChangesLeftInternal "C1" "B1" "C2" "B2"
-		vagrantGrepForPanicAll
+	runDataLoadBothSidesAndCheck
+	pauseAndResumeBothSidesAndCheck
+	deleteRecreateReplicationsAndCheck
 
-		echo "============================================================================"
-		echo "PASSED $loopCounter"
-		echo "============================================================================"
-		loopCounter=$(($loopCounter + 1))
-
-		cleanupBucketReplications
-		cleanupBuckets
-	done
-
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	cleanupBuckets
 }
