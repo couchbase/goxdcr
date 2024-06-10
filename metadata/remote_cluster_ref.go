@@ -1019,12 +1019,12 @@ func (ref *RemoteClusterReference) GetSRVHostNames() (hostnameList []string) {
 // because the user can fix any DNS SRV look up error if it isn't right
 // If it is a cold start-up or metakv callback, retry on error before giving up
 // because there is no way to manually intervene before the system corrects itself
-func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(logger *log.CommonLogger) {
+func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(logger *log.CommonLogger) error {
 	// hostname may have port
 	hostNameWithoutPort := base.GetHostName(ref.HostName())
 	if net.ParseIP(hostNameWithoutPort) != nil {
 		// If it is IPv4 or IPv6, it is not going to be a DNS SRV
-		return
+		return nil
 	}
 
 	ref.mutex.RLock()
@@ -1052,7 +1052,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(logger *log.CommonLogg
 		ref.mutex.Lock()
 		ref.hostnameSRVType.ClearSRV()
 		ref.mutex.Unlock()
-		return
+		return err
 	}
 
 	entries, srvRecordsType, err = dnsSrvHelper.DnsSrvLookup(lookupName)
@@ -1064,7 +1064,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(logger *log.CommonLogg
 			logger.Errorf("%s dnsSrv failed while lookup lookupHost=%s, err=%v", ref.Name_, lookupName, err)
 		}
 		ref.hostnameSRVType.ClearSRV()
-		return
+		return err
 	}
 	ref.hostnameSRVType.SetSRV(srvRecordsType)
 	ref.srvEntries = ref.srvEntries[:0]
@@ -1072,7 +1072,7 @@ func (ref *RemoteClusterReference) PopulateDnsSrvIfNeeded(logger *log.CommonLogg
 		ref.srvEntries = append(ref.srvEntries, SrvEntryType{entry})
 	}
 
-	return
+	return nil
 }
 
 func (ref *RemoteClusterReference) getSRVLookupHostnameNoLock() (string, error) {
