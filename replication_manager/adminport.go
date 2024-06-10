@@ -1417,8 +1417,8 @@ func (adminport *Adminport) doPostPeerToPeerRequest(request *http.Request) (*ap.
 
 func (adminport *Adminport) doPostConnectionPreCheckRequest(request *http.Request) (*ap.Response, error) {
 	redactedRequest := base.CloneAndTagHttpRequest(request)
-	logger_ap.Infof("doPostConnectionPreCheckRequest req=%v\n", redactedRequest)
-	defer logger_ap.Infof("Finished doPostConnectionPreCheckRequest\n")
+	logger_ap.Infof("doPostConnectionPreCheckRequest req=%v", redactedRequest)
+	defer logger_ap.Infof("Finished doPostConnectionPreCheckRequest")
 
 	response, err := authWebCreds(request, base.PermissionRemoteClusterWrite)
 	if response != nil || err != nil {
@@ -1429,31 +1429,31 @@ func (adminport *Adminport) doPostConnectionPreCheckRequest(request *http.Reques
 	if err != nil {
 		return nil, err
 	} else if len(errorsMap) > 0 {
-		logger_ap.Errorf("Validation error in inputs. errorsMap=%v\n", errorsMap)
+		logger_ap.Errorf("Validation error in inputs. errorsMap=%v", errorsMap)
 		return EncodeRemoteClusterErrorsMapIntoResponse(errorsMap)
 	} else if remoteClusterRef == nil {
-		logger_ap.Errorf("Invalid Remote Cluster Ref=%v\n", remoteClusterRef)
+		logger_ap.Errorf("Invalid Remote Cluster Ref=%v", remoteClusterRef)
 		return nil, fmt.Errorf("Remote cluster Ref is null")
 	}
 
 	taskId := generateTaskId(adminport.sourceKVHost)
 
-	logger_ap.Infof("Request params: remoteClusterRef=%v; Task ID generated: %v\n", remoteClusterRef.CloneAndRedact(), taskId)
+	logger_ap.Infof("Request params: remoteClusterRef=%v; Task ID generated: %v", remoteClusterRef.CloneAndRedact(), taskId)
 
 	response, err = NewConnectionPreCheckPostResponse(remoteClusterRef.HostName(), remoteClusterRef.UserName(), taskId)
 	if err != nil {
 		return nil, err
 	}
 
-	go adminport.p2pMgr.SendConnectionPreCheckRequest(remoteClusterRef, taskId)
+	go adminport.p2pMgr.SendConnectionPreCheckRequest(remoteClusterRef, RemoteClusterService().InitRemoteClusterReference, taskId)
 
 	return response, err
 }
 
 func (adminport *Adminport) doGetConnectionPreCheckResultRequest(request *http.Request) (*ap.Response, error) {
 	redactedRequest := base.CloneAndTagHttpRequest(request)
-	logger_ap.Infof("doGetConnectionPreCheckResultRequest req=%v\n", redactedRequest)
-	defer logger_ap.Infof("Finished doGetConnectionPreCheckResultRequest\n")
+	logger_ap.Infof("doGetConnectionPreCheckResultRequest req=%v", redactedRequest)
+	defer logger_ap.Infof("Finished doGetConnectionPreCheckResultRequest")
 	taskId, err := DecodeGetConnectionPreCheckResultRequest(request)
 	if err != nil {
 		return nil, err

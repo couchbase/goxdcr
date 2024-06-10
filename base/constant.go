@@ -1587,3 +1587,5 @@ var ValidJsonEnds []byte = []byte{
 }
 
 var DatapoolLogFrequency = 10
+
+const ConnectionPreCheckTaskId string = "taskId"

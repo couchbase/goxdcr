@@ -10,6 +10,7 @@ package service_def
 
 import (
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -89,4 +90,8 @@ type RemoteClusterSvc interface {
 
 	// Gives an API that returns the ability to retrieve target bucket info - note that this call may be heavy on ns_server
 	GetBucketInfoGetter(ref *metadata.RemoteClusterReference, bucketName string) (BucketInfoGetter, error)
+
+	// given a fresh remote cluster reference with user input information like input hostname etc.,
+	// the function populates the reference with other implicit values like active hostname(s).
+	InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error
 }

@@ -24,7 +24,7 @@ import (
 	"github.com/couchbase/goxdcr/utils"
 )
 
-const maxWaitBeforeRPCInMs = 20000 // 20 seconds
+const maxWaitBeforeRPCInMs = 10000 // 10 seconds
 
 type mccClientIfcWithErr struct {
 	clientIfc mcc.ClientIface
@@ -32,8 +32,35 @@ type mccClientIfcWithErr struct {
 }
 
 // helper function to establish connections to all the target nodes. Returns a hostname -> list of connection errors mapping
-func executePreCheck(ref *metadata.RemoteClusterReference, targetNodes []string, portsMap base.HostPortMapType, utils utils.UtilsIface, logger *log.CommonLogger) base.HostToErrorsMapType {
+func executeConnectionPreCheck(ref *metadata.RemoteClusterReference, targetNodes, srvLookupResults []string, portsMap base.HostPortMapType, utils utils.UtilsIface, logger *log.CommonLogger) base.HostToErrorsMapType {
 	result := make(base.HostToErrorsMapType)
+
+	// before performing actual RCPs, perform a trivial DNS resolution check if the user input is DNS SRV.
+	if len(srvLookupResults) > 0 {
+		// check if there any errors in local DNS SRV lookup
+		var errs []string
+		err := ref.PopulateDnsSrvIfNeeded(logger)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error while performing DNS SRV lookup in one of the peer nodes, err=%v", err)
+			logger.Errorf("%v, srvLookupResults=%v", errMsg, srvLookupResults)
+			errs = append(errs, errMsg)
+		} else {
+			// also check if the looked up entries in this node are same as that of the initiating node
+			lookupResults := ref.GetSRVHostNames()
+			if !base.EqualStringLists(srvLookupResults, lookupResults) {
+				errMsg := "Mismatch in the DNS lookup results between nodes of the same cluster"
+				logger.Errorf("%v, srvLookupResults=%v, lookupResults=%v", errMsg, srvLookupResults, lookupResults)
+				errs = append(errs, errMsg)
+			}
+		}
+
+		if len(errs) != 0 {
+			result[base.PlaceHolderFieldKey] = errs
+		}
+	}
+
+	// perform various connection checks now with the pre-computed targetNodes list from the initiating node,
+	// irrespective of the DNS lookup errors above.
 	var muForResult sync.Mutex
 	var wgForResult sync.WaitGroup
 	for _, hostAddr := range targetNodes {
@@ -52,7 +79,7 @@ func executePreCheck(ref *metadata.RemoteClusterReference, targetNodes []string,
 	}
 
 	wgForResult.Wait()
-	logger.Infof("Errors while connecting to remote reference name=%v and uuid=%v : %v", ref.Name(), ref.Uuid(), result)
+	logger.Infof("Errors while connecting to remote reference name=%v and uuid=%v: %v", ref.Name(), ref.Uuid(), result)
 	return result
 }
 
@@ -65,11 +92,7 @@ func connectToRemoteNS(ref *metadata.RemoteClusterReference, hostAddr string, po
 	numMilliSec := rand.Intn(maxWaitBeforeRPCInMs)
 	ticker := time.NewTicker(time.Duration(numMilliSec) * time.Millisecond)
 	logger.Debugf("connectionNS(hostAddr=%v) sleeping for %v milliseconds", hostAddr, numMilliSec)
-
-	select {
-	case <-ticker.C:
-		break
-	}
+	<-ticker.C
 
 	errs := make([]error, 0)
 	defer func() { ch <- errs }()
@@ -110,7 +133,6 @@ func connectToRemoteNS(ref *metadata.RemoteClusterReference, hostAddr string, po
 		clientKey, base.MethodGet, base.JsonContentType, nil, base.ConnectionPreCheckRPCTimeout, &out, nil, false, logger)
 
 	errs = append(errs, err)
-	return
 }
 
 // helper function to connect to the KV of a given target node
@@ -122,11 +144,7 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 	numMilliSec := rand.Intn(maxWaitBeforeRPCInMs)
 	ticker := time.NewTicker(time.Duration(numMilliSec) * time.Millisecond)
 	logger.Debugf("connectToRemoteKV(hostAddr=%v) sleeping for %v milliseconds", hostAddr, numMilliSec)
-
-	select {
-	case <-ticker.C:
-		break
-	}
+	<-ticker.C
 
 	errs := make([]error, 0)
 	defer func() { ch <- errs }()
@@ -276,7 +294,7 @@ func (h *ConnectionPreCheckHandler) handler() {
 }
 
 func (h *ConnectionPreCheckHandler) handleRequest(req *ConnectionPreCheckReq) {
-	results := executePreCheck(req.TargetRef, req.TargetClusterNodes, req.PortsMap, h.utils, h.logger)
+	results := executeConnectionPreCheck(req.TargetRef, req.TargetClusterNodes, req.SrvLookupResults, req.PortsMap, h.utils, h.logger)
 	req.ConnectionErrs = results
 
 	resp := req.GenerateResponse().(*ConnectionPreCheckRes)
@@ -301,7 +319,7 @@ func (h *ConnectionPreCheckHandler) handleResponse(resp *ConnectionPreCheckRes) 
 		h.logger.Errorf("SetToConnectionPreCheckStore resulted in %v", err)
 	}
 
-	connErrs := resp.connectionErrs
+	connErrs := resp.ConnectionErrs
 
 	for _, node := range resp.TargetClusterNodes {
 		if connErrs == nil {

@@ -359,9 +359,28 @@ func (s StringList) Len() int           { return len(s) }
 func (s StringList) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s StringList) Less(i, j int) bool { return s[i] < s[j] }
 
+// Not safe from concurrent access.
+// Caller has to make sure synchronisation is achieved, if necessary.
 func SortStringList(list []string) []string {
 	sort.Sort(StringList(list))
 	return list
+}
+
+func EqualStringLists(list1, list2 []string) bool {
+	if len(list1) != len(list2) {
+		return false
+	}
+
+	SortStringList(list1)
+	SortStringList(list2)
+
+	for i := 0; i < len(list1); i++ {
+		if list1[i] != list2[i] {
+			return false
+		}
+	}
+
+	return true
 }
 
 func MissingValueError(param string) error {
