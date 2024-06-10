@@ -4131,3 +4131,8 @@ func (service *RemoteClusterService) GetBucketTopologySvc() service_def.BucketTo
 	}
 	return bts
 }
+
+func (service *RemoteClusterService) InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error {
+	ref.PopulateDnsSrvIfNeeded(logger)
+	return setHostNamesAndSecuritySettings(logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict())
+}

@@ -52,7 +52,7 @@ func (s *connectionPreCheckStoreSingleton) GetFromConnectionPreCheckStore(taskId
 	preCheckResult, ok := result[taskId]
 	if !ok {
 		errMsg := fmt.Sprintf("No results found for taskId=%v in GetFromConnectionPreCheckStore", taskId)
-		s.logger.Errorf(errMsg)
+		s.logger.Warnf(errMsg)
 		return nil, false, errors.New(errMsg)
 	}
 

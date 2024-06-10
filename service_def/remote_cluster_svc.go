@@ -10,6 +10,7 @@ package service_def
 
 import (
 	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 )
 
@@ -96,4 +97,8 @@ type RemoteClusterSvc interface {
 
 	// MaxVBStats getter specific to KV
 	GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (MaxVBCasStatsGetter, error)
+
+	// given a fresh remote cluster reference with user input information like input hostname etc.,
+	// the function populates the reference with other implicit values like active hostname(s).
+	InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error
 }

@@ -1704,6 +1704,8 @@ var PortsKeysForConnectionPreCheck = map[PortType]string{
 var ConnectionPreCheckGCTimeout = 120 * time.Second
 var ConnectionPreCheckRPCTimeout = 15 * time.Second
 
+const ConnectionPreCheckTaskId string = "taskId"
+
 var ConnErrorsListMaxEntries = 20
 var ManifestsGetterSleepTimeSecs = 1
 var ManifestsGetterMaxRetry = 8
