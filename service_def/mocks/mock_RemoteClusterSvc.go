@@ -4,6 +4,8 @@ package mocks
 
 import (
 	base "github.com/couchbase/goxdcr/base"
+	log "github.com/couchbase/goxdcr/log"
+
 	metadata "github.com/couchbase/goxdcr/metadata"
 
 	mock "github.com/stretchr/testify/mock"
@@ -689,6 +691,53 @@ func (_c *RemoteClusterSvc_GetRemoteClusterNameFromClusterUuid_Call) Return(_a0 
 }
 
 func (_c *RemoteClusterSvc_GetRemoteClusterNameFromClusterUuid_Call) RunAndReturn(run func(string) string) *RemoteClusterSvc_GetRemoteClusterNameFromClusterUuid_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// InitRemoteClusterReference provides a mock function with given fields: logger, ref
+func (_m *RemoteClusterSvc) InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error {
+	ret := _m.Called(logger, ref)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InitRemoteClusterReference")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, *metadata.RemoteClusterReference) error); ok {
+		r0 = rf(logger, ref)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RemoteClusterSvc_InitRemoteClusterReference_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InitRemoteClusterReference'
+type RemoteClusterSvc_InitRemoteClusterReference_Call struct {
+	*mock.Call
+}
+
+// InitRemoteClusterReference is a helper method to define mock.On call
+//   - logger *log.CommonLogger
+//   - ref *metadata.RemoteClusterReference
+func (_e *RemoteClusterSvc_Expecter) InitRemoteClusterReference(logger interface{}, ref interface{}) *RemoteClusterSvc_InitRemoteClusterReference_Call {
+	return &RemoteClusterSvc_InitRemoteClusterReference_Call{Call: _e.mock.On("InitRemoteClusterReference", logger, ref)}
+}
+
+func (_c *RemoteClusterSvc_InitRemoteClusterReference_Call) Run(run func(logger *log.CommonLogger, ref *metadata.RemoteClusterReference)) *RemoteClusterSvc_InitRemoteClusterReference_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*log.CommonLogger), args[1].(*metadata.RemoteClusterReference))
+	})
+	return _c
+}
+
+func (_c *RemoteClusterSvc_InitRemoteClusterReference_Call) Return(_a0 error) *RemoteClusterSvc_InitRemoteClusterReference_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RemoteClusterSvc_InitRemoteClusterReference_Call) RunAndReturn(run func(*log.CommonLogger, *metadata.RemoteClusterReference) error) *RemoteClusterSvc_InitRemoteClusterReference_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -11,6 +11,8 @@ licenses/APL2.txt.
 package hlv
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"sort"
 
@@ -44,8 +46,12 @@ func (cr ConflictDetectionResult) String() string {
 // the values of this type are base64 encoded strings and without any prefix like s_
 type DocumentSourceId string
 
-func UUIDtoDocumentSource(uuid string) (DocumentSourceId, error) {
-	ret, err := base.HexToBase64(uuid)
+// When cluster is "cloned", the buckets in both the original and the cloned cluster will be the same
+// So we use both the bucketUUID and clusterUUID, with sourceActorId = base64(hex(md5(bucketUUID + clusterUUID))) of len = 22 bytes
+func UUIDstoDocumentSource(bucketUUID, clusterUUID string) (DocumentSourceId, error) {
+	hash := md5.Sum([]byte(bucketUUID + clusterUUID))
+	hexStr := hex.EncodeToString(hash[:])
+	ret, err := base.HexToBase64(hexStr)
 	return DocumentSourceId(ret), err
 }
 

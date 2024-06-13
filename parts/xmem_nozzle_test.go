@@ -94,7 +94,7 @@ func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, opti
 	remoteClusterSvc := &serviceDefMocks.RemoteClusterSvc{}
 
 	// local cluster run has KV port starting at 12000
-	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvStringTgt, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe", crMode, log.DefaultLoggerContext, utilitiesMock, vbList, nil)
+	xmemNozzle := NewXmemNozzle("testId", remoteClusterSvc, "", "", "testTopic", "testConnPoolNamePrefix", 5, kvStringTgt, "B1", bname, "temporaryBucketUuid", "Administrator", "wewewe", crMode, log.DefaultLoggerContext, utilitiesMock, vbList, nil, "")
 
 	// settings map
 	settingsMap := make(map[string]interface{})
@@ -221,8 +221,8 @@ func setupMocksXmem(xmem *XmemNozzle, utils *utilsMock.UtilsIface, bandwidthThro
 	xmem.SetBandwidthThrottler(bandwidthThrottler)
 
 	xmem.eventsProducer = evtProducer
-	xmem.sourceBucketId = hlv.DocumentSourceId("SourceCluster")
-	xmem.targetBucketId = hlv.DocumentSourceId("TargetCluster")
+	xmem.sourceActorId = hlv.DocumentSourceId("SourceCluster")
+	xmem.targetActorId = hlv.DocumentSourceId("TargetCluster")
 
 	setupMocksRC(remoteClusterSvc)
 }

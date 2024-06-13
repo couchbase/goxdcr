@@ -646,15 +646,17 @@ type XmemNozzle struct {
 	AbstractPart
 
 	//remote cluster reference for retrieving up to date remote cluster reference
-	remoteClusterSvc  service_def.RemoteClusterSvc
+	remoteClusterSvc service_def.RemoteClusterSvc
+
+	// used in HLV "source" actor ID
+	sourceClusterUuid string
 	targetClusterUuid string
-	sourceBucketUuid  string // used in HLV
+	sourceBucketUuid  string
 	targetBucketUuid  string
 
-	// Source and target bucket ID. Used for HLV in XATTR to identify source of changes.
-	// They are set bucketUuid encoded in base64 to save space.
-	sourceBucketId hlv.DocumentSourceId
-	targetBucketId hlv.DocumentSourceId
+	// Source and target actor ID. Used for HLV in XATTR to identify source of changes.
+	sourceActorId hlv.DocumentSourceId
+	targetActorId hlv.DocumentSourceId
 
 	bOpen      bool
 	lock_bOpen sync.RWMutex
@@ -783,11 +785,12 @@ func getMcStatusFromGuardrailIdx(idx int) mc.Status {
 	return mc.Status(int(mc.BUCKET_RESIDENT_RATIO_TOO_LOW) + idx)
 }
 
-func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sourceBucketUuid string, targetClusterUuid string, topic string, connPoolNamePrefix string, connPoolConnSize int, connectString string, sourceBucketName string, targetBucketName string, targetBucketUuid string, username string, password string, source_cr_mode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer) *XmemNozzle {
+func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sourceBucketUuid string, targetClusterUuid string, topic string, connPoolNamePrefix string, connPoolConnSize int, connectString string, sourceBucketName string, targetBucketName string, targetBucketUuid string, username string, password string, source_cr_mode base.ConflictResolutionMode, logger_context *log.LoggerContext, utilsIn utilities.UtilsIface, vbList []uint16, eventsProducer common.PipelineEventsProducer, sourceClusterUUID string) *XmemNozzle {
 
 	part := NewAbstractPartWithLogger(id, log.NewLogger("XmemNozzle", logger_context))
 
-	xmem := &XmemNozzle{AbstractPart: part,
+	xmem := &XmemNozzle{
+		AbstractPart:        part,
 		remoteClusterSvc:    remoteClusterSvc,
 		sourceBucketUuid:    sourceBucketUuid,
 		targetClusterUuid:   targetClusterUuid,
@@ -822,6 +825,7 @@ func NewXmemNozzle(id string, remoteClusterSvc service_def.RemoteClusterSvc, sou
 		eventsProducer:      eventsProducer,
 		nonTempErrsSeen:     make(map[uint16]mc.Status),
 		mcRequestPool:       base.NewMCRequestPool(id, nil),
+		sourceClusterUuid:   sourceClusterUUID,
 	}
 
 	xmem.last_ten_batches_size = []uint32{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -1369,7 +1373,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 						lookupResp)
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
-				err = xmem.conflictMgr.ResolveConflict(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.uncompressBody, xmem.recycleDataObj)
+				err = xmem.conflictMgr.ResolveConflict(item, lookupResp, xmem.sourceActorId, xmem.targetActorId, xmem.uncompressBody, xmem.recycleDataObj)
 				if err != nil {
 					return err
 				}
@@ -1383,7 +1387,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 					panic(fmt.Sprintf("No response for key %v", item.UniqueKey))
 				}
 				// This is the case where target has smaller CAS but it dominates source MV.
-				err = xmem.conflictMgr.SetBackToSource(item, lookupResp, xmem.sourceBucketId, xmem.targetBucketId, xmem.uncompressBody, xmem.recycleDataObj)
+				err = xmem.conflictMgr.SetBackToSource(item, lookupResp, xmem.sourceActorId, xmem.targetActorId, xmem.uncompressBody, xmem.recycleDataObj)
 				if err != nil {
 					return err
 				}
@@ -1891,7 +1895,7 @@ func (xmem *XmemNozzle) batchGet(get_map base.McRequestMap) (noRep_map map[strin
 				delete(get_map, uniqueKey)
 				resp.Resp.Recycle()
 			} else if base.IsSuccessGetResponse(resp.Resp) {
-				res, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceBucketId, xmem.targetBucketId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
+				res, err := xmem.conflict_resolver(wrappedReq, resp.Resp, resp.Specs, xmem.sourceActorId, xmem.targetActorId, xmem.xattrEnabled, xmem.uncompressBody, xmem.Logger())
 				if err != nil {
 					// Log the error. We will retry
 					xmem.Logger().Errorf("%v conflict_resolver: '%v'", xmem.Id(), err)
@@ -2145,7 +2149,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	var sourceDocMeta *crMeta.CRMetadata
 
 	if wrappedReq.HLVModeOptions.SendHlv {
-		sourceDoc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceBucketId)
+		sourceDoc := crMeta.NewSourceDocument(wrappedReq, xmem.sourceActorId)
 		sourceDocMeta, err = sourceDoc.GetMetadata(xmem.uncompressBody)
 		if err != nil {
 			return err
@@ -2180,7 +2184,7 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 			len(base.XATTR_HLV) + 2 /* _vv\x00{ */ +
 			len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
 			len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ +
-			len(xmem.sourceBucketId) + 3 /* "<bucketId>", */ +
+			len(xmem.sourceActorId) + 3 /* "<bucketId>", */ +
 			len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ +
 			20 /* "0x<16byte>" */ + 2 /* }\x00 */
 	}
@@ -2348,13 +2352,13 @@ func (xmem *XmemNozzle) isChangesFromTarget(req *base.WrappedMCRequest) (bool, e
 	}
 
 	if req.RetryCRCount == 0 {
-		doc := crMeta.NewSourceDocument(req, xmem.sourceBucketId)
+		doc := crMeta.NewSourceDocument(req, xmem.sourceActorId)
 		meta, err := doc.GetMetadata(xmem.uncompressBody)
 		if err != nil {
 			return false, err
 		}
 		src := meta.GetHLV().GetCvSrc()
-		if src == xmem.targetBucketId {
+		if src == xmem.targetActorId {
 			return true, nil
 		}
 	}
@@ -2597,16 +2601,16 @@ func (xmem *XmemNozzle) initialize(settings metadata.ReplicationSettingsMap) err
 		return err
 	}
 	if xmem.source_cr_mode == base.CRMode_Custom || xmem.config.crossClusterVers {
-		if xmem.sourceBucketId, err = hlv.UUIDtoDocumentSource(xmem.sourceBucketUuid); err != nil {
+		if xmem.sourceActorId, err = hlv.UUIDstoDocumentSource(xmem.sourceBucketUuid, xmem.sourceClusterUuid); err != nil {
 			xmem.Logger().Errorf("Cannot convert source bucket UUID %v to base64. Error: %v", xmem.sourceBucketUuid, err)
 			return err
 		}
-		if xmem.targetBucketId, err = hlv.UUIDtoDocumentSource(xmem.targetBucketUuid); err != nil {
+		if xmem.targetActorId, err = hlv.UUIDstoDocumentSource(xmem.targetBucketUuid, xmem.targetClusterUuid); err != nil {
 			xmem.Logger().Errorf("Cannot convert target bucket UUID %v to base64. Error: %v", xmem.targetClusterUuid, err)
 			return err
 		}
-		xmem.Logger().Infof("%v: Using %s(UUID %s) and %s(UUID %s) as source and target bucket IDs for HLV.",
-			xmem.Id(), xmem.sourceBucketId, xmem.sourceBucketUuid, xmem.targetBucketId, xmem.targetBucketUuid)
+		xmem.Logger().Infof("%v: Using %s (sourceBucketUUID %s + sourceClusterUUID %s) and %s (targetBucketUUID %s + targetClusterUUID %s) as source and target actor IDs for HLV.",
+			xmem.Id(), xmem.sourceActorId, xmem.sourceBucketUuid, xmem.sourceClusterUuid, xmem.targetActorId, xmem.targetBucketUuid, xmem.targetClusterUuid)
 	}
 
 	xmem.setDataChan(make(chan *base.WrappedMCRequest, xmem.config.maxCount*10))

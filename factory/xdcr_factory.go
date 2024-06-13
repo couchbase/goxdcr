@@ -273,6 +273,12 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	progress_recorder(fmt.Sprintf("%v source nozzles have been constructed", len(sourceNozzles)))
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", partTopic, kv_vb_map)
+
+	sourceClusterUUID, err := xdcrf.xdcr_topology_svc.MyClusterUuid()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	/**
 	 * Construct the outgoing (Destination) nozzles
 	 * 1. outNozzles - map of ID -> actual nozzle
@@ -280,7 +286,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	 * 3. kvVBMap - map of remote KVNodes -> vbucket# responsible for per node
 	 */
 	outNozzles, vbNozzleMap, target_kv_vb_map, targetUserName, targetPassword, targetClusterVersion, err :=
-		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx)
+		xdcrf.constructOutgoingNozzles(partTopic, spec, kv_vb_map, sourceCRMode, targetBucketInfo, targetClusterRef, isCapiReplication, logger_ctx, sourceClusterUUID)
 
 	if err != nil {
 		return nil, nil, err
@@ -579,7 +585,7 @@ func (xdcrf *XDCRFactory) filterVBList(targetkvVBList []uint16, kv_vb_map map[st
  */
 func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.ReplicationSpecification, kv_vb_map map[string][]uint16,
 	sourceCRMode base.ConflictResolutionMode, targetBucketInfo map[string]interface{},
-	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext) (outNozzles map[string]common.Nozzle,
+	targetClusterRef *metadata.RemoteClusterReference, isCapiReplication bool, logger_ctx *log.LoggerContext, sourceClusterUUID string) (outNozzles map[string]common.Nozzle,
 	vbNozzleMap map[uint16]string, kvVBMap map[string][]uint16, targetUserName string, targetPassword string, targetClusterVersion int, err error) {
 	outNozzles = make(map[string]common.Nozzle)
 	vbNozzleMap = make(map[uint16]string)
@@ -657,7 +663,7 @@ func (xdcrf *XDCRFactory) constructOutgoingNozzles(topic string, spec *metadata.
 				}
 			} else {
 				connSize := numOfOutNozzles * 2
-				outNozzle = xdcrf.constructXMEMNozzle(topic, spec.SourceBucketUUID, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList, eventsProducer)
+				outNozzle = xdcrf.constructXMEMNozzle(topic, spec.SourceBucketUUID, spec.TargetClusterUUID, kvaddr, spec.SourceBucketName, spec.TargetBucketName, spec.TargetBucketUUID, targetUserName, targetPassword, i, connSize, sourceCRMode, targetBucketInfo, logger_ctx, vbList, eventsProducer, sourceClusterUUID)
 			}
 
 			// Add the created nozzle to the collective map of outNozzles to be returned
@@ -755,11 +761,13 @@ func (xdcrf *XDCRFactory) constructXMEMNozzle(topic string,
 	targetBucketInfo map[string]interface{},
 	logger_ctx *log.LoggerContext,
 	vbList []uint16,
-	eventsProducer common.PipelineEventsProducer) common.Nozzle {
+	eventsProducer common.PipelineEventsProducer,
+	sourceClusterUUID string,
+) common.Nozzle {
 	// partIds of the xmem nozzles look like "xmem_$topic_$kvaddr_1"
 	xmemNozzle_Id := xdcrf.partId(XMEM_NOZZLE_NAME_PREFIX, topic, kvaddr, nozzle_index)
 	nozzle := parts.NewXmemNozzle(xmemNozzle_Id, xdcrf.remote_cluster_svc, sourceBucketUuid, targetClusterUuid, topic, topic, connPoolSize, kvaddr, sourceBucketName, targetBucketName,
-		targetBucketUuid, username, password, sourceCRMode, logger_ctx, xdcrf.utils, vbList, eventsProducer)
+		targetBucketUuid, username, password, sourceCRMode, logger_ctx, xdcrf.utils, vbList, eventsProducer, sourceClusterUUID)
 	return nozzle
 }
 
