@@ -1904,7 +1904,8 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 		}
 
 		dataTypeIsJson := uprEvent.DataType&mcc.JSONDataType > 0
-		if !dataTypeIsJson {
+		isTombstone := (uprEvent.Opcode == mc.UPR_DELETION || uprEvent.Opcode == mc.UPR_EXPIRATION)
+		if !dataTypeIsJson && !isTombstone {
 			metric_map[service_def.BINARY_FILTERED_METRIC].(metrics.Counter).Inc(1)
 		}
 		if uprEvent.Opcode == mc.UPR_DELETION {

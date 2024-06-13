@@ -144,7 +144,8 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 	}
 
 	dataTypeIsJson := wrappedUprEvent.UprEvent.DataType&memcached.JSONDataType > 0
-	if filter.ShouldSkipBinaryDocs() && !dataTypeIsJson {
+	isTombstone := (wrappedUprEvent.UprEvent.Opcode == gomemcached.UPR_DELETION || wrappedUprEvent.UprEvent.Opcode == gomemcached.UPR_EXPIRATION)
+	if filter.ShouldSkipBinaryDocs() && !dataTypeIsJson && !isTombstone {
 		// Skip binary document
 		return false, nil, "", totalFailedDpCnt
 	}
