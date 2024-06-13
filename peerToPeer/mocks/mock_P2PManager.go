@@ -292,9 +292,9 @@ func (_c *P2PManager_RetrieveConnectionPreCheckResult_Call) RunAndReturn(run fun
 	return _c
 }
 
-// SendConnectionPreCheckRequest provides a mock function with given fields: _a0, _a1
-func (_m *P2PManager) SendConnectionPreCheckRequest(_a0 *metadata.RemoteClusterReference, _a1 string) {
-	_m.Called(_a0, _a1)
+// SendConnectionPreCheckRequest provides a mock function with given fields: _a0, _a1, _a2
+func (_m *P2PManager) SendConnectionPreCheckRequest(_a0 *metadata.RemoteClusterReference, _a1 peerToPeer.InitRemoteClusterRefFunc, _a2 string) {
+	_m.Called(_a0, _a1, _a2)
 }
 
 // P2PManager_SendConnectionPreCheckRequest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SendConnectionPreCheckRequest'
@@ -304,14 +304,15 @@ type P2PManager_SendConnectionPreCheckRequest_Call struct {
 
 // SendConnectionPreCheckRequest is a helper method to define mock.On call
 //   - _a0 *metadata.RemoteClusterReference
-//   - _a1 string
-func (_e *P2PManager_Expecter) SendConnectionPreCheckRequest(_a0 interface{}, _a1 interface{}) *P2PManager_SendConnectionPreCheckRequest_Call {
-	return &P2PManager_SendConnectionPreCheckRequest_Call{Call: _e.mock.On("SendConnectionPreCheckRequest", _a0, _a1)}
+//   - _a1 peerToPeer.InitRemoteClusterRefFunc
+//   - _a2 string
+func (_e *P2PManager_Expecter) SendConnectionPreCheckRequest(_a0 interface{}, _a1 interface{}, _a2 interface{}) *P2PManager_SendConnectionPreCheckRequest_Call {
+	return &P2PManager_SendConnectionPreCheckRequest_Call{Call: _e.mock.On("SendConnectionPreCheckRequest", _a0, _a1, _a2)}
 }
 
-func (_c *P2PManager_SendConnectionPreCheckRequest_Call) Run(run func(_a0 *metadata.RemoteClusterReference, _a1 string)) *P2PManager_SendConnectionPreCheckRequest_Call {
+func (_c *P2PManager_SendConnectionPreCheckRequest_Call) Run(run func(_a0 *metadata.RemoteClusterReference, _a1 peerToPeer.InitRemoteClusterRefFunc, _a2 string)) *P2PManager_SendConnectionPreCheckRequest_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*metadata.RemoteClusterReference), args[1].(string))
+		run(args[0].(*metadata.RemoteClusterReference), args[1].(peerToPeer.InitRemoteClusterRefFunc), args[2].(string))
 	})
 	return _c
 }
@@ -321,7 +322,7 @@ func (_c *P2PManager_SendConnectionPreCheckRequest_Call) Return() *P2PManager_Se
 	return _c
 }
 
-func (_c *P2PManager_SendConnectionPreCheckRequest_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, string)) *P2PManager_SendConnectionPreCheckRequest_Call {
+func (_c *P2PManager_SendConnectionPreCheckRequest_Call) RunAndReturn(run func(*metadata.RemoteClusterReference, peerToPeer.InitRemoteClusterRefFunc, string)) *P2PManager_SendConnectionPreCheckRequest_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -13,6 +13,11 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
 	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
@@ -20,13 +25,9 @@ import (
 	"github.com/couchbase/goxdcr/log"
 	parts "github.com/couchbase/goxdcr/parts"
 	utils "github.com/couchbase/goxdcr/utils"
-	"net/http"
-	"os"
-	"sync"
-	"time"
-)
 
-import _ "net/http/pprof"
+	_ "net/http/pprof"
+)
 
 var logger *log.CommonLogger = log.NewLogger("Xmem_run", log.DefaultLoggerContext)
 
@@ -314,7 +315,7 @@ func startXmem(batch_count int) {
 	}
 	logger.Infof("target_connectStr=%s\n", target_connectStr)
 
-	xmem = parts.NewXmemNozzle("xmem", "abc", "abc", 10, target_connectStr, options.source_bucket, options.target_bucket, options.target_bucket, options.password, base.CRMode_RevId, logger.LoggerContext(), nil)
+	xmem = parts.NewXmemNozzle("xmem", "abc", "abc", 10, target_connectStr, options.source_bucket, options.target_bucket, options.target_bucket, options.password, base.CRMode_RevId, logger.LoggerContext(), nil, "")
 	var configs map[string]interface{} = map[string]interface{}{parts.SETTING_BATCHCOUNT: batch_count,
 		parts.SETTING_RESP_TIMEOUT: time.Millisecond * 10,
 		parts.SETTING_NUMOFRETRY:   3}
