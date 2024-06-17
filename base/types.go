@@ -3027,3 +3027,5 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 	}
 	return &req
 }
+
+type ExternalMgmtHostAndPortGetter func(map[string]interface{}, bool) (string, int, error)
