@@ -836,6 +836,9 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, remoteRef, logger)
 		return
 	}
+	logger.Infof("Remote cluster reference for Connection Pre-Check initialised as ref=%v", remoteRef.SmallString())
+
+	srvHostnames := remoteRef.GetSRVHostNames()
 
 	connStr, err := remoteRef.MyConnectionStr()
 	if err != nil {
@@ -923,7 +926,32 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
 		return
 	}
-	portsMap, targetNodes, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo, hostname, remoteRef.IsHttps(), logger)
+
+	nodesList, err := p.utils.GetNodesListFromNodeServicesInfo(logger, nodeServicesInfo)
+	if err != nil {
+		errMsg := fmt.Sprintf("Connection Pre-Check exited while getting nodesList, nodeServicesInfo=%v, err=%v", nodeServicesInfo, err)
+		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
+		return
+	}
+
+	var isExternal bool
+	if remoteRef.HostnameMode() == metadata.HostnameMode_External {
+		// user has network_type set to "external"
+		// so use external mode forcefully.
+		isExternal = true
+	} else {
+		// determine user intent for addressing from entered hostname (internal or external addressing)
+		isExternal, err = base.CheckIfHostnameIsAlternate(p.utils.GetExternalMgtHostAndPort, nodesList, connStr, remoteRef.IsHttps(), srvHostnames)
+		if err != nil {
+			errMsg := fmt.Sprintf("Connection Pre-Check exited while checking for user intent, nodeServicesInfo=%v, connStr=%v, isHttps=%v, srvHostnames=%v, err=%v", nodesList, connStr, remoteRef.IsHttps(), srvHostnames, err)
+			sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
+			return
+		}
+	}
+	logger.Infof("User intent for Connection Pre-Check initialised as isExternal=%v, network_type=%v", isExternal, remoteRef.HostnameMode())
+
+	// get appropriate hostnames and ports to connect to based on user intent
+	portsMap, targetNodes, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodesList, hostname, remoteRef.IsHttps(), isExternal, logger)
 	if err != nil {
 		errMsg := fmt.Sprintf("Connection Pre-Check exited while getting ports and hostAddrs from nodeServicesInfo, useSecurePort=%v, err=%v", remoteRef.IsHttps(), err)
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
@@ -938,7 +966,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 
 	getReqFunc := func(src, tgt string) Request {
 		common := NewRequestCommon(src, tgt, p.GetLifecycleId(), "", getOpaqueWrapper())
-		connectionPreCheckReq := NewP2PConnectionPreCheckReq(common, remoteRef, targetNodes, remoteRef.GetSRVHostNames(), portsMap, taskId)
+		connectionPreCheckReq := NewP2PConnectionPreCheckReq(common, remoteRef, targetNodes, srvHostnames, portsMap, taskId)
 		return connectionPreCheckReq
 	}
 

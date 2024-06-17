@@ -3932,6 +3932,65 @@ func (_c *UtilsIface_GetNodeServicesInfo_Call) RunAndReturn(run func(string, str
 	return _c
 }
 
+// GetNodesListFromNodeServicesInfo provides a mock function with given fields: logger, nodeServicesInfo
+func (_m *UtilsIface) GetNodesListFromNodeServicesInfo(logger *log.CommonLogger, nodeServicesInfo map[string]interface{}) ([]interface{}, error) {
+	ret := _m.Called(logger, nodeServicesInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodesListFromNodeServicesInfo")
+	}
+
+	var r0 []interface{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, map[string]interface{}) ([]interface{}, error)); ok {
+		return rf(logger, nodeServicesInfo)
+	}
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, map[string]interface{}) []interface{}); ok {
+		r0 = rf(logger, nodeServicesInfo)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, map[string]interface{}) error); ok {
+		r1 = rf(logger, nodeServicesInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_GetNodesListFromNodeServicesInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetNodesListFromNodeServicesInfo'
+type UtilsIface_GetNodesListFromNodeServicesInfo_Call struct {
+	*mock.Call
+}
+
+// GetNodesListFromNodeServicesInfo is a helper method to define mock.On call
+//   - logger *log.CommonLogger
+//   - nodeServicesInfo map[string]interface{}
+func (_e *UtilsIface_Expecter) GetNodesListFromNodeServicesInfo(logger interface{}, nodeServicesInfo interface{}) *UtilsIface_GetNodesListFromNodeServicesInfo_Call {
+	return &UtilsIface_GetNodesListFromNodeServicesInfo_Call{Call: _e.mock.On("GetNodesListFromNodeServicesInfo", logger, nodeServicesInfo)}
+}
+
+func (_c *UtilsIface_GetNodesListFromNodeServicesInfo_Call) Run(run func(logger *log.CommonLogger, nodeServicesInfo map[string]interface{})) *UtilsIface_GetNodesListFromNodeServicesInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*log.CommonLogger), args[1].(map[string]interface{}))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetNodesListFromNodeServicesInfo_Call) Return(_a0 []interface{}, _a1 error) *UtilsIface_GetNodesListFromNodeServicesInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *UtilsIface_GetNodesListFromNodeServicesInfo_Call) RunAndReturn(run func(*log.CommonLogger, map[string]interface{}) ([]interface{}, error)) *UtilsIface_GetNodesListFromNodeServicesInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetNonExistentBucketError provides a mock function with given fields:
 func (_m *UtilsIface) GetNonExistentBucketError() error {
 	ret := _m.Called()
@@ -3977,9 +4036,9 @@ func (_c *UtilsIface_GetNonExistentBucketError_Call) RunAndReturn(run func() err
 	return _c
 }
 
-// GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodeServicesInfo, defaultConnStr, useSecurePort, logger
-func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, useSecurePort bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
-	ret := _m.Called(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+// GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodesList, defaultConnStr, useSecurePort, useExternal, logger
+func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+	ret := _m.Called(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPortsAndHostAddrsFromNodeServices")
@@ -3988,27 +4047,27 @@ func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[
 	var r0 base.HostPortMapType
 	var r1 []string
 	var r2 error
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
-		return rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
+		return rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	}
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, bool, *log.CommonLogger) base.HostPortMapType); ok {
-		r0 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, bool, *log.CommonLogger) base.HostPortMapType); ok {
+		r0 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.HostPortMapType)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(map[string]interface{}, string, bool, *log.CommonLogger) []string); ok {
-		r1 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(1).(func([]interface{}, string, bool, bool, *log.CommonLogger) []string); ok {
+		r1 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(map[string]interface{}, string, bool, *log.CommonLogger) error); ok {
-		r2 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(2).(func([]interface{}, string, bool, bool, *log.CommonLogger) error); ok {
+		r2 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -4022,17 +4081,18 @@ type UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call struct {
 }
 
 // GetPortsAndHostAddrsFromNodeServices is a helper method to define mock.On call
-//   - nodeServicesInfo map[string]interface{}
+//   - nodesList []interface{}
 //   - defaultConnStr string
 //   - useSecurePort bool
+//   - useExternal bool
 //   - logger *log.CommonLogger
-func (_e *UtilsIface_Expecter) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo interface{}, defaultConnStr interface{}, useSecurePort interface{}, logger interface{}) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
-	return &UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call{Call: _e.mock.On("GetPortsAndHostAddrsFromNodeServices", nodeServicesInfo, defaultConnStr, useSecurePort, logger)}
+func (_e *UtilsIface_Expecter) GetPortsAndHostAddrsFromNodeServices(nodesList interface{}, defaultConnStr interface{}, useSecurePort interface{}, useExternal interface{}, logger interface{}) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+	return &UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call{Call: _e.mock.On("GetPortsAndHostAddrsFromNodeServices", nodesList, defaultConnStr, useSecurePort, useExternal, logger)}
 }
 
-func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Run(run func(nodeServicesInfo map[string]interface{}, defaultConnStr string, useSecurePort bool, logger *log.CommonLogger)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Run(run func(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[string]interface{}), args[1].(string), args[2].(bool), args[3].(*log.CommonLogger))
+		run(args[0].([]interface{}), args[1].(string), args[2].(bool), args[3].(bool), args[4].(*log.CommonLogger))
 	})
 	return _c
 }
@@ -4042,7 +4102,7 @@ func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) Return(_a0 base.
 	return _c
 }
 
-func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) RunAndReturn(run func(map[string]interface{}, string, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
+func (_c *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call) RunAndReturn(run func([]interface{}, string, bool, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)) *UtilsIface_GetPortsAndHostAddrsFromNodeServices_Call {
 	_c.Call.Return(run)
 	return _c
 }
