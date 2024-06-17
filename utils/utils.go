@@ -1120,61 +1120,110 @@ func (u *Utilities) getMemcachedSSLPortMapInternal(connStr string, bucketInfo ma
 	return portMap, nil
 }
 
-func nodeServicesInfoParseError(nodeServicesInfo map[string]interface{}, logger *log.CommonLogger) error {
-	errMsg := "Error parsing Node Services information of remote cluster."
-	detailedErrMsg := errMsg + fmt.Sprintf("nodeServicesInfo=%v", nodeServicesInfo)
+func nodeServicesInfoParseError(nodeServicesInfo interface{}, logger *log.CommonLogger) error {
+	errMsg := "Error parsing resource from Node Services endpoint of remote cluster."
+	detailedErrMsg := errMsg + fmt.Sprintf(" nodeServicesInfo=%v", nodeServicesInfo)
 	if logger != nil {
 		logger.Errorf(detailedErrMsg)
 	}
 	return fmt.Errorf(errMsg)
 }
 
+func getExternalInfoFromServicesMap(logger *log.CommonLogger, nodeExtMap map[string]interface{}) (string, bool, map[string]interface{}, bool) {
+	alternateAddresses, ok := nodeExtMap[base.AlternateKey]
+	if !ok {
+		return "", false, nil, false
+	}
+	alternateAddressesMap, ok := alternateAddresses.(map[string]interface{})
+	if !ok {
+		logger.Errorf("alternateAddresses is not of type map[string]interface{}, alternateAddresses=%v", alternateAddresses)
+		return "", false, nil, false
+	}
+	externalAddresses, ok := alternateAddressesMap[base.ExternalKey]
+	if !ok {
+		return "", false, nil, false
+	}
+	externalAddressesMap, ok := externalAddresses.(map[string]interface{})
+	if !ok {
+		logger.Errorf("externalAddresses is not of type map[string]interface{}, externalAddresses=%v", externalAddresses)
+		return "", false, nil, false
+	}
+	ports, portsExists := externalAddressesMap[base.PortsKey]
+	var portsMap map[string]interface{}
+	if portsExists {
+		portsMap, ok = ports.(map[string]interface{})
+		if !ok {
+			logger.Errorf("ports is not of type map[string]interface{}, ports=%v", ports)
+			portsExists = false
+		}
+	}
+	hostname, hostnameExists := externalAddressesMap[base.HostNameKey]
+	var hostnameStr string
+	if hostnameExists {
+		hostnameStr, ok = hostname.(string)
+		if !ok {
+			logger.Errorf("hostname is not of type string, hostname=%v", hostname)
+			hostnameExists = false
+		}
+	}
+
+	return hostnameStr, hostnameExists, portsMap, portsExists
+}
+
+func getInternalOrExternalPort(servicesMap map[string]interface{}, extPorts map[string]interface{}, useExternal, extPortsExists bool, portKey string) (port interface{}, found bool) {
+	port, found = servicesMap[portKey]
+	if useExternal && extPortsExists {
+		extPort, extFound := extPorts[portKey]
+		if extFound {
+			port = extPort
+			found = true
+		}
+	}
+
+	return port, found
+}
+
 // Input is the result for pools/default/nodeServices, port keys and a default hostAddr
 // returns hostAddr -> <portKey -> port> mapping and list of hostAddrs (only for KV nodes)
-func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, useSecurePort bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
-	nodesExt, ok := nodeServicesInfo[base.NodeExtKey]
+func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
 	portsMap := make(base.HostPortMapType)
 	hostAddrs := make([]string, 0)
 
-	if !ok {
-		return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
-	}
-
-	nodesExtArray, ok := nodesExt.([]interface{})
-	if !ok {
-		return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
-	}
-
 	var hostName string
 	var err error
-	for _, nodeExt := range nodesExtArray {
+	for _, nodeExt := range nodesList {
 		nodeExtMap, ok := nodeExt.(map[string]interface{})
 		if !ok {
-			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
-		}
-
-		// note that this is the only place where nodeExtMap contains a hostname without port
-		// instead of a host address with port
-		hostName, err = u.getHostNameWithoutPortFromNodeInfo(defaultConnStr, nodeExtMap, logger)
-
-		if err != nil {
-			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
 		}
 
 		// Internal key
 		service, ok := nodeExtMap[base.ServicesKey]
 		if !ok {
-			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
 		}
 
-		services_map, ok := service.(map[string]interface{})
+		servicesMap, ok := service.(map[string]interface{})
 		if !ok {
-			return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
 		}
 
-		_, hasKV := services_map[base.KVPortKey]
-		_, hasKVSSL := services_map[base.KVSSLPortKey]
-		_, hasMgmtSSL := services_map[base.SSLMgtPortKey]
+		extHostname, extHostnameExists, extPorts, extPortsExists := getExternalInfoFromServicesMap(logger, nodeExtMap)
+
+		// note that this is the only place where nodeExtMap contains a hostname without port
+		// instead of a host address with port
+		hostName, err = u.getHostNameWithoutPortFromNodeInfo(defaultConnStr, nodeExtMap, logger)
+		if err != nil {
+			return nil, nil, nodeServicesInfoParseError(nodesList, logger)
+		}
+
+		if useExternal && extHostnameExists {
+			hostName = extHostname
+		}
+
+		_, hasKV := getInternalOrExternalPort(servicesMap, extPorts, useExternal, extPortsExists, base.KVPortKey)
+		_, hasKVSSL := getInternalOrExternalPort(servicesMap, extPorts, useExternal, extPortsExists, base.KVSSLPortKey)
+		_, hasMgmtSSL := getInternalOrExternalPort(servicesMap, extPorts, useExternal, extPortsExists, base.SSLMgtPortKey)
 		useSecurePort = useSecurePort && hasMgmtSSL
 
 		// consider the nodes if it has KV service only
@@ -1185,14 +1234,14 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[st
 		hostAddr := hostName
 		var port interface{}
 		if useSecurePort {
-			port, ok = services_map[base.SSLMgtPortKey]
+			port, ok = getInternalOrExternalPort(servicesMap, extPorts, useExternal, extPortsExists, base.SSLMgtPortKey)
 		} else {
-			port, ok = services_map[base.MgtPortKey]
+			port, ok = getInternalOrExternalPort(servicesMap, extPorts, useExternal, extPortsExists, base.MgtPortKey)
 		}
 		if ok {
 			portFloat, ok := port.(float64)
 			if !ok {
-				return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+				return nil, nil, nodeServicesInfoParseError(nodesList, logger)
 			}
 			mgmtPort := uint16(portFloat)
 			hostAddr = base.GetHostAddr(hostName, mgmtPort)
@@ -1200,7 +1249,7 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[st
 
 		for _, portKey := range base.PortsKeysForConnectionPreCheck {
 			var portInt uint16
-			port, ok := services_map[portKey]
+			port, ok = getInternalOrExternalPort(servicesMap, extPorts, useExternal, extPortsExists, portKey)
 			if !ok {
 				// the node may not have the service. skip the node
 				continue
@@ -1208,7 +1257,7 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[st
 
 			portFloat, ok := port.(float64)
 			if !ok {
-				return nil, nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+				return nil, nil, nodeServicesInfoParseError(nodesList, logger)
 			}
 
 			portInt = uint16(portFloat)
@@ -1222,7 +1271,7 @@ func (u *Utilities) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[st
 
 		hostAddrs = append(hostAddrs, hostAddr)
 	}
-	logger.Debugf("Ports=%v; HostAddrs=%v in GetPortsAndHostAddrsFromNodeServices()", portsMap, hostAddrs)
+	logger.Infof("Ports=%v, HostAddrs=%v in GetPortsAndHostAddrsFromNodeServices", portsMap, hostAddrs)
 	return portsMap, hostAddrs, nil
 }
 
@@ -1356,6 +1405,20 @@ func (u *Utilities) GetNodeServicesInfo(hostAddr, username, password string, aut
 	}
 
 	return nodeServicesInfo, nil
+}
+
+func (u *Utilities) GetNodesListFromNodeServicesInfo(logger *log.CommonLogger, nodeServicesInfo map[string]interface{}) ([]interface{}, error) {
+	nodesExt, ok := nodeServicesInfo[base.NodeExtKey]
+	if !ok {
+		return nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+	}
+
+	nodesExtArray, ok := nodesExt.([]interface{})
+	if !ok {
+		return nil, nodeServicesInfoParseError(nodeServicesInfo, logger)
+	}
+
+	return nodesExtArray, nil
 }
 
 func (u *Utilities) GetClusterUUIDAndNodeListWithMinInfo(hostAddr, username, password string, authMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, logger *log.CommonLogger) (string, []interface{}, error) {

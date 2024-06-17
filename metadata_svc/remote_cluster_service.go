@@ -43,7 +43,6 @@ var UUIDMismatchError = errors.New("UUID does not match")
 var RemoteSyncInProgress = errors.New("A RPC request is currently underway")
 var InitInProgress = errors.New("Initialization is already in progress")
 var SetInProgress = errors.New("An user-driven setRemoteClusterReference event is already in progress")
-var HostNameEmpty = errors.New("Hostname is empty")
 var RefreshNotEnabledYet = errors.New("The initial reference update hasn't finished yet, refresh is not enabled and pipelines cannot be started yet")
 var RefreshAlreadyActive = errors.New("There is a refresh that is ongoing")
 var RefreshAborted = errors.New("Refresh instance was called to be aborted")
@@ -1534,109 +1533,8 @@ func (agent *RemoteClusterAgent) setAddressPreference(external bool, lock bool, 
 	}
 }
 
-// If len(srvHostNames) > 0, then hostname will be treated as an SRV entry
 func (agent *RemoteClusterAgent) checkIfHostnameIsAlternate(nodeList []interface{}, hostname string, isHttps bool, srvHostNames []string) (bool, error) {
-	var isExternal bool
-
-	if len(hostname) == 0 {
-		return false, HostNameEmpty
-	}
-
-	pendingHostname := base.GetHostName(hostname)
-	pendingPort, portErr := base.GetPortNumber(hostname)
-
-	if pendingPort == base.DefaultAdminPort {
-		// Because 8091 is always tagged on automatically if user did not enter a port
-		// So, if pendingPort is 8091, then categorize it as user did not enter port number
-		portErr = base.ErrorNoPortNumber
-	}
-
-	matchesExtHostName := func(extHost string) bool {
-		if len(srvHostNames) == 0 {
-			return extHost == pendingHostname
-		} else {
-			// Check SRV entries
-			for _, srvHostNameAndPort := range srvHostNames {
-				srvHostName := base.GetHostName(srvHostNameAndPort)
-				if extHost == srvHostName {
-					return true
-				}
-			}
-			return false
-		}
-	}
-
-	for _, node := range nodeList {
-		nodeInfoMap, ok := node.(map[string]interface{})
-		if !ok {
-			return isExternal, fmt.Errorf("node info is not of map type. type of node info=%v", reflect.TypeOf(node))
-		}
-
-		extHost, extPort, extErr := agent.utils.GetExternalMgtHostAndPort(nodeInfoMap, isHttps)
-
-		var matched bool
-
-		switch extErr {
-		case base.ErrorResourceDoesNotExist:
-			// No alternate address section for this node
-			continue
-
-		case base.ErrorNoPortNumber:
-			// Alternate address did not provide port number
-			switch portErr {
-			case base.ErrorNoPortNumber:
-				// User did not enter port number
-				// This means that the external hostname sitting on default port is
-				// the user's intention, since user did not specify a non-default port
-				matched = matchesExtHostName(extHost)
-			case nil:
-				// Since alternate address did not provide mgmt port number, and user provided
-				// port number, it means that the user did not intend to use external address
-				// Special case - if user specified 8091, then it is the same as didn't specifying
-				if pendingPort == base.DefaultAdminPort || pendingPort == base.DefaultAdminPortSSL {
-					matched = true
-				}
-			default:
-				return isExternal, fmt.Errorf("Unable to parse pendingRef's hostname port number")
-			}
-
-		case nil:
-			// Alternate address provided port number
-			// Now, check user entry:
-			switch portErr {
-			case base.ErrorNoPortNumber:
-				// User did not enter port number
-				// User's intention is to use the original default internal port
-				if matchesExtHostName(extHost) {
-					// Only allow this if the alternate port is also the default admin port
-					if !isHttps && extPort == int(base.DefaultAdminPort) {
-						matched = true
-					}
-					if isHttps && extPort == int(base.DefaultAdminPortSSL) {
-						matched = true
-					}
-				}
-			case nil:
-				// User entered port number
-				// User's intention to use external iff both match
-				if matchesExtHostName(extHost) && extPort == int(pendingPort) {
-					matched = true
-				}
-			default:
-				return isExternal, fmt.Errorf("Unable to parse pendingRef's hostname port number")
-			}
-
-		default:
-			return isExternal, fmt.Errorf("Unable to parse GetExternalMgtHostAndPort")
-		}
-
-		if matched {
-			isExternal = true
-			break
-		}
-	}
-
-	return isExternal, nil
+	return base.CheckIfHostnameIsAlternate(agent.utils.GetExternalMgtHostAndPort, nodeList, hostname, isHttps, srvHostNames)
 }
 
 func (agent *RemoteClusterAgent) UsesAlternateAddress() (bool, error) {

@@ -2131,3 +2131,100 @@ func IsJsonEndValid(body []byte, endPos int) bool {
 	}
 	return false
 }
+
+// If len(srvHostNames) > 0, then hostname will be treated as an SRV entry
+// nodeList is a list of nodes from say the response of pools/default endpoint. Eg: output of utils.GetNodeListFromInfoMap
+func CheckIfHostnameIsAlternate(externalInfoGetter ExternalMgmtHostAndPortGetter, nodeList []interface{}, hostname string, isHttps bool, srvHostNames []string) (bool, error) {
+	if len(hostname) == 0 {
+		return false, ErrorHostNameEmpty
+	}
+
+	pendingHostname := GetHostName(hostname)
+	pendingPort, portErr := GetPortNumber(hostname)
+
+	if pendingPort == DefaultAdminPort {
+		// Because 8091 is always tagged on automatically if user did not enter a port
+		// So, if pendingPort is 8091, then categorize it as user did not enter port number
+		portErr = ErrorNoPortNumber
+	}
+
+	matchesExtHostName := func(extHost string) bool {
+		if len(srvHostNames) == 0 {
+			return extHost == pendingHostname
+		} else {
+			// Check SRV entries
+			for _, srvHostNameAndPort := range srvHostNames {
+				srvHostName := GetHostName(srvHostNameAndPort)
+				if extHost == srvHostName {
+					return true
+				}
+			}
+			return false
+		}
+	}
+
+	for _, node := range nodeList {
+		nodeInfoMap, ok := node.(map[string]interface{})
+		if !ok {
+			return false, fmt.Errorf("node info is not of map type. type of node info=%v", reflect.TypeOf(node))
+		}
+
+		extHost, extPort, extErr := externalInfoGetter(nodeInfoMap, isHttps)
+
+		switch extErr {
+		case ErrorResourceDoesNotExist:
+			// No alternate address section for this node
+			continue
+
+		case ErrorNoPortNumber:
+			// Alternate address did not provide port number
+			switch portErr {
+			case ErrorNoPortNumber:
+				// User did not enter port number
+				// This means that the external hostname sitting on default port is
+				// the user's intention, since user did not specify a non-default port
+				return matchesExtHostName(extHost), nil
+			case nil:
+				// Since alternate address did not provide mgmt port number, and user provided
+				// port number, it means that the user did not intend to use external address
+				// Special case - if user specified 18091, then it is the same as didn't specifying
+				if pendingPort == DefaultAdminPortSSL {
+					return matchesExtHostName(extHost), nil
+				}
+			default:
+				return false, fmt.Errorf("unable to parse pendingRef's hostname port number")
+			}
+
+		case nil:
+			// Alternate address provided port number
+			// Now, check user entry:
+			switch portErr {
+			case ErrorNoPortNumber:
+				// User did not enter port number
+				// User's intention is to use the original default internal port
+				if matchesExtHostName(extHost) {
+					// Only allow this if the alternate port is also the default admin port
+					if !isHttps && extPort == int(DefaultAdminPort) {
+						return true, nil
+					}
+					if isHttps && extPort == int(DefaultAdminPortSSL) {
+						return true, nil
+					}
+				}
+			case nil:
+				// User entered port number
+				// User's intention to use external iff both match
+				if matchesExtHostName(extHost) && extPort == int(pendingPort) {
+					return true, nil
+				}
+			default:
+				return false, fmt.Errorf("unable to parse pendingRef's hostname port number")
+			}
+
+		default:
+			return false, fmt.Errorf("unable to parse externalInfoGetter")
+		}
+	}
+
+	return false, nil
+}

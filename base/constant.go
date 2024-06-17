@@ -344,6 +344,7 @@ var ErrorOpInterrupted = errors.New("Operation interrupted")
 var ErrorNoVbSpecified = errors.New("No vb being specified")
 var ErrorAdvFilterMixedModeUnsupported = errors.New("Not all nodes support advanced filtering so adv filtering editing is not allowed")
 var ErrorCasPoisoningDetected = errors.New("Document CAS is stamped with a time beyond allowable drift threshold")
+var ErrorHostNameEmpty = errors.New("Hostname is empty")
 
 func GetBackfillFatalDataLossError(specId string) error {
 	return fmt.Errorf("%v experienced fatal error when trying to create backfill request. To prevent data loss, the pipeline must restream from the beginning", specId)

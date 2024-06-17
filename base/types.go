@@ -3088,3 +3088,4 @@ type HostPortMapType map[string]map[string]uint16
 type ConnectionErrMapType map[string]map[string][]string
 
 type PortType int
+type ExternalMgmtHostAndPortGetter func(map[string]interface{}, bool) (string, int, error)
