@@ -2076,7 +2076,7 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		router.SetCrossClusterVersioning(val)
 	}
 
-	casDriftThreshold, ok := settings[metadata.CASDriftThresholdHoursKey].(int)
+	casDriftThreshold, ok := settings[metadata.CASDriftThresholdSecsKey].(int)
 	if ok {
 		casUint := uint32(casDriftThreshold)
 		atomic.StoreUint32(&router.casDriftThreshold, casUint)
@@ -2196,8 +2196,8 @@ func (router *Router) CheckCasDrift(wrappedUpr *base.WrappedUprEvent) bool {
 		return false
 	}
 
-	casDriftThresholdHours := atomic.LoadUint32(&router.casDriftThreshold)
-	if casDriftThresholdHours == 0 {
+	casDriftThresholdSecs := atomic.LoadUint32(&router.casDriftThreshold)
+	if casDriftThresholdSecs == 0 {
 		// Not enabled
 		return false
 	}
@@ -2211,7 +2211,7 @@ func (router *Router) CheckCasDrift(wrappedUpr *base.WrappedUprEvent) bool {
 		}
 	}
 
-	casDriftThresholdDuration := time.Duration(casDriftThresholdHours) * time.Hour
+	casDriftThresholdDuration := time.Duration(casDriftThresholdSecs) * time.Second
 
 	casInt64 := int64(wrappedUpr.UprEvent.Cas)
 	if casInt64 < 0 {

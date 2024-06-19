@@ -103,7 +103,7 @@ const (
 	MobileCompatibleKey               = base.MobileCompatibleKey
 	EnableDcpPurgeRollback            = base.EnableDcpPurgeRollback
 	TargetTopologyLogFreq             = base.TargetTopologyLogFreqKey
-	CasDriftThresholdHoursKey         = base.CASDriftThresholdHoursKey
+	CasDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
 )
 
@@ -225,7 +225,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	MobileCompatibleKey:               metadata.MobileCompatibleKey,
 	EnableDcpPurgeRollback:            metadata.EnableDcpPurgeRollback,
 	TargetTopologyLogFreq:             metadata.TargetTopologyLogFreqKey,
-	CasDriftThresholdHoursKey:         metadata.CASDriftThresholdHoursKey,
+	CasDriftThresholdSecsKey:          metadata.CASDriftThresholdSecsKey,
 	PreCheckCasDriftThresholdHoursKey: metadata.PreCheckCasDriftThresholdHoursKey,
 }
 
@@ -289,7 +289,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.MobileCompatibleKey:                  MobileCompatibleKey,
 	metadata.EnableDcpPurgeRollback:               EnableDcpPurgeRollback,
 	metadata.TargetTopologyLogFreqKey:             TargetTopologyLogFreq,
-	metadata.CASDriftThresholdHoursKey:            CasDriftThresholdHoursKey,
+	metadata.CASDriftThresholdSecsKey:             CasDriftThresholdSecsKey,
 	metadata.PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursKey,
 }
 

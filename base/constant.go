@@ -1740,7 +1740,7 @@ var ValidJsonEnds []byte = []byte{
 const EmptyJsonObject string = "{}"
 
 const (
-	CASDriftThresholdHoursKey         = "casDriftThresholdHours"
+	CASDriftThresholdSecsKey          = "casDriftThresholdSecs"
 	PreCheckCasDriftThresholdHoursKey = "preCheckCasDriftThresholdHours"
 )
 
