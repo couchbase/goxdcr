@@ -108,7 +108,7 @@ const (
 
 	TargetTopologyLogFreqKey = base.TargetTopologyLogFreqKey
 
-	CASDriftThresholdHoursKey         = base.CASDriftThresholdHoursKey
+	CASDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
 )
 
@@ -235,7 +235,7 @@ var EnableDcpPurgeRollbackConfig = &SettingsConfig{false, nil}
 var TargetTopologyLogFrequencyConfig = &SettingsConfig{base.TargetTopologyLogFreqVal, &Range{0, 60480}}
 
 // 0 means it is off
-var CasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
+var CasDriftThresholdSecsConfig = &SettingsConfig{100, &Range{0, math.MaxInt}}
 var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
 
 // Note that any keys that are in the MultiValueMap should not belong here
@@ -289,7 +289,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	CkptSvcCacheEnabledKey:               CkptSvcCacheEnabledConfig,
 	EnableDcpPurgeRollback:               EnableDcpPurgeRollbackConfig,
 	TargetTopologyLogFreqKey:             TargetTopologyLogFrequencyConfig,
-	CASDriftThresholdHoursKey:            CasDriftThresholdHoursConfig,
+	CASDriftThresholdSecsKey:             CasDriftThresholdSecsConfig,
 	PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursConfig,
 }
 
@@ -1060,10 +1060,10 @@ func (s *ReplicationSettings) GetReplicateCkptInterval() time.Duration {
 }
 
 func (s *ReplicationSettings) GetCasDriftThreshold() uint32 {
-	val, _ := s.GetSettingValueOrDefaultValue(CASDriftThresholdHoursKey)
+	val, _ := s.GetSettingValueOrDefaultValue(CASDriftThresholdSecsKey)
 
-	hrsInt := val.(int)
-	return uint32(hrsInt)
+	secsInt := val.(int)
+	return uint32(secsInt)
 }
 
 func (s *ReplicationSettings) GetCasDriftInjectDocKey() string {

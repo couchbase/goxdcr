@@ -104,7 +104,7 @@ const (
 	FilterBinaryDocsKey               = metadata.FilterBinaryDocsKey
 	EnableDcpPurgeRollback            = base.EnableDcpPurgeRollback
 	TargetTopologyLogFreq             = base.TargetTopologyLogFreqKey
-	CasDriftThresholdHoursKey         = base.CASDriftThresholdHoursKey
+	CasDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
 )
 
@@ -230,7 +230,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	FilterBinaryDocsKey:               metadata.FilterBinaryDocsKey,
 	EnableDcpPurgeRollback:            metadata.EnableDcpPurgeRollback,
 	TargetTopologyLogFreq:             metadata.TargetTopologyLogFreqKey,
-	CasDriftThresholdHoursKey:         metadata.CASDriftThresholdHoursKey,
+	CasDriftThresholdSecsKey:          metadata.CASDriftThresholdSecsKey,
 	PreCheckCasDriftThresholdHoursKey: metadata.PreCheckCasDriftThresholdHoursKey,
 }
 
@@ -292,7 +292,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.FilterBinaryDocsKey:                  FilterBinaryDocsKey,
 	metadata.EnableDcpPurgeRollback:               EnableDcpPurgeRollback,
 	metadata.TargetTopologyLogFreqKey:             TargetTopologyLogFreq,
-	metadata.CASDriftThresholdHoursKey:            CasDriftThresholdHoursKey,
+	metadata.CASDriftThresholdSecsKey:             CasDriftThresholdSecsKey,
 	metadata.PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursKey,
 }
 

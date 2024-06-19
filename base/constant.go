@@ -1606,7 +1606,7 @@ var DatapoolLogFrequency = 10
 const ConnectionPreCheckTaskId string = "taskId"
 
 const (
-	CASDriftThresholdHoursKey         = "casDriftThresholdHours"
+	CASDriftThresholdSecsKey          = "casDriftThresholdSecs"
 	PreCheckCasDriftThresholdHoursKey = "preCheckCasDriftThresholdHours"
 )
 

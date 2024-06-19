@@ -1314,9 +1314,9 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[metadata.CollectionsMappingRulesKey] = explicitMappingRules
 	}
 
-	casDriftThreshold, ok := settings[metadata.CASDriftThresholdHoursKey]
+	casDriftThreshold, ok := settings[metadata.CASDriftThresholdSecsKey]
 	if ok {
-		routerSettings[metadata.CASDriftThresholdHoursKey] = casDriftThreshold
+		routerSettings[metadata.CASDriftThresholdSecsKey] = casDriftThreshold
 	}
 
 	devCasDriftForceDocKey, ok := settings[metadata.DevCasDriftForceDocKey]

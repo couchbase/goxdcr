@@ -496,7 +496,8 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() ||
 		len(newMergeFuncMapping) > 0 && newMergeFuncMapping.SameAs(oldMergeFuncMapping) == false ||
 		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() ||
-		oldSettings.GetCasDriftInjectDocKey() != newSettings.GetCasDriftInjectDocKey() {
+		oldSettings.GetCasDriftInjectDocKey() != newSettings.GetCasDriftInjectDocKey() ||
+		oldSettings.GetCasDriftThreshold() != newSettings.GetCasDriftThreshold() {
 
 		newSettingsMap := newSettings.ToMap(false /*isDefaultSettings*/)
 
