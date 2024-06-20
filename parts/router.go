@@ -171,6 +171,7 @@ type Router struct {
 
 	devCasDriftInjectOn uint32
 	devCasDriftKey      string
+	devCasDriftKeyMtx   sync.Mutex
 
 	eventsProducer common.PipelineEventsProducer
 }
@@ -2081,7 +2082,7 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 		atomic.StoreUint32(&router.casDriftThreshold, casUint)
 	}
 
-	casDriftInjectDocKey, ok := settings[metadata.DevCasDrfitForceDocKey].(string)
+	casDriftInjectDocKey, ok := settings[metadata.DevCasDriftForceDocKey].(string)
 	if ok && casDriftInjectDocKey != "" {
 		router.devCasDriftKey = casDriftInjectDocKey
 		atomic.StoreUint32(&router.devCasDriftInjectOn, 1)
@@ -2202,7 +2203,9 @@ func (router *Router) CheckCasDrift(wrappedUpr *base.WrappedUprEvent) bool {
 	}
 
 	if atomic.LoadUint32(&router.devCasDriftInjectOn) == 1 {
+		router.devCasDriftKeyMtx.Lock()
 		keyToCheck := router.devCasDriftKey
+		router.devCasDriftKeyMtx.Unlock()
 		if keyToCheck == string(wrappedUpr.UprEvent.Key) {
 			return true
 		}

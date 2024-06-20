@@ -3343,6 +3343,76 @@ func (_c *UtilsIface_GetMapFromExpvarMap_Call) RunAndReturn(run func(*expvar.Map
 	return _c
 }
 
+// GetMaxCasStatsForVBs provides a mock function with given fields: vbnos, conn, statsMap, recycledVbSeqnoMap
+func (_m *UtilsIface) GetMaxCasStatsForVBs(vbnos []uint16, conn memcached.ClientIface, statsMap *map[string]string, recycledVbSeqnoMap *map[uint16]uint64) (map[uint16]uint64, []uint16, error) {
+	ret := _m.Called(vbnos, conn, statsMap, recycledVbSeqnoMap)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMaxCasStatsForVBs")
+	}
+
+	var r0 map[uint16]uint64
+	var r1 []uint16
+	var r2 error
+	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) (map[uint16]uint64, []uint16, error)); ok {
+		return rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	}
+	if rf, ok := ret.Get(0).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) map[uint16]uint64); ok {
+		r0 = rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[uint16]uint64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) []uint16); ok {
+		r1 = rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]uint16)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) error); ok {
+		r2 = rf(vbnos, conn, statsMap, recycledVbSeqnoMap)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// UtilsIface_GetMaxCasStatsForVBs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMaxCasStatsForVBs'
+type UtilsIface_GetMaxCasStatsForVBs_Call struct {
+	*mock.Call
+}
+
+// GetMaxCasStatsForVBs is a helper method to define mock.On call
+//   - vbnos []uint16
+//   - conn memcached.ClientIface
+//   - statsMap *map[string]string
+//   - recycledVbSeqnoMap *map[uint16]uint64
+func (_e *UtilsIface_Expecter) GetMaxCasStatsForVBs(vbnos interface{}, conn interface{}, statsMap interface{}, recycledVbSeqnoMap interface{}) *UtilsIface_GetMaxCasStatsForVBs_Call {
+	return &UtilsIface_GetMaxCasStatsForVBs_Call{Call: _e.mock.On("GetMaxCasStatsForVBs", vbnos, conn, statsMap, recycledVbSeqnoMap)}
+}
+
+func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) Run(run func(vbnos []uint16, conn memcached.ClientIface, statsMap *map[string]string, recycledVbSeqnoMap *map[uint16]uint64)) *UtilsIface_GetMaxCasStatsForVBs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]uint16), args[1].(memcached.ClientIface), args[2].(*map[string]string), args[3].(*map[uint16]uint64))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) Return(_a0 map[uint16]uint64, _a1 []uint16, _a2 error) *UtilsIface_GetMaxCasStatsForVBs_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *UtilsIface_GetMaxCasStatsForVBs_Call) RunAndReturn(run func([]uint16, memcached.ClientIface, *map[string]string, *map[uint16]uint64) (map[uint16]uint64, []uint16, error)) *UtilsIface_GetMaxCasStatsForVBs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetMemcachedClient provides a mock function with given fields: serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features
 func (_m *UtilsIface) GetMemcachedClient(serverAddr string, bucketName string, kv_mem_clients map[string]memcached.ClientIface, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger, features utils.HELOFeatures) (memcached.ClientIface, error) {
 	ret := _m.Called(serverAddr, bucketName, kv_mem_clients, userAgent, keepAlivePeriod, logger, features)

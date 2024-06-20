@@ -28,7 +28,9 @@ type BucketTopologySvc interface {
 	SubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
 	SubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
 	SubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
+	SubscribeToLocalBucketMaxVbCasStatFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
 	SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, error)
+	SubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, error)
 
 	UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
@@ -36,6 +38,8 @@ type BucketTopologySvc interface {
 	UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+	UnSubscribeToLocalBucketMaxVbCasStatFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
+	UnSubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 
 	// This service also provides a functionality to register a garbage collection function call associated with a
 	// specific VB. If the time is up and the VB is not owned by this node, then the garbage collect function will
@@ -68,7 +72,8 @@ type SourceNotification interface {
 	GetLocalTopologyUpdatedTime() time.Time
 	GetEnableCrossClusterVersioning() bool
 	GetVersionPruningWindowHrs() int
-	GetVbucketsMaxCas() []interface{}
+	GetHlvVbMaxCas() []interface{}
+	GetVBMaxCasStats() base.HighSeqnosMapType
 }
 
 type TargetNotification interface {
@@ -77,4 +82,5 @@ type TargetNotification interface {
 	GetTargetBucketUUID() string
 	GetTargetBucketInfo() base.BucketInfoMapType
 	GetTargetStorageBackend() string
+	GetVBMaxCasStats() base.HighSeqnosMapType
 }

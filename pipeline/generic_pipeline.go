@@ -29,6 +29,7 @@ var ErrorKey = "Error"
 const PipelineContextStart = "genericPipeline.context.Start"
 const PipelinePartStart = "genericPipeline.startPartsWithTimeout"
 const MergeCkptFuncKey = "genericPipeline.mergeCkptFunc"
+const PreCheckCasCheck = "genericPipeline.preCheckCasCheck"
 
 // In certain scenarios, e.g., incorrect bucket password, a large number of parts
 // may return error when starting. limit the number of errors we track and log
@@ -290,8 +291,13 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	pruningWindow := latestNotification.GetVersionPruningWindowHrs()
 	settings[base.VersionPruningWindowHrsKey] = pruningWindow
 	if hlvEnable {
-		maxCas := latestNotification.GetVbucketsMaxCas()
-		settings[base.VbucketsMaxCasKey] = maxCas
+		hlvVbMaxCas := latestNotification.GetHlvVbMaxCas()
+		settings[base.HlvVbMaxCasKey] = hlvVbMaxCas
+	}
+
+	errMap = genericPipeline.preCheckCasCheck(spec, genPipelineId, errMap)
+	if len(errMap) > 0 {
+		return errMap
 	}
 
 	settings[base.VBTimestamps] = &base.ObjectWithLock{make(map[uint16]*base.VBTimestamp), &sync.RWMutex{}}
@@ -402,6 +408,141 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	}
 
 	return errMap
+}
+
+// As part of CAS poison check, we need to make sure that given a specific VB, the max cas's between them
+// are not beyond an acceptable threshold
+func (genericPipeline *GenericPipeline) preCheckCasCheck(spec *metadata.ReplicationSpecification, genPipelineId string, errMap base.ErrorMap) base.ErrorMap {
+	preCheckThreshold := time.Duration(spec.Settings.GetPreCheckCasDriftThreshold()) * time.Hour
+	if preCheckThreshold == 0 {
+		genericPipeline.logger.Infof("Skip cas poison precheck because it has been disabled")
+		return errMap
+	}
+
+	var localMaxCasMap base.VbSeqnoMapType
+	var localErrMap base.ErrorMap
+	var remoteMinCasMap base.VbSeqnoMapType
+	var remoteErrMap base.ErrorMap
+	var maxVbWaitGrp sync.WaitGroup
+	maxVbWaitGrp.Add(2)
+	stopwatch1 := genericPipeline.utils.StartDiagStopwatch("getLocalVbMaxCas", base.DiagInternalThreshold)
+	stopwatch2 := genericPipeline.utils.StartDiagStopwatch("getRemoteVbMaxCas", base.DiagNetworkThreshold)
+	go func() {
+		defer maxVbWaitGrp.Done()
+		defer stopwatch1()
+		localMaxCasMap, localErrMap = genericPipeline.getlocalMaxCasMap(spec, genPipelineId)
+	}()
+	go func() {
+		defer maxVbWaitGrp.Done()
+		defer stopwatch2()
+		remoteMinCasMap, remoteErrMap = genericPipeline.getRemoteMinCasMap(spec, genPipelineId)
+	}()
+	maxVbWaitGrp.Wait()
+	if localErrMap != nil {
+		errMap[fmt.Sprintf("%v.local", PreCheckCasCheck)] = fmt.Errorf(base.FlattenErrorMap(localErrMap))
+	}
+	if remoteErrMap != nil {
+		errMap[fmt.Sprintf("%v.remote", PreCheckCasCheck)] = fmt.Errorf(base.FlattenErrorMap(remoteErrMap))
+	}
+	if len(errMap) > 0 {
+		return errMap
+	}
+
+	devInjectionVB := spec.Settings.GetDevPreCheckVBPoison()
+	if devInjectionVB >= 0 {
+		if _, exists := localMaxCasMap[uint16(devInjectionVB)]; exists {
+			// year 2033
+			localMaxCasMap[uint16(devInjectionVB)] = 2017616266604601370
+		}
+	}
+
+	if len(remoteMinCasMap) < len(localMaxCasMap) {
+		errMap[PreCheckCasCheck] = fmt.Errorf("Remote cluster vb cas map only has %v elements whereas locally there are %v", len(localMaxCasMap), len(localMaxCasMap))
+		return errMap
+	}
+
+	casCompareMap, missingVBs, err := localMaxCasMap.Subtract(remoteMinCasMap)
+	if err != nil {
+		errMap[PreCheckCasCheck] = err
+		return errMap
+	}
+	if len(missingVBs) > 0 {
+		genericPipeline.logger.Warnf("These VBs were missing and CAS poison check were skipped %v", missingVBs)
+	}
+	casPoisonedMap := make(base.VbSeqnoMapType)
+	for vbno, casDiff := range casCompareMap {
+		if casDiff > preCheckThreshold.Nanoseconds() {
+			casPoisonedMap[vbno] = uint64(casDiff)
+		}
+	}
+	if len(casPoisonedMap) > 0 {
+		poisonedErr := fmt.Errorf("%s: %v", base.PreCheckCASDriftDetected, casPoisonedMap)
+		genericPipeline.logger.Fatalf(poisonedErr.Error())
+		errMap[PreCheckCasCheck] = poisonedErr
+	}
+	return errMap
+}
+
+func (genericPipeline *GenericPipeline) getlocalMaxCasMap(spec *metadata.ReplicationSpecification, genPipelineId string) (base.VbSeqnoMapType, base.ErrorMap) {
+	localMaxCasNotificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToLocalBucketMaxVbCasStatFeed(spec, genPipelineId)
+	if err != nil {
+		errMap := make(base.ErrorMap)
+		errMap[PreCheckCasCheck] = err
+		return nil, errMap
+	}
+
+	localMaxCasMap := make(base.VbSeqnoMapType)
+	var nonEmptyResultFound bool
+	for !nonEmptyResultFound {
+		maxCasNotification := <-localMaxCasNotificationCh
+		vbMaxCasMap := maxCasNotification.GetVBMaxCasStats()
+		if len(vbMaxCasMap) == 0 {
+			time.Sleep(1 * time.Second)
+		} else {
+			nonEmptyResultFound = true
+			localMaxCasMap = vbMaxCasMap.DedupAndGetMax()
+		}
+		maxCasNotification.Recycle()
+	}
+
+	err = genericPipeline.bucketTopologySvc.UnSubscribeToLocalBucketMaxVbCasStatFeed(spec, genPipelineId)
+	if err != nil {
+		errMap := make(base.ErrorMap)
+		errMap[PreCheckCasCheck] = err
+		return nil, errMap
+	}
+	return localMaxCasMap, nil
+}
+
+func (genericPipeline *GenericPipeline) getRemoteMinCasMap(spec *metadata.ReplicationSpecification, genPipelineId string) (base.VbSeqnoMapType, base.ErrorMap) {
+	remoteMaxNotificationCh, err := genericPipeline.bucketTopologySvc.SubscribeToRemoteKVStatsFeed(spec, genPipelineId)
+	if err != nil {
+		errMap := make(base.ErrorMap)
+		errMap[PreCheckCasCheck] = err
+		return nil, errMap
+	}
+
+	remoteMinCasMap := make(base.VbSeqnoMapType)
+	var nonEmptyResultFound bool
+	for !nonEmptyResultFound {
+		maxCasNotification := <-remoteMaxNotificationCh
+		vbMaxCasMap := maxCasNotification.GetVBMaxCasStats()
+		if len(vbMaxCasMap) == 0 {
+			time.Sleep(1 * time.Second)
+		} else {
+			nonEmptyResultFound = true
+			remoteMinCasMap = vbMaxCasMap.DedupAndGetMin()
+		}
+		maxCasNotification.Recycle()
+	}
+
+	err = genericPipeline.bucketTopologySvc.UnSubscribeToRemoteKVStatsFeed(spec, genPipelineId)
+	if err != nil {
+		errMap := make(base.ErrorMap)
+		errMap[PreCheckCasCheck] = err
+		return nil, errMap
+	}
+	return remoteMinCasMap, nil
 }
 
 func (genericPipeline *GenericPipeline) runP2PProtocol(errMapPtr *base.ErrorMap) {

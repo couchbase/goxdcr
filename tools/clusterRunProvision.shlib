@@ -2859,7 +2859,8 @@ function enableDcpOsoBackfill {
 
 function getSpecificStatFromPrometheus {
 	local clusterName=$1
-	local statName=$2
+	local sourceBucketName=$2
+	local statName=$3
 	local port=${CLUSTER_NAME_XDCR_PORT_MAP[$clusterName]:-}
 	if [[ -z "$port" ]]; then
 		echo "Invalid clustername $clusterName"
@@ -2867,7 +2868,9 @@ function getSpecificStatFromPrometheus {
 	fi
 
 	# get the next word after regex match
-	statVal=$($CURL -X GET http://localhost:$port/_prometheusMetrics -u $DEFAULT_ADMIN:$DEFAULT_PW | awk -v regex=$statName+".*Main.*} " 'BEGIN{FS=regex}{if ($2!="") print $2}')
+	statVal=$($CURL -X GET http://localhost:$port/_prometheusMetrics -u $DEFAULT_ADMIN:$DEFAULT_PW |
+		grep "sourceBucketName=\"${sourceBucketName}\"" |
+		awk -v regex=$statName+".*Main.*} " 'BEGIN{FS=regex}{if ($2!="") print $2}')
 	echo $statVal
 }
 

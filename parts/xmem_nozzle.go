@@ -560,8 +560,8 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 			config.crossClusterVers = val.(bool)
 		}
 		if config.crossClusterVers {
-			config.vbMaxCas = make(map[uint16]uint64)
-			if val, ok := settings[base.VbucketsMaxCasKey]; ok {
+			config.vbHlvMaxCas = make(map[uint16]uint64)
+			if val, ok := settings[base.HlvVbMaxCasKey]; ok {
 				vbMaxCas := val.([]interface{})
 				for i, casObj := range vbMaxCas {
 					casStr := casObj.(string)
@@ -569,7 +569,7 @@ func (config *xmemConfig) initializeConfig(settings metadata.ReplicationSettings
 					if err != nil {
 						return fmt.Errorf("bad value %v in vbucketsMaxCas %v. err=%v", casStr, vbMaxCas, err)
 					}
-					config.vbMaxCas[uint16(i)] = cas
+					config.vbHlvMaxCas[uint16(i)] = cas
 				}
 			}
 		}
@@ -1935,7 +1935,7 @@ func (xmem *XmemNozzle) opcodeAndSpecsForGetOp(wrappedReq *base.WrappedMCRequest
 		// CCR mode requires fetching the document metadata and body for the purpose of conflict resolution
 		// Since they are considered true conflicts
 		getSpecs = getBodySpec
-	} else if xmem.getCrossClusterVers() && wrappedReq.HLVModeOptions.ActualCas >= xmem.config.vbMaxCas[incomingReq.VBucket] {
+	} else if xmem.getCrossClusterVers() && wrappedReq.HLVModeOptions.ActualCas >= xmem.config.vbHlvMaxCas[incomingReq.VBucket] {
 		// These are the mutations we need to maintain HLV for mobile and get target importCas/cvCas for CR
 		// Note that there is no mixed mode support for import mutations. If enableCrossClusterVersioning is false,
 		// and current source mutation already has HLV, we still don't get target importCas/HLV. The reason is to
@@ -2091,7 +2091,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 	} else if xmem.source_cr_mode == base.CRMode_Custom {
 		needToUpdateSysXattrs = true
 	} else if wrappedReq.HLVModeOptions.SendHlv {
-		maxCas := xmem.config.vbMaxCas[wrappedReq.Req.VBucket]
+		maxCas := xmem.config.vbHlvMaxCas[wrappedReq.Req.VBucket]
 		if wrappedReq.Req.Cas >= maxCas {
 			needToUpdateSysXattrs = true
 		}
@@ -2115,7 +2115,7 @@ func (xmem *XmemNozzle) updateSystemXattrForTarget(wrappedReq *base.WrappedMCReq
 			return err
 		}
 
-		updateHLV = crMeta.NeedToUpdateHlv(sourceDocMeta, xmem.config.vbMaxCas[wrappedReq.Req.VBucket], time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
+		updateHLV = crMeta.NeedToUpdateHlv(sourceDocMeta, xmem.config.vbHlvMaxCas[wrappedReq.Req.VBucket], time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
 	}
 
 	if wrappedReq.IsSubdocOp() {
@@ -3134,7 +3134,6 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 			if freeze_counter > max_idle_count {
 				xmem.Logger().Errorf("%v hasn't sent any item out for %v ticks, %v data in queue, flowcontrol=%v, con_retry_limit=%v, backoff_factor for client_setMeta is %v, backoff_factor for client_getMeta is %v", xmem_id, max_idle_count, len(dataChan), buffer_count <= xmem.buf.notify_threshold, xmem.client_for_setMeta.GetContinuousWriteFailureCounter(), xmem.client_for_setMeta.GetBackOffFactor(), xmem.client_for_getMeta.GetBackOffFactor())
 				xmem.Logger().Infof("%v open=%v checking..., %v item unsent, received %v items, sent %v items, ignored %v item, %v items waiting for response, %v batches ready\n", xmem_id, isOpen, len(dataChan), received_count, xmem_count_sent, xmem_count_ignored, int(buffer_size)-len(empty_slots_pos), len(batches_ready_queue))
-				//				utils.DumpStack(xmem.Logger())
 				//the connection might not be healthy, it should not go back to connection pool
 				xmem.client_for_setMeta.MarkConnUnhealthy()
 				xmem.client_for_getMeta.MarkConnUnhealthy()

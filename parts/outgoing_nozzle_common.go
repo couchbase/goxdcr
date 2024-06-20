@@ -99,7 +99,7 @@ type baseConfig struct {
 	password            string
 	hlvPruningWindowSec uint32 // Interval for pruning PV in seconds
 	crossClusterVers    bool   // Whether to send HLV when bucket is not custom CR
-	vbMaxCas            map[uint16]uint64
+	vbHlvMaxCas         map[uint16]uint64
 	logger              *log.CommonLogger
 	mobileCompatible    uint32
 

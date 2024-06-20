@@ -16,9 +16,21 @@ type BucketTopologyGetter struct {
 	bucketInfoGetter service_def.BucketInfoGetter
 }
 
+type MaxCasStatsGetter struct {
+	bucketName        string
+	maxCasStatsGetter service_def.MaxVBCasStatsGetter
+}
+
 func NewBucketTopologyGetter(bucketName string, bucketInfoGetter service_def.BucketInfoGetter) *BucketTopologyGetter {
 	return &BucketTopologyGetter{
 		bucketName:       bucketName,
 		bucketInfoGetter: bucketInfoGetter,
+	}
+}
+
+func NewMaxCasStatsGetter(bucketName string, maxCasStatsGetter service_def.MaxVBCasStatsGetter) *MaxCasStatsGetter {
+	return &MaxCasStatsGetter{
+		bucketName:        bucketName,
+		maxCasStatsGetter: maxCasStatsGetter,
 	}
 }

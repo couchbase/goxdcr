@@ -303,6 +303,53 @@ func (_c *SourceNotification_GetHighSeqnosMapLegacy_Call) RunAndReturn(run func(
 	return _c
 }
 
+// GetHlvVbMaxCas provides a mock function with given fields:
+func (_m *SourceNotification) GetHlvVbMaxCas() []interface{} {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetHlvVbMaxCas")
+	}
+
+	var r0 []interface{}
+	if rf, ok := ret.Get(0).(func() []interface{}); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]interface{})
+		}
+	}
+
+	return r0
+}
+
+// SourceNotification_GetHlvVbMaxCas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetHlvVbMaxCas'
+type SourceNotification_GetHlvVbMaxCas_Call struct {
+	*mock.Call
+}
+
+// GetHlvVbMaxCas is a helper method to define mock.On call
+func (_e *SourceNotification_Expecter) GetHlvVbMaxCas() *SourceNotification_GetHlvVbMaxCas_Call {
+	return &SourceNotification_GetHlvVbMaxCas_Call{Call: _e.mock.On("GetHlvVbMaxCas")}
+}
+
+func (_c *SourceNotification_GetHlvVbMaxCas_Call) Run(run func()) *SourceNotification_GetHlvVbMaxCas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *SourceNotification_GetHlvVbMaxCas_Call) Return(_a0 []interface{}) *SourceNotification_GetHlvVbMaxCas_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *SourceNotification_GetHlvVbMaxCas_Call) RunAndReturn(run func() []interface{}) *SourceNotification_GetHlvVbMaxCas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetKvVbMapRO provides a mock function with given fields:
 func (_m *SourceNotification) GetKvVbMapRO() base.KvVBMapType {
 	ret := _m.Called()
@@ -652,49 +699,49 @@ func (_c *SourceNotification_GetSourceVBMapRO_Call) RunAndReturn(run func() base
 	return _c
 }
 
-// GetVbucketsMaxCas provides a mock function with given fields:
-func (_m *SourceNotification) GetVbucketsMaxCas() []interface{} {
+// GetVBMaxCasStats provides a mock function with given fields:
+func (_m *SourceNotification) GetVBMaxCasStats() base.HighSeqnosMapType {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetVbucketsMaxCas")
+		panic("no return value specified for GetVBMaxCasStats")
 	}
 
-	var r0 []interface{}
-	if rf, ok := ret.Get(0).(func() []interface{}); ok {
+	var r0 base.HighSeqnosMapType
+	if rf, ok := ret.Get(0).(func() base.HighSeqnosMapType); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]interface{})
+			r0 = ret.Get(0).(base.HighSeqnosMapType)
 		}
 	}
 
 	return r0
 }
 
-// SourceNotification_GetVbucketsMaxCas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVbucketsMaxCas'
-type SourceNotification_GetVbucketsMaxCas_Call struct {
+// SourceNotification_GetVBMaxCasStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVBMaxCasStats'
+type SourceNotification_GetVBMaxCasStats_Call struct {
 	*mock.Call
 }
 
-// GetVbucketsMaxCas is a helper method to define mock.On call
-func (_e *SourceNotification_Expecter) GetVbucketsMaxCas() *SourceNotification_GetVbucketsMaxCas_Call {
-	return &SourceNotification_GetVbucketsMaxCas_Call{Call: _e.mock.On("GetVbucketsMaxCas")}
+// GetVBMaxCasStats is a helper method to define mock.On call
+func (_e *SourceNotification_Expecter) GetVBMaxCasStats() *SourceNotification_GetVBMaxCasStats_Call {
+	return &SourceNotification_GetVBMaxCasStats_Call{Call: _e.mock.On("GetVBMaxCasStats")}
 }
 
-func (_c *SourceNotification_GetVbucketsMaxCas_Call) Run(run func()) *SourceNotification_GetVbucketsMaxCas_Call {
+func (_c *SourceNotification_GetVBMaxCasStats_Call) Run(run func()) *SourceNotification_GetVBMaxCasStats_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *SourceNotification_GetVbucketsMaxCas_Call) Return(_a0 []interface{}) *SourceNotification_GetVbucketsMaxCas_Call {
+func (_c *SourceNotification_GetVBMaxCasStats_Call) Return(_a0 base.HighSeqnosMapType) *SourceNotification_GetVBMaxCasStats_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *SourceNotification_GetVbucketsMaxCas_Call) RunAndReturn(run func() []interface{}) *SourceNotification_GetVbucketsMaxCas_Call {
+func (_c *SourceNotification_GetVBMaxCasStats_Call) RunAndReturn(run func() base.HighSeqnosMapType) *SourceNotification_GetVBMaxCasStats_Call {
 	_c.Call.Return(run)
 	return _c
 }
