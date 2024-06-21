@@ -277,6 +277,8 @@ const (
 	CapellaHostNameSuffixKey = "CapellaHostNameSuffix"
 
 	DatapoolLogFrequencyKey = "DatapoolLogFrequency"
+
+	NWLatencyToleranceMilliSecKey = "NWLatencyToleranceMilliSec"
 )
 
 var TopologyChangeCheckIntervalConfig = &SettingsConfig{10, &Range{1, 100}}
@@ -400,6 +402,7 @@ var HumanRecoveryThresholdConfig = &SettingsConfig{int(base.HumanRecoveryThresho
 var DnsSrvReBootstrapConfig = &SettingsConfig{base.DNSSrvReBootstrap, nil}
 var CapellaHostnameSuffixConfig = &SettingsConfig{base.CapellaHostnameSuffix, nil}
 var DatapoolLogFrequencyConfig = &SettingsConfig{base.DatapoolLogFrequency, &Range{0, 10000}}
+var NWLatencyToleranceMilliSecConfig = &SettingsConfig{int(base.NWLatencyToleranceMilliSec / time.Millisecond), &Range{0, 60000}}
 
 var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	TopologyChangeCheckIntervalKey:                TopologyChangeCheckIntervalConfig,
@@ -523,6 +526,7 @@ var XDCRInternalSettingsConfigMap = map[string]*SettingsConfig{
 	ConnectionPreCheckRPCTimeoutKey:               ConnectionPreCheckRPCTimeoutConfig,
 	CapellaHostNameSuffixKey:                      CapellaHostnameSuffixConfig,
 	DatapoolLogFrequencyKey:                       DatapoolLogFrequencyConfig,
+	NWLatencyToleranceMilliSecKey:                 NWLatencyToleranceMilliSecConfig,
 }
 
 func InitConstants(xmemMaxIdleCountLowerBound int, xmemMaxIdleCountUpperBound int) {

@@ -129,7 +129,7 @@ type UtilsIface interface {
 	ExponentialBackoffExecutorWithOriginalError(name string, initialWait time.Duration, maxRetries int, factor int, op ExponentialOpFunc) (err error)
 	GetMapFromExpvarMap(expvarMap *expvar.Map) map[string]interface{}
 	AddKeyToBeFiltered(currentValue, key []byte, dpGetter base.DpGetterFunc, toBeReleased *[][]byte, currentValueEndBody int) ([]byte, error, int64, int)
-	StartDiagStopwatch(id string, threshold time.Duration) func()
+	StartDiagStopwatch(id string, threshold time.Duration) func() time.Duration
 	StartDebugExec(id string, threshold time.Duration, debugFunc func()) func()
 	DumpStackTraceAfterThreshold(id string, threshold time.Duration, goroutines base.PprofLookupTypes) func()
 

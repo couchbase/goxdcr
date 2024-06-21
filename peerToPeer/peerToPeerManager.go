@@ -815,7 +815,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 
 	myHostAddr, err := p.xdcrCompSvc.MyHostAddr()
 	if err != nil {
-		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting myHostAddr, err=%v", err)
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error in getting myHostAddr, err=%v, taskId=%v", err, taskId)
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, nil, logger)
 		return
 	}
@@ -823,11 +823,11 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 	// initialise authMech, active hostnames etc.
 	err = initRemoteClusterRef(logger, remoteRef)
 	if err != nil {
-		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error initialising remote cluster reference, err=%v", err)
+		errMsg := fmt.Sprintf("Connection Pre-Check exited because of the error initialising remote cluster reference, err=%v, taskId=%v", err, taskId)
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, remoteRef, logger)
 		return
 	}
-	logger.Infof("Remote cluster reference for Connection Pre-Check initialised as ref=%v", remoteRef.SmallString())
+	logger.Infof("Remote cluster reference for Connection Pre-Check initialised as ref=%v, taskId=%v", remoteRef.SmallString(), taskId)
 
 	srvHostnames := remoteRef.GetSRVHostNames()
 
@@ -837,7 +837,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 		sendConnectionPreCheckRequestErrHelper(errMsg, taskId, myHostAddr, false, remoteRef, logger)
 		return
 	}
-	logger.Infof("Connection pre-check for myHostAddr=%v, will be with connStr=%v", myHostAddr, connStr)
+	logger.Infof("Connection pre-check for myHostAddr=%v, will be with connStr=%v, taskId=%v", myHostAddr, connStr, taskId)
 
 	username, password, authMech, cert, SANInCert, clientCert, clientKey, err := remoteRef.MyCredentials()
 	if err != nil {
@@ -882,7 +882,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 	}
 
 	if !base.IsClusterCompatible(srcClusterCompatibility, base.VersionForConnectionPreCheckSupport) {
-		logger.Infof("Connection Pre-Check exited because: srcClusterCompatibility=%v and VersionForConnectionPreCheckRequest=%v", srcClusterCompatibility, base.VersionForConnectionPreCheckSupport)
+		logger.Infof("Connection Pre-Check exited because: srcClusterCompatibility=%v and VersionForConnectionPreCheckRequest=%v, taskId=%v", srcClusterCompatibility, base.VersionForConnectionPreCheckSupport, taskId)
 		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkIsCompatibleVersion], taskId, myHostAddr, true, nil, logger)
 		return
 	}
@@ -896,7 +896,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 
 	// check for intra-cluster replication
 	if srcUUID == targetUUID {
-		logger.Infof("Connection Pre-Check exited because: srcUUID=%v and tgtUUID=%v", srcUUID, targetUUID)
+		logger.Infof("Connection Pre-Check exited because: srcUUID=%v and tgtUUID=%v, taskId=%v", srcUUID, targetUUID, taskId)
 		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkIsIntraClusterReplication], taskId, myHostAddr, true, nil, logger)
 		return
 	}
@@ -939,7 +939,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 			return
 		}
 	}
-	logger.Infof("User intent for Connection Pre-Check initialised as isExternal=%v, network_type=%v", isExternal, remoteRef.HostnameMode())
+	logger.Infof("User intent for Connection Pre-Check initialised as isExternal=%v, network_type=%v, taskId=%v", isExternal, remoteRef.HostnameMode(), taskId)
 
 	// get appropriate hostnames and ports to connect to based on user intent
 	portsMap, targetNodes, err := p.utils.GetPortsAndHostAddrsFromNodeServices(nodesList, hostname, remoteRef.IsHttps(), isExternal, logger)
@@ -985,7 +985,7 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 
 	err = store.InitConnectionPreCheckResults(taskId, myHostAddr, peers, connectionErrs)
 	if err != nil {
-		logger.Errorf("Connection Pre-Check exited because of the error in InitConnectionPreCheckResults(myHostAddr=%v)=%v", myHostAddr, err)
+		logger.Errorf("Connection Pre-Check exited because of the error in InitConnectionPreCheckResults(myHostAddr=%v)=%v, taskId=%v", myHostAddr, err, taskId)
 		return
 	}
 

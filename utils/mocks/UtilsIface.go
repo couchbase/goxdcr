@@ -1874,6 +1874,36 @@ func (_m *UtilsIface) GetNodeServicesInfo(hostAddr string, username string, pass
 	return r0, r1
 }
 
+// GetNodesListFromNodeServicesInfo provides a mock function with given fields: logger, nodeServicesInfo
+func (_m *UtilsIface) GetNodesListFromNodeServicesInfo(logger *log.CommonLogger, nodeServicesInfo map[string]interface{}) ([]interface{}, error) {
+	ret := _m.Called(logger, nodeServicesInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNodesListFromNodeServicesInfo")
+	}
+
+	var r0 []interface{}
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, map[string]interface{}) ([]interface{}, error)); ok {
+		return rf(logger, nodeServicesInfo)
+	}
+	if rf, ok := ret.Get(0).(func(*log.CommonLogger, map[string]interface{}) []interface{}); ok {
+		r0 = rf(logger, nodeServicesInfo)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]interface{})
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*log.CommonLogger, map[string]interface{}) error); ok {
+		r1 = rf(logger, nodeServicesInfo)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNonExistentBucketError provides a mock function with given fields:
 func (_m *UtilsIface) GetNonExistentBucketError() error {
 	ret := _m.Called()
@@ -1892,9 +1922,9 @@ func (_m *UtilsIface) GetNonExistentBucketError() error {
 	return r0
 }
 
-// GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodeServicesInfo, defaultConnStr, useSecurePort, logger
-func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[string]interface{}, defaultConnStr string, useSecurePort bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
-	ret := _m.Called(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+// GetPortsAndHostAddrsFromNodeServices provides a mock function with given fields: nodesList, defaultConnStr, useSecurePort, useExternal, logger
+func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodesList []interface{}, defaultConnStr string, useSecurePort bool, useExternal bool, logger *log.CommonLogger) (base.HostPortMapType, []string, error) {
+	ret := _m.Called(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPortsAndHostAddrsFromNodeServices")
@@ -1903,27 +1933,27 @@ func (_m *UtilsIface) GetPortsAndHostAddrsFromNodeServices(nodeServicesInfo map[
 	var r0 base.HostPortMapType
 	var r1 []string
 	var r2 error
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
-		return rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, bool, *log.CommonLogger) (base.HostPortMapType, []string, error)); ok {
+		return rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	}
-	if rf, ok := ret.Get(0).(func(map[string]interface{}, string, bool, *log.CommonLogger) base.HostPortMapType); ok {
-		r0 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(0).(func([]interface{}, string, bool, bool, *log.CommonLogger) base.HostPortMapType); ok {
+		r0 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(base.HostPortMapType)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(map[string]interface{}, string, bool, *log.CommonLogger) []string); ok {
-		r1 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(1).(func([]interface{}, string, bool, bool, *log.CommonLogger) []string); ok {
+		r1 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(map[string]interface{}, string, bool, *log.CommonLogger) error); ok {
-		r2 = rf(nodeServicesInfo, defaultConnStr, useSecurePort, logger)
+	if rf, ok := ret.Get(2).(func([]interface{}, string, bool, bool, *log.CommonLogger) error); ok {
+		r2 = rf(nodesList, defaultConnStr, useSecurePort, useExternal, logger)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -2943,19 +2973,19 @@ func (_m *UtilsIface) StartDebugExec(id string, threshold time.Duration, debugFu
 }
 
 // StartDiagStopwatch provides a mock function with given fields: id, threshold
-func (_m *UtilsIface) StartDiagStopwatch(id string, threshold time.Duration) func() {
+func (_m *UtilsIface) StartDiagStopwatch(id string, threshold time.Duration) func() time.Duration {
 	ret := _m.Called(id, threshold)
 
 	if len(ret) == 0 {
 		panic("no return value specified for StartDiagStopwatch")
 	}
 
-	var r0 func()
-	if rf, ok := ret.Get(0).(func(string, time.Duration) func()); ok {
+	var r0 func() time.Duration
+	if rf, ok := ret.Get(0).(func(string, time.Duration) func() time.Duration); ok {
 		r0 = rf(id, threshold)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(func())
+			r0 = ret.Get(0).(func() time.Duration)
 		}
 	}
 
