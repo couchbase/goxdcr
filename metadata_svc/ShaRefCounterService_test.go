@@ -40,7 +40,7 @@ func TestShaRefCounter_cleanup_deadlock(t *testing.T) {
 	buf, err := json.Marshal(nsmap)
 	assert.Nil(t, err)
 
-	utilities.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
+	utilities.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
 	metadataSvc.On("Del", mock.Anything, mock.Anything).Return(nil)
 	metadataSvc.On("Get", mock.Anything).Return(buf, nil, nil)
 	metadataSvc.On("Set", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {

@@ -3236,13 +3236,14 @@ func (u *Utilities) composeNsServerDocGetPath(bucketName string, ns *base.Collec
 	return path
 }
 
-func (u *Utilities) StartDiagStopwatch(id string, threshold time.Duration) func() {
+func (u *Utilities) StartDiagStopwatch(id string, threshold time.Duration) func() time.Duration {
 	startTime := time.Now()
-	return func() {
+	return func() time.Duration {
 		duration := time.Since(startTime)
 		if duration > threshold {
 			u.logger_utils.Warnf("%v took %v", id, duration)
 		}
+		return duration
 	}
 }
 

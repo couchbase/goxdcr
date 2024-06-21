@@ -6346,19 +6346,19 @@ func (_c *UtilsIface_StartDebugExec_Call) RunAndReturn(run func(string, time.Dur
 }
 
 // StartDiagStopwatch provides a mock function with given fields: id, threshold
-func (_m *UtilsIface) StartDiagStopwatch(id string, threshold time.Duration) func() {
+func (_m *UtilsIface) StartDiagStopwatch(id string, threshold time.Duration) func() time.Duration {
 	ret := _m.Called(id, threshold)
 
 	if len(ret) == 0 {
 		panic("no return value specified for StartDiagStopwatch")
 	}
 
-	var r0 func()
-	if rf, ok := ret.Get(0).(func(string, time.Duration) func()); ok {
+	var r0 func() time.Duration
+	if rf, ok := ret.Get(0).(func(string, time.Duration) func() time.Duration); ok {
 		r0 = rf(id, threshold)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(func())
+			r0 = ret.Get(0).(func() time.Duration)
 		}
 	}
 
@@ -6384,12 +6384,12 @@ func (_c *UtilsIface_StartDiagStopwatch_Call) Run(run func(id string, threshold 
 	return _c
 }
 
-func (_c *UtilsIface_StartDiagStopwatch_Call) Return(_a0 func()) *UtilsIface_StartDiagStopwatch_Call {
+func (_c *UtilsIface_StartDiagStopwatch_Call) Return(_a0 func() time.Duration) *UtilsIface_StartDiagStopwatch_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *UtilsIface_StartDiagStopwatch_Call) RunAndReturn(run func(string, time.Duration) func()) *UtilsIface_StartDiagStopwatch_Call {
+func (_c *UtilsIface_StartDiagStopwatch_Call) RunAndReturn(run func(string, time.Duration) func() time.Duration) *UtilsIface_StartDiagStopwatch_Call {
 	_c.Call.Return(run)
 	return _c
 }
