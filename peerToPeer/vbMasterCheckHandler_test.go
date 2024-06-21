@@ -12,6 +12,10 @@ package peerToPeer
 
 import (
 	"fmt"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
@@ -21,9 +25,6 @@ import (
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"sync"
-	"testing"
-	"time"
 )
 
 func setupVBCHBoilerPlate() (*service_def.BucketTopologySvc, *service_def.CheckpointsService, *log.CommonLogger, *service_def.CollectionsManifestSvc, *service_def.BackfillReplSvc, *utilsMock.UtilsIface, *service_def.ReplicationSpecSvc) {
@@ -65,7 +66,7 @@ func setupMocks2(ckptSvc *service_def.CheckpointsService, ckptData map[uint16]*m
 
 	backfillReplSvc.On("BackfillReplSpec", replId).Return(backfillSpec, nil)
 
-	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
+	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
 	utils.On("ExponentialBackoffExecutor", "VBMasterCheckHandler.GetSpecDelNotification", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	replSpecSvc.On("ReplicationSpecReadOnly", mock.Anything).Return(spec, nil)

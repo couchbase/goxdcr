@@ -11,6 +11,10 @@ package metadata_svc
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
@@ -21,9 +25,6 @@ import (
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 func setupBoilerPlateBRS() (*service_def.UILogSvc, *service_def.MetadataSvc, *service_def.XDCRCompTopologySvc, *utilsMock.UtilsIface, *service_def.ReplicationSpecSvc, *service_def.BucketTopologySvc) {
@@ -44,7 +45,7 @@ func setupMocksBRS(uiLogSvc *service_def.UILogSvc, metadataSvc *service_def.Meta
 	// This is cool - it is actually returning the data we are feeding it back
 	utilsIn.On("ExponentialBackoffExecutor", "GetAllMetadataFromCatalogBackfillReplicationSpec", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Run(func(args mock.Arguments) { (args.Get(4)).(utilsReal.ExponentialOpFunc)() }).Return(nil)
-	utilsIn.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
+	utilsIn.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
 
 	for specName, actualSpec := range replSpecMap {
 		replSpecSvc.On("ReplicationSpec", specName).Return(actualSpec, nil)

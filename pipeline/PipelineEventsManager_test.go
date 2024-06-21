@@ -12,14 +12,15 @@ package pipeline
 
 import (
 	"fmt"
+	"testing"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"testing"
-	"time"
 )
 
 func setupPemBoilerPlate() (*int64, string, func(string) (*metadata.ReplicationSpecification, error), *log.CommonLogger, *utilsMock.UtilsIface) {
@@ -31,7 +32,7 @@ func setupPemBoilerPlate() (*int64, string, func(string) (*metadata.ReplicationS
 	}
 	logger := log.NewLogger("testPipelineEventsMgr", log.DefaultLoggerContext)
 	utils := &utilsMock.UtilsIface{}
-	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() {})
+	utils.On("StartDiagStopwatch", mock.Anything, mock.Anything).Return(func() time.Duration { return 0 })
 	return &idWell, specName, specGetter, logger, utils
 }
 

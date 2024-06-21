@@ -85,13 +85,10 @@ func executeConnectionPreCheck(ref *metadata.RemoteClusterReference, targetNodes
 
 // helper function to connect to the ns_server of a given target node
 func connectToRemoteNS(ref *metadata.RemoteClusterReference, hostAddr string, portsMap base.HostPortMapType, ch chan<- []error, utils utils.UtilsIface, logger *log.CommonLogger) {
-	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("connectToRemoteNS(%v)", hostAddr), base.DiagInternalThreshold)
-	defer stopFunc()
-
 	// sleep for a random amount of time to not overwhelm the target
 	numMilliSec := rand.Intn(maxWaitBeforeRPCInMs)
 	ticker := time.NewTicker(time.Duration(numMilliSec) * time.Millisecond)
-	logger.Debugf("connectionNS(hostAddr=%v) sleeping for %v milliseconds", hostAddr, numMilliSec)
+	logger.Debugf("connectToRemoteNS(hostAddr=%v) sleeping for %v milliseconds", hostAddr, numMilliSec)
 	<-ticker.C
 
 	errs := make([]error, 0)
@@ -129,17 +126,27 @@ func connectToRemoteNS(ref *metadata.RemoteClusterReference, hostAddr string, po
 	}
 
 	hostAddr = base.GetHostAddr(hostname, port)
+
+	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("connectToRemoteNS(%v)", hostAddr), base.DiagInternalThreshold)
 	err, _ = utils.QueryRestApiWithAuth(hostAddr, base.WhoAmIPath, false, username, password, authMech, cert, SANInCert, clientCert,
 		clientKey, base.MethodGet, base.JsonContentType, nil, base.ConnectionPreCheckRPCTimeout, &out, nil, false, logger)
+	timeTaken := stopFunc()
 
-	errs = append(errs, err)
+	if err != nil {
+		errs = append(errs, err)
+		return
+	}
+
+	// Warning related to possible network health issue
+	if timeTaken > base.NWLatencyToleranceMilliSec {
+		logger.Warnf("connectToRemoteNS(hostAddr=%v) slept for %vms and took %v for network call, which is above accepted threshold of %v", hostAddr, numMilliSec, timeTaken, base.NWLatencyToleranceMilliSec)
+		err = fmt.Errorf("WARN: Connection check was successful, no errors, but the network call to remote server took longer than expected threshold. Actual=%v, Expected=%v", timeTaken, base.NWLatencyToleranceMilliSec)
+		errs = append(errs, err)
+	}
 }
 
 // helper function to connect to the KV of a given target node
 func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, portsMap base.HostPortMapType, ch chan<- []error, utils utils.UtilsIface, logger *log.CommonLogger) {
-	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("connectToRemoteKV(%v)", hostAddr), base.DiagInternalThreshold)
-	defer stopFunc()
-
 	// sleep for a random amount of time to not overwhelm the target
 	numMilliSec := rand.Intn(maxWaitBeforeRPCInMs)
 	ticker := time.NewTicker(time.Duration(numMilliSec) * time.Millisecond)
@@ -158,7 +165,7 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 
 	portsInfo, ok := portsMap[hostAddr]
 	if !ok {
-		err = errors.New("No port information found for hostname=" + hostname)
+		err = errors.New("no port information found for hostname=" + hostname)
 		errs = append(errs, err)
 		return
 	}
@@ -167,7 +174,7 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 	if !ref.DemandEncryption() || ref.EncryptionType() == metadata.EncryptionType_Half {
 		port, ok = portsInfo[base.PortsKeysForConnectionPreCheck[base.KVIdxForConnPreChk]]
 		if !ok {
-			err = errors.New("No KV port information found for hostname=" + hostname)
+			err = errors.New("no KV port information found for hostname=" + hostname)
 			errs = append(errs, err)
 			return
 		}
@@ -175,12 +182,14 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 	} else {
 		port, ok = portsInfo[base.PortsKeysForConnectionPreCheck[base.KVSSLIdxForConnPreChk]]
 		if !ok {
-			err = errors.New("No KVSSL port information found for hostname=" + hostname)
+			err = errors.New("no KVSSL port information found for hostname=" + hostname)
 			errs = append(errs, err)
 			return
 		}
 	}
 	resultCh := make(chan mccClientIfcWithErr, 1)
+
+	stopFunc := utils.StartDiagStopwatch(fmt.Sprintf("connectToRemoteKV(%v)", hostAddr), base.DiagInternalThreshold)
 	go func() {
 		var conn mcc.ClientIface
 		var err error
@@ -200,15 +209,15 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 	}()
 
 	ticker = time.NewTicker(base.ConnectionPreCheckRPCTimeout)
-	var clientIfc mcc.ClientIface = nil
+	var client mcc.ClientIface = nil
 
 	select {
 	case <-ticker.C:
-		errs = append(errs, fmt.Errorf("Timeout encountered before successfully connecting to remote KV for hostAddr=%v", hostAddr))
+		errs = append(errs, fmt.Errorf("timeout encountered before successfully connecting to remote KV for hostAddr=%v", hostAddr))
 		return
 	case result := <-resultCh:
 		ticker.Stop()
-		clientIfc = result.clientIfc
+		client = result.clientIfc
 		err = result.err
 		if err != nil {
 			errs = append(errs, err)
@@ -216,15 +225,24 @@ func connectToRemoteKV(ref *metadata.RemoteClusterReference, hostAddr string, po
 		}
 	}
 
-	client, ok := clientIfc.(mcc.ClientIface)
-	if !ok {
-		errs = append(errs, fmt.Errorf("Wrong type of client in connectToRemoteKV for hostAddr=%v", hostAddr))
+	timeTaken := stopFunc()
+
+	if client == nil {
+		errs = append(errs, fmt.Errorf("nil client in connectToRemoteKV for hostAddr=%v", hostAddr))
 		return
 	}
+
 	err = client.Close()
 	if err != nil {
 		errs = append(errs, err)
 		return
+	}
+
+	// Warning related to possible network health issue
+	if timeTaken > base.NWLatencyToleranceMilliSec {
+		logger.Warnf("connectToRemoteKV(hostAddr=%v) slept for %vms and took %v for network call, which is above accepted threshold of %v", hostAddr, numMilliSec, timeTaken, base.NWLatencyToleranceMilliSec)
+		err = fmt.Errorf("WARN: Connection check was successful, no errors, but the network call to remote memcached took longer than expected threshold. Actual=%v, Expected=%v", timeTaken, base.NWLatencyToleranceMilliSec)
+		errs = append(errs, err)
 	}
 }
 

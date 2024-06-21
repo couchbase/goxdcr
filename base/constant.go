@@ -1293,8 +1293,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	connErrsListMaxEntries, P2PRetryFactor int,
 	P2PRetryWaitTimeMilliSec time.Duration,
 	p2pManifestsGetterSleepTimeSecs int, p2pManifestsGetterMaxRetry int,
-	datapoolLogFrequency int,
-	capellaHostNameSuffix string) {
+	datapoolLogFrequency int, capellaHostNameSuffix string,
+	nwLatencyToleranceMilliSec time.Duration) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1452,6 +1452,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ManifestsGetterMaxRetry = p2pManifestsGetterMaxRetry
 	DatapoolLogFrequency = datapoolLogFrequency
 	CapellaHostnameSuffix = capellaHostNameSuffix
+	NWLatencyToleranceMilliSec = nwLatencyToleranceMilliSec
 }
 
 // XDCR Dev hidden replication settings
@@ -1749,3 +1750,5 @@ const (
 
 const CASDriftLiveDetected = "One or more documents are not replicated because their CAS values are beyond the acceptable drift threshold"
 const PreCheckCASDriftDetected = "The following VBs have time drift (nanoSecs) beyond acceptable threshold"
+
+var NWLatencyToleranceMilliSec = 10000 * time.Millisecond
