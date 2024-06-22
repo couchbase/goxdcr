@@ -571,6 +571,7 @@ const (
 	HlvPrunedEventListener               = "HlvPrunedEventListener"
 	HlvPrunedAtMergeEventListener        = "HlvPrunedAtMergeEventListener"
 	DocsSentWithSubdocCmdEventListener   = "DocsSentWithSubdocSetEventListener"
+	DocsSentWithPoisonedCasEventListener = "DocsSentWithPoisonedCasEventListener"
 )
 
 const (
@@ -1717,24 +1718,26 @@ var DatapoolLogFrequency = 10
 const PipelineFullTopic string = "pipelineFullTopic"
 
 const (
-	DocsFiltered                    = "docs_filtered"
-	DocsUnableToFilter              = "docs_unable_to_filter"
-	ExpiryFiltered                  = "expiry_filtered"
-	DeletionFiltered                = "deletion_filtered"
-	SetFiltered                     = "set_filtered"
-	BinaryFiltered                  = "binary_filtered"
-	ExpiryStripped                  = "expiry_stripped"
-	AtrTxnDocsFiltered              = "atr_txn_docs_filtered"
-	ClientTxnDocsFiltered           = "client_txn_docs_filtered"
-	DocsFilteredOnTxnXattr          = "docs_filtered_on_txn_xattr"
-	DocsFilteredOnUserDefinedFilter = "docs_filtered_on_user_defined_filter"
-	MobileDocsFiltered              = "mobile_docs_filtered"
-	GuardrailResidentRatio          = "guardrail_resident_ratio"
-	GuardrailDataSize               = "guardrail_data_size"
-	GuardrailDiskSpace              = "guardrail_disk_space"
-	DocsSentWithSubdocSet           = "docs_sent_with_subdoc_set"
-	DocsSentWithSubdocDelete        = "docs_sent_with_subdoc_delete"
-	DocsCasPoisoned                 = "docs_cas_poisoned"
+	DocsFiltered                       = "docs_filtered"
+	DocsUnableToFilter                 = "docs_unable_to_filter"
+	ExpiryFiltered                     = "expiry_filtered"
+	DeletionFiltered                   = "deletion_filtered"
+	SetFiltered                        = "set_filtered"
+	BinaryFiltered                     = "binary_filtered"
+	ExpiryStripped                     = "expiry_stripped"
+	AtrTxnDocsFiltered                 = "atr_txn_docs_filtered"
+	ClientTxnDocsFiltered              = "client_txn_docs_filtered"
+	DocsFilteredOnTxnXattr             = "docs_filtered_on_txn_xattr"
+	DocsFilteredOnUserDefinedFilter    = "docs_filtered_on_user_defined_filter"
+	MobileDocsFiltered                 = "mobile_docs_filtered"
+	GuardrailResidentRatio             = "guardrail_resident_ratio"
+	GuardrailDataSize                  = "guardrail_data_size"
+	GuardrailDiskSpace                 = "guardrail_disk_space"
+	DocsSentWithSubdocSet              = "docs_sent_with_subdoc_set"
+	DocsSentWithSubdocDelete           = "docs_sent_with_subdoc_delete"
+	DocsSentWithPoisonedCasErrorMode   = "docs_sent_with_poisonedCas_errorMode"
+	DocsSentWithPoisonedCasReplaceMode = "docs_sent_with_poisonedCas_replaceMode"
+	DocsCasPoisoned                    = "docs_cas_poisoned"
 )
 
 var ValidJsonEnds []byte = []byte{

@@ -2986,12 +2986,13 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 							base.EventsMap{},
 							nil)
 					}
-
-					if wrappedReq.IsSubdocOp() {
+					isSubDocOp := wrappedReq.IsSubdocOp()
+					if isSubDocOp {
 						vbno := wrappedReq.Req.VBucket
 						seqno := wrappedReq.Seqno
 						xmem.RaiseEvent(common.NewEvent(common.DocsSentWithSubdocCmd, wrappedReq.SubdocCmdOptions.SubdocOp, xmem, []interface{}{vbno, seqno}, nil))
 					}
+					xmem.handleCasPoisoning(wrappedReq, response)
 					//feedback the most current commit_time to xmem.config.respTimeout
 					xmem.adjustRespTimeout(resp_wait_time)
 
@@ -3019,7 +3020,21 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 done:
 	xmem.Logger().Infof("%v receiveResponse exits\n", xmem.Id())
 }
-
+func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, response *mc.MCResponse) {
+	isSubDocOp := wrappedReq.IsSubdocOp()
+	sentCas := binary.BigEndian.Uint64(wrappedReq.Req.Extras[16:24])
+	vbno := wrappedReq.Req.VBucket
+	seqno := wrappedReq.Seqno
+	if response.Status == mc.SUCCESS && sentCas != response.Cas && !isSubDocOp { //replace mode
+		// Currently CAS regeneration takes place in two scenario's
+		// 1. If SubDoc is used
+		// 2. If there is a CAS poisoned doc and KV's protection mode is set to "replace"
+		// Note that this counter does not account for poisoned CAS's incase of subDocOp
+		xmem.RaiseEvent(common.NewEvent(common.DocsSentWithPoisonedCas, base.ReplaceMode, xmem, []interface{}{vbno, seqno}, nil))
+	} else if response.Status == mc.CAS_VALUE_INVALID { //error mode
+		xmem.RaiseEvent(common.NewEvent(common.DocsSentWithPoisonedCas, base.ErrorMode, xmem, []interface{}{vbno, seqno}, nil))
+	}
+}
 func (xmem *XmemNozzle) retryAfterCasLockingFailure(req *base.WrappedMCRequest) {
 	if req.IsSubdocOp() {
 		// If we have used subdoc command before for this request before, enter the retry assuming we wouldn't need subdoc command anymore

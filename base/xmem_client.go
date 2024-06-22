@@ -334,6 +334,8 @@ func IsIgnorableMCResponse(resp *gomemcached.MCResponse, caslock bool) bool {
 		}
 	case gomemcached.SUBDOC_SUCCESS_DELETED:
 		return true
+	case gomemcached.CAS_VALUE_INVALID:
+		return true
 	case gomemcached.SUBDOC_MULTI_PATH_FAILURE_DELETED: // Same as SUBDOC_BAD_MULTI but on a deleted document
 		if resp.Opcode == gomemcached.SUBDOC_MULTI_LOOKUP {
 			return true

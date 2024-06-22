@@ -11,9 +11,10 @@ package Component
 import (
 	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
-	"sync"
 )
 
 type AbstractComponent struct {

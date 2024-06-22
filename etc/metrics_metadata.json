@@ -455,6 +455,30 @@
         ],
         "stability": "committed"
     },
+    "xdcr_docs_sent_with_poisonedCas_errorMode_total": {
+        "type": "counter",
+        "help": "The total number of documents that failed the set_with_meta operation due to the set CAS exceeding the acceptable threshold on the target data service.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_docs_sent_with_poisonedCas_replaceMode_total": {
+        "type": "counter",
+        "help": "The total number of documents replicated to the target, where the target data service regenerated CAS values because the set CAS exceeded the acceptable threshold on the target's data service.",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_docs_sent_with_subdoc_delete_total": {
         "type": "counter",
         "help": "The number of deletes issued using subdoc command instead of delete_with_meta to avoid cas rollback on target",

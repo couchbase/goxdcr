@@ -167,6 +167,10 @@ const (
 
 	SYSTEM_EVENTS_RECEIVED_DCP_METRIC = "system_events_received_from_dcp"
 	SEQNO_ADV_RECEIVED_DCP_METRIC     = "seqno_adv_received_from_dcp"
+
+	//docs sent with poisoned CAS
+	DOCS_SENT_WITH_POISONED_CAS_ERROR   = base.DocsSentWithPoisonedCasErrorMode
+	DOCS_SENT_WITH_POISONED_CAS_REPLACE = base.DocsSentWithPoisonedCasReplaceMode
 )
 
 const (
@@ -1421,6 +1425,22 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Cardinality:  LowCardinality,
 		VersionAdded: base.VersionForCasPoisonDetection,
 		Description:  "Total number of documents not replicated because cas is beyond acceptable drift threshold",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	DOCS_SENT_WITH_POISONED_CAS_ERROR: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCasPoisonDetection,
+		Description:  "The total number of documents that failed the set_with_meta operation due to the set CAS exceeding the acceptable threshold on the target data service.",
+		Stability:    Committed,
+		Labels:       StandardLabels,
+	},
+	DOCS_SENT_WITH_POISONED_CAS_REPLACE: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCasPoisonDetection,
+		Description:  "The total number of documents replicated to the target, where the target data service regenerated CAS values because the set CAS exceeded the acceptable threshold on the target's data service.",
 		Stability:    Committed,
 		Labels:       StandardLabels,
 	},

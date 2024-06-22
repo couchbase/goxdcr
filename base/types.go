@@ -2868,6 +2868,14 @@ const (
 	SubdocDelete SubdocOpType = iota
 )
 
+// This denotes the target KV's Cas Poison protection Mode
+type TargetKVCasPoisonProtectionMode uint8
+
+const (
+	ErrorMode   TargetKVCasPoisonProtectionMode = iota
+	ReplaceMode TargetKVCasPoisonProtectionMode = iota
+)
+
 // HLVModeOptions indicate the options set when performing replication using HLV i.e. CCR, mobile mode etc
 type HLVModeOptions struct {
 	// Target KV cannot do CR if bucket uses CCR, or if we need to preserve _sync.

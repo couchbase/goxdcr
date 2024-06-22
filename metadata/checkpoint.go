@@ -50,6 +50,8 @@ const (
 	GuardrailDiskSpaceCnt              string = "guardrail_disk_space_cnt"
 	DocsSentWithSubdocSetCnt           string = "docs_sent_with_subdoc_set"
 	DocsSentWithSubdocDeleteCnt        string = "docs_sent_with_subdoc_delete"
+	DocsSentWithPoisonedCasErrorMode   string = "docs_sent_with_poisoned_cas_error_mode"
+	DocsSentWithPoisonedCasReplaceMode string = "docs_sent_with_poisoned_cas_replace_mode"
 	CasPoisonCnt                       string = "cas_poison_cnt"
 )
 
@@ -109,6 +111,9 @@ type CheckpointRecord struct {
 	DocsSentWithSubdocSetCnt    uint64 `json:"docs_sent_with_subdoc_set"`
 	DocsSentWithSubdocDeleteCnt uint64 `json:"docs_sent_with_subdoc_delete"`
 	CasPoisonCnt                uint64 `json:"cas_poison_cnt"`
+	// Docs sent with a poisoned CAS value
+	DocsSentWithPoisonedCasErrorMode   uint64 `json:"docs_sent_with_poisoned_cas_error_mode"`
+	DocsSentWithPoisonedCasReplaceMode uint64 `json:"docs_sent_with_poisoned_cas_replace_mode"`
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -155,6 +160,8 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 	subdocSetItems := uint64(vbCountMetrics[base.DocsSentWithSubdocSet])
 	subdocDeleteItems := uint64(vbCountMetrics[base.DocsSentWithSubdocDelete])
 	casPoisonItems := uint64(vbCountMetrics[base.DocsCasPoisoned])
+	docsSentWithPoisonedCasErrorMode := uint64(vbCountMetrics[base.DocsSentWithPoisonedCasErrorMode])
+	docsSentWithPoisonedCasReplaceMode := uint64(vbCountMetrics[base.DocsSentWithPoisonedCasReplaceMode])
 
 	record := &CheckpointRecord{
 		Failover_uuid:                      failoverUuid,
@@ -185,6 +192,8 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		DocsSentWithSubdocSetCnt:           subdocSetItems,
 		DocsSentWithSubdocDeleteCnt:        subdocDeleteItems,
 		CasPoisonCnt:                       casPoisonItems,
+		DocsSentWithPoisonedCasErrorMode:   docsSentWithPoisonedCasErrorMode,
+		DocsSentWithPoisonedCasReplaceMode: docsSentWithPoisonedCasReplaceMode,
 	}
 	err := record.PopulateBrokenMappingSha()
 	if err != nil {
@@ -244,7 +253,9 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.GuardrailResidentRatioCnt == newRecord.GuardrailResidentRatioCnt &&
 		ckptRecord.DocsSentWithSubdocDeleteCnt == newRecord.DocsSentWithSubdocDeleteCnt &&
 		ckptRecord.DocsSentWithSubdocSetCnt == newRecord.DocsSentWithSubdocSetCnt &&
-		ckptRecord.CasPoisonCnt == newRecord.CasPoisonCnt {
+		ckptRecord.CasPoisonCnt == newRecord.CasPoisonCnt &&
+		ckptRecord.DocsSentWithPoisonedCasErrorMode == newRecord.DocsSentWithPoisonedCasErrorMode &&
+		ckptRecord.DocsSentWithPoisonedCasReplaceMode == newRecord.DocsSentWithPoisonedCasReplaceMode {
 		return true
 	} else {
 		return false
@@ -284,6 +295,8 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.DocsSentWithSubdocDeleteCnt = other.DocsSentWithSubdocDeleteCnt
 	ckptRecord.DocsSentWithSubdocSetCnt = other.DocsSentWithSubdocSetCnt
 	ckptRecord.CasPoisonCnt = other.CasPoisonCnt
+	ckptRecord.DocsSentWithPoisonedCasErrorMode = other.DocsSentWithPoisonedCasErrorMode
+	ckptRecord.DocsSentWithPoisonedCasReplaceMode = other.DocsSentWithPoisonedCasReplaceMode
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -451,6 +464,14 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 	casPoisonCnt, ok := fieldMap[CasPoisonCnt]
 	if ok {
 		ckptRecord.CasPoisonCnt = uint64(casPoisonCnt.(float64))
+	}
+	docsSentWithPoisonedCasError, ok := fieldMap[DocsSentWithPoisonedCasErrorMode]
+	if ok {
+		ckptRecord.DocsSentWithPoisonedCasErrorMode = uint64(docsSentWithPoisonedCasError.(float64))
+	}
+	docsSentWithPoisonedCasReplace, ok := fieldMap[DocsSentWithPoisonedCasReplaceMode]
+	if ok {
+		ckptRecord.DocsSentWithPoisonedCasReplaceMode = uint64(docsSentWithPoisonedCasReplace.(float64))
 	}
 
 	return nil
@@ -1075,6 +1096,8 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 		DocsSentWithSubdocSetCnt:           c.DocsSentWithSubdocSetCnt,
 		DocsSentWithSubdocDeleteCnt:        c.DocsSentWithSubdocDeleteCnt,
 		CasPoisonCnt:                       c.CasPoisonCnt,
+		DocsSentWithPoisonedCasErrorMode:   c.DocsSentWithPoisonedCasErrorMode,
+		DocsSentWithPoisonedCasReplaceMode: c.DocsSentWithPoisonedCasReplaceMode,
 	}
 	return retVal
 }

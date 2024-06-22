@@ -470,6 +470,9 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 		dataSentWithSubdocCmdListener := component.NewDefaultAsyncComponentEventListenerImpl(
 			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DocsSentWithSubdocCmdEventListener, i),
 			pipeline.Topic(), logger_ctx)
+		dataSentWithPoisonedCasEventListener := component.NewDefaultAsyncComponentEventListenerImpl(
+			pipeline_utils.GetElementIdFromNameAndIndex(pipeline, base.DocsSentWithPoisonedCasEventListener, i),
+			pipeline.Topic(), logger_ctx)
 
 		for index := load_distribution[i][0]; index < load_distribution[i][1]; index++ {
 			out_nozzle := targets[index]
@@ -488,6 +491,7 @@ func (xdcrf *XDCRFactory) registerAsyncListenersOnTargets(pipeline common.Pipeli
 			out_nozzle.RegisterComponentEventListener(common.HlvPruned, hlvPrunedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.HlvUpdated, hlvUpdatedEventListener)
 			out_nozzle.RegisterComponentEventListener(common.DocsSentWithSubdocCmd, dataSentWithSubdocCmdListener)
+			out_nozzle.RegisterComponentEventListener(common.DocsSentWithPoisonedCas, dataSentWithPoisonedCasEventListener)
 		}
 	}
 }
