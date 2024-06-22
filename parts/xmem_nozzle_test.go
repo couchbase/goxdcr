@@ -562,6 +562,7 @@ func TestNonTempErrorResponsesEvents(t *testing.T) {
 	fail2 := mc.DURABILITY_IMPOSSIBLE
 	fail3 := mc.DURABILITY_INVALID_LEVEL
 	fail4 := mc.NOT_STORED
+	responseStr := "responseStatus"
 	// send 2 success packets at pos 0 - sleep 5s - [<>, <>, <>, <>, <>, <>, <>, <>]
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 0}, false)
 	time.Sleep(5 * time.Second)
@@ -576,33 +577,33 @@ func TestNonTempErrorResponsesEvents(t *testing.T) {
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 0}, true)
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1)}))
 	// send 2 failure 2 packets at pos 1 - sleep 5 seconds - [fail1, fail2, <>, <>, <>, <>, <>, <>]
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail2, Opaque: 1}, true)
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail2, Opaque: 1}, true)
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail2)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1), fmt.Sprintf("%v=%v", responseStr, fail2)}))
 	// send 2 failure 3 packets at pos 1 and failure 1 packets at pos 2 - sleep 5 seconds - [fail1, fail3, fail1, <>, <>, <>, <>, <>]
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail3, Opaque: 1}, true)
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail3, Opaque: 1}, true)
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 2}, true)
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1), fmt.Sprintf("%v=%v", responseStr, fail3)}))
 	// sleep 5 seconds - do nothing - same state
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1), fmt.Sprintf("%v=%v", responseStr, fail3)}))
 	// sleep 5 seconds - send 1 success packet at pos 0 - [<>, fail3, fail1, <>, <>, <>, <>, <>]
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 0}, false)
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1), fmt.Sprintf("%v=%v", responseStr, fail3)}))
 	// sleep 5 seconds - do nothing - same state
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1), fmt.Sprintf("%v=%v", responseStr, fail3)}))
 	// send fail 4 packet at pos 3 and fail 1 packet at pos 4-7 - sleep 5 seconds - [<>, fail3, fail1, fail4, fail1, fail1, fail1, fail1]
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail4, Opaque: 3}, true)
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 4}, true)
@@ -611,13 +612,13 @@ func TestNonTempErrorResponsesEvents(t *testing.T) {
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: fail1, Opaque: 7}, true)
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail4), fmt.Sprintf("response=%v", fail3)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1), fmt.Sprintf("%v=%v", responseStr, fail4), fmt.Sprintf("%v=%v", responseStr, fail3)}))
 	// send success at pos 5 and 6 - sleep 5s - [<>, fail3, fail1, fail4, fail1, <>, <>, fail1]
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 5}, false)
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 6}, false)
 	time.Sleep(5 * time.Second)
 	assert.Equal(1, len(events))
-	assert.True(eventExists([]string{fmt.Sprintf("response=%v", fail1), fmt.Sprintf("response=%v", fail3), fmt.Sprintf("response=%v", fail3)}))
+	assert.True(eventExists([]string{fmt.Sprintf("%v=%v", responseStr, fail1), fmt.Sprintf("%v=%v", responseStr, fail3), fmt.Sprintf("%v=%v", responseStr, fail3)}))
 	// send success in all - sleep 5 seconds - [<>, <>, <>, <>, <>, <>, <>, <>]
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 1}, false)
 	xmem.markNonTempErrorResponse(&mc.MCResponse{Status: success, Opaque: 2}, false)
