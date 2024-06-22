@@ -356,10 +356,9 @@ func (r *RemoteMemcachedComponent) getMaxCasWithRetry(serverAddr string, vbnos [
 				r.KvMemClientsMtx.Unlock()
 			}
 		}
-		var vbsUnableToParse []uint16
 
 		r.KvMemClientsMtx.Lock()
-		vbSeqnoMap, vbsUnableToParse, err = r.Utils.GetMaxCasStatsForVBs(vbnos, client, nil, &vbSeqnoMap)
+		vbSeqnoMapReturned, vbsUnableToParse, err := r.Utils.GetMaxCasStatsForVBs(vbnos, client, nil, &vbSeqnoMap)
 		if err != nil {
 			if err == base.ErrorNoVbSpecified {
 				err = fmt.Errorf("KV node %v has no vbucket assigned to it", serverAddr)
@@ -371,10 +370,13 @@ func (r *RemoteMemcachedComponent) getMaxCasWithRetry(serverAddr string, vbnos [
 			delete(r.KvMemClients, serverAddr)
 			r.KvMemClientsMtx.Unlock()
 			return nil, err
-		} else if len(vbsUnableToParse) > 0 {
-			r.LoggerImpl.Warnf("parsing VbMaxCas had vbs unable to parse %v", vbsUnableToParse)
 		}
 		r.KvMemClientsMtx.Unlock()
+
+		vbSeqnoMap = vbSeqnoMapReturned
+		if len(vbsUnableToParse) > 0 {
+			r.LoggerImpl.Warnf("parsing VbMaxCas had vbs unable to parse %v", vbsUnableToParse)
+		}
 
 		return nil, err
 	}
