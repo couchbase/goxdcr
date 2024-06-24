@@ -1049,9 +1049,9 @@ func TestRouterCasDriftCheck(t *testing.T) {
 	assert.False(router.CheckCasDrift(wrappedExp))
 
 	// CAS from time.Now() but with a little bit of a drift
-	oneMin := time.Duration(1) * time.Minute
-	driftThreshold := time.Duration(router.casDriftThreshold) * time.Hour
-	acceptableDriftTime := time.Now().Add(driftThreshold).Add(-oneMin).UnixNano()
+	onsSec := time.Duration(1) * time.Second
+	driftThreshold := time.Duration(router.casDriftThreshold) * time.Second
+	acceptableDriftTime := time.Now().Add(driftThreshold).Add(-onsSec).UnixNano()
 	wrappedExp.UprEvent.Cas = uint64(acceptableDriftTime)
 	assert.False(router.CheckCasDrift(wrappedExp))
 
