@@ -433,12 +433,12 @@ func (rm *ResourceManager) cpuMaxedout(previousState *State, state *State) bool 
 }
 
 // returns whether goxdcr process cpu has been maxed out
-// if state.cpu has value of -1 because of cpu collection failure, use previousState.cpu instead
-// if previousState.cpu is also -1, this method returns false
+// if state.cpu has value of -1 because of cpu collection failure, check for previousState.cpu instead
+// if previousState is nil, or previousState.cpu is also -1, then this method returns false
 // in such cases we are effectively reverting back to the algorithm where cpu was not a factor
 func (rm *ResourceManager) processCpuMaxedout(previousState *State, state *State) bool {
 	cpu := state.cpu
-	if cpu < 0 {
+	if cpu < 0 && previousState != nil {
 		cpu = previousState.cpu
 	}
 	return cpu >= rm.getMaxCpu()*int64(base.ThresholdRatioForProcessCpu)/100
@@ -447,11 +447,11 @@ func (rm *ResourceManager) processCpuMaxedout(previousState *State, state *State
 // returns whether the cpu on the current node has been maxed out
 func (rm *ResourceManager) overallCpuMaxedout(previousState *State, state *State) bool {
 	totalCpu := state.totalCpu
-	if totalCpu < 0 {
+	if totalCpu < 0 && previousState != nil {
 		totalCpu = previousState.totalCpu
 	}
 	idleCpu := state.idleCpu
-	if idleCpu < 0 {
+	if idleCpu < 0 && previousState != nil {
 		idleCpu = previousState.totalCpu
 	}
 
@@ -804,7 +804,7 @@ func (rm *ResourceManager) computeThrottlingActions(previousState, state *State)
 
 		if atomic.LoadUint32(&rm.throughputDropCount) == 0 {
 			// have not seen throughput drop before
-			if state.overallThroughput < previousState.overallThroughput {
+			if previousState != nil && state.overallThroughput < previousState.overallThroughput {
 				// first drop in throughput
 				atomic.StoreUint32(&rm.throughputDropCount, 1)
 				// remember throughput before drop
