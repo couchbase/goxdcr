@@ -240,7 +240,7 @@
     "xdcr_docs_cas_poisoned_total": {
         "type": "counter",
         "help": "Total number of documents not replicated because cas is beyond acceptable drift threshold",
-        "added": "8.0.0",
+        "added": "7.2.6",
         "labels": [
             "sourceBucketName",
             "targetClusterUUID",
