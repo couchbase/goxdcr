@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/couchbase/goxdcr/base"
+	component "github.com/couchbase/goxdcr/component"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
@@ -304,6 +305,8 @@ type RemoteClusterAgentIface interface {
 }
 
 type RemoteClusterAgent struct {
+	*component.RemoteMemcachedComponent
+
 	/** Members protected by refMutex */
 	// Mutex used to protect any internal data structure that may be modified
 	refMtx sync.RWMutex
@@ -365,11 +368,17 @@ type RemoteClusterAgent struct {
 	// utilites service
 	utils utilities.UtilsIface
 	// for getting cluster security setting
-	topologySvc service_def.XDCRCompTopologySvc
+	topologySvc          service_def.XDCRCompTopologySvc
+	bucketTopologySvc    func() service_def.BucketTopologySvc
+	bucketTopologySvcMtx sync.RWMutex
 
+	// Agent is responsible for monitoring bucket requests
+	// As such, each bucket monitoring request will translate into individual remote memcached components
+	targetKVComponents map[string]*component.RemoteMemcachedComponent
 	// Each bucket on one remote cluster will have one centralized getter
-	bucketManifestGetters map[string]*BucketManifestGetter
-	bucketTopologyGetter  map[string]*BucketTopologyGetter
+	bucketManifestGetters    map[string]*BucketManifestGetter
+	bucketTopologyGetter     map[string]*BucketTopologyGetter
+	bucketMaxCasStatsGetters map[string]*MaxCasStatsGetter
 	// bucket refcounts
 	bucketRefCnt map[string]uint32
 	// protects the maps
@@ -2163,9 +2172,93 @@ func (agent *RemoteClusterAgent) getBucketInfoGetter(bucketName string) (service
 	return getter.bucketInfoGetter, nil
 }
 
+func (agent *RemoteClusterAgent) getMaxCasStatsGetter(bucketName string) (service_def.MaxVBCasStatsGetter, error) {
+	agent.bucketMtx.RLock()
+	defer agent.bucketMtx.RUnlock()
+
+	getter, ok := agent.bucketMaxCasStatsGetters[bucketName]
+	if !ok || getter == nil {
+		return nil, base.ErrorNotFound
+	}
+
+	return getter.maxCasStatsGetter, nil
+}
+
+func (agent *RemoteClusterAgent) getRemoteMemcachedComponent(bucketName string) *component.RemoteMemcachedComponent {
+	userAgentStr := fmt.Sprintf("RemoteClusterAgent_%v", atomic.AddUint64(&agentCounter, 1))
+	remoteMemcachedComponent := component.NewRemoteMemcachedComponent(agent.logger, agent.agentFinCh, agent.utils, bucketName)
+	remoteMemcachedComponent.SetTargetUsernameGetter(func() string {
+		agent.waitForRefreshEnabled()
+		agent.refMtx.RLock()
+		defer agent.refMtx.RUnlock()
+		return agent.reference.UserName()
+	}).SetTargetPasswordGetter(func() string {
+		agent.waitForRefreshEnabled()
+		agent.refMtx.RLock()
+		defer agent.refMtx.RUnlock()
+		return agent.reference.Password()
+	}).SetTargetKvVbMapGetter(func() (base.KvVBMapType, error) {
+		agent.waitForRefreshEnabled()
+
+		agent.refMtx.RLock()
+		refCpy := agent.reference.Clone()
+		agent.refMtx.RUnlock()
+
+		remoteOnlySpec := &metadata.ReplicationSpecification{
+			TargetClusterUUID: refCpy.Uuid(),
+			TargetBucketName:  bucketName,
+		}
+		hostname := refCpy.HostName()
+		useAlternate, err := agent.UsesAlternateAddress()
+		if err != nil {
+			return nil, err
+		}
+
+		// This is a bit unconventional - because instead of directly getting a target bucket topology
+		// we are using the remote feed instead, which has a dependency on the agent
+		// However, since this feed is supposed to have been initialized, just use
+		// current topology framework instead of exposing the underlying implementation details
+		targetBucketFeed, err := agent.bucketTopologySvc().SubscribeToRemoteBucketFeed(remoteOnlySpec, userAgentStr)
+		if err != nil {
+			return nil, err
+		}
+		var latestTargetBucketTopology service_def.TargetNotification
+		defer agent.bucketTopologySvc().UnSubscribeRemoteBucketFeed(remoteOnlySpec, userAgentStr)
+		select {
+		case latestTargetBucketTopology = <-targetBucketFeed:
+		default:
+			return nil, base.ErrorTargetBucketTopologyNotReady
+		}
+		targetBucketInfo := latestTargetBucketTopology.GetTargetBucketInfo()
+		defer latestTargetBucketTopology.Recycle()
+
+		kvVBMap, err := agent.utils.GetRemoteServerVBucketsMap(hostname, bucketName, targetBucketInfo, useAlternate)
+		if err != nil {
+			return nil, err
+		}
+		if len(kvVBMap) == 0 {
+			err = base.ErrorNoTargetNozzle
+			return nil, err
+		}
+		return kvVBMap, nil
+	}).SetRefGetter(func() *metadata.RemoteClusterReference {
+		agent.refMtx.RLock()
+		defer agent.refMtx.RUnlock()
+		return agent.reference.Clone()
+	}).SetAlternateAddressChecker(func(reference *metadata.RemoteClusterReference) (bool, error) {
+		return agent.UsesAlternateAddress()
+	})
+
+	return remoteMemcachedComponent
+}
+
 func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error {
 	agent.bucketMtx.Lock()
 	defer agent.bucketMtx.Unlock()
+
+	if _, componentExists := agent.targetKVComponents[bucketName]; !componentExists {
+		agent.targetKVComponents[bucketName] = agent.getRemoteMemcachedComponent(bucketName)
+	}
 
 	manifestGetter, ok := agent.bucketManifestGetters[bucketName]
 	if !ok {
@@ -2176,33 +2269,15 @@ func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error 
 
 	topologyGetter, ok := agent.bucketTopologyGetter[bucketName]
 	if !ok {
-		getterFunc := func() (map[string]interface{}, bool, string, error) {
-			agent.refMtx.RLock()
-			connStr, err := agent.reference.MyConnectionStr()
-			if err != nil {
-				agent.refMtx.RUnlock()
-				return nil, false, "", err
-			}
-			username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := agent.reference.MyCredentials()
-			if err != nil {
-				agent.refMtx.RUnlock()
-				return nil, false, "", err
-			}
-			agent.refMtx.RUnlock()
-
-			useExternal, err := agent.UsesAlternateAddress()
-			if err != nil {
-				return nil, false, "", err
-			}
-
-			targetBucketInfo, err := agent.utils.GetBucketInfo(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
-			if err != nil {
-				return nil, false, "", err
-			}
-			return targetBucketInfo, useExternal, connStr, nil
-		}
+		getterFunc := agent.initTopologyGetterFunc(bucketName)
 		topologyGetter = NewBucketTopologyGetter(bucketName, getterFunc)
 		agent.bucketTopologyGetter[bucketName] = topologyGetter
+	}
+
+	_, ok = agent.bucketMaxCasStatsGetters[bucketName]
+	if !ok {
+		getterFunc := agent.initMaxCasGetterFunc(bucketName)
+		agent.bucketMaxCasStatsGetters[bucketName] = NewMaxCasStatsGetter(bucketName, getterFunc)
 	}
 
 	_, ok = agent.bucketRefCnt[bucketName]
@@ -2212,6 +2287,39 @@ func (agent *RemoteClusterAgent) RegisterBucketRequest(bucketName string) error 
 	agent.bucketRefCnt[bucketName]++
 
 	return nil
+}
+
+func (agent *RemoteClusterAgent) initTopologyGetterFunc(bucketName string) func() (map[string]interface{}, bool, string, error) {
+	return func() (map[string]interface{}, bool, string, error) {
+		agent.refMtx.RLock()
+		connStr, err := agent.reference.MyConnectionStr()
+		if err != nil {
+			agent.refMtx.RUnlock()
+			return nil, false, "", err
+		}
+		username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := agent.reference.MyCredentials()
+		if err != nil {
+			agent.refMtx.RUnlock()
+			return nil, false, "", err
+		}
+		agent.refMtx.RUnlock()
+
+		useExternal, err := agent.UsesAlternateAddress()
+		if err != nil {
+			return nil, false, "", err
+		}
+
+		targetBucketInfo, err := agent.utils.GetBucketInfo(connStr, bucketName, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, agent.logger)
+		if err != nil {
+			return nil, false, "", err
+		}
+		return targetBucketInfo, useExternal, connStr, nil
+	}
+}
+
+func (agent *RemoteClusterAgent) initMaxCasGetterFunc(bucketName string) func() (base.HighSeqnosMapType, error) {
+	remComponent := agent.targetKVComponents[bucketName]
+	return remComponent.GetVbMaxCasMap
 }
 
 func (agent *RemoteClusterAgent) UnRegisterBucketRefresh(bucketName string) error {
@@ -2228,8 +2336,14 @@ func (agent *RemoteClusterAgent) UnRegisterBucketRefresh(bucketName string) erro
 	}
 
 	if agent.bucketRefCnt[bucketName] == uint32(0) {
+		remComponent := agent.targetKVComponents[bucketName]
+		if remComponent != nil {
+			go remComponent.CloseConnections()
+			delete(agent.targetKVComponents, bucketName)
+		}
 		delete(agent.bucketManifestGetters, bucketName)
 		delete(agent.bucketTopologyGetter, bucketName)
+		delete(agent.bucketMaxCasStatsGetters, bucketName)
 	}
 	return nil
 }
@@ -2325,7 +2439,11 @@ type RemoteClusterService struct {
 	metakv_svc        service_def.MetadataSvc
 	uilog_svc         service_def.UILogSvc
 	xdcr_topology_svc service_def.XDCRCompTopologySvc
-	logger            *log.CommonLogger
+
+	bucketTopologySvc    service_def.BucketTopologySvc // externally set
+	bucketTopologySvcMtx sync.RWMutex
+
+	logger *log.CommonLogger
 	// key = hostname; value = https address of hostname
 	httpsAddrMap             map[string]string
 	httpsAddrMap_lock        sync.Mutex
@@ -3220,18 +3338,26 @@ func (service *RemoteClusterService) formErrorFromValidatingRemotehost(ref *meta
 	}
 }
 
+var agentCounter uint64
+
 func (service *RemoteClusterService) NewRemoteClusterAgent() *RemoteClusterAgent {
-	newAgent := &RemoteClusterAgent{metakvSvc: service.metakv_svc,
-		uiLogSvc:               service.uilog_svc,
-		utils:                  service.utils,
-		logger:                 service.logger,
-		topologySvc:            service.xdcr_topology_svc,
-		metadataChangeCallback: service.metadata_change_callback,
-		bucketRefCnt:           make(map[string]uint32),
-		bucketManifestGetters:  make(map[string]*BucketManifestGetter),
-		agentFinCh:             make(chan bool, 1),
-		connectivityHelper:     NewConnectivityHelper(base.RefreshRemoteClusterRefInterval),
-		bucketTopologyGetter:   map[string]*BucketTopologyGetter{},
+	finCh := make(chan bool, 1)
+
+	newAgent := &RemoteClusterAgent{
+		metakvSvc:                service.metakv_svc,
+		uiLogSvc:                 service.uilog_svc,
+		utils:                    service.utils,
+		logger:                   service.logger,
+		topologySvc:              service.xdcr_topology_svc,
+		metadataChangeCallback:   service.metadata_change_callback,
+		bucketRefCnt:             make(map[string]uint32),
+		bucketManifestGetters:    make(map[string]*BucketManifestGetter),
+		agentFinCh:               finCh,
+		connectivityHelper:       NewConnectivityHelper(base.RefreshRemoteClusterRefInterval),
+		bucketTopologyGetter:     map[string]*BucketTopologyGetter{},
+		bucketMaxCasStatsGetters: map[string]*MaxCasStatsGetter{},
+		targetKVComponents:       make(map[string]*component.RemoteMemcachedComponent),
+		bucketTopologySvc:        service.GetBucketTopologySvc,
 	}
 	newAgent.refreshCv = &sync.Cond{L: &newAgent.refreshMtx}
 	return newAgent
@@ -3932,4 +4058,39 @@ func (service *RemoteClusterService) GetBucketInfoGetter(ref *metadata.RemoteClu
 func (service *RemoteClusterService) InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error {
 	ref.PopulateDnsSrvIfNeeded(logger)
 	return setHostNamesAndSecuritySettings(logger, service.utils, ref, service.xdcr_topology_svc.IsMyClusterEncryptionLevelStrict())
+}
+
+func (service *RemoteClusterService) GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (service_def.MaxVBCasStatsGetter, error) {
+	if ref == nil {
+		return nil, base.ErrorInvalidInput
+	}
+
+	service.agentMutex.RLock()
+	agent := service.agentMap[ref.Id()]
+	if agent == nil {
+		service.agentMutex.RUnlock()
+		return nil, getUnknownCluster("refId", ref.Id())
+	}
+	service.agentMutex.RUnlock()
+
+	return agent.getMaxCasStatsGetter(bucketName)
+}
+
+func (service *RemoteClusterService) SetBucketTopologySvc(svc service_def.BucketTopologySvc) {
+	service.bucketTopologySvcMtx.Lock()
+	defer service.bucketTopologySvcMtx.Unlock()
+	service.bucketTopologySvc = svc
+}
+
+func (service *RemoteClusterService) GetBucketTopologySvc() service_def.BucketTopologySvc {
+	var hasBeenSet bool
+	var bts service_def.BucketTopologySvc
+	for !hasBeenSet {
+		service.bucketTopologySvcMtx.RLock()
+		bts = service.bucketTopologySvc
+		hasBeenSet = bts != nil
+		service.bucketTopologySvcMtx.RUnlock()
+		time.Sleep(100 * time.Millisecond)
+	}
+	return bts
 }

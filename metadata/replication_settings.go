@@ -21,15 +21,17 @@ import (
 
 // keys for replication settings
 const (
-	DevMainPipelineSendDelay     = base.DevMainPipelineSendDelay
-	DevBackfillPipelineSendDelay = base.DevBackfillPipelineSendDelay
-	DevBackfillRollbackTo0VB     = base.DevBackfillRollbackTo0VB
-	DevMainPipelineRollbackTo0VB = base.DevMainPipelineRollbackTo0VB
-	DevCkptMgrForceGCWaitSec     = base.DevCkptMgrForceGCWaitSec
-	DevColManifestSvcDelaySec    = base.DevColManifestSvcDelaySec
-	DevNsServerPortSpecifier     = base.DevNsServerPortSpecifier
-	DevBucketTopologyLegacyDelay = base.DevBucketTopologyLegacyDelay
-	DevCasDrfitForceDocKey       = base.DevCasDriftForceDocKey
+	DevMainPipelineSendDelay      = base.DevMainPipelineSendDelay
+	DevBackfillPipelineSendDelay  = base.DevBackfillPipelineSendDelay
+	DevBackfillRollbackTo0VB      = base.DevBackfillRollbackTo0VB
+	DevMainPipelineRollbackTo0VB  = base.DevMainPipelineRollbackTo0VB
+	DevCkptMgrForceGCWaitSec      = base.DevCkptMgrForceGCWaitSec
+	DevColManifestSvcDelaySec     = base.DevColManifestSvcDelaySec
+	DevNsServerPortSpecifier      = base.DevNsServerPortSpecifier
+	DevBucketTopologyLegacyDelay  = base.DevBucketTopologyLegacyDelay
+	DevCasDrfitForceDocKey        = base.DevCasDriftForceDocKey
+	DevCasDriftForceDocKey        = base.DevCasDriftForceDocKey
+	DevPreCheckCasDriftForceVbKey = base.DevPreCheckCasDriftForceVbKey
 
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
@@ -106,7 +108,8 @@ const (
 
 	TargetTopologyLogFreqKey = base.TargetTopologyLogFreqKey
 
-	CASDriftThresholdHoursKey = base.CASDriftThresholdHoursKey
+	CASDriftThresholdHoursKey         = base.CASDriftThresholdHoursKey
+	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
 )
 
 // keys to facilitate redaction of replication settings map
@@ -131,7 +134,7 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
 	DevNsServerPortSpecifier, DevBucketTopologyLegacyDelay,
-	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDrfitForceDocKey}
+	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDrfitForceDocKey, DevPreCheckCasDriftForceVbKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -158,6 +161,7 @@ const (
 )
 
 var DefaultPipelineStatsIntervalMs = 1000
+var DefaultMaxCasIntervalSec = 10
 
 var XDCRDevMainPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
 var XDCRDevBackfillPipelineSendDelayConfig = &SettingsConfig{0 /*ms*/, &Range{0, 10000}}
@@ -167,6 +171,7 @@ var XDCRDevCkptGcWaitConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
 var XDCRDevColManifestSvcDelayConfig = &SettingsConfig{0 /*sec*/, &Range{0, 3600}}
 var XDCRDevNsServerPortSpecifierConfig = &SettingsConfig{0 /*not specified*/, &Range{0, 65535}}
 var XDCRDevCasDriftForceDocConfig = &SettingsConfig{"", nil}
+var XDCRDevPreCheckCasDriftForceVBConfig = &SettingsConfig{-1, &Range{-1, 1023}}
 
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
@@ -231,19 +236,21 @@ var TargetTopologyLogFrequencyConfig = &SettingsConfig{base.TargetTopologyLogFre
 
 // 0 means it is off
 var CasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
+var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Range{0, math.MaxInt}}
 
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
-	DevMainPipelineSendDelay:     XDCRDevMainPipelineSendDelayConfig,
-	DevBackfillPipelineSendDelay: XDCRDevBackfillPipelineSendDelayConfig,
-	DevMainPipelineRollbackTo0VB: XDCRDevMainPipelineRollbackConfig,
-	DevBackfillRollbackTo0VB:     XDCRDevBackfillPipelineRollbackConfig,
-	DevCkptMgrForceGCWaitSec:     XDCRDevCkptGcWaitConfig,
-	DevColManifestSvcDelaySec:    XDCRDevColManifestSvcDelayConfig,
-	DevNsServerPortSpecifier:     XDCRDevNsServerPortSpecifierConfig,
-	DevBucketTopologyLegacyDelay: XDCRDevBucketTopologyLevacyDelayConfig,
-	DevCasDrfitForceDocKey:       XDCRDevCasDriftForceDocConfig,
+	DevMainPipelineSendDelay:      XDCRDevMainPipelineSendDelayConfig,
+	DevBackfillPipelineSendDelay:  XDCRDevBackfillPipelineSendDelayConfig,
+	DevMainPipelineRollbackTo0VB:  XDCRDevMainPipelineRollbackConfig,
+	DevBackfillRollbackTo0VB:      XDCRDevBackfillPipelineRollbackConfig,
+	DevCkptMgrForceGCWaitSec:      XDCRDevCkptGcWaitConfig,
+	DevColManifestSvcDelaySec:     XDCRDevColManifestSvcDelayConfig,
+	DevNsServerPortSpecifier:      XDCRDevNsServerPortSpecifierConfig,
+	DevBucketTopologyLegacyDelay:  XDCRDevBucketTopologyLevacyDelayConfig,
+	DevCasDrfitForceDocKey:        XDCRDevCasDriftForceDocConfig,
+	DevPreCheckCasDriftForceVbKey: XDCRDevPreCheckCasDriftForceVBConfig,
 
 	ReplicationTypeKey:                   ReplicationTypeConfig,
 	FilterExpressionKey:                  FilterExpressionConfig,
@@ -283,6 +290,7 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	EnableDcpPurgeRollback:               EnableDcpPurgeRollbackConfig,
 	TargetTopologyLogFreqKey:             TargetTopologyLogFrequencyConfig,
 	CASDriftThresholdHoursKey:            CasDriftThresholdHoursConfig,
+	PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursConfig,
 }
 
 // Adding values in this struct is deprecated - use ReplicationSettings.Settings.Values instead
@@ -979,6 +987,10 @@ func (s *ReplicationSettings) GetDevMainPipelineDelay() int {
 	return s.GetIntSettingValue(DevMainPipelineSendDelay)
 }
 
+func (s *ReplicationSettings) GetDevPreCheckVBPoison() int {
+	return s.GetIntSettingValue(DevPreCheckCasDriftForceVbKey)
+}
+
 func (s *ReplicationSettings) GetDevBackfillPipelineDelay() int {
 	return s.GetIntSettingValue(DevBackfillPipelineSendDelay)
 }
@@ -1055,9 +1067,16 @@ func (s *ReplicationSettings) GetCasDriftThreshold() uint32 {
 }
 
 func (s *ReplicationSettings) GetCasDriftInjectDocKey() string {
-	val := s.GetStringSettingValue(DevCasDrfitForceDocKey)
+	val := s.GetStringSettingValue(DevCasDriftForceDocKey)
 
 	return val
+}
+
+func (s *ReplicationSettings) GetPreCheckCasDriftThreshold() uint32 {
+	val, _ := s.GetSettingValueOrDefaultValue(PreCheckCasDriftThresholdHoursKey)
+
+	hrsInt := val.(int)
+	return uint32(hrsInt)
 }
 
 type ReplicationSettingsMap map[string]interface{}

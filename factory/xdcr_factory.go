@@ -325,7 +325,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 	pipeline := pp.NewPipelineWithSettingConstructor(topic, pipelineType, sourceNozzles, outNozzles, specForConstruction, targetClusterRef,
 		xdcrf.ConstructSettingsForPart, xdcrf.ConstructSettingsForConnector, xdcrf.ConstructSSLPortMap, xdcrf.ConstructUpdateSettingsForPart,
 		xdcrf.ConstructUpdateSettingsForConnector, xdcrf.SetStartSeqno, xdcrf.CheckpointBeforeStop, logger_ctx, xdcrf.PreReplicationVBMasterCheck,
-		xdcrf.MergePeerNodesCkptsResponse, xdcrf.utils, xdcrf.GeneratePrometheusStatusCb)
+		xdcrf.MergePeerNodesCkptsResponse, xdcrf.bucketTopologySvc, xdcrf.utils, xdcrf.GeneratePrometheusStatusCb)
 
 	// These listeners are the driving factors of the pipeline
 	xdcrf.registerAsyncListenersOnSources(pipeline, logger_ctx)
@@ -1089,6 +1089,10 @@ func (xdcrf *XDCRFactory) constructSettingsForXmemNozzle(pipeline common.Pipelin
 		xdcrf.logger.Infof("xmemSettings=%v\n", xmemSettings.CloneAndRedact())
 	}
 
+	if val, ok := settings[base.HlvVbMaxCasKey]; ok {
+		xmemSettings[base.HlvVbMaxCasKey] = val
+	}
+
 	return xmemSettings, nil
 
 }
@@ -1315,9 +1319,9 @@ func (xdcrf *XDCRFactory) constructSettingsForRouter(pipeline common.Pipeline, s
 		routerSettings[metadata.CASDriftThresholdHoursKey] = casDriftThreshold
 	}
 
-	devCasDriftForceDocKey, ok := settings[metadata.DevCasDrfitForceDocKey]
+	devCasDriftForceDocKey, ok := settings[metadata.DevCasDriftForceDocKey]
 	if ok {
-		routerSettings[metadata.DevCasDrfitForceDocKey] = devCasDriftForceDocKey
+		routerSettings[metadata.DevCasDriftForceDocKey] = devCasDriftForceDocKey
 	}
 
 	return routerSettings, nil

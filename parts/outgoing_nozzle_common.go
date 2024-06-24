@@ -98,6 +98,7 @@ type baseConfig struct {
 	username            string
 	password            string
 	hlvPruningWindowSec uint32 // Interval for pruning PV in seconds
+	vbHlvMaxCas         map[uint16]uint64
 	logger              *log.CommonLogger
 
 	devMainSendDelay     uint32

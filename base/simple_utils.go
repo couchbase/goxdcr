@@ -2070,6 +2070,10 @@ func ComposeVBHighSeqnoStatsKey(vbno uint16) string {
 	return fmt.Sprintf(VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT, vbno)
 }
 
+func ComposeVBMaxCasStatsKey(vbno uint16) string {
+	return fmt.Sprintf(VBUCKET_MAXCAS_STAT_KEY_FORMAT, vbno)
+}
+
 func DecomposeVBHighSeqnoStatsKey(key string) (uint16, error) {
 	if !strings.Contains(key, HIGH_SEQNO_CONST) {
 		return 0, fmt.Errorf("key (%v) does not contain %v", key, HIGH_SEQNO_CONST)

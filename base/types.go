@@ -2636,6 +2636,17 @@ func (k *KvVBMapType) GreenClone(poolGet func(keys []string) *KvVBMapType) *KvVB
 	return recycledMap
 }
 
+func (k *KvVBMapType) FilterByVBs(vbs []uint16) KvVBMapType {
+	retMap := make(KvVBMapType)
+
+	lookupIndex := k.CompileLookupIndex()
+	for _, vb := range vbs {
+		node := lookupIndex[vb]
+		retMap[node] = append(retMap[node], vb)
+	}
+	return retMap
+}
+
 func GetKeysListFromStrStrMap(a map[string]string) []string {
 	var retList []string
 	for k, _ := range a {
@@ -2735,6 +2746,41 @@ func (t *BucketInfoMapType) GetKeyList() []string {
 	return retList
 }
 
+type VbSeqnoMapType map[uint16]uint64
+
+func (v *VbSeqnoMapType) Clone() VbSeqnoMapType {
+	if v == nil {
+		return nil
+	}
+	clonedMap := make(VbSeqnoMapType)
+	for k, v2 := range *v {
+		clonedMap[k] = v2
+	}
+	return clonedMap
+}
+
+// Returns:
+// 1. Map of key-val where val is v[key] - other[key] if key exists in both
+// 2. VBs unable to perform due to mismatch keys during operation
+// 3. non-nil error if subtraction operation did not commence
+func (v *VbSeqnoMapType) Subtract(other VbSeqnoMapType) (map[uint16]int64, []uint16, error) {
+	if v == nil || *v == nil || other == nil {
+		return nil, nil, ErrorNilPtr
+	}
+
+	result := make(map[uint16]int64)
+	var missingVBs []uint16
+	for k, v := range *v {
+		_, exists := other[k]
+		if !exists {
+			missingVBs = append(missingVBs, k)
+			continue
+		}
+		result[k] = int64(v) - int64(other[k])
+	}
+	return result, missingVBs, nil
+}
+
 type HighSeqnosMapType map[string]*map[uint16]uint64
 
 func GetVBListFromSeqnosMap(a map[uint16]uint64) []uint16 {
@@ -2791,6 +2837,46 @@ func (h *HighSeqnosMapType) GreenClone(highSeqnoPool func(keys []string) *HighSe
 		}
 	}
 	return recycledVbSeqnoMap
+}
+
+func (h *HighSeqnosMapType) DedupAndGetMax() VbSeqnoMapType {
+	if h == nil {
+		return nil
+	}
+
+	dedupMap := make(VbSeqnoMapType)
+	for _, oneNodeVbSeqno := range *h {
+		if oneNodeVbSeqno == nil {
+			continue
+		}
+		for vb, oneNodeSeqno := range *oneNodeVbSeqno {
+			currentMax, exists := dedupMap[vb]
+			if !exists || (exists && currentMax < oneNodeSeqno) {
+				dedupMap[vb] = oneNodeSeqno
+			}
+		}
+	}
+	return dedupMap
+}
+
+func (h *HighSeqnosMapType) DedupAndGetMin() VbSeqnoMapType {
+	if h == nil {
+		return nil
+	}
+
+	dedupMap := make(VbSeqnoMapType)
+	for _, oneNodeVbSeqno := range *h {
+		if oneNodeVbSeqno == nil {
+			continue
+		}
+		for vb, oneNodeSeqno := range *oneNodeVbSeqno {
+			currentMin, exists := dedupMap[vb]
+			if !exists || (exists && currentMin > oneNodeSeqno) {
+				dedupMap[vb] = oneNodeSeqno
+			}
+		}
+	}
+	return dedupMap
 }
 
 type VbHostsMapType map[uint16]*[]string

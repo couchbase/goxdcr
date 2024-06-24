@@ -113,12 +113,13 @@ type PipelineEventsManager interface {
 	common.PipelineEventsProducer
 
 	GetCurrentEvents() *PipelineEventList
-	ClearNonBrokenMapEvents()
+	ClearNonBrokenMapOrPersistentEvents()
 	ClearNonBrokenMapEventsWithString(substr string)
 	LoadLatestBrokenMap(mapping metadata.CollectionNamespaceMapping)
 	ContainsEvent(eventId int) bool
 	ResetDismissedHistory()
 	BackfillUpdateCb(diffPair *metadata.CollectionNamespaceMappingsDiffPair, srcManifestsDelta []*metadata.CollectionsManifest) error
+	ClearPersistentEvents()
 }
 
 // The pipeline events mgr's job is to handle the exporting of events and also remember the user's preference
@@ -236,9 +237,9 @@ func (p *PipelineEventsMgr) UpdateEvent(eventId int64, newEventDesc string, newE
 }
 
 // When pipeline is paused, brokenMap events need to stay once pipeline resumes because no further mutations will
-// go through the router and re-trigger the brokenmap events... but other events like warnings, errors, persistent
+// go through the router and re-trigger the brokenmap events... but other events like warnings, errors,
 // messages, should be reset and then they can be re-triggered as needed
-func (p *PipelineEventsMgr) ClearNonBrokenMapEvents() {
+func (p *PipelineEventsMgr) ClearNonBrokenMapOrPersistentEvents() {
 	p.events.Mutex.Lock()
 	defer p.events.Mutex.Unlock()
 
@@ -246,7 +247,27 @@ func (p *PipelineEventsMgr) ClearNonBrokenMapEvents() {
 	var replacementTime []int64
 
 	for i, event := range p.events.EventInfos {
-		if event.EventType != base.BrokenMappingInfoType {
+		if event.EventType != base.BrokenMappingInfoType &&
+			event.EventType != base.PersistentMsg {
+			continue
+		}
+		replacementList = append(replacementList, event)
+		replacementTime = append(replacementTime, p.events.TimeInfos[i])
+	}
+
+	p.events.EventInfos = replacementList
+	p.events.TimeInfos = replacementTime
+}
+
+func (p *PipelineEventsMgr) ClearPersistentEvents() {
+	p.events.Mutex.Lock()
+	defer p.events.Mutex.Unlock()
+
+	var replacementList []*base.EventInfo
+	var replacementTime []int64
+
+	for i, event := range p.events.EventInfos {
+		if event.EventType == base.PersistentMsg {
 			continue
 		}
 		replacementList = append(replacementList, event)
@@ -265,7 +286,8 @@ func (p *PipelineEventsMgr) ClearNonBrokenMapEventsWithString(substr string) {
 	var replacementTime []int64
 
 	for i, event := range p.events.EventInfos {
-		if event.EventType != base.BrokenMappingInfoType {
+		if event.EventType != base.BrokenMappingInfoType &&
+			event.EventType != base.PersistentMsg {
 			continue
 		}
 		if !strings.Contains(event.EventDesc, substr) {

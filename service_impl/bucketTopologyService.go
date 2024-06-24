@@ -80,6 +80,7 @@ func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySv
 		healthCheckInterval:  healthCheckInterval,
 		securitySvc:          securitySvc,
 	}
+	remClusterSvc.SetBucketTopologySvc(b)
 	return b, b.loadFromReplSpecSvc(replicationSpecService)
 }
 
@@ -195,6 +196,11 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		highSeqnoFuncLegacy := b.getHighSeqnosUpdater(spec, watcher, true)
 		intervalFuncMap[HIGHSEQNOSLEGACY] = make(IntervalInnerFuncMap)
 		intervalFuncMap[HIGHSEQNOSLEGACY][defaultPipelineStatsInterval] = highSeqnoFuncLegacy
+
+		maxVBCasStatsInterval := time.Duration(metadata.DefaultMaxCasIntervalSec) * time.Second
+		maxVBCasFunc := b.getMaxCasUpdater(spec, watcher)
+		intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
+		intervalFuncMap[MAXCAS][maxVBCasStatsInterval] = maxVBCasFunc
 
 		watcher.intervalFuncMap = intervalFuncMap
 	}
@@ -417,6 +423,7 @@ func (b *BucketTopologyService) getLocalBucketTopologyUpdater(spec *metadata.Rep
 			// This shouldn't happen.
 			watcher.logger.Errorf("%v Failed to get source storageBackend. Error=%v", spec.SourceBucketName, err.Error())
 		}
+
 		watcher.latestCacheMtx.Lock()
 		if !watcher.cachePopulated {
 			watcher.cachePopulated = true
@@ -468,6 +475,11 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 		return nil, fmt.Errorf("Unable to get remote bucketInfo getter for spec %v", spec.Id)
 	}
 
+	maxCasGetter, err := b.remClusterSvc.GetMaxVBStatsGetter(ref, spec.TargetBucketName)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to get remote maxCasGetter for spec %v", spec.Id)
+	}
+
 	b.tgtBucketWatchersMtx.Lock()
 	defer b.tgtBucketWatchersMtx.Unlock()
 	watcher, exists := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
@@ -475,73 +487,15 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 		watcher = NewBucketTopologySvcWatcher(spec.TargetBucketName, spec.TargetBucketUUID, b.logger, false, b.xdcrCompTopologySvc)
 		b.tgtBucketWatchers[getTargetWatcherKey(spec)] = watcher
 
-		topologyUpdateFunc := func() error {
-			targetBucketInfo, shouldUseExternal, connStr, err := bucketInfoGetter()
-			if err != nil {
-				return err
-			}
-			targetBucketUUID, err := b.utils.GetBucketUuidFromBucketInfo(spec.TargetBucketName, targetBucketInfo, b.logger)
-			if err != nil {
-				return err
-			}
-			targetServerVBMap, err := b.utils.GetRemoteServerVBucketsMap(connStr, spec.TargetBucketName, targetBucketInfo, shouldUseExternal)
-			if err != nil {
-				return err
-			}
-			perUpdateRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
-			if err != nil {
-				return err
-			}
+		topologyUpdateFunc := b.getRemoteTopologyUpdateFunc(spec, bucketInfoGetter, watcher)
 
-			nodesList, err := b.utils.GetHostNamesFromBucketInfo(targetBucketInfo)
-			if err != nil {
-				return err
-			}
-
-			replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
-			if err != nil {
-				if err != watcher.replicaLastWarnErr {
-					watcher.replicaLastWarnErr = err
-					watcher.logger.Warnf("%v target replicasInfo error %v", spec.TargetBucketName, err)
-				}
-				// Odd error but continue anyway
-				replicasMap = watcher.objsPool.VbHostsMapPool.Get(nil).Clear()
-				translateMap = watcher.objsPool.StringStringPool.Get(nil).Clear()
-				numOfReplicas = 0
-				vbReplicaMember = []uint16{}
-			} else {
-				watcher.replicaLastWarnErr = nil
-			}
-
-			storageBackend, err := b.utils.BucketStorageBackend(targetBucketInfo)
-			if err != nil {
-				// This can happen if target is older version
-				storageBackend = ""
-			}
-
-			watcher.latestCacheMtx.Lock()
-			if !watcher.cachePopulated {
-				watcher.cachePopulated = true
-				watcher.source = false
-			}
-
-			replacementNotification := watcher.latestCached.Clone(1).(*Notification)
-			replacementNotification.TargetServerVBMap = (*base.KvVBMapType)(&targetServerVBMap)
-			replacementNotification.TargetBucketUUID = targetBucketUUID
-			replacementNotification.TargetBucketInfo = (base.BucketInfoMapType)(targetBucketInfo)
-			replacementNotification.TargetReplicasMap = replicasMap
-			replacementNotification.TargetReplicasTranslateMap = translateMap
-			replacementNotification.TargetReplicaCnt = numOfReplicas
-			replacementNotification.TargetVbReplicasMember = vbReplicaMember
-			replacementNotification.TargetStorageBackend = storageBackend
-			watcher.latestCached.Recycle()
-			watcher.latestCached = replacementNotification
-			watcher.latestCacheMtx.Unlock()
-			return nil
-		}
 		intervalFuncMap := make(IntervalFuncMap)
 		intervalFuncMap[TOPOLOGY] = make(IntervalInnerFuncMap)
 		intervalFuncMap[TOPOLOGY][b.refreshInterval] = topologyUpdateFunc
+
+		maxCasGetterFunc := b.getRemoteMaxCasUpdater(maxCasGetter, watcher)
+		intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
+		intervalFuncMap[MAXCAS][b.refreshInterval] = maxCasGetterFunc
 
 		watcher.intervalFuncMap = intervalFuncMap
 	}
@@ -549,7 +503,95 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 	return watcher, nil
 }
 
+func (b *BucketTopologyService) getRemoteMaxCasUpdater(maxCasGetter service_def.MaxVBCasStatsGetter, watcher *BucketTopologySvcWatcher) func() error {
+	maxCasGetterFunc := func() error {
+		maxCasMap, err := maxCasGetter()
+		if err != nil {
+			return err
+		}
+
+		watcher.latestCacheMtx.Lock()
+		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
+		replacementNotification.MaxVbCasStatsMap = &maxCasMap
+		watcher.latestCached.Recycle()
+		watcher.latestCached = replacementNotification
+		watcher.latestCacheMtx.Unlock()
+		return nil
+	}
+	return maxCasGetterFunc
+}
+
+func (b *BucketTopologyService) getRemoteTopologyUpdateFunc(spec *metadata.ReplicationSpecification, bucketInfoGetter service_def.BucketInfoGetter, watcher *BucketTopologySvcWatcher) func() error {
+	topologyUpdateFunc := func() error {
+		targetBucketInfo, shouldUseExternal, connStr, err := bucketInfoGetter()
+		if err != nil {
+			return err
+		}
+		targetBucketUUID, err := b.utils.GetBucketUuidFromBucketInfo(spec.TargetBucketName, targetBucketInfo, b.logger)
+		if err != nil {
+			return err
+		}
+		targetServerVBMap, err := b.utils.GetRemoteServerVBucketsMap(connStr, spec.TargetBucketName, targetBucketInfo, shouldUseExternal)
+		if err != nil {
+			return err
+		}
+		perUpdateRef, err := b.remClusterSvc.RemoteClusterByUuid(spec.TargetClusterUUID, false)
+		if err != nil {
+			return err
+		}
+
+		nodesList, err := b.utils.GetHostNamesFromBucketInfo(targetBucketInfo)
+		if err != nil {
+			return err
+		}
+
+		replicasMap, translateMap, numOfReplicas, vbReplicaMember, err := b.utils.GetReplicasInfo(targetBucketInfo, perUpdateRef.IsHttps(), watcher.objsPool.StringStringPool.Get(nodesList), watcher.objsPool.VbHostsMapPool.Get, watcher.objsPool.StringSlicePool.Get)
+		if err != nil {
+			if err != watcher.replicaLastWarnErr {
+				watcher.replicaLastWarnErr = err
+				watcher.logger.Warnf("%v target replicasInfo error %v", spec.TargetBucketName, err)
+			}
+			// Odd error but continue anyway
+			replicasMap = watcher.objsPool.VbHostsMapPool.Get(nil).Clear()
+			translateMap = watcher.objsPool.StringStringPool.Get(nil).Clear()
+			numOfReplicas = 0
+			vbReplicaMember = []uint16{}
+		} else {
+			watcher.replicaLastWarnErr = nil
+		}
+
+		storageBackend, err := b.utils.BucketStorageBackend(targetBucketInfo)
+		if err != nil {
+			// This can happen if target is older version
+			storageBackend = ""
+		}
+
+		watcher.latestCacheMtx.Lock()
+		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
+		replacementNotification.TargetServerVBMap = (*base.KvVBMapType)(&targetServerVBMap)
+		replacementNotification.TargetBucketUUID = targetBucketUUID
+		replacementNotification.TargetBucketInfo = (base.BucketInfoMapType)(targetBucketInfo)
+		replacementNotification.TargetReplicasMap = replicasMap
+		replacementNotification.TargetReplicasTranslateMap = translateMap
+		replacementNotification.TargetReplicaCnt = numOfReplicas
+		replacementNotification.TargetVbReplicasMember = vbReplicaMember
+		replacementNotification.TargetStorageBackend = storageBackend
+		watcher.latestCached.Recycle()
+		watcher.latestCached = replacementNotification
+		if !watcher.cachePopulated {
+			watcher.cachePopulated = true
+		}
+		watcher.latestCacheMtx.Unlock()
+		return nil
+	}
+	return topologyUpdateFunc
+}
+
 func (b *BucketTopologyService) SubscribeToRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, error) {
+	return b.subscribeRemoteInternal(spec, subscriberId, TOPOLOGY)
+}
+
+func (b *BucketTopologyService) subscribeRemoteInternal(spec *metadata.ReplicationSpecification, subscriberId string, subscriptionType string) (chan service_def.TargetNotification, error) {
 	if spec == nil {
 		return nil, base.ErrorNilPtr
 	}
@@ -562,7 +604,7 @@ func (b *BucketTopologyService) SubscribeToRemoteBucketFeed(spec *metadata.Repli
 	defer b.tgtBucketWatchersMtx.Unlock()
 	watcher, exists := b.tgtBucketWatchers[getTargetWatcherKey(spec)]
 	if exists {
-		return watcher.registerAndGetCh(spec, subscriberId, TOPOLOGY, nil).(chan service_def.TargetNotification), nil
+		return watcher.registerAndGetCh(spec, subscriberId, subscriptionType, nil).(chan service_def.TargetNotification), nil
 	}
 
 	return nil, fmt.Errorf("SubscribeToRemoteBucketFeed could not find watcher for %v", spec.TargetBucketName)
@@ -570,6 +612,14 @@ func (b *BucketTopologyService) SubscribeToRemoteBucketFeed(spec *metadata.Repli
 
 func (b *BucketTopologyService) UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	return b.unSubscribeLocalInternal(spec, subscriberId, TOPOLOGY)
+}
+
+func (b *BucketTopologyService) SubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.TargetNotification, error) {
+	return b.subscribeRemoteInternal(spec, subscriberId, MAXCAS)
+}
+
+func (b *BucketTopologyService) UnSubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+	return b.unsubscribeRemoteInternal(spec, subscriberId, MAXCAS)
 }
 
 func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpecification) error {
@@ -601,6 +651,10 @@ func (b *BucketTopologyService) handleSpecDeletion(spec *metadata.ReplicationSpe
 }
 
 func (b *BucketTopologyService) UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+	return b.unsubscribeRemoteInternal(spec, subscriberId, TOPOLOGY)
+}
+
+func (b *BucketTopologyService) unsubscribeRemoteInternal(spec *metadata.ReplicationSpecification, subscriberId string, subscribeType string) error {
 	if spec == nil {
 		return base.ErrorNilPtr
 	}
@@ -612,7 +666,7 @@ func (b *BucketTopologyService) UnSubscribeRemoteBucketFeed(spec *metadata.Repli
 		b.tgtBucketWatchersMtx.RUnlock()
 		return base.ErrorResourceDoesNotExist
 	}
-	b.tgtBucketWatchers[getTargetWatcherKey(spec)].unregisterCh(spec, subscriberId, TOPOLOGY)
+	b.tgtBucketWatchers[getTargetWatcherKey(spec)].unregisterCh(spec, subscriberId, subscribeType)
 	b.tgtBucketWatchersMtx.RUnlock()
 	return nil
 }
@@ -775,6 +829,7 @@ func (b *BucketTopologyService) unSubscribeLocalInternal(spec *metadata.Replicat
 }
 
 func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher, legacyMode bool) func() error {
+	// This function shares both legacy and traditional
 	updaterFunc := func() error {
 		settings := spec.Settings.ToMap(false)
 		metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, spec.GetReplicationSpec().Settings.StatsInterval)
@@ -821,6 +876,7 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 
 			oneSeqnoMap := watcher.objsPool.VbSeqnoMapPool.Get(vbnos)
 			freeInCaseOfErrList = append(freeInCaseOfErrList, oneSeqnoMap)
+
 			_, updatedStatsMap, vbsUnableToParse, err := b.utils.GetHighSeqNos(vbnos, client, &watcher.statsMap, collectionIds, oneSeqnoMap)
 			if err != nil {
 				if err == base.ErrorNoVbSpecified {
@@ -855,9 +911,9 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 							if lastSeqnoMap != nil {
 								if seqno, exists := (*lastSeqnoMap)[failedVB]; exists {
 									seqnoToReuse = seqno
+									(*oneSeqnoMap)[failedVB] = seqnoToReuse
 								}
 							}
-							(*oneSeqnoMap)[failedVB] = seqnoToReuse
 						}
 					}
 				}
@@ -881,6 +937,99 @@ func (b *BucketTopologyService) getHighSeqnosUpdater(spec *metadata.ReplicationS
 		return nil
 	}
 	return updaterFunc
+}
+
+func (b *BucketTopologyService) getMaxCasUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
+	updateFunc := func() error {
+		watcher.latestCacheMtx.RLock()
+		if !watcher.cachePopulated {
+			watcher.latestCacheMtx.RUnlock()
+			return fmt.Errorf("Cache is not populated yet to get maxCas")
+		}
+		kv_vb_map := watcher.latestCached.SourceVBMap.Clone()
+		watcher.latestCacheMtx.RUnlock()
+		if len(kv_vb_map) == 0 {
+			return fmt.Errorf("KvVbMap not established yet")
+		}
+
+		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", watcher.bucketName)
+		var features utils.HELOFeatures
+		features.CompressionType = base.CompressionTypeNone
+
+		// MaxCasUpdater should not be run too often - no need for data pools
+		nodesMaxCasMap := make(base.HighSeqnosMapType)
+		vbSeqnoMap := make(map[uint16]uint64)
+
+		// Temp notification is used for if partial VBs are not parsed
+		watcher.latestCacheMtx.RLock()
+		temporaryNotification := watcher.latestCached.Clone(1).(*Notification)
+		watcher.latestCacheMtx.RUnlock()
+		defer temporaryNotification.Recycle()
+
+		var vbsUnableToParse []uint16
+
+		watcher.kvMemClientsMtx.Lock()
+		for serverAddr, vbnos := range kv_vb_map {
+			var err error
+			client, err := b.utils.GetMemcachedClient(serverAddr, watcher.bucketName, watcher.kvMemClients, userAgent, base.KeepAlivePeriod, watcher.logger, features)
+			if err != nil {
+				watcher.kvMemClientsMtx.Unlock()
+				return err
+			}
+			vbSeqnoMap, vbsUnableToParse, err = b.utils.GetMaxCasStatsForVBs(vbnos, client, nil, &vbSeqnoMap)
+
+			if err != nil {
+				if err == base.ErrorNoVbSpecified {
+					err = fmt.Errorf("KV node %v has no vbucket assigned to it", serverAddr)
+				}
+
+				// We should really return err if nothing could be parsed, because this means the update() call has
+				// failed and subscribers will not hear back any event at all
+				watcher.logger.Warnf("%v Error getting maxCas for kv %v. err=%v", userAgent, serverAddr, err)
+				err1 := client.Close()
+				if err1 != nil {
+					watcher.logger.Warnf("%v error from closing connection for %v is %v\n", userAgent, serverAddr, err1)
+				}
+				delete(watcher.kvMemClients, serverAddr)
+				watcher.kvMemClientsMtx.Unlock()
+				return err
+			} else {
+				if len(vbsUnableToParse) > 0 && temporaryNotification != nil {
+					// If partial VBs were not able to be parsed (i.e stuck rebalancing, etc), and we have old data,
+					// then we could try our best to set so that the stats will be as accurate as possible...
+					// instead of getting stuck, use the previous instance of the statsMap to find old data
+					lastCachedData := temporaryNotification.HighSeqnoMap
+					if lastCachedData == nil || len(*lastCachedData) == 0 || (*lastCachedData)[serverAddr] == nil {
+						// cache not instantiated yet... just use whatever we have and do replacement at the end
+					} else {
+						lastMaxCasMap := (*lastCachedData)[serverAddr]
+						for _, failedVB := range vbsUnableToParse {
+							var casToReuse uint64
+							if lastMaxCasMap != nil {
+								if cas, exists := (*lastMaxCasMap)[failedVB]; exists {
+									casToReuse = cas
+									vbSeqnoMap[failedVB] = casToReuse
+								}
+							}
+						}
+					}
+				}
+				nodesMaxCasMap[serverAddr] = &vbSeqnoMap
+				watcher.kvMemClients[serverAddr] = client
+			}
+		}
+		watcher.kvMemClientsMtx.Unlock()
+
+		watcher.latestCacheMtx.Lock()
+		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
+		replacementNotification.MaxVbCasStatsMap = &nodesMaxCasMap
+		watcher.latestCached.Recycle()
+		watcher.latestCached = replacementNotification
+		watcher.latestCacheMtx.Unlock()
+		return nil
+	}
+
+	return updateFunc
 }
 
 // Returns a duration updater
@@ -963,6 +1112,33 @@ func (b *BucketTopologyService) SubscribeToLocalBucketHighSeqnosLegacyFeed(spec 
 	return nil, nil, fmt.Errorf("SubscribeToLocalBucketHighSeqnosLegacyFeed could not find watcher for %v", spec.SourceBucketName)
 }
 
+func (b *BucketTopologyService) SubscribeToLocalBucketMaxVbCasStatFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
+	if spec == nil {
+		return nil, base.ErrorNilPtr
+	}
+
+	if spec.SourceBucketName == "" {
+		return nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
+	}
+
+	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
+		return nil, base.ErrorNoSourceNozzle
+	}
+
+	b.srcBucketWatchersMtx.Lock()
+	defer b.srcBucketWatchersMtx.Unlock()
+	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
+	if exists {
+		retCh := watcher.registerAndGetCh(spec, subscriberId, MAXCAS, nil).(chan service_def.SourceNotification)
+		return retCh, nil
+	}
+	return nil, fmt.Errorf("SubscribeToLocalBucketHighSeqnosLegacyFeed could not find watcher for %v", spec.SourceBucketName)
+}
+
+func (b *BucketTopologyService) UnSubscribeToLocalBucketMaxVbCasStatFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
+	return b.unSubscribeLocalInternal(spec, subscriberId, MAXCAS)
+}
+
 func (b *BucketTopologyService) RegisterGarbageCollect(specId string, srcBucketName string, vbno uint16, requestId string, gcFunc func() error, timeToFire time.Duration) error {
 	if specId == "" {
 		return base.ErrorInvalidInput
@@ -1014,6 +1190,8 @@ type BucketTopologySvcWatcher struct {
 	highSeqnosChs          map[string]interface{}
 	highSeqnosLegacyChsMtx sync.RWMutex
 	highSeqnosLegacyChs    map[string]interface{}
+	maxCasChsMtx           sync.RWMutex
+	maxCasChs              map[string]interface{}
 
 	latestCacheMtx sync.RWMutex
 	latestCached   *Notification
@@ -1103,7 +1281,30 @@ const (
 	DCPSTATSCHECKLEGACY = "dcpStatsLegacy"
 	HIGHSEQNOS          = "vbHighSeqnos"
 	HIGHSEQNOSLEGACY    = "vbHighSeqnosLegacy" // Legacy means it only receives default collection high seqnos
+	MAXCAS              = "vbMaxCas"
 )
+
+// If no one is subscribed, no need to run the updater except for
+// - TOPOLOGY, which is for sure needed
+// - HIGHSEQNOS, this is needed for active as well as paused pipeline status which will subscribe, calculate and unsubscribe.
+// - MAXCAS, this is needed as part of pipeline start to check for cas poison
+// If we don't update HIGHSEQNOS when there is no subscriber, paused replication status will not be accurate,
+// and if topology change causing server name change, we will incorrectly report total_changes as 0 and changes_left as negative for paused pipeline.
+func needToRunInitially(subscriptionType string) bool {
+	switch subscriptionType {
+	case TOPOLOGY:
+		return true
+	case HIGHSEQNOS:
+		return true
+	case HIGHSEQNOSLEGACY:
+		return true
+	case MAXCAS:
+		//return true
+		return false
+	default:
+		return false
+	}
+}
 
 type HighSeqnosOpts struct {
 	Spec              *metadata.ReplicationSpecification
@@ -1144,6 +1345,7 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		gcPruneMap:                    GcMapPruneMapType{},
 		gcPruneWindow:                 base.BucketTopologyGCPruneTime,
 		objsPool:                      sharedPool,
+		maxCasChs:                     map[string]interface{}{},
 	}
 	watcher.latestCached.SetNumberOfReaders(1)
 	return watcher
@@ -1372,16 +1574,14 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 	case HIGHSEQNOSLEGACY:
 		channelsMap = bw.highSeqnosLegacyChs
 		mutex = &bw.highSeqnosLegacyChsMtx
+	case MAXCAS:
+		channelsMap = bw.maxCasChs
+		mutex = &bw.maxCasChsMtx
 	default:
 		panic(fmt.Sprintf("Unknown type: %v", updateType))
 	}
 
-	// If no one is subscribed, no need to run the updater except for
-	// - TOPOLOGY, which is for sure needed
-	// - HIGHSEQNOS, this is needed for active as well as paused pipeline status which will subscribe, calculate and unsubscribe.
-	// If we don't update HIGHSEQNOS when there is no subscriber, paused replication status will not be accurate,
-	// and if topology change causing server name change, we will incorrectly report total_changes as 0 and changes_left as negative for paused pipeline.
-	if updateType != TOPOLOGY && updateType != HIGHSEQNOS && updateType != HIGHSEQNOSLEGACY {
+	if !needToRunInitially(updateType) {
 		mutex.RLock()
 		chanLen := len(channelsMap)
 		mutex.RUnlock()
@@ -1474,6 +1674,9 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 		specifiedChs = bw.highSeqnosLegacyChs
 		mutex = &bw.highSeqnosLegacyChsMtx
 		defer bw.setHighSeqnosInterval(opts.(HighSeqnosOpts), true)
+	case MAXCAS:
+		specifiedChs = bw.maxCasChs
+		mutex = &bw.maxCasChsMtx
 	default:
 		panic(fmt.Sprintf("Unknown type %v", chType))
 	}
@@ -1539,6 +1742,9 @@ func (bw *BucketTopologySvcWatcher) unregisterCh(spec *metadata.ReplicationSpeci
 		specifiedChs = bw.highSeqnosLegacyChs
 		mutex = &bw.highSeqnosLegacyChsMtx
 		bw.cleanupHighSeqnosInternalData(spec, subscriberId, true)
+	case MAXCAS:
+		specifiedChs = bw.maxCasChs
+		mutex = &bw.maxCasChsMtx
 	default:
 		panic(fmt.Sprintf("Unknown type %v", chType))
 	}
@@ -1837,6 +2043,10 @@ type Notification struct {
 	TargetReplicasTranslateMap *base.StringStringMap // nil if not initialized
 	TargetVbReplicasMember     []uint16
 	TargetStorageBackend       string
+
+	// Source & Target
+	VersionPruningWindowHrs int
+	MaxVbCasStatsMap        *base.HighSeqnosMapType
 }
 
 func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification {
@@ -1853,6 +2063,8 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 	targetBucketInfo := make(base.BucketInfoMapType)
 	targetReplicasMap := make(base.VbHostsMapType)
 	targetReplicasTranslateMap := make(base.StringStringMap)
+
+	maxCasMap := make(base.HighSeqnosMapType)
 
 	return &Notification{
 		Source:                     isSource,
@@ -1871,6 +2083,8 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 		TargetBucketInfo:           targetBucketInfo,
 		TargetReplicasMap:          &targetReplicasMap,
 		TargetReplicasTranslateMap: &targetReplicasTranslateMap,
+
+		MaxVbCasStatsMap: &maxCasMap,
 	}
 }
 
@@ -1964,6 +2178,7 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		// Check call paths to ensure no one has called recycle before it's done
 		panic("Should not be 0")
 	}
+	maxCasClone := n.MaxVbCasStatsMap.Clone()
 	return &Notification{
 		ObjPool:    n.ObjPool,
 		Source:     n.Source,
@@ -1991,6 +2206,8 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		TargetReplicasTranslateMap: n.TargetReplicasTranslateMap.GreenClone(n.ObjPool.StringStringPool.Get),
 		TargetVbReplicasMember:     base.CloneUint16List(n.TargetVbReplicasMember),
 		TargetStorageBackend:       n.TargetStorageBackend,
+
+		MaxVbCasStatsMap: &maxCasClone,
 	}
 }
 
@@ -2051,4 +2268,11 @@ func (n *Notification) GetReplicasInfo() (int, *base.VbHostsMapType, *base.Strin
 
 func (n *Notification) GetLocalTopologyUpdatedTime() time.Time {
 	return n.LocalBucketTopologyUpdateTime
+}
+
+func (n *Notification) GetVBMaxCasStats() base.HighSeqnosMapType {
+	if n.MaxVbCasStatsMap == nil {
+		return nil
+	}
+	return *n.MaxVbCasStatsMap
 }

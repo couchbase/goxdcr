@@ -21,6 +21,8 @@ import (
 // 4. err
 type BucketInfoGetter func() (map[string]interface{}, bool, string, error)
 
+type MaxVBCasStatsGetter func() (base.HighSeqnosMapType, error)
+
 type RemoteClusterSvc interface {
 	RemoteClusterByRefId(refId string, refresh bool) (*metadata.RemoteClusterReference, error)
 	RemoteClusterByRefName(refName string, refresh bool) (*metadata.RemoteClusterReference, error)
@@ -94,4 +96,9 @@ type RemoteClusterSvc interface {
 	// given a fresh remote cluster reference with user input information like input hostname etc.,
 	// the function populates the reference with other implicit values like active hostname(s).
 	InitRemoteClusterReference(logger *log.CommonLogger, ref *metadata.RemoteClusterReference) error
+
+	SetBucketTopologySvc(svc BucketTopologySvc)
+
+	// MaxVBStats getter specific to KV
+	GetMaxVBStatsGetter(ref *metadata.RemoteClusterReference, bucketName string) (MaxVBCasStatsGetter, error)
 }

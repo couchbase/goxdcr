@@ -251,6 +251,35 @@ func (u *Utilities) ParseHighSeqnoStat(vbnos []uint16, stats_map map[string]stri
 	return unableToParseVBs, nil
 }
 
+func (u *Utilities) ParseMaxCasStat(vbnos []uint16, statsMap map[string]string, maxCasStatsMap map[uint16]uint64) ([]uint16, error) {
+	var unableToParseVBs []uint16
+	if len(vbnos) == 0 {
+		return nil, base.ErrorNoVbSpecified
+	}
+
+	for _, vbno := range vbnos {
+		statsKey := base.ComposeVBMaxCasStatsKey(vbno)
+		maxCasStr, ok := statsMap[statsKey]
+		if !ok || maxCasStr == "" {
+			unableToParseVBs = append(unableToParseVBs, vbno)
+			continue
+		}
+
+		maxCas, parseIntErr := strconv.ParseUint(maxCasStr, 10, 64)
+		if parseIntErr != nil {
+			u.logger_utils.Errorf("maxCas stats for vbno=%v in stats map is not a valid uint64. maxCas=%v", vbno, maxCasStr)
+			unableToParseVBs = append(unableToParseVBs, vbno)
+		}
+		maxCasStatsMap[vbno] = maxCas
+	}
+	if len(unableToParseVBs) == len(vbnos) {
+		return nil, fmt.Errorf("All Requested VBs %v were not able to be parsed from statsMap %v", vbnos, statsMap)
+	} else if len(unableToParseVBs) > 0 {
+		u.logger_utils.Warnf("(Requested VBs: %v) Can't find maxCas for vbnos=%v in stats map. Source topology may have changed", vbnos, unableToParseVBs)
+	}
+	return unableToParseVBs, nil
+}
+
 // convert the format returned by go-memcached StatMap - map[string]string to map[uint16][]uint64
 func (u *Utilities) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string) {
 	invalidVbnos := make([]uint16, 0)
@@ -3175,6 +3204,27 @@ func (u *Utilities) GetHighSeqNos(vbnos []uint16, conn mcc.ClientIface, stats_ma
 	} else {
 		return highseqno_map, stats_map, unableToBeParsedVBs, nil
 	}
+}
+
+// These are the actual max cas's from KV stats
+func (u *Utilities) GetMaxCasStatsForVBs(vbnos []uint16, conn mcc.ClientIface, statsMap *map[string]string, vbMaxCasMap *map[uint16]uint64) (map[uint16]uint64, []uint16, error) {
+	if len(vbnos) == 0 {
+		return nil, nil, base.ErrorNoVbSpecified
+	}
+
+	var err error
+	if statsMap != nil && *statsMap != nil {
+		sanitizeHighSeqnoStatsMap(vbnos, statsMap)
+		err = conn.StatsMapForSpecifiedStats(base.VBUCKET_DETAILS_NAME, *statsMap)
+	} else {
+		statsMap = &map[string]string{}
+		*statsMap, err = conn.StatsMap(base.VBUCKET_DETAILS_NAME)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	unableToBeParsedVBs, err := u.ParseMaxCasStat(vbnos, *statsMap, *vbMaxCasMap)
+	return *vbMaxCasMap, unableToBeParsedVBs, nil
 }
 
 // Ensure that only the VBs being requested are entries in the stats_map

@@ -450,6 +450,9 @@ const (
 	DCP_STAT_NAME                      = "dcp"
 	DCP_XDCR_STATS_PREFIX              = "eq_dcpq:xdcr:"
 	DCP_XDCR_ITEMS_REMAINING_SUFFIX    = ":items_remaining"
+	VBUCKET_DETAILS_NAME               = "vbucket-details"
+	MAXCAS_CONST                       = ":max_cas"
+	VBUCKET_MAXCAS_STAT_KEY_FORMAT     = VBUCKET_PREFIX + "%v" + MAXCAS_CONST
 )
 
 var ErrorsStatsKey = "Errors"
@@ -1387,6 +1390,7 @@ const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
 const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
 const DevBucketTopologyLegacyDelay = "xdcrDevBucketTopologyLegacyDelay"
 const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
+const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
@@ -1457,6 +1461,13 @@ const (
 	BucketMergeFunctionKey = "default"
 
 	CCRKVRestCallRetryInterval = 2 * time.Second
+)
+
+const (
+	// Bucket setting for starting timestamp (CAS) to enable versioning
+	VbucketsMaxCasKey = "vbucketsMaxCas"
+	// Bucket setting for starting timestamp (CAS) to eanble versioning
+	HlvVbMaxCasKey = "vbucketsMaxCas"
 )
 
 const DcpSeqnoEnd = uint64(0xFFFFFFFFFFFFFFFF)
@@ -1594,5 +1605,10 @@ var DatapoolLogFrequency = 10
 
 const ConnectionPreCheckTaskId string = "taskId"
 
-const CASDriftThresholdHoursKey = "casDriftThresholdHours"
+const (
+	CASDriftThresholdHoursKey         = "casDriftThresholdHours"
+	PreCheckCasDriftThresholdHoursKey = "preCheckCasDriftThresholdHours"
+)
+
 const CASDriftLiveDetected = "One or more documents are not replicated because their CAS values are beyond the acceptable drift threshold"
+const PreCheckCASDriftDetected = "The following VBs have time drift (nanoSecs) beyond acceptable threshold"

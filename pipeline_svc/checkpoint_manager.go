@@ -60,6 +60,7 @@ type CheckpointMgrSvc interface {
 
 type CheckpointManager struct {
 	*component.AbstractComponent
+	*component.RemoteMemcachedComponent
 
 	pipeline                   common.Pipeline
 	srcBucketName              string
@@ -108,22 +109,7 @@ type CheckpointManager struct {
 
 	logger *log.CommonLogger
 
-	target_username    string
-	target_password    string
-	target_bucket_name string
-
 	target_cluster_ref *metadata.RemoteClusterReference
-
-	// key = kv host name, value = ssl connection str
-	ssl_con_str_map  map[string]string
-	target_kv_vb_map base.KvVBMapType
-
-	user_agent string
-
-	// these fields are used for xmem replication only
-	// memcached clients for retrieval of target bucket stats
-	kv_mem_clients      map[string]mcc.ClientIface
-	kv_mem_clients_lock sync.RWMutex
 
 	utils    utilities.UtilsIface
 	statsMgr service_def.StatsMgrIface
@@ -164,10 +150,6 @@ type CheckpointManager struct {
 	backfillLastRemoved metadata.CollectionNamespaceMapping
 
 	getBackfillMgr func() service_def.BackfillMgrIface
-
-	initConnOnce sync.Once
-	initConnDone chan bool
-	initConnErr  error
 
 	bucketTopologySvc service_def.BucketTopologySvc
 
@@ -345,8 +327,27 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 	}
 	logger := log.NewLogger("CheckpointMgr", logger_ctx)
 
+	finCh := make(chan bool, 1)
+
 	ckmgr := &CheckpointManager{
-		AbstractComponent:                 component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
+		AbstractComponent: component.NewAbstractComponentWithLogger(CheckpointMgrId, logger),
+		RemoteMemcachedComponent: component.NewRemoteMemcachedComponent(logger, finCh, utilsIn,
+			target_bucket_name).SetTargetKvVbMapGetter(
+			func() (base.KvVBMapType, error) {
+				return target_kv_vb_map, nil
+			}).SetTargetUsernameGetter(
+			func() string {
+				return target_username
+			}).SetTargetPasswordGetter(
+			func() string {
+				return target_password
+			}).SetRefGetter(
+			func() *metadata.RemoteClusterReference {
+				return target_cluster_ref
+			}).SetAlternateAddressChecker(
+			func(ref *metadata.RemoteClusterReference) (bool, error) {
+				return remote_cluster_svc.ShouldUseAlternateAddress(ref)
+			}),
 		pipeline:                          nil,
 		checkpoints_svc:                   checkpoints_svc,
 		capi_svc:                          capi_svc,
@@ -354,19 +355,14 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		remote_cluster_svc:                remote_cluster_svc,
 		xdcr_topology_svc:                 xdcr_topology_svc,
 		through_seqno_tracker_svc:         through_seqno_tracker_svc,
-		finish_ch:                         make(chan bool, 1),
+		finish_ch:                         finCh,
 		checkpoint_ticker_ch:              make(chan *time.Ticker, 1000),
 		logger:                            logger,
 		cur_ckpts:                         make(map[uint16]*checkpointRecordWithLock),
 		active_vbs:                        active_vbs,
-		target_username:                   target_username,
-		target_password:                   target_password,
-		target_bucket_name:                target_bucket_name,
-		target_kv_vb_map:                  target_kv_vb_map,
 		wait_grp:                          &sync.WaitGroup{},
 		failoverlog_map:                   make(map[uint16]*failoverlogWithLock),
 		snapshot_history_map:              make(map[uint16]*snapshotHistoryWithLock),
-		kv_mem_clients:                    make(map[string]mcc.ClientIface),
 		target_cluster_ref:                target_cluster_ref,
 		utils:                             utilsIn,
 		statsMgr:                          statsMgr,
@@ -378,7 +374,6 @@ func NewCheckpointManager(checkpoints_svc service_def.CheckpointsService, capi_s
 		getBackfillMgr:                    getBackfillMgr,
 		checkpointAllowedHelper:           newCheckpointSyncHelper(),
 		bucketTopologySvc:                 bucketTopologySvc,
-		initConnDone:                      make(chan bool),
 		getHighSeqnoAndVBUuidFromTargetCh: make(chan bool, 1),
 		periodicPushRequested:             make(chan bool, 1),
 	}
@@ -534,7 +529,7 @@ func (ckmgr *CheckpointManager) Start(settings metadata.ReplicationSettingsMap) 
 
 func (ckmgr *CheckpointManager) initConnBg() {
 	initInBg := func() error {
-		return ckmgr.initConnections()
+		return ckmgr.InitConnections()
 	}
 	defer ckmgr.wait_grp.Done()
 	execErr := base.ExecWithTimeout(initInBg, base.TimeoutRuntimeContextStart, ckmgr.Logger())
@@ -603,134 +598,13 @@ var ckmgrIterationId uint32
 // compose user agent string for HELO command
 func (ckmgr *CheckpointManager) composeUserAgent() {
 	spec := ckmgr.pipeline.Specification().GetReplicationSpec()
-	ckmgr.user_agent = base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName)
+	ckmgr.SetUserAgent(base.ComposeUserAgentWithBucketNames("Goxdcr CkptMgr", spec.SourceBucketName, spec.TargetBucketName))
 	ckmgr.bucketTopologySubscriberId = fmt.Sprintf("%v_%v_%v_%v", "ckptMgr", ckmgr.pipeline.Type().String(), ckmgr.pipeline.InstanceId(), base.GetIterationId(&ckmgrIterationId))
-}
-
-func (ckmgr *CheckpointManager) initConnections() error {
-	ckmgr.initConnOnce.Do(func() {
-		defer close(ckmgr.initConnDone)
-		if ckmgr.target_cluster_ref.IsFullEncryption() {
-			err := ckmgr.initSSLConStrMap()
-			if err != nil {
-				ckmgr.logger.Errorf("%v %v failed to initialize ssl connection string map, err=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), err)
-				ckmgr.initConnErr = err
-				return
-			}
-		}
-
-		for server_addr, _ := range ckmgr.target_kv_vb_map {
-			client, err := ckmgr.getNewMemcachedClient(server_addr, true /*initializing*/)
-			if err != nil {
-				ckmgr.logger.Errorf("%v %v failed to construct memcached client for %v, err=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), server_addr, err)
-				ckmgr.initConnErr = err
-				return
-			}
-			ckmgr.kv_mem_clients_lock.Lock()
-			ckmgr.kv_mem_clients[server_addr] = client
-			ckmgr.kv_mem_clients_lock.Unlock()
-		}
-		return
-	})
-
-	ckmgr.waitForInitConnDone()
-	return ckmgr.initConnErr
-}
-
-func (ckmgr *CheckpointManager) waitForInitConnDone() {
-	select {
-	case <-ckmgr.finish_ch:
-		return
-	case <-ckmgr.initConnDone:
-		return
-	}
-}
-
-func (ckmgr *CheckpointManager) initSSLConStrMap() error {
-	connStr, err := ckmgr.target_cluster_ref.MyConnectionStr()
-	if err != nil {
-		return err
-	}
-
-	username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, err := ckmgr.target_cluster_ref.MyCredentials()
-	if err != nil {
-		return err
-	}
-
-	useExternal, err := ckmgr.remote_cluster_svc.ShouldUseAlternateAddress(ckmgr.target_cluster_ref)
-	if err != nil {
-		return err
-	}
-
-	ssl_port_map, err := ckmgr.utils.GetMemcachedSSLPortMap(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey,
-		ckmgr.target_bucket_name, ckmgr.logger, useExternal)
-	if err != nil {
-		return err
-	}
-
-	ckmgr.ssl_con_str_map = make(map[string]string)
-	for server_addr, _ := range ckmgr.target_kv_vb_map {
-		ssl_port, ok := ssl_port_map[server_addr]
-		if !ok {
-			return fmt.Errorf("Can't get remote memcached ssl port for %v", server_addr)
-		}
-		host_name := base.GetHostName(server_addr)
-		ssl_con_str := base.GetHostAddr(host_name, uint16(ssl_port))
-		ckmgr.ssl_con_str_map[server_addr] = ssl_con_str
-	}
-
-	return nil
-}
-
-func (ckmgr *CheckpointManager) getNewMemcachedClient(server_addr string, initializing bool) (mcc.ClientIface, error) {
-	if ckmgr.target_cluster_ref.IsFullEncryption() {
-		_, _, _, certificate, san_in_certificate, client_certificate, client_key, err := ckmgr.target_cluster_ref.MyCredentials()
-		if err != nil {
-			return nil, err
-		}
-		ssl_con_str := ckmgr.ssl_con_str_map[server_addr]
-
-		if !initializing {
-			// if not initializing at replication startup time, retrieve up to date security settings
-			latestTargetClusterRef, err := ckmgr.remote_cluster_svc.RemoteClusterByUuid(ckmgr.target_cluster_ref.Uuid(), false)
-			if err != nil {
-				return nil, err
-			}
-			connStr, err := latestTargetClusterRef.MyConnectionStr()
-			if err != nil {
-				return nil, err
-			}
-			// hostAddr not used in full encryption mode
-			_, _, _, err = ckmgr.utils.GetSecuritySettingsAndDefaultPoolInfo("" /*hostAddr*/, connStr,
-				ckmgr.target_username, ckmgr.target_password, certificate, client_certificate, client_key, false /*scramShaEnabled*/, ckmgr.logger)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return base.NewTLSConn(ssl_con_str, ckmgr.target_username, ckmgr.target_password, certificate, san_in_certificate, client_certificate, client_key, ckmgr.target_bucket_name, ckmgr.logger)
-	} else {
-		return ckmgr.utils.GetRemoteMemcachedConnection(server_addr, ckmgr.target_username, ckmgr.target_password,
-			ckmgr.target_bucket_name, ckmgr.user_agent, !ckmgr.target_cluster_ref.IsEncryptionEnabled(), /*plain_auth*/
-			base.KeepAlivePeriod, ckmgr.logger)
-	}
-}
-
-func (ckmgr *CheckpointManager) closeConnections() {
-	ckmgr.waitForInitConnDone()
-	ckmgr.kv_mem_clients_lock.Lock()
-	defer ckmgr.kv_mem_clients_lock.Unlock()
-	for server_addr, client := range ckmgr.kv_mem_clients {
-		err := client.Close()
-		if err != nil {
-			ckmgr.logger.Warnf("%v %v error from closing connection for %v is %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), server_addr, err)
-		}
-	}
-	ckmgr.kv_mem_clients = make(map[string]mcc.ClientIface)
 }
 
 // If periodicMode is false, there should not be any error returned
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool, periodicMode bool) (map[uint16][]uint64, error) {
-	ckmgr.waitForInitConnDone()
+	ckmgr.WaitForInitConnDone()
 
 	// get singular access to run to prevent concurrent calls into this function
 	switch periodicMode {
@@ -756,7 +630,11 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool
 	serverClientStatsMap := make(map[string]base.StringStringMap)
 	var serverClientStatsMapMtx sync.RWMutex
 	var waitGrp sync.WaitGroup
-	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
+	kvVbMap, err := ckmgr.TargetKvVbMap()
+	if err != nil {
+		return nil, err
+	}
+	for serverAddr, vbnos := range kvVbMap {
 		waitGrp.Add(1)
 		go ckmgr.getTargetKVStatsMapWithRetry(serverAddr, vbnos, fin_ch, serverClientStatsMap, &serverClientStatsMapMtx, &waitGrp)
 	}
@@ -766,7 +644,7 @@ func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool
 	highSeqnoAndVbUuidMap := make(base.HighSeqnoAndVbUuidMap)
 	invalidVbNos := make([]uint16, 0)
 	serverWarningsMap := make(map[string]map[uint16]string)
-	for serverAddr, vbnos := range ckmgr.target_kv_vb_map {
+	for serverAddr, vbnos := range kvVbMap {
 		if _, found := serverClientStatsMap[serverAddr]; !found {
 			continue
 		}
@@ -795,19 +673,19 @@ func (ckmgr *CheckpointManager) getTargetKVStatsMapWithRetry(serverAddr string, 
 
 	statMapOp := func(param interface{}) (interface{}, error) {
 		var err error
-		ckmgr.kv_mem_clients_lock.RLock()
-		client, ok := ckmgr.kv_mem_clients[serverAddr]
-		ckmgr.kv_mem_clients_lock.RUnlock()
+		ckmgr.KvMemClientsMtx.RLock()
+		client, ok := ckmgr.KvMemClients[serverAddr]
+		ckmgr.KvMemClientsMtx.RUnlock()
 		if !ok {
 			// memcached connection may have been closed in previous retries. create a new one
-			client, err = ckmgr.getNewMemcachedClient(serverAddr, false /*initializing*/)
+			client, err = ckmgr.GetNewMemcachedClient(serverAddr, false /*initializing*/)
 			if err != nil {
 				ckmgr.logger.Warnf("%v %v Retrieval of high seqno and vbuuid stats failed. serverAddr=%v, vbnos=%v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), serverAddr, vbnos)
 				return nil, err
 			} else {
-				ckmgr.kv_mem_clients_lock.Lock()
-				ckmgr.kv_mem_clients[serverAddr] = client
-				ckmgr.kv_mem_clients_lock.Unlock()
+				ckmgr.KvMemClientsMtx.Lock()
+				ckmgr.KvMemClients[serverAddr] = client
+				ckmgr.KvMemClientsMtx.Unlock()
 			}
 		}
 
@@ -818,14 +696,14 @@ func (ckmgr *CheckpointManager) getTargetKVStatsMapWithRetry(serverAddr string, 
 			if clientCloseErr != nil {
 				ckmgr.logger.Warnf("%v %v error from closing connection for %v is %v\n", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), serverAddr, err)
 			}
-			ckmgr.kv_mem_clients_lock.Lock()
-			delete(ckmgr.kv_mem_clients, serverAddr)
-			ckmgr.kv_mem_clients_lock.Unlock()
+			ckmgr.KvMemClientsMtx.Lock()
+			delete(ckmgr.KvMemClients, serverAddr)
+			ckmgr.KvMemClientsMtx.Unlock()
 		}
 		return nil, err
 	}
 
-	opErr, _ := ckmgr.utils.ExponentialBackoffExecutorWithFinishSignal("StatsMapOnVBToSeqno", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
+	_, opErr := ckmgr.utils.ExponentialBackoffExecutorWithFinishSignal("StatsMapOnVBToSeqno", base.RemoteMcRetryWaitTime, base.MaxRemoteMcRetry,
 		base.RemoteMcRetryFactor, statMapOp, nil, fin_ch)
 
 	if opErr != nil {
@@ -852,7 +730,7 @@ func (ckmgr *CheckpointManager) Stop() error {
 	close(ckmgr.finish_ch)
 
 	//close the connections
-	ckmgr.closeConnections()
+	ckmgr.CloseConnections()
 
 	ckmgr.wait_grp.Wait()
 	return nil
@@ -2703,7 +2581,7 @@ func (ckmgr *CheckpointManager) mergeNodesToVBMasterCheckResp(respMap peerToPeer
 	filteredMaps := filterInvalidCkptsBasedOnSourceFailover([]nodeVbCkptMap{nodeVbMainCkptsMap, nodeVbBackfillCkptsMap}, srcFailoverLogs)
 	vbsThatNeedTargetFailoverlogs := findVbsThatNeedTargetFailoverLogs(filteredMaps)
 	if len(vbsThatNeedTargetFailoverlogs) > 0 {
-		tgtFailoverLogs, err = ckmgr.getOneTimeTgtFailoverLogs(vbsThatNeedTargetFailoverlogs)
+		tgtFailoverLogs, err = ckmgr.GetOneTimeTgtFailoverLogs(vbsThatNeedTargetFailoverlogs)
 		if err != nil {
 			ckmgr.logger.Errorf("unable to get failoverlog from target(s) %v", err)
 			return err
@@ -3090,7 +2968,7 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 	}
 
 	//GetMemcachedConnection(serverAddr, bucketName, userAgent string, keepAlivePeriod time.Duration, logger *log.CommonLogger) (mcc.ClientIface, error)
-	client, err := ckmgr.utils.GetMemcachedConnection(memcachedAddr, spec.SourceBucketName, ckmgr.user_agent, 0, ckmgr.logger)
+	client, err := ckmgr.utils.GetMemcachedConnection(memcachedAddr, spec.SourceBucketName, ckmgr.UserAgent, 0, ckmgr.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -3098,7 +2976,7 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 	if err != nil {
 		return nil, err
 	}
-	err = feed.UprOpen(ckmgr.user_agent, uint32(0), base.UprFeedBufferSize)
+	err = feed.UprOpen(ckmgr.UserAgent, uint32(0), base.UprFeedBufferSize)
 	if err != nil {
 		return nil, err
 	}
@@ -3107,77 +2985,6 @@ func (ckmgr *CheckpointManager) getOneTimeSrcFailoverLog() (map[uint16]*mcc.Fail
 }
 
 // TODO - maybe need retry mechanism
-func (ckmgr *CheckpointManager) getOneTimeTgtFailoverLogs(vbsList []uint16) (map[uint16]*mcc.FailoverLog, error) {
-	err := ckmgr.initConnections()
-	if err != nil {
-		return nil, err
-	}
-
-	filteredKvVbMap := filterKvVbMap(ckmgr.target_kv_vb_map, vbsList)
-
-	failoverLogsMap := make(map[string]map[uint16]*mcc.FailoverLog)
-	var failoverLogsMapMtx sync.Mutex
-
-	errMap := make(base.ErrorMap)
-	var errMapMtx sync.Mutex
-
-	var waitGrp sync.WaitGroup
-	ckmgr.kv_mem_clients_lock.RLock()
-	for kvTransient, mccClientTransient := range ckmgr.kv_mem_clients {
-		mccClient := mccClientTransient
-		kv := kvTransient
-		// Get failoverlogs in parallel
-		waitGrp.Add(1)
-		go func() {
-			defer waitGrp.Done()
-			feed, err := mccClient.NewUprFeed()
-			if err != nil {
-				errMapMtx.Lock()
-				errMap[kv] = err
-				errMapMtx.Unlock()
-				return
-			}
-
-			err = feed.UprOpen(ckmgr.user_agent, 0, base.UprFeedBufferSize)
-			if err != nil {
-				errMapMtx.Lock()
-				errMap[kv] = err
-				errMapMtx.Unlock()
-				return
-			}
-			defer feed.Close()
-
-			failoverLogs, err := mccClient.UprGetFailoverLog(filteredKvVbMap[kv])
-			if err != nil {
-				errMapMtx.Lock()
-				errMap[kv] = err
-				errMapMtx.Unlock()
-				return
-			}
-
-			failoverLogsMapMtx.Lock()
-			failoverLogsMap[kv] = failoverLogs
-			failoverLogsMapMtx.Unlock()
-		}()
-	}
-	ckmgr.kv_mem_clients_lock.RUnlock()
-	waitGrp.Wait()
-
-	if len(errMap) > 0 {
-		ckmgr.logger.Errorf("err getting failoverlogs from target %v", errMap)
-		return nil, fmt.Errorf(base.FlattenErrorMap(errMap))
-	}
-
-	// We shouldn't have conflicting VBs since each target KV should own non-intersecting VBs
-	compiledMap := make(map[uint16]*mcc.FailoverLog)
-	for _, failoverLogsPerVb := range failoverLogsMap {
-		for vb, failoverLogs := range failoverLogsPerVb {
-			compiledMap[vb] = failoverLogs
-		}
-	}
-
-	return compiledMap, nil
-}
 
 // This merge function is called in two different paths: 1. Pull model vs 2. Push model (only on main pipeline's)
 // When pulling, both main and backfill pipelines are stopped, and the main pipeline's checkpoint manager is responsible
@@ -3573,15 +3380,4 @@ func (ckmgr *CheckpointManager) periodicMergerImpl() {
 			ckmgr.checkpoints_svc.EnableRefCntDecrement(backfillTopic)
 		}
 	}
-}
-
-func filterKvVbMap(kvVbMap base.KvVBMapType, vbsList []uint16) base.KvVBMapType {
-	retMap := make(base.KvVBMapType)
-
-	lookupIndex := kvVbMap.CompileLookupIndex()
-	for _, vb := range vbsList {
-		node := lookupIndex[vb]
-		retMap[node] = append(retMap[node], vb)
-	}
-	return retMap
 }

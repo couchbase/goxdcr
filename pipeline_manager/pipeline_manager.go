@@ -436,6 +436,11 @@ func (pipelineMgr *PipelineManager) StartPipeline(topic string) base.ErrorMap {
 		return errMap
 	}
 
+	// When persistent events are raised, usually they are fatal and pipelines would have paused and the
+	// persistent messages remain while pipelins are paused
+	// Thus, when pipelines are restarted, clear them. If they come back, they'll come back again by themselves
+	rep_status.GetEventsManager().ClearPersistentEvents()
+
 	if rep_status.RuntimeStatus(true) == pipeline.Replicating {
 		//the pipeline is already running
 		pipelineMgr.logger.Infof("The pipeline asked to be started, %v, is already running", topic)
@@ -641,7 +646,7 @@ func (pipelineMgr *PipelineManager) StopPipeline(rep_status pipeline.Replication
 
 	// Remove all dismissed events
 	rep_status.GetEventsManager().ResetDismissedHistory()
-	rep_status.GetEventsManager().ClearNonBrokenMapEvents()
+	rep_status.GetEventsManager().ClearNonBrokenMapOrPersistentEvents()
 
 	// if replication spec has been deleted
 	// or deleted and recreated, which is signaled by change in spec internal id
@@ -1410,7 +1415,7 @@ func (pipelineMgr *PipelineManager) PostTopologyStatus() {
 					pipelineMgr.logger.Errorf("Unable to update source topology rebalance progress: %v - %v", srcProgress, err)
 				}
 			} else {
-				eventMgr.AddEvent(base.PersistentMsg, srcProgress, base.NewEventsMap(), sourceHint)
+				eventMgr.AddEvent(base.HighPriorityMsg, srcProgress, base.NewEventsMap(), sourceHint)
 			}
 		}
 		if needToUpdateTgt {
@@ -1421,7 +1426,7 @@ func (pipelineMgr *PipelineManager) PostTopologyStatus() {
 					pipelineMgr.logger.Errorf("Unable to update target topology rebalance progress: %v - %v", tgtProgress, err)
 				}
 			} else {
-				eventMgr.AddEvent(base.PersistentMsg, tgtProgress, base.NewEventsMap(), targetHint)
+				eventMgr.AddEvent(base.HighPriorityMsg, tgtProgress, base.NewEventsMap(), targetHint)
 			}
 		}
 	}
@@ -2147,7 +2152,7 @@ func (r *PipelineUpdater) raiseNonCollectionTargetIfNeeded() {
 	errMsg := fmt.Sprintf("Only default collection from source bucket '%v' to target bucket '%v' on cluster '%v' is being replicated because '%v' does not have collections capability\n", spec.SourceBucketName, spec.TargetBucketName, targetClusterRef.Name(), targetClusterRef.Name())
 	r.logger.Warnf(errMsg)
 	r.pipelineMgr.GetLogSvc().Write(errMsg)
-	r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap(), nil)
+	r.rep_status.GetEventsManager().AddEvent(base.HighPriorityMsg, errMsg, base.NewEventsMap(), nil)
 }
 
 func (r *PipelineUpdater) raiseCompressionWarningIfNeeded() {
@@ -2402,10 +2407,16 @@ func (r *PipelineUpdater) setLastUpdateFailure(errs base.ErrorMap) {
 					r.pipeline_name, humanRecoveryThreshold, base.FlattenErrorMap(errs))
 				r.logger.Warnf(errMsg)
 				r.pipelineMgr.GetLogSvc().Write(errMsg)
+				r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap(), nil)
 				r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
 			})
 		}
 		r.humanRecoveryThresholdMtx.Unlock()
+	} else if r.casPoisonErrors(errs) {
+		errMsg := base.FlattenErrorMap(errs)
+		r.pipelineMgr.GetLogSvc().Write(errMsg)
+		r.rep_status.GetEventsManager().AddEvent(base.PersistentMsg, errMsg, base.NewEventsMap(), nil)
+		r.pipelineMgr.AutoPauseReplication(r.pipeline_name)
 	}
 }
 
@@ -2516,6 +2527,11 @@ func (r *PipelineUpdater) humanRecoverableTransitionalErrors(errMap base.ErrorMa
 		return true
 	}
 	return false
+}
+
+func (r *PipelineUpdater) casPoisonErrors(errMap base.ErrorMap) bool {
+	casPoisonErr := fmt.Errorf(base.PreCheckCASDriftDetected)
+	return base.CheckErrorMapForError(errMap, casPoisonErr, false)
 }
 
 func (r *PipelineUpdater) shouldRetryOnRemoteAuthErrAndRemoteClusterName() (bool, string) {

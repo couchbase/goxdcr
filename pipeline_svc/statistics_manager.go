@@ -1956,10 +1956,12 @@ func (r_collector *routerCollector) ProcessEvent(event *common.Event) error {
 			metric_map[service_def.DELETION_CLONED_METRIC].(metrics.Counter).Inc(int64(totalCount - 1))
 		}
 	case common.DataNotReplicated:
-		casPoisonErrChk := event.DerivedData[0].(error)
-		if casPoisonErrChk == base.ErrorCasPoisoningDetected {
-			metric_map[service_def.DOCS_FILTERED_CAS_POISONING_METRIC].(metrics.Counter).Inc(1)
-			err = r_collector.handleVBEvent(event, service_def.DOCS_FILTERED_CAS_POISONING_METRIC)
+		if len(event.DerivedData) > 0 {
+			casPoisonErrChk := event.DerivedData[0].(error)
+			if casPoisonErrChk == base.ErrorCasPoisoningDetected {
+				metric_map[service_def.DOCS_FILTERED_CAS_POISONING_METRIC].(metrics.Counter).Inc(1)
+				err = r_collector.handleVBEvent(event, service_def.DOCS_FILTERED_CAS_POISONING_METRIC)
+			}
 		}
 	}
 

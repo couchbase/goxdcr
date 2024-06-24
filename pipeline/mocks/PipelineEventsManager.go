@@ -52,14 +52,19 @@ func (_m *PipelineEventsManager) BackfillUpdateCb(diffPair *metadata.CollectionN
 	return r0
 }
 
-// ClearNonBrokenMapEvents provides a mock function with given fields:
-func (_m *PipelineEventsManager) ClearNonBrokenMapEvents() {
-	_m.Called()
-}
-
 // ClearNonBrokenMapEventsWithString provides a mock function with given fields: substr
 func (_m *PipelineEventsManager) ClearNonBrokenMapEventsWithString(substr string) {
 	_m.Called(substr)
+}
+
+// ClearNonBrokenMapOrPersistentEvents provides a mock function with given fields:
+func (_m *PipelineEventsManager) ClearNonBrokenMapOrPersistentEvents() {
+	_m.Called()
+}
+
+// ClearPersistentEvents provides a mock function with given fields:
+func (_m *PipelineEventsManager) ClearPersistentEvents() {
+	_m.Called()
 }
 
 // ContainsEvent provides a mock function with given fields: eventId

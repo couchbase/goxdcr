@@ -175,6 +175,8 @@ func setupMocksBTS(remClusterSvc *mocks.RemoteClusterSvc, xdcrTopologySvc *mocks
 	}
 	remClusterSvc.On("GetBucketInfoGetter", mock.Anything, mock.Anything).Return(service_def.BucketInfoGetter(bucketInfoGetter), nil)
 	remClusterSvc.On("GetCapability", mock.Anything).Return(cap, nil)
+	remClusterSvc.On("SetBucketTopologySvc", mock.Anything).Return(nil)
+	remClusterSvc.On("GetMaxVBStatsGetter", mock.Anything, mock.Anything).Return(nil, nil)
 
 	mcClient.On("StatsMap", mock.Anything).Return(nil, nil)
 
