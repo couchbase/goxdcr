@@ -211,396 +211,396 @@ func TestDataPool(t *testing.T) {
 // If ns_server cluster run is running, generate a Xattr doc
 // And then also retrieve it back via gocb
 // At DCP nozzle, serialize the uprEvent as a json and write it to a file
-func Disabled_TestGenerateXattrUsingGoCB(t *testing.T) {
-	cluster, err := gocb.Connect("http://localhost:9000")
-	if err != nil {
-		return
-	}
-	fmt.Println("============== Test case start: TestGenerateXattrUsingGoCB =================")
+//func Disabled_TestGenerateXattrUsingGoCB(t *testing.T) {
+//	cluster, err := gocb.Connect("http://localhost:9000")
+//	if err != nil {
+//		return
+//	}
+//	fmt.Println("============== Test case start: TestGenerateXattrUsingGoCB =================")
+//
+//	cluster.Authenticate(gocb.PasswordAuthenticator{
+//		Username: "Administrator",
+//		Password: "wewewe",
+//	})
+//
+//	bucket, err := cluster.OpenBucket("B1", "")
+//	if err != nil {
+//		return
+//	}
+//
+//	bucket.Remove(docKey, 0)
+//
+//	_, err = bucket.Insert(docKey, docMap, 0)
+//	if err != nil {
+//		fmt.Printf("err %v\n", err)
+//		return
+//	}
+//
+//	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("TestXattr", 30, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert: %v\n", err)
+//		return
+//	}
+//	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("AnotherXattr", "TestValueString", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert2: %v\n", err)
+//		return
+//	}
+//
+//	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("NilXattr", nil, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert3: %v\n", err)
+//		return
+//	}
+//
+//	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
+//	dummyStagedData := make(map[string]interface{})
+//	dummyStagedData["name"] = "neil"
+//	txDummyVal := make(map[string]interface{})
+//	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
+//	txDummyVal["atr_id"] = "atr-690-#18"
+//	txDummyVal["staged"] = dummyStagedData
+//	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert4: %v\n", err)
+//		return
+//	}
+//
+//	mapTypeXattr := make(map[string]interface{})
+//	mapTypeXattrArr := []string{"a", "b", "c"}
+//	mapTypeXattr["stringType"] = "string"
+//	mapTypeXattr["floatType"] = 1.0
+//	mapTypeXattr["array"] = mapTypeXattrArr
+//
+//	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("MapXattr", mapTypeXattr, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert3: %v\n", err)
+//		return
+//	}
+//
+//	var docRetrieveVal interface{}
+//	_, err = bucket.Get(docKey, &docRetrieveVal)
+//
+//	retrievedMap, ok := docRetrieveVal.(map[string]interface{})
+//	if !ok {
+//		fmt.Printf("Error with retrieving\n")
+//	}
+//
+//	if val, ok := retrievedMap["Key"]; ok && val == docMap["Key"] {
+//		fmt.Printf("Set and get working\n")
+//	}
+//
+//	bodySlice, err := json.Marshal(retrievedMap)
+//	if err != nil {
+//		fmt.Printf("err marshal %v\n", err)
+//	}
+//
+//	fileName := "/tmp/docValueSlice.bin"
+//	//	dumpBytes := new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(bodySlice)
+//	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	writeErr := ioutil.WriteFile(fileName, bodySlice, 0644)
+//	if writeErr == nil {
+//		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
+//	} else {
+//		fmt.Printf("Unable to write file due to %v\n", writeErr)
+//	}
+//
+//	frag, err := bucket.LookupIn(docKey).GetEx(base.XattributeToc, gocb.SubdocFlagXattr).Execute()
+//	if err != nil {
+//		fmt.Printf("err1: %v\n", err)
+//	}
+//
+//	var docMap interface{}
+//	err = frag.Content(base.XattributeToc, &docMap)
+//	if err != nil {
+//		fmt.Printf("err frag.Content: %v\n", err)
+//	}
+//
+//	xattrMap := make(map[string]interface{})
+//	tocList := docMap.([]interface{})
+//	for _, aToc := range tocList {
+//		if entry, ok := aToc.(string); ok {
+//			frag, err := bucket.LookupIn(docKey).GetEx(entry, gocb.SubdocFlagXattr).Execute()
+//			if err != nil {
+//				fmt.Printf("err lookupIn: %v\n", err)
+//			}
+//
+//			// TODO - check CAS
+//
+//			var value interface{}
+//			frag.Content(entry, &value)
+//			xattrMap[entry] = value
+//		}
+//	}
+//
+//	xattrSlice, err := json.Marshal(xattrMap)
+//	if err != nil {
+//		fmt.Printf("err marshal2 %v\n", err)
+//	}
+//
+//	fileName = "/tmp/xattrSlice.bin"
+//	//	dumpBytes = new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(xattrSlice)
+//	//	writeErr = ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	writeErr = ioutil.WriteFile(fileName, xattrSlice, 0644)
+//	if writeErr == nil {
+//		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
+//	} else {
+//		fmt.Printf("Unable to write file due to %v\n", writeErr)
+//	}
+//
+//	//	frag, err = bucket.LookupIn(docKey).GetEx(base.XattributeDoc, gocb.SubdocFlagXattr).Execute()
+//	//	if err != nil {
+//	//		fmt.Printf("err getting $XTOC: %v\n", err)
+//	//	}
+//
+//	//	_, err = base.AddXattrToBeFilteredWithoutDP(bodySlice, xattrSlice)
+//	//	if err != nil {
+//	//		fmt.Printf("err adding Xattr %v\n", err)
+//	//	}
+//	//
+//	//	_, err, _ = base.AddKeyToBeFiltered(bodySlice, []byte(docKey), nil, nil)
+//	//	if err != nil {
+//	//		fmt.Printf("err adding key %v\n", err)
+//	//	}
+//
+//	//Put the following in DCP nozzle to dump uprEvent to a file
+//	// Import: bytes, encoding/json, io/ioutil
+//
+//	//	fileName := "/tmp/uprEventDump.bin"
+//	//	dumpBytes := new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(*m)
+//	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	//	if writeErr == nil {
+//	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+//	//	} else {
+//	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+//	//	}
+//
+//	fmt.Println("============== Test case end: TestGenerateXattrUsingGoCB =================")
+//}
 
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: "Administrator",
-		Password: "wewewe",
-	})
-
-	bucket, err := cluster.OpenBucket("B1", "")
-	if err != nil {
-		return
-	}
-
-	bucket.Remove(docKey, 0)
-
-	_, err = bucket.Insert(docKey, docMap, 0)
-	if err != nil {
-		fmt.Printf("err %v\n", err)
-		return
-	}
-
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("TestXattr", 30, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert: %v\n", err)
-		return
-	}
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("AnotherXattr", "TestValueString", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert2: %v\n", err)
-		return
-	}
-
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("NilXattr", nil, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert3: %v\n", err)
-		return
-	}
-
-	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
-	dummyStagedData := make(map[string]interface{})
-	dummyStagedData["name"] = "neil"
-	txDummyVal := make(map[string]interface{})
-	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
-	txDummyVal["atr_id"] = "atr-690-#18"
-	txDummyVal["staged"] = dummyStagedData
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert4: %v\n", err)
-		return
-	}
-
-	mapTypeXattr := make(map[string]interface{})
-	mapTypeXattrArr := []string{"a", "b", "c"}
-	mapTypeXattr["stringType"] = "string"
-	mapTypeXattr["floatType"] = 1.0
-	mapTypeXattr["array"] = mapTypeXattrArr
-
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx("MapXattr", mapTypeXattr, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert3: %v\n", err)
-		return
-	}
-
-	var docRetrieveVal interface{}
-	_, err = bucket.Get(docKey, &docRetrieveVal)
-
-	retrievedMap, ok := docRetrieveVal.(map[string]interface{})
-	if !ok {
-		fmt.Printf("Error with retrieving\n")
-	}
-
-	if val, ok := retrievedMap["Key"]; ok && val == docMap["Key"] {
-		fmt.Printf("Set and get working\n")
-	}
-
-	bodySlice, err := json.Marshal(retrievedMap)
-	if err != nil {
-		fmt.Printf("err marshal %v\n", err)
-	}
-
-	fileName := "/tmp/docValueSlice.bin"
-	//	dumpBytes := new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(bodySlice)
-	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	writeErr := ioutil.WriteFile(fileName, bodySlice, 0644)
-	if writeErr == nil {
-		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
-	} else {
-		fmt.Printf("Unable to write file due to %v\n", writeErr)
-	}
-
-	frag, err := bucket.LookupIn(docKey).GetEx(base.XattributeToc, gocb.SubdocFlagXattr).Execute()
-	if err != nil {
-		fmt.Printf("err1: %v\n", err)
-	}
-
-	var docMap interface{}
-	err = frag.Content(base.XattributeToc, &docMap)
-	if err != nil {
-		fmt.Printf("err frag.Content: %v\n", err)
-	}
-
-	xattrMap := make(map[string]interface{})
-	tocList := docMap.([]interface{})
-	for _, aToc := range tocList {
-		if entry, ok := aToc.(string); ok {
-			frag, err := bucket.LookupIn(docKey).GetEx(entry, gocb.SubdocFlagXattr).Execute()
-			if err != nil {
-				fmt.Printf("err lookupIn: %v\n", err)
-			}
-
-			// TODO - check CAS
-
-			var value interface{}
-			frag.Content(entry, &value)
-			xattrMap[entry] = value
-		}
-	}
-
-	xattrSlice, err := json.Marshal(xattrMap)
-	if err != nil {
-		fmt.Printf("err marshal2 %v\n", err)
-	}
-
-	fileName = "/tmp/xattrSlice.bin"
-	//	dumpBytes = new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(xattrSlice)
-	//	writeErr = ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	writeErr = ioutil.WriteFile(fileName, xattrSlice, 0644)
-	if writeErr == nil {
-		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
-	} else {
-		fmt.Printf("Unable to write file due to %v\n", writeErr)
-	}
-
-	//	frag, err = bucket.LookupIn(docKey).GetEx(base.XattributeDoc, gocb.SubdocFlagXattr).Execute()
-	//	if err != nil {
-	//		fmt.Printf("err getting $XTOC: %v\n", err)
-	//	}
-
-	//	_, err = base.AddXattrToBeFilteredWithoutDP(bodySlice, xattrSlice)
-	//	if err != nil {
-	//		fmt.Printf("err adding Xattr %v\n", err)
-	//	}
-	//
-	//	_, err, _ = base.AddKeyToBeFiltered(bodySlice, []byte(docKey), nil, nil)
-	//	if err != nil {
-	//		fmt.Printf("err adding key %v\n", err)
-	//	}
-
-	//Put the following in DCP nozzle to dump uprEvent to a file
-	// Import: bytes, encoding/json, io/ioutil
-
-	//	fileName := "/tmp/uprEventDump.bin"
-	//	dumpBytes := new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(*m)
-	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	//	if writeErr == nil {
-	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
-	//	} else {
-	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
-	//	}
-
-	fmt.Println("============== Test case end: TestGenerateXattrUsingGoCB =================")
-}
-
-func Disabled_TestGenerateXattrPureArrayUsingGoCB(t *testing.T) {
-	cluster, err := gocb.Connect("http://localhost:9000")
-	if err != nil {
-		return
-	}
-	fmt.Println("============== Test case start: TestGenerateXattrPureArrayUsingGoCB =================")
-
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: "Administrator",
-		Password: "wewewe",
-	})
-
-	bucket, err := cluster.OpenBucket("B1", "")
-	if err != nil {
-		return
-	}
-
-	bucket.Remove(docArrayKey, 0)
-
-	_, err = bucket.Insert(docArrayKey, docArray, 0)
-	if err != nil {
-		fmt.Printf("err %v\n", err)
-		return
-	}
-
-	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("TestXattr", 30, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert: %v\n", err)
-		return
-	}
-	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("AnotherXattr", "TestValueString", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert2: %v\n", err)
-		return
-	}
-
-	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("NilXattr", nil, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert3: %v\n", err)
-		return
-	}
-
-	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
-	dummyStagedData := make(map[string]interface{})
-	dummyStagedData["name"] = "neil"
-	txDummyVal := make(map[string]interface{})
-	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
-	txDummyVal["atr_id"] = "atr-690-#18"
-	txDummyVal["staged"] = dummyStagedData
-	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert4: %v\n", err)
-		return
-	}
-
-	mapTypeXattr := make(map[string]interface{})
-	mapTypeXattrArr := []string{"a", "b", "c"}
-	mapTypeXattr["stringType"] = "string"
-	mapTypeXattr["floatType"] = 1.0
-	mapTypeXattr["array"] = mapTypeXattrArr
-
-	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("MapXattr", mapTypeXattr, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert3: %v\n", err)
-		return
-	}
-
-	var docRetrieveVal interface{}
-	_, err = bucket.Get(docArrayKey, &docRetrieveVal)
-
-	retrievedSlice, ok := docRetrieveVal.([]interface{})
-	if !ok {
-		fmt.Printf("Error with retrieving\n")
-	}
-
-	bodySlice, err := json.Marshal(retrievedSlice)
-	if err != nil {
-		fmt.Printf("err marshal %v\n", err)
-	}
-
-	fileName := "/tmp/docValueArraySlice.bin"
-	//	dumpBytes := new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(bodySlice)
-	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	writeErr := ioutil.WriteFile(fileName, bodySlice, 0644)
-	if writeErr == nil {
-		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
-	} else {
-		fmt.Printf("Unable to write file due to %v\n", writeErr)
-	}
-	fmt.Println("============== Test case end: TestGenerateXattrPureArrayUsingGoCB =================")
-}
+//func Disabled_TestGenerateXattrPureArrayUsingGoCB(t *testing.T) {
+//	cluster, err := gocb.Connect("http://localhost:9000")
+//	if err != nil {
+//		return
+//	}
+//	fmt.Println("============== Test case start: TestGenerateXattrPureArrayUsingGoCB =================")
+//
+//	cluster.Authenticate(gocb.PasswordAuthenticator{
+//		Username: "Administrator",
+//		Password: "wewewe",
+//	})
+//
+//	bucket, err := cluster.OpenBucket("B1", "")
+//	if err != nil {
+//		return
+//	}
+//
+//	bucket.Remove(docArrayKey, 0)
+//
+//	_, err = bucket.Insert(docArrayKey, docArray, 0)
+//	if err != nil {
+//		fmt.Printf("err %v\n", err)
+//		return
+//	}
+//
+//	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("TestXattr", 30, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert: %v\n", err)
+//		return
+//	}
+//	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("AnotherXattr", "TestValueString", gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert2: %v\n", err)
+//		return
+//	}
+//
+//	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("NilXattr", nil, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert3: %v\n", err)
+//		return
+//	}
+//
+//	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
+//	dummyStagedData := make(map[string]interface{})
+//	dummyStagedData["name"] = "neil"
+//	txDummyVal := make(map[string]interface{})
+//	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
+//	txDummyVal["atr_id"] = "atr-690-#18"
+//	txDummyVal["staged"] = dummyStagedData
+//	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert4: %v\n", err)
+//		return
+//	}
+//
+//	mapTypeXattr := make(map[string]interface{})
+//	mapTypeXattrArr := []string{"a", "b", "c"}
+//	mapTypeXattr["stringType"] = "string"
+//	mapTypeXattr["floatType"] = 1.0
+//	mapTypeXattr["array"] = mapTypeXattrArr
+//
+//	_, err = bucket.MutateIn(docArrayKey, 0, 0).InsertEx("MapXattr", mapTypeXattr, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert3: %v\n", err)
+//		return
+//	}
+//
+//	var docRetrieveVal interface{}
+//	_, err = bucket.Get(docArrayKey, &docRetrieveVal)
+//
+//	retrievedSlice, ok := docRetrieveVal.([]interface{})
+//	if !ok {
+//		fmt.Printf("Error with retrieving\n")
+//	}
+//
+//	bodySlice, err := json.Marshal(retrievedSlice)
+//	if err != nil {
+//		fmt.Printf("err marshal %v\n", err)
+//	}
+//
+//	fileName := "/tmp/docValueArraySlice.bin"
+//	//	dumpBytes := new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(bodySlice)
+//	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	writeErr := ioutil.WriteFile(fileName, bodySlice, 0644)
+//	if writeErr == nil {
+//		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
+//	} else {
+//		fmt.Printf("Unable to write file due to %v\n", writeErr)
+//	}
+//	fmt.Println("============== Test case end: TestGenerateXattrPureArrayUsingGoCB =================")
+//}
 
 // If ns_server cluster run is running, generate a Xattr doc
 // And then also retrieve it back via gocb
 // At DCP nozzle, serialize the uprEvent as a json and write it to a file
-func Disabled_TestGenerateOnlyTxnXattrUsingGoCB(t *testing.T) {
-	cluster, err := gocb.Connect("http://localhost:9000")
-	if err != nil {
-		return
-	}
-	fmt.Println("============== Test case start: TestGenerateOnlyTxnXattrUsingGoCB =================")
-	defer fmt.Println("============== Test case end: TestGenerateOnlyTxnXattrUsingGoCB =================")
-
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: "Administrator",
-		Password: "wewewe",
-	})
-
-	bucket, err := cluster.OpenBucket("B1", "")
-	if err != nil {
-		return
-	}
-
-	bucket.Remove(docKey, 0)
-
-	_, err = bucket.Insert(docKey, docMap, 0)
-	if err != nil {
-		fmt.Printf("err %v\n", err)
-		return
-	}
-
-	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
-	dummyStagedData := make(map[string]interface{})
-	dummyStagedData["name"] = "neil"
-	txDummyVal := make(map[string]interface{})
-	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
-	txDummyVal["atr_id"] = "atr-690-#18"
-	txDummyVal["staged"] = dummyStagedData
-	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
-	if err != nil {
-		fmt.Printf("Error with Insert4: %v\n", err)
-		return
-	}
-
-	var docRetrieveVal interface{}
-	_, err = bucket.Get(docKey, &docRetrieveVal)
-
-	retrievedMap, ok := docRetrieveVal.(map[string]interface{})
-	if !ok {
-		fmt.Printf("Error with retrieving\n")
-	}
-
-	if val, ok := retrievedMap["Key"]; ok && val == docMap["Key"] {
-		fmt.Printf("Set and get working\n")
-	}
-
-	bodySlice, err := json.Marshal(retrievedMap)
-	if err != nil {
-		fmt.Printf("err marshal %v\n", err)
-	}
-
-	fileName := "/tmp/docValueSlice.bin"
-	//	dumpBytes := new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(bodySlice)
-	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	writeErr := ioutil.WriteFile(fileName, bodySlice, 0644)
-	if writeErr == nil {
-		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
-	} else {
-		fmt.Printf("Unable to write file due to %v\n", writeErr)
-	}
-
-	frag, err := bucket.LookupIn(docKey).GetEx(base.XattributeToc, gocb.SubdocFlagXattr).Execute()
-	if err != nil {
-		fmt.Printf("err1: %v\n", err)
-	}
-
-	var docMap interface{}
-	err = frag.Content(base.XattributeToc, &docMap)
-	if err != nil {
-		fmt.Printf("err frag.Content: %v\n", err)
-	}
-
-	xattrMap := make(map[string]interface{})
-	tocList := docMap.([]interface{})
-	for _, aToc := range tocList {
-		if entry, ok := aToc.(string); ok {
-			frag, err := bucket.LookupIn(docKey).GetEx(entry, gocb.SubdocFlagXattr).Execute()
-			if err != nil {
-				fmt.Printf("err lookupIn: %v\n", err)
-			}
-
-			// TODO - check CAS
-
-			var value interface{}
-			frag.Content(entry, &value)
-			xattrMap[entry] = value
-		}
-	}
-
-	xattrSlice, err := json.Marshal(xattrMap)
-	if err != nil {
-		fmt.Printf("err marshal2 %v\n", err)
-	}
-
-	fileName = "/tmp/xattrSlice.bin"
-	//	dumpBytes = new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(xattrSlice)
-	//	writeErr = ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	writeErr = ioutil.WriteFile(fileName, xattrSlice, 0644)
-	if writeErr == nil {
-		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
-	} else {
-		fmt.Printf("Unable to write file due to %v\n", writeErr)
-	}
-
-	//Put the following in DCP nozzle to dump uprEvent to a file
-	// Import: bytes, encoding/json, io/ioutil
-
-	//	fileName := "/tmp/uprEventDump.bin"
-	//	dumpBytes := new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(*m)
-	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	//	if writeErr == nil {
-	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
-	//	} else {
-	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
-	//	}
-}
+//func Disabled_TestGenerateOnlyTxnXattrUsingGoCB(t *testing.T) {
+//	cluster, err := gocb.Connect("http://localhost:9000")
+//	if err != nil {
+//		return
+//	}
+//	fmt.Println("============== Test case start: TestGenerateOnlyTxnXattrUsingGoCB =================")
+//	defer fmt.Println("============== Test case end: TestGenerateOnlyTxnXattrUsingGoCB =================")
+//
+//	cluster.Authenticate(gocb.PasswordAuthenticator{
+//		Username: "Administrator",
+//		Password: "wewewe",
+//	})
+//
+//	bucket, err := cluster.OpenBucket("B1", "")
+//	if err != nil {
+//		return
+//	}
+//
+//	bucket.Remove(docKey, 0)
+//
+//	_, err = bucket.Insert(docKey, docMap, 0)
+//	if err != nil {
+//		fmt.Printf("err %v\n", err)
+//		return
+//	}
+//
+//	// The following is extracted from datafile from TestTransXattrOnlyFilteringWithoutCompression
+//	dummyStagedData := make(map[string]interface{})
+//	dummyStagedData["name"] = "neil"
+//	txDummyVal := make(map[string]interface{})
+//	txDummyVal["ver"] = "d0cb40cf-41e0-4f9d-94ef-0ef29fa76d37"
+//	txDummyVal["atr_id"] = "atr-690-#18"
+//	txDummyVal["staged"] = dummyStagedData
+//	_, err = bucket.MutateIn(docKey, 0, 0).InsertEx(base.TransactionXattrKey, txDummyVal, gocb.SubdocFlagXattr|gocb.SubdocFlagCreatePath).Execute()
+//	if err != nil {
+//		fmt.Printf("Error with Insert4: %v\n", err)
+//		return
+//	}
+//
+//	var docRetrieveVal interface{}
+//	_, err = bucket.Get(docKey, &docRetrieveVal)
+//
+//	retrievedMap, ok := docRetrieveVal.(map[string]interface{})
+//	if !ok {
+//		fmt.Printf("Error with retrieving\n")
+//	}
+//
+//	if val, ok := retrievedMap["Key"]; ok && val == docMap["Key"] {
+//		fmt.Printf("Set and get working\n")
+//	}
+//
+//	bodySlice, err := json.Marshal(retrievedMap)
+//	if err != nil {
+//		fmt.Printf("err marshal %v\n", err)
+//	}
+//
+//	fileName := "/tmp/docValueSlice.bin"
+//	//	dumpBytes := new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(bodySlice)
+//	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	writeErr := ioutil.WriteFile(fileName, bodySlice, 0644)
+//	if writeErr == nil {
+//		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
+//	} else {
+//		fmt.Printf("Unable to write file due to %v\n", writeErr)
+//	}
+//
+//	frag, err := bucket.LookupIn(docKey).GetEx(base.XattributeToc, gocb.SubdocFlagXattr).Execute()
+//	if err != nil {
+//		fmt.Printf("err1: %v\n", err)
+//	}
+//
+//	var docMap interface{}
+//	err = frag.Content(base.XattributeToc, &docMap)
+//	if err != nil {
+//		fmt.Printf("err frag.Content: %v\n", err)
+//	}
+//
+//	xattrMap := make(map[string]interface{})
+//	tocList := docMap.([]interface{})
+//	for _, aToc := range tocList {
+//		if entry, ok := aToc.(string); ok {
+//			frag, err := bucket.LookupIn(docKey).GetEx(entry, gocb.SubdocFlagXattr).Execute()
+//			if err != nil {
+//				fmt.Printf("err lookupIn: %v\n", err)
+//			}
+//
+//			// TODO - check CAS
+//
+//			var value interface{}
+//			frag.Content(entry, &value)
+//			xattrMap[entry] = value
+//		}
+//	}
+//
+//	xattrSlice, err := json.Marshal(xattrMap)
+//	if err != nil {
+//		fmt.Printf("err marshal2 %v\n", err)
+//	}
+//
+//	fileName = "/tmp/xattrSlice.bin"
+//	//	dumpBytes = new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(xattrSlice)
+//	//	writeErr = ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	writeErr = ioutil.WriteFile(fileName, xattrSlice, 0644)
+//	if writeErr == nil {
+//		fmt.Printf("Wrote dump file successfully to %v\n", fileName)
+//	} else {
+//		fmt.Printf("Unable to write file due to %v\n", writeErr)
+//	}
+//
+//	//Put the following in DCP nozzle to dump uprEvent to a file
+//	// Import: bytes, encoding/json, io/ioutil
+//
+//	//	fileName := "/tmp/uprEventDump.bin"
+//	//	dumpBytes := new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(*m)
+//	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	//	if writeErr == nil {
+//	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+//	//	} else {
+//	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+//	//	}
+//}
 
 func TestMatchDocKeyValueAndXattr(t *testing.T) {
 	fmt.Println("============== Test case start: TestMatchDocKeyValueAndXattr =================")
@@ -662,41 +662,41 @@ func TestMatchPcreNegLookahead(t *testing.T) {
 	fmt.Println("============== Test case end: TestMatchPcreNegLookahead =================")
 }
 
-func Disabled_TestGenerateBinaryDoc(t *testing.T) {
-	cluster, err := gocb.Connect("http://localhost:9000")
-	if err != nil {
-		return
-	}
-	fmt.Println("============== Test case start: TestGenerateBinaryDoc =================")
-	defer fmt.Println("============== Test case end: TestGenerateBinaryDoc =================")
-
-	cluster.Authenticate(gocb.PasswordAuthenticator{
-		Username: "Administrator",
-		Password: "wewewe",
-	})
-
-	bucket, err := cluster.OpenBucket("B1", "")
-	if err != nil {
-		return
-	}
-
-	bucket.Remove(docKey, 0)
-
-	slice := []byte("abcde")
-
-	_, err = bucket.Insert(docKey, slice, 0)
-	if err != nil {
-		fmt.Printf("err %v\n", err)
-		return
-	}
-
-	//	fileName := "/tmp/uprEventDump.bin"
-	//	dumpBytes := new(bytes.Buffer)
-	//	json.NewEncoder(dumpBytes).Encode(*m)
-	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
-	//	if writeErr == nil {
-	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
-	//	} else {
-	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
-	//	}
-}
+//func Disabled_TestGenerateBinaryDoc(t *testing.T) {
+//	cluster, err := gocb.Connect("http://localhost:9000")
+//	if err != nil {
+//		return
+//	}
+//	fmt.Println("============== Test case start: TestGenerateBinaryDoc =================")
+//	defer fmt.Println("============== Test case end: TestGenerateBinaryDoc =================")
+//
+//	cluster.Authenticate(gocb.PasswordAuthenticator{
+//		Username: "Administrator",
+//		Password: "wewewe",
+//	})
+//
+//	bucket, err := cluster.OpenBucket("B1", "")
+//	if err != nil {
+//		return
+//	}
+//
+//	bucket.Remove(docKey, 0)
+//
+//	slice := []byte("abcde")
+//
+//	_, err = bucket.Insert(docKey, slice, 0)
+//	if err != nil {
+//		fmt.Printf("err %v\n", err)
+//		return
+//	}
+//
+//	//	fileName := "/tmp/uprEventDump.bin"
+//	//	dumpBytes := new(bytes.Buffer)
+//	//	json.NewEncoder(dumpBytes).Encode(*m)
+//	//	writeErr := ioutil.WriteFile(fileName, dumpBytes.Bytes(), 0644)
+//	//	if writeErr == nil {
+//	//		dcp.Logger().Infof("Wrote dump file successfully to %v\n", fileName)
+//	//	} else {
+//	//		dcp.Logger().Warnf("Unable to write file due to %v\n", writeErr)
+//	//	}
+//}
