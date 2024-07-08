@@ -11,8 +11,9 @@ licenses/APL2.txt.
 package utils
 
 import (
-	base "github.com/couchbase/goxdcr/base"
 	"sync"
+
+	base "github.com/couchbase/goxdcr/base"
 )
 
 // TODO - we should revisit these to use *WrappedUprPool instead to make sure pools do not get copied
@@ -153,46 +154,6 @@ func NewKvVbMapPool() *KvVbMapPool {
 		pool: sync.Pool{
 			New: func() interface{} {
 				retMap := make(base.KvVBMapType)
-				return &retMap
-			},
-		},
-	}
-	return newPool
-}
-
-type DcpStatsMapPool struct {
-	pool sync.Pool
-}
-
-// Get() will not clean the inner map
-// The inner map of DcpStatsMap will be re-used and the component reusing it
-// should take care of the clean-up
-func (d *DcpStatsMapPool) Get(nodes []string) *base.DcpStatsMapType {
-	nodesStatsMap := d.pool.Get().(*base.DcpStatsMapType)
-	for oldNodeName, _ := range *nodesStatsMap {
-		var found bool
-		for _, nodeName := range nodes {
-			if oldNodeName == nodeName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			delete(*nodesStatsMap, oldNodeName)
-		}
-	}
-	return nodesStatsMap
-}
-
-func (d *DcpStatsMapPool) Put(incoming *base.DcpStatsMapType) {
-	d.pool.Put(incoming)
-}
-
-func NewDcpStatsMapPool() *DcpStatsMapPool {
-	newPool := &DcpStatsMapPool{
-		pool: sync.Pool{
-			New: func() interface{} {
-				retMap := make(base.DcpStatsMapType)
 				return &retMap
 			},
 		},

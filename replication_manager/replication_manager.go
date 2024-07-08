@@ -332,7 +332,6 @@ func InitConstants(xdcr_topology_svc service_def.XDCRCompTopologySvc, internal_s
 		time.Duration(internal_settings.Values[metadata.ReplStatusExportBrokenMapTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.TopologySvcCooldownPeriodKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.TopologySvcCooldownPeriodKey].(int))*time.Second,
-		time.Duration(internal_settings.Values[metadata.HealthCheckIntervalKey].(int))*time.Second,
 		xdcr_topology_svc.IsIpv4Blocked(), xdcr_topology_svc.IsIpv6Blocked(),
 		time.Duration(internal_settings.Values[metadata.P2PCommTimeoutKey].(int))*time.Second,
 		time.Duration(internal_settings.Values[metadata.BucketTopologyGCScanTimeKey].(int))*time.Minute,
