@@ -28,7 +28,6 @@ const (
 	DevCkptMgrForceGCWaitSec      = base.DevCkptMgrForceGCWaitSec
 	DevColManifestSvcDelaySec     = base.DevColManifestSvcDelaySec
 	DevNsServerPortSpecifier      = base.DevNsServerPortSpecifier
-	DevBucketTopologyLegacyDelay  = base.DevBucketTopologyLegacyDelay
 	DevCasDrfitForceDocKey        = base.DevCasDriftForceDocKey
 	DevCasDriftForceDocKey        = base.DevCasDriftForceDocKey
 	DevPreCheckCasDriftForceVbKey = base.DevPreCheckCasDriftForceVbKey
@@ -133,8 +132,8 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey, CollectionsDelAllBackfillKey,
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
-	DevNsServerPortSpecifier, DevBucketTopologyLegacyDelay,
-	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDrfitForceDocKey, DevPreCheckCasDriftForceVbKey}
+	DevNsServerPortSpecifier, SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDrfitForceDocKey,
+	DevPreCheckCasDriftForceVbKey}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -227,9 +226,6 @@ var ReplicateCkptIntervalConfig = &SettingsConfig{int(base.ReplicateCkptInterval
 
 var CkptSvcCacheEnabledConfig = &SettingsConfig{true, nil}
 
-// In seconds
-var XDCRDevBucketTopologyLevacyDelayConfig = &SettingsConfig{0, &Range{0, 600}}
-
 var EnableDcpPurgeRollbackConfig = &SettingsConfig{false, nil}
 
 var TargetTopologyLogFrequencyConfig = &SettingsConfig{base.TargetTopologyLogFreqVal, &Range{0, 60480}}
@@ -248,7 +244,6 @@ var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
 	DevCkptMgrForceGCWaitSec:      XDCRDevCkptGcWaitConfig,
 	DevColManifestSvcDelaySec:     XDCRDevColManifestSvcDelayConfig,
 	DevNsServerPortSpecifier:      XDCRDevNsServerPortSpecifierConfig,
-	DevBucketTopologyLegacyDelay:  XDCRDevBucketTopologyLevacyDelayConfig,
 	DevCasDrfitForceDocKey:        XDCRDevCasDriftForceDocConfig,
 	DevPreCheckCasDriftForceVbKey: XDCRDevPreCheckCasDriftForceVBConfig,
 

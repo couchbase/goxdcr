@@ -11,6 +11,11 @@ package service_impl
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"sync"
+	"testing"
+	"time"
+
 	mocks2 "github.com/couchbase/gomemcached/client/mocks"
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
@@ -21,10 +26,6 @@ import (
 	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"io/ioutil"
-	"sync"
-	"testing"
-	"time"
 )
 
 func setupBTSBoilerPlate() (*mocks.RemoteClusterSvc, *utilsMock.UtilsIface, *mocks.XDCRCompTopologySvc, *utilities.Utilities, *mocks.ReplicationSpecSvc, *mocks2.ClientIface, *mocks.SecuritySvc) {
@@ -220,7 +221,7 @@ func TestBucketTopologyServiceRegister(t *testing.T) {
 	bucketMap, kvNames := getBucketMap()
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -317,7 +318,7 @@ func TestBucketTopologyServiceWithLodedSpecs(t *testing.T) {
 	specList := []*metadata.ReplicationSpecification{spec, spec2}
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, specList, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc, 10*time.Second, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 10*time.Second, log.DefaultLoggerContext, replSpecSvc, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -356,7 +357,7 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	bucketMap, kvNames := getBucketMap()
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 
@@ -405,7 +406,7 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	// Feed 1 should get something and feed 2 should not
 	select {
 	case notification := <-feed1:
-		notification.GetDcpStatsMap()
+		notification.GetHighSeqnosMap()
 	default:
 		assert.True(false)
 	}
@@ -432,13 +433,13 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	time.Sleep(120 * time.Millisecond)
 	select {
 	case notification := <-feed1:
-		notification.GetDcpStatsMap()
+		notification.GetHighSeqnosMap()
 	default:
 		assert.True(false)
 	}
 	select {
 	case notification := <-feed2:
-		notification.GetDcpStatsMap()
+		notification.GetHighSeqnosMap()
 	default:
 		assert.True(false)
 	}
@@ -460,7 +461,7 @@ func TestBucketTopologyWatcherGC(t *testing.T) {
 	bucketMap, kvNames := getBucketMap()
 	setupMocksBTS(remClusterSvc, xdcrCompTopologySvc, utils, bucketMap, utilsReal, kvNames, replSpecSvc, nil, getTestRemRef(), getCapability(), mcClient, securitySvc)
 
-	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, 100*time.Millisecond, securitySvc)
+	bts, err := NewBucketTopologyService(xdcrCompTopologySvc, remClusterSvc, utils, 100*time.Millisecond, log.DefaultLoggerContext, replSpecSvc, securitySvc)
 	assert.NotNil(bts)
 	assert.Nil(err)
 

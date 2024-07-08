@@ -449,9 +449,6 @@ const (
 	HIGH_SEQNO_CONST                   = ":high_seqno"
 	VBUCKET_HIGH_SEQNO_STAT_KEY_FORMAT = VBUCKET_PREFIX + "%v" + HIGH_SEQNO_CONST
 	VBUCKET_UUID_STAT_KEY_FORMAT       = "vb_%v:uuid"
-	DCP_STAT_NAME                      = "dcp"
-	DCP_XDCR_STATS_PREFIX              = "eq_dcpq:xdcr:"
-	DCP_XDCR_ITEMS_REMAINING_SUFFIX    = ":items_remaining"
 	VBUCKET_DETAILS_NAME               = "vbucket-details"
 	MAXCAS_CONST                       = ":max_cas"
 	VBUCKET_MAXCAS_STAT_KEY_FORMAT     = VBUCKET_PREFIX + "%v" + MAXCAS_CONST
@@ -1149,8 +1146,6 @@ var TopologySvcCoolDownPeriod = 60 * time.Second
 var TopologySvcErrCoolDownPeriod = 120 * time.Second
 var TopologySvcStatusNotFoundCoolDownPeriod = 10 * time.Second
 
-var HealthCheckInterval = 120 * time.Second
-
 var BucketTopologyWatcherChanLen = 1000
 var BucketTopologyGCScanTime = 1 * time.Minute
 var BucketTopologyGCPruneTime = 24 * time.Hour
@@ -1217,7 +1212,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	utilsStopwatchDiagInternal time.Duration, utilsStopwatchDiagExternal time.Duration,
 	replStatusLoadBrokenMapTimeout, replStatusExportBrokenMapTimeout time.Duration,
 	topologyCooldownPeriod time.Duration, topologyErrCooldownPeriod time.Duration,
-	healthCheckInterval time.Duration,
 	blockedIpv4 bool, blockedIpv6 bool,
 	peerToPeerTimeout, bucketTopologyGCScanTime, bucketTopologyGCPruneTime time.Duration,
 	maxP2PReceiveChLen int,
@@ -1351,7 +1345,6 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	ReplStatusExportBrokenMapTimeout = replStatusExportBrokenMapTimeout
 	TopologySvcCoolDownPeriod = topologyCooldownPeriod
 	TopologySvcErrCoolDownPeriod = topologyErrCooldownPeriod
-	HealthCheckInterval = healthCheckInterval
 	if blockedIpv4 == true {
 		NetTCP = TCP6
 		IpFamilyStr = "ipv6"
@@ -1394,7 +1387,6 @@ const DevBackfillRollbackTo0VB = "xdcrDevBackfillRollbackTo0VB"
 const DevCkptMgrForceGCWaitSec = "xdcrDevCkptMgrForceGCWaitSec"
 const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
 const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
-const DevBucketTopologyLegacyDelay = "xdcrDevBucketTopologyLegacyDelay"
 const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
 const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
 

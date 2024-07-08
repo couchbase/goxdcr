@@ -181,7 +181,6 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	base.DevCkptMgrForceGCWaitSec:      metadata.DevCkptMgrForceGCWaitSec,
 	base.DevColManifestSvcDelaySec:     metadata.DevColManifestSvcDelaySec,
 	base.DevNsServerPortSpecifier:      metadata.DevNsServerPortSpecifier,
-	base.DevBucketTopologyLegacyDelay:  metadata.DevBucketTopologyLegacyDelay,
 	base.DevCasDriftForceDocKey:        metadata.DevCasDrfitForceDocKey,
 	base.DevPreCheckCasDriftForceVbKey: metadata.DevPreCheckCasDriftForceVbKey,
 
@@ -243,7 +242,6 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.DevCkptMgrForceGCWaitSec:      base.DevCkptMgrForceGCWaitSec,
 	metadata.DevColManifestSvcDelaySec:     base.DevColManifestSvcDelaySec,
 	metadata.DevNsServerPortSpecifier:      base.DevNsServerPortSpecifier,
-	metadata.DevBucketTopologyLegacyDelay:  base.DevBucketTopologyLegacyDelay,
 	metadata.DevCasDrfitForceDocKey:        base.DevCasDriftForceDocKey,
 	metadata.DevPreCheckCasDriftForceVbKey: base.DevPreCheckCasDriftForceVbKey,
 
