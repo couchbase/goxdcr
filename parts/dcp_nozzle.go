@@ -63,6 +63,8 @@ const checkInactiveStreamsTimeout = 1000 * time.Millisecond
 
 const nonOkVbStreamEndCheckInterval = 300 * time.Second
 
+const source_dead_conn_threshold = 2 * mcc.UPRDefaultNoopIntervalSeconds // threshold for Producer stuckness
+
 var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTimestamp: base.NewSettingDef(reflect.TypeOf((*map[uint16]*base.VBTimestamp)(nil)), false)}
 
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
@@ -591,6 +593,10 @@ func (dcp *DcpNozzle) initializeUprFeed() error {
 		uprFeatures.EnableOso = dcp.osoRequested
 		uprFeatures.EnableStreamId = false
 		uprFeatures.SendStreamEndOnClose = !dcp.isMainPipeline() && !dcp.osoRequested // nozzle could initiate streamClose
+		if err = uprFeatures.EnableDeadConnDetection(source_dead_conn_threshold); err != nil {
+			return err
+		}
+
 		if dcp.uprFeed == nil {
 			err = fmt.Errorf("%v uprfeed is nil\n", dcp.Id())
 			return err
