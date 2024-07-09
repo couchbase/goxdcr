@@ -203,7 +203,7 @@ function runReplicationResume {
 	echo "$(date): Waiting $waitTime seconds for resume to finish"
 	sleep $waitTime
 
-	#checkForP2PError
+	checkForP2PError
 
 	# Make sure we check to see that the message is displayed, but make sure that the count is not 0
 	logs=$(getInternalNodeXdcrLog "C1")
@@ -255,13 +255,6 @@ function checkForP2PError {
 	done
 }
 
-function monitorP2PError {
-	while ((1 == 1)); do
-		checkForP2PError
-		sleep 15
-	done
-}
-
 function runTestCase {
 	echo "============================================================================"
 	echo "Running large scaled cluster with P2P checkpoint pull after rebalancing 6 nodes restarting pipeline"
@@ -281,7 +274,7 @@ function runTestCase {
 		validateInternalLogWithInstance "$clusterName" "$P2P_PULL_MANIFEST_ERR" 0
 	done
 
-	#monitorP2PError &
+	checkForP2PError
 	# Pick a random node to eject
 	echo "Picking a random node to eject:"
 	local randomID
@@ -292,7 +285,7 @@ function runTestCase {
 
 	killAllBgJobs
 	# Do one last round
-	#monitorP2PError
+	checkForP2PError
 
 	echo "============================================================================"
 	echo "PASSED"
