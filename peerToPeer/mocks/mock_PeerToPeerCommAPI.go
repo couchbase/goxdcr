@@ -5,6 +5,7 @@ package mocks
 import (
 	log "github.com/couchbase/goxdcr/v8/log"
 	metadata "github.com/couchbase/goxdcr/v8/metadata"
+
 	mock "github.com/stretchr/testify/mock"
 
 	peerToPeer "github.com/couchbase/goxdcr/v8/peerToPeer"

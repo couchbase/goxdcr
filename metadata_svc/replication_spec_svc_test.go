@@ -72,6 +72,8 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 
 	replSettingSvc.On("GetDefaultReplicationSettings").Return(metadata.DefaultReplicationSettings(), nil)
 
+	remoteClusterMock.On("SetReplReader", mock.Anything).Return(nil)
+
 	replSpecSvc, _ := NewReplicationSpecService(uiLogSvcMock, remoteClusterMock, metadataSvcMock, xdcrTopologyMock, nil, log.DefaultLoggerContext, utilitiesMock, replSettingSvc)
 	replSpecSvc.SetManifestsGetter(defaultManifestGetter)
 

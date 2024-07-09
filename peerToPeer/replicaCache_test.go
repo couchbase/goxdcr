@@ -55,8 +55,8 @@ func TestNewReplicaCache(t *testing.T) {
 	spec, _ := metadata.NewReplicationSpecification(srcBucketName, "", "", tgtBucketName, "")
 	specList := []*metadata.ReplicationSpecification{spec}
 
-	xdcrComp, utilsMock, bucketTopSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc, _ := setupBoilerPlate()
-	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketTopSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc)
+	xdcrComp, utilsMock, bucketTopSvc, replSvc, utilsReal, queryResultErrs, queryResultsStatusCode, peerNodes, myHostAddr, srcCh, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc, _, remClusterSvc := setupBoilerPlate()
+	setupMocks(utilsMock, utilsReal, xdcrComp, peerNodes, myHostAddr, specList, replSvc, queryResultErrs, queryResultsStatusCode, srcCh, nil, bucketTopSvc, ckptSvc, backfillSpecSvc, colManifestSvc, securitySvc, remClusterSvc)
 
 	cache := NewReplicaCache(bucketTopSvc, nil)
 	assert.NotNil(cache)
