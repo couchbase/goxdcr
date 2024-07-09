@@ -796,6 +796,25 @@
         ],
         "stability": "committed"
     },
+    "xdcr_number_of_source_nodes_total": {
+        "type": "gauge",
+        "help": "For a given source cluster, the number of data service nodes that it contains",
+        "added": "8.0",
+        "labels": [
+            "sourceClusterUUID"
+        ],
+        "stability": "committed"
+    },
+    "xdcr_number_of_source_replications_total": {
+        "type": "gauge",
+        "help": "For a given source cluster, the total number of outbound replications to this cluster",
+        "added": "8.0",
+        "labels": [
+            "sourceClusterUUID",
+            "status"
+        ],
+        "stability": "committed"
+    },
     "xdcr_pipeline_errors": {
         "type": "gauge",
         "help": "The number of currently present errors for a specific Replication Pipeline",
