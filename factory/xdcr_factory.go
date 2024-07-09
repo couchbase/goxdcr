@@ -1387,7 +1387,7 @@ func (xdcrf *XDCRFactory) registerServices(pipeline common.Pipeline, logger_ctx 
 		if isCapi {
 			return errors.New("Custom conflict resolution cannot be used with Capi nozzle.")
 		}
-		conflictMgr := pipeline_svc.NewConflictManager(xdcrf.resolverSvc, pipeline.Specification().GetReplicationSpec().Id, xdcrf.xdcr_topology_svc, xdcrf.utils)
+		conflictMgr := pipeline_svc.NewConflictManager(xdcrf.resolverSvc, pipeline.Specification().GetReplicationSpec().Id, xdcrf.xdcr_topology_svc, logger_ctx, xdcrf.utils)
 		err := ctx.RegisterService(base.CONFLICT_MANAGER_SVC, conflictMgr)
 		if err != nil {
 			return err

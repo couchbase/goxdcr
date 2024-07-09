@@ -25,6 +25,8 @@ type LogLevel int
 
 var GOXDCR_COMPONENT_CODE = "GOXDCR."
 
+const DefaultContextKey = "Default"
+
 // starting point of valid log level values
 const BaseLogLevel = 10
 
@@ -63,6 +65,14 @@ const (
 	XdcrErrorLogFileName = "xdcr_errors.log"
 )
 
+// Map of service to context
+type ServiceToContextType struct {
+	ServiceToContextMap map[string]*LoggerContext
+	Lock                sync.RWMutex
+}
+
+var ServiceToLoggerContext *ServiceToContextType
+
 // keep module separate from log.Logger so that we can control its formating
 type XdcrLogger struct {
 	logger *log.Logger
@@ -81,6 +91,23 @@ type LoggerContext struct {
 	additionalInfo      map[string]string
 	additionalInfoCache string
 	additionalInfoLock  sync.RWMutex
+}
+
+// This function is used to create LoggerContext
+// Takes in 1 parameter
+// @module - specifies the module name against which the context is recorded in the ServiceToContext Map
+// returns the LoggerContext
+func GetOrCreateContext(module string) *LoggerContext {
+	ServiceToLoggerContext.Lock.Lock()
+	defer ServiceToLoggerContext.Lock.Unlock()
+	context, exists := ServiceToLoggerContext.ServiceToContextMap[module]
+	if exists {
+		return context
+	} else {
+		context = CopyCtx(DefaultLoggerContext)
+		ServiceToLoggerContext.ServiceToContextMap[module] = context
+		return context
+	}
 }
 
 func (lc *LoggerContext) AddMoreContext(info map[string]string) {
@@ -157,6 +184,10 @@ func init() {
 		additionalInfo:      make(map[string]string),
 		additionalInfoCache: "",
 	}
+	ServiceToLoggerContext = &ServiceToContextType{ServiceToContextMap: make(map[string]*LoggerContext)}
+	ServiceToLoggerContext.Lock.Lock()
+	defer ServiceToLoggerContext.Lock.Unlock()
+	ServiceToLoggerContext.ServiceToContextMap[DefaultContextKey] = DefaultLoggerContext
 }
 
 // re-initializes default logger context with runtime logging parameters

@@ -492,7 +492,7 @@ func (rm *replicationManager) init(
 	securitySvc service_def.SecuritySvc,
 	p2pMgr peerToPeer.P2PManager) {
 
-	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.DefaultLoggerContext, rm, nil, rm.utils)
+	rm.GenericSupervisor = *supervisor.NewGenericSupervisor(base.ReplicationManagerSupervisorId, log.GetOrCreateContext(base.GenericSupervisorKey), rm, nil, rm.utils)
 	rm.repl_spec_svc = repl_spec_svc
 	rm.remote_cluster_svc = remote_cluster_svc
 	rm.xdcr_topology_svc = xdcr_topology_svc
@@ -512,16 +512,16 @@ func (rm *replicationManager) init(
 
 	fac := factory.NewXDCRFactory(repl_spec_svc, remote_cluster_svc,
 		xdcr_topology_svc, checkpoint_svc, capi_svc, uilog_svc,
-		throughput_throttler_svc, log.DefaultLoggerContext, log.DefaultLoggerContext,
+		throughput_throttler_svc, log.DefaultLoggerContext, log.GetOrCreateContext(base.XDCRFactoryKey),
 		rm, rm.utils, resolverSvc, collectionsManifestSvc, rm.GetBackfillMgr, rm.backfillReplSvc,
 		rm.bucketTopologySvc, rm.p2pMgr, rm.getReplStatus)
 
-	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.DefaultLoggerContext, rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell, rm.GetBackfillMgr)
+	pipelineMgrObj := pipeline_manager.NewPipelineManager(fac, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, log.GetOrCreateContext(base.PipelineMgrKey), rm.utils, collectionsManifestSvc, rm.backfillReplSvc, &rm.eventIdAtomicWell, rm.GetBackfillMgr)
 	rm.pipelineMgr = pipelineMgrObj
 	securitySvc.SetEncryptionLevelChangeCallback("pipelineMgr", rm.pipelineMgr.HandleClusterEncryptionLevelChange)
 	rm.p2pMgr.SetPushReqMergerOnce(rm.pipelineMgr.HandlePeerCkptPush)
 
-	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.DefaultLoggerContext, rm.utils, rm.backfillReplSvc)
+	rm.resourceMgr = resource_manager.NewResourceManager(rm.pipelineMgr, repl_spec_svc, xdcr_topology_svc, remote_cluster_svc, checkpoint_svc, uilog_svc, throughput_throttler_svc, log.GetOrCreateContext(base.ResourceMgrKey), rm.utils, rm.backfillReplSvc)
 	rm.resourceMgr.Start()
 
 	rm.backfillMgr = backfill_manager.NewBackfillManager(collectionsManifestSvc, repl_spec_svc, backfillReplSvc, pipelineMgrObj, xdcr_topology_svc, checkpoint_svc, rm.bucketTopologySvc, rm.utils)

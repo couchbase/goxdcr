@@ -1762,3 +1762,36 @@ var CasPoisoningPreCheckEnabled int = 0
 func IsCasPoisoningPreCheckEnabled() bool {
 	return CasPoisoningPreCheckEnabled > 0
 }
+
+// names of services to be used for setting loggerContext's
+// this list also contains some of the single ton loggers declared at package level
+const (
+	UtilsKey                  = "Utils"
+	SecuritySvcKey            = "SecuritySvc"
+	TopoSvcKey                = "TopoSvc"
+	MetadataSvcKey            = "MetadataSvc"
+	IntSettSvcKey             = "IntSettSvc"
+	AuditSvcKey               = "AuditSvc"
+	GlobalSettSvcKey          = "GlobalSettSvc"
+	RemClusterSvcKey          = "RemClusterSvc"
+	ReplSpecSvcKey            = "ReplSpecSvc"
+	CheckpointSvcKey          = "CheckpointSvc"
+	MigrationSvcKey           = "MigrationSvc"
+	ReplSettSvcKey            = "ReplSettSvc"
+	BucketTopologySvcKey      = "BucketTopologySvc"
+	ManifestServiceKey        = "ManifestService"
+	CollectionsManifestSvcKey = "CollectionsManifestSvc"
+	BackfillReplSvcKey        = "BackfillReplSvc"
+	P2PManagerKey             = "P2PManager"
+	CapiSvcKey                = "CapiSvc"
+	TpThrottlerSvcKey         = "TpThrottlerSvc"
+	GenericSupervisorKey      = "GenericSupervisor"
+	XDCRFactoryKey            = "XDCRFactory"
+	PipelineMgrKey            = "PipelineMgr"
+	ResourceMgrKey            = "ResourceMgr"
+	BackfillMgrKey            = "BackfillMgr"
+	DefaultKey                = "Default"
+	AdminPortKey              = "AdminPort"
+	HttpServerKey             = "HttpServer"
+	MsgUtilsKey               = "MsgUtils"
+)
