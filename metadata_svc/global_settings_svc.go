@@ -12,11 +12,12 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"sync"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
-	"sync"
 )
 
 const (
@@ -160,19 +161,14 @@ func (service *GlobalSettingsSvc) setGlobalSettings(globalSettings *metadata.Glo
 	}
 	pKey := getGlobalSettingKey()
 	if globalSettings.Revision != nil {
-		return service.metadata_svc.Set(pKey, bytes, globalSettings.Revision)
+		err = service.metadata_svc.Set(pKey, bytes, globalSettings.Revision)
 	} else {
-		return service.metadata_svc.Add(pKey, bytes)
+		err = service.metadata_svc.Add(pKey, bytes)
 	}
-
-	//update setting
-	if service.metadata_change_callback != nil {
-		err := service.metadata_change_callback(pKey, nil, globalSettings)
-		if err != nil {
-			service.logger.Error(err.Error())
-			return err
-		}
+	if err != nil {
+		service.logger.Infof("Failed to save Global settings to metakv. settings=%v\n", globalSettings)
+		return err
 	}
-	service.logger.Infof("Global settings saved successfully. settings=%v\n", globalSettings)
+	service.logger.Infof("Global settings saved successfully to metakv. settings=%v\n", globalSettings)
 	return nil
 }

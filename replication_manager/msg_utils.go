@@ -106,6 +106,7 @@ const (
 	TargetTopologyLogFreq             = base.TargetTopologyLogFreqKey
 	CasDriftThresholdSecsKey          = base.CASDriftThresholdSecsKey
 	PreCheckCasDriftThresholdHoursKey = base.PreCheckCasDriftThresholdHoursKey
+	GenericServicesLogLevelKey        = metadata.GenericServicesLogLevelKey
 )
 
 // constants for parsing create/change/view replication response
@@ -231,6 +232,7 @@ var RestKeyToSettingsKeyMap = map[string]string{
 	TargetTopologyLogFreq:             metadata.TargetTopologyLogFreqKey,
 	CasDriftThresholdSecsKey:          metadata.CASDriftThresholdSecsKey,
 	PreCheckCasDriftThresholdHoursKey: metadata.PreCheckCasDriftThresholdHoursKey,
+	GenericServicesLogLevelKey:        metadata.GenericServicesLogLevelKey,
 }
 
 // internal replication settings key -> replication settings key in rest api
@@ -292,6 +294,7 @@ var SettingsKeyToRestKeyMap = map[string]string{
 	metadata.TargetTopologyLogFreqKey:             TargetTopologyLogFreq,
 	metadata.CASDriftThresholdSecsKey:             CasDriftThresholdSecsKey,
 	metadata.PreCheckCasDriftThresholdHoursKey:    PreCheckCasDriftThresholdHoursKey,
+	metadata.GenericServicesLogLevelKey:           GenericServicesLogLevelKey,
 }
 
 // Conversion to REST for user -> pauseRequested - Pretty much a NOT operation
@@ -319,7 +322,7 @@ var SettingsValueToRestValueMap = map[string]map[interface{}]interface{}{
 	PauseRequested:           ReplicationPauseRequestsedValuesMap,
 }
 
-var logger_msgutil *log.CommonLogger = log.NewLogger("MsgUtils", log.DefaultLoggerContext)
+var logger_msgutil *log.CommonLogger = log.NewLogger(base.MsgUtilsKey, log.GetOrCreateContext(base.MsgUtilsKey))
 
 func NewGetRemoteClustersResponse(remoteClusters map[string]*metadata.RemoteClusterReference) (*ap.Response, error) {
 	remoteClusterArr := make([]map[string]interface{}, 0)

@@ -14,12 +14,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"net/http"
 )
 
 const GoxdcrPrefix = "_goxdcr/"
@@ -31,10 +32,10 @@ const (
 	COMMIT_FOR_CKPT_CMD     string = "_commit_for_checkpoint"
 )
 
-//errors
+// errors
 var NO_VB_OPAQUE_IN_RESP_ERR error = errors.New("No vb opaque in the response")
 
-//apiRequest is a structure for http request used for CAPI
+// apiRequest is a structure for http request used for CAPI
 type apiRequest struct {
 	url               string
 	path              string
@@ -77,12 +78,12 @@ func (req *apiRequest) CloneAndRedact() *apiRequest {
 	return req
 }
 
-//CAPIService is a wrapper around the rest interface provided by couchbase server
-//It provide the following methods:
-//		1. _pre_preplicate: check if the checkpoint on-file for a vb is valid on remote cluster
-//		2. _mass_vbopaque_check: mass check if vb uuid on the remote cluster is the same as the one on-file for a list of vbs
-//		3. _commit_for_checkpoint: ask the remote vbucket to commit and return back the seqno, or if the remote vbucket's UUID
-//								   has changed due to the topology change, in that case, new vb UUID would be returned
+// CAPIService is a wrapper around the rest interface provided by couchbase server
+// It provide the following methods:
+//  1. _pre_preplicate: check if the checkpoint on-file for a vb is valid on remote cluster
+//  2. _mass_vbopaque_check: mass check if vb uuid on the remote cluster is the same as the one on-file for a list of vbs
+//  3. _commit_for_checkpoint: ask the remote vbucket to commit and return back the seqno, or if the remote vbucket's UUID
+//     has changed due to the topology change, in that case, new vb UUID would be returned
 type CAPIService struct {
 	logger *log.CommonLogger
 	utils  utilities.UtilsIface
@@ -95,14 +96,18 @@ func NewCAPIService(logger_ctx *log.LoggerContext, utilsIn utilities.UtilsIface)
 	}
 }
 
-//PrePrelicate (_pre_replicate)
-//Parameters: remoteBucket - the information about the remote bucket
-//			  knownRemoteVBStatus - the current replication status of a vbucket
-//			  disableCkptBackwardsCompat
-//returns:
-//		  bMatch - true if the remote vbucket matches the current replication status
-//		  current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
-//		  err
+// PrePrelicate (_pre_replicate)
+// Parameters: remoteBucket - the information about the remote bucket
+//
+//	knownRemoteVBStatus - the current replication status of a vbucket
+//	disableCkptBackwardsCompat
+//
+// returns:
+//
+//	bMatch - true if the remote vbucket matches the current replication status
+//	current_remoteVBUUID - new remote vb uuid might be retured if bMatch = false and there was a topology change on remote vb
+//	err
+//
 // Refer to ns_server/deps/ns_couchdb/src/capi_replication.erl for server side source code
 func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucketInfo,
 	knownRemoteVBStatus *service_def.RemoteVBReplicationStatus, xdcrCheckpointingCapbility bool) (bMatch bool, current_remoteVBOpaque metadata.TargetVBOpaque, err error) {
@@ -135,13 +140,16 @@ func (capi_svc *CAPIService) PreReplicate(remoteBucket *service_def.RemoteBucket
 
 }
 
-//CommitForCheckpoint (_commit_for_checkpoint)
-//Parameters: remoteBucket - the information about the remote bucket
-//			  remoteVBUUID - the remote vb uuid on file
-//			  vbno		   - the vb number
-//returns:	  remote_seqno - the remote vbucket's high sequence number
-//			  vb_uuid	   - the new vb uuid if there was a topology change
-//			  err
+// CommitForCheckpoint (_commit_for_checkpoint)
+// Parameters: remoteBucket - the information about the remote bucket
+//
+//	remoteVBUUID - the remote vb uuid on file
+//	vbno		   - the vb number
+//
+// returns:	  remote_seqno - the remote vbucket's high sequence number
+//
+//	vb_uuid	   - the new vb uuid if there was a topology change
+//	err
 func (capi_svc *CAPIService) CommitForCheckpoint(remoteBucket *service_def.RemoteBucketInfo, remoteVBOpaque metadata.TargetVBOpaque, vbno uint16) (remote_seqno uint64, vbOpaque metadata.TargetVBOpaque, err error) {
 	api_base, err := capi_svc.composeAPIRequestBaseForVb(remoteBucket, vbno, COMMIT_FOR_CKPT_CMD)
 	if err != nil {
@@ -249,7 +257,7 @@ func (capi_svc *CAPIService) composeAPIRequestBase(remoteBucket *service_def.Rem
 	return api_base, nil
 }
 
-//compose a json request body
+// compose a json request body
 func (capi_svc *CAPIService) composePreReplicateBody(api_base *apiRequest, knownRemoteVBStatus *service_def.RemoteVBReplicationStatus) error {
 	//    ReqBody = case RemoteCommitOpaque of
 	//                  undefined -> [];
@@ -305,10 +313,10 @@ func (capi_svc *CAPIService) parsePreReplicateResp(hostName string,
 			return false, nil, err
 		}
 
-		capi_svc.logger.Debugf("_re_replicate returned match=%v, remote VBOpaque=%v\n", bMatch, vbOpaque)
+		capi_svc.logger.Debugf("_pre_replicate returned match=%v, remote VBOpaque=%v\n", bMatch, vbOpaque)
 		return bMatch, vbOpaque, nil
 	} else {
-		var retError error = fmt.Errorf("unexpected status code, %v, in _pre_replicate response. respMap=%v\n", resp_status_code, respMap)
+		var retError error = fmt.Errorf("unexpected status code, %v, in _pre_replicate response from host %v. respMap=%v\n", resp_status_code, hostName, respMap)
 
 		//double check again disableCkptBackwardsCompat
 		if resp_status_code == 404 && xdcrCheckpointingCapbility == false {

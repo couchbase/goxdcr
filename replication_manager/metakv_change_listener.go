@@ -759,7 +759,42 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 		oldGoGCValue := debug.SetGCPercent(newSetting.GoGC)
 		pscl.logger.Infof("Successfully changed  GOGC setting from(old) %v to(New) %v\n", oldGoGCValue, newSetting.GoGC)
 	}
+	if newSetting.Settings != nil {
+		// represents a map containing the logLevel for individual services
+		val, ok := newSetting.Settings.Values[metadata.GenericServicesLogLevelKey]
+		if ok {
+			// since setting value is defined as interface{}, the actual data type of a setting value may change
+			// after marshalling and unmarshalling
+			// in this case map[string]string becomes map[string]interface{}
+			serviceToLogLevelMap, valid := val.(map[string]interface{})
 
+			if !valid {
+				return fmt.Errorf("failed to apply the LogLevel for specified services. err=Invalid type %T for genericServicesLogLevel. Expected map[string]interface{}", val)
+			}
+			for service, logLevelIface := range serviceToLogLevelMap {
+				log.ServiceToLoggerContext.Lock.RLock()
+				context, ok := log.ServiceToLoggerContext.ServiceToContextMap[service]
+				log.ServiceToLoggerContext.Lock.RUnlock()
+				if !ok {
+					continue
+				}
+				logLevelStr, valid := logLevelIface.(string)
+				if !valid {
+					pscl.logger.Errorf("failed to apply the LogLevel for service %v. err=Invalid type %T for logLevel. Expected string", service, logLevelIface)
+					continue
+				}
+				loglevel, err := log.LogLevelFromStr(logLevelStr)
+				if err != nil {
+					pscl.logger.Errorf("%v, setting the loglevel to Info for %v", err, service)
+					//reset it to logLevelInfo
+					loglevel = log.LogLevelInfo
+				}
+				if context.Log_level != loglevel {
+					context.SetLogLevel(loglevel)
+				}
+			}
+		}
+	}
 	return nil
 }
 

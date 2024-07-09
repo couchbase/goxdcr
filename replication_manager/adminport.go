@@ -40,7 +40,7 @@ import (
 var StaticPaths = []string{base.RemoteClustersPath, CreateReplicationPath, SettingsReplicationsPath, AllReplicationsPath, AllReplicationInfosPath, RegexpValidationPrefix, MemStatsPath, BlockProfileStartPath, BlockProfileStopPath, XDCRInternalSettingsPath, XDCRPrometheusStatsPath, XDCRPrometheusStatsHighPath, base.XDCRPeerToPeerPath, base.XDCRConnectionPreCheckPath}
 var DynamicPathPrefixes = []string{base.RemoteClustersPath, DeleteReplicationPrefix, SettingsReplicationsPath, StatisticsPrefix, AllReplicationsPath, BucketSettingsPrefix}
 
-var logger_ap *log.CommonLogger = log.NewLogger("AdminPort", log.DefaultLoggerContext)
+var logger_ap *log.CommonLogger = log.NewLogger(base.AdminPortKey, log.GetOrCreateContext(base.AdminPortKey))
 
 /*
 ***********************************
@@ -68,7 +68,7 @@ func NewAdminport(laddr string, xdcrRestPort, kvAdminPort uint16, finch chan boo
 	var error_handler_func gen_server.Error_Handler_Func
 
 	server := gen_server.NewGenServer(&msg_callback_func,
-		&exit_callback_func, &error_handler_func, log.DefaultLoggerContext, "Adminport", utilsIn)
+		&exit_callback_func, &error_handler_func, log.GetOrCreateContext(base.AdminPortKey), base.AdminPortKey, utilsIn)
 
 	adminport := &Adminport{
 		sourceKVHost:       laddr,

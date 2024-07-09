@@ -77,7 +77,7 @@ type Utilities struct {
  */
 func NewUtilities() *Utilities {
 	retVar := &Utilities{
-		logger_utils: log.NewLogger("Utils", log.DefaultLoggerContext),
+		logger_utils: log.NewLogger(base.UtilsKey, log.GetOrCreateContext(base.UtilsKey)),
 	}
 	retVar.FilterUtilsImpl = &filter.FilterUtilsImpl{}
 	return retVar

@@ -42,7 +42,7 @@ type SpecialSettingValue interface {
 	SameAs(other interface{}) bool
 }
 
-var SpecialSettingKeys = []string{CollectionsMappingRulesKey, MergeFunctionMappingKey}
+var SpecialSettingKeys = []string{CollectionsMappingRulesKey, MergeFunctionMappingKey, GenericServicesLogLevelKey}
 
 func CheckIfKeyIsSpecialSetting(key string) bool {
 	for _, checkKey := range SpecialSettingKeys {

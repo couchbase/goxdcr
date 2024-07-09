@@ -15,14 +15,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/parts"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"io"
 	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/pipeline_utils"
 
 	mcc "github.com/couchbase/gomemcached/client"
 
@@ -124,9 +125,9 @@ func (spec *SubdocMutationPathSpec) size() int {
 	// 1B opcode, 1B flags, 2B path len, 4B value len
 	return 8 + len(spec.path) + len(spec.value)
 }
-func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string, top_svc service_def.XDCRCompTopologySvc, utils utilities.UtilsIface) *ConflictManager {
+func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string, top_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, utils utilities.UtilsIface) *ConflictManager {
 	return &ConflictManager{
-		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, log.NewLogger("ConflictManager", log.DefaultLoggerContext)),
+		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, log.NewLogger("ConflictManager", logger_ctx)),
 		top_svc:                      top_svc,
 		resolverSvc:                  resolverSvc,
 		utils:                        utils,
