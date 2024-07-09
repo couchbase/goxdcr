@@ -117,9 +117,9 @@ type mergeFailureInfo struct {
 	err   string
 }
 
-func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string, top_svc service_def.XDCRCompTopologySvc, utils utilities.UtilsIface) *ConflictManager {
+func NewConflictManager(resolverSvc service_def.ResolverSvcIface, replId string, top_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, utils utilities.UtilsIface) *ConflictManager {
 	return &ConflictManager{
-		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, log.NewLogger("ConflictManager", log.DefaultLoggerContext)),
+		AbstractComponent:            component.NewAbstractComponentWithLogger(replId, log.NewLogger("ConflictManager", logger_ctx)),
 		top_svc:                      top_svc,
 		resolverSvc:                  resolverSvc,
 		utils:                        utils,

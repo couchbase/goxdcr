@@ -12,6 +12,7 @@ package metadata
 
 import (
 	"fmt"
+
 	"github.com/couchbase/goxdcr/base"
 	"github.com/couchbase/goxdcr/log"
 )
@@ -25,8 +26,9 @@ var logger_ps *log.CommonLogger = log.NewLogger("GlobalSetting", log.DefaultLogg
  */
 
 const (
-	GoMaxProcsKey = "gomaxprocs"
-	GoGCKey       = "gogc"
+	GoMaxProcsKey              = "gomaxprocs"
+	GoGCKey                    = "gogc"
+	GenericServicesLogLevelKey = "genericServicesLogLevel"
 
 	DefaultGlobalSettingsKey = "GlobalSettings"
 	GlobalConfigurationKey   = "GlobalConfiguration"
@@ -38,11 +40,17 @@ var GoMaxProcsConfig = &SettingsConfig{base.DefaultGoMaxProcs, &Range{1, 10000}}
 // note, 0 is not a valid value for GOGC, which will be checked separately from the range check
 var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
 
+const EmptyString = ""
+
+var genericServicesLogLevelConfig = &SettingsConfig{EmptyString, nil}
+
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
-	GoMaxProcsKey: GoMaxProcsConfig,
-	GoGCKey:       GoGCConfig,
+	GoMaxProcsKey:              GoMaxProcsConfig,
+	GoGCKey:                    GoGCConfig,
+	GenericServicesLogLevelKey: genericServicesLogLevelConfig,
 }
 
+// Adding values in this struct is deprecated - use GlobalSettings.Settings.Values instead
 type GlobalSettings struct {
 	*Settings
 	//maxprocs setting for golang to use number of core in the system

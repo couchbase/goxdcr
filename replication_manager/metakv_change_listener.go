@@ -767,7 +767,30 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 		oldGoGCValue := debug.SetGCPercent(newSetting.GoGC)
 		pscl.logger.Infof("Successfully changed  GOGC setting from(old) %v to(New) %v\n", oldGoGCValue, newSetting.GoGC)
 	}
-
+	// represents a json containing the logLevel for individual services
+	genericServicesLogLevel := newSetting.Settings.Values[metadata.GenericServicesLogLevelKey].(string)
+	serviceToLogLevelMap, err1 := base.ValidateAndConvertStringToJsonType(genericServicesLogLevel)
+	if err1 != nil {
+		return fmt.Errorf("Failed to apply the LogLevel for specified services. err: %v\n", err1)
+	}
+	for service, logLevelStr := range serviceToLogLevelMap {
+		log.ServiceToLoggerContext.Lock.RLock()
+		context, ok := log.ServiceToLoggerContext.ServiceToContextMap[service]
+		log.ServiceToLoggerContext.Lock.RUnlock()
+		if !ok {
+			pscl.logger.Errorf("No LoggerContext exists for the service %v\n", service)
+			continue
+		}
+		loglevel, err1 := log.LogLevelFromStr(logLevelStr.(string))
+		if err1 != nil {
+			pscl.logger.Errorf("%v, setting the loglevel to Info for %v", err, service)
+			//reset it to logLevelInfo
+			loglevel = log.LogLevelInfo
+		}
+		if context.Log_level != loglevel {
+			context.SetLogLevel(loglevel)
+		}
+	}
 	return nil
 }
 

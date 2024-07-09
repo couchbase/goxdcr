@@ -46,7 +46,7 @@ import (
 	_ "expvar"
 )
 
-var logger_server *log.CommonLogger = log.NewLogger("HttpServer", log.DefaultLoggerContext)
+var logger_server *log.CommonLogger = log.NewLogger(base.HttpServerKey, log.GetOrCreateContext(base.HttpServerKey))
 
 type httpServer struct {
 	mu        sync.RWMutex   // handle concurrent updates to this object
@@ -190,7 +190,7 @@ func (r *httpAdminRequest) SendError(err error) error {
 	return nil
 }
 
-//xdcr implementaton of RequestHandler
+// xdcr implementaton of RequestHandler
 type Handler struct {
 	server *httpServer
 }

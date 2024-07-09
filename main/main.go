@@ -17,14 +17,15 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/couchbase/goxdcr/peerToPeer"
+	"github.com/couchbase/goxdcr/streamApiWatcher"
+
 	base "github.com/couchbase/goxdcr/base"
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata_svc"
-	"github.com/couchbase/goxdcr/peerToPeer"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
-	"github.com/couchbase/goxdcr/streamApiWatcher"
 	utilities "github.com/couchbase/goxdcr/utils"
 )
 
@@ -137,10 +138,10 @@ func main() {
 	utils := utilities.NewUtilities()
 
 	// This needs to be started immediately since some of the constructors will start to query the security setting
-	securitySvc := service_impl.NewSecurityService(options.caFileLocation, nil)
+	securitySvc := service_impl.NewSecurityService(options.caFileLocation, log.GetOrCreateContext(base.SecuritySvcKey))
 	securitySvc.Start()
 
-	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, securitySvc, nil, utils)
+	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, securitySvc, log.GetOrCreateContext(base.TopoSvcKey), utils)
 	if err != nil {
 		fmt.Printf("Error starting xdcr topology service. err=%v\n", err)
 		os.Exit(1)
@@ -148,7 +149,7 @@ func main() {
 
 	host := top_svc.GetLocalHostName()
 
-	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(nil, utils, false /*readOnly*/)
+	metakv_svc, err := metadata_svc.NewMetaKVMetadataSvc(log.GetOrCreateContext(base.MetadataSvcKey), utils, false /*readOnly*/)
 	if err != nil {
 		fmt.Printf("Error starting metadata service. err=%v\n", err)
 		os.Exit(1)
@@ -160,32 +161,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, nil)
+	internalSettings_svc := metadata_svc.NewInternalSettingsSvc(metakv_svc, log.GetOrCreateContext(base.IntSettSvcKey))
 
 	rm.InitConstants(top_svc, internalSettings_svc)
 
-	audit_svc, err := service_impl.NewAuditSvc(top_svc, nil, utils)
+	audit_svc, err := service_impl.NewAuditSvc(top_svc, log.GetOrCreateContext(base.AuditSvcKey), utils)
 	if err != nil {
 		fmt.Printf("Error starting audit service. err=%v\n", err)
 		os.Exit(1)
 	}
 
-	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(metakv_svc, nil)
+	processSetting_svc := metadata_svc.NewGlobalSettingsSvc(metakv_svc, log.GetOrCreateContext(base.GlobalSettSvcKey))
 
 	if options.isConvert {
 		// disable uilogging during upgrade by specifying a nil uilog service
-		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, nil, utils)
+		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(nil, metakv_svc, top_svc, log.GetOrCreateContext(base.RemClusterSvcKey), utils)
 		if err != nil {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, nil, nil, utils, nil)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(nil, remote_cluster_svc, metakv_svc, top_svc, nil, log.GetOrCreateContext(base.ReplSpecSvcKey), utils, nil)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
 		}
 
-		ckpt_svc, err := metadata_svc.NewCheckpointsService(metakv_svc, nil, utils, replication_spec_svc)
+		ckpt_svc, err := metadata_svc.NewCheckpointsService(metakv_svc, log.GetOrCreateContext(base.CheckpointSvcKey), utils, replication_spec_svc)
 		if err != nil {
 			fmt.Printf("Error starting checkpoints service. err=%v\n", err)
 			os.Exit(1)
@@ -193,8 +194,8 @@ func main() {
 
 		migration_svc := service_impl.NewMigrationSvc(top_svc, remote_cluster_svc,
 			replication_spec_svc,
-			metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc),
-			ckpt_svc, nil, utils)
+			metadata_svc.NewReplicationSettingsSvc(metakv_svc, log.GetOrCreateContext(base.ReplSettSvcKey), top_svc),
+			ckpt_svc, log.GetOrCreateContext(base.MigrationSvcKey), utils)
 		err = migration_svc.Migrate()
 		if err == nil {
 			os.Exit(0)
@@ -204,37 +205,37 @@ func main() {
 	} else {
 		uilog_svc := service_impl.NewUILogSvc(top_svc, nil, utils)
 		eventlog_svc := service_impl.NewEventLog(top_svc, utils, nil)
-		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, nil, utils)
+		remote_cluster_svc, err := metadata_svc.NewRemoteClusterService(uilog_svc, metakv_svc, top_svc, log.GetOrCreateContext(base.RemClusterSvcKey), utils)
 		if err != nil {
 			fmt.Printf("Error starting remote cluster service. err=%v\n", err)
 			os.Exit(1)
 		}
 		resolver_svc := service_impl.NewResolverSvc(top_svc)
 
-		replicationSettingSvc := metadata_svc.NewReplicationSettingsSvc(metakv_svc, nil, top_svc)
+		replicationSettingSvc := metadata_svc.NewReplicationSettingsSvc(metakv_svc, log.GetOrCreateContext(base.ReplSettSvcKey), top_svc)
 
-		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, resolver_svc, nil, utils, replicationSettingSvc)
+		replication_spec_svc, err := metadata_svc.NewReplicationSpecService(uilog_svc, remote_cluster_svc, metakv_svc, top_svc, resolver_svc, log.GetOrCreateContext(base.ReplSpecSvcKey), utils, replicationSettingSvc)
 		if err != nil {
 			fmt.Printf("Error starting replication spec service. err=%v\n", err)
 			os.Exit(1)
 		}
 
-		checkpointsService, err := metadata_svc.NewCheckpointsService(metakv_svc, nil, utils, replication_spec_svc)
+		checkpointsService, err := metadata_svc.NewCheckpointsService(metakv_svc, log.GetOrCreateContext(base.CheckpointSvcKey), utils, replication_spec_svc)
 		if err != nil {
 			fmt.Printf("Error starting checkpoints service. err=%v\n", err)
 			os.Exit(1)
 		}
 
 		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils,
-			base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc, securitySvc, streamApiWatcher.GetStreamApiWatcher)
+			base.TopologyChangeCheckInterval, log.GetOrCreateContext(base.BucketTopologySvcKey), replication_spec_svc, securitySvc, streamApiWatcher.GetStreamApiWatcher)
 		if err != nil {
 			fmt.Printf("Error starting bucket topology service. err=%v\n", err)
 			os.Exit(1)
 		}
 
-		manifestsService := metadata_svc.NewManifestsService(metakv_svc, nil)
+		manifestsService := metadata_svc.NewManifestsService(metakv_svc, log.GetOrCreateContext(base.ManifestServiceKey))
 		collectionsManifestService, err := metadata_svc.NewCollectionsManifestService(remote_cluster_svc,
-			replication_spec_svc, uilog_svc, log.DefaultLoggerContext, utils, checkpointsService,
+			replication_spec_svc, uilog_svc, log.GetOrCreateContext(base.CollectionsManifestSvcKey), utils, checkpointsService,
 			top_svc, bucketTopologyService, manifestsService)
 		if err != nil {
 			fmt.Printf("Error starting collections manifest service. err=%v\n", err)
@@ -242,14 +243,14 @@ func main() {
 		}
 
 		backfillReplService, err := metadata_svc.NewBackfillReplicationService(uilog_svc,
-			metakv_svc, log.DefaultLoggerContext, utils, replication_spec_svc, top_svc,
+			metakv_svc, log.GetOrCreateContext(base.BackfillReplSvcKey), utils, replication_spec_svc, top_svc,
 			bucketTopologyService)
 		if err != nil {
 			fmt.Printf("Error starting backfill replication service. err=%v\n", err)
 			os.Exit(1)
 		}
 
-		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.DefaultLoggerContext, top_svc, utils, bucketTopologyService,
+		p2pMgr, err := peerToPeer.NewPeerToPeerMgr(log.GetOrCreateContext(base.P2PManagerKey), top_svc, utils, bucketTopologyService,
 			replication_spec_svc, base.P2POpaqueCleanupInterval, checkpointsService, collectionsManifestService,
 			backfillReplService, securitySvc, rm.BackfillManager)
 		if err != nil {
@@ -266,13 +267,13 @@ func main() {
 			top_svc,
 			replicationSettingSvc,
 			checkpointsService,
-			service_impl.NewCAPIService(nil, utils),
+			service_impl.NewCAPIService(log.GetOrCreateContext(base.CapiSvcKey), utils),
 			audit_svc,
 			uilog_svc,
 			eventlog_svc,
 			processSetting_svc,
 			internalSettings_svc,
-			service_impl.NewThroughputThrottlerSvc(nil),
+			service_impl.NewThroughputThrottlerSvc(log.GetOrCreateContext(base.TpThrottlerSvcKey)),
 			resolver_svc,
 			utils,
 			collectionsManifestService,

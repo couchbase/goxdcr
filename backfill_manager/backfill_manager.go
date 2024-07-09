@@ -260,7 +260,7 @@ func NewBackfillManager(collectionsManifestSvc service_def.CollectionsManifestSv
 		collectionsManifestSvc:            collectionsManifestSvc,
 		replSpecSvc:                       replSpecSvc,
 		backfillReplSvc:                   backfillReplSvc,
-		logger:                            log.NewLogger("BackfillMgr", log.DefaultLoggerContext),
+		logger:                            log.NewLogger(base.BackfillMgrKey, log.GetOrCreateContext(base.BackfillMgrKey)),
 		cacheSpecSourceMap:                make(map[string]*metadata.CollectionsManifest),
 		cacheSpecLastSuccessfulManifestId: make(map[string]uint64),
 		cacheSpecTargetMap:                make(map[string]*metadata.CollectionsManifest),
