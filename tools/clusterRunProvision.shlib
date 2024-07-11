@@ -2252,6 +2252,8 @@ function setInternalSettings {
 		if (($? == 0)); then
 			break
 		fi
+		echo "Failed to set internal settings, retrying in 10 seconds..."
+		sleep 10
 	done
 }
 

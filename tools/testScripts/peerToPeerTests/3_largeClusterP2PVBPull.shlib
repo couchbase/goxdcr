@@ -60,6 +60,8 @@ function runOneReplicationCycleAndPause {
 	local checkInt
 	setupCluster
 	setupTopologies
+	echo "Waiting 10 seconds to allow cluster setup to complete..."
+	sleep 10
 	# Shorten the amount of time pipeline restarts
 	setInternalSettings "C1" "TopologyChangeCheckInterval=$checkInterval" "MaxTopologyChangeCountBeforeRestart=$maxChangeCnt" "MaxTopologyStableCountBeforeRestart=$maxStableCnt" "TopologySvcCooldownPeriodSec=$coolDownPeriod"
 	sleep 5
@@ -253,6 +255,11 @@ function runTestCase {
 		validateInternalLogWithInstance "$dependentClusterName" "$P2P_PULL_ERR_MSG" 0
 		validateInternalLogWithInstance "$clusterName" "$CKPT_MAPPING_NOT_FOUND_MSG" 0
 	done
+
+	echo "Sleeping 120 seconds for heartbeat to be passed and parsed"
+	sleep 120
+	validatePrometheusSourceNodesCnt "C2" 4
+	validatePrometheusSourceRunningReplCnt "C2" 1
 
 	echo "============================================================================"
 	echo "PASSED"
