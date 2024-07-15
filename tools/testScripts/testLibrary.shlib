@@ -74,10 +74,8 @@ function checkItemCnt {
 
 # Assumes running test script from this directory
 function getNsServerDir {
-	# i.e. Running from "/Users/neil.huang/source/couchbase/goproj/src/github.com/couchbase/goxdcr/tools/testScripts"
-	local srcTreeName=$(pwd | cut -d/ -f6-)
-	# /Users/neil.huang/source/couchbase/
-	local couchbaseDir=$(pwd | sed "s|$srcTreeName||g")
+	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
+	local couchbaseDir="../../../../../../../"
 	echo "${couchbaseDir}ns_server"
 	return 0
 }

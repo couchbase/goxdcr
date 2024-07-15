@@ -112,7 +112,6 @@ type RequestCommon struct {
 	RemoteLifeCycleId string
 
 	// For debugging and/or stats
-	timeMtx      sync.RWMutex
 	enqueuedTime time.Time
 
 	responseCb func(resp Response) (HandlerResult, error)
@@ -156,14 +155,10 @@ func (p *RequestCommon) GetOpaque() uint32 {
 }
 
 func (p *RequestCommon) RecordEnqueuedTime() {
-	p.timeMtx.Lock()
-	defer p.timeMtx.Unlock()
 	p.enqueuedTime = time.Now()
 }
 
 func (p *RequestCommon) GetEnqueuedTime() time.Time {
-	p.timeMtx.RLock()
-	defer p.timeMtx.RUnlock()
 	return p.enqueuedTime
 }
 
@@ -238,7 +233,6 @@ type ResponseCommon struct {
 	RemoteLifeCycleId string
 	ErrorString       string
 
-	timeMtx      sync.RWMutex
 	enqueuedTime time.Time
 }
 
@@ -249,7 +243,8 @@ func NewResponseCommon(opcode OpCode, senderLifeCycleId string, receiverLifeCycl
 		RespType:          opcode,
 		Opaque:            opaque,
 		LocalLifeCycleId:  senderLifeCycleId,
-		RemoteLifeCycleId: receiverLifeCycleId}
+		RemoteLifeCycleId: receiverLifeCycleId,
+	}
 }
 
 func (r *ResponseCommon) GetType() ReqRespType {
@@ -273,14 +268,10 @@ func (r *ResponseCommon) GetErrorString() string {
 }
 
 func (r *ResponseCommon) RecordEnqueuedTime() {
-	r.timeMtx.Lock()
-	defer r.timeMtx.Unlock()
 	r.enqueuedTime = time.Now()
 }
 
 func (r *ResponseCommon) GetEnqueuedTime() time.Time {
-	r.timeMtx.RLock()
-	defer r.timeMtx.RUnlock()
 	return r.enqueuedTime
 }
 
