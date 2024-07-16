@@ -511,8 +511,14 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 			err = fmt.Errorf("SourceHeartbeatReq deSerialize err: %v", err)
 		}
 		reqHeartbeat.RequestCommon = reqCommon
+		// When a source node sends a heartbeat, this node is not expected to be able to
+		// contact back to the source node because it may not have the credentials
+		// The source node can send to here because it has a remote cluster reference
+		// But this node does not have a "source cluster reference"
+		// In the future, we could look at if bi-directional replication can do something about
+		// it. But in the meantime, it's best to just not do any proper response
 		reqCommon.responseCb = func(resp Response) (HandlerResult, error) {
-			return &HandlerResultImpl{Err: base.ErrorNotSupported, HttpStatusCode: 500}, base.ErrorNotSupported
+			return &HandlerResultImpl{Err: base.ErrorNotSupported, HttpStatusCode: http.StatusNotImplemented}, base.ErrorNotSupported
 		}
 		return reqHeartbeat, err
 	default:

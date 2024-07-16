@@ -162,7 +162,7 @@ func (m *MetricsMapType) RecordSourceClusterV1(specsIn map[string][]*metadata.Re
 		// m -> key is stat (i.e. numRepl, numNodes)
 		//   -> value is a map where:
 		//         -> key is either replication ID or source clusterUUID
-		//         -> value is
+		//         -> value is IdentifierStatsMap, a KV pair for a specific stat
 		srcClusterUUIDToStatsMap, exists := (*m)[oneStat]
 		if !exists {
 			srcClusterUUIDToStatsMap = IdentifierStatsMap{}
@@ -711,9 +711,6 @@ func (p *PrometheusExporter) Export() ([]byte, error) {
 	if needToOutput {
 		p.outputReplStatsToBuffer()
 	}
-	//if p.hasSourceInfo() {
-	//	p.outputSourceClusterStatsV1ToBuffer()
-	//}
 	return p.outputBuffer, nil
 }
 
@@ -816,17 +813,6 @@ func (p *PrometheusExporter) prepareStatsBuffer() (needToOutput bool) {
 		}
 	}
 
-	//for _, srcStatKey := range sourceClusterStats {
-	//	identifierStatsMap := p.metricsMap[srcStatKey]
-	//	for identifier, _ := range identifierStatsMap {
-	//		_, stillExists := latestKnownSrc[identifier]
-	//		if !stillExists {
-	//			delete(identifierStatsMap, identifier)
-	//			needToOutput = true
-	//			break
-	//		}
-	//	}
-	//}
 	return
 }
 
@@ -834,26 +820,6 @@ func (p *PrometheusExporter) outputOneReplStat(buffer []byte) {
 	p.outputBuffer = append(p.outputBuffer, buffer...)
 	p.outputBufferNewLine()
 }
-
-// V1 is very basic stats
-//func (p *PrometheusExporter) outputSourceClusterStatsV1ToBuffer() {
-//	p.mapsMtx.RLock()
-//	defer p.mapsMtx.RUnlock()
-//
-//	if len(p.srcNodes) == 0 {
-//		// no incoming sources
-//		return
-//	}
-//
-//	// 1. number of nodes per source
-//	statsTemplate := p.globalLookupMap[service_def.SOURCE_CLUSTER_NUM_NODES]
-//	p.outputHelp(service_def.SOURCE_CLUSTER_NUM_NODES)
-//	p.outputType(service_def.SOURCE_CLUSTER_NUM_NODES)
-//	// TODO: labels
-//
-//	// 2. Number of source replications
-//
-//}
 
 type LabelsValuesExtractor interface {
 	LoadValue(value interface{})

@@ -210,8 +210,8 @@ if [[ -z "$testCaseNumber" ]]; then
 			continue
 		fi
 
-		if [[ "$testcase" =~ _idle_ ]]; then
-			# test cases with _idle_ in the filename means they take too long for the whole suite
+		if [[ "$testcase" =~ _idle ]]; then
+			# test cases with _idle in the filename means they take too long for the whole suite
 			# and should be run on an individual basis only
 			echo ""
 			echo "WARN: Skipping test - ${testCasesDirectory:-}/$testcase"

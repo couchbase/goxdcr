@@ -97,7 +97,7 @@ func (r *RateLimitOperatorCache) GetResult() (interface{}, error) {
 	r.cachedMtx.RLock()
 	// Timer's existence determines whether or not we're in cool down period
 	if r.cachedTimer != nil {
-		r.cachedMtx.RUnlock()
+		defer r.cachedMtx.RUnlock()
 		return r.cachedInfo, r.cachedErr
 	}
 
@@ -680,8 +680,7 @@ func (top_svc *XDCRTopologySvc) getTerseInfoOp() (interface{}, error) {
 		return nil, err
 	}
 
-	terseInfo, err := top_svc.utils.GetTerseInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_svc.logger)
-	return terseInfo, err
+	return top_svc.utils.GetTerseInfo(connStr, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, top_svc.logger)
 }
 
 func (top_svc *XDCRTopologySvc) IsOrchestratorNode() (bool, error) {

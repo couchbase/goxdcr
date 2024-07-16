@@ -1215,7 +1215,8 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 		return req
 	}
 
-	// TODO - for POC, no sync and no response
+	// Cannot be synchronous because remote cluster may not be able to respond back
+	// This will be a send and forget operation, no ack from the remote
 	opts := NewSendOpts(false, 0, base.PeerToPeerMaxRetry).SetRemoteClusterRef(reference)
 	err, failedToSend := p.sendToEachPeerOnce(ReqSrcHeartbeat, getReqFunc, opts)
 	if err != nil {

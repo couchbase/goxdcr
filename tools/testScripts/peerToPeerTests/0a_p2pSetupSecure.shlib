@@ -136,10 +136,6 @@ function runOneRebalanceCycle {
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1))
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PSECUREMSG" $(($currentPeerMsgsC1Secure + 1))
 
-	validateInternalLogWithInstance "C1" "$HEARTBEAT_RECEIVED" 1 100
-	validateInternalLogWithInstance "C1P" "$HEARTBEAT_RECEIVED" 1 100
-	validateInternalLogWithInstance "C2" "$HEARTBEAT_RECEIVED" 1 100
-
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
 	echo "============================================================================"

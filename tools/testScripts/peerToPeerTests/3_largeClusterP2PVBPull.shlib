@@ -256,8 +256,8 @@ function runTestCase {
 		validateInternalLogWithInstance "$clusterName" "$CKPT_MAPPING_NOT_FOUND_MSG" 0
 	done
 
-	echo "Sleeping 120 seconds for heartbeat to be passed and parsed"
-	sleep 120
+	echo "Sleeping 60 seconds for heartbeat to be passed and parsed"
+	sleep 60
 	validatePrometheusSourceNodesCnt "C2" 4
 	validatePrometheusSourceRunningReplCnt "C2" 1
 

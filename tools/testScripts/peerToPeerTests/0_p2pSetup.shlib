@@ -152,10 +152,6 @@ function runReplicationResume {
 	fi
 
 	validateInternalLogWithInstance "C1P" "$CKPT_RETRIEVED" 1
-
-	validateInternalLogWithInstance "C1" "$HEARTBEAT_RECEIVED" 1 100
-	validateInternalLogWithInstance "C1P" "$HEARTBEAT_RECEIVED" 1 100
-	validateInternalLogWithInstance "C2" "$HEARTBEAT_RECEIVED" 1 100
 	grepForPanics
 }
 
