@@ -583,7 +583,7 @@ func (sm StatisticsPropertyMap) KeyExists(key string) bool {
 }
 
 func (sm StatisticsPropertyMap) GetAllKeys() []string {
-	keys := make([]string, len(sm))
+	keys := make([]string, 0, len(sm))
 	for k, _ := range sm {
 		keys = append(keys, k)
 	}
