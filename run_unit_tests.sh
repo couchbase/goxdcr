@@ -82,6 +82,7 @@ peerToPeer
 pipeline
 pipeline_svc
 pipeline_manager
+pipeline_utils
 service_impl
 streamApiWatcher
 utils
