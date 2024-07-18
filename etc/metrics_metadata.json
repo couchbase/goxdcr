@@ -314,6 +314,18 @@
         "notes": "This usually means that one source mutation is now going to exist in two or more target collections, leading to mismatching doc counts between buckets. This can happen when migration mode is turned on, and the migration filtering expression is not specific enough, leading to a single doc matching multiple migration filtering expressions. To prevent this, ensure that the filtering expr are more specific such that each doc is migrated to only one target collection.",
         "stability": "committed"
     },
+    "xdcr_docs_compression_skipped_total": {
+        "type": "counter",
+        "help": "Total number of documents whose compression was skipped before replication, due to a larger snappy-compressed size",
+        "added": "8.0.0",
+        "labels": [
+            "sourceBucketName",
+            "targetClusterUUID",
+            "targetBucketName",
+            "pipelineType"
+        ],
+        "stability": "committed"
+    },
     "xdcr_docs_failed_cr_source_total": {
         "type": "counter",
         "help": "Number of documents (or tombstones) that were not replicated to the Target due to Conflict Resolution evaluated on the Source",

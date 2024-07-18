@@ -727,6 +727,7 @@ type WrappedMCRequest struct {
 	SlicesToBeReleasedByRouter [][]byte
 	SlicesToBeReleasedMtx      sync.Mutex
 	NeedToRecompress           bool
+	SkippedRecompression       bool
 	ImportMutation             bool
 
 	// If a single source mutation is translated to multiple target requests, the additional ones are listed here

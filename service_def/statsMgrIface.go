@@ -61,6 +61,7 @@ const (
 	SIZE_REP_QUEUE_METRIC               = "size_rep_queue"
 	DOCS_REP_QUEUE_METRIC               = base.DocsRepQueueStats
 	DATA_REPLICATED_UNCOMPRESSED_METRIC = "data_replicated_uncompress"
+	DOCS_COMPRESSION_SKIPPED_METRIC     = "docs_compression_skipped"
 
 	DOCS_FILTERED_METRIC               = base.DocsFiltered
 	DOCS_UNABLE_TO_FILTER_METRIC       = base.DocsUnableToFilter
@@ -788,6 +789,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Stability:    Committed,
 		Labels:       StandardLabels,
 		Notes:        "This stat is used in conjunction with data_replicated such that compression ratios can be calculated",
+	},
+	DOCS_COMPRESSION_SKIPPED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.VersionForCasPoisonDetection,
+		Description:  "Total number of documents whose compression was skipped before replication, due to a larger snappy-compressed size",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 
 	DOCS_FILTERED_METRIC: StatsProperty{

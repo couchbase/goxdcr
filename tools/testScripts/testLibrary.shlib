@@ -59,14 +59,15 @@ function checkItemCnt {
 			if (($itemCount != $previousItemCnt)); then
 				previousItemCnt=$itemCount
 				i=$(($i - 1))
-				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items. Expect $expectedCnt. Items are increasing..."
+				echo "WARN: Cluster $cluster bucket $bucket only has $itemCount items. Expect $expectedCnt. Items are increasing..."
 			else
-				echo "ERROR: Cluster $cluster bucket $bucket only has $itemCount items"
+				echo "WARN: Cluster $cluster bucket $bucket only has $itemCount items"
 			fi
 		fi
 		echo "Sleeping 10 seconds and retrying..."
 		sleep 10
 	done
+	echo "ERROR: Cluster $cluster bucket $bucket has $itemCount items - failed to match expected items count of $expectedCnt"
 	read -p "Press any key once done investigating"
 	dumpDebugInfoBeforeExit
 	exit 1

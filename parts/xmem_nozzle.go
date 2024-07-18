@@ -1441,8 +1441,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *base.SubdocLookupResponse) error {
 	mc_req := req.Req
 
-	contains_xattr := base.HasXattr(mc_req.DataType)
-	if contains_xattr && !xmem.xattrEnabled {
+	if base.HasXattr(mc_req.DataType) && !xmem.xattrEnabled && mc_req.DataType&mcc.SnappyDataType == 0 {
 		// if request contains xattr and xattr is not enabled in the memcached connection, strip xattr off the request
 
 		// strip the xattr bit off data type
@@ -1458,13 +1457,13 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 		mc_req.Body = mc_req.Body[xattr_length+4:]
 	}
 
-	// Memcached does not like it when any other flags are in there. Purge and re-do
+	// Memcached does not like it when irrelevant flags are present; so unset them.
 	if mc_req.DataType > 0 {
+		flagsToTest := base.XattrDataType
 		if xmem.compressionSetting == base.CompressionTypeSnappy {
-			mc_req.DataType &= (base.PROTOCOL_BINARY_DATATYPE_XATTR | base.SnappyDataType)
-		} else {
-			mc_req.DataType &= base.PROTOCOL_BINARY_DATATYPE_XATTR
+			flagsToTest |= base.SnappyDataType
 		}
+		mc_req.DataType &= flagsToTest
 	}
 
 	// Send HLV and preserve _sync if necessary
@@ -1483,19 +1482,28 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest, lookup *
 	// if the request is a subdoc op, then the body would be composed of operational specs. KV doesn't support snappy compression on it.
 	if !req.IsSubdocOp() && req.NeedToRecompress && mc_req.DataType&mcc.SnappyDataType == 0 {
 		maxEncodedLen := snappy.MaxEncodedLen(len(mc_req.Body))
-		if maxEncodedLen > 0 && maxEncodedLen < len(mc_req.Body) {
-			body, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
-			if err != nil {
-				body = make([]byte, maxEncodedLen)
-				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
-			} else {
-				req.AddByteSliceForXmemToRecycle(body)
-			}
-			body = snappy.Encode(body, mc_req.Body)
-			mc_req.Body = body
-			mc_req.DataType = mc_req.DataType | mcc.SnappyDataType
-			req.NeedToRecompress = false
+		bodyBytes, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
+		if err != nil {
+			bodyBytes = make([]byte, maxEncodedLen)
+			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 		}
+		bodyBytes = snappy.Encode(bodyBytes, mc_req.Body)
+
+		if len(mc_req.Body) < len(bodyBytes) {
+			// not compressing MCRequest body as the snappy-compressed size is greater than the raw size
+			req.SkippedRecompression = true
+			if err == nil {
+				xmem.dataPool.PutByteSlice(bodyBytes)
+			}
+			return nil
+		}
+
+		if err == nil {
+			req.AddByteSliceForXmemToRecycle(bodyBytes)
+		}
+		mc_req.Body = bodyBytes
+		mc_req.DataType = mc_req.DataType | mcc.SnappyDataType
+		req.NeedToRecompress = false
 	}
 	return nil
 }
@@ -2514,7 +2522,7 @@ func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures) error 
 		errMsg := fmt.Sprintf("%v Attempted to send HELO with compression type: %v, but received response with %v",
 			xmem.Id(), xmem.compressionSetting, features.CompressionType)
 		xmem.Logger().Error(errMsg)
-		if xmem.compressionSetting != base.CompressionTypeForceUncompress {
+		if xmem.compressionSetting != base.CompressionTypeNone {
 			return base.ErrorCompressionNotSupported
 		} else {
 			// This is potentially a serious issue
@@ -2964,19 +2972,20 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 						isExpirySet = (len(req.Extras) >= 8 && binary.BigEndian.Uint32(req.Extras[4:8]) != 0)
 					}
 					additionalInfo := DataSentEventAdditional{Seqno: seqno,
-						IsOptRepd:           xmem.optimisticRep(wrappedReq),
-						Opcode:              req.Opcode,
-						IsExpirySet:         isExpirySet,
-						VBucket:             req.VBucket,
-						Req_size:            req.Size(),
-						Commit_time:         committing_time,
-						Resp_wait_time:      resp_wait_time,
-						ManifestId:          manifestId,
-						FailedTargetCR:      base.IsEExistsError(response.Status),
-						UncompressedReqSize: req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
-						ImportMutation:      wrappedReq.ImportMutation,
-						Cloned:              wrappedReq.Cloned,
-						CloneSyncCh:         wrappedReq.ClonedSyncCh,
+						IsOptRepd:            xmem.optimisticRep(wrappedReq),
+						Opcode:               req.Opcode,
+						IsExpirySet:          isExpirySet,
+						VBucket:              req.VBucket,
+						Req_size:             req.Size(),
+						Commit_time:          committing_time,
+						Resp_wait_time:       resp_wait_time,
+						ManifestId:           manifestId,
+						FailedTargetCR:       base.IsEExistsError(response.Status),
+						UncompressedReqSize:  req.Size() - wrappedReq.GetBodySize() + wrappedReq.GetUncompressedBodySize(),
+						SkippedRecompression: wrappedReq.SkippedRecompression,
+						ImportMutation:       wrappedReq.ImportMutation,
+						Cloned:               wrappedReq.Cloned,
+						CloneSyncCh:          wrappedReq.ClonedSyncCh,
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 					if wrappedReq.ImportMutation && xmem.getMobileCompatible() == base.MobileCompatibilityOff && atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 0, 1) {
