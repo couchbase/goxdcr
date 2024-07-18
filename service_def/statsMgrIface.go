@@ -55,11 +55,11 @@ const (
 	EXPIRY_DOCS_MERGE_FAILED_METRIC = "expiry_docs_merge_failed"
 
 	// the number of docs processed by pipeline
-	DOCS_PROCESSED_METRIC  = "docs_processed"
-	DATA_REPLICATED_METRIC = "data_replicated"
-	SIZE_REP_QUEUE_METRIC  = "size_rep_queue"
-	DOCS_REP_QUEUE_METRIC  = base.DocsRepQueueStats
-
+	DOCS_PROCESSED_METRIC              = "docs_processed"
+	DATA_REPLICATED_METRIC             = "data_replicated"
+	SIZE_REP_QUEUE_METRIC              = "size_rep_queue"
+	DOCS_REP_QUEUE_METRIC              = base.DocsRepQueueStats
+	DOCS_COMPRESSION_SKIPPED_METRIC    = "docs_compression_skipped"
 	DOCS_FILTERED_METRIC               = "docs_filtered"
 	DOCS_UNABLE_TO_FILTER_METRIC       = "docs_unable_to_filter"
 	EXPIRY_FILTERED_METRIC             = "expiry_filtered"
@@ -743,6 +743,14 @@ var GlobalStatsTable = StatisticsPropertyMap{
 		Notes: "The larger the amount of data being buffered to be sent will cause the goxdcr process to take up more memory.  " +
 			"If too much memory is being used, consider decreasing the number of nozzles or tune such that less data " +
 			"will be buffered",
+	},
+	DOCS_COMPRESSION_SKIPPED_METRIC: StatsProperty{
+		MetricType:   StatsUnit{MetricTypeCounter, StatsMgrNoUnit},
+		Cardinality:  LowCardinality,
+		VersionAdded: base.Version7_2_7,
+		Description:  "Total number of documents whose compression was skipped before replication, due to a larger snappy-compressed size",
+		Stability:    Committed,
+		Labels:       StandardLabels,
 	},
 	DOCS_FILTERED_METRIC: StatsProperty{
 		MetricType:   StatsUnit{MetricTypeGauge, StatsMgrNoUnit},

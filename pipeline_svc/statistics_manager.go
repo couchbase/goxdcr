@@ -50,7 +50,7 @@ var StatsToInitializeForPausedReplications = []string{service_def.DOCS_WRITTEN_M
 var StatsToClearForPausedReplications = []string{service_def.SIZE_REP_QUEUE_METRIC, service_def.DOCS_REP_QUEUE_METRIC, service_def.DOCS_LATENCY_METRIC, service_def.META_LATENCY_METRIC,
 	service_def.TIME_COMMITING_METRIC, service_def.NUM_FAILEDCKPTS_METRIC, service_def.RATE_DOC_CHECKS_METRIC, service_def.RATE_OPT_REPD_METRIC, service_def.RATE_RECEIVED_DCP_METRIC,
 	service_def.RATE_REPLICATED_METRIC, service_def.BANDWIDTH_USAGE_METRIC, service_def.THROTTLE_LATENCY_METRIC, service_def.THROUGHPUT_THROTTLE_LATENCY_METRIC, service_def.GET_DOC_LATENCY_METRIC,
-	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DELETION_CLONED_METRIC, service_def.TARGET_TMPFAIL_METRIC,
+	service_def.MERGE_LATENCY_METRIC, service_def.DOCS_CLONED_METRIC, service_def.DOCS_COMPRESSION_SKIPPED_METRIC, service_def.DELETION_CLONED_METRIC, service_def.TARGET_TMPFAIL_METRIC,
 	service_def.TARGET_EACCESS_METRIC}
 
 // keys for metrics in overview
@@ -103,6 +103,7 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.DELETION_CLONED_METRIC:             service_def.MetricTypeCounter,
 	service_def.TARGET_DOCS_SKIPPED_METRIC:         service_def.MetricTypeCounter,
 	service_def.DOCS_FAILED_CR_TARGET_METRIC:       service_def.MetricTypeCounter,
+	service_def.DOCS_COMPRESSION_SKIPPED_METRIC:    service_def.MetricTypeCounter,
 	service_def.BINARY_FILTERED_METRIC:             service_def.MetricTypeCounter,
 	service_def.PIPELINE_STATUS:                    service_def.MetricTypeGauge,
 	service_def.PIPELINE_ERRORS:                    service_def.MetricTypeGauge,
@@ -652,6 +653,13 @@ func (stats_mgr *StatisticsManager) processCalculatedStats(overview_expvar_map *
 	docs_checked_var.Set(int64(docs_checked))
 	overview_expvar_map.Set(service_def.DOCS_CHECKED_METRIC, docs_checked_var)
 	setCounter(stats_mgr.getOverviewRegistry().Get(service_def.DOCS_CHECKED_METRIC).(metrics.Counter), int(docs_checked))
+
+	// calculate docs_compression_skipped
+	docsCompressionSkippedVar := new(expvar.Int)
+	docsCompressionSkippedVar.Set(
+		stats_mgr.getOverviewRegistry().Get(service_def.DOCS_COMPRESSION_SKIPPED_METRIC).(metrics.Counter).Count(),
+	)
+	overview_expvar_map.Set(service_def.DOCS_COMPRESSION_SKIPPED_METRIC, docsCompressionSkippedVar)
 
 	//calculate rate_doc_checks
 	var rate_doc_checks float64
@@ -1418,6 +1426,8 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		registry.Register(service_def.SET_DOCS_CAS_CHANGED_METRIC, set_cas_changed)
 		add_cas_changed := metrics.NewCounter()
 		registry.Register(service_def.ADD_DOCS_CAS_CHANGED_METRIC, add_cas_changed)
+		docs_compression_skipped := metrics.NewCounter()
+		registry.Register(service_def.DOCS_COMPRESSION_SKIPPED_METRIC, docs_compression_skipped)
 		eaccessReceived := metrics.NewCounter()
 		registry.Register(service_def.TARGET_EACCESS_METRIC, eaccessReceived)
 		tmpfailReceived := metrics.NewCounter()
@@ -1454,6 +1464,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.DELETION_DOCS_CAS_CHANGED_METRIC] = deletion_cas_changed
 		metric_map[service_def.SET_DOCS_CAS_CHANGED_METRIC] = set_cas_changed
 		metric_map[service_def.ADD_DOCS_CAS_CHANGED_METRIC] = add_cas_changed
+		metric_map[service_def.DOCS_COMPRESSION_SKIPPED_METRIC] = docs_compression_skipped
 		metric_map[service_def.TARGET_EACCESS_METRIC] = eaccessReceived
 		metric_map[service_def.TARGET_TMPFAIL_METRIC] = tmpfailReceived
 		outNozzle_collector.component_map[part.Id()] = metric_map
@@ -1503,6 +1514,9 @@ func (outNozzle_collector *outNozzleCollector) ProcessEvent(event *common.Event)
 		resp_wait_time := event_otherInfo.Resp_wait_time
 		metric_map[service_def.DOCS_WRITTEN_METRIC].(metrics.Counter).Inc(1)
 		metric_map[service_def.DATA_REPLICATED_METRIC].(metrics.Counter).Inc(int64(req_size))
+		if event_otherInfo.SkippedRecompression {
+			metric_map[service_def.DOCS_COMPRESSION_SKIPPED_METRIC].(metrics.Counter).Inc(1)
+		}
 		if opti_replicated {
 			metric_map[service_def.DOCS_OPT_REPD_METRIC].(metrics.Counter).Inc(1)
 		}

@@ -664,6 +664,7 @@ var VersionForConnectionPreCheckSupport = ServerVersion{7, 2, 1}
 var VersionForSupportability = Version7_2_1
 var Version7_2_5 = ServerVersion{7, 2, 5}
 var Version7_2_6 = ServerVersion{7, 2, 6}
+var Version7_2_7 = ServerVersion{7, 2, 7}
 var VersionForCasPoisonDetection = Version7_2_6
 
 func (s ServerVersion) String() string {

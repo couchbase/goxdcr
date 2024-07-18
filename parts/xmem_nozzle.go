@@ -1312,8 +1312,7 @@ func (xmem *XmemNozzle) batchSetMetaWithRetry(batch *dataBatch, numOfRetry int) 
 func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 	mc_req := req.Req
 
-	contains_xattr := base.HasXattr(mc_req.DataType)
-	if contains_xattr && !xmem.xattrEnabled {
+	if base.HasXattr(mc_req.DataType) && !xmem.xattrEnabled && mc_req.DataType&mcc.SnappyDataType == 0 {
 		// if request contains xattr and xattr is not enabled in the memcached connection, strip xattr off the request
 
 		// strip the xattr bit off data type
@@ -1329,13 +1328,13 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 		mc_req.Body = mc_req.Body[xattr_length+4:]
 	}
 
-	// Memcached does not like it when any other flags are in there. Purge and re-do
+	// Memcached does not like it when irrelevant flags are present; so unset them.
 	if mc_req.DataType > 0 {
+		flagsToTest := uint8(base.XattrDataType)
 		if xmem.compressionSetting == base.CompressionTypeSnappy {
-			mc_req.DataType &= (base.PROTOCOL_BINARY_DATATYPE_XATTR | base.SnappyDataType)
-		} else {
-			mc_req.DataType &= base.PROTOCOL_BINARY_DATATYPE_XATTR
+			flagsToTest |= base.SnappyDataType
 		}
+		mc_req.DataType &= flagsToTest
 	}
 	if xmem.source_cr_mode == base.CRMode_Custom {
 		err := xmem.updateCustomCRXattrForTarget(req)
@@ -1345,23 +1344,29 @@ func (xmem *XmemNozzle) preprocessMCRequest(req *base.WrappedMCRequest) error {
 		// Compress it if needed
 		if mc_req.DataType&mcc.SnappyDataType == 0 {
 			maxEncodedLen := snappy.MaxEncodedLen(len(mc_req.Body))
-			if maxEncodedLen > 0 && maxEncodedLen < len(mc_req.Body) {
-				body, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
-				if err != nil {
-					body = make([]byte, maxEncodedLen)
-					xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
-				} else {
-					req.SlicesToBeReleasedMtx.Lock()
-					if req.SlicesToBeReleasedByXmem == nil {
-						req.SlicesToBeReleasedByXmem = make([][]byte, 0, 1)
-					}
-					req.SlicesToBeReleasedByXmem = append(req.SlicesToBeReleasedByXmem, body)
-					req.SlicesToBeReleasedMtx.Unlock()
-				}
-				body = snappy.Encode(body, mc_req.Body)
-				mc_req.Body = body
-				mc_req.DataType = mc_req.DataType | mcc.SnappyDataType
+			bodyBytes, err := xmem.dataPool.GetByteSlice(uint64(maxEncodedLen))
+			if err != nil {
+				bodyBytes = make([]byte, maxEncodedLen)
+				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
 			}
+
+			bodyBytes = snappy.Encode(bodyBytes, mc_req.Body)
+			if len(mc_req.Body) < len(bodyBytes) {
+				// not compressing MCRequest body as the snappy-compressed size is greater than the raw size
+				req.SkippedRecompression = true
+				if err == nil {
+					xmem.dataPool.PutByteSlice(bodyBytes)
+				}
+				return nil
+			}
+
+			if err == nil {
+				req.SlicesToBeReleasedMtx.Lock()
+				req.SlicesToBeReleasedByXmem = append(req.SlicesToBeReleasedByXmem, bodyBytes)
+				req.SlicesToBeReleasedMtx.Unlock()
+			}
+			mc_req.Body = bodyBytes
+			mc_req.DataType = mc_req.DataType | mcc.SnappyDataType
 		}
 	}
 	req.UpdateReqBytes()
@@ -2477,7 +2482,7 @@ func (xmem *XmemNozzle) validateFeatures(features utilities.HELOFeatures) error 
 		errMsg := fmt.Sprintf("%v Attempted to send HELO with compression type: %v, but received response with %v",
 			xmem.Id(), xmem.compressionSetting, features.CompressionType)
 		xmem.Logger().Error(errMsg)
-		if xmem.compressionSetting != base.CompressionTypeForceUncompress {
+		if xmem.compressionSetting != base.CompressionTypeNone {
 			return base.ErrorCompressionNotSupported
 		} else {
 			// This is potentially a serious issue
@@ -2856,17 +2861,18 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 
 				if req != nil && req.Opaque == response.Opaque {
 					additionalInfo := DataSentEventAdditional{Seqno: seqno,
-						IsOptRepd:      xmem.optimisticRep(req),
-						Opcode:         req.Opcode,
-						IsExpirySet:    (binary.BigEndian.Uint32(req.Extras[4:8]) != 0),
-						VBucket:        req.VBucket,
-						Req_size:       req.Size(),
-						Commit_time:    committing_time,
-						Resp_wait_time: resp_wait_time,
-						ManifestId:     manifestId,
-						FailedTargetCR: base.IsEExistsError(response.Status),
-						Cloned:         wrappedReq.Cloned,
-						CloneSyncCh:    wrappedReq.ClonedSyncCh,
+						IsOptRepd:            xmem.optimisticRep(req),
+						Opcode:               req.Opcode,
+						IsExpirySet:          (binary.BigEndian.Uint32(req.Extras[4:8]) != 0),
+						VBucket:              req.VBucket,
+						Req_size:             req.Size(),
+						Commit_time:          committing_time,
+						Resp_wait_time:       resp_wait_time,
+						ManifestId:           manifestId,
+						FailedTargetCR:       base.IsEExistsError(response.Status),
+						SkippedRecompression: wrappedReq.SkippedRecompression,
+						Cloned:               wrappedReq.Cloned,
+						CloneSyncCh:          wrappedReq.ClonedSyncCh,
 					}
 					xmem.RaiseEvent(common.NewEvent(common.DataSent, nil, xmem, nil, additionalInfo))
 
