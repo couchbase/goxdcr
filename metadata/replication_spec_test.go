@@ -12,8 +12,10 @@ package metadata
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -63,5 +65,23 @@ func TestListSameAs(t *testing.T) {
 	list4 := ReplSpecList{spec, spec2, spec3a}
 	assert.False(list4.SameAs(list1))
 	assert.False(list1.SameAs(list4))
+
+}
+
+func TestListRedact(t *testing.T) {
+	assert := assert.New(t)
+	fmt.Println("============== Test case start: TestListSameAs =================")
+	defer fmt.Println("============== Test case end: TestListSameAs =================")
+
+	spec, err := NewReplicationSpecification("S1", "s1UUID", "tcUUID", "tb2", "tbUuid")
+	assert.Nil(err)
+	spec.Settings.Values[FilterExpressionKey] = "EXISTS(key)"
+	spec2 := spec.Clone()
+	spec3 := spec.Clone()
+
+	list1 := ReplSpecList{spec, spec2, spec3}
+
+	list1 = list1.Redact()
+	assert.True(strings.Contains(list1[0].Settings.Values[FilterExpressionKey].(string), base.UdTagBegin))
 
 }

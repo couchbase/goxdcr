@@ -309,6 +309,10 @@ type getRemoteClusterOpts struct {
 	RemoteClusterUuid        string
 }
 
+type getSourcesOpt struct {
+	getOptsCommon
+}
+
 func (g getRemoteClusterOpts) ShouldPopulateRemoteBucketManifest() bool {
 	return g.BucketManifestBucketName != "" && g.RemoteClusterUuid != ""
 }
@@ -349,6 +353,22 @@ func parseGetOptsCommon(query url.Values, opt *getOptsCommon) {
 
 func parseGetReplicationsRequestQuery(request *http.Request) getReplicationsOpt {
 	var opt getReplicationsOpt
+	if request == nil {
+		return opt
+	}
+
+	query := request.URL.Query()
+	if query == nil || len(query) == 0 {
+		return opt
+	}
+
+	parseGetOptsCommon(query, &opt.getOptsCommon)
+
+	return opt
+}
+
+func parseGetSourcesRequestQuery(request *http.Request) getSourcesOpt {
+	var opt getSourcesOpt
 	if request == nil {
 		return opt
 	}
@@ -1411,13 +1431,28 @@ func (adminport *Adminport) doGetConnectionPreCheckResultRequest(request *http.R
 }
 
 func (adminport *Adminport) doGetSourceClustersRequest(request *http.Request) (*ap.Response, error) {
-	redactedRequest := base.CloneAndTagHttpRequest(request)
-	logger_ap.Infof("doGetSourceClustersRequest req=%v\n", redactedRequest)
+	logger_ap.Infof("doGetSourceClustersRequest req=%v\n", base.CloneAndTagHttpRequest(request))
 	defer logger_ap.Infof("Finished doGetSourceClustersRequest\n")
+
+	// Since getting source clusters information will return replication and its settings, use the same
+	// limiting privilege as what it takes to retrieve a replication and its settings
+	response, err := authWebCreds(request, base.PermissionXDCRInternalRead)
+	if response != nil || err != nil {
+		return response, err
+	}
+
+	options := parseGetSourcesRequestQuery(request)
 
 	srcSpecs, srcNodes, err := adminport.p2pMgr.GetHeartbeatsReceivedV1()
 	if err != nil {
 		return nil, err
+	}
+
+	if options.RedactRequested {
+		for sourceUuid, specList := range srcSpecs {
+			list := metadata.ReplSpecList(specList)
+			srcSpecs[sourceUuid] = list.Redact()
+		}
 	}
 
 	return NewSourceClustersV1Response(srcSpecs, srcNodes)

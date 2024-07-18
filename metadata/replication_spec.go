@@ -320,3 +320,14 @@ func (r ReplSpecList) String() any {
 	}
 	return strBuilder.String()
 }
+
+func (r ReplSpecList) Redact() ReplSpecList {
+	if r == nil {
+		return nil
+	}
+
+	for i, spec := range r {
+		r[i] = spec.Redact()
+	}
+	return r
+}
