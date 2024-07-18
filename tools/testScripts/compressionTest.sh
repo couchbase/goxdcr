@@ -20,6 +20,11 @@ if (($? != 0)); then
 	exit $?
 fi
 
+. ./testLibrary.shlib
+if (($? != 0)); then
+	exit $?
+fi
+
 # set globals
 # -----------------
 DEFAULT_ADMIN="Administrator"
@@ -86,7 +91,7 @@ function printTestCaseStats {
 	local -a statsKeys=("docs_written" "data_replicated")
 
 	echo "FROM $srcCluster $srcBucket TO $targetCluster $targetBucket"
-	echo "-----------------------------------------------------------"
+	echo "----------------------------------------------------------------------------"
 	for key in "${statsKeys[@]}"; do
 		local data=$(getStats "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket" "$key")
 		if (($? != 0)); then
@@ -94,7 +99,7 @@ function printTestCaseStats {
 		fi
 		echo "$key: $data"
 	done
-	echo "-----------------------------------------------------------"
+	echo ""
 }
 
 function runTestCase {
@@ -103,7 +108,10 @@ function runTestCase {
 	local targetBucketPolicy=$3
 	local replPolicy=$4
 
-	echo "TEST CASE $testCaseName SourceBucket: $sourceBucketPolicy TargetBucket: $targetBucketPolicy CompressionMode: $replPolicy"
+	echo ""
+	echo "============================================================================"
+	echo "RUNNING TEST CASE $testCaseName"
+	echo "============================================================================"
 	cleanupBucketNamePropertyMap
 	if [[ "$sourceBucketPolicy" == "Active" ]]; then
 		insertPropertyIntoBucketNamePropertyMap "B0" BucketActiveCompression
@@ -138,7 +146,7 @@ function runTestCase {
 	fi
 
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
-	sleep 1
+	sleep 10
 	runDataLoad
 	sleep 1
 
@@ -162,34 +170,50 @@ function runTestCase {
 	checkItemCnt "C2" "B3" $EXPECTED_CNT
 
 	# Cleaning up buckets should remove all existing replications
-	echo "========================================================="
-	echo "TEST CASE $testCaseName sourceBucket $sourceBucketPolicy targetBucket $targetBucketPolicy replCompression $replPolicy"
-	echo "Summary: "
+	echo "----------------------------------------------------------------------------"
+	echo "TEST CASE $testCaseName Summary: sourceBucket $sourceBucketPolicy targetBucket $targetBucketPolicy replCompression $replPolicy"
 	printTestCaseStats "C1" "B0" "C2" "B2"
 	printTestCaseStats "C1" "B1" "C2" "B3"
 	printTestCaseStats "C2" "B2" "C1" "B0"
 	printTestCaseStats "C2" "B3" "C1" "B1"
-	echo "========================================================="
+	echo "----------------------------------------------------------------------------"
+
+	echo "============================================================================"
+	echo "PASSED TEST CASE $testCaseName"
+	echo "============================================================================"
+	echo ""
+	
 	cleanupBucketReplications
 	cleanupBuckets
 	sleep $sleepTime
 }
 
-runTestCase "1a" "Active" "Active" "Auto"
-runTestCase "1b" "Active" "Active" "None"
-runTestCase "2a" "Active" "Passive" "Auto"
-runTestCase "2b" "Active" "Passive" "None"
-runTestCase "3a" "Active" "None" "Auto"
-runTestCase "3b" "Active" "None" "None"
-runTestCase "4a" "Passive" "Active" "Auto"
-runTestCase "4b" "Passive" "Active" "None"
-runTestCase "5a" "Passive" "Passive" "Auto"
-runTestCase "5b" "Passive" "Passive" "None"
-runTestCase "6a" "Passive" "None" "Auto"
-runTestCase "6b" "Passive" "None" "None"
-runTestCase "7a" "None" "Active" "Auto"
-runTestCase "7b" "None" "Active" "None"
-runTestCase "8a" "None" "Passive" "Auto"
-runTestCase "8b" "None" "Passive" "None"
-runTestCase "9a" "None" "None" "Auto"
-runTestCase "9b" "None" "None" "None"
+runTestCase "1a" "Active" "Active" "Auto" \
+&& runTestCase "1b" "Active" "Active" "None" \
+&& runTestCase "2a" "Active" "Passive" "Auto" \
+&& runTestCase "2b" "Active" "Passive" "None" \
+&& runTestCase "3a" "Active" "None" "Auto" \
+&& runTestCase "3b" "Active" "None" "None" \
+&& runTestCase "4a" "Passive" "Active" "Auto" \
+&& runTestCase "4b" "Passive" "Active" "None" \
+&& runTestCase "5a" "Passive" "Passive" "Auto" \
+&& runTestCase "5b" "Passive" "Passive" "None" \
+&& runTestCase "6a" "Passive" "None" "Auto" \
+&& runTestCase "6b" "Passive" "None" "None" \
+&& runTestCase "7a" "None" "Active" "Auto" \
+&& runTestCase "7b" "None" "Active" "None" \
+&& runTestCase "8a" "None" "Passive" "Auto" \
+&& runTestCase "8b" "None" "Passive" "None" \
+&& runTestCase "9a" "None" "None" "Auto" \
+&& runTestCase "9b" "None" "None" "None"
+
+if (($? != 0)); then
+	echo "============================================================================"
+	echo "Compression Test FAILED!"
+	echo "============================================================================"
+	exit 1
+fi
+
+echo "============================================================================"
+echo "All Compression Tests PASSED!"
+echo "============================================================================"

@@ -130,20 +130,21 @@ type DataFailedCRSourceEventAdditional struct {
 type TargetDataSkippedEventAdditional DataFailedCRSourceEventAdditional
 
 type DataSentEventAdditional struct {
-	Seqno               uint64
-	IsOptRepd           bool
-	Commit_time         time.Duration
-	Resp_wait_time      time.Duration
-	Opcode              mc.CommandCode
-	IsExpirySet         bool
-	VBucket             uint16
-	Req_size            int
-	ManifestId          uint64
-	FailedTargetCR      bool
-	UncompressedReqSize int
-	ImportMutation      bool
-	Cloned              bool
-	CloneSyncCh         chan bool
+	Seqno                uint64
+	IsOptRepd            bool
+	Commit_time          time.Duration
+	Resp_wait_time       time.Duration
+	Opcode               mc.CommandCode
+	IsExpirySet          bool
+	VBucket              uint16
+	Req_size             int
+	ManifestId           uint64
+	FailedTargetCR       bool
+	UncompressedReqSize  int
+	SkippedRecompression bool
+	ImportMutation       bool
+	Cloned               bool
+	CloneSyncCh          chan bool
 }
 
 type DataFilteredAdditional struct {
