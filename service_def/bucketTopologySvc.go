@@ -24,8 +24,6 @@ var ErrorBucketTopSvcUndergoingGC = errors.New("Specified bucket/spec is undergo
 // and feeding the information back to those who need it
 type BucketTopologySvc interface {
 	SubscribeToLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
-	SubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
-	SubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
 	SubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
 	SubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string, requestedInterval time.Duration) (chan SourceNotification, func(time.Duration), error)
 	SubscribeToLocalBucketMaxVbCasStatFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan SourceNotification, error)
@@ -33,8 +31,6 @@ type BucketTopologySvc interface {
 	SubscribeToRemoteKVStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan TargetNotification, error)
 
 	UnSubscribeLocalBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
-	UnSubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
-	UnSubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeRemoteBucketFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
 	UnSubscribeToLocalBucketHighSeqnosLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error
@@ -63,8 +59,6 @@ type SourceNotification interface {
 	GetNumberOfSourceNodes() int
 	GetSourceVBMapRO() base.KvVBMapType
 	GetKvVbMapRO() base.KvVBMapType
-	GetDcpStatsMap() base.DcpStatsMapType
-	GetDcpStatsMapLegacy() base.DcpStatsMapType
 	GetHighSeqnosMap() base.HighSeqnosMapType
 	GetHighSeqnosMapLegacy() base.HighSeqnosMapType
 	GetSourceStorageBackend() string

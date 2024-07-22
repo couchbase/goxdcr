@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,15 +36,15 @@ const (
 	// end developer injection section
 
 	// start settings key name
-	DCP_VBTimestamp         = "VBTimestamps"
-	DCP_VBTimestampUpdater  = "VBTimestampUpdater"
-	DCP_Connection_Prefix   = "xdcr:"
-	EVENT_DCP_DISPATCH_TIME = "dcp_dispatch_time"
-	EVENT_DCP_DATACH_LEN    = "dcp_datach_length"
-	DCP_Stats_Interval      = "stats_interval"
-	DCP_Priority            = "dcpPriority"
-	DCP_VBTasksMap          = "VBTaskMap"
-	DCP_EnableOSO           = "enableOSO"
+	DCP_VBTimestamp           = "VBTimestamps"
+	DCP_VBTimestampUpdater    = "VBTimestampUpdater"
+	DCP_Connection_Prefix     = "xdcr:"
+	EVENT_DCP_DISPATCH_TIME   = "dcp_dispatch_time"
+	EVENT_DCP_DATACH_LEN      = "dcp_datach_length"
+	DCP_Nozzle_Stats_Interval = "stats_interval"
+	DCP_Priority              = "dcpPriority"
+	DCP_VBTasksMap            = "VBTaskMap"
+	DCP_EnableOSO             = "enableOSO"
 )
 
 type DcpStreamState int
@@ -271,10 +270,8 @@ func (reqHelper *dcpStreamReqHelper) getDisabledError() error {
 
 type DcpNozzleIface interface {
 	common.Nozzle
-	CheckStuckness(dcp_stats base.DcpStatsMapType) error
 	CollectionEnabled() bool
 	GetStreamState(vbno uint16) (DcpStreamState, error)
-	SetMaxMissCount(max_dcp_miss_count int)
 	PrintStatusSummary()
 
 	// Embedded from AbstractPart
@@ -319,8 +316,6 @@ type DcpNozzle struct {
 	counter_compressed_received uint64
 	counter_received            uint64
 	counter_sent                uint64
-	// the counter_received stats from last dcp check
-	counter_received_last uint64
 
 	// the number of check intervals after which dcp still has inactive streams
 	// inactive streams will be restarted after this count exceeds MaxCountStreamsInactive
@@ -330,12 +325,6 @@ type DcpNozzle struct {
 	handle_error        bool
 	cur_ts              map[uint16]*vbtsWithLock
 	vbtimestamp_updater func(uint16, uint64) (*base.VBTimestamp, error)
-
-	// the number of times that the dcp nozzle did not receive anything from dcp when there are
-	// items remaining in dcp
-	// dcp is considered to be stuck and pipeline broken when this number reaches a limit
-	dcp_miss_count     uint32
-	max_dcp_miss_count uint32
 
 	// Each vb stream has its own helper to help with DCP handshaking
 	vbHandshakeMap map[uint16]*dcpStreamReqHelper
@@ -673,7 +662,7 @@ func (dcp *DcpNozzle) initialize(settings metadata.ReplicationSettingsMap) (err 
 	// fetch start timestamp from settings
 	dcp.vbtimestamp_updater = settings[DCP_VBTimestampUpdater].(func(uint16, uint64) (*base.VBTimestamp, error))
 
-	if val, ok := settings[DCP_Stats_Interval]; ok {
+	if val, ok := settings[DCP_Nozzle_Stats_Interval]; ok {
 		dcp.setStatsInterval(uint32(val.(int)))
 	} else {
 		return errors.New("setting 'stats_interval' is missing")
@@ -1683,7 +1672,7 @@ func (dcp *DcpNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 			return err
 		}
 	}
-	if statsInterval, ok := settings[DCP_Stats_Interval]; ok {
+	if statsInterval, ok := settings[DCP_Nozzle_Stats_Interval]; ok {
 		dcp.setStatsInterval(uint32(statsInterval.(int)))
 		dcp.stats_interval_change_ch <- true
 	}
@@ -1824,15 +1813,6 @@ func (dcp *DcpNozzle) GetStreamState(vbno uint16) (DcpStreamState, error) {
 	}
 }
 
-func (dcp *DcpNozzle) SetMaxMissCount(max_dcp_miss_count int) {
-	atomic.StoreUint32(&dcp.max_dcp_miss_count, uint32(max_dcp_miss_count))
-	dcp.Logger().Infof("%v set max dcp miss count to %v\n", dcp.Id(), max_dcp_miss_count)
-}
-
-func (dcp *DcpNozzle) getMaxMissCount() uint32 {
-	return atomic.LoadUint32(&dcp.max_dcp_miss_count)
-}
-
 func (dcp *DcpNozzle) checkInactiveUprStreams() {
 	defer dcp.childrenWaitGrp.Done()
 
@@ -1908,69 +1888,6 @@ func (dcp *DcpNozzle) checkInactiveUprStreams_once() error {
 	}
 
 	return nil
-}
-
-// check if dcp is stuck
-func (dcp *DcpNozzle) CheckStuckness(dcp_stats base.DcpStatsMapType) error {
-	counter_received := dcp.counterReceived()
-	if counter_received > dcp.counter_received_last {
-		// dcp is ok if received more items from dcp
-		dcp.counter_received_last = counter_received
-		dcp.dcp_miss_count = 0
-		return nil
-	}
-
-	// check if there are items remaining in dcp
-	dcp_has_items := dcp.dcpHasRemainingItemsForXdcr(dcp_stats)
-	if !dcp_has_items {
-		dcp.dcp_miss_count = 0
-		return nil
-	}
-
-	// if we get here, there is probably something wrong with dcp
-	dcp.dcp_miss_count++
-	dcp.Logger().Infof("%v Incrementing dcp miss count. Dcp miss count = %v\n", dcp.Id(), dcp.dcp_miss_count)
-
-	if dcp.dcp_miss_count > dcp.getMaxMissCount() {
-		//declare pipeline broken
-		dcp.Logger().Errorf("%v is stuck", dcp.Id())
-		return errors.New("Dcp is stuck")
-	}
-
-	return nil
-}
-
-func (dcp *DcpNozzle) dcpHasRemainingItemsForXdcr(dcp_stats base.DcpStatsMapType) bool {
-	// Each dcp nozzle has an "items_remaining" stats in stats_map.
-	// An example key for the stats is "eq_dcpq:xdcr:dcp_f58e0727200a19771e4459925908dd66/default/target_10.17.2.102:12000_0:items_remaining"
-	xdcr_items_remaining_key := base.DCP_XDCR_STATS_PREFIX + dcp.Id() + base.DCP_XDCR_ITEMS_REMAINING_SUFFIX
-
-	kv_nodes, err := dcp.xdcr_topology_svc.MyKVNodes()
-	if err != nil {
-		dcp.Logger().Warnf("%v skipping dcp remaining item check because of failure to get my kv nodes. err=%v", dcp.Id(), err)
-		// return false to avoid false negative in dcp health issue check
-		return false
-	}
-
-	for _, kv_node := range kv_nodes {
-		per_node_stats_map, ok := dcp_stats[kv_node]
-		if ok && per_node_stats_map != nil {
-			if items_remaining_stats_str, ok := (*per_node_stats_map)[xdcr_items_remaining_key]; ok {
-				items_remaining_stats_int, err := strconv.ParseInt(items_remaining_stats_str, base.ParseIntBase, base.ParseIntBitSize)
-				if err != nil {
-					dcp.Logger().Errorf("%v Items remaining stats, %v, is not of integer type.", dcp.Id(), items_remaining_stats_str)
-					continue
-				}
-				if items_remaining_stats_int > 0 {
-					return true
-				}
-			}
-		} else {
-			dcp.Logger().Errorf("%v Failed to find dcp stats in statsMap returned for server=%v", dcp.Id(), kv_node)
-		}
-	}
-
-	return false
 }
 
 func (dcp *DcpNozzle) counterReceived() uint64 {

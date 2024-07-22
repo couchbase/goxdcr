@@ -13,8 +13,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/couchbase/goxdcr/peerToPeer"
-	"github.com/couchbase/goxdcr/streamApiWatcher"
 	"os"
 	"runtime"
 	"time"
@@ -22,9 +20,11 @@ import (
 	base "github.com/couchbase/goxdcr/base"
 	log "github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata_svc"
+	"github.com/couchbase/goxdcr/peerToPeer"
 	rm "github.com/couchbase/goxdcr/replication_manager"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/service_impl"
+	"github.com/couchbase/goxdcr/streamApiWatcher"
 	utilities "github.com/couchbase/goxdcr/utils"
 )
 
@@ -226,8 +226,7 @@ func main() {
 		}
 
 		bucketTopologyService, err := service_impl.NewBucketTopologyService(top_svc, remote_cluster_svc, utils,
-			base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc,
-			base.HealthCheckInterval, securitySvc, streamApiWatcher.GetStreamApiWatcher)
+			base.TopologyChangeCheckInterval, log.DefaultLoggerContext, replication_spec_svc, securitySvc, streamApiWatcher.GetStreamApiWatcher)
 		if err != nil {
 			fmt.Printf("Error starting bucket topology service. err=%v\n", err)
 			os.Exit(1)

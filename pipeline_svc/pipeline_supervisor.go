@@ -22,9 +22,7 @@ import (
 	"github.com/couchbase/goxdcr/common"
 	"github.com/couchbase/goxdcr/log"
 	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/parts"
 	"github.com/couchbase/goxdcr/pipeline"
-	"github.com/couchbase/goxdcr/pipeline_utils"
 	"github.com/couchbase/goxdcr/service_def"
 	"github.com/couchbase/goxdcr/supervisor"
 	utilities "github.com/couchbase/goxdcr/utils"
@@ -37,7 +35,6 @@ const (
 )
 
 const (
-	default_max_dcp_miss_count     = 10
 	filterErrCheckAndPrintInterval = 5 * time.Second
 	maxFilterErrorsPerInterval     = 20
 )
@@ -116,15 +113,8 @@ func (pipelineSupervisor *PipelineSupervisor) Attach(p common.Pipeline) error {
 }
 
 func (pipelineSupervisor *PipelineSupervisor) Start(settings metadata.ReplicationSettingsMap) error {
-	pipelineSupervisor.setMaxDcpMissCount(settings)
-
 	// do the generic supervisor start stuff
 	err := pipelineSupervisor.GenericSupervisor.Start(settings)
-	if err != nil {
-		return err
-	}
-
-	err = pipelineSupervisor.monitorPipelineHealth()
 	if err != nil {
 		return err
 	}
@@ -134,25 +124,6 @@ func (pipelineSupervisor *PipelineSupervisor) Start(settings metadata.Replicatio
 	return err
 }
 
-func (pipelineSupervisor *PipelineSupervisor) setMaxDcpMissCount(settings metadata.ReplicationSettingsMap) {
-	// when doing health check, we want to wait long enough to ensure that we see bad stats in at least two different stats collection intervals
-	// before we declare the pipeline to be broken
-	var max_dcp_miss_count int
-	stats_update_interval := StatsUpdateInterval(settings)
-	number_of_waits_to_ensure_stats_update := int(stats_update_interval.Nanoseconds()/base.HealthCheckInterval.Nanoseconds()) + 1
-	if number_of_waits_to_ensure_stats_update < default_max_dcp_miss_count {
-		max_dcp_miss_count = default_max_dcp_miss_count
-	} else {
-		max_dcp_miss_count = number_of_waits_to_ensure_stats_update
-	}
-
-	pipelineSupervisor.Logger().Infof("%v updating max_dcp_miss_count to %v\n", pipelineSupervisor.Id(), max_dcp_miss_count)
-
-	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
-		dcp_nozzle.(*parts.DcpNozzle).SetMaxMissCount(max_dcp_miss_count)
-	}
-}
-
 func (pipelineSupervisor *PipelineSupervisor) Stop() error {
 	// do the generic supervisor stop stuff
 	err := pipelineSupervisor.GenericSupervisor.Stop()
@@ -160,93 +131,6 @@ func (pipelineSupervisor *PipelineSupervisor) Stop() error {
 		pipelineSupervisor.Logger().Warnf("%v received error when stopping, %v\n", pipelineSupervisor.Id(), err)
 	}
 
-	return nil
-}
-
-func (pipelineSupervisor *PipelineSupervisor) monitorPipelineHealth() error {
-	spec := pipelineSupervisor.Pipeline().Specification()
-	if spec == nil {
-		return fmt.Errorf("Nil spec")
-	}
-	replSpec := spec.GetReplicationSpec()
-	if replSpec == nil {
-		return fmt.Errorf("Nil spec2")
-	}
-
-	ref, err := pipelineSupervisor.remoteClusterSvc.RemoteClusterByUuid(replSpec.TargetClusterUUID, false)
-	if err != nil {
-		return err
-	}
-	remoteClusterCapability, err := pipelineSupervisor.remoteClusterSvc.GetCapability(ref)
-	if err != nil {
-		return err
-	}
-
-	fin_ch := pipelineSupervisor.GenericSupervisor.FinishChannel()
-	var dcpStatsCh chan service_def.SourceNotification
-
-	initCh := make(chan bool, 1)
-	initCh <- true
-	// When finCh is closed, to know whether or not initCh has been run as to whether or not wait for the init part to be done
-	var initHasRun bool
-	// Holds a variable to say whether or not closing portion needs to unsubscribe, and acts as semaphore
-	initDoneCh := make(chan bool, 1)
-
-	go func() {
-		for {
-			select {
-			case <-initCh:
-				pipelineSupervisor.Logger().Infof("%v monitorPipelineHealth started with interval: %v", pipelineSupervisor.Id(), base.HealthCheckInterval)
-				stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_subscribeDcpStatsFeed", pipelineSupervisor.pipeline.InstanceId()), base.DiagInternalThreshold)
-				initHasRun = true
-				initMonitors := func() error {
-					var initErr error
-					if remoteClusterCapability.HasCollectionSupport() {
-						dcpStatsCh, initErr = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
-					} else {
-						dcpStatsCh, initErr = pipelineSupervisor.bucketTopologySvc.SubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
-					}
-					stopFunc()
-					if initErr == nil {
-						initDoneCh <- true
-					} else {
-						initDoneCh <- false
-					}
-					return initErr
-				}
-				execErr := base.ExecWithTimeout(initMonitors, base.TimeoutRuntimeContextStart, pipelineSupervisor.Logger())
-				if execErr != nil {
-					pipelineSupervisor.setError(pipelineSupervisor.Id(), fmt.Errorf("Subscribing to bucketTopologySvc: %v", execErr))
-					// Don't exit - set the error and let Stop() gets called so clean up will ensue
-				}
-			case <-fin_ch:
-				pipelineSupervisor.Logger().Infof("monitorPipelineHealth routine is exiting because parent supervisor %v has been stopped (originally started? %v)\n", pipelineSupervisor.Id(), initHasRun)
-				if initHasRun {
-					needToUnsubscribe := <-initDoneCh
-					if needToUnsubscribe {
-						stopFunc := pipelineSupervisor.utils.StartDiagStopwatch(fmt.Sprintf("%v_unSubscribeDcpStatsFeed", pipelineSupervisor.pipeline.InstanceId()), base.DiagInternalThreshold)
-						if remoteClusterCapability.HasCollectionSupport() {
-							err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
-						} else {
-							err = pipelineSupervisor.bucketTopologySvc.UnSubscribeToLocalBucketDcpStatsLegacyFeed(replSpec, pipelineSupervisor.pipeline.InstanceId())
-						}
-						stopFunc()
-						if err != nil {
-							pipelineSupervisor.Logger().Errorf("Unable to unsubscribe from DcpStatsFeed: %v", err)
-						}
-					}
-				}
-				return
-			case notification := <-dcpStatsCh:
-				if remoteClusterCapability.HasCollectionSupport() {
-					pipelineSupervisor.checkPipelineHealth(notification.GetDcpStatsMap())
-				} else {
-					pipelineSupervisor.checkPipelineHealth(notification.GetDcpStatsMapLegacy())
-				}
-				notification.Recycle()
-			}
-		}
-	}()
 	return nil
 }
 
@@ -353,18 +237,12 @@ func (pipelineSupervisor *PipelineSupervisor) UpdateSettings(settings metadata.R
 	logLevelObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, PIPELINE_LOG_LEVEL)
 
 	if logLevelObj != nil {
-
 		logLevel, ok := logLevelObj.(log.LogLevel)
 		if !ok {
 			return fmt.Errorf("Log level %v is of wrong type %v", logLevelObj, reflect.TypeOf(logLevelObj))
 		}
 		pipelineSupervisor.LoggerContext().SetLogLevel(logLevel)
 		pipelineSupervisor.Logger().Infof("%v Updated log level to %v\n", pipelineSupervisor.Id(), logLevel)
-	}
-
-	updateIntervalObj := pipelineSupervisor.utils.GetSettingFromSettings(settings, service_def.PUBLISH_INTERVAL)
-	if updateIntervalObj != nil {
-		pipelineSupervisor.setMaxDcpMissCount(settings)
 	}
 
 	return nil
@@ -374,26 +252,6 @@ func (pipelineSupervisor *PipelineSupervisor) ReportFailure(errors map[string]er
 	pipelineSupervisor.StopHeartBeatTicker()
 	//report the failure to decision maker
 	pipelineSupervisor.GenericSupervisor.ReportFailure(errors)
-}
-
-// check if any runtime stats indicates that pipeline is broken
-func (pipelineSupervisor *PipelineSupervisor) checkPipelineHealth(dcpStats base.DcpStatsMapType) error {
-	if !pipeline_utils.IsPipelineRunning(pipelineSupervisor.pipeline.State()) {
-		//the pipeline is no longer running, kill myself
-		message := "Pipeline is no longer running, exit."
-		pipelineSupervisor.Logger().Infof("%v %v", pipelineSupervisor.Id(), message)
-		return errors.New(message)
-	}
-
-	for _, dcp_nozzle := range pipelineSupervisor.pipeline.Sources() {
-		err := dcp_nozzle.(*parts.DcpNozzle).CheckStuckness(dcpStats)
-		if err != nil {
-			pipelineSupervisor.setError(dcp_nozzle.Id(), err)
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (pipelineSupervisor *PipelineSupervisor) setError(partId string, err error) {

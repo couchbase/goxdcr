@@ -2375,60 +2375,6 @@ func GetKeysListFromStrBoolMap(a map[string]bool) []string {
 	return retList
 }
 
-type DcpStatsMapType map[string]*StringStringMap
-
-func (t *DcpStatsMapType) GetKeyList() []string {
-	if t == nil || *t == nil {
-		return nil
-	}
-	var retList []string
-	for k, _ := range *t {
-		retList = append(retList, k)
-	}
-	return retList
-}
-
-func (t *DcpStatsMapType) Clone() DcpStatsMapType {
-	if t == nil || *t == nil {
-		return nil
-	}
-
-	clonedMap := make(DcpStatsMapType)
-
-	for k, vMap := range *t {
-		if vMap == nil {
-			clonedMap[k] = nil
-		} else {
-			vMapClone := make(StringStringMap)
-			for k2, v2 := range *vMap {
-				vMapClone[k2] = v2
-			}
-			clonedMap[k] = &vMapClone
-		}
-	}
-	return clonedMap
-}
-
-func (t *DcpStatsMapType) GreenClone(dcpStatsPool func(keys []string) *DcpStatsMapType, strStrPool func(keys []string) *StringStringMap) *DcpStatsMapType {
-	if t == nil || *t == nil {
-		return nil
-	}
-
-	recycledMap := dcpStatsPool(t.GetKeyList())
-	for key, vMap := range *t {
-		if vMap == nil {
-			(*recycledMap)[key] = nil
-		} else {
-			recycledStrStr := strStrPool(GetKeysListFromStrStrMap(*vMap))
-			for key2, val2 := range *vMap {
-				(*recycledStrStr)[key2] = val2
-			}
-			(*recycledMap)[key] = recycledStrStr
-		}
-	}
-	return recycledMap
-}
-
 type BucketInfoMapType map[string]interface{}
 
 // Shallow copy clone of the values

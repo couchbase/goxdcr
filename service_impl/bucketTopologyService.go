@@ -10,7 +10,6 @@ package service_impl
 
 import (
 	"fmt"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,7 +25,6 @@ import (
 
 type BucketTopologyObjsPool struct {
 	KvVbMapPool       *utils.KvVbMapPool
-	DcpStatsMapPool   *utils.DcpStatsMapPool
 	StringStringPool  *utils.StringStringMapPool
 	HighSeqnosMapPool *utils.HighSeqnosMapPool
 	VbSeqnoMapPool    *utils.VbSeqnoMapPool
@@ -38,7 +36,6 @@ func NewBucketTopologyObjsPool() *BucketTopologyObjsPool {
 	stringSlicePool := utils.NewStringSlicePool()
 	return &BucketTopologyObjsPool{
 		KvVbMapPool:       utils.NewKvVbMapPool(),
-		DcpStatsMapPool:   utils.NewDcpStatsMapPool(),
 		StringStringPool:  utils.NewStringStringMapPool(),
 		HighSeqnosMapPool: utils.NewHighSeqnosMapPool(),
 		VbSeqnoMapPool:    utils.NewVbSeqnoMapPool(),
@@ -54,7 +51,6 @@ type BucketTopologyService struct {
 	utils               utils.UtilsIface
 	refreshInterval     time.Duration
 	logger              *log.CommonLogger
-	healthCheckInterval time.Duration
 
 	// Key is bucket Name
 	srcBucketWatchers    map[string]*BucketTopologySvcWatcher
@@ -69,7 +65,7 @@ type BucketTopologyService struct {
 	streamApiGetter streamApiWatcher.StreamApiGetterFunc
 }
 
-func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc, healthCheckInterval time.Duration,
+func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySvc, remClusterSvc service_def.RemoteClusterSvc, utils utils.UtilsIface, refreshInterval time.Duration, loggerContext *log.LoggerContext, replicationSpecService service_def.ReplicationSpecSvc,
 	securitySvc service_def.SecuritySvc, streamApiGetter streamApiWatcher.StreamApiGetterFunc) (*BucketTopologyService, error) {
 	b := &BucketTopologyService{
 		remClusterSvc:        remClusterSvc,
@@ -81,7 +77,6 @@ func NewBucketTopologyService(xdcrCompTopologySvc service_def.XDCRCompTopologySv
 		tgtBucketWatchers:    map[string]*BucketTopologySvcWatcher{},
 		tgtBucketWatchersCnt: map[string]int{},
 		refreshInterval:      refreshInterval,
-		healthCheckInterval:  healthCheckInterval,
 		securitySvc:          securitySvc,
 		streamApiGetter:      streamApiGetter,
 	}
@@ -181,13 +176,6 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		b.srcBucketWatchers[spec.SourceBucketName] = watcher
 
 		intervalFuncMap := make(IntervalFuncMap)
-		dcpStatsFunc := b.getDcpStatsUpdater(spec, watcher)
-		intervalFuncMap[DCPSTATSCHECK] = make(IntervalInnerFuncMap)
-		intervalFuncMap[DCPSTATSCHECK][b.healthCheckInterval] = dcpStatsFunc
-
-		dcpStatsLegacyFunc := b.getDcpStatsLegacyUpdater(spec, watcher)
-		intervalFuncMap[DCPSTATSCHECKLEGACY] = make(IntervalInnerFuncMap)
-		intervalFuncMap[DCPSTATSCHECKLEGACY][b.healthCheckInterval] = dcpStatsLegacyFunc
 
 		defaultPipelineStatsInterval := time.Duration(metadata.DefaultPipelineStatsIntervalMs) * time.Millisecond
 		highSeqnoFunc := b.getHighSeqnosUpdater(spec, watcher, false)
@@ -234,117 +222,6 @@ func (b *BucketTopologyService) getStreamApiCallback(spec *metadata.ReplicationS
 		}
 		watcher.sendNotificationAfterUpdate(notification, channelsMap, TOPOLOGY)
 	}
-}
-
-func (b *BucketTopologyService) getDcpStatsUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
-	dcpStatsFunc := func() error {
-		nodes, err := watcher.xdcrCompTopologySvc.MyKVNodes()
-		if err != nil {
-			return fmt.Errorf("Failed to get my KV nodes, err=%v\n", err)
-		}
-		if len(nodes) == 0 {
-			return base.ErrorNoSourceKV
-		}
-		dcp_stats := watcher.objsPool.DcpStatsMapPool.Get(nodes)
-		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcher %v", spec.SourceBucketName)
-		var features utils.HELOFeatures
-		watcher.kvMemClientsMtx.Lock()
-		for _, serverAddr := range nodes {
-			// TODO - optimize locking
-			client, err := b.utils.GetMemcachedClient(serverAddr, spec.SourceBucketName, watcher.kvMemClients, userAgent, base.KeepAlivePeriod, watcher.logger, features)
-			if err != nil {
-				watcher.kvMemClientsMtx.Unlock()
-				return err
-			}
-
-			stats_map := watcher.objsPool.StringStringPool.Get([]string{base.DCP_STAT_NAME})
-			err = client.StatsMapForSpecifiedStats(base.DCP_STAT_NAME, *stats_map)
-			if err != nil {
-				watcher.logger.Warnf("%v Error getting dcp stats for kv %v. err=%v", userAgent, serverAddr, err)
-				err1 := client.Close()
-				if err1 != nil {
-					watcher.logger.Warnf("%v error from closing connection for %v is %v\n", userAgent, serverAddr, err1)
-				}
-				delete(watcher.kvMemClients, serverAddr)
-				watcher.kvMemClientsMtx.Unlock()
-				watcher.objsPool.StringStringPool.Put(stats_map)
-				watcher.objsPool.DcpStatsMapPool.Put(dcp_stats)
-				return err
-			} else {
-				(*dcp_stats)[serverAddr] = stats_map
-			}
-		}
-		watcher.kvMemClientsMtx.Unlock()
-		watcher.latestCacheMtx.Lock()
-		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
-		replacementNotification.DcpStatsMap = dcp_stats
-		watcher.latestCached.Recycle()
-		watcher.latestCached = replacementNotification
-		watcher.latestCacheMtx.Unlock()
-		return nil
-	}
-	return dcpStatsFunc
-}
-
-func (b *BucketTopologyService) getDcpStatsLegacyUpdater(spec *metadata.ReplicationSpecification, watcher *BucketTopologySvcWatcher) func() error {
-	dcpStatsFunc := func() error {
-		nodes, err := watcher.xdcrCompTopologySvc.MyKVNodes()
-		if err != nil {
-			return fmt.Errorf("Failed to get my KV nodes, err=%v\n", err)
-		}
-		if len(nodes) == 0 {
-			return base.ErrorNoSourceKV
-		}
-		dcp_stats := watcher.objsPool.DcpStatsMapPool.Get(nodes)
-		userAgent := fmt.Sprintf("Goxdcr BucketTopologyWatcherLegacy %v", spec.SourceBucketName)
-		watcher.kvMemClientsLegacyMtx.Lock()
-		for _, serverAddr := range nodes {
-			// If the remote cluster does not support collections, then only get the stat for default collection
-			var features utils.HELOFeatures
-			// This is reverse logic because to only get stat for the default collection, we need to enable collection
-			// so we can ask specifically for a subset, aka the default collection
-			features.Collections = true
-			// TODO - optimize locking
-			client, err := b.utils.GetMemcachedClient(serverAddr, spec.SourceBucketName, watcher.kvMemClientsLegacy, userAgent, base.KeepAlivePeriod, watcher.logger, features)
-			if err != nil {
-				watcher.kvMemClientsLegacyMtx.Unlock()
-				return err
-			}
-
-			stats_map := watcher.objsPool.StringStringPool.Get([]string{base.DCP_STAT_NAME})
-
-			err = client.StatsMapForSpecifiedStats(base.DCP_STAT_NAME, *stats_map)
-			if err != nil {
-				watcher.logger.Warnf("%v Error getting dcp stats for kv %v. err=%v", userAgent, serverAddr, err)
-				err1 := client.Close()
-				if err1 != nil {
-					watcher.logger.Warnf("%v error from closing connection for %v is %v\n", userAgent, serverAddr, err1)
-				}
-				delete(watcher.kvMemClientsLegacy, serverAddr)
-				watcher.kvMemClientsLegacyMtx.Unlock()
-				watcher.objsPool.StringStringPool.Put(stats_map)
-				watcher.objsPool.DcpStatsMapPool.Put(dcp_stats)
-				return err
-			} else {
-				(*dcp_stats)[serverAddr] = stats_map
-			}
-			if delaySec := atomic.LoadUint64(&watcher.devDcpStatsLegacyDelay); delaySec > 0 {
-				randFraction := float64(rand.Int()%100) / 100.0 // get a random delay of one second
-				timeToSleep := (time.Duration(int(delaySec)) + time.Duration(randFraction)) * time.Second
-				time.Sleep(timeToSleep)
-			}
-		}
-		watcher.kvMemClientsLegacyMtx.Unlock()
-		watcher.latestCacheMtx.Lock()
-		replacementNotification := watcher.latestCached.Clone(1).(*Notification)
-		replacementNotification.DcpStatsMapLegacy = dcp_stats
-		watcher.latestCached.Recycle()
-		watcher.latestCached = replacementNotification
-		watcher.latestCacheMtx.Unlock()
-		return nil
-	}
-	watcher.setDevLegacyDelay(spec)
-	return dcpStatsFunc
 }
 
 // When cluster uses strict encryption, we need to use loopback address for local server
@@ -804,60 +681,6 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 	return nil
 }
 
-func (b *BucketTopologyService) SubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
-	if spec == nil {
-		return nil, base.ErrorNilPtr
-	}
-
-	if spec.SourceBucketName == "" {
-		return nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
-	}
-
-	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
-		return nil, base.ErrorNoSourceNozzle
-	}
-
-	b.srcBucketWatchersMtx.Lock()
-	defer b.srcBucketWatchersMtx.Unlock()
-	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
-	if exists {
-		retCh := watcher.registerAndGetCh(spec, subscriberId, DCPSTATSCHECK, nil).(chan service_def.SourceNotification)
-		return retCh, nil
-	}
-	return nil, fmt.Errorf("SubscribeToLocalBucketDcpStatsFeed could not find watcher for %v", spec.SourceBucketName)
-}
-
-func (b *BucketTopologyService) SubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) (chan service_def.SourceNotification, error) {
-	if spec == nil {
-		return nil, base.ErrorNilPtr
-	}
-
-	if spec.SourceBucketName == "" {
-		return nil, fmt.Errorf("Empty source bucket name for spec %v", spec.Id)
-	}
-
-	if isKvNode, isKvNodeErr := b.xdcrCompTopologySvc.IsKVNode(); isKvNodeErr == nil && !isKvNode {
-		return nil, base.ErrorNoSourceNozzle
-	}
-
-	b.srcBucketWatchersMtx.Lock()
-	defer b.srcBucketWatchersMtx.Unlock()
-	watcher, exists := b.srcBucketWatchers[spec.SourceBucketName]
-	if exists {
-		retCh := watcher.registerAndGetCh(spec, subscriberId, DCPSTATSCHECKLEGACY, nil).(chan service_def.SourceNotification)
-		return retCh, nil
-	}
-	return nil, fmt.Errorf("SubscribeToLocalBucketDcpStatsLegacyFeed could not find watcher for %v", spec.SourceBucketName)
-}
-
-func (b *BucketTopologyService) UnSubscribeToLocalBucketDcpStatsFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
-	return b.unSubscribeLocalInternal(spec, subscriberId, DCPSTATSCHECK)
-}
-
-func (b *BucketTopologyService) UnSubscribeToLocalBucketDcpStatsLegacyFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
-	return b.unSubscribeLocalInternal(spec, subscriberId, DCPSTATSCHECKLEGACY)
-}
-
 func (b *BucketTopologyService) UnSubscribeToLocalBucketHighSeqnosFeed(spec *metadata.ReplicationSpecification, subscriberId string) error {
 	return b.unSubscribeLocalInternal(spec, subscriberId, HIGHSEQNOS)
 }
@@ -1237,10 +1060,6 @@ type BucketTopologySvcWatcher struct {
 	// Key is a "spec + subscriber ID"
 	topologyNotifyMtx      sync.RWMutex
 	topologyNotifyChs      map[string]interface{}
-	dcpStatsMtx            sync.RWMutex
-	dcpStatsChs            map[string]interface{}
-	dcpStatsLegacyMtx      sync.RWMutex
-	dcpStatsLegacyChs      map[string]interface{}
 	highSeqnosChsMtx       sync.RWMutex
 	highSeqnosChs          map[string]interface{}
 	highSeqnosLegacyChsMtx sync.RWMutex
@@ -1333,12 +1152,10 @@ type WatchersTickerValueMap map[string]time.Duration
 // Legacy below is needed to replicate to target cluster that is < 7.0
 // Once <7.0 is EOL'ed, then LEGACY can be removed
 const (
-	TOPOLOGY            = "topology"
-	DCPSTATSCHECK       = "dcpStats"
-	DCPSTATSCHECKLEGACY = "dcpStatsLegacy"
-	HIGHSEQNOS          = "vbHighSeqnos"
-	HIGHSEQNOSLEGACY    = "vbHighSeqnosLegacy" // Legacy means it only receives default collection high seqnos
-	MAXCAS              = "vbMaxCas"
+	TOPOLOGY         = "topology"
+	HIGHSEQNOS       = "vbHighSeqnos"
+	HIGHSEQNOSLEGACY = "vbHighSeqnosLegacy" // Legacy means it only receives default collection high seqnos
+	MAXCAS           = "vbMaxCas"
 )
 
 // If no one is subscribed, no need to run the updater except for
@@ -1387,8 +1204,6 @@ func NewBucketTopologySvcWatcher(bucketName, bucketUuid string, logger *log.Comm
 		topologyNotifyChs:             make(map[string]interface{}),
 		kvMemClients:                  map[string]mcc.ClientIface{},
 		kvMemClientsLegacy:            map[string]mcc.ClientIface{},
-		dcpStatsChs:                   map[string]interface{}{},
-		dcpStatsLegacyChs:             map[string]interface{}{},
 		statsMap:                      nil,
 		watchersTickersMap:            WatchersTickerMap{},
 		watchersTickersValueMap:       WatchersTickerValueMap{},
@@ -1622,12 +1437,6 @@ func (bw *BucketTopologySvcWatcher) updateOnce(updateType string, customUpdateFu
 	case TOPOLOGY:
 		channelsMap = bw.topologyNotifyChs
 		mutex = &bw.topologyNotifyMtx
-	case DCPSTATSCHECK:
-		channelsMap = bw.dcpStatsChs
-		mutex = &bw.dcpStatsMtx
-	case DCPSTATSCHECKLEGACY:
-		channelsMap = bw.dcpStatsLegacyChs
-		mutex = &bw.dcpStatsLegacyMtx
 	case HIGHSEQNOS:
 		channelsMap = bw.highSeqnosChs
 		mutex = &bw.highSeqnosChsMtx
@@ -1726,12 +1535,6 @@ func (bw *BucketTopologySvcWatcher) registerAndGetCh(spec *metadata.ReplicationS
 	case TOPOLOGY:
 		specifiedChs = bw.topologyNotifyChs
 		mutex = &bw.topologyNotifyMtx
-	case DCPSTATSCHECK:
-		specifiedChs = bw.dcpStatsChs
-		mutex = &bw.dcpStatsMtx
-	case DCPSTATSCHECKLEGACY:
-		specifiedChs = bw.dcpStatsLegacyChs
-		mutex = &bw.dcpStatsLegacyMtx
 	case HIGHSEQNOS:
 		specifiedChs = bw.highSeqnosChs
 		mutex = &bw.highSeqnosChsMtx
@@ -1794,12 +1597,6 @@ func (bw *BucketTopologySvcWatcher) unregisterCh(spec *metadata.ReplicationSpeci
 	case TOPOLOGY:
 		specifiedChs = bw.topologyNotifyChs
 		mutex = &bw.topologyNotifyMtx
-	case DCPSTATSCHECK:
-		specifiedChs = bw.dcpStatsChs
-		mutex = &bw.dcpStatsMtx
-	case DCPSTATSCHECKLEGACY:
-		specifiedChs = bw.dcpStatsLegacyChs
-		mutex = &bw.dcpStatsLegacyMtx
 	case HIGHSEQNOS:
 		specifiedChs = bw.highSeqnosChs
 		mutex = &bw.highSeqnosChsMtx
@@ -2089,8 +1886,6 @@ type Notification struct {
 	NumberOfSourceNodes           int
 	SourceVBMap                   *base.KvVBMapType
 	KvVbMap                       *base.KvVBMapType
-	DcpStatsMap                   *base.DcpStatsMapType
-	DcpStatsMapLegacy             *base.DcpStatsMapType
 	HighSeqnoMap                  *base.HighSeqnosMapType
 	HighSeqnoMapLegacy            *base.HighSeqnosMapType
 	SourceReplicaCnt              int
@@ -2121,8 +1916,6 @@ type Notification struct {
 func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification {
 	sourceVBMap := make(base.KvVBMapType)
 	kvVbMap := make(base.KvVBMapType)
-	dcpStatsMap := make(base.DcpStatsMapType)
-	dcpStatsMapLegacy := make(base.DcpStatsMapType)
 	highSeqnoMap := make(base.HighSeqnosMapType)
 	highSeqnoMapLegacy := make(base.HighSeqnosMapType)
 	sourceReplicasMap := make(base.VbHostsMapType)
@@ -2141,8 +1934,6 @@ func NewNotification(isSource bool, pool *BucketTopologyObjsPool) *Notification 
 		NumberOfSourceNodes:        0,
 		SourceVBMap:                &sourceVBMap,
 		KvVbMap:                    &kvVbMap,
-		DcpStatsMap:                &dcpStatsMap,
-		DcpStatsMapLegacy:          &dcpStatsMapLegacy,
 		HighSeqnoMap:               &highSeqnoMap,
 		HighSeqnoMapLegacy:         &highSeqnoMapLegacy,
 		SourceReplicasMap:          &sourceReplicasMap,
@@ -2180,24 +1971,6 @@ func (n *Notification) Recycle() {
 
 	if n.KvVbMap != nil {
 		n.ObjPool.KvVbMapPool.Put(n.KvVbMap)
-	}
-
-	if n.DcpStatsMap != nil {
-		for _, vMap := range *n.DcpStatsMap {
-			if vMap != nil {
-				n.ObjPool.StringStringPool.Put(vMap)
-			}
-		}
-		n.ObjPool.DcpStatsMapPool.Put(n.DcpStatsMap)
-	}
-
-	if n.DcpStatsMapLegacy != nil {
-		for _, vMap := range *n.DcpStatsMapLegacy {
-			if vMap != nil {
-				n.ObjPool.StringStringPool.Put(vMap)
-			}
-		}
-		n.ObjPool.DcpStatsMapPool.Put(n.DcpStatsMapLegacy)
 	}
 
 	if n.HighSeqnoMap != nil {
@@ -2256,8 +2029,6 @@ func (n *Notification) Clone(numOfReaders int) interface{} {
 		NumberOfSourceNodes:           n.NumberOfSourceNodes,
 		SourceVBMap:                   n.SourceVBMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
 		KvVbMap:                       n.KvVbMap.GreenClone(n.ObjPool.KvVbMapPool.Get),
-		DcpStatsMap:                   n.DcpStatsMap.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
-		DcpStatsMapLegacy:             n.DcpStatsMapLegacy.GreenClone(n.ObjPool.DcpStatsMapPool.Get, n.ObjPool.StringStringPool.Get),
 		HighSeqnoMap:                  n.HighSeqnoMap.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
 		HighSeqnoMapLegacy:            n.HighSeqnoMapLegacy.GreenClone(n.ObjPool.HighSeqnosMapPool.Get, n.ObjPool.VbSeqnoMapPool.Get),
 		SourceReplicaCnt:              n.SourceReplicaCnt,
@@ -2317,13 +2088,6 @@ func (n *Notification) GetTargetBucketInfo() base.BucketInfoMapType {
 
 func (n *Notification) GetTargetStorageBackend() string {
 	return n.TargetStorageBackend
-}
-func (n *Notification) GetDcpStatsMap() base.DcpStatsMapType {
-	return *n.DcpStatsMap
-}
-
-func (n *Notification) GetDcpStatsMapLegacy() base.DcpStatsMapType {
-	return *n.DcpStatsMapLegacy
 }
 
 func (n *Notification) GetHighSeqnosMap() base.HighSeqnosMapType {

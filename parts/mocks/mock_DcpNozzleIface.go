@@ -3,9 +3,7 @@
 package mocks
 
 import (
-	base "github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
-
 	log "github.com/couchbase/goxdcr/log"
 
 	metadata "github.com/couchbase/goxdcr/metadata"
@@ -71,52 +69,6 @@ func (_c *DcpNozzleIface_AsyncComponentEventListeners_Call) Return(_a0 map[strin
 }
 
 func (_c *DcpNozzleIface_AsyncComponentEventListeners_Call) RunAndReturn(run func() map[string]common.AsyncComponentEventListener) *DcpNozzleIface_AsyncComponentEventListeners_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CheckStuckness provides a mock function with given fields: dcp_stats
-func (_m *DcpNozzleIface) CheckStuckness(dcp_stats base.DcpStatsMapType) error {
-	ret := _m.Called(dcp_stats)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CheckStuckness")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(base.DcpStatsMapType) error); ok {
-		r0 = rf(dcp_stats)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// DcpNozzleIface_CheckStuckness_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckStuckness'
-type DcpNozzleIface_CheckStuckness_Call struct {
-	*mock.Call
-}
-
-// CheckStuckness is a helper method to define mock.On call
-//   - dcp_stats base.DcpStatsMapType
-func (_e *DcpNozzleIface_Expecter) CheckStuckness(dcp_stats interface{}) *DcpNozzleIface_CheckStuckness_Call {
-	return &DcpNozzleIface_CheckStuckness_Call{Call: _e.mock.On("CheckStuckness", dcp_stats)}
-}
-
-func (_c *DcpNozzleIface_CheckStuckness_Call) Run(run func(dcp_stats base.DcpStatsMapType)) *DcpNozzleIface_CheckStuckness_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(base.DcpStatsMapType))
-	})
-	return _c
-}
-
-func (_c *DcpNozzleIface_CheckStuckness_Call) Return(_a0 error) *DcpNozzleIface_CheckStuckness_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *DcpNozzleIface_CheckStuckness_Call) RunAndReturn(run func(base.DcpStatsMapType) error) *DcpNozzleIface_CheckStuckness_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -776,39 +728,6 @@ func (_c *DcpNozzleIface_SetConnector_Call) Return(_a0 error) *DcpNozzleIface_Se
 }
 
 func (_c *DcpNozzleIface_SetConnector_Call) RunAndReturn(run func(common.Connector) error) *DcpNozzleIface_SetConnector_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SetMaxMissCount provides a mock function with given fields: max_dcp_miss_count
-func (_m *DcpNozzleIface) SetMaxMissCount(max_dcp_miss_count int) {
-	_m.Called(max_dcp_miss_count)
-}
-
-// DcpNozzleIface_SetMaxMissCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMaxMissCount'
-type DcpNozzleIface_SetMaxMissCount_Call struct {
-	*mock.Call
-}
-
-// SetMaxMissCount is a helper method to define mock.On call
-//   - max_dcp_miss_count int
-func (_e *DcpNozzleIface_Expecter) SetMaxMissCount(max_dcp_miss_count interface{}) *DcpNozzleIface_SetMaxMissCount_Call {
-	return &DcpNozzleIface_SetMaxMissCount_Call{Call: _e.mock.On("SetMaxMissCount", max_dcp_miss_count)}
-}
-
-func (_c *DcpNozzleIface_SetMaxMissCount_Call) Run(run func(max_dcp_miss_count int)) *DcpNozzleIface_SetMaxMissCount_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int))
-	})
-	return _c
-}
-
-func (_c *DcpNozzleIface_SetMaxMissCount_Call) Return() *DcpNozzleIface_SetMaxMissCount_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *DcpNozzleIface_SetMaxMissCount_Call) RunAndReturn(run func(int)) *DcpNozzleIface_SetMaxMissCount_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -905,7 +905,7 @@ func (xdcrf *XDCRFactory) constructUpdateSettingsForDcpNozzle(pipeline common.Pi
 
 	statsInterval, ok := settings[metadata.PipelineStatsIntervalKey]
 	if ok {
-		dcpSettings[parts.DCP_Stats_Interval] = statsInterval
+		dcpSettings[parts.DCP_Nozzle_Stats_Interval] = statsInterval
 	}
 
 	devMainVbRollback, ok := settings[metadata.DevMainPipelineRollbackTo0VB]
@@ -1212,7 +1212,7 @@ func (xdcrf *XDCRFactory) constructSettingsForDcpNozzle(pipeline common.Pipeline
 	dcpNozzleSettings[parts.DCP_DEV_BACKFILL_ROLLBACK_VB] = metadata.GetSettingFromSettingsMap(settings, metadata.DevBackfillRollbackTo0VB, -1)
 
 	dcpNozzleSettings[parts.DCP_VBTimestampUpdater] = ckpt_svc.(*pipeline_svc.CheckpointManager).UpdateVBTimestamps
-	dcpNozzleSettings[parts.DCP_Stats_Interval] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
+	dcpNozzleSettings[parts.DCP_Nozzle_Stats_Interval] = metadata.GetSettingFromSettingsMap(settings, metadata.PipelineStatsIntervalKey, repSettings.StatsInterval)
 
 	if repSettings.IsCapi() {
 		// For CAPI nozzle, do not allow DCP to have compression

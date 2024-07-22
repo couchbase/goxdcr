@@ -63,7 +63,7 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 	settingsMap[DCP_VBTimestampUpdater] = vbReturner
 
 	// statsInterval needs to be fed something
-	settingsMap[DCP_Stats_Interval] = 88888888
+	settingsMap[DCP_Nozzle_Stats_Interval] = 88888888
 
 	// Enable compression by default
 	settingsMap[SETTING_COMPRESSION_TYPE] = (base.CompressionType)(base.CompressionTypeSnappy)
