@@ -678,12 +678,52 @@ func filterSettingsChanged(changedSettingsMap metadata.ReplicationSettingsMap, o
 	return false
 }
 
+// This function determines if the specified replication settings require remote validation
+func CheckIfRemoteValidationRequired(justValidate bool, oldSettings, newSettings metadata.ReplicationSettingsMap) bool {
+	//justValidate means UI is in need of immediate update - do not perform RPC call
+	if justValidate {
+		return false
+	}
+
+	compressionType, compressionOk := newSettings[metadata.CompressionTypeKey]
+	if compressionOk {
+		oldCompressionType := oldSettings[metadata.CompressionTypeKey].(int)
+		if (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
+			base.GetCompressionType(oldCompressionType) != base.GetCompressionType(compressionType.(int)) {
+			return true
+		}
+	}
+
+	mobile, mobileOk := newSettings[metadata.MobileCompatibleKey].(int)
+	if mobileOk {
+		oldMobileSetting := oldSettings[metadata.MobileCompatibleKey].(int)
+		if mobile != base.MobileCompatibilityOff && oldMobileSetting != mobile {
+			return true
+		}
+	}
+	// in future, if there are any other settings that require remote validation can go here
+	return false
+}
+
+// This function checks if there is a need to perform validation of replicationSettings
+func ShouldValidateReplicationSettings(settings metadata.ReplicationSettingsMap) bool {
+	for _, key := range metadata.ValidateReplicationSettings {
+		if _, ok := settings[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // update the per-replication settings only if justValidate is false
 // Warnings should be given only if there are no errors
 func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettingsMap, realUserId *service_def.RealUserId, ips *service_def.LocalRemoteIPs, justValidate bool) (map[string]error, error, service_def.UIWarnings) {
 	logger_rm.Infof("Update replication settings for %v, settings=%v, justValidate=%v", topic, settings.CloneAndRedact(), justValidate)
 
 	var internalChangesTookPlace bool
+	var validateErr error
+	var validateRoutineErrorMap base.ErrorMap
+	var warnings service_def.UIWarnings
 
 	// read replication spec with the specified replication id
 	replSpec, err := ReplicationSpecService().ReplicationSpec(topic)
@@ -701,29 +741,21 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 	filterExpression := replSpec.Settings.Values[metadata.FilterExpressionKey].(string)
 	oldCompressionType := replSpec.Settings.Values[metadata.CompressionTypeKey].(int)
 	filterVersion := replSpec.Settings.Values[metadata.FilterVersionKey].(base.FilterVersionType)
+	_, CompressionOk := settings[metadata.CompressionTypeKey]
+
+	shouldValidateSettings := ShouldValidateReplicationSettings(settings)
+	if shouldValidateSettings {
+		performRemoteValidation := CheckIfRemoteValidationRequired(justValidate, replSpec.Settings.ToMap(false), settings)
+		validateRoutineErrorMap, validateErr, warnings = ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName, replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings, performRemoteValidation)
+		if len(validateRoutineErrorMap) > 0 {
+			return validateRoutineErrorMap, nil, nil
+		} else if validateErr != nil {
+			return nil, validateErr, nil
+		}
+	}
 
 	// update replication spec with input settings
 	changedSettingsMap, errorMap := replSpec.Settings.UpdateSettingsFromMap(settings)
-
-	var performRemoteValidation bool
-	// Only Re-evaluate Compression pre-requisites if it is turned on and actually switched algorithms to catch any cluster-wide compression changes
-	compressionType, CompressionOk := changedSettingsMap[metadata.CompressionTypeKey]
-	if !justValidate && CompressionOk && (base.GetCompressionType(compressionType.(int)) != base.CompressionTypeNone) &&
-		base.GetCompressionType(oldCompressionType) != base.GetCompressionType(compressionType.(int)) {
-		// justValidate means UI is in need of immediate update - do not perform RPC call
-		performRemoteValidation = true
-	}
-	validateRoutineErrorMap, validateErr, warnings := ReplicationSpecService().ValidateReplicationSettings(replSpecificFields.SourceBucketName, replSpecificFields.RemoteClusterName, replSpecificFields.TargetBucketName, settings, performRemoteValidation)
-	if len(validateRoutineErrorMap) > 0 {
-		return validateRoutineErrorMap, nil, nil
-	} else if validateErr != nil {
-		return nil, validateErr, nil
-	}
-
-	// If compression is SNAPPY and is not changed, take this oppurtunity to change it to AUTO
-	if oldCompressionType == base.CompressionTypeSnappy && !CompressionOk {
-		changedSettingsMap[metadata.CompressionTypeKey] = base.CompressionTypeAuto
-	}
 	if len(errorMap) != 0 {
 		return errorMap, nil, nil
 	}
@@ -735,6 +767,15 @@ func UpdateReplicationSettings(topic string, settings metadata.ReplicationSettin
 		_, errorMap = replSpec.Settings.UpdateSettingsFromMap(settings)
 		if len(errorMap) != 0 {
 			return errorMap, fmt.Errorf("Internal XDCR Error related to internal filter management: %v", errorMap), nil
+		}
+		internalChangesTookPlace = true
+	}
+	// If compression is SNAPPY and is not changed, take this oppurtunity to change it to AUTO
+	if oldCompressionType == base.CompressionTypeSnappy && !CompressionOk {
+		settings[metadata.CompressionTypeKey] = base.CompressionTypeAuto
+		_, errorMap = replSpec.Settings.UpdateSettingsFromMap(settings)
+		if len(errorMap) != 0 {
+			return errorMap, fmt.Errorf("Internal XDCR Error related to internal compression settings: %v", errorMap), nil
 		}
 		internalChangesTookPlace = true
 	}
