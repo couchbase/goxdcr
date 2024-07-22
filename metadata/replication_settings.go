@@ -157,6 +157,9 @@ var MultiValueMap map[string]string = map[string]string{
 	CollectionsMgtOsoKey:     CollectionsMgtMultiKey,
 }
 
+// settings that require validation
+var ValidateReplicationSettings = []string{FilterExpressionKey, MobileCompatibleKey, base.MergeFunctionMappingKey, CompressionTypeKey}
+
 var MaxBatchCount = 10000
 
 const (
