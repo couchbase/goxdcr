@@ -507,12 +507,18 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 		errMap[base.ToBucket] = errors.New(errMsg)
 		return "", "", nil, errMap, nil, nil
 	}
-
-	err, warnings := service.validateReplicationSettingsInternal(errMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remoteConnstr, remoteUsername, remotePassword, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo, true, performRemoteValidation)
+	var warnings service_def.UIWarnings = base.NewUIWarning()
+	var err error
+	err = service.validateReplicationSettingsLocal(errMap, sourceBucket, targetCluster, targetBucket, settings, true, warnings)
 	if len(errMap) > 0 || err != nil {
 		return "", "", nil, errMap, err, nil
 	}
-
+	if performRemoteValidation {
+		err = service.validateReplicationSettingsRemote(errMap, sourceBucket, targetBucket, settings, targetClusterRef, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo, warnings)
+		if len(errMap) > 0 || err != nil {
+			return "", "", nil, errMap, err, nil
+		}
+	}
 	if performRemoteValidation && sourceConflictResolutionType != targetConflictResolutionType {
 		errMap[base.PlaceHolderFieldKey] = errors.New("Replication between buckets with different ConflictResolutionType setting is not allowed")
 		return "", "", nil, errMap, nil, nil
@@ -541,50 +547,33 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 
 func (service *ReplicationSpecService) ValidateReplicationSettings(sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, performRemoteValidation bool) (base.ErrorMap, error, service_def.UIWarnings) {
 	var errorMap base.ErrorMap = make(base.ErrorMap)
-
-	targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey := service.getRemoteReference(errorMap, targetCluster)
-	if len(errorMap) > 0 {
-		return errorMap, nil, nil
+	var err error
+	var useExternal bool
+	var warnings service_def.UIWarnings = base.NewUIWarning()
+	err = service.validateReplicationSettingsLocal(errorMap, sourceBucket, targetCluster, targetBucket, settings, false, warnings)
+	if len(errorMap) > 0 || err != nil {
+		return errorMap, err, warnings
 	}
-
-	useExternal, err := service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
-	if err != nil {
-		return nil, err, nil
-	}
-
-	var targetBucketInfo map[string]interface{}
-	var targetKVVBMap map[string][]uint16
 	if performRemoteValidation {
+		targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey := service.getRemoteReference(errorMap, targetCluster)
+		if len(errorMap) > 0 {
+			return errorMap, nil, nil
+		}
+		useExternal, err = service.remote_cluster_svc.ShouldUseAlternateAddress(targetClusterRef)
+		if err != nil {
+			return nil, err, nil
+		}
+		var targetBucketInfo map[string]interface{}
+		var targetKVVBMap map[string][]uint16
 		targetBucketInfo, _, _, _, _, targetKVVBMap, err = service.utils.RemoteBucketValidationInfo(remote_connStr, targetBucket, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, service.logger, useExternal)
 		if err != nil {
 			return nil, err, nil
 		}
+		err = service.validateReplicationSettingsRemote(errorMap, sourceBucket, targetBucket, settings, targetClusterRef, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo, warnings)
 	}
-
-	err, warnings := service.validateReplicationSettingsInternal(errorMap, sourceBucket, targetCluster, targetBucket, settings, targetClusterRef, remote_connStr, remote_userName, remote_password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey, targetKVVBMap, targetBucketInfo, false, performRemoteValidation)
 	return errorMap, err, warnings
 }
-
-func (service *ReplicationSpecService) validateReplicationSettingsInternal(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, remote_connStr, remote_userName, remote_password string, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, newSettings, performTargetValidation bool) (error, service_def.UIWarnings) {
-	var populateErr error
-	var err error
-
-	allKvConnStrs, username, password, populateErr := service.populateConnectionCreds(targetClusterRef, targetKVVBMap)
-	if performTargetValidation && populateErr != nil {
-		return populateErr, nil
-	}
-
-	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
-
-	compressionType, compressionOk := settings[metadata.CompressionTypeKey]
-	if !compressionOk {
-		if isEnterprise {
-			compressionType = metadata.DefaultReplicationSettings().CompressionType
-			settings[metadata.CompressionTypeKey] = compressionType
-		} else {
-			compressionType = base.CompressionTypeNone
-		}
-	}
+func (service *ReplicationSpecService) validateReplicationSettingsLocal(errorMap base.ErrorMap, sourceBucket, targetCluster, targetBucket string, settings metadata.ReplicationSettingsMap, newSettings bool, warnings service_def.UIWarnings) error {
 
 	if filter, ok := settings[metadata.FilterExpressionKey].(string); ok {
 		// Validate filter if it's a new setting OR it's an existing adv filter
@@ -593,15 +582,15 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			clusterCompat, err := service.xdcr_comp_topology_svc.MyClusterCompatibility()
 			if err != nil {
 				service.logger.Errorf("Unable to get local cluster compatibility as part of replSpec validation: %v", err)
-				return err, nil
+				return err
 			}
 			if !base.IsClusterCompatible(clusterCompat, base.VersionForAdvFilteringSupport) {
-				return base.ErrorAdvFilterMixedModeUnsupported, nil
+				return base.ErrorAdvFilterMixedModeUnsupported
 			}
 
 			err = base.ValidateAdvFilter(filter)
 			if err != nil {
-				return err, nil
+				return err
 			}
 		}
 	}
@@ -609,11 +598,11 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 	// If merge function is specified, check that it exists
 	if mergeFunctions, ok := settings[base.MergeFunctionMappingKey].(base.MergeFunctionMappingType); ok {
 		for _, f := range mergeFunctions {
-			err = service.resolver_svc.CheckMergeFunction(f)
+			err := service.resolver_svc.CheckMergeFunction(f)
 			if err != nil {
 				if f != base.DefaultMergeFunc {
 					errorMap[base.MergeFunctionMappingKey] = err
-					return nil, nil
+					return nil
 				} else {
 					// Create the default merge function if it is not there
 					service.resolver_svc.InitDefaultFunc()
@@ -621,37 +610,56 @@ func (service *ReplicationSpecService) validateReplicationSettingsInternal(error
 			}
 		}
 	}
+	targetClusterRef, err1 := service.remote_cluster_svc.RemoteClusterByRefName(targetCluster, false)
+	if err1 != nil {
+		// In this case an error is reported only when the agent is not yet initialized.
+		// It is ok to skip the appendGoMaxProcsWarnings and unblock the function. Hence set the error to nil and move ahead
+		service.logger.Errorf("Failed to fetch remote cluster ref for %v - skip checking GoMaxProcs and nozzles warnings", targetCluster)
+		return nil
+	}
+	service.appendGoMaxProcsWarnings(sourceBucket, targetClusterRef, targetBucket, warnings, settings)
+	return nil
+}
+func (service *ReplicationSpecService) validateReplicationSettingsRemote(errorMap base.ErrorMap, sourceBucket, targetBucket string, settings metadata.ReplicationSettingsMap, targetClusterRef *metadata.RemoteClusterReference, httpAuthMech base.HttpAuthMech, certificate []byte, sanInCertificate bool, clientCertificate, clientKey []byte, targetKVVBMap map[string][]uint16, targetBucketInfo map[string]interface{}, warnings service_def.UIWarnings) error {
+	var populateErr error
+	var err error
+	allKvConnStrs, username, password, populateErr := service.populateConnectionCreds(targetClusterRef, targetKVVBMap)
+	if populateErr != nil {
+		return populateErr
+	}
 
-	warnings := base.NewUIWarning()
-	if performTargetValidation {
-		service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo, allKvConnStrs[0], username, password)
-		if len(errorMap) > 0 {
-			return nil, nil
-		}
+	isEnterprise, _ := service.xdcr_comp_topology_svc.IsMyClusterEnterprise()
 
-		// Compression is only allowed in XMEM mode
-		if compressionType != base.CompressionTypeNone {
-			err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType.(int), allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
-			if len(errorMap) > 0 || err != nil {
-				if compressionType == base.CompressionTypeAuto && isEnterprise {
-					// For enterprise version, if target doesn't support the compression setting but AUTO is set, let the replication creation/change through
-					// because Pipeline Manager will be able to detect this and then handle it
-					warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name())
-					warnings.AppendGeneric(warning)
-					// Since we are disabling compression, reset errors
-					for k, _ := range errorMap {
-						delete(errorMap, k)
-					}
-					err = nil
-				} else {
-					return err, warnings
+	service.validateXmemSettings(errorMap, targetClusterRef, targetKVVBMap, sourceBucket, targetBucket, targetBucketInfo, allKvConnStrs[0], username, password)
+	if len(errorMap) > 0 {
+		return nil
+	}
+
+	compressionType, compressionOk := settings[metadata.CompressionTypeKey].(int)
+	// validateReplicationSettingsRemote can be called in the following scenarios
+	// 1. At the time of replication creation - if compression setting is absent, we can skip the validation. This is beacuse the default setting is AUTO(for enterprise), and if target
+	// does not support compression, Pipeline Manager will handle it. For non-enterprise clusters, the default value is NONE
+	// 2. At the time of update - if compression setting is absent, skip validation
+	// Compression is only allowed in XMEM mode
+	if compressionOk && compressionType != base.CompressionTypeNone {
+		err = service.validateCompression(errorMap, sourceBucket, targetClusterRef, targetKVVBMap, targetBucket, targetBucketInfo, compressionType, allKvConnStrs, username, password, httpAuthMech, certificate, sanInCertificate, clientCertificate, clientKey)
+		if len(errorMap) > 0 || err != nil {
+			if compressionType == base.CompressionTypeAuto && isEnterprise {
+				// For enterprise version, if target doesn't support the compression setting but AUTO is set, let the replication creation/change through
+				// because Pipeline Manager will be able to detect this and then handle it
+				warning := fmt.Sprintf("Compression pre-requisite to cluster %v check failed. Compression will be temporarily disabled for replication.", targetClusterRef.Name())
+				warnings.AppendGeneric(warning)
+				// Since we are disabling compression, reset errors
+				for k, _ := range errorMap {
+					delete(errorMap, k)
 				}
+				err = nil
+			} else {
+				return err
 			}
 		}
 	}
-
-	service.appendGoMaxProcsWarnings(sourceBucket, targetClusterRef, targetBucket, warnings, settings)
-	return nil, warnings
+	return nil
 }
 
 // validate compression - should only be called if compression setting dictates that there is compression
