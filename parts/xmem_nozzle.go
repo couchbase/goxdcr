@@ -3022,10 +3022,15 @@ done:
 }
 func (xmem *XmemNozzle) handleCasPoisoning(wrappedReq *base.WrappedMCRequest, response *mc.MCResponse) {
 	isSubDocOp := wrappedReq.IsSubdocOp()
-	sentCas := binary.BigEndian.Uint64(wrappedReq.Req.Extras[16:24])
+	sentCas, err := wrappedReq.GetSentCas()
+	if err != nil && !isSubDocOp {
+		// if subDoc is not used and extras.cas is not set then it must be a coding error. Log it
+		// Note: We shouldn't hit this case in practice
+		xmem.Logger().Errorf("extras.cas is not set in req %v. len of extras:%v, isSubDocOp: %v", wrappedReq.Req, len(wrappedReq.Req.Extras), isSubDocOp)
+	}
 	vbno := wrappedReq.Req.VBucket
 	seqno := wrappedReq.Seqno
-	if response.Status == mc.SUCCESS && sentCas != response.Cas && !isSubDocOp { //replace mode
+	if response.Status == mc.SUCCESS && (sentCas != 0 && sentCas != response.Cas) && !isSubDocOp { //replace mode
 		// Currently CAS regeneration takes place in two scenario's
 		// 1. If SubDoc is used
 		// 2. If there is a CAS poisoned doc and KV's protection mode is set to "replace"

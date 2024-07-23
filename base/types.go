@@ -947,6 +947,15 @@ func (wrappedReq *WrappedMCRequest) AddByteSliceForXmemToRecycle(slice []byte) {
 	wrappedReq.SlicesToBeReleasedByXmem = append(wrappedReq.SlicesToBeReleasedByXmem, slice)
 	wrappedReq.SlicesToBeReleasedMtx.Unlock()
 }
+func (wrappedReq *WrappedMCRequest) GetSentCas() (uint64, error) {
+	var sentCas uint64
+	isSubDocOp := wrappedReq.IsSubdocOp()
+	if !isSubDocOp && len(wrappedReq.Req.Extras) >= 24 { // extras.cas is set only incase of a non-subdoc operation
+		sentCas = binary.BigEndian.Uint64(wrappedReq.Req.Extras[16:24])
+		return sentCas, nil
+	}
+	return sentCas, fmt.Errorf("extras.cas is not set in the request")
+}
 
 type McRequestMap map[string]*WrappedMCRequest
 
