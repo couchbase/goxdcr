@@ -426,7 +426,7 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	// Feed 1 should get something and feed 2 should not
 	select {
 	case notification := <-feed1:
-		notification.GetDcpStatsMap()
+		notification.GetHighSeqnosMap()
 	default:
 		assert.True(false)
 	}
@@ -453,13 +453,13 @@ func TestBucketTopologyServiceHighSeqnos(t *testing.T) {
 	time.Sleep(120 * time.Millisecond)
 	select {
 	case notification := <-feed1:
-		notification.GetDcpStatsMap()
+		notification.GetHighSeqnosMap()
 	default:
 		assert.True(false)
 	}
 	select {
 	case notification := <-feed2:
-		notification.GetDcpStatsMap()
+		notification.GetHighSeqnosMap()
 	default:
 		assert.True(false)
 	}
