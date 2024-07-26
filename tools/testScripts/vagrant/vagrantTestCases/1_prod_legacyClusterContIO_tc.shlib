@@ -36,7 +36,7 @@ insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B3" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B4" BucketProperty
 
-declare -A DelayedBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevBucketTopologyLegacyDelay"]=3)
+declare -A DelayedBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
 #BUCKET_NAME_SCOPE_MAP=(["B2"]="test")
 #SCOPE_NAME_COLLECTION_MAP=(["test"]="test")

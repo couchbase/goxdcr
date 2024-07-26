@@ -1457,7 +1457,6 @@ const DevBackfillRollbackTo0VB = "xdcrDevBackfillRollbackTo0VB"
 const DevCkptMgrForceGCWaitSec = "xdcrDevCkptMgrForceGCWaitSec"
 const DevColManifestSvcDelaySec = "xdcrDevColManifestSvcDelaySec"
 const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may apply to a specific node using this
-const DevBucketTopologyLegacyDelay = "xdcrDevBucketTopologyLegacyDelay"
 const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
 const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
 const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"

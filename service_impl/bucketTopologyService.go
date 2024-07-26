@@ -673,9 +673,6 @@ func (b *BucketTopologyService) ReplicationSpecChangeCallback(id string, oldVal,
 			return err
 		}
 		b.logger.Infof("Unregistered bucket monitor for %v", oldSpec.Id)
-	} else {
-		// Changes
-		b.checkAndUpdateSpecSettingChanges(oldSpec, newSpec)
 	}
 
 	return nil
@@ -1030,25 +1027,6 @@ func (b *BucketTopologyService) RegisterGarbageCollect(specId string, srcBucketN
 	return watcher.RegisterGarbageCollect(specId, vbno, requestId, gcFunc, timeToFire)
 }
 
-func (b *BucketTopologyService) checkAndUpdateSpecSettingChanges(oldSpec *metadata.ReplicationSpecification, newSpec *metadata.ReplicationSpecification) {
-	// For now, only dev delay changes
-	if newSpec == nil || newSpec.Settings == nil {
-		return
-	}
-	delaySec := newSpec.Settings.GetIntSettingValue(metadata.DevBucketTopologyLegacyDelay)
-	if delaySec == 0 {
-		return
-	}
-
-	b.srcBucketWatchersMtx.RLock()
-	defer b.srcBucketWatchersMtx.RUnlock()
-	watcher, exists := b.srcBucketWatchers[newSpec.SourceBucketName]
-	if !exists {
-		return
-	}
-	watcher.setDevLegacyDelay(newSpec)
-}
-
 type BucketTopologySvcWatcher struct {
 	bucketName string
 	bucketUUID string
@@ -1129,8 +1107,6 @@ type BucketTopologySvcWatcher struct {
 	nonKVNodeLastTimeWarnedMtx sync.Mutex
 
 	streamApi streamApiWatcher.StreamApiWatcher
-
-	devDcpStatsLegacyDelay uint64
 }
 
 type GcMapType map[string]VbnoReqMapType
@@ -1864,17 +1840,6 @@ func (bw *BucketTopologySvcWatcher) handleSpecDeletion(specId string) {
 	delete(bw.gcMap, specId)
 	delete(bw.gcPruneMap, specId)
 	bw.gcMapMtx.Unlock()
-}
-
-func (bw *BucketTopologySvcWatcher) setDevLegacyDelay(spec *metadata.ReplicationSpecification) {
-	if bw == nil || spec == nil || spec.Settings == nil {
-		return
-	}
-	delaySec := spec.Settings.GetIntSettingValue(metadata.DevBucketTopologyLegacyDelay)
-	if delaySec > 0 {
-		atomic.StoreUint64(&bw.devDcpStatsLegacyDelay, uint64(delaySec))
-		bw.logger.Infof("DcpStatsLegacyDelay set to variation of %v seconds", delaySec)
-	}
 }
 
 type Notification struct {
