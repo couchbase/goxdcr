@@ -69,8 +69,8 @@ var dcp_setting_defs base.SettingDefinitions = base.SettingDefinitions{DCP_VBTim
 var ErrorEmptyVBList = errors.New("Invalid configuration for DCP nozzle. VB list cannot be empty.")
 
 const (
-	dcpFlagNone             uint32 = 0
 	dcpFlagIgnoreTombstones uint32 = 0x80
+	dcpFlagActiveVBOnly     uint32 = 0x10
 )
 
 type vbtsWithLock struct {
@@ -1454,9 +1454,9 @@ func (dcp *DcpNozzle) startUprStreams_internal(streams_to_start []uint16) error 
 
 // Have an internal so we can control the opaque and version being passed in
 func (dcp *DcpNozzle) startUprStreamInner(vbno uint16, vbts *base.VBTimestamp, version uint16) (err error) {
-	flags := dcpFlagIgnoreTombstones
-	if dcp.enablePurgeRollback {
-		flags = dcpFlagNone
+	flags := dcpFlagActiveVBOnly
+	if !dcp.enablePurgeRollback {
+		flags |= dcpFlagIgnoreTombstones
 	}
 
 	seqEnd := base.DcpSeqnoEnd
