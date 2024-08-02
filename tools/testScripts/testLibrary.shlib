@@ -100,8 +100,21 @@ function grepForErrs {
 	for dir in $(ls $logsDir); do
 		count=$(grep -c "decoding source mutation" ${logsDir}/${dir}/goxdcr.log)
 		if (($count > 0)); then
-			echo "WARNING Found errs in ${logsDir}/${dir}"
+			echo "WARNING Found err:decoding source mutation in ${logsDir}/${dir}"
 			exit 1
+		fi
+	done
+	return 0
+}
+
+function grepForPipelineFailures {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+	for dir in $(ls $logsDir); do
+		count=$(grep -c "Failed to start the pipeline" ${logsDir}/${dir}/goxdcr.log)
+		if (($count > 0)); then
+			echo "WARNING Found err:Failed to start the pipeline in ${logsDir}/${dir}/goxdcr.log"
+			return 1
 		fi
 	done
 	return 0
@@ -113,7 +126,7 @@ function grepForEINVAL {
 	for dir in $(ls $logsDir); do
 		count=$(grep -c "EINVAL" ${logsDir}/${dir}/goxdcr.log)
 		if (($count > 0)); then
-			echo "WARNING Found errs in ${logsDir}/${dir}"
+			echo "WARNING Found EINVAL in ${logsDir}/${dir}"
 			exit 1
 		fi
 	done

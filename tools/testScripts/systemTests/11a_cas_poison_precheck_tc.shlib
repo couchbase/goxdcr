@@ -1,0 +1,105 @@
+# Copyright 2024-Present Couchbase, Inc.
+#
+# Use of this software is governed by the Business Source License included in
+# the file licenses/BSL-Couchbase.txt.  As of the Change Date specified in that
+# file, in accordance with the Business Source License, use of this software
+# will be governed by the Apache License, Version 2.0, included in the file
+# licenses/APL2.txt.
+
+# =============================
+# topological map information
+# =============================
+# cluster -> Bucket(s)
+# -----------------
+
+CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C2"]=9001)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C2"]=13001)
+# Set c1 to have 2 buckets and c2 to have 1 bucket
+declare -a cluster1BucketsArr
+cluster1BucketsArr=("B0" "B1")
+CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
+
+# Bucket properties
+declare -A BucketProperty=(["ramQuotaMB"]=100)
+declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
+insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A PreCheckFailureReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["xdcrDevPreCheckMaxCasErrorInjection"]=true)
+
+# Bucket -> Scopes
+# -----------------
+declare -a scope1Arr=("S1" "S2")
+BUCKET_NAME_SCOPE_MAP=(["B1"]=${scope1Arr[@]} ["B2"]="S1")
+
+# Scopes -> Collections
+# ----------------------
+declare -a collection1Arr=("col1" "col2")
+declare -a collection2Arr=("col1" "col2" "col3")
+SCOPE_NAME_COLLECTION_MAP=(["S1"]=${collection1Arr[@]} ["S2"]=${collection2Arr[@]} ["S3"]=${collection2Arr[@]})
+
+function runDataLoad {
+	echo "RUNNING dataload..."
+	runCbWorkloadGenCollection "C1" "B1" "S1" "col1"
+}
+
+function validateDataLoad {
+	echo "VALIDATING Data..."
+	validateCbWorkloadGenCollection "C2" "B2" "S1" "col1" "C1" "B1" "S1" "col1"
+	checkBidirectionalChangesLeft
+	checkItemCnt "C1" "B1" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+	checkItemCnt "C2" "B2" $CBWORKLOAD_COLLECTION_NUM_ITEMS
+}
+
+function runTestCase {
+	echo "============================================================================"
+	echo "Running pre-check CAS Poison error injection test case"
+	echo "============================================================================"
+	setupTopologies
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	echo "Sleeping 10 seconds for XDCR CPUs to have a chance to idle before measurement"
+	sleep 10
+	testIdleXdcrCPU
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	#change the internal setting to ensure PreCheckCasCheck is enabled
+	local clusterName="C1"
+	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+	echo "Changing internal Setting CasPoisoningPreCheckEnabled to ensure PreChechCasCheck is enabled"
+	$CURL -X POST -u $DEFAULT_ADMIN:$DEFAULT_PW http://localhost:$port/xdcr/internalSettings -d "CasPoisoningPreCheckEnabled"=1 | jq
+
+	echo "wait 10 sec for GOXDCR to restart after change in internal settings"
+	sleep 10
+
+	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
+	sleep 5
+	createRemoteClusterReference "C1" "C2"
+	createRemoteClusterReference "C2" "C1"
+	sleep 1
+	createBucketReplication "C1" "B1" "C2" "B2" PreCheckFailureReplProperties
+	createBucketReplication "C2" "B2" "C1" "B1" DefaultBucketReplProperties
+	printGlobalScopeAndCollectionInfo
+
+	echo "Sleeping for 15 sec to capture non-zero pipeline start failures"
+	sleep 15
+
+	grepForPipelineFailures
+	if (($? == 0)); then
+		echo "Pipeline creation should have failed but did not"
+		exit 1
+	fi
+
+	echo "============================================================================"
+	echo "PASSED"
+	echo "============================================================================"
+	cleanupBucketReplications
+	cleanupBuckets
+	cleanupRemoteClusterRefs
+}

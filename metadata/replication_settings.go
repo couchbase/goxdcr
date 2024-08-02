@@ -21,16 +21,17 @@ import (
 
 // keys for replication settings
 const (
-	DevMainPipelineSendDelay      = base.DevMainPipelineSendDelay
-	DevBackfillPipelineSendDelay  = base.DevBackfillPipelineSendDelay
-	DevBackfillRollbackTo0VB      = base.DevBackfillRollbackTo0VB
-	DevMainPipelineRollbackTo0VB  = base.DevMainPipelineRollbackTo0VB
-	DevCkptMgrForceGCWaitSec      = base.DevCkptMgrForceGCWaitSec
-	DevColManifestSvcDelaySec     = base.DevColManifestSvcDelaySec
-	DevNsServerPortSpecifier      = base.DevNsServerPortSpecifier
-	DevBackfillReplUpdateDelay    = base.DevBackfillReplUpdateDelay
-	DevCasDriftForceDocKey        = base.DevCasDriftForceDocKey
-	DevPreCheckCasDriftForceVbKey = base.DevPreCheckCasDriftForceVbKey
+	DevMainPipelineSendDelay        = base.DevMainPipelineSendDelay
+	DevBackfillPipelineSendDelay    = base.DevBackfillPipelineSendDelay
+	DevBackfillRollbackTo0VB        = base.DevBackfillRollbackTo0VB
+	DevMainPipelineRollbackTo0VB    = base.DevMainPipelineRollbackTo0VB
+	DevCkptMgrForceGCWaitSec        = base.DevCkptMgrForceGCWaitSec
+	DevColManifestSvcDelaySec       = base.DevColManifestSvcDelaySec
+	DevNsServerPortSpecifier        = base.DevNsServerPortSpecifier
+	DevBackfillReplUpdateDelay      = base.DevBackfillReplUpdateDelay
+	DevCasDriftForceDocKey          = base.DevCasDriftForceDocKey
+	DevPreCheckCasDriftForceVbKey   = base.DevPreCheckCasDriftForceVbKey
+	DevPreCheckMaxCasErrorInjection = base.DevPreCheckMaxCasErrorInjection
 
 	ReplicationTypeKey                = "replication_type"
 	FilterExpressionKey               = "filter_expression"
@@ -137,7 +138,7 @@ var HiddenSettings = []string{FilterVersionKey, FilterSkipRestreamKey, FilterExp
 	CollectionsDelVbBackfillKey, DismissEventKey, DevMainPipelineSendDelay, DevBackfillPipelineSendDelay,
 	DevMainPipelineRollbackTo0VB, DevBackfillRollbackTo0VB, DevCkptMgrForceGCWaitSec, DevColManifestSvcDelaySec,
 	DevNsServerPortSpecifier, FilterSystemScopeKey, DevBackfillReplUpdateDelay,
-	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey}
+	SourceTopologyChangeStatusKey, TargetTopologyChangeStatusKey, DevCasDriftForceDocKey, DevPreCheckCasDriftForceVbKey, DevPreCheckMaxCasErrorInjection}
 
 // Temporary settings are supposed to be used only for validation purposes. Once they are done, they should be removed and not interpreted or persisted downstream
 var TemporaryValidationSettings = []string{CollectionsSkipSourceCheckKey, CollectionsManualBackfillKey,
@@ -179,6 +180,7 @@ var XDCRDevNsServerPortSpecifierConfig = &SettingsConfig{0 /*not specified*/, &R
 var XDCRDevBackfillReplUpdateDelayConfig = &SettingsConfig{0 /*not specified*/, &Range{0, 100000}}
 var XDCRDevCasDriftForceDocConfig = &SettingsConfig{"", nil}
 var XDCRDevPreCheckCasDriftForceVBConfig = &SettingsConfig{-1, &Range{-1, 1023}}
+var XDCRDevPreCheckMaxCasErrorInjectionConfig = &SettingsConfig{false, nil}
 
 var ReplicationTypeConfig = &SettingsConfig{ReplicationTypeXmem, nil}
 var FilterExpressionConfig = &SettingsConfig{"", nil}
@@ -246,16 +248,17 @@ var PreCheckCasDriftThresholdHoursConfig = &SettingsConfig{8760 /*1 year*/, &Ran
 // Note that any keys that are in the MultiValueMap should not belong here
 // Read How MultiValueMap is parsed in code for more details
 var ReplicationSettingsConfigMap = map[string]*SettingsConfig{
-	DevMainPipelineSendDelay:      XDCRDevMainPipelineSendDelayConfig,
-	DevBackfillPipelineSendDelay:  XDCRDevBackfillPipelineSendDelayConfig,
-	DevMainPipelineRollbackTo0VB:  XDCRDevMainPipelineRollbackConfig,
-	DevBackfillRollbackTo0VB:      XDCRDevBackfillPipelineRollbackConfig,
-	DevCkptMgrForceGCWaitSec:      XDCRDevCkptGcWaitConfig,
-	DevColManifestSvcDelaySec:     XDCRDevColManifestSvcDelayConfig,
-	DevNsServerPortSpecifier:      XDCRDevNsServerPortSpecifierConfig,
-	DevBackfillReplUpdateDelay:    XDCRDevBackfillReplUpdateDelayConfig,
-	DevCasDriftForceDocKey:        XDCRDevCasDriftForceDocConfig,
-	DevPreCheckCasDriftForceVbKey: XDCRDevPreCheckCasDriftForceVBConfig,
+	DevMainPipelineSendDelay:        XDCRDevMainPipelineSendDelayConfig,
+	DevBackfillPipelineSendDelay:    XDCRDevBackfillPipelineSendDelayConfig,
+	DevMainPipelineRollbackTo0VB:    XDCRDevMainPipelineRollbackConfig,
+	DevBackfillRollbackTo0VB:        XDCRDevBackfillPipelineRollbackConfig,
+	DevCkptMgrForceGCWaitSec:        XDCRDevCkptGcWaitConfig,
+	DevColManifestSvcDelaySec:       XDCRDevColManifestSvcDelayConfig,
+	DevNsServerPortSpecifier:        XDCRDevNsServerPortSpecifierConfig,
+	DevBackfillReplUpdateDelay:      XDCRDevBackfillReplUpdateDelayConfig,
+	DevCasDriftForceDocKey:          XDCRDevCasDriftForceDocConfig,
+	DevPreCheckCasDriftForceVbKey:   XDCRDevPreCheckCasDriftForceVBConfig,
+	DevPreCheckMaxCasErrorInjection: XDCRDevPreCheckMaxCasErrorInjectionConfig,
 
 	ReplicationTypeKey:                   ReplicationTypeConfig,
 	FilterExpressionKey:                  FilterExpressionConfig,
@@ -999,6 +1002,10 @@ func (s *ReplicationSettings) GetDevPreCheckVBPoison() int {
 
 func (s *ReplicationSettings) GetDevBackfillPipelineDelay() int {
 	return s.GetIntSettingValue(DevBackfillPipelineSendDelay)
+}
+
+func (s *ReplicationSettings) GetDevPreCheckMaxCasErrorInjection() bool {
+	return s.GetBoolSettingValue(DevPreCheckMaxCasErrorInjection)
 }
 
 func (s *ReplicationSettings) GetJsFunctionTimeoutMs() int {
