@@ -625,7 +625,6 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 				top_detect_svc.logger.Infof("TopologyChangeDetectorSvc for pipeline received finish signal and is exiting")
 				return
 			case notification := <-sourceVbUpdateCh:
-				var updateOnceErr error
 				if top_detect_svc.pipelineHasStopped() {
 					notification.Recycle()
 					err := top_detect_svc.bucketTopologySvc.UnSubscribeLocalBucketFeed(replicationSpec, top_detect_svc.bucketTopSubscriberId)
@@ -635,31 +634,21 @@ func (top_detect_svc *TopologyChangeDetectorSvc) monitorSource(initWg *sync.Wait
 					return
 				}
 				kv_vb_map := notification.GetSourceVBMapRO()
-				if updateOnceErr != nil {
-					top_detect_svc.logger.Errorf("Unable to get KV VB Map - %v", updateOnceErr)
-					notification.Recycle()
-					continue
-				}
-
 				number_of_source_nodes := notification.GetNumberOfSourceNodes()
-				if updateOnceErr != nil {
-					top_detect_svc.logger.Errorf("Unable to get number of source nodes - %v", updateOnceErr)
-					notification.Recycle()
-					continue
-				}
 				vblist_supposed := []uint16{}
 				for _, vblist := range kv_vb_map {
 					vblist_supposed = append(vblist_supposed, vblist...)
 				}
 				base.SortUint16List(vblist_supposed)
 
+				var sourceUpdateErr error
 				if !base.AreSortedUint16ListsTheSame(top_detect_svc.vblist_original, vblist_supposed) {
 					top_detect_svc.logger.Infof("Source topology has changed for pipeline\n")
 					top_detect_svc.logger.Infof("vblist_supposed=%v, vblist_now=%v\n", vblist_supposed, top_detect_svc.vblist_original)
-					updateOnceErr = source_topology_changedErr
+					sourceUpdateErr = source_topology_changedErr
 				}
 
-				err := top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, updateOnceErr)
+				err := top_detect_svc.handleSourceTopologyChange(vblist_supposed, number_of_source_nodes, sourceUpdateErr)
 				if err != nil {
 					if err == errPipelinesDetached {
 						notification.Recycle()
