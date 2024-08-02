@@ -1210,6 +1210,7 @@ var TopologySvcStatusNotFoundCoolDownPeriod = 10 * time.Second
 var BucketTopologyWatcherChanLen = 1000
 var BucketTopologyGCScanTime = 1 * time.Minute
 var BucketTopologyGCPruneTime = 24 * time.Hour
+var BucketTopologyWatcherErrChanLen = 1
 
 var P2PCommTimeout = 15 * time.Second
 var MaxP2PReceiveChLen = 10000
@@ -1461,6 +1462,7 @@ const DevNsServerPortSpecifier = "xdcrDevNsServerPort" // Certain injection may 
 const DevBackfillReplUpdateDelay = "xdcrDevBackfillReplUpdateDelayMs"
 const DevCasDriftForceDocKey = "xdcrDevCasDriftInjectDocKey"
 const DevPreCheckCasDriftForceVbKey = "xdcrDevPreCheckCasDriftInjectVb"
+const DevPreCheckMaxCasErrorInjection = "xdcrDevPreCheckMaxCasErrorInjection"
 
 // Need to escape the () to result in "META().xattrs" literal
 const ExternalKeyXattr = "META\\(\\).xattrs"
