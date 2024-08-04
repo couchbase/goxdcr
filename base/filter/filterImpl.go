@@ -44,7 +44,7 @@ type FilterImpl struct {
 	slicesToBeReleasedBuf    [][]byte
 	skipUncommittedTxn       uint32
 	skipBinaryDocs           uint32
-	mobileCompatible         uint32
+	mobileCompatible         int
 }
 
 func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils, dp base.DataPool, filterModes base.FilterExpDelType, mobileCompatible int) (*FilterImpl, error) {
@@ -54,7 +54,7 @@ func NewFilterWithSharedDP(id string, filterExpression string, utils FilterUtils
 		dp:                    dp,
 		slicesToBeReleasedBuf: make([][]byte, 0, 2),
 	}
-	filter.mobileCompatible = uint32(mobileCompatible)
+	filter.mobileCompatible = mobileCompatible
 
 	if filterModes.IsSkipReplicateUncommittedTxnSet() {
 		filter.skipUncommittedTxn = 1
@@ -133,12 +133,8 @@ func (filter *FilterImpl) SetShouldSkipBinaryDocs(val bool) {
 	}
 }
 
-func (filter *FilterImpl) SetMobileCompatibility(val uint32) {
-	atomic.StoreUint32(&filter.mobileCompatible, val)
-}
-
-func (filter *FilterImpl) getMobileCompatibility() uint32 {
-	return atomic.LoadUint32(&filter.mobileCompatible)
+func (filter *FilterImpl) getMobileCompatibility() int {
+	return filter.mobileCompatible
 }
 
 func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) (bool, error, string, int64, base.FilteringStatusType) {
@@ -146,7 +142,7 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		return false, base.ErrorInvalidInput, "UprEvent or wrappedUprEvent is nil", 0, FilteredOnOthers
 	}
 	// Mobile filter applies to all scopes/collections so let's do that first
-	if filter.filterMobileRelatedUprEvent(wrappedUprEvent.UprEvent) == false {
+	if !filter.filterMobileRelatedUprEvent(wrappedUprEvent.UprEvent) {
 		return false, nil, "", 0, FilteredOnMobileRecord
 	}
 	// User defined filter doesn't apply to system scope

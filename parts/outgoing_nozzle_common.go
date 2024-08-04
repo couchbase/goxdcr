@@ -226,6 +226,9 @@ type dataBatch struct {
 	getMetaSpecWithoutHlv []base.SubdocLookupPathSpec
 	getMetaSpecWithHlv    []base.SubdocLookupPathSpec
 	getBodySpec           []base.SubdocLookupPathSpec // This one will get document body in addition to document metadata. Used for CCR only
+	isCCR                 bool
+	isMobile              bool
+	crossClusterVer       bool
 
 	curCount          uint32
 	curSize           uint32
@@ -318,10 +321,12 @@ func (b *dataBatch) accumuBatch(req *base.WrappedMCRequest, classifyFunc func(re
 	var isFull bool = true
 
 	if req != nil && req.Req != nil {
-		// When this batch is established, it establishes these specs so store it to be used in case of mutation retries
+		// When this batch is established,
+		// it establishes these specs and settings so store it to be used in case of mutation retries
 		req.GetMetaSpecWithoutHlv = b.getMetaSpecWithoutHlv
 		req.GetMetaSpecWithHlv = b.getMetaSpecWithHlv
 		req.GetBodySpec = b.getBodySpec
+		req.SetHLVModeOptions(b.isMobile, b.isCCR, b.crossClusterVer)
 
 		size := req.Req.Size()
 
