@@ -752,6 +752,16 @@ type WrappedMCRequest struct {
 	MouAfterProcessing []byte
 }
 
+// Set options to replicate using HLV.
+func (req *WrappedMCRequest) SetHLVModeOptions(isMobile, isCCR, crossClusterVersioning bool) {
+	if isMobile {
+		req.HLVModeOptions.PreserveSync = true
+	}
+	if crossClusterVersioning || isCCR {
+		req.HLVModeOptions.SendHlv = true
+	}
+}
+
 // set the intent to use subdoc command
 func (req *WrappedMCRequest) SetSubdocOp() {
 	if req == nil {

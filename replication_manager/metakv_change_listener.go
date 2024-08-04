@@ -453,6 +453,7 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	filterChanged := !(oldSettings.FilterExpression == newSettings.FilterExpression)
 	modesChanged := oldSettings.NeedToRestartPipelineDueToCollectionModeChanges(newSettings)
 	rulesChanged := !oldSettings.GetCollectionsRoutingRules().SameAs(newSettings.GetCollectionsRoutingRules())
+	mobileModeChanged := oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible()
 
 	// the following may qualify for live update in the future.
 	// batchCount is tricky since the sizes of xmem data channels depend on it.
@@ -461,7 +462,8 @@ func needToReconstructPipeline(oldSettings, newSettings *metadata.ReplicationSet
 	batchSizeChanged := (oldSettings.BatchSize != newSettings.BatchSize)
 
 	return repTypeChanged || sourceNozzlePerNodeChanged || targetNozzlePerNodeChanged ||
-		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged || modesChanged || rulesChanged
+		batchCountChanged || batchSizeChanged || compressionTypeChanged || filterChanged ||
+		modesChanged || rulesChanged || mobileModeChanged
 }
 
 func needToRestreamPipeline(oldSettings *metadata.ReplicationSettings, newSettings *metadata.ReplicationSettings) bool {
@@ -499,7 +501,6 @@ func (rscl *ReplicationSpecChangeListener) liveUpdatePipeline(topic string, oldS
 		isOldReplHighPriority != isNewReplHighPriority ||
 		oldSettings.GetExpDelMode() != newSettings.GetExpDelMode() ||
 		oldSettings.GetDevMainPipelineDelay() != newSettings.GetDevMainPipelineDelay() ||
-		oldSettings.GetMobileCompatible() != newSettings.GetMobileCompatible() ||
 		oldSettings.GetJsFunctionTimeoutMs() != newSettings.GetJsFunctionTimeoutMs() ||
 		oldSettings.GetDevBackfillPipelineDelay() != newSettings.GetDevBackfillPipelineDelay() ||
 		len(newMergeFuncMapping) > 0 && newMergeFuncMapping.SameAs(oldMergeFuncMapping) == false ||

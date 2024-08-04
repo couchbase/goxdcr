@@ -66,6 +66,9 @@ function testReplicationSettings {
 		exit 1
 	fi
 
+	echo "sleeping 10 seconds for pipeline to restart"
+	sleep 10
+
 	writeJSONDocument "C1" "B1" "_sync:doc2" '{"foo":"bar"}'
 	writeJSONDocument "C1" "B1" "_sync:att:doc2" '{"foo":"bar"}'
 	sleep 20
@@ -85,6 +88,9 @@ function testReplicationSettings {
 		echo "mobile should be \"Active\" but got $mobile"
 		exit 1
 	fi
+
+	echo "sleeping 10 seconds for pipeline to restart"
+	sleep 10
 
 	writeJSONDocument "C1" "B1" "_sync:doc3" '{"foo":"bar"}'
 	writeJSONDocument "C1" "B1" "_sync:att:doc3" '{"foo":"bar"}'

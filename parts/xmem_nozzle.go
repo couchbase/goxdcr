@@ -2539,6 +2539,10 @@ func (xmem *XmemNozzle) initNewBatch() {
 	crossClusterVers := xmem.getCrossClusterVers()
 	isMobile := xmem.getMobileCompatible() != base.MobileCompatibilityOff
 
+	xmem.batch.isCCR = isCCR
+	xmem.batch.isMobile = isMobile
+	xmem.batch.crossClusterVer = crossClusterVers
+
 	subdocSpecOpt := base.SubdocSpecOption{}
 	if isMobile {
 		subdocSpecOpt.IncludeMobileSync = true
@@ -3969,18 +3973,7 @@ func (xmem *XmemNozzle) UpdateSettings(settings metadata.ReplicationSettingsMap)
 			xmem.Logger().Infof("%v updated %v to %v\n", xmem.Id(), HLV_PRUNING_WINDOW, hlvPruningWindowInt)
 		}
 	}
-	mobileCompatible, ok := settings[MOBILE_COMPATBILE]
-	if ok {
-		mobileCompatibleInt := mobileCompatible.(int)
-		oldMobileCompatible := int(atomic.LoadUint32(&xmem.config.mobileCompatible))
-		atomic.StoreUint32(&xmem.config.mobileCompatible, uint32(mobileCompatibleInt))
-		if oldMobileCompatible != mobileCompatible {
-			xmem.Logger().Infof("%v updated %v to %v\n", xmem.Id(), MOBILE_COMPATBILE, mobileCompatible)
-		}
-		if mobileCompatible != base.MobileCompatibilityOff && atomic.CompareAndSwapUint32(&xmem.importMutationEventRaised, 1, 0) {
-			xmem.eventsProducer.DismissEvent(int(xmem.importMutationEventId))
-		}
-	}
+
 	return nil
 }
 

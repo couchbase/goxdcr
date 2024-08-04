@@ -153,9 +153,6 @@ type Router struct {
 
 	connectivityStatusGetter func() (metadata.ConnectivityStatus, error)
 
-	crossClusterVersioning uint32
-	mobileCompatMode       uint32
-
 	// RevID or CAS can't be used with doc key to create a unique-key when we skip targetCR
 	// This is because of the possibility of same revID or CAS mutations over the dcp stream
 	// This monotonic counter will be used to construct unique-key instead
@@ -1604,16 +1601,6 @@ func (router *Router) ComposeMCRequest(wrappedEvent *base.WrappedUprEvent) (*bas
 	wrapped_req.ColInfo = router.targetColInfoPool.Get()
 	wrapped_req.ColInfoMtx.Unlock()
 
-	isCCR := router.sourceCRMode == base.CRMode_Custom
-	isMobile := router.getMobileCompatMode() != base.MobileCompatibilityOff
-	crossClusterVersioning := router.getCrossClusterVersioning()
-	if isMobile {
-		wrapped_req.HLVModeOptions.PreserveSync = true
-	}
-	if crossClusterVersioning || isCCR {
-		wrapped_req.HLVModeOptions.SendHlv = true
-	}
-
 	return wrapped_req, nil
 }
 
@@ -1993,15 +1980,6 @@ func (router *Router) updateHighRepl(isHighReplicationObj interface{}) error {
 	return nil
 }
 
-func (router *Router) SetMobileCompatibility(val uint32) {
-	router.filter.SetMobileCompatibility(val)
-	atomic.StoreUint32(&router.mobileCompatMode, val)
-}
-
-func (router *Router) getMobileCompatMode() int {
-	return int(atomic.LoadUint32(&router.mobileCompatMode))
-}
-
 func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) error {
 	errMap := make(base.ErrorMap)
 
@@ -2063,16 +2041,6 @@ func (router *Router) UpdateSettings(settings metadata.ReplicationSettingsMap) e
 	collectionsMgtMode, ok := settings[metadata.CollectionsMgtMultiKey].(base.CollectionsMgtType)
 	if ok {
 		router.collectionModes.Set(collectionsMgtMode)
-	}
-
-	mobileCompatibleMode, ok := settings[metadata.MobileCompatibleKey].(int)
-	if ok {
-		router.SetMobileCompatibility(uint32(mobileCompatibleMode))
-	}
-
-	val, ok := settings[base.EnableCrossClusterVersioningKey].(bool)
-	if ok {
-		router.SetCrossClusterVersioning(val)
 	}
 
 	casDriftThreshold, ok := settings[metadata.CASDriftThresholdSecsKey].(int)
@@ -2174,18 +2142,6 @@ func (router *Router) recycleDataObj(obj interface{}) {
 	default:
 		panic(fmt.Sprintf("Coding bug type is %v", reflect.TypeOf(obj)))
 	}
-}
-
-func (router *Router) SetCrossClusterVersioning(val bool) {
-	var storeVal uint32
-	if val {
-		storeVal = 1
-	}
-	atomic.StoreUint32(&router.crossClusterVersioning, storeVal)
-}
-
-func (router *Router) getCrossClusterVersioning() bool {
-	return atomic.LoadUint32(&router.crossClusterVersioning) == 1
 }
 
 // Returns a bool set to true if not to be replicated
