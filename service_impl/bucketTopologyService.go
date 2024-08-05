@@ -186,10 +186,12 @@ func (b *BucketTopologyService) getOrCreateLocalWatcher(spec *metadata.Replicati
 		intervalFuncMap[HIGHSEQNOSLEGACY] = make(IntervalInnerFuncMap)
 		intervalFuncMap[HIGHSEQNOSLEGACY][defaultPipelineStatsInterval] = highSeqnoFuncLegacy
 
-		maxVBCasStatsInterval := time.Duration(metadata.DefaultMaxCasIntervalSec) * time.Second
-		maxVBCasFunc := b.getMaxCasUpdater(spec, watcher)
-		intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
-		intervalFuncMap[MAXCAS][maxVBCasStatsInterval] = maxVBCasFunc
+		if base.IsCasPoisoningPreCheckEnabled() {
+			maxVBCasStatsInterval := time.Duration(metadata.DefaultMaxCasIntervalSec) * time.Second
+			maxVBCasFunc := b.getMaxCasUpdater(spec, watcher)
+			intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
+			intervalFuncMap[MAXCAS][maxVBCasStatsInterval] = maxVBCasFunc
+		}
 
 		watcher.intervalFuncMap = intervalFuncMap
 
@@ -415,9 +417,11 @@ func (b *BucketTopologyService) getOrCreateRemoteWatcher(spec *metadata.Replicat
 		intervalFuncMap[TOPOLOGY] = make(IntervalInnerFuncMap)
 		intervalFuncMap[TOPOLOGY][b.refreshInterval] = topologyUpdateFunc
 
-		maxCasGetterFunc := b.getRemoteMaxCasUpdater(maxCasGetter, watcher)
-		intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
-		intervalFuncMap[MAXCAS][b.refreshInterval] = maxCasGetterFunc
+		if base.IsCasPoisoningPreCheckEnabled() {
+			maxCasGetterFunc := b.getRemoteMaxCasUpdater(maxCasGetter, watcher)
+			intervalFuncMap[MAXCAS] = make(IntervalInnerFuncMap)
+			intervalFuncMap[MAXCAS][b.refreshInterval] = maxCasGetterFunc
+		}
 
 		watcher.intervalFuncMap = intervalFuncMap
 	}
