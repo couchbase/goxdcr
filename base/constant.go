@@ -1227,7 +1227,8 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	humanRecoveryThreshold time.Duration,
 	dnsSrvReBootstrap bool,
 	connectionPreCheckGCTimeout time.Duration, connectionPreCheckRPCTimeout time.Duration,
-	capellaHostNameSuffix string, datapoolLogFrequency int, nwLatencyToleranceMilliSec time.Duration) {
+	capellaHostNameSuffix string, datapoolLogFrequency int,
+	nwLatencyToleranceMilliSec time.Duration, casPoisoningPreCheckEnabled int) {
 	TopologyChangeCheckInterval = topologyChangeCheckInterval
 	MaxTopologyChangeCountBeforeRestart = maxTopologyChangeCountBeforeRestart
 	MaxTopologyStableCountBeforeRestart = maxTopologyStableCountBeforeRestart
@@ -1380,6 +1381,7 @@ func InitConstants(topologyChangeCheckInterval time.Duration, maxTopologyChangeC
 	CapellaHostnameSuffix = capellaHostNameSuffix
 	DatapoolLogFrequency = datapoolLogFrequency
 	NWLatencyToleranceMilliSec = nwLatencyToleranceMilliSec
+	CasPoisoningPreCheckEnabled = casPoisoningPreCheckEnabled
 }
 
 // XDCR Dev hidden replication settings
@@ -1616,3 +1618,12 @@ const CASDriftLiveDetected = "One or more documents are not replicated because t
 const PreCheckCASDriftDetected = "The following VBs have time drift (nanoSecs) beyond acceptable threshold"
 
 var NWLatencyToleranceMilliSec = 10000 * time.Millisecond
+
+// This is exposed as an internal setting (which triggers process restart which is necessary),
+// which needs to be turned on if new pipeline cas poisoning check is required.
+// 0 means disbaled, 1 means enabled.
+var CasPoisoningPreCheckEnabled int = 0
+
+func IsCasPoisoningPreCheckEnabled() bool {
+	return CasPoisoningPreCheckEnabled > 0
+}

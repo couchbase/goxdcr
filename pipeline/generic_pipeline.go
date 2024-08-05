@@ -11,6 +11,9 @@ package pipeline
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/couchbase/goxdcr/base"
 	common "github.com/couchbase/goxdcr/common"
 	log "github.com/couchbase/goxdcr/log"
@@ -19,8 +22,6 @@ import (
 	"github.com/couchbase/goxdcr/peerToPeer"
 	"github.com/couchbase/goxdcr/service_def"
 	utilities "github.com/couchbase/goxdcr/utils"
-	"sync"
-	"time"
 )
 
 var ErrorKey = "Error"
@@ -247,6 +248,8 @@ func (genericPipeline *GenericPipeline) startPart(part common.Part, settings met
 	}
 }
 
+var genericPipelineIteration uint32
+
 // Start starts the pipeline
 //
 // settings - a map of parameter to start the pipeline. it can contain initialization paramters
@@ -271,6 +274,13 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 	err = genericPipeline.SetState(common.Pipeline_Starting)
 	if err != nil {
 		errMap["genericPipeline.SetState.Pipeline_Starting"] = err
+		return errMap
+	}
+
+	genPipelineId := "GenericPipeline" + base.GetIterationId(&genericPipelineIteration)
+	spec := genericPipeline.Specification().GetReplicationSpec()
+	errMap = genericPipeline.preCheckCasCheck(spec, genPipelineId, errMap)
+	if len(errMap) > 0 {
 		return errMap
 	}
 
@@ -387,9 +397,14 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 // As part of CAS poison check, we need to make sure that given a specific VB, the max cas's between them
 // are not beyond an acceptable threshold
 func (genericPipeline *GenericPipeline) preCheckCasCheck(spec *metadata.ReplicationSpecification, genPipelineId string, errMap base.ErrorMap) base.ErrorMap {
+	if !base.IsCasPoisoningPreCheckEnabled() {
+		genericPipeline.logger.Infof("Skip cas poison precheck because it has been disabled entirely")
+		return errMap
+	}
+
 	preCheckThreshold := time.Duration(spec.Settings.GetPreCheckCasDriftThreshold()) * time.Hour
 	if preCheckThreshold == 0 {
-		genericPipeline.logger.Infof("Skip cas poison precheck because it has been disabled")
+		genericPipeline.logger.Infof("Skip cas poison precheck because it has been disabled for this pipeline")
 		return errMap
 	}
 
