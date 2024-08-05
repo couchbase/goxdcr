@@ -413,9 +413,14 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 // As part of CAS poison check, we need to make sure that given a specific VB, the max cas's between them
 // are not beyond an acceptable threshold
 func (genericPipeline *GenericPipeline) preCheckCasCheck(spec *metadata.ReplicationSpecification, genPipelineId string, errMap base.ErrorMap) base.ErrorMap {
+	if !base.IsCasPoisoningPreCheckEnabled() {
+		genericPipeline.logger.Infof("Skip cas poison precheck because it has been disabled entirely")
+		return errMap
+	}
+
 	preCheckThreshold := time.Duration(spec.Settings.GetPreCheckCasDriftThreshold()) * time.Hour
 	if preCheckThreshold == 0 {
-		genericPipeline.logger.Infof("Skip cas poison precheck because it has been disabled")
+		genericPipeline.logger.Infof("Skip cas poison precheck because it has been disabled for this pipeline")
 		return errMap
 	}
 
