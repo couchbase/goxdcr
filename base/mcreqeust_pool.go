@@ -66,6 +66,7 @@ func (pool *MCRequestPool) cleanReq(req *WrappedMCRequest) *WrappedMCRequest {
 	req.SiblingReqsMtx.Unlock()
 	req.RetryCRCount = 0
 	req.NeedToRecompress = false
+	req.SkippedRecompression = false
 	req.ImportMutation = false
 	req.HLVModeOptions.NoTargetCR = false
 	req.HLVModeOptions.PreserveSync = false
