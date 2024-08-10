@@ -163,12 +163,12 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 	// compressed DCP document, and it has been stripped of any transactional related xattrs
 	// Save the body so that it can be copied later and reused if it hasn't been done before (determined via flag)
 	if needToReplicate && body != nil && bodyHasBeenModified && !wrappedUprEvent.Flags.ShouldUseDecompressedValue() {
-		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos))
+		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos + 1))
 		if err != nil {
 			return needToReplicate, err, "wrappedUprEvent.ByteSliceGetter", totalFailedDpCnt
 		}
 		wrappedUprEvent.Flags.SetShouldUseDecompressedValue()
-		copy(valueBod, body[0:endBodyPos])
+		copy(valueBod, body[0:endBodyPos+1])
 		wrappedUprEvent.DecompressedValue = valueBod
 	}
 	return needToReplicate, err, errDesc, totalFailedDpCnt
@@ -243,24 +243,22 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *memcached.U
 		for xattrIterator.HasNext() {
 			key, value, err := xattrIterator.Next()
 			if err != nil {
-				errDesc = fmt.Sprintf("error during xattribute walk")
-				if err != nil {
-					return false, nil, 0, err, errDesc, failedDpCnt, false
-				}
+				errDesc = "error during xattribute walk"
+				return false, nil, 0, err, errDesc, failedDpCnt, false
 			}
 			if base.Equals(key, base.TransactionXattrKey) {
 				continue
 			}
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {
-				errDesc = fmt.Sprintf("error during xattribute composition")
+				errDesc = "error during xattribute composition"
 				return false, nil, 0, err, errDesc, failedDpCnt, false
 			}
 		}
 
 		var modifiedBodyHasAtLeastOneXattr bool
 		body, modifiedBodyHasAtLeastOneXattr = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr)
-		endBodyPos = len(body)
+		endBodyPos = len(body) - 1
 		bodyHasBeenModified = true
 		if uprEvent.DataType&memcached.XattrDataType > 0 && !modifiedBodyHasAtLeastOneXattr {
 			// Since Transactional Xattr was the only xattribute, the new document value should not have any xattribute
