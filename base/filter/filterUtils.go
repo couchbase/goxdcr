@@ -149,7 +149,6 @@ func (f *FilterUtilsImpl) CheckForTransactionXattrsInUprEvent(uprEvent *memcache
 		endBodyPos = -1
 	}
 	return
-
 }
 
 // returns
@@ -231,6 +230,8 @@ func processKeyOnlyForFiltering(key []byte, dp base.DataPool, slicesToBeReleased
 	return body, 0, bodyPos
 }
 
+// Decompresses the input snappy-compressed document body into a buffer slice obtained from the passed data pool.
+// Optionally allows adding extra bytes at the end of the buffer slice for appending the document key (as required when filtering on key), to avoid reallocation later on.
 func decompressSnappyBody(incomingBody, key []byte, dp base.DataPool, slicesToBeReleased *[][]byte, needExtraBytesInBody, isJson bool) ([]byte, error, string, int64, int) {
 	var dpFailedCnt int64
 	lenOfDecodedData, err := snappy.DecodedLen(incomingBody)
@@ -264,6 +265,8 @@ func decompressSnappyBody(incomingBody, key []byte, dp base.DataPool, slicesToBe
 	return body, nil, "", dpFailedCnt, lastBodyPos
 }
 
+// Decompresses the input snappy-compressed document body into a buffer slice obtained from the passed data pool.
+// Also allocates extra bytes at the end of the buffer slice for appending the document key (as required when filtering on key), to avoid reallocation later on.
 func getBodySlice(incomingBody, key []byte, dp base.DataPool, slicesToBeReleased *[][]byte) ([]byte, error, string, int64, int) {
 	var dpFailedCnt int64
 	var incomingBodyLen int = len(incomingBody)
