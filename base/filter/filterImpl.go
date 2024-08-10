@@ -163,14 +163,9 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		filter.slicesToBeReleasedBuf = filter.slicesToBeReleasedBuf[:0]
 	}()
 
-	filterStatus := NotFiltered
 	needToReplicate, body, endBodyPos, err, errDesc, totalFailedDpCnt, bodyHasBeenModified, filterStatus := filter.filterTransactionRelatedUprEvent(wrappedUprEvent.UprEvent, &filter.slicesToBeReleasedBuf)
-	if err != nil {
-		return false, err, errDesc, totalFailedDpCnt, FilteredOnOthers
-	}
-
-	if !needToReplicate {
-		return false, nil, "", totalFailedDpCnt, filterStatus
+	if err != nil || !needToReplicate {
+		return false, err, errDesc, totalFailedDpCnt, filterStatus
 	}
 
 	dataTypeIsJson := wrappedUprEvent.UprEvent.DataType&mcc.JSONDataType > 0
@@ -188,7 +183,7 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 		}
 
 		if !needToReplicate {
-			filterStatus = FilteredOnUserDefinedFilter
+			return needToReplicate, err, errDesc, totalFailedDpCnt, FilteredOnUserDefinedFilter
 		}
 	}
 
@@ -196,14 +191,14 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 	// it means the body is meant to be used - it contains decompressed values of the original
 	// compressed DCP document, and it has been stripped of any transactional related xattrs
 	// Save the body so that it can be copied later and reused if it hasn't been done before (determined via flag)
-	if needToReplicate && body != nil && bodyHasBeenModified && !wrappedUprEvent.Flags.ShouldUseDecompressedValue() {
+	if body != nil && bodyHasBeenModified {
 		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos))
 		if err != nil {
 			return needToReplicate, err, "wrappedUprEvent.ByteSliceGetter", totalFailedDpCnt, filterStatus
 		}
-		wrappedUprEvent.Flags.SetShouldUseDecompressedValue()
 		copy(valueBod, body[0:endBodyPos])
 		wrappedUprEvent.DecompressedValue = valueBod
+		wrappedUprEvent.Flags.SetShouldUseDecompressedValue()
 	}
 	return needToReplicate, err, errDesc, totalFailedDpCnt, filterStatus
 }
@@ -328,7 +323,7 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEven
 // If body is not nil, filterUprEvent will simply use it instead of having to perform decompression again
 // The body will also be free of any transactional metadata that has been stripped unless that is opted out
 // Returns:
-// 1. bool - Whether or not it was a match
+// 1. bool - condition that the UPR event matched the filter expression, & hence needs to be replicated
 // 2. err code
 // 3. If err is not nil, additional description
 // 4. Total bytes of failed datapool gets - which means len of []byte alloc (garbage)
