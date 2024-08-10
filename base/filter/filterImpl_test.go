@@ -977,3 +977,229 @@ func TestMobileFiltering(t *testing.T) {
 	assert.Nil(err)
 	assert.Equal(status, FilteredOnMobileRecord)
 }
+
+func TestTxnXattrOnlyWithKeyAndBodyFilter(t *testing.T) {
+	fmt.Println("============== Test case start: TestTxnXattrOnlyWithKeyAndBodyFilter =================")
+	defer fmt.Println("=============== Test case end: TestTxnXattrOnlyWithKeyAndBodyFilter ==================")
+	assert := assert.New(t)
+
+	transXattrFile := "../../utils/testInternalData/txnXattrOnlyWithKeyAndBodyFilter.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	assert.True(uprEvent.UprEvent.IsSnappyDataType())
+
+	// Before decompression, xattr iterator should have some error
+	_, err = base.NewXattrIterator(uprEvent.UprEvent.Value)
+	assert.NotNil(err)
+
+	// Uncompress should have no problem
+	uncompressedUprEventVal, err := snappy.Decode(nil, uprEvent.UprEvent.Value)
+	assert.Nil(err)
+
+	// After decompression, xattr iterator should have no error
+	_, err = base.NewXattrIterator(uncompressedUprEventVal)
+	assert.Nil(err)
+
+	strippedData, err := base.StripXattrAndGetBody(uncompressedUprEventVal)
+	assert.Nil(err)
+
+	// Validate that the body is a valid json
+	type dummyStruct struct{}
+	testStruct := dummyStruct{}
+	assert.Nil(json.Unmarshal(strippedData, &testStruct))
+
+	keyAndBodyFilter := "REGEXP_CONTAINS(META().id, \"amendment_brewery_cafe\") AND name == \"21st Amendment Brewery Cafe\""
+
+	// Test filtering due to uncommitted txn XATTR
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	legacyFilter, err := NewFilter(filterId, keyAndBodyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(legacyFilter)
+	result, err, _, _, status := legacyFilter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+	assert.Equal(status, FilteredOnTxnsXattr)
+
+	// Test body modification to remove txn XATTR
+	sdkFilter, err := NewFilter(filterId, keyAndBodyFilter, realUtil, 0, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(sdkFilter)
+	result, err, _, _, status = sdkFilter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
+	assert.True(uprEvent.Flags.ShouldUseDecompressedValue())
+	assert.NotNil(uprEvent.DecompressedValue)
+}
+
+func TestNonTxnXattrWithKeyAndBodyFilter(t *testing.T) {
+	fmt.Println("============== Test case start: TestNonTxnXattrWithKeyAndBodyFilter =================")
+	defer fmt.Println("=============== Test case end: TestNonTxnXattrWithKeyAndBodyFilter ==================")
+	assert := assert.New(t)
+
+	transXattrFile := "../../utils/testInternalData/nonTxnXattrWithKeyAndBodyFilter.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	assert.False(uprEvent.UprEvent.IsSnappyDataType())
+
+	// XATTR iterator should have no error
+	xattrIter, err := base.NewXattrIterator(uprEvent.UprEvent.Value)
+	assert.Nil(err)
+	assert.NotNil(xattrIter)
+	origXattrSize, err := base.GetXattrSize(uprEvent.UprEvent.Value)
+	assert.True(origXattrSize > 0)
+	assert.Nil(err)
+
+	// Calculate total number of xattributes
+	var originalTotalXattrCnt int
+	var transactionXattrFound bool
+	for xattrIter.HasNext() {
+		originalTotalXattrCnt++
+		key, value, err := xattrIter.Next()
+		assert.Nil(err)
+		if string(key) == base.TransactionXattrKey {
+			transactionXattrFound = true
+			assert.NotNil(value)
+		}
+	}
+	assert.False(transactionXattrFound)
+
+	strippedData, err := base.StripXattrAndGetBody(uprEvent.UprEvent.Value)
+	assert.Nil(err)
+
+	// Validate that the body is a valid json
+	type dummyStruct struct{}
+	testStruct := dummyStruct{}
+	assert.Nil(json.Unmarshal(strippedData, &testStruct))
+
+	keyAndBodyFilter := "REGEXP_CONTAINS(META().id, \"amendment_brewery_cafe\") AND name == \"21st Amendment Brewery Cafe\""
+
+	sdkFilter, err := NewFilter(filterId, keyAndBodyFilter, realUtil, 0, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(sdkFilter)
+	result, err, _, _, status := sdkFilter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
+
+	var dummySlice [][]byte
+	result, body, endPos, err, _, _, _, status := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	assert.True(result)
+	assert.Nil(body)
+	assert.True(endPos <= len(body))
+	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
+
+	// Xattrs should not have SDK transaction Xattribute
+	xattrIter, err = base.NewXattrIterator(uprEvent.UprEvent.Value)
+	assert.Nil(err)
+	for xattrIter.HasNext() {
+		key, _, err := xattrIter.Next()
+		assert.NotEqual(key, base.TransactionXattrKey)
+		assert.Nil(err)
+	}
+}
+
+func TestMixedXattrWithKeyAndBodyFilter(t *testing.T) {
+	fmt.Println("============== Test case start: TestMixedXattrWithKeyAndBodyFilter =================")
+	fmt.Println("=============== Test case end: TestMixedXattrWithKeyAndBodyFilter ==================")
+	assert := assert.New(t)
+
+	transXattrFile := "../../utils/testInternalData/mixedXattrWithKeyAndBodyFilter.json"
+	uprEvent, err := base.RetrieveUprJsonAndConvert(transXattrFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	assert.True(uprEvent.UprEvent.IsSnappyDataType())
+
+	// Before decompression, xattr iterator should have some error
+	xattrIter, err := base.NewXattrIterator(uprEvent.UprEvent.Value)
+	assert.NotNil(err)
+	assert.Nil(xattrIter)
+
+	// Uncompress should have no problem
+	uncompressedUprEventVal, err := snappy.Decode(nil, uprEvent.UprEvent.Value)
+	assert.Nil(err)
+
+	// After decompression, xattr iterator should have no error
+	xattrIter, err = base.NewXattrIterator(uncompressedUprEventVal)
+	assert.Nil(err)
+	assert.NotNil(xattrIter)
+	origXattrSize, err := base.GetXattrSize(uncompressedUprEventVal)
+	assert.Nil(err)
+
+	// Calculate total number of xattributes
+	var originalTotalXattrCnt int
+	var transactionXattrFound bool
+	for xattrIter.HasNext() {
+		originalTotalXattrCnt++
+		key, value, err := xattrIter.Next()
+		assert.Nil(err)
+		if string(key) == base.TransactionXattrKey {
+			transactionXattrFound = true
+			assert.NotNil(value)
+		}
+	}
+	assert.True(transactionXattrFound)
+
+	strippedData, err := base.StripXattrAndGetBody(uncompressedUprEventVal)
+	assert.Nil(err)
+
+	// Validate that the body is a valid json
+	type dummyStruct struct{}
+	testStruct := dummyStruct{}
+	assert.Nil(json.Unmarshal(strippedData, &testStruct))
+
+	keyAndBodyFilter := "REGEXP_CONTAINS(META().id, \"amendment_brewery_cafe\") AND name == \"22nd Amendment Brewery Cafe\""
+
+	var filterType base.FilterExpDelType
+	filterType.SetSkipReplicateUncommittedTxn(true)
+	legacyFilter, err := NewFilter(filterId, keyAndBodyFilter, realUtil, filterType, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(legacyFilter)
+	result, err, _, _, status := legacyFilter.FilterUprEvent(uprEvent)
+	assert.False(result)
+	assert.Nil(err)
+	assert.Equal(status, FilteredOnTxnsXattr)
+
+	sdkFilter, err := NewFilter(filterId, keyAndBodyFilter, realUtil, 0, base.MobileCompatibilityOff)
+	assert.Nil(err)
+	assert.NotNil(sdkFilter)
+	result, err, _, _, status = sdkFilter.FilterUprEvent(uprEvent)
+	assert.True(result)
+	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
+
+	var dummySlice [][]byte
+	result, body, endPos, err, _, _, _, status := sdkFilter.filterTransactionRelatedUprEvent(uprEvent.UprEvent, &dummySlice)
+	assert.True(result)
+	assert.NotNil(body)
+	assert.True(endPos <= len(body))
+	assert.Nil(err)
+	assert.Equal(status, NotFiltered)
+
+	// The body returned is xattributes + body
+	bodyWoXattr, err := base.StripXattrAndGetBody(body)
+	assert.Nil(err)
+	assert.True(reflect.DeepEqual(bodyWoXattr, strippedData))
+
+	// Xattrs should not have SDK transaction Xattribute
+	xattrIter, err = base.NewXattrIterator(body)
+	assert.Nil(err)
+	newXattrSize, err := base.GetXattrSize(body)
+	assert.Nil(err)
+	assert.True(newXattrSize < origXattrSize)
+	var postStripXattrCnt int
+	for xattrIter.HasNext() {
+		postStripXattrCnt++
+		key, _, err := xattrIter.Next()
+		assert.NotEqual(key, base.TransactionXattrKey)
+		assert.Nil(err)
+	}
+	assert.Equal(postStripXattrCnt, originalTotalXattrCnt-1)
+}
