@@ -192,11 +192,11 @@ func (filter *FilterImpl) FilterUprEvent(wrappedUprEvent *base.WrappedUprEvent) 
 	// compressed DCP document, and it has been stripped of any transactional related xattrs
 	// Save the body so that it can be copied later and reused if it hasn't been done before (determined via flag)
 	if body != nil && bodyHasBeenModified {
-		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos))
+		valueBod, err := wrappedUprEvent.ByteSliceGetter(uint64(endBodyPos + 1))
 		if err != nil {
 			return needToReplicate, err, "wrappedUprEvent.ByteSliceGetter", totalFailedDpCnt, filterStatus
 		}
-		copy(valueBod, body[0:endBodyPos])
+		copy(valueBod, body[0:endBodyPos+1])
 		wrappedUprEvent.DecompressedValue = valueBod
 		wrappedUprEvent.Flags.SetShouldUseDecompressedValue()
 	}
@@ -291,24 +291,22 @@ func (filter *FilterImpl) filterTransactionRelatedUprEvent(uprEvent *mcc.UprEven
 		for xattrIterator.HasNext() {
 			key, value, err := xattrIterator.Next()
 			if err != nil {
-				errDesc = fmt.Sprintf("error during xattribute walk")
-				if err != nil {
-					return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
-				}
+				errDesc = "error during xattribute walk"
+				return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 			}
 			if base.Equals(key, base.TransactionXattrKey) {
 				continue
 			}
 			err = xattrComposer.WriteKV(key, value)
 			if err != nil {
-				errDesc = fmt.Sprintf("error during xattribute composition")
+				errDesc = "error during xattribute composition"
 				return false, nil, 0, err, errDesc, failedDpCnt, false, FilteredOnOthers
 			}
 		}
 
 		var modifiedBodyHasAtLeastOneXattr bool
 		body, modifiedBodyHasAtLeastOneXattr = xattrComposer.FinishAndAppendDocValue(bodyWithoutXttr, nil, nil)
-		endBodyPos = len(body)
+		endBodyPos = len(body) - 1
 		bodyHasBeenModified = true
 		if uprEvent.DataType&mcc.XattrDataType > 0 && !modifiedBodyHasAtLeastOneXattr {
 			// Since Transactional Xattr was the only xattribute, the new document value should not have any xattribute
