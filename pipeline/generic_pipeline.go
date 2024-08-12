@@ -60,7 +60,7 @@ type VBMasterCheckFunc func(common.Pipeline) (map[string]*peerToPeer.VBMasterChe
 
 type MergeVBMasterRespCkptsFunc func(common.Pipeline, peerToPeer.PeersVBMasterCheckRespMap) error
 
-type PrometheusPipelineStatusCb []func()
+type PrometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error
 
 // GenericPipeline is the generic implementation of a data processing pipeline
 //
@@ -142,7 +142,7 @@ type GenericPipeline struct {
 	sourceTopologyProgressMsg string
 	targetTopologyProgressMsg string
 
-	statusCallbacks PrometheusPipelineStatusCb
+	prometheusStatusUpdater PrometheusStatusUpdater
 }
 
 // Get the runtime context of this pipeline
@@ -264,10 +264,16 @@ func (genericPipeline *GenericPipeline) Start(settings metadata.ReplicationSetti
 		if len(errMap) > 0 {
 			genericPipeline.logger.Errorf("%v failed to start, err=%v", genericPipeline.InstanceId(), errMap)
 			genericPipeline.ReportProgress(fmt.Sprintf("Pipeline failed to start, err=%v", errMap))
-			genericPipeline.statusCallbacks[base.PipelineStatusError]()
+			err := genericPipeline.prometheusStatusUpdater(genericPipeline, base.PipelineStatusError)
+			if err != nil {
+				genericPipeline.logger.Errorf("failed to update prometheus status. err=%v", err)
+			}
 		} else {
 			// Only set to running if there is no error starting the pipeline
-			genericPipeline.statusCallbacks[base.PipelineStatusRunning]()
+			err := genericPipeline.prometheusStatusUpdater(genericPipeline, base.PipelineStatusRunning)
+			if err != nil {
+				genericPipeline.logger.Errorf("failed to update prometheus status. err=%v", err)
+			}
 		}
 	}(genericPipeline, errMap)
 
@@ -728,7 +734,10 @@ func (genericPipeline *GenericPipeline) Stop() base.ErrorMap {
 			// Only mark the pipeline paused if the user requested it (or auto paused)
 			// Otherwise, any stop() could be called during error phase and we want to keep
 			// the pipeline in error phase
-			genericPipeline.statusCallbacks[base.PipelineStatusPaused]()
+			err := genericPipeline.prometheusStatusUpdater(genericPipeline, base.PipelineStatusPaused)
+			if err != nil {
+				genericPipeline.logger.Errorf("failed to update prometheus status. err=%v", err)
+			}
 		}
 	}
 
@@ -809,7 +818,7 @@ func NewGenericPipeline(t string,
 	return pipeline
 }
 
-func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc, utils utilities.UtilsIface, prometheusStatusCbConstructor func(pipeline common.Pipeline) PrometheusPipelineStatusCb) *GenericPipeline {
+func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineType, sources map[string]common.Nozzle, targets map[string]common.Nozzle, spec metadata.GenericSpecification, targetClusterRef *metadata.RemoteClusterReference, partsSettingsConstructor PartsSettingsConstructor, connectorSettingsConstructor ConnectorSettingsConstructor, sslPortMapConstructor SSLPortMapConstructor, partsUpdateSettingsConstructor PartsUpdateSettingsConstructor, connectorUpdateSetting_constructor ConnectorsUpdateSettingsConstructor, startingSeqnoConstructor StartingSeqnoConstructor, checkpoint_func CheckpointFunc, logger_context *log.LoggerContext, vbMasterCheckFunc VBMasterCheckFunc, mergeCkptFunc MergeVBMasterRespCkptsFunc, bucketTopologySvc service_def.BucketTopologySvc, utils utilities.UtilsIface, prometheusStatusUpdater func(pipeline common.Pipeline, status base.PipelineStatusGauge) error) *GenericPipeline {
 	pipeline := &GenericPipeline{topic: t,
 		sources:                            sources,
 		targets:                            targets,
@@ -831,9 +840,9 @@ func NewPipelineWithSettingConstructor(t string, pipelineType common.PipelineTyp
 		vbMasterCheckFunc:                  vbMasterCheckFunc,
 		mergeCkptFunc:                      mergeCkptFunc,
 		utils:                              utils,
+		prometheusStatusUpdater:            prometheusStatusUpdater,
 	}
 	// NOTE: Calling initialize here as part of constructor
-	pipeline.statusCallbacks = prometheusStatusCbConstructor(pipeline)
 	pipeline.initialize()
 	pipeline.logger.Debugf("Pipeline %s has been initialized with a part setting constructor %v", t, partsSettingsConstructor)
 
