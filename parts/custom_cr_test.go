@@ -74,6 +74,7 @@ func createBucket(connStr, bucketName string, crType gocb.ConflictResolutionType
 		ConflictResolutionType: crType},
 		&gocb.CreateBucketOptions{Timeout: 10 * time.Second})
 	// Wait for bucket ready
+	time.Sleep(5 * time.Second)
 	bucket = cluster.Bucket(bucketName)
 	err = bucket.WaitUntilReady(20*time.Second, &gocb.WaitUntilReadyOptions{DesiredState: gocb.ClusterStateOnline})
 	return
@@ -155,8 +156,13 @@ func waitForCasChange(t *testing.T, key string, cas gocb.Cas, bucket *gocb.Bucke
 		time.Sleep(1 * time.Second)
 	}
 	if newCas == cas {
-		t.Errorf("Document '%s' with cas %v has not changed in %v, err=%v\n", key, cas, time.Since(start), err)
-		t.FailNow()
+		if t != nil {
+			t.Errorf("Document '%s' with cas %v has not changed in %v, err=%v\n", key, cas, time.Since(start), err)
+			t.FailNow()
+			return
+		}
+
+		panic(fmt.Sprintf("Document '%s' with cas %v has not changed in %v, err=%v\n", key, cas, time.Since(start), err))
 	}
 }
 
@@ -256,7 +262,7 @@ func createMergeFunction(t *testing.T, mergeFunction string) {
 func TestCustomCrXattrAfterRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrAfterRep =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterRep =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -497,7 +503,7 @@ func TestCustomCrXattrAfterRep(t *testing.T) {
 func MB_58490_TestCustomCRDeletedDocs(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCRDeletedDocs =================")
 	defer fmt.Println("============== Test case end: TestCustomCRDeletedDocs =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -627,7 +633,7 @@ func MB_58490_TestCustomCRDeletedDocs(t *testing.T) {
 func TestCustomCrXattrAfterMerge(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrAfterMerge =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrAfterMerge =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -700,7 +706,7 @@ func TestCustomCrXattrAfterMerge(t *testing.T) {
 func TestCustomCrXattrSetBack(t *testing.T) {
 	fmt.Println("============== Test case start: TestCustomCrXattrSetBack =================")
 	defer fmt.Println("============== Test case end: TestCustomCrXattrSetBack =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}

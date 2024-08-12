@@ -2112,8 +2112,8 @@ func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMet
 	specs := lookupResp.Specs
 	resp := lookupResp.Resp
 	body := resp.Body
-	if IsSuccessGetResponse(resp) == false {
-		return DocumentMetadata{}, fmt.Errorf("Cannot decode subdoc lookup response because the lookup failed with status %v", resp.Status)
+	if !IsSuccessGetResponse(resp) {
+		return DocumentMetadata{}, fmt.Errorf("cannot decode subdoc lookup response because the lookup failed with status %v", resp.Status)
 	}
 	pos := 0
 	docMeta := DocumentMetadata{
@@ -2132,7 +2132,7 @@ func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMet
 		xattrlen := int(binary.BigEndian.Uint32(body[pos : pos+4]))
 		if pos+xattrlen > len(body) {
 			// This should never happen
-			return DocumentMetadata{}, fmt.Errorf("Returned value length %v for subdoc_get path %v exceeds body length", xattrlen, spec.Path)
+			return DocumentMetadata{}, fmt.Errorf("returned value length %v for subdoc_get path %v exceeds body length", xattrlen, spec.Path)
 		}
 		pos = pos + 4
 		value := string(body[pos : pos+xattrlen])
@@ -2141,7 +2141,7 @@ func DecodeSubDocResp(key []byte, lookupResp *SubdocLookupResponse) (DocumentMet
 			case VXATTR_REVID:
 				if xattrlen < MinRevIdLengthWithQuotes {
 					// This should never happen
-					return DocumentMetadata{}, fmt.Errorf("Unexpected return value length %v for subdoc_get path %v", xattrlen, VXATTR_REVID)
+					return DocumentMetadata{}, fmt.Errorf("unexpected return value length %v for subdoc_get path %v", xattrlen, VXATTR_REVID)
 				}
 				// KV returns $document.revid as a string. So skip the quotes in the return value
 				if revid, err := strconv.ParseUint(value[1:xattrlen-1], 10, 64); err == nil {

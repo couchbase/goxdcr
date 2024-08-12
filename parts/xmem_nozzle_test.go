@@ -156,17 +156,17 @@ func setupBoilerPlateXmem(bname string, crMode base.ConflictResolutionMode, opti
 	return utilitiesMock, settingsMap, xmemNozzle, router, bandwidthThrottler, remoteClusterSvc, colManifestSvc, producer
 }
 
-func targetXmemIsUpAndCorrectSetupExists(bname string) bool {
+func targetXmemIsUpAndCorrectSetupExists(connStr, port, bname string) bool {
 	if clusterChecked {
 		return clusterReady
 	}
 	clusterChecked = true
-	_, err := net.Listen("tcp4", fmt.Sprintf(":"+targetPort))
+	_, err := net.Listen("tcp4", fmt.Sprintf(":"+port))
 	if err == nil {
 		clusterReady = false
 		return false
 	}
-	cluster, err := gocb.Connect(targetConnStr, gocb.ClusterOptions{Authenticator: gocb.PasswordAuthenticator{
+	cluster, err := gocb.Connect(connStr, gocb.ClusterOptions{Authenticator: gocb.PasswordAuthenticator{
 		Username: username,
 		Password: password,
 	}})
@@ -174,13 +174,15 @@ func targetXmemIsUpAndCorrectSetupExists(bname string) bool {
 		clusterReady = false
 		return false
 	}
-	mgr := cluster.Buckets()
-	_, err = mgr.GetBucket(xmemBucket, nil)
-	if err != nil {
-		clusterReady = false
-		return false
+	if bname != "" {
+		mgr := cluster.Buckets()
+		_, err = mgr.GetBucket(bname, nil)
+		if err != nil {
+			clusterReady = false
+			return false
+		}
+		clusterReady = true
 	}
-	clusterReady = true
 	return true
 }
 
@@ -300,7 +302,7 @@ func TestPositiveXmemNozzleAuto(t *testing.T) {
  * Prerequisites:
  * 1. make dataclean
  * 2. cluster_run -n 2
- * 3. tools/provision.sh
+ * 3. tools/provision_oneCluster.sh --bucket=B2 --cluster=9001
  *
  * If cluster run is up and the buckets are provisioned, this test will read an actual UPR
  * file captured from DCP and actually run it through the XMEM nozzle and write it to a live target
@@ -316,7 +318,7 @@ func TestXmemSendAPacket(t *testing.T) {
 }
 
 func xmemSendPackets(t *testing.T, uprfiles []string, bname string) {
-	if !targetXmemIsUpAndCorrectSetupExists(bname) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, bname) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -650,7 +652,7 @@ func GetAndFlushBucket(connStr, bucketName string) (cluster *gocb.Cluster, bucke
 func TestMobilePreserveSync(t *testing.T) {
 	fmt.Println("============== Test case start: TestMobilePreserveSync =================")
 	defer fmt.Println("============== Test case end: TestMobilePreserveSync =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -753,10 +755,10 @@ func checkTarget(bucket *gocb.Bucket, key, path string, expectedValue []byte, is
 }
 
 // This test was useful in development but is disabled. TestMobilePreserveSync is used instead
-func DISABLE_TestMobilePreserveSyncLiveRep(t *testing.T) {
+func TestMobilePreserveSyncLiveRep(t *testing.T) {
 	fmt.Println("============== Test case start: TestMobilePreserveSyncLiveRep =================")
 	defer fmt.Println("============== Test case end: TestMobilePreserveSyncLiveRep =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -821,12 +823,10 @@ func mobilePreserveSyncLiveRep(t *testing.T, bucketName string, crType gocb.Conf
 }
 
 // We want to avoid replicating import mutation by using its pre-import metadata for CR.
-// This only works for LWW since pre-import revId is not saved so import mutations are still
-// replicated for revId buckets
 func TestMobileImportCasLWW(t *testing.T) {
 	fmt.Println("============== Test case start: TestMobileImportCasLWW =================")
 	defer fmt.Println("============== Test case end: TestMobileImportCasLWW =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -875,7 +875,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 	out, err := bucket.DefaultCollection().Get(key, nil)
 	assert.Nil(err)
 	assert.Equal(gocb.Cas(1700503142566854656), out.Cas())
-	err = checkTarget(bucket, key, base.XATTR_IMPORTCAS, []byte("\"0x0000223899669917\""), true)
+	err = checkTarget(bucket, key, base.XATTR_MOU, []byte(`{"importCAS":"0x0000223899669917","pRev":1}`), true)
 	assert.Nil(err)
 
 	// Test 2. Update the import document (Doc1). It should replicate with importCas removed
@@ -890,7 +890,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 	err = waitForReplication(key, 1700503747140517888, bucket)
 	assert.Nil(err)
 	value, err := bucket.DefaultCollection().LookupIn(key,
-		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_IMPORTCAS, &gocb.GetSpecOptions{IsXattr: true})}, nil)
+		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_MOU, &gocb.GetSpecOptions{IsXattr: true})}, nil)
 	assert.Nil(err)
 	assert.False(value.Exists(0))
 
@@ -923,7 +923,7 @@ func TestMobileImportCasLWW(t *testing.T) {
 func TestMobileMixedMode(t *testing.T) {
 	fmt.Println("============== Test case start: TestMobileMixedMode =================")
 	defer fmt.Println("============== Test case end: TestMobileMixedMode =================")
-	if !targetXmemIsUpAndCorrectSetupExists(xmemBucket) {
+	if !targetXmemIsUpAndCorrectSetupExists(targetConnStr, targetPort, xmemBucket) {
 		fmt.Println("Skipping since live cluster_run setup has not been detected")
 		return
 	}
@@ -942,18 +942,20 @@ func TestMobileMixedMode(t *testing.T) {
 
 	settings[base.EnableCrossClusterVersioningKey] = true
 	settings[base.VersionPruningWindowHrsKey] = 720
-	router.SetMobileCompatibility(base.MobileCompatibilityActive)
+	router.crossClusterVersioning = 1
 
 	setupMocksXmem(xmem, utilsNotUsed, throttler, remoteClusterSvc, colManSvc, eventProducer)
 
 	settings[MOBILE_COMPATBILE] = base.MobileCompatibilityOff
 	xmem.sourceBucketUuid = "93fcf4f0fcc94fdb3d6196235029d6bf"
+	router.SetMobileCompatibility(base.MobileCompatibilityOff)
 	startTargetXmem(xmem, settings, bucketName, assert)
 	fmt.Println("=== Test mobile mixed mode with mobile off ===")
 	mobileMixedModeTest(xmem, router, settings, bucketName, assert)
 
 	fmt.Println("=== Test mobile mixed mode with mobile active ===")
 	xmem.config.mobileCompatible = base.MobileCompatibilityActive
+	router.SetMobileCompatibility(base.MobileCompatibilityActive)
 	mobileMixedModeTest(xmem, router, settings, bucketName, assert)
 }
 
@@ -1003,7 +1005,7 @@ func mobileMixedModeTest(xmem *XmemNozzle, router *Router, settings map[string]i
 	assert.Nil(err)
 	assert.False(value.Exists(0))
 
-	// Doc2 Cas is larger than its vbHlvMaxCas. So it does  have HLV
+	// Doc2 Cas is larger than its vbHlvMaxCas. So it has HLV
 	value, err = bucket.DefaultCollection().LookupIn(string(doc2event.Key),
 		[]gocb.LookupInSpec{gocb.GetSpec(base.XATTR_HLV, &gocb.GetSpecOptions{IsXattr: true})}, nil)
 	assert.Nil(err)
@@ -1054,7 +1056,7 @@ func Disable_TestLiveImportDoc(t *testing.T) {
 	// In goxdcr.log, we have:
 	// 2024-01-03T09:55:01.810-08:00 INFO GOXDCR.XmemNozzle: pipelineFullTopic=44d5d82a3909c505c52133a353d98254/B1/B2, xmem_44d5d82a3909c505c52133a353d98254/B1/B2_127.0.0.1:12002_0: Using adX1DsoRpCb6kQWoZYq5ew(UUID 69d5f50eca11a426fa9105a8658ab97b) and QIpU9Op/zY2WDmGxkjwvPQ(UUID 408a54f4ea7fcd8d960e61b1923c2f3d) as source and target bucket IDs for HLV.
 	// Use the source bucket Id.
-	simulateImportOperation(assert, bucket, key, defaultScopeCol, defaultScopeCol, "adX1DsoRpCb6kQWoZYq5ew", uint64(upsOut.Cas()))
+	simulateImportOperation(assert, bucket, key, defaultScopeCol, defaultScopeCol, "adX1DsoRpCb6kQWoZYq5ew", uint64(upsOut.Cas()), 1)
 }
 
 type mockConn struct {
@@ -1179,7 +1181,8 @@ func getVVXattr(bucket *gocb.Bucket, key, colName, scopeName string, a *assert.A
 //  1. Update its HLV, with cvCAS set to the document CAS.
 //  2. Add the mobile metadata in the document XATTR (_sync)
 //  3. Write back the document. This results in a new mutation with new CAS.
-//     Mobile will set an XATTR _importCAS to the same value as the new CAS
+//     Mobile will set an XATTR _mou which has pRev which represents pre-import revID and
+//     importCAS which has the same value as the new CAS
 //
 // The resulting import mutation has the following properties:
 // 1. importCAS == document.CAS
@@ -1189,7 +1192,7 @@ func getVVXattr(bucket *gocb.Bucket, key, colName, scopeName string, a *assert.A
 // document.CAS > importCAS
 // This new mutation is no longer considered import mutation. It is a local mutation. When it is replicated to a target,
 // the importCAS XATTR will be removed.
-func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, colName, scopeName string, bucketId hlv.DocumentSourceId, curNonImportCas uint64) gocb.Cas {
+func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, colName, scopeName string, bucketId hlv.DocumentSourceId, curNonImportCas uint64, preImportRevId uint64) gocb.Cas {
 	// xattr Lookup
 	cvCas, src, ver, mv, pv, _ := getVVXattr(bucket, key, colName, scopeName, a)
 	meta, err := crMeta.NewMetadataForTest([]byte(key), []byte(bucketId), curNonImportCas, 1, cvCas, src, ver, pv, mv)
@@ -1221,6 +1224,8 @@ func simulateImportOperation(a *assert.Assertions, bucket *gocb.Bucket, key, col
 	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_CVCAS_PATH, string(newVer), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
 	// Add _mou.importCas
 	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_IMPORTCAS, gocb.MutationMacroCAS, &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
+	// Add _mou.pRev
+	mutateInSpec = append(mutateInSpec, gocb.UpsertSpec(crMeta.XATTR_PREVIOUSREV, fmt.Sprintf(`%v`, preImportRevId), &gocb.UpsertSpecOptions{IsXattr: true, CreatePath: true}))
 	res, err := bucket.Scope(scopeName).Collection(colName).MutateIn(key, mutateInSpec, &gocb.MutateInOptions{
 		Internal: struct {
 			DocFlags gocb.SubdocDocFlag
@@ -1488,7 +1493,7 @@ func turnOnCrossXVersioningClusterRun(port int, bucketname string) {
 
 func changesLeft(port int) string {
 	defer time.Sleep(3 * time.Second)
-	cmd := exec.Command(curl, "-u", combinedCreds, "-X", POST, fmt.Sprintf("http://localhost:%v/_prometheusMetrics", port))
+	cmd := exec.Command(curl, "-u", combinedCreds, "-X", GET, fmt.Sprintf("http://localhost:%v/_prometheusMetrics", port))
 	out, _ := runCmd(cmd, printCmd)
 	return string(out)
 }
@@ -1606,7 +1611,7 @@ func setupForCasPoisonTest(a *assert.Assertions, bucketName string, srcNode, tgt
 
 // this is a scenario where, after CAS regeneration, import happens after cas convergence from C2 to C1
 func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, replID2, docKey string, srcNode, tgtNode int, cas1, cas2 uint64, bucketUUID string, srcBucket, tgtBucket *gocb.Bucket, srcAgent, tgtAgent *gocbcore.Agent) {
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas2)
+	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas2, 1)
 
 	cas3, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
 	cas4, _, _, _, _, _, cvCas4, _, _, importCas4, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
@@ -1650,7 +1655,7 @@ func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, r
 	a.Equal(cas7, cas8)
 	a.Equal(cvCas7Int, cvCas8Int)
 
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas8)
+	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas8, 1)
 	cas9, _, _, _, _, _, cvCas9, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
 	cas10, _, _, _, _, _, cvCas10, _, _, importCas10, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
 	cvCas9Int, err := base.HexLittleEndianToUint64(cvCas9)
@@ -1669,7 +1674,7 @@ func importAfterConvergence(a *assert.Assertions, colName, scopeName, replID1, r
 
 // this is a scenario where, after CAS regeneration, import happens before cas convergence from C2 to C1
 func convergenceAfterImport(a *assert.Assertions, colName, scopeName, replID1, replID2, docKey string, srcNode, tgtNode int, cas1, cas2 uint64, bucketUUID string, srcBucket, tgtBucket *gocb.Bucket, srcAgent, tgtAgent *gocbcore.Agent) {
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas2)
+	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas2, 1)
 
 	cas3, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
 	cas4, _, _, _, _, _, cvCas4, _, _, importCas4, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
@@ -1698,7 +1703,7 @@ func convergenceAfterImport(a *assert.Assertions, colName, scopeName, replID1, r
 	a.Greater(cas6, cas5)    // check if cas was regenerated
 	a.Equal(cvCas6Int, cas6) // check if macro-expansion was successful
 
-	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas6)
+	simulateImportOperation(a, tgtBucket, docKey, colName, scopeName, hlv.DocumentSourceId(bucketUUID), cas6, 1)
 	cas7, _, _, _, _, _, _, _, _, _, _, _ := getDocMetaAndVV(srcBucket, srcAgent, docKey, colName, scopeName, a)
 	cas8, _, _, _, _, _, cvCas8, _, _, importCas8, _, _ := getDocMetaAndVV(tgtBucket, tgtAgent, docKey, colName, scopeName, a)
 	cvCas8Int, err := base.HexLittleEndianToUint64(cvCas8)
@@ -1734,10 +1739,12 @@ func convergenceAfterImport(a *assert.Assertions, colName, scopeName, replID1, r
 }
 
 func verifyStatsForDone(a *assert.Assertions, srcNode, tgtNode int) {
+	srcPromPort := srcNode - 9000 + 13000
+	tgtPromPort := tgtNode - 9000 + 13000
 	// changes left should be 0 on both source and target
-	srcPromStats := changesLeft(srcNode)
+	srcPromStats := changesLeft(srcPromPort)
 	a.NotRegexp(regexp.MustCompile("changes_left.*} [1-9]"), srcPromStats)
-	tgtPromStats := changesLeft(tgtNode)
+	tgtPromStats := changesLeft(tgtPromPort)
 	a.NotRegexp(regexp.MustCompile("changes_left.*} [1-9]"), tgtPromStats)
 }
 func verifyCasPoisonProtectionStats(t *testing.T, a *assert.Assertions, srcNode int, protectionMode string, count int) {
@@ -2058,6 +2065,8 @@ func TestCasRollbackLWWMobileScenario8(t *testing.T) {
 	verifyStatsForDone(a, srcNode, tgtNode)
 }
 
+// make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
+// go test -timeout 120s -run ^TestCasPoisonKVProtection$ github.com/couchbase/goxdcr/parts
 func TestCasPoisonKVProtection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasPoisonErrorMode")

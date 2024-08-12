@@ -1726,7 +1726,7 @@ func (x *XattrComposer) FinishAndAppendDocValue(val []byte, req *mc.MCRequest, l
 			reqBody = req.Body
 			key = req.Key
 		}
-		panic(fmt.Sprintf("The whole doc body was not written, key=%v%s%v, x.body=%v%v%v, x.pos=%v, val=%v%v%v, reqBody=%v%v%v, respBody=%v%v%v", UdTagBegin, key, UdTagEnd, UdTagBegin, x.body, UdTagEnd, x.pos, UdTagBegin, val, UdTagEnd, UdTagBegin, reqBody, UdTagEnd, UdTagBegin, respBody, UdTagEnd))
+		panic(fmt.Sprintf("The whole doc body was not written, key=%v%s%v, x.body=%v%s%v, x.pos=%v, val=%v%v%v, reqBody=%v%v%v, respBody=%v%v%v", UdTagBegin, key, UdTagEnd, UdTagBegin, x.body, UdTagEnd, x.pos, UdTagBegin, val, UdTagEnd, UdTagBegin, reqBody, UdTagEnd, UdTagBegin, respBody, UdTagEnd))
 	}
 	x.pos = x.pos + len(val)
 
@@ -2836,10 +2836,11 @@ const (
 type HLVModeOptions struct {
 	// Target KV cannot do CR if bucket uses CCR, or if we need to preserve _sync.
 	// TODO: this needs change once MB-44034 is done.
-	NoTargetCR   bool
-	SendHlv      bool   // Pack the HLV and send in setWithMeta
-	PreserveSync bool   // Preserve target _sync XATTR and send it in setWithMeta.
-	ActualCas    uint64 // copy of Req.Cas, which can be used if Req.Cas is set to 0
+	NoTargetCR    bool
+	SendHlv       bool   // Pack the HLV and send in setWithMeta
+	PreserveSync  bool   // Preserve target _sync XATTR and send it in setWithMeta.
+	ActualCas     uint64 // copy of Req.Cas, which can be used if Req.Cas is set to 0
+	IncludeTgtHlv bool   // If HLV is fetched from target doc
 }
 
 // These options are explicitly set when SubdocOp != NotSubdoc
@@ -2911,13 +2912,28 @@ func (smps SubdocMutationPathSpecs) Size() int {
 // If document body is included, it must be specified as the last path in the specs.
 // If targetDocIsTombstone is true, we set CAS to 0 and set an ADD flag. It will fail with KEY_EEXISTS if the doc exists.
 // If targetDocIsTombstone is false, targetCas must match the document CAS. Otherwise it will fail with KEY_EEXISTS (i.e. cas locking).
-// Make sure that accessDeleted is false if one of the subdoc spec is for CMD_SET.
 // If reuseReq is set, then the source request which was input, will be modified and returned, instead of a creating a new request instance.
-func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, targetCas uint64, bodyslice []byte, accessDeleted, targetDocIsTombstone, reuseReq bool) *mc.MCRequest {
+func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.MCRequest, targetCas uint64, bodyslice []byte, sourceDocIsTombstone, targetDocIsTombstone, reuseReq bool) *mc.MCRequest {
 	// Each path has: 1B Opcode -> 1B flag -> 2B path length -> 4B value length -> path -> value
 	pos := 0
 	n := 0
 	for i := 0; i < len(specs); i++ {
+		if targetDocIsTombstone {
+			if specs[i].Opcode == uint8(mc.DELETE) {
+				// 1. If target document is a tombstone, we can skip the document body DELETE (CmdDelete).
+				// This is because the target document body doesn't exist in the first place, given that it is a tombstone.
+				continue
+			}
+
+			if !sourceDocIsTombstone && specs[i].Opcode == uint8(SUBDOC_DELETE) {
+				// 2. If target document is a tombstone and source document is not a tombstone i.e. SET (CmdSet)
+				// needs to be executed, we can skip any SUBDOC_DELETE paths. This is because the target document will
+				// go from a tombstone to a non-tombstone document, and will have a fresh set of xattrs provided by the
+				// subdoc command (except the SUBDOC_DELETE ones)
+				continue
+			}
+		}
+
 		bodyslice[pos] = specs[i].Opcode // 1B opcode
 		pos++
 		bodyslice[pos] = specs[i].Flags // 1B flag
@@ -2941,13 +2957,19 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 	}
 
 	var flags uint8 = 0
-	if accessDeleted {
-		flags |= mc.SUBDOC_FLAG_ACCESS_DELETED
-	} else if targetDocIsTombstone {
-		// The subdoc command will follow the ADD semantics i.e.
-		// cas should be 0 and returns KEY_EEXISTS if the document exists
-		flags |= mc.SUBDOC_FLAG_ADD
-		cas = 0
+	if targetDocIsTombstone {
+		if !sourceDocIsTombstone {
+			// The subdoc command will follow the ADD semantics i.e.
+			// cas should be 0 and returns KEY_EEXISTS if the document exists or if document is not a tombstone.
+			// Target tombstone will be converted into a non-tombstone document.
+			// Should not have any xattr SUBDOC_DELETE or doc body DELETE/CmdDelete specs.
+			flags |= mc.SUBDOC_FLAG_ADD
+			cas = 0
+		} else {
+			// Target tombstone will be updated and will remain a tombstone.
+			// Should not have doc body DELETE/CmdDelete spec, since the target is already a tombstone.
+			flags |= mc.SUBDOC_FLAG_ACCESS_DELETED
+		}
 	}
 
 	// Set Flags
