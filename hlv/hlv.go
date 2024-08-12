@@ -168,6 +168,7 @@ func NewHLV(source DocumentSourceId, cas uint64, cvCas uint64, src DocumentSourc
 	hlv := HLV{
 		cvCAS: cas,
 	}
+
 	if cas < cvCas {
 		// When XDCR or mobile sends a mutation, it sets cvCas to the same value as CAS.
 		// If cas == cvCas, it means there has been no local change since replication
@@ -188,11 +189,19 @@ func NewHLV(source DocumentSourceId, cas uint64, cvCas uint64, src DocumentSourc
 		hlv.cv = currentVersion{source, cas}
 		hlv.pv = pv
 		if len(mv) > 0 {
+			if hlv.pv == nil {
+				hlv.pv = VersionsMap{}
+			}
+
 			// Add mv to pv, no need to add cv to history because it represents a merge event
 			for k, v := range mv {
 				hlv.pv[k] = v
 			}
 		} else if len(src) > 0 {
+			if hlv.pv == nil {
+				hlv.pv = VersionsMap{}
+			}
+
 			// Add cv to pv only if mv does not exist.
 			// When there is no mv, cv represents a mutation and needs to be added to version history
 			hlv.pv[src] = ver
@@ -314,11 +323,13 @@ func (h *HLV) Merge(other *HLV) (*HLV, error) {
 		res.mv[other.cv.source] = other.cv.version
 	}
 
+	if res.pv == nil {
+		res.pv = VersionsMap{}
+	}
+
 	// Remove any entries in pv that are already in mv
-	for src, _ := range res.mv {
-		if _, ok := res.pv[src]; ok {
-			delete(res.pv, src)
-		}
+	for src := range res.mv {
+		delete(res.pv, src)
 	}
 	return &res, nil
 }

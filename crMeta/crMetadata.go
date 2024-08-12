@@ -327,34 +327,46 @@ func GetMetadataForCR(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []b
 	var doc_meta_source, doc_meta_target base.DocumentMetadata
 	var target_meta, source_meta *CRMetadata
 	var err error
+
 	if resp.Opcode == base.GET_WITH_META {
 		// GET_WITH_META will also be used when only ECCV is on (mobile is off) and cas < max_cas.
 		// source HLV is not parsed and target HLV is not fetched.
 		doc_meta_source = base.DecodeSetMetaReq(req)
 		doc_meta_target, err = base.DecodeGetMetaResp(req.Req.Key, resp, xattrEnabled)
 		if err != nil {
-			err = fmt.Errorf("error decoding GET_META response for key=%v%s%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			err = fmt.Errorf("error decoding GET_META response for key=%v%s%v, respBody=%v%v%v, err=%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd, err)
 			return doc_meta_source, doc_meta_target, err
 		}
 	} else if resp.Opcode == mc.SUBDOC_MULTI_LOOKUP {
+		// We always parse the HLV in the source mutation for CR, if mobile is on, given that there could
+		// be import on source cluster and it could be an active site in the mixed mode of the SGW+XDCR active-passive
+		// setup, which is supported.
+		// However for the target doc, we only fetch HLV if cas >= max_cas and if ECCV is on.
+		// For the following cases, we don't fetch target HLV:
+		// 1. mobile is on, ECCV is on and cas < max_cas (mixed mode) - this is fine as long as it was an
+		// active-passive setup when this mutation was created.
+		// 2. mobile is on, but ECCV is off - not supported and can lead to data loss as import on target can win CR.
+		// Hence, target is not expected to have import in mixed mode, assuming that it is a passive site in the mixed
+		// mode. Doing import on target, which is a passive site during mixed mode may cause data loss.
+
 		source_doc := NewSourceDocument(req, sourceId)
 		source_meta, err = source_doc.GetMetadata(uncompressFunc)
 		if err != nil {
-			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, req.Req, base.UdTagEnd, base.UdTagBegin, req.Req.Body, base.UdTagEnd)
+			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v, err=%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, req.Req, base.UdTagEnd, base.UdTagBegin, req.Req.Body, base.UdTagEnd, err)
 			return doc_meta_source, doc_meta_target, err
 		}
 		doc_meta_source = *source_meta.docMeta
-		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, true)
+		target_doc, err := NewTargetDocument(req.Req.Key, resp, specs, targetId, xattrEnabled, req.HLVModeOptions.IncludeTgtHlv)
 		if err != nil {
 			if err == base.ErrorDocumentNotFound {
 				return doc_meta_source, doc_meta_target, err
 			}
-			err = fmt.Errorf("error creating target document for key=%v%s%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			err = fmt.Errorf("error creating target document for key=%v%s%v, respBody=%v%v%v, err=%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd, err)
 			return doc_meta_source, doc_meta_target, err
 		}
 		target_meta, err = target_doc.GetMetadata()
 		if err != nil {
-			err = fmt.Errorf("error decoding target SUBDOC_MULTI_LOOKUP response for key=%v%s%v, respBody=%v%v%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd)
+			err = fmt.Errorf("error decoding target SUBDOC_MULTI_LOOKUP response for key=%v%s%v, respBody=%v%v%v, err=%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd, err)
 			return doc_meta_source, doc_meta_target, err
 		}
 		doc_meta_target = *target_meta.docMeta
@@ -453,6 +465,10 @@ func ResolveConflictByRevSeq(req *base.WrappedMCRequest, resp *mc.MCResponse, sp
 	}
 }
 
+// Check if HLV needs to be updated/stamped, i.e. when
+// 1. ECCV is on and meta.cas >= vbMaxCas - stamp a new HLV or update the existing HLV.
+// 2. ECCV is on and meta.cas < vbMaxCas - update if there is an existing HLV. Do not stamp a new HLV if it doesn't exist in the mutation already.
+// 3. ECCV is off - update if there is an existing HLV. Do not stamp a new HLV if it doesn't exist in the mutation already.
 func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Duration) bool {
 	if meta == nil || meta.GetHLV() == nil {
 		return false
@@ -461,8 +477,10 @@ func NeedToUpdateHlv(meta *CRMetadata, vbMaxCas uint64, pruningWindow time.Durat
 		// We have an import mutation that's winning CR. mobile has already updated HLV so it doesn't need update
 		return false
 	}
-	if !meta.hadHlv && meta.docMeta.Cas < vbMaxCas {
-		// This is older mutation that doesn't already have an HLV
+	if !meta.hadHlv && (vbMaxCas == 0 || meta.actualCas < vbMaxCas) {
+		// This mutation doesn't already have an HLV, HLV is not newly stamped if
+		// 1. ECCV is not on (i.e. vbMaxCas == 0).
+		// 2. ECCV is on, but this is an older mutation (meta.docMeta.Cas < vbMaxCas).
 		return false
 	}
 	hlv := meta.hlv
@@ -652,10 +670,17 @@ func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFu
 
 	// deltas need to be recomputed from the non-pruned versions
 	deltas := vMap.VersionsDeltas()
+	firstEntry := true
 	for _, delta := range deltas {
 		key := delta.GetSource()
 		ver := delta.GetVersion()
-		value := base.Uint64ToHexLittleEndianAndStrip0s(ver)
+		var value []byte
+		if firstEntry {
+			value = base.Uint64ToHexLittleEndian(ver)
+			firstEntry = false
+		} else {
+			value = base.Uint64ToHexLittleEndianAndStrip0s(ver)
+		}
 		body, pos = base.WriteJsonRawMsg(body, []byte(key), pos, base.WriteJsonKey, len(key), first /*firstKey*/)
 		body, pos = base.WriteJsonRawMsg(body, value, pos, base.WriteJsonValue, len(value), false /*firstKey*/)
 		first = false
@@ -757,6 +782,10 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 		// If there is no mv, then cv and document.CAS represent mutation events. It needs to be in pv
 		source := meta.hlv.GetCvSrc()
 		version := meta.hlv.GetCvVer()
+
+		if pv == nil {
+			pv = hlv.VersionsMap{}
+		}
 		pv[source] = version
 	}
 
@@ -851,6 +880,7 @@ func ParseHlvFields(cas uint64, xattr []byte) (cvCas uint64, src hlv.DocumentSou
 
 func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64,
 	pvMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64, err error) {
+
 	cas = lookupResp.Resp.Cas
 	xattr, err1 := lookupResp.ResponseForAPath(base.XATTR_HLV)
 	if err1 != nil {
@@ -884,6 +914,7 @@ func getHlvFromMCResponse(lookupResp *base.SubdocLookupResponse) (cas, cvCas uin
 
 // This will find the custom CR XATTR from the req body, including HLV and _importCas
 func getHlvFromMCRequest(wrappedReq *base.WrappedMCRequest, uncompressFunc base.UncompressFunc) (cas, cvCas uint64, cvSrc hlv.DocumentSourceId, cvVer uint64, pvMap, mvMap hlv.VersionsMap, importCas uint64, pRev uint64, err error) {
+
 	req := wrappedReq.Req
 	cas = binary.BigEndian.Uint64(req.Extras[16:24])
 	if req.DataType&mcc.XattrDataType == 0 {
