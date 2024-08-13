@@ -130,13 +130,13 @@ func (reqHelper *dcpStreamReqHelper) getNewVersion() uint16 {
 	newVersion = atomic.AddUint64(&reqHelper.currentVersionWell, 1)
 
 	if newVersion > math.MaxUint16 {
-		errStr := fmt.Sprintf("Error: dcpStreamHelper for dcp %v vbno: %v internal version overflow", reqHelper.dcp.Id(), reqHelper.vbno)
+		err := fmt.Errorf("dcpStreamHelper for dcp %v vbno: %v internal version overflow", reqHelper.dcp.Id(), reqHelper.vbno)
 		reqHelper.lock.RLock()
 		defer reqHelper.lock.RUnlock()
 		if !reqHelper.isDisabled {
 			// Something is seriously wrong if interal version overflowed
-			reqHelper.dcp.Logger().Fatalf(errStr)
-			reqHelper.dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, reqHelper.dcp, nil, errStr))
+			reqHelper.dcp.Logger().Fatalf(err.Error())
+			reqHelper.dcp.RaiseEvent(common.NewEvent(common.ErrorEncountered, nil, reqHelper.dcp, nil, err))
 		}
 		atomic.StoreUint64(&reqHelper.currentVersionWell, 0)
 		newVersion = 0
