@@ -2792,14 +2792,9 @@ function writeMandatoryClientCertJSON {
     "state": "mandatory",
     "prefixes": [
       {
-        "path": "san.uri",
-        "prefix": "www.",
-        "delimiter": "."
-      },
-      {
-        "path": "san.email",
+        "path": "subject.cn",
         "prefix": "",
-        "delimiter": "@"
+        "delimiter": ""
       }
     ]
   }' >$tempFile
@@ -2859,6 +2854,7 @@ function executeClientCertAuth {
 
 	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
 		$CURL -X POST http://127.0.0.1:${port}/settings/clientCertAuth --data-binary @${tempFile} -u $DEFAULT_ADMIN:$DEFAULT_PW
+		echo "returned code $?"
 	else
 		# First load tempfile to the cluster
 		idx="$(getClusterIdx "$clusterName")"

@@ -1320,6 +1320,7 @@ EOF
 			# Reload the node certificate from disk, for the current node:
 			curl -X POST \
 				http://$DEFAULT_ADMIN:$DEFAULT_PW@127.0.0.1:$port/node/controller/reloadCertificate
+
 		else
 			echo "Running vagrant, skipping copy for now"
 		fi
