@@ -3,8 +3,8 @@
 package mocks
 
 import (
-	base "github.com/couchbase/goxdcr/base"
-	metadata "github.com/couchbase/goxdcr/metadata"
+	base "github.com/couchbase/goxdcr/v8/base"
+	metadata "github.com/couchbase/goxdcr/v8/metadata"
 
 	mock "github.com/stretchr/testify/mock"
 

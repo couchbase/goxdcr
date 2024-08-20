@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/v8/service_def"
 )
 
 const (

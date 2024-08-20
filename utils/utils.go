@@ -38,10 +38,10 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	"github.com/couchbase/goutils/scramsha"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/base/filter"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/base/filter"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbaselabs/gojsonsm"
 )
 

@@ -12,8 +12,8 @@ package peerToPeer
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"

@@ -4,11 +4,11 @@ package mocks
 
 import (
 	gomemcached "github.com/couchbase/gomemcached"
-	base "github.com/couchbase/goxdcr/base"
+	base "github.com/couchbase/goxdcr/v8/base"
 
-	hlv "github.com/couchbase/goxdcr/hlv"
+	hlv "github.com/couchbase/goxdcr/v8/hlv"
 
-	log "github.com/couchbase/goxdcr/log"
+	log "github.com/couchbase/goxdcr/v8/log"
 
 	mock "github.com/stretchr/testify/mock"
 )

@@ -11,9 +11,9 @@ package service_impl
 import (
 	"crypto/x509"
 	"github.com/couchbase/cbauth"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/service_def"
 	"io/ioutil"
 	"sync"
 )

@@ -14,7 +14,7 @@ package metadata
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

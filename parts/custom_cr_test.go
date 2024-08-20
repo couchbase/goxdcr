@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/couchbase/gocb/v2"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/crMeta"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/crMeta"
 	"github.com/stretchr/testify/assert"
 )
 

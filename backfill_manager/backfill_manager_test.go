@@ -12,14 +12,14 @@ package backfill_manager
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/peerToPeer"
-	pipeline_mgr "github.com/couchbase/goxdcr/pipeline_manager/mocks"
-	service_def_real "github.com/couchbase/goxdcr/service_def"
-	service_def "github.com/couchbase/goxdcr/service_def/mocks"
-	"github.com/couchbase/goxdcr/service_impl"
-	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/peerToPeer"
+	pipeline_mgr "github.com/couchbase/goxdcr/v8/pipeline_manager/mocks"
+	service_def_real "github.com/couchbase/goxdcr/v8/service_def"
+	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
+	"github.com/couchbase/goxdcr/v8/service_impl"
+	utilsMock "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
@@ -602,12 +602,12 @@ func getTaskForVB0(srcBucketName string) (*metadata.ReplicationSpecification, *m
 // What happens now is that the two things happen in parallel:
 //
 // First,  1 + 2 causes replication spec change callback to occur. This will cause
-// https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/replication_manager/metakv_change_listener.go#L258-L259
+// https://github.com/couchbase/goxdcr/v8/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/replication_manager/metakv_change_listener.go#L258-L259
 // to hit.
-// Which eventually means https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/replication_manager/metakv_change_listener.go#L292-L293
-// gets hit as well, leading to https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/backfill_manager/backfill_manager.go#L1377
+// Which eventually means https://github.com/couchbase/goxdcr/v8/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/replication_manager/metakv_change_listener.go#L292-L293
+// gets hit as well, leading to https://github.com/couchbase/goxdcr/v8/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/backfill_manager/backfill_manager.go#L1377
 //
-// Secondly, 1 + 3 causes this https://github.com/couchbase/goxdcr/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/backfill_manager/backfill_manager.go#L534-L548
+// Secondly, 1 + 3 causes this https://github.com/couchbase/goxdcr/v8/blob/a8a1a3d2848fe85da7bb2fb40055f56ef707ef2c/backfill_manager/backfill_manager.go#L534-L548
 // to occur. And this block will require a pipeline stop and callback mechanism to fire
 //
 // The first path will require backfill_request_handler to be free to handle the necessary work

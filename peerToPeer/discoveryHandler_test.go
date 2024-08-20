@@ -12,9 +12,9 @@ package peerToPeer
 
 import (
 	"fmt"
-	base2 "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	base2 "github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
+	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"sync"

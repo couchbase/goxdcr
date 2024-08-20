@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/couchbase/goxdcr/base"
-	baseH "github.com/couchbase/goxdcr/base/helpers"
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/v8/base"
+	baseH "github.com/couchbase/goxdcr/v8/base/helpers"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 const (

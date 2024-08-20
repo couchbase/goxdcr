@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	crMeta "github.com/couchbase/goxdcr/crMeta"
+	crMeta "github.com/couchbase/goxdcr/v8/crMeta"
 	mock "github.com/stretchr/testify/mock"
 )
 

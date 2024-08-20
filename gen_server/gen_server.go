@@ -10,8 +10,8 @@ package gen_server
 
 import (
 	"errors"
-	"github.com/couchbase/goxdcr/log"
-	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/v8/log"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"reflect"
 	"sync"
 	"time"

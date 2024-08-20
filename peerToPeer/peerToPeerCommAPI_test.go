@@ -15,9 +15,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/base/filter"
-	utils2 "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/base/filter"
+	utils2 "github.com/couchbase/goxdcr/v8/utils"
 	"github.com/stretchr/testify/assert"
 )
 

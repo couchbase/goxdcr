@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"math"

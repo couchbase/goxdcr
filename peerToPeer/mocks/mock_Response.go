@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	peerToPeer "github.com/couchbase/goxdcr/peerToPeer"
+	peerToPeer "github.com/couchbase/goxdcr/v8/peerToPeer"
 	mock "github.com/stretchr/testify/mock"
 
 	time "time"

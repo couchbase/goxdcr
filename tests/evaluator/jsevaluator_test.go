@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/couchbase/eventing-ee/evaluator/api"
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/stretchr/testify/assert"
 )
 

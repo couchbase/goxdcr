@@ -14,9 +14,9 @@ package pipeline_manager
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/pipeline"
-	PipelineMgrMock "github.com/couchbase/goxdcr/pipeline_manager/mocks"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/pipeline"
+	PipelineMgrMock "github.com/couchbase/goxdcr/v8/pipeline_manager/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"testing"

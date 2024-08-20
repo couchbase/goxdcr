@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	metadata_svc "github.com/couchbase/goxdcr/metadata_svc"
+	metadata_svc "github.com/couchbase/goxdcr/v8/metadata_svc"
 	mock "github.com/stretchr/testify/mock"
 )
 

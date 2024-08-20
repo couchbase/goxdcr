@@ -10,12 +10,12 @@ package peerToPeer
 
 import (
 	"fmt"
-	base2 "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
-	service_def_real "github.com/couchbase/goxdcr/service_def"
-	service_def "github.com/couchbase/goxdcr/service_def/mocks"
-	"github.com/couchbase/goxdcr/utils"
-	utilsMock2 "github.com/couchbase/goxdcr/utils/mocks"
+	base2 "github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	service_def_real "github.com/couchbase/goxdcr/v8/service_def"
+	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
+	"github.com/couchbase/goxdcr/v8/utils"
+	utilsMock2 "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"net/http"

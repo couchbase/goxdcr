@@ -10,7 +10,7 @@ package replication_manager
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 	"time"
 )
 

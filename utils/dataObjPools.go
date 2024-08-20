@@ -13,7 +13,7 @@ package utils
 import (
 	"sync"
 
-	base "github.com/couchbase/goxdcr/base"
+	base "github.com/couchbase/goxdcr/v8/base"
 )
 
 // TODO - we should revisit these to use *WrappedUprPool instead to make sure pools do not get copied

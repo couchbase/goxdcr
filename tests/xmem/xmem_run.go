@@ -21,10 +21,10 @@ import (
 	"github.com/couchbase/go-couchbase"
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	parts "github.com/couchbase/goxdcr/parts"
-	utils "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
+	parts "github.com/couchbase/goxdcr/v8/parts"
+	utils "github.com/couchbase/goxdcr/v8/utils"
 
 	_ "net/http/pprof"
 )

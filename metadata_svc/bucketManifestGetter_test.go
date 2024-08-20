@@ -10,8 +10,8 @@ package metadata_svc
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/metadata"
-	service_def "github.com/couchbase/goxdcr/service_def/mocks"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
 	"sync"

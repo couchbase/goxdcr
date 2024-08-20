@@ -15,8 +15,8 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 var logger_sc *log.CommonLogger = log.NewLogger("SettingsCommon", log.DefaultLoggerContext)

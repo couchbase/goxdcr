@@ -10,7 +10,7 @@ package factory
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/peerToPeer"
+	"github.com/couchbase/goxdcr/v8/peerToPeer"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

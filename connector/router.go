@@ -10,11 +10,11 @@ package connector
 
 import (
 	"errors"
-	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	component "github.com/couchbase/goxdcr/component"
-	"github.com/couchbase/goxdcr/log"
-	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/v8/base"
+	common "github.com/couchbase/goxdcr/v8/common"
+	component "github.com/couchbase/goxdcr/v8/component"
+	"github.com/couchbase/goxdcr/v8/log"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"sync"
 	"sync/atomic"
 )
