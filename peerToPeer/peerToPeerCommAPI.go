@@ -15,6 +15,7 @@ import (
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"github.com/couchbase/goxdcr/v8/utils"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -117,9 +118,7 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 		return nil, err
 	}
 	authType := base.HttpAuthMechPlain
-	var certificates []byte
-
-	//isMandatory, err := p2p.xdcrCompTopSvc.ClientCertIsMandatory()
+	var certificates, clientKey, clientCert []byte
 
 	if p2p.securitySvc.IsClusterEncryptionLevelStrict() {
 		authType = base.HttpAuthMechHttps
@@ -130,14 +129,31 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 				HttpStatusCode: http.StatusInternalServerError,
 			}, base.ErrorNilCertificateStrictMode
 		}
+
+		isMandatory, err := p2p.xdcrCompTopSvc.ClientCertIsMandatory()
+		if err == nil && isMandatory {
+			// If n2n encryption is required and client cert is mandatory, then the traditional
+			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
+			// provided by the ns_server
+			clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
+		}
 	}
 
 	var out interface{}
-	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, nil, nil, base.MethodPost, base.JsonContentType,
+	err, statusCode := p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, clientCert, clientKey, base.MethodPost, base.JsonContentType,
 		payload, base.P2PCommTimeout, &out, nil, false, logger)
 	// utils returns this error because body is empty, which is fine
 	if err == base.ErrorResourceDoesNotExist {
 		err = nil
+	} else if err != nil && strings.Contains(err.Error(), base.ErrorStringClientCertMandatory) {
+		// This is a special case where client cert is set to mandatory but either the propagation
+		// of the setting is not done cluster wide, or if the p2p is done before the cached value
+		// is updated. Try again with client certs
+		clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
+		err, statusCode = p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, clientCert, clientKey, base.MethodPost, base.JsonContentType,
+			payload, base.P2PCommTimeout, &out, nil, false, logger)
+		// Client Cert mandatory + n2n encryption turned on is only implemented with p2p already existing
+		// No need to check for 404 return error
 	}
 	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
 	return result, err

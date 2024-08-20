@@ -259,3 +259,11 @@ func (sec *SecurityService) refreshClientCertConfig() error {
 	sec.encrytionSetting.clientKey = clientKey
 	return nil
 }
+
+func (sec *SecurityService) GetClientCertAndKey() (clientCert, clientKey []byte) {
+	sec.settingMtx.RLock()
+	defer sec.settingMtx.RUnlock()
+	clientCert = sec.encrytionSetting.clientCert
+	clientKey = sec.encrytionSetting.clientKey
+	return
+}
