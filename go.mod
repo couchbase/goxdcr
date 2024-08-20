@@ -12,7 +12,17 @@ replace github.com/couchbase/go_json => ../go_json
 
 replace github.com/couchbase/query => ../query
 
+replace github.com/couchbase/query-ee => ../query-ee
+
+replace github.com/couchbase/n1fty => ../n1fty
+
 replace github.com/couchbase/gocb/v2 => github.com/couchbase/gocb/v2 v2.2.5
+
+replace github.com/couchbase/cbft => ../../../../../cbft
+
+replace github.com/couchbase/cbgt => ../../../../../cbgt
+
+replace github.com/couchbase/hebrew => ../../../../../hebrew
 
 require (
 	github.com/couchbase/cbauth v0.1.12
