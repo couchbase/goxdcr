@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	pipeline_svc "github.com/couchbase/goxdcr/pipeline_svc"
+	pipeline_svc "github.com/couchbase/goxdcr/v8/pipeline_svc"
 	mock "github.com/stretchr/testify/mock"
 )
 

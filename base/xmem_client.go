@@ -21,7 +21,7 @@ import (
 
 	mcc "github.com/couchbase/gomemcached/client"
 	memcached "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 /*

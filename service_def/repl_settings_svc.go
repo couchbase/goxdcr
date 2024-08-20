@@ -9,7 +9,7 @@
 package service_def
 
 import (
-	metadata "github.com/couchbase/goxdcr/metadata"
+	metadata "github.com/couchbase/goxdcr/v8/metadata"
 )
 
 // this service is likely provided by exposing an erlang rest api in ns_server

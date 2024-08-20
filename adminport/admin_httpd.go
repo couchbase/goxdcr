@@ -40,8 +40,8 @@ import (
 	"net/http"
 	"sync"
 
-	base "github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
+	base "github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
 
 	_ "expvar"
 )

@@ -12,20 +12,21 @@ package backfill_manager
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/peerToPeer"
-	pipeline_mgr "github.com/couchbase/goxdcr/pipeline_manager/mocks"
-	service_def_real "github.com/couchbase/goxdcr/service_def"
-	service_def "github.com/couchbase/goxdcr/service_def/mocks"
-	"github.com/couchbase/goxdcr/service_impl"
-	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
-	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
 	"io/ioutil"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/peerToPeer"
+	pipeline_mgr "github.com/couchbase/goxdcr/v8/pipeline_manager/mocks"
+	service_def_real "github.com/couchbase/goxdcr/v8/service_def"
+	service_def "github.com/couchbase/goxdcr/v8/service_def/mocks"
+	"github.com/couchbase/goxdcr/v8/service_impl"
+	utilsMock "github.com/couchbase/goxdcr/v8/utils/mocks"
+	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
 )
 
 func setupBoilerPlate() (*service_def.CollectionsManifestSvc, *service_def.ReplicationSpecSvc, *service_def.BackfillReplSvc, *pipeline_mgr.PipelineMgrBackfillIface, *service_def.XDCRCompTopologySvc, *service_def.CheckpointsService, *service_def.BucketTopologySvc, *utilsMock.UtilsIface) {

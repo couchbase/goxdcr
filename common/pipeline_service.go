@@ -9,7 +9,7 @@
 package common
 
 import (
-	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
 //PipelineService can be any component that monitors, does logging, keeps state for the pipeline

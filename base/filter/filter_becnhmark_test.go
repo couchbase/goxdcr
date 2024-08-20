@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 )
 
 func BenchmarkFilterUprEvent(b *testing.B) {

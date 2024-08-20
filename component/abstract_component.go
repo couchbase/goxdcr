@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 type AbstractComponent struct {

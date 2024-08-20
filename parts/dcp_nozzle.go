@@ -21,12 +21,12 @@ import (
 
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	base "github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
-	utilities "github.com/couchbase/goxdcr/utils"
+	base "github.com/couchbase/goxdcr/v8/base"
+	common "github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/service_def"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
 const (

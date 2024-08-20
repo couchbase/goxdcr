@@ -9,7 +9,7 @@
 package service_def
 
 import (
-	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
 type ManifestsService interface {

@@ -13,10 +13,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/v8/base"
+	common "github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
 )
 
 type ServiceSettingsConstructor func(pipeline common.Pipeline, service common.PipelineService, pipeline_settings metadata.ReplicationSettingsMap) (metadata.ReplicationSettingsMap, error)

@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	common "github.com/couchbase/goxdcr/common"
+	common "github.com/couchbase/goxdcr/v8/common"
 	mock "github.com/stretchr/testify/mock"
 )
 

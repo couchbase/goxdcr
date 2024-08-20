@@ -15,7 +15,7 @@ import (
 	"sync"
 
 	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 type MCRequestPool struct {

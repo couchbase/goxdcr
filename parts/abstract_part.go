@@ -11,11 +11,11 @@ package parts
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	common "github.com/couchbase/goxdcr/common"
-	component "github.com/couchbase/goxdcr/component"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
+	"github.com/couchbase/goxdcr/v8/base"
+	common "github.com/couchbase/goxdcr/v8/common"
+	component "github.com/couchbase/goxdcr/v8/component"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
 	"sync"
 )
 

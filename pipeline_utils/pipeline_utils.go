@@ -9,8 +9,8 @@
 package pipeline_utils
 
 import (
-	"github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/parts"
+	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/parts"
 	"strconv"
 	"strings"
 )

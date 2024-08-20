@@ -9,10 +9,10 @@ package streamApiWatcher
 
 import (
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/service_def/mocks"
-	realUtils "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/service_def/mocks"
+	realUtils "github.com/couchbase/goxdcr/v8/utils"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

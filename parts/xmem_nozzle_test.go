@@ -34,16 +34,16 @@ import (
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
 	mcMock "github.com/couchbase/gomemcached/client/mocks"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/base/generator"
-	"github.com/couchbase/goxdcr/common/mocks"
-	"github.com/couchbase/goxdcr/crMeta"
-	"github.com/couchbase/goxdcr/hlv"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	serviceDefMocks "github.com/couchbase/goxdcr/service_def/mocks"
-	utilsReal "github.com/couchbase/goxdcr/utils"
-	utilsMock "github.com/couchbase/goxdcr/utils/mocks"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/base/generator"
+	"github.com/couchbase/goxdcr/v8/common/mocks"
+	"github.com/couchbase/goxdcr/v8/crMeta"
+	"github.com/couchbase/goxdcr/v8/hlv"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	serviceDefMocks "github.com/couchbase/goxdcr/v8/service_def/mocks"
+	utilsReal "github.com/couchbase/goxdcr/v8/utils"
+	utilsMock "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1759,7 +1759,7 @@ func verifyCasPoisonProtectionStats(t *testing.T, a *assert.Assertions, srcNode 
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario1$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario1$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario1(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario1")
@@ -1796,7 +1796,7 @@ func TestCasRollbackLWWMobileScenario1(t *testing.T) {
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario2$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario2$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario2(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario2")
@@ -1833,7 +1833,7 @@ func TestCasRollbackLWWMobileScenario2(t *testing.T) {
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario3$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario3$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario3(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario3")
@@ -1871,7 +1871,7 @@ func TestCasRollbackLWWMobileScenario3(t *testing.T) {
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario4$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario4$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario4(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario4")
@@ -1909,7 +1909,7 @@ func TestCasRollbackLWWMobileScenario4(t *testing.T) {
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario5$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario5$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario5(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario5")
@@ -1946,7 +1946,7 @@ func TestCasRollbackLWWMobileScenario5(t *testing.T) {
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario6$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario6$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario6(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario6")
@@ -1983,7 +1983,7 @@ func TestCasRollbackLWWMobileScenario6(t *testing.T) {
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario7$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario7$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario7(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario7")
@@ -2021,7 +2021,7 @@ func TestCasRollbackLWWMobileScenario7(t *testing.T) {
 }
 
 // make sure you have a "dataclean" cluster_run running. The test doesn't cleanup the cluster at the end.
-// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario8$ github.com/couchbase/goxdcr/parts
+// go test -timeout 120s -run ^TestCasRollbackLWWMobileScenario8$ github.com/couchbase/goxdcr/v8/parts
 func TestCasRollbackLWWMobileScenario8(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestCasRollbackLWWMobileScenario4")

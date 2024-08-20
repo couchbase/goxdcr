@@ -2,7 +2,7 @@ package service_def
 
 import (
 	"encoding/json"
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"

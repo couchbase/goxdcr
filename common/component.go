@@ -8,7 +8,7 @@
 
 package common
 
-import "github.com/couchbase/goxdcr/base"
+import "github.com/couchbase/goxdcr/v8/base"
 
 // ComponentEventType is the common event type that Component can raise during its lifecycle
 // It is not required for Component to raise all those event

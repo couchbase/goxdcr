@@ -3,7 +3,7 @@
 package mocks
 
 import (
-	service_def "github.com/couchbase/goxdcr/service_def"
+	service_def "github.com/couchbase/goxdcr/v8/service_def"
 	mock "github.com/stretchr/testify/mock"
 )
 

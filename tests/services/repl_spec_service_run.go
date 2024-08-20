@@ -13,9 +13,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/couchbase/goxdcr/metadata_svc"
-	"github.com/couchbase/goxdcr/service_impl"
-	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/v8/metadata_svc"
+	"github.com/couchbase/goxdcr/v8/service_impl"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 	"os"
 )
 

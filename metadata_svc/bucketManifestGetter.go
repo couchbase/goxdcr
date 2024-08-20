@@ -9,8 +9,8 @@
 package metadata_svc
 
 import (
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/service_def"
 	"sync"
 	"time"
 )

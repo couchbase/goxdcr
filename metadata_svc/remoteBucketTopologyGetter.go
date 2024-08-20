@@ -8,7 +8,7 @@
 
 package metadata_svc
 
-import "github.com/couchbase/goxdcr/service_def"
+import "github.com/couchbase/goxdcr/v8/service_def"
 
 type BucketTopologyGetter struct {
 	bucketName string

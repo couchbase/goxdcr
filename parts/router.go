@@ -21,14 +21,14 @@ import (
 
 	mc "github.com/couchbase/gomemcached"
 	mcc "github.com/couchbase/gomemcached/client"
-	"github.com/couchbase/goxdcr/base"
-	baseFilter "github.com/couchbase/goxdcr/base/filter"
-	"github.com/couchbase/goxdcr/common"
-	"github.com/couchbase/goxdcr/connector"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
-	utilities "github.com/couchbase/goxdcr/utils"
+	"github.com/couchbase/goxdcr/v8/base"
+	baseFilter "github.com/couchbase/goxdcr/v8/base/filter"
+	"github.com/couchbase/goxdcr/v8/common"
+	"github.com/couchbase/goxdcr/v8/connector"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/service_def"
+	utilities "github.com/couchbase/goxdcr/v8/utils"
 )
 
 var ErrorInvalidDataForRouter = errors.New("Input data to Router is invalid.")

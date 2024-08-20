@@ -11,7 +11,7 @@ licenses/APL2.txt.
 package service_def
 
 import (
-	"github.com/couchbase/goxdcr/crMeta"
+	"github.com/couchbase/goxdcr/v8/crMeta"
 )
 
 type ResolverSvcIface interface {

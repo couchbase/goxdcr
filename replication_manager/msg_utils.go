@@ -20,12 +20,12 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	ap "github.com/couchbase/goxdcr/adminport"
-	"github.com/couchbase/goxdcr/base"
-	base2 "github.com/couchbase/goxdcr/base/helpers"
-	"github.com/couchbase/goxdcr/log"
-	"github.com/couchbase/goxdcr/metadata"
-	"github.com/couchbase/goxdcr/service_def"
+	ap "github.com/couchbase/goxdcr/v8/adminport"
+	"github.com/couchbase/goxdcr/v8/base"
+	base2 "github.com/couchbase/goxdcr/v8/base/helpers"
+	"github.com/couchbase/goxdcr/v8/log"
+	"github.com/couchbase/goxdcr/v8/metadata"
+	"github.com/couchbase/goxdcr/v8/service_def"
 )
 
 // xdcr prefix for internal settings keys

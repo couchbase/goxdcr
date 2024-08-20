@@ -18,10 +18,10 @@ import (
 	"net"
 	"testing"
 
-	"github.com/couchbase/goxdcr/base"
-	base2 "github.com/couchbase/goxdcr/base/helpers"
-	baseH "github.com/couchbase/goxdcr/base/helpers/mocks"
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/v8/base"
+	base2 "github.com/couchbase/goxdcr/v8/base/helpers"
+	baseH "github.com/couchbase/goxdcr/v8/base/helpers/mocks"
+	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -12,7 +12,7 @@ package service_def
 import (
 	"errors"
 	"fmt"
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 	"strings"
 )
 

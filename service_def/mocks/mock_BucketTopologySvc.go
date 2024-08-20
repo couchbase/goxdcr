@@ -3,10 +3,10 @@
 package mocks
 
 import (
-	metadata "github.com/couchbase/goxdcr/metadata"
+	metadata "github.com/couchbase/goxdcr/v8/metadata"
 	mock "github.com/stretchr/testify/mock"
 
-	service_def "github.com/couchbase/goxdcr/service_def"
+	service_def "github.com/couchbase/goxdcr/v8/service_def"
 
 	sync "sync"
 

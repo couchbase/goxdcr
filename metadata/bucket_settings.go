@@ -9,7 +9,7 @@
 package metadata
 
 import (
-	"github.com/couchbase/goxdcr/log"
+	"github.com/couchbase/goxdcr/v8/log"
 )
 
 var logger_bs *log.CommonLogger = log.NewLogger("BucketSettings", log.DefaultLoggerContext)

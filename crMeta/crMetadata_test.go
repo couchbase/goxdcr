@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/couchbase/gomemcached"
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/hlv"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/hlv"
 	"github.com/couchbaselabs/gojsonsm"
 	"github.com/stretchr/testify/assert"
 )

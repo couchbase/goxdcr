@@ -9,8 +9,8 @@
 package service_def
 
 import (
-	"github.com/couchbase/goxdcr/base"
-	"github.com/couchbase/goxdcr/common"
+	"github.com/couchbase/goxdcr/v8/base"
+	"github.com/couchbase/goxdcr/v8/common"
 )
 
 type ThroughSeqnoTrackerSvc interface {

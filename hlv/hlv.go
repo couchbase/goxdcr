@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/couchbase/goxdcr/base"
+	"github.com/couchbase/goxdcr/v8/base"
 )
 
 type ConflictDetectionResult uint32
