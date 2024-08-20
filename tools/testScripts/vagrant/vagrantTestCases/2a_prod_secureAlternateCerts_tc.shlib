@@ -46,13 +46,15 @@ function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B1" &
 }
 
-function runTestCase {
+function runFullSecurelAlternateClientCert {
+	local versionToLoad="$1"
+
 	echo "============================================================================"
-	echo "Running Full secure with client cert replication"
+	echo "Running Full secure with client cert replication over alternate address on $versionToLoad"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
-	vagrantInstallCBServerAll "neo"
+	vagrantInstallCBServerAll "$versionToLoad"
 
 	setupTopologies
 
@@ -85,7 +87,13 @@ function runTestCase {
 	echo "PASSED"
 	echo "============================================================================"
 
-	cleanupBucketReplications
-	cleanupBuckets
+	#cleanupBucketReplications
+	#cleanupBuckets
 
+}
+
+function runTestCase {
+	runFullSecurelAlternateClientCert "neo" &&
+		runFullSecurelAlternateClientCert "trinity" &&
+		runFullSecurelAlternateClientCert "morpheus"
 }

@@ -74,13 +74,13 @@ function deleteRecreateReplicationsAndCheck {
 	checkBidirectionalChangesLeft
 }
 
-function runTestCase {
-	echo "============================================================================"
-	echo "Running major releases upgrade test case"
-	echo "============================================================================"
+function runMajorReleasesUpgrade {
+	local versionFrom="$1"
+	local versionTo="$2"
 
-	local versionFrom="trinity"
-	local versionTo="toy"
+	echo "============================================================================"
+	echo "Running major releases upgrade test case from $versionFrom to $versionTo"
+	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
 
@@ -163,4 +163,11 @@ function runTestCase {
 	echo "PASSED"
 	echo "============================================================================"
 
+}
+
+function runTestCase {
+	runMajorReleasesUpgrade "neo" "trinity" &&
+		runMajorReleasesUpgrade "trinity" "cypher" &&
+		runMajorReleasesUpgrade "trinity" "morpheus" &&
+		runMajorReleasesUpgrade "cypher" "morpheus"
 }

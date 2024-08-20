@@ -155,7 +155,7 @@ function recordNamespaceCreated {
 		# bucket
 		local -a bucketArr
 		local key="${clusterName}"
-		if [[ -z ${CLUSTER_NAME_BUCKET_DONE_MAP[$key]:-} ]]; then
+		if [[ -z "${CLUSTER_NAME_BUCKET_DONE_MAP[$key]:-}" ]]; then
 			bucketArr=("$bucketName")
 		else
 			bucketArr=(${CLUSTER_NAME_BUCKET_DONE_MAP[$key]})
@@ -175,7 +175,7 @@ function recordNamespaceCreated {
 	else
 		local -a colArr
 		local key="${clusterName},${bucketName},${scopeName}"
-		if [[ -z ${SCOPE_NAME_COLLECTION_DONE_MAP[$key]:-} ]]; then
+		if [[ -z "${SCOPE_NAME_COLLECTION_DONE_MAP[$key]:-}" ]]; then
 			colArr=("$collectionName")
 		else
 			colArr=(${SCOPE_NAME_COLLECTION_DONE_MAP[$key]})

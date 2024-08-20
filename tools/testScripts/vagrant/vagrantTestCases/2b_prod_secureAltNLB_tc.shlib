@@ -21,7 +21,7 @@ VAGRANT_CAPI_EXTERNAL_MAP=(["C1"]=15010 ["C1P"]=15011 ["C2"]=15012 ["C2P"]=15013
 VAGRANT_VM_IP_MAP=(["C1"]="192.168.56.2" ["C1P"]="192.168.56.3" ["C2"]="192.168.56.4" ["C2P"]="192.168.56.5")
 VAGRANT_VM_IDX_MAP=(["0"]="C1" ["1"]="C1P" ["2"]="C2" ["3"]="C2P")
 VAGRANT_IP_EXTERNAL_MAP=(["C1"]="192.168.56.6" ["C1P"]="192.168.56.7" ["C2"]="192.168.56.8" ["C2P"]="192.168.56.9")
-VAGRANT_LB_IP="192.168.56.9"
+VAGRANT_LB_IP="192.168.56.10"
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 declare -a cluster1BucketsArr
 cluster1BucketsArr=("B0" "B1" "B2" "B3" "B4")
@@ -47,13 +47,15 @@ function runDataLoad {
 	runCbWorkloadGenBucket "C1" "B1" &
 }
 
-function runTestCase {
+function runFullSecureAlternateClientCertAndNLB {
+	local versionToLoad="$1"
+
 	echo "============================================================================"
-	echo "Running Full secure with client cert replication with NLB"
+	echo "Running Full secure with client cert replication with NLB with version $versionToLoad"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
-	vagrantInstallCBServerAll "neo"
+	vagrantInstallCBServerAll "$versionToLoad"
 
 	# Node 5 (idx 4) is to be haproxy
 	vagrantRemoveCbServer 4
@@ -100,4 +102,10 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	unset VAGRANT_LB_IP
+}
+
+function runTestCase {
+	runFullSecureAlternateClientCertAndNLB "neo" &&
+		runFullSecureAlternateClientCertAndNLB "trinity" &&
+		runFullSecureAlternateClientCertAndNLB "morpheus"
 }

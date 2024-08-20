@@ -58,6 +58,7 @@ declare -A CBServerLink=(
 	["neo"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/neo/latest/couchbase-server-enterprise_neo-ubuntu20.04_amd64.deb"
 	["trinity"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/trinity/latest/couchbase-server-enterprise_trinity-ubuntu20.04_amd64.deb"
 	["morpheus"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/morpheus/latest/couchbase-server-enterprise_morpheus-ubuntu20.04_amd64.deb"
+	["cypher"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/cypher/latest/couchbase-server-enterprise_cypher-ubuntu20.04_amd64.deb"
 	["toy"]="https://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/toybuilds/..." # to be filled out
 )
 
@@ -92,6 +93,13 @@ function vagrantRemoveCbServerAll {
 		checkAndWaitForUnattendedUpgrade $i
 		vagrantRemoveCbServer $i
 	done
+
+	unset CLUSTER_SETUP_DONE_MAP
+	declare -gA CLUSTER_SETUP_DONE_MAP
+
+	CLUSTER_NAME_BUCKET_DONE_MAP=()
+	BUCKET_NAME_SCOPE_DONE_MAP=()
+	SCOPE_NAME_COLLECTION_DONE_MAP=()
 }
 
 function vagrantRemoveSGWAll {
@@ -241,6 +249,13 @@ function vagrantInstallSGW {
 	vagrantInstallDebFile "$i" "$debFile"
 }
 
+function vagrantAptUpdate {
+	local i=$1
+	cmd="${VSSH[$i]} \"sudo apt-get update\""
+	echo "==== Running $cmd ===="
+	eval $cmd
+}
+
 function vagrantAptInstall {
 	local i=$1
 	local aptName=$2
@@ -249,6 +264,18 @@ function vagrantAptInstall {
 	cmd="${VSSH[$i]} \"sudo apt-get -y install $aptName\""
 	echo "==== Running $cmd ===="
 	eval $cmd
+
+	if (($? > 0)); then
+		echo "$cmd failed - trying to update repo then try again"
+		vagrantAptUpdate $i
+		cmd="${VSSH[$i]} \"sudo apt-get -y install $aptName\""
+		echo "==== Running $cmd ===="
+		eval $cmd
+	fi
+
+	if (($? > 0)); then
+		exit 1
+	fi
 }
 
 function vagrantInstallPythonHttpLib {

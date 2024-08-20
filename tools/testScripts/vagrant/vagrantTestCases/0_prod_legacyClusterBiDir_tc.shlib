@@ -75,17 +75,20 @@ function deleteRecreateReplicationsAndCheck {
 	checkBidirectionalChangesLeft
 }
 
-function runTestCase {
+function runLegacyCurrentBidir {
+	local c1Ver="$1"
+	local c2Ver="$2"
+
 	echo "============================================================================"
-	echo "Running legacy and current bidir"
+	echo "Running legacy and current bidir between $c1Ver and $c2Ver"
 	echo "============================================================================"
 
 	vagrantRemoveCbServerAll
 
-	vagrantInstallCBServer 0 "toy" # To be updated
-	vagrantInstallCBServer 1 "toy"
-	vagrantInstallCBServer 2 "neo"
-	vagrantInstallCBServer 3 "neo"
+	vagrantInstallCBServer 0 "$c1Ver"
+	vagrantInstallCBServer 1 "$c1Ver"
+	vagrantInstallCBServer 2 "$c2Ver"
+	vagrantInstallCBServer 3 "$c2Ver"
 
 	setupTopologies
 
@@ -118,4 +121,11 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
 	cleanupBuckets
+}
+
+function runTestCase {
+	runLegacyCurrentBidir "neo" "trinity" &&
+		runLegacyCurrentBidir "trinity" "cypher" &&
+		runLegacyCurrentBidir "cypher" "morpheus" &&
+		runLegacyCurrentBidir "trinity" "morpheus"
 }
