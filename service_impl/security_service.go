@@ -10,11 +10,13 @@ package service_impl
 
 import (
 	"crypto/x509"
+	"fmt"
 	"github.com/couchbase/cbauth"
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	"io/ioutil"
+	"os"
 	"sync"
 )
 
@@ -26,6 +28,9 @@ type EncryptionSetting struct {
 	certificates     []byte         // This is the content of ca.pem
 	initializer      sync.Once
 	initializedCh    chan bool
+
+	clientCert []byte
+	clientKey  []byte
 }
 
 func (setting *EncryptionSetting) IsStrictEncryption() bool {
@@ -38,6 +43,8 @@ type SecurityService struct {
 	settingMtx              sync.RWMutex
 	callbackMtx             sync.RWMutex
 	caFile                  string
+	clientKeyFile           string
+	clientCertFile          string
 	logger                  *log.CommonLogger
 }
 
@@ -54,9 +61,20 @@ func NewSecurityService(caFile string, logger_ctx *log.LoggerContext) *SecurityS
 	}
 }
 
-func (sec *SecurityService) Start() {
+func (sec *SecurityService) SetClientKeyFile(clientKey string) *SecurityService {
+	sec.clientKeyFile = clientKey
+	return sec
+}
+
+func (sec *SecurityService) SetClientCertFile(clientCert string) *SecurityService {
+	sec.clientCertFile = clientCert
+	return sec
+}
+
+func (sec *SecurityService) Start() error {
 	cbauth.RegisterConfigRefreshCallback(sec.refresh)
 	sec.logger.Infof("Security service started. Waiting for security context to be initialized")
+	return nil
 }
 
 func (sec *SecurityService) getEncryptionSetting() EncryptionSetting {
@@ -108,7 +126,7 @@ func (sec *SecurityService) refreshClusterEncryption() error {
 }
 
 // Currently GetTLSConfig will return error "TLSConfig is not present for this service".
-// This will be updated after ns_server pass the key/certificate from the commandline and xdcr can get TLSConfig.
+// This is because XDCR does not have its own TLS server, as it uses ns_server's TLS https proxy
 func (sec *SecurityService) refreshTLSConfig() error {
 	return nil
 	//newConfig, err := cbauth.GetTLSConfig()
@@ -158,6 +176,13 @@ func (sec *SecurityService) refresh(code uint64) error {
 		}
 	}
 
+	if code&cbauth.CFG_CHANGE_CLIENT_CERTS_TLSCONFIG != 0 {
+		if err := sec.refreshClientCertConfig(); err != nil {
+			sec.logger.Error(err.Error())
+			return err
+		}
+	}
+
 	if code&cbauth.CFG_CHANGE_CERTS_TLSCONFIG != 0 {
 		if err := sec.refreshTLSConfig(); err != nil {
 			sec.logger.Error(err.Error())
@@ -171,6 +196,15 @@ func (sec *SecurityService) refresh(code uint64) error {
 	}
 
 	sec.encrytionSetting.initializer.Do(func() {
+		// When goXDCR starts up, ns_server will automatically have client key and cert generated already
+		// However, cbauth will not call ConfigRefreshCallback with CFG_CHANGE_CLIENT_CERTS_TLSCONFIG flag set
+		// because it did not change (it is the originally generated cert/key)
+		// So, call the same method here to at a minimum load the cert and key during initialization
+		if err := sec.refreshClientCertConfig(); err != nil {
+			err = fmt.Errorf("security context initializing client cert: %v", err)
+			sec.logger.Error(err.Error())
+		}
+
 		close(sec.encrytionSetting.initializedCh)
 		sec.logger.Infof("Security context is initialized.")
 	})
@@ -187,4 +221,41 @@ func (sec *SecurityService) SetEncryptionLevelChangeCallback(key string, callbac
 	sec.callbackMtx.Lock()
 	defer sec.callbackMtx.Unlock()
 	sec.securityChangeCallbacks[key] = callback
+}
+
+func (sec *SecurityService) refreshClientCertConfig() error {
+	if len(sec.clientCertFile) == 0 {
+		// Warn because there is nothing XDCR can do if ns_server did not provide correct credentials
+		sec.logger.Warnf("Client Certificate location is missing. Cannot refresh certificate.")
+		return nil
+	}
+
+	if len(sec.clientKeyFile) == 0 {
+		// Warn because there is nothing XDCR can do if ns_server did not provide correct credentials
+		sec.logger.Warnf("Client Key location is missing. Cannot refresh certificate.")
+		return nil
+	}
+
+	certPEMBlock, err := os.ReadFile(sec.clientCertFile)
+	if err != nil {
+		err = fmt.Errorf("reading client cert file: %v", err)
+		return err
+	}
+
+	certPool := x509.NewCertPool()
+	if ok := certPool.AppendCertsFromPEM(certPEMBlock); !ok {
+		return base.InvalidCerfiticateError
+	}
+
+	clientKey, err := os.ReadFile(sec.clientKeyFile)
+	if err != nil {
+		err = fmt.Errorf("reading client key file: %v", err)
+		return err
+	}
+
+	sec.settingMtx.Lock()
+	defer sec.settingMtx.Unlock()
+	sec.encrytionSetting.clientCert = certPEMBlock
+	sec.encrytionSetting.clientKey = clientKey
+	return nil
 }

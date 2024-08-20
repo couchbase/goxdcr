@@ -97,6 +97,7 @@ type UtilsIface interface {
 	GetServersListFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error)
 	GetServerVBucketsMap(connStr, bucketName string, bucketInfo map[string]interface{}, recycledMapGetter func(nodes []string) *base.KvVBMapType, serversList []string) (*base.KvVBMapType, error)
 	GetHostNamesFromBucketInfo(bucketInfo map[string]interface{}) ([]string, error)
+	ParseClientCertOutput(clientCertInput map[string]interface{}) (isMandatory bool, err error)
 
 	// Network related utilities
 	ConstructHttpRequest(baseURL string, path string, preservePathEncoding bool, username string, password string, authMech base.HttpAuthMech, userAuthMode base.UserAuthMode, httpCommand string, contentType string, body []byte, logger *log.CommonLogger) (*http.Request, string, error)

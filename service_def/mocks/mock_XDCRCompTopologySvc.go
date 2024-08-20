@@ -20,6 +20,61 @@ func (_m *XDCRCompTopologySvc) EXPECT() *XDCRCompTopologySvc_Expecter {
 	return &XDCRCompTopologySvc_Expecter{mock: &_m.Mock}
 }
 
+// ClientCertIsMandatory provides a mock function with given fields:
+func (_m *XDCRCompTopologySvc) ClientCertIsMandatory() (bool, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClientCertIsMandatory")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (bool, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// XDCRCompTopologySvc_ClientCertIsMandatory_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClientCertIsMandatory'
+type XDCRCompTopologySvc_ClientCertIsMandatory_Call struct {
+	*mock.Call
+}
+
+// ClientCertIsMandatory is a helper method to define mock.On call
+func (_e *XDCRCompTopologySvc_Expecter) ClientCertIsMandatory() *XDCRCompTopologySvc_ClientCertIsMandatory_Call {
+	return &XDCRCompTopologySvc_ClientCertIsMandatory_Call{Call: _e.mock.On("ClientCertIsMandatory")}
+}
+
+func (_c *XDCRCompTopologySvc_ClientCertIsMandatory_Call) Run(run func()) *XDCRCompTopologySvc_ClientCertIsMandatory_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *XDCRCompTopologySvc_ClientCertIsMandatory_Call) Return(_a0 bool, _a1 error) *XDCRCompTopologySvc_ClientCertIsMandatory_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *XDCRCompTopologySvc_ClientCertIsMandatory_Call) RunAndReturn(run func() (bool, error)) *XDCRCompTopologySvc_ClientCertIsMandatory_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetLocalHostName provides a mock function with given fields:
 func (_m *XDCRCompTopologySvc) GetLocalHostName() string {
 	ret := _m.Called()

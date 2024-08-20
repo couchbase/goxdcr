@@ -118,6 +118,9 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 	}
 	authType := base.HttpAuthMechPlain
 	var certificates []byte
+
+	//isMandatory, err := p2p.xdcrCompTopSvc.ClientCertIsMandatory()
+
 	if p2p.securitySvc.IsClusterEncryptionLevelStrict() {
 		authType = base.HttpAuthMechHttps
 		certificates = p2p.securitySvc.GetCACertificates()

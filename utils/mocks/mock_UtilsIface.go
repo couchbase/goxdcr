@@ -5570,6 +5570,62 @@ func (_c *UtilsIface_NewTCPConn_Call) RunAndReturn(run func(string) (*net.TCPCon
 	return _c
 }
 
+// ParseClientCertOutput provides a mock function with given fields: clientCertInput
+func (_m *UtilsIface) ParseClientCertOutput(clientCertInput map[string]interface{}) (bool, error) {
+	ret := _m.Called(clientCertInput)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ParseClientCertOutput")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) (bool, error)); ok {
+		return rf(clientCertInput)
+	}
+	if rf, ok := ret.Get(0).(func(map[string]interface{}) bool); ok {
+		r0 = rf(clientCertInput)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(map[string]interface{}) error); ok {
+		r1 = rf(clientCertInput)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// UtilsIface_ParseClientCertOutput_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ParseClientCertOutput'
+type UtilsIface_ParseClientCertOutput_Call struct {
+	*mock.Call
+}
+
+// ParseClientCertOutput is a helper method to define mock.On call
+//   - clientCertInput map[string]interface{}
+func (_e *UtilsIface_Expecter) ParseClientCertOutput(clientCertInput interface{}) *UtilsIface_ParseClientCertOutput_Call {
+	return &UtilsIface_ParseClientCertOutput_Call{Call: _e.mock.On("ParseClientCertOutput", clientCertInput)}
+}
+
+func (_c *UtilsIface_ParseClientCertOutput_Call) Run(run func(clientCertInput map[string]interface{})) *UtilsIface_ParseClientCertOutput_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]interface{}))
+	})
+	return _c
+}
+
+func (_c *UtilsIface_ParseClientCertOutput_Call) Return(isMandatory bool, err error) *UtilsIface_ParseClientCertOutput_Call {
+	_c.Call.Return(isMandatory, err)
+	return _c
+}
+
+func (_c *UtilsIface_ParseClientCertOutput_Call) RunAndReturn(run func(map[string]interface{}) (bool, error)) *UtilsIface_ParseClientCertOutput_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ParseHighSeqnoAndVBUuidFromStats provides a mock function with given fields: vbnos, stats_map, high_seqno_and_vbuuid_map
 func (_m *UtilsIface) ParseHighSeqnoAndVBUuidFromStats(vbnos []uint16, stats_map map[string]string, high_seqno_and_vbuuid_map map[uint16][]uint64) ([]uint16, map[uint16]string) {
 	ret := _m.Called(vbnos, stats_map, high_seqno_and_vbuuid_map)

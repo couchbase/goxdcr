@@ -15,7 +15,7 @@ type EncryptionSettingIface interface {
 }
 
 type SecuritySvc interface {
-	Start()
+	Start() error
 	IsClusterEncryptionLevelStrict() bool
 	EncryptData() bool
 	GetCACertificates() []byte

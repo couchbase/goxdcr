@@ -139,7 +139,8 @@ func main() {
 
 	// This needs to be started immediately since some of the constructors will start to query the security setting
 	securitySvc := service_impl.NewSecurityService(options.caFileLocation, log.GetOrCreateContext(base.SecuritySvcKey))
-	securitySvc.Start()
+	securitySvc = securitySvc.SetClientKeyFile(options.clientKeyFile).SetClientCertFile(options.clientCertFile)
+	err := securitySvc.Start()
 
 	top_svc, err := service_impl.NewXDCRTopologySvc(uint16(options.sourceKVAdminPort), uint16(options.xdcrRestPort), options.isEnterprise, options.ipv4, options.ipv6, securitySvc, log.GetOrCreateContext(base.TopoSvcKey), utils)
 	if err != nil {

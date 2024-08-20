@@ -63,6 +63,7 @@ const DocsPath = "/docs/"
 const CollectionsManifestPath = "/scopes"
 const ScopesPath = "/scopes/"
 const CollectionsPath = "/collections/"
+const ClientCertAuthPath = "/settings/clientCertAuth"
 
 // Streaming API paths. They are used for source clusters only
 const ObservePoolPath = "/poolsStreaming/default"
@@ -1793,3 +1794,10 @@ var CasPoisoningPreCheckEnabled int = 0
 func IsCasPoisoningPreCheckEnabled() bool {
 	return CasPoisoningPreCheckEnabled > 0
 }
+
+// Client Cert related consts
+const (
+	ErrorStringClientCertMandatory = "tls: certificate required"
+	StateKey                       = "state"
+	MandatoryVal                   = "mandatory"
+)

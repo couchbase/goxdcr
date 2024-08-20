@@ -82,4 +82,9 @@ type XDCRCompTopologySvc interface {
 	MyConnectionStr() (string, error)
 	MyCredentials() (string, string, base.HttpAuthMech, []byte, bool, []byte, []byte, error)
 	IsKVNode() (bool, error)
+
+	// Checks to see if client cert is mandatory
+	// Note that the setting is cluster wide but may take some time to sync during network partition
+	// Thus, code that uses this should check for specific string of ErrorStringClientCertMandatory
+	ClientCertIsMandatory() (bool, error)
 }
