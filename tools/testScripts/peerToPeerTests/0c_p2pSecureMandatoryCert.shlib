@@ -118,6 +118,21 @@ function runRebalanceAndReplication {
 
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PMSG" $(($currentPeerMsgsC1))
 	validateInternalLogWithInstance "C1" "$C1LOOKINGC1PSECUREMSG" $(($currentPeerMsgsC1Secure + 1))
+
+	# do the same thing again but now with clientCert disabled to make sure XDCR can create replication with updated
+	# security setting
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+
+	# The expectation is that when client cert is disabled, the p2p will get a callback from the security
+	# service and start sending and receiving requests using username/password instead
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		setDisableClientCert "$clusterName"
+	done
+
+	cleanupClientCertMaps # this is needed so createSecureRemoteClusterReference will not use client cert but will use pw
+	runOneReplicationCycleAndPause
+
 }
 
 function runReplicationResume {

@@ -2854,7 +2854,6 @@ function executeClientCertAuth {
 
 	if [[ -z "${VAGRANT_VM_IP_MAP["$clusterName"]:-}" ]]; then
 		$CURL -X POST http://127.0.0.1:${port}/settings/clientCertAuth --data-binary @${tempFile} -u $DEFAULT_ADMIN:$DEFAULT_PW
-		echo "returned code $?"
 	else
 		# First load tempfile to the cluster
 		idx="$(getClusterIdx "$clusterName")"

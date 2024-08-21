@@ -86,6 +86,9 @@ func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 	} else if ipv6 == base.IpFamilyOffOption {
 		top_svc.ipv6 = base.IpFamilyOff
 	}
+
+	top_svc.setClientCertSettingChangeCb()
+
 	top_svc.clusterWatcher = streamApiWatcher.NewStreamApiWatcher(base.ObservePoolPath, top_svc, utilsIn, nil, top_svc.logger)
 	top_svc.clusterWatcher.Start()
 	return top_svc, nil
@@ -611,12 +614,18 @@ func (top_svc *XDCRTopologySvc) ClientCertIsMandatory() (bool, error) {
 		}
 	}
 
-	top_svc.cachedClientCertMandatoryTimer = time.AfterFunc(cooldownPeriod, func() {
-		top_svc.cachedClientCertMandatoryMtx.Lock()
-		top_svc.cachedClientCertMandatoryTimer = nil
-		top_svc.cachedClientCertMandatoryErr = nil
-		top_svc.cachedClientCertMandatory = false
-		top_svc.cachedClientCertMandatoryMtx.Unlock()
-	})
+	top_svc.cachedClientCertMandatoryTimer = time.AfterFunc(cooldownPeriod, top_svc.clearCachedClientCertCache)
 	return top_svc.cachedClientCertMandatory, top_svc.cachedClientCertMandatoryErr
+}
+
+func (top_svc *XDCRTopologySvc) setClientCertSettingChangeCb() {
+	top_svc.securitySvc.SetClientCertSettingChangeCb(top_svc.clearCachedClientCertCache)
+}
+
+func (top_svc *XDCRTopologySvc) clearCachedClientCertCache() {
+	top_svc.cachedClientCertMandatoryMtx.Lock()
+	top_svc.cachedClientCertMandatoryTimer = nil
+	top_svc.cachedClientCertMandatoryErr = nil
+	top_svc.cachedClientCertMandatory = false
+	top_svc.cachedClientCertMandatoryMtx.Unlock()
 }

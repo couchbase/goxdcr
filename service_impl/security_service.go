@@ -46,6 +46,9 @@ type SecurityService struct {
 	clientKeyFile           string
 	clientCertFile          string
 	logger                  *log.CommonLogger
+
+	clientCertSettingChangeCbMtx sync.RWMutex
+	clientCertSettingChangeCb    func()
 }
 
 func NewSecurityService(caFile string, logger_ctx *log.LoggerContext) *SecurityService {
@@ -177,6 +180,9 @@ func (sec *SecurityService) refresh(code uint64) error {
 	}
 
 	if code&cbauth.CFG_CHANGE_CLIENT_CERTS_TLSCONFIG != 0 {
+		// This is sent down whenever client certs are changed (or regenerated)
+		// See https://docs.couchbase.com/server/current/rest-api/rest-regenerate-all-certs.html#description
+		// which will regenerate both client certs and other types of certs
 		if err := sec.refreshClientCertConfig(); err != nil {
 			sec.logger.Error(err.Error())
 			return err
@@ -184,10 +190,11 @@ func (sec *SecurityService) refresh(code uint64) error {
 	}
 
 	if code&cbauth.CFG_CHANGE_CERTS_TLSCONFIG != 0 {
-		if err := sec.refreshTLSConfig(); err != nil {
-			sec.logger.Error(err.Error())
-			return err
-		}
+		// When a user changes the client cert config (i.e. off -> mandatory, or mandatory -> off)
+		// CFG_CHANGE_CERTS_TLSCONFIG is sent down but not CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
+		// because the client certs themselves did not change
+		// XDCR needs to ensure that any decision-making based on mandatory cert or not should be refreshed
+		go sec.clientCertSettingChangeCb()
 
 		if err := sec.refreshCert(); err != nil {
 			sec.logger.Error(err.Error())
@@ -266,4 +273,11 @@ func (sec *SecurityService) GetClientCertAndKey() (clientCert, clientKey []byte)
 	clientCert = sec.encrytionSetting.clientCert
 	clientKey = sec.encrytionSetting.clientKey
 	return
+}
+
+func (sec *SecurityService) SetClientCertSettingChangeCb(cb func()) {
+	sec.clientCertSettingChangeCbMtx.Lock()
+	defer sec.clientCertSettingChangeCbMtx.Unlock()
+
+	sec.clientCertSettingChangeCb = cb
 }

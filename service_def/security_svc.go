@@ -21,7 +21,9 @@ type SecuritySvc interface {
 	GetCACertificates() []byte
 	GetCaPool() *x509.CertPool
 	SetEncryptionLevelChangeCallback(key string, callback SecChangeCallback)
+
 	GetClientCertAndKey() ([]byte, []byte)
+	SetClientCertSettingChangeCb(func())
 }
 
 type SecChangeCallback func(old, new EncryptionSettingIface)
