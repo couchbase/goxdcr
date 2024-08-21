@@ -171,4 +171,6 @@ function runTestCase {
 
 	echo "Cleaning up topology..."
 	restoreClusterBack "C1"
+	regenerateCertificate "C1"
+	cleanupClientCertMaps
 }

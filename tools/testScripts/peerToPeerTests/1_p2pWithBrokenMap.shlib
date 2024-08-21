@@ -195,7 +195,7 @@ function runReplicationResume {
 	# That's ok... so skip checking those
 	resumeFrom0Cnt=$(echo "$logsC1P" | grep "$TS_PREFIX" | grep -v "backfill" | grep -c "${TS_PREFIX}=0")
 	if (($resumeFrom0Cnt > 10)); then
-		echo "C1P has at least 10 VBs that resumed from seqno 0"
+		echo "C1P has at least 10 VBs ($resumeFrom0Cnt) that resumed from seqno 0"
 		exit 1
 	fi
 	resumeLoadBrokenMapCnt=$(echo "$logsC1P" | grep "$LOADED_BROKEN_MAP" | grep -c "$LOADED_BROKEN_MAP_NAME")
@@ -214,6 +214,11 @@ function runTestCase {
 
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
+
+	# since this test requires testing for specific log counts, clear first
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		clearInternalNodeXdcrLog "$clusterName"
+	done
 
 	runOneReplicationCycleAndPause
 	runOneRebalanceCycle 1 1

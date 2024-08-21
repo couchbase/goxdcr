@@ -99,24 +99,19 @@ CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
 CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
 
 function runOneRebalanceCycle {
-	local cycleCnt=$1
-	local totalCycleCnt=$2
 	local timeIntervalSecs=30
 
 	setupCluster
 	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
 
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
-	echo "============================================================================"
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	addNodesIn
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
-
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
-	echo "============================================================================"
 }
 
 function runTestCase {
@@ -127,7 +122,7 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-	runOneRebalanceCycle 1 1
+	runOneRebalanceCycle
 	runOneReplicationCycle
 	setReplicationSettings "C1" "B0" "C2" "B1" "manualBackfill=S1.col1"
 

@@ -128,8 +128,6 @@ LOADED_BROKEN_MAP="Loaded brokenMap: map"
 LOADED_BROKEN_MAP_NAME="S1.col1"
 
 function runOneRebalanceCycleIn {
-	local cycleCnt=$1
-	local totalCycleCnt=$2
 	local timeIntervalSecs=30
 
 	setupCluster
@@ -137,17 +135,15 @@ function runOneRebalanceCycleIn {
 	echo "Sleeping 15 secs before rebalancing node in"
 	sleep 15
 
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
-	echo "============================================================================"
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	addNodesIn
 	sleep 5
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
 
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
-	echo "============================================================================"
 	grepForPanics
 }
 
@@ -263,7 +259,7 @@ function runTestCase {
 	# At this point, settings need to be restored IF the script was forced exited
 	trap killAllBgJobs EXIT
 
-	runOneRebalanceCycleIn 1 1
+	runOneRebalanceCycleIn
 	runOneReplicationCycleAndPause
 	runReplicationResume
 
@@ -295,6 +291,11 @@ function runTestCase {
 	cleanupRemoteClusterRefs
 
 	echo "To simplify clean up, add random node back in..."
+
+	# Before adding nodes, need to redo certs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	addOneNodeIn "$randomNodeName" "C1"
 	sleep 20
 	startRebalancing "C1"

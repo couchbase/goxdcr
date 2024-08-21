@@ -126,24 +126,19 @@ LOADED_BROKEN_MAP="Loaded brokenMap: map"
 LOADED_BROKEN_MAP_NAME="S1.col1"
 
 function runOneRebalanceCycleIn {
-	local cycleCnt=$1
-	local totalCycleCnt=$2
 	local timeIntervalSecs=30
 
 	echo "Sleeping 15 secs before rebalancing node in"
 	sleep 15
 
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
-	echo "============================================================================"
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	addNodesIn
 	sleep 5
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"
-
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
-	echo "============================================================================"
 	grepForPanics
 }
 
@@ -279,7 +274,7 @@ function runTestCase {
 	done
 
 	runOneReplicationCycleAndPause
-	runOneRebalanceCycleIn 1 1
+	runOneRebalanceCycleIn
 	runReplicationResume
 
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do

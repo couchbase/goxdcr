@@ -70,6 +70,11 @@ function runTestCase {
 	setupCluster
 	echo "Sleeping 10 secs before rebalancing node in"
 	sleep 10
+
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	addNodesIn
 	startRebalancing "C1"
 	echo "Rebalancing node in is completed"

@@ -75,6 +75,10 @@ function runOneReplicationCycleAndPause {
 
 	setCustomManifestRefreshInterval "C1"
 
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
 	createRemoteClusterReference "C1" "C2"
@@ -113,16 +117,11 @@ LOADED_BROKEN_MAP="Loaded brokenMap: map"
 LOADED_BROKEN_MAP_NAME="S1.col1"
 
 function runOneRebalanceCycle {
-	local cycleCnt=$1
-	local totalCycleCnt=$2
 	local timeIntervalSecs=30
 
 	echo "Sleeping 15 secs before rebalancing node in"
 	sleep 15
 
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
-	echo "============================================================================"
 	addNodesIn
 	sleep 5
 	startRebalancing "C1"
@@ -131,9 +130,6 @@ function runOneRebalanceCycle {
 	echo "Sleeping before checking logs"
 	sleep 15
 
-	echo "============================================================================"
-	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) DONE"
-	echo "============================================================================"
 	grepForPanics
 }
 
@@ -207,7 +203,7 @@ function runTestCase {
 	trap killAllBgJobs EXIT
 
 	runOneReplicationCycleAndPause
-	runOneRebalanceCycle 1 1
+	runOneRebalanceCycle
 	runReplicationResume
 
 	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do

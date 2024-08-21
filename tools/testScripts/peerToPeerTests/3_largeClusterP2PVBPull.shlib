@@ -133,6 +133,11 @@ function runOneRebalanceCycle {
 	echo "============================================================================"
 	echo "Rebalance Cycle $(($cycleCnt + 1))/$(($totalCycleCnt)) STARTING"
 	echo "============================================================================"
+
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	addNodesIn
 	sleep 5
 	startRebalancing "C1"

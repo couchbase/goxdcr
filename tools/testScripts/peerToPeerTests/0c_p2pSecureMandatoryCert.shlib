@@ -145,7 +145,7 @@ function runReplicationResume {
 
 function runTestCase {
 	echo "============================================================================"
-	echo "Running P2P Setup with security and enabled client cert"
+	echo "Running P2P Setup with security and mandatory client cert"
 	echo "============================================================================"
 
 	# At this point, settings need to be restored IF the script was forced exited
@@ -171,4 +171,6 @@ function runTestCase {
 
 	echo "Cleaning up topology..."
 	restoreClusterBack "C1"
+	regenerateCertificate "C1"
+	cleanupClientCertMaps
 }

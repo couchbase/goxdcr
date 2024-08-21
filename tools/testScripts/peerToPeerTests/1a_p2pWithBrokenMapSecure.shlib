@@ -59,6 +59,8 @@ function runOneReplicationCycleAndPause {
 	local maxStableCnt=3
 	local coolDownPeriod=1
 	local checkInt
+	local clusterName
+
 	setupCluster
 	setupTopologies
 	# Shorten the amount of time pipeline restarts
@@ -77,9 +79,13 @@ function runOneReplicationCycleAndPause {
 
 	setCustomManifestRefreshInterval "C1"
 
+	# Previous test may have messed with the CAs
+	setupCertsForTesting
+	cleanupClientCertMaps
+
 	# Wait for vbuckets and all the other things to propagate before XDCR provisioning
 	sleep 5
-	createSecureRemoteClusterReference "C1" "C2"
+	createSecureRemoteClusterReference "C1" "C2" "${CLUSTER_ROOT_CERTIFICATE_MAP["C2"]}"
 	sleep 1
 	createBucketReplication "C1" "B0" "C2" "B1" DefaultBucketReplProperties
 	printGlobalScopeAndCollectionInfo

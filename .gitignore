@@ -21,6 +21,8 @@ tools/.xdcrToolsExport
 tools/clusterRunProvision.sh
 tools/importExporter.sh
 tools/testScripts/testsLibrary.sh
+tools/testScripts/ca.pem
+tools/testScripts/ca.key
 
 # MacOS file
 .DS_Store
