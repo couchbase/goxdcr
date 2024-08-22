@@ -265,6 +265,39 @@ func (_c *SecuritySvc_IsClusterEncryptionLevelStrict_Call) RunAndReturn(run func
 	return _c
 }
 
+// SetClientCertSettingChangeCb provides a mock function with given fields: _a0
+func (_m *SecuritySvc) SetClientCertSettingChangeCb(_a0 func()) {
+	_m.Called(_a0)
+}
+
+// SecuritySvc_SetClientCertSettingChangeCb_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetClientCertSettingChangeCb'
+type SecuritySvc_SetClientCertSettingChangeCb_Call struct {
+	*mock.Call
+}
+
+// SetClientCertSettingChangeCb is a helper method to define mock.On call
+//   - _a0 func()
+func (_e *SecuritySvc_Expecter) SetClientCertSettingChangeCb(_a0 interface{}) *SecuritySvc_SetClientCertSettingChangeCb_Call {
+	return &SecuritySvc_SetClientCertSettingChangeCb_Call{Call: _e.mock.On("SetClientCertSettingChangeCb", _a0)}
+}
+
+func (_c *SecuritySvc_SetClientCertSettingChangeCb_Call) Run(run func(_a0 func())) *SecuritySvc_SetClientCertSettingChangeCb_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(func()))
+	})
+	return _c
+}
+
+func (_c *SecuritySvc_SetClientCertSettingChangeCb_Call) Return() *SecuritySvc_SetClientCertSettingChangeCb_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *SecuritySvc_SetClientCertSettingChangeCb_Call) RunAndReturn(run func(func())) *SecuritySvc_SetClientCertSettingChangeCb_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetEncryptionLevelChangeCallback provides a mock function with given fields: key, callback
 func (_m *SecuritySvc) SetEncryptionLevelChangeCallback(key string, callback service_def.SecChangeCallback) {
 	_m.Called(key, callback)

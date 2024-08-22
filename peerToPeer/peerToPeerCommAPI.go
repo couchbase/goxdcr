@@ -19,10 +19,12 @@ import (
 	"time"
 )
 
-var ErrorInvalidOpcode = fmt.Errorf("Invalid Opcode")
-var ErrorInvalidMagic = fmt.Errorf("Invalid Magic")
-var ErrorReceiveChanFull = fmt.Errorf("Opcode receiver channel is full")
-var ErrorLifecycleMismatch = fmt.Errorf("Lifecycle mismatch")
+var ErrorInvalidOpcode = fmt.Errorf("invalid Opcode")
+var ErrorInvalidMagic = fmt.Errorf("invalid Magic")
+var ErrorReceiveChanFull = fmt.Errorf("opcode receiver channel is full")
+var ErrorLifecycleMismatch = fmt.Errorf("lifecycle mismatch")
+var ErrorMissingClientKey = fmt.Errorf("missing client key")
+var ErrorMissingClientCert = fmt.Errorf("missing client cert")
 
 type OpCode int
 
@@ -136,6 +138,10 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
 			// provided by the ns_server
 			clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
+			result, err, done := checkClientCertAndKeyExists(clientCert, clientKey)
+			if done {
+				return result, err
+			}
 		}
 	}
 
@@ -150,6 +156,10 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 		// of the setting is not done cluster wide, or if the p2p is done before the cached value
 		// is updated. Try again with client certs
 		clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
+		result, err, done := checkClientCertAndKeyExists(clientCert, clientKey)
+		if done {
+			return result, err
+		}
 		err, statusCode = p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, clientCert, clientKey, base.MethodPost, base.JsonContentType,
 			payload, base.P2PCommTimeout, &out, nil, false, logger)
 		// Client Cert mandatory + n2n encryption turned on is only implemented with p2p already existing
@@ -157,4 +167,25 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 	}
 	result := &HandlerResultImpl{HttpStatusCode: statusCode, Err: err}
 	return result, err
+}
+
+// this is a wrapper function that returns appropriate error if client cert or key are missing
+// generally speaking, this should not happen because ns_server should always be passing in a valid
+// cert or key. If XDCR somehow gets in a terrible situation where the clientCert or key was not
+// loaded successfully, leading to a CBSE or anything, there are 2 ways about it:
+// 1. regenerateCerts or reload certs, which requires customer intervention
+// 2. restart goxdcr ... which will allow security service to reload the key and cert from the files specified
+func checkClientCertAndKeyExists(clientCert []byte, clientKey []byte) (HandlerResult, error, bool) {
+	if len(clientCert) == 0 {
+		return &HandlerResultImpl{
+			Err:            ErrorMissingClientCert,
+			HttpStatusCode: http.StatusInternalServerError,
+		}, ErrorMissingClientCert, true
+	} else if len(clientKey) == 0 {
+		return &HandlerResultImpl{
+			Err:            ErrorMissingClientKey,
+			HttpStatusCode: http.StatusInternalServerError,
+		}, ErrorMissingClientKey, true
+	}
+	return nil, nil, false
 }

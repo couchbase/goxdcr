@@ -3610,6 +3610,7 @@ func (u *Utilities) GetReplicasInfo(bucketInfo map[string]interface{}, isStrictl
 	return vbReplicaMap, kvToNsServerTranslateMap, numOfReplicas, vbListForBeingAReplica, nil
 }
 
+// ParseClientCertOutput takes the output of /settings/clientCertAuth endpoint and checks if client cert is mandatory
 func (u *Utilities) ParseClientCertOutput(clientCertInput map[string]interface{}) (isMandatory bool, err error) {
 	if clientCertInput == nil {
 		err = fmt.Errorf("ClientCert input is empty")

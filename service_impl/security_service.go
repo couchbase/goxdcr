@@ -29,6 +29,8 @@ type EncryptionSetting struct {
 	initializer      sync.Once
 	initializedCh    chan bool
 
+	// used to contact other peer nodes when client certificate setting on this cluster
+	// is mandatory
 	clientCert []byte
 	clientKey  []byte
 }
@@ -42,10 +44,11 @@ type SecurityService struct {
 	securityChangeCallbacks map[string]service_def.SecChangeCallback
 	settingMtx              sync.RWMutex
 	callbackMtx             sync.RWMutex
-	caFile                  string
-	clientKeyFile           string
-	clientCertFile          string
-	logger                  *log.CommonLogger
+	// babysitter starts up and passes these file locations to goxdcr to read as needed
+	caFile         string
+	clientKeyFile  string
+	clientCertFile string
+	logger         *log.CommonLogger
 
 	clientCertSettingChangeCbMtx sync.RWMutex
 	clientCertSettingChangeCb    func()
@@ -239,7 +242,7 @@ func (sec *SecurityService) refreshClientCertConfig() error {
 
 	if len(sec.clientKeyFile) == 0 {
 		// Warn because there is nothing XDCR can do if ns_server did not provide correct credentials
-		sec.logger.Warnf("Client Key location is missing. Cannot refresh certificate.")
+		sec.logger.Warnf("Client Key location is missing. Cannot refresh key.")
 		return nil
 	}
 
