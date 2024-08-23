@@ -138,8 +138,8 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
 			// provided by the ns_server
 			clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
-			result, err, done := checkClientCertAndKeyExists(clientCert, clientKey)
-			if done {
+			result, err := checkClientCertAndKeyExists(clientCert, clientKey)
+			if err != nil {
 				return result, err
 			}
 		}
@@ -156,8 +156,8 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 		// of the setting is not done cluster wide, or if the p2p is done before the cached value
 		// is updated. Try again with client certs
 		clientCert, clientKey = p2p.securitySvc.GetClientCertAndKey()
-		result, err, done := checkClientCertAndKeyExists(clientCert, clientKey)
-		if done {
+		result, err := checkClientCertAndKeyExists(clientCert, clientKey)
+		if err != nil {
 			return result, err
 		}
 		err, statusCode = p2p.utils.QueryRestApiWithAuth(req.GetTarget(), base.XDCRPeerToPeerPath, false, "", "", authType, certificates, true, clientCert, clientKey, base.MethodPost, base.JsonContentType,
@@ -175,17 +175,17 @@ func (p2p *P2pCommAPIimpl) P2PSend(req Request, logger *log.CommonLogger) (Handl
 // loaded successfully, leading to a CBSE or anything, there are 2 ways about it:
 // 1. regenerateCerts or reload certs, which requires customer intervention
 // 2. restart goxdcr ... which will allow security service to reload the key and cert from the files specified
-func checkClientCertAndKeyExists(clientCert []byte, clientKey []byte) (HandlerResult, error, bool) {
+func checkClientCertAndKeyExists(clientCert []byte, clientKey []byte) (HandlerResult, error) {
 	if len(clientCert) == 0 {
 		return &HandlerResultImpl{
 			Err:            ErrorMissingClientCert,
 			HttpStatusCode: http.StatusInternalServerError,
-		}, ErrorMissingClientCert, true
+		}, ErrorMissingClientCert
 	} else if len(clientKey) == 0 {
 		return &HandlerResultImpl{
 			Err:            ErrorMissingClientKey,
 			HttpStatusCode: http.StatusInternalServerError,
-		}, ErrorMissingClientKey, true
+		}, ErrorMissingClientKey
 	}
-	return nil, nil, false
+	return nil, nil
 }

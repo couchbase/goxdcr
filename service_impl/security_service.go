@@ -9,6 +9,7 @@
 package service_impl
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"github.com/couchbase/cbauth"
@@ -134,17 +135,16 @@ func (sec *SecurityService) refreshClusterEncryption() error {
 // Currently GetTLSConfig will return error "TLSConfig is not present for this service".
 // This is because XDCR does not have its own TLS server, as it uses ns_server's TLS https proxy
 func (sec *SecurityService) refreshTLSConfig() error {
+	newConfig, err := cbauth.GetTLSConfig()
+	if err != nil {
+		sec.logger.Errorf("Failed to call cbauth.GetTLSConfig. Error: %v", err)
+		return err
+	}
+	sec.settingMtx.Lock()
+	defer sec.settingMtx.Unlock()
+	sec.encrytionSetting.TlsConfig = newConfig
+	sec.logger.Infof("Cluster TLS Config changed.")
 	return nil
-	//newConfig, err := cbauth.GetTLSConfig()
-	//if err != nil {
-	//	sec.logger.Errorf("Failed to call cbauth.GetTLSConfig. Error: %v", err)
-	//	return err
-	//}
-	//sec.mutex.Lock()
-	//defer sec.mutex.Unlock()
-	//sec.encrytionSetting.TlsConfig = newConfig
-	//sec.logger.Infof("Cluster TLS Config changed.")
-	//return nil
 }
 
 func (sec *SecurityService) refreshCert() error {
@@ -197,7 +197,13 @@ func (sec *SecurityService) refresh(code uint64) error {
 		// CFG_CHANGE_CERTS_TLSCONFIG is sent down but not CFG_CHANGE_CLIENT_CERTS_TLSCONFIG
 		// because the client certs themselves did not change
 		// XDCR needs to ensure that any decision-making based on mandatory cert or not should be refreshed
-		go sec.clientCertSettingChangeCb()
+		go func() {
+			sec.clientCertSettingChangeCbMtx.RLock()
+			if sec.clientCertSettingChangeCb != nil {
+				sec.clientCertSettingChangeCb()
+			}
+			sec.clientCertSettingChangeCbMtx.RUnlock()
+		}()
 
 		if err := sec.refreshCert(); err != nil {
 			sec.logger.Error(err.Error())
@@ -260,6 +266,13 @@ func (sec *SecurityService) refreshClientCertConfig() error {
 	clientKey, err := os.ReadFile(sec.clientKeyFile)
 	if err != nil {
 		err = fmt.Errorf("reading client key file: %v", err)
+		return err
+	}
+
+	// Do validation
+	_, err = tls.X509KeyPair(certPEMBlock, clientKey)
+	if err != nil {
+		err = fmt.Errorf("unable to validate x509KeyPair from cbauth: %v", err)
 		return err
 	}
 

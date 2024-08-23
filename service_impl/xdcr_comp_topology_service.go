@@ -588,13 +588,12 @@ func (top_svc *XDCRTopologySvc) ClientCertIsMandatory() (bool, error) {
 	// Upgrade lock
 	top_svc.cachedClientCertMandatoryMtx.RUnlock()
 	top_svc.cachedClientCertMandatoryMtx.Lock()
+	defer top_svc.cachedClientCertMandatoryMtx.Unlock()
 
 	if top_svc.cachedClientCertMandatoryTimer != nil {
 		// someone sneaked in
-		defer top_svc.cachedClientCertMandatoryMtx.Unlock()
 		return top_svc.cachedClientCertMandatory, top_svc.cachedClientCertMandatoryErr
 	}
-	defer top_svc.cachedClientCertMandatoryMtx.Unlock()
 
 	stopFunc := top_svc.utils.StartDiagStopwatch("top_svc.ClientCertIsMandatory()", base.DiagInternalThreshold)
 	defer stopFunc()
@@ -607,11 +606,14 @@ func (top_svc *XDCRTopologySvc) ClientCertIsMandatory() (bool, error) {
 		err = fmt.Errorf("ClientCertIsMandatory.Query(%v) status %v err %v", base.ClientCertAuthPath, statusCode, err)
 		top_svc.cachedClientCertMandatoryErr = err
 		top_svc.cachedClientCertMandatory = false
+		// ns_server call failed means we need to elongate the cooldown period
 	} else {
+		// If parsing fails, it is either coding bug (unlikely since it would have been tested)
+		// or ns_server is returning odd things. In either case, should still try to cooldown
 		top_svc.cachedClientCertMandatory, top_svc.cachedClientCertMandatoryErr = top_svc.utils.ParseClientCertOutput(clientCertOutput)
-		if top_svc.cachedClientCertMandatoryErr != nil {
-			cooldownPeriod = base.TopologySvcErrCoolDownPeriod
-		}
+	}
+	if top_svc.cachedClientCertMandatoryErr != nil {
+		cooldownPeriod = base.TopologySvcErrCoolDownPeriod
 	}
 
 	top_svc.cachedClientCertMandatoryTimer = time.AfterFunc(cooldownPeriod, top_svc.clearCachedClientCertCache)

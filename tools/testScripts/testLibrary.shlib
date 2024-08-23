@@ -1170,7 +1170,31 @@ function setupCertificateAuthority {
 	done
 }
 
+function setupCertsForTestingUsage {
+  echo "setupCertsForTesting [-p \"client cert passphrase\"]"
+}
+
+# optional arguments:
+# -p <client key passphrase>
 function setupCertsForTesting {
+	local OPTIND o p
+	while getopts ":p:" o; do
+		case "${o}" in
+		p)
+			p="${OPTARG}"
+			;;
+		*)
+			setupCertsForTestingUsage
+			;;
+		esac
+	done
+	shift $((OPTIND - 1))
+
+	local clientKeyPassphrase
+	if [[ ! -z "${p:-}" ]]; then
+		clientKeyPassphrase="$p"
+	fi
+
 	checkOpenSSL
 	# Currently this test library exists under goproj/src/github.com/couchbase/goxdcr/tools/testScripts/
 	# before below, store the ns_server absolute path
@@ -1345,7 +1369,11 @@ EOF
 			>>./client.ext.tmp
 
 		# Create a client private key.
-		openssl genrsa -out ./travel-sample.key 2048
+		if [[ -z "${clientKeyPassphrase:-}" ]]; then
+			openssl genrsa -out ./travel-sample.key 2048
+		else
+			openssl genrsa -passout pass:"${clientKeyPassphrase}" -out ./travel-sample.key 2048
+		fi
 
 		# Generate the client-certificate signing-request.
 		openssl req -new -key ./travel-sample.key -out ./travel-sample.csr -subj "/CN=Administrator"

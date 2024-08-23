@@ -14,7 +14,7 @@
 CLUSTER_NAME_PORT_MAP=(["C1"]=9000 ["C1P"]=9001 ["C2"]=9002 ["C2P"]=9003)
 # For uni directional, just have one node rebalancing in
 CLUSTER_DEPENDENCY_MAP=(["C1P"]="C1")
-CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=9003)
+CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P"]=13001 ["C2"]=13002 ["C2P"]=13003)
 CLUSTER_NAME_SECURE_PORT_MAP=(["C1"]=19000 ["C1P"]=19001 ["C2"]=19002 ["C2P"]=19003)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
@@ -121,6 +121,7 @@ function runRebalanceAndReplication {
 
 	# do the same thing again but now with clientCert disabled to make sure XDCR can create replication with updated
 	# security setting
+	# as long as replications can be created, p2p should be working
 	cleanupBucketReplications
 	cleanupRemoteClusterRefs
 
@@ -133,6 +134,15 @@ function runRebalanceAndReplication {
 	cleanupClientCertMaps # this is needed so createSecureRemoteClusterReference will not use client cert but will use pw
 	runOneReplicationCycleAndPause
 
+	# do the same thing now but with regenerated client key where the keys have passphrase protection
+	# as long as replications can be created, p2p should be working
+	cleanupBucketReplications
+	cleanupRemoteClusterRefs
+	setupCertsForTesting -p "passphrase"
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		setMandatoryClientCert "$clusterName"
+	done
+	runOneReplicationCycleAndPause
 }
 
 function runReplicationResume {
