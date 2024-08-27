@@ -1132,26 +1132,6 @@ function checkOpenSSL {
 	fi
 }
 
-function findNsServerDir {
-	local i=0
-	local outStr=""
-	pushd "$PWD" >/dev/null
-
-	while [[ "$PWD" != / ]] && [[ ! -d "ns_server" ]]; do
-		i=$(($i + 1))
-		cd ..
-	done
-
-	local j
-	for ((j = 0; $j < $i; j = $(($j + 1)))); do
-		outStr="${outStr}../"
-	done
-	outStr="${outStr}ns_server"
-	popd >/dev/null
-
-	echo "$outStr"
-}
-
 function setupCertificateAuthority {
 	local clusterName="$1"
 	local dependentNodeName
