@@ -1,104 +1,104 @@
 disable-version-string: True
 packages:
-  github.com/couchbase/goxdcr/service_def:
+  github.com/couchbase/goxdcr/v8/service_def:
     config:
       recursive: True
       all: True
       dir: "service_def/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/pipeline:
+  github.com/couchbase/goxdcr/v8/pipeline:
     config:
       recursive: True
       all: True
       dir: "pipeline/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/streamApiWatcher:
+  github.com/couchbase/goxdcr/v8/streamApiWatcher:
     config:
       recursive: True
       all: True
       dir: "streamApiWatcher/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/peerToPeer:
+  github.com/couchbase/goxdcr/v8/peerToPeer:
     config:
       recursive: True
       all: True
       dir: "peerToPeer/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/replication_manager:
+  github.com/couchbase/goxdcr/v8/replication_manager:
     config:
       recursive: True
       all: True
       dir: "replication_manager/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/metadata_svc:
+  github.com/couchbase/goxdcr/v8/metadata_svc:
     config:
       recursive: True
       all: True
       dir: "metadata_svc/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/utils:
+  github.com/couchbase/goxdcr/v8/utils:
     config:
       recursive: True
       all: True
       dir: "utils/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/common:
+  github.com/couchbase/goxdcr/v8/common:
     config:
       recursive: True
       all: True
       dir: "common/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/parts:
+  github.com/couchbase/goxdcr/v8/parts:
     config:
       recursive: True
       all: True
       dir: "parts/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/pipeline_svc:
+  github.com/couchbase/goxdcr/v8/pipeline_svc:
     config:
       recursive: True
       all: True
       dir: "pipeline_svc/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/pipeline_manager:
+  github.com/couchbase/goxdcr/v8/pipeline_manager:
     config:
       recursive: True
       all: True
       dir: "pipeline_manager/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/metadata:
+  github.com/couchbase/goxdcr/v8/metadata:
     config:
       recursive: True
       all: True
       dir: "metadata/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/factory:
+  github.com/couchbase/goxdcr/v8/factory:
     config:
       recursive: True
       all: True
       dir: "factory/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/base/filter:
+  github.com/couchbase/goxdcr/v8/base/filter:
     config:
       recursive: True
       all: True
       dir: "base/filter/mocks"
       outpkg: "mocks"
       mockname: "{{.InterfaceName}}"
-  github.com/couchbase/goxdcr/base/helpers:
+  github.com/couchbase/goxdcr/v8/base/helpers:
     config:
       recursive: True
       all: True
