@@ -91,6 +91,9 @@ declare -A CLUSTER_NAME_BUCKET_DONE_MAP
 declare -A BUCKET_NAME_SCOPE_DONE_MAP
 declare -A SCOPE_NAME_COLLECTION_DONE_MAP
 
+# For variable VB tests, cluster run is run on its behalf
+declare -A CLUSTER_VBCOUNT_MAP
+
 REST_MAX_RETRY=5
 GET_BROKEN_MAP_NOT_FOUND=255
 CHECK_CHANGES_LEFT_MAX=5
@@ -1254,19 +1257,55 @@ function setupCollections {
 
 # Allow specific flags to be passed in:
 # -d : <developer mode>
+# -c : runs cluster_run on behalf of user
+# -v : variable vb mode - will read global to determine number of VBs to start
 function setupTopologies {
 	local OPTIND
 	local d
 	local developerPreviewSet=0
 	local opt
+	local runClusterRun
+	local variableVbMode
+	local portNo
 
-	while getopts "d" opt; do
+	while getopts "cdv" opt; do
 		case ${opt} in
 		d)
 			developerPreviewSet=1
 			;;
+		c)
+			# Note for running cluster run on behalf of users
+			# it may be problematic in the scenario of a test failure that the cluster_run is shut down
+			# automatically, which prevents ease of debug
+			runClusterRun=1
+			trap killClusterRun EXIT
+			;;
+		v)
+			variableVbMode=1
+			;;
+		*)
+			echo "setupTopologies: Unknown option $opt"
+			exit 1
+			;;
 		esac
 	done
+
+	if [[ ! -z "${runClusterRun:-}" ]]; then
+		if [[ ! -z "${variableVbMode:-}" ]]; then
+			echo "Launching node by node with variable VB"
+			for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+				echo "Launching $clusterName"
+				launchClusterRun -c $clusterName -v ${CLUSTER_VBCOUNT_MAP[$clusterName]}
+			done
+		else
+			for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+				echo "Launching $clusterName"
+				launchClusterRun -c $clusterName
+			done
+		fi
+		echo "Sleeping 30 seconds for cluster(s)_run to finish initializing..."
+		sleep 30
+	fi
 
 	setupCluster
 	if (($? != 0)); then
@@ -1462,9 +1501,28 @@ function deleteBucketReplication {
 	exit 1
 }
 
+# Optional inputs:
+# -c : cluster_run was launched in the background, thus skip the kill and wait for bg jobs
 function cleanupBucketReplications {
+	local OPTIND
+	local OPTARG
+	local opt
+	local skipKillOrWaitBg
+
+	while getopts "c" opt; do
+	  case ${opt} in
+	  c)
+	    skipKillOrWaitBg=1
+	    ;;
+	  *)
+	    echo "cleanupBucketReplications: Unknown option $opt"
+	    exit 1
+	    ;;
+	  esac
+	done
+
 	# Certain functions only exist under test library
-	[[ $(type -t killAllBgJobs) == function ]] && killAllBgJobs
+	[[ $(type -t killAllBgJobs) == function ]] && [[ -z "${skipKillOrWaitBg:-}" ]] && killAllBgJobs
 
 	for replKey in "${!BUCKET_REPL_EXPORT_MAP[@]}"; do
 		local sourceCluster=$(echo "$replKey" | cut -d, -f1)
@@ -1482,7 +1540,7 @@ function cleanupBucketReplications {
 		echo "DELETING replication from sourceCluster $sourceCluster sourceBucket $sourceBucket to targetCluster $targetCluster targetBucket $targetBucket..."
 		$CURL -X DELETE -u $DEFAULT_ADMIN:$DEFAULT_PW http://$sourceHost:$sourcePort/controller/cancelXDCR/${restID} >/dev/null 2>&1
 	done
-	[[ $(type -t waitForBgJobs) == function ]] && waitForBgJobs
+	[[ $(type -t waitForBgJobs) == function ]] && [[ -z "${skipKillOrWaitBg:-}" ]] && waitForBgJobs
 }
 
 function findCbDocLoader {
@@ -2951,4 +3009,69 @@ function regenerateCertificate {
 
 	echo "Regenerating certificates including out of the box CA for $clusterName..."
 	$CURL -u $DEFAULT_ADMIN:$DEFAULT_PW -X POST http://localhost:${port}/controller/regenerateCertificate
+}
+
+function findNsServerDir {
+	local i=0
+	local outStr=""
+	pushd "$PWD" >/dev/null
+
+	while [[ "$PWD" != / ]] && [[ ! -d "ns_server" ]]; do
+		i=$(($i + 1))
+		cd ..
+	done
+
+	local j
+	for ((j = 0; $j < $i; j = $(($j + 1)))); do
+		outStr="${outStr}../"
+	done
+	outStr="${outStr}ns_server"
+	popd >/dev/null
+
+	echo "$outStr"
+}
+
+function launchClusterRun {
+	local nsServerDir=$(findNsServerDir)
+	local OPTIND
+	local OPTARG
+	local clusterName
+	local vbPrefix
+	local port
+	local startingIdx
+	local startingIdxPrefix
+
+	while getopts "c:v:" opt; do
+		case ${opt} in
+		c)
+			clusterName=$OPTARG
+			port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
+			startingIdx=$(echo "$port % 10" | bc)
+			startingIdxPrefix="--start-index"
+			;;
+		v)
+			vbCount=$OPTARG
+			vbPrefix="--num_vbuckets "
+			;;
+		*)
+			echo "launchClusterRun: Unknown option $opt"
+			exit 1
+			;;
+		esac
+	done
+
+	$nsServerDir/cluster_run -n 1 ${startingIdxPrefix:-} ${startingIdx:-} ${vbPrefix:-} ${vbCount:-} >/dev/null 2>&1 &
+}
+
+function killClusterRun {
+	ps -ef | grep cluster_run | grep -v grep | awk '{print $2}' | xargs kill
+}
+
+function cleanClusterRun {
+	local nsServerDir=$(findNsServerDir)
+
+	pushd $(pwd)
+	cd $nsServerDir
+	make dataclean
+	popd
 }
