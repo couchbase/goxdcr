@@ -77,6 +77,7 @@ C1LOOKINGC1PMSG="Discovered peers: map\\[127.0.0.1:9001"
 C1LOOKINGC1PSECUREMSG="Discovered peers: map\\[127.0.0.1:19001"
 CKPT_FOUND_DOCS="retrieving CheckpointsDocs request found"
 CKPT_RETRIEVED="Received peerToPeer checkpoint data from node"
+CERT_REQUIRED="tls: certificate required"
 
 function runRebalanceAndReplication {
 	local timeIntervalSecs=30
@@ -143,6 +144,10 @@ function runRebalanceAndReplication {
 		setMandatoryClientCert "$clusterName"
 	done
 	runOneReplicationCycleAndPause
+
+	for clusterName in $(echo ${!CLUSTER_NAME_PORT_MAP[@]}); do
+		validateInternalLogWithInstance "$clusterName" "$CERT_REQUIRED" 0
+	done
 }
 
 function runReplicationResume {

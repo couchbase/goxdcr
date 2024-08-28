@@ -1171,7 +1171,7 @@ function setupCertificateAuthority {
 }
 
 function setupCertsForTestingUsage {
-  echo "setupCertsForTesting [-p \"client cert passphrase\"]"
+	echo "setupCertsForTesting [-p \"client cert passphrase\"]"
 }
 
 # optional arguments:

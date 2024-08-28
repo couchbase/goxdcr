@@ -304,7 +304,7 @@ var filterUtils = utilities.NewUtilities()
 var reqMagicCheckFilter, _ = filter.NewFilter("magicCheckReq", fmt.Sprintf("Magic=%d", ReqMagic), filterUtils, 0, base.MobileCompatibilityOff)
 var respMagicCheckFilter, _ = filter.NewFilter("magicCheckResp", fmt.Sprintf("Magic=%d", RespMagic), filterUtils, 0, base.MobileCompatibilityOff)
 
-func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, securitySvc service_def.SecuritySvc, logger *log.CommonLogger) (ReqRespCommon, error) {
+func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, securitySvc service_def.SecuritySvc, logger *log.CommonLogger, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) (ReqRespCommon, error) {
 	body, err := ioutil.ReadAll(httpReq.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading httpReq.Body resulted in err: %v", err)
@@ -323,7 +323,7 @@ func GenerateP2PReqOrResp(httpReq *http.Request, utils utilities.UtilsIface, sec
 		if err != nil {
 			return nil, fmt.Errorf("unmarshalling request with reqCommon %v had err %v", reqCommon, err)
 		}
-		return generateRequest(utils, reqCommon, body, securitySvc, logger)
+		return generateRequest(utils, reqCommon, body, securitySvc, logger, xdcrCompTopologySvc)
 	} else {
 		err = json.Unmarshal(body, &respCommon)
 		if err != nil {
@@ -392,14 +392,14 @@ func generateResp(respCommon ResponseCommon, err error, body []byte) (ReqRespCom
 	}
 }
 
-func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body []byte, securitySvc service_def.SecuritySvc, logger *log.CommonLogger) (ReqRespCommon, error) {
+func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body []byte, securitySvc service_def.SecuritySvc, logger *log.CommonLogger, xdcrCompTopologySvc service_def.XDCRCompTopologySvc) (ReqRespCommon, error) {
 	cbFunc := func(resp Response) (HandlerResult, error) {
 		payload, err := resp.Serialize()
 		if err != nil {
 			return &HandlerResultImpl{}, fmt.Errorf("generating response %v err: %v", resp.GetType(), err)
 		}
 		var out interface{}
-		var certificates []byte
+		var certificates, clientKey, clientCert []byte
 		authMech := base.HttpAuthMechPlain
 		if securitySvc.IsClusterEncryptionLevelStrict() {
 			authMech = base.HttpAuthMechHttps
@@ -411,8 +411,20 @@ func generateRequest(utils utilities.UtilsIface, reqCommon RequestCommon, body [
 				}, base.ErrorNilCertificateStrictMode
 			}
 		}
+		isMandatory, err := xdcrCompTopologySvc.ClientCertIsMandatory()
+		if err == nil && isMandatory {
+			// If n2n encryption is required and client cert is mandatory, then the traditional
+			// cbauth username/pw "superuser" pairing will not work - and thus we must use clientCert and key
+			// provided by the ns_server
+			clientCert, clientKey = securitySvc.GetClientCertAndKey()
+			result, err := checkClientCertAndKeyExists(clientCert, clientKey)
+			if err != nil {
+				return result, err
+			}
+		}
+
 		err, statusCode := utils.QueryRestApiWithAuth(reqCommon.GetSender(), base.XDCRPeerToPeerPath, false,
-			"", "", authMech, certificates, true, nil, nil,
+			"", "", authMech, certificates, true, clientCert, clientKey,
 			base.MethodPost, base.JsonContentType, payload, base.P2PCommTimeout, &out, nil, false, logger)
 		// utils returns this error because body is empty, which is fine
 		if err == base.ErrorResourceDoesNotExist {
