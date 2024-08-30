@@ -62,7 +62,8 @@ const (
 	GetDocsCasChangedCnt               string = "get_docs_cas_changed_cnt"
 )
 
-type CheckpointRecord struct {
+// SourceVBTimestamp defines the necessary items to start or resume a source DCP stream in a checkpoint context
+type SourceVBTimestamp struct {
 	//source vbucket failover uuid
 	Failover_uuid uint64 `json:"failover_uuid"`
 	//source vbucket high sequence number
@@ -71,10 +72,24 @@ type CheckpointRecord struct {
 	Dcp_snapshot_seqno uint64 `json:"dcp_snapshot_seqno"`
 	//source snapshot end sequence number
 	Dcp_snapshot_end_seqno uint64 `json:"dcp_snapshot_end_seqno"`
-	//target vb opaque
+
+	SourceManifestForDCP         uint64 `json:"source_manifest_dcp"`
+	SourceManifestForBackfillMgr uint64 `json:"source_manifest_backfill_mgr"`
+}
+
+// TargetVBTimestamp defines the necessary items to confirm that the checkpoint is valid for resuming
+type TargetVBTimestamp struct {
+	//target vb opaque / high seqno
 	Target_vb_opaque TargetVBOpaque `json:"target_vb_opaque"`
 	//target vb high sequence number
 	Target_Seqno uint64 `json:"target_seqno"`
+	// Manifests uid corresponding to this checkpoint
+	TargetManifest uint64 `json:"target_manifest"`
+}
+
+// SourceFilteredCounters are item counts based on source VB streams and are restored to the source-related
+// components when resuming from a checkpoint
+type SourceFilteredCounters struct {
 	// Number of items filtered
 	Filtered_Items_Cnt uint64 `json:"filtered_items_cnt"`
 	// Number of items failed filter
@@ -99,17 +114,16 @@ type CheckpointRecord struct {
 	FilteredItemsOnMobileRecords uint64 `json:"mobile_records_filtered_cnt"`
 	// Number of mobile records filtered
 	FilteredItemsOnUserDefinedFilters uint64 `json:"docs_filtered_on_user_defined_filters_cnt"`
-	// Manifests uid corresponding to this checkpoint
-	SourceManifestForDCP         uint64 `json:"source_manifest_dcp"`
-	SourceManifestForBackfillMgr uint64 `json:"source_manifest_backfill_mgr"`
-	TargetManifest               uint64 `json:"target_manifest"`
-	// BrokenMappingInfoType SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMappingInfoType above
-	BrokenMappingSha256 string `json:"brokenCollectionsMapSha256"`
-	// Broken mapping (if any) associated with the checkpoint - this is populated automatically by checkpointsService
-	brokenMappings    CollectionNamespaceMapping
-	brokenMappingsMtx sync.RWMutex
-	// Epoch timestamp of when this record was created
-	CreationTime uint64 `json:"creationTime"`
+	// conflict logger stats
+	FilteredConflictDocs   uint64 `json:"clog_docs_filtered_cnt"`
+	SrcConflictDocsWritten uint64 `json:"clog_src_docs_written"`
+	TgtConflictDocsWritten uint64 `json:"clog_tgt_docs_written"`
+	CRDConflictDocsWritten uint64 `json:"clog_crd_docs_written"`
+}
+
+// TargetPerVBCounters contain a list of counters that are collected throughout a target VB's
+// lifetime. Each one is stored and restored on a per target VB basis
+type TargetPerVBCounters struct {
 	// Guardrails
 	GuardrailResidentRatioCnt uint64 `json:"guardrail_resident_ratio_cnt"`
 	GuardrailDataSizeCnt      uint64 `json:"guardrail_data_size_cnt"`
@@ -122,13 +136,27 @@ type CheckpointRecord struct {
 	DocsSentWithPoisonedCasErrorMode   uint64 `json:"docs_sent_with_poisoned_cas_error_mode"`
 	DocsSentWithPoisonedCasReplaceMode uint64 `json:"docs_sent_with_poisoned_cas_replace_mode"`
 	// conflict logger stats
-	SrcConflictDocsWritten uint64 `json:"clog_src_docs_written"`
-	TgtConflictDocsWritten uint64 `json:"clog_tgt_docs_written"`
-	CRDConflictDocsWritten uint64 `json:"clog_crd_docs_written"`
-	TrueConflictsDetected  uint64 `json:"true_conflicts_detected"`
-	FilteredConflictDocs   uint64 `json:"clog_docs_filtered_cnt"`
-	CLogHibernatedCnt      uint64 `json:"clog_hibernated_cnt"`
-	GetDocsCasChangedCnt   uint64 `json:"get_docs_cas_changed_cnt"`
+	TrueConflictsDetected uint64 `json:"true_conflicts_detected"`
+	CLogHibernatedCnt     uint64 `json:"clog_hibernated_cnt"`
+	GetDocsCasChangedCnt  uint64 `json:"get_docs_cas_changed_cnt"`
+}
+
+type CheckpointRecord struct {
+	// Epoch timestamp of when this record was created
+	CreationTime uint64 `json:"creationTime"`
+
+	SourceVBTimestamp
+	SourceFilteredCounters
+
+	// Traditional checkpoints will utilize one single TargetVBTimestamp and one single TargetPerVBCounters
+	TargetVBTimestamp
+	TargetPerVBCounters
+
+	// BrokenMappingInfoType SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMappingInfoType above
+	BrokenMappingSha256 string `json:"brokenCollectionsMapSha256"`
+	// Broken mapping (if any) associated with the checkpoint - this is populated automatically by checkpointsService
+	brokenMappings    CollectionNamespaceMapping
+	brokenMappingsMtx sync.RWMutex
 }
 
 func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
@@ -202,43 +230,51 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 	getDocsCasChangedCnt := uint64(vbCountMetrics[base.GetDocsCasChangedCount])
 
 	record := &CheckpointRecord{
-		Failover_uuid:                      failoverUuid,
-		Seqno:                              seqno,
-		Dcp_snapshot_seqno:                 dcpSnapSeqno,
-		Dcp_snapshot_end_seqno:             dcpSnapEnd,
-		Target_Seqno:                       targetSeqno,
-		Filtered_Items_Cnt:                 filteredItems,
-		Filtered_Failed_Cnt:                filterFailed,
-		FilteredItemsOnExpirationsCnt:      filteredExpiredItems,
-		FilteredItemsOnDeletionsCnt:        filteredDelItems,
-		FilteredItemsOnSetCnt:              filteredSetItems,
-		FilteredItemsOnExpiryStrippedCnt:   filteredExpiryStripItems,
-		FilteredItemsOnBinaryDocsCnt:       filteredBinaryDocItems,
-		FilteredItemsOnATRDocsCnt:          filteredATRDocItems,
-		FilteredItemsOnClientTxnRecordsCnt: filteredClientTxnDocItems,
-		FilteredItemsOnTxnXattrsDocsCnt:    filteredTxnXattrsItems,
-		FilteredItemsOnMobileRecords:       filteredMobileDocItems,
-		FilteredItemsOnUserDefinedFilters:  filteredDocsOnUserDefinedFilters,
-		SourceManifestForDCP:               srcManifestForDCP,
-		SourceManifestForBackfillMgr:       srcManifestForBackfill,
-		TargetManifest:                     tgtManifest,
-		brokenMappings:                     brokenMappings,
-		CreationTime:                       creationTime,
-		GuardrailResidentRatioCnt:          guardrailResidentRatioItems,
-		GuardrailDataSizeCnt:               guardrailDataSizeItems,
-		GuardrailDiskSpaceCnt:              guardrailDiskSpaceItems,
-		DocsSentWithSubdocSetCnt:           subdocSetItems,
-		DocsSentWithSubdocDeleteCnt:        subdocDeleteItems,
-		CasPoisonCnt:                       casPoisonItems,
-		DocsSentWithPoisonedCasErrorMode:   docsSentWithPoisonedCasErrorMode,
-		DocsSentWithPoisonedCasReplaceMode: docsSentWithPoisonedCasReplaceMode,
-		SrcConflictDocsWritten:             srcConflictDocsWritten,
-		TgtConflictDocsWritten:             tgtConflictDocsWritten,
-		CRDConflictDocsWritten:             crdConflictDocsWritten,
-		TrueConflictsDetected:              trueConflictsDetected,
-		FilteredConflictDocs:               conflictDocsFiltered,
-		CLogHibernatedCnt:                  clogHibernatedCnt,
-		GetDocsCasChangedCnt:               getDocsCasChangedCnt,
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid:                failoverUuid,
+			Seqno:                        seqno,
+			Dcp_snapshot_seqno:           dcpSnapSeqno,
+			Dcp_snapshot_end_seqno:       dcpSnapEnd,
+			SourceManifestForDCP:         srcManifestForDCP,
+			SourceManifestForBackfillMgr: srcManifestForBackfill,
+		},
+		TargetVBTimestamp: TargetVBTimestamp{
+			Target_Seqno:   targetSeqno,
+			TargetManifest: tgtManifest,
+		},
+		SourceFilteredCounters: SourceFilteredCounters{
+			Filtered_Items_Cnt:                 filteredItems,
+			Filtered_Failed_Cnt:                filterFailed,
+			FilteredItemsOnExpirationsCnt:      filteredExpiredItems,
+			FilteredItemsOnDeletionsCnt:        filteredDelItems,
+			FilteredItemsOnSetCnt:              filteredSetItems,
+			FilteredItemsOnExpiryStrippedCnt:   filteredExpiryStripItems,
+			FilteredItemsOnBinaryDocsCnt:       filteredBinaryDocItems,
+			FilteredItemsOnATRDocsCnt:          filteredATRDocItems,
+			FilteredItemsOnClientTxnRecordsCnt: filteredClientTxnDocItems,
+			FilteredItemsOnTxnXattrsDocsCnt:    filteredTxnXattrsItems,
+			FilteredItemsOnMobileRecords:       filteredMobileDocItems,
+			FilteredItemsOnUserDefinedFilters:  filteredDocsOnUserDefinedFilters,
+			FilteredConflictDocs:               conflictDocsFiltered,
+			SrcConflictDocsWritten:             srcConflictDocsWritten,
+			TgtConflictDocsWritten:             tgtConflictDocsWritten,
+			CRDConflictDocsWritten:             crdConflictDocsWritten,
+		},
+		brokenMappings: brokenMappings,
+		CreationTime:   creationTime,
+		TargetPerVBCounters: TargetPerVBCounters{
+			GuardrailResidentRatioCnt:          guardrailResidentRatioItems,
+			GuardrailDataSizeCnt:               guardrailDataSizeItems,
+			GuardrailDiskSpaceCnt:              guardrailDiskSpaceItems,
+			DocsSentWithSubdocSetCnt:           subdocSetItems,
+			DocsSentWithSubdocDeleteCnt:        subdocDeleteItems,
+			CasPoisonCnt:                       casPoisonItems,
+			DocsSentWithPoisonedCasErrorMode:   docsSentWithPoisonedCasErrorMode,
+			DocsSentWithPoisonedCasReplaceMode: docsSentWithPoisonedCasReplaceMode,
+			GetDocsCasChangedCnt:               getDocsCasChangedCnt,
+			CLogHibernatedCnt:                  clogHibernatedCnt,
+			TrueConflictsDetected:              trueConflictsDetected,
+		},
 	}
 	return record
 }
@@ -1160,46 +1196,54 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 	}
 
 	retVal := &CheckpointRecord{
-		Failover_uuid:                      c.Failover_uuid,
-		Seqno:                              c.Seqno,
-		Dcp_snapshot_seqno:                 c.Dcp_snapshot_seqno,
-		Dcp_snapshot_end_seqno:             c.Dcp_snapshot_end_seqno,
-		Target_vb_opaque:                   c.Target_vb_opaque,
-		Target_Seqno:                       c.Target_Seqno,
-		Filtered_Items_Cnt:                 c.Filtered_Items_Cnt,
-		Filtered_Failed_Cnt:                c.Filtered_Failed_Cnt,
-		FilteredItemsOnExpirationsCnt:      c.FilteredItemsOnExpirationsCnt,
-		FilteredItemsOnDeletionsCnt:        c.FilteredItemsOnDeletionsCnt,
-		FilteredItemsOnSetCnt:              c.FilteredItemsOnSetCnt,
-		FilteredItemsOnExpiryStrippedCnt:   c.FilteredItemsOnExpiryStrippedCnt,
-		FilteredItemsOnBinaryDocsCnt:       c.FilteredItemsOnBinaryDocsCnt,
-		FilteredItemsOnATRDocsCnt:          c.FilteredItemsOnATRDocsCnt,
-		FilteredItemsOnClientTxnRecordsCnt: c.FilteredItemsOnClientTxnRecordsCnt,
-		FilteredItemsOnTxnXattrsDocsCnt:    c.FilteredItemsOnTxnXattrsDocsCnt,
-		FilteredItemsOnMobileRecords:       c.FilteredItemsOnMobileRecords,
-		FilteredItemsOnUserDefinedFilters:  c.FilteredItemsOnUserDefinedFilters,
-		SourceManifestForDCP:               c.SourceManifestForDCP,
-		SourceManifestForBackfillMgr:       c.SourceManifestForBackfillMgr,
-		TargetManifest:                     c.TargetManifest,
-		BrokenMappingSha256:                c.BrokenMappingSha256,
-		brokenMappings:                     c.brokenMappings.Clone(),
-		brokenMappingsMtx:                  sync.RWMutex{},
-		CreationTime:                       c.CreationTime,
-		GuardrailDiskSpaceCnt:              c.GuardrailDiskSpaceCnt,
-		GuardrailDataSizeCnt:               c.GuardrailDataSizeCnt,
-		GuardrailResidentRatioCnt:          c.GuardrailResidentRatioCnt,
-		DocsSentWithSubdocSetCnt:           c.DocsSentWithSubdocSetCnt,
-		DocsSentWithSubdocDeleteCnt:        c.DocsSentWithSubdocDeleteCnt,
-		CasPoisonCnt:                       c.CasPoisonCnt,
-		DocsSentWithPoisonedCasErrorMode:   c.DocsSentWithPoisonedCasErrorMode,
-		DocsSentWithPoisonedCasReplaceMode: c.DocsSentWithPoisonedCasReplaceMode,
-		SrcConflictDocsWritten:             c.SrcConflictDocsWritten,
-		TgtConflictDocsWritten:             c.TgtConflictDocsWritten,
-		CRDConflictDocsWritten:             c.CRDConflictDocsWritten,
-		TrueConflictsDetected:              c.TrueConflictsDetected,
-		FilteredConflictDocs:               c.FilteredConflictDocs,
-		CLogHibernatedCnt:                  c.CLogHibernatedCnt,
-		GetDocsCasChangedCnt:               c.GetDocsCasChangedCnt,
+		BrokenMappingSha256: c.BrokenMappingSha256,
+		brokenMappings:      c.brokenMappings.Clone(),
+		brokenMappingsMtx:   sync.RWMutex{},
+		CreationTime:        c.CreationTime,
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid:                c.Failover_uuid,
+			Seqno:                        c.Seqno,
+			Dcp_snapshot_seqno:           c.Dcp_snapshot_seqno,
+			Dcp_snapshot_end_seqno:       c.Dcp_snapshot_end_seqno,
+			SourceManifestForDCP:         c.SourceManifestForDCP,
+			SourceManifestForBackfillMgr: c.SourceManifestForBackfillMgr,
+		},
+		TargetVBTimestamp: TargetVBTimestamp{
+			Target_vb_opaque: c.Target_vb_opaque,
+			Target_Seqno:     c.Target_Seqno,
+			TargetManifest:   c.TargetManifest,
+		},
+		SourceFilteredCounters: SourceFilteredCounters{
+			Filtered_Items_Cnt:                 c.Filtered_Items_Cnt,
+			Filtered_Failed_Cnt:                c.Filtered_Failed_Cnt,
+			FilteredItemsOnExpirationsCnt:      c.FilteredItemsOnExpirationsCnt,
+			FilteredItemsOnDeletionsCnt:        c.FilteredItemsOnDeletionsCnt,
+			FilteredItemsOnSetCnt:              c.FilteredItemsOnSetCnt,
+			FilteredItemsOnExpiryStrippedCnt:   c.FilteredItemsOnExpiryStrippedCnt,
+			FilteredItemsOnBinaryDocsCnt:       c.FilteredItemsOnBinaryDocsCnt,
+			FilteredItemsOnATRDocsCnt:          c.FilteredItemsOnATRDocsCnt,
+			FilteredItemsOnClientTxnRecordsCnt: c.FilteredItemsOnClientTxnRecordsCnt,
+			FilteredItemsOnTxnXattrsDocsCnt:    c.FilteredItemsOnTxnXattrsDocsCnt,
+			FilteredItemsOnMobileRecords:       c.FilteredItemsOnMobileRecords,
+			FilteredItemsOnUserDefinedFilters:  c.FilteredItemsOnUserDefinedFilters,
+			FilteredConflictDocs:               c.FilteredConflictDocs,
+			SrcConflictDocsWritten:             c.SrcConflictDocsWritten,
+			TgtConflictDocsWritten:             c.TgtConflictDocsWritten,
+			CRDConflictDocsWritten:             c.CRDConflictDocsWritten,
+		},
+		TargetPerVBCounters: TargetPerVBCounters{
+			GuardrailDiskSpaceCnt:              c.GuardrailDiskSpaceCnt,
+			GuardrailDataSizeCnt:               c.GuardrailDataSizeCnt,
+			GuardrailResidentRatioCnt:          c.GuardrailResidentRatioCnt,
+			DocsSentWithSubdocSetCnt:           c.DocsSentWithSubdocSetCnt,
+			DocsSentWithSubdocDeleteCnt:        c.DocsSentWithSubdocDeleteCnt,
+			CasPoisonCnt:                       c.CasPoisonCnt,
+			DocsSentWithPoisonedCasErrorMode:   c.DocsSentWithPoisonedCasErrorMode,
+			DocsSentWithPoisonedCasReplaceMode: c.DocsSentWithPoisonedCasReplaceMode,
+			TrueConflictsDetected:              c.TrueConflictsDetected,
+			CLogHibernatedCnt:                  c.CLogHibernatedCnt,
+			GetDocsCasChangedCnt:               c.GetDocsCasChangedCnt,
+		},
 	}
 	return retVal
 }
