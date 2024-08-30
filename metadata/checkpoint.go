@@ -154,9 +154,25 @@ func (c *CheckpointRecord) Size() int {
 }
 
 func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno uint64,
-	vbCountMetrics base.VBCountMetricMap, srcManifestForDCP, srcManifestForBackfill,
+	incomingMetric base.VBCountMetric, srcManifestForDCP, srcManifestForBackfill,
 	tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
 
+	var record *CheckpointRecord
+
+	if incomingMetric.IsTraditional() {
+		record = newTraditionalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, srcManifestForDCP, srcManifestForBackfill, tgtManifest, brokenMappings, creationTime, incomingMetric)
+	} else {
+		return nil, fmt.Errorf("TODO global checkpoint")
+	}
+	err := record.PopulateBrokenMappingSha()
+	if err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
+func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, targetSeqno uint64, srcManifestForDCP uint64, srcManifestForBackfill uint64, tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64, incomingMetric base.VBCountMetric) *CheckpointRecord {
+	vbCountMetrics := incomingMetric.(*base.TraditionalVBMetrics).GetValue()
 	filteredItems := uint64(vbCountMetrics[base.DocsFiltered])
 	filterFailed := uint64(vbCountMetrics[base.DocsUnableToFilter])
 	filteredExpiredItems := uint64(vbCountMetrics[base.ExpiryFiltered])
@@ -224,11 +240,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSe
 		CLogHibernatedCnt:                  clogHibernatedCnt,
 		GetDocsCasChangedCnt:               getDocsCasChangedCnt,
 	}
-	err := record.PopulateBrokenMappingSha()
-	if err != nil {
-		return nil, err
-	}
-	return record, nil
+	return record
 }
 
 func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
@@ -1359,4 +1371,9 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 		return fmt.Errorf(base.FlattenErrorMap(errMap))
 	}
 	return nil
+}
+
+func (c *CheckpointsDoc) IsTraditional() bool {
+	// TODO global checkpoint
+	return true
 }
