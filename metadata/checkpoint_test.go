@@ -32,23 +32,31 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 		Startup_time:   "012",
 	}
 	newCkptRecord := CheckpointRecord{
-		Failover_uuid:                0,
-		Seqno:                        1,
-		Dcp_snapshot_seqno:           2,
-		Dcp_snapshot_end_seqno:       3,
-		Target_vb_opaque:             vbUuidAndTimestamp,
-		Target_Seqno:                 4,
-		Filtered_Items_Cnt:           5,
-		Filtered_Failed_Cnt:          6,
-		SourceManifestForDCP:         7,
-		SourceManifestForBackfillMgr: 8,
-		TargetManifest:               9,
-		BrokenMappingSha256:          "",
-		brokenMappings:               nil,
-		GuardrailResidentRatioCnt:    100,
-		GuardrailDataSizeCnt:         200,
-		GuardrailDiskSpaceCnt:        300,
-		CasPoisonCnt:                 1,
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid:                0,
+			Seqno:                        1,
+			Dcp_snapshot_seqno:           2,
+			Dcp_snapshot_end_seqno:       3,
+			SourceManifestForDCP:         7,
+			SourceManifestForBackfillMgr: 8,
+		},
+		TargetVBTimestamp: TargetVBTimestamp{
+			Target_vb_opaque: vbUuidAndTimestamp,
+			Target_Seqno:     4,
+			TargetManifest:   9,
+		},
+		SourceFilteredCounters: SourceFilteredCounters{
+			Filtered_Items_Cnt:  5,
+			Filtered_Failed_Cnt: 6,
+		},
+		TargetPerVBCounters: TargetPerVBCounters{
+			GuardrailResidentRatioCnt: 100,
+			GuardrailDataSizeCnt:      200,
+			GuardrailDiskSpaceCnt:     300,
+			CasPoisonCnt:              1,
+		},
+		BrokenMappingSha256: "",
+		brokenMappings:      nil,
 	}
 
 	brokenMap := make(CollectionNamespaceMapping)
@@ -59,23 +67,31 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 
 	brokenMap.AddSingleMapping(&ns1, &ns2)
 	ckptRecord2 := CheckpointRecord{
-		Failover_uuid:                0,
-		Seqno:                        1,
-		Dcp_snapshot_seqno:           2,
-		Dcp_snapshot_end_seqno:       3,
-		Target_vb_opaque:             vbUuidAndTimestamp,
-		Target_Seqno:                 4,
-		Filtered_Items_Cnt:           5,
-		Filtered_Failed_Cnt:          6,
-		SourceManifestForDCP:         7,
-		SourceManifestForBackfillMgr: 8,
-		TargetManifest:               9,
-		BrokenMappingSha256:          "",
-		brokenMappings:               brokenMap,
-		GuardrailResidentRatioCnt:    50,
-		GuardrailDataSizeCnt:         100,
-		GuardrailDiskSpaceCnt:        200,
-		CasPoisonCnt:                 2,
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid:                0,
+			Seqno:                        1,
+			Dcp_snapshot_seqno:           2,
+			Dcp_snapshot_end_seqno:       3,
+			SourceManifestForDCP:         7,
+			SourceManifestForBackfillMgr: 8,
+		},
+		TargetVBTimestamp: TargetVBTimestamp{
+			Target_vb_opaque: vbUuidAndTimestamp,
+			Target_Seqno:     4,
+			TargetManifest:   9,
+		},
+		SourceFilteredCounters: SourceFilteredCounters{
+			Filtered_Items_Cnt:  5,
+			Filtered_Failed_Cnt: 6,
+		},
+		BrokenMappingSha256: "",
+		brokenMappings:      brokenMap,
+		TargetPerVBCounters: TargetPerVBCounters{
+			GuardrailResidentRatioCnt: 50,
+			GuardrailDataSizeCnt:      100,
+			GuardrailDiskSpaceCnt:     200,
+			CasPoisonCnt:              2,
+		},
 	}
 	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
 
@@ -133,18 +149,26 @@ func TestCheckpointSortBySeqno(t *testing.T) {
 	latestSeqno := uint64(300)
 
 	record := &CheckpointRecord{
-		Failover_uuid:    validFailoverLog,
-		Seqno:            earlySeqno,
-		Target_vb_opaque: nil,
-		Target_Seqno:     0,
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid: validFailoverLog,
+			Seqno:         earlySeqno,
+		},
+		TargetVBTimestamp: TargetVBTimestamp{
+			Target_vb_opaque: nil,
+			Target_Seqno:     0,
+		},
 	}
 	record2 := &CheckpointRecord{
-		Failover_uuid: validFailoverLog,
-		Seqno:         laterSeqno,
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid: validFailoverLog,
+			Seqno:         laterSeqno,
+		},
 	}
 	record3 := &CheckpointRecord{
-		Failover_uuid: validFailoverLog,
-		Seqno:         latestSeqno,
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid: validFailoverLog,
+			Seqno:         latestSeqno,
+		},
 	}
 
 	unsortedList = append(unsortedList, record)
@@ -170,8 +194,8 @@ func TestCheckpointSortByFailoverLog(t *testing.T) {
 	validFailoverLog2 := uint64(12345)
 	failoverLog := &mcc.FailoverLog{[2]uint64{validFailoverLog, 0}, [2]uint64{validFailoverLog2, 0}}
 
-	recordA := &CheckpointRecord{Failover_uuid: validFailoverLog2}
-	recordB := &CheckpointRecord{Failover_uuid: validFailoverLog}
+	recordA := &CheckpointRecord{SourceVBTimestamp: SourceVBTimestamp{Failover_uuid: validFailoverLog2}}
+	recordB := &CheckpointRecord{SourceVBTimestamp: SourceVBTimestamp{Failover_uuid: validFailoverLog}}
 
 	unsortedList = append(unsortedList, recordA)
 	unsortedList = append(unsortedList, recordB)
