@@ -24,6 +24,8 @@ replace github.com/couchbase/cbgt => ../../../../../cbgt
 
 replace github.com/couchbase/hebrew => ../../../../../hebrew
 
+replace github.com/couchbase/cbauth => ../cbauth
+
 require (
 	github.com/couchbase/cbauth v0.1.12
 	github.com/couchbase/eventing-ee v0.0.0-00010101000000-000000000000
