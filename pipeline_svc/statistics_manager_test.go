@@ -234,7 +234,8 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	assert.Equal(int64(1), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
 	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
 
-	metricsMap, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	tradtitionalMetric, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	metricsMap := tradtitionalMetric.(*base.TraditionalVBMetrics).GetValue()
 	assert.Nil(err)
 	assert.NotNil(metricsMap)
 
@@ -256,31 +257,37 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	assert.Equal(int64(1), count)
 
 	// Try setting something else
-	metricKVs := make(map[string]int64)
+	tradMetric := base.NewTraditionalVBMetrics()
+	metricKVs := tradMetric.GetValue()
 	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 10
-	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, metricKVs)
+	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, tradMetric)
 	assert.Nil(err)
 
 	// Set some other vbucket
-	metricKVs = make(map[string]int64)
+	tradMetric = base.NewTraditionalVBMetrics()
+	metricKVs = tradMetric.GetValue()
+	//metricKVs = make(map[string]int64)
 	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 12
-	err = statsMgr.SetVBCountMetrics(102, metricKVs)
+	err = statsMgr.SetVBCountMetrics(102, tradMetric)
 	assert.Nil(err)
 
 	// Test setting something else
-	metricKVs = make(map[string]int64)
+	tradMetric = base.NewTraditionalVBMetrics()
+	metricKVs = tradMetric.GetValue()
 	metricKVs[service_def2.DOCS_FILTERED_METRIC] = 4
-	err = statsMgr.SetVBCountMetrics(102, metricKVs)
+	err = statsMgr.SetVBCountMetrics(102, tradMetric)
 	assert.Nil(err)
 
 	// verify
-	metricsMap, err = statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	vbMetrics, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
+	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue()
 	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(10), count)
 
-	metricsMap, err = statsMgr.GetVBCountMetrics(102)
+	vbMetrics, err = statsMgr.GetVBCountMetrics(102)
 	assert.Nil(err)
+	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue()
 	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(12), count)
 
@@ -295,14 +302,16 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	assert.Equal(int64(22), counter.Count())
 
 	// Pretend that a rollback occurred for a VB and the number decreased
-	metricKVs = make(map[string]int64)
+	tradMetric = base.NewTraditionalVBMetrics()
+	metricKVs = tradMetric.GetValue()
 	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 9
-	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, metricKVs)
+	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, tradMetric)
 	assert.Nil(err)
 
 	// validate difference calculation
-	metricsMap, err = statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	vbMetrics, err = statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
+	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue()
 	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(9), count)
 

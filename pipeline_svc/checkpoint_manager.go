@@ -580,14 +580,7 @@ func (ckmgr *CheckpointManager) startRandomizedCheckpointingTicker() {
 }
 
 func (ckmgr *CheckpointManager) initialize() {
-	listOfVbs := ckmgr.getMyVBs()
-	for _, vbno := range listOfVbs {
-		ckmgr.cur_ckpts[vbno] = &checkpointRecordWithLock{ckpt: &metadata.CheckpointRecord{}, lock: &sync.RWMutex{}}
-		ckmgr.failoverlog_map[vbno] = &failoverlogWithLock{failoverlog: nil, lock: &sync.RWMutex{}}
-		ckmgr.snapshot_history_map[vbno] = &snapshotHistoryWithLock{
-			snapshot_history: make([]*snapshot, 0, base.MaxLengthSnapshotHistory),
-		}
-	}
+	ckmgr.initializeCkptsPerVB()
 
 	ckmgr.composeUserAgent()
 
@@ -596,6 +589,30 @@ func (ckmgr *CheckpointManager) initialize() {
 	ckmgr.cachedBrokenMap.lock.Unlock()
 
 	ckmgr.getHighSeqnoAndVBUuidFromTargetCh <- true
+}
+
+func (ckmgr *CheckpointManager) initializeCkptsPerVB() {
+	myVBsList := ckmgr.getMyVBs()
+	for _, vbno := range myVBsList {
+		ckmgr.initializeCheckpointForVB(vbno)
+	}
+
+	myTgtVBsList := ckmgr.getMyTgtVBs()
+
+	if ckmgr.isVariableVBMode() && len(myTgtVBsList) > len(myVBsList) {
+		_, tgtVBs, _ := base.ComputeDeltaOfUint16Lists(myVBsList, myTgtVBsList, false)
+		for _, vbno := range tgtVBs {
+			ckmgr.initializeCheckpointForVB(vbno)
+		}
+	}
+}
+
+func (ckmgr *CheckpointManager) initializeCheckpointForVB(vbno uint16) {
+	ckmgr.cur_ckpts[vbno] = &checkpointRecordWithLock{ckpt: &metadata.CheckpointRecord{}, lock: &sync.RWMutex{}}
+	ckmgr.failoverlog_map[vbno] = &failoverlogWithLock{failoverlog: nil, lock: &sync.RWMutex{}}
+	ckmgr.snapshot_history_map[vbno] = &snapshotHistoryWithLock{
+		snapshot_history: make([]*snapshot, 0, base.MaxLengthSnapshotHistory),
+	}
 }
 
 var ckmgrIterationId uint32
@@ -608,6 +625,10 @@ func (ckmgr *CheckpointManager) composeUserAgent() {
 }
 
 // If periodicMode is false, there should not be any error returned
+// getHighSeqnoAndVBUuidFromTarget returns a map containg all VBs from the target where
+// the key is a vbno, and the values are 2 numbers:
+// 1. highSeqno for this VB
+// 2. Vbuuid for this VB
 func (ckmgr *CheckpointManager) getHighSeqnoAndVBUuidFromTarget(fin_ch chan bool, periodicMode bool) (map[uint16][]uint64, error) {
 	ckmgr.WaitForInitConnDone()
 
@@ -1309,17 +1330,18 @@ func (ckmgr *CheckpointManager) populateTargetVBOpaqueIfNeeded(vbno uint16) {
 	ckmgr.updateCurrentVBOpaque(vbno, curRemoteVBOpaque)
 }
 
-func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, base.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+func (ckmgr *CheckpointManager) getDataFromCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, base.VBCountMetric, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
 	switch ckmgr.isVariableVBMode() {
 	case true:
+		fmt.Printf("TODO global checkpoint\n")
 		return ckmgr.getDataFromGlobalCkpts(vbno, ckptDoc, max_seqno)
 	default:
 		return ckmgr.getDataFromCkptsInternal(vbno, ckptDoc, max_seqno)
 	}
 }
 
-func (ckmgr *CheckpointManager) getDataFromGlobalCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, maxSeqno uint64) (*base.VBTimestamp, base.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
-	// NEIL TODO - for now do not support checkpointing
+func (ckmgr *CheckpointManager) getDataFromGlobalCkpts(vbno uint16, ckptDoc *metadata.CheckpointsDoc, maxSeqno uint64) (*base.VBTimestamp, base.VBCountMetric, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+	// TODO global checkpoint
 	vbts := &base.VBTimestamp{
 		Vbno: vbno,
 	}
@@ -1328,7 +1350,7 @@ func (ckmgr *CheckpointManager) getDataFromGlobalCkpts(vbno uint16, ckptDoc *met
 
 // Given a specific vbno and a list of checkpoints and a max possible seqno, return:
 // valid VBTimestamp and corresponding VB-specific stats for statsMgr that was stored in the same ckpt doc
-func (ckmgr *CheckpointManager) getDataFromCkptsInternal(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, base.VBCountMetricMap, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
+func (ckmgr *CheckpointManager) getDataFromCkptsInternal(vbno uint16, ckptDoc *metadata.CheckpointsDoc, max_seqno uint64) (*base.VBTimestamp, base.VBCountMetric, *metadata.CollectionNamespaceMapping, uint64, uint64, error) {
 	var agreedIndex int = -1
 
 	ckptRecordsList := ckmgr.ckptRecordsWLock(ckptDoc, vbno)
