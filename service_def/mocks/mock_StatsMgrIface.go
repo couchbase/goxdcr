@@ -126,23 +126,23 @@ func (_c *StatsMgrIface_GetThroughSeqnosFromTsService_Call) RunAndReturn(run fun
 }
 
 // GetVBCountMetrics provides a mock function with given fields: vb
-func (_m *StatsMgrIface) GetVBCountMetrics(vb uint16) (base.VBCountMetricMap, error) {
+func (_m *StatsMgrIface) GetVBCountMetrics(vb uint16) (base.VBCountMetric, error) {
 	ret := _m.Called(vb)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetVBCountMetrics")
 	}
 
-	var r0 base.VBCountMetricMap
+	var r0 base.VBCountMetric
 	var r1 error
-	if rf, ok := ret.Get(0).(func(uint16) (base.VBCountMetricMap, error)); ok {
+	if rf, ok := ret.Get(0).(func(uint16) (base.VBCountMetric, error)); ok {
 		return rf(vb)
 	}
-	if rf, ok := ret.Get(0).(func(uint16) base.VBCountMetricMap); ok {
+	if rf, ok := ret.Get(0).(func(uint16) base.VBCountMetric); ok {
 		r0 = rf(vb)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(base.VBCountMetricMap)
+			r0 = ret.Get(0).(base.VBCountMetric)
 		}
 	}
 
@@ -173,12 +173,12 @@ func (_c *StatsMgrIface_GetVBCountMetrics_Call) Run(run func(vb uint16)) *StatsM
 	return _c
 }
 
-func (_c *StatsMgrIface_GetVBCountMetrics_Call) Return(_a0 base.VBCountMetricMap, _a1 error) *StatsMgrIface_GetVBCountMetrics_Call {
+func (_c *StatsMgrIface_GetVBCountMetrics_Call) Return(_a0 base.VBCountMetric, _a1 error) *StatsMgrIface_GetVBCountMetrics_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *StatsMgrIface_GetVBCountMetrics_Call) RunAndReturn(run func(uint16) (base.VBCountMetricMap, error)) *StatsMgrIface_GetVBCountMetrics_Call {
+func (_c *StatsMgrIface_GetVBCountMetrics_Call) RunAndReturn(run func(uint16) (base.VBCountMetric, error)) *StatsMgrIface_GetVBCountMetrics_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -217,7 +217,7 @@ func (_c *StatsMgrIface_HandleLatestThroughSeqnos_Call) RunAndReturn(run func(ma
 }
 
 // SetVBCountMetrics provides a mock function with given fields: vb, metricKVs
-func (_m *StatsMgrIface) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetricMap) error {
+func (_m *StatsMgrIface) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetric) error {
 	ret := _m.Called(vb, metricKVs)
 
 	if len(ret) == 0 {
@@ -225,7 +225,7 @@ func (_m *StatsMgrIface) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetr
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(uint16, base.VBCountMetricMap) error); ok {
+	if rf, ok := ret.Get(0).(func(uint16, base.VBCountMetric) error); ok {
 		r0 = rf(vb, metricKVs)
 	} else {
 		r0 = ret.Error(0)
@@ -241,14 +241,14 @@ type StatsMgrIface_SetVBCountMetrics_Call struct {
 
 // SetVBCountMetrics is a helper method to define mock.On call
 //   - vb uint16
-//   - metricKVs base.VBCountMetricMap
+//   - metricKVs base.VBCountMetric
 func (_e *StatsMgrIface_Expecter) SetVBCountMetrics(vb interface{}, metricKVs interface{}) *StatsMgrIface_SetVBCountMetrics_Call {
 	return &StatsMgrIface_SetVBCountMetrics_Call{Call: _e.mock.On("SetVBCountMetrics", vb, metricKVs)}
 }
 
-func (_c *StatsMgrIface_SetVBCountMetrics_Call) Run(run func(vb uint16, metricKVs base.VBCountMetricMap)) *StatsMgrIface_SetVBCountMetrics_Call {
+func (_c *StatsMgrIface_SetVBCountMetrics_Call) Run(run func(vb uint16, metricKVs base.VBCountMetric)) *StatsMgrIface_SetVBCountMetrics_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(uint16), args[1].(base.VBCountMetricMap))
+		run(args[0].(uint16), args[1].(base.VBCountMetric))
 	})
 	return _c
 }
@@ -258,7 +258,7 @@ func (_c *StatsMgrIface_SetVBCountMetrics_Call) Return(_a0 error) *StatsMgrIface
 	return _c
 }
 
-func (_c *StatsMgrIface_SetVBCountMetrics_Call) RunAndReturn(run func(uint16, base.VBCountMetricMap) error) *StatsMgrIface_SetVBCountMetrics_Call {
+func (_c *StatsMgrIface_SetVBCountMetrics_Call) RunAndReturn(run func(uint16, base.VBCountMetric) error) *StatsMgrIface_SetVBCountMetrics_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -3027,7 +3027,27 @@ type PortType int
 type FilteringStatusType int
 
 // Stats per vbucket
-type VBCountMetricMap map[string]int64
+type VBCountMetric interface {
+	IsTraditional() bool
+}
+
+type TraditionalVBMetrics struct {
+	vbCountMetricMap map[string]int64
+}
+
+func NewTraditionalVBMetrics() *TraditionalVBMetrics {
+	return &TraditionalVBMetrics{vbCountMetricMap: map[string]int64{}}
+}
+
+func (v *TraditionalVBMetrics) GetValue() map[string]int64 {
+	return v.vbCountMetricMap
+}
+
+func (v *TraditionalVBMetrics) IsTraditional() bool {
+	return true
+}
+
+//type TraditionalVBMetrics map[string]int64
 
 // the following will be not set for target doc when retrieved using GET_META.
 type OptionalConflictLoggingMetadata struct {

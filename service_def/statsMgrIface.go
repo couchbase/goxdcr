@@ -23,8 +23,9 @@ type StatsMgrIface interface {
 	Stop() error
 	GetCountMetrics(key string) (int64, error)
 	GetThroughSeqnosFromTsService() map[uint16]uint64
-	GetVBCountMetrics(vb uint16) (base.VBCountMetricMap, error)
-	SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetricMap) error
+
+	GetVBCountMetrics(vb uint16) (base.VBCountMetric, error)
+	SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetric) error
 	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 }
 

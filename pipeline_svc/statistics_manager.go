@@ -193,22 +193,24 @@ var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC
 
 var CLogVBMetricKeys = []string{service_def.SRC_CONFLICT_DOCS_WRITTEN, service_def.TGT_CONFLICT_DOCS_WRITTEN, service_def.CRD_CONFLICT_DOCS_WRITTEN}
 
-func MakeVBCountMetricMap(metricsKeys []string) base.VBCountMetricMap {
-	newMap := make(base.VBCountMetricMap)
-	for _, key := range metricsKeys {
-		newMap[key] = 0
-	}
-	return newMap
-}
-
-func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) base.VBCountMetricMap {
+func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) base.VBCountMetric {
 	if agreedIndex < 0 || ckptDoc == nil || agreedIndex >= len(ckptDoc.Checkpoint_records) {
 		return nil
 	}
 
 	record := ckptDoc.Checkpoint_records[agreedIndex]
 
-	vbStatMap := make(base.VBCountMetricMap)
+	if ckptDoc.IsTraditional() {
+		return getTraditionalMetrics(record)
+	} else {
+		// TODO global checkpoint
+		return nil
+	}
+}
+
+func getTraditionalMetrics(record *metadata.CheckpointRecord) base.VBCountMetric {
+	tradMetrics := base.NewTraditionalVBMetrics()
+	vbStatMap := tradMetrics.GetValue()
 	vbStatMap[service_def.DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
 	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
 	vbStatMap[service_def.EXPIRY_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnExpirationsCnt)
@@ -236,7 +238,7 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 	vbStatMap[service_def.DOCS_FILTERED_CLOG_METRIC] = base.Uint64ToInt64(record.FilteredConflictDocs)
 	vbStatMap[service_def.CLOG_HIBERNATED_COUNT] = base.Uint64ToInt64(record.CLogHibernatedCnt)
 	vbStatMap[service_def.GET_DOCS_CAS_CHANGED_METRIC] = base.Uint64ToInt64(record.GetDocsCasChangedCnt)
-	return vbStatMap
+	return tradMetrics
 }
 
 // keys for metrics that do not monotonically increase during replication, to which the "going backward" check should not be applied
@@ -326,11 +328,13 @@ type StatisticsManager struct {
 	// PipelineStatus is an int type underneath
 	pipelineStatus int32
 	pipelineErrors int32
+
+	variableVBMode bool
 }
 
 func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrackerSvc, xdcr_topology_svc service_def.XDCRCompTopologySvc, logger_ctx *log.LoggerContext, active_vbs map[string][]uint16, bucket_name string,
 	utilsIn utilities.UtilsIface, remoteClusterSvc service_def.RemoteClusterSvc, bucketTopologySvc service_def.BucketTopologySvc, replStatusGetter func(string) (pipeline_pkg.ReplicationStatusIface, error),
-	hasConflictLogger bool) *StatisticsManager {
+	hasConflictLogger bool, variableVBMode bool) *StatisticsManager {
 	localLogger := log.NewLogger(StatsMgrId, logger_ctx)
 	stats_mgr := &StatisticsManager{
 		AbstractComponent:         component.NewAbstractComponentWithLogger(StatsMgrId, localLogger),
@@ -354,6 +358,7 @@ func NewStatisticsManager(through_seqno_tracker_svc service_def.ThroughSeqnoTrac
 		replStatusGetter:          replStatusGetter,
 		latestNotificationReqCh:   make(chan notificationReqOpt, 100),
 		initDone:                  make(chan bool),
+		variableVBMode:            variableVBMode,
 	}
 	stats_mgr.collectors = []MetricsCollector{&outNozzleCollector{}, &dcpCollector{}, &routerCollector{}, &checkpointMgrCollector{}, &conflictMgrCollector{}}
 	if hasConflictLogger {
@@ -1362,8 +1367,8 @@ type MetricsCollector interface {
 	OnEvent(event *common.Event)
 	HandleLatestThroughSeqnos(SeqnoMap map[uint16]uint64)
 
-	AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error
-	UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error
+	AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error
+	UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error
 }
 
 // metrics collector for custom conflict manager
@@ -1377,12 +1382,12 @@ type conflictMgrCollector struct {
 	component_map map[string]map[string]interface{}
 }
 
-func (conflictMgr_collector *conflictMgrCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+func (conflictMgr_collector *conflictMgrCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	// do nothing
 	return nil
 }
 
-func (conflictMgr_collector *conflictMgrCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+func (conflictMgr_collector *conflictMgrCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
 	//do nothing
 	return nil
 }
@@ -1511,11 +1516,11 @@ type outNozzleCollector struct {
 	vbMetricHelper *VbBasedMetricHelper
 }
 
-func (outNozzle_collector *outNozzleCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+func (outNozzle_collector *outNozzleCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	return outNozzle_collector.vbMetricHelper.UpdateCurrentVbSpecificMetrics(vbno, valuesToApply, currentRegistries)
 }
 
-func (outNozzle_collector *outNozzleCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+func (outNozzle_collector *outNozzleCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
 	return outNozzle_collector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
 }
 
@@ -2069,12 +2074,12 @@ type dcpCollector struct {
 	component_map map[string]map[string]interface{}
 }
 
-func (dcp_collector *dcpCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+func (dcp_collector *dcpCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	// do nothing
 	return nil
 }
 
-func (dcp_collector *dcpCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+func (dcp_collector *dcpCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
 	// do nothing
 	return nil
 }
@@ -2269,16 +2274,29 @@ func (h *VbBasedMetricHelper) handleLatestThroughSeqnoForVb(vb uint16, latestSeq
 	vbHelper.mergeWithMetrics(metricsMap, latestSeqno)
 }
 
-func (h *VbBasedMetricHelper) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+func (h *VbBasedMetricHelper) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
+	if compiledMap.IsTraditional() {
+		return h.addTraditionalVbSpecificMetrics(vbno, compiledMap)
+	} else {
+		return fmt.Errorf("TODO global checkpoint")
+	}
+}
+
+func (h *VbBasedMetricHelper) addTraditionalVbSpecificMetrics(vbno uint16, genericMetrics base.VBCountMetric) error {
 	vbBasedMetric, ok := h.vbBasedMetric[vbno]
 	if !ok {
 		return base.ErrorNotMyVbucket
 	}
 
-	if compiledMap == nil {
+	if genericMetrics == nil {
 		return fmt.Errorf("CompiledMap being passed into AddVbSpecificMetrics is nil")
 	}
+	traditionalMetrics, ok := genericMetrics.(*base.TraditionalVBMetrics)
+	if !ok {
+		return fmt.Errorf("metrics passed in should be traditional, but got %T", genericMetrics)
+	}
 
+	compiledMap := traditionalMetrics.GetValue()
 	for _, k := range h.responsibleKeys {
 		registry, ok := vbBasedMetric[k]
 		if !ok {
@@ -2290,7 +2308,20 @@ func (h *VbBasedMetricHelper) AddVbSpecificMetrics(vbno uint16, compiledMap base
 	return nil
 }
 
-func (h *VbBasedMetricHelper) UpdateCurrentVbSpecificMetrics(vb uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+func (h *VbBasedMetricHelper) UpdateCurrentVbSpecificMetrics(vb uint16, vbCountMetric base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
+	if vbCountMetric == nil {
+		// nil is a valid input, which means do nothing
+		return nil
+	}
+	if vbCountMetric.IsTraditional() {
+		return h.updateTraditionalVbMetrics(vb, vbCountMetric, currentRegistries)
+	} else {
+		// TODO global checkpoint
+		return nil
+	}
+}
+
+func (h *VbBasedMetricHelper) updateTraditionalVbMetrics(vb uint16, vbCountMetric base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	vbBasedMetric, ok := h.vbBasedMetric[vb]
 	if !ok {
 		return base.ErrorNotMyVbucket
@@ -2308,6 +2339,7 @@ func (h *VbBasedMetricHelper) UpdateCurrentVbSpecificMetrics(vb uint16, valuesTo
 	}
 
 	// Keys is the "keys" being read, i.e. the filtered_cnt, etc from Checkpoint
+	valuesToApply := vbCountMetric.(*base.TraditionalVBMetrics).GetValue()
 	for k, v := range valuesToApply {
 		var isResponsibleForThisKey bool
 		for _, keyToCheck := range h.responsibleKeys {
@@ -2344,7 +2376,6 @@ func (h *VbBasedMetricHelper) UpdateCurrentVbSpecificMetrics(vb uint16, valuesTo
 		}
 		counter.Inc(difference)
 	}
-
 	return nil
 }
 
@@ -2370,11 +2401,11 @@ type routerCollector struct {
 	vbMetricHelper *VbBasedMetricHelper
 }
 
-func (r_collector *routerCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+func (r_collector *routerCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	return r_collector.vbMetricHelper.UpdateCurrentVbSpecificMetrics(vbno, valuesToApply, currentRegistries)
 }
 
-func (r_collector *routerCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+func (r_collector *routerCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
 	return r_collector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
 }
 
@@ -2660,12 +2691,12 @@ type checkpointMgrCollector struct {
 	stats_mgr *StatisticsManager
 }
 
-func (ckpt_collector *checkpointMgrCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+func (ckpt_collector *checkpointMgrCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	// do nothing
 	return nil
 }
 
-func (ckpt_collector *checkpointMgrCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+func (ckpt_collector *checkpointMgrCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
 	// do nothing
 	return nil
 }
@@ -3169,18 +3200,23 @@ func (stats_mgr *StatisticsManager) GetCountMetrics(key string) (int64, error) {
 	return registryCounter.Count(), nil
 }
 
-func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (base.VBCountMetricMap, error) {
-	compiledMap := make(base.VBCountMetricMap)
-	for _, collector := range stats_mgr.collectors {
-		err := collector.AddVbSpecificMetrics(vb, compiledMap)
-		if err != nil {
-			return nil, err
+func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (base.VBCountMetric, error) {
+	if !stats_mgr.variableVBMode {
+		vbCountMetricMap := base.NewTraditionalVBMetrics()
+		for _, collector := range stats_mgr.collectors {
+			err := collector.AddVbSpecificMetrics(vb, vbCountMetricMap)
+			if err != nil {
+				return nil, err
+			}
 		}
+		return vbCountMetricMap, nil
+	} else {
+		// TODO global checkpoint
+		return nil, fmt.Errorf("TODO global checkpoint")
 	}
-	return compiledMap, nil
 }
 
-func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetricMap) error {
+func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetric) error {
 	for _, collector := range stats_mgr.collectors {
 		err := collector.UpdateCurrentVbSpecificMetrics(vb, metricKVs, stats_mgr.registries)
 		if err != nil {
@@ -3272,11 +3308,11 @@ type cLogCollector struct {
 	pipelineType   common.PipelineType
 }
 
-func (cLogCollector *cLogCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetricMap, currentRegistries map[string]metrics.Registry) error {
+func (cLogCollector *cLogCollector) UpdateCurrentVbSpecificMetrics(vbno uint16, valuesToApply base.VBCountMetric, currentRegistries map[string]metrics.Registry) error {
 	return cLogCollector.vbMetricHelper.UpdateCurrentVbSpecificMetrics(vbno, valuesToApply, currentRegistries)
 }
 
-func (cLogCollector *cLogCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetricMap) error {
+func (cLogCollector *cLogCollector) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
 	return cLogCollector.vbMetricHelper.AddVbSpecificMetrics(vbno, compiledMap)
 }
 
