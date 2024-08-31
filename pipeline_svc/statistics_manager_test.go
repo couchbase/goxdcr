@@ -545,7 +545,9 @@ func setupPausedStatsMocks(backfillSvc *service_def.BackfillReplSvc, remoteSvc *
 	ckpts := make(map[uint16]*metadata.CheckpointsDoc, numVbs)
 	ckptRecordsList := []*metadata.CheckpointRecord{
 		{
-			Seqno: uint64(seqnoProcessed),
+			SourceVBTimestamp: metadata.SourceVBTimestamp{
+				Seqno: uint64(seqnoProcessed),
+			},
 		}}
 	var ckptlist metadata.CheckpointRecordsList = ckptRecordsList
 	for i := 0; i < int(numVbs); i++ {

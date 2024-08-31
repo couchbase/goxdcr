@@ -57,6 +57,18 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 		},
 		BrokenMappingSha256: "",
 		brokenMappings:      nil,
+		GlobalTimestamp: GlobalTimestamp{
+			100: &TargetVBTimestamp{
+				Target_vb_opaque: vbUuidAndTimestamp,
+				Target_Seqno:     5,
+				TargetManifest:   10,
+			},
+		},
+		GlobalCounters: GlobalTargetCounters{
+			1: &TargetPerVBCounters{
+				CasPoisonCnt: 2,
+			},
+		},
 	}
 
 	brokenMap := make(CollectionNamespaceMapping)
