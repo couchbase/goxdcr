@@ -56,8 +56,12 @@ func TestCheckpointsServiceCacheImplGetAndSet(t *testing.T) {
 
 	// that's it
 	record := &metadata.CheckpointRecord{
-		Seqno:            12345,
-		Target_vb_opaque: &metadata.TargetVBUuid{Target_vb_uuid: 123},
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Seqno: 12345,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_vb_opaque: &metadata.TargetVBUuid{Target_vb_uuid: 123},
+		},
 	}
 	var recordsList metadata.CheckpointRecordsList
 	recordsList = append(recordsList, record)
