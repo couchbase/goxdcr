@@ -50,12 +50,16 @@ func TestCombineFailoverlogs(t *testing.T) {
 	failoverLogMap[2] = failoverLog
 
 	goodRecord := &metadata.CheckpointRecord{
-		Failover_uuid: goodVbUuid,
-		Seqno:         goodSeqno,
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: goodVbUuid,
+			Seqno:         goodSeqno,
+		},
 	}
 	badRecord := &metadata.CheckpointRecord{
-		Failover_uuid: badVbUuid,
-		Seqno:         goodSeqno,
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Failover_uuid: badVbUuid,
+			Seqno:         goodSeqno,
+		},
 	}
 
 	goodDoc := &metadata.CheckpointsDoc{
@@ -506,16 +510,24 @@ func mockVBCkptDoc(spec *metadata.ReplicationSpecification, i uint16) map[uint16
 	ckptDocs := make(map[uint16]*metadata.CheckpointsDoc)
 	records := metadata.CheckpointRecordsList{}
 	record := &metadata.CheckpointRecord{
-		Seqno:                  1000,
-		Dcp_snapshot_seqno:     1000,
-		Dcp_snapshot_end_seqno: 1000,
-		Target_Seqno:           1000,
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Seqno:                  1000,
+			Dcp_snapshot_seqno:     1000,
+			Dcp_snapshot_end_seqno: 1000,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno: 1000,
+		},
 	}
 	record2 := &metadata.CheckpointRecord{
-		Seqno:                  500,
-		Dcp_snapshot_seqno:     500,
-		Dcp_snapshot_end_seqno: 500,
-		Target_Seqno:           500,
+		SourceVBTimestamp: metadata.SourceVBTimestamp{
+			Seqno:                  500,
+			Dcp_snapshot_seqno:     500,
+			Dcp_snapshot_end_seqno: 500,
+		},
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			Target_Seqno: 500,
+		},
 	}
 	records = append(records, record)
 	records = append(records, record2)
