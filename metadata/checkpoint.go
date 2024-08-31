@@ -11,6 +11,7 @@ package metadata
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -60,6 +61,8 @@ const (
 	FilteredConflictDocs               string = "clog_docs_filtered_cnt"
 	CLogHibernatedCnt                  string = "clog_hibernated_cnt"
 	GetDocsCasChangedCnt               string = "get_docs_cas_changed_cnt"
+	GlobalTimestampStr                 string = "global_timestamp"
+	GlobalTargetCountersStr            string = "global_target_counters"
 )
 
 // SourceVBTimestamp defines the necessary items to start or resume a source DCP stream in a checkpoint context
@@ -85,6 +88,94 @@ type TargetVBTimestamp struct {
 	Target_Seqno uint64 `json:"target_seqno"`
 	// Manifests uid corresponding to this checkpoint
 	TargetManifest uint64 `json:"target_manifest"`
+}
+
+func (t *TargetVBTimestamp) SameAs(other *TargetVBTimestamp) bool {
+	if t == nil || other == nil {
+		return t == nil && other == nil
+	}
+
+	return t.Target_vb_opaque.IsSame(other.Target_vb_opaque) &&
+		t.Target_Seqno == other.Target_Seqno &&
+		t.TargetManifest == other.TargetManifest
+}
+
+func (t *TargetVBTimestamp) LoadUnmarshalled(v interface{}) error {
+	if t == nil {
+		return base.ErrorNilPtr
+	}
+
+	fieldMap, ok := v.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("expecting map[string]interface{}, got %T", v)
+	}
+
+	target_seqno, ok := fieldMap[TargetSeqno]
+	if ok {
+		t.Target_Seqno = uint64(target_seqno.(float64))
+	}
+
+	// this is the special logic where we unmarshal targetVBOpaque into different concrete types
+	target_vb_opaque, ok := fieldMap[TargetVbOpaque]
+	if ok {
+		target_vb_opaque_obj, err := UnmarshalTargetVBOpaque(target_vb_opaque)
+		if err != nil {
+			return err
+		}
+		t.Target_vb_opaque = target_vb_opaque_obj
+	}
+
+	tgtManifest, ok := fieldMap[TargetManifest]
+	if ok {
+		t.TargetManifest = uint64(tgtManifest.(float64))
+	}
+
+	return nil
+}
+
+type GlobalTimestamp map[uint16]*TargetVBTimestamp
+
+func (g *GlobalTimestamp) SameAs(other *GlobalTimestamp) bool {
+	if g == nil || other == nil {
+		return g == nil && other == nil
+	}
+
+	if len(*g) != len(*other) {
+		return false
+	}
+
+	for k, v := range *g {
+		otherV, found := (*other)[k]
+		if !found {
+			return false
+		}
+		if !v.SameAs(otherV) {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *GlobalTimestamp) LoadUnmarshalled(generic map[string]interface{}) error {
+	if g == nil {
+		return base.ErrorNilPtr
+	}
+
+	for strKey, v := range generic {
+		vbInt, err := strconv.Atoi(strKey)
+		if err != nil {
+			return err
+		}
+		vb := uint16(vbInt)
+
+		newTargetTs := TargetVBTimestamp{}
+		err = newTargetTs.LoadUnmarshalled(v)
+		if err != nil {
+			return err
+		}
+		(*g)[vb] = &newTargetTs
+	}
+	return nil
 }
 
 // SourceFilteredCounters are item counts based on source VB streams and are restored to the source-related
@@ -141,6 +232,116 @@ type TargetPerVBCounters struct {
 	GetDocsCasChangedCnt  uint64 `json:"get_docs_cas_changed_cnt"`
 }
 
+func (t *TargetPerVBCounters) SameAs(other *TargetPerVBCounters) bool {
+	if t == nil || other == nil {
+		return t == nil && other == nil
+	}
+
+	return t.GuardrailDiskSpaceCnt == other.GuardrailDiskSpaceCnt &&
+		t.GuardrailDataSizeCnt == other.GuardrailDataSizeCnt &&
+		t.GuardrailResidentRatioCnt == other.GuardrailResidentRatioCnt &&
+		t.DocsSentWithSubdocDeleteCnt == other.DocsSentWithSubdocDeleteCnt &&
+		t.DocsSentWithSubdocSetCnt == other.DocsSentWithSubdocSetCnt &&
+		t.CasPoisonCnt == other.CasPoisonCnt &&
+		t.DocsSentWithPoisonedCasErrorMode == other.DocsSentWithPoisonedCasErrorMode &&
+		t.DocsSentWithPoisonedCasReplaceMode == other.DocsSentWithPoisonedCasReplaceMode
+}
+
+func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
+	if t == nil {
+		return base.ErrorNilPtr
+	}
+
+	fieldMap, ok := v.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("expecting map[string]interface{}, got %T", v)
+	}
+
+	guardrailResidentRatio, ok := fieldMap[GuardrailResidentRatioCnt]
+	if ok {
+		t.GuardrailResidentRatioCnt = uint64(guardrailResidentRatio.(float64))
+	}
+
+	guardrailDataSize, ok := fieldMap[GuardrailDataSizeCnt]
+	if ok {
+		t.GuardrailDataSizeCnt = uint64(guardrailDataSize.(float64))
+	}
+
+	guardrailDiskSpace, ok := fieldMap[GuardrailDiskSpaceCnt]
+	if ok {
+		t.GuardrailDiskSpaceCnt = uint64(guardrailDiskSpace.(float64))
+	}
+
+	docsSentWithSubdocSet, ok := fieldMap[DocsSentWithSubdocSetCnt]
+	if ok {
+		t.DocsSentWithSubdocSetCnt = uint64(docsSentWithSubdocSet.(float64))
+	}
+
+	docsSentWithSubdocDelete, ok := fieldMap[DocsSentWithSubdocDeleteCnt]
+	if ok {
+		t.DocsSentWithSubdocDeleteCnt = uint64(docsSentWithSubdocDelete.(float64))
+	}
+
+	casPoisonCnt, ok := fieldMap[CasPoisonCnt]
+	if ok {
+		t.CasPoisonCnt = uint64(casPoisonCnt.(float64))
+	}
+	docsSentWithPoisonedCasError, ok := fieldMap[DocsSentWithPoisonedCasErrorMode]
+	if ok {
+		t.DocsSentWithPoisonedCasErrorMode = uint64(docsSentWithPoisonedCasError.(float64))
+	}
+	docsSentWithPoisonedCasReplace, ok := fieldMap[DocsSentWithPoisonedCasReplaceMode]
+	if ok {
+		t.DocsSentWithPoisonedCasReplaceMode = uint64(docsSentWithPoisonedCasReplace.(float64))
+	}
+
+	return nil
+}
+
+type GlobalTargetCounters map[uint16]*TargetPerVBCounters
+
+func (g *GlobalTargetCounters) SameAs(other *GlobalTargetCounters) bool {
+	if g == nil || other == nil {
+		return g == nil && other == nil
+	}
+
+	if len(*g) != len(*other) {
+		return false
+	}
+
+	for k, v := range *g {
+		otherV, found := (*other)[k]
+		if !found {
+			return false
+		}
+		if !v.SameAs(otherV) {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *GlobalTargetCounters) LoadUnmarshalled(generic map[string]interface{}) error {
+	if g == nil {
+		return base.ErrorNilPtr
+	}
+	for strKey, v := range generic {
+		vbInt, err := strconv.Atoi(strKey)
+		if err != nil {
+			return err
+		}
+		vb := uint16(vbInt)
+
+		newTargetCounters := TargetPerVBCounters{}
+		err = newTargetCounters.LoadUnmarshalled(v)
+		if err != nil {
+			return err
+		}
+		(*g)[vb] = &newTargetCounters
+	}
+	return nil
+}
+
 type CheckpointRecord struct {
 	// Epoch timestamp of when this record was created
 	CreationTime uint64 `json:"creationTime"`
@@ -151,6 +352,10 @@ type CheckpointRecord struct {
 	// Traditional checkpoints will utilize one single TargetVBTimestamp and one single TargetPerVBCounters
 	TargetVBTimestamp
 	TargetPerVBCounters
+
+	// Global checkpoints will utilize multiple TargetVBTimestamp and TargetVBCounters
+	GlobalTimestamp GlobalTimestamp      `json:"global_timestamp"`
+	GlobalCounters  GlobalTargetCounters `json:"global_target_counters"`
 
 	// BrokenMappingInfoType SHA256 string - Internally used by checkpoints Service to populate the actual BrokenMappingInfoType above
 	BrokenMappingSha256 string `json:"brokenCollectionsMapSha256"`
@@ -306,8 +511,7 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.Seqno == newRecord.Seqno &&
 		ckptRecord.Dcp_snapshot_seqno == newRecord.Dcp_snapshot_seqno &&
 		ckptRecord.Dcp_snapshot_end_seqno == newRecord.Dcp_snapshot_end_seqno &&
-		ckptRecord.Target_vb_opaque.IsSame(newRecord.Target_vb_opaque) &&
-		ckptRecord.Target_Seqno == newRecord.Target_Seqno &&
+		ckptRecord.TargetVBTimestamp.SameAs(&newRecord.TargetVBTimestamp) &&
 		ckptRecord.Filtered_Failed_Cnt == newRecord.Filtered_Failed_Cnt &&
 		ckptRecord.Filtered_Items_Cnt == newRecord.Filtered_Items_Cnt &&
 		ckptRecord.FilteredItemsOnExpirationsCnt == newRecord.FilteredItemsOnExpirationsCnt &&
@@ -322,7 +526,6 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.FilteredItemsOnUserDefinedFilters == newRecord.FilteredItemsOnUserDefinedFilters &&
 		ckptRecord.SourceManifestForDCP == newRecord.SourceManifestForDCP &&
 		ckptRecord.SourceManifestForBackfillMgr == newRecord.SourceManifestForBackfillMgr &&
-		ckptRecord.TargetManifest == newRecord.TargetManifest &&
 		ckptRecord.BrokenMappingSha256 == newRecord.BrokenMappingSha256 &&
 		ckptRecord.CreationTime == newRecord.CreationTime &&
 		ckptRecord.GuardrailDiskSpaceCnt == newRecord.GuardrailDiskSpaceCnt &&
@@ -339,7 +542,10 @@ func (ckptRecord *CheckpointRecord) SameAs(newRecord *CheckpointRecord) bool {
 		ckptRecord.TrueConflictsDetected == newRecord.TrueConflictsDetected &&
 		ckptRecord.FilteredConflictDocs == newRecord.FilteredConflictDocs &&
 		ckptRecord.CLogHibernatedCnt == newRecord.CLogHibernatedCnt &&
-		ckptRecord.GetDocsCasChangedCnt == newRecord.GetDocsCasChangedCnt {
+		ckptRecord.GetDocsCasChangedCnt == newRecord.GetDocsCasChangedCnt &&
+		ckptRecord.TargetPerVBCounters.SameAs(&newRecord.TargetPerVBCounters) &&
+		ckptRecord.GlobalTimestamp.SameAs(&newRecord.GlobalTimestamp) &&
+		ckptRecord.GlobalCounters.SameAs(&newRecord.GlobalCounters) {
 		return true
 	} else {
 		return false
@@ -388,6 +594,8 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.FilteredConflictDocs = other.FilteredConflictDocs
 	ckptRecord.CLogHibernatedCnt = other.CLogHibernatedCnt
 	ckptRecord.GetDocsCasChangedCnt = other.GetDocsCasChangedCnt
+	ckptRecord.GlobalCounters = other.GlobalCounters
+	ckptRecord.GlobalTimestamp = other.GlobalTimestamp
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(other CollectionNamespaceMapping) error {
@@ -602,6 +810,23 @@ func (ckptRecord *CheckpointRecord) UnmarshalJSON(data []byte) error {
 		ckptRecord.GetDocsCasChangedCnt = uint64(getDocsCasChangedCnt.(float64))
 	}
 
+	globalTimestampRaw, ok := fieldMap[GlobalTimestampStr]
+	if ok && globalTimestampRaw != nil {
+		ckptRecord.GlobalTimestamp = make(GlobalTimestamp)
+		err = ckptRecord.GlobalTimestamp.LoadUnmarshalled(globalTimestampRaw.(map[string]interface{}))
+		if err != nil {
+			return fmt.Errorf("ckptRecord.GlobalTimestamp.LoadUnmarshalled %v", err)
+		}
+	}
+
+	globalTargetCounters, ok := fieldMap[GlobalTargetCountersStr]
+	if ok && globalTargetCounters != nil {
+		ckptRecord.GlobalCounters = make(GlobalTargetCounters)
+		err = ckptRecord.GlobalCounters.LoadUnmarshalled(globalTargetCounters.(map[string]interface{}))
+		if err != nil {
+			return fmt.Errorf("ckptRecord.GlobalCOunters.LoadUnmarshalled %v", err)
+		}
+	}
 	return nil
 }
 
