@@ -1737,7 +1737,10 @@ var ValidJsonEnds []byte = []byte{
 	'}', ']',
 }
 
-const EmptyJsonObject string = "{}"
+const (
+	EmptyJsonObject string = "{}"
+	EmptyJsonArray  string = "[]"
+)
 
 const (
 	CASDriftThresholdSecsKey          = "casDriftThresholdSecs"

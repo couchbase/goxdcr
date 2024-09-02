@@ -327,3 +327,90 @@ func TestRuleNameTooLong(t *testing.T) {
 	ns2 := fmt.Sprintf("%v%v%v", longStr, ScopeCollectionDelimiter, longStr)
 	assert.NotNil(validator.ValidateKV(ns2, ns2))
 }
+
+func TestArrayXattrFieldIterator(t *testing.T) {
+	type fields struct {
+		name    string
+		xattr   string
+		entries []string
+		err     bool
+	}
+	tests := []fields{
+		{
+			name:    "empty array",
+			xattr:   "[]",
+			entries: []string{},
+		},
+		{
+			name:    "one string entry",
+			xattr:   `["foo"]`,
+			entries: []string{`"foo"`},
+		},
+		{
+			name:    "one JSON obj entry",
+			xattr:   `[{"foo":"bar"}]`,
+			entries: []string{`{"foo":"bar"}`},
+		},
+		{
+			name:    "multiple string entries",
+			xattr:   `["foo","bar","lorem","epsum"]`,
+			entries: []string{`"foo"`, `"bar"`, `"lorem"`, `"epsum"`},
+		},
+		{
+			name:    "multiple json obj entries",
+			xattr:   `[{"foo":"foo1"},{"bar":"bar1"},{"lorem":"lorem1"},{"epsum":"epsum1"}]`,
+			entries: []string{`{"foo":"foo1"}`, `{"bar":"bar1"}`, `{"lorem":"lorem1"}`, `{"epsum":"epsum1"}`},
+		},
+		{
+			name:    "multiple string and json obj entries - I",
+			xattr:   `["foo",{"bar":"bar1"},"lorem",{"epsum":"epsum1"}]`,
+			entries: []string{`"foo"`, `{"bar":"bar1"}`, `"lorem"`, `{"epsum":"epsum1"}`},
+		},
+		{
+			name:    "multiple string and json obj entries - II",
+			xattr:   `[{"bar":"bar1"},"foo",{"epsum":"epsum1"},"lorem"]`,
+			entries: []string{`{"bar":"bar1"}`, `"foo"`, `{"epsum":"epsum1"}`, `"lorem"`},
+		},
+		{
+			name:    "one VV deltas entry",
+			xattr:   `["NqiIe0LekFPLeX4JvTO6Iw@0x00008cd6ac059a16"]`,
+			entries: []string{`"NqiIe0LekFPLeX4JvTO6Iw@0x00008cd6ac059a16"`},
+		},
+		{
+			name:    "multiple VV deltas entry",
+			xattr:   `["NqiIe0LekFPLeX4JvTO6Iw@0x00008cd6ac059a16","LhRPsa7CpjEvP5zeXTXEBA@0x0a","LhRPsa7CpjEvP5zsdsxEBA@0xffff"]`,
+			entries: []string{`"NqiIe0LekFPLeX4JvTO6Iw@0x00008cd6ac059a16"`, `"LhRPsa7CpjEvP5zeXTXEBA@0x0a"`, `"LhRPsa7CpjEvP5zsdsxEBA@0xffff"`},
+		},
+		{
+			name:    "invalid array with whitespaces",
+			xattr:   `["foo", "bar", "lorem", "epsum"]`,
+			entries: []string{`"foo"`, `"bar"`, `"lorem"`, `"epsum"`},
+			err:     true,
+		},
+		{
+			name:    "invalid entries",
+			xattr:   `["foo",1,"lorem","epsum"]`,
+			entries: []string{`"foo"`, `1`, `"lorem"`, `"epsum"`},
+			err:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			it, err := NewArrayXattrFieldIterator([]byte(tt.xattr))
+			assert.Nil(t, err, nil)
+
+			i := 0
+			for it.HasNext() {
+				val, err := it.Next()
+				if err != nil {
+					assert.True(t, tt.err)
+					break
+				} else {
+					assert.Nil(t, err, nil)
+					assert.Equal(t, tt.entries[i], string(val))
+				}
+				i++
+			}
+		})
+	}
+}

@@ -379,7 +379,7 @@ func BytesRequired(vMap VersionsMap) int {
 	for k := range vMap {
 		res = res + len(k)
 		res = res + base.MaxHexCASLength
-		res = res + base.QuotesAndSepLenForVVEntry
+		res = res + base.QuotesAndSepLenForHLVEntry
 	}
 	if res != 0 {
 		res = res + len(base.EmptyJsonObject) + 1 // Add { and } and nil terminator
