@@ -1825,7 +1825,7 @@ func (xfi *CCRXattrFieldIterator) HasNext() bool {
 	return xfi.hasItems && xfi.pos < len(xfi.xattr)
 }
 
-// Expected format is: {"key":"value","key":"value","key":{...},key:{...}}
+// Expected format is: {"key":"value","key":{...},"key":[...]}
 func (xfi *CCRXattrFieldIterator) Next() (key, value []byte, err error) {
 	beginQuote := xfi.pos
 	colon := bytes.Index(xfi.xattr[beginQuote:], []byte{':'})
@@ -1851,10 +1851,58 @@ func (xfi *CCRXattrFieldIterator) Next() (key, value []byte, err error) {
 			err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
 		}
 		value = xfi.xattr[beginValue : endValue+1]
+	} else if xfi.xattr[beginValue] == '[' {
+		endValue = beginValue + 1 + bytes.Index(xfi.xattr[beginValue+1:], []byte{']'})
+		if endValue < beginValue {
+			err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
+		}
+		value = xfi.xattr[beginValue : endValue+1]
 	} else {
 		err = fmt.Errorf("XATTR %s invalid format searching for key '%s' at pos=%v, beginValue pos %v, char '%c', endValue pos %v, char '%c'", xfi.xattr, key, xfi.pos, beginValue, xfi.xattr[beginValue], endValue, xfi.xattr[endValue])
 	}
 	xfi.pos = endValue + 2
+	return
+}
+
+type ArrayXattrFieldIterator struct {
+	xattr    []byte
+	pos      int
+	hasItems bool
+}
+
+func NewArrayXattrFieldIterator(xattr []byte) (*ArrayXattrFieldIterator, error) {
+	length := len(xattr)
+	if xattr[0] != EmptyJsonArray[0] || xattr[length-1] != EmptyJsonArray[1] {
+		return nil, fmt.Errorf("invalid format for array XATTR: %s", xattr)
+	}
+	return &ArrayXattrFieldIterator{
+		xattr:    xattr,
+		pos:      1,
+		hasItems: !Equals(xattr, EmptyJsonArray),
+	}, nil
+}
+
+func (xfi *ArrayXattrFieldIterator) HasNext() bool {
+	return xfi.hasItems && xfi.pos < len(xfi.xattr)
+}
+
+// Expected input format is: ["string",{"json":"object"}]
+// returns `"string"` and `{"json":"object"}`
+func (xfi *ArrayXattrFieldIterator) Next() (value []byte, err error) {
+	begin := xfi.pos
+	sep := bytes.Index(xfi.xattr[begin:], []byte{','})
+	if sep == -1 {
+		// could be the last entry
+		sep = bytes.Index(xfi.xattr[begin:], []byte{']'})
+	}
+	end := begin + sep - 1
+	if sep == -1 || (xfi.xattr[begin] != '"' || xfi.xattr[end] != '"') &&
+		(xfi.xattr[begin] != '{' || xfi.xattr[end] != '}') {
+		err = fmt.Errorf("array XATTR %s invalid format at pos=%v, char '%c', end=%v", xfi.xattr, xfi.pos, xfi.xattr[xfi.pos], end)
+		return
+	}
+	value = xfi.xattr[begin : end+1]
+	xfi.pos = end + 2
 	return
 }
 
@@ -2219,7 +2267,7 @@ var MaxHexCASLength = MaxHexDecodedLength + 2
 var MinRevIdLength = 1
 var MinRevIdLengthWithQuotes = MinRevIdLength + 2
 
-const QuotesAndSepLenForVVEntry = 6 /* quotes and sepeartors. Eg - "src":"ver", */
+const QuotesAndSepLenForHLVEntry = 6 /* quotes and sepeartors. Eg - "src":"ver", */
 
 type ConflictManagerAction int
 

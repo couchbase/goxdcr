@@ -1589,6 +1589,7 @@ const (
 	WriteJsonKey           WriteJsonRawMsgType = iota
 	WriteJsonValue         WriteJsonRawMsgType = iota
 	WriteJsonValueNoQuotes WriteJsonRawMsgType = iota
+	WriteJsonArrayEntry    WriteJsonRawMsgType = iota
 )
 
 // Given a correctly allocatedBytes slice that can contain the whole rawJSON message, write the given information without
@@ -1608,6 +1609,28 @@ const (
 //	original byte slice reference
 //	updated position
 func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, mode WriteJsonRawMsgType, size int, isFirstKey bool) ([]byte, int) {
+	// JSON array
+	if mode == WriteJsonArrayEntry {
+		if isFirstKey {
+			// Need to do an open bracket
+			allocatedBytes[pos] = '['
+			pos++
+		} else {
+			allocatedBytes[pos] = ','
+			pos++
+		}
+		allocatedBytes[pos] = '"'
+		pos++
+		copy(allocatedBytes[pos:], bytesToWrite[:size])
+		pos += size
+		allocatedBytes[pos] = '"'
+		pos++
+		allocatedBytes[pos] = ']'
+
+		return allocatedBytes, pos
+	}
+
+	// JSON object
 	if mode == WriteJsonKey {
 		if isFirstKey {
 			// Need to do an open bracket
@@ -1619,7 +1642,7 @@ func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, mode WriteJso
 		}
 		allocatedBytes[pos] = '"'
 		pos++
-		copy(allocatedBytes[pos:], bytesToWrite[:])
+		copy(allocatedBytes[pos:], bytesToWrite[:size])
 		pos += size
 		allocatedBytes[pos] = '"'
 		pos++
@@ -1630,7 +1653,7 @@ func WriteJsonRawMsg(allocatedBytes, bytesToWrite []byte, pos int, mode WriteJso
 			allocatedBytes[pos] = '"'
 			pos++
 		}
-		copy(allocatedBytes[pos:], bytesToWrite[:])
+		copy(allocatedBytes[pos:], bytesToWrite[:size])
 		pos += size
 		if mode == WriteJsonValue {
 			allocatedBytes[pos] = '"'
