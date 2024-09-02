@@ -12,11 +12,13 @@ package metadata_svc
 
 import (
 	"encoding/json"
+	"fmt"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/log"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
-	"sync"
 )
 
 const (
@@ -150,6 +152,17 @@ func (service *GlobalSettingsSvc) UpdateGlobalSettings(settings metadata.Replica
 		return nil, nil
 	}
 
+	if val, ok := changedSettingsMap[metadata.GenericServicesLogLevelKey]; ok {
+		jsonStr, ok := val.(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to update global settings.err=Invalid type %T for genericServicesLogLevel. Expected string", val)
+		}
+		updatedJsonStr, err := metadata.ValidateAndFillJson(jsonStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update global settings. err=%v", err)
+		}
+		globalSettings.Settings.Values[metadata.GenericServicesLogLevelKey] = updatedJsonStr
+	}
 	return nil, service.setGlobalSettings(globalSettings)
 }
 
@@ -160,19 +173,14 @@ func (service *GlobalSettingsSvc) setGlobalSettings(globalSettings *metadata.Glo
 	}
 	pKey := getGlobalSettingKey()
 	if globalSettings.Revision != nil {
-		return service.metadata_svc.Set(pKey, bytes, globalSettings.Revision)
+		err = service.metadata_svc.Set(pKey, bytes, globalSettings.Revision)
 	} else {
-		return service.metadata_svc.Add(pKey, bytes)
+		err = service.metadata_svc.Add(pKey, bytes)
 	}
-
-	//update setting
-	if service.metadata_change_callback != nil {
-		err := service.metadata_change_callback(pKey, nil, globalSettings)
-		if err != nil {
-			service.logger.Error(err.Error())
-			return err
-		}
+	if err != nil {
+		service.logger.Infof("Failed to save Global settings to metakv. settings=%v\n", globalSettings)
+		return err
 	}
-	service.logger.Infof("Global settings saved successfully. settings=%v\n", globalSettings)
+	service.logger.Infof("Global settings saved successfully to metakv. settings=%v\n", globalSettings)
 	return nil
 }

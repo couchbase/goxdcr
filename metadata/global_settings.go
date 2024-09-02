@@ -11,6 +11,7 @@ licenses/APL2.txt.
 package metadata
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -40,9 +41,15 @@ var GoMaxProcsConfig = &SettingsConfig{base.DefaultGoMaxProcs, &Range{1, 10000}}
 // note, 0 is not a valid value for GOGC, which will be checked separately from the range check
 var GoGCConfig = &SettingsConfig{100, &Range{-1, 10000}}
 
-const EmptyString = ""
+var genericServices = []string{base.UtilsKey, base.SecuritySvcKey, base.TopoSvcKey, base.MetadataSvcKey,
+	base.IntSettSvcKey, base.AuditSvcKey, base.GlobalSettSvcKey, base.RemClusterSvcKey, base.ReplSpecSvcKey,
+	base.CheckpointSvcKey, base.MigrationSvcKey, base.ReplSettSvcKey, base.BucketTopologySvcKey, base.ManifestServiceKey,
+	base.CollectionsManifestSvcKey, base.BackfillReplSvcKey, base.P2PManagerKey, base.CapiSvcKey, base.TpThrottlerSvcKey,
+	base.GenericSupervisorKey, base.XDCRFactoryKey, base.PipelineMgrKey, base.ResourceMgrKey, base.BackfillMgrKey,
+	base.DefaultKey, base.AdminPortKey, base.HttpServerKey, base.MsgUtilsKey}
 
-var genericServicesLogLevelConfig = &SettingsConfig{EmptyString, nil}
+var genericServicesLogLevelDefaultVal, _ = ValidateAndFillJson(base.EmptyJsonObject)
+var genericServicesLogLevelConfig = &SettingsConfig{genericServicesLogLevelDefaultVal, nil}
 
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
 	GoMaxProcsKey:              GoMaxProcsConfig,
@@ -158,4 +165,32 @@ func ValidateAndConvertGlobalSettingsValue(key, value string) (convertedValue in
 		}
 	}
 	return
+}
+
+func ValidateAndFillJson(jsonInput string) (string, error) {
+	serviceToLogLevelMap, err := base.ValidateAndConvertStringToJsonType(jsonInput)
+	if err != nil {
+		return "", fmt.Errorf("failed to unmarshal the json input %v.err=%v", jsonInput, err)
+	}
+	for _, service := range genericServices {
+		if _, ok := serviceToLogLevelMap[service]; !ok {
+			//If the input JSON lacks the entry, populate it with the current or default value.
+			log.ServiceToLoggerContext.Lock.RLock()
+			loggerContext, exists := log.ServiceToLoggerContext.ServiceToContextMap[service]
+			log.ServiceToLoggerContext.Lock.RUnlock()
+			if exists { //populate with current value
+				serviceToLogLevelMap[service] = loggerContext.Log_level.String()
+			} else { // populate with default value
+				serviceToLogLevelMap[service] = log.LogLevelInfo.String()
+			}
+		}
+	}
+	mapLength := len(serviceToLogLevelMap)
+	noOfServices := len(genericServices)
+	if mapLength != noOfServices {
+		return "", fmt.Errorf("failed to ensure the correct length. actual %v expected %v", mapLength, noOfServices)
+	} else {
+		updatedJson, err := json.Marshal(serviceToLogLevelMap)
+		return string(updatedJson), err
+	}
 }

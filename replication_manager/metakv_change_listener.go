@@ -784,7 +784,6 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 				context, ok := log.ServiceToLoggerContext.ServiceToContextMap[service]
 				log.ServiceToLoggerContext.Lock.RUnlock()
 				if !ok {
-					pscl.logger.Errorf("no LoggerContext exists for the service %v", service)
 					continue
 				}
 				logLevelStr, valid := logLevelIface.(string)
