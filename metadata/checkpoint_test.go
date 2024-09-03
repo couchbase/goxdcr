@@ -315,12 +315,16 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno: 20,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno: 20,
+						},
 					},
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno: 10,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno: 10,
+						},
 					},
 				},
 				source: true,
@@ -333,12 +337,16 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno: 10,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno: 10,
+						},
 					},
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno: 20,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno: 20,
+						},
 					},
 				},
 				source: true,
@@ -351,8 +359,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno:         10,
-						Failover_uuid: 3,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno:         10,
+							Failover_uuid: 3,
+						},
 					},
 					srcFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -361,8 +371,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno:         20,
-						Failover_uuid: 2,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno:         20,
+							Failover_uuid: 2,
+						},
 					},
 					srcFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -379,8 +391,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno:         10,
-						Failover_uuid: 4,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno:         10,
+							Failover_uuid: 4,
+						},
 					},
 					srcFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -389,8 +403,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Seqno:         20,
-						Failover_uuid: 2,
+						SourceVBTimestamp: SourceVBTimestamp{
+							Seqno:         20,
+							Failover_uuid: 2,
+						},
 					},
 					srcFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -407,14 +423,18 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     20,
-						Target_vb_opaque: &TargetVBUuid{0},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     20,
+							Target_vb_opaque: &TargetVBUuid{0},
+						},
 					},
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     10,
-						Target_vb_opaque: &TargetVBUuid{0},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     10,
+							Target_vb_opaque: &TargetVBUuid{0},
+						},
 					},
 				},
 				source: false,
@@ -427,14 +447,18 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     10,
-						Target_vb_opaque: &TargetVBUuid{0},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     10,
+							Target_vb_opaque: &TargetVBUuid{0},
+						},
 					},
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     20,
-						Target_vb_opaque: &TargetVBUuid{0},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     20,
+							Target_vb_opaque: &TargetVBUuid{0},
+						},
 					},
 				},
 				source: false,
@@ -447,8 +471,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     10,
-						Target_vb_opaque: &TargetVBUuid{3},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     10,
+							Target_vb_opaque: &TargetVBUuid{3},
+						},
 					},
 					tgtFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -457,8 +483,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     20,
-						Target_vb_opaque: &TargetVBUuid{2},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     20,
+							Target_vb_opaque: &TargetVBUuid{2},
+						},
 					},
 					tgtFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -475,8 +503,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			args: args{
 				aRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     10,
-						Target_vb_opaque: &TargetVBUuid{4},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     10,
+							Target_vb_opaque: &TargetVBUuid{4},
+						},
 					},
 					tgtFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -485,8 +515,10 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 				},
 				bRecord: &CheckpointSortRecord{
 					CheckpointRecord: &CheckpointRecord{
-						Target_Seqno:     20,
-						Target_vb_opaque: &TargetVBUuid{2},
+						TargetVBTimestamp: TargetVBTimestamp{
+							Target_Seqno:     20,
+							Target_vb_opaque: &TargetVBUuid{2},
+						},
 					},
 					tgtFailoverLog: &mcc.FailoverLog{
 						{3, 0},
@@ -504,6 +536,36 @@ func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
 			got, got1 := compareFailoverLogPositionThenSeqnos(tt.args.aRecord, tt.args.bRecord, tt.args.source)
 			assert.Equalf(t, tt.want, got, "compareFailoverLogPositionThenSeqnos(%v, %v, %v)", tt.args.aRecord, tt.args.bRecord, tt.args.source)
 			assert.Equalf(t, tt.want1, got1, "compareFailoverLogPositionThenSeqnos(%v, %v, %v)", tt.args.aRecord, tt.args.bRecord, tt.args.source)
+		})
+	}
+}
+
+func TestGlobalTimestamp_GetValue(t *testing.T) {
+	tests := []struct {
+		name string
+		g    GlobalTimestamp
+		want interface{}
+	}{
+		{
+			name: "globalGetValueTest",
+			g: map[uint16]*TargetVBTimestamp{
+				0: &TargetVBTimestamp{Target_vb_opaque: &TargetVBUuid{1},
+					Target_Seqno: 2,
+				},
+				1: &TargetVBTimestamp{Target_vb_opaque: &TargetVBUuid{5},
+					Target_Seqno: 3,
+				},
+			},
+			want: map[uint16]*TargetVBUuid{
+				0: &TargetVBUuid{1},
+				1: &TargetVBUuid{5},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, tt.g.GetValue(), "GetValue()")
 		})
 	}
 }

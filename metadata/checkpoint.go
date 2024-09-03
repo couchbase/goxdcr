@@ -90,6 +90,14 @@ type TargetVBTimestamp struct {
 	TargetManifest uint64 `json:"target_manifest"`
 }
 
+func (t *TargetVBTimestamp) IsTraditional() bool {
+	return true
+}
+
+func (t *TargetVBTimestamp) GetValue() interface{} {
+	return t
+}
+
 func (t *TargetVBTimestamp) SameAs(other *TargetVBTimestamp) bool {
 	if t == nil || other == nil {
 		return t == nil && other == nil
@@ -133,7 +141,49 @@ func (t *TargetVBTimestamp) LoadUnmarshalled(v interface{}) error {
 	return nil
 }
 
+// Also needs to inplement VBOpaque
 type GlobalTimestamp map[uint16]*TargetVBTimestamp
+
+func (g *GlobalTimestamp) IsSame(targetVBOpaque TargetVBOpaque) bool {
+	otherGlobalTs, ok := targetVBOpaque.Value().(*GlobalTimestamp)
+	if !ok {
+		return false
+	}
+	return g.SameAs(otherGlobalTs)
+}
+
+func (g *GlobalTimestamp) Size() int {
+	return int(unsafe.Sizeof(g))
+}
+
+func (g *GlobalTimestamp) Value() interface{} {
+	return g.GetValue()
+}
+
+func (g *GlobalTimestamp) IsTraditional() bool {
+	return false
+}
+
+// GlobalTimestamp can implement as TargetVBOpaque
+// This is just a "cast" for readability
+func (g *GlobalTimestamp) GetTargetOpaque() TargetVBOpaque {
+	return g
+}
+
+// Value returns a map of all the target VBs and the VBUUIDs assocated with each
+func (g *GlobalTimestamp) GetValue() interface{} {
+	if g == nil {
+		return nil
+	}
+
+	opaqueMap := make(map[uint16]*TargetVBUuid)
+	for k, v := range *g {
+		vbuuid := v.Target_vb_opaque.Value().(uint64)
+		opaqueMap[k] = &TargetVBUuid{Target_vb_uuid: vbuuid}
+	}
+
+	return opaqueMap
+}
 
 func (g *GlobalTimestamp) SameAs(other *GlobalTimestamp) bool {
 	if g == nil || other == nil {
@@ -342,6 +392,13 @@ func (g *GlobalTargetCounters) LoadUnmarshalled(generic map[string]interface{}) 
 	return nil
 }
 
+// TargetTimestamp is an interface used within checkpointing operation that can be either
+// traditional or variable VB (global) timestamp
+type TargetTimestamp interface {
+	IsTraditional() bool
+	GetValue() interface{}
+}
+
 type CheckpointRecord struct {
 	// Epoch timestamp of when this record was created
 	CreationTime uint64 `json:"creationTime"`
@@ -386,13 +443,17 @@ func (c *CheckpointRecord) Size() int {
 	return totalSize
 }
 
-func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno uint64,
-	incomingMetric base.VBCountMetric, srcManifestForDCP, srcManifestForBackfill,
+func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
+	tgtTimestamp TargetTimestamp, incomingMetric base.VBCountMetric, srcManifestForDCP, srcManifestForBackfill,
 	tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
 
 	var record *CheckpointRecord
 
 	if incomingMetric.IsTraditional() {
+		if !tgtTimestamp.IsTraditional() {
+			return nil, fmt.Errorf("coding error: tgtTimestamp and incoming metrics must be both traditional")
+		}
+		targetSeqno := tgtTimestamp.GetValue().(*TargetVBTimestamp).Target_Seqno
 		record = newTraditionalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, srcManifestForDCP, srcManifestForBackfill, tgtManifest, brokenMappings, creationTime, incomingMetric)
 	} else {
 		return nil, fmt.Errorf("TODO global checkpoint")
@@ -867,6 +928,74 @@ func (targetVBUuid *TargetVBUuid) IsSame(targetVBOpaque TargetVBOpaque) bool {
 			return targetVBUuid.Target_vb_uuid == new_targetVBUuid.Target_vb_uuid
 		}
 	}
+}
+
+type GlobalTargetVbUuids map[uint16][]uint64
+
+func (g *GlobalTargetVbUuids) Size() int {
+	if g == nil {
+		return 0
+	}
+	return int(unsafe.Sizeof(g))
+}
+
+func (g *GlobalTargetVbUuids) Value() interface{} {
+	return g
+}
+
+// IsSame essentially checks to make sure all VBUUIDs haven't changed
+// Note that the input must be a type of global target opaque used in the context
+// of a checkpointing logic
+// This is needed to implement the TargetVBOpaque interface and is *not*
+// meant to be a direct comparison between two GlobalTargetVbUuids objects
+// Use SameAs() for direct comparisons
+func (g *GlobalTargetVbUuids) IsSame(globalTargetOpaque TargetVBOpaque) bool {
+	opaqueMap := globalTargetOpaque.Value().(map[uint16]*TargetVBUuid)
+	for vb, curTargetVbUuid := range opaqueMap {
+		seqnoAndVbuuid, ok := (*g)[vb]
+		if !ok {
+			return false
+		}
+		vbuuid := seqnoAndVbuuid[1]
+
+		latestVbUuid := &TargetVBUuid{vbuuid}
+		if !curTargetVbUuid.IsSame(latestVbUuid) {
+			return false
+		}
+	}
+	return true
+}
+
+// SameAs is the actual method to compare between two objects of the same type in this case
+func (g *GlobalTargetVbUuids) SameAs(other *GlobalTargetVbUuids) bool {
+	if g == nil || other == nil {
+		return g == nil && other == nil
+	}
+
+	if len(*g) != len(*other) {
+		return false
+	}
+
+	uuidMap := base.HighSeqnoAndVbUuidMap(*g)
+	diffOutput := uuidMap.Diff(base.HighSeqnoAndVbUuidMap(*other))
+	return len(diffOutput) == 0
+}
+
+func (g *GlobalTargetVbUuids) ToGlobalTimestamp() *GlobalTimestamp {
+	if g == nil {
+		return nil
+	}
+
+	gts := make(GlobalTimestamp)
+	for vb, pair := range *g {
+		gts[vb] = &TargetVBTimestamp{
+			Target_vb_opaque: &TargetVBUuid{pair[1]},
+			Target_Seqno:     pair[0],
+			//TargetManifest:   0, // TODO
+		}
+	}
+
+	return &gts
 }
 
 // elasticSearch clusters have a single string vbuuid
