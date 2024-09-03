@@ -1956,7 +1956,11 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	// when updating the actual record, then this mean an concurrent operation has jumped ahead of us
 	currRecordVersion := ckpt_obj.versionNum
 	last_seqno := ckpt_obj.ckpt.Seqno
-	curCkptTargetVBOpaque = ckpt_obj.ckpt.Target_vb_opaque
+	if ckmgr.isVariableVBMode() {
+		curCkptTargetVBOpaque = ckpt_obj.ckpt.GlobalTimestamp.GetTargetOpaque()
+	} else {
+		curCkptTargetVBOpaque = ckpt_obj.ckpt.TargetVBTimestamp.Target_vb_opaque
+	}
 	ckpt_obj.lock.RUnlock()
 
 	through_seqno, err := ckmgr.getThroughSeqno(vbno, through_seqno_map)
@@ -1966,7 +1970,6 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 		return
 	}
 
-	// This should not occur, and should be removed in a subsequent changeset
 	if curCkptTargetVBOpaque == nil {
 		err = fmt.Errorf("Target timestamp for vb %v is not populated properly", vbno)
 		return
@@ -1983,7 +1986,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	}
 
 	// Do this before through seqno check to ensure we catch failover as soon as we can
-	remote_seqno, err := ckmgr.getRemoteSeqno(vbno, high_seqno_and_vbuuid_map, curCkptTargetVBOpaque)
+	remoteTimestamp, err := ckmgr.getRemoteTimestamp(vbno, high_seqno_and_vbuuid_map, curCkptTargetVBOpaque)
 	if err != nil {
 		if err == targetVbuuidChangedError {
 			// vb uuid on target has changed. rollback may be needed. return error to get pipeline restarted
@@ -2010,7 +2013,6 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 	}
 
 	// if target vb opaque has not changed, persist checkpoint record
-	ckptRecordTargetSeqno := remote_seqno
 	// Item 2:
 	// Get the failover_UUID here
 	ckRecordFailoverUuid, failoverUuidErr := ckmgr.getFailoverUUIDForSeqno(vbno, ckRecordDcpSnapEndSeqno)
@@ -2035,7 +2037,7 @@ func (ckmgr *CheckpointManager) doCheckpoint(vbno uint16, through_seqno_map map[
 
 	// Write-operation - feed the temporary variables and update them into the record and also write them to metakv
 	newCkpt, err := metadata.NewCheckpointRecord(ckRecordFailoverUuid, through_seqno, ckRecordDcpSnapSeqno, ckRecordDcpSnapEndSeqno,
-		ckptRecordTargetSeqno, vbCountMetrics,
+		remoteTimestamp, vbCountMetrics,
 		srcManifestIdForDcp, srcManifestIdForBackfill, tgtManifestId, brokenMapping, uint64(time.Now().Unix()))
 	if err != nil {
 		ckmgr.logger.Errorf("Unable to create a checkpoint record due to - %v", err)
@@ -2102,21 +2104,32 @@ func (ckmgr *CheckpointManager) getThroughSeqno(vbno uint16, through_seqno_map m
 	return through_seqno, nil
 }
 
-func (ckmgr *CheckpointManager) getRemoteSeqno(vbno uint16, high_seqno_and_vbuuid_map map[uint16][]uint64, curCkptTargetVBOpaque metadata.TargetVBOpaque) (uint64, error) {
-	// non-capi mode, high_seqno and vbuuid on target have been retrieved through vbucket-seqno stats
+func (ckmgr *CheckpointManager) getRemoteTimestamp(vbno uint16, high_seqno_and_vbuuid_map map[uint16][]uint64, curCkptTargetVBOpaque metadata.TargetVBOpaque) (metadata.TargetTimestamp, error) {
+	if ckmgr.isVariableVBMode() {
+		return ckmgr.getRemoteGlobalTimestamp(high_seqno_and_vbuuid_map, curCkptTargetVBOpaque)
+	} else {
+		return ckmgr.getRemoteSeqno(vbno, high_seqno_and_vbuuid_map, curCkptTargetVBOpaque)
+	}
+}
+
+func (ckmgr *CheckpointManager) getRemoteSeqno(vbno uint16, high_seqno_and_vbuuid_map map[uint16][]uint64, curCkptTargetVBOpaque metadata.TargetVBOpaque) (metadata.TargetTimestamp, error) {
 	high_seqno_and_vbuuid, ok := high_seqno_and_vbuuid_map[vbno]
 	if !ok {
-		return 0, fmt.Errorf("%v %v cannot find high seqno and vbuuid for vb %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
+		return nil, fmt.Errorf("%v %v cannot find high seqno and vbuuid for vb %v", ckmgr.pipeline.Type().String(), ckmgr.pipeline.FullTopic(), vbno)
 	}
 
 	remote_seqno := high_seqno_and_vbuuid[0]
 	vbuuid := high_seqno_and_vbuuid[1]
 	targetVBOpaque := &metadata.TargetVBUuid{vbuuid}
 	if !curCkptTargetVBOpaque.IsSame(targetVBOpaque) {
-		ckmgr.logger.Errorf("target vbuuid has changed for vb=%v. old=%v, new=%v", vbno, curCkptTargetVBOpaque, targetVBOpaque)
-		return 0, targetVbuuidChangedError
+		//ckmgr.logger.Errorf("target vbuuid has changed for vb=%v. old=%v, new=%v", vbno, curCkptTargetVBOpaque, targetVBOpaque)
+		return nil, targetVbuuidChangedError
 	}
-	return remote_seqno, nil
+	remoteSeqno := &metadata.TargetVBTimestamp{
+		Target_Seqno:     remote_seqno,
+		Target_vb_opaque: targetVBOpaque,
+	}
+	return remoteSeqno, nil
 }
 
 func (ckmgr *CheckpointManager) raiseSuccessCkptForVbEvent(ckpt_record metadata.CheckpointRecord, vbno uint16) {
@@ -3465,4 +3478,19 @@ func (ckmgr *CheckpointManager) periodicMergerImpl() {
 			ckmgr.checkpoints_svc.EnableRefCntDecrement(backfillTopic)
 		}
 	}
+}
+
+func (ckmgr *CheckpointManager) getRemoteGlobalTimestamp(highSeqnoAndVBUuid metadata.GlobalTargetVbUuids, globalTargetOpaque metadata.TargetVBOpaque) (metadata.TargetTimestamp, error) {
+	if highSeqnoAndVBUuid == nil {
+		return nil, fmt.Errorf("%v:  getRemoteGlobalTimestamp:highSeqnoAndVBUuid", base.ErrorNilPtr.Error())
+	}
+
+	// first check if vbuuid has changed or not
+	if !highSeqnoAndVBUuid.IsSame(globalTargetOpaque) {
+		ckmgr.logger.Errorf("target vbuuid has changed: old=%v, new=%v", highSeqnoAndVBUuid, globalTargetOpaque)
+		return nil, targetVbuuidChangedError
+	}
+
+	// TODO MB-63383: can improve performance via caching and not recompute every time
+	return highSeqnoAndVBUuid.ToGlobalTimestamp(), nil
 }
