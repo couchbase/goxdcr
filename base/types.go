@@ -3029,25 +3029,48 @@ type FilteringStatusType int
 // Stats per vbucket
 type VBCountMetric interface {
 	IsTraditional() bool
+	GetValue() interface{}
 }
 
-type TraditionalVBMetrics struct {
-	vbCountMetricMap map[string]int64
-}
+// TraditionalVBMetrics represent a map where the key is the stat name or component
+// and the value is the representation of said metric
+type TraditionalVBMetrics map[string]int64
 
 func NewTraditionalVBMetrics() *TraditionalVBMetrics {
-	return &TraditionalVBMetrics{vbCountMetricMap: map[string]int64{}}
+	newMap := map[string]int64{}
+	return (*TraditionalVBMetrics)(&newMap)
 }
 
-func (v *TraditionalVBMetrics) GetValue() map[string]int64 {
-	return v.vbCountMetricMap
+func (v *TraditionalVBMetrics) GetValue() interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func (v *TraditionalVBMetrics) IsTraditional() bool {
 	return true
 }
 
-//type TraditionalVBMetrics map[string]int64
+// GlobalVBMetrics represents a map where the key represents the stat name or component
+// and the value contains all the stats for all the VBs that is related to the target view
+// at the moment of capture
+type GlobalVBMetrics map[string]map[uint16]int64
+
+func NewGlobalVBMetrics() *GlobalVBMetrics {
+	return (*GlobalVBMetrics)(&map[string]map[uint16]int64{})
+}
+
+func (g *GlobalVBMetrics) GetValue() interface{} {
+	if g == nil {
+		return nil
+	}
+	return *g
+}
+
+func (g *GlobalVBMetrics) IsTraditional() bool {
+	return false
+}
 
 // the following will be not set for target doc when retrieved using GET_META.
 type OptionalConflictLoggingMetadata struct {
