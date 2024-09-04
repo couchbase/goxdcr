@@ -235,7 +235,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
 
 	tradtitionalMetric, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
-	metricsMap := tradtitionalMetric.(*base.TraditionalVBMetrics).GetValue()
+	metricsMap := tradtitionalMetric.GetValue().(base.TraditionalVBMetrics)
 	assert.Nil(err)
 	assert.NotNil(metricsMap)
 
@@ -258,14 +258,14 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 
 	// Try setting something else
 	tradMetric := base.NewTraditionalVBMetrics()
-	metricKVs := tradMetric.GetValue()
+	metricKVs := tradMetric.GetValue().(base.TraditionalVBMetrics)
 	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 10
 	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, tradMetric)
 	assert.Nil(err)
 
 	// Set some other vbucket
 	tradMetric = base.NewTraditionalVBMetrics()
-	metricKVs = tradMetric.GetValue()
+	metricKVs = tradMetric.GetValue().(base.TraditionalVBMetrics)
 	//metricKVs = make(map[string]int64)
 	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 12
 	err = statsMgr.SetVBCountMetrics(102, tradMetric)
@@ -273,7 +273,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 
 	// Test setting something else
 	tradMetric = base.NewTraditionalVBMetrics()
-	metricKVs = tradMetric.GetValue()
+	metricKVs = tradMetric.GetValue().(base.TraditionalVBMetrics)
 	metricKVs[service_def2.DOCS_FILTERED_METRIC] = 4
 	err = statsMgr.SetVBCountMetrics(102, tradMetric)
 	assert.Nil(err)
@@ -281,13 +281,13 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	// verify
 	vbMetrics, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
-	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue()
+	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue().(base.TraditionalVBMetrics)
 	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(10), count)
 
 	vbMetrics, err = statsMgr.GetVBCountMetrics(102)
 	assert.Nil(err)
-	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue()
+	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue().(base.TraditionalVBMetrics)
 	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(12), count)
 
@@ -303,7 +303,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 
 	// Pretend that a rollback occurred for a VB and the number decreased
 	tradMetric = base.NewTraditionalVBMetrics()
-	metricKVs = tradMetric.GetValue()
+	metricKVs = tradMetric.GetValue().(base.TraditionalVBMetrics)
 	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = 9
 	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, tradMetric)
 	assert.Nil(err)
@@ -311,7 +311,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 	// validate difference calculation
 	vbMetrics, err = statsMgr.GetVBCountMetrics(uprEvent.VBucket)
 	assert.Nil(err)
-	metricsMap = vbMetrics.(*base.TraditionalVBMetrics).GetValue()
+	metricsMap = vbMetrics.GetValue().(base.TraditionalVBMetrics)
 	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC]
 	assert.Equal(int64(9), count)
 
@@ -723,4 +723,143 @@ func TestPausedReplicationStats2b(t *testing.T) {
 	bucketSvc, replGetter := setupPausedStatsMocks(backfillSvc, remoteSvc, ckptSvc, ref, targetKVVbMap, replSpec, assert, false, true)
 	UpdateStats(ckptSvc, logger, remoteSvc, backfillSvc, bucketSvc, replGetter)
 	assertPausedStats(OverviewStatsMain, OverviewStatsBackfill, assert)
+}
+
+func TestStatsMgrWithDCPCollectorGlobal(t *testing.T) {
+	fmt.Println("============== Test case start: TestStatsMgrWithDCPCollectorGlobal =================")
+	defer fmt.Println("============== Test case end: TestStatsMgrWithDCPCollectorGlobal =================")
+	assert := assert.New(t)
+	_, throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle := setupBoilerPlate()
+
+	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs,
+		pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
+		backfillReplSvc, xmemNozzle)
+
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, true)
+	assert.NotNil(statsMgr)
+
+	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
+		xdcrTopologySvc, throughSeqSvc, activeVBs, targetKVVbMap, remoteClusterRef, utils, statsMgr, uiLogSvc,
+		collectionsManifestSvc, backfillReplSvc)
+	setupInnerMock(runtimeCtx, ckptManager)
+
+	statsMgr.Attach(pipeline)
+	statsMgr.initOverviewRegistry()
+
+	routerCollector := statsMgr.getRouterCollector()
+	assert.Equal(4, len(routerCollector.vbMetricHelper.vbBasedMetric))
+
+	uprEvent, err := RetrieveUprFile(uprEventFile)
+	assert.Nil(err)
+	assert.NotNil(uprEvent)
+
+	passedEvent := &commonReal.Event{}
+	passedEvent.EventType = commonReal.DataFiltered
+	fakeComponent := &common.Component{}
+	fakeComponent.On("Id").Return(testRouter)
+	passedEvent.Component = fakeComponent
+	passedEvent.Data = uprEvent
+	passedEvent.OtherInfos = parts.DataFilteredAdditional{}
+
+	assert.Nil(routerCollector.ProcessEvent(passedEvent))
+
+	assert.Equal(1, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+
+	seqnoCommitMap := make(map[uint16]uint64)
+	seqnoCommitMap[uprEvent.VBucket] = uprEvent.Seqno
+
+	assert.Equal(int64(0), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	routerCollector.HandleLatestThroughSeqnos(seqnoCommitMap)
+	assert.Equal(int64(1), (routerCollector.vbMetricHelper.vbBasedMetric[uprEvent.VBucket][service_def2.DOCS_FILTERED_METRIC]).(metrics.Counter).Count())
+	assert.Equal(0, routerCollector.vbMetricHelper.vbBasedHelper[uprEvent.VBucket].sortedSeqnoListMap[service_def2.DOCS_FILTERED_METRIC].GetLengthOfSeqnoList())
+
+	globalMetric, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	metricsMap := globalMetric.GetValue().(base.GlobalVBMetrics)
+	assert.Nil(err)
+	assert.NotNil(metricsMap)
+
+	count, ok := metricsMap[service_def2.DOCS_FILTERED_METRIC][uprEvent.VBucket]
+	assert.True(ok)
+	assert.Equal(int64(1), count)
+	// Simulate overview registry updated
+	metric_overview := statsMgr.getOverviewRegistry().Get(service_def2.DOCS_FILTERED_METRIC)
+	metric_overview.(metrics.Counter).Inc(count)
+
+	count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC][uprEvent.VBucket]
+	assert.Equal(int64(0), count)
+	metric_overview = statsMgr.getOverviewRegistry().Get(service_def2.DOCS_UNABLE_TO_FILTER_METRIC)
+	metric_overview.(metrics.Counter).Inc(count)
+
+	// Validate overview stats
+	count, err = statsMgr.GetCountMetrics(service_def2.DOCS_FILTERED_METRIC)
+	assert.Nil(err)
+	assert.Equal(int64(1), count)
+
+	// Try setting something else
+	globalMetric = base.NewGlobalVBMetrics()
+	metricKVs := globalMetric.GetValue().(base.GlobalVBMetrics)
+	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = map[uint16]int64{uprEvent.VBucket: 10}
+	err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, globalMetric)
+	assert.Nil(err)
+
+	// Set some other vbucket
+	globalMetric = base.NewGlobalVBMetrics()
+	metricKVs = globalMetric.GetValue().(base.GlobalVBMetrics)
+	//metricKVs = make(map[string]int64)
+	metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = map[uint16]int64{uprEvent.VBucket: 12}
+	err = statsMgr.SetVBCountMetrics(102, globalMetric)
+	assert.Nil(err)
+
+	// Test setting something else
+	globalMetric = base.NewGlobalVBMetrics()
+	metricKVs = globalMetric.GetValue().(base.GlobalVBMetrics)
+	metricKVs[service_def2.DOCS_FILTERED_METRIC] = map[uint16]int64{uprEvent.VBucket: 4}
+	err = statsMgr.SetVBCountMetrics(102, globalMetric)
+	assert.Nil(err)
+
+	// verify
+	// TODO MB-63393: reactivate as part of getting stats/pipeline resume
+	//vbMetrics, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	//assert.Nil(err)
+	//metricsMap = vbMetrics.GetValue().(base.GlobalVBMetrics)
+	//count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC][uprEvent.VBucket]
+	//assert.Equal(int64(10), count)
+	//
+	//vbMetrics, err = statsMgr.GetVBCountMetrics(102)
+	//assert.Nil(err)
+	//metricsMap = vbMetrics.GetValue().(base.GlobalVBMetrics)
+	//count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC][uprEvent.VBucket]
+	//assert.Equal(int64(12), count)
+	//
+	//dcpRegistry := statsMgr.registries[testDCPPart]
+	//assert.NotNil(dcpRegistry)
+	//routerRegistry := statsMgr.registries[testRouter]
+	//assert.NotNil(routerRegistry)
+	//
+	//counter, ok := routerRegistry.Get(service_def2.DOCS_UNABLE_TO_FILTER_METRIC).(metrics.Counter)
+	//assert.True(ok)
+	//assert.NotNil(counter)
+	//assert.Equal(int64(22), counter.Count())
+	//
+	//// Pretend that a rollback occurred for a VB and the number decreased
+	//globalMetric = base.NewGlobalVBMetrics()
+	//metricKVs = globalMetric.GetValue().(base.GlobalVBMetrics)
+	//metricKVs[service_def2.DOCS_UNABLE_TO_FILTER_METRIC] = map[uint16]int64{uprEvent.VBucket: 9}
+	//err = statsMgr.SetVBCountMetrics(uprEvent.VBucket, globalMetric)
+	//assert.Nil(err)
+	//
+	//// validate difference calculation
+	//vbMetrics, err = statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	//assert.Nil(err)
+	//metricsMap = vbMetrics.GetValue().(base.GlobalVBMetrics)
+	//count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC][uprEvent.VBucket]
+	//assert.Equal(int64(9), count)
+	//
+	//routerRegistry = statsMgr.registries[testRouter]
+	//counter, ok = routerRegistry.Get(service_def2.DOCS_UNABLE_TO_FILTER_METRIC).(metrics.Counter)
+	//assert.True(ok)
+	//assert.NotNil(counter)
+	//assert.Equal(int64(21), counter.Count())
 }

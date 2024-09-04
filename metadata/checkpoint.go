@@ -466,7 +466,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 }
 
 func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, targetSeqno uint64, srcManifestForDCP uint64, srcManifestForBackfill uint64, tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64, incomingMetric base.VBCountMetric) *CheckpointRecord {
-	vbCountMetrics := incomingMetric.(*base.TraditionalVBMetrics).GetValue()
+	vbCountMetrics := incomingMetric.GetValue().(base.TraditionalVBMetrics)
 	filteredItems := uint64(vbCountMetrics[base.DocsFiltered])
 	filterFailed := uint64(vbCountMetrics[base.DocsUnableToFilter])
 	filteredExpiredItems := uint64(vbCountMetrics[base.ExpiryFiltered])
