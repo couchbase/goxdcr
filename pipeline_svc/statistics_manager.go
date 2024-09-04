@@ -210,7 +210,7 @@ func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) ba
 
 func getTraditionalMetrics(record *metadata.CheckpointRecord) base.VBCountMetric {
 	tradMetrics := base.NewTraditionalVBMetrics()
-	vbStatMap := tradMetrics.GetValue()
+	vbStatMap := tradMetrics.GetValue().(base.TraditionalVBMetrics)
 	vbStatMap[service_def.DOCS_FILTERED_METRIC] = base.Uint64ToInt64(record.Filtered_Items_Cnt)
 	vbStatMap[service_def.DOCS_UNABLE_TO_FILTER_METRIC] = base.Uint64ToInt64(record.Filtered_Failed_Cnt)
 	vbStatMap[service_def.EXPIRY_FILTERED_METRIC] = base.Uint64ToInt64(record.FilteredItemsOnExpirationsCnt)
@@ -1528,7 +1528,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 	outNozzle_collector.id = pipeline_utils.GetElementIdFromName(pipeline, base.OutNozzleStatsCollector)
 	outNozzle_collector.stats_mgr = stats_mgr
 	outNozzle_collector.component_map = make(map[string]map[string]interface{})
-	outNozzle_collector.vbMetricHelper = NewVbBasedMetricHelper()
+	outNozzle_collector.vbMetricHelper = NewVbBasedMetricHelper().SetGlobalContext()
 	outNozzle_parts := pipeline.Targets()
 	for _, part := range outNozzle_parts {
 		registry := stats_mgr.getOrCreateRegistry(part.Id())
@@ -2232,6 +2232,18 @@ type VbBasedMetricHelper struct {
 	vbBasedHelper map[uint16]*vbBasedThroughSeqnoHelper
 
 	responsibleKeys []string
+
+	usedGlobally bool
+}
+
+// SetGlobalContext is used if the helper is part of the component that spans
+// across VB boundaries and used in a global timestamp context
+func (h *VbBasedMetricHelper) SetGlobalContext() *VbBasedMetricHelper {
+	if h == nil {
+		return nil
+	}
+	h.usedGlobally = true
+	return h
 }
 
 func (h *VbBasedMetricHelper) Register(id string, vbs []uint16, partId string, keys []string) {
@@ -2275,10 +2287,14 @@ func (h *VbBasedMetricHelper) handleLatestThroughSeqnoForVb(vb uint16, latestSeq
 }
 
 func (h *VbBasedMetricHelper) AddVbSpecificMetrics(vbno uint16, compiledMap base.VBCountMetric) error {
-	if compiledMap.IsTraditional() {
+	if compiledMap == nil {
+		return fmt.Errorf("CompiledMap being passed into AddVbSpecificMetrics is nil")
+	}
+
+	if !h.usedGlobally {
 		return h.addTraditionalVbSpecificMetrics(vbno, compiledMap)
 	} else {
-		return fmt.Errorf("TODO global checkpoint")
+		return h.addGlobalVbSpecificMetrics(vbno, compiledMap)
 	}
 }
 
@@ -2288,15 +2304,40 @@ func (h *VbBasedMetricHelper) addTraditionalVbSpecificMetrics(vbno uint16, gener
 		return base.ErrorNotMyVbucket
 	}
 
-	if genericMetrics == nil {
-		return fmt.Errorf("CompiledMap being passed into AddVbSpecificMetrics is nil")
+	if genericMetrics.IsTraditional() {
+		err := h.addTraditionalToGenericMetrics(genericMetrics, vbBasedMetric)
+		if err != nil {
+			return err
+		}
+	} else {
+		// This is the case where this vbBasedMetricHelper is only responsible to add a specific vbno worth
+		// of metrics to a non-traditional data structure
+		compiledMap, ok := genericMetrics.GetValue().(base.GlobalVBMetrics)
+		if !ok {
+			return fmt.Errorf("metrics passed in should be global, but got %T", genericMetrics)
+		}
+
+		for _, k := range h.responsibleKeys {
+			registry, ok := vbBasedMetric[k]
+			if !ok {
+				continue
+			}
+			counter := registry.(metrics.Counter)
+			if compiledMap[k] == nil {
+				compiledMap[k] = make(map[uint16]int64)
+			}
+			compiledMap[k][vbno] = counter.Count()
+		}
 	}
-	traditionalMetrics, ok := genericMetrics.(*base.TraditionalVBMetrics)
+	return nil
+}
+
+func (h *VbBasedMetricHelper) addTraditionalToGenericMetrics(genericMetrics base.VBCountMetric, vbBasedMetric map[string]interface{}) error {
+	compiledMap, ok := genericMetrics.GetValue().(base.TraditionalVBMetrics)
 	if !ok {
 		return fmt.Errorf("metrics passed in should be traditional, but got %T", genericMetrics)
 	}
 
-	compiledMap := traditionalMetrics.GetValue()
 	for _, k := range h.responsibleKeys {
 		registry, ok := vbBasedMetric[k]
 		if !ok {
@@ -2304,6 +2345,47 @@ func (h *VbBasedMetricHelper) addTraditionalVbSpecificMetrics(vbno uint16, gener
 		}
 		counter := registry.(metrics.Counter)
 		compiledMap[k] = counter.Count()
+	}
+	return nil
+}
+
+// addGlobalVbSpecificMetrics' goal is to ensure that for every responsible key, all the VBs
+// associated with this responsible keyed metrics is added or updated to the global metrics
+// Meanwhile, it needs to be able to take care of traditional replication by handling just
+// vb-to-vb use case
+func (h *VbBasedMetricHelper) addGlobalVbSpecificMetrics(vbno uint16, genericMetrics base.VBCountMetric) error {
+	if genericMetrics.IsTraditional() {
+		// Traditional passed in, means that this method should treat handling stats traditionally
+		vbBasedMetric, ok := h.vbBasedMetric[vbno]
+		if !ok {
+			return base.ErrorNotMyVbucket
+		}
+		err := h.addTraditionalToGenericMetrics(genericMetrics, vbBasedMetric)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Global VBCountMetric passed in with this VbBasedMetricHelper that is meant to handle global stats
+		// means that this helper should return all the stats for all the VBs to fill in the globalVBCountMetrics
+		globalMetrics, ok := genericMetrics.GetValue().(base.GlobalVBMetrics)
+		if !ok {
+			return fmt.Errorf("metrics passed in should be global, but got %T", genericMetrics)
+		}
+
+		for _, k := range h.responsibleKeys {
+			for oneVb, oneVbBasedMetric := range h.vbBasedMetric {
+				registry, ok := oneVbBasedMetric[k]
+				if !ok {
+					continue
+				}
+
+				counter := registry.(metrics.Counter)
+				if globalMetrics[k] == nil {
+					globalMetrics[k] = make(map[uint16]int64)
+				}
+				globalMetrics[k][oneVb] = counter.Count()
+			}
+		}
 	}
 	return nil
 }
@@ -2339,7 +2421,7 @@ func (h *VbBasedMetricHelper) updateTraditionalVbMetrics(vb uint16, vbCountMetri
 	}
 
 	// Keys is the "keys" being read, i.e. the filtered_cnt, etc from Checkpoint
-	valuesToApply := vbCountMetric.(*base.TraditionalVBMetrics).GetValue()
+	valuesToApply := vbCountMetric.GetValue().(base.TraditionalVBMetrics)
 	for k, v := range valuesToApply {
 		var isResponsibleForThisKey bool
 		for _, keyToCheck := range h.responsibleKeys {
@@ -3201,19 +3283,20 @@ func (stats_mgr *StatisticsManager) GetCountMetrics(key string) (int64, error) {
 }
 
 func (stats_mgr *StatisticsManager) GetVBCountMetrics(vb uint16) (base.VBCountMetric, error) {
+	var vbCountMetrics base.VBCountMetric
 	if !stats_mgr.variableVBMode {
-		vbCountMetricMap := base.NewTraditionalVBMetrics()
-		for _, collector := range stats_mgr.collectors {
-			err := collector.AddVbSpecificMetrics(vb, vbCountMetricMap)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return vbCountMetricMap, nil
+		vbCountMetrics = base.NewTraditionalVBMetrics()
 	} else {
-		// TODO global checkpoint
-		return nil, fmt.Errorf("TODO global checkpoint")
+		vbCountMetrics = base.NewGlobalVBMetrics()
 	}
+
+	for _, collector := range stats_mgr.collectors {
+		err := collector.AddVbSpecificMetrics(vb, vbCountMetrics)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return vbCountMetrics, nil
 }
 
 func (stats_mgr *StatisticsManager) SetVBCountMetrics(vb uint16, metricKVs base.VBCountMetric) error {
