@@ -12,7 +12,6 @@ package metadata_svc
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/couchbase/goxdcr/v8/base"
@@ -152,17 +151,6 @@ func (service *GlobalSettingsSvc) UpdateGlobalSettings(settings metadata.Replica
 		return nil, nil
 	}
 
-	if val, ok := changedSettingsMap[metadata.GenericServicesLogLevelKey]; ok {
-		jsonStr, ok := val.(string)
-		if !ok {
-			return nil, fmt.Errorf("failed to update global settings.err=Invalid type %T for genericServicesLogLevel. Expected string", val)
-		}
-		updatedJsonStr, err := metadata.ValidateAndFillJson(jsonStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to update global settings. err=%v", err)
-		}
-		globalSettings.Settings.Values[metadata.GenericServicesLogLevelKey] = updatedJsonStr
-	}
 	return nil, service.setGlobalSettings(globalSettings)
 }
 

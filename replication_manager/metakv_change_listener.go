@@ -768,16 +768,16 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 		pscl.logger.Infof("Successfully changed  GOGC setting from(old) %v to(New) %v\n", oldGoGCValue, newSetting.GoGC)
 	}
 	if newSetting.Settings != nil {
-		// represents a json containing the logLevel for individual services
-		genericServicesLogLevel, ok := newSetting.Settings.Values[metadata.GenericServicesLogLevelKey]
+		// represents a map containing the logLevel for individual services
+		val, ok := newSetting.Settings.Values[metadata.GenericServicesLogLevelKey]
 		if ok {
-			genericServicesLogLevelStr, valid := genericServicesLogLevel.(string)
+			// since setting value is defined as interface{}, the actual data type of a setting value may change
+			// after marshalling and unmarshalling
+			// in this case map[string]string becomes map[string]interface{}
+			serviceToLogLevelMap, valid := val.(map[string]interface{})
+
 			if !valid {
-				return fmt.Errorf("failed to apply the LogLevel for specified services. err=Invalid type %T for genericServicesLogLevel. Expected string", genericServicesLogLevel)
-			}
-			serviceToLogLevelMap, err1 := base.ValidateAndConvertStringToJsonType(genericServicesLogLevelStr)
-			if err1 != nil {
-				return fmt.Errorf("failed to apply the LogLevel for specified services. err: %v\n", err1)
+				return fmt.Errorf("failed to apply the LogLevel for specified services. err=Invalid type %T for genericServicesLogLevel. Expected map[string]interface{}", val)
 			}
 			for service, logLevelIface := range serviceToLogLevelMap {
 				log.ServiceToLoggerContext.Lock.RLock()
@@ -791,8 +791,8 @@ func (pscl *GlobalSettingChangeListener) globalSettingChangeHandlerCallback(sett
 					pscl.logger.Errorf("failed to apply the LogLevel for service %v. err=Invalid type %T for logLevel. Expected string", service, logLevelIface)
 					continue
 				}
-				loglevel, err1 := log.LogLevelFromStr(logLevelStr)
-				if err1 != nil {
+				loglevel, err := log.LogLevelFromStr(logLevelStr)
+				if err != nil {
 					pscl.logger.Errorf("%v, setting the loglevel to Info for %v", err, service)
 					//reset it to logLevelInfo
 					loglevel = log.LogLevelInfo
