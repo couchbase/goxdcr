@@ -48,8 +48,15 @@ var genericServices = []string{base.UtilsKey, base.SecuritySvcKey, base.TopoSvcK
 	base.GenericSupervisorKey, base.XDCRFactoryKey, base.PipelineMgrKey, base.ResourceMgrKey, base.BackfillMgrKey,
 	base.DefaultKey, base.AdminPortKey, base.HttpServerKey, base.MsgUtilsKey}
 
-var genericServicesLogLevelDefaultVal, _ = ValidateAndFillJson(base.EmptyJsonObject)
+type ServiceToLogLevelMapType map[string]string
+
+var genericServicesLogLevelDefaultVal = ServiceToLogLevelMapType{}
 var genericServicesLogLevelConfig = &SettingsConfig{genericServicesLogLevelDefaultVal, nil}
+
+func init() {
+	// initialize the map with a default value of 'Info' for each generic service
+	genericServicesLogLevelDefaultVal.Initialize()
+}
 
 var GlobalSettingsConfigMap = map[string]*SettingsConfig{
 	GoMaxProcsKey:              GoMaxProcsConfig,
@@ -163,18 +170,40 @@ func ValidateAndConvertGlobalSettingsValue(key, value string) (convertedValue in
 		if convertedValue == 0 {
 			err = fmt.Errorf("0 is not a valid value for GOGC")
 		}
+	case GenericServicesLogLevelKey:
+		// the input JSON string needs to be converted to map[string]string
+		serviceToLogLevelMap := make(ServiceToLogLevelMapType)
+		err = json.Unmarshal([]byte(value), &serviceToLogLevelMap)
+		if err != nil {
+			return ServiceToLogLevelMapType{}, err
+		}
+		// Add any missing entries to serviceToLogLevelMap and ensure it has the correct number of services
+		err = serviceToLogLevelMap.FillAndValidate()
+		if err != nil {
+			err = fmt.Errorf("invalid input. err=%v", err)
+			return ServiceToLogLevelMapType{}, err
+		}
+		convertedValue = serviceToLogLevelMap
 	}
 	return
 }
 
-func ValidateAndFillJson(jsonInput string) (string, error) {
-	serviceToLogLevelMap, err := base.ValidateAndConvertStringToJsonType(jsonInput)
-	if err != nil {
-		return "", fmt.Errorf("failed to unmarshal the json input %v.err=%v", jsonInput, err)
+func (serviceToLogLevelMap ServiceToLogLevelMapType) Initialize() {
+	// populate the map with default values
+	for _, service := range genericServices {
+		serviceToLogLevelMap[service] = log.LogLevelInfo.String()
 	}
+}
+
+// genericServicesLogLevel can be updated through
+// 1. UI - in this case all the genericServices will be present
+// 2. REST API - the user could enter only those services whose logLevel needs to be changed
+// When retrieving data via the REST API, it must always return logLevels for all services to reflect the current status in the UI.
+// Hence this functions fills the missing entries if any and ensures all the services are present at any point of time
+func (serviceToLogLevelMap ServiceToLogLevelMapType) FillAndValidate() error {
 	for _, service := range genericServices {
 		if _, ok := serviceToLogLevelMap[service]; !ok {
-			//If the input JSON lacks the entry, populate it with the current or default value.
+			//If the input map lacks the entry, populate it with the current or default value.
 			log.ServiceToLoggerContext.Lock.RLock()
 			loggerContext, exists := log.ServiceToLoggerContext.ServiceToContextMap[service]
 			log.ServiceToLoggerContext.Lock.RUnlock()
@@ -188,9 +217,28 @@ func ValidateAndFillJson(jsonInput string) (string, error) {
 	mapLength := len(serviceToLogLevelMap)
 	noOfServices := len(genericServices)
 	if mapLength != noOfServices {
-		return "", fmt.Errorf("failed to ensure the correct length. actual %v expected %v", mapLength, noOfServices)
-	} else {
-		updatedJson, err := json.Marshal(serviceToLogLevelMap)
-		return string(updatedJson), err
+		// can happpen when serviceToLogLevelMap contains invalid service names
+		return fmt.Errorf("serviceToLogLevelMap contains invalid entries: expected %v valid services, but found %v", noOfServices, mapLength)
 	}
+	return nil
+}
+
+func (serviceToLogLevelMap ServiceToLogLevelMapType) SameAs(otherRaw interface{}) bool {
+	other, ok := otherRaw.(ServiceToLogLevelMapType)
+	if !ok {
+		return false
+	}
+	if len(serviceToLogLevelMap) != len(other) {
+		return false
+	}
+	for k, v := range serviceToLogLevelMap {
+		v2, exists := other[k]
+		if !exists {
+			return false
+		}
+		if v != v2 {
+			return false
+		}
+	}
+	return true
 }
