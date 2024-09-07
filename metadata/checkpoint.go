@@ -170,7 +170,13 @@ func (g *GlobalTimestamp) IsSame(targetVBOpaque TargetVBOpaque) bool {
 }
 
 func (g *GlobalTimestamp) Size() int {
-	return int(unsafe.Sizeof(g))
+	var numOfUint64s int
+	var numOfUint16s int
+	for _, oneGlobalVbTimestamp := range *g {
+		numOfUint64s += int(unsafe.Sizeof(oneGlobalVbTimestamp.Target_vb_opaque)) // Sizeof returns num of references
+		numOfUint16s++
+	}
+	return 8*numOfUint64s + 2*numOfUint16s
 }
 
 func (g *GlobalTimestamp) Value() interface{} {
@@ -302,6 +308,11 @@ type TargetPerVBCounters struct {
 	GetDocsCasChangedCnt  uint64 `json:"get_docs_cas_changed_cnt"`
 }
 
+func (t *TargetPerVBCounters) Size() int {
+	numOfUint64s := int(unsafe.Sizeof(t))
+	return numOfUint64s * 8
+}
+
 func (t *TargetPerVBCounters) SameAs(other *TargetPerVBCounters) bool {
 	if t == nil || other == nil {
 		return t == nil && other == nil
@@ -369,6 +380,18 @@ func (t *TargetPerVBCounters) LoadUnmarshalled(v interface{}) error {
 }
 
 type GlobalTargetCounters map[uint16]*TargetPerVBCounters
+
+func (g *GlobalTargetCounters) Size() int {
+	var totalSize int
+	var numOfVBs int
+	for _, perVbCounter := range *g {
+		numOfVBs++
+		totalSize += perVbCounter.Size()
+	}
+
+	return totalSize + numOfVBs*2
+
+}
 
 func (g *GlobalTargetCounters) SameAs(other *GlobalTargetCounters) bool {
 	if g == nil || other == nil {
@@ -451,15 +474,24 @@ func (c *CheckpointRecord) BrokenMappings() *CollectionNamespaceMapping {
 	return &(cloned)
 }
 
+func (c *CheckpointRecord) IsTraditional() bool {
+	return len(c.GlobalTimestamp) == 0
+}
+
 func (c *CheckpointRecord) Size() int {
 	if c == nil {
 		return 0
 	}
 
 	var totalSize int
-	totalSize += int(unsafe.Sizeof(*c))
+	totalSize += int(unsafe.Sizeof(*c)) // This seems to return the number of members
 	totalSize += len(c.BrokenMappingSha256)
-	totalSize += c.Target_vb_opaque.Size()
+	if c.IsTraditional() {
+		totalSize += c.Target_vb_opaque.Size()
+	} else {
+		totalSize += c.GlobalTimestamp.Size()
+		totalSize += c.GlobalCounters.Size()
+	}
 	return totalSize
 }
 
@@ -468,6 +500,7 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 	tgtManifest uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64) (*CheckpointRecord, error) {
 
 	var record *CheckpointRecord
+	var err error
 
 	if incomingMetric.IsTraditional() {
 		if !tgtTimestamp.IsTraditional() {
@@ -476,9 +509,12 @@ func NewCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd uint64,
 		targetSeqno := tgtTimestamp.GetValue().(*TargetVBTimestamp).Target_Seqno
 		record = newTraditionalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, targetSeqno, srcManifestForDCP, srcManifestForBackfill, tgtManifest, brokenMappings, creationTime, incomingMetric)
 	} else {
-		return nil, fmt.Errorf("TODO global checkpoint")
+		record, err = newGlobalCheckpointRecord(failoverUuid, seqno, dcpSnapSeqno, dcpSnapEnd, tgtTimestamp, srcManifestForDCP, srcManifestForBackfill, brokenMappings, creationTime, incomingMetric)
+		if err != nil {
+			return nil, err
+		}
 	}
-	err := record.PopulateBrokenMappingSha()
+	err = record.PopulateBrokenMappingSha()
 	if err != nil {
 		return nil, err
 	}
@@ -563,6 +599,136 @@ func newTraditionalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSe
 		},
 	}
 	return record
+}
+
+func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno uint64, dcpSnapEnd uint64, targetTimestamp TargetTimestamp, srcManifestForDCP uint64, srcManifestForBackfill uint64, brokenMappings CollectionNamespaceMapping, creationTime uint64, incomingMetric base.VBCountMetric) (*CheckpointRecord, error) {
+	vbCountMetrics := incomingMetric.GetValue().(base.GlobalVBMetrics)
+
+	var srcFilteredCntrs SourceFilteredCounters
+	for _, routerKey := range base.RouterVBMetricKeys {
+		vbCountMap := vbCountMetrics[routerKey]
+		if len(vbCountMap) > 1 {
+			return nil, fmt.Errorf("global stats %v should only have 1 vb", routerKey)
+		}
+		var vbKey uint16
+		for vb, _ := range vbCountMap {
+			vbKey = vb
+		}
+		switch routerKey {
+		case base.DocsFiltered:
+			srcFilteredCntrs.Filtered_Items_Cnt = uint64(vbCountMap[vbKey])
+		case base.DocsUnableToFilter:
+			srcFilteredCntrs.Filtered_Failed_Cnt = uint64(vbCountMap[vbKey])
+		case base.ExpiryFiltered:
+			srcFilteredCntrs.FilteredItemsOnExpirationsCnt = uint64(vbCountMap[vbKey])
+		case base.DeletionFiltered:
+			srcFilteredCntrs.FilteredItemsOnDeletionsCnt = uint64(vbCountMap[vbKey])
+		case base.SetFiltered:
+			srcFilteredCntrs.FilteredItemsOnSetCnt = uint64(vbCountMap[vbKey])
+		case base.BinaryFiltered:
+			srcFilteredCntrs.FilteredItemsOnBinaryDocsCnt = uint64(vbCountMap[vbKey])
+		case base.ExpiryStripped:
+			srcFilteredCntrs.FilteredItemsOnExpiryStrippedCnt = uint64(vbCountMap[vbKey])
+		case base.AtrTxnDocsFiltered:
+			srcFilteredCntrs.FilteredItemsOnATRDocsCnt = uint64(vbCountMap[vbKey])
+		case base.ClientTxnDocsFiltered:
+			srcFilteredCntrs.FilteredItemsOnTxnXattrsDocsCnt = uint64(vbCountMap[vbKey])
+		case base.DocsFilteredOnTxnXattr:
+			srcFilteredCntrs.FilteredItemsOnTxnXattrsDocsCnt = uint64(vbCountMap[vbKey])
+		case base.MobileDocsFiltered:
+			srcFilteredCntrs.FilteredItemsOnMobileRecords = uint64(vbCountMap[vbKey])
+		case base.DocsFilteredOnUserDefinedFilter:
+			srcFilteredCntrs.FilteredItemsOnUserDefinedFilters = uint64(vbCountMap[vbKey])
+		}
+	}
+
+	for _, clogKey := range base.CLogVBMetricKeys {
+		vbCountMap := vbCountMetrics[clogKey]
+		if len(vbCountMap) > 1 {
+			return nil, fmt.Errorf("global stats %v should only have 1 vb", clogKey)
+		}
+		var vbKey uint16
+		for vb, _ := range vbCountMap {
+			vbKey = vb
+		}
+		switch clogKey {
+		case base.ConflictDocsFiltered:
+			srcFilteredCntrs.FilteredConflictDocs = uint64(vbCountMap[vbKey])
+		case base.SrcConflictDocsWritten:
+			srcFilteredCntrs.SrcConflictDocsWritten = uint64(vbCountMap[vbKey])
+		case base.TgtConflictDocsWritten:
+			srcFilteredCntrs.TgtConflictDocsWritten = uint64(vbCountMap[vbKey])
+		case base.CRDConflictDocsWritten:
+			srcFilteredCntrs.CRDConflictDocsWritten = uint64(vbCountMap[vbKey])
+		}
+	}
+
+	globalCntrs := make(GlobalTargetCounters)
+	for _, outNozzleKey := range base.OutNozzleVBMetricKeys {
+		vbCountMap := vbCountMetrics[outNozzleKey]
+		for vb, count := range vbCountMap {
+			if globalCntrs[vb] == nil {
+				globalCntrs[vb] = &TargetPerVBCounters{}
+			}
+			switch outNozzleKey {
+			case base.GuardrailResidentRatio:
+				globalCntrs[vb].GuardrailResidentRatioCnt = uint64(count)
+			case base.GuardrailDataSize:
+				globalCntrs[vb].GuardrailDataSizeCnt = uint64(count)
+			case base.GuardrailDiskSpace:
+				globalCntrs[vb].GuardrailDiskSpaceCnt = uint64(count)
+			case base.DocsSentWithSubdocSet:
+				globalCntrs[vb].DocsSentWithSubdocSetCnt = uint64(count)
+			case base.DocsSentWithSubdocDelete:
+				globalCntrs[vb].DocsSentWithSubdocDeleteCnt = uint64(count)
+			case base.DocsCasPoisoned:
+				globalCntrs[vb].CasPoisonCnt = uint64(count)
+			case base.DocsSentWithPoisonedCasErrorMode:
+				globalCntrs[vb].DocsSentWithPoisonedCasErrorMode = uint64(count)
+			case base.DocsSentWithPoisonedCasReplaceMode:
+				globalCntrs[vb].DocsSentWithPoisonedCasReplaceMode = uint64(count)
+			}
+		}
+	}
+
+	for _, targetClogKey := range base.CLogTargetMetricKeys {
+		vbCountMap := vbCountMetrics[targetClogKey]
+		for vb, count := range vbCountMap {
+			if globalCntrs[vb] == nil {
+				globalCntrs[vb] = &TargetPerVBCounters{}
+			}
+			switch targetClogKey {
+			case base.TrueConflictsDetected:
+				globalCntrs[vb].TrueConflictsDetected = uint64(count)
+			case base.CLogHibernatedCount:
+				globalCntrs[vb].CLogHibernatedCnt = uint64(count)
+			case base.GetDocsCasChangedCount:
+				globalCntrs[vb].GetDocsCasChangedCnt = uint64(count)
+			}
+		}
+	}
+
+	globalTs, ok := targetTimestamp.(*GlobalTimestamp)
+	if !ok {
+		return nil, fmt.Errorf("global timestamp passed in of type %T expecting *GlobalTimestamp", targetTimestamp)
+	}
+
+	record := &CheckpointRecord{
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid:                failoverUuid,
+			Seqno:                        seqno,
+			Dcp_snapshot_seqno:           dcpSnapSeqno,
+			Dcp_snapshot_end_seqno:       dcpSnapEnd,
+			SourceManifestForDCP:         srcManifestForDCP,
+			SourceManifestForBackfillMgr: srcManifestForBackfill,
+		},
+		SourceFilteredCounters: srcFilteredCntrs,
+		GlobalCounters:         globalCntrs,
+		GlobalTimestamp:        *globalTs,
+		brokenMappings:         brokenMappings,
+		CreationTime:           creationTime,
+	}
+	return record, nil
 }
 
 func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {

@@ -1971,3 +1971,16 @@ var CLogStatsLoggingMaxFreqInterval time.Duration = 30 * 60 * time.Second
 const ROUTER_NAME_PREFIX = "Router"
 
 var VariableVBSupport = false
+
+var RouterVBMetricKeys = []string{DocsFiltered, DocsUnableToFilter, ExpiryFiltered,
+	DeletionFiltered, SetFiltered, BinaryFiltered, ExpiryStripped,
+	AtrTxnDocsFiltered, ClientTxnDocsFiltered, DocsFilteredOnTxnXattr,
+	MobileDocsFiltered, DocsFilteredOnUserDefinedFilter, DocsCasPoisoned}
+
+var OutNozzleVBMetricKeys = []string{GuardrailResidentRatio, GuardrailDataSize, GuardrailDiskSpace,
+	DocsSentWithSubdocSet, DocsSentWithSubdocDelete,
+	DocsSentWithPoisonedCasErrorMode, DocsSentWithPoisonedCasReplaceMode}
+
+var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten, ConflictDocsFiltered}
+
+var CLogTargetMetricKeys = []string{TrueConflictsDetected, CLogHibernatedCount, GetDocsCasChangedCount}

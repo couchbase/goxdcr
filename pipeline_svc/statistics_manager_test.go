@@ -195,7 +195,7 @@ func TestStatsMgrWithDCPCollector(t *testing.T) {
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc, xmemNozzle)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
@@ -332,7 +332,7 @@ func TestStatsMgrWithExpiration(t *testing.T) {
 
 	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
@@ -405,7 +405,7 @@ func TestStatsMgrWithFilteringStats(t *testing.T) {
 
 	setupMocks(throughSeqSvc, xdcrTopologySvc, utils, activeVBs, pipeline, replicationSpec, runtimeCtx, ckptService, capiSvc, remoteClusterSvc, replSpecSvc, targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc, backfillReplSvc, xmemNozzle)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, false)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
@@ -736,7 +736,7 @@ func TestStatsMgrWithDCPCollectorGlobal(t *testing.T) {
 		targetKVVbMap, remoteClusterRef, dcpNozzle, connector, uiLogSvc, collectionsManifestSvc,
 		backfillReplSvc, xmemNozzle)
 
-	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, true)
+	statsMgr := NewStatisticsManager(throughSeqSvc, xdcrTopologySvc, log.DefaultLoggerContext, activeVBs, "TestBucket", utils, remoteClusterSvc, nil, nil, false, true)
 	assert.NotNil(statsMgr)
 
 	ckptManager := setupCheckpointMgr(ckptService, capiSvc, remoteClusterSvc, replSpecSvc,
@@ -820,10 +820,20 @@ func TestStatsMgrWithDCPCollectorGlobal(t *testing.T) {
 	assert.Nil(err)
 
 	// verify
-	// TODO MB-63393: reactivate as part of getting stats/pipeline resume
-	//vbMetrics, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
-	//assert.Nil(err)
-	//metricsMap = vbMetrics.GetValue().(base.GlobalVBMetrics)
+	vbMetrics, err := statsMgr.GetVBCountMetrics(uprEvent.VBucket)
+	assert.Nil(err)
+	metricsMap = vbMetrics.GetValue().(base.GlobalVBMetrics)
+
+	for _, routerKey := range base.RouterVBMetricKeys {
+		vbCountMap := metricsMap[routerKey]
+		assert.Len(vbCountMap, 1)
+	}
+
+	for _, outNozzleKey := range base.OutNozzleVBMetricKeys {
+		vbCountMap := metricsMap[outNozzleKey]
+		assert.NotEqual(1, len(vbCountMap))
+	}
+
 	//count = metricsMap[service_def2.DOCS_UNABLE_TO_FILTER_METRIC][uprEvent.VBucket]
 	//assert.Equal(int64(10), count)
 	//
