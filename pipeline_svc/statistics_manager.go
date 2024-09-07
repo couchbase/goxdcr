@@ -181,17 +181,9 @@ var OverviewMetricKeys = map[string]service_def.MetricType{
 	service_def.GET_DOCS_CAS_CHANGED_METRIC:         service_def.MetricTypeCounter,
 }
 
-var RouterVBMetricKeys = []string{service_def.DOCS_FILTERED_METRIC, service_def.DOCS_UNABLE_TO_FILTER_METRIC, service_def.EXPIRY_FILTERED_METRIC,
-	service_def.DELETION_FILTERED_METRIC, service_def.SET_FILTERED_METRIC, service_def.BINARY_FILTERED_METRIC, service_def.EXPIRY_STRIPPED_METRIC,
-	service_def.DOCS_FILTERED_TXN_ATR_METRIC, service_def.DOCS_FILTERED_CLIENT_TXN_METRIC, service_def.DOCS_FILTERED_TXN_XATTR_METRIC,
-	service_def.DOCS_FILTERED_MOBILE_METRIC, service_def.DOCS_FILTERED_USER_DEFINED_METRIC, service_def.DOCS_FILTERED_CAS_POISONING_METRIC,
-	service_def.DOCS_FILTERED_CLOG_METRIC}
-
-var OutNozzleVBMetricKeys = []string{service_def.GUARDRAIL_RESIDENT_RATIO_METRIC, service_def.GUARDRAIL_DATA_SIZE_METRIC, service_def.GUARDRAIL_DISK_SPACE_METRIC,
-	service_def.DOCS_SENT_WITH_SUBDOC_SET, service_def.DOCS_SENT_WITH_SUBDOC_DELETE, service_def.DOCS_SENT_WITH_POISONED_CAS_ERROR, service_def.DOCS_SENT_WITH_POISONED_CAS_REPLACE,
-	service_def.TRUE_CONFLICTS_DETECTED, service_def.GET_DOCS_CAS_CHANGED_METRIC}
-
-var CLogVBMetricKeys = []string{service_def.SRC_CONFLICT_DOCS_WRITTEN, service_def.TGT_CONFLICT_DOCS_WRITTEN, service_def.CRD_CONFLICT_DOCS_WRITTEN}
+var VBMetricKeys []string
+var compileVBMetricKeyOnce sync.Once
+var vbMetricKeyLock sync.RWMutex
 
 func NewVBStatsMapFromCkpt(ckptDoc *metadata.CheckpointsDoc, agreedIndex int) base.VBCountMetric {
 	if agreedIndex < 0 || ckptDoc == nil || agreedIndex >= len(ckptDoc.Checkpoint_records) {
@@ -1709,7 +1701,7 @@ func (outNozzle_collector *outNozzleCollector) Mount(pipeline common.Pipeline, s
 		metric_map[service_def.GET_DOCS_CAS_CHANGED_METRIC] = getCasChanged
 
 		listOfVBs := part.ResponsibleVBs()
-		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), OutNozzleVBMetricKeys)
+		outNozzle_collector.vbMetricHelper.Register(outNozzle_collector.Id(), listOfVBs, part.Id(), base.OutNozzleVBMetricKeys)
 		outNozzle_collector.component_map[part.Id()] = metric_map
 		// register outNozzle_collector as the sync event listener/handler for StatsUpdate event
 		part.RegisterComponentEventListener(common.StatsUpdate, outNozzle_collector)
@@ -2577,7 +2569,7 @@ func (r_collector *routerCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 
 		// VB specific stats
 		listOfVbs := routersListOfVB[conn.Id()]
-		r_collector.vbMetricHelper.Register(r_collector.Id(), listOfVbs, conn.Id(), RouterVBMetricKeys)
+		r_collector.vbMetricHelper.Register(r_collector.Id(), listOfVbs, conn.Id(), base.RouterVBMetricKeys)
 		r_collector.component_map[conn.Id()] = metric_map
 	}
 
@@ -3473,7 +3465,7 @@ func (cLogCollector *cLogCollector) Mount(pipeline common.Pipeline, stats_mgr *S
 	for _, source := range sources {
 		responsibleVbs = append(responsibleVbs, source.ResponsibleVBs()...)
 	}
-	cLogCollector.vbMetricHelper.Register(cLogCollector.Id(), responsibleVbs, cLogInstance.Id(), CLogVBMetricKeys)
+	cLogCollector.vbMetricHelper.Register(cLogCollector.Id(), responsibleVbs, cLogInstance.Id(), base.CLogVBMetricKeys)
 
 	// register conflict logger as the async event handler for relevant events
 	async_listener_map := pipeline_pkg.GetAllAsyncComponentEventListeners(pipeline)
