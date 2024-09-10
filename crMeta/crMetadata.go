@@ -184,7 +184,7 @@ func NewSourceDocument(req *base.WrappedMCRequest, source hlv.DocumentSourceId) 
 }
 
 func (doc *SourceDocument) GetMetadata(uncompressFunc base.UncompressFunc) (*CRMetadata, error) {
-	docMeta := base.DecodeSetMetaReq(doc.req.Req)
+	docMeta := base.DecodeSetMetaReq(doc.req)
 	cas, cvCas, cvSrc, cvVer, pvMap, mvMap, importCas, pRev, err := getHlvFromMCRequest(doc.req, uncompressFunc)
 	if err != nil {
 		return nil, err
@@ -345,7 +345,7 @@ func GetMetadataForCR(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []b
 	if resp.Opcode == base.GET_WITH_META {
 		// GET_WITH_META will also be used when only ECCV is on (mobile is off) and cas < max_cas.
 		// source HLV is not parsed and target HLV is not fetched.
-		doc_meta_source = base.DecodeSetMetaReq(req.Req)
+		doc_meta_source = base.DecodeSetMetaReq(req)
 		doc_meta_target, err = base.DecodeGetMetaResp(req.Req.Key, resp, xattrEnabled)
 		if err != nil {
 			err = fmt.Errorf("error decoding GET_META response for key=%v%s%v, respBody=%v%v%v, err=%v", base.UdTagBegin, req.Req.Key, base.UdTagEnd, base.UdTagBegin, resp.Body, base.UdTagEnd, err)
