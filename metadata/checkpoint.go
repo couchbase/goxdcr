@@ -901,8 +901,16 @@ func (ckptRecord *CheckpointRecord) PopulateBrokenMappingSha() error {
 	if ckptRecord.IsTraditional() {
 		return ckptRecord.TargetVBTimestamp.PopulateBrokenMappingSha()
 	} else {
-		// TODO MB-63378
-		return fmt.Errorf("Not implemented ")
+		errMap := make(base.ErrorMap)
+		for vbno, perVbTs := range ckptRecord.GlobalTimestamp {
+			err := perVbTs.PopulateBrokenMappingSha()
+			if err != nil {
+				errMap[fmt.Sprintf("PopulateBrokenMappingSha vb(%v)", vbno)] = err
+			}
+		}
+		if len(errMap) > 0 {
+			return fmt.Errorf(base.FlattenErrorMap(errMap))
+		}
 	}
 	return nil
 }
@@ -1380,7 +1388,6 @@ func (g *GlobalTargetVbUuids) ToGlobalTimestamp() *GlobalTimestamp {
 			TargetVBTimestamp: TargetVBTimestamp{
 				Target_vb_opaque: &TargetVBUuid{pair[1]},
 				Target_Seqno:     pair[0],
-				//TargetManifest:   0, // TODO
 			},
 		}
 	}

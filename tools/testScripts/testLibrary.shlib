@@ -38,6 +38,7 @@ XMEM_REPAIR_CONNECTION="Repairing connection"
 BACKFILL_PIPELINE_START="Starting BackfillPipeline"
 BACKFILL_KILLED="background waiting backfill streams to all be replicated timed out"
 BAD_MAGIC_MSG="bad magic"
+CKPTSEQNO_BACKARD="Checkpoint seqno went backward"
 
 # These should be imported after clusterRunProvision script
 

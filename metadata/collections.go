@@ -2078,7 +2078,11 @@ func (s *ShaToCollectionNamespaceMap) CompressToShaCompressedMap(preExistMap Sha
 		preExistMap[sha] = compressedBytes
 	}
 
-	return nil
+	if len(errorMap) == 0 {
+		return nil
+	} else {
+		return fmt.Errorf(base.FlattenErrorMap(errorMap))
+	}
 }
 
 type CompressedColNamespaceMapping struct {
