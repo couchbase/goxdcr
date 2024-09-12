@@ -77,6 +77,8 @@ function runTestCase {
 	printGlobalScopeAndCollectionInfo
 	checkUnidirectionalChangesLeft
 
+	sleep 5
+
 	runDataLoad
 
 	echo "Waiting 5 seconds before checking item count"
@@ -89,6 +91,7 @@ function runTestCase {
 	pauseReplication "C1" "B1" "C2" "B2"
 	sleep 15
 	grepForPanics
+	validateInternalLogWithInstance "C1" "$CKPTSEQNO_BACKARD" 0
 
 	echo "============================================================================"
 	echo "PASSED"

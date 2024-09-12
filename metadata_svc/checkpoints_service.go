@@ -539,13 +539,11 @@ func (ckpt_svc *CheckpointsService) RecordMappings(replicationId string, ckptRec
 	}
 
 	clonedBrokenMaps := ckptRecord.BrokenMappings()
-	if clonedBrokenMaps != nil && len(clonedBrokenMaps) > 0 {
-		for sha, oneBrokenMap := range clonedBrokenMaps {
-			if oneBrokenMap == nil || len(*oneBrokenMap) == 0 {
-				continue
-			}
-			incrementerFunc(sha, oneBrokenMap)
+	for sha, oneBrokenMap := range clonedBrokenMaps {
+		if oneBrokenMap == nil || len(*oneBrokenMap) == 0 {
+			continue
 		}
+		incrementerFunc(sha, oneBrokenMap)
 	}
 
 	// The following was in a potential wrong place in earlier releases
