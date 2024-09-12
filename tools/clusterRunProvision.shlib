@@ -1509,15 +1509,15 @@ function cleanupBucketReplications {
 	local skipKillOrWaitBg
 
 	while getopts "c" opt; do
-	  case ${opt} in
-	  c)
-	    skipKillOrWaitBg=1
-	    ;;
-	  *)
-	    echo "cleanupBucketReplications: Unknown option $opt"
-	    exit 1
-	    ;;
-	  esac
+		case ${opt} in
+		c)
+			skipKillOrWaitBg=1
+			;;
+		*)
+			echo "cleanupBucketReplications: Unknown option $opt"
+			exit 1
+			;;
+		esac
 	done
 
 	# Certain functions only exist under test library
