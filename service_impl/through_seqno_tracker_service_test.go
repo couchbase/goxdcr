@@ -1203,3 +1203,103 @@ func TestOSOLargeRangeOutOfOrder(t *testing.T) {
 	through_seqno = svc.GetThroughSeqno(1)
 	assert.Equal(uint64(4), through_seqno)
 }
+
+// This test simulates a 128 VB to 1024 VB test
+func TestVariableVBSent(t *testing.T) {
+	fmt.Println("============== Test case start: TestVariableVBSent =================")
+	defer fmt.Println("============== Test case end: TestVariableVBSent =================")
+	assert := assert.New(t)
+	pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc := setupBoilerPlate()
+	svc := setupMocks(pipeline, nozzle, replSpecSvc, runtimeCtx, pipelineSvc)
+
+	mutationEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.UPR_MUTATION,
+	}
+
+	systemEvent := &mcc.UprEvent{
+		VBucket: 1,
+		Opcode:  gomemcached.DCP_SYSTEM_EVENT,
+	}
+
+	var dataSentAdditional parts.DataSentEventAdditional
+	dataSentAdditional.VBucket = 1
+
+	// First let VB 1 replicate to VB 1
+	mutationEvent.Seqno = 1
+	commonEvent := common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.NotNil(commonEvent)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	sentEvent := common.NewEvent(common.DataSent, mutationEvent, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Let VB 1 replicate to VB 2
+	mutationEvent.Seqno = 2
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.VbucketCommon.VBucket = 2
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	dataSentAdditional.VariableVBUsed = true
+	dataSentAdditional.OrigSrcVB = 1
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	// Let VB 1 replicate to VB 3
+	mutationEvent.Seqno = 3
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	dataSentAdditional.VbucketCommon.VBucket = 3
+	dataSentAdditional.Seqno = mutationEvent.Seqno
+	dataSentAdditional.VariableVBUsed = true
+	dataSentAdditional.OrigSrcVB = 1
+	sentEvent = common.NewEvent(common.DataSent, nil, nil, nil, dataSentAdditional)
+	assert.Nil(svc.ProcessEvent(sentEvent))
+
+	through_seqno := svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(3), through_seqno)
+
+	systemEvent.Seqno = 4
+	commonEvent = common.NewEvent(common.SystemEventReceived, systemEvent, nil, nil, nil)
+	oldFilteredLen := svc.vbSystemEventsSeqnoListMap[1].getLengthOfSeqnoLists()
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	newFilteredLen := svc.vbSystemEventsSeqnoListMap[1].getLengthOfSeqnoLists()
+	assert.NotEqual(oldFilteredLen, newFilteredLen)
+
+	// Happy path - through seqno is at 4
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(4), through_seqno)
+
+	mutationEvent.Seqno = 5
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+	mutationEvent.Seqno = 6
+	commonEvent = common.NewEvent(common.DataReceived, mutationEvent, nil, nil, nil)
+	assert.Nil(svc.ProcessEvent(commonEvent))
+
+	wrappedMCR := &base.WrappedMCRequest{
+		Seqno: 5,
+		Req:   &gomemcached.MCRequest{VBucket: 1},
+	}
+
+	ignoreEvent := common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	oldIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
+	assert.Nil(svc.ProcessEvent(ignoreEvent))
+	newIgnoreLen := svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
+	assert.NotEqual(oldIgnoreLen, newIgnoreLen)
+
+	wrappedMCR.Seqno = 6
+	ignoreEvent = common.NewEvent(common.DataNotReplicated, wrappedMCR, nil, nil, nil)
+	oldIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
+	assert.Nil(svc.ProcessEvent(ignoreEvent))
+	newIgnoreLen = svc.vbIgnoredSeqnoListMap[1].GetLengthOfSeqnoList()
+	assert.NotEqual(oldIgnoreLen, newIgnoreLen)
+
+	// Ignored ones should not be counted as through seqno
+	through_seqno = svc.GetThroughSeqno(1)
+	svc.truncateSeqnoLists(1, through_seqno)
+	assert.Equal(uint64(6), through_seqno)
+}
