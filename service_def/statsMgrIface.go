@@ -442,6 +442,7 @@ var (
 	PipelineTypeLabel      = StatsLabel{Name: PrometheusPipelineTypeLabel}
 	PipelineStatusLabel    = StatsLabel{Name: PrometheusPipelineStatusLabel}
 	SourceClusterUUIDLabel = StatsLabel{Name: PrometheusSourceClusterUUIDLabel}
+	SourceClusterNameLabel = StatsLabel{Name: PrometheusSourceClusterNameLabel}
 )
 
 func (s StatsLabel) IsSourceClusterStats() bool {
@@ -465,10 +466,12 @@ var PipelineStatusLabels = StatsLabels{
 
 var SourceClusterV1Labels = StatsLabels{
 	SourceClusterUUIDLabel,
+	SourceClusterNameLabel,
 }
 
 var SourceClusterV1ReplLabels = StatsLabels{
 	SourceClusterUUIDLabel,
+	SourceClusterNameLabel,
 	PipelineStatusLabel,
 }
 
@@ -1533,4 +1536,5 @@ const (
 	PrometheusPipelineTypeLabel      = "pipelineType"
 	PrometheusPipelineStatusLabel    = "status"
 	PrometheusSourceClusterUUIDLabel = "sourceClusterUUID"
+	PrometheusSourceClusterNameLabel = "sourceClusterName"
 )

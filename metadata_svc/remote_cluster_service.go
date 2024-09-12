@@ -4065,6 +4065,11 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 			return
 
 		case <-ticker.C:
+			amIOrchestrator, err := agent.topologySvc.IsOrchestratorNode()
+			if err != nil || !amIOrchestrator {
+				continue
+			}
+
 			if !agent.heartbeatAPIReady() || !agent.specsReaderReady() || !agent.srcSupportsHeartbeat() {
 				continue
 			}
@@ -4073,11 +4078,6 @@ func (agent *RemoteClusterAgent) runHeartbeatSender() {
 			capability, err := agent.GetCapability()
 			if err != nil || !capability.HasHeartbeatSupport() {
 				// check again later
-				continue
-			}
-
-			amIOrchestrator, err := agent.topologySvc.IsOrchestratorNode()
-			if err != nil || !amIOrchestrator {
 				continue
 			}
 

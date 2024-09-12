@@ -10,6 +10,11 @@ package peerToPeer
 
 import (
 	"fmt"
+	"net/http"
+	"sync"
+	"testing"
+	"time"
+
 	base2 "github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	service_def_real "github.com/couchbase/goxdcr/v8/service_def"
@@ -18,10 +23,6 @@ import (
 	utilsMock2 "github.com/couchbase/goxdcr/v8/utils/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"net/http"
-	"sync"
-	"testing"
-	"time"
 )
 
 func setupBoilerPlate() (*service_def.XDCRCompTopologySvc, *utilsMock2.UtilsIface, *service_def.BucketTopologySvc, *service_def.ReplicationSpecSvc, *utils.Utilities, []error, []int, []string, string, chan service_def_real.SourceNotification, *service_def.CheckpointsService, *service_def.BackfillReplSvc, *service_def.CollectionsManifestSvc, *service_def.SecuritySvc, *service_def.BackfillMgrIface, *service_def.RemoteClusterSvc) {
@@ -59,6 +60,9 @@ func setupMocks(utilsMock *utilsMock2.UtilsIface, utilsReal *utils.Utilities, xd
 
 	xdcrComp.On("PeerNodesAdminAddrs").Return(peerNodes, nil)
 	xdcrComp.On("MyHostAddr").Return(myAddr, nil)
+	xdcrComp.On("MyClusterUUID").Return("dummyClusterUUID", nil)
+	xdcrComp.On("MyClusterName").Return("dummyClusterName", nil)
+	xdcrComp.On("IsOrchestratorNode").Return(true, nil)
 
 	retMap := make(map[string]*metadata.ReplicationSpecification)
 	for _, spec := range specList {

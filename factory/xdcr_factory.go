@@ -281,7 +281,7 @@ func (xdcrf *XDCRFactory) newPipelineCommon(topic string, pipelineType common.Pi
 
 	xdcrf.logger.Infof("%v kv_vb_map=%v\n", partTopic, kv_vb_map)
 
-	sourceClusterUUID, err := xdcrf.xdcr_topology_svc.MyClusterUuid()
+	sourceClusterUUID, err := xdcrf.xdcr_topology_svc.MyClusterUUID()
 	if err != nil {
 		return nil, nil, err
 	}

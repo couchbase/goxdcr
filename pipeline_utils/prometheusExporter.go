@@ -12,17 +12,18 @@ import (
 	"bytes"
 	"expvar"
 	"fmt"
+	"strings"
+	"sync"
+
 	"github.com/couchbase/goxdcr/v8/base"
 	"github.com/couchbase/goxdcr/v8/metadata"
 	"github.com/couchbase/goxdcr/v8/service_def"
 	utilities "github.com/couchbase/goxdcr/v8/utils"
-	"strings"
-	"sync"
 )
 
 type ExpVarExporter interface {
 	LoadExpVarMap(m *expvar.Map) bool
-	LoadSourceClustersInfoV1(srcSpecs map[string][]*metadata.ReplicationSpecification, srcNodes map[string][]string)
+	LoadSourceClustersInfoV1(srcClusterNames map[string]string, srcSpecs map[string][]*metadata.ReplicationSpecification, srcNodes map[string][]string)
 	Export() ([]byte, error)
 }
 
@@ -31,6 +32,7 @@ var PrometheusSourceBucketBytes = []byte(service_def.PrometheusSourceBucketLabel
 var PrometheusTargetBucketBytes = []byte(service_def.PrometheusTargetBucketLabel)
 var PrometheusPipelineTypeBytes = []byte(service_def.PrometheusPipelineTypeLabel)
 var PrometheusSourceClusterUuidBytes = []byte(service_def.PrometheusSourceClusterUUIDLabel)
+var PrometheusSourceClusterNameBytes = []byte(service_def.PrometheusSourceClusterNameLabel)
 
 type PrometheusExporter struct {
 	// Read only
@@ -132,7 +134,7 @@ func (m *MetricsMapType) RecordStat(replicationId, statsConst string, value inte
 
 var sourceClusterStats = []string{service_def.SOURCE_CLUSTER_NUM_REPL, service_def.SOURCE_CLUSTER_NUM_NODES}
 
-func (m *MetricsMapType) RecordSourceClusterV1(specsIn map[string][]*metadata.ReplicationSpecification, nodesIn map[string][]string, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
+func (m *MetricsMapType) RecordSourceClusterV1(clusterNameIn map[string]string, specsIn map[string][]*metadata.ReplicationSpecification, nodesIn map[string][]string, lookupMap service_def.StatisticsPropertyMap, constructStatsTable PrometheusLabelsConstructorType) {
 	constValueMap := make(map[string]map[string]int)
 	specsCountMap := make(map[string]int)
 	nodesCountMap := make(map[string]int)
@@ -174,7 +176,7 @@ func (m *MetricsMapType) RecordSourceClusterV1(specsIn map[string][]*metadata.Re
 			if !srcClusterExists {
 				statsProperty := lookupMap[oneStat]
 				labelsTable := constructStatsTable(oneStat)
-				srcClusterUUIDToStatsMap[srcClusterUuid] = NewPerSourceClusterStatsType(statsProperty, labelsTable, []byte(oneStat), srcClusterUuid)
+				srcClusterUUIDToStatsMap[srcClusterUuid] = NewPerSourceClusterStatsType(statsProperty, labelsTable, []byte(oneStat), srcClusterUuid, clusterNameIn[srcClusterUuid])
 			}
 
 			srcClusterUUIDToStatsMap[srcClusterUuid].SetValue(valueToStore)
@@ -484,6 +486,7 @@ type PerSourceClusterStatsType struct {
 
 	StatsNameToOutput []byte
 	SourceClusterUuid string
+	SourceClusterName string
 }
 
 func (p *PerSourceClusterStatsType) UpdateOutputBuffer(metricKey []byte, srcUuid string) {
@@ -492,29 +495,35 @@ func (p *PerSourceClusterStatsType) UpdateOutputBuffer(metricKey []byte, srcUuid
 	if p.LabelsTable != nil {
 		for customLabelName, extractor := range p.LabelsTable {
 			p.appendMetricName(metricKey, p.IndividualLabelBuffer[customLabelName])
-			p.appendStandardLabels(srcUuid, p.IndividualLabelBuffer[customLabelName])
+			p.appendStandardLabels(p.IndividualLabelBuffer[customLabelName])
 			p.appendCustomLabels(p.IndividualLabelBuffer[customLabelName], extractor)
 			p.appendBufferWithValue(p.IndividualLabelBuffer[customLabelName], extractor.GetValueBaseUnit)
 		}
 		p.composeFinalOutputBufferFromLabelBuffers()
 	} else {
 		p.appendMetricName(metricKey, &p.OutputBuffer)
-		p.appendStandardLabels(srcUuid, &p.OutputBuffer)
+		p.appendStandardLabels(&p.OutputBuffer)
 		p.appendBufferWithValue(&p.OutputBuffer, p.GetValueBaseUnit)
 	}
 }
 
-func (p *PerSourceClusterStatsType) appendStandardLabels(uuid string, buffer *[]byte) {
+func (p *PerSourceClusterStatsType) appendStandardLabels(buffer *[]byte) {
 	// {
 	*buffer = append(*buffer, []byte(" {")...)
 
-	// {sourceClusterUUID="abcdef"
+	// {sourceClusterUUID="abcdef",
 	*buffer = append(*buffer, PrometheusSourceClusterUuidBytes...)
 	*buffer = append(*buffer, []byte("=\"")...)
 	*buffer = append(*buffer, []byte(p.SourceClusterUuid)...)
+	*buffer = append(*buffer, []byte("\", ")...)
+
+	// {sourceClusterUUID="abcdef", sourceClusterName="wxyz"
+	*buffer = append(*buffer, PrometheusSourceClusterNameBytes...)
+	*buffer = append(*buffer, []byte("=\"")...)
+	*buffer = append(*buffer, []byte(p.SourceClusterName)...)
 	*buffer = append(*buffer, []byte("\"")...)
 
-	// {sourceClusterUUID="abcdef"}
+	// {sourceClusterUUID="abcdef", sourceClusterName="wxyz"}
 	*buffer = append(*buffer, endBracketWithSpace...)
 }
 
@@ -522,7 +531,7 @@ func (p *PerSourceClusterStatsType) ResetBuffer() {
 	p.resetBuffers()
 }
 
-func NewPerSourceClusterStatsType(properties service_def.StatsProperty, labelsTable PrometheusLabels, keyBytesCache []byte, uuid string) *PerSourceClusterStatsType {
+func NewPerSourceClusterStatsType(properties service_def.StatsProperty, labelsTable PrometheusLabels, keyBytesCache []byte, uuid, clusterName string) *PerSourceClusterStatsType {
 	obj := &PerSourceClusterStatsType{
 		PerItemStatTypeCommon: PerItemStatTypeCommon{
 			Properties:            properties,
@@ -532,6 +541,7 @@ func NewPerSourceClusterStatsType(properties service_def.StatsProperty, labelsTa
 		},
 		StatsNameToOutput: keyBytesCache,
 		SourceClusterUuid: uuid,
+		SourceClusterName: clusterName,
 	}
 	for k, _ := range labelsTable {
 		oneSlice := make([]byte, 0)
@@ -608,7 +618,7 @@ func (p *PrometheusExporter) resetOutputBuffer() {
 	p.outputBufferMtx.Unlock()
 }
 
-func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string) {
+func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcClusterNamesIn map[string]string, srcSpecsIn map[string][]*metadata.ReplicationSpecification, srcNodesIn map[string][]string) {
 	p.mapsMtx.Lock()
 	defer p.mapsMtx.Unlock()
 
@@ -656,7 +666,7 @@ func (p *PrometheusExporter) LoadSourceClustersInfoV1(srcSpecsIn map[string][]*m
 	}
 	if cacheOutdated {
 		p.resetOutputBuffer()
-		p.metricsMap.RecordSourceClusterV1(srcSpecsIn, srcNodesIn, p.globalLookupMap, p.labelsTableConstructor)
+		p.metricsMap.RecordSourceClusterV1(srcClusterNamesIn, srcSpecsIn, srcNodesIn, p.globalLookupMap, p.labelsTableConstructor)
 	}
 }
 

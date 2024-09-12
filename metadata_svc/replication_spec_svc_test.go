@@ -68,7 +68,8 @@ func setupBoilerPlate() (*service_def.XDCRCompTopologySvc,
 		actualFunc := args.Get(4).(utilities.ExponentialOpFunc)
 		actualFunc()
 	}).Return(nil)
-	xdcrTopologyMock.On("MyClusterUuid").Return("dummyClusterUUID", nil)
+	xdcrTopologyMock.On("MyClusterUUID").Return("dummyClusterUUID", nil)
+	xdcrTopologyMock.On("IsOrchestratorNode").Return(true, nil)
 
 	replSettingSvc.On("GetDefaultReplicationSettings").Return(metadata.DefaultReplicationSettings(), nil)
 

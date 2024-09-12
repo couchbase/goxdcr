@@ -87,6 +87,7 @@ const WhoAmIPath = "/whoami"
 // keys used in parsing cluster info
 var NodesKey = "nodes"
 var HostNameKey = "hostname"
+var ClusterNameKey = "clusterName"
 var ThisNodeKey = "thisNode"
 var SSLPortKey = "httpsMgmt"
 var SSLMgtPortKey = "mgmtSSL"

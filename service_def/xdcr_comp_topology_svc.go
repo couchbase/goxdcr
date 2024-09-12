@@ -47,7 +47,10 @@ type XDCRCompTopologySvc interface {
 	NumberOfKVNodes() (int, error)
 
 	// the uuid of the cluster that this xdcr comp is running on
-	MyClusterUuid() (string, error)
+	MyClusterUUID() (string, error)
+
+	// the name assigned by user for the cluster during setup
+	MyClusterName() (string, error)
 
 	// the version of the cluster that this xdcr comp is running on
 	MyNodeVersion() (string, error)

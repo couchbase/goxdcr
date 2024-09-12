@@ -405,7 +405,7 @@ func (service *ReplicationSpecService) ValidateNewReplicationSpec(sourceBucket, 
 	go func() {
 		defer myClusterUUIDWaitGrp.Done()
 		defer srcSideWaitGrpPhase1.Done()
-		sourceClusterUuid, sourceClusterUuidErr = service.xdcr_comp_topology_svc.MyClusterUuid()
+		sourceClusterUuid, sourceClusterUuidErr = service.xdcr_comp_topology_svc.MyClusterUUID()
 	}()
 
 	var myCompatWaitGrp sync.WaitGroup

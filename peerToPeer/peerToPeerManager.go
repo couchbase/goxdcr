@@ -111,16 +111,20 @@ type P2PManagerImpl struct {
 	pushReqMerger func(string, string, interface{}) error
 
 	sourceClusterUUID string
+	sourceClusterName string
 }
 
 func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, securitySvc service_def.SecuritySvc, backfillMgr func() service_def.BackfillMgrIface, remoteClusterSvc service_def.RemoteClusterSvc) (*P2PManagerImpl, error) {
-	randId, err := base.GenerateRandomId(randIdLen, 100)
-	if err != nil {
+	var randId, clusterUUID, clusterName string
+	var err error
+
+	if randId, err = base.GenerateRandomId(randIdLen, 100); err != nil {
 		return nil, err
 	}
-
-	clusterUUID, err := xdcrCompTopologySvc.MyClusterUuid()
-	if err != nil {
+	if clusterUUID, err = xdcrCompTopologySvc.MyClusterUUID(); err != nil {
+		return nil, err
+	}
+	if clusterName, err = xdcrCompTopologySvc.MyClusterName(); err != nil {
 		return nil, err
 	}
 
@@ -147,6 +151,7 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		backfillMgrSvc:      backfillMgr,
 		remoteClusterSvc:    remoteClusterSvc,
 		sourceClusterUUID:   clusterUUID,
+		sourceClusterName:   clusterName,
 	}, nil
 }
 
@@ -1208,7 +1213,7 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 
 	getReqFunc := func(src, tgt string) Request {
 		common := NewRequestCommon(srcStr, target, p.GetLifecycleId(), "", getOpaqueWrapper())
-		req := NewSourceHeartbeatReq(common).SetUUID(p.sourceClusterUUID).SetNodesList(nodesList)
+		req := NewSourceHeartbeatReq(common).SetUUID(p.sourceClusterUUID).SetClusterName(p.sourceClusterName).SetNodesList(nodesList)
 		for _, spec := range specs {
 			req.AppendSpec(spec)
 		}
@@ -1234,16 +1239,16 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 	return nil
 }
 
-func (p *P2PManagerImpl) GetHeartbeatsReceivedV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+func (p *P2PManagerImpl) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
 	p.receiveHandlersMtx.RLock()
 	handlerGeneric, ok := p.receiveHandlers[ReqSrcHeartbeat]
 	p.receiveHandlersMtx.RUnlock()
 	if !ok {
-		return nil, nil, fmt.Errorf("unable to find heartbeat handler")
+		return nil, nil, nil, fmt.Errorf("unable to find heartbeat handler")
 	}
 	srcClustersProvider, ok := handlerGeneric.(SourceClustersProvider)
 	if !ok {
-		return nil, nil, fmt.Errorf("unable to cast heartbeat handler as source cluster provider")
+		return nil, nil, nil, fmt.Errorf("unable to cast heartbeat handler as source cluster provider")
 	}
 	return srcClustersProvider.GetSourceClustersInfoV1()
 }

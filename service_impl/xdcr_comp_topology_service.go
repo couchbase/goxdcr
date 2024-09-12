@@ -39,6 +39,10 @@ type XDCRTopologySvc struct {
 	utils          utilities.UtilsIface
 	clusterWatcher streamApiWatcher.StreamApiWatcher
 
+	clusterDetailsMtx sync.RWMutex
+	clusterName       string
+	clusterUUID       string
+
 	cachedIsKVNode         bool
 	cachedIsKVNodeInitDone bool
 	cachedIsKVNodeMtx      sync.RWMutex
@@ -164,6 +168,7 @@ func NewXDCRTopologySvc(adminport, xdcrRestPort uint16,
 
 	top_svc.clusterWatcher = streamApiWatcher.NewStreamApiWatcher(base.ObservePoolPath, top_svc, utilsIn, nil, top_svc.logger)
 	top_svc.clusterWatcher.Start()
+
 	return top_svc, nil
 }
 
@@ -462,25 +467,63 @@ func (top_svc *XDCRTopologySvc) MyCredentials() (string, string, base.HttpAuthMe
 	return "", "", base.HttpAuthMechPlain, nil, false, nil, nil, nil
 }
 
-func (top_svc *XDCRTopologySvc) MyClusterUuid() (string, error) {
+func (top_svc *XDCRTopologySvc) MyClusterUUID() (string, error) {
+	top_svc.clusterDetailsMtx.RLock()
+	if top_svc.clusterUUID != "" {
+		defer top_svc.clusterDetailsMtx.RUnlock()
+		return top_svc.clusterUUID, nil
+	}
+	top_svc.clusterDetailsMtx.RUnlock()
+
 	var poolsInfo map[string]interface{}
 	stopFunc := top_svc.utils.StartDiagStopwatch("MyClusterUuid()", base.DiagInternalThreshold)
 	defer stopFunc()
 	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.PoolsPath, false, base.MethodGet, "", nil, 0, &poolsInfo, top_svc.logger)
 	if err != nil || statusCode != 200 {
-		return "", errors.New(fmt.Sprintf("Failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode))
+		return "", fmt.Errorf("failed on calling %v, err=%v, statusCode=%v", base.PoolsPath, err, statusCode)
 	}
 
 	uuidObj, ok := poolsInfo[base.RemoteClusterUuid]
 	if !ok {
-		return "", errors.New("Could not get uuid of local cluster.")
-	}
-	uuid, ok := uuidObj.(string)
-	if !ok {
-		return "", errors.New(fmt.Sprintf("uuid of local cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(uuid)))
+		return "", errors.New("could not get uuid of local cluster")
 	}
 
-	return uuid, nil
+	top_svc.clusterDetailsMtx.Lock()
+	defer top_svc.clusterDetailsMtx.Unlock()
+	if top_svc.clusterUUID, ok = uuidObj.(string); !ok {
+		return "", fmt.Errorf("uuid of local cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(uuidObj))
+	}
+
+	return top_svc.clusterUUID, nil
+}
+
+func (top_svc *XDCRTopologySvc) MyClusterName() (string, error) {
+	top_svc.clusterDetailsMtx.RLock()
+	if top_svc.clusterName != "" {
+		defer top_svc.clusterDetailsMtx.RUnlock()
+		return top_svc.clusterName, nil
+	}
+	top_svc.clusterDetailsMtx.RUnlock()
+
+	var defaultPoolsInfo map[string]interface{}
+
+	err, statusCode := top_svc.utils.QueryRestApi(top_svc.staticHostAddr(), base.DefaultPoolPath, false, base.MethodGet, "", nil, 0, &defaultPoolsInfo, top_svc.logger)
+	if err != nil || statusCode != 200 {
+		return "", fmt.Errorf("failed on calling %v, err=%v, statusCode=%v", base.DefaultPoolPath, err, statusCode)
+	}
+
+	clusterName, ok := defaultPoolsInfo[base.ClusterNameKey]
+	if !ok {
+		return "", fmt.Errorf("%v response contains no value for %v", base.DefaultPoolPath, base.ClusterNameKey)
+	}
+
+	top_svc.clusterDetailsMtx.Lock()
+	defer top_svc.clusterDetailsMtx.Unlock()
+	if top_svc.clusterName, ok = clusterName.(string); !ok {
+		return "", fmt.Errorf("name of local cluster is of wrong type. Expected type: string; Actual type: %s", reflect.TypeOf(clusterName))
+	}
+
+	return top_svc.clusterName, nil
 }
 
 func (top_svc *XDCRTopologySvc) MyNodeVersion() (string, error) {

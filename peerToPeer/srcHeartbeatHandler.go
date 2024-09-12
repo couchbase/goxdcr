@@ -13,7 +13,7 @@ import (
 )
 
 type SourceClustersProvider interface {
-	GetSourceClustersInfoV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)
+	GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error)
 }
 
 type HeartbeatCache struct {
@@ -23,6 +23,7 @@ type HeartbeatCache struct {
 	refreshTime time.Time
 
 	SourceClusterUUID string
+	SourceClusterName string
 	SourceSpecsList   metadata.ReplSpecList
 	NodesList         []string
 }
@@ -30,6 +31,7 @@ type HeartbeatCache struct {
 // note: should NOT be concurrently called on the same HeartbeatCache value
 func (h *HeartbeatCache) LoadInfoFrom(req *SourceHeartbeatReq) {
 	h.SourceClusterUUID = req.SourceClusterUUID
+	h.SourceClusterName = req.SourceClusterName
 	h.NodesList = req.NodesList
 	h.SourceSpecsList = req.specs
 }
@@ -208,24 +210,25 @@ func (s *SrcHeartbeatHandler) PrintStatusSummary() {
 		return
 	}
 
-	var outputBuffer []string
-
-	outputBuffer = append(outputBuffer, "Heartbeats heard from: ")
-	var atleastOne bool
 	s.heartbeatMtx.RLock()
 	defer s.heartbeatMtx.RUnlock()
-	for srcUUID, cache := range s.heartbeatMap {
-		atleastOne = true
-		outputBuffer = append(outputBuffer, fmt.Sprintf("SrcUUID: %v ", srcUUID))
-		outputBuffer = append(outputBuffer, fmt.Sprintf("Nodes: %v ", cache.NodesList))
-		for _, spec := range cache.SourceSpecsList {
-			outputBuffer = append(outputBuffer, fmt.Sprintf("SrcBucket %v TgtBucket %v ", spec.SourceBucketName, spec.TargetBucketName))
-		}
+
+	if len(s.heartbeatMap) == 0 {
+		return
 	}
 
-	if atleastOne {
-		s.logger.Infof(strings.Join(outputBuffer, " "))
+	var statusLogStmt strings.Builder
+	statusLogStmt.WriteString("Heartbeats heard from ")
+
+	for srcUUID, cache := range s.heartbeatMap {
+		statusLogStmt.WriteString(fmt.Sprintf("- SrcUUID: %v SrcName: %v Nodes: %v Replications: { ", srcUUID, cache.SourceClusterName, cache.NodesList))
+		for _, spec := range cache.SourceSpecsList {
+			statusLogStmt.WriteString(fmt.Sprintf("SrcBucket %v => TgtBucket %v ", spec.SourceBucketName, spec.TargetBucketName))
+		}
+		statusLogStmt.WriteString("} ")
 	}
+
+	s.logger.Infof(statusLogStmt.String())
 }
 
 func (s *SrcHeartbeatHandler) forwardToPeers(origReq *SourceHeartbeatReq) {
@@ -234,7 +237,7 @@ func (s *SrcHeartbeatHandler) forwardToPeers(origReq *SourceHeartbeatReq) {
 	opts := NewSendOpts(false, base.P2PCommTimeout, base.PeerToPeerMaxRetry)
 	getReqFunc := func(src, tgt string) Request {
 		requestCommon := NewRequestCommon(src, tgt, s.lifecycleIdGetter(), "", getOpaqueWrapper())
-		return NewSourceHeartbeatReq(requestCommon).LoadFromTemplate(origReq)
+		return NewSourceHeartbeatReq(requestCommon).LoadInfoFrom(origReq)
 	}
 
 	err, peersFailedToSend := s.sendFunc(ReqSrcHeartbeat, getReqFunc, opts)
@@ -251,7 +254,8 @@ func (s *SrcHeartbeatHandler) forwardToPeers(origReq *SourceHeartbeatReq) {
 	}
 }
 
-func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+	sourceClusterNamesMap := make(map[string]string)
 	sourceUuidSpecsMap := make(map[string][]*metadata.ReplicationSpecification)
 	sourceUuidNodesMap := make(map[string][]string)
 
@@ -260,13 +264,14 @@ func (s *SrcHeartbeatHandler) GetSourceClustersInfoV1() (map[string][]*metadata.
 	for srcUUID, hb := range s.heartbeatMap {
 		hb.cacheMtx.RLock()
 
+		sourceClusterNamesMap[srcUUID] = hb.SourceClusterName
 		sourceUuidSpecsMap[srcUUID] = hb.SourceSpecsList.Clone()
 		sourceUuidNodesMap[srcUUID] = base.SortStringList(base.CloneStringList(hb.NodesList))
 
 		hb.cacheMtx.RUnlock()
 	}
 
-	return sourceUuidSpecsMap, sourceUuidNodesMap, nil
+	return sourceClusterNamesMap, sourceUuidSpecsMap, sourceUuidNodesMap, nil
 }
 
 func (s *SrcHeartbeatHandler) periodicPrintSummary() {

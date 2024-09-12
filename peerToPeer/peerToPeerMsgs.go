@@ -2120,6 +2120,7 @@ type SourceHeartbeatReq struct {
 	RequestCommon
 
 	SourceClusterUUID string
+	SourceClusterName string
 	NodesList         []string
 	ProxyMode         bool // ProxyMode is set when the receiver node needs to forward the request to its peers
 
@@ -2137,8 +2138,9 @@ func NewSourceHeartbeatReq(common RequestCommon) *SourceHeartbeatReq {
 	return req
 }
 
-func (s *SourceHeartbeatReq) LoadFromTemplate(orig *SourceHeartbeatReq) *SourceHeartbeatReq {
+func (s *SourceHeartbeatReq) LoadInfoFrom(orig *SourceHeartbeatReq) *SourceHeartbeatReq {
 	s.SourceClusterUUID = orig.SourceClusterUUID
+	s.SourceClusterName = orig.SourceClusterName
 	s.specs = orig.specs
 	s.NodesList = orig.NodesList
 	s.ProxyMode = orig.ProxyMode
@@ -2151,6 +2153,11 @@ func (s *SourceHeartbeatReq) AppendSpec(spec *metadata.ReplicationSpecification)
 
 func (s *SourceHeartbeatReq) SetUUID(uuid string) *SourceHeartbeatReq {
 	s.SourceClusterUUID = uuid
+	return s
+}
+
+func (s *SourceHeartbeatReq) SetClusterName(name string) *SourceHeartbeatReq {
+	s.SourceClusterName = name
 	return s
 }
 
@@ -2203,11 +2210,10 @@ func (s *SourceHeartbeatReq) SameAs(otherRaw interface{}) (bool, error) {
 
 	// Ignore compressed payload because it's mostly used for serialization
 
-	if s.SourceClusterUUID != other.SourceClusterUUID {
-		return false, nil
-	}
-
-	if len(s.NodesList) != len(other.NodesList) {
+	if s.SourceClusterUUID != other.SourceClusterUUID ||
+		s.SourceClusterName != other.SourceClusterName ||
+		len(s.NodesList) != len(other.NodesList) ||
+		len(s.specs) != len(other.specs) {
 		return false, nil
 	}
 
@@ -2215,10 +2221,6 @@ func (s *SourceHeartbeatReq) SameAs(otherRaw interface{}) (bool, error) {
 		if other.NodesList[i] != node {
 			return false, nil
 		}
-	}
-
-	if len(s.specs) != len(other.specs) {
-		return false, nil
 	}
 
 	for i, spec := range s.specs {

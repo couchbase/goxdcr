@@ -127,7 +127,9 @@ func TestPrometheusRemoteHeartbeat(t *testing.T) {
 	var tgtBucketName2 = "tgtBucket2"
 
 	var srcClusterUuid1 = "abcde"
+	var srcClusterName1 = "name1"
 	var srcClusterUuid2 = "fghij"
+	var srcClusterName2 = "name2"
 
 	spec1, err := metadata.NewReplicationSpecification(srcBucketName, "", tgtBucketName, "", "")
 	assert.Nil(err)
@@ -136,6 +138,10 @@ func TestPrometheusRemoteHeartbeat(t *testing.T) {
 	assert.Nil(err)
 
 	// GetHeartbeatsReceivedV1 outputs
+	sourceClusterNames := make(map[string]string)
+	sourceClusterNames[srcClusterUuid1] = srcClusterName1
+	sourceClusterNames[srcClusterUuid2] = srcClusterName2
+
 	sourceSpecs := make(map[string][]*metadata.ReplicationSpecification)
 	sourceSpecs[srcClusterUuid1] = []*metadata.ReplicationSpecification{spec1, spec2}
 	sourceSpecs[srcClusterUuid2] = []*metadata.ReplicationSpecification{spec1}
@@ -170,7 +176,7 @@ func TestPrometheusRemoteHeartbeat(t *testing.T) {
 	exporter.expVarParseMap = convertedMap
 
 	exporter.LoadMetricsMap(true)
-	exporter.LoadSourceClustersInfoV1(sourceSpecs, sourceNodes)
+	exporter.LoadSourceClustersInfoV1(sourceClusterNames, sourceSpecs, sourceNodes)
 
 	numNodes := exporter.metricsMap[service_def.SOURCE_CLUSTER_NUM_NODES]
 	assert.NotNil(numNodes)

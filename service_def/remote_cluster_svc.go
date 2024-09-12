@@ -111,5 +111,8 @@ type RemoteClusterSvc interface {
 
 type ClusterHeartbeatAPI interface {
 	SendHeartbeatToRemoteV1(reference *metadata.RemoteClusterReference, specs []*metadata.ReplicationSpecification) error
-	GetHeartbeatsReceivedV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)
+
+	// Provides the heartbeats received from source clusters in the form of maps keyed on cluster UUIDs,
+	// pointing to values of: 1) cluster name, 2) replication specifications, and 3) list of cluster nodes.
+	GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error)
 }

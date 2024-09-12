@@ -88,42 +88,51 @@ func (_c *P2PManager_CheckVBMaster_Call) RunAndReturn(run func(peerToPeer.Bucket
 }
 
 // GetHeartbeatsReceivedV1 provides a mock function with given fields:
-func (_m *P2PManager) GetHeartbeatsReceivedV1() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
+func (_m *P2PManager) GetHeartbeatsReceivedV1() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetHeartbeatsReceivedV1")
 	}
 
-	var r0 map[string][]*metadata.ReplicationSpecification
-	var r1 map[string][]string
-	var r2 error
-	if rf, ok := ret.Get(0).(func() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)); ok {
+	var r0 map[string]string
+	var r1 map[string][]*metadata.ReplicationSpecification
+	var r2 map[string][]string
+	var r3 error
+	if rf, ok := ret.Get(0).(func() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error)); ok {
 		return rf()
 	}
-	if rf, ok := ret.Get(0).(func() map[string][]*metadata.ReplicationSpecification); ok {
+	if rf, ok := ret.Get(0).(func() map[string]string); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string][]*metadata.ReplicationSpecification)
+			r0 = ret.Get(0).(map[string]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func() map[string][]string); ok {
+	if rf, ok := ret.Get(1).(func() map[string][]*metadata.ReplicationSpecification); ok {
 		r1 = rf()
 	} else {
 		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(map[string][]string)
+			r1 = ret.Get(1).(map[string][]*metadata.ReplicationSpecification)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func() error); ok {
+	if rf, ok := ret.Get(2).(func() map[string][]string); ok {
 		r2 = rf()
 	} else {
-		r2 = ret.Error(2)
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).(map[string][]string)
+		}
 	}
 
-	return r0, r1, r2
+	if rf, ok := ret.Get(3).(func() error); ok {
+		r3 = rf()
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // P2PManager_GetHeartbeatsReceivedV1_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetHeartbeatsReceivedV1'
@@ -143,12 +152,12 @@ func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) Run(run func()) *P2PManager_G
 	return _c
 }
 
-func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) Return(_a0 map[string][]*metadata.ReplicationSpecification, _a1 map[string][]string, _a2 error) *P2PManager_GetHeartbeatsReceivedV1_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) Return(_a0 map[string]string, _a1 map[string][]*metadata.ReplicationSpecification, _a2 map[string][]string, _a3 error) *P2PManager_GetHeartbeatsReceivedV1_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3)
 	return _c
 }
 
-func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) RunAndReturn(run func() (map[string][]*metadata.ReplicationSpecification, map[string][]string, error)) *P2PManager_GetHeartbeatsReceivedV1_Call {
+func (_c *P2PManager_GetHeartbeatsReceivedV1_Call) RunAndReturn(run func() (map[string]string, map[string][]*metadata.ReplicationSpecification, map[string][]string, error)) *P2PManager_GetHeartbeatsReceivedV1_Call {
 	_c.Call.Return(run)
 	return _c
 }

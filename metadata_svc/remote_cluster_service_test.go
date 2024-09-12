@@ -111,6 +111,7 @@ func setupMocksRCS(uiLogSvcMock *service_def.UILogSvc,
 func setupXDCRTopologyMock(topologyMock *service_def.XDCRCompTopologySvc) {
 	topologyMock.On("IsMyClusterEnterprise").Return(true, nil)
 	topologyMock.On("IsMyClusterEncryptionLevelStrict").Return(false)
+	topologyMock.On("IsOrchestratorNode").Return(true, nil)
 }
 
 func setupMetaSvcMockGeneric(metadataSvcMock *service_def.MetadataSvc, remoteClusterRef *metadata.RemoteClusterReference) {
