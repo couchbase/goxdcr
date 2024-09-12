@@ -349,7 +349,7 @@ func decodeSetMetaReq(req *mc.MCRequest) documentMetadata {
 	ret.expiry = binary.BigEndian.Uint32(req.Extras[4:8])
 	ret.revSeq = binary.BigEndian.Uint64(req.Extras[8:16])
 	ret.cas = req.Cas
-	ret.deletion = (req.Opcode == base.DELETE_WITH_META)
+	ret.deletion = (encodeOpCode(req, false /* isCustomCR */) == base.DELETE_WITH_META)
 	ret.dataType = req.DataType
 
 	return ret
