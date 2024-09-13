@@ -714,7 +714,10 @@ func (ckpt_svc *CheckpointsService) constructCheckpointDoc(content []byte, rev i
 			return nil, err
 		}
 		if len(shaToBrokenMapping) > 0 {
-			ckpt_svc.populateActualMapping(ckpt_doc, shaToBrokenMapping)
+			err := ckpt_svc.populateActualMapping(ckpt_doc, shaToBrokenMapping)
+			if err != nil {
+				return nil, err
+			}
 		}
 		return ckpt_doc, nil
 	} else {

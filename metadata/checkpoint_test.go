@@ -577,3 +577,133 @@ func TestGlobalTimestamp_GetValue(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
+	fmt.Println("============== Test case start: TestCheckpointDocMarshallerGlobalCkpt =================")
+	defer fmt.Println("============== Test case end: TestCheckpointDocMarshallerGlobalCkpt =================")
+	assert := assert.New(t)
+
+	vbUuidAndTimestamp := &TargetVBUuidAndTimestamp{
+		Target_vb_uuid: "abc",
+		Startup_time:   "012",
+	}
+	newCkptRecord := CheckpointRecord{
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid:                0,
+			Seqno:                        1,
+			Dcp_snapshot_seqno:           2,
+			Dcp_snapshot_end_seqno:       3,
+			SourceManifestForDCP:         7,
+			SourceManifestForBackfillMgr: 8,
+		},
+		SourceFilteredCounters: SourceFilteredCounters{
+			Filtered_Items_Cnt:  5,
+			Filtered_Failed_Cnt: 6,
+		},
+		GlobalTimestamp: GlobalTimestamp{
+			100: &GlobalVBTimestamp{
+				TargetVBTimestamp{
+					Target_vb_opaque: vbUuidAndTimestamp,
+					Target_Seqno:     5,
+					TargetManifest:   10,
+				},
+			},
+		},
+		GlobalCounters: GlobalTargetCounters{
+			1: &TargetPerVBCounters{
+				CasPoisonCnt: 2,
+			},
+		},
+	}
+
+	ns1, err := base.NewCollectionNamespaceFromString("s1.col1")
+	assert.Nil(err)
+	ns2, err := base.NewCollectionNamespaceFromString("s1.col2")
+	assert.Nil(err)
+
+	brokenMap := make(CollectionNamespaceMapping)
+	brokenMap.AddSingleMapping(&ns1, &ns2)
+	brokenMap1Sha, err := brokenMap.Sha256()
+	assert.Nil(err)
+
+	brokenMap2 := make(CollectionNamespaceMapping)
+	brokenMap2.AddSingleMapping(&ns2, &ns1)
+	brokenMap2Sha, err := brokenMap.Sha256()
+	assert.Nil(err)
+
+	ckptRecord2 := CheckpointRecord{
+		SourceVBTimestamp: SourceVBTimestamp{
+			Failover_uuid:                0,
+			Seqno:                        1,
+			Dcp_snapshot_seqno:           2,
+			Dcp_snapshot_end_seqno:       3,
+			SourceManifestForDCP:         7,
+			SourceManifestForBackfillMgr: 8,
+		},
+		SourceFilteredCounters: SourceFilteredCounters{
+			Filtered_Items_Cnt:  5,
+			Filtered_Failed_Cnt: 6,
+		},
+		GlobalTimestamp: GlobalTimestamp{
+			100: &GlobalVBTimestamp{
+				TargetVBTimestamp{
+					Target_vb_opaque:    vbUuidAndTimestamp,
+					Target_Seqno:        5,
+					TargetManifest:      10,
+					BrokenMappingSha256: fmt.Sprintf("%s", brokenMap1Sha[:]),
+					brokenMappings:      brokenMap,
+				},
+			},
+			200: &GlobalVBTimestamp{
+				TargetVBTimestamp{
+					Target_vb_opaque:    vbUuidAndTimestamp,
+					Target_Seqno:        5,
+					TargetManifest:      10,
+					BrokenMappingSha256: fmt.Sprintf("%s", brokenMap2Sha[:]),
+					brokenMappings:      brokenMap2,
+				},
+			},
+		},
+		GlobalCounters: GlobalTargetCounters{
+			1: &TargetPerVBCounters{
+				CasPoisonCnt: 2,
+			},
+		},
+	}
+	assert.Nil(ckptRecord2.PopulateBrokenMappingSha())
+
+	ckpt_doc := NewCheckpointsDoc("testInternalId")
+	added, _ := ckpt_doc.AddRecord(&newCkptRecord)
+	assert.True(added)
+	added, _ = ckpt_doc.AddRecord(&ckptRecord2)
+	assert.True(added)
+
+	marshalledData, err := json.Marshal(ckpt_doc)
+	assert.Nil(err)
+
+	ckptDocCompressed, shaMapCompressed, err := ckpt_doc.SnappyCompress()
+	assert.Nil(err)
+
+	var checkDoc CheckpointsDoc
+	err = json.Unmarshal(marshalledData, &checkDoc)
+	assert.Nil(err)
+	shaToBrokenMap := make(ShaToCollectionNamespaceMap)
+	shaToBrokenMap[fmt.Sprintf("%s", brokenMap1Sha)] = &brokenMap
+	shaToBrokenMap[fmt.Sprintf("%s", brokenMap2Sha)] = &brokenMap2
+
+	assert.Equal(5, len(checkDoc.Checkpoint_records))
+	assert.NotNil(checkDoc.Checkpoint_records[1])
+	assert.True(checkDoc.Checkpoint_records[1].SameAs(&newCkptRecord))
+	assert.Equal(newCkptRecord.SourceManifestForBackfillMgr, checkDoc.Checkpoint_records[1].SourceManifestForBackfillMgr)
+	assert.NotNil(checkDoc.Checkpoint_records[0])
+	assert.True(checkDoc.Checkpoint_records[0].SameAs(&ckptRecord2))
+
+	var decompressCheck CheckpointsDoc
+	assert.Nil(decompressCheck.SnappyDecompress(ckptDocCompressed, shaMapCompressed))
+	assert.Equal(5, len(decompressCheck.Checkpoint_records))
+	assert.NotNil(decompressCheck.Checkpoint_records[1])
+	assert.True(decompressCheck.Checkpoint_records[1].SameAs(&newCkptRecord))
+	assert.Equal(newCkptRecord.SourceManifestForBackfillMgr, decompressCheck.Checkpoint_records[1].SourceManifestForBackfillMgr)
+	assert.NotNil(decompressCheck.Checkpoint_records[0])
+	assert.True(decompressCheck.Checkpoint_records[0].SameAs(&ckptRecord2))
+}
