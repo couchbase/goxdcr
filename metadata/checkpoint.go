@@ -133,7 +133,10 @@ func (t *TargetVBTimestamp) SameAs(other *TargetVBTimestamp) bool {
 		return t == nil && other == nil
 	}
 
-	return t.Target_vb_opaque.IsSame(other.Target_vb_opaque) &&
+	targetVBOpaqueSame := t.Target_vb_opaque == nil && other.Target_vb_opaque == nil ||
+		t.Target_vb_opaque != nil && other.Target_vb_opaque != nil && t.Target_vb_opaque.IsSame(other.Target_vb_opaque)
+
+	return targetVBOpaqueSame &&
 		t.Target_Seqno == other.Target_Seqno &&
 		t.TargetManifest == other.TargetManifest &&
 		t.BrokenMappingSha256 == other.BrokenMappingSha256
