@@ -54,13 +54,15 @@ function validateDataLoad {
 function runTestCase {
 	# Vbucket settings
 	# ----------------------
-	CLUSTER_VBCOUNT_MAP=(["C1"]=128 ["C2"]=128)
+	#CLUSTER_VBCOUNT_MAP=(["C1"]=128 ["C2"]=128)
 
 	echo "============================================================================"
 	echo "Running 128 to 128 VB basic test"
 	echo "============================================================================"
-	cleanClusterRun
-	setupTopologies -c -v
+	# Since ns_server has made magma the default, the VBucket count is now 128 by default
+	#cleanClusterRun
+
+	setupTopologies
 	if (($? != 0)); then
 		exit 1
 	fi
@@ -99,9 +101,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-	cleanupBucketReplications -c
+	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
-
-	CLUSTER_VBCOUNT_MAP=()
 }
