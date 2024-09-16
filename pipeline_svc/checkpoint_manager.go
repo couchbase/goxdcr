@@ -1754,7 +1754,9 @@ func (ckmgr *CheckpointManager) PerformCkpt(fin_ch chan bool) {
 	// get through seqnos for all vbuckets in the pipeline
 	through_seqno_map, srcManifestIds, tgtManifestIds = ckmgr.through_seqno_tracker_svc.GetThroughSeqnosAndManifestIds()
 	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
-	ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
+	vbSeqnoMap := base.VbSeqnoMapType(through_seqno_map)
+	// Clone because statsMgr has collectors that handle things in background and we want to avoid potential modification
+	ckmgr.statsMgr.HandleLatestThroughSeqnos(vbSeqnoMap.Clone())
 	// get high seqno and vbuuid for all vbuckets in the pipeline
 	high_seqno_and_vbuuid_map, err = ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch, false)
 	if err != nil {
@@ -1863,7 +1865,9 @@ func (ckmgr *CheckpointManager) gatherCkptData(fin_ch chan bool, through_seqno_m
 		through_seqno_map = ckmgr.through_seqno_tracker_svc.GetThroughSeqnos()
 	}
 	// Let statsmgr know of the latest through seqno for it to prepare data for checkpointing
-	ckmgr.statsMgr.HandleLatestThroughSeqnos(through_seqno_map)
+	vbSeqnoMap := base.VbSeqnoMapType(through_seqno_map)
+	// Clone because statsMgr has collectors that handle things in background and we want to avoid potential modification
+	ckmgr.statsMgr.HandleLatestThroughSeqnos(vbSeqnoMap.Clone())
 	// get high seqno and vbuuid for all vbuckets in the pipeline
 	high_seqno_and_vbuuid_map, err := ckmgr.getHighSeqnoAndVBUuidFromTarget(fin_ch, true)
 	return through_seqno_map, srcManifestIds, tgtManifestIds, high_seqno_and_vbuuid_map, err
