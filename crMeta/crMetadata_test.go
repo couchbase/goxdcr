@@ -56,7 +56,7 @@ func TestConstructCustomCRXattrForSetMeta(t *testing.T) {
 	dh3 := base.Uint64ToHexLittleEndianAndStrip0s(d3)
 	dh4 := base.Uint64ToHexLittleEndianAndStrip0s(d4)
 
-	// _vv:{"ver":"0x0b0085b25e8d1416","src":"Cluster4","pv":{"Cluster1@0x0000f8da4d881416","Cluster2@0x1500f8da4d881416","Cluster3@0x2000f8da4d881416"]}
+	// _vv:{"ver":"0x0b0085b25e8d1416","src":"Cluster4","pv":{"0x0000f8da4d881416@Cluster1","0x1500f8da4d881416@Cluster2","0x2000f8da4d881416@Cluster3"]}
 	ver, err := base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
 	assert.Nil(err)
 
@@ -81,45 +81,45 @@ func TestConstructCustomCRXattrForSetMeta(t *testing.T) {
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
-	newXattr := "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":[\"Cluster4@0x0b0085b25e8d1416\"]}\x00"
+	newXattr := "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":[\"0x0b0085b25e8d1416@Cluster4\"]}\x00"
 	assert.Equal(newXattr, string(body[4:pos]))
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 3: New change (cas=ver+1000) with existing XATTR (pv with deltas):
-	// _vv:{\"cvCas\":\"0xf30385b25e8d1416\","ver":"0x0b0085b25e8d1416","src":"Cluster4","pv":["Cluster1@0x0000f8da4d881416","Cluster2@0x1500f8da4d881416","Cluster3@0x2000f8da4d881416"]}
-	// oldXattr = "_vv\x00{\"cvCas\":\"0x0b0085b25e8d1416\",\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x1500f8da4d881416\",\"Cluster3@0x2000f8da4d881416\"]}\x00"
+	// _vv:{\"cvCas\":\"0xf30385b25e8d1416\","ver":"0x0b0085b25e8d1416","src":"Cluster4","pv":["0x0000f8da4d881416@Cluster1","0x1500f8da4d881416@Cluster2","0x2000f8da4d881416@Cluster3"]}
+	// oldXattr = "_vv\x00{\"cvCas\":\"0x0b0085b25e8d1416\",\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"0x0000f8da4d881416@Cluster1\",\"0x1500f8da4d881416@Cluster2\",\"0x2000f8da4d881416@Cluster3\"]}\x00"
 	meta, err = NewMetadataForTest(docKey, sourceClusterId, ver+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		[]byte(fmt.Sprintf(`["%s@%s","%s@%s","%s@%s"]`, s1, dh1, s2, dh2, s3, dh3)), nil)
+		[]byte(fmt.Sprintf(`["%s@%s","%s@%s","%s@%s"]`, dh1, s1, dh2, s2, dh3, s3)), nil)
 	assert.Nil(err)
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
-	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s","%s@%s"]}`, s1, dh1, s2, dh2, s3, dh3, s4, dh4))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s","%s@%s"]}`, dh1, s1, dh2, s2, dh3, s3, dh4, s4))
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 4: New change (cas=ver+1000) with existing XATTR (mv):
 	meta, err = NewMetadataForTest(docKey, sourceClusterId, ver+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		nil, []byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]"))
+		nil, []byte("[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]"))
 	assert.Nil(err)
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[0:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
-	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s"]}`, s1, dh1, s2, dh2, s3, dh3))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s"]}`, dh1, s1, dh2, s2, dh3, s3))
 	assert.NotContains(string(body[0:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 5: New change (cas=ver+1000) with existing XATTR(pv and mv):
 	meta, err = NewMetadataForTest(docKey, sourceClusterId, ver+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		[]byte("[\"Cluster1@0x0000f8da4d881416\"]"), []byte("[\"Cluster2@0x1500f8da4d881416\",\"Cluster3@0x0b\"]"))
+		[]byte("[\"0x0000f8da4d881416@Cluster1\"]"), []byte("[\"0x1500f8da4d881416@Cluster2\",\"0x0b@Cluster3\"]"))
 	assert.Nil(err)
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 0, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[0:pos]), "_vv\x00{\"cvCas\":\"0xf30385b25e8d1416\",\"src\":\"SourceCluster\",\"ver\":\"0xf30385b25e8d1416\",\"pv\":")
-	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s"]}`, s1, dh1, s2, dh2, s3, dh3))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s"]}`, dh1, s1, dh2, s2, dh3, s3))
 	assert.NotContains(string(body[0:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
@@ -148,10 +148,10 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	key := []byte("docKey")
 
 	// Test 1. With 5 second pruning window, the whole pv survives
-	p2 := fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t5))
-	p3 := fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	p4 := fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4))
-	p5 := fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	p2 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5), s5)
+	p3 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4)
+	p4 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s3)
+	p5 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2)
 	pv := fmt.Sprintf("[%s,%s,%s,%s]", p2, p3, p4, p5)
 	meta, err := NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), nil)
 	assert.Nil(err)
@@ -168,17 +168,17 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3), s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t3), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s4))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s5))
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 3. With 3 second pruning window, the first 2 items are pruned i.e. s2 and s3's entries pruned
-	p2 = fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t5))
-	p3 = fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	p4 = fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4))
-	p5 = fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	p2 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5), s2)
+	p3 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s3)
+	p4 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s4)
+	p5 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s5)
 	pv = fmt.Sprintf("[%s,%s,%s,%s]", p2, p3, p4, p5)
 	meta, err = NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), nil)
 	assert.Nil(err)
@@ -186,17 +186,17 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", s4, base.Uint64ToHexLittleEndianAndStrip0s(t3), s5, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t3), s4, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s5))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s2))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s3))
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 4. With 3 second pruning window, 1st and 3rd items are pruned i.e. s2 and s4's entries pruned
-	p2 = fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t5))
-	p3 = fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	p4 = fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4))
-	p5 = fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	p2 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5), s2)
+	p3 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4)
+	p4 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s5)
+	p5 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s3)
 	pv = fmt.Sprintf("[%s,%s,%s,%s]", p2, p3, p4, p5)
 	meta, err = NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), nil)
 	assert.Nil(err)
@@ -204,7 +204,7 @@ func setMetaPruningWithNoNewChange(t *testing.T) {
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", s5, base.Uint64ToHexLittleEndianAndStrip0s(t3), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t3), s5, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s3))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s2))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s4))
 	assert.NotContains(string(body[4:pos]), "mv")
@@ -230,10 +230,10 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	key := []byte("docKey")
 
 	// Test 1. With 6 second pruning window, the whole pv survives, plus the id/ver also goes into PV
-	p2 := fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t5))
-	p3 := fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	p4 := fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4))
-	p5 := fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	p2 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5), s5)
+	p3 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4)
+	p4 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s3)
+	p5 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2)
 	pv := fmt.Sprintf("[%s,%s,%s,%s]", p2, p3, p4, p5)
 
 	meta, err := NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), nil)
@@ -243,7 +243,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	assert.Nil(err)
 	newCvHex := base.Uint64ToHexLittleEndian(cas)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[%s,%s,%s,%s,\"%s@%s\"]", p2, p3, p4, p5, s1, base.Uint64ToHexLittleEndianAndStrip0s(cas-t1)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[%s,%s,%s,%s,\"%s@%s\"]", p2, p3, p4, p5, base.Uint64ToHexLittleEndianAndStrip0s(cas-t1), s1))
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
@@ -252,7 +252,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", s2, base.Uint64ToHexLittleEndianAndStrip0s(t2), s1, base.Uint64ToHexLittleEndianAndStrip0s(t1-t2)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t2), s2, base.Uint64ToHexLittleEndianAndStrip0s(t1-t2), s1))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s3))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s4))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s5))
@@ -260,10 +260,10 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 3. With 3 second pruning window, id/ver is added; only s2 in PV stays, along with s1 in cv
-	p2 = fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t5))
-	p3 = fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	p4 = fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t2-t4))
-	p5 = fmt.Sprintf("\"%s@%s\"", s1, base.Uint64ToHexLittleEndianAndStrip0s(t1-t2))
+	p2 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5), s2)
+	p3 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s3)
+	p4 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t4), s4)
+	p5 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t1-t2), s1)
 	pv = fmt.Sprintf("[%s,%s,%s,%s]", p2, p3, p4, p5)
 	meta, err = NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), nil)
 	assert.Nil(err)
@@ -271,7 +271,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 3*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", s4, base.Uint64ToHexLittleEndianAndStrip0s(t2), s1, base.Uint64ToHexLittleEndianAndStrip0s(t1-t2)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t2), s4, base.Uint64ToHexLittleEndianAndStrip0s(t1-t2), s1))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s2))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s3))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s5))
@@ -279,10 +279,10 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 4. With 4 second pruning window, 1st and 3rd items are pruned, id/ver added i.e. s2 and s4 entries pruned
-	p2 = fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t5))
-	p3 = fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	p4 = fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4))
-	p5 = fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	p2 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5), s2)
+	p3 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4)
+	p4 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s3)
+	p5 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s5)
 	pv = fmt.Sprintf("[%s,%s,%s,%s]", p2, p3, p4, p5)
 	meta, err = NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), nil)
 	assert.Nil(err)
@@ -290,7 +290,7 @@ func setMetaPruningWithNewChange(t *testing.T) {
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 4*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\",\"%s@%s\"]", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3), s5, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s1, base.Uint64ToHexLittleEndianAndStrip0s(t1-t2)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t3), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s5, base.Uint64ToHexLittleEndianAndStrip0s(t1-t2), s1))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s2))
 	assert.NotContains(string(body[4:pos]), fmt.Sprintf("\"%s\":", s4))
 	assert.NotContains(string(body[4:pos]), "mv")
@@ -316,10 +316,10 @@ func setMetaPruningWithMvNoNewChange(t *testing.T) {
 	cvHex := base.Uint64ToHexLittleEndian(cv)
 
 	// Test 1. With 5 second pruning window, the whole pv survives
-	v2 := fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t5))
-	v3 := fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	v4 := fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3))
-	v5 := fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	v2 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5), s5)
+	v3 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4)
+	v4 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3), s3)
+	v5 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2)
 	pv := fmt.Sprintf("[%s,%s]", v2, v3)
 	mv := fmt.Sprintf("[%s,%s]", v4, v5)
 	meta, err := NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), []byte(mv))
@@ -328,8 +328,8 @@ func setMetaPruningWithMvNoNewChange(t *testing.T) {
 	pos, _, err := ConstructXattrFromHlvForSetMeta(meta, 5*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", s5, base.Uint64ToHexLittleEndianAndStrip0s(t5), s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5)))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"mv\":[\"%s@%s\",\"%s@%s\"]", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3), s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"pv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t5), s5, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"mv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t3), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2))
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 2. With 3 second pruning window and a valid MV, the PV is pruned
@@ -338,24 +338,24 @@ func setMetaPruningWithMvNoNewChange(t *testing.T) {
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
 	assert.NotContains(string(body[4:pos]), "pv")
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"mv\":[\"%s@%s\",\"%s@%s\"]", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3), s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"mv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t3), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2))
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 3. With 4 second pruning window, only Cluster5/t4 survives
 	pv = fmt.Sprintf("[\"%s@%s\",\"%s@%s\",\"%s@%s\"]",
-		s6, base.Uint64ToHexLittleEndianAndStrip0s(t6),
-		s4, base.Uint64ToHexLittleEndianAndStrip0s(t5-t6),
-		s5, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
+		base.Uint64ToHexLittleEndianAndStrip0s(t6), s6,
+		base.Uint64ToHexLittleEndianAndStrip0s(t5-t6), s4,
+		base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s5)
 	meta, err = NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), []byte(mv))
 	assert.Nil(err)
 	composer = base.NewXattrRawComposer(body)
 	pos, _, err = ConstructXattrFromHlvForSetMeta(meta, 4*time.Second, composer)
 	assert.Nil(err)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"Cluster1\",\"ver\":\"%s\",", cvHex, cvHex))
-	pvPruned := fmt.Sprintf("\"pv\":[\"%s@%s\"]", s5, base.Uint64ToHexLittleEndianAndStrip0s(t4))
+	pvPruned := fmt.Sprintf("\"pv\":[\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t4), s5)
 	assert.Contains(string(body[4:pos]), pvPruned)
 	// These are in MV
-	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"mv\":[\"%s@%s\",\"%s@%s\"]", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3), s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf("\"mv\":[\"%s@%s\",\"%s@%s\"]", base.Uint64ToHexLittleEndianAndStrip0s(t3), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2))
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 }
 
@@ -378,11 +378,11 @@ func setMetaPruningWithMvNewChange(t *testing.T) {
 	cvHex := base.Uint64ToHexLittleEndian(cv)
 
 	// Test 1. With 7 second pruning window, the whole pv survives
-	v2 := fmt.Sprintf("\"%s@%s\"", s6, base.Uint64ToHexLittleEndianAndStrip0s(t6))
-	v3 := fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t5-t6))
-	v4 := fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5))
-	v5 := fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3))
-	v6 := fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	v2 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t6), s6)
+	v3 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5-t6), s5)
+	v4 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4)
+	v5 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3), s3)
+	v6 := fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2)
 	pv := fmt.Sprintf("[%s,%s,%s]", v2, v3, v4)
 	mv := fmt.Sprintf("[%s,%s]", v5, v6)
 	meta, err := NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), cvHex, []byte(pv), []byte(mv))
@@ -392,17 +392,17 @@ func setMetaPruningWithMvNewChange(t *testing.T) {
 	assert.Nil(err)
 	newCvHex := base.Uint64ToHexLittleEndian(cas)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s","%s@%s","%s@%s"]`, s6, base.Uint64ToHexLittleEndianAndStrip0s(t6), s5,
-		base.Uint64ToHexLittleEndianAndStrip0s(t5-t6), s4, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s3, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s","%s@%s","%s@%s"]`, base.Uint64ToHexLittleEndianAndStrip0s(t6), s6,
+		base.Uint64ToHexLittleEndianAndStrip0s(t5-t6), s5, base.Uint64ToHexLittleEndianAndStrip0s(t4-t5), s4, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2))
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
 	// Test 2. With 5 second pruning window, part of pv is pruned
-	v2 = fmt.Sprintf("\"%s@%s\"", s6, base.Uint64ToHexLittleEndianAndStrip0s(t6))
-	v3 = fmt.Sprintf("\"%s@%s\"", s5, base.Uint64ToHexLittleEndianAndStrip0s(t5-t6))
-	v4 = fmt.Sprintf("\"%s@%s\"", s4, base.Uint64ToHexLittleEndianAndStrip0s(t4))
-	v5 = fmt.Sprintf("\"%s@%s\"", s3, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4))
-	v6 = fmt.Sprintf("\"%s@%s\"", s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3))
+	v2 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t6), s6)
+	v3 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t5-t6), s5)
+	v4 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t4), s4)
+	v5 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s3)
+	v6 = fmt.Sprintf("\"%s@%s\"", base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2)
 	mv = fmt.Sprintf("[%s,%s]", v2, v3)
 	pv = fmt.Sprintf("[%s,%s,%s]", v4, v5, v6)
 	meta, err = NewMetadataForTest(key, sourceClusterId, cas, 1, cvHex, []byte("Cluster1"), []byte(cvHex), []byte(pv), []byte(mv))
@@ -412,7 +412,7 @@ func setMetaPruningWithMvNewChange(t *testing.T) {
 	assert.Nil(err)
 	newCvHex = base.Uint64ToHexLittleEndian(cas)
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s"]`, s4, base.Uint64ToHexLittleEndianAndStrip0s(t4), s3, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s2, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s","%s@%s","%s@%s"]`, base.Uint64ToHexLittleEndianAndStrip0s(t4), s4, base.Uint64ToHexLittleEndianAndStrip0s(t3-t4), s3, base.Uint64ToHexLittleEndianAndStrip0s(t2-t3), s2))
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 
@@ -423,7 +423,7 @@ func setMetaPruningWithMvNewChange(t *testing.T) {
 	newCvHex = base.Uint64ToHexLittleEndian(cas)
 
 	assert.Contains(string(body[4:pos]), fmt.Sprintf("{\"cvCas\":\"%s\",\"src\":\"SourceCluster\",\"ver\":\"%s\",", newCvHex, newCvHex))
-	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s"]`, s2, base.Uint64ToHexLittleEndianAndStrip0s(t2)))
+	assert.Contains(string(body[4:pos]), fmt.Sprintf(`"pv":["%s@%s"]`, base.Uint64ToHexLittleEndianAndStrip0s(t2), s2))
 	assert.NotContains(string(body[4:pos]), "mv")
 	assert.Equal(uint32(pos-4), binary.BigEndian.Uint32(body[0:4]))
 }
@@ -453,58 +453,58 @@ func TestMergeMeta(t *testing.T) {
 	mvlen, _ := VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ := VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
 
-	assert.Equal(string(mv[:mvlen]), "[\"TargetCluster@0x1b2785b25e8d1416\",\"SourceCluster@0x1027\"]")
+	assert.Equal(string(mv[:mvlen]), "[\"0x1b2785b25e8d1416@TargetCluster\",\"0x1027@SourceCluster\"]")
 	assert.Equal(0, pvlen)
 
 	/*
 	* 2. Source and target both updated the same old document (from Cluster4)
 	*    The two pv should be combined with srv/ver
-	* oldXattr = "_vv\x00{\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]}\x00"
+	* oldXattr = "_vv\x00{\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]}\x00"
 	 */
 	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv+20000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		[]byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]"), nil)
+		[]byte("[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]"), nil)
 	assert.Nil(err)
 	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+10000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"),
-		[]byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]"), nil)
+		[]byte("[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]"), nil)
 	assert.Nil(err)
 	mergedMeta, err = sourceMeta.Merge(targetMeta)
 	assert.Nil(err)
 	mvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
-	assert.Equal(string(mv[:mvlen]), "[\"TargetCluster@0x1b2785b25e8d1416\",\"SourceCluster@0x1027\"]")
-	assert.Equal(string(pv[:pvlen]), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\",\"Cluster4@0xebff8cd71005\"]")
+	assert.Equal(string(mv[:mvlen]), "[\"0x1b2785b25e8d1416@TargetCluster\",\"0x1027@SourceCluster\"]")
+	assert.Equal(string(pv[:pvlen]), "[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\",\"0xebff8cd71005@Cluster4\"]")
 
 	/*
 	* 3. Source and target contain conflict with updates from other clusters. Both have different pv
-	* Source cluster contains changes coming from cluster4: "_vv\x00{\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"Cluster1@0x0000f8da4d881416\"]}\x00"
-	* Target cluster contains changes coming from cluster5: "_vv\x00{\"src\":\"Cluster5\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]}\x00"
+	* Source cluster contains changes coming from cluster4: "_vv\x00{\"src\":\"Cluster4\",\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"0x0000f8da4d881416@Cluster1\"]}\x00"
+	* Target cluster contains changes coming from cluster5: "_vv\x00{\"src\":\"Cluster5\"ver\":\"0x0b0085b25e8d1416\",\"pv\":[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]}\x00"
 	 */
 	cv, _ = base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
-	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster1@0x0000f8da4d881416\"]"), nil)
+	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\"0x0000f8da4d881416@Cluster1\"]"), nil)
 	assert.Nil(err)
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]"), nil)
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]"), nil)
 	assert.Nil(err)
 	mergedMeta, err = sourceMeta.Merge(targetMeta)
 	assert.Nil(err)
 	mvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
-	assert.Equal(string(mv[:mvlen]), "[\"Cluster4@0x0b0085b25e8d1416\",\"Cluster5@0x0\"]")
-	assert.Equal(string(pv[:pvlen]), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]")
+	assert.Equal(string(mv[:mvlen]), "[\"0x0b0085b25e8d1416@Cluster4\",\"0x0@Cluster5\"]")
+	assert.Equal(string(pv[:pvlen]), "[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]")
 
 	/*
 	* 4. Source and target both updated. Both have pv, one has mv
 	 */
 	cv, _ = base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
-	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv+20000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster1@0x0000f8da4d881416\"]"), []byte("[\"Cluster2@0x1500f8da4d881416\",\"Cluster3@0x0b\"]"))
+	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv+20000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\"0x0000f8da4d881416@Cluster1\"]"), []byte("[\"0x1500f8da4d881416@Cluster2\",\"0x0b@Cluster3\"]"))
 	assert.Nil(err)
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+10000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\"]"), nil)
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+10000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\"]"), nil)
 	assert.Nil(err)
 	mergedMeta, err = sourceMeta.Merge(targetMeta)
 	assert.Nil(err)
 	mvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
-	assert.Equal(string(mv[:mvlen]), "[\"TargetCluster@0x1b2785b25e8d1416\",\"SourceCluster@0x1027\"]")
-	assert.Equal(string(pv[:pvlen]), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\",\"Cluster5@0xebff8cd71005\"]")
+	assert.Equal(string(mv[:mvlen]), "[\"0x1b2785b25e8d1416@TargetCluster\",\"0x1027@SourceCluster\"]")
+	assert.Equal(string(pv[:pvlen]), "[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\",\"0xebff8cd71005@Cluster5\"]")
 
 	/*
 	* 5. Source is a merged doc. Target is an update with pv
@@ -512,43 +512,43 @@ func TestMergeMeta(t *testing.T) {
 	cv, _ = base.HexLittleEndianToUint64([]byte("0x0b0085b25e8d1416"))
 	c1 := base.Uint64ToHexLittleEndian(1591046436336173056)
 	c2 := base.Uint64ToHexLittleEndian(1591046436336173056 - 10000)
-	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\"Cluster1@"+string(c1)+"\",\"Cluster3@0x2\"]"))
+	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\""+string(c1)+"@Cluster1"+"\",\"0x2@Cluster3\"]"))
 	assert.Nil(err)
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+10000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster1@"+string(c2)+"\",\"Cluster2@0x2527\"]"), nil)
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+10000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\""+string(c2)+"@Cluster1\",\"0x2527@Cluster2\"]"), nil)
 	assert.Nil(err)
 	mergedMeta, err = sourceMeta.Merge(targetMeta)
 	assert.Nil(err)
 	mvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
-	assert.Equal(string(mv[:mvlen]), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\",\"TargetCluster@0xfb268dd71005\"]")
-	assert.Equal(string(pv[:pvlen]), "[\"Cluster2@0x1500f8da4d881416\",\"Cluster5@0xf6ff8cd71005\"]")
+	assert.Equal(string(mv[:mvlen]), "[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\",\"0xfb268dd71005@TargetCluster\"]")
+	assert.Equal(string(pv[:pvlen]), "[\"0x1500f8da4d881416@Cluster2\",\"0xf6ff8cd71005@Cluster5\"]")
 
 	/*
 	* 6. Target is a merged doc. Source is an update with PV and MV
 	 */
-	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv+10000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster1@"+string(c2)+"\",\"Cluster2@0x2527\"]"), nil)
+	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv+10000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), []byte("[\""+string(c2)+"@Cluster1\",\"0x2527@Cluster2\"]"), nil)
 	assert.Nil(err)
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\"Cluster1@"+string(c1)+"\",\"Cluster3@0x2\"]"))
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\""+string(c1)+"@Cluster1\",\"0x2@Cluster3\"]"))
 	assert.Nil(err)
 	mergedMeta, err = sourceMeta.Merge(targetMeta)
 	assert.Nil(err)
 	mvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
-	assert.Equal(string(mv[:mvlen]), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\",\"SourceCluster@0xfb268dd71005\"]")
-	assert.Equal(string(pv[:pvlen]), "[\"Cluster2@0x1500f8da4d881416\",\"Cluster5@0xf6ff8cd71005\"]")
+	assert.Equal(string(mv[:mvlen]), "[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\",\"0xfb268dd71005@SourceCluster\"]")
+	assert.Equal(string(pv[:pvlen]), "[\"0x1500f8da4d881416@Cluster2\",\"0xf6ff8cd71005@Cluster5\"]")
 
 	/*
 	* 7. Both are merged docs.
 	 */
-	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\"Cluster1@"+string(c2)+"\",\"Cluster2@0x2527\"]"))
+	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster5"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\""+string(c2)+"@Cluster1\",\"0x2527@Cluster2\"]"))
 	assert.Nil(err)
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\"Cluster1@"+string(c1)+"\",\"Cluster3@0x2\"]"))
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\""+string(c1)+"@Cluster1\",\"0x2@Cluster3\"]"))
 	assert.Nil(err)
 	mergedMeta, err = sourceMeta.Merge(targetMeta)
 	assert.Nil(err)
 	mvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
-	assert.Equal(string(mv[:mvlen]), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\"]")
+	assert.Equal(string(mv[:mvlen]), "[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\"]")
 	assert.Equal(0, pvlen)
 
 	/*
@@ -556,14 +556,14 @@ func TestMergeMeta(t *testing.T) {
 	 */
 	sourceMeta, err = NewMetadataForTest(key, sourceClusterId, cv+2000, 1, nil, nil, nil, nil, nil)
 	assert.Nil(err)
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster1@"+string(c1)+"\",\"Cluster3@0x2\"]"), nil)
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\""+string(c1)+"@Cluster1\",\"0x2@Cluster3\"]"), nil)
 	assert.Nil(err)
 	mergedMeta, err = sourceMeta.Merge(targetMeta)
 	assert.Nil(err)
 	mvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mv, 0, nil)
 	pvlen, _ = VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pv, 0, nil)
-	assert.Equal(string(pv[:pvlen]), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\",\"Cluster4@0xebff8cd71005\"]")
-	assert.Contains(string(mv[:mvlen]), "[\"TargetCluster@0xf30385b25e8d1416\",\"SourceCluster@0xe803\"]")
+	assert.Equal(string(pv[:pvlen]), "[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\",\"0xebff8cd71005@Cluster4\"]")
+	assert.Contains(string(mv[:mvlen]), "[\"0xf30385b25e8d1416@TargetCluster\",\"0xe803@SourceCluster\"]")
 }
 
 func TestUpdateMetaForSetBack(t *testing.T) {
@@ -579,12 +579,12 @@ func TestUpdateMetaForSetBack(t *testing.T) {
 	cvHex := []byte("0x0b0085b25e8d1416")
 	cv, err := base.HexLittleEndianToUint64(cvHex)
 	assert.Nil(err)
-	targetMeta, err := NewMetadataForTest(key, targetClusterId, cv, 1, cvHex, []byte("Cluster4"), cvHex, []byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\"]"), nil)
+	targetMeta, err := NewMetadataForTest(key, targetClusterId, cv, 1, cvHex, []byte("Cluster4"), cvHex, []byte("[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\"]"), nil)
 	assert.Nil(err)
 	pv, mv, err := targetMeta.UpdateMetaForSetBack()
 	assert.Nil(err)
 	assert.Nil(mv)
-	assert.Equal(string(pv), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\",\"Cluster4@0xebff8cd71005\"]")
+	assert.Equal(string(pv), "[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\",\"0xebff8cd71005@Cluster4\"]")
 
 	/*
 	* 2. Target has a PV, no MV, and new update. ver/src and cas/source are added to pv
@@ -592,34 +592,34 @@ func TestUpdateMetaForSetBack(t *testing.T) {
 	cvHex = []byte("0x0b0085b25e8d1416")
 	cv, err = base.HexLittleEndianToUint64(cvHex)
 	assert.Nil(err)
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+1000, 1, cvHex, []byte("Cluster4"), cvHex, []byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\"]"), nil)
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+1000, 1, cvHex, []byte("Cluster4"), cvHex, []byte("[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\"]"), nil)
 	assert.Nil(err)
 	pv, mv, err = targetMeta.UpdateMetaForSetBack()
 	assert.Nil(err)
 	assert.Nil(mv)
-	assert.Equal(string(pv), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\",\"Cluster4@0xebff8cd71005\",\"TargetCluster@0xe803\"]")
+	assert.Equal(string(pv), "[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\",\"0xebff8cd71005@Cluster4\",\"0xe803@TargetCluster\"]")
 
 	/*
 	* 3. Target is a merged docs with no new change.
 	 */
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\"]"))
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), nil, []byte("[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\"]"))
 	assert.Nil(err)
 
 	pv, mv, err = targetMeta.UpdateMetaForSetBack()
 	assert.Nil(err)
 	assert.Nil(pv)
-	assert.Equal(string(mv), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\"]")
+	assert.Equal(string(mv), "[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\"]")
 
 	/*
 	* 4. Target is a merged docs with new change.
 	 */
-	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\"Cluster2@0x1500f8da4d881416\"]"), []byte("[\"Cluster1@0x0000f8da4d881416\",\"Cluster3@0x2\"]"))
+	targetMeta, err = NewMetadataForTest(key, targetClusterId, cv+1000, 1, []byte("0x0b0085b25e8d1416"), []byte("Cluster4"), []byte("0x0b0085b25e8d1416"), []byte("[\"0x1500f8da4d881416@Cluster2\"]"), []byte("[\"0x0000f8da4d881416@Cluster1\",\"0x2@Cluster3\"]"))
 	assert.Nil(err)
 
 	pv, mv, err = targetMeta.UpdateMetaForSetBack()
 	assert.Nil(err)
 	assert.Nil(mv)
-	assert.Equal(string(pv), "[\"Cluster1@0x0000f8da4d881416\",\"Cluster2@0x15\",\"Cluster3@0x0b\",\"TargetCluster@0xd3038dd71005\"]")
+	assert.Equal(string(pv), "[\"0x0000f8da4d881416@Cluster1\",\"0x15@Cluster2\",\"0x0b@Cluster3\",\"0xd3038dd71005@TargetCluster\"]")
 }
 
 func randomString(l int) string {
@@ -833,7 +833,7 @@ func TestParseHlvFromMCRequest(t *testing.T) {
 	var pv2Val uint64 = 10
 	pv1Key := "ksajxsjx"
 	pv2Key := "ksajxsjy"
-	PV := fmt.Sprintf("\"%s\":[\"%s@%s\",\"%s@%s\"]", HLV_PV_FIELD, pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv1Val), pv2Key, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val))
+	PV := fmt.Sprintf("\"%s\":[\"%s@%s\",\"%s@%s\"]", HLV_PV_FIELD, base.Uint64ToHexLittleEndianAndStrip0s(pv1Val), pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val), pv2Key)
 	vv1s := []string{
 		"{" + src + "," + ver + "," + cvCas + "}",
 		"{" + src + "," + cvCas + "," + ver + "}",
@@ -1058,20 +1058,20 @@ func TestXattrToVersionMap(t *testing.T) {
 	pv2Key := "ksajxsjy"
 	pv3Key := "ksajxsjz"
 
-	PV := fmt.Sprintf(`["%s%c%s","%s%c%s","%s%c%s"]`, pv1Key, HLV_SEPARATOR, base.Uint64ToHexLittleEndian(pv1Val), pv2Key, HLV_SEPARATOR, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val), pv3Key, HLV_SEPARATOR, base.Uint64ToHexLittleEndianAndStrip0s(pv3Val))
+	PV := fmt.Sprintf(`["%s%c%s","%s%c%s","%s%c%s"]`, base.Uint64ToHexLittleEndian(pv1Val), HLV_SEPARATOR, pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val), HLV_SEPARATOR, pv2Key, base.Uint64ToHexLittleEndianAndStrip0s(pv3Val), HLV_SEPARATOR, pv3Key)
 	pv, err := xattrVVtoDeltas([]byte(PV))
 	a.Nil(err)
 	a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
 	a.Equal(pv[hlv.DocumentSourceId(pv2Key)], pv2Val+pv1Val)
 	a.Equal(pv[hlv.DocumentSourceId(pv3Key)], pv3Val+pv2Val+pv1Val)
 
-	PV = fmt.Sprintf(`["%s%c%s","%s%c%s"]`, pv1Key, HLV_SEPARATOR, base.Uint64ToHexLittleEndian(pv1Val), pv2Key, HLV_SEPARATOR, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val))
+	PV = fmt.Sprintf(`["%s%c%s","%s%c%s"]`, base.Uint64ToHexLittleEndian(pv1Val), HLV_SEPARATOR, pv1Key, base.Uint64ToHexLittleEndianAndStrip0s(pv2Val), HLV_SEPARATOR, pv2Key)
 	pv, err = xattrVVtoDeltas([]byte(PV))
 	a.Nil(err)
 	a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
 	a.Equal(pv[hlv.DocumentSourceId(pv2Key)], pv2Val+pv1Val)
 
-	PV = fmt.Sprintf(`["%s%c%s"]`, pv1Key, HLV_SEPARATOR, base.Uint64ToHexLittleEndian(pv1Val))
+	PV = fmt.Sprintf(`["%s%c%s"]`, base.Uint64ToHexLittleEndian(pv1Val), HLV_SEPARATOR, pv1Key)
 	pv, err = xattrVVtoDeltas([]byte(PV))
 	a.Nil(err)
 	a.Equal(pv[hlv.DocumentSourceId(pv1Key)], pv1Val)
@@ -1187,7 +1187,7 @@ func TestParseOneVersionDeltaEntry(t *testing.T) {
 	}{
 		{
 			name:    "[HAPPY] full version",
-			entry:   fmt.Sprintf("NqiIe0LekFPLeX4JvTO6Iw%c0x00008cd6ac059a16", HLV_SEPARATOR),
+			entry:   fmt.Sprintf("0x00008cd6ac059a16%cNqiIe0LekFPLeX4JvTO6Iw", HLV_SEPARATOR),
 			source:  "NqiIe0LekFPLeX4JvTO6Iw",
 			version: "0x00008cd6ac059a16",
 		},
@@ -1200,7 +1200,7 @@ func TestParseOneVersionDeltaEntry(t *testing.T) {
 		},
 		{
 			name:    "[HAPPY] delta version",
-			entry:   fmt.Sprintf("NqiIe0LekFPLeX4JvTO6Iw%c0xda", HLV_SEPARATOR),
+			entry:   fmt.Sprintf("0xda%cNqiIe0LekFPLeX4JvTO6Iw", HLV_SEPARATOR),
 			source:  "NqiIe0LekFPLeX4JvTO6Iw",
 			version: "0xda",
 		},

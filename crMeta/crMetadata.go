@@ -31,8 +31,8 @@ const (
 	// These are the fields in the HLV
 	HLV_SRC_FIELD = "src" // src and ver combined is the cv in the design
 	HLV_VER_FIELD = "ver" //
-	HLV_MV_FIELD  = "mv"  // the MV field in _xdcr
-	HLV_PV_FIELD  = "pv"  // The PV field in _xdcr
+	HLV_MV_FIELD  = "mv"  // the MV field in _vv
+	HLV_PV_FIELD  = "pv"  // The PV field in _vv
 
 	XATTR_CVCAS_PATH = base.XATTR_HLV + base.PERIOD + HLV_CVCAS_FIELD
 	XATTR_SRC_PATH   = base.XATTR_HLV + base.PERIOD + HLV_SRC_FIELD
@@ -44,7 +44,7 @@ const (
 	XATTR_PREVIOUSREV = base.XATTR_PREVIOUSREV
 
 	// separator between source and version in version deltas entry
-	// i.e <source>@<version>
+	// i.e <version>@<source>
 	HLV_SEPARATOR = '@'
 )
 
@@ -666,28 +666,29 @@ type MergeResultNotifier interface {
 	NotifyMergeResult(input *ConflictParams, mergeResult interface{}, mergeError error)
 }
 
-// returns key@value, which is one entry of a PV or MV.
-func ComposeHLVEntry(key hlv.DocumentSourceId, value []byte) []byte {
-	hlvEntryLen := len(key) + 1 + len(value)
+// returns version@source, which is one entry of a PV or MV.
+func ComposeHLVEntry(source hlv.DocumentSourceId, version []byte) []byte {
+	hlvEntryLen := len(version) + 1 + len(source)
 	hlvEntry := make([]byte, hlvEntryLen)
 	idx := 0
-	// copy the source
-	for ; idx < len(key); idx++ {
-		hlvEntry[idx] = key[idx]
-	}
+	// copy the version
+	n := copy(hlvEntry[idx:], version)
+	idx += n
 	// copy the separator
 	hlvEntry[idx] = HLV_SEPARATOR
 	idx++
-	// copy the version
-	n := copy(hlvEntry[idx:], value)
-	idx = idx + n
+	// copy the source
+	for i := 0; i < len(source); i++ {
+		hlvEntry[idx+i] = source[i]
+	}
+	idx += len(source)
 	return hlvEntry[:idx]
 }
 
 // given a version map (PV or MV), this function,
 // 1. applies the pruning function on top of the version entries if they are PVs i.e. if the pruning function is passed in.
 // 2. converts the entries into version deltas, strips the leading zeroes of delta values and composes the PV or MV for the target doc.
-// 3. PVs and MVs will be of the format of JSON arrays with individual string entries of the form "<source>@<version>".
+// 3. PVs and MVs will be of the format of JSON arrays with individual string entries of the form "<version>@<source>".
 func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) (int, bool) {
 	startPos := pos
 	first := true
@@ -757,12 +758,12 @@ func (meta *CRMetadata) HadPv() bool {
 	return meta.hadPv
 }
 
-// input is expected to be of the format <source>@<version>
+// input is expected to be of the format <version>@<source>
 // returns <source> and <version>
 func ParseOneVersionDeltaEntry(entry []byte) (source, version []byte, err error) {
 	sep := -1
-	for idx := len(entry) - 3; idx >= 0; idx-- {
-		if entry[idx] == HLV_SEPARATOR && entry[idx+1] == '0' && entry[idx+2] == 'x' {
+	for idx := 0; idx < len(entry); idx++ {
+		if entry[idx] == HLV_SEPARATOR {
 			sep = idx
 			break
 		}
@@ -774,8 +775,8 @@ func ParseOneVersionDeltaEntry(entry []byte) (source, version []byte, err error)
 	}
 
 	// sep points to the HLV_SEPARATOR now
-	source = entry[:sep]
-	version = entry[sep+1:]
+	version = entry[:sep]
+	source = entry[sep+1:]
 	err = nil
 	return
 }
