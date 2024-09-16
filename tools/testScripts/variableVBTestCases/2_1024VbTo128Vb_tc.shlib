@@ -20,10 +20,11 @@ CLUSTER_NAME_BUCKET_MAP=(["C1"]=${cluster1BucketsArr[@]} ["C2"]="B2")
 
 # Bucket properties
 declare -A BucketProperty=(["ramQuotaMB"]=100)
-declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
+declare -A Bucket2Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
-insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
+insertPropertyIntoBucketNamePropertyMap "B2" Bucket2Properties
 
 declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
 
@@ -44,15 +45,10 @@ function runDataLoad {
 }
 
 function runTestCase {
-	# Vbucket settings
-	# ----------------------
-	CLUSTER_VBCOUNT_MAP=(["C1"]=128 ["C2"]=1024)
-
 	echo "============================================================================"
-	echo "Running 128 to 1024 VB basic test"
+	echo "Running 1024 to 128 VB basic test"
 	echo "============================================================================"
-	cleanClusterRun
-	setupTopologies -c -v
+	setupTopologies
 	if (($? != 0)); then
 		exit 1
 	fi
@@ -94,9 +90,7 @@ function runTestCase {
 	echo "============================================================================"
 	echo "PASSED"
 	echo "============================================================================"
-	cleanupBucketReplications -c
+	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
-
-	CLUSTER_VBCOUNT_MAP=()
 }
