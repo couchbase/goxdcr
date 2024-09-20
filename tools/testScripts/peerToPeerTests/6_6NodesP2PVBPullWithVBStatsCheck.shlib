@@ -20,12 +20,12 @@ declare -A CLUSTER_NAME_N1QL_PORT_MAP=(["C1"]=9499 ["C1P0"]=9498 ["C1P1"]=9497 [
 
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0 B1" ["C2"]="B1")
-unset CLUSTER_SETUP_DONE_MAP
+CLUSTER_SETUP_DONE_MAP=()
 declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=100)
-declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A BucketProperty=(["ramQuotaMB"]=1024 ["numVBuckets"]=1024)
+declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 

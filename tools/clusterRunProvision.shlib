@@ -823,6 +823,9 @@ function restoreClusterBack {
 
 	local totalFoundNode=0
 
+	regenerateCertificate "$nodeName"
+	cleanupClientCertMaps
+
 	local preEjectCnt=$(getNsServerPoolsDefault $nodeName | jq '.nodes' | jq length)
 	for dependentClusterName in $(echo ${!CLUSTER_DEPENDENCY_MAP[@]}); do
 		local dependentNodePort=${CLUSTER_NAME_PORT_MAP[$dependentClusterName]:-}

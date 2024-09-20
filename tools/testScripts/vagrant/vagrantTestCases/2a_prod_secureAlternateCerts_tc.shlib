@@ -87,8 +87,8 @@ function runFullSecurelAlternateClientCert {
 	echo "PASSED"
 	echo "============================================================================"
 
-	#cleanupBucketReplications
-	#cleanupBuckets
+	cleanupBucketReplications
+	cleanupBuckets
 
 }
 

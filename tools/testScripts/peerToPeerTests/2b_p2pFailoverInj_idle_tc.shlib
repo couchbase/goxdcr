@@ -17,12 +17,12 @@ CLUSTER_DEPENDENCY_MAP=(["C1P0"]="C1" ["C1P1"]="C1" ["C1P2"]="C1" ["C1P3"]="C1" 
 CLUSTER_NAME_XDCR_PORT_MAP=(["C1"]=13000 ["C1P0"]=13001 ["C2"]=13002 ["C1P1"]=13003 ["C1P2"]=13004 ["C1P3"]=13005 ["C1P4"]=13006 ["C1P5"]=13007 ["C1P6"]=13008 ["C1P7"]=13009)
 # Set c1 to have 2 buckets and c2 to have 1 bucket
 CLUSTER_NAME_BUCKET_MAP=(["C1"]="B0" ["C2"]="B1")
-unset CLUSTER_SETUP_DONE_MAP
+CLUSTER_SETUP_DONE_MAP=()
 declare -gA CLUSTER_SETUP_DONE_MAP
 
 # Bucket properties
-declare -A BucketProperty=(["ramQuotaMB"]=100)
-declare -A Bucket1Properties=(["ramQuotaMB"]=100 ["CompressionMode"]="Active")
+declare -A BucketProperty=(["ramQuotaMB"]=1024 ["numVBuckets"]=1024)
+declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" ["numVBuckets"]=1024)
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
@@ -164,6 +164,10 @@ function runTestCase {
 	cleanupBuckets
 	cleanupRemoteClusterRefs
 
+	# magma test cleanup
+	cleanupBucketNamePropertyMap
+
 	echo "Cleaning up topology..."
 	restoreClusterBack "C1"
+
 }
