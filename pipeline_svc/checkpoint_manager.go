@@ -1232,7 +1232,6 @@ func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata
 			if record == nil {
 				continue
 			}
-
 			cacheLookupMap[record.TargetManifest] = append(cacheLookupMap[record.TargetManifest], record)
 			if record.TargetManifest > highestManifestId {
 				highestManifestId = record.TargetManifest
