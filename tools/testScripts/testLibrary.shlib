@@ -345,12 +345,19 @@ function checkDocsProcessed {
 	local targetCluster=$3
 	local targetBucket=$4
 	local docsProcessedCheck=$5
+	local prevDocsProcessed=0
 	local i
 
 	for ((i = 0; $i < 5; i = $(($i + 1)))); do
 		docsProcessed=$(getDocsProcessed "$srcCluster" "$srcBucket" "$targetCluster" "$targetBucket")
 		if (($docsProcessed != $docsProcessedCheck)); then
-			echo "DocsProcessed: $docsProcessed. Waiting for it to be $docsProcessedCheck..."
+			if (($docsProcessed != $prevDocsProcessed)); then
+				prevDocsProcessed=$docsProcessed
+				i=$(($i - 1))
+				echo "DocsProcessed: $docsProcessed. Waiting for it to be $docsProcessedCheck... Items are increasing"
+			else
+				echo "DocsProcessed: $docsProcessed. Waiting for it to be $docsProcessedCheck..."
+			fi
 		else
 			return 0
 		fi

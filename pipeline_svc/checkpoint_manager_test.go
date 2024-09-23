@@ -140,12 +140,12 @@ func TestCheckpointSyncHelper(t *testing.T) {
 	helper := newCheckpointSyncHelper()
 
 	helper.disableCkptAndWait()
-	_, err := helper.registerCkptOp(false)
+	_, err := helper.registerCkptOp(false, false)
 	assert.NotNil(err)
 
 	helper.setCheckpointAllowed()
-	idx, err := helper.registerCkptOp(false)
-	idx2, err2 := helper.registerCkptOp(false)
+	idx, err := helper.registerCkptOp(false, false)
+	idx2, err2 := helper.registerCkptOp(false, false)
 	assert.Nil(err)
 	assert.Nil(err2)
 

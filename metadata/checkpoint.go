@@ -581,8 +581,10 @@ func (c *CheckpointRecord) BrokenMappings() ShaToCollectionNamespaceMap {
 	if c.IsTraditional() {
 		c.brokenMappingsMtx.RLock()
 		defer c.brokenMappingsMtx.RUnlock()
-		clonedMapping := c.brokenMappings.Clone()
-		shaToBrokenMap[c.BrokenMappingSha256] = &clonedMapping
+		if len(c.brokenMappings) > 0 {
+			clonedMapping := c.brokenMappings.Clone()
+			shaToBrokenMap[c.BrokenMappingSha256] = &clonedMapping
+		}
 	} else {
 		for _, oneGlobalTs := range c.GlobalTimestamp {
 			oneGlobalTs.brokenMappingsMtx.RLock()
@@ -594,6 +596,39 @@ func (c *CheckpointRecord) BrokenMappings() ShaToCollectionNamespaceMap {
 		}
 	}
 	return shaToBrokenMap
+}
+
+type ManifestIdAndBrokenMapPair struct {
+	ManifestId uint64
+	BrokenMap  *CollectionNamespaceMapping
+}
+
+func (c *CheckpointRecord) BrokenMappingsAndManifestIds() []ManifestIdAndBrokenMapPair {
+	if c.IsTraditional() {
+		c.brokenMappingsMtx.RLock()
+		defer c.brokenMappingsMtx.RUnlock()
+		clonedMapping := c.brokenMappings.Clone()
+		return []ManifestIdAndBrokenMapPair{
+			{BrokenMap: &clonedMapping,
+				ManifestId: c.TargetVBTimestamp.TargetManifest},
+		}
+	} else {
+		var listToReturn []ManifestIdAndBrokenMapPair
+		for _, oneGlobalTs := range c.GlobalTimestamp {
+			var brokenMapToReturn *CollectionNamespaceMapping
+			oneGlobalTs.brokenMappingsMtx.RLock()
+			if oneGlobalTs.brokenMappings != nil && len(oneGlobalTs.brokenMappings) > 0 {
+				clonedMapping := oneGlobalTs.brokenMappings.Clone()
+				brokenMapToReturn = &clonedMapping
+			}
+			oneGlobalTs.brokenMappingsMtx.RUnlock()
+			listToReturn = append(listToReturn, ManifestIdAndBrokenMapPair{
+				BrokenMap:  brokenMapToReturn,
+				ManifestId: oneGlobalTs.TargetManifest,
+			})
+		}
+		return listToReturn
+	}
 }
 
 func (c *CheckpointRecord) BrokenMappingsLen() int {
@@ -645,7 +680,7 @@ func (c *CheckpointRecord) GetShaOnlyMap() ShaToCollectionNamespaceMap {
 }
 
 func (c *CheckpointRecord) IsTraditional() bool {
-	return len(c.GlobalTimestamp) == 0
+	return c.Target_vb_opaque != nil
 }
 
 func (c *CheckpointRecord) Size() int {
@@ -882,6 +917,9 @@ func newGlobalCheckpointRecord(failoverUuid uint64, seqno uint64, dcpSnapSeqno u
 	if !ok {
 		return nil, fmt.Errorf("global timestamp passed in of type %T expecting *GlobalTimestamp", targetTimestamp)
 	}
+	if globalTs == nil || len(*globalTs) == 0 {
+		return nil, fmt.Errorf("global timestamp passed in is nil or empty")
+	}
 
 	record := &CheckpointRecord{
 		SourceVBTimestamp: SourceVBTimestamp{
@@ -1020,11 +1058,13 @@ func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCo
 	}
 
 	if ckptRecord.IsTraditional() {
-		for _, mapping := range allShaToBrokenMaps {
+		for sha, mapping := range allShaToBrokenMaps {
 			if mapping == nil || len(allShaToBrokenMaps) > 1 {
 				return fmt.Errorf("LoadBrokenMapping should expect one non-nil mapping %v len: %v", allShaToBrokenMaps, len(allShaToBrokenMaps))
 			}
-			// Should have only one
+			if ckptRecord.BrokenMappingSha256 != sha {
+				continue
+			}
 			err := ckptRecord.TargetVBTimestamp.SetBrokenMappingAsPartOfCreation(*mapping)
 			if err != nil {
 				return err
@@ -2122,7 +2162,7 @@ func (c *CheckpointsDoc) SnappyCompress() ([]byte, ShaMappingCompressedMap, erro
 			continue
 		}
 		brokenMap := record.BrokenMappings()
-		if brokenMap == nil {
+		if len(brokenMap) == 0 {
 			// Record has no broken map
 			continue
 		}
@@ -2140,7 +2180,7 @@ func (c *CheckpointsDoc) SnappyCompress() ([]byte, ShaMappingCompressedMap, erro
 }
 
 func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappingCompressedMap) error {
-	if c == nil || shaCompressedMap == nil || len(shaCompressedMap) == 0 {
+	if c == nil || shaCompressedMap == nil {
 		return base.ErrorNilPtr
 	}
 
@@ -2156,29 +2196,23 @@ func (c *CheckpointsDoc) SnappyDecompress(data []byte, shaCompressedMap ShaMappi
 
 	errMap := make(base.ErrorMap)
 
-	records := c.GetCheckpointRecords()
-	for _, record := range records {
-		if record == nil {
-			continue
-		}
+	brokenMap, err := shaCompressedMap.ToBrokenMapShaMap()
+	if err != nil {
+		return err
+	}
 
-		//brokenMapSha := record.BrokenMappingSha256
-		//brokenMap, brokenMapLookupErr := shaCompressedMap.Get(brokenMapSha)
-		//if brokenMapLookupErr != nil {
-		//	errMap[brokenMapSha] = brokenMapLookupErr
-		//	continue
-		//}
-		brokenMap, err := shaCompressedMap.ToBrokenMapShaMap()
-		if err != nil {
-			errMap["shaCompressedMap.ToBrokenMapShaMap()"] = err
-			continue
-		}
-		//err = record.LoadBrokenMapping(*brokenMap)
-		//err = record.LoadBrokenMapping(shaCompressedMap)
-		err = record.LoadBrokenMapping(brokenMap)
-		if err != nil {
-			errMap["record.LoadBrokenMapping"] = err
-			continue
+	if len(brokenMap) > 0 {
+		records := c.GetCheckpointRecords()
+		for _, record := range records {
+			if record == nil {
+				continue
+			}
+
+			err = record.LoadBrokenMapping(brokenMap)
+			if err != nil {
+				errMap[fmt.Sprintf("record.LoadBrokenMapping created at: %v", record.CreationTime)] = err
+				continue
+			}
 		}
 	}
 
