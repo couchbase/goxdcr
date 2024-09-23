@@ -784,6 +784,22 @@ func TestCustomCrXattrSetBack(t *testing.T) {
 	assert.Nil(err)
 }
 
+// Test to verify that no panic occurs when xattrs are malformed
+func TestMalformedXattrs(t *testing.T) {
+	a := assert.New(t)
+	xattrs := []byte(`{"CvSrc":"C1}`)
+	it, err := base.NewCCRXattrFieldIterator(xattrs)
+	a.Nil(err)
+
+	for it.HasNext() {
+		_, _, err := it.Next()
+		if err != nil {
+			fmt.Printf("Pasring Error: %v", err)
+			return
+		}
+	}
+}
+
 // TODO: Javascript engine timeout not working
 //func TestCustomCRFunctionTimeout(t *testing.T) {
 //	fmt.Println("============== Test case start: TestCustomCRFunctionTimeout =================")
