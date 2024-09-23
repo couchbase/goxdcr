@@ -26,7 +26,7 @@ declare -A Bucket1Properties=(["ramQuotaMB"]=1024 ["CompressionMode"]="Active" [
 insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=14400 ["statsInterval"]=500 ["preReplicateVBMasterCheck"]="true")
 
 # Bucket -> Scopes
 # -----------------

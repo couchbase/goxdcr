@@ -25,7 +25,8 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" BucketProperty
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+# We want the manual pipeline pause to be the actual op that creates the checkpoint
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=6000 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
