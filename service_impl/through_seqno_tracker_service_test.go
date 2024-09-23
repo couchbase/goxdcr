@@ -1302,4 +1302,7 @@ func TestVariableVBSent(t *testing.T) {
 	through_seqno = svc.GetThroughSeqno(1)
 	svc.truncateSeqnoLists(1, through_seqno)
 	assert.Equal(uint64(6), through_seqno)
+
+	through_seqno = svc.GetThroughSeqno(1)
+	assert.Equal(uint64(6), through_seqno)
 }

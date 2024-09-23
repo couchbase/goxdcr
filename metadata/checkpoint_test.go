@@ -112,14 +112,33 @@ func TestCheckpointDocMarshaller(t *testing.T) {
 	ckpt_doc := NewCheckpointsDoc("testInternalId")
 	added, _ := ckpt_doc.AddRecord(&newCkptRecord)
 	assert.True(added)
+	// Adding newCkptRecord at this point should not have brokenMappings
+	brokenMappings := ckpt_doc.Checkpoint_records[0].BrokenMappings()
+	assert.Len(brokenMappings, 0)
+	assert.True(ckpt_doc.Checkpoint_records[0].SameAs(&newCkptRecord))
+
 	added, _ = ckpt_doc.AddRecord(&ckptRecord2)
 	assert.True(added)
+	assert.True(ckpt_doc.Checkpoint_records[0].SameAs(&ckptRecord2))
+	assert.True(ckpt_doc.Checkpoint_records[1].SameAs(&newCkptRecord))
+
+	brokenMappings = ckpt_doc.Checkpoint_records[0].BrokenMappings()
+	assert.Len(brokenMappings, 1)
+	brokenMappings = ckpt_doc.Checkpoint_records[1].BrokenMappings()
+	assert.Len(brokenMappings, 0)
 
 	marshalledData, err := json.Marshal(ckpt_doc)
 	assert.Nil(err)
 
 	ckptDocCompressed, shaMapCompressed, err := ckpt_doc.SnappyCompress()
 	assert.Nil(err)
+	// Make sure shaMapCompressed contain only one sha, which is record 0's
+	assert.Len(shaMapCompressed, 1)
+	var key string
+	for k, _ := range shaMapCompressed {
+		key = k
+	}
+	assert.Equal(key, ckptRecord2.BrokenMappingSha256)
 
 	var checkDoc CheckpointsDoc
 	err = json.Unmarshal(marshalledData, &checkDoc)

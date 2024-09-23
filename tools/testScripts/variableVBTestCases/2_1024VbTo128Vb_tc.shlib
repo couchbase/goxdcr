@@ -26,7 +26,7 @@ insertPropertyIntoBucketNamePropertyMap "B0" BucketProperty
 insertPropertyIntoBucketNamePropertyMap "B1" Bucket1Properties
 insertPropertyIntoBucketNamePropertyMap "B2" Bucket2Properties
 
-declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=60 ["statsInterval"]=500)
+declare -A DefaultBucketReplProperties=(["replicationType"]="continuous" ["checkpointInterval"]=600 ["statsInterval"]=500)
 
 # Bucket -> Scopes
 # -----------------
@@ -45,6 +45,9 @@ function runDataLoad {
 }
 
 function runTestCase {
+	local oldDataReplicated
+	local oldDocsProcessed
+
 	echo "============================================================================"
 	echo "Running 1024 to 128 VB basic test"
 	echo "============================================================================"
@@ -73,6 +76,7 @@ function runTestCase {
 	printGlobalScopeAndCollectionInfo
 	checkUnidirectionalChangesLeft
 
+	sleep 5
 	runDataLoad
 
 	echo "Waiting 5 seconds before checking item count"
@@ -82,10 +86,47 @@ function runTestCase {
 
 	checkUnidirectionalChangesLeft
 
+	oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
+	oldDocsProcessed=$(getDocsProcessed "C1" "B1" "C2" "B2")
+
 	pauseReplication "C1" "B1" "C2" "B2"
 	sleep 15
 	grepForPanics
 	validateInternalLogWithInstance "C1" "$CKPTSEQNO_BACKARD" 0
+
+	resumeReplication "C1" "B1" "C2" "B2"
+	sleep 120
+	# TODO MB-63383 can shorten once done
+	# Resume could take some time
+	checkUnidirectionalChangesLeft
+	grepForPanics
+
+	checkDocsProcessed "C1" "B1" "C2" "B2" "$oldDocsProcessed"
+	checkDataReplicatedIsZero "C1" "B1" "C2" "B2" "$oldDataReplicated"
+
+	# Kill source goxdcr
+	killGoXdcr "C1"
+	echo "Sleeping 15 seconds for goxdcr to reboot"
+	sleep 15
+	checkUnidirectionalChangesLeft
+	grepForPanics
+
+	# Run data load again
+	oldDataReplicated=$(getDataReplicated "C1" "B1" "C2" "B2")
+	runDataLoad
+	# Changes left should go to 0
+	checkUnidirectionalChangesLeft
+	sleep 10
+	if (($(getDocsProcessed "C1" "B1" "C2" "B2") == $oldDocsProcessed)); then
+		echo "Data processed should not be the same after run"
+		exit 1
+	fi
+	if (($(getDataReplicated "C1" "B1" "C2" "B2") == $oldDataReplicated)); then
+		# Because broken mapping should have persisted
+		echo "Data replicated should not be the same after run"
+		exit 1
+	fi
+	grepForPanics
 
 	echo "============================================================================"
 	echo "PASSED"

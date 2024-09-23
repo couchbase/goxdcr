@@ -2716,6 +2716,22 @@ func (v *VbSeqnoMapType) Subtract(other VbSeqnoMapType) (map[uint16]int64, []uin
 	return result, missingVBs, nil
 }
 
+func (v *VbSeqnoMapType) GetSubset(vbList []uint16) map[uint16]uint64 {
+	if v == nil || *v == nil {
+		return nil
+	}
+
+	retMap := make(map[uint16]uint64)
+	for _, vb := range vbList {
+		val, ok := (*v)[vb]
+		if ok {
+			retMap[vb] = val
+		}
+	}
+
+	return retMap
+}
+
 type HighSeqnosMapType map[string]*map[uint16]uint64
 
 func GetVBListFromSeqnosMap(a map[uint16]uint64) []uint16 {
