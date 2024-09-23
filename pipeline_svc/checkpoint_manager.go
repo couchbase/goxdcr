@@ -1148,7 +1148,11 @@ func (ckmgr *CheckpointManager) loadCollectionMappingsFromCkptDocs(ckptDocs map[
 
 func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
 	var highestManifestId uint64
+
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+
 	ckmgr.cachedBrokenMap.lock.Lock()
+	// First find the highest manifestID to load the brokenmaps
 	for _, ckptDoc := range ckptDocs {
 		if ckptDoc == nil {
 			continue
@@ -1157,23 +1161,32 @@ func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata
 			if record == nil {
 				continue
 			}
-			brokenMappings := record.BrokenMappings()
-			if brokenMappings == nil {
-				continue
-			}
+
+			cacheLookupMap[record.TargetManifest] = append(cacheLookupMap[record.TargetManifest], record)
 			if record.TargetManifest > highestManifestId {
-				// Simply set the new map
-				ckmgr.cachedBrokenMap.brokenMap = *brokenMappings
-				if ckmgr.cachedBrokenMap.brokenMap == nil {
-					ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
-				}
 				highestManifestId = record.TargetManifest
-			} else if record.TargetManifest == highestManifestId {
-				// Same version - consolidate it into a bigger fishing net
-				ckmgr.cachedBrokenMap.brokenMap.Consolidate(*brokenMappings)
 			}
 		}
 	}
+
+	// Then only populate from highest manifestID
+	listToTraverse := cacheLookupMap[highestManifestId]
+	for _, record := range listToTraverse {
+		if record == nil || record.TargetManifest < highestManifestId {
+			continue
+		}
+
+		brokenMapping := record.BrokenMappings()
+		if brokenMapping == nil || len(*brokenMapping) == 0 {
+			continue
+		}
+		if ckmgr.cachedBrokenMap.brokenMap == nil {
+			ckmgr.cachedBrokenMap.brokenMap = make(metadata.CollectionNamespaceMapping)
+		}
+		ckmgr.cachedBrokenMap.brokenMap.Consolidate(*brokenMapping)
+	}
+	ckmgr.cachedBrokenMap.correspondingTargetManifest = highestManifestId
+
 	ckmgr.cachedBrokenMap.lock.Unlock()
 	go ckmgr.updateReplStatusBrokenMap()
 }

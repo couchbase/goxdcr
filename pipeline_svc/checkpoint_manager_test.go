@@ -925,3 +925,70 @@ func TestCkptMgrStopBeforeStart(t *testing.T) {
 	assert.Nil(err)
 	assert.Nil(ckptMgr.Stop())
 }
+
+func TestCkptMgrRestoreLatestTargetManifest(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptMgrRestoreLatestTargetManifest =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrRestoreLatestTargetManifest =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	var upsertCkptDoneErr error
+
+	targetMCDelayMap[kvKey] = 2
+
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult)
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc)
+	assert.Nil(err)
+
+	mainPipeline := setupMainPipelineMock(spec, pipelineSupervisor)
+	ckptMgr.pipeline = mainPipeline
+
+	// Before restoring, target manifest is 0
+	assert.Equal(uint64(0), ckptMgr.cachedBrokenMap.correspondingTargetManifest)
+
+	// Let's say there are two records, one outdated with brokenmap and one most up-to-date without brokenmap
+	ckptDocs := make(map[uint16]*metadata.CheckpointsDoc)
+
+	record1 := metadata.CheckpointRecord{
+		TargetManifest: 1,
+	}
+	brokenMap := make(metadata.CollectionNamespaceMapping)
+	srcNs := &base.CollectionNamespace{
+		ScopeName:      "s1",
+		CollectionName: "col",
+	}
+	tgtNs := &base.CollectionNamespace{
+		ScopeName:      "s1",
+		CollectionName: "col1",
+	}
+	brokenMap.AddSingleMapping(srcNs, tgtNs)
+	assert.Nil(record1.LoadBrokenMapping(brokenMap))
+
+	// Record 2 is "newer" in terms of target manifest and has no brokenmap
+	record2 := metadata.CheckpointRecord{
+		TargetManifest: 2,
+	}
+
+	var recordList metadata.CheckpointRecordsList
+	recordList = append(recordList, &record1)
+	recordList = append(recordList, &record2)
+
+	ckptDocs[0] = &metadata.CheckpointsDoc{
+		Checkpoint_records: recordList,
+		SpecInternalId:     "",
+		Revision:           nil,
+	}
+
+	ckptMgr.loadBrokenMappings(ckptDocs)
+	assert.Len(ckptMgr.cachedBrokenMap.brokenMap, 0)
+	assert.Equal(uint64(2), ckptMgr.cachedBrokenMap.correspondingTargetManifest)
+}
