@@ -520,7 +520,7 @@ func TestBackfillVBTaskResume(t *testing.T) {
 	errCh := make(chan interface{}, 1)
 	var lowestManifestId uint64
 	var vbtsStartedNon0 uint32
-	ckptMgr.startSeqnoGetter(0, []uint16{0}, ckptDocs, &waitGrp, errCh, &lowestManifestId, &vbtsStartedNon0)
+	ckptMgr.startSeqnoGetter(0, []uint16{0}, ckptDocs, &waitGrp, errCh, &lowestManifestId, &vbtsStartedNon0, nil)
 	waitGrp.Wait()
 
 	timeStampMtx.RLock()
@@ -1186,4 +1186,77 @@ func TestCkptMgrRestoreLatestTargetManifest(t *testing.T) {
 	ckptMgr.loadBrokenMappings(ckptDocs)
 	assert.Len(ckptMgr.cachedBrokenMap.brokenMap, 0)
 	assert.Equal(uint64(2), ckptMgr.cachedBrokenMap.correspondingTargetManifest)
+}
+
+func TestCkptMgrPreReplicateCacheCtx(t *testing.T) {
+	fmt.Println("============== Test case start: TestCkptMgrPreReplicateCacheCtx =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrPreReplicateCacheCtx =================")
+	assert := assert.New(t)
+
+	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
+	activeVBs := make(map[string][]uint16)
+	activeVBs[kvKey] = []uint16{0}
+	targetRef, _ := metadata.NewRemoteClusterReference("", "C2", "", "", "",
+		"", false, "", nil, nil, nil, nil)
+	throughSeqnoMap := make(map[uint16]uint64)
+	var upsertCkptDoneErr error
+
+	targetMCDelayMap[kvKey] = 2
+
+	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
+		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
+		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
+		getBackfillMgr, bucketTopologySvc, true)
+
+	assert.Nil(err)
+	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult, nil, nil, nil, nil)
+
+	// Replace with a customized one
+	capiSvcErr := &service_def.CAPIService{}
+	var preReplicateCounter uint32
+	// capiSvc that returns error
+	capiSvcErr.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		atomic.AddUint32(&preReplicateCounter, 1)
+	}).Return(false, nil, fmt.Errorf("dummy"))
+	ckptMgr.capi_svc = capiSvcErr
+
+	cacheCtx := ckptMgr.newGlobalCkptPrereplicateCacheCtx(5*time.Second, 250*time.Millisecond)
+
+	// Test an error scenario where the error code is stored and returned various times before expiration
+	dummyRemBucketInfo := &service_def_real.RemoteBucketInfo{}
+	tgtTs := &service_def_real.RemoteVBReplicationStatus{}
+
+	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	assert.NotNil(err)
+	assert.Equal(uint32(1), atomic.LoadUint32(&preReplicateCounter))
+	assert.Len(cacheCtx.lastQueriedTimers, 1)
+	// Immediately do another pull, call should not increment, same error
+	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	assert.NotNil(err)
+	assert.Equal(uint32(1), atomic.LoadUint32(&preReplicateCounter))
+	assert.Len(cacheCtx.lastQueriedTimers, 1)
+
+	// error should expire after 1 second
+	time.Sleep(1 * time.Second)
+	assert.Len(cacheCtx.lastQueriedTimers, 0)
+
+	// Replace with a customized one that returns positive results, like positive match
+	capiSvcGood := &service_def.CAPIService{}
+	capiSvcGood.On("PreReplicate", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		atomic.AddUint32(&preReplicateCounter, 1)
+	}).Return(true, nil, nil)
+	ckptMgr.capi_svc = capiSvcGood
+
+	cacheCtx = ckptMgr.newGlobalCkptPrereplicateCacheCtx(1*time.Second, 250*time.Millisecond)
+	match, _, err := cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	assert.Nil(err)
+	assert.True(match)
+	assert.Equal(uint32(2), atomic.LoadUint32(&preReplicateCounter))
+	assert.Len(cacheCtx.lastQueriedTimers, 1)
+	// Immediately do another pull, call should not increment, same error
+	_, _, err = cacheCtx.preReplicate(dummyRemBucketInfo, tgtTs)
+	assert.Nil(err)
+	assert.True(match)
+	assert.Equal(uint32(2), atomic.LoadUint32(&preReplicateCounter))
+
 }
