@@ -1230,6 +1230,16 @@ func HexLittleEndianToUint64(hexLE []byte) (uint64, error) {
 		return 0, fmt.Errorf("incorrect hex little endian input %s", hexLE)
 	}
 
+	return HexLittleEndianToUint64WO0x(hexLE[2:])
+}
+
+// This routine is same as HexLittleEndianToUint64,
+// but this one doesn't expect 0x prefixed.
+func HexLittleEndianToUint64WO0x(hexLE []byte) (uint64, error) {
+	if len(hexLE) == 0 {
+		return 0, nil
+	}
+
 	// Decoding the hexLE will need the string to be of even length
 	// If hexLE is not of even length, it was probably stripped off of zeroes at the end as part of Uint64ToHexLittleEndianAndStrip
 	if len(hexLE)%2 != 0 {
@@ -1242,7 +1252,7 @@ func HexLittleEndianToUint64(hexLE []byte) (uint64, error) {
 
 	// hexLE may not necessarily be 16+2 bytes because of Uint64ToHexLittleEndianAndStrip0s
 	decoded := make([]byte, MaxHexDecodedLength)
-	_, err := hex.Decode(decoded, hexLE[2:])
+	_, err := hex.Decode(decoded, hexLE)
 	if err != nil {
 		return 0, err
 	}
