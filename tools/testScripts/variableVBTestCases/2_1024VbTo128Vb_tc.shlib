@@ -95,9 +95,7 @@ function runTestCase {
 	validateInternalLogWithInstance "C1" "$CKPTSEQNO_BACKARD" 0
 
 	resumeReplication "C1" "B1" "C2" "B2"
-	sleep 120
-	# TODO MB-63383 can shorten once done
-	# Resume could take some time
+	sleep 30
 	checkUnidirectionalChangesLeft
 	grepForPanics
 

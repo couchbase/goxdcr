@@ -1996,3 +1996,11 @@ var OutNozzleVBMetricKeys = []string{GuardrailResidentRatio, GuardrailDataSize, 
 var CLogVBMetricKeys = []string{SrcConflictDocsWritten, TgtConflictDocsWritten, CRDConflictDocsWritten, ConflictDocsFiltered}
 
 var CLogTargetMetricKeys = []string{TrueConflictsDetected, CLogHibernatedCount, GetDocsCasChangedCount}
+
+// After a successful pre_replicate call, how long the information stays around for
+var GlobalPreReplicateCacheExpireTimeSecs = 10
+
+// After a failed pre_replicate call that returns an error, how long the error stays around for before a retry
+// Generally speaking, pre_replicate should not fail. If it fails, ckpt resume/rollback
+// would generally error out and XDCR should avoid hammering ns_server
+var GlobalPreReplicateCacheErrorExpireTimeSecs = 30
