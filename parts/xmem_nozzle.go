@@ -2668,9 +2668,11 @@ func (xmem *XmemNozzle) setClient(client *base.XmemClient, isSetMeta bool) {
 
 func shouldUpdateNonTempErrResponse(seenBefore, nonTempErrSeen bool, nonTempErrSeenBefore, nonTempErrSeenNow mc.Status) bool {
 	return nonTempErrSeen &&
-		((seenBefore && nonTempErrSeenBefore != nonTempErrSeenNow) || !seenBefore)
+		(!seenBefore || (seenBefore && nonTempErrSeenBefore != nonTempErrSeenNow))
 }
 
+// Used to create a UI alert when non-temporary errors are received from xmem.client_for_setMeta,
+// and then subsequently dismiss them when some other type of response is received for the same buffer "pos".
 func (xmem *XmemNozzle) markNonTempErrorResponse(response *mc.MCResponse, nonTempErrSeen bool) {
 	if response == nil {
 		return
@@ -2780,6 +2782,7 @@ func (xmem *XmemNozzle) receiveResponse(finch chan bool, waitGrp *sync.WaitGroup
 					// Don't spam the log. Keep a counter instead
 					atomic.AddUint64(&xmem.counter_eaccess, 1)
 					xmem.RaiseEvent(common.NewEvent(common.DataSentFailed, response.Status, xmem, nil, nil))
+					nonTempErrReceived = true
 					_, err = xmem.buf.modSlot(pos, xmem.resendWithReset)
 					if err != nil {
 						xmem.Logger().Errorf("%v received error for resendWithReset during EAccess error, err=%v", xmem.Id(), err)
@@ -3185,7 +3188,7 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				}
 			}
 
-			// non-temp error response to number of items in the current state of the buffer with the given reponse mapping
+			// non-temp error response to number of items in the current state of the buffer with the given response mapping
 			var totalNonTempErrCodes map[mc.Status]uint16
 			xmem.nonTempErrsSeenMtx.RLock()
 			if len(xmem.nonTempErrsSeen) > 0 {
@@ -3211,10 +3214,11 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				continue
 			}
 
-			eventMsgStr := "Following number of mutations are rejected by target due to non-temporary error responses: "
+			var eventMsgStrBuilder strings.Builder
+			eventMsgStrBuilder.WriteString("Following number of mutations are rejected by target due to non-temporary error responses: ")
 			changed := false
 			for status, count := range totalNonTempErrCodes {
-				eventMsgStr = eventMsgStr + fmt.Sprintf("{%v : count=%v} | ", xmem.PrintResponseStatusError(status), count)
+				eventMsgStrBuilder.WriteString(fmt.Sprintf("{%v : count=%v} | ", xmem.PrintResponseStatusError(status), count))
 				if !changed && count != lastTotalNonTempErrMap[status] {
 					changed = true
 				}
@@ -3225,21 +3229,19 @@ func (xmem *XmemNozzle) selfMonitor(finch chan bool, waitGrp *sync.WaitGroup) {
 				continue
 			}
 
-			if nonTempErrMsgId == -1 {
-				// new message
-				eventId := xmem.eventsProducer.AddEvent(base.LowPriorityMsg,
-					fmt.Sprintf("%sPipeline: %s", eventMsgStr, xmem.topic), base.EventsMap{}, nil)
-				nonTempErrMsgId = eventId
-			} else if nonTempErrMsgId >= 0 {
+			eventMsgStrBuilder.WriteString("XMEM ID: " + xmem.Id())
+			if nonTempErrMsgId >= 0 {
 				// update the message
-				err := xmem.eventsProducer.UpdateEvent(nonTempErrMsgId,
-					fmt.Sprintf("%sPipeline: %s", eventMsgStr, xmem.topic), nil)
+				err := xmem.eventsProducer.UpdateEvent(nonTempErrMsgId, eventMsgStrBuilder.String(), nil)
 				if err != nil {
 					xmem.Logger().Warnf("Unable to update event %v: %v", nonTempErrMsgId, err)
 				}
+			} else {
+				// new message
+				nonTempErrMsgId = xmem.eventsProducer.AddEvent(base.LowPriorityMsg, eventMsgStrBuilder.String(), base.EventsMap{}, nil)
 			}
-
 			lastTotalNonTempErrMap = totalNonTempErrCodes
+
 		case <-statsTicker.C:
 			xmem.RaiseEvent(common.NewEvent(common.StatsUpdate, nil, xmem, nil, []int{len(xmem.dataChan), xmem.bytesInDataChan()}))
 		}
