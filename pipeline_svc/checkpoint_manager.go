@@ -1218,11 +1218,18 @@ func (ckmgr *CheckpointManager) loadCollectionMappingsFromCkptDocs(ckptDocs map[
 }
 
 func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
-	var highestManifestId uint64
+	if ckmgr.isVariableVBMode() {
+		ckmgr.loadBrokenMappingsGlobal(ckptDocs)
+	} else {
+		ckmgr.loadBrokenMappingsLegacy(ckptDocs)
+	}
+	go ckmgr.updateReplStatusBrokenMap()
+}
 
+func (ckmgr *CheckpointManager) loadBrokenMappingsLegacy(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
+	var highestManifestId uint64
 	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
 
-	ckmgr.cachedBrokenMap.lock.Lock()
 	// First find the highest manifestID to load the brokenmaps
 	for _, ckptDoc := range ckptDocs {
 		if ckptDoc == nil {
@@ -1240,6 +1247,14 @@ func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata
 	}
 
 	// Then only populate from highest manifestID
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, highestManifestId)
+}
+
+// ckmgr.cachedBrokenMap.lock should be held
+func (ckmgr *CheckpointManager) loadBrokenMappingCommit(cacheLookupMap map[uint64]metadata.CheckpointRecordsList, highestManifestId uint64) {
+	ckmgr.cachedBrokenMap.lock.Lock()
+	defer ckmgr.cachedBrokenMap.lock.Unlock()
+
 	listToTraverse := cacheLookupMap[highestManifestId]
 	for _, record := range listToTraverse {
 		if record == nil || record.TargetManifest < highestManifestId {
@@ -1262,9 +1277,33 @@ func (ckmgr *CheckpointManager) loadBrokenMappings(ckptDocs map[uint16]*metadata
 		}
 	}
 	ckmgr.cachedBrokenMap.correspondingTargetManifest = highestManifestId
+}
 
-	ckmgr.cachedBrokenMap.lock.Unlock()
-	go ckmgr.updateReplStatusBrokenMap()
+func (ckmgr *CheckpointManager) loadBrokenMappingsGlobal(ckptDocs map[uint16]*metadata.CheckpointsDoc) {
+	var highestManifestId uint64
+	cacheLookupMap := make(map[uint64]metadata.CheckpointRecordsList)
+
+	// First find the highest manifestID to load the brokenmaps
+	for _, ckptDoc := range ckptDocs {
+		if ckptDoc == nil {
+			continue
+		}
+		for _, record := range ckptDoc.Checkpoint_records {
+			if record == nil {
+				continue
+			}
+
+			for _, oneGlobalTs := range record.GlobalTimestamp {
+				cacheLookupMap[oneGlobalTs.TargetManifest] = append(cacheLookupMap[oneGlobalTs.TargetManifest], record)
+				if oneGlobalTs.TargetManifest > highestManifestId {
+					highestManifestId = oneGlobalTs.TargetManifest
+				}
+			}
+		}
+	}
+
+	// Then only populate from highest manifestID
+	ckmgr.loadBrokenMappingCommit(cacheLookupMap, highestManifestId)
 }
 
 func (ckmgr *CheckpointManager) setTimestampForVB(vbno uint16, ts *base.VBTimestamp) error {
@@ -1662,7 +1701,6 @@ func (ckmgr *CheckpointManager) populateDataFromCkptDoc(ckptDoc *metadata.Checkp
 		// However, if there are backfill checkpoints and they all do not match because of
 		//    checkpoint's startSeqno > backfillTaskEndSeqno
 		// then the vbopaque will never be populated and will need to be populated to ensure that ckpt operations can take place
-		// TODO MB-63393 backfill pipeline work to come
 		ckmgr.populateTargetVBOpaqueIfNeeded(vbno)
 	}
 
