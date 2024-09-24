@@ -370,7 +370,7 @@ func (h *HLV) String() string {
 	return fmt.Sprintf("{cvCAS: %v, cv: {%v,%v}, pv: %v, mv: %v}", h.cvCAS, h.cv.source, h.cv.version, h.pv, h.mv)
 }
 
-// Bytes required when formatting the map to XATTR
+// Max bytes required when formatting the PV and MV array to XATTR
 func BytesRequired(vMap VersionsMap) int {
 	if vMap == nil {
 		return 0
@@ -382,7 +382,7 @@ func BytesRequired(vMap VersionsMap) int {
 		res = res + base.QuotesAndSepLenForHLVEntry
 	}
 	if res != 0 {
-		res = res + len(base.EmptyJsonObject) + 1 // Add { and } and nil terminator
+		res = res + len(base.EmptyJsonArray) + 1 // Add [ and ] and nil terminator
 	}
 	return res
 }

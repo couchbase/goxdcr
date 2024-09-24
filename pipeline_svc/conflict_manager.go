@@ -461,14 +461,20 @@ func (c *ConflictManager) formatMergedDoc(input *crMeta.ConflictParams, mergedDo
 	var mv, pv, mvSlice, pvSlice []byte
 	if mvlen > 0 {
 		mvSlice = make([]byte, mvlen)
-		pos, _ := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mvSlice, 0, nil)
+		pos, _, err := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetMV(), mvSlice, 0, nil)
+		if err != nil {
+			return nil, err
+		}
 		mv = mvSlice[:pos]
 	}
 	if pvlen > 0 {
 		pruneFunc := base.GetHLVPruneFunction(sourceMeta.GetDocumentMetadata().Cas,
 			time.Duration(atomic.LoadUint32(&c.pruningWindowSec))*time.Second)
 		pvSlice = make([]byte, pvlen)
-		pos, pruned := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pvSlice, 0, &pruneFunc)
+		pos, pruned, err := crMeta.VersionMapToDeltasBytes(mergedMeta.GetHLV().GetPV(), pvSlice, 0, &pruneFunc)
+		if err != nil {
+			return nil, err
+		}
 		pv = pvSlice[:pos]
 		if pruned {
 			c.RaiseEvent(common.NewEvent(common.HlvPrunedAtMerge, nil, c, nil, nil))
