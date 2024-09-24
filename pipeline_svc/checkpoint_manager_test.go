@@ -1108,8 +1108,8 @@ func TestCkptMgrGlobalCkpt(t *testing.T) {
 }
 
 func TestCkptMgrRestoreLatestTargetManifest(t *testing.T) {
-	fmt.Println("============== Test case start: TestCkptMgrStopBeforeStart =================")
-	defer fmt.Println("============== Test case end: TestCkptMgrStopBeforeStart =================")
+	fmt.Println("============== Test case start: TestCkptMgrRestoreLatestTargetManifest =================")
+	defer fmt.Println("============== Test case end: TestCkptMgrRestoreLatestTargetManifest =================")
 	assert := assert.New(t)
 
 	ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, getBackfillMgr, bucketTopologySvc, spec, pipelineSupervisor, _, targetKvVbMap, targetMCMap, targetMCDelayMap, targetMCResult := setupCkptMgrBoilerPlate()
@@ -1125,7 +1125,7 @@ func TestCkptMgrRestoreLatestTargetManifest(t *testing.T) {
 	ckptMgr, err := NewCheckpointManager(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc,
 		throughSeqnoTrackerSvc, activeVBs, "", "", "", targetKvVbMap,
 		targetRef, nil, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc,
-		getBackfillMgr, bucketTopologySvc, true)
+		getBackfillMgr, bucketTopologySvc, false)
 
 	assert.Nil(err)
 	setupMock(ckptSvc, capiSvc, remoteClusterSvc, replSpecSvc, xdcrTopologySvc, throughSeqnoTrackerSvc, utils, statsMgr, uiLogSvc, collectionsManifestSvc, backfillReplSvc, backfillMgrIface, bucketTopologySvc, spec, pipelineSupervisor, throughSeqnoMap, upsertCkptDoneErr, targetMCMap, targetMCDelayMap, targetMCResult, nil, nil, nil, nil)
@@ -1137,13 +1137,6 @@ func TestCkptMgrRestoreLatestTargetManifest(t *testing.T) {
 	assert.Equal(uint64(0), ckptMgr.cachedBrokenMap.correspondingTargetManifest)
 
 	// Let's say there are two records, one outdated with brokenmap and one most up-to-date without brokenmap
-	ckptDocs := make(map[uint16]*metadata.CheckpointsDoc)
-
-	record1 := metadata.CheckpointRecord{
-		TargetVBTimestamp: metadata.TargetVBTimestamp{
-			TargetManifest: 1,
-		},
-	}
 	brokenMap := make(metadata.CollectionNamespaceMapping)
 	srcNs := &base.CollectionNamespace{
 		ScopeName:      "s1",
@@ -1154,19 +1147,29 @@ func TestCkptMgrRestoreLatestTargetManifest(t *testing.T) {
 		CollectionName: "col1",
 	}
 	brokenMap.AddSingleMapping(srcNs, tgtNs)
-
 	brokenMapShaSlice, err := brokenMap.Sha256()
 	assert.Nil(err)
-	brokenMapStr := fmt.Sprintf("%s", brokenMapShaSlice)
+	brokenMapStr := fmt.Sprintf("%x", brokenMapShaSlice)
 	shaMap := make(metadata.ShaToCollectionNamespaceMap)
 	shaMap[brokenMapStr] = &brokenMap
+
+	ckptDocs := make(map[uint16]*metadata.CheckpointsDoc)
+
+	record1 := metadata.CheckpointRecord{
+		TargetVBTimestamp: metadata.TargetVBTimestamp{
+			TargetManifest:      1,
+			Target_vb_opaque:    &metadata.TargetVBUuidAndTimestamp{},
+			BrokenMappingSha256: brokenMapStr,
+		},
+	}
 
 	assert.Nil(record1.LoadBrokenMapping(shaMap))
 
 	// Record 2 is "newer" in terms of target manifest and has no brokenmap
 	record2 := metadata.CheckpointRecord{
 		TargetVBTimestamp: metadata.TargetVBTimestamp{
-			TargetManifest: 2,
+			TargetManifest:   2,
+			Target_vb_opaque: &metadata.TargetVBUuidAndTimestamp{},
 		},
 	}
 
