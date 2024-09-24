@@ -2271,7 +2271,7 @@ var MaxHexCASLength = MaxHexDecodedLength + 2
 var MinRevIdLength = 1
 var MinRevIdLengthWithQuotes = MinRevIdLength + 2
 
-const QuotesAndSepLenForHLVEntry = 6 /* quotes and sepeartors. Eg - "src":"ver", */
+const QuotesAndSepLenForHLVEntry = 4 /* quotes and sepeartors. Eg - "version@source", */
 
 type ConflictManagerAction int
 

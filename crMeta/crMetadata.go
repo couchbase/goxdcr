@@ -551,7 +551,10 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 	if len(mv) > 0 {
 		// This is not the first since we have cv before this
 		body, *pos = base.WriteJsonRawMsg(body, []byte(HLV_MV_FIELD), *pos, base.WriteJsonKey, len([]byte(HLV_MV_FIELD)), false)
-		*pos, _ = VersionMapToDeltasBytes(mv, body, *pos, nil)
+		*pos, _, err = VersionMapToDeltasBytes(mv, body, *pos, nil)
+		if err != nil {
+			return *pos, false, err
+		}
 	}
 	// Format PV
 	pv := meta.GetHLV().GetPV()
@@ -560,7 +563,10 @@ func ConstructXattrFromHlvForSetMeta(meta *CRMetadata, pruningWindow time.Durati
 		startPos := *pos
 		body, *pos = base.WriteJsonRawMsg(body, []byte(HLV_PV_FIELD), *pos, base.WriteJsonKey, len([]byte(HLV_PV_FIELD)), false)
 		afterKeyPos := *pos
-		*pos, pruned = VersionMapToDeltasBytes(pv, body, *pos, &pruneFunc)
+		*pos, pruned, err = VersionMapToDeltasBytes(pv, body, *pos, &pruneFunc)
+		if err != nil {
+			return *pos, pruned, err
+		}
 		if *pos == afterKeyPos {
 			// Did not add PV, need to back off and remove the PV key
 			*pos = startPos
@@ -581,6 +587,7 @@ func ConstructSpecsFromHlvForSubdocOp(meta *CRMetadata, pruningWindow time.Durat
 
 	var spec base.SubdocMutationPathSpec
 	var idx int
+	var err error
 
 	pruneFunc := base.GetHLVPruneFunction(meta.GetDocumentMetadata().Cas, pruningWindow)
 	HLV := meta.GetHLV()
@@ -605,7 +612,10 @@ func ConstructSpecsFromHlvForSubdocOp(meta *CRMetadata, pruningWindow time.Durat
 	mv := HLV.GetMV()
 	if len(mv) > 0 {
 		idx = 0
-		idx, _ = VersionMapToDeltasBytes(mv, mvSlice, idx, nil)
+		idx, _, err = VersionMapToDeltasBytes(mv, mvSlice, idx, nil)
+		if err != nil {
+			return false, err
+		}
 		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(XATTR_MV_PATH), mvSlice[:idx])
 		*specs = append(*specs, spec)
 	} else if targetHasMv {
@@ -620,7 +630,10 @@ func ConstructSpecsFromHlvForSubdocOp(meta *CRMetadata, pruningWindow time.Durat
 	if len(pv) > 0 {
 		idx = 0
 		afterKeyPos := idx
-		idx, pruned = VersionMapToDeltasBytes(pv, pvSlice, idx, &pruneFunc)
+		idx, pruned, err = VersionMapToDeltasBytes(pv, pvSlice, idx, &pruneFunc)
+		if err != nil {
+			return pruned, err
+		}
 		if idx == afterKeyPos {
 			// PV is all pruned - remove from target
 			if !targetHasPV {
@@ -666,13 +679,23 @@ type MergeResultNotifier interface {
 	NotifyMergeResult(input *ConflictParams, mergeResult interface{}, mergeError error)
 }
 
-// returns version@source, which is one entry of a PV or MV.
-func ComposeHLVEntry(source hlv.DocumentSourceId, version []byte) []byte {
+// source should be of non zero length
+// version should be atleast of length >= 3
+// returns version@source, after stripping 0x of the version,
+// which will be one entry of a PV or MV.
+func ComposeHLVEntry(source hlv.DocumentSourceId, version []byte) ([]byte, error) {
+	if len(source) == 0 {
+		return nil, fmt.Errorf("invalid source=%v", source)
+	}
+	if len(version) < 3 {
+		return nil, fmt.Errorf("invalid version=%v", version)
+	}
+
 	hlvEntryLen := len(version) + 1 + len(source)
 	hlvEntry := make([]byte, hlvEntryLen)
 	idx := 0
-	// copy the version
-	n := copy(hlvEntry[idx:], version)
+	// copy the version, without the 0x
+	n := copy(hlvEntry[idx:], version[2:])
 	idx += n
 	// copy the separator
 	hlvEntry[idx] = HLV_SEPARATOR
@@ -682,14 +705,14 @@ func ComposeHLVEntry(source hlv.DocumentSourceId, version []byte) []byte {
 		hlvEntry[idx+i] = source[i]
 	}
 	idx += len(source)
-	return hlvEntry[:idx]
+	return hlvEntry[:idx], nil
 }
 
 // given a version map (PV or MV), this function,
 // 1. applies the pruning function on top of the version entries if they are PVs i.e. if the pruning function is passed in.
 // 2. converts the entries into version deltas, strips the leading zeroes of delta values and composes the PV or MV for the target doc.
 // 3. PVs and MVs will be of the format of JSON arrays with individual string entries of the form "<version>@<source>".
-func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) (int, bool) {
+func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFunction *base.PruningFunc) (int, bool, error) {
 	startPos := pos
 	first := true
 	pruned := false
@@ -718,7 +741,10 @@ func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFu
 			value = base.Uint64ToHexLittleEndianAndStrip0s(ver)
 		}
 
-		hlvEntry := ComposeHLVEntry(key, value)
+		hlvEntry, err := ComposeHLVEntry(key, value)
+		if err != nil {
+			return startPos, pruned, err
+		}
 
 		body, pos = base.WriteJsonRawMsg(body, hlvEntry, pos, base.WriteJsonArrayEntry, len(hlvEntry), first /*firstKey*/)
 		first = false
@@ -726,11 +752,11 @@ func VersionMapToDeltasBytes(vMap hlv.VersionsMap, body []byte, pos int, pruneFu
 
 	if first {
 		// We haven't added anything
-		return startPos, pruned
+		return startPos, pruned, nil
 	}
 	body[pos] = ']'
 	pos++
-	return pos, pruned
+	return pos, pruned, nil
 }
 
 // {"cvCas":...,"src":...,"ver":...
@@ -810,7 +836,7 @@ func xattrVVtoDeltas(vvBytes []byte) (hlv.VersionsMap, error) {
 		}
 
 		src := hlv.DocumentSourceId(source)
-		ver, err := base.HexLittleEndianToUint64(version)
+		ver, err := base.HexLittleEndianToUint64WO0x(version)
 		if err != nil {
 			return nil, err
 		}
@@ -850,7 +876,10 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 				value = base.Uint64ToHexLittleEndianAndStrip0s(ver)
 			}
 
-			hlvEntry := ComposeHLVEntry(src, value)
+			hlvEntry, err := ComposeHLVEntry(src, value)
+			if err != nil {
+				return pvBytes, mvBytes, err
+			}
 
 			mvBytes, mvPos = base.WriteJsonRawMsg(mvBytes, hlvEntry, mvPos, base.WriteJsonArrayEntry, len(hlvEntry), firstKey /*firstKey*/)
 			firstKey = false
@@ -892,7 +921,10 @@ func (meta *CRMetadata) UpdateMetaForSetBack() (pvBytes, mvBytes []byte, err err
 				value = base.Uint64ToHexLittleEndianAndStrip0s(ver)
 			}
 
-			hlvEntry := ComposeHLVEntry(src, value)
+			hlvEntry, err := ComposeHLVEntry(src, value)
+			if err != nil {
+				return pvBytes, mvBytes, err
+			}
 
 			pvBytes, pvPos = base.WriteJsonRawMsg(pvBytes, hlvEntry, pvPos, base.WriteJsonArrayEntry, len(hlvEntry), firstKey /*firstKey*/)
 			firstKey = false
