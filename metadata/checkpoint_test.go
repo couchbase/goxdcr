@@ -725,4 +725,10 @@ func TestCheckpointDocMarshallerGlobalCkpt(t *testing.T) {
 	assert.Equal(newCkptRecord.SourceManifestForBackfillMgr, decompressCheck.Checkpoint_records[1].SourceManifestForBackfillMgr)
 	assert.NotNil(decompressCheck.Checkpoint_records[0])
 	assert.True(decompressCheck.Checkpoint_records[0].SameAs(&ckptRecord2))
+
+	// Test clone
+	clonedDoc := ckpt_doc.Clone()
+	for i, record := range clonedDoc.Checkpoint_records {
+		assert.True(record.SameAs(ckpt_doc.Checkpoint_records[i]))
+	}
 }

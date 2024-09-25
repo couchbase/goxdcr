@@ -218,12 +218,15 @@ func (t *TargetVBTimestamp) Clone() TargetVBTimestamp {
 	}
 
 	clonedVal := &TargetVBTimestamp{
-		Target_vb_opaque:    t.Target_vb_opaque,
+		//Target_vb_opaque to be cloned later
 		Target_Seqno:        t.Target_Seqno,
 		TargetManifest:      t.TargetManifest,
 		BrokenMappingSha256: t.BrokenMappingSha256,
 		brokenMappings:      t.brokenMappings.Clone(),
 		brokenMappingsMtx:   sync.RWMutex{},
+	}
+	if t.Target_vb_opaque != nil {
+		clonedVal.Target_vb_opaque = t.Target_vb_opaque.Clone()
 	}
 	return *clonedVal
 }
@@ -231,7 +234,7 @@ func (t *TargetVBTimestamp) Clone() TargetVBTimestamp {
 // Also needs to inplement VBOpaque
 type GlobalTimestamp map[uint16]*GlobalVBTimestamp
 
-func (g *GlobalTimestamp) Clone() GlobalTimestamp {
+func (g *GlobalTimestamp) CloneGlobalTimestamp() GlobalTimestamp {
 	if g == nil {
 		return GlobalTimestamp{}
 	}
@@ -293,6 +296,15 @@ func (g *GlobalTimestamp) GetValue() interface{} {
 	}
 
 	return opaqueMap
+}
+
+func (g *GlobalTimestamp) Clone() TargetVBOpaque {
+	if g == nil {
+		return g
+	}
+
+	clonedVal := g.CloneGlobalTimestamp()
+	return TargetVBOpaque(&clonedVal)
 }
 
 func (g *GlobalTimestamp) SameAs(other *GlobalTimestamp) bool {
@@ -1049,7 +1061,7 @@ func (ckptRecord *CheckpointRecord) Load(other *CheckpointRecord) {
 	ckptRecord.CLogHibernatedCnt = other.CLogHibernatedCnt
 	ckptRecord.GetDocsCasChangedCnt = other.GetDocsCasChangedCnt
 	ckptRecord.GlobalCounters = other.GlobalCounters.Clone()
-	ckptRecord.GlobalTimestamp = other.GlobalTimestamp.Clone()
+	ckptRecord.GlobalTimestamp = other.GlobalTimestamp.CloneGlobalTimestamp()
 }
 
 func (ckptRecord *CheckpointRecord) LoadBrokenMapping(allShaToBrokenMaps ShaToCollectionNamespaceMap) error {
@@ -1318,6 +1330,7 @@ type TargetVBOpaque interface {
 	Value() interface{}
 	IsSame(targetVBOpaque TargetVBOpaque) bool
 	Size() int
+	Clone() TargetVBOpaque
 }
 
 // clusters have a single int vbuuid
@@ -1351,6 +1364,14 @@ func (targetVBUuid *TargetVBUuid) IsSame(targetVBOpaque TargetVBOpaque) bool {
 			return targetVBUuid.Target_vb_uuid == new_targetVBUuid.Target_vb_uuid
 		}
 	}
+}
+
+func (targetVBUuid *TargetVBUuid) Clone() TargetVBOpaque {
+	if targetVBUuid == nil {
+		return nil
+	}
+
+	return &TargetVBUuid{Target_vb_uuid: targetVBUuid.Target_vb_uuid}
 }
 
 type GlobalTargetVbUuids map[uint16][]uint64
@@ -1468,6 +1489,14 @@ func (targetVBUuid *TargetVBUuidStr) IsSame(targetVBOpaque TargetVBOpaque) bool 
 	}
 }
 
+func (targetVBUuid *TargetVBUuidStr) Clone() TargetVBOpaque {
+	if targetVBUuid == nil {
+		return nil
+	}
+
+	return &TargetVBUuidStr{Target_vb_uuid: targetVBUuid.Target_vb_uuid}
+}
+
 // newer clusters have a pair of vbuuid and seqno
 type TargetVBUuidAndTimestamp struct {
 	Target_vb_uuid string `json:"target_vb_uuid"`
@@ -1499,6 +1528,17 @@ func (targetVBUuidAndTimestamp *TargetVBUuidAndTimestamp) IsSame(targetVBOpaque 
 		} else {
 			return targetVBUuidAndTimestamp.Target_vb_uuid == new_targetVBUuidAndTimestamp.Target_vb_uuid && targetVBUuidAndTimestamp.Startup_time == new_targetVBUuidAndTimestamp.Startup_time
 		}
+	}
+}
+
+func (targetVBUuidAndTimestamp *TargetVBUuidAndTimestamp) Clone() TargetVBOpaque {
+	if targetVBUuidAndTimestamp == nil {
+		return nil
+	}
+
+	return &TargetVBUuidAndTimestamp{
+		Target_vb_uuid: targetVBUuidAndTimestamp.Target_vb_uuid,
+		Startup_time:   targetVBUuidAndTimestamp.Startup_time,
 	}
 }
 
@@ -2014,7 +2054,7 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			SourceManifestForBackfillMgr: c.SourceManifestForBackfillMgr,
 		},
 		TargetVBTimestamp: TargetVBTimestamp{
-			Target_vb_opaque:    c.Target_vb_opaque,
+			// Target_vb_opaque to be cloned later
 			Target_Seqno:        c.Target_Seqno,
 			TargetManifest:      c.TargetManifest,
 			BrokenMappingSha256: c.BrokenMappingSha256,
@@ -2054,6 +2094,13 @@ func (c *CheckpointRecord) Clone() *CheckpointRecord {
 			CLogHibernatedCnt:                  c.CLogHibernatedCnt,
 			GetDocsCasChangedCnt:               c.GetDocsCasChangedCnt,
 		},
+
+		GlobalTimestamp: c.GlobalTimestamp.CloneGlobalTimestamp(),
+		GlobalCounters:  c.GlobalCounters.Clone(),
+	}
+
+	if c.Target_vb_opaque != nil {
+		retVal.Target_vb_opaque = c.Target_vb_opaque.Clone()
 	}
 	return retVal
 }
