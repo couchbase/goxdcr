@@ -132,4 +132,8 @@ function runTestCase {
 	cleanupBucketReplications
 	cleanupBuckets
 	cleanupRemoteClusterRefs
+
+	cleanupBucketNamePropertyMap
+	# For magma clean up, sleep a bit
+	sleep 20
 }
