@@ -307,7 +307,6 @@ func (g *globalCkptPrereplicateCacheCtx) preReplicate(remoteBucket *service_def.
 		_, timerExists := g.lastQueriedTimers[tgtTs.String()]
 		g.mtx.RUnlock()
 		if lastMatchExists || lastOpaqueExists || lastErrExists {
-			fmt.Printf("NEIL DEBUG tgtTs %v vbno %v prereplicate called retrieved cached\n", tgtTs, tgtTs.VBNo)
 			return lastMatch, lastOpaque, lastErr
 		}
 

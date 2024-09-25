@@ -20,6 +20,53 @@ func (_m *TargetVBOpaque) EXPECT() *TargetVBOpaque_Expecter {
 	return &TargetVBOpaque_Expecter{mock: &_m.Mock}
 }
 
+// Clone provides a mock function with given fields:
+func (_m *TargetVBOpaque) Clone() metadata.TargetVBOpaque {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Clone")
+	}
+
+	var r0 metadata.TargetVBOpaque
+	if rf, ok := ret.Get(0).(func() metadata.TargetVBOpaque); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(metadata.TargetVBOpaque)
+		}
+	}
+
+	return r0
+}
+
+// TargetVBOpaque_Clone_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Clone'
+type TargetVBOpaque_Clone_Call struct {
+	*mock.Call
+}
+
+// Clone is a helper method to define mock.On call
+func (_e *TargetVBOpaque_Expecter) Clone() *TargetVBOpaque_Clone_Call {
+	return &TargetVBOpaque_Clone_Call{Call: _e.mock.On("Clone")}
+}
+
+func (_c *TargetVBOpaque_Clone_Call) Run(run func()) *TargetVBOpaque_Clone_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TargetVBOpaque_Clone_Call) Return(_a0 metadata.TargetVBOpaque) *TargetVBOpaque_Clone_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *TargetVBOpaque_Clone_Call) RunAndReturn(run func() metadata.TargetVBOpaque) *TargetVBOpaque_Clone_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsSame provides a mock function with given fields: targetVBOpaque
 func (_m *TargetVBOpaque) IsSame(targetVBOpaque metadata.TargetVBOpaque) bool {
 	ret := _m.Called(targetVBOpaque)
