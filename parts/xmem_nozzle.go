@@ -2335,6 +2335,53 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 		specs = append(specs, spec)
 	}
 
+	xtoc, err := lookup.ResponseForAPath(base.XattributeToc)
+	if err != nil {
+		return fmt.Errorf("%v: XTOC was not fetched, err=%v, eccv=%v, mobile=%v",
+			xmem.Id(), err, xmem.getCrossClusterVers(), xmem.getMobileCompatible())
+	}
+
+	it, err := base.NewXTOCIterator(xtoc)
+	if err != nil {
+		return err
+	}
+
+	for it.HasNext() {
+		xattrKey, err := it.Next()
+		if err != nil {
+			return err
+		}
+
+		if len(xattrKey) == 0 {
+			continue
+		}
+
+		if base.Equals(xattrKey, base.XATTR_HLV) {
+			continue
+		}
+
+		if base.Equals(xattrKey, base.XATTR_MOBILE) {
+			continue
+		}
+
+		if base.Equals(xattrKey, base.XATTR_MOU) {
+			continue
+		}
+
+		exists := true
+		for i := 0; i < len(specs); i++ {
+			if base.EqualBytes(xattrKey, specs[i].Path) {
+				exists = true
+				break
+			}
+		}
+
+		if !exists {
+			spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), xattrKey, nil)
+			specs = append(specs, spec)
+		}
+	}
+
 	var accessDeleted bool
 	// body path
 	switch wrappedReq.SubdocCmdOptions.SubdocOp {
@@ -2579,6 +2626,7 @@ func (xmem *XmemNozzle) initNewBatch() {
 	if isMobile {
 		subdocSpecOpt.IncludeMobileSync = true
 		subdocSpecOpt.IncludeVXattr = true
+		subdocSpecOpt.IncludeXTOC = true
 		// For mixed mode, we never need to get target HLV
 		xmem.batch.getMetaSpecWithoutHlv = base.ComposeSpecForSubdocGet(subdocSpecOpt)
 	}

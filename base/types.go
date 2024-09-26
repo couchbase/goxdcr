@@ -1910,8 +1910,8 @@ func (xfi *ArrayXattrFieldIterator) Next() (value []byte, err error) {
 		sep = bytes.Index(xfi.xattr[begin:], []byte{']'})
 	}
 	end := begin + sep - 1
-	if sep == -1 || (xfi.xattr[begin] != '"' || xfi.xattr[end] != '"') &&
-		(xfi.xattr[begin] != '{' || xfi.xattr[end] != '}') {
+	if sep == -1 || ((xfi.xattr[begin] != '"' || xfi.xattr[end] != '"') &&
+		(xfi.xattr[begin] != '{' || xfi.xattr[end] != '}')) {
 		err = fmt.Errorf("array XATTR %s invalid format at pos=%v, char '%c', end=%v", xfi.xattr, xfi.pos, xfi.xattr[xfi.pos], end)
 		return
 	}
@@ -1926,6 +1926,7 @@ type SubdocSpecOption struct {
 	IncludeImportCas  bool // Include target importCas if enableCrossClusterVersioning.
 	IncludeBody       bool // Get the target body for merge
 	IncludeVXattr     bool // Get the target document metadata as Virtual so we can perform CR and format target HLV
+	IncludeXTOC       bool // Get xattr table of content (all xattr keys)
 }
 
 func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathSpec) {
@@ -1979,6 +1980,11 @@ func ComposeSpecForSubdocGet(option SubdocSpecOption) (specs []SubdocLookupPathS
 		specs = append(specs, spec)
 
 		spec = SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XATTR_PREVIOUSREV)}
+		specs = append(specs, spec)
+	}
+	if option.IncludeXTOC {
+		// $document.XTOC
+		spec := SubdocLookupPathSpec{gomemcached.SUBDOC_GET, gomemcached.SUBDOC_FLAG_XATTR_PATH, []byte(XattributeToc)}
 		specs = append(specs, spec)
 	}
 	if option.IncludeBody {
@@ -2979,6 +2985,7 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 	// Each path has: 1B Opcode -> 1B flag -> 2B path length -> 4B value length -> path -> value
 	pos := 0
 	n := 0
+
 	for i := 0; i < len(specs); i++ {
 		if targetDocIsTombstone {
 			if specs[i].Opcode == uint8(mc.DELETE) {
@@ -3064,3 +3071,101 @@ func ComposeRequestForSubdocMutation(specs []SubdocMutationPathSpec, source *mc.
 }
 
 type ExternalMgmtHostAndPortGetter func(map[string]interface{}, bool) (string, int, error)
+
+type XTOCIterator struct {
+	xtoc     []byte
+	endPos   int
+	pos      int
+	hasItems bool
+}
+
+func NewXTOCIterator(xtoc []byte) (*XTOCIterator, error) {
+	length := len(xtoc)
+	if length == 0 {
+		return &XTOCIterator{hasItems: false}, nil
+	}
+
+	startPos := -1
+	endPos := -1
+
+	for i := 0; i < length; i++ {
+		if xtoc[i] == '"' {
+			startPos = i
+			break
+		}
+	}
+
+	for i := length - 1; i >= 0; i-- {
+		if xtoc[i] == '"' {
+			endPos = i
+			break
+		}
+	}
+
+	if startPos == -1 || endPos == -1 {
+		// could be empty list i.e. []
+		return &XTOCIterator{hasItems: false}, nil
+	}
+
+	return &XTOCIterator{
+		xtoc:     xtoc,
+		pos:      startPos,
+		endPos:   endPos,
+		hasItems: !Equals(xtoc, EmptyJsonArray),
+	}, nil
+}
+
+func (xti *XTOCIterator) HasNext() bool {
+	return xti.hasItems && xti.pos <= xti.endPos
+}
+
+// Expected input format is: ["string","escaped,\"string"]
+// returns `string` and `escaped,\"string`
+func (xti *XTOCIterator) Next() (value []byte, err error) {
+	begin := xti.pos
+	startQuote := -1
+	endQuote := -1
+	for i := begin; i < len(xti.xtoc); i++ {
+		if xti.xtoc[i] == '"' && i-1 >= 0 && xti.xtoc[i-1] != '\\' {
+			if startQuote == -1 {
+				startQuote = i
+			} else {
+				endQuote = i
+				break
+			}
+		}
+	}
+
+	if startQuote == -1 || endQuote == -1 || endQuote-startQuote+1 <= 2 {
+		err = fmt.Errorf("XTOC %s invalid format at pos=%v, char '%c', start=%v, end=%v",
+			xti.xtoc, xti.pos, xti.xtoc[xti.pos], startQuote, endQuote)
+		return
+	}
+
+	xti.pos = endQuote + 1
+
+	return xti.xtoc[startQuote+1 : endQuote], nil
+}
+
+func (xi *XTOCIterator) Len() (int, error) {
+	var len int
+	pos := xi.pos
+	defer func() {
+		xi.pos = pos
+	}()
+
+	l, err := NewXTOCIterator(xi.xtoc)
+	if err != nil {
+		return 0, err
+	}
+
+	for l.HasNext() {
+		_, err := l.Next()
+		if err != nil {
+			return len, err
+		}
+		len++
+	}
+
+	return len, nil
+}
