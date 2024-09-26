@@ -483,7 +483,7 @@ type TargetVBOpaque interface {
 	Size() int
 }
 
-// older clusters have a single int vbuuid
+// clusters have a single int vbuuid
 type TargetVBUuid struct {
 	Target_vb_uuid uint64 `json:"target_vb_uuid"`
 }
@@ -729,6 +729,9 @@ func (c CheckpointSortRecordsList) Less(i, j int) bool {
 	return aRecord.Target_Seqno > bRecord.Target_Seqno
 }
 
+// Returns:
+// 1. True if aRecord is "more recent in time" than bRecord", false otherwise
+// 2. True if a valid operation, false otherwise
 func compareFailoverLogPositionThenSeqnos(aRecord *CheckpointSortRecord, bRecord *CheckpointSortRecord, source bool) (bool, bool) {
 	var aFailoverLog *mcc.FailoverLog
 	var aFailoverUuid uint64
@@ -778,7 +781,7 @@ func compareFailoverLogPositionThenSeqnos(aRecord *CheckpointSortRecord, bRecord
 			// Failover logs are sent back in the order of recent -> oldest
 			return aFailoverPos < bFailoverPos, true
 		} else {
-			if aRecord.Seqno != bRecord.Seqno {
+			if aSeqno != bSeqno {
 				// If aSeqno is > than bSeqno, that means aRecord should be "less than" or "newer" than bRecord
 				return aSeqno > bSeqno, true
 			}

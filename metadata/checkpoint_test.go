@@ -261,3 +261,213 @@ func TestCheckpointSortByFailoverLogRealData(t *testing.T) {
 	assert.NotEqual(0, nonNilDocCounter)
 	assert.Len(nonConformedVBList, 0)
 }
+
+func Test_compareFailoverLogPositionThenSeqnos(t *testing.T) {
+	type args struct {
+		aRecord *CheckpointSortRecord
+		bRecord *CheckpointSortRecord
+		source  bool
+	}
+	tests := []struct {
+		name  string
+		args  args
+		want  bool
+		want1 bool
+	}{
+		{
+			name: "Traditional ckpt no failover, compare between seqno, aRecord newer than bRecord",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno: 20,
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno: 10,
+					},
+				},
+				source: true,
+			},
+			want:  true, // aRecord is more recent than bRecord
+			want1: true, // validOp
+		},
+		{
+			name: "Traditional ckpt no failover, compare between seqno, aRecord older than bRecord",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno: 10,
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno: 20,
+					},
+				},
+				source: true,
+			},
+			want:  false, // aRecord is not more recent than bRecord
+			want1: true,  // valid op
+		},
+		{
+			name: "Traditional ckpt failover, compare between failoverlogs even if seqno is lower, aRecord newer than bRecord",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno:         10,
+						Failover_uuid: 3,
+					},
+					srcFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno:         20,
+						Failover_uuid: 2,
+					},
+					srcFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				source: true,
+			},
+			want:  true, // aRecord is more recent than bRecord
+			want1: true, // valid op
+		},
+		{
+			name: "Traditional ckpt failover, compare between failoverlogs but aRecord does not exist in failover log. bRecord wins",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno:         10,
+						Failover_uuid: 4,
+					},
+					srcFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Seqno:         20,
+						Failover_uuid: 2,
+					},
+					srcFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				source: true,
+			},
+			want:  false, // aRecord is more recent than bRecord
+			want1: true,  // valid op
+		},
+		{
+			name: "Traditional target ckpt no failover, compare between seqno, aRecord newer than bRecord",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     20,
+						Target_vb_opaque: &TargetVBUuid{0},
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     10,
+						Target_vb_opaque: &TargetVBUuid{0},
+					},
+				},
+				source: false,
+			},
+			want:  true, // aRecord is more recent than bRecord
+			want1: true, // valid op
+		},
+		{
+			name: "Traditional target ckpt no failover, compare between seqno, aRecord older than bRecord",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     10,
+						Target_vb_opaque: &TargetVBUuid{0},
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     20,
+						Target_vb_opaque: &TargetVBUuid{0},
+					},
+				},
+				source: false,
+			},
+			want:  false, // aRecord is not more recent than bRecord
+			want1: true,  // valid op
+		},
+		{
+			name: "Traditional target ckpt failover, compare between failoverlogs even if seqno is lower, aRecord newer than bRecord",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     10,
+						Target_vb_opaque: &TargetVBUuid{3},
+					},
+					tgtFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     20,
+						Target_vb_opaque: &TargetVBUuid{2},
+					},
+					tgtFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				source: false,
+			},
+			want:  true, // aRecord is more recent than bRecord
+			want1: true, // valid op
+		},
+		{
+			name: "Traditional target ckpt failover, compare between failoverlogs but aRecord does not exist in failover log. bRecord wins",
+			args: args{
+				aRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     10,
+						Target_vb_opaque: &TargetVBUuid{4},
+					},
+					tgtFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				bRecord: &CheckpointSortRecord{
+					CheckpointRecord: &CheckpointRecord{
+						Target_Seqno:     20,
+						Target_vb_opaque: &TargetVBUuid{2},
+					},
+					tgtFailoverLog: &mcc.FailoverLog{
+						{3, 0},
+						{2, 0},
+					},
+				},
+				source: false,
+			},
+			want:  false, // aRecord is more recent than bRecord
+			want1: true,  // valid op
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := compareFailoverLogPositionThenSeqnos(tt.args.aRecord, tt.args.bRecord, tt.args.source)
+			assert.Equalf(t, tt.want, got, "compareFailoverLogPositionThenSeqnos(%v, %v, %v)", tt.args.aRecord, tt.args.bRecord, tt.args.source)
+			assert.Equalf(t, tt.want1, got1, "compareFailoverLogPositionThenSeqnos(%v, %v, %v)", tt.args.aRecord, tt.args.bRecord, tt.args.source)
+		})
+	}
+}
