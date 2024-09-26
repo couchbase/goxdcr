@@ -375,7 +375,8 @@ func GetMetadataForCR(req *base.WrappedMCRequest, resp *mc.MCResponse, specs []b
 		}
 		doc_meta_target = *target_meta.docMeta
 
-		if target_meta.IsImportMutation() && source_meta.actualCas < target_meta.actualCas {
+		if req.HLVModeOptions.PreserveSync &&
+			target_meta.IsImportMutation() && source_meta.actualCas < target_meta.actualCas {
 			// This is the case when target CAS will rollback if source wins
 			// So use subdoc command in this case instead of *_WITH_META commands
 			req.SetSubdocOp()

@@ -1698,6 +1698,19 @@ func Equals(source []byte, target string) bool {
 	return true
 }
 
+// checks whether two byte slices are equal in content
+func EqualBytes(source []byte, target []byte) bool {
+	if len(source) != len(target) {
+		return false
+	}
+	for i := 0; i < len(target); i++ {
+		if target[i] != source[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func MatchWrapper(matcher gojsonsm.Matcher, slice []byte) (matched bool, status int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
