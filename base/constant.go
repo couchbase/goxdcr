@@ -923,7 +923,7 @@ var CapiDataChanSizeMultiplier = 1
 var RefreshRemoteClusterRefInterval = 15 * time.Second
 
 // interval for potentially posting heartbeats
-var RemoteHeartbeatCheckInterval = 15 * time.Second
+var RemoteHeartbeatCheckInterval = 60 * time.Second
 
 // max retry for capi batchUpdateDocs operation
 var CapiMaxRetryBatchUpdateDocs = 6
@@ -1680,17 +1680,19 @@ const FilterBinaryDocs = "filterBinary"
 type ConnPreChkMsgType int
 
 const (
-	ConnPreChkIsCompatibleVersion       ConnPreChkMsgType = iota
-	ConnPreChkIsIntraClusterReplication ConnPreChkMsgType = iota
-	ConnPreChkSendingRequest            ConnPreChkMsgType = iota
-	ConnPreChkResponseWait              ConnPreChkMsgType = iota
-	ConnPreChkResponseObtained          ConnPreChkMsgType = iota
-	ConnPreChkP2PSuccessful             ConnPreChkMsgType = iota
-	ConnPreChkSuccessful                ConnPreChkMsgType = iota
+	ConnPreChkIsCompatibleVersion ConnPreChkMsgType = iota
+	ConnPreChkUnableToFetchUUID
+	ConnPreChkIsIntraClusterReplication
+	ConnPreChkSendingRequest
+	ConnPreChkResponseWait
+	ConnPreChkResponseObtained
+	ConnPreChkP2PSuccessful
+	ConnPreChkSuccessful
 )
 
 var ConnectionPreCheckMsgs = map[ConnPreChkMsgType]string{
 	ConnPreChkIsCompatibleVersion:       "This version of some or all the nodes doesn't support the connection pre-check",
+	ConnPreChkUnableToFetchUUID:         "Unable to fetch source cluster's UUID",
 	ConnPreChkIsIntraClusterReplication: "Intra-cluster replication detected, skipping connection pre-check",
 	ConnPreChkSendingRequest:            "Sending requests to the peer",
 	ConnPreChkResponseWait:              "P2PSend was successful, waiting for the node's response",
@@ -1817,9 +1819,7 @@ const (
 	MandatoryVal                   = "mandatory"
 )
 
-var SrcHeartbeatExpirationTimeout = 3 * time.Minute
-
-// var SrcHeartbeatCooldownPeriod = 30 * time.Second
-var SrcHeartbeatCooldownPeriod = 15 * time.Second
+var SrcHeartbeatExpirationTimeout = 5 * time.Minute
+var SrcHeartbeatCooldownPeriod = 60 * time.Second
 
 const XDCRSourceClustersPath = XDCRPrefix + "/sourceClusters"

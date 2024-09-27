@@ -109,22 +109,11 @@ type P2PManagerImpl struct {
 	mergerSetOnce sync.Once
 	mergerSetCh   chan bool
 	pushReqMerger func(string, string, interface{}) error
-
-	sourceClusterUUID string
-	sourceClusterName string
 }
 
 func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_def.XDCRCompTopologySvc, utilsIn utils.UtilsIface, bucketTopologySvc service_def.BucketTopologySvc, replicationSpecSvc service_def.ReplicationSpecSvc, cleanupInt time.Duration, ckptSvc service_def.CheckpointsService, colManifestSvc service_def.CollectionsManifestSvc, backfillReplSvc service_def.BackfillReplSvc, securitySvc service_def.SecuritySvc, backfillMgr func() service_def.BackfillMgrIface, remoteClusterSvc service_def.RemoteClusterSvc) (*P2PManagerImpl, error) {
-	var randId, clusterUUID, clusterName string
-	var err error
-
-	if randId, err = base.GenerateRandomId(randIdLen, 100); err != nil {
-		return nil, err
-	}
-	if clusterUUID, err = xdcrCompTopologySvc.MyClusterUUID(); err != nil {
-		return nil, err
-	}
-	if clusterName, err = xdcrCompTopologySvc.MyClusterName(); err != nil {
+	randId, err := base.GenerateRandomId(randIdLen, 100)
+	if err != nil {
 		return nil, err
 	}
 
@@ -150,8 +139,6 @@ func NewPeerToPeerMgr(loggerCtx *log.LoggerContext, xdcrCompTopologySvc service_
 		replicatorInitCh:    make(chan bool, 1),
 		backfillMgrSvc:      backfillMgr,
 		remoteClusterSvc:    remoteClusterSvc,
-		sourceClusterUUID:   clusterUUID,
-		sourceClusterName:   clusterName,
 	}, nil
 }
 
@@ -951,8 +938,14 @@ func (p *P2PManagerImpl) SendConnectionPreCheckRequest(remoteRef *metadata.Remot
 	}
 
 	// check for intra-cluster replication
-	if p.sourceClusterUUID == targetUUID {
-		logger.Infof("Connection Pre-Check exited because: srcUUID=%v and tgtUUID=%v", p.sourceClusterUUID, targetUUID)
+	var sourceClusterUUID string
+	if sourceClusterUUID, err = p.xdcrCompSvc.MyClusterUUID(); err != nil {
+		logger.Infof("Connection Pre-Check exited because of an error in fetching source cluster UUID: %v", err)
+		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkUnableToFetchUUID], taskId, myHostAddr, false, nil, logger)
+		return
+	}
+	if sourceClusterUUID == targetUUID {
+		logger.Infof("Connection Pre-Check exited because: srcUUID=%v and tgtUUID=%v", sourceClusterUUID, targetUUID)
 		sendConnectionPreCheckRequestErrHelper(base.ConnectionPreCheckMsgs[base.ConnPreChkIsIntraClusterReplication], taskId, myHostAddr, true, nil, logger)
 		return
 	}
@@ -1211,9 +1204,17 @@ func (p *P2PManagerImpl) SendHeartbeatToRemoteV1(reference *metadata.RemoteClust
 	// Add myself back in amongst the peers
 	nodesList = append(nodesList, srcStr)
 
+	var sourceClusterUUID, sourceClusterName string
+	if sourceClusterUUID, err = p.xdcrCompSvc.MyClusterUUID(); err != nil {
+		return err
+	}
+	if sourceClusterName, err = p.xdcrCompSvc.MyClusterName(); err != nil {
+		return err
+	}
+
 	getReqFunc := func(src, tgt string) Request {
 		common := NewRequestCommon(srcStr, target, p.GetLifecycleId(), "", getOpaqueWrapper())
-		req := NewSourceHeartbeatReq(common).SetUUID(p.sourceClusterUUID).SetClusterName(p.sourceClusterName).SetNodesList(nodesList)
+		req := NewSourceHeartbeatReq(common).SetUUID(sourceClusterUUID).SetClusterName(sourceClusterName).SetNodesList(nodesList)
 		for _, spec := range specs {
 			req.AppendSpec(spec)
 		}
