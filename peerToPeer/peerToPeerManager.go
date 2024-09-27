@@ -348,11 +348,16 @@ func (p *P2PManagerImpl) handlePreCheckP2PSendSuccess(taskId string, src string,
 }
 
 func (p *P2PManagerImpl) sendToSpecifiedPeersOnce(opCode OpCode, getReqFunc GetReqFunc, cbOpts *SendOpts, peersToRetryOrig map[string]bool, myHost string) (error, map[string]bool) {
-	successOpaqueMap := make(map[string]*uint32)
 	peersToRetry := make(map[string]bool)
+	if len(peersToRetryOrig) == 0 {
+		p.logger.Debugf("No peer nodes provided, skipping send of %v request", opCode.String())
+		return nil, peersToRetry
+	}
+
 	for k, v := range peersToRetryOrig {
 		peersToRetry[k] = v
 	}
+	successOpaqueMap := make(map[string]*uint32)
 
 	retryOp := func() error {
 		peersToRetryReplacement := make(map[string]bool)
