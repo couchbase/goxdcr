@@ -2208,7 +2208,7 @@ func (xmem *XmemNozzle) updateSystemXattrForMetaOp(wrappedReq *base.WrappedMCReq
 	if updateHLV {
 		_, pruned, err := crMeta.ConstructXattrFromHlvForSetMeta(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, xattrComposer)
 		if err != nil {
-			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForTarget, err=%v", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, err)
+			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForMetaOp, err=%v", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, err)
 			return err
 		}
 
@@ -2252,37 +2252,47 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 
 	req := wrappedReq.Req
 	var spec base.SubdocMutationPathSpec
-	var pruned bool
 	specs := base.NewSubdocMutationPathSpecs()
 
 	if updateHLV {
-		var pvSlice, mvSlice []byte
+		maxHlvLen := 2 /* {...} */ +
+			len(crMeta.HLV_CVCAS_FIELD) + 3 /* "cvCas": */ + 21 /* "0x<16bytes>", */ +
+			len(crMeta.HLV_SRC_FIELD) + 3 /* "src": */ + len(xmem.sourceActorId) + 3 /* "<bucketId>", */ +
+			len(crMeta.HLV_VER_FIELD) + 3 /* "ver": */ + 21 /* "0x<16byte>", */
+
 		pv := sourceDocMeta.GetHLV().GetPV()
-		mv := sourceDocMeta.GetHLV().GetMV()
 		if len(pv) > 0 {
-			pvlen := hlv.BytesRequired(pv)
-			pvSlice, err = xmem.dataPool.GetByteSlice(uint64(pvlen))
-			if err != nil {
-				pvSlice = make([]byte, pvlen)
-				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
-			} else {
-				wrappedReq.AddByteSliceForXmemToRecycle(pvSlice)
-			}
+			maxHlvLen += len(crMeta.HLV_PV_FIELD) + 3 /* "pv": */ + hlv.BytesRequired(pv) + 1 /* , */
 		}
+
+		mv := sourceDocMeta.GetHLV().GetMV()
 		if len(mv) > 0 {
-			mvlen := hlv.BytesRequired(mv)
-			mvSlice, err = xmem.dataPool.GetByteSlice(uint64(mvlen))
-			if err != nil {
-				mvSlice = make([]byte, mvlen)
-				xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
-			} else {
-				wrappedReq.AddByteSliceForXmemToRecycle(mvSlice)
-			}
+			maxHlvLen += len(crMeta.HLV_MV_FIELD) + 3 /* "mv": */ + hlv.BytesRequired(mv)
 		}
-		pruned, err = crMeta.ConstructSpecsFromHlvForSubdocOp(sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second, &specs, wrappedReq.SubdocCmdOptions.TargetHasPv, wrappedReq.SubdocCmdOptions.TargetHasMv, pvSlice, mvSlice)
+
+		newHlv, err := xmem.dataPool.GetByteSlice(uint64(maxHlvLen))
 		if err != nil {
+			newHlv = make([]byte, maxHlvLen)
+			xmem.RaiseEvent(common.NewEvent(common.DataPoolGetFail, 1, xmem, nil, nil))
+		} else {
+			wrappedReq.AddByteSliceForXmemToRecycle(newHlv)
+		}
+
+		pos, pruned, err := crMeta.ConstructHlv(newHlv, 0, sourceDocMeta, time.Duration(atomic.LoadUint32(&xmem.config.hlvPruningWindowSec))*time.Second)
+		if err != nil {
+			err = fmt.Errorf("error decoding source mutation for key=%v%s%v, req=%v%v%v, reqBody=%v%v%v in updateSystemXattrForSubdocOp, err=%v", base.UdTagBegin, req.Key, base.UdTagEnd, base.UdTagBegin, req, base.UdTagEnd, base.UdTagBegin, req.Body, base.UdTagEnd, err)
 			return err
 		}
+
+		// spec to update HLV or _vv xattr
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_MKDIR_P|base.SUBDOC_FLAG_XATTR), []byte(base.XATTR_HLV), newHlv[:pos])
+		specs = append(specs, spec)
+
+		// set cvCas as regenerated Cas from mc.SET/DELETE using macro expansion.
+		// MKDIR_P is not set, because we know for sure there exists cvCas on target since we used it for conflict resolution,
+		// otherwise there is something wrong
+		spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DICT_UPSERT), uint8(base.SUBDOC_FLAG_XATTR|base.SUBDOC_FLAG_EXPAND_MACROS), []byte(crMeta.XATTR_CVCAS_PATH), []byte(base.CAS_MACRO_EXPANSION))
+		specs = append(specs, spec)
 
 		xmem.RaiseEvent(common.NewEvent(common.HlvUpdated, nil, xmem, nil, nil))
 		if pruned {
@@ -2303,49 +2313,48 @@ func (xmem *XmemNozzle) updateSystemXattrForSubdocOp(wrappedReq *base.WrappedMCR
 		specs = append(specs, spec)
 	}
 
+	// delete all the other xattrs - user xattrs and system xattrs that XDCR doesn't recognise,
+	// which are present on target document, but not on the source document.
 	xtoc, err := lookup.ResponseForAPath(base.XattributeToc)
 	if err != nil {
 		return fmt.Errorf("%v: XTOC was not fetched, err=%v, eccv=%v, mobile=%v",
 			xmem.Id(), err, xmem.getCrossClusterVers(), xmem.getMobileCompatible())
 	}
 
-	it, err := base.NewXTOCIterator(xtoc)
+	targetXattrs, err := base.NewXTOCIterator(xtoc)
 	if err != nil {
 		return err
 	}
 
-	for it.HasNext() {
-		xattrKey, err := it.Next()
+	for targetXattrs.HasNext() {
+		targetXattr, err := targetXattrs.Next()
 		if err != nil {
 			return err
 		}
 
-		if len(xattrKey) == 0 {
+		if len(targetXattr) == 0 {
 			continue
 		}
 
-		if base.Equals(xattrKey, base.XATTR_HLV) {
+		if base.Equals(targetXattr, base.XATTR_HLV) ||
+			base.Equals(targetXattr, base.XATTR_MOBILE) ||
+			base.Equals(targetXattr, base.XATTR_MOU) {
+			// XDCR can recognise these system xattrs
+			// and should be updated above. These should
+			// not be deleted.
 			continue
 		}
 
-		if base.Equals(xattrKey, base.XATTR_MOBILE) {
-			continue
-		}
-
-		if base.Equals(xattrKey, base.XATTR_MOU) {
-			continue
-		}
-
-		exists := true
+		existsOnSourceDoc := false
 		for i := 0; i < len(specs); i++ {
-			if base.EqualBytes(xattrKey, specs[i].Path) {
-				exists = true
+			if base.EqualBytes(targetXattr, specs[i].Path) {
+				existsOnSourceDoc = true
 				break
 			}
 		}
 
-		if !exists {
-			spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), xattrKey, nil)
+		if !existsOnSourceDoc {
+			spec = base.NewSubdocMutationPathSpec(uint8(base.SUBDOC_DELETE), uint8(base.SUBDOC_FLAG_XATTR), targetXattr, nil)
 			specs = append(specs, spec)
 		}
 	}
