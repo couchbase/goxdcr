@@ -181,6 +181,22 @@ function grepForDecodingError {
 	return 0
 }
 
+function grepForUnknownResponse {
+	local ns_serverDir=$(getNsServerDir)
+	local logsDir="${ns_serverDir}/logs"
+
+	for dir in $(ls $logsDir); do
+		counts=$(grep -crhn "received error response from setMeta client. Repairing connection" ${logsDir}/${dir})
+		for count in $(echo "$counts"); do
+			if (($count > 0)); then
+				echo "WARNING Found 'received error response from setMeta client. Repairing connection' in ${logsDir}/${dir}"
+				exit 1
+			fi
+		done
+	done
+	return 0
+}
+
 function getDataReplicated {
 	local srcCluster=$1
 	local srcBucket=$2
@@ -1965,7 +1981,7 @@ function enableMobileImportSimIfPresent {
 	local port=${CLUSTER_NAME_PORT_MAP[$clusterName]:-}
 	echo "Enabling mobile import simulator on $bucketName of 127.0.0.1:$port"
 
-	$mobileImportSimBin -username $DEFAULT_ADMIN -password $DEFAULT_PW -bucketname $bucketName -hostAddr 127.0.0.1:$port 2>&1 >/dev/null &
+	$mobileImportSimBin -username $DEFAULT_ADMIN -password $DEFAULT_PW -bucketname $bucketName -hostAddr 127.0.0.1:$port -debugMode 1 > /tmp/importSim-$clusterName-$bucketName.log &
 
 	echo "Sleeping 3 seconds for simulator to start"
 	sleep 3
@@ -1993,6 +2009,11 @@ function grepForAbnormalities {
 	fi
 
 	grepForDecodingError
+	if (($? != 0)); then
+		exit 1
+	fi
+
+	grepForUnknownResponse
 	if (($? != 0)); then
 		exit 1
 	fi

@@ -161,7 +161,7 @@ type currentVersion struct {
 // - cas: this is the document CAS, representing the latest mutation excluding import mutation
 // - source: this is the bucket XDCR get this mutation from, either through DCP or subdoc_get
 // - {src,ver} these combined is the input cv
-// If cas > ver, then the document has been mutated since replication.
+// If cas > cvCas, then the document has been mutated since replication.
 // - If there is no mv, the input cv will be rolled into pv
 // - If there is an mv, the mv will be rolled into pv
 func NewHLV(source DocumentSourceId, cas uint64, cvCas uint64, src DocumentSourceId, ver uint64, pv, mv VersionsMap) (*HLV, error) {
